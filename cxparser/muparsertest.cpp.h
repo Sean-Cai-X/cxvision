@@ -1,6 +1,6 @@
 /*
-  File: muParserTest.cpp
-  Role: Regression test harness for parser behavior.
+  File: muparsertest.cpp.h
+  Role: Supplementary parser test declarations.
 */
 
 
@@ -17,26 +17,17 @@ using namespace std;
 static int iusingtestnum=0;
 
 /*
-  Role: Exercise parser-visible class binding signatures inside regression
-  tests, including numeric, string, object, and variadic call patterns.
+  Role: Supplementary class-binding test double used by the legacy parser
+  test compilation path.
 */
 class usingclass
 {
 public :
 	int m_inumid;
-	int m_variadic_num_count;
-	double m_variadic_num_sum;
-	int m_variadic_str_count;
-	int m_variadic_str_chars;
-	std::string m_variadic_str_joined;
 	usingclass()
 	{
 		iusingtestnum++;
 		m_inumid = iusingtestnum;
-		m_variadic_num_count = 0;
-		m_variadic_num_sum = 0.0;
-		m_variadic_str_count = 0;
-		m_variadic_str_chars = 0;
 	}
 
 	void ISCALL()
@@ -214,36 +205,6 @@ public :
 	{
 
 	}
-	void FUCN_ANY(mu::paramvect &values)
-	{
-		m_variadic_num_count++;
-		m_variadic_num_sum = 0.0;
-		for (size_t i = 0; i < values.size(); ++i)
-			m_variadic_num_sum += values[i];
-	}
-	double FUN_ANY_RE_DOUBLE(mu::paramvect &values)
-	{
-		FUCN_ANY(values);
-		return m_variadic_num_sum;
-	}
-	void FUCN_CHARP_ANY(mu::charpvect &values)
-	{
-		m_variadic_str_count++;
-		m_variadic_str_chars = 0;
-		m_variadic_str_joined.clear();
-		for (size_t i = 0; i < values.size(); ++i)
-		{
-			m_variadic_str_chars += (int)values[i].size();
-			m_variadic_str_joined += values[i];
-			if (i + 1 < values.size())
-				m_variadic_str_joined += "|";
-		}
-	}
-	int FUN_CHARP_ANY_RE_INT(mu::charpvect &values)
-	{
-		FUCN_CHARP_ANY(values);
-		return m_variadic_str_chars;
-	}
 
 };
 
@@ -255,59 +216,16 @@ namespace mu
     int ParserTester::c_iCount = 0;
 
     /*
-      Role: Build the regression harness for the selected parser test
-      profile.
+      Role: Build the supplementary regression harness used by this merged
+      test source.
     */
-    ParserTester::ParserTester(TestProfile profile)
+    ParserTester::ParserTester()
       :m_vTestFun()
       ,m_stream(&std::cout)
     {
-      switch (profile)
-      {
-      case BasicProfile:
-        AddTest(&ParserTester::TestNames);
-        AddTest(&ParserTester::TestSyntax);
-        AddTest(&ParserTester::TestPostFix);
-        AddTest(&ParserTester::TestInfixOprt);
-        AddTest(&ParserTester::TestVarConst);
-        AddTest(&ParserTester::TestMultiArg);
-        AddTest(&ParserTester::TestFormula);
-        AddTest(&ParserTester::TestInterface);
-        AddTest(&ParserTester::TestBinOprt);
-        AddTest(&ParserTester::TestException);
-        AddTest(&ParserTester::TestStrArg);
-        AddTest(&ParserTester::TestComment);
-        break;
 
-      case ControlFlowProfile:
-        AddTest(&ParserTester::TestInfixOprt);
-        AddTest(&ParserTester::TestIfCondition);
-        AddTest(&ParserTester::TestElseCondition);
-        AddTest(&ParserTester::TestWhileCondition);
-        AddTest(&ParserTester::TestAllCondition);
-        break;
+		AddTest(&ParserTester::TestElseCondition);
 
-      case FullProfile:
-      default:
-        AddTest(&ParserTester::TestNames);
-        AddTest(&ParserTester::TestSyntax);
-        AddTest(&ParserTester::TestPostFix);
-        AddTest(&ParserTester::TestInfixOprt);
-        AddTest(&ParserTester::TestVarConst);
-        AddTest(&ParserTester::TestMultiArg);
-        AddTest(&ParserTester::TestFormula);
-        AddTest(&ParserTester::TestInterface);
-        AddTest(&ParserTester::TestBinOprt);
-        AddTest(&ParserTester::TestException);
-        AddTest(&ParserTester::TestStrArg);
-        AddTest(&ParserTester::TestComment);
-        AddTest(&ParserTester::TestIfCondition);
-        AddTest(&ParserTester::TestElseCondition);
-        AddTest(&ParserTester::TestWhileCondition);
-        AddTest(&ParserTester::TestAllCondition);
-        AddTest(&ParserTester::TestClassVariadicBinding);
-        break;
-      }
       ParserTester::c_iCount = 0;
     }
 
@@ -788,8 +706,6 @@ namespace mu
       iStat += EqnTest("-sin(8)", -0.989358, true);
       iStat += EqnTest("3-(-a)", 4, true);
       iStat += EqnTest("3--a", 4, true);
-      iStat += EqnTest("a=-b+1", -1, true);
-      iStat += EqnTest("a=3--b", 5, true);
 
       iStat += EqnTest("~2#", 8, true);
       iStat += EqnTest("~f1of1(2)#", 8, true);
@@ -1015,7 +931,7 @@ namespace mu
       iStat += ThrowTest("1+valueof(\"abc\"",  ecMISSING_PARENS);
       iStat += ThrowTest("valueof(\"abc\"",    ecMISSING_PARENS);
       iStat += ThrowTest("valueof(\"abc",      ecUNTERMINATED_STRING);
-      iStat += ThrowTest("valueof(\"abc\",3)", ecUNEXPECTED_ARG);
+      iStat += ThrowTest("valueof(\"abc\",3)", ecUNEXPECTED_COMMA);
       iStat += ThrowTest("valueof(3)",         ecSTRING_EXPECTED);
       iStat += ThrowTest("sin(\"abc\")",       ecVAL_EXPECTED);
       iStat += ThrowTest("valueof(\"\\\"abc\\\"\")",  999, false);
@@ -1095,17 +1011,6 @@ namespace mu
 			if(*pda !=50) iStat++;
 
 		}
-		catch(Parser::exception_type &e)
-		{
-			iStat += 1;
-			*m_stream << " Parser exception: " << e.GetMsg() << "\r\n";
-			*m_stream << " Token: " << e.GetToken() << "\r\n";
-		}
-		catch(std::exception &e)
-		{
-			iStat += 1;
-			*m_stream << " std::exception: " << e.what() << "\r\n";
-		}
 		catch(...)
 		{
 			iStat += 1;
@@ -1116,73 +1021,6 @@ namespace mu
 			*m_stream << "passed" << "\r\n";
 		else
 			*m_stream << "\n comment failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-	int ParserTester::TestClassVariadicBinding()
-	{
-		int iStat = 0;
-		*m_stream << "testing class variadic binding...";
-
-		Parser p;
-
-		try
-		{
-			double *apdouble = 0;
-			p.DefineOrgClass("double", apdouble);
-			p.UsingClass(true);
-
-			usingclass *atestclass = 0;
-			p.DefineClass("usingclass", atestclass);
-			p.DefineClassFun("usingclass", atestclass, "FUCN_ANY", &usingclass::FUCN_ANY);
-			p.DefineClassFun("usingclass", atestclass, "FUN_ANY_RE_DOUBLE", &usingclass::FUN_ANY_RE_DOUBLE);
-			p.DefineClassFun("usingclass", atestclass, "FUCN_CHARP_ANY", &usingclass::FUCN_CHARP_ANY);
-			p.DefineClassFun("usingclass", atestclass, "FUN_CHARP_ANY_RE_INT", &usingclass::FUN_CHARP_ANY_RE_INT);
-
-			double sumret = 0.0;
-			double charret = 0.0;
-			p.DefineVar("sumret", &sumret);
-			p.DefineVar("charret", &charret);
-
-			p.SetExpr("usingclass atestclass;sumret=atestclass.FUN_ANY_RE_DOUBLE(10,20,30,40);charret=atestclass.FUN_CHARP_ANY_RE_INT(\"one\",\"three\");atestclass.FUCN_ANY(1,2,3);atestclass.FUCN_CHARP_ANY(\"alpha\",\"beta\",\"g\");");
-			p.Eval();
-
-			usingclass *pclassobj = (usingclass*)p.GetClassObj("usingclass", "atestclass");
-			if (pclassobj == 0)
-				iStat++;
-			else
-			{
-				if (sumret != 100.0) iStat++;
-				if (charret != 8.0) iStat++;
-				if (pclassobj->m_variadic_num_count != 2) iStat++;
-				if (pclassobj->m_variadic_num_sum != 6.0) iStat++;
-				if (pclassobj->m_variadic_str_count != 2) iStat++;
-				if (pclassobj->m_variadic_str_chars != 10) iStat++;
-				if (pclassobj->m_variadic_str_joined != "alpha|beta|g") iStat++;
-			}
-		}
-		catch(Parser::exception_type &e)
-		{
-			iStat += 1;
-			*m_stream << " Parser exception: " << e.GetMsg() << "\r\n";
-			*m_stream << " Token: " << e.GetToken() << "\r\n";
-		}
-		catch(std::exception &e)
-		{
-			iStat += 1;
-			*m_stream << " std::exception: " << e.what() << "\r\n";
-		}
-		catch(...)
-		{
-			iStat += 1;
-			*m_stream << " TestClassVariadicBinding() catch error " << "\r\n";
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n class variadic binding failed with " << iStat << " errors" << "\r\n";
 
 		return iStat;
 	}
@@ -1504,428 +1342,6 @@ namespace mu
 			ListFormula(p);
 
 			ListClass(p);
-
-			*m_stream <<"\r\n";
-			*m_stream <<"*************************"<<"\r\n";
-			*m_stream <<"Test class assgin          "<<"\r\n";
-			*m_stream <<"*************************"<<"\r\n";
-
-			p.SetExpr("usingclass atestassgin1;usingclass atestassgin2;atestassgin1.ISCALL();atestassgin2.ISCALL();");
-
-			p.Eval();
-
-			ListFormula(p);
-
-			ListClass(p);
-
-			p.SetExpr("atestassgin1 = atestassgin2;atestassgin1.ISCALL();atestassgin2.ISCALL();");
-
-			p.Eval();
-
-			ListFormula(p);
-
-			ListClass(p);
-
-			p.UsingClass(false);
-
-			*m_stream <<"\r\n";
-			*m_stream <<"***************************"<<"\r\n";
-			*m_stream <<"Test char class member func"<<"\r\n";
-			*m_stream <<"***************************"<<"\r\n";
-
-			p.SetExpr("atestclass.FUCN_CHARP(\"hello world!\");");
-
-			p.Eval();
-
-			ListFormula(p);
-
-			ListVar(p);
-
-			ListClass(p);
-
-			*m_stream <<"\r\n";
-			*m_stream <<"***************************"<<"\r\n";
-			*m_stream <<"Test clear class member func"<<"\r\n";
-			*m_stream <<"***************************"<<"\r\n";
-
-			p.ClearClassObj();
-
-			ListClass(p);
-
-			p.SetExpr("usingclass atestassgin1;usingclass atestassgin2;atestassgin1.ISCALL();atestassgin2.ISCALL();");
-
-			p.Eval();
-
-			ListFormula(p);
-
-			ListClass(p);
-
-			*m_stream <<"*************************"<<"\r\n";
-			*m_stream <<"     Test Class end"<<"\r\n";
-			*m_stream <<"*************************"<<"\r\n";
-
-		}
-		catch(...)
-		{
-			iStat += 1;
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-	int ParserTester::TestIfCondition()
-	{
-		ParserTester::c_iCount++;
-		int iStat = 0;
-		*m_stream << "testing if condition...";
-
-		Parser p;
-		double a = 0;
-		double b = 0;
-		double c = 0;
-		double d = 0;
-		try
-		{
-			p.DefineVar("a", &a);
-			p.DefineVar("b", &b);
-			p.DefineVar("c", &c);
-			p.DefineVar("d", &d);
-			*m_stream <<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-			*m_stream <<"test if condition Begin"<<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-
-			p.SetExpr("a=0;b=0;c=0;d=0;if(a>0){d=d+1;a=10;}if(a<1){a=100;d=10;}");
-			p.Eval();
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=100) iStat++;
-			if(d !=10) iStat++;
-
-			p.SetExpr(
-			"\
-a=0;d=0;c=0;b=0;\
-if(a>0) \
-{ \
-a=100; \
-if(b>0)\
-{\
-b=100;\
-}\
-a=a/3;  \
-} \
-if(c<1)\
-{ \
-c=100;\
-if(d<1)\
-{\
-d=100;\
-}\
-c=c/3;\
-d=(d+100)/3;\
-}"
-			);
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=0) iStat++;
-			if(b !=0) iStat++;
-			if(c !=100.0/3.0) iStat++;
-			if(d !=200.0/3.0) iStat++;
-		}
-		catch(Parser::exception_type &e)
-		{
-			iStat += 1;
-			*m_stream << " Parser exception: " << e.GetMsg() << "\r\n";
-			*m_stream << " Token: " << e.GetToken() << "\r\n";
-		}
-		catch(std::exception &e)
-		{
-			iStat += 1;
-			*m_stream << " std::exception: " << e.what() << "\r\n";
-		}
-		catch(...)
-		{
-			iStat += 1;
-			*m_stream <<" TestComment() catch error "<<"\r\n";
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-	int ParserTester::TestElseCondition()
-	{
-		ParserTester::c_iCount++;
-		int iStat = 0;
-		*m_stream << "testing if condition...";
-
-		Parser p;
-		double a = 0;
-		double b = 0;
-		double c = 0;
-		double d = 0;
-		try
-		{
-			p.DefineVar("a", &a);
-			p.DefineVar("b", &b);
-			p.DefineVar("c", &c);
-			p.DefineVar("d", &d);
-			*m_stream <<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-			*m_stream <<"test if condition Begin"<<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-
-			p.SetExpr("a=0;b=0;c=0;d=0;if(a>0){d=d+1;a=10;}else{a=100;d=10;}");
-			p.Eval();
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=100) iStat++;
-			if(d !=10) iStat++;
-
-			p.SetExpr(
-				"\
-a=0;d=0;c=0;b=0;\
-if(a>0) \
-{ \
-a=100; \
-if(b>0)\
-{\
-b=100;\
-}\
-} \
-else\
-{\
-a=a+10/3;\
-}\
-if(c<1)\
-{ \
-c=100;\
-if(d<1)\
-{\
-d=100;\
-}\
-else\
-{\
-c=c/3;\
-}\
-d=(d+100)/3;\
-}\
-else\
-{\
-c=c+3;\
-}"
-				 );
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=10.0/3.0) iStat++;
-			if(b !=0) iStat++;
-			if(c !=103) iStat++;
-			if(d !=200.0/3.0) iStat++;
-		}
-		catch(Parser::exception_type &e)
-		{
-			iStat += 1;
-			*m_stream << " Parser exception: " << e.GetMsg() << "\r\n";
-			*m_stream << " Token: " << e.GetToken() << "\r\n";
-		}
-		catch(std::exception &e)
-		{
-			iStat += 1;
-			*m_stream << " std::exception: " << e.what() << "\r\n";
-		}
-		catch(...)
-		{
-			iStat += 1;
-			*m_stream <<" TestComment() catch error "<<"\r\n";
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-	int ParserTester::TestWhileCondition()
-	{
-		ParserTester::c_iCount++;
-		int iStat = 0;
-		*m_stream << "testing while condition...";
-
-		Parser p;
-		double a = 0;
-		double b = 0;
-		double c = 0;
-		double d = 0;
-		try
-		{
-			p.DefineVar("a", &a);
-			p.DefineVar("b", &b);
-			p.DefineVar("c", &c);
-			p.DefineVar("d", &d);
-			*m_stream <<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-			*m_stream <<"test while condition Begin"<<"\r\n";
-			p.SetExpr("a=10;b=0;c=0;d=0;while(a>0){d=d+1;a=a-1;}while(c<100){c=c+1;b=b+1;}");
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=0) iStat++;
-			if(b !=100) iStat++;
-			if(c !=100) iStat++;
-			if(d !=10) iStat++;
-
-			p.SetExpr(
-			"\
-a=10;b=10;c=0;d=0;\
-while(a>0) \
-{ \
-a=a-1; \
-b=10;\
-while(b>0)\
-{\
-b=b-1;\
-c=c+1;\
-}\
-d=d+1;\
-}"
-			);
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			if(a !=0) iStat++;
-			if(b !=0) iStat++;
-			if(c !=100 ) iStat++;
-			if(d !=10) iStat++;
-		}
-		catch(...)
-		{
-			iStat += 1;
-			*m_stream <<" TestComment() catch error "<<"\r\n";
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-	int ParserTester::TestAllCondition()
-	{
-		ParserTester::c_iCount++;
-		int iStat = 0;
-		*m_stream << "testing all condition...";
-
-		value_type afVal[3] = {1,2,3};
-		Parser p;
-
-		int aint=0;
-		double adouble=0;
-		try
-		{
-			double *apdouble=0;
-			p.DefineOrgClass("double",apdouble);
-			p.UsingClass(true);
-			*m_stream <<"\r\n";
-			*m_stream <<"***********************"<<"\r\n";
-			*m_stream <<"test All condition Begin"<<"\r\n";
-			p.SetExpr("\
-double a=0;\
-double b=0;\
-double c=0;\
-double d=0;\
-while(a==0)\
-{\
-d=d+1;\
-if(d==10)\
-{\
-a=a+1;\
-while(c<10)\
-{\
-c=c+1;\
-if(c>5)\
-{\
-b=b+1;\
-}\
-}\
-}\
-}\
-			");
-			p.Eval();
-			*m_stream<< "Input: " <<"\r\n";
-			ListFormula(p);
-			*m_stream<< "Output: " <<"\r\n";
-			ListVar(p);
-			*m_stream<< "End " <<"\r\n\r\n";
-
-			double* pda = NULL;
-			pda =(double*) p.GetClassObj("double","a");
-			if(*pda !=1) iStat++;
-			pda =(double*) p.GetClassObj("double","b");
-			if(*pda !=5) iStat++;
-			pda =(double*) p.GetClassObj("double","c");
-			if(*pda !=10) iStat++;
-			pda =(double*) p.GetClassObj("double","d");
-			if(*pda !=10) iStat++;
-		}
-		catch(...)
-		{
-			iStat += 1;
-			*m_stream <<" TestComment() catch error "<<"\r\n";
-		}
-
-		if (iStat==0)
-			*m_stream << "passed" << "\r\n";
-		else
-			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
-
-		return iStat;
-	}
-
-    void ParserTester::AddTest(testfun_type a_pFun)
-    {
-      m_vTestFun.push_back(a_pFun);
-    }
 
 	void ParserTester::SetStream(std::ostream *a_stream)
 	{

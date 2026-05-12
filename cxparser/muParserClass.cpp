@@ -1,3 +1,8 @@
+/*
+  File: muParserClass.cpp
+  Role: Parser-visible class binding runtime and scripted class support.
+*/
+
 #include "muParserDef.h"
 #include "muParserClass.h"
 
@@ -7,44 +12,29 @@
 
 namespace mu
 {
-	//void* operator new(size_t sz)
-	//{
-	//	return ::HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sz);
-	//}
-	//void operator delete (void* pz,size_t sz)
-	//{
-	//	::HeapFree(GetProcessHeap(),HEAP_ZERO_MEMORY,pz);
-	//}
-	//void* CWinFunc::muHeapAlloc(size_t sz)
-	//{
-	//	return ::HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sz);
 
-	//}
-	//void CWinFunc::muHeapFree (void* pz,size_t sz)
-	//{
-	//	::HeapFree(GetProcessHeap(),HEAP_ZERO_MEMORY,pz);
-	//}
-	//////////////////////////////////////////////////////////////////////////
-	//createclass 
-
+	/*
+	  Role: Materialize one parser-visible object instance and bind its
+	  generated member storage into the current parser.
+	*/
 	void * CreateClass::addvar(const string_type & strobjname)
 	{
 		objmap_type::iterator item = m_objmap.find(strobjname);
 		if (item!=m_objmap.end())
 			return 0;
 		objstruct * pobj =  new objstruct;
+		pobj->m_ctor_ran = false;
 		void *pclassvar = NULL;
-		//建立类对象成员变量表
+
 		string_type astrname,astrtype;
-		string_type astr = m_classname+"@"+strobjname + "@";//建立类对象成员类名
 		for(int i=0;i<m_classdefbuf.size();i++)
 		{
-			astrname = astr + m_classStr[i];
+			astrname = BuildMemberStorageName(strobjname, m_classStr[i]);
 			pclassvar=m_classdefbuf[i]->addvar(astrname);
 			astrtype=m_classdefbuf[i]->getclass();
 			if(astrtype==typeid(value_type).name())
 			{
-				//
+
 				m_pCurParser->DefineVar(astrname,(value_type *)pclassvar);
 			}
 
@@ -55,43 +45,81 @@ namespace mu
 		return pobj;
 	};
 
-
-	double CreateClass::ApplyClassFunc(void *pobj,const string_type &a_strFuncName,paramvect& parm)
+	bool CreateClass::FindObjectBindingName(void *pobj, string_type &object_name) const
 	{
-		//todo 			
-		string_type strobjname;
-		objmap_type::iterator item = m_objmap.begin();
-		int inum=0;
+		objmap_type::const_iterator item = m_objmap.begin();
 		for (; item!=m_objmap.end(); ++item)
 		{
 			if(item->second == pobj)
 			{
-				strobjname = item->first;
-				break;
+				object_name = item->first;
+				return true;
 			}
 		}
-		if(item == m_objmap.end())
+		object_name.clear();
+		return false;
+	}
+
+	/*
+	  Role: Resolve a scripted class function by name and execute it against
+	  one concrete object instance.
+	*/
+	double CreateClass::ApplyClassFunc(void *pobj,const string_type &a_strFuncName,paramvect& parm)
+	{
+		string_type strobjname;
+		if(!FindObjectBindingName(pobj, strobjname))
 			return 0;
-		//get function run string and run function
-		m_pCurParser->CompileFuncAndRunString(m_codemap[a_strFuncName]->m_strbuf,m_classname,strobjname);
+
+		objmap_type::iterator obj_item = m_objmap.find(strobjname);
+		if (obj_item == m_objmap.end() || obj_item->second == NULL)
+			return 0;
+		objstruct *bound_object = obj_item->second;
+
+		if (!bound_object->m_ctor_ran &&
+			a_strFuncName != "__ctor__" &&
+			a_strFuncName != "__factory__" &&
+			a_strFuncName != "create")
+		{
+			const char *ctor_script = FindCtorFuncDef();
+			if (ctor_script != NULL)
+			{
+				paramvect empty_ctor_args;
+				m_pCurParser->CompileFuncAndRunString(ctor_script, m_classname, strobjname, empty_ctor_args);
+			}
+			bound_object->m_ctor_ran = true;
+		}
+
+		funcodemap_type::iterator func_item = m_codemap.find(a_strFuncName);
+		if (func_item == m_codemap.end() || func_item->second == NULL)
+			return 0;
+
+		m_pCurParser->CompileFuncAndRunString(func_item->second->m_strbuf,m_classname,strobjname, parm);
+		if (a_strFuncName == "__ctor__" || a_strFuncName == "__factory__" || a_strFuncName == "create")
+			bound_object->m_ctor_ran = true;
+		return 0;
 
 	};
-	//////////////////////////////////////////////////////////////////////////
-	//通过给定对象和浮点型参数成员函数指针 调用类成员函数
+
+	/*
+	  Role: Placeholder dispatch path for numeric parameter vectors.
+	*/
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm)
 	{
-		//
-		
+
 		return 0;
 	}
-	//////////////////////////////////////////////////////////////////////////
-	//通过给定对象和指针型参数成员函数指针 调用类成员函数
+
+	/*
+	  Role: Placeholder dispatch path for object parameter vectors.
+	*/
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,voidparamvect& parm)
 	{
 		return 0;
-	} 
-	//////////////////////////////////////////////////////////////////////////
-	//通过给定对象和字符串型参数成员函数指针 调用类成员函数
+	}
+
+	/*
+	  Role: Placeholder dispatch path for string parameter vectors.
+	*/
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,charpvect& parm)
 	{
 		return 0;

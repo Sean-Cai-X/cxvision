@@ -1,21 +1,8 @@
-/** 
-  Copyright (C) 2004-2006 Ingo Berg
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this 
-  software and associated documentation files (the "Software"), to deal in the Software
-  without restriction, including without limitation the rights to use, copy, modify, 
-  merge, publish, distribute, sublicense, and/or sell copies of the Software, and to 
-  permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-  The above copyright notice and this permission notice shall be included in all copies or 
-  substantial portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
-  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, 
-  DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+ï»¿/*
+  File: muParserBase.h
+  Role: Core parser runtime and execution entry points.
 */
+
 #ifndef MU_PARSER_BASE_H
 #define MU_PARSER_BASE_H
 
@@ -35,53 +22,50 @@
 #include "muparserClassReader.h"
 #include "muParserClassFunctionReader.h"
 
-
 namespace mu
 {
+/*
+  Class: ParserBase
+  Role: Owns parser state, readers, bytecode buffers, symbol tables, and class registries.
 
-/** \brief Mathematical expressions parser (base parser engine).
-  
-  Version 1.26 (20060904)
-
-  This is the implementation of a bytecode based mathematical expressions parser. 
-  The formula will be parsed from string and converted into a bytecode. 
-  Future calculations will be done with the bytecode instead the formula string
-  resulting in a significant performance increase. 
-  Complementary to a set of internally implemented functions the parser is able to handle 
-  user defined functions and variables. 
-
-  \author (C) 2004-2006 Ingo Berg
+  Mainline warning:
+  - Reliability and stability take priority over new parser semantics.
+  - Changes touching reader selection, control-flow execution, class dispatch,
+    or bytecode/default execution paths must not alter default behavior unless
+    the mainline test chain has been revalidated.
+  - Prefer macro-gated branches for experimental parser work.
 */
+
 	static const char_type *c_DefaultOprt[28]=
-	{ 
-		"<=",  ///< Operator item:  cmLE
-		">=",  ///< Operator item:  cmGE
-		"!=",  ///< Operator item:  cmNEQ
-		"==",  ///< Operator item:  cmEQ
-		"<",   ///< Operator item:  cmLT 
-		">",   ///< Operator item:  cmGT
-		"+",  ///< Operator item:  cmADD
-		"-",   ///< Operator item:  cmSUB
-		"*",  ///< Operator item:  cmMUL
-		"/",   ///< Operator item:  cmDIV
-		"^",  ///< Operator item:  cmPOW
-		"and",  ///< Operator item:  cmAND
-		"or",   ///< Operator item:  cmOR
-		"xor",  ///< Operator item:  cmXOR
-		"=",  ///< Operator item:  cmASSIGN
-		"(",   ///< Operator item:  cmBO
-		")",  ///< Operator item:  cmBC
-		",",  ///< Operator item:  cmCOMMA
-		";",  ///< Operator item:  cmSEMICOLON
-		"{",  ///< Operator item:  cmLB
-		"}",  ///< Operator item:  cmRB
-		".",  ///< Operator item:  cmMember
-		"->",  ///< Operator item:  cmPointer
-		"if",  ///< Operator item:  cmIf
-		"else", ///< Operator item:  cmElse
-		"while", ///< Operator item:  cmWhile
+	{
+		"<=",
+		">=",
+		"!=",
+		"==",
+		"<",
+		">",
+		"+",
+		"-",
+		"*",
+		"/",
+		"^",
+		"and",
+		"or",
+		"xor",
+		"=",
+		"(",
+		")",
+		",",
+		";",
+		"{",
+		"}",
+		".",
+		"->",
+		"if",
+		"else",
+		"while",
 		"for",
-		0		///cxyadd ";","{","}", ".","->","if","else","while"
+		0
 	};
 class   ParserBase
 {
@@ -89,95 +73,55 @@ friend class ParserTokenReader;
 friend class ParserClassReader;
 friend class ParserClassFunctionReader;
 private:
-    typedef value_type (ParserBase::*ParseFunction)() const;  
-
+    typedef value_type (ParserBase::*ParseFunction)() const;
 	typedef ParserToken<value_type, string_type> token_type;
-
     typedef std::vector<string_type> stringbuf_type;
-
     typedef ParserTokenReader token_reader_type;
-
-
-
-	//cxyaddbegin
     typedef ParserToken<vision_type, string_type> token_viosiontype;
+ public:
 
-	//cxyaddend
- public: 
-
-    /** \brief Type of the error class. 
-    
-      Included for backwards compatibility.
-    */
+    /* Backwards-compatible public error alias. */
     typedef ParserError exception_type;
 
-    ParserBase(); 
+    ParserBase();
     ParserBase( const ParserBase &a_Parser );
     ParserBase& operator=(const ParserBase &a_Parser);
 
-    //---------------------------------------------------------------------------
-    /** \brief Destructor. (trivial) 
-
-        \throw nothrow
-    */
+    /* Releases parser-owned class registry objects. */
     virtual ~ParserBase()
     {
-		//cxyadd 
-
 			classbasemap_type:: iterator pIter,pIter2;
 			for ( pIter = m_ClassDefMap.begin( ) ; pIter != m_ClassDefMap.end( ) ;)
 			{
 				pIter2=pIter;
 				pIter++ ;
-				//cxy noted !!! need to delete m_ClassDefMap here
-				//m_ClassDefMap.delete()
-
 				classbase *pbase=pIter2->second;
 				switch(pbase->m_iclasstype)
 				{
 					case CLASS_ORG:
-						//OrgClass *pclass = (OrgClass *)pbase;
-						//delete pclass;
 					break;
 					case CLASS_PARSER:
-						//ParserClass *pclass = (ParserClass*)pbase;
-						//delete pclass;
 					break;
 					case CLASS_CREATE:
-						//CreateClass *pclass = (CreateClass*)pbase;
-						//delete pclass;
 					break;
 					default:
-						//delete pbase;
 					break;
 				}
 				delete pbase;
-				
 			}
-		//exit(1);
 	}
-    
-    //---------------------------------------------------------------------------
-    /** \brief Calculate the result.
 
-      A note on const correctness: 
-      I consider it important that Calc is a const function.
-      Due to caching operations Calc changes only the state of internal variables with one exception
-      m_UsedVar this is reset during string parsing and accessible from the outside. Instead of making
-      Calc non const GetUsedVar is non const because it explicitely calls Eval() forcing this update. 
-
-      \pre A formula must be set.
-      \pre Variables must have been set (if needed)
-  
-      \sa #m_pParseFormula
-      \return The evaluation result
-      \throw ParseException if no Formula is set or in case of any other error related to the formula.
-    */
-  	inline value_type Eval() const
+    /* Evaluates the active expression through the selected execution path. */
+    inline value_type Eval() const
     {
-      return (this->*m_pParseFormula)(); 
+      if (m_bHasControlFlow)
+      {
+        m_pParseFormula = &ParserBase::ParseString;
+      }
+      return (this->*m_pParseFormula)();
     }
 
+    /* Sets the active expression and refreshes parser execution state. */
     void SetExpr(const string_type &a_sExpr);
 	void SetVarFactory(facfun_type a_pFactory,void *a_pvoid=0);
     void EnableOptimizer(bool a_bIsOn=true);
@@ -202,7 +146,6 @@ private:
     MUP_DEFINE_FUNC(strfun_type1)
 #undef MUP_DEFINE_FUNC
 
-
     void DefineOprt(const string_type &a_strName, fun_type2 a_pFun, unsigned a_iPri=0, bool a_bAllowOpt = false);
     void DefineConst(const string_type &a_sName, value_type a_fVal);
     void DefineStrConst(const string_type &a_sName, const string_type &a_strVal);
@@ -210,10 +153,6 @@ private:
     void DefinePostfixOprt(const string_type &a_strFun, fun_type1 a_pOprt, bool a_bAllowOpt=true);
     void DefineInfixOprt(const string_type &a_strName, fun_type1 a_pOprt, int a_iPrec=prINFIX, bool a_bAllowOpt=true);
 	void DefineGetAdress(const string_type &a_strName,fun_lptype a_pFun, int a_iPrec=prINFIX, bool a_bAllowOpt=true);
-
-	//////////////////////////////////////////////////////////////////////////
-	//cxyadd <ver1>///////////////////////////////////////////////////////////
-	//////////////////////////////////////////////////////////////////////////
 
 #define MUP_DEFINE_VOID_FUNC(TYPE)                                                               \
 	inline void DefineVoidFun(const string_type &a_strName, TYPE a_pFun, bool a_bAllowOpt = true)  \
@@ -231,22 +170,22 @@ private:
 	MUP_DEFINE_VOID_FUNC(strfun_void_type1)
 #undef MUP_DEFINE_VOID_FUNC
 
-
-	//
 	void UsingClass(bool usingclass)
 	{
+		(void)usingclass;
 		m_pTokenReader->UsingClassDef(true);
     }
 
 	template<class ACLASS>
-	void DefineOrgClass(const char *a_szName,//const string_type &a_sName,
+	void DefineOrgClass(const char *a_szName,
 						ACLASS *apclass)
 	{
+		(void)apclass;
 		string_type a_sName(a_szName);
-		//// Test if a constant with that names already exists
+
 		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sName);
 		if (itor!=m_ClassDefMap.end())
-		//if (m_ClassDefMap.find(a_sName)!=m_ClassDefMap.end())
+
 			Error(ecNAME_CONFLICT);
 
 		CheckName(a_sName, ValidNameChars());
@@ -259,10 +198,11 @@ private:
 	}
 
 	template<class ACLASS>
-	void DefineClass(const char *a_szName,/*const string_type &a_sName,*/
+	void DefineClass(const char *a_szName,
 						ACLASS *apclass)
 	{
-		//// Test if a constant with that names already exists
+		(void)apclass;
+
 		string_type a_sName(a_szName);
 		if (m_ClassDefMap.find(a_sName)!=m_ClassDefMap.end())
 			Error(ecNAME_CONFLICT);
@@ -276,11 +216,15 @@ private:
 		ReInit();
 	}
 
-
-	void DefineCreateClass(const char *a_szName,/*const string_type &a_sName,*/
-							const char *a_szstr)/*class def string*/
+  	/*
+  	  Registers a parser-declared class definition from script text.
+  	  This is the create-class semantic entry for class create / ctor-factory
+  	  metadata, not a direct runtime instance materialize path.
+  	*/
+  	void DefineCreateClass(const char *a_szName,
+  							const char *a_szstr)
 	{
-		//// Test if a constant with that names already exists
+
 		string_type a_sName(a_szName);
 
 		if (m_ClassDefMap.find(a_sName)!=m_ClassDefMap.end())
@@ -290,642 +234,131 @@ private:
 
 		CreateClass *paclass=new CreateClass(a_sName,this);
 
-		
 		m_ClassDefMap[a_sName] = (classbase*) paclass;
-		
-		//paclass->AddClassDef()
-		
+
 		CompileClassDeclara(a_szstr,paclass);
 		ReInit();
     }
-	void DefineCreateClasFun(const char *a_szClassName,//const string_type&a_sClassName,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		const char *a_szFuncStr)
+
+  	/*
+  	  Registers one scripted member body for a previously declared create-class.
+  	  Together with DefineCreateClass, this forms the scripted class creation
+  	  registration layer before later runtime instance materialize.
+  	*/
+  	void DefineCreateClasFun(const char *a_szClassName,
+ 		const char *a_szClassmemberFuncName,
+ 		const char *a_szFuncStr)
 	{
 		string_type a_sClassName(a_szClassName);
 		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
 		string_type a_sClassFunStr(a_szFuncStr);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
 
-		CreateClass *pCreateclass = (CreateClass *)pclass;
+		CreateClass *pCreateclass = ResolveCreateClass(a_sClassName);
+		if (pCreateclass == NULL)
+			return;
 
-		pCreateclass->AddClassFun(a_szClassmemberFuncName,a_sClassFunStr);
+		pCreateclass->AddClassFun(a_sClassmemberFuncName,a_sClassFunStr);
 	}
-	//template<class ACLASS,class PARAM>
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-						ACLASS *apclass,
-						const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-						void (ACLASS::*aparclass)(void ) )
+
+	/*
+	  Runtime class-function registration entry.
+	  The many signature overloads below are legacy shells; the actual storage
+	  mainline is ParserClass::AddClassFun and should stay the single sink.
+	  New signature support should first map into the generic signature
+	  categories declared in muParserClass.h instead of adding more outward
+	  registration surface.
+
+	  Overload families:
+	  - fixed numeric / fixed integral / fixed mixed primitive callbacks
+	  - variadic numeric and variadic char* callbacks
+	  - scripted/create-class text registration (separate string overload)
+	*/
+	template<class ACLASS, class TMETHOD>
+	void DefineClassFunImpl(const char *a_szClassName,
+							const char *a_szClassmemberFuncName,
+							TMETHOD aparclass)
 	{
 		string_type a_sClassName(a_szClassName);
 		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-		
+
+		classbase *pclass = ResolveRegisteredClass(a_sClassName);
+		if (pclass == NULL)
+			return;
+
 		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
 		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
+		(void)ptureclass->GetFuncSignatureShape(a_sClassmemberFuncName);
 
 		ReInit();
 	}
 
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-						ACLASS *apclass,
-						const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-						void (ACLASS::*aparclass)(double ) )
-	{
-		//// Test if a constant with that names already exists
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
+#define CXPARSER_DEFINE_CLASSFUN_FORWARD(METHOD_SIG) \
+	template<class ACLASS> \
+	void DefineClassFun(const char *a_szClassName, \
+		ACLASS *apclass, \
+		const char *a_szClassmemberFuncName, \
+		METHOD_SIG ) \
+	{ \
+		(void)apclass; \
+		DefineClassFunImpl<ACLASS>(a_szClassName, a_szClassmemberFuncName, aparclass); \
 	}
 
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(double,double ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(double,double,double ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(double,double,double,double ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int,int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int,int ,int,int) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int,int,int ,int,int) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(int,int,int,int,int ,int,int) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(const char *) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		void (ACLASS::*aparclass)(void *) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	
-	//
-
-	//template<class ACLASS>
-	//void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-	//	ACLASS *apclass,
-	//	const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-	//	void (ACLASS::*aparclass)(void *,void *) )
-	//{
-	//	string_type a_sClassName( a_szClassName); 
-	//	string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-	//	//// Test if a constant with that names already exists
-	//	classbase *pclass;
-	//	classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-	//	if (itor!=m_ClassDefMap.end())
-	//		pclass=itor->second;
-	//	else
-	//		Error(ecNAME_CONFLICT);
-
-	//	ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-	//	ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-	//	ReInit();
-	//}
-	//template<class ACLASS>
-	//void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-	//	ACLASS *apclass,
-	//	const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-	//	void (ACLASS::*aparclass)(void *,void *,void *) )
-	//{
-	//	string_type a_sClassName( a_szClassName); 
-	//	string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-	//	//// Test if a constant with that names already exists
-	//	classbase *pclass;
-	//	classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-	//	if (itor!=m_ClassDefMap.end())
-	//		pclass=itor->second;
-	//	else
-	//		Error(ecNAME_CONFLICT);
-
-	//	ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-	//	ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-	//	ReInit();
-	//}
-
-	//template<class ACLASS>
-	//void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-	//	ACLASS *apclass,
-	//	const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-	//	void (ACLASS::*aparclass)(void *,void *,void *,void *) )
-	//{
-	//	string_type a_sClassName( a_szClassName); 
-	//	string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-	//	//// Test if a constant with that names already exists
-	//	classbase *pclass;
-	//	classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-	//	if (itor!=m_ClassDefMap.end())
-	//		pclass=itor->second;
-	//	else
-	//		Error(ecNAME_CONFLICT);
-
-	//	ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-	//	ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-	//	ReInit();
-	//}
-	//template<class ACLASS>
-	//void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-	//	ACLASS *apclass,
-	//	const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-	//	void (ACLASS::*aparclass)(void *,void *,void *,void *,void *) )
-	//{
-	//	string_type a_sClassName( a_szClassName); 
-	//	string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-	//	//// Test if a constant with that names already exists
-	//	classbase *pclass;
-	//	classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-	//	if (itor!=m_ClassDefMap.end())
-	//		pclass=itor->second;
-	//	else
-	//		Error(ecNAME_CONFLICT);
-
-	//	ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-	//	ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-	//	ReInit();
-	//}
-	
-	//
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		double (ACLASS::*aparclass)(void *) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		double (ACLASS::*aparclass)(int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		double (ACLASS::*aparclass)(int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		double (ACLASS::*aparclass)(int,int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		int (ACLASS::*aparclass)(int,int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		int (ACLASS::*aparclass)(int ) )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		int (ACLASS::*aparclass)() )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		double (ACLASS::*aparclass)() )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-	template<class ACLASS>
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		ACLASS *apclass,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
-		char* (ACLASS::*aparclass)() )
-	{
-		string_type a_sClassName( a_szClassName); 
-		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
-		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
-		if (itor!=m_ClassDefMap.end())
-			pclass=itor->second;
-		else
-			Error(ecNAME_CONFLICT);
-
-		ParserClass<ACLASS> *ptureclass=(ParserClass<ACLASS> *)pclass;
-		ptureclass->AddClassFun(a_sClassmemberFuncName, aparclass);
-
-		ReInit();
-	}
-//////////////////////////////////////////////////////////////////////////
-//createclass
-	void DefineClassFun(const char *a_szClassName,//const string_type&a_sClassName,
-		const char *a_szClassmemberFuncName,//const string_type&a_sClassmemberFuncName,
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(void))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(double))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(double,double))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(double,double,double))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(double,double,double,double))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(double,const char_type *))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int,int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int,int,int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(int,int,int,int,int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(const char *))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(void *))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(charpvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(void (ACLASS::*aparclass)(paramvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(int (ACLASS::*aparclass)(charpvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(int (ACLASS::*aparclass)(paramvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(int (ACLASS::*aparclass)(int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(int (ACLASS::*aparclass)(int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(int (ACLASS::*aparclass)())
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(void *))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(double,const char_type *))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(charpvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(paramvect &))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)(int,int,int))
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(double (ACLASS::*aparclass)())
+	CXPARSER_DEFINE_CLASSFUN_FORWARD(char* (ACLASS::*aparclass)())
+
+#undef CXPARSER_DEFINE_CLASSFUN_FORWARD
+
+	void DefineClassFun(const char *a_szClassName,
+		const char *a_szClassmemberFuncName,
 		const char *a_szClassFuncStr )
 	{
-		string_type a_sClassName( a_szClassName); 
+		/*
+		  Role: Scripted class-function registration entry.
+		  This is the textual sibling of the runtime callback path and
+		  should stay separate from the generic callback registration sink.
+		*/
+		string_type a_sClassName( a_szClassName);
 		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
 		string_type a_sFuncstr(a_szClassFuncStr);
-		//// Test if a constant with that names already exists
-		classbase *pclass;
+
+		classbase *pclass = nullptr;
 		classbasemap_type::iterator itor=m_ClassDefMap.find(a_sClassName);
 		if (itor!=m_ClassDefMap.end())
 			pclass=itor->second;
 		else
-			Error(ecNAME_CONFLICT);
+			{
+				Error(ecNAME_CONFLICT);
+				return;
+			}
 
 		CreateClass *ptureclass=(CreateClass *)pclass;
 		ptureclass->AddClassFun(a_sClassmemberFuncName, a_sFuncstr);
@@ -941,16 +374,8 @@ private:
 
 	}
 
-
-
-	//////////////////////////////////////////////////////////////////////////
-	//cxyadd end//////////////////////////////////////////////////////////////
-	//////////////////////////////////////////////////////////////////////////
-
-
-
-    // Clear user defined variables, constants or functions
-  	void ClearVar();
+    /* Clears user-defined symbols and parser-visible runtime objects. */
+    void ClearVar();
     void ClearFun();
     void ClearConst();
     void ClearInfixOprt();
@@ -968,81 +393,47 @@ private:
 
 	const classbasemap_type& GetClassMap() const;
 	const string_type& GetFormula() const;
-	
-    //---------------------------------------------------------------------------
-    /** \brief Return the strings of all Operator identifiers. 
-    
-        GetOprt is a const function returning a pinter to an array of const char pointers.
-        
-        \return Returns a pointer to the c_DefaultOprt array of const char *.
-        \throw nothrow
-		"<=", ">=", "!=", "==", "<", ">", "+", "-", "*", "/", 
-		"^", "and", "or", "xor", "=", "(", ")", ",", 0 
-    */
+
     const char_type ** GetOprtDef() const
     {
       return (const char **)(&c_DefaultOprt[0]);
     }
 
-    //---------------------------------------------------------------------------
-    /** \brief Define the set of valid characters to be used in names of
-               functions, variables, constants.
-    */
     void DefineNameChars(const char_type *a_szCharset)
     {
       m_sNameChars = a_szCharset;
     }
 
-    //---------------------------------------------------------------------------
-    /** \brief Define the set of valid characters to be used in names of
-               binary operators and postfix operators.
-    */
     void DefineOprtChars(const char_type *a_szCharset)
     {
 		m_sOprtChars = a_szCharset;
     }
 
-    //---------------------------------------------------------------------------
-    /** \brief Define the set of valid characters to be used in names of
-               infix operators.
-    */
     void DefineInfixOprtChars(const char_type *a_szCharset)
     {
 		m_sInfixOprtChars = a_szCharset;
     }
 
-    //---------------------------------------------------------------------------
-    /** \brief Virtual function that defines the characters allowed in name identifiers. 
-        \sa #ValidOprtChars, #ValidPrefixOprtChars
-    */ 
     const char_type* ValidNameChars() const
-    {/*DefineNameChars("0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");*/
+    {
 		assert(m_sNameChars.size());
 		return m_sNameChars.c_str();
     }
 
-    //---------------------------------------------------------------------------
-    /** \brief Virtual function that defines the characters allowed in operator definitions. 
-        \sa #ValidNameChars, #ValidPrefixOprtChars
-    */
     const char_type* ValidOprtChars() const
     {
 		assert(m_sOprtChars.size());
 		return m_sOprtChars.c_str();
     }
 
- 
-    /** \brief Virtual function that defines the characters allowed in infix operator definitions.
-        \sa #ValidNameChars, #ValidOprtChars
-    */
     const char_type* ValidInfixOprtChars() const
     {
 		assert(m_sInfixOprtChars.size());
 		return m_sInfixOprtChars.c_str();
     }
 
-    void  Error( EErrorCodes a_iErrc, 
-                 int a_iPos = (int)mu::string_type::npos, 
+    void  Error( EErrorCodes a_iErrc,
+                 int a_iPos = (int)mu::string_type::npos,
                  const string_type &a_strTok = string_type() ) const;
 	void RunCode()
 	{
@@ -1050,12 +441,8 @@ private:
 	}
 
  protected:
-	  
-    //---------------------------------------------------------------------------
-    /** \brief Initialize user defined functions. 
-     
-      Calls the virtual functions InitFun(), InitConst() and InitOprt().
-    */
+
+    /* Initializes charsets, built-in functions, constants, and operators. */
     void Init()
     {
       InitCharSets();
@@ -1064,11 +451,10 @@ private:
       InitOprt();
     }
 
-    //---------------------------------------------------------------------------
     virtual void InitCharSets() = 0;
     virtual void InitFun() = 0;
     virtual void InitConst() = 0;
-    virtual void InitOprt() = 0; 
+    virtual void InitOprt() = 0;
 
  private:
     void Assign(const ParserBase &a_Parser);
@@ -1077,8 +463,8 @@ private:
 	void InitClassFunReader();
     void ReInit() const;
 	void EndExpress() const;
-    void AddCallback( const string_type &a_strName, 
-                      const ParserCallback &a_Callback, 
+    void AddCallback( const string_type &a_strName,
+                      const ParserCallback &a_Callback,
                       funmap_type &a_Storage,
                       const char_type *a_szCharSet );
 
@@ -1086,11 +472,10 @@ private:
                       ParserStack<token_type> &a_stVal,
 					  ParserStack<token_type> &a_classobj) const;
 
-    void ApplyFunc(ParserStack<token_type> &a_stOpt,					
-                   ParserStack<token_type> &a_stVal, 
+    void ApplyFunc(ParserStack<token_type> &a_stOpt,
+                   ParserStack<token_type> &a_stVal,
 				   ParserStack<token_type> &a_classobj,
-                   int iArgCount) const; 
-
+                   int iArgCount) const;
 
     token_type ApplyNumFunc(const token_type &a_FunTok,
                             const std::vector<token_type> &a_vArg) const;
@@ -1100,7 +485,7 @@ private:
 
     int GetOprtPri(const token_type &a_Tok) const;
 
-    value_type ParseString() const; 
+    value_type ParseString() const;
     value_type ParseCmdCode() const;
     value_type ParseValue() const;
 
@@ -1108,51 +493,49 @@ private:
     void  CheckName(const string_type &a_strName, const string_type &a_CharSet) const;
 
 #if defined(MU_PARSER_DUMP_STACK) | defined(MU_PARSER_DUMP_CMDCODE)
-    void StackDump(const ParserStack<token_type > &a_stVal, 
+    void StackDump(const ParserStack<token_type > &a_stVal,
                    const ParserStack<token_type > &a_stOprt) const;
 #endif
 
-    /** \brief Pointer to the parser function.     
-      Eval() calls the function whose address is stored there.
-    */
-	mutable ParseFunction  m_pParseFormula; ///< Function callback adress such as muParserBase::ParseString
-    mutable const ParserByteCode::map_type *m_pCmdCode; ///< Formula converted to bytecode, points to the data of the bytecode class.
-    mutable ParserByteCode m_vByteCode;   ///< The Bytecode class.
-    mutable stringbuf_type m_vStringBuf; ///< String buffer, used for storing string function arguments
+    /* Active evaluation entry used by Eval(). */
+	mutable ParseFunction  m_pParseFormula;
+    mutable const ParserByteCode::map_type *m_pCmdCode;
+    mutable ParserByteCode m_vByteCode;
+    mutable stringbuf_type m_vStringBuf;
 
     stringbuf_type m_vStringVarBuf;
 
-    /** \brief Managed pointer to the token reader object. */
-    std::auto_ptr<token_reader_type> m_pTokenReader; 
-    std::auto_ptr<ParserClassReader> m_pClassReader; 
-	std::auto_ptr<ParserClassFunctionReader> m_pClassFunReader;
+    std::unique_ptr <token_reader_type> m_pTokenReader;
+    std::unique_ptr <ParserClassReader> m_pClassReader;
+	std::unique_ptr <ParserClassFunctionReader> m_pClassFunReader;
 
-    funmap_type  m_FunDef;        ///< Map of function names and pointers.
-    funmap_type  m_PostOprtDef;   ///< Postfix operator callbacks
-    funmap_type  m_InfixOprtDef;  ///< unary infix operator.
-    funmap_type  m_OprtDef;       ///< Binary operator callbacks
- 
-	valmap_type  m_ConstDef;      ///< user constants.
-    strmap_type  m_StrVarDef;     ///< user defined string constants
-    varmap_type  m_VarDef;        ///< user defind variables.
-	stringmap_type m_StringVarDef;///< user defined string variables constants
+    funmap_type  m_FunDef;
+    funmap_type  m_PostOprtDef;
+    funmap_type  m_InfixOprtDef;
+    funmap_type  m_OprtDef;
 
-    bool m_bOptimize;             ///< Flag that indicates if the optimizer is on or off.
-    bool m_bUseByteCode;          ///< Flag that indicates if bytecode parsing is on or off.
-    bool m_bBuiltInOp;            ///< Flag that can be used for switching built in operators on and off
-	bool m_bcolllection;		  ///
+	valmap_type  m_ConstDef;
+    strmap_type  m_StrVarDef;
+    varmap_type  m_VarDef;
+	stringmap_type m_StringVarDef;
 
-    string_type m_sNameChars;      ///< Charset for names
-    string_type m_sOprtChars;      ///< Charset for postfix/ binary operator tokens
-    string_type m_sInfixOprtChars; ///< Charset for infix operator tokens
+    bool m_bOptimize;
+    bool m_bUseByteCode;
+    bool m_bHasControlFlow;
+    bool m_bBuiltInOp;
+	bool m_bcolllection;
+
+    string_type m_sNameChars;
+    string_type m_sOprtChars;
+    string_type m_sInfixOprtChars;
   public:
 	mutable string_type m_StrCollection;
 	mutable ParserByteCode m_vByteCodeCollection;
-	mutable const ParserByteCode::map_type *m_pCmdCodeCollection; 
+	mutable const ParserByteCode::map_type *m_pCmdCodeCollection;
 	mutable classbasemap_type m_ClassDefMap;
 	mutable string_type m_StringFormula;
-//////////////////////////////////////////////////////////////////////////
-//
+
+    /* Optional virtual-class grouping hook used by extended parser flows. */
     virtualclass *m_PVirClassGroup;
 
 	ParserByteCode::storage_type GetCollectionStorage()
@@ -1194,55 +577,41 @@ private:
 		 m_bstopcompile=false;
 	 }
 
-
 	typedef ParserStack<token_type> TokeStack;
 
 	mutable TokeStack m_OptStack;
-
-	//mutable TokeStack m_optstack1;
-	//mutable TokeStack m_optstack2;
-	//mutable TokeStack m_optstack3;
 
 	mutable map<string_type,TokeStack> m_mapoptstack;
 
 	void RunOptString(const char *optstackname);
 	void SetOptStack(const string_type & optstackname);
 	void ClearOptStack();
-	//mutable TokeVector m_optvector;
-    //mutable TokeVector m_optvector1;
-    //mutable TokeVector m_optvector2;
-    //mutable TokeVector m_optvector3;
 
-	
 	bool m_boptcollect;
 	void SetOptCollect(bool bcollec)
 	{
 		m_boptcollect=bcollec;
 	}
-//////////////////////////////////////////////////////////////////////////
-	
 
-	value_type RunCollectionOpt() const;//ÔËÐÐÊÕ¼¯×Ö´®ÆÊÎöºóÉú³ÉµÄ²Ù×÷·û
+	value_type RunCollectionOpt() const;
 	value_type RunOptStack(TokeStack & optstack) const;
-	//double m_dtimelimit;
-	//mutable double m_druntime;
-	//void SetOptLimitTime(double dlimittime){m_dtimelimit = dlimittime;}
-	//double GetOptRunTime(){return m_druntime;}
+
 	value_type RunOptVect_SetTime(TokeStack & optstack) const;
 	value_type RunClassFuncCode(int * vFuncByteCode,int iFuncBytesize,stringbuf_type& strtab) const;
 
-//////////////////////////////////////////////////////////////////////////
-	void CopyRUNOpt(int ioptnum); 
+	void CopyRUNOpt(int ioptnum);
 	void RunOpt(int ioptnum);
-	//void RunOptTimeLimit(int ioptnum);
-//////////////////////////////////////////////////////////////////////////
+
 	void CompileClassDeclara(const string_type &a_strdeclarastr,CreateClass *paclass);
 	void CompileFuncAndRunString(const string_type &a_strfucstr,const string_type &a_strclass,const string_type &a_strobj);
-	
+	void CompileFuncAndRunString(const string_type &a_strfucstr,const string_type &a_strclass,const string_type &a_strobj,const paramvect &aparms);
+	classbase* ResolveRegisteredClass(const string_type &a_sClassName);
+	CreateClass* ResolveCreateClass(const string_type &a_sClassName);
+
 	CreateClass *m_pcreateclass;
 
     bool m_bprecompile;
-	
+
 	void* GetClassObj(const string_type & strclass,const string_type & strobj);
     void* GetClassObj(const string_type &  strclass,int iobjnum);
 	int GetClassObjSum(const string_type &  strclass);
@@ -1251,7 +620,8 @@ private:
 
 };
 
-} // namespace mu
+}
 
 #endif
+
 

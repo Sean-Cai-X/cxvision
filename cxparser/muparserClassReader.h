@@ -1,21 +1,8 @@
- /*
-  Copyright (C) 2005 Ingo Berg
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this 
-  software and associated documentation files (the "Software"), to deal in the Software
-  without restriction, including without limitation the rights to use, copy, modify, 
-  merge, publish, distribute, sublicense, and/or sell copies of the Software, and to 
-  permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-  The above copyright notice and this permission notice shall be included in all copies or 
-  substantial portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-  NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
-  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, 
-  DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+/*
+  File: muparserClassReader.h
+  Role: Reader path for class-aware parser expressions.
 */
+
 #ifndef MU_PARSER_CLASS_READER_H
 #define MU_PARSER_CLASS_READER_H
 
@@ -31,17 +18,20 @@
 #include "muParserToken.h"
 #include "muParserClass.h"
 
-
-
-
 namespace mu
 {
 
-  // Forward declaration
   class ParserBase;
 
-  /** \brief Token reader for the ParserBase class.
+  /*
+    Role: Token reader variant that understands parser-visible class
+    declarations, object references, and member access syntax.
 
+    Mainline warning:
+    - This class protects current class/object/member-access behavior.
+    - Do not attach new feature semantics here by default.
+    - Any change in this reader should be macro-gated, tested away from the
+      default path, and announced before it can affect other threads.
   */
   class   ParserClassReader
   {
@@ -55,7 +45,6 @@ namespace mu
       int  m_iSynFlags;
       bool m_bIgnoreUndefVar;
 
-
       const funmap_type *m_pFunDef;
       const funmap_type *m_pPostOprtDef;
       const funmap_type *m_pInfixOprtDef;
@@ -63,111 +52,109 @@ namespace mu
       const valmap_type *m_pConstDef;
       const strmap_type *m_pStrVarDef;
 
-      varmap_type *m_pVarDef;  ///< The only non const pointer to parser internals
+      varmap_type *m_pVarDef;
       facfun_type m_pFactory;
 
-      std::vector<identfun_type> m_vIdentFun; ///< Value token identification function
+      std::vector<identfun_type> m_vIdentFun;
       varmap_type m_UsedVar;
-      value_type m_fZero;      ///< Dummy value of zero, referenced by undefined variables
+      value_type m_fZero;
       int m_iBrackets;
 	  int m_iBigBrackets;
 
-	  //////////////////////////////////////////////////////////////////////////
-	  //cxyadd
-	  void *m_pClass;  ///< 生成变量工厂的基类
-	  classbasemap_type *m_pClassDef;   ///< Class map point ,def class store in map
-      bool m_bClassDef;		///< reader find a class def in front set m_bClassDefVar true,else false
-	  classbase *m_pClassBase;  ///< Get the Class Object var map
-	  void *m_pClassObj;		///< Get the spec Class Object
-	  int  m_iPreFlags; ///< 前一个符号
+	  void *m_pClass;
+	  classbasemap_type *m_pClassDef;
+      bool m_bClassDef;
+	  classbase *m_pClassBase;
+	  void *m_pClassObj;
+	  int  m_iPreFlags;
 
 	 stringmap_type *m_pStringVarDef;
 	 CreateClass * m_pcreateclass;
   private:
+
 	  enum EPreCodes
 	  {
-		  isBO      = 1 << 0,  ///< " (" 
-		  isBC      = 1 << 1,  ///< " )"
-		  isVAL     = 1 << 2,  ///< "2"
-		  isVAR     = 1 << 3,  ///< "var"
-		  isCOMMA   = 1 << 4,  ///< "," 
-		  isFUN     = 1 << 5,  ///< "sin(var)"	
-		  isOPT     = 1 << 6,  ///< "(var1+var2)"
-		  isPOSTOP  = 1 << 7,  ///< "sin!"
-		  isINFIXOP = 1 << 8,  ///< "+var" "!var"
-		  isEND     = 1 << 9,  ///< end of formula
-		  isSTR     = 1 << 10, ///< ""string to demo""
-		  isASSIGN  = 1 << 11, ///<  "="
-		  isLB      = 1 << 12, ///<  "{"
-		  isRB	    = 1 << 13, ///<  "}"
-		  isSEMIC   = 1 << 14, ///<  ";"
-		  isClassDef= 1 << 15, ///<  "int ","TCLASS" 
-		  isClassObjDef= 1 << 16,///< "int aobject;"  then ".aobject;" 
-		  isClassPointObjDef=1<<17,///<"*" then "int * apoint;"
-		  isClassMemOp=1 << 18,///<  "." 
-		  isClassPointOp=1<<19,///<  " ->"
-		  isClassMemVar=1<<20, ///<  ".m_var"
-		  isClassMemFuc=1<<21, ///<  ".m_fucn()"
+		  isBO      = 1 << 0,
+		  isBC      = 1 << 1,
+		  isVAL     = 1 << 2,
+		  isVAR     = 1 << 3,
+		  isCOMMA   = 1 << 4,
+		  isFUN     = 1 << 5,
+		  isOPT     = 1 << 6,
+		  isPOSTOP  = 1 << 7,
+		  isINFIXOP = 1 << 8,
+		  isEND     = 1 << 9,
+		  isSTR     = 1 << 10,
+		  isASSIGN  = 1 << 11,
+		  isLB      = 1 << 12,
+		  isRB	    = 1 << 13,
+		  isSEMIC   = 1 << 14,
+		  isClassDef= 1 << 15,
+		  isClassObjDef= 1 << 16,
+		  isClassPointObjDef=1<<17,
+		  isClassMemOp=1 << 18,
+		  isClassPointOp=1<<19,
+		  isClassMemVar=1<<20,
+		  isClassMemFuc=1<<21,
 		  isClassObj=1<<22,
 		  isIfWhile	=1<<23,
-		  isANY     = ~0       ///< All of he above flags set
+		  isANY     = ~0
 	  };
-	  //cxyaddend
-	  //////////////////////////////////////////////////////////////////////////
 
-  //
-  // private Functions
-  //
   private:
-      /*
-		  brief Syntax codes. 
-	        The syntax codes control the syntax check done during the first time parsing of 
-          the expression string. They are flags that indicate which tokens are allowed next
-          if certain tokens are identified.
-  	  */
+
       enum ESynCodes
       {
-        noBO      = 1 << 0,  ///< to avoid i.e. "cos(7)(" 
-        noBC      = 1 << 1,  ///< to avoid i.e. "sin)" or "()"
-        noVAL     = 1 << 2,  ///< to avoid i.e. "tan 2" or "sin(8)3.14"
-        noVAR     = 1 << 3,  ///< to avoid i.e. "sin a" or "sin(8)a"
-        noCOMMA   = 1 << 4,  ///< to avoid i.e. ",," or "+," ...
-        noFUN     = 1 << 5,  ///< to avoid i.e. "sqrt cos" or "(1)sin"	
-        noOPT     = 1 << 6,  ///< to avoid i.e. "(+)"
-        noPOSTOP  = 1 << 7,  ///< to avoid i.e. "(5!!)" "sin!"
-	    noINFIXOP = 1 << 8,  ///< to avoid i.e. "++4" "!!4"
-        noEND     = 1 << 9,  ///< to avoid unexpected end of formula
-        noSTR     = 1 << 10, ///< to block numeric arguments on string functions
-        noASSIGN  = 1 << 11, ///< to block assignement to constant i.e. "4=7"
-		noLB      = 1 << 12, ///< to avoid i.e. "({","cos{",",{","+{"
-		noRB	  = 1 << 13, ///< to avoid i.e. "(}","cos}",",{}","+}"
-		noSEMIC   = 1 << 14, ///< to avoid i.e. "(;","cos;","{;","+;",""
-		noClassDef		= 1 << 15, ///< to avoid i.e. "int int","int cos","int {"
-		noClassObjDef	= 1 << 16, ///< to avoid i.e. pre define("int aobject;") then ".aobject;" 
-		noClassMemOp	= 1 << 17,///< to avoid i.e. "cos." "+." "(." 
-		noClassPointOp	= 1 << 18,///< to avoid i.e. "=->" "+->"
-		noClassMemVar	= 1 << 19, ///
-		noClassMemFuc	= 1 << 20, ///
+        noBO      = 1 << 0,
+        noBC      = 1 << 1,
+        noVAL     = 1 << 2,
+        noVAR     = 1 << 3,
+        noCOMMA   = 1 << 4,
+        noFUN     = 1 << 5,
+        noOPT     = 1 << 6,
+        noPOSTOP  = 1 << 7,
+	    noINFIXOP = 1 << 8,
+        noEND     = 1 << 9,
+        noSTR     = 1 << 10,
+        noASSIGN  = 1 << 11,
+		noLB      = 1 << 12,
+		noRB	  = 1 << 13,
+		noSEMIC   = 1 << 14,
+		noClassDef		= 1 << 15,
+		noClassObjDef	= 1 << 16,
+		noClassMemOp	= 1 << 17,
+		noClassPointOp	= 1 << 18,
+		noClassMemVar	= 1 << 19,
+		noClassMemFuc	= 1 << 20,
 		noClassObj		= 1 << 21,
-        noANY     = ~0       ///< All of he above flags set
+        noANY     = ~0
       };
 
       ParserClassReader(const ParserClassReader &a_Reader);
       ParserClassReader& operator=(const ParserClassReader &a_Reader);
       void Assign(const ParserClassReader &a_Reader);
+#if defined(CXPARSER_TOKENREADER_LIFECYCLE_V1)
+        void CopyLifecycleStateFrom(const ParserClassReader &a_Reader);
+        void FinalizeCloneParent(ParserBase *a_pParent);
+        void ResetLifecycleForNewFormula();
+        void ResetLifecycleForExpressionEnd();
+#endif
 
   public:
       ParserClassReader(ParserBase *a_pParent);
      ~ParserClassReader();
+      /*
+        Role: Clone the class-aware token reader for copied parser instances.
+      */
       ParserClassReader* Clone(ParserBase *a_pParent) const;
       void AddValIdent(identfun_type a_pCallback);
-      void SetVarCreator(facfun_type a_pFactory);		
+      void SetVarCreator(facfun_type a_pFactory);
 	  void SetClassUing(void * a_pVoid);
       int GetPos() const;
       const string_type& GetFormula() const;
       const varmap_type& GetUsedVar() const;
       void SetFormula(const string_type &a_strFormula);
-      void SetDefs( const funmap_type *a_pFunDef, 
+      void SetDefs( const funmap_type *a_pFunDef,
                     const funmap_type *a_pOprtDef,
                     const funmap_type *a_pInfixOprtDef,
                     const funmap_type *a_pPostOprtDef,
@@ -179,17 +166,19 @@ namespace mu
 
       void ReInit();
 	  void EndExpress();
+
+      /*
+        Role: Return the next token from a class-aware expression stream.
+      */
       token_type ReadNextToken();
-//////////////////////////////////////////////////////////////////////////
+
 	  void SetCreateClass(CreateClass *pclass);
 
-  //
-  // private functions
-  //
   private:
 
       void SetParent(ParserBase *a_pParent);
-      int ExtractToken( const char_type *a_szCharSet, 
+
+      int ExtractToken( const char_type *a_szCharSet,
                         string_type &a_strTok, int a_iPos ) const;
       bool IsBuiltIn(token_type &a_Tok);
       bool IsEOF(token_type &a_Tok);
@@ -203,18 +192,15 @@ namespace mu
       bool IsStrVarTok(token_type &a_Tok);
       bool IsUndefVarTok(token_type &a_Tok);
       bool IsString(token_type &a_Tok);
-	  //cxyaddBegin
+
 	  bool IsClassDefTok(token_type &a_Tok);
 	  bool IsClassObjDefTok(token_type &a_Tok);
 	  bool IsClassObjTok(token_type &a_Tok);
 	  bool IsClassFucTok(token_type &a_Tok);
-	//  bool IsIfWhileTok(token_type &a_Tok);
-	  //cxyaddEnd
-	  void Error( EErrorCodes a_iErrc, int a_iPos = -1, 
+
+	  void Error( EErrorCodes a_iErrc, int a_iPos = -1,
                   const string_type &a_sTok = string_type() ) const;
   };
-} // namespace mu
+}
 
 #endif
-
-

@@ -1,3 +1,8 @@
+/*
+  File: muParserClass.h
+  Role: Parser-visible class binding runtime and scripted class support.
+*/
+
 #ifndef MU_PARSER_CLASS_H
 #define MU_PARSER_CLASS_H
 
@@ -6,22 +11,109 @@
 #include<typeinfo>
 using namespace std;
 
-
-
 namespace mu
 {
+        /* Forward declaration for the parser core that owns class registries. */
         class ParserBase;
-        //class DLLDIR CWinFunc
-        //{
-        //public:
-        //	static void* muHeapAlloc(size_t sz);
-        //	static void muHeapFree (void* pz,size_t sz);
-        //};
+
         typedef std::vector<double> paramvect;
         typedef std::vector<void *> voidparamvect;
         typedef std::vector<string> charpvect;
-        //////////////////////////////////////////////////////////////////////////
-        //??????????›¥????
+
+        /*
+          Role: Minimal generic signature abstraction for parser-visible
+          class-function registration. Existing DefineClassFun overloads still
+          exist, but they should map into one of these shapes instead of
+          proliferating new registration entry points.
+        */
+        enum ClassFunReturnKind
+        {
+                ClassFunReturnVoid = 0,
+                ClassFunReturnInt,
+                ClassFunReturnDouble,
+                ClassFunReturnCharp
+        };
+
+        enum ClassFunParamShape
+        {
+                ClassFunParamUnknown = 0,
+                ClassFunParamNone,
+                ClassFunParamFixedDouble,
+                ClassFunParamFixedInt,
+                ClassFunParamFixedCharp,
+                ClassFunParamFixedDoubleCharp,
+                ClassFunParamFixedVoidp,
+                ClassFunParamAnyNumeric,
+                ClassFunParamAnyCharp
+        };
+
+        struct ClassFunSignatureShape
+        {
+                ClassFunParamShape param_shape;
+                ClassFunReturnKind return_kind;
+                bool variadic;
+        };
+
+        inline ClassFunSignatureShape DescribeClassFunSignature(int param_type)
+        {
+                switch(param_type)
+                {
+                case Param_none:
+                        return {ClassFunParamNone, ClassFunReturnVoid, false};
+                case Param_voidp_1:
+                        return {ClassFunParamFixedVoidp, ClassFunReturnVoid, false};
+                case Param_voidp_1_Return_double:
+                        return {ClassFunParamFixedVoidp, ClassFunReturnDouble, false};
+                case Param_double_1:
+                case Param_double_2:
+                case Param_double_3:
+                case Param_double_4:
+                        return {ClassFunParamFixedDouble, ClassFunReturnVoid, false};
+                case Param_int_1:
+                case Param_int_2:
+                case Param_int_3:
+                case Param_int_4:
+                case Param_int_5:
+                case Param_int_6:
+                case Param_int_7:
+                        return {ClassFunParamFixedInt, ClassFunReturnVoid, false};
+                case Param_charp_1:
+                        return {ClassFunParamFixedCharp, ClassFunReturnVoid, false};
+                case Param_double_charp_2:
+                        return {ClassFunParamFixedDoubleCharp, ClassFunReturnVoid, false};
+                case Param_double_charp_2_Return_double:
+                        return {ClassFunParamFixedDoubleCharp, ClassFunReturnDouble, false};
+                case Param_charp_any:
+                        return {ClassFunParamAnyCharp, ClassFunReturnVoid, true};
+                case Param_charp_any_Return_int:
+                        return {ClassFunParamAnyCharp, ClassFunReturnInt, true};
+                case Param_charp_any_Return_double:
+                        return {ClassFunParamAnyCharp, ClassFunReturnDouble, true};
+                case Param_0_Return_charp:
+                        return {ClassFunParamNone, ClassFunReturnCharp, false};
+                case Param_0_Return_int:
+                        return {ClassFunParamNone, ClassFunReturnInt, false};
+                case Param_0_Return_double:
+                        return {ClassFunParamNone, ClassFunReturnDouble, false};
+                case Param_int_1_Return_int:
+                case Param_int_2_Return_int:
+                        return {ClassFunParamFixedInt, ClassFunReturnInt, false};
+                case Param_int_1_Return_double:
+                case Param_int_2_Return_double:
+                case Param_int_3_Return_double:
+                        return {ClassFunParamFixedInt, ClassFunReturnDouble, false};
+                case Param_any:
+                        return {ClassFunParamAnyNumeric, ClassFunReturnVoid, true};
+                case Param_any_Return_int:
+                        return {ClassFunParamAnyNumeric, ClassFunReturnInt, true};
+                case Param_any_Return_double:
+                        return {ClassFunParamAnyNumeric, ClassFunReturnDouble, true};
+                default:
+                        return {ClassFunParamUnknown, ClassFunReturnVoid, false};
+                }
+        }
+
+        /* Common callback wrapper interface for parser-visible member functions. */
         class classbasefunc
         {
         public:
@@ -33,6 +125,8 @@ namespace mu
                 {
                         return 0;
                 }
+
+                /* Executes the stored callback without using a return value. */
                 virtual void UseFUNC()
                 {
                 };
@@ -46,15 +140,15 @@ namespace mu
                 }
                 virtual void SetClassObj(void *pclass)
                 {
-
+                        (void)pclass;
                 }
                 virtual void AddParam(double dparm)
                 {
-
+                        (void)dparm;
                 }
                 virtual void AddParam(paramvect &avect)
                 {
-
+                        (void)avect;
                 }
                 virtual void ClearvoidpParam()
                 {
@@ -62,31 +156,20 @@ namespace mu
                 }
                 virtual void AddVoidpParam(voidparamvect &avect)
                 {
-
+                        (void)avect;
                 }
                 virtual void AddCharpParam(charpvect &charPparm)
                 {
-
+                        (void)charPparm;
                 };
 
-                //void* operator new(size_t sz)
-                //{
-                //	return CWinFunc::muHeapAlloc(sz);
-                //};
-                //void operator delete (void* pz,size_t sz)
-                //{
-                //	CWinFunc::muHeapFree(pz,sz);
-                //};
         };
 
-
-        //////////////////////////////////////////////////////////////////////////
-        //??????????›¥??
+        /* Adapts concrete member-function pointer signatures into classbasefunc. */
         template<class ACLASS>
         class classfuncstorage: public classbasefunc
         {
                 int m_ifunctype;
-
 
                 typedef void (ACLASS::*PDF0)(void );
                 typedef void (ACLASS::*PDFVOIDP)(void* );
@@ -111,10 +194,16 @@ namespace mu
                 typedef double (ACLASS::*PIF3_R_D)(int,int,int);
 
                 typedef void (ACLASS::*PCF1)(const char_type *);
+                typedef void (ACLASS::*PDFC2)(double, const char_type *);
+                typedef void (ACLASS::*PCF_ANY)(charpvect &);
+                typedef void (ACLASS::*PANY)(paramvect &);
+                typedef int (ACLASS::*PCF_ANY_R_I)(charpvect &);
+                typedef double (ACLASS::*PDFC2_R_D)(double, const char_type *);
+                typedef double (ACLASS::*PCF_ANY_R_D)(charpvect &);
+                typedef int (ACLASS::*PANY_R_I)(paramvect &);
+                typedef double (ACLASS::*PANY_R_D)(paramvect &);
 
-                //  [12/21/2009 cxy]
                 typedef char_type *(ACLASS::*PF0_R_C)();
-
 
                 PDF0 m_pdf0;
                 PDFVOIDP m_pdfvoidp;
@@ -142,8 +231,15 @@ namespace mu
                 PIF3_R_D m_pif3_re_double;
 
                 PCF1 m_pfc1;
+                PDFC2 m_pdfc2;
+                PCF_ANY m_pfc_any;
+                PANY m_pany;
+                PCF_ANY_R_I m_pfc_any_re_int;
+                PDFC2_R_D m_pdfc2_re_double;
+                PCF_ANY_R_D m_pfc_any_re_double;
+                PANY_R_I m_pany_re_int;
+                PANY_R_D m_pany_re_double;
 
-                //  [12/21/2009 cxy]
                 PF0_R_C m_pf0_re_charp;
 
                 ACLASS *m_pclass;
@@ -193,6 +289,16 @@ namespace mu
 
                         case Param_charp_1:
                                 return 1;
+                        case Param_double_charp_2:
+                                return 2;
+                        case Param_double_charp_2_Return_double:
+                                return 2;
+                        case Param_charp_any:
+                                return -1;
+                        case Param_charp_any_Return_int:
+                                return -1;
+                        case Param_charp_any_Return_double:
+                                return -1;
 
                         case Param_0_Return_charp:
                                 return 0;
@@ -209,7 +315,6 @@ namespace mu
                         case Param_int_2_Return_int:
                                 return 2;
 
-
                         case Param_int_1_Return_double:
                                 return 1;
 
@@ -218,6 +323,10 @@ namespace mu
                         case Param_int_3_Return_double:
                                 return 3;
                         case Param_any:
+                                return -1;
+                        case Param_any_Return_int:
+                                return -1;
+                        case Param_any_Return_double:
                                 return -1;
                         default :
                                 return -1;
@@ -229,7 +338,7 @@ namespace mu
                         return m_ifunctype;
                 }
 
-                virtual void UseFUNC()		//???›¥???????????
+                virtual void UseFUNC()
                 {
                         switch(m_ifunctype)
                         {
@@ -259,38 +368,58 @@ namespace mu
 
                         case Param_int_1:
                                 if(m_parm.size()>=1)
-                                        (m_pclass->*m_pif1)(m_parm[0]);
+                                        (m_pclass->*m_pif1)(static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_2:
                                 if(m_parm.size()>=2)
-                                        (m_pclass->*m_pif2)(m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif2)(static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_3:
                                 if(m_parm.size()>=3)
-                                        (m_pclass->*m_pif3)(m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif3)(static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pif4)(m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_5:
                                 if(m_parm.size()>=5)
-                                        (m_pclass->*m_pif5)(m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif5)(static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_6:
                                 if(m_parm.size()>=6)
-                                        (m_pclass->*m_pif6)(m_parm[5],m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif6)(static_cast<int>(m_parm[5]),static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_7:
                                 if(m_parm.size()>=7)
-                                        (m_pclass->*m_pif7)(m_parm[6],m_parm[5],m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif7)(static_cast<int>(m_parm[6]),static_cast<int>(m_parm[5]),static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
 
                         case Param_charp_1:
                                 if(m_charPparm.size()>=1)
                                         (m_pclass->*m_pfc1)(m_charPparm[0].c_str());
                                 break;
+                        case Param_double_charp_2:
+                                if(m_parm.size()>=1 && m_charPparm.size()>=1)
+                                        (m_pclass->*m_pdfc2)(m_parm[0], m_charPparm[0].c_str());
+                                break;
+                        case Param_charp_any:
+                                (m_pclass->*m_pfc_any)(m_charPparm);
+                                break;
                         case Param_any:
+                                (m_pclass->*m_pany)(m_parm);
+                                break;
+                        case Param_charp_any_Return_int:
+                                (m_pclass->*m_pfc_any_re_int)(m_charPparm);
+                                break;
+                        case Param_charp_any_Return_double:
+                                (m_pclass->*m_pfc_any_re_double)(m_charPparm);
+                                break;
+                        case Param_any_Return_int:
+                                (m_pclass->*m_pany_re_int)(m_parm);
+                                break;
+                        case Param_any_Return_double:
+                                (m_pclass->*m_pany_re_double)(m_parm);
                                 break;
                                 default :
                                         break;
@@ -301,8 +430,7 @@ namespace mu
                 {
                         switch(m_ifunctype)
                         {
-//////////////////////////////////////////////////////////////////////////
-//follow as is no return function
+
                         case Param_none:
                                 (m_pclass->*m_pdf0)();
                                 break;
@@ -329,42 +457,65 @@ namespace mu
 
                         case Param_int_1:
                                 if(m_parm.size()>=1)
-                                        (m_pclass->*m_pif1)(m_parm[0]);
+                                        (m_pclass->*m_pif1)(static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_2:
                                 if(m_parm.size()>=2)
-                                        (m_pclass->*m_pif2)(m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif2)(static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_3:
                                 if(m_parm.size()>=3)
-                                        (m_pclass->*m_pif3)(m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif3)(static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pif4)(m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_5:
                                 if(m_parm.size()>=5)
-                                        (m_pclass->*m_pif5)(m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif5)(static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_6:
                                 if(m_parm.size()>=6)
-                                        (m_pclass->*m_pif6)(m_parm[5],m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif6)(static_cast<int>(m_parm[5]),static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_7:
                                 if(m_parm.size()>=7)
-                                        (m_pclass->*m_pif7)(m_parm[6],m_parm[5],m_parm[4],m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pif7)(static_cast<int>(m_parm[6]),static_cast<int>(m_parm[5]),static_cast<int>(m_parm[4]),static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
 
                         case Param_charp_1:
                                 if(m_charPparm.size()>=1)
                                         (m_pclass->*m_pfc1)(m_charPparm[0].c_str());
                                 break;
+                        case Param_double_charp_2:
+                                if(m_parm.size()>=1 && m_charPparm.size()>=1)
+                                        (m_pclass->*m_pdfc2)(m_parm[0], m_charPparm[0].c_str());
+                                break;
+                        case Param_double_charp_2_Return_double:
+                                if(m_parm.size()>=1 && m_charPparm.size()>=1)
+                                        return (m_pclass->*m_pdfc2_re_double)(m_parm[0], m_charPparm[0].c_str());
+                                break;
+                        case Param_charp_any:
+                                (m_pclass->*m_pfc_any)(m_charPparm);
+                                break;
+                        case Param_charp_any_Return_int:
+                                return (m_pclass->*m_pfc_any_re_int)(m_charPparm);
+                                break;
+                        case Param_charp_any_Return_double:
+                                return (m_pclass->*m_pfc_any_re_double)(m_charPparm);
+                                break;
 
                         case Param_any:
+                                (m_pclass->*m_pany)(m_parm);
                                 break;
-                        //////////////////////////////////////////////////////////////////////////
-                        //follow as is need return function
+                        case Param_any_Return_int:
+                                return (m_pclass->*m_pany_re_int)(m_parm);
+                                break;
+                        case Param_any_Return_double:
+                                return (m_pclass->*m_pany_re_double)(m_parm);
+                                break;
+
                         case Param_voidp_1_Return_double:
                                 if(m_voidPparm.size()>=1)
                                         return (m_pclass->*m_pdfvoidp_re_double)(m_voidPparm[0]);
@@ -382,7 +533,7 @@ namespace mu
                         case Param_int_2_Return_int:
                                 if(m_parm.size()>=2)
                                         return (m_pclass->*m_pif2_re_int)(m_parm[1],m_parm[0]);
-                                ///
+
                         case Param_int_1_Return_double:
                                 if(m_parm.size()>=1)
                                         return (m_pclass->*m_pif1_re_double)(m_parm[0]);
@@ -496,6 +647,21 @@ namespace mu
                         m_pfc1=pfc1;
                         m_ifunctype = Param_charp_1 ;
                 }
+                void StorageFUNC(void (ACLASS::*pdfc2)(double,const char_type *))
+                {
+                        m_pdfc2=pdfc2;
+                        m_ifunctype = Param_double_charp_2;
+                }
+                void StorageFUNC(void (ACLASS::*pfc_any)(charpvect &))
+                {
+                        m_pfc_any=pfc_any;
+                        m_ifunctype = Param_charp_any;
+                }
+                void StorageFUNC(void (ACLASS::*pany)(paramvect &))
+                {
+                        m_pany=pany;
+                        m_ifunctype = Param_any ;
+                }
                 void StorageFUNC(char* (ACLASS::*pf0_re_c)())
                 {
                         m_pf0_re_charp=pf0_re_c;
@@ -538,6 +704,31 @@ namespace mu
                         m_pif3_re_double=pif3_re_db;
                         m_ifunctype = Param_int_3_Return_double ;
                 }
+                void StorageFUNC(int (ACLASS::*pany_re_int)(paramvect &))
+                {
+                        m_pany_re_int=pany_re_int;
+                        m_ifunctype = Param_any_Return_int ;
+                }
+                void StorageFUNC(int (ACLASS::*pfc_any_re_int)(charpvect &))
+                {
+                        m_pfc_any_re_int=pfc_any_re_int;
+                        m_ifunctype = Param_charp_any_Return_int;
+                }
+                void StorageFUNC(double (ACLASS::*pany_re_double)(paramvect &))
+                {
+                        m_pany_re_double=pany_re_double;
+                        m_ifunctype = Param_any_Return_double ;
+                }
+                void StorageFUNC(double (ACLASS::*pdfc2_re_double)(double,const char_type *))
+                {
+                        m_pdfc2_re_double=pdfc2_re_double;
+                        m_ifunctype = Param_double_charp_2_Return_double;
+                }
+                void StorageFUNC(double (ACLASS::*pfc_any_re_double)(charpvect &))
+                {
+                        m_pfc_any_re_double=pfc_any_re_double;
+                        m_ifunctype = Param_charp_any_Return_double;
+                }
                 virtual void AddParam(double dparm)
                 {
                         m_parm.push_back(dparm);
@@ -568,19 +759,10 @@ namespace mu
                         m_charPparm.clear();
                 }
 
-                //void* operator new(size_t sz)
-                //{
-                //	return CWinFunc::muHeapAlloc(sz);
-                //};
-                //void operator delete (void* pz,size_t sz)
-                //{
-                //	CWinFunc::muHeapFree(pz,sz);
-                //}
         };
         typedef std::vector<classbasefunc*> basefuncvector;
 
-        //////////////////////////////////////////////////////////////////////////
-        //?????????
+        /* Abstract runtime container for one parser-visible class family. */
         class classbase
         {
         public:
@@ -595,14 +777,17 @@ namespace mu
         public:
                 virtual void * addvar(const string_type & strname)
                 {
+                        (void)strname;
                         return 0;
                 };
                 virtual int findstacknum(void *pclassobj)
                 {
+                        (void)pclassobj;
                         return -1;
                 };
                 virtual void * getstackvar(int inum)
                 {
+                        (void)inum;
                         return 0;
                 };
                 virtual void clearvar()
@@ -611,19 +796,22 @@ namespace mu
                 }
                 virtual void delvar(void *pobj)
                 {
-
+                        (void)pobj;
                 }
                 virtual void delvar(const string_type& strname)
                 {
-
+                        (void)strname;
                 }
                 virtual void* addpointvar(const string_type & strname,void *pclassobject)
                 {
+                        (void)strname;
+                        (void)pclassobject;
                         return 0;
                 }
 
                 virtual bool findvar(const string_type & a_strVarName)
                 {
+                        (void)a_strVarName;
                         return false;
                 };
                 virtual const char*   getclass() const
@@ -632,31 +820,38 @@ namespace mu
                 };
                 virtual void * getvar(const string_type & a_str)
                 {
+                        (void)a_str;
                         return 0;
                 };
                 virtual const char* getvar(int a_num)
                 {
+                        (void)a_num;
                         return string_type("none").c_str();
                 }
                 virtual void * getvarpoint(int a_num)
                 {
+                        (void)a_num;
                         return 0;
                 }
                 virtual void * getvarpoint(const string_type & a_str)
                 {
+                        (void)a_str;
                         return 0;
                 }
                 virtual const char* getpointvar(int a_num)
                 {
+                        (void)a_num;
                         return string_type("none").c_str();
                 }
                 virtual void * getpointvarp(int a_num)
                 {
+                        (void)a_num;
                         return 0;
                 }
                 virtual void Setpointvarp(const string_type & a_str,void *pvar)
                 {
-
+                        (void)a_str;
+                        (void)pvar;
                 };
 
                 virtual int size()
@@ -669,64 +864,109 @@ namespace mu
                 }
                 virtual void AddClassFun(const string_type &a_strName, void* a_pFun)
                 {
+                        (void)a_strName;
+                        (void)a_pFun;
                         return;
                 }
                 virtual bool findclassfun(const string_type &a_strName)
                 {
+                        (void)a_strName;
                         return false;
                 }
                 virtual double ApplyClassFunc(void *pobj,const string_type &a_strName,paramvect& parm)
                 {
+                        (void)pobj;
+                        (void)a_strName;
+                        (void)parm;
                         return 0;
                 };
                 virtual void* GetClassFuncLP(const string_type &strname)
                 {
+                        (void)strname;
                         return 0;
                 }
                 virtual double ApplyClassFunc(void *pobj,const string_type &a_strName,voidparamvect& parm)
                 {
+                        (void)pobj;
+                        (void)a_strName;
+                        (void)parm;
                         return 0;
                 };
                 virtual double ApplyClassFunc(void *pobj,const string_type &a_strName,charpvect& parm)
                 {
+                        (void)pobj;
+                        (void)a_strName;
+                        (void)parm;
                         return 0;
                 };
-                //////////////////////////////////////////////////////////////////////////
-                //??????????????????????????????? ?????????????
+                virtual double ApplyClassFunc(void *pobj,const string_type &a_strName,paramvect& parm,charpvect& charparm)
+                {
+                        (void)pobj;
+                        (void)a_strName;
+                        (void)parm;
+                        (void)charparm;
+                        return 0;
+                };
+
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm)
                 {
+                        (void)pobj;
+                        (void)apclassfunc;
+                        (void)parm;
                         return 0;
                 };
-                //////////////////////////////////////////////////////////////////////////
-                //??????????????????????????????? ?????????????
+
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,voidparamvect& parm)
                 {
+                        (void)pobj;
+                        (void)apclassfunc;
+                        (void)parm;
                         return 0;
                 };
                 virtual char* ApplyClassFuncString(void *pobj,const string_type &a_strName)
                 {
+                        (void)pobj;
+                        (void)a_strName;
                         return 0;
                 };
-                //////////////////////////////////////////////////////////////////////////
-                //????????????????????????????????? ?????????????
+
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,charpvect& parm)
                 {
+                        (void)pobj;
+                        (void)apclassfunc;
+                        (void)parm;
+                        return 0;
+                };
+                virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm,charpvect& charparm)
+                {
+                        (void)pobj;
+                        (void)apclassfunc;
+                        (void)parm;
+                        (void)charparm;
                         return 0;
                 };
                 virtual int GetFuncArgType(const string_type &a_strName)
                 {
+                        (void)a_strName;
                         return 0;
+                }
+                virtual ClassFunSignatureShape GetFuncSignatureShape(const string_type &a_strName)
+                {
+                        return DescribeClassFunSignature(GetFuncArgType(a_strName));
                 }
                 virtual int GetFuncArgCount(const string_type &a_strName)
                 {
+                        (void)a_strName;
                         return 0;
                 }
                 virtual const char* getfuncname(int a_num)
                 {
+                        (void)a_num;
                         return string_type("none").c_str();
                 }
                 virtual const char* getfunctype(int a_num)
                 {
+                        (void)a_num;
                         return string_type("none").c_str();
                 }
                 virtual int funcsize()
@@ -742,25 +982,16 @@ namespace mu
                 {
                         return false;
                 }
-                //void* operator new(size_t sz)
-                //{
-                //	return CWinFunc::muHeapAlloc(sz);
-                //
-                //};
-                //void operator delete (void* pz,size_t sz)
-                //{
-                //	CWinFunc::muHeapFree(pz,sz);
-                //}
 
         };
-        //////////////////////////////////////////////////////////////////////////
-        //????????????????? int ,double ,
+
+        /* Stores parser-visible primitive/object values without member dispatch. */
         template<class TCLASS>
         class OrgClass:public classbase
         {
                 typedef std::map<string_type,TCLASS*> OrgStorage_type;
                 typedef std::vector<TCLASS*> OrgVect;
-                OrgStorage_type m_ObjectStorage;//?????????
+                OrgStorage_type m_ObjectStorage;
                 OrgVect m_Stack;
 
                 TCLASS *m_p;
@@ -780,7 +1011,7 @@ namespace mu
                         }
                 };
                 void deleteself(){delete this;};
-                //add
+
                 virtual void * addvar(const string_type & strname)
                 {
                         typename OrgStorage_type::iterator item = m_ObjectStorage.find(strname);
@@ -802,7 +1033,7 @@ namespace mu
                                         return inum;
                                 inum ++;
                         }
-                        return -1;//¦Ä?????????§Ú????
+                        return -1;
                 };
                 virtual void clearvar()
                 {
@@ -848,9 +1079,11 @@ namespace mu
                                 }
                         }
                 }
-                //add class point var ???????????????
+
                 virtual void* addpointvar(const string_type & strname,void *pclassobject)
                 {
+                        (void)strname;
+                        (void)pclassobject;
                         return 0;
                 }
                 virtual bool findvar(const string_type & a_strVarName)
@@ -907,64 +1140,57 @@ namespace mu
                 };
                 virtual const char* getpointvar(int a_num)
                 {
+                        (void)a_num;
                         return string_type("none").c_str();
                 }
                 virtual void Setpointvarp(const string_type & a_str,void *pvar)
-                {}
+                {
+                        (void)a_str;
+                        (void)pvar;
+                }
 
                 virtual void * getpointvarp(int a_num)
                 {
+                        (void)a_num;
                         return 0;
                 }
                 virtual int size()
                 {
-                        return  m_ObjectStorage.size();
+                        return static_cast<int>(m_ObjectStorage.size());
                 }
                 virtual int pointsize()
                 {
                         return  0;
                 }
 
-
-                //void* operator new(size_t sz)
-                //{
-                //	return CWinFunc::muHeapAlloc(sz);
-
-                //};
-                //void operator delete (void* pz,size_t sz)
-                //{
-                //	CWinFunc::muHeapFree(pz,sz);
-                //}
-
-
         };
-        //////////////////////////////////////////////////////////////////////////
-        //?????? ???????‰?? ???? ???????
-        //next step to do -> template<class TCLASS,class Parm_TCLASS>
+
+        /* Owns bound C++ objects and registered member-function wrappers for one type. */
         template<class TCLASS>
         class ParserClass :public classbase
         {
 
-                //typedef std::map<string_type, void*> classfunmap_type;
-                //
-                //classfunmap_type  m_ClsFunDef;        ///??????????§Ò?< Map of one class 's function names and pointers.
-                //typedef void (TCLASS::*PDF0)(void );
-                //typedef void (TCLASS::*PDFVOIDP)(void* );
-                //typedef void (TCLASS::*PDF1)(double );
-                //typedef void (TCLASS::*PDF2)(double,double );
-                //typedef void (TCLASS::*PDF3)(double,double,double);
                 TCLASS *m_p;
 
                 typedef std::map<string_type,TCLASS*> ClassStorage_type;
                 typedef std::vector<TCLASS*> ParsVect;
 
-
-                ClassStorage_type m_ObjectStorage;  ///?????(TCLASS)????????§Ò?<< cvision av1;
+                ClassStorage_type m_ObjectStorage;
                 ParsVect m_Stack;
 
-                ClassStorage_type m_PointObjectStorage; ///?????????§Ò?
+                ClassStorage_type m_PointObjectStorage;
                 typedef std::map<string_type, classbasefunc*> classfunmap_type;
-                classfunmap_type m_FunCmap;			///?????(TCLASS)?????›¥??
+                classfunmap_type m_FunCmap;
+                template<typename TMETHOD>
+                void StoreRuntimeClassFun(const string_type &strname, TMETHOD method)
+                {
+                        classfunmap_type::iterator item = m_FunCmap.find(strname);
+                        if (item!=m_FunCmap.end())
+                                return;
+                        classfuncstorage<TCLASS> *apclassfunc = new classfuncstorage<TCLASS>;
+                        apclassfunc->StorageFUNC(method);
+                        m_FunCmap[strname] = apclassfunc;
+                }
 
         public:
 
@@ -974,7 +1200,7 @@ namespace mu
                 }
                 virtual ~ParserClass()
                 {
-                        //????????????????????????????AddClassFun???????
+
                         classfunmap_type:: iterator pFcIter;
                         for ( pFcIter = m_FunCmap.begin( ) ; pFcIter != m_FunCmap.end( ) ; pFcIter++ )
                         {
@@ -982,7 +1208,7 @@ namespace mu
                                 delete pbasefun;
                                 pFcIter->second=0;
                         }
-                        //????????????????? ??addvar???????
+
                         typename ClassStorage_type:: iterator pIter;
                         for ( pIter = m_ObjectStorage.begin( ) ; pIter != m_ObjectStorage.end( ) ; pIter++ )
                         {
@@ -993,7 +1219,7 @@ namespace mu
 
                 };
                 void deleteself(){delete this;};
-                //add class object var??????????
+
                 virtual void* addvar(const string_type & strname)
                 {
                         typename ClassStorage_type::iterator item = m_ObjectStorage.find(strname);
@@ -1015,7 +1241,7 @@ namespace mu
                                         return inum;
                                 inum ++;
                         }
-                        return -1;//¦Ä?????????§Ú????
+                        return -1;
                 };
                 virtual void clearvar()
                 {
@@ -1062,7 +1288,7 @@ namespace mu
                                 }
                         }
                 }
-                //add class point var ???????????????
+
                 virtual void* addpointvar(const string_type & strname,void *pclassobject)
                 {
                         typename ClassStorage_type::iterator item = m_PointObjectStorage.find(strname);
@@ -1086,8 +1312,7 @@ namespace mu
                 {
                         return  typeid(TCLASS).name();
                 };
-                //----------------------------------------
-                //from class var name get class var point
+
                 virtual void * getvar(const string_type & a_str)
                 {
                         typename ClassStorage_type::iterator item = m_ObjectStorage.find(a_str);
@@ -1099,8 +1324,7 @@ namespace mu
 
                         return 0;
                 };
-                //----------------------------------------
-                //from class var number get class var name
+
                 virtual const char* getvar(int a_num)
                 {
                         typename ClassStorage_type::const_iterator item = m_ObjectStorage.begin();
@@ -1163,6 +1387,7 @@ namespace mu
                 }
                 virtual void Setpointvarp(const string_type & a_str,void *pvar)
                 {
+                        (void)a_str;
                         typename ClassStorage_type::iterator item = m_ObjectStorage.find(a_str);
                         item = m_PointObjectStorage.find(a_str);
                         if (item!=m_PointObjectStorage.end())
@@ -1172,233 +1397,149 @@ namespace mu
                 }
                 virtual int size()
                 {
-                        return  m_ObjectStorage.size();
+                        return static_cast<int>(m_ObjectStorage.size());
                 }
                 virtual int pointsize()
                 {
-                        return  m_PointObjectStorage.size();
+                        return static_cast<int>(m_PointObjectStorage.size());
                 }
-                //////////////////////////////////////////////////////////////////////////
+
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf)(void ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf);
-                        m_FunCmap[strname]=apclassfunc;
-
+                        /*
+                          Role: Generic runtime member-registration mainline.
+                          All DefineClassFun overloads should converge to one of
+                          these AddClassFun storage points instead of adding new
+                          side-channel registries.
+                        */
+                        StoreRuntimeClassFun(strname, pdf);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf1)(double ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf1);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdf1);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf2)(double,double ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf2);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdf2);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf3)(double,double,double))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf3);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdf3);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf4)(double,double,double,double))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf4);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdf4);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif1)(int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif1);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif1);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif2)(int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif2);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif2);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif3)(int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif3);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif3);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif4)(int,int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif4);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif4);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif5)(int,int,int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif5);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif5);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif6)(int,int,int,int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif6);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif6);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif7)(int,int,int,int,int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif7);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif7);
                 }
-
 
                 void AddClassFun(const string_type & strname,double (TCLASS::*pdfrd)(void* ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdfrd);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdfrd);
                 }
-
-
 
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf)(void* ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pdf);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pdf);
                 }
-
-
 
                 void AddClassFun(const string_type & strname,void (TCLASS::*pcf1)(const char_type *))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pcf1);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pcf1);
+                }
+                void AddClassFun(const string_type & strname,void (TCLASS::*pdfc2)(double,const char_type *))
+                {
+                        StoreRuntimeClassFun(strname, pdfc2);
+                }
+                void AddClassFun(const string_type & strname,void (TCLASS::*pfc_any)(charpvect &))
+                {
+                        StoreRuntimeClassFun(strname, pfc_any);
+                }
+                void AddClassFun(const string_type & strname,void (TCLASS::*pany)(paramvect &))
+                {
+                        StoreRuntimeClassFun(strname, pany);
                 }
                 void AddClassFun(const string_type & strname,char_type * (TCLASS::*pf0_re_c)(void))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pf0_re_c);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pf0_re_c);
                 }
                 void AddClassFun(const string_type & strname,double (TCLASS::*pif1_re_db)(int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif1_re_db);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif1_re_db);
                 }
                 void AddClassFun(const string_type & strname,double (TCLASS::*pif2_re_db)(int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif2_re_db);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif2_re_db);
                 }
 
                 void AddClassFun(const string_type & strname,double (TCLASS::*pif3_re_db)(int,int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif3_re_db);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif3_re_db);
                 }
-
 
                 void AddClassFun(const string_type & strname,int (TCLASS::*pif2_re_int)(int,int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif2_re_int);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif2_re_int);
                 }
                 void AddClassFun(const string_type & strname,int (TCLASS::*pif1_re_int)(int))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pif1_re_int);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pif1_re_int);
                 }
                 void AddClassFun(const string_type & strname,int (TCLASS::*pf0_re_int)( ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pf0_re_int);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pf0_re_int);
                 }
                 void AddClassFun(const string_type & strname,double (TCLASS::*pf0_re_double)( ))
                 {
-                        classfunmap_type::iterator item = m_FunCmap.find(strname);
-                        if (item!=m_FunCmap.end())
-                                return  ;
-                        classfuncstorage<TCLASS> *apclassfunc=new classfuncstorage<TCLASS>;
-                        apclassfunc->StorageFUNC(pf0_re_double);
-                        m_FunCmap[strname]=apclassfunc;
+                        StoreRuntimeClassFun(strname, pf0_re_double);
                 }
-                //////////////////////////////////////////////////////////////////////////
+                void AddClassFun(const string_type & strname,int (TCLASS::*pany_re_int)(paramvect &))
+                {
+                        StoreRuntimeClassFun(strname, pany_re_int);
+                }
+                void AddClassFun(const string_type & strname,int (TCLASS::*pfc_any_re_int)(charpvect &))
+                {
+                        StoreRuntimeClassFun(strname, pfc_any_re_int);
+                }
+                void AddClassFun(const string_type & strname,double (TCLASS::*pany_re_double)(paramvect &))
+                {
+                        StoreRuntimeClassFun(strname, pany_re_double);
+                }
+                void AddClassFun(const string_type & strname,double (TCLASS::*pdfc2_re_double)(double,const char_type *))
+                {
+                        StoreRuntimeClassFun(strname, pdfc2_re_double);
+                }
+                void AddClassFun(const string_type & strname,double (TCLASS::*pfc_any_re_double)(charpvect &))
+                {
+                        StoreRuntimeClassFun(strname, pfc_any_re_double);
+                }
+
                 virtual bool findclassfun(const string_type &a_strName)
                 {
                         classfunmap_type::iterator item = m_FunCmap.find(a_strName);
@@ -1423,9 +1564,12 @@ namespace mu
                         classbasefunc  *apclassfunc= item->second;
                         return apclassfunc->GetArgType();
                 }
-                //////////////////////////////////////////////////////////////////////////
-                //????????????????????? ???¨°????????????????????
-                //
+                virtual ClassFunSignatureShape GetFuncSignatureShape(const string_type &a_strName)
+                {
+                        return DescribeClassFunSignature(GetFuncArgType(a_strName));
+                }
+
+                /* Dispatches a member function by parser-visible function name. */
                 virtual double ApplyClassFunc(void *pobj,const string_type &strname,paramvect& parm)
                 {
                         classfunmap_type::iterator item = m_FunCmap.find(strname);
@@ -1434,15 +1578,9 @@ namespace mu
                         classbasefunc  *apclassfunc= item->second;
                         apclassfunc->SetClassObj(pobj);
                         apclassfunc->AddParam(parm);
-
-
-
                         return apclassfunc->UseFUNC_Return();
-
                 };
 
-                //////////////////////////////////////////////////////////////////////////
-                //??????????????????????????????? ?????????????
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm)
                 {
                         classbasefunc *pfunc =(classbasefunc *) apclassfunc;
@@ -1459,24 +1597,10 @@ namespace mu
                         apclassfunc->SetClassObj(pobj);
                         apclassfunc->AddVoidpParam(parm);
 
-                        //switch(apclassfunc->GetArgType())
-                        //{
-                        //	case Param_voidp_1:
-                        //		apclassfunc->UseFUNC();
-                        //		return  0;
-                        //		break;
-                        //	case Param_voidp_1_Return_double:
                                         return apclassfunc->UseFUNC_Return();
-                        //		break;
-                        //	default:
-                        //		break;
-                        //}
-                        //
-                        //return  0;
+
                 };
 
-                //////////////////////////////////////////////////////////////////////////
-                //??????????????????????????????? ?????????????
                 virtual double ApplyClassFunc(void *pobj,void * pclassfuc,voidparamvect& parm)
                 {
                         classbasefunc  *apclassfunc = (classbasefunc  *)pclassfuc;
@@ -1485,8 +1609,7 @@ namespace mu
 
                         return apclassfunc->UseFUNC_Return();
                 };
-                //////////////////////////////////////////////////////////////////////////
-                //?????????????????????????????? ?????????????
+
                 virtual double ApplyClassFunc(void *pobj,const string_type &strname,charpvect& parm)
                 {
                         classfunmap_type::iterator item = m_FunCmap.find(strname);
@@ -1496,27 +1619,34 @@ namespace mu
                         apclassfunc->SetClassObj(pobj);
                         apclassfunc->AddCharpParam(parm);
 
-                        //switch(apclassfunc->GetArgType())
-                        //{
-                                //case Param_charp_1:
-                                //	apclassfunc->UseFUNC();
-                                //	return  0;
-                                //break;
-                                //default:
-                                //	break;
-                        //}
                         return apclassfunc->UseFUNC_Return();
-                        //return  0;
+
+                };
+                virtual double ApplyClassFunc(void *pobj,const string_type &strname,paramvect& parm,charpvect& charparm)
+                {
+                        classfunmap_type::iterator item = m_FunCmap.find(strname);
+                        if (item==m_FunCmap.end())
+                                return  0;
+                        classbasefunc  *apclassfunc= item->second;
+                        apclassfunc->SetClassObj(pobj);
+                        apclassfunc->AddParam(parm);
+                        apclassfunc->AddCharpParam(charparm);
+                        return apclassfunc->UseFUNC_Return();
                 };
 
-
-                //////////////////////////////////////////////////////////////////////////
-                //????????????????????????????????? ?????????????
                 virtual double ApplyClassFunc(void *pobj,void * pclassfun,charpvect& parm)
                 {
                         classbasefunc  *apclassfunc =(classbasefunc*) pclassfun;
                         apclassfunc->SetClassObj(pobj);
                         apclassfunc->AddCharpParam(parm);
+                        return apclassfunc->UseFUNC_Return();
+                };
+                virtual double ApplyClassFunc(void *pobj,void * pclassfun,paramvect& parm,charpvect& charparm)
+                {
+                        classbasefunc  *apclassfunc =(classbasefunc*) pclassfun;
+                        apclassfunc->SetClassObj(pobj);
+                        apclassfunc->AddParam(parm);
+                        apclassfunc->AddCharpParam(charparm);
                         return apclassfunc->UseFUNC_Return();
                 };
                 virtual char* ApplyClassFuncString(void *pobj,const string_type &strname)
@@ -1528,8 +1658,7 @@ namespace mu
                         apclassfunc->SetClassObj(pobj);
                         return apclassfunc->UseFUNC_ReturnChar();
                 };
-                //////////////////////////////////////////////////////////////////////////
-                //???????
+
                 virtual void* GetClassFuncLP(const string_type &strname)
                 {
                         classfunmap_type::iterator item = m_FunCmap.find(strname);
@@ -1606,8 +1735,24 @@ namespace mu
                                                         return "Param_int_3_Return_double";
                                                 case Param_charp_1:
                                                         return "Param_charp_1";
+                                                case Param_double_charp_2:
+                                                        return "Param_double_charp_2";
+                                                case Param_double_charp_2_Return_double:
+                                                        return "Param_double_charp_2_Return_double";
+                                                case Param_charp_any:
+                                                        return "Param_charp_any";
                                                 case Param_0_Return_charp:
                                                         return "Param_0_Return_charp";
+                                                case Param_any:
+                                                        return "Param_any";
+                                                case Param_any_Return_int:
+                                                        return "Param_any_Return_int";
+                                                case Param_any_Return_double:
+                                                        return "Param_any_Return_double";
+                                                case Param_charp_any_Return_int:
+                                                        return "Param_charp_any_Return_int";
+                                                case Param_charp_any_Return_double:
+                                                        return "Param_charp_any_Return_double";
 
                                                 default:
                                                         return "Param_any" ;
@@ -1622,7 +1767,7 @@ namespace mu
                 }
                 virtual int funcsize()
                 {
-                        return m_FunCmap.size();
+                        return static_cast<int>(m_FunCmap.size());
                 }
 
                 virtual classbase*GetMe()
@@ -1630,70 +1775,59 @@ namespace mu
                         return this;
                 }
 
-                //void* operator new(size_t sz)
-                //{
-                //	return CWinFunc::muHeapAlloc(sz);
-
-                //};
-                //void operator delete (void* pz,size_t sz)
-                //{
-                //	CWinFunc::muHeapFree(pz,sz);
-                //}
-
-
         private:
-                void *m_pFun;       ///< Pointer to the callback function, casted to void
+                void *m_pFun;
         };
 
-        //////////////////////////////////////////////////////////////////////////
-        //?????????????????
+        /* Stores parser-declared class definitions and scripted member bodies. */
         class CreateClass :public classbase
         {
         private:
 
-                typedef std::map<string_type,string_type> strmapfunc_type;//
+                typedef std::map<string_type,string_type> strmapfunc_type;
 
-                typedef struct stringvirclass//?????????
+                typedef struct stringvirclass
                 {
-                        string_type m_classdef;//?????????
-                        strmapfunc_type m_classfuncdef;//???????
-                }strclass;//???????????????
+                        string_type m_classdef;
+                        strmapfunc_type m_classfuncdef;
+                }strclass;
 
-                typedef std::vector<string_type> stringmember_type;//??????????
-                typedef std::vector<classbase *> classdefbuf_type;//??????????????
-                typedef std::vector<void *> classobjbuf_type;//?›¥?????§Ö???????
+                typedef std::vector<string_type> stringmember_type;
+                typedef std::vector<classbase *> classdefbuf_type;
+                typedef std::vector<void *> classobjbuf_type;
 
-                typedef std::vector<string_type> stringbuf_type;//?›¥??????????§ß????????
-                typedef std::vector<int> storage_type;//?›¥??????????§ß???
+                typedef std::vector<string_type> stringbuf_type;
+                typedef std::vector<int> storage_type;
 
                 typedef struct 	fuctioncodestruct
                 {
-                        storage_type m_bytecode; //?????????
-                        string_type m_strbuf;    //????????
-                        //string_type m_strparmtype;	 //????????(????·ÚCreateClass function??????????????????)
-                }fucstruct;//?????›¥??
+                        storage_type m_bytecode;
+                        string_type m_strbuf;
+
+                }fucstruct;
 
                 typedef struct classobjectstruct
                 {
-                        stringmember_type m_objname;//??????????????????§Ò?
-                        classobjbuf_type m_objbuf;//????????????????????§Ò?
-                }objstruct;//???????›¥??
+                        stringmember_type m_objname;
+                        classobjbuf_type m_objbuf;
+                        bool m_ctor_ran;
+                }objstruct;
 
-                typedef std::map<string_type,fucstruct*> funcodemap_type;//func map
-                typedef std::map<string_type,objstruct*> objmap_type;//obj map
+                typedef std::map<string_type,fucstruct*> funcodemap_type;
+                typedef std::map<string_type,objstruct*> objmap_type;
 
         public:
-                //classmap_type m_strclassmap;
-                string_type m_classname;//????
 
-                strclass  m_ClassStrmap;//??????›¥??
+                string_type m_classname;
 
-                funcodemap_type m_codemap;//?????????
+                strclass  m_ClassStrmap;
 
-                stringmember_type m_classStr;//??????????
-        classdefbuf_type m_classdefbuf;//??????????????
+                funcodemap_type m_codemap;
 
-                objmap_type m_objmap;//??????????
+                stringmember_type m_classStr;
+        classdefbuf_type m_classdefbuf;
+
+                objmap_type m_objmap;
         public:
                 ParserBase *m_pCurParser;
                 CreateClass()
@@ -1727,15 +1861,16 @@ namespace mu
                                 pIter->second=0;
                         }
                 }
-                //?????????????
+
+                /* Updates the parser used when scripted members are executed. */
                 void GetRunParser(ParserBase* pParser)
                 {
                         m_pCurParser = pParser;
                 }
-                //???????????????????????????
+
                 bool addclassdef(classbase*pclassdef,const string_type & strname)
                 {
-                        //classbase *pclass = (classbase *)pclassdef;
+
                         if(NULL == pclassdef)
                                 return false;
                         stringmember_type::iterator pIter;
@@ -1750,10 +1885,49 @@ namespace mu
                         m_classdefbuf.push_back(pclassdef);
                         return true;
                 }
-                //////////////////////////////////////////////////////////////////////////
-                //??????????
+                int FindMemberSlot(const string_type &member_name) const
+                {
+                        for (int i = 0; i < static_cast<int>(m_classStr.size()); ++i)
+                        {
+                                if (m_classStr[i] == member_name)
+                                        return i;
+                        }
+                        return -1;
+                }
+                classbase *GetMemberClass(const string_type &member_name) const
+                {
+                        const int slot = FindMemberSlot(member_name);
+                        if (slot < 0)
+                                return NULL;
+                        return m_classdefbuf[slot];
+                }
+                string_type BuildMemberStorageName(const string_type &object_name,
+                                                   const string_type &member_name) const
+                {
+                        return m_classname + _T("@") + object_name + _T("@") + member_name;
+                }
+                bool FindObjectBindingName(void *pobj, string_type &object_name) const;
+                const char *FindCtorFuncDef() const
+                {
+                        const char *ctor_func = GetFuncDef("__ctor__");
+                        if (ctor_func != NULL)
+                                return ctor_func;
+
+                        const char *factory_func = GetFuncDef("__factory__");
+                        if (factory_func != NULL)
+                                return factory_func;
+
+                        return GetFuncDef("create");
+                }
+
+                /* Stores a scripted member-function body by name. */
                 bool AddClassFun(const string_type &a_strName, const string_type &a_strFun)
                 {
+                        /*
+                          Role: Scripted class-function registration for
+                          parser-declared classes. This is the string-backed
+                          sibling of the runtime callback AddClassFun path.
+                        */
                         funcodemap_type:: iterator pIter;
                         fucstruct *pfucstruct;
                         for ( pIter = m_codemap.begin( ) ; pIter != m_codemap.end( ) ; pIter++ )
@@ -1766,7 +1940,6 @@ namespace mu
                         pfucstruct->m_strbuf = a_strFun;
                         m_codemap[a_strName] = pfucstruct;
                         return true;
-                        //need to build function get bitystock
 
                 }
                 virtual void * addvar(const string_type & strobjname);
@@ -1783,12 +1956,12 @@ namespace mu
                 }
                 virtual int funcsize()
                 {
-                        return m_codemap.size();
+                        return static_cast<int>(m_codemap.size());
                 }
 
                 virtual int size()
                 {
-                        return  m_objmap.size();
+                        return static_cast<int>(m_objmap.size());
                 }
                 virtual bool findvar(const string_type & a_strVarName)
                 {
@@ -1839,10 +2012,12 @@ namespace mu
                 };
                 virtual const char* getpointvar(int a_num)
                 {
+                        (void)a_num;
                         return "none";
                 }
                 virtual void * getpointvarp(int a_num)
                 {
+                        (void)a_num;
 
                         return 0;
                 }
@@ -1885,41 +2060,49 @@ namespace mu
                 }
                 virtual int GetFuncArgCount(const string_type &a_strName)
                 {
-                        ////????????(????·ÚCreateClass function??????????????????)
+                        if (a_strName == "__ctor__" ||
+                            a_strName == "__factory__" ||
+                            a_strName == "create")
+                                return -1;
+
                         return 0;
                 }
                 virtual int GetFuncArgType(const string_type &a_strName)
                 {
-                        ////????????(????·ÚCreateClass function??????????????????)
-
+                        if (a_strName == "__ctor__" ||
+                            a_strName == "__factory__" ||
+                            a_strName == "create")
+                                return Param_any;
                         return Param_none;
+                }
+                virtual ClassFunSignatureShape GetFuncSignatureShape(const string_type &a_strName)
+                {
+                        return DescribeClassFunSignature(GetFuncArgType(a_strName));
                 }
                 virtual double ApplyClassFunc(void *pobj,const string_type &a_strName,paramvect& parm);
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm);
-                //////////////////////////////////////////////////////////////////////////
-                //??????????????????????????????? ?????????????
+
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,voidparamvect& parm);
-                //////////////////////////////////////////////////////////////////////////
-                //????????????????????????????????? ?????????????
+
                 virtual double ApplyClassFunc(void *pobj,void  *apclassfunc,charpvect& parm);
-                const char * GetClassMemberName(int inum)
+                const char * GetClassMemberName(int inum) const
                 {
                         return m_classStr[inum].c_str();
                 }
-                const char * GetClassDefName(int inum)
+                const char * GetClassDefName(int inum) const
                 {
                         return m_classdefbuf[inum]->getclass();
                 }
-                int GetClassMemberNum()
+                int GetClassMemberNum() const
                 {
-                        return m_classStr.size();
+                        return static_cast<int>(m_classStr.size());
                 }
-                const char * GetFuncDef(const char *pFuncname)
+                const char * GetFuncDef(const char *pFuncname) const
                 {
                         string_type astr(pFuncname);
-                        funcodemap_type::iterator item = m_codemap.find(astr);
+                        funcodemap_type::const_iterator item = m_codemap.find(astr);
                         if (item!=m_codemap.end())
-                                return m_codemap[astr]->m_strbuf.c_str();
+                                return item->second->m_strbuf.c_str();
                         return 0;
                 }
                 virtual bool Iscreateclass()
@@ -1928,11 +2111,9 @@ namespace mu
                 }
         };
 
-        //------------------------------------------------------------------------------
-        /** \brief Container for ParserClass objects. */
+        /* Shared registry type used by ParserBase for parser-visible class definitions. */
         typedef std::map<string_type, mu::classbase*> classbasemap_type;
 
 }
-
 
 #endif
