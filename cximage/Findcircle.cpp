@@ -16,10 +16,29 @@
 
 #include <Extrema_GenExtCS.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 constexpr int kEdgeDetectMinNum = 10;
+
+int ClampSizeToInt(std::size_t value)
+{
+    const std::size_t max_value = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return value > max_value ? std::numeric_limits<int>::max() : static_cast<int>(value);
+}
+
+int RoundToInt(double value)
+{
+    if (!std::isfinite(value))
+        return 0;
+    const double clamped = std::min(
+        std::max(value, static_cast<double>(std::numeric_limits<int>::min())),
+        static_cast<double>(std::numeric_limits<int>::max()));
+    return static_cast<int>(std::lround(clamped));
+}
 
 int ComputeCircleEdgeOffset(int edge_width, int default_offset)
 {
@@ -110,28 +129,56 @@ void ApplyCircleObjectPrefilter(FindObject* find_object,
     find_object->Measure(*process_image);
 }
 
+bool IsEnabledEnvironmentValue(const char* raw)
+{
+    return raw != nullptr &&
+        (raw[0] == '1' || raw[0] == 't' || raw[0] == 'T' || raw[0] == 'y' || raw[0] == 'Y');
+}
+
+bool ReadEnvironmentFlag(const char* name)
+{
+#if defined(_MSC_VER)
+    char* raw = nullptr;
+    std::size_t length = 0;
+    if (::_dupenv_s(&raw, &length, name) != 0 || raw == nullptr)
+        return false;
+    const bool enabled = IsEnabledEnvironmentValue(raw);
+    std::free(raw);
+    return enabled;
+#else
+    return IsEnabledEnvironmentValue(std::getenv(name));
+#endif
+}
+
+int ReadEnvironmentInt(const char* name, int fallback)
+{
+#if defined(_MSC_VER)
+    char* raw = nullptr;
+    std::size_t length = 0;
+    if (::_dupenv_s(&raw, &length, name) != 0 || raw == nullptr)
+        return fallback;
+    const int parsed = std::atoi(raw);
+    std::free(raw);
+    return parsed;
+#else
+    const char* raw = std::getenv(name);
+    return raw == nullptr ? fallback : std::atoi(raw);
+#endif
+}
+
 bool ShouldBypassCircleMeasurePoints()
 {
-    const char* raw = std::getenv("CXCIRCLE_FORCE_POINT_BYPASS");
-    if (raw == nullptr)
-        return false;
-    return raw[0] == '1' || raw[0] == 't' || raw[0] == 'T' || raw[0] == 'y' || raw[0] == 'Y';
+    return ReadEnvironmentFlag("CXCIRCLE_FORCE_POINT_BYPASS");
 }
 
 bool ShouldSkipCircleFitResultMeasure()
 {
-    const char* raw = std::getenv("CXCIRCLE_SKIP_FITRESULTMEASURE");
-    if (raw == nullptr)
-        return false;
-    return raw[0] == '1' || raw[0] == 't' || raw[0] == 'T' || raw[0] == 'y' || raw[0] == 'Y';
+    return ReadEnvironmentFlag("CXCIRCLE_SKIP_FITRESULTMEASURE");
 }
 
 int ReadCircleMeasureStageLimit()
 {
-    const char* raw = std::getenv("CXCIRCLE_MEASURE_STAGE_LIMIT");
-    if (raw == nullptr)
-        return 6;
-    const int parsed = std::atoi(raw);
+    const int parsed = ReadEnvironmentInt("CXCIRCLE_MEASURE_STAGE_LIMIT", 6);
     if (parsed < 1 || parsed > 6)
         return 6;
     return parsed;
@@ -201,7 +248,8 @@ void AppendSimulatedCirclePoints(PointsShape& points,
         const double angle = (2.0 * pi * static_cast<double>(i)) / static_cast<double>(point_count);
         const double x = center_x + radius * std::cos(angle);
         const double y = center_y + radius * std::sin(angle);
-        points.addpoint(gp_Pnt(x, y, 0.0));
+        gp_Pnt perimeter_point(x, y, 0.0);
+        points.addpoint(perimeter_point);
     }
 }
 }
@@ -252,7 +300,7 @@ void Findcircle::setshow(int ishow)
 {
     if (ishow == 0)
     {
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
             m_lines[i].setshow(false);
         Shape::setshow(ishow);
         m_resultcircle.setshow(0);
@@ -269,7 +317,7 @@ void Findcircle::setshow(int ishow)
     }
     if (0x04 == ishow)
     {     
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
         {
             if (i == 0)
                 m_lines[i].setcolor(255, 255, 0);
@@ -280,7 +328,7 @@ void Findcircle::setshow(int ishow)
     }
     else
     {
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
             m_lines[i].setshow(false);
     } 
     Shape::setshow(ishow);
@@ -292,11 +340,13 @@ void Findcircle::setselectedgenum(int iedgenum)
 void Findcircle::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
+    if (pshape0 == nullptr)
+        return;
      
-    int ix0 = pshape0->rect().TopLeft().X();
-    int iy0 = pshape0->rect().TopLeft().Y();
-    int iw = pshape0->rect().Width();
-    int ih = pshape0->rect().Height();
+    int ix0 = RoundToInt(pshape0->rect().TopLeft().X());
+    int iy0 = RoundToInt(pshape0->rect().TopLeft().Y());
+    int iw = RoundToInt(pshape0->rect().Width());
+    int ih = RoundToInt(pshape0->rect().Height());
 
     int icentx = ix0 + iw / 2;
     int icenty = iy0 + ih / 2; 
@@ -330,12 +380,12 @@ void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
     m_ipay = ipay; 
     Shape::setcircle(icentx, icenty, ipax, ipay);
 
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
     m_lines.clear();
-    int isize = getpath().ElementCount();
+    int isize = ClampSizeToInt(getpath().ElementCount());
     const cxgeom::CxSetCircleBuildMeta scan_meta =
         BuildCircleScanMeta(icentx, icenty, ipax, ipay, m_igap);
     if (m_igap > 0)
@@ -347,7 +397,7 @@ void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
             m_lines.push_back(aline1);
-            m_lines[iadd].setline(icentx, icenty, apoint.X(), apoint.Y());
+            m_lines[iadd].setline(icentx, icenty, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
             m_lines[iadd].setPercent(m_dsamplerate);
             iadd = iadd + 1;
             i = i + igapadd;
@@ -356,7 +406,7 @@ void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
     /*
     m_Line.setline(icentx, icenty, ipax, ipay); 
     m_Line.setshow(false); 
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }  
@@ -390,12 +440,12 @@ void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay,int idis)
     m_ipay = ipay;
     m_idisgap = idis;
     Shape::setcircle2(icentx, icenty, ipax, ipay,idis);
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
     m_lines.clear();
-    int isize = getpath().ElementCount();
+    int isize = ClampSizeToInt(getpath().ElementCount());
     const cxgeom::CxSetCircleBuildMeta scan_meta =
         BuildCircleScanMeta(icentx, icenty, ipax, ipay, m_igap);
     if (m_igap > 0)
@@ -408,14 +458,14 @@ void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay,int idis)
         {
             LineShape aline1;
             gp_Pnt apoint = getpath().ElementAt(i); 
-            aline1.setline(icx0, icy0, apoint.X(), apoint.Y());
+            aline1.setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
             std::vector<gp_Pnt> acrosspoints = aline1.getpath().IntersectPaths(getpath2());
             if (acrosspoints.size() > 0)
             {
                 LineShape aline2;
                 //aline2.setline(acrosspoints[0].X(), acrosspoints[0].Y(), apoint.X(), apoint.Y());
                 m_lines.push_back(aline2);
-                m_lines[m_lines.size() - 1].setline(acrosspoints[0].X(), acrosspoints[0].Y(), apoint.X(), apoint.Y());
+                m_lines[m_lines.size() - 1].setline(RoundToInt(acrosspoints[0].X()), RoundToInt(acrosspoints[0].Y()), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
                 m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
             }
             aline1.clear();
@@ -426,7 +476,7 @@ void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay,int idis)
     /*
     m_Line.setline(icentx, icenty, ipax, ipay);
     m_Line.setshow(false);
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
@@ -457,12 +507,12 @@ void Findcircle::translate(int ix,int iy)
 }
 void Findcircle::Translate(const gp_Vec& translationVector)
 { 
-   int ix0 = translationVector.X();
-   int iy0 = translationVector.Y();
+   int ix0 = RoundToInt(translationVector.X());
+   int iy0 = RoundToInt(translationVector.Y());
    getpath().Translate(translationVector);
     m_Line.Move(ix0, iy0);
     LineShape aline1, aline2;
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     { 
         m_lines[i].Move(ix0, iy0);
     } 
@@ -513,7 +563,7 @@ void Findcircle::edgepattern(Image& image)
 void Findcircle::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRect();
-    m_modelpoints.Move(-arect1.TopLeft().X(), -arect1.TopLeft().Y());
+    m_modelpoints.Move(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 }
 void Findcircle::savepatternfile(const char* pchar)
 {
@@ -533,7 +583,7 @@ void Findcircle::patterngap2gap(int inewgap)
 }
 void Findcircle::patternrootgrid(double itype, double drate, double ilevel)
 {
-    m_modelpoints.keysrootgrid(itype, drate, ilevel);
+    m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
 void Findcircle::patterntranform(int igap, int itype, int isgap, int iline)
 {
@@ -541,15 +591,15 @@ void Findcircle::patterntranform(int igap, int itype, int isgap, int iline)
 }
 void Findcircle::patternzoom(double dx, double dy, double igap, double itype)
 {
-    m_modelpoints.patternzoom(dx, dy, igap, itype);
+    m_modelpoints.patternzoom(RoundToInt(dx), RoundToInt(dy), RoundToInt(igap), RoundToInt(itype));
 }
 void Findcircle::patternrotate(double dangle)
 {
-    m_modelpoints.Rotate(dangle);
+    m_modelpoints.Rotate(RoundToInt(dangle));
 }
 void Findcircle::modelzoom(double dx, double dy)
 {
-    m_modelpoints.Zoom(dx, dy);
+    m_modelpoints.Zoom(RoundToInt(dx), RoundToInt(dy));
 }
 gp_Path& Findcircle::getpatternpath()
 {
@@ -562,6 +612,8 @@ PointsShape& Findcircle::getpattern()
 void Findcircle::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     edgepattern(*pgetimage);
 }
 void Findcircle::drawshape()
@@ -615,14 +667,16 @@ void Findcircle::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 void Findcircle::MeasureT(void *pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     m_measurepoints.clear();
     cv::Point2f apoint;
     double dradiusOut;
     Image::GetLargestCircle(pgetimage->getmat(), apoint, dradiusOut);
  
-    int icentx = apoint.x;
-    int icenty = apoint.y;
-    int ipax = icentx + dradiusOut;
+    int icentx = RoundToInt(apoint.x);
+    int icenty = RoundToInt(apoint.y);
+    int ipax = icentx + RoundToInt(dradiusOut);
     int ipay = icenty;
     m_resultcircle.setcolor(0, 255, 100);
     m_resultcircle.setcircle(icentx, icenty, ipax, ipay);
@@ -643,7 +697,7 @@ void Findcircle::Measure(Image& image)
     m_avgdist = 0.0;
     m_last_prefilter_used = 0;
     const int stage_limit = ReadCircleMeasureStageLimit();
-    int isize = m_lines.size();
+    int isize = ClampSizeToInt(m_lines.size());
     if (isize <= 0 || g_pbackimage == 0)
         return;
     if (stage_limit == 1)
@@ -669,7 +723,7 @@ void Findcircle::Measure(Image& image)
           return;
 
       const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
-      if (!compact_domain && ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize))
+      if (!compact_domain && g_pbackfindobject != nullptr && ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize))
       {
           m_last_prefilter_used = 1;
           const int filter_min = compact_domain
@@ -1038,7 +1092,7 @@ void Findcircle::MeasureBalanced(Image& image)
                     {
                         const gp_Pnt& seed_point = candidate_seed_points[seed_index];
                         Setgap(gap);
-                        setcircle(saved_centx, saved_centy, static_cast<int>(seed_point.X()), static_cast<int>(seed_point.Y()));
+                        setcircle(saved_centx, saved_centy, RoundToInt(seed_point.X()), RoundToInt(seed_point.Y()));
                         setmethod(method);
                         setthre(threshold);
                         setlinegap(line_gap);
@@ -1074,10 +1128,10 @@ void Findcircle::MeasureBalanced(Image& image)
         std::isfinite(best_candidate.center_y))
     {
         m_resultcircle.setcolor(0, 155, 50);
-        m_resultcircle.setcircle(static_cast<int>(best_candidate.center_x),
-            static_cast<int>(best_candidate.center_y),
-            static_cast<int>(best_candidate.center_x + best_candidate.radius),
-            static_cast<int>(best_candidate.center_y));
+        m_resultcircle.setcircle(RoundToInt(best_candidate.center_x),
+            RoundToInt(best_candidate.center_y),
+            RoundToInt(best_candidate.center_x + best_candidate.radius),
+            RoundToInt(best_candidate.center_y));
     }
 }
 
@@ -1087,7 +1141,9 @@ PointsShape& Findcircle::getresultpoints()
 }
  double distance(const gp_Pnt& a, const gp_Pnt& b)
 {
-    return sqrtf((a.X() - b.X()) * (a.X() - b.X()) + (a.Y() - b.Y()) * (a.Y() - b.Y()));
+    const double dx = a.X() - b.X();
+    const double dy = a.Y() - b.Y();
+    return std::sqrt(dx * dx + dy * dy);
 }
 
 void Findcircle::fitcircle()
@@ -1100,13 +1156,13 @@ void Findcircle::fitcircle()
 
 
     vector<cv::Point2f>  vecResult;
-    int isize = m_measurepoints.size();
+    int isize = ClampSizeToInt(m_measurepoints.size());
  
     for (int it = 0; it < isize; it++)
     {
-       int ix = m_measurepoints.getx(it);
-       int iy = m_measurepoints.gety(it);
-       vecResult.push_back(cv::Point2f(ix, iy));
+       int ix = RoundToInt(m_measurepoints.getx(it));
+       int iy = RoundToInt(m_measurepoints.gety(it));
+       vecResult.push_back(cv::Point2f(static_cast<float>(ix), static_cast<float>(iy)));
     }
     const int min_fit_points = ComputeCircleMinFitPoints(static_cast<int>(m_lines.size()));
     if (vecResult.size() < static_cast<size_t>(min_fit_points))
@@ -1129,10 +1185,10 @@ void Findcircle::fitcircle()
         m_avgdist = 0.0;
         return;
     }
-    int icentx = dOut_x;
-    int icenty = dOut_y;
-    int ipax = dOut_x + radius;
-    int ipay = dOut_y;
+    int icentx = RoundToInt(dOut_x);
+    int icenty = RoundToInt(dOut_y);
+    int ipax = RoundToInt(dOut_x + radius);
+    int ipay = RoundToInt(dOut_y);
     m_resultcircle.setcolor(0, 155, 50);
     m_resultcircle.setcircle(icentx, icenty, ipax, ipay);
      m_dresultcentx = dOut_x;
@@ -1149,8 +1205,8 @@ void Findcircle::fitcircle()
      double dtotaldis = 0;
      for (int it = 0; it < isize; it++)
      {
-         int ix = m_measurepoints.getx(it);
-         int iy = m_measurepoints.gety(it);
+         int ix = RoundToInt(m_measurepoints.getx(it));
+         int iy = RoundToInt(m_measurepoints.gety(it));
          gp_Pnt aexternalPoint;
          aexternalPoint.SetX(ix);
          aexternalPoint.SetY(iy);
@@ -1169,6 +1225,10 @@ void Findcircle::fitcircle()
 }
 void Findcircle::FitResultMeasure(void* pimage)
 {
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+
     const PointsShape pre_measurepoints = m_measurepoints;
     const int pre_points = m_measurepoints.size();
     const int min_fit_points = ComputeCircleMinFitPoints(static_cast<int>(m_lines.size()));
@@ -1182,8 +1242,11 @@ void Findcircle::FitResultMeasure(void* pimage)
         std::isfinite(pre_center_y) &&
         std::isfinite(pre_avg_distance);
 
-    setcircle2(m_dresultcentx, m_dresultcenty, m_dresultcentx, m_dresultcenty + m_dradius + m_fitmeasuregap/2, m_fitmeasuregap);
-    Image* pgetimage = (Image*)pimage;
+    setcircle2(RoundToInt(m_dresultcentx),
+        RoundToInt(m_dresultcenty),
+        RoundToInt(m_dresultcentx),
+        RoundToInt(m_dresultcenty + m_dradius + static_cast<double>(m_fitmeasuregap) / 2.0),
+        m_fitmeasuregap);
     Measure(*pgetimage);
   
     //  pgetimage->GetSubPixel(&m_measurepoints);
@@ -1269,14 +1332,19 @@ gp_Pnt Findcircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt exte
 void Findcircle::measure(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Measure(*pgetimage);
 }
 void Findcircle::automeasure(void* pimage)
 {
+    (void)pimage;
  
 }
 void Findcircle::shapesetroi(void* pshape)
 {
+    if (pshape == nullptr)
+        return;
     Shape::shapesetroi(pshape);
 }
 void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
@@ -1284,7 +1352,7 @@ void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
     PointsShape resultpoints;
     resultpoints.addpoints(getresultpoints());
     vector<int> numlist;
-    int isize = resultpoints.size();
+    int isize = ClampSizeToInt(resultpoints.size());
     if (0 == isize)
         return;
     for (int i = 0; i < isize; i++)
@@ -1293,13 +1361,13 @@ void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
     }
     for (int i = 0; i < isize; i++)
     {
-        int ix0 = resultpoints.getx(i);
-        int iy0 = resultpoints.gety(i);
+        int ix0 = RoundToInt(resultpoints.getx(i));
+        int iy0 = RoundToInt(resultpoints.gety(i));
         if (i + 1 < isize)
             for (int j = i + 1; j < isize; j++)
             {
-                int ix1 = resultpoints.getx(j);
-                int iy1 = resultpoints.gety(j);
+                int ix1 = RoundToInt(resultpoints.getx(j));
+                int iy1 = RoundToInt(resultpoints.gety(j));
                 if (abs(ix0 - ix1) < igapx
                     && abs(iy0 - iy1) < igapy)
                 {
@@ -1310,14 +1378,13 @@ void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
     }
     PointsShape amodelpointsw;
     PointsShape amodelpointsh;
-    int isize1 = getresultpoints().size();
-    int isize2 = isize;
+    int isize1 = ClampSizeToInt(getresultpoints().size());
     getresultpoints().clear();
     int inum = 0;
     for (inum = 0; inum < isize1; inum++)
     {
-        int ix0 = resultpoints.getx(inum);
-        int iy0 = resultpoints.gety(inum);
+        int ix0 = RoundToInt(resultpoints.getx(inum));
+        int iy0 = RoundToInt(resultpoints.gety(inum));
         int inumsum = numlist[inum];
         if (inumsum > iclusternum)
         {

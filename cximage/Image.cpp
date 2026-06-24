@@ -253,6 +253,8 @@ void Image::setROI(const Image& roi, int startX, int startY) {
 void Image::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
+    if (pshape0 == nullptr)
+        return;
 
     setroi(static_cast<int>(pshape0->rect().TopLeft().X()),
         static_cast<int>(pshape0->rect().TopLeft().Y()),
@@ -3828,6 +3830,8 @@ void Image::Test(void* pshape)
 {
 
     PointsShape* tpoints = (PointsShape*)pshape;;
+    if (tpoints == nullptr)
+        return;
 
     std::vector<cv::Point2f> corners;
     featureDet2(this->getmat(), corners);

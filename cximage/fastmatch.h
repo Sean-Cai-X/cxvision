@@ -7,6 +7,7 @@
 #include "shapebase.h"
 #include "Findline.h"
 #include "Grid.h"
+#include <opencv2/core/mat.hpp>
 
 class Grid;
 typedef vector<int> Cluster;
@@ -146,18 +147,25 @@ public:
     void setmultimatchrect(int inum, int ix, int iy, int iw, int ih);
     void setmatchthre(int ithre);
     void setfindnum(int ifindnum);
+    void setmatchmask(const cv::Mat* pmask);
+    void clearmatchmask();
     int getrawmatchprobecount() const;
     int getrawmatchthresholdhitcount() const;
     int getresulttolistcallcount() const;
     int getresultcandidateinsertcount() const;
     int getresultcandidatereplacecount() const;
     int getresultcandidaterejectcount() const;
+    int getresultcandidatecount() const;
+    int getresultbestindex() const;
+    double getresultbestscore() const;
     int getrawthresholdhitrecordcount() const;
     gp_Pnt getrawthresholdhitpoint(int inum) const;
     int getrawthresholdhitscore(int inum) const;
     double getresultnum(int inum);
     double getresultcentx(int inum);
     double getresultcenty(int inum);
+    double getresolvedresultcentx(int inum);
+    double getresolvedresultcenty(int inum);
     int getrotateresultcentx(int inum);
     int getrotateresultcenty(int inum);
 
@@ -253,6 +261,7 @@ public:
     RectsShape& getmatchrects();
     gp_Rectangle& getmatchrect();
     gp_Rectangle getresultrect(int inum);
+    gp_Rectangle getresolvedresultrect(int inum);
     vector<PointsShape>& getmodels_l12();
     Grid* getgrid();
     void setgrid(int iw, int igrid);
@@ -269,6 +278,7 @@ private:
     int m_istyle;
     Image* g_pmodelimage;
     Image* m_matchimage;
+    const cv::Mat* m_matchmask;
 
 
     vector<int> m_imagefastmodel;

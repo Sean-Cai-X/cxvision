@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "CxCoreBoundary.h"
+#include "CxCoreGeometryAttach.h"
+#include "RegionPatternNet.h"
 
 namespace cxcore {
 
@@ -63,6 +65,8 @@ struct RoiInput
 struct FeatureVectorInput
 {
     std::string name;
+    std::string role;
+    std::string source;
     std::vector<float> values;
 };
 
@@ -93,6 +97,14 @@ struct AiTaskEnvelope
     int topk = 1;
 };
 
+struct EvidenceDescriptorSummary
+{
+    std::string name;
+    std::string role;
+    std::string source;
+    int dim = 0;
+};
+
 struct AiRouteDecision
 {
     AiRoute route = AiRoute::ManualReview;
@@ -115,6 +127,174 @@ struct AiTaskResult
     std::vector<float> losses;
     std::vector<std::string> diagnostics;
 };
+
+inline const char* RegionPatternFeatureVectorName()
+{
+    return "region_pattern_descriptor";
+}
+
+inline const char* BaselineFeatureVectorName()
+{
+    return "baseline_feature_v1";
+}
+
+inline const char* FastMatchFeatureVectorName()
+{
+    return "fastmatch_structural_feature";
+}
+
+inline const char* FractalPartitionFeatureVectorName()
+{
+    return "fractal_partition_feature";
+}
+
+inline const char* GeometryDistanceFieldFeatureVectorName()
+{
+    return "geometry_distance_field_feature";
+}
+
+inline const char* GeometrySkeletonFeatureVectorName()
+{
+    return "geometry_skeleton_feature";
+}
+
+inline const char* GeometryTopologyBundleFeatureVectorName()
+{
+    return "geometry_topology_bundle_feature";
+}
+
+inline const char* RegionPatternFeatureRole()
+{
+    return "content_aux";
+}
+
+inline const char* BaselineFeatureRole()
+{
+    return "baseline_summary";
+}
+
+inline const char* FastMatchFeatureRole()
+{
+    return "structural_primary";
+}
+
+inline const char* FractalPartitionFeatureRole()
+{
+    return "geometry_partition_aux";
+}
+
+inline const char* GeometryDistanceFieldFeatureRole()
+{
+    return "geometry_distance_aux";
+}
+
+inline const char* GeometrySkeletonFeatureRole()
+{
+    return "geometry_skeleton_aux";
+}
+
+inline const char* GeometryTopologyBundleFeatureRole()
+{
+    return "geometry_topology_bundle";
+}
+
+inline const char* RegionPatternFeatureSource()
+{
+    return "region_pattern_net";
+}
+
+inline const char* BaselineFeatureSource()
+{
+    return "baseline_feature_sample_v1";
+}
+
+inline const char* FastMatchFeatureSource()
+{
+    return "fastmatch";
+}
+
+inline const char* FractalPartitionFeatureSource()
+{
+    return "fractal_partition";
+}
+
+inline const char* GeometryDistanceFieldFeatureSource()
+{
+    return "geometry_distance_field";
+}
+
+inline const char* GeometrySkeletonFeatureSource()
+{
+    return "geometry_skeleton";
+}
+
+inline const char* GeometryTopologyBundleFeatureSource()
+{
+    return "geometry_topology_bundle";
+}
+
+inline const char* GeometryTopologyBundleEnvelopeBuildCommandName()
+{
+    return "cxcore.build.topology_bundle_envelope";
+}
+
+inline const char* GeometryTopologyBundleEnvelopeRouteCommandName()
+{
+    return "cxcore.route.topology_bundle_envelope";
+}
+
+inline const char* GeometryTopologyBundleEnvelopeSummarizeCommandName()
+{
+    return "cxcore.summarize.topology_bundle_envelope";
+}
+
+inline std::vector<std::string> GetGeometryTopologyBundleEnvelopeCommandNames()
+{
+    return {
+        GeometryTopologyBundleEnvelopeBuildCommandName(),
+        GeometryTopologyBundleEnvelopeRouteCommandName(),
+        GeometryTopologyBundleEnvelopeSummarizeCommandName()
+    };
+}
+
+inline const char* StructuralEvidenceBundleFeatureVectorName()
+{
+    return "structural_evidence_bundle_feature";
+}
+
+inline const char* StructuralEvidenceBundleFeatureRole()
+{
+    return "structural_bundle";
+}
+
+inline const char* StructuralEvidenceBundleFeatureSource()
+{
+    return "fastmatch_plus_topology_bundle";
+}
+
+inline const char* StructuralEvidenceBundleEnvelopeBuildCommandName()
+{
+    return "cxcore.build.structural_evidence_bundle_envelope";
+}
+
+inline const char* StructuralEvidenceBundleEnvelopeRouteCommandName()
+{
+    return "cxcore.route.structural_evidence_bundle_envelope";
+}
+
+inline const char* StructuralEvidenceBundleEnvelopeSummarizeCommandName()
+{
+    return "cxcore.summarize.structural_evidence_bundle_envelope";
+}
+
+inline std::vector<std::string> GetStructuralEvidenceBundleEnvelopeCommandNames()
+{
+    return {
+        StructuralEvidenceBundleEnvelopeBuildCommandName(),
+        StructuralEvidenceBundleEnvelopeRouteCommandName(),
+        StructuralEvidenceBundleEnvelopeSummarizeCommandName()
+    };
+}
 
 inline const char* AiTaskKindName(AiTaskKind task)
 {
@@ -310,6 +490,416 @@ inline AiTaskEnvelope MakeStructuredGeometryEnvelope(
     envelope.requires_classical_explainability = requires_classical_explainability;
     envelope.topk = 1;
     return envelope;
+}
+
+inline FeatureVectorInput MakeRegionPatternFeatureVector(
+    const RegionPatternDescriptor& descriptor,
+    const std::string& name = RegionPatternFeatureVectorName(),
+    bool include_foreground_ratio = true)
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = RegionPatternFeatureRole();
+    input.source = RegionPatternFeatureSource();
+    input.values.reserve(descriptor.values.size() + (include_foreground_ratio ? 1u : 0u));
+    if (include_foreground_ratio)
+    {
+        input.values.push_back(static_cast<float>(descriptor.global_foreground_ratio));
+    }
+    for (const double value : descriptor.values)
+    {
+        input.values.push_back(static_cast<float>(value));
+    }
+    return input;
+}
+
+inline FeatureVectorInput MakeBaselineFeatureVector(
+    const BaselineFeatureSampleV1& sample,
+    const std::string& name = BaselineFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = BaselineFeatureRole();
+    input.source = BaselineFeatureSource();
+    input.values = {
+        static_cast<float>(sample.roi_area),
+        static_cast<float>(sample.component_count),
+        static_cast<float>(sample.largest_component_ratio),
+        static_cast<float>(sample.line_w_points_count),
+        static_cast<float>(sample.circle_radius),
+        static_cast<float>(sample.match_candidate_count),
+        static_cast<float>(sample.match_best_score),
+        static_cast<float>(sample.image_model_score),
+        static_cast<float>(sample.region_pattern_foreground_ratio),
+        static_cast<float>(sample.region_pattern_descriptor_dim),
+        static_cast<float>(sample.region_pattern_descriptor_mean),
+        static_cast<float>(sample.region_pattern_descriptor_std)
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeFastMatchFeatureVector(
+    const MatchOutput& match,
+    const std::string& name = FastMatchFeatureVectorName())
+{
+    const MatchCandidateOutput* primary = match.candidates.empty() ? nullptr : &match.candidates.front();
+
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = FastMatchFeatureRole();
+    input.source = FastMatchFeatureSource();
+    input.values = {
+        static_cast<float>(match.candidates.size()),
+        static_cast<float>(match.max_score),
+        static_cast<float>(match.image_model_score),
+        primary ? static_cast<float>(primary->score) : 0.0f,
+        primary ? static_cast<float>(primary->center.x) : 0.0f,
+        primary ? static_cast<float>(primary->center.y) : 0.0f,
+        primary ? static_cast<float>(primary->bounds.width) : 0.0f,
+        primary ? static_cast<float>(primary->bounds.height) : 0.0f
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeFractalPartitionFeatureVector(
+    const FractalPartitionOutput& partition,
+    const std::string& name = FractalPartitionFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = FractalPartitionFeatureRole();
+    input.source = FractalPartitionFeatureSource();
+    input.values = {
+        static_cast<float>(partition.node_count),
+        static_cast<float>(partition.leaf_node_count),
+        static_cast<float>(partition.boundary_node_count),
+        static_cast<float>(partition.max_depth),
+        static_cast<float>(partition.width),
+        static_cast<float>(partition.height)
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeGeometryDistanceFieldFeatureVector(
+    const GeometryDistanceFieldOutput& distance,
+    const std::string& name = GeometryDistanceFieldFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = GeometryDistanceFieldFeatureRole();
+    input.source = GeometryDistanceFieldFeatureSource();
+    input.values = {
+        static_cast<float>(distance.seed_count),
+        static_cast<float>(distance.min_distance),
+        static_cast<float>(distance.max_distance),
+        static_cast<float>(distance.mean_distance),
+        static_cast<float>(distance.width),
+        static_cast<float>(distance.height)
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeGeometrySkeletonFeatureVector(
+    const GeometrySkeletonOutput& skeleton,
+    const std::string& name = GeometrySkeletonFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = GeometrySkeletonFeatureRole();
+    input.source = GeometrySkeletonFeatureSource();
+    input.values = {
+        static_cast<float>(skeleton.skeleton_pixel_count),
+        static_cast<float>(skeleton.endpoint_count),
+        static_cast<float>(skeleton.branch_point_count),
+        static_cast<float>(skeleton.width),
+        static_cast<float>(skeleton.height)
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeGeometryTopologyBundleSummaryFeatureVector(
+    const GeometryTopologyBundleSummary& summary,
+    const std::string& name = GeometryTopologyBundleFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = GeometryTopologyBundleFeatureRole();
+    input.source = GeometryTopologyBundleFeatureSource();
+    input.values = {
+        static_cast<float>(summary.object_count),
+        static_cast<float>(summary.object_summaries.size()),
+        static_cast<float>(summary.object_ids.size())
+    };
+    return input;
+}
+
+inline FeatureVectorInput MakeStructuralEvidenceBundleFeatureVector(
+    const MatchOutput& match,
+    const GeometryTopologyBundleSummary& summary,
+    const std::string& name = StructuralEvidenceBundleFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = StructuralEvidenceBundleFeatureRole();
+    input.source = StructuralEvidenceBundleFeatureSource();
+    input.values = {
+        static_cast<float>(match.candidates.size()),
+        static_cast<float>(match.max_score),
+        static_cast<float>(match.image_model_score),
+        static_cast<float>(summary.object_count),
+        static_cast<float>(summary.object_summaries.size())
+    };
+    return input;
+}
+
+inline AiTaskEnvelope MakeGeometryContentEnvelope(
+    AiTaskKind task,
+    const GeometrySignalInput& geometry,
+    const RegionPatternDescriptor& descriptor,
+    bool requires_classical_explainability = false)
+{
+    std::vector<FeatureVectorInput> descriptors;
+    descriptors.push_back(MakeRegionPatternFeatureVector(descriptor));
+    return MakeStructuredGeometryEnvelope(task, geometry, descriptors, requires_classical_explainability);
+}
+
+inline AiTaskEnvelope MakeGeometryContentEnvelopeFromPatch(
+    AiTaskKind task,
+    const GeometrySignalInput& geometry,
+    const cv::Mat& roi_patch,
+    bool requires_classical_explainability = false,
+    const RegionPatternConfig& config = RegionPatternConfig())
+{
+    RegionPatternNet net;
+    net.SetConfig(config);
+    return MakeGeometryContentEnvelope(
+        task,
+        geometry,
+        net.BuildDescriptor(roi_patch),
+        requires_classical_explainability);
+}
+
+inline AiTaskEnvelope MakeRegionClassificationEnvelopeFromPatch(
+    const TensorBufferView& image_tensor,
+    const std::vector<RoiInput>& proposals,
+    const cv::Mat& roi_patch,
+    const RegionPatternConfig& config = RegionPatternConfig())
+{
+    RegionPatternNet net;
+    net.SetConfig(config);
+    std::vector<FeatureVectorInput> descriptors;
+    descriptors.push_back(MakeRegionPatternFeatureVector(net.BuildDescriptor(roi_patch)));
+    return MakeRegionClassificationEnvelope(image_tensor, proposals, descriptors);
+}
+
+inline AiTaskEnvelope MakeBaselineFeatureEnvelope(
+    AiTaskKind task,
+    const BaselineFeatureSampleV1& sample,
+    bool requires_classical_explainability = false)
+{
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.descriptors.push_back(MakeBaselineFeatureVector(sample));
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeFastMatchEnvelope(
+    AiTaskKind task,
+    const MatchOutput& match,
+    bool requires_classical_explainability = true)
+{
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeFastMatchFeatureVector(match));
+    envelope.geometry.match = match;
+    envelope.geometry.has_match = true;
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeCombinedEvidenceEnvelope(
+    AiTaskKind task,
+    const MatchOutput& match,
+    const BaselineFeatureSampleV1& sample,
+    const RegionPatternDescriptor& descriptor,
+    bool requires_classical_explainability = false)
+{
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeFastMatchFeatureVector(match));
+    envelope.descriptors.push_back(MakeBaselineFeatureVector(sample));
+    envelope.descriptors.push_back(MakeRegionPatternFeatureVector(descriptor));
+    envelope.geometry.match = match;
+    envelope.geometry.has_match = true;
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeCombinedEvidenceEnvelopeFromPatch(
+    AiTaskKind task,
+    const MatchOutput& match,
+    const BaselineFeatureSampleV1& sample,
+    const cv::Mat& roi_patch,
+    bool requires_classical_explainability = false,
+    const RegionPatternConfig& config = RegionPatternConfig())
+{
+    RegionPatternNet net;
+    net.SetConfig(config);
+    return MakeCombinedEvidenceEnvelope(
+        task,
+        match,
+        sample,
+        net.BuildDescriptor(roi_patch),
+        requires_classical_explainability);
+}
+
+inline AiTaskEnvelope MakeGeometryTopologyEvidenceEnvelope(
+    AiTaskKind task,
+    const FractalPartitionOutput& partition,
+    const GeometryDistanceFieldOutput& distance,
+    const GeometrySkeletonOutput& skeleton,
+    bool requires_classical_explainability = false)
+{
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeFractalPartitionFeatureVector(partition));
+    envelope.descriptors.push_back(MakeGeometryDistanceFieldFeatureVector(distance));
+    envelope.descriptors.push_back(MakeGeometrySkeletonFeatureVector(skeleton));
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeGeometryTopologyBundleEnvelope(
+    AiTaskKind task,
+    const GeometryTopologyBundle& bundle,
+    const FractalPartitionObject& partition,
+    const DistanceFieldObject& distance,
+    const SkeletonObject& skeleton,
+    bool requires_classical_explainability = false)
+{
+    const GeometryTopologyBundleSummary summary =
+        SummarizeGeometryTopologyBundle(bundle, partition, distance, skeleton);
+
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeGeometryTopologyBundleSummaryFeatureVector(summary));
+    envelope.descriptors.push_back(MakeFractalPartitionFeatureVector(partition.output));
+    envelope.descriptors.push_back(MakeGeometryDistanceFieldFeatureVector(distance.output));
+    envelope.descriptors.push_back(MakeGeometrySkeletonFeatureVector(skeleton.output));
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeStructuralEvidenceBundleEnvelope(
+    AiTaskKind task,
+    const MatchOutput& match,
+    const GeometryTopologyBundle& bundle,
+    const FractalPartitionObject& partition,
+    const DistanceFieldObject& distance,
+    const SkeletonObject& skeleton,
+    bool requires_classical_explainability = true)
+{
+    const GeometryTopologyBundleSummary summary =
+        SummarizeGeometryTopologyBundle(bundle, partition, distance, skeleton);
+
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeStructuralEvidenceBundleFeatureVector(match, summary));
+    envelope.descriptors.push_back(MakeFastMatchFeatureVector(match));
+    envelope.descriptors.push_back(MakeGeometryTopologyBundleSummaryFeatureVector(summary));
+    envelope.descriptors.push_back(MakeFractalPartitionFeatureVector(partition.output));
+    envelope.descriptors.push_back(MakeGeometryDistanceFieldFeatureVector(distance.output));
+    envelope.descriptors.push_back(MakeGeometrySkeletonFeatureVector(skeleton.output));
+    envelope.geometry.match = match;
+    envelope.geometry.has_match = true;
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline std::vector<std::string> GetDescriptorNames(const AiTaskEnvelope& envelope)
+{
+    std::vector<std::string> names;
+    names.reserve(envelope.descriptors.size());
+    for (const auto& item : envelope.descriptors)
+    {
+        names.push_back(item.name);
+    }
+    return names;
+}
+
+inline std::vector<std::string> GetDescriptorRoles(const AiTaskEnvelope& envelope)
+{
+    std::vector<std::string> roles;
+    roles.reserve(envelope.descriptors.size());
+    for (const auto& item : envelope.descriptors)
+    {
+        roles.push_back(item.role);
+    }
+    return roles;
+}
+
+inline std::vector<std::string> GetDescriptorSources(const AiTaskEnvelope& envelope)
+{
+    std::vector<std::string> sources;
+    sources.reserve(envelope.descriptors.size());
+    for (const auto& item : envelope.descriptors)
+    {
+        sources.push_back(item.source);
+    }
+    return sources;
+}
+
+inline std::vector<EvidenceDescriptorSummary> BuildDescriptorSummary(const AiTaskEnvelope& envelope)
+{
+    std::vector<EvidenceDescriptorSummary> summary;
+    summary.reserve(envelope.descriptors.size());
+    for (const auto& item : envelope.descriptors)
+    {
+        EvidenceDescriptorSummary entry;
+        entry.name = item.name;
+        entry.role = item.role;
+        entry.source = item.source;
+        entry.dim = static_cast<int>(item.values.size());
+        summary.push_back(entry);
+    }
+    return summary;
+}
+
+inline bool HasDescriptorRole(const AiTaskEnvelope& envelope, const std::string& role)
+{
+    for (const auto& item : envelope.descriptors)
+    {
+        if (item.role == role)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool HasDescriptorNamed(const AiTaskEnvelope& envelope, const std::string& name)
+{
+    for (const auto& item : envelope.descriptors)
+    {
+        if (item.name == name)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline AiTaskResult MakeEmptyAiTaskResult(const AiTaskEnvelope& envelope, AiRoute route)

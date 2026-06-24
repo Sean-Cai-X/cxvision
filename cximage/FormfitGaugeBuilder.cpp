@@ -4,6 +4,7 @@
 
 #include "CxCoreBoundary.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace cxcore
@@ -11,15 +12,58 @@ namespace cxcore
 namespace formfit
 {
 
+namespace
+{
+double FiniteOr(double value, double fallback)
+{
+    return std::isfinite(value) ? value : fallback;
+}
+
+OutputRect NormalizeRect(OutputRect rect)
+{
+    rect.x = FiniteOr(rect.x, 0.0);
+    rect.y = FiniteOr(rect.y, 0.0);
+    rect.width = FiniteOr(rect.width, 0.0);
+    rect.height = FiniteOr(rect.height, 0.0);
+    if (rect.width < 0.0)
+    {
+        rect.x += rect.width;
+        rect.width = -rect.width;
+    }
+    if (rect.height < 0.0)
+    {
+        rect.y += rect.height;
+        rect.height = -rect.height;
+    }
+    return rect;
+}
+
+bool HasPositiveFiniteBounds(const OutputRect& rect)
+{
+    return std::isfinite(rect.x) && std::isfinite(rect.y) && std::isfinite(rect.width) &&
+        std::isfinite(rect.height) && rect.width > 0.0 && rect.height > 0.0;
+}
+
+double ClampPositiveScore(double score)
+{
+    return std::isfinite(score) && score > 0.0 ? score : 0.0;
+}
+
+int ClampCandidateLimit(int max_candidates)
+{
+    return std::max(0, max_candidates);
+}
+}
+
 OutputRect GaugeBuilder::MakeRectOutput(const FindRect& rect, int index)
 {
     OutputRect output;
-    const gp_Rectangle result = rect.getresultrect(index);
+    const gp_Rectangle result = rect.getresultrect(std::max(0, index));
     output.x = result.TopLeft().X();
     output.y = result.TopLeft().Y();
     output.width = result.Width();
     output.height = result.Height();
-    return output;
+    return NormalizeRect(output);
 }
 
 LineMeasurementOutput GaugeBuilder::MakeLineOutput(Findline& line)
@@ -34,15 +78,16 @@ CircleMeasurementOutput GaugeBuilder::MakeCircleOutput(Findcircle& circle)
 
 MatchOutput GaugeBuilder::MakeMatchOutput(fastmatch& matcher, int max_candidates)
 {
-    MatchOutput output = ExportMatchOutput(matcher, max_candidates);
+    MatchOutput output = ExportMatchOutput(matcher, ClampCandidateLimit(max_candidates));
     std::vector<MatchCandidateOutput> filtered;
     filtered.reserve(output.candidates.size());
-    for (const MatchCandidateOutput& candidate : output.candidates)
+    for (MatchCandidateOutput candidate : output.candidates)
     {
-        const bool valid_bounds = candidate.bounds.width > 0.0 && candidate.bounds.height > 0.0;
-        const bool valid_center = std::isfinite(candidate.center.x) && std::isfinite(candidate.center.y);
-        const bool valid_score = candidate.score > 0.0;
-        if (valid_bounds && valid_center && valid_score)
+        candidate.bounds = NormalizeRect(candidate.bounds);
+        candidate.center.x = FiniteOr(candidate.center.x, candidate.bounds.x + candidate.bounds.width * 0.5);
+        candidate.center.y = FiniteOr(candidate.center.y, candidate.bounds.y + candidate.bounds.height * 0.5);
+        candidate.score = ClampPositiveScore(candidate.score);
+        if (HasPositiveFiniteBounds(candidate.bounds) && candidate.score > 0.0)
         {
             filtered.push_back(candidate);
         }

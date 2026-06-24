@@ -14,7 +14,7 @@ public:
 
     void clear();
     void setshow(int ishow);
-    virtual void setrect(int ix, int iy, int iw, int ih) {}
+    virtual void setrect(int ix, int iy, int iw, int ih) { (void)ix; (void)iy; (void)iw; (void)ih; }
     void setcircle(int icentx, int icenty, int ipax, int ipay);
     void setcircle2(int icentx, int icenty, int ipax, int ipay, int idis);
     virtual void drawshape();

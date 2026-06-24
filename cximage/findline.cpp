@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -24,6 +25,46 @@
 
 namespace
 {
+int ClampSizeToInt(std::size_t value)
+{
+    const std::size_t max_value = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return value > max_value ? std::numeric_limits<int>::max() : static_cast<int>(value);
+}
+
+int RoundToInt(double value)
+{
+    if (!std::isfinite(value))
+        return 0;
+    const double clamped = std::min(
+        std::max(value, static_cast<double>(std::numeric_limits<int>::min())),
+        static_cast<double>(std::numeric_limits<int>::max()));
+    return static_cast<int>(std::lround(clamped));
+}
+
+int ClampLongLongToInt(long long value)
+{
+    const long long min_value = static_cast<long long>(std::numeric_limits<int>::min());
+    const long long max_value = static_cast<long long>(std::numeric_limits<int>::max());
+    return static_cast<int>(std::min(std::max(value, min_value), max_value));
+}
+
+int PositiveGap(int gap)
+{
+    return std::max(1, gap);
+}
+
+int PositiveExtent(int extent)
+{
+    return std::max(1, extent);
+}
+
+int CeilPositiveToInt(double value)
+{
+    if (!std::isfinite(value) || value <= 0.0)
+        return 1;
+    const double max_value = static_cast<double>(std::numeric_limits<int>::max());
+    return static_cast<int>(std::ceil(std::min(value, max_value)));
+}
 cxgeom::CxSetLineBuildMeta BuildLineScanMeta(double x0,
                                              double y0,
                                              double x1,
@@ -42,9 +83,9 @@ cxgeom::CxSetLineBuildMeta BuildLineScanMeta(double x0,
     request.x1 = x1;
     request.y1 = y1;
     request.z1 = 0.0;
-    request.gap = std::max(1, gap);
-    request.roi_width = roi_width;
-    request.roi_height = roi_height;
+    request.gap = PositiveGap(gap);
+    request.roi_width = PositiveExtent(roi_width);
+    request.roi_height = PositiveExtent(roi_height);
 
     const cxgeom::CxSetLineBuild builder;
     const cxgeom::CxSetLineBuildResult result = builder.Build(request);
@@ -60,9 +101,9 @@ int ComputeLineScanCount(double length_hint,
     if (gap <= 0)
         return 0;
 
-    int scan_count = static_cast<int>(meta.scan_count_hint);
-    if (scan_count <= 0 && length_hint > 0.0)
-        scan_count = static_cast<int>(std::ceil(length_hint / gap));
+    int scan_count = ClampSizeToInt(meta.scan_count_hint);
+    if (scan_count <= 0 && std::isfinite(length_hint) && length_hint > 0.0)
+        scan_count = CeilPositiveToInt(length_hint / static_cast<double>(gap));
     if (scan_count <= 0)
         scan_count = 1;
 
@@ -123,6 +164,11 @@ m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
     setname(strname.c_str());
     m_curfindlinenum = m_curfindlinenum + 1;
     int icurmodule = ImageManager::GetCurMode();
+    if (icurmodule == 0)
+    {
+        ImageManager::CurMode();
+        icurmodule = ImageManager::GetCurMode();
+    }
     g_pbackimage = ImageManager::GetBackImage(icurmodule);
     g_pbackfindobject = ImageManager::Getbackfindobject(icurmodule);
     g_pyrimage0 = ImageManager::GetPyrDownImage(icurmodule, 0);
@@ -208,8 +254,8 @@ void Findline::setshow(int ishow)
     }
     if (32 == ishow)
     {
-        int isize0 = m_l_measure_w_seek.size();
-        int isize1 = m_l_measure_h_seek.size();
+        int isize0 = ClampSizeToInt(m_l_measure_w_seek.size());
+        int isize1 = ClampSizeToInt(m_l_measure_h_seek.size());
         for (int i = 0; i < isize0; i++)
         {
             if (m_ishowlines == i) 
@@ -246,23 +292,27 @@ void Findline::clear()
 }
 void Findline::SetWHgap(int wgap, int hgap)
 {
-    m_iwgap = wgap;
-    m_ihgap = hgap;
+    m_iwgap = PositiveGap(wgap);
+    m_ihgap = PositiveGap(hgap);
 
     gp_Path path = getpath();
+    if (path.ElementCount() < 4)
+        return;
     gp_Pnt p0 = path.ElementAt(0);
     gp_Pnt p1 = path.ElementAt(1);
     gp_Pnt p2 = path.ElementAt(2);
     gp_Pnt p3 = path.ElementAt(3);
+    (void)p2;
+    (void)p3;
   
     if (p0.X() == p1.X() || p0.Y() == p1.Y())
     {
 
-        int ix = rect().TopLeft().X();
-        int iy = rect().TopLeft().Y();
+        int ix = RoundToInt(rect().TopLeft().X());
+        int iy = RoundToInt(rect().TopLeft().Y());
 
-        int iw = rect().Width();
-        int ih = rect().Height();
+        int iw = RoundToInt(rect().Width());
+        int ih = RoundToInt(rect().Height());
         setrect(ix, iy, iw, ih); 
         Shape::setrect(ix, iy, iw, ih);
     }
@@ -277,13 +327,24 @@ void Findline::SetWHgap(int wgap, int hgap)
 void Findline::setlinesegment(double ix0, double iy0,
     double ix1, double iy1, double dscale)
 {
+    if (!std::isfinite(ix0) || !std::isfinite(iy0) || !std::isfinite(ix1) || !std::isfinite(iy1) ||
+        !std::isfinite(dscale) || dscale <= 0.0)
+        return;
+
+    const double dx = ix1 - ix0;
+    const double dy = iy1 - iy0;
+    const double dDist = std::sqrt(dx * dx + dy * dy);
+    if (!std::isfinite(dDist) || dDist <= 1.0e-9)
+        return;
+
+    m_iwgap = PositiveGap(m_iwgap);
+    m_ihgap = PositiveGap(m_ihgap);
+
     gp_Pnt ptRect[4];
-    double dDist = sqrt((ix1 - ix0) * (ix1 - ix0) + (iy0 - iy1) * (iy0 - iy1));
-    double kk1, kk2;
+    double kk2;
 
     if (iy0 == iy1)
     {
-        kk1 = 0;
         ptRect[0].SetX(ix0);
         ptRect[0].SetY(iy0 - dscale);
         ptRect[1].SetX(ix0);
@@ -296,24 +357,26 @@ void Findline::setlinesegment(double ix0, double iy0,
     }
     else
     {
-        kk2 = (double)(ix0 - ix1) / (double)(iy0 - iy1);
-        double theta = atan(kk2);
+        kk2 = (ix0 - ix1) / (iy0 - iy1);
+        double theta = std::atan(kk2);
         if (theta < 0)
         {
             theta += CV_PI;
         }
 
-        ptRect[0].SetX(ix0 + dscale * cos(theta));
-        ptRect[0].SetY( iy0 - dscale * sin(theta));
-        ptRect[1].SetX(ix0 - dscale * cos(theta));
-        ptRect[1].SetY(iy0 + dscale * sin(theta));
-        ptRect[2].SetX(ix1 - dscale * cos(theta));
-        ptRect[2].SetY( iy1 + dscale * sin(theta));
-        ptRect[3].SetX(ix1 + dscale * cos(theta));
-        ptRect[3].SetY( iy1 - dscale * sin(theta));
+        ptRect[0].SetX(ix0 + dscale * std::cos(theta));
+        ptRect[0].SetY( iy0 - dscale * std::sin(theta));
+        ptRect[1].SetX(ix0 - dscale * std::cos(theta));
+        ptRect[1].SetY(iy0 + dscale * std::sin(theta));
+        ptRect[2].SetX(ix1 - dscale * std::cos(theta));
+        ptRect[2].SetY( iy1 + dscale * std::sin(theta));
+        ptRect[3].SetX(ix1 + dscale * std::cos(theta));
+        ptRect[3].SetY( iy1 - dscale * std::sin(theta));
     }
-    m_LineA.setline(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y());
-    m_LineB.setline(ptRect[1].X(), ptRect[1].Y(), ptRect[2].X(), ptRect[2].Y());
+    m_LineA.setline(RoundToInt(ptRect[0].X()), RoundToInt(ptRect[0].Y()),
+        RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()));
+    m_LineB.setline(RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()),
+        RoundToInt(ptRect[2].X()), RoundToInt(ptRect[2].Y()));
     m_LineA.setshow(0);
     m_LineB.setshow(0);
     for (int i = 0; i < m_lines_w.size(); i++)
@@ -341,8 +404,8 @@ void Findline::setlinesegment(double ix0, double iy0,
 
     double ilinesizeA = m_LineA.getlinedistance();
     double ilinesizeB = m_LineB.getlinedistance();
-    const int roi_width_hint = std::max(1, static_cast<int>(std::ceil(std::abs(ptRect[2].X() - ptRect[0].X()))));
-    const int roi_height_hint = std::max(1, static_cast<int>(std::ceil(std::abs(ptRect[2].Y() - ptRect[0].Y()))));
+    const int roi_width_hint = CeilPositiveToInt(std::abs(ptRect[2].X() - ptRect[0].X()));
+    const int roi_height_hint = CeilPositiveToInt(std::abs(ptRect[2].Y() - ptRect[0].Y()));
     const cxgeom::CxSetLineBuildMeta line_a_meta =
         BuildLineScanMeta(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(), m_iwgap, roi_width_hint, roi_height_hint);
     const cxgeom::CxSetLineBuildMeta line_b_meta =
@@ -363,7 +426,8 @@ void Findline::setlinesegment(double ix0, double iy0,
     {
         m_lines_w.push_back(aline1);
         m_lines_w[i].copy(m_LineB);
-        m_lines_w[i].Move(-dlineax * i, -dlineay*i);
+        m_lines_w[i].Move(RoundToInt(-dlineax * static_cast<double>(i)),
+            RoundToInt(-dlineay * static_cast<double>(i)));
         m_lines_w[i].setPercent(m_dsamplerate);
         m_lines_w[i].setshow(0);
     //    m_l_measure_h.push_back(alinepoints);
@@ -372,7 +436,8 @@ void Findline::setlinesegment(double ix0, double iy0,
     {
         m_lines_h.push_back(aline2);
         m_lines_h[i].copy(m_LineA);
-        m_lines_h[i].Move(dlinebx * i, dlineby * i);
+        m_lines_h[i].Move(RoundToInt(dlinebx * static_cast<double>(i)),
+            RoundToInt(dlineby * static_cast<double>(i)));
         m_lines_h[i].setPercent(m_dsamplerate);
         m_lines_h[i].setshow(0);
     //    m_l_measure_w.push_back(alinepoints);
@@ -385,6 +450,19 @@ void Findline::setlinesegment(double ix0, double iy0,
 }
 void Findline::setrect(int ix, int iy, int iw, int ih)
 { 
+    m_iwgap = PositiveGap(m_iwgap);
+    m_ihgap = PositiveGap(m_ihgap);
+    if (iw < 0)
+    {
+        ix += iw;
+        iw = -iw;
+    }
+    if (ih < 0)
+    {
+        iy += ih;
+        ih = -ih;
+    }
+
     m_LineA.setline(ix, iy, ix + iw, iy);
     m_LineB.setline(ix, iy, ix, iy + ih);
     m_LineA.setshow(false);
@@ -412,6 +490,12 @@ void Findline::setrect(int ix, int iy, int iw, int ih)
     m_l_measure_w_seek.clear();
     m_l_measure_h_seek.clear();
 
+    if (iw <= 0 || ih <= 0)
+    {
+        Shape::setrect(ix, iy, iw, ih);
+        return;
+    }
+
     const cxgeom::CxSetLineBuildMeta line_w_meta =
         BuildLineScanMeta(ix, iy, ix + iw, iy, m_iwgap, iw, ih);
     const cxgeom::CxSetLineBuildMeta line_h_meta =
@@ -424,7 +508,7 @@ void Findline::setrect(int ix, int iy, int iw, int ih)
     { 
         m_lines_w.push_back(aline1);
         m_lines_w[i].copy(m_LineB);
-        m_lines_w[i].Move(m_iwgap * i, 0);
+        m_lines_w[i].Move(RoundToInt(static_cast<double>(m_iwgap) * static_cast<double>(i)), 0);
         m_lines_w[i].setPercent(m_dsamplerate);
         m_lines_w[i].setshow(false);
  //       m_l_measure_w.push_back(alinepoints);
@@ -433,7 +517,7 @@ void Findline::setrect(int ix, int iy, int iw, int ih)
     { 
         m_lines_h.push_back(aline2);
         m_lines_h[i].copy(m_LineA);
-        m_lines_h[i].Move(0, m_ihgap * i);
+        m_lines_h[i].Move(0, RoundToInt(static_cast<double>(m_ihgap) * static_cast<double>(i)));
         m_lines_h[i].setPercent(m_dsamplerate);
         m_lines_h[i].setshow(false);
   //      m_l_measure_h.push_back(alinepoints);
@@ -444,11 +528,14 @@ void Findline::setrect(int ix, int iy, int iw, int ih)
 void Findline::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
+    if (pshape0 == nullptr)
+        return;
 
-    Findline::setrect(pshape0->rect().TopLeft().X(),
-        pshape0->rect().TopLeft().Y(),
-        pshape0->rect().Width(),
-        pshape0->rect().Height());
+    const gp_Rectangle arect = rect();
+    pshape0->setrect(RoundToInt(arect.TopLeft().X()),
+        RoundToInt(arect.TopLeft().Y()),
+        RoundToInt(arect.Width()),
+        RoundToInt(arect.Height()));
 }
 void Findline::translate(int ix,int iy)
 {
@@ -456,8 +543,8 @@ void Findline::translate(int ix,int iy)
 }
 void Findline::Translate(const gp_Vec& translationVector)
 { 
-   int ix0 = translationVector.X();
-   int iy0 = translationVector.Y();
+   int ix0 = RoundToInt(translationVector.X());
+   int iy0 = RoundToInt(translationVector.Y());
    getpath().Translate(translationVector);
     m_LineA.Move(ix0, iy0);
     m_LineB.Move(ix0, iy0);
@@ -531,7 +618,7 @@ void Findline::edgepattern(Image& image)
 void Findline::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRectAB();
-    m_modelpoints.MoveAB(-arect1.TopLeft().X(), -arect1.TopLeft().Y());
+    m_modelpoints.MoveAB(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 
 }
 void Findline::savepatternfile(const char* pchar)
@@ -603,7 +690,7 @@ void Findline::org2pattern()
 }
 void Findline::patternrootgrid(double itype, double drate, double ilevel)
 {
-    m_modelpoints.keysrootgrid(itype, drate, ilevel);
+    m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
 void Findline::patterntranform(int igap, int itype, int isgap, int iline)
 {
@@ -611,7 +698,7 @@ void Findline::patterntranform(int igap, int itype, int isgap, int iline)
 }
 void Findline::patternzoom(double dx, double dy, double igap, double itype)
 {
-    m_modelpoints.patternzoom(dx, dy, igap, itype);
+    m_modelpoints.patternzoom(dx, dy, RoundToInt(igap), RoundToInt(itype));
 }
 void Findline::patternrotate(double dangle)
 {
@@ -640,6 +727,8 @@ PointsShape& Findline::getpattern()
 
 void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
 {
+    (void)distanceThreshold;
+    (void)waveletThreshold;
 #if defined USE_AI___
     //void AdaptiveDistfilter();
     //m_modelpoints.FftWaveletTransform( distanceThreshold ,  waveletThreshold );
@@ -648,14 +737,14 @@ void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
     arma::mat points(2, numPoints);
     for (size_t i = 0; i < numPoints; ++i)
     {
-        points(0, i) = path.getpoints()[i].X(); //   һ     x     
-        points(1, i) = path.getpoints()[i].Y(); //  ڶ      y     
+        points(0, i) = path.getpoints()[i].X(); //   一     x     
+        points(1, i) = path.getpoints()[i].Y(); //  诙      y     
     }
     //path.Clear();
-    //  Ե  ƽ  з   
+    //  缘  平  蟹   
     auto clusters = mlpackclass::ClusterPointCloud_(points, distanceThreshold);
     //vector<PointsShape>
-    //    ÿ            ͻ   С        ·   ֶν  
+    //    每            突   小        路   侄谓  
     std::cout << "        " << std::endl;
     //m_modelsegments
     for (int i = 0; i < m_modelsegments.size(); i++)
@@ -667,14 +756,14 @@ void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
     {
         std::cout << "Cluster " << clusterId << ":" << std::endl;
 
-        //   ·      С       ֶ 
+        //   路      小       侄 
         std::vector<std::vector<size_t>> segments = mlpackclass::SegmentPathByWaveletAnalysis(points, clusterPoints, waveletThreshold);
 
         PointsShape segmentspoints;
-        //     ֶν  
+        //     侄谓  
         for (size_t segIdx = 0; segIdx < segments.size(); ++segIdx)
         {
-            std::cout << "   ֶ  " << segIdx + 1 << ": ";
+            std::cout << "   侄  " << segIdx + 1 << ": ";
             for (size_t pointIdx : segments[segIdx])
             {
                 segmentspoints.addpoint(gp_Pnt(points(0, pointIdx), points(1, pointIdx), 0));
@@ -689,6 +778,8 @@ void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
 void Findline::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     edgepattern(*pgetimage);
 }
 void Findline::drawshape()
@@ -789,13 +880,15 @@ void Findline::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 void Findline::MeasureT(void *pimage)
 {
     Image* image = (Image*)pimage;
+    if (image == nullptr || g_pbackimage == nullptr)
+        return;
 
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
         return;//error process
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
-    int iwsize = m_lines_w.size();
-    int ihsize = m_lines_h.size();
+    int iwsize = ClampSizeToInt(m_lines_w.size());
+    int ihsize = ClampSizeToInt(m_lines_h.size());
     for (int i = 0; i < iwsize; i++)
     {
         m_lines_w[i].linecopyex(*image, *g_pbackimage, 0, i);
@@ -821,6 +914,9 @@ void Findline::MeasureT(void *pimage)
 }
 void Findline::Measure(Image& image)
 {
+    if (g_pbackimage == nullptr)
+        return;
+
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
@@ -828,8 +924,8 @@ void Findline::Measure(Image& image)
         return;//error process
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
-    int iwsize = m_lines_w.size();
-    int ihsize = m_lines_h.size();
+    int iwsize = ClampSizeToInt(m_lines_w.size());
+    int ihsize = ClampSizeToInt(m_lines_h.size());
     for (int i = 0; i < iwsize; i++)
     {
         m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
@@ -852,11 +948,12 @@ void Findline::Measure(Image& image)
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
-    if (m_iobjfilterset & 0x01)
+    if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
          g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
          g_pbackfindobject->setbrow(m_ifilterborw);//21 22
-         g_pbackfindobject->setminmaxarea(m_ifiltermin, m_ifiltermax);
+         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)),
+             ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
          g_pbackfindobject->Measure(*g_pbackimage);
          //mask 
     }
@@ -1094,6 +1191,12 @@ void Findline::ClearMeasureState()
 void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    if (g_pbackimage == nullptr)
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height()
         || rect().TopLeft().X() < 0
@@ -1103,8 +1206,8 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
         return;
     }
 
-    const int iwsize = static_cast<int>(m_lines_w.size());
-    const int ihsize = static_cast<int>(m_lines_h.size());
+    const int iwsize = ClampSizeToInt(m_lines_w.size());
+    const int ihsize = ClampSizeToInt(m_lines_h.size());
 
     for (int i = 0; i < iwsize; ++i)
     {
@@ -1126,11 +1229,12 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
-    if (m_iobjfilterset & 0x01)
+    if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
         g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
         g_pbackfindobject->setbrow(m_ifilterborw);
-        g_pbackfindobject->setminmaxarea(m_ifiltermin, m_ifiltermax);
+        g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)),
+            ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
         g_pbackfindobject->Measure(*g_pbackimage);
     }
 
@@ -1141,10 +1245,16 @@ void Findline::CollectAllEdgeBands(Image& image, FindlineMeasureProfileStats& st
 {
     (void)image;
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    if (g_pbackimage == nullptr)
+    {
+        stats.edgeband_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
     const int ifixvalue = 3;
     const int max_band_width = 70;
-    const int iwsize = static_cast<int>(m_lines_w.size());
-    const int ihsize = static_cast<int>(m_lines_h.size());
+    const int iwsize = ClampSizeToInt(m_lines_w.size());
+    const int ihsize = ClampSizeToInt(m_lines_h.size());
     const int ilineslen1 = iwsize > 0 ? m_lines_w[0].getlinesize() : 0;
     const int ilineslen2 = ihsize > 0 ? m_lines_h[0].getlinesize() : 0;
 
@@ -1369,6 +1479,17 @@ void Findline::RefineBestChainSubpixel(Image& image, FindlineMeasureProfileStats
         EdgeBandCandidate& candidate = m_bestEdgeChain[i];
         if (!candidate.valid)
             continue;
+
+        if (candidate.scan_type == 0)
+        {
+            if (candidate.line_index < 0 || candidate.line_index >= static_cast<int>(m_lines_w.size()))
+                continue;
+        }
+        else
+        {
+            if (candidate.line_index < 0 || candidate.line_index >= static_cast<int>(m_lines_h.size()))
+                continue;
+        }
 
         const int line_size = candidate.scan_type == 0
             ? m_lines_w[candidate.line_index].getlinesize()
@@ -1600,7 +1721,7 @@ void Findline::SmartFilter(double dist, double filtnum)
 }
 void Findline::PyrImage(Image& image)
 {
-
+    (void)image;
 }
 PointsShape& Findline::getresultpointsw()
 {
@@ -1613,15 +1734,21 @@ PointsShape& Findline::getresultpointsh()
 void Findline::measure(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Measure(*pgetimage);
 }
 void Findline::pyrimage(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     PyrImage(*pgetimage);
 }
 void Findline::shapesetroi(void* pshape)
 {
+    if (pshape == nullptr)
+        return;
     Shape::shapesetroi(pshape);
 }
 void Findline::easycluster(int igapx, int igapy, int iclusternum)
@@ -1630,7 +1757,7 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
     resultpoints.addpoints(getresultpointsw());
     resultpoints.addpoints(getresultpointsh());
     vector<int> numlist;
-    int isize = resultpoints.size();
+    int isize = ClampSizeToInt(resultpoints.size());
     if (0 == isize)
         return;
     for (int i = 0; i < isize; i++)
@@ -1639,13 +1766,13 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
     }
     for (int i = 0; i < isize; i++)
     {
-        int ix0 = resultpoints.getx(i);
-        int iy0 = resultpoints.gety(i);
+        int ix0 = RoundToInt(resultpoints.getx(i));
+        int iy0 = RoundToInt(resultpoints.gety(i));
         if (i + 1 < isize)
             for (int j = i + 1; j < isize; j++)
             {
-                int ix1 = resultpoints.getx(j);
-                int iy1 = resultpoints.gety(j);
+                int ix1 = RoundToInt(resultpoints.getx(j));
+                int iy1 = RoundToInt(resultpoints.gety(j));
                 if (abs(ix0 - ix1) < igapx
                     && abs(iy0 - iy1) < igapy)
                 {
@@ -1656,15 +1783,15 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
     }
     PointsShape amodelpointsw;
     PointsShape amodelpointsh;
-    int isize1 = getresultpointsw().size();
+    int isize1 = ClampSizeToInt(getresultpointsw().size());
     int isize2 = isize;
     getresultpointsw().clear();
     getresultpointsh().clear();
     int inum = 0;
     for (inum = 0; inum < isize1; inum++)
     {
-        int ix0 = resultpoints.getx(inum);
-        int iy0 = resultpoints.gety(inum);
+        int ix0 = RoundToInt(resultpoints.getx(inum));
+        int iy0 = RoundToInt(resultpoints.gety(inum));
         int inumsum = numlist[inum];
         if (inumsum > iclusternum)
         {
@@ -1673,8 +1800,8 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
     }
     for (; inum < isize2; inum++)
     {
-        int ix0 = resultpoints.getx(inum);
-        int iy0 = resultpoints.gety(inum);
+        int ix0 = RoundToInt(resultpoints.getx(inum));
+        int iy0 = RoundToInt(resultpoints.gety(inum));
         int inumsum = numlist[inum];
         if (inumsum > iclusternum)
         {
@@ -1685,6 +1812,8 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
 void Findline::InflectionPoint(void* points)
 { 
     PointsShape* tpoints = (PointsShape*)points;
+    if (tpoints == nullptr)
+        return;
     if (m_measurepoints_h.size() > 0)
     {
         m_measurepoints_h.FindCrossPoints(points);

@@ -40,20 +40,20 @@ typedef unsigned char  BYTE;
 #define LO4bit(w)         static_cast<BYTE>(w & 0x0F)// ((BYTE)((qintptr)(w) & 0x0f)) 
 #define LOBYTE(w)         static_cast<BYTE>(w & 0xFF)//  ((BYTE)((qintptr)(w) & 0xff))
 /*
-//  ϲ  ķ ʽ ǽ  ivalue   ǰ     ֽڣ B, G     ivalue0  ĺ      ֽڣ R, A         
-//    ȣ    ivalue   ȡ      ɫͨ  ֵ         16 λ
+//  喜  姆 式 墙  ivalue   前     纸冢 B, G     ivalue0  暮      纸冢 R, A         
+//    龋    ivalue   取      色通  值         16 位
 unsigned int highPart = (static_cast<unsigned int>(rgbx[0]) << 24) |(static_cast<unsigned int>(rgbx[1]) << 16);
 
-// Ȼ 󣬴  ivalue0   ȡ 졢alpha ͨ  ֵ
+// 然 螅  ivalue0   取 臁lpha 通  值
 unsigned int lowPart = (static_cast<unsigned int>(rgbx[2]) << 8) |static_cast<unsigned int>(rgbx[3]);
 
-//  ϲ       ֵ
+//  喜       值
 unsigned int combinedValue = highPart | lowPart;
 
-//    ϲ    ֵ      ivalue1
-ivalue1[0] = (combinedValue >> 24) & 0xFF; //   ɫ
-ivalue1[1] = (combinedValue >> 16) & 0xFF; //   ɫ
-ivalue1[2] = (combinedValue >> 8) & 0xFF;  //   ɫ
+//    喜    值      ivalue1
+ivalue1[0] = (combinedValue >> 24) & 0xFF; //   色
+ivalue1[1] = (combinedValue >> 16) & 0xFF; //   色
+ivalue1[2] = (combinedValue >> 8) & 0xFF;  //   色
 ivalue1[3] = combinedValue & 0xFF;         // Alpha
 */
 
@@ -251,11 +251,14 @@ void FindObject::setshow(int ishow)
 void FindObject::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
+    if (pshape0 == nullptr)
+        return;
 
-    FindObject::setrect(pshape0->rect().TopLeft().X(),
-        pshape0->rect().TopLeft().Y(),
-        pshape0->rect().Width(),
-        pshape0->rect().Height());
+    const gp_Rectangle arect = rect();
+    pshape0->setrect(arect.TopLeft().X(),
+        arect.TopLeft().Y(),
+        arect.Width(),
+        arect.Height());
 }
 void FindObject::setrect(int ix, int iy, int iw, int ih)
 {
@@ -292,14 +295,14 @@ void FindObject::drawshape()
 }
 int FindObject::getresultcentx(int inum)
 {
-    if (inum < m_rectresults.size())
+    if (inum >= 0 && inum < m_rectresults.size())
         return m_rectresults.getrect(inum).BottomRight().X();
     else
         return 0;
 }
 int FindObject::getresultcenty(int inum)
 {
-    if (inum < m_rectresults.size())
+    if (inum >= 0 && inum < m_rectresults.size())
         return m_rectresults.getrect(inum).BottomRight().Y();
     else
         return 0;
@@ -320,21 +323,21 @@ int FindObject::getresulty(int inum)
 }
 int FindObject::getresultw(int inum)
 {
-    if (inum < m_rectresults.size())
+    if (inum >= 0 && inum < m_rectresults.size())
         return m_rectresults.getrect(inum).Width();
     else
         return 0;
 }
 int FindObject::getresulth(int inum)
 {
-    if (inum < m_rectresults.size())
+    if (inum >= 0 && inum < m_rectresults.size())
         return m_rectresults.getrect(inum).Height();
     else
         return 0;
 }
 int FindObject::getresultsize(int inum)
 {
-    if (inum < m_rectresults.size())
+    if (inum >= 0 && inum < m_rectresults.size() && inum < static_cast<int>(m_vobjnum.size()))
         return m_vobjnum.at(inum);
     else
         return 0;
@@ -1159,6 +1162,8 @@ void FindObject::Object(int inum)
 void FindObject::measure(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Measure(*pgetimage);
 }
 
@@ -1177,7 +1182,7 @@ void FindObject::MeasureX(Image& image)
 {
     m_pgetimage = &image;
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
-        || image.getWidth() < rect().TopLeft().Y() + rect().Height())
+        || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
     int iw = rect().Width();
     int ih = rect().Height();
@@ -1463,6 +1468,8 @@ void FindObject::MeasureX(Image& image)
 void FindObject::measurex(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
 
     MeasureX(*pgetimage);
 }
@@ -1694,7 +1701,7 @@ void FindObject::setrelationrectfrom_matchresult(void* pmatch)
     if (0 != m_prelationmatch)
     {
         int inum = m_prelationmatch->getresultrects()->size();
-        if (m_irelationresultnum < inum)
+        if (m_irelationresultnum >= 0 && m_irelationresultnum < inum)
         {
             m_irelationrect = m_prelationmatch->getresultrects()->getrect(m_irelationresultnum);
         }
@@ -1779,5 +1786,7 @@ void FindObject::ImageROIedgeH(void* pimage)
 }
 void FindObject::shapesetroi(void* pshape)
 {
+    if (pshape == nullptr)
+        return;
     Shape::shapesetroi(pshape);
 }

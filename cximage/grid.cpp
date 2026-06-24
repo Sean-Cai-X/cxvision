@@ -148,6 +148,8 @@ void Grid::modeltogrid(int iatype, int ibtype)
 void Grid::roiimagetomodel(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     ROIImagetoModel(*pgetimage);
 }
 void Grid::ROIImagetoModel(Image& aimage)

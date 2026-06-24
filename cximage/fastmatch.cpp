@@ -1,16 +1,51 @@
-﻿
+
 #include "pch.h"
 
 #include "FastMatch.h"
 #include "imagemanager.h"
+#include <algorithm>
+#include <cmath>
 #include <opencv2/imgproc.hpp>
-#include <format> // C++20 格式化库
+#include <format> // C++20 formatting
 #if defined USE_AI
 #include "mlpackrun.h"
 #endif
+
+namespace
+{
+int FastMatchPositiveInt(int value, int fallback = 1)
+{
+    return value > 0 ? value : fallback;
+}
+
+int FastMatchNonNegativeInt(int value)
+{
+    return std::max(0, value);
+}
+
+double FastMatchFiniteOr(double value, double fallback = 0.0)
+{
+    return std::isfinite(value) ? value : fallback;
+}
+
+double FastMatchPositiveFiniteOr(double value, double fallback = 1.0)
+{
+    return std::isfinite(value) && value > 0.0 ? value : fallback;
+}
+
+double FastMatchUnitScore(double value, double fallback = 0.4)
+{
+    if (!std::isfinite(value))
+    {
+        value = fallback;
+    }
+    return std::clamp(value, 0.0, 1.0);
+}
+}
+
 void removeAt(std::vector<int>& vec, size_t index) {
     if (index < vec.size()) {
-        // 使用 erase 方法移除指定位置的元素
+        // erase item at index
         vec.erase(vec.begin() + index);
     }
     else {
@@ -19,7 +54,7 @@ void removeAt(std::vector<int>& vec, size_t index) {
 }
 void removePntAt(std::vector<gp_Pnt>& vec, size_t index) {
     if (index < vec.size()) {
-        // 使用 erase 方法移除指定位置的元素
+        // erase item at index
         vec.erase(vec.begin() + index);
     }
     else {
@@ -28,7 +63,7 @@ void removePntAt(std::vector<gp_Pnt>& vec, size_t index) {
 } 
 void removedoubleAt(std::vector<double>& vec, size_t index) {
     if (index < vec.size()) {
-        // 使用 erase 方法移除指定位置的元素
+        // erase item at index
         vec.erase(vec.begin() + index);
     }
     else {
@@ -37,7 +72,7 @@ void removedoubleAt(std::vector<double>& vec, size_t index) {
 }
 void removePointsShapeAt(std::vector<PointsShape>& vec, size_t index) {
     if (index < vec.size()) {
-        // 使用 erase 方法移除指定位置的元素
+        // erase item at index
         vec.erase(vec.begin() + index);
     }
     else {
@@ -47,7 +82,7 @@ void removePointsShapeAt(std::vector<PointsShape>& vec, size_t index) {
 
 void removeLast(std::vector<int>& vec) {
     if (!vec.empty()) {
-        vec.pop_back(); // 移除最后一个元素
+        vec.pop_back(); // remove last element
     }
     else {
         std::cerr << "Vector is already empty" << std::endl;
@@ -55,7 +90,7 @@ void removeLast(std::vector<int>& vec) {
 }
 void removedoubleLast(std::vector<double>& vec) {
     if (!vec.empty()) {
-        vec.pop_back(); // 移除最后一个元素
+        vec.pop_back(); // remove last element
     }
     else {
         std::cerr << "Vector is already empty" << std::endl;
@@ -63,7 +98,7 @@ void removedoubleLast(std::vector<double>& vec) {
 }
 void removePntLast(std::vector<gp_Pnt>& vec) {
     if (!vec.empty()) {
-        vec.pop_back(); // 移除最后一个元素
+        vec.pop_back(); // remove last element
     }
     else {
         std::cerr << "Vector is already empty" << std::endl;
@@ -71,7 +106,7 @@ void removePntLast(std::vector<gp_Pnt>& vec) {
 }
 void removePointsShapeLast(std::vector<PointsShape>& vec) {
     if (!vec.empty()) {
-        vec.pop_back(); // 移除最后一个元素
+        vec.pop_back(); // remove last element
     }
     else {
         std::cerr << "Vector is already empty" << std::endl;
@@ -136,6 +171,96 @@ int EvaluateMatchSampleABScore(
     return icalnum;
 }
 
+bool MatchSampleABAnchorPass(
+    Image& image,
+    gp_Path& pathA,
+    gp_Path& pathB,
+    int movx,
+    int movy,
+    int ithre,
+    int ib2w)
+{
+    const int icount = std::min(
+        static_cast<int>(pathA.ElementCount()),
+        static_cast<int>(pathB.ElementCount()));
+    if (icount <= 0)
+    {
+        return false;
+    }
+
+    const int anchor_count = std::min(5, icount);
+    const int anchor_step = std::max(1, icount / anchor_count);
+    int hit_count = 0;
+    int probe_count = 0;
+    for (int anchor_index = 0; anchor_index < anchor_count; ++anchor_index)
+    {
+        int sample_index = anchor_index * anchor_step;
+        if (anchor_index + 1 == anchor_count)
+        {
+            sample_index = icount - 1;
+        }
+
+        const gp_Pnt pointA = pathA.ElementAt(sample_index);
+        const gp_Pnt pointB = pathB.ElementAt(sample_index);
+        const cv::Vec3b pixel0 = image.pixel(
+            static_cast<int>(pointA.X() + movx),
+            static_cast<int>(pointA.Y() + movy));
+        const cv::Vec3b pixel1 = image.pixel(
+            static_cast<int>(pointB.X() + movx),
+            static_cast<int>(pointB.Y() + movy));
+        const int dr = ib2w == 0 ? Red(pixel0) - Red(pixel1) : Red(pixel1) - Red(pixel0);
+        const int dg = ib2w == 0 ? Green(pixel0) - Green(pixel1) : Green(pixel1) - Green(pixel0);
+        const int db = ib2w == 0 ? Blue(pixel0) - Blue(pixel1) : Blue(pixel1) - Blue(pixel0);
+        ++probe_count;
+        if (dr > ithre || dg > ithre || db > ithre)
+        {
+            ++hit_count;
+        }
+    }
+
+    // A single positive anchor keeps recall high while rejecting clear background.
+    return probe_count == 0 || hit_count > 0;
+}
+
+bool FastMatchMaskPixelPass(const cv::Mat* mask, int x, int y)
+{
+    if (mask == nullptr || mask->empty())
+    {
+        return true;
+    }
+    if (x < 0 || y < 0 || x >= mask->cols || y >= mask->rows)
+    {
+        return false;
+    }
+    if (mask->depth() != CV_8U)
+    {
+        return true;
+    }
+
+    const int channels = mask->channels();
+    const uchar* pixel = mask->ptr<uchar>(y) + x * channels;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        if (pixel[channel] != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FastMatchCandidateMaskPass(const cv::Mat* mask, gp_Path& path, int movx, int movy)
+{
+    if (mask == nullptr || mask->empty())
+    {
+        return true;
+    }
+
+    const gp_Rectangle bounds = path.boundingRect();
+    const int center_x = static_cast<int>(bounds.TopLeft().X() + bounds.Width() / 2 + movx);
+    const int center_y = static_cast<int>(bounds.TopLeft().Y() + bounds.Height() / 2 + movy);
+    return FastMatchMaskPixelPass(mask, center_x, center_y);
+}
 gp_Pnt RefineMatchSampleABPoint(
     Image& image,
     gp_Path& pathA,
@@ -209,6 +334,43 @@ gp_Pnt GetRotateFilterAnchor(
     return shape.getpointscent();
 }
 
+int EasyObjectWidthAt(const std::vector<easyobj>& models, int index)
+{
+    if (index < 0 || index >= static_cast<int>(models.size()))
+    {
+        return 0;
+    }
+    return models[index].s_iwobjnum;
+}
+
+int EasyObjectBlackCountAt(const std::vector<easyobj>& models, int index)
+{
+    if (index < 0 || index >= static_cast<int>(models.size()))
+    {
+        return 0;
+    }
+    return models[index].s_ibobjnum;
+}
+
+size_t RotateResultSharedCount(
+    const std::vector<double>& results,
+    const std::vector<gp_Pnt>& points,
+    const std::vector<double>& angles,
+    const std::vector<PointsShape>& shapes)
+{
+    return std::min(std::min(results.size(), points.size()), std::min(angles.size(), shapes.size()));
+}
+
+bool HasRotateResultAt(
+    int index,
+    const std::vector<double>& results,
+    const std::vector<gp_Pnt>& points,
+    const std::vector<double>& angles,
+    const std::vector<PointsShape>& shapes)
+{
+    return index >= 0 && index < static_cast<int>(RotateResultSharedCount(results, points, angles, shapes));
+}
+
 void FilterRotateResultsByDistance(
     std::vector<double>& results,
     std::vector<gp_Pnt>& points,
@@ -219,9 +381,15 @@ void FilterRotateResultsByDistance(
     int itype,
     bool full_scan)
 {
-    const int isize = static_cast<int>(results.size());
-    if (isize <= 0)
+    const size_t shared_count = std::min(std::min(results.size(), points.size()), std::min(angles.size(), shapes.size()));
+    if (shared_count == 0)
+    {
         return;
+    }
+    results.resize(shared_count);
+    points.resize(shared_count);
+    angles.resize(shared_count);
+    shapes.resize(shared_count);
 
     if (!full_scan)
     {
@@ -286,9 +454,73 @@ void FilterRotateResultsByDistance(
     }
 }
 
+void NormalizeMatchCandidates(
+    std::vector<int>& scores,
+    std::vector<gp_Pnt>& points,
+    int keep_limit,
+    int& min_score,
+    gp_Pnt& min_point)
+{
+    const size_t shared_count = std::min(scores.size(), points.size());
+    if (scores.size() != shared_count)
+        scores.resize(shared_count);
+    if (points.size() != shared_count)
+        points.resize(shared_count);
+
+    struct Candidate
+    {
+        int score;
+        gp_Pnt point;
+    };
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(shared_count);
+    for (size_t i = 0; i < shared_count; ++i)
+    {
+        candidates.push_back({ scores[i], points[i] });
+    }
+
+    std::stable_sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const Candidate& lhs, const Candidate& rhs)
+        {
+            if (lhs.score != rhs.score)
+                return lhs.score < rhs.score;
+            if (lhs.point.X() != rhs.point.X())
+                return lhs.point.X() < rhs.point.X();
+            return lhs.point.Y() < rhs.point.Y();
+        });
+
+    const size_t normalized_keep = static_cast<size_t>(std::max(1, keep_limit));
+    while (candidates.size() > normalized_keep)
+    {
+        candidates.erase(candidates.begin());
+    }
+
+    scores.clear();
+    points.clear();
+    scores.reserve(candidates.size());
+    points.reserve(candidates.size());
+    for (const Candidate& candidate : candidates)
+    {
+        scores.push_back(candidate.score);
+        points.push_back(candidate.point);
+    }
+
+    min_score = -1;
+    min_point = gp_Pnt();
+    if (!candidates.empty())
+    {
+        min_score = candidates.front().score;
+        min_point = candidates.front().point;
+    }
+}
+
 int fastmatch::m_curfastmatchnum = 0;
 fastmatch::fastmatch() :Findline(),
 m_matchimage(0),
+m_matchmask(nullptr),
 m_imaxmatchnum(10),
 m_iminfindnum(-1),
 m_imatchthre(5),
@@ -337,7 +569,11 @@ m_irelationrect(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0))
 }
 void fastmatch::setgrid(int iw, int igrid)
 {
-    m_pgrid->setgrid(iw, iw, igrid, igrid, iw, iw);
+    if (m_pgrid == nullptr)
+    {
+        return;
+    }
+    m_pgrid->setgrid(FastMatchPositiveInt(iw), FastMatchPositiveInt(iw), FastMatchPositiveInt(igrid), FastMatchPositiveInt(igrid), FastMatchPositiveInt(iw), FastMatchPositiveInt(iw));
 }
 fastmatch::~fastmatch()
 {
@@ -349,20 +585,31 @@ void fastmatch::setcomparegap(int igap)
 }
 void fastmatch::setfindnum(int ifindnum)
 {
-    m_imaxmatchnum = ifindnum;
+    m_imaxmatchnum = FastMatchPositiveInt(ifindnum);
+}
+void fastmatch::setmatchmask(const cv::Mat* pmask)
+{
+    m_matchmask = pmask;
+}
+void fastmatch::clearmatchmask()
+{
+    m_matchmask = nullptr;
 }
 void fastmatch::setb2w(int ib2w)
 {
-    m_iB2W = ib2w;
+    m_iB2W = ib2w == 1 ? 1 : 0;
 }
 void fastmatch::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
-    
-    Findline::setrect(static_cast<int>(pshape0->rect().TopLeft().X()),
-        static_cast<int>(pshape0->rect().TopLeft().Y()),
-        static_cast<int>(pshape0->rect().Width()),
-        static_cast<int>(pshape0->rect().Height()));
+    if (pshape0 == nullptr)
+        return;
+
+    const gp_Rectangle arect = rect();
+    pshape0->setrect(static_cast<int>(arect.TopLeft().X()),
+        static_cast<int>(arect.TopLeft().Y()),
+        static_cast<int>(arect.Width()),
+        static_cast<int>(arect.Height()));
 }
 void fastmatch::setrect(int ix, int iy, int iw, int ih)
 {
@@ -430,7 +677,7 @@ void fastmatch::setthre(int ithre)
 }
 void fastmatch::setmatchthre(int ithre)
 {
-    m_imatchthre = ithre;
+    m_imatchthre = FastMatchNonNegativeInt(ithre);
 }
 void fastmatch::setobjfilter(int ifindset)
 {
@@ -457,7 +704,7 @@ void fastmatch::setspecshow(int ishow)
 
 void fastmatch::setshownum(int ishownum)
 {
-    m_ishownum = ishownum;
+    m_ishownum = FastMatchPositiveInt(ishownum);
 }
 void fastmatch::drawshape( )
 {
@@ -499,7 +746,15 @@ void fastmatch::drawshape( )
         const int iclustersize = static_cast<int>(m_clusters.size());
         for (int ic = 0; ic < iclustersize; ic++)
         {
-            int id = m_clusters[ic][0];
+            if (m_clusters[ic].empty())
+            {
+                continue;
+            }
+            const int id = m_clusters[ic][0];
+            if (id < 0 || id >= static_cast<int>(m_rotateshaperesults.size()))
+            {
+                continue;
+            }
             PointsShape apoints = m_rotateshaperesults[id];
             apoints.setshow(16);
             apoints.drawshape(painter);
@@ -507,7 +762,7 @@ void fastmatch::drawshape( )
     }
     else if (show() & 0x80)
     {
-        const int isize = static_cast<int>(m_models_rotate.size());
+        const int isize = static_cast<int>(std::min(m_models_rotate.size(), m_models_rotaterects.size()));
         for (int iz = 0; iz < isize; iz++)
         {
             if (-1 == m_ispecshow || iz == m_ispecshow)
@@ -527,7 +782,7 @@ void fastmatch::setcolorstyle(int istyle)
 {
     m_istyle = istyle;
 }
-void fastmatch::drawshapex( 
+void fastmatch::drawshapex(
     double dmovx,
     double dmovy,
     double dangle,
@@ -537,14 +792,11 @@ void fastmatch::drawshapex(
     if (show() & 0x20)
     {
         m_pgrid->setshow(0x04);
-        m_pgrid->drawshape( );
+        m_pgrid->drawshape();
     }
     if (show() & 0x08)
     {
-        drawpattern( );
-      //  if (nullptr != m_rootgridA)
-      //      m_rootgridA->drawgrid( );
-
+        drawpattern();
     }
     if (show() & 0x10)
     {
@@ -556,60 +808,39 @@ void fastmatch::drawshapex(
     {
         m_resultrects.setshow(2);
         gp_Path painter;
-        m_resultrects.drawshapex(painter,
-            dmovx,
-            dmovy,
-            dangle,
-            dzoomx,
-            dzoomy);
+        m_resultrects.drawshapex(painter, dmovx, dmovy, dangle, dzoomx, dzoomy);
     }
     if (show() & 0x04)
     {
         m_resultrects.setshow(4);
         gp_Path painter;
-        m_resultrects.drawshapex(painter,
-            dmovx,
-            dmovy,
-            dangle,
-            dzoomx,
-            dzoomy);
+        m_resultrects.drawshapex(painter, dmovx, dmovy, dangle, dzoomx, dzoomy);
     }
     else if (show() & 0x40)
     {
-        const int irsize = static_cast<int>(m_rotateresults.size());
-        for (int i = 0; i < irsize; i++)
+        const int irsize = static_cast<int>(RotateResultSharedCount(
+            m_rotateresults,
+            m_rotatereslutpoints,
+            m_rotatereslutangles,
+            m_rotateshaperesults));
+        for (int i = 0; i < irsize; ++i)
         {
-            if (i <= m_ishownum)//显示前3个选择
+            if (i > m_ishownum || i < 0 || i >= static_cast<int>(m_rotateshaperesults.size()))
             {
-                PointsShape apoints = m_rotateshaperesults[i];
-                apoints.setPen(0, 255, 0);
-                apoints.setshow(16);
-                gp_Path painter;
-                apoints.drawshapex(painter, dmovx, dmovy, dangle, dzoomx, dzoomy);
-                double drotateresult = m_rotateresults[i];
-                double drotatedangle = m_rotatereslutangles[i];
-                std::ostringstream stream;
-                stream << i << "," << drotatedangle << "," << drotateresult;
-                std::string strshow = stream.str(); 
-                gp_Pnt apoint = m_rotatereslutpoints[i];
-                //painter.drawText(gp_Rectangle(dx, dy, 80, 30),"", strshow); 
+                continue;
             }
+
+            PointsShape rotated_points = m_rotateshaperesults[i];
+            rotated_points.setPen(0, 255, 0);
+            rotated_points.setshow(16);
+            gp_Path painter;
+            rotated_points.drawshapex(painter, dmovx, dmovy, dangle, dzoomx, dzoomy);
         }
-        /*
-         int iclustersize = m_clusters.size();
-         for(int ic=0;ic<iclustersize;ic++)
-         {
-              int id=m_clusters[ic][0];
-              PointsShape apoints= m_rotateshaperesults[id];
-              apoints.setshow(16);
-              apoints.drawshape(painter);
-         }
-         */
     }
     else if (show() & 0x80)
     {
-        const int isize = static_cast<int>(m_models_rotate.size());
-        for (int iz = 0; iz < isize; iz++)
+        const int isize = static_cast<int>(std::min(m_models_rotate.size(), m_models_rotaterects.size()));
+        for (int iz = 0; iz < isize; ++iz)
         {
             if (-1 == m_ispecshow || iz == m_ispecshow)
             {
@@ -622,19 +853,19 @@ void fastmatch::drawshapex(
         }
     }
     else
-    { 
-        gp_Path painter;
+    {
         Findline::drawshape();
-    }  
-    //); 
-    gp_Rectangle amatchrect(gp_Pnt(0,0,0),gp_Pnt(0, 0, 0));
-    amatchrect.setrect(gp_Pnt(m_matchrect.TopLeft().X() * dzoomx + dmovx,
-        m_matchrect.TopLeft().Y() * dzoomy + dmovy, 0),
-        gp_Pnt((m_matchrect.TopLeft().X() + m_matchrect.Width()) * dzoomx + dmovx,
-            (m_matchrect.TopLeft().Y() + m_matchrect.Height()) * dzoomy + dmovy, 0));
-    //painter.drawRect(amatchrect);
-}
+    }
 
+    gp_Rectangle amatchrect(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
+    amatchrect.setrect(
+        gp_Pnt(m_matchrect.TopLeft().X() * dzoomx + dmovx,
+               m_matchrect.TopLeft().Y() * dzoomy + dmovy,
+               0),
+        gp_Pnt((m_matchrect.TopLeft().X() + m_matchrect.Width()) * dzoomx + dmovx,
+               (m_matchrect.TopLeft().Y() + m_matchrect.Height()) * dzoomy + dmovy,
+               0));
+}
 
 void fastmatch::Learn(Image& image)
 {
@@ -758,7 +989,7 @@ void fastmatch::modelzeroposition()
 }
 void fastmatch::rotatemodelzeropositionAB()
 {
-    const int isize = static_cast<int>(m_models_rotate.size());
+    const int isize = static_cast<int>(std::min(m_models_rotate.size(), m_models_rotaterects.size()));
     for (int iz = 0; iz < isize; iz++)
     {
         gp_Rectangle arect1 = m_models_rotate[iz].boundingRectAB();
@@ -768,7 +999,7 @@ void fastmatch::rotatemodelzeropositionAB()
 }
 void fastmatch::rotatemodelzeroposition()
 {
-    const int isize = static_cast<int>(m_models_rotate.size());
+    const int isize = static_cast<int>(std::min(m_models_rotate.size(), m_models_rotaterects.size()));
     for (int iz = 0; iz < isize; iz++)
     {
         gp_Rectangle arect1 = m_models_rotate[iz].boundingRect();
@@ -778,7 +1009,7 @@ void fastmatch::rotatemodelzeroposition()
 }
 void fastmatch::rotatemodel05zeroposition()
 {
-    const int isize = static_cast<int>(m_models05_rotate.size());
+    const int isize = static_cast<int>(std::min(m_models05_rotate.size(), m_models05_rotaterects.size()));
     for (int iz = 0; iz < isize; iz++)
     {
         gp_Rectangle arect1 = m_models05_rotate[iz].boundingRect();
@@ -788,7 +1019,7 @@ void fastmatch::rotatemodel05zeroposition()
 }
 void fastmatch::rotatemodel025zeroposition()
 {
-    const int isize = static_cast<int>(m_models025_rotate.size());
+    const int isize = static_cast<int>(std::min(m_models025_rotate.size(), m_models025_rotaterects.size()));
     for (int iz = 0; iz < isize; iz++)
     {
         gp_Rectangle arect1 = m_models025_rotate[iz].boundingRect();
@@ -799,33 +1030,45 @@ void fastmatch::rotatemodel025zeroposition()
 void fastmatch::learn_level0(void* pimage)//5pyrDown   thre >50
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn_level0(*pgetimage);
 
 }
 void fastmatch::learn_level1(void* pimage)//2pyrDown   thre >30
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn_level1(*pgetimage);
 
 }
 void fastmatch::learn_level2(void* pimage)//pyrDown thre >10
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn_level2(*pgetimage);
 }
 void fastmatch::learn_level3(void* pimage)//pyrDown thre >10
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn_level3(*pgetimage);
 }
 void fastmatch::learn_level4(void* pimage)//pyrDown thre >10
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn_level4(*pgetimage);
 }
 void fastmatch::learn(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Learn(*pgetimage);
 }
 void fastmatch::savemodelfile(const char* pchar)
@@ -836,6 +1079,7 @@ void fastmatch::savemodelfile(const char* pchar)
 void fastmatch::loadmodelfile(const char* pchar)
 {
     Findline::loadpatternfile(pchar);
+    ZeroPOS();
     gp_Rectangle arect1 = Findline::patternboundingrectAB();
     m_imodelwith = static_cast<int>(arect1.Width());
     m_imodelheigh = static_cast<int>(arect1.Height());
@@ -890,6 +1134,7 @@ void fastmatch::loadrotate05modelfile(const char* pchar)
 {
     //red(white 1) gap blue(black 0) model
     Findline::loadpatternfile(pchar);
+    ZeroPOS();
     gp_Rectangle arect1 = Findline::patternboundingrect();
     m_imodelwith = static_cast<int>(arect1.Width());
     m_imodelheigh = static_cast<int>(arect1.Height());
@@ -931,6 +1176,7 @@ void fastmatch::loadrotate025modelfile(const char* pchar)
 {
     //red(white 1) gap blue(black 0) model
     Findline::loadpatternfile(pchar);
+    ZeroPOS();
     gp_Rectangle arect1 = Findline::patternboundingrect();
     m_imodelwith = static_cast<int>(arect1.Width());
     m_imodelheigh = static_cast<int>(arect1.Height());
@@ -1052,12 +1298,12 @@ void fastmatch::savecalibration(const char* pchar)
 }
 void fastmatch::setrotateangle(double dangle)
 {
-    m_danglegap = dangle;
+    m_danglegap = FastMatchPositiveFiniteOr(dangle, m_danglegap);
 }
 void fastmatch::setrotateanglescale(double dangle1, double dangle2)
 {
-    m_dangle_add = dangle2;
-    m_dangle_mud = dangle1;
+    m_dangle_add = FastMatchFiniteOr(dangle2, m_dangle_add);
+    m_dangle_mud = FastMatchFiniteOr(dangle1, m_dangle_mud);
 }
 void fastmatch::clearmodels_l12()
 {
@@ -1097,7 +1343,7 @@ void fastmatch::addmodels_rotate(const char* pchar)
 }
 void fastmatch::setcurmodels(int inum)
 {
-    if (inum < m_models_l12.size())
+    if (inum >= 0 && inum < static_cast<int>(m_models_l12.size()))
         Findline::setpattern(m_models_l12[inum]);
 }
 void fastmatch::setcurimagemodels(int inum)
@@ -1108,32 +1354,32 @@ void fastmatch::setcurimagemodels(int inum)
     m_pgrid->ModelGridMethod_Gauss();
     m_imagefastmodel = m_pgrid->getfastmodel();
 
-    if (inum < m_imagefastmodels_l12.size())
+    if (inum >= 0 && inum < static_cast<int>(m_imagefastmodels_l12.size()))
         m_imagefastmodels_l12[inum] = m_imagefastmodel;
 }
 void fastmatch::modelstocurrent_l72(int i)
 {
-    if (i < m_models_l72.size())
+    if (i >= 0 && i < static_cast<int>(m_models_l72.size()))
         Findline::setpattern(m_models_l72[i]);
 }
 void fastmatch::modelstocurrent_l36(int i)
 {
-    if (i < m_models_l36.size())
+    if (i >= 0 && i < static_cast<int>(m_models_l36.size()))
         Findline::setpattern(m_models_l36[i]);
 }
 void fastmatch::modelstocurrent_l12(int i)
 {
-    if (i < m_models_l12.size())
+    if (i >= 0 && i < static_cast<int>(m_models_l12.size()))
         Findline::setpattern(m_models_l12[i]);
 }
 void fastmatch::modelstocurrent_l3(int i)
 {
-    if (i < m_models_l3.size())
+    if (i >= 0 && i < static_cast<int>(m_models_l3.size()))
         Findline::setpattern(m_models_l3[i]);
 }
 void fastmatch::modelstocurrent_l6(int i)
 {
-    if (i < m_models_l6.size())
+    if (i >= 0 && i < static_cast<int>(m_models_l6.size()))
         Findline::setpattern(m_models_l6[i]);
 }
 void fastmatch::patternrootgrid(double itype, double drate, double ilevel)
@@ -1181,25 +1427,28 @@ void fastmatch::modelzoom(double dx, double dy)
 void fastmatch::setmodelwh(int iw, int ih)
 {
     gp_Rectangle rectf = Findline::patternboundingrect();
-    int iorgw = static_cast<int>(rectf.Width());
-    int iorgh = static_cast<int>(rectf.Height());
+    iw = FastMatchPositiveInt(iw);
+    ih = FastMatchPositiveInt(ih);
+    int iorgw = FastMatchPositiveInt(static_cast<int>(rectf.Width()));
+    int iorgh = FastMatchPositiveInt(static_cast<int>(rectf.Height()));
     double dw = (iw * 1.0) / (iorgw * 1.0);
     double dh = (ih * 1.0) / (iorgh * 1.0);
     modelzoom(dw, dh);
 }
 void fastmatch::setmatchrect(int ix, int iy, int iw, int ih)
 {
-    if (ix >= 0 && iy >= 0 && iw > 0 && ih > 0)
+    ix = FastMatchNonNegativeInt(ix);
+    iy = FastMatchNonNegativeInt(iy);
+    iw = FastMatchPositiveInt(iw);
+    ih = FastMatchPositiveInt(ih);
+    m_matchrect = gp_Rectangle(gp_Pnt(ix, iy,0), gp_Pnt(ix + iw, iy + ih,0));
+    if (m_matchrects.size() <= 0)
     {
-        m_matchrect = gp_Rectangle(gp_Pnt(ix, iy,0), gp_Pnt(ix + iw, iy + ih,0));
-        if (m_matchrects.size() <= 0)
-        {
-            gp_Rectangle arect(gp_Pnt(ix, iy, 0), gp_Pnt(ix + iw, iy + ih, 0));
-            m_matchrects.addrect(arect);
-        }
-        else
-            m_matchrects.setrect(0,ix,iy,iw,ih);
+        gp_Rectangle arect(gp_Pnt(ix, iy, 0), gp_Pnt(ix + iw, iy + ih, 0));
+        m_matchrects.addrect(arect);
     }
+    else
+        m_matchrects.setrect(0,ix,iy,iw,ih);
 }
 
 void fastmatch::setmatchrectnum(int inum)
@@ -1227,13 +1476,31 @@ RectsShape& fastmatch::getmatchrects()
 }
 gp_Rectangle fastmatch::getresultrect(int inum)
 {
+    if (inum < 0 || inum >= m_resultrects.size())
+        return gp_Rectangle(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
     gp_Rectangle arect0 = m_resultrects.getrect(inum);
     return arect0;
 }
+
+gp_Rectangle fastmatch::getresolvedresultrect(int inum)
+{
+    gp_Rectangle arect0 = getresultrect(inum);
+    gp_Pnt origin = rect().TopLeft();
+    const int rectw = FastMatchPositiveInt(static_cast<int>(arect0.Width()));
+    const int recth = FastMatchPositiveInt(static_cast<int>(arect0.Height()));
+    return gp_Rectangle(
+        gp_Pnt(arect0.TopLeft().X() + origin.X(), arect0.TopLeft().Y() + origin.Y(), 0),
+        rectw,
+        recth);
+}
 void fastmatch::setmultimatchrect(int inum, int ix, int iy, int iw, int ih)
 {
-    if (inum < m_matchrects.size())
-        m_matchrects.setrect(inum, ix, iy, iw, ih);
+    if (inum >= 0 && inum < m_matchrects.size())
+    {
+        const int rectx = FastMatchNonNegativeInt(ix);
+        const int recty = FastMatchNonNegativeInt(iy);
+        m_matchrects.setrect(inum, rectx, recty, FastMatchPositiveInt(iw), FastMatchPositiveInt(ih));
+    }
 }
 void fastmatch::resultclear()
 {
@@ -1264,10 +1531,16 @@ void fastmatch::resulttolist(gp_Pnt& apoint, int inum)
             : m_imodelheigh / 2);
         const int replace_margin = keep_limit > 1 ? 1 : 0;
         //have same area
-        for (int i = 0; i < m_resultnums.size(); ++i)
+        const size_t shared_count = std::min(m_resultnums.size(), m_resultpoints.size());
+        if (m_resultnums.size() != shared_count)
+            m_resultnums.resize(shared_count);
+        if (m_resultpoints.size() != shared_count)
+            m_resultpoints.resize(shared_count);
+
+        for (int i = 0; i < static_cast<int>(shared_count); ++i)
         {
-            gp_Pnt apoint0 = m_resultpoints[i];
-            int ivalue = m_resultnums[i];
+            gp_Pnt apoint0 = m_resultpoints.at(i);
+            int ivalue = m_resultnums.at(i);
             const int idx = std::abs(static_cast<int>(apoint0.X() - apoint.X()));
             const int idy = std::abs(static_cast<int>(apoint0.Y() - apoint.Y()));
             if (idx <= merge_half_w
@@ -1301,21 +1574,12 @@ void fastmatch::resulttolist(gp_Pnt& apoint, int inum)
           m_resultnums.push_back(inum);
           ++m_resultcandidate_insert_count;
 
-          while (m_resultnums.size() > keep_limit)
-          {
-              int min_index = 0;
-              int min_value = m_resultnums.at(0);
-              for (int i = 1; i < m_resultnums.size(); ++i)
-              {
-                  if (m_resultnums.at(i) < min_value)
-                  {
-                      min_value = m_resultnums.at(i);
-                      min_index = i;
-                  }
-              }
-              removeAt(m_resultnums, min_index);
-              removePntAt(m_resultpoints, min_index);
-          }
+          NormalizeMatchCandidates(
+              m_resultnums,
+              m_resultpoints,
+              keep_limit,
+              m_iminfindnum,
+              m_iminpointkey);
       }
       else
           return;
@@ -1325,82 +1589,21 @@ void fastmatch::resulttolist(gp_Pnt& apoint, int inum)
     //
 
 NextRun01:
-    //
-    int imini = 9999;
-    gp_Pnt minipoint;
-    for (int i = 0; i < m_resultnums.size(); ++i)
-    {
-        int ivalue = m_resultnums.at(i);
-        gp_Pnt apoint1 = m_resultpoints.at(i);
-        if (ivalue < imini)
-        {
-            minipoint = apoint1;
-            imini = ivalue;
-        }
-    }
-
-    m_iminfindnum = imini;
-    m_iminpointkey = minipoint;
+    NormalizeMatchCandidates(
+        m_resultnums,
+        m_resultpoints,
+        std::max(1, m_imaxmatchnum),
+        m_iminfindnum,
+        m_iminpointkey);
 }
 void fastmatch::resultsort()
 {
-    const int isize = static_cast<int>(m_resultnums.size());
-    if (isize <= 0)
-        return;
-
-    int iprevalue = m_resultnums.at(0);
-    gp_Pnt prepoint = m_resultpoints.at(0);
-    int iprenum = 0;
-    int inxtvalue = m_resultnums.at(0);
-    gp_Pnt nxtpoint = m_resultpoints.at(0);
-    int inxtnum = 0;
-
-    for (int i = 1; i < isize; ++i)
-    {
-        iprevalue = m_resultnums.at(i - 1);
-        prepoint = m_resultpoints.at(i - 1);
-        iprenum = i - 1;
-
-        inxtvalue = m_resultnums.at(i);
-        nxtpoint = m_resultpoints.at(i);
-        inxtnum = i;
-
-        if (iprevalue > inxtvalue)
-        {
-            m_resultnums[iprenum] = inxtvalue;
-            m_resultpoints[iprenum] = nxtpoint;
-            m_resultnums[inxtnum] = iprevalue;
-            m_resultpoints[inxtnum] = prepoint;
-
-            for (int j = i - 1; j > 0; j--)
-            {
-                iprevalue = m_resultnums.at(j - 1);
-                prepoint = m_resultpoints.at(j - 1);
-                iprenum = j - 1;
-
-                inxtvalue = m_resultnums.at(j);
-                nxtpoint = m_resultpoints.at(j);
-                inxtnum = j;
-
-                if (iprevalue > inxtvalue)
-                {
-                    m_resultnums[iprenum] = inxtvalue;
-                    m_resultpoints[iprenum] = nxtpoint;
-                    m_resultnums[inxtnum] = iprevalue;
-                    m_resultpoints[inxtnum] = prepoint;
-                }
-            }
-        }
-
-    }
-
-    const int keep_limit = std::max(1, m_imaxmatchnum);
-    while (m_resultnums.size() > keep_limit)
-    {
-        removeAt(m_resultnums, 0);
-        removePntAt(m_resultpoints, 0);
-    }
-
+    NormalizeMatchCandidates(
+        m_resultnums,
+        m_resultpoints,
+        std::max(1, m_imaxmatchnum),
+        m_iminfindnum,
+        m_iminpointkey);
 }
 void fastmatch::rotateresultsortfilter(int ifdx, int ifdy, int itype)
 {
@@ -1429,13 +1632,26 @@ void fastmatch::rotateresultsortfilterA(int ifdx, int ifdy, int itype)
  
 int fastmatch::rotateresultsize()
 {
-    return static_cast<int>(m_rotateresults.size());
+    return static_cast<int>(RotateResultSharedCount(
+        m_rotateresults,
+        m_rotatereslutpoints,
+        m_rotatereslutangles,
+        m_rotateshaperesults));
 }
 void fastmatch::rotateresultsort()
 {
-    const int isize = static_cast<int>(m_rotateresults.size());
-    if (isize <= 0)
+    const size_t shared_count = RotateResultSharedCount(
+        m_rotateresults,
+        m_rotatereslutpoints,
+        m_rotatereslutangles,
+        m_rotateshaperesults);
+    if (shared_count == 0)
         return;
+    m_rotateresults.resize(shared_count);
+    m_rotatereslutpoints.resize(shared_count);
+    m_rotatereslutangles.resize(shared_count);
+    m_rotateshaperesults.resize(shared_count);
+    const int isize = static_cast<int>(shared_count);
     double dprevalue = m_rotateresults.at(0);
     gp_Pnt prepoint = m_rotatereslutpoints.at(0);
     double predangle = m_rotatereslutangles.at(0);
@@ -1547,7 +1763,7 @@ double fastmatch::getrotateresultscore()
 }
 double fastmatch::getrotateresultscoreA(int inum)
 {
-    if (static_cast<int>(m_rotateresults.size()) > inum)
+    if (inum >= 0 && inum < static_cast<int>(m_rotateresults.size()))
     {
         double drotateresult = m_rotateresults[inum];
         return drotateresult;
@@ -1561,7 +1777,12 @@ void fastmatch::clusterclear()
 }
 void fastmatch::resultcluster(int ixgap, int iygap, int ianglegap)
 { 
-    const int ipointsize = static_cast<int>(m_rotatereslutpoints.size());
+    const size_t shared_count = std::min(m_rotatereslutpoints.size(), m_rotatereslutangles.size());
+    if (shared_count == 0)
+    {
+        return;
+    }
+    const int ipointsize = static_cast<int>(shared_count);
     gp_Pnt apoint;
     bool binsert = false;
     const int cluster_count = static_cast<int>(m_clusters.size());
@@ -1586,6 +1807,10 @@ void fastmatch::resultcluster(int ixgap, int iygap, int ianglegap)
             for (int cluster_index = 0; cluster_index < cluster_size; cluster_index++)
             {
                 int ipos = m_clusters[ic][cluster_index];
+                if (ipos < 0 || ipos >= ipointsize)
+                {
+                    continue;
+                }
                 gp_Pnt bpoint = m_rotatereslutpoints[ipos];
                 const int ix1 = static_cast<int>(bpoint.X());
                 const int iy1 = static_cast<int>(bpoint.Y());
@@ -1598,17 +1823,21 @@ void fastmatch::resultcluster(int ixgap, int iygap, int ianglegap)
                     && iygap0 < iygap
                     && danglegap0 < ianglegap)
                 {
-                    //插入堆栈
+                    //鎻掑叆鍫嗘爤
                     m_clusters[ic].push_back(ir);
                     binsert = true;
-                    //排序
-                    const int sorted_cluster_size = static_cast<int>(m_clusters[ic].size());
-                    for (int sorted_index = 0; sorted_index < sorted_cluster_size - 1; sorted_index++)
+                    const int cluster_size = static_cast<int>(m_clusters[ic].size());
+                    for (int sorted_index = 0; sorted_index < cluster_size - 1; ++sorted_index)
                     {
-                        int ipos0 = m_clusters[ic][sorted_index];
-                        int ipos1 = m_clusters[ic][sorted_index + 1];
-                        double sort_angle0 = m_rotatereslutangles[ipos0];
-                        double sort_angle1 = m_rotatereslutangles[ipos1];
+                        const int ipos0 = m_clusters[ic][sorted_index];
+                        const int ipos1 = m_clusters[ic][sorted_index + 1];
+                        if (ipos0 < 0 || ipos0 >= ipointsize || ipos1 < 0 || ipos1 >= ipointsize)
+                        {
+                            continue;
+                        }
+
+                        const double sort_angle0 = m_rotatereslutangles[ipos0];
+                        const double sort_angle1 = m_rotatereslutangles[ipos1];
                         if (sort_angle0 < sort_angle1)
                         {
                             m_clusters[ic][sorted_index] = ipos1;
@@ -1689,11 +1918,11 @@ void fastmatch::Distfilter()
         arma::mat points(2, numPoints);
         for (size_t i = 0; i < numPoints; ++i)
         {
-            points(0, i) = pathA.getpoints()[i].X(); // 第一行是 x 坐标
-            points(1, i) = pathA.getpoints()[i].Y(); // 第二行是 y 坐标
+            points(0, i) = pathA.getpoints()[i].X(); // 绗竴琛屾槸 x 鍧愭爣
+            points(1, i) = pathA.getpoints()[i].Y(); // 绗簩琛屾槸 y 鍧愭爣
         }
         pathA.Clear();
-        // 自适应过滤
+        // 鑷€傚簲杩囨护
         auto filteredIndices = mlpackclass::AdaptiveFilterWithCoincidenceHandling_(points);
         for (auto idx : filteredIndices)
             pathA.AddPoint(gp_Pnt(points(0, idx), points(1, idx), 0));
@@ -1704,11 +1933,11 @@ void fastmatch::Distfilter()
         arma::mat points(2, numPoints);
         for (size_t i = 0; i < numPoints; ++i)
         {
-            points(0, i) = pathB.getpoints()[i].X(); // 第一行是 x 坐标
-            points(1, i) = pathB.getpoints()[i].Y(); // 第二行是 y 坐标
+            points(0, i) = pathB.getpoints()[i].X(); // 绗竴琛屾槸 x 鍧愭爣
+            points(1, i) = pathB.getpoints()[i].Y(); // 绗簩琛屾槸 y 鍧愭爣
         }
         pathB.Clear();
-        // 自适应过滤
+        // 鑷€傚簲杩囨护
         auto filteredIndices = mlpackclass::AdaptiveFilterWithCoincidenceHandling_(points);
         for (auto idx : filteredIndices)
             pathB.AddPoint(gp_Pnt(points(0, idx), points(1, idx), 0));
@@ -1740,6 +1969,8 @@ void fastmatch::MatchABMore(Image& image)
 void fastmatch::match(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
 
     MatchAB(*pgetimage);
 }
@@ -1747,6 +1978,8 @@ void fastmatch::match(void* pimage)
 void fastmatch::matchmore(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
 
     MatchABMore(*pgetimage);
 }
@@ -2327,35 +2560,35 @@ void fastmatch::imagemodelstocurrent_l72(int i)
 {
     m_pgrid->SetModelWH(72, 72);
 
-    if (i < static_cast<int>(m_imagefastmodels_l72.size()))
+    if (i >= 0 && i < static_cast<int>(m_imagefastmodels_l72.size()))
         m_imagefastmodel = m_imagefastmodels_l72[i];
 }
 void fastmatch::imagemodelstocurrent_l36(int i)
 {
     m_pgrid->SetModelWH(36, 36);
 
-    if (i < static_cast<int>(m_imagefastmodels_l36.size()))
+    if (i >= 0 && i < static_cast<int>(m_imagefastmodels_l36.size()))
         m_imagefastmodel = m_imagefastmodels_l36[i];
 }
 void fastmatch::imagemodelstocurrent_l12(int i)
 {
     m_pgrid->SetModelWH(12, 12);
 
-    if (i < static_cast<int>(m_imagefastmodels_l12.size()))
+    if (i >= 0 && i < static_cast<int>(m_imagefastmodels_l12.size()))
         m_imagefastmodel = m_imagefastmodels_l12[i];
 }
 
 void fastmatch::imagemodelstocurrent_l3(int i)
 {
     m_pgrid->SetModelWH(3, 3);
-    if (i < static_cast<int>(m_imagefastmodels_l3.size()))
+    if (i >= 0 && i < static_cast<int>(m_imagefastmodels_l3.size()))
         m_imagefastmodel = m_imagefastmodels_l3[i];
 }
 void fastmatch::imagemodelstocurrent_l6(int i)
 {
     m_pgrid->SetModelWH(6, 6);
 
-    if (i < static_cast<int>(m_imagefastmodels_l6.size()))
+    if (i >= 0 && i < static_cast<int>(m_imagefastmodels_l6.size()))
         m_imagefastmodel = m_imagefastmodels_l6[i];
 }
 
@@ -2382,7 +2615,7 @@ int fastmatch::imagefastmodelsize(int ilevel)
 
 void fastmatch::objectmodelstocurrent(int i)
 {
-    if (i < m_easyobjectmodels_l12.size())
+    if (i >= 0 && i < static_cast<int>(m_easyobjectmodels_l12.size()))
         m_easyobject = m_easyobjectmodels_l12[i];
 }
 void fastmatch::savefastimagemodel(const char* pfilename)
@@ -2399,43 +2632,61 @@ void fastmatch::savefastimagepatmodel(const char* pfilename)
 }
 void fastmatch::savematchroi(const char* pfilename)
 {
+    if (m_matchimage == nullptr)
+        return;
     SaveMatchROI(*m_matchimage, pfilename);
 }
 void fastmatch::savematchimagemodel(const char* pfilename)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     g_pmodelimage->SaveROI(pfilename);
 }
 void fastmatch::SaveMatchROI(Image& image, const char* pfilename)
 {
     const int isize = m_resultrects.size();
+    if (isize <= 0)
+        return;
     gp_Rectangle arect = m_resultrects.getrect(isize - 1);
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect.Height()));
  
     image.setroi(
         static_cast<int>(arect.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect.TopLeft().Y()),
-        static_cast<int>(arect.Width()),
-        static_cast<int>(arect.Height()));
+        roiw,
+        roih);
     image.SaveROI(pfilename);
 }
 void fastmatch::imagelearn(int ithre1, int iandor)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageLearn(*m_matchimage, ithre1, iandor);
 }
 void fastmatch::imagelearnmass(int ithre1, int iandor, int igridwh)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageLearnMass(*m_matchimage, ithre1, iandor, igridwh);
 }
 void fastmatch::imagelearncheck(int iimagetype, int iandor, int igridwh)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageCheck(*m_matchimage, iimagetype, iandor, igridwh);
 }
 
 void fastmatch::imagelearnex(int ithre1, int iandor, int igrid)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageLearnEx(*m_matchimage, ithre1, iandor, igrid);
 }
 void fastmatch::MatchImageLearn(Image& aimage, int ithre1, int iandor)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     (void)iandor;
     const int isize = m_resultrects.size();
     if (isize <= 0)
@@ -2445,13 +2696,15 @@ void fastmatch::MatchImageLearn(Image& aimage, int ithre1, int iandor)
     //gp_Rectangle arect = m_pgrid->CentRect(arect0);
     m_pgrid->SetUnit(12, 12);
     gp_Rectangle arect = m_pgrid->CentRect_Condition(arect0, 3);
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect.Height()));
 
     aimage.setroi(
         static_cast<int>(arect.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect.TopLeft().Y()),
-        static_cast<int>(arect.Width()),
-        static_cast<int>(arect.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect.Width()), static_cast<int>(arect.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(3);
     aimage.ROItoROI(*g_pmodelimage);
     g_pmodelimage->ROIEasyThre(ithre1); 
@@ -2486,6 +2739,8 @@ int fastmatch::GetRectGridLevel(int irectw)
 }
 void fastmatch::MatchImageLearnEx(Image& aimage, int ithre1, int iandor, int igrid)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     (void)iandor;
     const int isize = m_resultrects.size();
     if (isize <= 0)
@@ -2499,12 +2754,14 @@ void fastmatch::MatchImageLearnEx(Image& aimage, int ithre1, int iandor, int igr
     // {
     m_pgrid->SetUnit(igrid, igrid);//(12,12);
     gp_Rectangle arect = m_pgrid->CentRect_Condition(arect0, 3);
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect.Height()));
     aimage.setroi(
         static_cast<int>(arect.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect.TopLeft().Y()),
-        static_cast<int>(arect.Width()),
-        static_cast<int>(arect.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect.Width()), static_cast<int>(arect.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(3);
     aimage.ROItoROI(*g_pmodelimage); 
     g_pmodelimage->ROIEasyThre(ithre1);
@@ -2518,6 +2775,8 @@ void fastmatch::MatchImageLearnEx(Image& aimage, int ithre1, int iandor, int igr
 }
 void fastmatch::MatchImageLearnMass(Image& aimage, int ithre1, int iandor, int igrid)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     (void)iandor;
     const int isize = m_resultrects.size();
     if (isize <= 0)
@@ -2548,12 +2807,14 @@ void fastmatch::MatchImageLearnMass(Image& aimage, int ithre1, int iandor, int i
 
     m_pgrid->SetUnit(igrid, igrid);//(12,12);
     gp_Rectangle arect = m_pgrid->CentRect_Condition(arect0, 3);
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect.Height()));
     aimage.setroi(
         static_cast<int>(arect.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect.TopLeft().Y()),
-        static_cast<int>(arect.Width()),
-        static_cast<int>(arect.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect.Width()), static_cast<int>(arect.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(3);//linux 0 ,win 3
     aimage.ROItoROI(*g_pmodelimage); 
     g_pmodelimage->ROIEasyThre(ithre1);
@@ -2567,6 +2828,8 @@ void fastmatch::MatchImageLearnMass(Image& aimage, int ithre1, int iandor, int i
 }
 void fastmatch::MatchImageCheck(Image& aimage, int iimagetype, int iandor, int igrid)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     (void)iandor;
     int isize = m_resultrects.size();
     if (isize <= 0)
@@ -2583,12 +2846,14 @@ void fastmatch::MatchImageCheck(Image& aimage, int iimagetype, int iandor, int i
     g_pmodelimage->setroi(0, 0, igrid, igrid);
     g_pmodelimage->colorizeROI(0,0,0);
 
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect0.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect0.Height()));
     aimage.setroi(
         static_cast<int>(arect0.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect0.TopLeft().Y()),
-        static_cast<int>(arect0.Width()),
-        static_cast<int>(arect0.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect0.Width()), static_cast<int>(arect0.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(iimagetype);//linux 0 ,win 30
     aimage.ROItoROI(*g_pmodelimage);
 
@@ -2646,21 +2911,29 @@ void fastmatch::MatchImageCheck(Image& aimage, int iimagetype, int iandor, int i
 
 void fastmatch::imagematch(int ithre1, int iandor, int igrid, int ineedthre)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageMatch(*m_matchimage, ithre1, iandor, igrid, ineedthre);
 }
 
 void fastmatch::imagematch_grid(int ithre1, int iandor, int igrid)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageMatch(*m_matchimage, ithre1, iandor, igrid);
 }
 
 void fastmatch::imagematchex(int igrid)
 {
+    if (m_matchimage == nullptr)
+        return;
     MatchImageExMatch(*m_matchimage, igrid);
 }
 
 void fastmatch::MatchImageMatch(Image& aimage, int ithre1, int iandor, int igrid, int ineedthre)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     (void)iandor;
     int isize = m_resultrects.size();
     if (isize <= 0)
@@ -2668,12 +2941,14 @@ void fastmatch::MatchImageMatch(Image& aimage, int ithre1, int iandor, int igrid
     gp_Rectangle arect0 = m_resultrects.getrect(isize - 1);
     //gp_Rectangle arect = m_pgrid->CentRect(arect0);
     //gp_Rectangle arect = m_pgrid->CentRect_Condition(arect0,3);
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect0.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect0.Height()));
     aimage.setroi(
         static_cast<int>(arect0.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect0.TopLeft().Y()),
-        static_cast<int>(arect0.Width()),
-        static_cast<int>(arect0.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect0.Width()), static_cast<int>(arect0.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(3);
     aimage.ROItoROI(*g_pmodelimage);
 
@@ -2728,6 +3003,8 @@ void fastmatch::MatchImageMatch(Image& aimage, int ithre1, int iandor, int igrid
 
 void fastmatch::MatchImageExMatch(Image& aimage, int igrid)
 {
+    if (g_pmodelimage == nullptr)
+        return;
     int isize = m_resultrects.size();
     if (isize <= 0)
         return;
@@ -2748,12 +3025,14 @@ void fastmatch::MatchImageExMatch(Image& aimage, int igrid)
     default:
         break;
     }
+    const int roiw = FastMatchPositiveInt(static_cast<int>(arect.Width()));
+    const int roih = FastMatchPositiveInt(static_cast<int>(arect.Height()));
     aimage.setroi(
         static_cast<int>(arect.TopLeft().X()) - m_imatchoffset,
         static_cast<int>(arect.TopLeft().Y()),
-        static_cast<int>(arect.Width()),
-        static_cast<int>(arect.Height()));
-    g_pmodelimage->setroi(0, 0, static_cast<int>(arect.Width()), static_cast<int>(arect.Height()));
+        roiw,
+        roih);
+    g_pmodelimage->setroi(0, 0, roiw, roih);
     aimage.SetMode(3);
     aimage.ROItoROI(*g_pmodelimage);
 
@@ -2765,7 +3044,9 @@ void fastmatch::MatchImageExMatch(Image& aimage, int igrid)
     m_pgrid->ModelGridMethod_Gauss();
     m_imagefastmatchlist = m_pgrid->getfastmodel();
 
-    isize = static_cast<int>(m_imagefastmodel.size());
+    isize = std::min(
+        static_cast<int>(m_imagefastmodel.size()),
+        static_cast<int>(m_imagefastmatchlist.size()));
     int ingsize = 0;
     int ioksize = 0;
     for (int i = 0; i < isize; i++)
@@ -2804,7 +3085,9 @@ void fastmatch::MatchGrid(Grid* pgrid)
     m_pgrid->ModelGridMethod_Gauss();
     m_imagefastmatchlist = m_pgrid->getfastmodel();
 
-    const int isize = static_cast<int>(m_imagefastmodel.size());
+    const int isize = std::min(
+        static_cast<int>(m_imagefastmodel.size()),
+        static_cast<int>(m_imagefastmatchlist.size()));
     int ingsize = 0;
     int ioksize = 0;
     for (int i = 0; i < isize; i++)
@@ -2846,6 +3129,9 @@ double fastmatch::getimagemodelreslut()
     if (0 == m_imagemodelresult_OK
         && 0 == m_imagemodelresult_NG)
         return 0;
+    if (m_imagemodelresult_OK < 0
+        || m_imagemodelresult_NG <= 0)
+        return 0;
 
     const int itotalsize = static_cast<int>(m_imagefastmodel.size());
     (void)itotalsize;
@@ -2863,6 +3149,9 @@ double fastmatch::getimagemodelreslut_check_1()
         return 0;
     if (0 == m_imagemodelresult_OK
         && 0 == m_imagemodelresult_NG)
+        return 0;
+    if (m_imagemodelresult_OK < 0
+        || m_imagemodelresult_NG <= 0)
         return 0;
 
     const int itotalsize = static_cast<int>(m_imagefastmodel.size());
@@ -3042,8 +3331,8 @@ void fastmatch::imagemodelshow()
 }
 void fastmatch::matchstepgap(int ix, int iy)
 {
-    m_stepgapx = ix;
-    m_stepgapy = iy;
+    m_stepgapx = FastMatchPositiveInt(ix);
+    m_stepgapy = FastMatchPositiveInt(iy);
 }
 
 void fastmatch::imagematchshow()
@@ -3063,7 +3352,7 @@ void fastmatch::imagematchshow()
 }
 void fastmatch::setminscore(double dminscore)
 {
-    m_dminscore = dminscore;
+    m_dminscore = FastMatchUnitScore(dminscore);
 }
 void fastmatch::MatchSample(Image& image, gp_Path& path)
 {
@@ -3098,8 +3387,7 @@ void fastmatch::MatchSample(Image& image, gp_Path& path)
     int ih = static_cast<int>(Findline::patternboundingrect().Height());
     int itotalsize = static_cast<int>(Findline::getpattern().size());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     const int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -3166,26 +3454,13 @@ void fastmatch::MatchSample(Image& image, gp_Path& path)
             if (icalnum > m_iminfindnum
                 && icalnum > iminfindoknum)
             {
-                gp_Pnt refined_point(imovx, imovy, 0);
-                int refined_score = icalnum;
-                refined_point = RefineMatchSampleABPoint(
-                    image,
-                    pathA,
-                    pathB,
-                    refined_point,
-                    icalnum,
-                    ithre,
-                    m_iB2W,
-                    iminfindngnum,
-                    igapx,
-                    igapy,
-                    refined_score);
+                gp_Pnt apoint(imovx, imovy, 0);
                 if (m_rawthresholdhitpoints.size() < 32)
                 {
-                    m_rawthresholdhitpoints.push_back(refined_point);
-                    m_rawthresholdhitscores.push_back(refined_score);
+                    m_rawthresholdhitpoints.push_back(apoint);
+                    m_rawthresholdhitscores.push_back(icalnum);
                 }
-                resulttolist(refined_point, refined_score);
+                resulttolist(apoint, icalnum);
             }
 
         }
@@ -3248,8 +3523,7 @@ void fastmatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
     int ih = static_cast<int>(pathA.boundingRect().Height());
     int itotalsize = static_cast<int>(pathA.ElementCount());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     const int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -3265,6 +3539,16 @@ void fastmatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
 
             icalnum = 0;
             icalng = 0;
+            if (!FastMatchCandidateMaskPass(m_matchmask, pathA, imovx, imovy))
+            {
+                ix += igapx;
+                continue;
+            }
+            if (!MatchSampleABAnchorPass(image, pathA, pathB, imovx, imovy, ithre, m_iB2W))
+            {
+                ix += igapx;
+                continue;
+            }
             for (int i = 0; i < icount1 - 1; i++)
             {
                 aele = pathA.ElementAt(i);
@@ -3420,8 +3704,7 @@ void fastmatch::MatchSampleABMore(Image& image, gp_Path& pathA, gp_Path& pathB)
     ix1 = ix1 - static_cast<int>(arect1.Width());
     int itotalsize = static_cast<int>(pathA.ElementCount());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     const int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -3547,6 +3830,31 @@ int fastmatch::getresultcandidaterejectcount() const
     return m_resultcandidate_reject_count;
 }
 
+int fastmatch::getresultcandidatecount() const
+{
+    return static_cast<int>(std::min(m_resultnums.size(), m_resultpoints.size()));
+}
+
+int fastmatch::getresultbestindex() const
+{
+    const int candidate_count = getresultcandidatecount();
+    if (candidate_count <= 0)
+    {
+        return -1;
+    }
+    return candidate_count - 1;
+}
+
+double fastmatch::getresultbestscore() const
+{
+    const int best_index = getresultbestindex();
+    if (best_index < 0)
+    {
+        return 0.0;
+    }
+    return m_resultnums.at(best_index);
+}
+
 int fastmatch::getrawthresholdhitrecordcount() const
 {
     return static_cast<int>(m_rawthresholdhitpoints.size());
@@ -3584,6 +3892,8 @@ void fastmatch::MultiMatch(Image& image)
 void fastmatch::multimatch(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     MultiMatch(*pgetimage);
 }
 void fastmatch::MultiMatchSample(Image& image, gp_Path& path)
@@ -3627,8 +3937,7 @@ void fastmatch::MultiMatchSample(Image& image, gp_Path& path)
         int ih = static_cast<int>(Findline::patternboundingrect().Height());
         int itotalsize = static_cast<int>(Findline::getpattern().size());
 
-        if (m_dminscore > 1 && m_dminscore < 0)
-            m_dminscore = 0.4;
+        m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
         const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize);
         const int iminfindoknum = static_cast<int>(m_dminscore * itotalsize);
 
@@ -3816,7 +4125,12 @@ void fastmatch::RotateMatchAB_upgrade(Image& image)
         double m_dangle_mud;//-10 
     */
     //result
-    if (m_rotateresults.size() <= 0)
+    if (!HasRotateResultAt(
+            m_iupgradenum,
+            m_rotateresults,
+            m_rotatereslutpoints,
+            m_rotatereslutangles,
+            m_rotateshaperesults))
         return;
 
     PointsShape abestshape = m_rotateshaperesults[m_iupgradenum];//4 points
@@ -3900,7 +4214,12 @@ void fastmatch::RotateMatchAB05_upgrade(Image& image)
 {
 
     //result
-    if (m_rotateresults.size() <= 0)
+    if (!HasRotateResultAt(
+            m_iupgradenum,
+            m_rotateresults,
+            m_rotatereslutpoints,
+            m_rotatereslutangles,
+            m_rotateshaperesults))
         return;
 
     PointsShape abestshape = m_rotateshaperesults[m_iupgradenum];//4 points
@@ -3986,7 +4305,12 @@ void fastmatch::RotateMatchAB05_upgrade(Image& image)
 void fastmatch::RotateMatchAB025_upgrade(Image& image)
 {
     //result
-    if (m_rotateresults.size() <= 0)
+    if (!HasRotateResultAt(
+            m_iupgradenum,
+            m_rotateresults,
+            m_rotatereslutpoints,
+            m_rotatereslutangles,
+            m_rotateshaperesults))
         return;
 
     PointsShape abestshape = m_rotateshaperesults[m_iupgradenum];//4 points
@@ -4110,9 +4434,9 @@ void fastmatch::RotateMatch(Image& image)
 }
 void fastmatch::setclustergap(int ixclustergap, int iyclustergap, int iangleclustergap)
 {
-    m_ixclustergap = ixclustergap;
-    m_iyclustergap = iyclustergap;
-    iangleclustergap = m_iangleclustergap;
+    m_ixclustergap = FastMatchPositiveInt(ixclustergap);
+    m_iyclustergap = FastMatchPositiveInt(iyclustergap);
+    m_iangleclustergap = FastMatchPositiveInt(iangleclustergap);
 }
 void fastmatch::rotatematchAB(void* pimage)
 {
@@ -4122,12 +4446,12 @@ void fastmatch::rotatematchAB(void* pimage)
 
 void fastmatch::Setupgradescale(int isx, int isy)
 {
-    m_iupgradexscale = isx;
-    m_iupgradeyscale = isy;
+    m_iupgradexscale = FastMatchPositiveInt(isx);
+    m_iupgradeyscale = FastMatchPositiveInt(isy);
 }
 void fastmatch::Setupgradeanglescale(int iangle)
 {
-    m_iupgradeanglescale = iangle;
+    m_iupgradeanglescale = FastMatchPositiveInt(iangle);
 }
 void fastmatch::rotatematchAB_upgrade(void* pimage)
 {
@@ -4189,8 +4513,7 @@ void fastmatch::RotateMatchSample(Image& image, gp_Path& path,
     int ih = static_cast<int>(Findline::patternboundingrect().Height());
     int itotalsize = static_cast<int>(Findline::getpattern().size());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     const int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -4267,26 +4590,13 @@ void fastmatch::RotateMatchSample(Image& image, gp_Path& path,
             if (icalnum > m_iminfindnum
                 && icalnum > iminfindoknum)
             {
-                gp_Pnt refined_point(imovx, imovy, 0);
-                int refined_score = icalnum;
-                refined_point = RefineMatchSampleABPoint(
-                    image,
-                    pathA,
-                    pathB,
-                    refined_point,
-                    icalnum,
-                    ithre,
-                    m_iB2W,
-                    iminfindngnum,
-                    igapx,
-                    igapy,
-                    refined_score);
+                gp_Pnt apoint(imovx, imovy, 0);
                 if (m_rawthresholdhitpoints.size() < 32)
                 {
-                    m_rawthresholdhitpoints.push_back(refined_point);
-                    m_rawthresholdhitscores.push_back(refined_score);
+                    m_rawthresholdhitpoints.push_back(apoint);
+                    m_rawthresholdhitscores.push_back(icalnum);
                 }
-                resulttolist(refined_point, refined_score);
+                resulttolist(apoint, icalnum);
             }
 
         }
@@ -4369,8 +4679,7 @@ void fastmatch::RotateMatchSampleAB(Image& image, gp_Path& pathA,
     int ih = static_cast<int>(pathA.boundingRect().Height());
     int itotalsize = static_cast<int>(pathA.ElementCount());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -4385,6 +4694,16 @@ void fastmatch::RotateMatchSampleAB(Image& image, gp_Path& pathA,
 
             icalnum = 0;
             icalng = 0;
+            if (!FastMatchCandidateMaskPass(m_matchmask, pathA, imovx, imovy))
+            {
+                ix += igapx;
+                continue;
+            }
+            if (!MatchSampleABAnchorPass(image, pathA, pathB, imovx, imovy, ithre, m_iB2W))
+            {
+                ix += igapx;
+                continue;
+            }
             for (int i = 0; i < icount1 - 1; i++)
             {
                 aele = pathA.ElementAt(i);
@@ -4515,8 +4834,7 @@ void fastmatch::RotateMatchSample_upgrade(Image& image, gp_Path& path, PointsSha
     int ih = static_cast<int>(Findline::patternboundingrect().Height());
     int itotalsize = static_cast<int>(Findline::getpattern().size());
 
-    if (m_dminscore > 1 && m_dminscore < 0)
-        m_dminscore = 0.4;
+    m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
     int iminfindoknum = static_cast<int>(m_dminscore * itotalsize / 2);
 
@@ -4623,68 +4941,83 @@ void fastmatch::RotateMatchSample_upgrade(Image& image, gp_Path& path, PointsSha
 
 double fastmatch::getresultnum(int inum)
 {
-    if (m_resultnums.size() > inum)
+    if (inum >= 0 && inum < static_cast<int>(m_resultnums.size()))
+    {
         return m_resultnums.at(inum);
-    else if (-1 == inum)
-    { 
-        if (m_resultnums.size() > 0)
-        return m_resultnums.at(m_resultnums.size() - 1);
     }
-    else
-        return 0;
-    return 0;
+    if (inum == -1 && !m_resultnums.empty())
+    {
+        return m_resultnums.back();
+    }
+    return 0.0;
 }
 double fastmatch::getresultcentx(int inum)
 {
-    if (m_resultpoints.size() > inum)
+    const int iw = static_cast<int>(Findline::patternboundingrectAB().Width());
+    if (inum >= 0 && inum < static_cast<int>(m_resultpoints.size()))
     {
-        int iw = static_cast<int>(Findline::patternboundingrectAB().Width());
         return m_resultpoints.at(inum).X() + (iw / 2);
     }
-    else if (-1 == inum)
+    if (inum == -1 && !m_resultpoints.empty())
     {
-        int iw = static_cast<int>(Findline::patternboundingrectAB().Width());
-        if (m_resultpoints.size() > 1)
-            return m_resultpoints.at(m_resultpoints.size() - 1).X() + (iw / 2);
-        else
-            return 0;
+        return m_resultpoints.back().X() + (iw / 2);
     }
-    else
-        return 0;
+    return 0.0;
 }
 double fastmatch::getresultcenty(int inum)
 {
-    if (m_resultpoints.size() > inum)
+    const int ih = static_cast<int>(Findline::patternboundingrectAB().Height());
+    if (inum >= 0 && inum < static_cast<int>(m_resultpoints.size()))
     {
-        int ih = static_cast<int>(Findline::patternboundingrectAB().Height());
-        return m_resultpoints.at(inum).Y() + (ih / 2); 
+        return m_resultpoints.at(inum).Y() + (ih / 2);
     }
-    else if (-1 == inum)
+    if (inum == -1 && !m_resultpoints.empty())
     {
-        int iw = static_cast<int>(Findline::patternboundingrectAB().Width());
-        if (m_resultpoints.size() > 1)
-            return m_resultpoints.at(m_resultpoints.size() - 1).Y() + (iw / 2);
-        else
-            return 0;
+        return m_resultpoints.back().Y() + (ih / 2);
     }
-    else
-        return 0;
+    return 0.0;
+}
+
+double fastmatch::getresolvedresultcentx(int inum)
+{
+    return getresultcentx(inum) + rect().TopLeft().X();
+}
+
+double fastmatch::getresolvedresultcenty(int inum)
+{
+    if ((inum >= 0 && inum < static_cast<int>(m_resultpoints.size())) ||
+        (inum == -1 && !m_resultpoints.empty()))
+    {
+        return getresultcenty(inum) + rect().TopLeft().Y();
+    }
+    return 0.0;
 }
 
 int fastmatch::getrotateresultcentx(int inum)
 {
-    if (m_rotateshaperesults.size() > 0)
-        return static_cast<int>(m_rotateshaperesults[inum].getpointscent().X());
-    else
+    if (!HasRotateResultAt(
+        inum,
+        m_rotateresults,
+        m_rotatereslutpoints,
+        m_rotatereslutangles,
+        m_rotateshaperesults))
+    {
         return -9999;
-
+    }
+    return static_cast<int>(m_rotateshaperesults[inum].getpointscent().X());
 }
 int fastmatch::getrotateresultcenty(int inum)
 {
-    if (m_rotateshaperesults.size() > 0)
-        return static_cast<int>(m_rotateshaperesults[inum].getpointscent().Y());
-    else
+    if (!HasRotateResultAt(
+        inum,
+        m_rotateresults,
+        m_rotatereslutpoints,
+        m_rotatereslutangles,
+        m_rotateshaperesults))
+    {
         return -9999;
+    }
+    return static_cast<int>(m_rotateshaperesults[inum].getpointscent().Y());
 }
 
 void fastmatch::getresultcentpoints(void* apoints)
@@ -4694,7 +5027,11 @@ void fastmatch::getresultcentpoints(void* apoints)
     if (nullptr == points)
         return;
     points->clear();
-    int isize = static_cast<int>(m_rotateshaperesults.size());
+    const int isize = static_cast<int>(RotateResultSharedCount(
+        m_rotateresults,
+        m_rotatereslutpoints,
+        m_rotatereslutangles,
+        m_rotateshaperesults));
     for (int i = 0; i < isize; i++)
     {
         double dx = m_rotateshaperesults[i].getpointscent().X();
@@ -4721,15 +5058,16 @@ void fastmatch::getrotateresultrectpoints(std::vector<cv::Point2f>& points)
 double fastmatch::getmaxresult()
 {
     if (m_resultnums.size() > 0)
-    { 
-        int itotalsize = static_cast<int>(Findline::getpatternpathA().ElementCount());
-        double dpercent = m_resultnums.at(m_resultnums.size() - 1) / (1.0 * itotalsize);
-        return dpercent;
+    {
+        const int total_size = static_cast<int>(Findline::getpatternpathA().ElementCount());
+        if (total_size <= 0)
+        {
+            return 0.0;
+        }
+        return m_resultnums.at(m_resultnums.size() - 1) / static_cast<double>(total_size);
     }
 
-    else
-        return 0;
-
+    return 0.0;
 }
 int fastmatch::geteasyobjectw()
 {
@@ -4742,46 +5080,46 @@ int fastmatch::geteasyobjectb()
 
 int fastmatch::getmodeleasyobjectw_l72(int i)
 {
-    return m_easyobjectmodels_l72[i].s_iwobjnum;
+    return EasyObjectWidthAt(m_easyobjectmodels_l72, i);
 }
 int fastmatch::getmodeleasyobjectb_l72(int i)
 {
-    return m_easyobjectmodels_l72[i].s_ibobjnum;
+    return EasyObjectBlackCountAt(m_easyobjectmodels_l72, i);
 }
 
 int fastmatch::getmodeleasyobjectw_l36(int i)
 {
-    return m_easyobjectmodels_l36[i].s_iwobjnum;
+    return EasyObjectWidthAt(m_easyobjectmodels_l36, i);
 }
 int fastmatch::getmodeleasyobjectb_l36(int i)
 {
-    return m_easyobjectmodels_l36[i].s_ibobjnum;
+    return EasyObjectBlackCountAt(m_easyobjectmodels_l36, i);
 }
 
 int fastmatch::getmodeleasyobjectw_l12(int i)
 {
-    return m_easyobjectmodels_l12[i].s_iwobjnum;
+    return EasyObjectWidthAt(m_easyobjectmodels_l12, i);
 }
 int fastmatch::getmodeleasyobjectb_l12(int i)
 {
-    return m_easyobjectmodels_l12[i].s_ibobjnum;
+    return EasyObjectBlackCountAt(m_easyobjectmodels_l12, i);
 }
 
 int fastmatch::getmodeleasyobjectw_l3(int i)
 {
-    return m_easyobjectmodels_l3[i].s_iwobjnum;
+    return EasyObjectWidthAt(m_easyobjectmodels_l3, i);
 }
 int fastmatch::getmodeleasyobjectb_l3(int i)
 {
-    return m_easyobjectmodels_l3[i].s_ibobjnum;
+    return EasyObjectBlackCountAt(m_easyobjectmodels_l3, i);
 }
 int fastmatch::getmodeleasyobjectw_l6(int i)
 {
-    return m_easyobjectmodels_l6[i].s_iwobjnum;
+    return EasyObjectWidthAt(m_easyobjectmodels_l6, i);
 }
 int fastmatch::getmodeleasyobjectb_l6(int i)
 {
-    return m_easyobjectmodels_l6[i].s_ibobjnum;
+    return EasyObjectBlackCountAt(m_easyobjectmodels_l6, i);
 }
 
 void fastmatch::setrelationrectfromresultnum(int inum)
@@ -4794,7 +5132,7 @@ void fastmatch::setrelationrectfrom_matchresult(void* pmatch)
     if (0 != m_prelationmatch)
     {
         int inum = m_prelationmatch->m_resultrects.size();
-        if (m_irelationresultnum < inum)
+        if (m_irelationresultnum >= 0 && m_irelationresultnum < inum)
         {
             m_irelationrect = m_prelationmatch->m_resultrects.getrect(m_irelationresultnum);
         }
@@ -4831,5 +5169,7 @@ void fastmatch::setrelationtorect()
 }
 void fastmatch::shapesetroi(void* pshape)
 {
+    if (pshape == nullptr)
+        return;
     Shape::shapesetroi(pshape);
 }

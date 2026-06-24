@@ -23,6 +23,72 @@ struct FittedLine
     double angle = 0.0;
 };
 
+double FiniteOr(double value, double fallback)
+{
+    return std::isfinite(value) ? value : fallback;
+}
+
+double NonNegativeOr(double value, double fallback = 0.0)
+{
+    return std::isfinite(value) && value >= 0.0 ? value : fallback;
+}
+
+int ClampNonNegativeInt(int value)
+{
+    return std::max(0, value);
+}
+
+int ClampPositiveInt(int value, int fallback = 1)
+{
+    return value > 0 ? value : fallback;
+}
+
+void NormalizeRange(int& minimum, int& maximum)
+{
+    minimum = ClampNonNegativeInt(minimum);
+    maximum = ClampNonNegativeInt(maximum);
+    if (maximum < minimum)
+    {
+        maximum = minimum;
+    }
+}
+
+double NormalizeUnitRatio(double value, double fallback)
+{
+    if (!std::isfinite(value))
+    {
+        return fallback;
+    }
+    return std::max(0.0, std::min(1.0, value));
+}
+
+gp_Rectangle NormalizeRectangle(const gp_Rectangle& rect)
+{
+    const double x0 = FiniteOr(rect.TopLeft().X(), 0.0);
+    const double y0 = FiniteOr(rect.TopLeft().Y(), 0.0);
+    const double x1 = FiniteOr(rect.BottomRight().X(), x0);
+    const double y1 = FiniteOr(rect.BottomRight().Y(), y0);
+    return gp_Rectangle(
+        gp_Pnt(std::min(x0, x1), std::min(y0, y1), 0.0),
+        gp_Pnt(std::max(x0, x1), std::max(y0, y1), 0.0));
+}
+
+bool HasPositiveArea(const gp_Rectangle& rect)
+{
+    return std::isfinite(rect.Width()) && std::isfinite(rect.Height()) &&
+        std::fabs(rect.Width()) > 0.0 && std::fabs(rect.Height()) > 0.0;
+}
+
+int RoundNonNegativeToInt(double value)
+{
+    if (!std::isfinite(value) || value <= 0.0)
+    {
+        return 0;
+    }
+    const double max_int = static_cast<double>(std::numeric_limits<int>::max());
+    return static_cast<int>(std::min(max_int, std::round(value)));
+}
+
 PointsShape CollectLinePoints(Findline& finder)
 {
     PointsShape points;
@@ -116,6 +182,8 @@ int SelectGauge(const gp_Rectangle& rect, int manual_gauge)
 
 double NormalizeLineAngleDelta(double a, double b)
 {
+    if (!std::isfinite(a) || !std::isfinite(b))
+        return 0.0;
     double delta = std::fabs(a - b);
     const double kPi = 3.14159265358979323846;
     while (delta > kPi)
@@ -160,16 +228,19 @@ double ComputeRectScore(const FindRect::RectLearnResult& result)
         const double height_ratio = std::fabs(result.rect.Height()) / std::max(1.0, std::fabs(result.seed_rect.Height()));
         seed_penalty = (std::fabs(width_ratio - 1.0) + std::fabs(height_ratio - 1.0)) * 20.0;
     }
-    return top_score + bottom_score + left_score + right_score - parallel_penalty - orthogonal_penalty - seed_penalty;
+    const double score = top_score + bottom_score + left_score + right_score - parallel_penalty - orthogonal_penalty - seed_penalty;
+    return std::isfinite(score) ? score : -std::numeric_limits<double>::max();
 }
 
 gp_Rectangle MergeRectWithSeed(const gp_Rectangle& learned_rect, const gp_Rectangle& seed_rect)
 {
-    const double min_x = std::min(learned_rect.TopLeft().X(), seed_rect.TopLeft().X());
-    const double min_y = std::min(learned_rect.TopLeft().Y(), seed_rect.TopLeft().Y());
-    const double max_x = std::max(learned_rect.BottomRight().X(), seed_rect.BottomRight().X());
-    const double max_y = std::max(learned_rect.BottomRight().Y(), seed_rect.BottomRight().Y());
-    return gp_Rectangle(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0));
+    const gp_Rectangle safe_learned = NormalizeRectangle(learned_rect);
+    const gp_Rectangle safe_seed = NormalizeRectangle(seed_rect);
+    const double min_x = std::min(safe_learned.TopLeft().X(), safe_seed.TopLeft().X());
+    const double min_y = std::min(safe_learned.TopLeft().Y(), safe_seed.TopLeft().Y());
+    const double max_x = std::max(safe_learned.BottomRight().X(), safe_seed.BottomRight().X());
+    const double max_y = std::max(safe_learned.BottomRight().Y(), safe_seed.BottomRight().Y());
+    return NormalizeRectangle(gp_Rectangle(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0)));
 }
 
 gp_Rectangle EstimateSeedRect(Image& image, const gp_Rectangle& working_rect, int threshold)
@@ -186,7 +257,11 @@ gp_Rectangle EstimateSeedRect(Image& image, const gp_Rectangle& working_rect, in
     if (roi.width <= 0 || roi.height <= 0)
         return working_rect;
 
-    cv::Mat roi_image = image.getmat()(roi);
+    cv::Mat source = image.getmat();
+    if (source.empty())
+        return working_rect;
+
+    cv::Mat roi_image = source(roi);
     cv::Mat gray;
     if (roi_image.channels() == 3)
         cv::cvtColor(roi_image, gray, cv::COLOR_BGR2GRAY);
@@ -329,6 +404,8 @@ void FindRect::drawshape()
 void FindRect::shapesetroi(void* pshape)
 {
     Shape* pshape0 = static_cast<Shape*>(pshape);
+    if (pshape0 == nullptr)
+        return;
     FindRect::setrect(static_cast<int>(pshape0->rect().TopLeft().X()),
                       static_cast<int>(pshape0->rect().TopLeft().Y()),
                       static_cast<int>(pshape0->rect().Width()),
@@ -337,7 +414,7 @@ void FindRect::shapesetroi(void* pshape)
 
 void FindRect::setthre(int ithre)
 {
-    m_ithreshold = ithre;
+    m_ithreshold = std::max(1, ithre);
 }
 
 int FindRect::thre() const
@@ -347,7 +424,7 @@ int FindRect::thre() const
 
 void FindRect::setcomparegap(int igap)
 {
-    m_icomparegap = igap;
+    m_icomparegap = ClampPositiveInt(igap, 1);
 }
 
 int FindRect::getcomparegap() const
@@ -357,7 +434,7 @@ int FindRect::getcomparegap() const
 
 void FindRect::setlinegap(int igap)
 {
-    m_ilinegap = igap;
+    m_ilinegap = ClampPositiveInt(igap, 1);
 }
 
 int FindRect::linegap() const
@@ -367,7 +444,7 @@ int FindRect::linegap() const
 
 void FindRect::setmethod(int imethod)
 {
-    m_imethod = imethod;
+    m_imethod = std::max(0, imethod);
 }
 
 int FindRect::method() const
@@ -377,7 +454,7 @@ int FindRect::method() const
 
 void FindRect::setgauge(int igauge)
 {
-    m_igauge = igauge;
+    m_igauge = ClampNonNegativeInt(igauge);
 }
 
 int FindRect::gauge() const
@@ -387,24 +464,28 @@ int FindRect::gauge() const
 
 void FindRect::setfindsetting(int ifindset)
 {
-    m_ifindset = ifindset;
+    m_ifindset = std::max(0, ifindset);
 }
 
 void FindRect::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 {
-    m_ifilterborw = ifilterborw;
+    m_ifilterborw = std::max(0, ifilterborw);
+    NormalizeRange(ifiltermin, ifiltermax);
     m_ifiltermin = ifiltermin;
     m_ifiltermax = ifiltermax;
 }
 
 void FindRect::setminmaxarea(int imin, int imax)
 {
+    NormalizeRange(imin, imax);
     m_iminarea = imin;
     m_imaxarea = imax;
 }
 
 void FindRect::setminmaxwh(int iminw, int imaxw, int iminh, int imaxh)
 {
+    NormalizeRange(iminw, imaxw);
+    NormalizeRange(iminh, imaxh);
     m_iminobjw = iminw;
     m_imaxobjw = imaxw;
     m_iminobjh = iminh;
@@ -413,12 +494,12 @@ void FindRect::setminmaxwh(int iminw, int imaxw, int iminh, int imaxh)
 
 void FindRect::setpolygonepsilon(double epsilon_ratio)
 {
-    m_depsilonratio = epsilon_ratio;
+    m_depsilonratio = NormalizeUnitRatio(epsilon_ratio, 0.04);
 }
 
 void FindRect::setfillratio(double min_fill_ratio)
 {
-    m_dminfillratio = min_fill_ratio;
+    m_dminfillratio = NormalizeUnitRatio(min_fill_ratio, 0.75);
 }
 
 void FindRect::measure(void* pimage)
@@ -439,7 +520,7 @@ void FindRect::Measure(Image& image)
     const int roi_h = std::max(0, static_cast<int>(std::round(std::fabs(roi_rect.Height()))));
     if (roi_w <= 0 || roi_h <= 0)
         return;
-    if (roi_x + roi_w > image.getWidth() || roi_y + roi_h > image.getHeight())
+    if (roi_x > image.getWidth() || roi_y > image.getHeight() || roi_w > image.getWidth() - roi_x || roi_h > image.getHeight() - roi_y)
         return;
 
     RectLearnResult coarse_result;
@@ -450,7 +531,7 @@ void FindRect::Measure(Image& image)
     if (RefineRectOnce(image, coarse_result.rect, refined_result) && refined_result.score >= coarse_result.score)
         coarse_result = refined_result;
 
-    const double area = std::fabs(coarse_result.rect.Width() * coarse_result.rect.Height());
+    const double area = NonNegativeOr(std::fabs(coarse_result.rect.Width() * coarse_result.rect.Height()));
     if (area < m_iminarea || area > m_imaxarea)
         return;
 
@@ -461,7 +542,7 @@ void FindRect::Measure(Image& image)
 bool FindRect::LearnRectOnce(Image& image, const gp_Rectangle& working_rect, RectLearnResult& result)
 {
     result = RectLearnResult();
-    const gp_Rectangle seed_rect = EstimateSeedRect(image, working_rect, m_ithreshold);
+    const gp_Rectangle seed_rect = NormalizeRectangle(EstimateSeedRect(image, working_rect, m_ithreshold));
     result.seed_rect = seed_rect;
     const int working_x = std::max(0, static_cast<int>(std::round(seed_rect.TopLeft().X())));
     const int working_y = std::max(0, static_cast<int>(std::round(seed_rect.TopLeft().Y())));
@@ -522,6 +603,8 @@ bool FindRect::LearnRectOnce(Image& image, const gp_Rectangle& working_rect, Rec
     const gp_Rectangle learned_rect(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0));
     result.rect = MergeRectWithSeed(learned_rect, seed_rect);
     result.score = ComputeRectScore(result);
+    if (!std::isfinite(result.score))
+        return false;
     return true;
 }
 
@@ -532,7 +615,7 @@ bool FindRect::RefineRectOnce(Image& image, const gp_Rectangle& coarse_rect, Rec
     const double min_y = coarse_rect.TopLeft().Y() - pad;
     const double max_x = coarse_rect.BottomRight().X() + pad;
     const double max_y = coarse_rect.BottomRight().Y() + pad;
-    gp_Rectangle expanded(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0));
+    gp_Rectangle expanded = NormalizeRectangle(gp_Rectangle(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0)));
     return LearnRectOnce(image, expanded, result);
 }
 

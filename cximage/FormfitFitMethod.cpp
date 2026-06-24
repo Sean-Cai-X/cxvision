@@ -5,6 +5,12 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <limits>
+#include <opencv2/core.hpp>
+
+#if defined(CXCORE_HAS_EIGEN)
+#include <Eigen/Dense>
+#endif
 
 namespace cxcore
 {
@@ -16,6 +22,64 @@ namespace
 double ClampNonNegative(double value)
 {
     return value < 0.0 ? 0.0 : value;
+}
+
+bool IsFinite(double value)
+{
+    return std::isfinite(value);
+}
+
+double InfiniteCost()
+{
+    return std::numeric_limits<double>::infinity();
+}
+
+bool HasUsableBounds(const FitVariable& variable)
+{
+    return IsFinite(variable.lower_bound) && IsFinite(variable.upper_bound) && variable.lower_bound < variable.upper_bound;
+}
+
+double ClampToVariableBounds(const FitVariable& variable, double value)
+{
+    if (!HasUsableBounds(variable))
+    {
+        return value;
+    }
+    return std::min(std::max(value, variable.lower_bound), variable.upper_bound);
+}
+
+double ResidualScale(const FitProblem& problem, const FitStage& stage, const FitResidual& residual)
+{
+    if (!IsFinite(residual.value) || !IsFinite(residual.weight) || !IsFinite(residual.tolerance) ||
+        !IsFinite(problem.global_weight_scale) || !IsFinite(problem.global_tolerance_scale) ||
+        !IsFinite(stage.stage_weight) || !IsFinite(stage.tolerance_scale))
+    {
+        return 0.0;
+    }
+    const double weight = ClampNonNegative(residual.weight) *
+                          std::max(0.0, problem.global_weight_scale) *
+                          std::max(0.0, stage.stage_weight);
+    if (weight <= 0.0)
+    {
+        return 0.0;
+    }
+    const double tolerance_scale = std::max(1e-9, problem.global_tolerance_scale) *
+                                   std::max(1e-9, stage.tolerance_scale);
+    const double denominator = std::max(1e-9,
+        residual.tolerance > 0.0 ? residual.tolerance * tolerance_scale : tolerance_scale);
+    return std::sqrt(weight) / denominator;
+}
+
+int FindVariableIndex(const std::vector<const FitVariable*>& variables, const std::string& variable_name)
+{
+    for (size_t i = 0; i < variables.size(); ++i)
+    {
+        if (variables[i] && variables[i]->name == variable_name)
+        {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
 }
 
 FitVariable* FindVariable(FitProblem& problem, const std::string& variable_name)
@@ -52,6 +116,59 @@ FitStage* FindStage(FitProblem& problem, const std::string& stage_id)
         }
     }
     return nullptr;
+}
+
+bool SolveLeastSquares(const std::vector<std::vector<double>>& rows, const std::vector<double>& rhs, std::vector<double>& solution)
+{
+    solution.clear();
+    if (rows.empty() || rhs.size() != rows.size() || rows.front().empty()) return false;
+    const int row_count = static_cast<int>(rows.size());
+    const int col_count = static_cast<int>(rows.front().size());
+    for (int row = 0; row < row_count; ++row)
+    {
+        if (static_cast<int>(rows[static_cast<size_t>(row)].size()) != col_count) return false;
+        if (!IsFinite(rhs[static_cast<size_t>(row)])) return false;
+        for (int col = 0; col < col_count; ++col)
+        {
+            if (!IsFinite(rows[static_cast<size_t>(row)][static_cast<size_t>(col)])) return false;
+        }
+    }
+#if defined(CXCORE_HAS_EIGEN)
+    Eigen::MatrixXd eigen_matrix(row_count, col_count);
+    Eigen::VectorXd eigen_rhs(row_count);
+    for (int row = 0; row < row_count; ++row)
+    {
+        for (int col = 0; col < col_count; ++col) eigen_matrix(row, col) = rows[static_cast<size_t>(row)][static_cast<size_t>(col)];
+        eigen_rhs(row) = rhs[static_cast<size_t>(row)];
+    }
+    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(eigen_matrix);
+    if (qr.rank() > 0)
+    {
+        const Eigen::VectorXd eigen_solution = qr.solve(eigen_rhs);
+        if (eigen_solution.size() == col_count && eigen_solution.allFinite())
+        {
+            solution.assign(eigen_solution.data(), eigen_solution.data() + eigen_solution.size());
+            return true;
+        }
+    }
+#endif
+    cv::Mat matrix(row_count, col_count, CV_64F);
+    cv::Mat vector(row_count, 1, CV_64F);
+    for (int row = 0; row < row_count; ++row)
+    {
+        for (int col = 0; col < col_count; ++col) matrix.at<double>(row, col) = rows[static_cast<size_t>(row)][static_cast<size_t>(col)];
+        vector.at<double>(row, 0) = rhs[static_cast<size_t>(row)];
+    }
+    cv::Mat solved;
+    if (!cv::solve(matrix, vector, solved, cv::DECOMP_SVD)) return false;
+    solution.assign(static_cast<size_t>(col_count), 0.0);
+    for (int i = 0; i < col_count; ++i)
+    {
+        const double value = solved.at<double>(i, 0);
+        if (!IsFinite(value)) return false;
+        solution[static_cast<size_t>(i)] = value;
+    }
+    return true;
 }
 
 bool StageContainsResidual(const FitStage& stage, const FitResidual& residual)
@@ -97,6 +214,122 @@ double ComputeStageMaxResidualValue(const FitProblem& problem, const FitStage& s
     }
     return max_value;
 }
+
+bool AppendLinearizedResidualRow(const FitProblem& problem,
+                                 const FitStage& stage,
+                                 const FitResidual& residual,
+                                 const std::vector<const FitVariable*>& variables,
+                                 std::vector<std::vector<double>>& rows,
+                                 std::vector<double>& rhs)
+{
+    if (!StageContainsResidual(stage, residual) || residual.jacobian_terms.empty() || !IsFinite(residual.value))
+    {
+        return false;
+    }
+    const double scale = ResidualScale(problem, stage, residual);
+    if (scale <= 0.0 || !IsFinite(scale))
+    {
+        return false;
+    }
+    std::vector<double> row(variables.size(), 0.0);
+    bool used = false;
+    for (const FitJacobianTerm& term : residual.jacobian_terms)
+    {
+        const int index = FindVariableIndex(variables, term.variable_name);
+        if (index < 0 || !IsFinite(term.coefficient))
+        {
+            continue;
+        }
+        row[static_cast<size_t>(index)] += term.coefficient * scale;
+        used = true;
+    }
+    if (!used) return false;
+    rows.push_back(row);
+    rhs.push_back(-residual.value * scale);
+    return true;
+}
+
+void BuildLinearizedLeastSquaresSystem(const FitProblem& problem,
+                                       const FitStage& stage,
+                                       const std::vector<const FitVariable*>& variables,
+                                       std::vector<std::vector<double>>& rows,
+                                       std::vector<double>& rhs)
+{
+    rows.clear();
+    rhs.clear();
+    for (const FitResidual& residual : problem.residuals)
+    {
+        AppendLinearizedResidualRow(problem, stage, residual, variables, rows, rhs);
+    }
+}
+
+std::vector<double> ScaleDelta(const std::vector<double>& delta, double scale)
+{
+    std::vector<double> scaled = delta;
+    for (double& value : scaled)
+    {
+        value *= scale;
+    }
+    return scaled;
+}
+
+double DeltaNorm(const std::vector<double>& delta)
+{
+    double sum = 0.0;
+    for (double value : delta)
+    {
+        if (!IsFinite(value)) return InfiniteCost();
+        sum += value * value;
+    }
+    return std::sqrt(sum);
+}
+
+void ApplyLinearizedDelta(FitProblem& problem,
+                          const std::vector<const FitVariable*>& variables,
+                          const std::vector<double>& delta)
+{
+    for (FitVariable& variable : problem.variables)
+    {
+        const int index = FindVariableIndex(variables, variable.name);
+        if (variable.locked || index < 0 || static_cast<size_t>(index) >= delta.size())
+        {
+            continue;
+        }
+        const double next_value = variable.value + delta[static_cast<size_t>(index)];
+        if (IsFinite(next_value))
+        {
+            variable.value = ClampToVariableBounds(variable, next_value);
+        }
+    }
+}
+
+void UpdateLinearizedResiduals(FitProblem& problem,
+                               const FitStage& stage,
+                               const std::vector<const FitVariable*>& variables,
+                               const std::vector<double>& delta)
+{
+    for (FitResidual& residual : problem.residuals)
+    {
+        if (!StageContainsResidual(stage, residual) || residual.jacobian_terms.empty())
+        {
+            continue;
+        }
+        double correction = 0.0;
+        for (const FitJacobianTerm& term : residual.jacobian_terms)
+        {
+            const int index = FindVariableIndex(variables, term.variable_name);
+            if (index < 0 || static_cast<size_t>(index) >= delta.size() || !IsFinite(term.coefficient))
+            {
+                continue;
+            }
+            correction += term.coefficient * delta[static_cast<size_t>(index)];
+        }
+        if (IsFinite(correction))
+        {
+            residual.value += correction;
+        }
+    }
+}
 }
 
 CompositeFitter::CompositeFitter(std::shared_ptr<IOptimizerBackend> backend)
@@ -117,8 +350,9 @@ FitResult CompositeFitter::SolveComposite(const FitProblem& problem)
     }
 
     FitResult final_result = MakeEmptyFitResult(problem, "empty", "no_stage_executed");
-    final_result.solved_variables = problem.variables;
-    final_result.residuals = problem.residuals;
+    FitProblem stage_problem = problem;
+    final_result.solved_variables = stage_problem.variables;
+    final_result.residuals = stage_problem.residuals;
 
     for (const FitStage& stage : problem.stages)
     {
@@ -127,7 +361,7 @@ FitResult CompositeFitter::SolveComposite(const FitProblem& problem)
             continue;
         }
 
-        FitResult stage_result = m_backend->Optimize(problem, stage);
+        FitResult stage_result = m_backend->Optimize(stage_problem, stage);
 
         FitStageSummary stage_summary;
         stage_summary.stage_id = stage.stage_id;
@@ -149,6 +383,8 @@ FitResult CompositeFitter::SolveComposite(const FitProblem& problem)
 
         const std::vector<FitStageSummary> accumulated_summaries = final_result.stage_summaries;
         final_result = stage_result;
+        stage_problem.variables = stage_result.solved_variables;
+        stage_problem.residuals = stage_result.residuals;
         final_result.stage_summaries = accumulated_summaries;
         final_result.stage_summaries.push_back(stage_summary);
     }
@@ -175,6 +411,111 @@ FitResult PassthroughOptimizerBackend::Optimize(const FitProblem& problem, const
     result.iterations = std::max(1, stage.max_iterations);
     result.solved_variables = problem.variables;
     result.residuals = problem.residuals;
+    return result;
+}
+
+FitResult LinearizedLeastSquaresOptimizerBackend::Optimize(const FitProblem& problem, const FitStage& stage)
+{
+    FitProblem current = problem;
+    double current_cost = ComputeStageWeightedResidualCost(current, stage);
+    if (!IsFinite(current_cost))
+    {
+        return MakeEmptyFitResult(problem, "invalid_residual", "linearized_least_squares_non_finite_cost");
+    }
+
+    const int max_iterations = std::max(1, stage.max_iterations);
+    int completed_iterations = 0;
+    for (int iteration = 0; iteration < max_iterations; ++iteration)
+    {
+        std::vector<const FitVariable*> active_variables;
+        for (const FitVariable& variable : current.variables)
+        {
+            if (!variable.locked && IsFinite(variable.value))
+            {
+                active_variables.push_back(&variable);
+            }
+        }
+        if (active_variables.empty())
+        {
+            break;
+        }
+
+        std::vector<std::vector<double>> rows;
+        std::vector<double> rhs;
+        BuildLinearizedLeastSquaresSystem(current, stage, active_variables, rows, rhs);
+        if (rows.empty())
+        {
+            break;
+        }
+
+        std::vector<double> delta;
+        if (!SolveLeastSquares(rows, rhs, delta) || delta.size() != active_variables.size())
+        {
+            if (completed_iterations == 0)
+            {
+                return MakeEmptyFitResult(problem, "linear_solver_failed", "linearized_least_squares_singular");
+            }
+            break;
+        }
+
+        const double raw_delta_norm = DeltaNorm(delta);
+        if (!IsFinite(raw_delta_norm))
+        {
+            if (completed_iterations == 0)
+            {
+                return MakeEmptyFitResult(problem, "linear_solver_failed", "linearized_least_squares_non_finite_delta");
+            }
+            break;
+        }
+
+        bool accepted = false;
+        for (int damping_attempt = 0; damping_attempt < 8; ++damping_attempt)
+        {
+            const double damping = 1.0 / static_cast<double>(1 << damping_attempt);
+            const std::vector<double> damped_delta = ScaleDelta(delta, damping);
+            FitProblem candidate = current;
+            ApplyLinearizedDelta(candidate, active_variables, damped_delta);
+            UpdateLinearizedResiduals(candidate, stage, active_variables, damped_delta);
+            const double candidate_cost = ComputeStageWeightedResidualCost(candidate, stage);
+            if (!IsFinite(candidate_cost))
+            {
+                continue;
+            }
+            if (candidate_cost <= current_cost || std::fabs(candidate_cost - current_cost) <= 1e-12)
+            {
+                const double improvement = current_cost - candidate_cost;
+                current = candidate;
+                current_cost = candidate_cost;
+                ++completed_iterations;
+                accepted = true;
+                if (raw_delta_norm * damping <= 1e-9 || std::fabs(improvement) <= 1e-12)
+                {
+                    iteration = max_iterations;
+                }
+                break;
+            }
+        }
+
+        if (!accepted)
+        {
+            break;
+        }
+    }
+
+    if (completed_iterations == 0)
+    {
+        return PassthroughOptimizerBackend().Optimize(problem, stage);
+    }
+
+    FitResult result;
+    result.success = true;
+    result.status = "ok";
+    result.failure_mode = "none";
+    result.final_cost = ComputeStageWeightedResidualCost(current, stage);
+    result.max_residual = ComputeStageMaxResidualValue(current, stage);
+    result.iterations = completed_iterations;
+    result.solved_variables = current.variables;
+    result.residuals = current.residuals;
     return result;
 }
 
@@ -421,9 +762,15 @@ double ComputeWeightedResidualCost(const FitProblem& problem)
     double cost = 0.0;
     for (const FitResidual& residual : problem.residuals)
     {
+        if (!IsFinite(residual.value) || !IsFinite(residual.weight) || !IsFinite(residual.tolerance) ||
+            !IsFinite(problem.global_weight_scale) || !IsFinite(problem.global_tolerance_scale))
+        {
+            return InfiniteCost();
+        }
         const double weight = ClampNonNegative(residual.weight) * std::max(0.0, problem.global_weight_scale);
         const double scaled = residual.value / std::max(1e-9, residual.tolerance > 0.0 ? residual.tolerance * problem.global_tolerance_scale : problem.global_tolerance_scale);
         cost += weight * scaled * scaled;
+        if (!IsFinite(cost)) return InfiniteCost();
     }
     return cost;
 }
@@ -433,6 +780,10 @@ double ComputeMaxResidualValue(const FitProblem& problem)
     double max_value = 0.0;
     for (const FitResidual& residual : problem.residuals)
     {
+        if (!IsFinite(residual.value))
+        {
+            return InfiniteCost();
+        }
         max_value = std::max(max_value, std::fabs(residual.value));
     }
     return max_value;

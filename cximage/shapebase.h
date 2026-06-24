@@ -206,7 +206,7 @@ public:
     double getx(int inum);
     double gety(int inum);
 
-    gp_Pnt getpointscent();
+    gp_Pnt getpointscent() const;
     void pointsABadd(void *pointsB);
     void pointslineadd(void *pointsB);
 

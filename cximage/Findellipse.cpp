@@ -11,16 +11,45 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
  
 namespace
 {
+int ClampSizeToInt(std::size_t value)
+{
+    const std::size_t max_value = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return value > max_value ? std::numeric_limits<int>::max() : static_cast<int>(value);
+}
+
+int RoundToInt(double value)
+{
+    if (!std::isfinite(value))
+        return 0;
+    const double clamped = std::min(
+        std::max(value, static_cast<double>(std::numeric_limits<int>::min())),
+        static_cast<double>(std::numeric_limits<int>::max()));
+    return static_cast<int>(std::lround(clamped));
+}
+
+int ClampLongLongToInt(long long value)
+{
+    if (value < static_cast<long long>(std::numeric_limits<int>::min()))
+        return std::numeric_limits<int>::min();
+    if (value > static_cast<long long>(std::numeric_limits<int>::max()))
+        return std::numeric_limits<int>::max();
+    return static_cast<int>(value);
+}
+
 int ComputeEllipseLineStep(int gap_degrees, int point_count)
 {
     if (gap_degrees <= 0 || point_count <= 0)
         return 1;
 
     const double angle_rate = gap_degrees / 360.0;
-    const int step = static_cast<int>(angle_rate * point_count);
+    const int step = RoundToInt(angle_rate * static_cast<double>(point_count));
     return step > 0 ? step : 1;
 }
 }
@@ -66,7 +95,7 @@ void Findellipse::setshow(int ishow)
 {
     if (ishow == 0)
     {
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
             m_lines[i].setshow(false);
         Shape::setshow(ishow);
         return;
@@ -81,12 +110,12 @@ void Findellipse::setshow(int ishow)
     }
     if (0x04 == ishow)
     {     
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
             m_lines[i].setshow(true);
     }
     else
     {
-        for (int i = 0; i < m_lines.size(); i++)
+        for (std::size_t i = 0; i < m_lines.size(); ++i)
             m_lines[i].setshow(false);
     } 
     Shape::setshow(ishow);
@@ -101,57 +130,55 @@ void Findellipse::clear()
 }
 void Findellipse::Setgap(int gap)
 {
-
-    for (int i = 0; i < m_lines.size(); i++)
+    m_igap = gap;
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
-    int isize = getpath().ElementCount();
-    if (m_igap > 0)
+    m_lines.clear();
+
+    const int isize = ClampSizeToInt(getpath().ElementCount());
+    if (m_igap > 0 && isize > 0)
     {
         LineShape aline1;
-        int iadd = 0;
-        for (int i = 0; i < isize; )
+        const int igapadd = ComputeEllipseLineStep(m_igap, isize);
+        for (int i = 0; i < isize; i += igapadd)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
             m_lines.push_back(aline1);
-            m_lines[iadd].setline(getcent().X(), getcent().Y(), apoint.X(), apoint.Y());
-            iadd = iadd + 1;
-            i = i + m_igap;
+            m_lines[m_lines.size() - 1].setline(RoundToInt(getcent().X()), RoundToInt(getcent().Y()), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
         }
     }
-
 }
 void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 {
     Shape::setellipse(icentx, icenty, ipax, ipay);
 
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
     m_lines.clear();
-    int isize = getpath().ElementCount();
-    if (m_igap > 0)
+    const int isize = ClampSizeToInt(getpath().ElementCount());
+    if (m_igap > 0 && isize > 0)
     {
         LineShape aline1;
-        int iadd = 0;
-        int icx0 = (icentx + ipax)/2;
-        int icy0 = (icenty + ipay)/2;
-        for (int i = 0; i < isize; )
+        const int igapadd = ComputeEllipseLineStep(m_igap, isize);
+        int icx0 = (icentx + ipax) / 2;
+        int icy0 = (icenty + ipay) / 2;
+        for (int i = 0; i < isize; i += igapadd)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
             m_lines.push_back(aline1);
-            m_lines[iadd].setline(icx0, icy0, apoint.X(), apoint.Y()); 
-            m_lines[iadd].setPercent(m_dsamplerate);
-            iadd = iadd + 1;
-            i = i + m_igap;
+            m_lines[m_lines.size() - 1].setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
         }
     }
     /*
     m_Line.setline(icentx, icenty, ipax, ipay); 
     m_Line.setshow(false); 
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }  
@@ -180,7 +207,7 @@ void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idi
 {
     /*
     Shape::setellipse2(icentx, icenty, ipax, ipay,  idis);
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
@@ -207,40 +234,38 @@ void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idi
     }
     */
     Shape::setellipse2(icentx, icenty, ipax, ipay, idis);
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
     m_lines.clear();
-    int isize = getpath().ElementCount();
-    if (m_igap > 0)
+    const int isize = ClampSizeToInt(getpath().ElementCount());
+    if (m_igap > 0 && isize > 0)
     {
         LineShape aline1;
         const int igapadd = ComputeEllipseLineStep(m_igap, isize);
-        int iadd = 0;
-        int icx0 = icentx ;
-        int icy0 = icenty ;
-        for (int i = 0; i < isize; )
+        int icx0 = icentx;
+        int icy0 = icenty;
+        for (int i = 0; i < isize; i += igapadd)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
-            m_lines.push_back(aline1);
-            aline1.setline(icx0, icy0, apoint.X(), apoint.Y());
+            aline1.setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
             std::vector<gp_Pnt> acrosspoints = aline1.getpath().IntersectPaths(getpath2());
-            if (acrosspoints.size() > 0)
+            if (!acrosspoints.empty())
             {
-                m_lines[m_lines.size() - 1].setline(acrosspoints[0].X(), acrosspoints[0].Y(), apoint.X(), apoint.Y());
-                m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
+                LineShape scan_line;
+                scan_line.setline(RoundToInt(acrosspoints[0].X()), RoundToInt(acrosspoints[0].Y()), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+                scan_line.setPercent(m_dsamplerate);
+                m_lines.push_back(scan_line);
             }
             aline1.clear();
-            iadd = iadd + 1;
-            i = i + igapadd;
         }
     }
      
     /*
     m_Line.setline(icentx, icenty, ipax, ipay);
     m_Line.setshow(false);
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
     }
@@ -272,12 +297,12 @@ void Findellipse::translate(int ix,int iy)
 }
 void Findellipse::Translate(const gp_Vec& translationVector)
 { 
-   int ix0 = translationVector.X();
-   int iy0 = translationVector.Y();
+   int ix0 = RoundToInt(translationVector.X());
+   int iy0 = RoundToInt(translationVector.Y());
    getpath().Translate(translationVector);
     m_Line.Move(ix0, iy0);
     LineShape aline1, aline2;
-    for (int i = 0; i < m_lines.size(); i++)
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
     { 
         m_lines[i].Move(ix0, iy0);
     } 
@@ -328,7 +353,7 @@ void Findellipse::edgepattern(Image& image)
 void Findellipse::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRect();
-    m_modelpoints.Move(-arect1.TopLeft().X(), -arect1.TopLeft().Y());
+    m_modelpoints.Move(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 }
 void Findellipse::savepatternfile(const char* pchar)
 {
@@ -348,7 +373,7 @@ void Findellipse::patterngap2gap(int inewgap)
 }
 void Findellipse::patternrootgrid(double itype, double drate, double ilevel)
 {
-    m_modelpoints.keysrootgrid(itype, drate, ilevel);
+    m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
 void Findellipse::patterntranform(int igap, int itype, int isgap, int iline)
 {
@@ -356,15 +381,15 @@ void Findellipse::patterntranform(int igap, int itype, int isgap, int iline)
 }
 void Findellipse::patternzoom(double dx, double dy, double igap, double itype)
 {
-    m_modelpoints.patternzoom(dx, dy, igap, itype);
+    m_modelpoints.patternzoom(RoundToInt(dx), RoundToInt(dy), RoundToInt(igap), RoundToInt(itype));
 }
 void Findellipse::patternrotate(double dangle)
 {
-    m_modelpoints.Rotate(dangle);
+    m_modelpoints.Rotate(RoundToInt(dangle));
 }
 void Findellipse::modelzoom(double dx, double dy)
 {
-    m_modelpoints.Zoom(dx, dy);
+    m_modelpoints.Zoom(RoundToInt(dx), RoundToInt(dy));
 }
 gp_Path& Findellipse::getpatternpath()
 {
@@ -377,6 +402,8 @@ PointsShape& Findellipse::getpattern()
 void Findellipse::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     edgepattern(*pgetimage);
 }
 void Findellipse::drawshape()
@@ -429,7 +456,7 @@ void Findellipse::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 }
 void Findellipse::MeasureT(void *pimage)
 {
-
+    (void)pimage;
 }
 void Findellipse::Measure(Image& image)
 {
@@ -439,7 +466,9 @@ void Findellipse::Measure(Image& image)
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
         return;//error process
     m_measurepoints.clear();
-    int isize = m_lines.size();
+    int isize = ClampSizeToInt(m_lines.size());
+    if (isize <= 0 || g_pbackimage == nullptr)
+        return;
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
@@ -455,16 +484,16 @@ void Findellipse::Measure(Image& image)
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
-    if (m_ifindset & 0x01)
+    if ((m_ifindset & 0x01) && g_pbackfindobject != nullptr)
     {
         g_pbackfindobject->setrect(0, 0, iprocessw, isize);
         g_pbackfindobject->setbrow(m_ifilterborw);//21 22
-        g_pbackfindobject->setminmaxarea(m_ifiltermin, m_ifiltermax);
+        g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)), ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
         g_pbackfindobject->Measure(*g_pbackimage);
     }
 
-    int irecordpoint[100];
-    int irecordnum = 0;
+    std::vector<int> irecordpoint;
+    irecordpoint.reserve(128);
     bool bcollectBegin = false;
 
     int icurlinenum = 0;
@@ -475,7 +504,7 @@ void Findellipse::Measure(Image& image)
     cv::Vec3b icolor = 0;
     for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++)
     {
-        irecordnum = 0;
+        irecordpoint.clear();
         icurlinenum = 0;
         bcollectBegin = false;
         for (int inumx = 0; inumx < ilineslen1; inumx++)
@@ -483,25 +512,16 @@ void Findellipse::Measure(Image& image)
             icolor = g_pbackimage->pixel(inumx, inumy);
             if ((icolor[0]) > 0)
             {
-                if (irecordnum < 100)
-                {
-                    irecordpoint[irecordnum] = inumx;
-                    irecordnum++;
-                }
-                else
-                {
-                    irecordnum = 0;
-                    break;
-                }
+                irecordpoint.push_back(inumx);
                 bcollectBegin = true;
             }
             else
             {
                 if (true == bcollectBegin
-                    && irecordnum > 0
-                    && irecordnum <= 70)
+                    && !irecordpoint.empty()
+                    && irecordpoint.size() <= 70)
                 {
-                    icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
+                    icurlineposition = m_ineedfixs + irecordpoint[(irecordpoint.size() >> 1)];
                     //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
                     icurlinenum++;
@@ -518,14 +538,14 @@ void Findellipse::Measure(Image& image)
                         }
                     }
                 }
-                irecordnum = 0;
+                irecordpoint.clear();
                 bcollectBegin = false;
             }
         }
         if (true == bcollectBegin
-            && irecordnum > 0)
+            && !irecordpoint.empty())
         {
-            icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
+            icurlineposition = m_ineedfixs + irecordpoint[(irecordpoint.size() >> 1)];
             //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
             icurlinenum++;
             if (icurlinenum == m_iselectedgenum
@@ -540,7 +560,7 @@ void Findellipse::Measure(Image& image)
                         break;
                 }
             }
-            irecordnum = 0;
+            irecordpoint.clear();
             bcollectBegin = false;
         }
 
@@ -558,10 +578,14 @@ PointsShape& Findellipse::getresultpoints()
 void Findellipse::measure(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
     Measure(*pgetimage);
 }
 void Findellipse::shapesetroi(void* pshape)
 {
+    if (pshape == nullptr)
+        return;
     Shape::shapesetroi(pshape);
 }
 void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
@@ -569,7 +593,7 @@ void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
     PointsShape resultpoints;
     resultpoints.addpoints(getresultpoints());
     vector<int> numlist;
-    int isize = resultpoints.size();
+    int isize = ClampSizeToInt(resultpoints.size());
     if (0 == isize)
         return;
     for (int i = 0; i < isize; i++)
@@ -578,13 +602,13 @@ void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
     }
     for (int i = 0; i < isize; i++)
     {
-        int ix0 = resultpoints.getx(i);
-        int iy0 = resultpoints.gety(i);
+        int ix0 = RoundToInt(resultpoints.getx(i));
+        int iy0 = RoundToInt(resultpoints.gety(i));
         if (i + 1 < isize)
             for (int j = i + 1; j < isize; j++)
             {
-                int ix1 = resultpoints.getx(j);
-                int iy1 = resultpoints.gety(j);
+                int ix1 = RoundToInt(resultpoints.getx(j));
+                int iy1 = RoundToInt(resultpoints.gety(j));
                 if (abs(ix0 - ix1) < igapx
                     && abs(iy0 - iy1) < igapy)
                 {
@@ -595,14 +619,13 @@ void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
     }
     PointsShape amodelpointsw;
     PointsShape amodelpointsh;
-    int isize1 = getresultpoints().size();
-    int isize2 = isize;
+    int isize1 = ClampSizeToInt(getresultpoints().size());
     getresultpoints().clear();
     int inum = 0;
     for (inum = 0; inum < isize1; inum++)
     {
-        int ix0 = resultpoints.getx(inum);
-        int iy0 = resultpoints.gety(inum);
+        int ix0 = RoundToInt(resultpoints.getx(inum));
+        int iy0 = RoundToInt(resultpoints.gety(inum));
         int inumsum = numlist[inum];
         if (inumsum > iclusternum)
         {

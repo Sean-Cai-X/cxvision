@@ -67,6 +67,12 @@ struct FitVariable
     bool locked = false;
 };
 
+struct FitJacobianTerm
+{
+    std::string variable_name;
+    double coefficient = 0.0;
+};
+
 struct FitResidual
 {
     std::string name;
@@ -74,6 +80,7 @@ struct FitResidual
     double value = 0.0;
     double weight = 1.0;
     double tolerance = 0.0;
+    std::vector<FitJacobianTerm> jacobian_terms;
 };
 
 struct FitParameterSpec
@@ -162,15 +169,58 @@ struct FitMethodDescriptor
     std::vector<FitParameterSpec> parameters;
 };
 
+
 struct FitMethodResult
 {
-    FitResult fit_result;
     std::string method_name;
     bool valid = false;
+    FitResult fit_result;
+    double final_cost = 0.0;
+    double max_residual = 0.0;
     int iterations = 0;
     double elapsed_ms = 0.0;
     std::vector<FitResidual> residuals;
     std::vector<FitResidual> quality_metrics;
+};
+
+struct FitCandidate
+{
+    std::string candidate_id;
+    std::string source_stage_id;
+    FitMethodType source_method_type = FitMethodType::LeastSquares;
+    bool valid = false;
+    double final_cost = 0.0;
+    double max_residual = 0.0;
+    int iterations = 0;
+    double elapsed_ms = 0.0;
+};
+
+struct FitCandidateRankItem
+{
+    std::string candidate_id;
+    int rank_index = 0;
+    double score = 0.0;
+};
+
+struct FitCandidateGroup
+{
+    std::string group_id;
+    std::string task_id;
+    std::string problem_id;
+    std::string config_id;
+    std::vector<FitCandidate> candidates;
+    int candidate_count = 0;
+    std::vector<std::string> ordered_candidate_ids;
+    int ordered_candidate_count = 0;
+    std::vector<FitCandidateRankItem> baseline_rank;
+    int ranked_candidate_count = 0;
+    std::string best_candidate_id;
+    double group_score = 0.0;
+    double rank_delta = 0.0;
+    bool fixed_point_converged = false;
+    int fixed_point_iterations = 0;
+    double fixed_point_delta = 0.0;
+    std::string convergence_status;
 };
 
 struct FitVariableSetting
@@ -273,6 +323,12 @@ private:
 };
 
 class PassthroughOptimizerBackend : public IOptimizerBackend
+{
+public:
+    FitResult Optimize(const FitProblem& problem, const FitStage& stage) override;
+};
+
+class LinearizedLeastSquaresOptimizerBackend : public IOptimizerBackend
 {
 public:
     FitResult Optimize(const FitProblem& problem, const FitStage& stage) override;

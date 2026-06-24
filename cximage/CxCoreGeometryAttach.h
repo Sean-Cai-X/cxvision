@@ -19,7 +19,10 @@ enum class GeometryObjectKind
     PointSet,
     Mask,
     Boundary,
-    Keypoints
+    Keypoints,
+    FractalPartition,
+    DistanceField,
+    Skeleton
 };
 
 enum class GeometryRole
@@ -28,6 +31,16 @@ enum class GeometryRole
     InputPrior,
     TrainingLabel,
     OutputAttach
+};
+
+enum class GeometryAtomicOperation
+{
+    Unknown = 0,
+    Load,
+    Publish,
+    Attach,
+    Summarize,
+    ExportFeatureVector
 };
 
 struct StableGeometryRef
@@ -84,6 +97,27 @@ struct KeypointsObject
     std::vector<float> visibility;
 };
 
+struct FractalPartitionObject
+{
+    StableGeometryRef ref;
+    FractalPartitionOutput output;
+    std::string overlay_object_id;
+};
+
+struct DistanceFieldObject
+{
+    StableGeometryRef ref;
+    GeometryDistanceFieldOutput output;
+    std::string overlay_object_id;
+};
+
+struct SkeletonObject
+{
+    StableGeometryRef ref;
+    GeometrySkeletonOutput output;
+    std::string overlay_object_id;
+};
+
 struct GeometryAttachRecord
 {
     StableGeometryRef target;
@@ -95,6 +129,51 @@ struct GeometryAttachRecord
     std::string mask_object_id;
     std::string boundary_object_id;
     std::string keypoints_object_id;
+    std::string fractal_partition_object_id;
+    std::string distance_field_object_id;
+    std::string skeleton_object_id;
+};
+
+struct GeometryDisplayHint
+{
+    bool supports_2d_overlay = false;
+    bool supports_3d_overlay = false;
+    std::string overlay_object_id;
+    std::string preview_ref;
+};
+
+struct GeometryPropertyItem
+{
+    std::string key;
+    std::string value;
+};
+
+struct GeometryObjectSummary
+{
+    StableGeometryRef ref;
+    std::string summary;
+    int width = 0;
+    int height = 0;
+    GeometryDisplayHint display;
+    std::vector<GeometryPropertyItem> properties;
+};
+
+struct GeometryTopologyBundle
+{
+    std::string bundle_id;
+    StableGeometryRef target_roi_ref;
+    std::string fractal_partition_object_id;
+    std::string distance_field_object_id;
+    std::string skeleton_object_id;
+};
+
+struct GeometryTopologyBundleSummary
+{
+    std::string bundle_id;
+    StableGeometryRef target_roi_ref;
+    int object_count = 0;
+    std::vector<std::string> object_ids;
+    std::vector<GeometryObjectSummary> object_summaries;
 };
 
 inline const char* GeometryObjectKindName(GeometryObjectKind kind)
@@ -113,6 +192,12 @@ inline const char* GeometryObjectKindName(GeometryObjectKind kind)
         return "boundary";
     case GeometryObjectKind::Keypoints:
         return "keypoints";
+    case GeometryObjectKind::FractalPartition:
+        return "fractal_partition";
+    case GeometryObjectKind::DistanceField:
+        return "distance_field";
+    case GeometryObjectKind::Skeleton:
+        return "skeleton";
     case GeometryObjectKind::Unknown:
     default:
         return "unknown";
@@ -134,6 +219,9 @@ inline bool IsSuitableAsTorchInputPrior(GeometryObjectKind kind)
     case GeometryObjectKind::Mask:
     case GeometryObjectKind::Boundary:
     case GeometryObjectKind::Keypoints:
+    case GeometryObjectKind::FractalPartition:
+    case GeometryObjectKind::DistanceField:
+    case GeometryObjectKind::Skeleton:
         return true;
     case GeometryObjectKind::Unknown:
     default:
@@ -152,6 +240,9 @@ inline bool IsSuitableAsTrainingLabel(GeometryObjectKind kind)
         return true;
     case GeometryObjectKind::Line:
     case GeometryObjectKind::PointSet:
+    case GeometryObjectKind::FractalPartition:
+    case GeometryObjectKind::DistanceField:
+    case GeometryObjectKind::Skeleton:
     case GeometryObjectKind::Unknown:
     default:
         return false;
@@ -168,11 +259,128 @@ inline bool NeedsModelOutputAttach(GeometryObjectKind kind)
     case GeometryObjectKind::Mask:
     case GeometryObjectKind::Boundary:
     case GeometryObjectKind::Keypoints:
+    case GeometryObjectKind::FractalPartition:
+    case GeometryObjectKind::DistanceField:
+    case GeometryObjectKind::Skeleton:
         return true;
     case GeometryObjectKind::Unknown:
     default:
         return false;
     }
+}
+
+inline const char* GeometryAtomicOperationName(GeometryAtomicOperation op)
+{
+    switch (op)
+    {
+    case GeometryAtomicOperation::Load:
+        return "load";
+    case GeometryAtomicOperation::Publish:
+        return "publish";
+    case GeometryAtomicOperation::Attach:
+        return "attach";
+    case GeometryAtomicOperation::Summarize:
+        return "summarize";
+    case GeometryAtomicOperation::ExportFeatureVector:
+        return "export_feature_vector";
+    case GeometryAtomicOperation::Unknown:
+    default:
+        return "unknown";
+    }
+}
+
+inline const char* GeometryObjectScriptSuffix(GeometryObjectKind kind)
+{
+    switch (kind)
+    {
+    case GeometryObjectKind::Roi:
+        return "roi_object";
+    case GeometryObjectKind::Line:
+        return "line_object";
+    case GeometryObjectKind::PointSet:
+        return "pointset_object";
+    case GeometryObjectKind::Mask:
+        return "mask_object";
+    case GeometryObjectKind::Boundary:
+        return "boundary_object";
+    case GeometryObjectKind::Keypoints:
+        return "keypoints_object";
+    case GeometryObjectKind::FractalPartition:
+        return "fractal_partition_object";
+    case GeometryObjectKind::DistanceField:
+        return "distance_field_object";
+    case GeometryObjectKind::Skeleton:
+        return "skeleton_object";
+    case GeometryObjectKind::Unknown:
+    default:
+        return "unknown_object";
+    }
+}
+
+inline bool SupportsAtomicOperation(GeometryObjectKind kind, GeometryAtomicOperation op);
+
+inline std::string BuildGeometryAtomicCommandName(GeometryObjectKind kind, GeometryAtomicOperation op)
+{
+    if (!SupportsAtomicOperation(kind, op))
+    {
+        return std::string();
+    }
+    return std::string("cxcore.") + GeometryAtomicOperationName(op) + "." + GeometryObjectScriptSuffix(kind);
+}
+
+inline bool SupportsAtomicOperation(GeometryObjectKind kind, GeometryAtomicOperation op)
+{
+    switch (op)
+    {
+    case GeometryAtomicOperation::Load:
+    case GeometryAtomicOperation::Publish:
+    case GeometryAtomicOperation::Summarize:
+        return kind != GeometryObjectKind::Unknown;
+
+    case GeometryAtomicOperation::Attach:
+        return NeedsModelOutputAttach(kind);
+
+    case GeometryAtomicOperation::ExportFeatureVector:
+        return kind == GeometryObjectKind::Line ||
+            kind == GeometryObjectKind::PointSet ||
+            kind == GeometryObjectKind::FractalPartition ||
+            kind == GeometryObjectKind::DistanceField ||
+            kind == GeometryObjectKind::Skeleton;
+
+    case GeometryAtomicOperation::Unknown:
+    default:
+        return false;
+    }
+}
+
+inline std::vector<std::string> GetAtomicOperationNamesForKind(GeometryObjectKind kind)
+{
+    std::vector<std::string> names;
+    const GeometryAtomicOperation ops[] = {
+        GeometryAtomicOperation::Load,
+        GeometryAtomicOperation::Publish,
+        GeometryAtomicOperation::Attach,
+        GeometryAtomicOperation::Summarize,
+        GeometryAtomicOperation::ExportFeatureVector
+    };
+    for (const GeometryAtomicOperation op : ops)
+    {
+        if (SupportsAtomicOperation(kind, op))
+        {
+            names.push_back(GeometryAtomicOperationName(op));
+        }
+    }
+    return names;
+}
+
+inline std::vector<std::string> GetAtomicOperationNamesForTopologyBundle()
+{
+    return {
+        GeometryAtomicOperationName(GeometryAtomicOperation::Load),
+        GeometryAtomicOperationName(GeometryAtomicOperation::Publish),
+        GeometryAtomicOperationName(GeometryAtomicOperation::Attach),
+        GeometryAtomicOperationName(GeometryAtomicOperation::Summarize)
+    };
 }
 
 inline bool ValidateMaskObject(const MaskObject& object)
@@ -199,6 +407,39 @@ inline bool ValidateKeypointsObject(const KeypointsObject& object)
     return IsValidGeometryRef(object.ref) &&
         !object.points.empty() &&
         object.points.size() == object.visibility.size();
+}
+
+inline bool ValidateFractalPartitionObject(const FractalPartitionObject& object)
+{
+    return IsValidGeometryRef(object.ref) &&
+        object.output.status == 1 &&
+        object.output.width > 0 &&
+        object.output.height > 0 &&
+        object.output.node_count >= 0 &&
+        static_cast<int>(object.output.nodes.size()) <= object.output.node_count;
+}
+
+inline bool ValidateDistanceFieldObject(const DistanceFieldObject& object)
+{
+    const auto expected = static_cast<std::size_t>(object.output.width) * static_cast<std::size_t>(object.output.height);
+    return IsValidGeometryRef(object.ref) &&
+        object.output.status == 1 &&
+        object.output.width > 0 &&
+        object.output.height > 0 &&
+        (object.output.raster_distances.empty() || object.output.raster_distances.size() == expected);
+}
+
+inline bool ValidateSkeletonObject(const SkeletonObject& object)
+{
+    const auto expected = static_cast<std::size_t>(object.output.width) * static_cast<std::size_t>(object.output.height);
+    return IsValidGeometryRef(object.ref) &&
+        object.output.status == 1 &&
+        object.output.width > 0 &&
+        object.output.height > 0 &&
+        object.output.skeleton_pixel_count >= 0 &&
+        object.output.endpoint_count >= 0 &&
+        object.output.branch_point_count >= 0 &&
+        (object.output.skeleton_mask.empty() || object.output.skeleton_mask.size() == expected);
 }
 
 inline GeometryAttachRecord MakeRoiAttachRecord(
@@ -249,6 +490,137 @@ inline GeometryAttachRecord MakeKeypointsAttachRecord(
     record.refined_bounds = roi.bounds;
     record.keypoints_object_id = keypoints_object_id;
     return record;
+}
+
+inline GeometryAttachRecord MakeTopologyAttachRecord(
+    const RoiObject& roi,
+    const std::string& attach_id,
+    const std::string& fractal_partition_object_id,
+    const std::string& distance_field_object_id,
+    const std::string& skeleton_object_id,
+    float score)
+{
+    GeometryAttachRecord record;
+    record.target = roi.ref;
+    record.attach_id = attach_id;
+    record.score = score;
+    record.refined_bounds = roi.bounds;
+    record.fractal_partition_object_id = fractal_partition_object_id;
+    record.distance_field_object_id = distance_field_object_id;
+    record.skeleton_object_id = skeleton_object_id;
+    return record;
+}
+
+inline GeometryDisplayHint MakeDisplayHint(
+    bool supports_2d_overlay,
+    bool supports_3d_overlay,
+    const std::string& overlay_object_id,
+    const std::string& preview_ref)
+{
+    GeometryDisplayHint hint;
+    hint.supports_2d_overlay = supports_2d_overlay;
+    hint.supports_3d_overlay = supports_3d_overlay;
+    hint.overlay_object_id = overlay_object_id;
+    hint.preview_ref = preview_ref;
+    return hint;
+}
+
+inline GeometryObjectSummary SummarizeFractalPartitionObject(const FractalPartitionObject& object)
+{
+    GeometryObjectSummary summary;
+    summary.ref = object.ref;
+    summary.summary = object.output.summary;
+    summary.width = object.output.width;
+    summary.height = object.output.height;
+    summary.display = MakeDisplayHint(true, true, object.overlay_object_id, object.output.debug_preview_ref);
+    summary.properties.push_back({ "node_count", std::to_string(object.output.node_count) });
+    summary.properties.push_back({ "leaf_node_count", std::to_string(object.output.leaf_node_count) });
+    summary.properties.push_back({ "boundary_node_count", std::to_string(object.output.boundary_node_count) });
+    summary.properties.push_back({ "max_depth", std::to_string(object.output.max_depth) });
+    return summary;
+}
+
+inline GeometryObjectSummary SummarizeDistanceFieldObject(const DistanceFieldObject& object)
+{
+    GeometryObjectSummary summary;
+    summary.ref = object.ref;
+    summary.summary = object.output.summary;
+    summary.width = object.output.width;
+    summary.height = object.output.height;
+    summary.display = MakeDisplayHint(true, true, object.overlay_object_id, object.output.debug_heatmap_ref);
+    summary.properties.push_back({ "seed_count", std::to_string(object.output.seed_count) });
+    summary.properties.push_back({ "min_distance", std::to_string(object.output.min_distance) });
+    summary.properties.push_back({ "max_distance", std::to_string(object.output.max_distance) });
+    summary.properties.push_back({ "mean_distance", std::to_string(object.output.mean_distance) });
+    return summary;
+}
+
+inline GeometryObjectSummary SummarizeSkeletonObject(const SkeletonObject& object)
+{
+    GeometryObjectSummary summary;
+    summary.ref = object.ref;
+    summary.summary = object.output.summary;
+    summary.width = object.output.width;
+    summary.height = object.output.height;
+    summary.display = MakeDisplayHint(true, true, object.overlay_object_id, object.output.debug_overlay_ref);
+    summary.properties.push_back({ "skeleton_pixel_count", std::to_string(object.output.skeleton_pixel_count) });
+    summary.properties.push_back({ "endpoint_count", std::to_string(object.output.endpoint_count) });
+    summary.properties.push_back({ "branch_point_count", std::to_string(object.output.branch_point_count) });
+    return summary;
+}
+
+inline GeometryTopologyBundle MakeGeometryTopologyBundle(
+    const RoiObject& roi,
+    const FractalPartitionObject& partition,
+    const DistanceFieldObject& distance,
+    const SkeletonObject& skeleton,
+    const std::string& bundle_id)
+{
+    GeometryTopologyBundle bundle;
+    bundle.bundle_id = bundle_id;
+    bundle.target_roi_ref = roi.ref;
+    bundle.fractal_partition_object_id = partition.ref.object_id;
+    bundle.distance_field_object_id = distance.ref.object_id;
+    bundle.skeleton_object_id = skeleton.ref.object_id;
+    return bundle;
+}
+
+inline bool ValidateGeometryTopologyBundle(const GeometryTopologyBundle& bundle)
+{
+    return !bundle.bundle_id.empty() &&
+        IsValidGeometryRef(bundle.target_roi_ref) &&
+        !bundle.fractal_partition_object_id.empty() &&
+        !bundle.distance_field_object_id.empty() &&
+        !bundle.skeleton_object_id.empty();
+}
+
+inline GeometryTopologyBundleSummary SummarizeGeometryTopologyBundle(
+    const GeometryTopologyBundle& bundle,
+    const FractalPartitionObject& partition,
+    const DistanceFieldObject& distance,
+    const SkeletonObject& skeleton)
+{
+    GeometryTopologyBundleSummary summary;
+    summary.bundle_id = bundle.bundle_id;
+    summary.target_roi_ref = bundle.target_roi_ref;
+    summary.object_count = 3;
+    summary.object_ids.push_back(bundle.fractal_partition_object_id);
+    summary.object_ids.push_back(bundle.distance_field_object_id);
+    summary.object_ids.push_back(bundle.skeleton_object_id);
+    summary.object_summaries.push_back(SummarizeFractalPartitionObject(partition));
+    summary.object_summaries.push_back(SummarizeDistanceFieldObject(distance));
+    summary.object_summaries.push_back(SummarizeSkeletonObject(skeleton));
+    return summary;
+}
+
+inline std::vector<std::string> BuildGeometryTopologyBundleCommandNames()
+{
+    return {
+        "cxcore.load.topology_bundle",
+        "cxcore.publish.topology_bundle",
+        "cxcore.attach.topology_bundle",
+        "cxcore.summarize.topology_bundle"
+    };
 }
 
 inline cxgeom::CxGeomBounds MakeGeomBounds(const OutputRect& rect)

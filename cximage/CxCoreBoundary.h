@@ -11,6 +11,7 @@ class Findcircle;
 class Findellipse;
 class FindObject;
 class fastmatch;
+namespace cxcore { struct RegionPatternDescriptor; struct RegionPatternScore; }
 
 namespace cxcore {
 
@@ -94,6 +95,177 @@ struct MatchOutput
     double image_model_score = 0.0;
 };
 
+struct RegionPatternDescriptorOutput
+{
+    int normalized_width = 0;
+    int normalized_height = 0;
+    int pooling_rows = 0;
+    int pooling_cols = 0;
+    double global_foreground_ratio = 0.0;
+    std::vector<double> values;
+};
+
+struct RegionPatternScoreOutput
+{
+    bool success = false;
+    double descriptor_distance = 0.0;
+    double content_score = 0.0;
+    std::string summary;
+};
+
+struct FractalPartitionNodeRecord
+{
+    int node_id = -1;
+    int parent_id = -1;
+    int depth = 0;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int status = 0;
+    int is_leaf = 0;
+};
+
+struct FractalPartitionOutput
+{
+    int status = 0;
+    std::string summary;
+
+    std::string source_mask_id;
+    int width = 0;
+    int height = 0;
+
+    int node_count = 0;
+    int leaf_node_count = 0;
+    int boundary_node_count = 0;
+    int max_depth = 0;
+
+    std::vector<FractalPartitionNodeRecord> nodes;
+
+    std::string debug_preview_ref;
+};
+
+struct GeometryDistanceFieldOutput
+{
+    int status = 0;
+    std::string summary;
+
+    std::string source_mask_id;
+    int width = 0;
+    int height = 0;
+
+    int seed_count = 0;
+
+    double min_distance = 0.0;
+    double max_distance = 0.0;
+    double mean_distance = 0.0;
+
+    std::vector<double> node_distances;
+    std::vector<double> raster_distances;
+
+    std::string debug_heatmap_ref;
+};
+
+struct GeometrySkeletonPointRecord
+{
+    int x = 0;
+    int y = 0;
+};
+
+struct GeometrySkeletonOutput
+{
+    int status = 0;
+    std::string summary;
+
+    std::string source_mask_id;
+    int width = 0;
+    int height = 0;
+
+    int skeleton_pixel_count = 0;
+    int endpoint_count = 0;
+    int branch_point_count = 0;
+
+    std::vector<unsigned char> skeleton_mask;
+    std::vector<GeometrySkeletonPointRecord> endpoints;
+    std::vector<GeometrySkeletonPointRecord> branch_points;
+
+    std::string debug_overlay_ref;
+};
+
+struct GeometryPathPointRecord
+{
+    int x = 0;
+    int y = 0;
+};
+
+struct GeometryPathRecord
+{
+    int path_id = -1;
+    double path_length = 0.0;
+    std::vector<GeometryPathPointRecord> points;
+};
+
+struct GeometryCenterlineOutput
+{
+    int status = 0;
+    std::string summary;
+
+    std::string source_mask_id;
+    int width = 0;
+    int height = 0;
+
+    int path_count = 0;
+    int junction_count = 0;
+
+    double min_path_length = 0.0;
+    double max_path_length = 0.0;
+    double mean_path_length = 0.0;
+
+    int main_path_id = -1;
+    std::vector<GeometryPathRecord> centerline_paths;
+
+    std::string debug_path_overlay_ref;
+};
+
+struct GeometryTopologyRepairOutput
+{
+    int status = 0;
+    std::string summary;
+
+    std::string source_mask_id;
+    int width = 0;
+    int height = 0;
+
+    int repair_path_count = 0;
+    int repaired_gap_count = 0;
+
+    double min_repair_cost = 0.0;
+    double max_repair_cost = 0.0;
+    double mean_repair_cost = 0.0;
+    double repair_success_rate = 0.0;
+
+    std::vector<GeometryPathRecord> repair_paths;
+
+    std::string debug_repair_overlay_ref;
+};
+
+
+struct GeometryTopologyBuildConfig
+{
+    int max_depth = 3;
+    int min_cell_size = 4;
+    bool use_eight_connected = true;
+};
+
+struct GeometryTopologyPipelineOutput
+{
+    FractalPartitionOutput partition;
+    GeometryDistanceFieldOutput distance;
+    GeometrySkeletonOutput skeleton;
+    GeometryCenterlineOutput centerline;
+    GeometryTopologyRepairOutput repair;
+};
+
 // Baseline validation layer for cxcore structured outputs.
 // The schema is intentionally flat so downstream evaluators can emit
 // deterministic CSV rows and compare classical baselines directly.
@@ -122,6 +294,10 @@ struct BaselineFeatureSampleV1
     double gray_max = 0.0;
     double edge_pixel_ratio = 0.0;
     double binary_foreground_ratio = 0.0;
+    double region_pattern_foreground_ratio = 0.0;
+    double region_pattern_descriptor_dim = 0.0;
+    double region_pattern_descriptor_mean = 0.0;
+    double region_pattern_descriptor_std = 0.0;
 
     double component_count = 0.0;
     double largest_component_area = 0.0;
@@ -190,6 +366,39 @@ CircleMeasurementOutput ExportCircleMeasurement(Findcircle& circle);
 EllipseMeasurementOutput ExportEllipseMeasurement(Findellipse& ellipse);
 DetectionOutput ExportDetections(FindObject& object);
 MatchOutput ExportMatchOutput(fastmatch& matcher, int max_candidates);
+RegionPatternDescriptorOutput ExportRegionPatternDescriptor(const RegionPatternDescriptor& descriptor);
+RegionPatternScoreOutput ExportRegionPatternScore(const RegionPatternScore& score);
+
+FractalPartitionOutput BuildFractalPartitionFromMask(
+    const std::vector<unsigned char>& mask,
+    int width,
+    int height,
+    const std::string& source_mask_id = std::string(),
+    const GeometryTopologyBuildConfig& config = GeometryTopologyBuildConfig());
+GeometryDistanceFieldOutput BuildGeometryDistanceFieldFromMask(
+    const std::vector<unsigned char>& mask,
+    int width,
+    int height,
+    const std::string& source_mask_id = std::string(),
+    bool use_eight_connected = true);
+GeometrySkeletonOutput BuildGeometrySkeletonFromDistanceField(
+    const GeometryDistanceFieldOutput& distance,
+    const std::vector<unsigned char>& mask,
+    int width,
+    int height,
+    const std::string& source_mask_id = std::string());
+GeometryCenterlineOutput BuildGeometryCenterlineFromSkeleton(
+    const GeometrySkeletonOutput& skeleton,
+    const std::string& source_mask_id = std::string());
+GeometryTopologyRepairOutput BuildGeometryTopologyRepairFromSkeleton(
+    const GeometrySkeletonOutput& skeleton,
+    const std::string& source_mask_id = std::string());
+GeometryTopologyPipelineOutput BuildGeometryTopologyPipelineFromMask(
+    const std::vector<unsigned char>& mask,
+    int width,
+    int height,
+    const std::string& source_mask_id = std::string(),
+    const GeometryTopologyBuildConfig& config = GeometryTopologyBuildConfig());
 BaselineFeatureSampleV1 ExportBaselineFeatureSampleV1(
     const Image& image,
     const ImageAnalysisOutput& analysis,

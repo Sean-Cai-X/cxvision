@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "shapebase.h"
 #include "Findline.h"
@@ -933,6 +933,8 @@ void PointsShape::pointslineadd(void *pointsB)
 void PointsShape::getfindlinemodel(void* findline)
 { 
     Findline* pfindline = (Findline*)findline;
+    if (pfindline == nullptr)
+        return;
     pfindline->getpattern();
              
 }
@@ -1124,7 +1126,7 @@ void PointsShape::Distfilter()
 }
 */
 
-gp_Pnt PointsShape::getpointscent()
+gp_Pnt PointsShape::getpointscent() const
 { 
     return m_path.centroid();
 }
@@ -1750,11 +1752,12 @@ void PointsShape::patterntokeys(gp_Path&keypointsA, gp_Path&keypointsA_,
     gp_Path&keypointsB, gp_Path&keypointsB_,
     int ibackgroundtype)
 {//ibackgroundtype=0无背景=1黑背景=2白背景
-    int icount = m_path.ElementCount();
-    for(int i=0;i<icount;)
+    int i = 0;
+    while(i<m_path.ElementCount())
     {
          gp_Pnt aele0 = m_path.ElementAt(i);
          i++;
+         if (i >= m_path.ElementCount()) break;
          gp_Pnt aele1 = m_path.ElementAt(i);
          i++;
          int ix0 = aele0.X();
@@ -2675,7 +2678,7 @@ double PointsShape::gety(int inum)
 }
 
 //圆条件
-#define _DISTANCE(y,x,x0,y0,R2) (x-x0)*(x-x0)+(y-y0)*(y-y0)-R2;
+#define CXCORE_CIRCLE_STEP_DISTANCE_RESIDUAL(y,x,x0,y0,R2) ((x-x0)*(x-x0)+(y-y0)*(y-y0)-R2)
 
 #define _DISTANCEX(y,x,x0,y0,R2) PointDistance[abs(x-x0)][abs(y-y0)]-R2
 //椭圆条件
@@ -2692,14 +2695,14 @@ int PointsShape::CircleStep(int apha,int x,int y,int i_x0,int i_y0,int  i_R_2)
 {
     float Eightsum[8];
     apha=apha%360;
-    Eightsum[0]=_DISTANCE(y+1,x,i_x0,i_y0,i_R_2);
-    Eightsum[1]=_DISTANCE(y+1,x+1,i_x0,i_y0,i_R_2);
-    Eightsum[2]=_DISTANCE(y,x+1,i_x0,i_y0,i_R_2);
-    Eightsum[3]=_DISTANCE(y-1,x+1,i_x0,i_y0,i_R_2);
-    Eightsum[4]=_DISTANCE(y-1,x,i_x0,i_y0,i_R_2);
-    Eightsum[5]=_DISTANCE(y-1,x-1,i_x0,i_y0,i_R_2);
-    Eightsum[6]=_DISTANCE(y,x-1,i_x0,i_y0,i_R_2);
-    Eightsum[7]=_DISTANCE(y+1,x-1,i_x0,i_y0,i_R_2);
+    Eightsum[0]=(x-i_x0)*(x-i_x0)+(y+1-i_y0)*(y+1-i_y0)-i_R_2;
+    Eightsum[1]=(x+1-i_x0)*(x+1-i_x0)+(y+1-i_y0)*(y+1-i_y0)-i_R_2;
+    Eightsum[2]=(x+1-i_x0)*(x+1-i_x0)+(y-i_y0)*(y-i_y0)-i_R_2;
+    Eightsum[3]=(x+1-i_x0)*(x+1-i_x0)+(y-1-i_y0)*(y-1-i_y0)-i_R_2;
+    Eightsum[4]=(x-i_x0)*(x-i_x0)+(y-1-i_y0)*(y-1-i_y0)-i_R_2;
+    Eightsum[5]=(x-1-i_x0)*(x-1-i_x0)+(y-1-i_y0)*(y-1-i_y0)-i_R_2;
+    Eightsum[6]=(x-1-i_x0)*(x-1-i_x0)+(y-i_y0)*(y-i_y0)-i_R_2;
+    Eightsum[7]=(x-1-i_x0)*(x-1-i_x0)+(y+1-i_y0)*(y+1-i_y0)-i_R_2;
     for(int i=0;i<8;i++)
     {
         //Direction
@@ -3119,6 +3122,8 @@ void PointsShape::ellipsepointsx(int i_x, int i_y, int i_x0, int i_y0, int ix1, 
 void PointsShape::OBBCenterAngleSort(void * points)
 {
     PointsShape* tpoints = (PointsShape*)points;;
+    if (tpoints == nullptr)
+        return;
     gp_Pnt apnt = m_path.OBBCenterAngleSort();
     tpoints->clear();
     tpoints->addpoint(apnt);
@@ -3129,6 +3134,8 @@ void PointsShape::OBBCenterAngleSort(void * points)
 void PointsShape::PointsMaxLen(void* points)
 {
     PointsShape* tpoints = (PointsShape*)points;;
+    if (tpoints == nullptr)
+        return;
     gp_Pnt apnt = m_path.OBBCenterAngleSort();
     tpoints->clear();
     tpoints->addpoint(apnt);
@@ -3444,11 +3451,14 @@ std::vector<std::vector<size_t>> FindKNearestAndSort
         float fradius = directions[i].length();
 
         // 查询最多 k 个最近点（也可以换成 radius search）
-        std::vector<uint32_t> indices(k);
+        std::vector<unsigned int> indices(k);
         std::vector<float> dists2(k);
 
         // 使用 kNN 搜索
-        size_t found = index.knnSearch(&query.x, k, &indices[0], &dists2[0]);
+        nanoflann::KNNResultSet<float, unsigned int> result_set(k);
+        result_set.init(indices.data(), dists2.data());
+        index.findNeighbors(result_set, &query.x, nanoflann::SearchParameters());
+        size_t found = result_set.size();
 
         // 收集邻居并计算距离、角度
         std::vector<Neighbor> neighbors;
@@ -3475,15 +3485,16 @@ std::vector<std::vector<size_t>> FindKNearestAndSort
 
             float dists = sqrt(dists2[j]);
             if(theta < 45 && dists< fradius)
-                neighbors.emplace_back(neighbor_idx, dists, theta);
+                neighbors.push_back(Neighbor(neighbor_idx, dists, theta));
                                                   // 实际距离    // 角度（弧度）
         }
  
         // 排序策略一：按距离升序
         std::sort(neighbors.begin(), neighbors.end(), compareByDistance);
         std::vector<size_t> sorted_by_distance;
-        for (const auto& n : neighbors)
+        for (size_t nidx = 0; nidx < neighbors.size(); ++nidx)
         {
+            const Neighbor& n = neighbors[nidx];
             sorted_by_distance.push_back(n.index);
             nodesonvalue[n.index] = 2;
         }
@@ -3493,8 +3504,11 @@ std::vector<std::vector<size_t>> FindKNearestAndSort
             // 排序策略二：按角度升序
             std::sort(neighbors.begin(), neighbors.end(), compareByAngle);
             std::vector<size_t> sorted_by_angle;
-            for (const auto& n : neighbors)
+            for (size_t nidx = 0; nidx < neighbors.size(); ++nidx)
+            {
+                const Neighbor& n = neighbors[nidx];
                 sorted_by_angle.push_back(n.index);
+            }
         }
 
         // 可以根据需要返回其中一个排序结果，或者两者都保留
@@ -3566,7 +3580,10 @@ std::vector<std::vector<size_t>> FindAngleAndDistanceFilteredNeighbors(
         std::vector<unsigned int> indices(k);
         std::vector<float> dists2(k);
 
-        size_t found = index.knnSearch(&query.x, k, &indices[0], &dists2[0]);
+        nanoflann::KNNResultSet<float, unsigned int> result_set(k);
+        result_set.init(indices.data(), dists2.data());
+        index.findNeighbors(result_set, &query.x, nanoflann::SearchParameters());
+        size_t found = result_set.size();
 
         std::vector<Neighbor> filtered_neighbors;
 
@@ -3580,7 +3597,8 @@ std::vector<std::vector<size_t>> FindAngleAndDistanceFilteredNeighbors(
             vec = vec.normalized();
 
             float dot = dir.dot(vec);
-            dot = std::clamp(dot, -1.0f, 1.0f);
+            dot = std::max(-1.0f, dot);
+            dot = std::min(1.0f, dot);
             float angle_rad = std::acos(dot);
 
                 gp_Pnt startP0(query.x, query.y, 0), endP0(query.x + directions[i].x, query.y + directions[i].y, 0);
@@ -3599,15 +3617,16 @@ std::vector<std::vector<size_t>> FindAngleAndDistanceFilteredNeighbors(
                 && distance <= max_distance) 
             {
             //if (angle_rad <= max_angle_rad && distance <= max_distance) {
-                filtered_neighbors.emplace_back(neighbor_idx, abs(theta), distance);
+                filtered_neighbors.push_back(Neighbor(neighbor_idx, abs(theta), distance));
             } 
         }
         // 按Distance排序
         std::sort(filtered_neighbors.begin(), filtered_neighbors.end(), compareByDistance); 
         // 提取索引并标记父邻点
         std::vector<size_t> sorted_indices;
-        for (const auto& n : filtered_neighbors) 
+        for (size_t nidx = 0; nidx < filtered_neighbors.size(); ++nidx)
         { 
+            const Neighbor& n = filtered_neighbors[nidx];
             sorted_indices.push_back(n.index);
             hasParent0[n.index] = i; // 被别人选为邻居了
             break;
@@ -3616,8 +3635,9 @@ std::vector<std::vector<size_t>> FindAngleAndDistanceFilteredNeighbors(
         { 
             // 按angle排序
             std::sort(filtered_neighbors.begin(), filtered_neighbors.end(), compareByAngle);
-            for (const auto& n : filtered_neighbors)
+            for (size_t nidx = 0; nidx < filtered_neighbors.size(); ++nidx)
             {
+                const Neighbor& n = filtered_neighbors[nidx];
                 sorted_indices.push_back(n.index);
                 hasParent0[n.index] = i; // 被别人选为邻居了
                 break;
@@ -4592,8 +4612,12 @@ Point_2D findInflectionPoints(const std::vector<Point_2D>& points,
 void PointsShape::FindCrossPoints(void* points)
 {
     PointsShape* tpoints = (PointsShape*)points;
+    if (tpoints == nullptr)
+        return;
     gp_Path& path = getpath();
     size_t numPoints = path.getpoints().size();
+    if (numPoints < 2)
+        return;
     std::vector<Point_2D> points2d;
     for (size_t i = 0; i < numPoints; ++i)
     {

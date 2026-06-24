@@ -13,6 +13,7 @@ struct PrototypeCandidateScore
 {
     int candidate_index = -1;
     double evaluation_score = 0.0;
+    int rank_index = -1;
     bool valid = false;
 };
 
@@ -23,12 +24,16 @@ struct PrototypeRunResult
     FitProblem problem;
     FitProblem configured_problem;
     FitMethodDescriptor method;
-    FitOperationConfig operation_config;
     FitMethodResult method_result;
+    FitCandidateGroup candidate_group;
+    FitOperationConfig operation_config;
+    double group_score = 0.0;
     double evaluation_score = 0.0;
     int selected_match_candidate_index = -1;
+    int best_match_candidate_index = -1;
     int evaluated_match_candidate_count = 0;
     std::vector<PrototypeCandidateScore> candidate_scores;
+    std::vector<int> ordered_match_candidate_indices;
 };
 
 FitOperationConfig MakeRectCircleCompositeOperationConfig();

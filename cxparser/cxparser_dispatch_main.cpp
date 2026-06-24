@@ -1,4 +1,5 @@
 #include <iostream>
+#include <algorithm>
 #include <string>
 
 #include "../cxparser_ext/drivers/parser_dispatch_driver.h"
@@ -15,6 +16,32 @@ bool ReadValue(int argc,
   value = argv[++index];
   return true;
 }
+
+bool IsKnownCxScriptLayer(const std::string &value)
+{
+  return value == "feature" ||
+         value == "smoke" ||
+         value == "scenario" ||
+         value == "train" ||
+         value == "infer" ||
+         value == "score" ||
+         value == "contract";
+}
+
+bool IsKnownCxScriptModule(const std::string &value)
+{
+  return value == "cxcore" ||
+         value == "ensmallen_layer" ||
+         value == "mlpack" ||
+         value == "torch_module" ||
+         value == "rag";
+}
+
+void NormalizeModuleLayerArguments(cxparser_ext::ParserDispatchRequest &request)
+{
+  if (IsKnownCxScriptModule(request.layer) && IsKnownCxScriptLayer(request.module))
+    std::swap(request.layer, request.module);
+}
 }
 
 int main(int argc, char **argv)
@@ -25,7 +52,7 @@ int main(int argc, char **argv)
   for (int i = 1; i < argc; ++i)
   {
     const std::string arg = argv[i];
-    if (arg == "--script-type")
+    if (arg == "--script-type" || arg == "--kind")
     {
       if (!ReadValue(argc, argv, i, request.script_type))
         return 2;
@@ -70,11 +97,6 @@ int main(int argc, char **argv)
       if (!ReadValue(argc, argv, i, request.script_path))
         return 2;
     }
-    else if (arg == "--script-runtime")
-    {
-      if (!ReadValue(argc, argv, i, request.script_runtime_mode))
-        return 2;
-    }
     else if (arg == "--report")
     {
       std::string report_value;
@@ -86,6 +108,8 @@ int main(int argc, char **argv)
 
   if (request.script_type.empty())
     request.script_type = request.integration.empty() ? "module" : "integration";
+
+  NormalizeModuleLayerArguments(request);
 
   if (request.layer.empty() || request.case_id.empty())
   {
@@ -102,13 +126,6 @@ int main(int argc, char **argv)
   if (request.script_type == "integration" && request.integration.empty())
   {
     std::cerr << "[FAIL] integration cxscript requires --integration\n";
-    return 2;
-  }
-
-  if (request.script_runtime_mode != "lightweight" &&
-      request.script_runtime_mode != "debug")
-  {
-    std::cerr << "[FAIL] --script-runtime must be lightweight or debug\n";
     return 2;
   }
 

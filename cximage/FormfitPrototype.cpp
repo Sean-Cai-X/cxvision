@@ -2,12 +2,131 @@
 
 #include "FormfitPrototype.h"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <vector>
 
 namespace cxcore
 {
 namespace formfit
 {
+
+namespace
+{
+double PositiveOr(double value, double fallback)
+{
+    return std::isfinite(value) && value > 0.0 ? value : fallback;
+}
+
+double NonNegativeOr(double value, double fallback = 0.0)
+{
+    return std::isfinite(value) && value >= 0.0 ? value : fallback;
+}
+
+double WorstScore()
+{
+    return std::numeric_limits<double>::max();
+}
+
+double StageScore(double cost, double max_residual)
+{
+    const double score = NonNegativeOr(cost) + NonNegativeOr(max_residual);
+    return std::isfinite(score) ? score : WorstScore();
+}
+
+bool IsBetterScore(double lhs, double rhs)
+{
+    const bool lhs_valid = std::isfinite(lhs);
+    const bool rhs_valid = std::isfinite(rhs);
+    if (lhs_valid != rhs_valid)
+    {
+        return lhs_valid;
+    }
+    return lhs < rhs;
+}
+
+double SafeRankDelta(double next_score, double best_score)
+{
+    return std::isfinite(next_score) && std::isfinite(best_score) && next_score >= best_score ?
+        next_score - best_score : 0.0;
+}
+
+void FinalizeCandidateGroup(FitCandidateGroup& group, const FitMethodResult& method_result)
+{
+    group.candidate_count = static_cast<int>(group.candidates.size());
+    group.ranked_candidate_count = static_cast<int>(group.baseline_rank.size());
+
+    group.ordered_candidate_ids.clear();
+    group.ordered_candidate_ids.reserve(group.baseline_rank.size());
+    for (const FitCandidateRankItem& rank_item : group.baseline_rank)
+    {
+        group.ordered_candidate_ids.push_back(rank_item.candidate_id);
+    }
+    group.ordered_candidate_count = static_cast<int>(group.ordered_candidate_ids.size());
+
+    int total_iterations = 0;
+    for (const FitCandidate& candidate : group.candidates)
+    {
+        total_iterations += std::max(0, candidate.iterations);
+    }
+    group.fixed_point_iterations = method_result.fit_result.iterations > 0 ?
+        method_result.fit_result.iterations : total_iterations;
+    group.fixed_point_delta = NonNegativeOr(group.rank_delta);
+    group.fixed_point_converged = method_result.valid &&
+        !group.best_candidate_id.empty() &&
+        std::isfinite(group.group_score);
+    group.convergence_status = group.fixed_point_converged ?
+        "converged" : (group.candidates.empty() ? "no_candidates" : "not_converged");
+}
+
+FitOperationConfig NormalizeOperationConfig(FitOperationConfig config)
+{
+    if (config.has_global_tolerance_scale)
+    {
+        config.global_tolerance_scale = PositiveOr(config.global_tolerance_scale, 1.0);
+    }
+    if (config.has_global_weight_scale)
+    {
+        config.global_weight_scale = PositiveOr(config.global_weight_scale, 1.0);
+    }
+    for (FitStageSetting& stage : config.stage_settings)
+    {
+        if (stage.has_stage_weight)
+        {
+            stage.stage_weight = PositiveOr(stage.stage_weight, 1.0);
+        }
+        if (stage.has_tolerance_scale)
+        {
+            stage.tolerance_scale = PositiveOr(stage.tolerance_scale, 1.0);
+        }
+        if (stage.has_max_iterations)
+        {
+            stage.max_iterations = std::max(0, stage.max_iterations);
+        }
+    }
+    for (FitResidualSetting& residual : config.residual_settings)
+    {
+        if (residual.has_weight)
+        {
+            residual.weight = PositiveOr(residual.weight, 1.0);
+        }
+        if (residual.has_tolerance)
+        {
+            residual.tolerance = PositiveOr(residual.tolerance, 1.0);
+        }
+    }
+    for (FitVariableSetting& variable : config.variable_settings)
+    {
+        if (variable.has_weight)
+        {
+            variable.weight = PositiveOr(variable.weight, 1.0);
+        }
+    }
+    return config;
+}
+} // namespace
 
 FitOperationConfig MakeRectCircleCompositeOperationConfig()
 {
@@ -61,7 +180,7 @@ FitOperationConfig MakeRectCircleCompositeOperationConfig()
     final_stage.max_iterations = 24;
     config.stage_settings.push_back(final_stage);
 
-    return config;
+    return NormalizeOperationConfig(config);
 }
 
 FitOperationConfig MakeRectCircleLineCompositeOperationConfig()
@@ -70,7 +189,7 @@ FitOperationConfig MakeRectCircleLineCompositeOperationConfig()
     config.config_id = "rect_circle_line_composite_config";
     config.has_global_weight_scale = true;
     config.global_weight_scale = 1.1;
-    return config;
+    return NormalizeOperationConfig(config);
 }
 
 FitOperationConfig MakeRectCircleLineMatchCompositeOperationConfig()
@@ -140,7 +259,7 @@ FitOperationConfig MakeRectCircleLineMatchCompositeOperationConfig()
     circle_radius.weight = 1.4;
     config.variable_settings.push_back(circle_radius);
 
-    return config;
+    return NormalizeOperationConfig(config);
 }
 
 PrototypeRunResult RunRectCirclePrototype(const OutputRect& rect,
@@ -148,6 +267,7 @@ PrototypeRunResult RunRectCirclePrototype(const OutputRect& rect,
                                           const FitOperationConfig& operation_config)
 {
     PrototypeRunResult result;
+    result.evaluation_score = WorstScore();
     result.gauge = MakeRectCircleGauge(rect, circle, "rect_circle_gauge", "rect_circle_gauge");
     result.task = MakeTaskSpecFromGauge(result.gauge, "rect_circle_task", FitTaskType::GaugeFit);
     result.problem = MakeFitProblemFromGauge(result.gauge, "rect_circle_problem");
@@ -159,11 +279,65 @@ PrototypeRunResult RunRectCirclePrototype(const OutputRect& rect,
     result.operation_config = operation_config;
     FitOperationController::Apply(result.operation_config, result.configured_problem);
 
-    std::shared_ptr<IOptimizerBackend> backend = std::make_shared<PassthroughOptimizerBackend>();
+    std::shared_ptr<IOptimizerBackend> backend = std::make_shared<LinearizedLeastSquaresOptimizerBackend>();
     std::shared_ptr<ICompositeFitter> fitter = std::make_shared<CompositeFitter>(backend);
     DefaultMethodExecutor executor(fitter);
     result.method_result = executor.Execute(result.task, result.method, result.operation_config, result.problem);
-    result.evaluation_score = EvaluateFitTask(result.task, result.method_result);
+    
+    result.candidate_group.group_id = "rect_circle_candidates";
+    result.candidate_group.task_id = result.task.task_id;
+    result.candidate_group.problem_id = result.problem.problem_id;
+    result.candidate_group.config_id = result.operation_config.config_id;
+
+    if (!result.method_result.fit_result.stage_summaries.empty())
+    {
+        for (const FitStageSummary& summary : result.method_result.fit_result.stage_summaries)
+        {
+            FitCandidate candidate;
+            candidate.candidate_id = summary.stage_id;
+            candidate.source_stage_id = summary.stage_id;
+            candidate.source_method_type = summary.method_type;
+            candidate.valid = result.method_result.valid;
+            candidate.final_cost = NonNegativeOr(summary.stage_cost);
+            candidate.max_residual = NonNegativeOr(summary.stage_max_residual);
+            candidate.iterations = summary.iterations;
+            candidate.elapsed_ms = result.method_result.elapsed_ms;
+            result.candidate_group.candidates.push_back(candidate);
+        }
+
+        std::vector<FitCandidateRankItem> ranking;
+        ranking.reserve(result.candidate_group.candidates.size());
+        for (const FitCandidate& candidate : result.candidate_group.candidates)
+        {
+            FitCandidateRankItem item;
+            item.candidate_id = candidate.candidate_id;
+            item.score = StageScore(candidate.final_cost, candidate.max_residual);
+            ranking.push_back(item);
+        }
+
+        std::stable_sort(ranking.begin(), ranking.end(),
+                         [](const FitCandidateRankItem& lhs, const FitCandidateRankItem& rhs)
+                         {
+                             return IsBetterScore(lhs.score, rhs.score);
+                         });
+
+        for (size_t i = 0; i < ranking.size(); ++i)
+        {
+            ranking[i].rank_index = static_cast<int>(i);
+            result.candidate_group.baseline_rank.push_back(ranking[i]);
+        }
+
+        if (!ranking.empty())
+        {
+            result.candidate_group.best_candidate_id = ranking.front().candidate_id;
+            result.candidate_group.group_score = ranking.front().score;
+            result.candidate_group.rank_delta =
+                ranking.size() > 1 ? SafeRankDelta(ranking[1].score, ranking.front().score) : 0.0;
+            result.group_score = result.candidate_group.group_score;
+            result.evaluation_score = result.group_score;
+        }
+    }
+    FinalizeCandidateGroup(result.candidate_group, result.method_result);
     return result;
 }
 
@@ -173,6 +347,7 @@ PrototypeRunResult RunRectCircleLinePrototype(const OutputRect& rect,
                                               const FitOperationConfig& operation_config)
 {
     PrototypeRunResult result;
+    result.evaluation_score = WorstScore();
     result.gauge = MakeRectCircleLineGauge(rect, circle, line, "rect_circle_line_gauge", "rect_circle_line_gauge");
     result.task = MakeTaskSpecFromGauge(result.gauge, "rect_circle_line_task", FitTaskType::StructureFit);
     result.problem = MakeFitProblemFromGauge(result.gauge, "rect_circle_line_problem");
@@ -184,11 +359,65 @@ PrototypeRunResult RunRectCircleLinePrototype(const OutputRect& rect,
     result.operation_config = operation_config;
     FitOperationController::Apply(result.operation_config, result.configured_problem);
 
-    std::shared_ptr<IOptimizerBackend> backend = std::make_shared<PassthroughOptimizerBackend>();
+    std::shared_ptr<IOptimizerBackend> backend = std::make_shared<LinearizedLeastSquaresOptimizerBackend>();
     std::shared_ptr<ICompositeFitter> fitter = std::make_shared<CompositeFitter>(backend);
     DefaultMethodExecutor executor(fitter);
     result.method_result = executor.Execute(result.task, result.method, result.operation_config, result.problem);
-    result.evaluation_score = EvaluateFitTask(result.task, result.method_result);
+    
+    result.candidate_group.group_id = "rect_circle_line_candidates";
+    result.candidate_group.task_id = result.task.task_id;
+    result.candidate_group.problem_id = result.problem.problem_id;
+    result.candidate_group.config_id = result.operation_config.config_id;
+
+    if (!result.method_result.fit_result.stage_summaries.empty())
+    {
+        for (const FitStageSummary& summary : result.method_result.fit_result.stage_summaries)
+        {
+            FitCandidate candidate;
+            candidate.candidate_id = summary.stage_id;
+            candidate.source_stage_id = summary.stage_id;
+            candidate.source_method_type = summary.method_type;
+            candidate.valid = result.method_result.valid;
+            candidate.final_cost = NonNegativeOr(summary.stage_cost);
+            candidate.max_residual = NonNegativeOr(summary.stage_max_residual);
+            candidate.iterations = summary.iterations;
+            candidate.elapsed_ms = result.method_result.elapsed_ms;
+            result.candidate_group.candidates.push_back(candidate);
+        }
+
+        std::vector<FitCandidateRankItem> ranking;
+        ranking.reserve(result.candidate_group.candidates.size());
+        for (const FitCandidate& candidate : result.candidate_group.candidates)
+        {
+            FitCandidateRankItem item;
+            item.candidate_id = candidate.candidate_id;
+            item.score = StageScore(candidate.final_cost, candidate.max_residual);
+            ranking.push_back(item);
+        }
+
+        std::stable_sort(ranking.begin(), ranking.end(),
+                         [](const FitCandidateRankItem& lhs, const FitCandidateRankItem& rhs)
+                         {
+                             return IsBetterScore(lhs.score, rhs.score);
+                         });
+
+        for (size_t i = 0; i < ranking.size(); ++i)
+        {
+            ranking[i].rank_index = static_cast<int>(i);
+            result.candidate_group.baseline_rank.push_back(ranking[i]);
+        }
+
+        if (!ranking.empty())
+        {
+            result.candidate_group.best_candidate_id = ranking.front().candidate_id;
+            result.candidate_group.group_score = ranking.front().score;
+            result.candidate_group.rank_delta =
+                ranking.size() > 1 ? SafeRankDelta(ranking[1].score, ranking.front().score) : 0.0;
+            result.group_score = result.candidate_group.group_score;
+            result.evaluation_score = result.group_score;
+        }
+    }
+    FinalizeCandidateGroup(result.candidate_group, result.method_result);
     return result;
 }
 
@@ -201,6 +430,7 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
     auto run_single = [&](const MatchOutput& single_match, int candidate_index) -> PrototypeRunResult
     {
         PrototypeRunResult result;
+    result.evaluation_score = WorstScore();
         result.gauge = MakeRectCircleLineMatchGauge(rect, circle, line, single_match, "rect_circle_line_match_gauge", "rect_circle_line_match_gauge");
         result.task = MakeTaskSpecFromGauge(result.gauge, "rect_circle_line_match_task", FitTaskType::ComparativeFit);
         result.problem = MakeFitProblemFromGauge(result.gauge, "rect_circle_line_match_problem");
@@ -212,11 +442,65 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
         result.operation_config = operation_config;
         FitOperationController::Apply(result.operation_config, result.configured_problem);
 
-        std::shared_ptr<IOptimizerBackend> backend = std::make_shared<PassthroughOptimizerBackend>();
+        std::shared_ptr<IOptimizerBackend> backend = std::make_shared<LinearizedLeastSquaresOptimizerBackend>();
         std::shared_ptr<ICompositeFitter> fitter = std::make_shared<CompositeFitter>(backend);
         DefaultMethodExecutor executor(fitter);
         result.method_result = executor.Execute(result.task, result.method, result.operation_config, result.problem);
-        result.evaluation_score = EvaluateFitTask(result.task, result.method_result);
+        
+    result.candidate_group.group_id = "rect_circle_line_match_candidates";
+    result.candidate_group.task_id = result.task.task_id;
+    result.candidate_group.problem_id = result.problem.problem_id;
+    result.candidate_group.config_id = result.operation_config.config_id;
+
+    if (!result.method_result.fit_result.stage_summaries.empty())
+    {
+        for (const FitStageSummary& summary : result.method_result.fit_result.stage_summaries)
+        {
+            FitCandidate candidate;
+            candidate.candidate_id = summary.stage_id;
+            candidate.source_stage_id = summary.stage_id;
+            candidate.source_method_type = summary.method_type;
+            candidate.valid = result.method_result.valid;
+            candidate.final_cost = NonNegativeOr(summary.stage_cost);
+            candidate.max_residual = NonNegativeOr(summary.stage_max_residual);
+            candidate.iterations = summary.iterations;
+            candidate.elapsed_ms = result.method_result.elapsed_ms;
+            result.candidate_group.candidates.push_back(candidate);
+        }
+
+        std::vector<FitCandidateRankItem> ranking;
+        ranking.reserve(result.candidate_group.candidates.size());
+        for (const FitCandidate& candidate : result.candidate_group.candidates)
+        {
+            FitCandidateRankItem item;
+            item.candidate_id = candidate.candidate_id;
+            item.score = StageScore(candidate.final_cost, candidate.max_residual);
+            ranking.push_back(item);
+        }
+
+        std::stable_sort(ranking.begin(), ranking.end(),
+                         [](const FitCandidateRankItem& lhs, const FitCandidateRankItem& rhs)
+                         {
+                             return IsBetterScore(lhs.score, rhs.score);
+                         });
+
+        for (size_t i = 0; i < ranking.size(); ++i)
+        {
+            ranking[i].rank_index = static_cast<int>(i);
+            result.candidate_group.baseline_rank.push_back(ranking[i]);
+        }
+
+        if (!ranking.empty())
+        {
+            result.candidate_group.best_candidate_id = ranking.front().candidate_id;
+            result.candidate_group.group_score = ranking.front().score;
+            result.candidate_group.rank_delta =
+                ranking.size() > 1 ? SafeRankDelta(ranking[1].score, ranking.front().score) : 0.0;
+            result.group_score = result.candidate_group.group_score;
+            result.evaluation_score = result.group_score;
+        }
+    }
+        FinalizeCandidateGroup(result.candidate_group, result.method_result);
         result.selected_match_candidate_index = candidate_index;
         result.evaluated_match_candidate_count = 1;
         return result;
@@ -227,6 +511,7 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
         return run_single(match, -1);
     }
 
+    int best_match_candidate_index = -1;
     PrototypeRunResult best_result;
     bool has_best = false;
     int evaluated_count = 0;
@@ -243,16 +528,34 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
         score_entry.evaluation_score = current.evaluation_score;
         score_entry.valid = current.method_result.valid;
         candidate_scores.push_back(score_entry);
-        if (!has_best || current.evaluation_score < best_result.evaluation_score)
+        if (!has_best || IsBetterScore(current.evaluation_score, best_result.evaluation_score))
         {
             best_result = current;
+            best_match_candidate_index = static_cast<int>(i);
             has_best = true;
         }
     }
+    std::vector<PrototypeCandidateScore> ordered_scores = candidate_scores;
+    std::stable_sort(ordered_scores.begin(), ordered_scores.end(),
+                     [](const PrototypeCandidateScore& lhs, const PrototypeCandidateScore& rhs)
+                     {
+                         return IsBetterScore(lhs.evaluation_score, rhs.evaluation_score);
+                     });
+    for (size_t i = 0; i < ordered_scores.size(); ++i)
+    {
+        ordered_scores[i].rank_index = static_cast<int>(i);
+    }
     if (has_best)
     {
+        best_result.best_match_candidate_index = best_match_candidate_index;
         best_result.evaluated_match_candidate_count = evaluated_count;
-        best_result.candidate_scores = candidate_scores;
+        best_result.candidate_scores = ordered_scores;
+        best_result.ordered_match_candidate_indices.clear();
+        best_result.ordered_match_candidate_indices.reserve(ordered_scores.size());
+        for (const PrototypeCandidateScore& score_entry : ordered_scores)
+        {
+            best_result.ordered_match_candidate_indices.push_back(score_entry.candidate_index);
+        }
         return best_result;
     }
     return run_single(match, -1);

@@ -2,6 +2,7 @@
 
 #include "FormfitGauge.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace cxcore
@@ -11,9 +12,43 @@ namespace formfit
 
 namespace
 {
+double FiniteOr(double value, double fallback)
+{
+    return std::isfinite(value) ? value : fallback;
+}
+
 double ClampPositive(double value, double fallback)
 {
-    return value > 0.0 ? value : fallback;
+    return std::isfinite(value) && value > 0.0 ? value : fallback;
+}
+
+double ClampNonNegative(double value, double fallback = 0.0)
+{
+    return std::isfinite(value) && value >= 0.0 ? value : fallback;
+}
+
+double ClampConfidence(double value)
+{
+    return std::min(1.0, std::max(0.0, FiniteOr(value, 0.0)));
+}
+
+OutputRect NormalizeRect(OutputRect rect)
+{
+    rect.x = FiniteOr(rect.x, 0.0);
+    rect.y = FiniteOr(rect.y, 0.0);
+    rect.width = FiniteOr(rect.width, 0.0);
+    rect.height = FiniteOr(rect.height, 0.0);
+    if (rect.width < 0.0)
+    {
+        rect.x += rect.width;
+        rect.width = -rect.width;
+    }
+    if (rect.height < 0.0)
+    {
+        rect.y += rect.height;
+        rect.height = -rect.height;
+    }
+    return rect;
 }
 
 double EstimateLineAngleDegrees(const LineMeasurementOutput& line)
@@ -52,10 +87,12 @@ FitVariable MakeVariable(const char* name,
 {
     FitVariable variable;
     variable.name = name ? name : "";
-    variable.value = value;
-    variable.lower_bound = lower_bound;
-    variable.upper_bound = upper_bound;
-    variable.weight = weight;
+    variable.value = FiniteOr(value, 0.0);
+    variable.lower_bound = FiniteOr(lower_bound, variable.value);
+    variable.upper_bound = FiniteOr(upper_bound, variable.value);
+    if (variable.lower_bound > variable.upper_bound)
+        std::swap(variable.lower_bound, variable.upper_bound);
+    variable.weight = ClampPositive(weight, 1.0);
     variable.locked = locked;
     return variable;
 }
@@ -81,15 +118,16 @@ GaugeElement MakeRectGaugeElement(const OutputRect& rect,
     element.element_id = element_id ? element_id : "rect";
     element.element_type = GaugeElementType::Rect;
     element.source_entity_id = source_entity_id ? source_entity_id : "";
-    element.confidence = confidence;
-    element.bbox_x = rect.x;
-    element.bbox_y = rect.y;
-    element.bbox_width = rect.width;
-    element.bbox_height = rect.height;
-    element.variables.push_back(MakeVariable("rect.center_x", rect.x + rect.width * 0.5, rect.x - rect.width, rect.x + rect.width * 2.0));
-    element.variables.push_back(MakeVariable("rect.center_y", rect.y + rect.height * 0.5, rect.y - rect.height, rect.y + rect.height * 2.0));
-    element.variables.push_back(MakeVariable("rect.width", rect.width, 1.0, std::max(1.0, rect.width * 3.0)));
-    element.variables.push_back(MakeVariable("rect.height", rect.height, 1.0, std::max(1.0, rect.height * 3.0)));
+    const OutputRect safe_rect = NormalizeRect(rect);
+    element.confidence = ClampConfidence(confidence);
+    element.bbox_x = safe_rect.x;
+    element.bbox_y = safe_rect.y;
+    element.bbox_width = safe_rect.width;
+    element.bbox_height = safe_rect.height;
+    element.variables.push_back(MakeVariable("rect.center_x", safe_rect.x + safe_rect.width * 0.5, safe_rect.x - safe_rect.width, safe_rect.x + safe_rect.width * 2.0));
+    element.variables.push_back(MakeVariable("rect.center_y", safe_rect.y + safe_rect.height * 0.5, safe_rect.y - safe_rect.height, safe_rect.y + safe_rect.height * 2.0));
+    element.variables.push_back(MakeVariable("rect.width", safe_rect.width, 1.0, std::max(1.0, safe_rect.width * 3.0)));
+    element.variables.push_back(MakeVariable("rect.height", safe_rect.height, 1.0, std::max(1.0, safe_rect.height * 3.0)));
     element.variables.push_back(MakeVariable("rect.rotation", 0.0, -180.0, 180.0, 0.5));
     return element;
 }
@@ -103,14 +141,15 @@ GaugeElement MakeLineGaugeElement(const LineMeasurementOutput& line,
     element.element_id = element_id ? element_id : "line";
     element.element_type = GaugeElementType::Line;
     element.source_entity_id = source_entity_id ? source_entity_id : "";
-    element.confidence = confidence;
-    element.bbox_x = line.measure_bounds.x;
-    element.bbox_y = line.measure_bounds.y;
-    element.bbox_width = line.measure_bounds.width;
-    element.bbox_height = line.measure_bounds.height;
+    const OutputRect safe_bounds = NormalizeRect(line.measure_bounds);
+    element.confidence = ClampConfidence(confidence);
+    element.bbox_x = safe_bounds.x;
+    element.bbox_y = safe_bounds.y;
+    element.bbox_width = safe_bounds.width;
+    element.bbox_height = safe_bounds.height;
 
-    const double center_x = line.measure_bounds.x + line.measure_bounds.width * 0.5;
-    const double center_y = line.measure_bounds.y + line.measure_bounds.height * 0.5;
+    const double center_x = safe_bounds.x + safe_bounds.width * 0.5;
+    const double center_y = safe_bounds.y + safe_bounds.height * 0.5;
     const double length = ClampPositive(EstimateLineLength(line), 1.0);
     const double angle = EstimateLineAngleDegrees(line);
 
@@ -130,14 +169,18 @@ GaugeElement MakeCircleGaugeElement(const CircleMeasurementOutput& circle,
     element.element_id = element_id ? element_id : "circle";
     element.element_type = GaugeElementType::Circle;
     element.source_entity_id = source_entity_id ? source_entity_id : "";
-    element.confidence = confidence;
-    element.bbox_x = circle.measure_bounds.x;
-    element.bbox_y = circle.measure_bounds.y;
-    element.bbox_width = circle.measure_bounds.width;
-    element.bbox_height = circle.measure_bounds.height;
-    element.variables.push_back(MakeVariable("circle.center_x", circle.center.x, circle.center.x - circle.radius * 2.0, circle.center.x + circle.radius * 2.0));
-    element.variables.push_back(MakeVariable("circle.center_y", circle.center.y, circle.center.y - circle.radius * 2.0, circle.center.y + circle.radius * 2.0));
-    element.variables.push_back(MakeVariable("circle.radius", circle.radius, 1.0, std::max(1.0, circle.radius * 3.0)));
+    const OutputRect safe_bounds = NormalizeRect(circle.measure_bounds);
+    const double center_x = FiniteOr(circle.center.x, safe_bounds.x + safe_bounds.width * 0.5);
+    const double center_y = FiniteOr(circle.center.y, safe_bounds.y + safe_bounds.height * 0.5);
+    const double radius = ClampPositive(circle.radius, std::max(1.0, std::max(safe_bounds.width, safe_bounds.height) * 0.5));
+    element.confidence = ClampConfidence(confidence);
+    element.bbox_x = safe_bounds.x;
+    element.bbox_y = safe_bounds.y;
+    element.bbox_width = safe_bounds.width;
+    element.bbox_height = safe_bounds.height;
+    element.variables.push_back(MakeVariable("circle.center_x", center_x, center_x - radius * 2.0, center_x + radius * 2.0));
+    element.variables.push_back(MakeVariable("circle.center_y", center_y, center_y - radius * 2.0, center_y + radius * 2.0));
+    element.variables.push_back(MakeVariable("circle.radius", radius, 1.0, std::max(1.0, radius * 3.0)));
     return element;
 }
 
@@ -151,6 +194,7 @@ GaugeElement MakeMatchRectGaugeElement(const MatchCandidateOutput& match_candida
     rect.y = match_candidate.bounds.y;
     rect.width = match_candidate.bounds.width;
     rect.height = match_candidate.bounds.height;
+    rect = NormalizeRect(rect);
     GaugeElement element = MakeRectGaugeElement(rect, element_id ? element_id : "match_rect", source_entity_id, confidence);
     return element;
 }
@@ -178,7 +222,7 @@ FormfitGauge MakeRectCircleGauge(const OutputRect& rect,
     rect_aspect.constraint_id = "rect_aspect";
     rect_aspect.target_element_id = "rect_0";
     rect_aspect.constraint_type = GaugeConstraintType::AspectRatio;
-    rect_aspect.target_value = rect.height != 0.0 ? rect.width / rect.height : 0.0;
+    rect_aspect.target_value = ClampPositive(rect.height, 0.0) > 0.0 ? ClampNonNegative(rect.width) / ClampPositive(rect.height, 1.0) : 0.0;
     rect_aspect.tolerance = 0.25;
     rect_aspect.weight = 1.0;
     gauge.constraints.push_back(rect_aspect);
@@ -187,8 +231,8 @@ FormfitGauge MakeRectCircleGauge(const OutputRect& rect,
     circle_radius.constraint_id = "circle_radius";
     circle_radius.target_element_id = "circle_0";
     circle_radius.constraint_type = GaugeConstraintType::Radius;
-    circle_radius.target_value = circle.radius;
-    circle_radius.tolerance = std::max(1.0, circle.radius * 0.15);
+    circle_radius.target_value = ClampPositive(circle.radius, 1.0);
+    circle_radius.tolerance = std::max(1.0, circle_radius.target_value * 0.15);
     circle_radius.weight = 1.2;
     gauge.constraints.push_back(circle_radius);
 
@@ -248,7 +292,7 @@ FormfitGauge MakeRectCircleLineMatchGauge(const OutputRect& rect,
     }
 
     const MatchCandidateOutput& best = match.candidates.front();
-    const double match_confidence = std::max(0.25, best.score);
+    const double match_confidence = std::max(0.25, ClampConfidence(best.score));
     gauge.elements.push_back(MakeMatchRectGaugeElement(best, "match_rect_0", "fastmatch", match_confidence));
 
     const double rect_center_x = rect.x + rect.width * 0.5;

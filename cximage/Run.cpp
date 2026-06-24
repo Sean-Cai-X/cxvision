@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "Run.h"
 
@@ -55,8 +55,8 @@ void RunClass::Run()
     m_Match.match(&m_occtimage);
 
     double dvalue1 = m_Match.getmaxresult();
-    double dvaluex = m_Match.getresultcentx(-1);
-    double dvaluey = m_Match.getresultcenty(-1);
+    double dvaluex = m_Match.getresolvedresultcentx(-1);
+    double dvaluey = m_Match.getresolvedresultcenty(-1);
    
 }
 
@@ -241,8 +241,8 @@ double RunClass::ProcessIdentifyCoordPattern(cv::Mat matInput, std::vector<cv::P
 
     log_alg << "run ok" << endl;
     double dvalue1 = m_Match.getmaxresult();
-    double dvaluex = m_Match.getresultcentx(-1);
-    double dvaluey = m_Match.getresultcenty(-1);
+    double dvaluex = m_Match.getresolvedresultcentx(-1);
+    double dvaluey = m_Match.getresolvedresultcenty(-1);
     //  ptOut.x = dvaluex;
     //  ptOut.y = dvaluey;
 

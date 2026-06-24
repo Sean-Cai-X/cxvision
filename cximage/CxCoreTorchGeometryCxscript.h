@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "CxCoreTorchHandoffBridge.h"
+
 namespace cxcore {
 
 inline const char* TorchGeometryCxscriptFragmentName_InputPriorRoiLinePointSet()
@@ -18,6 +20,46 @@ inline const char* TorchGeometryCxscriptFragmentName_LabelMaskBoundaryKeypoints(
 inline const char* TorchGeometryCxscriptFragmentName_AttachBackToGeometry()
 {
     return "feature.integration.torch_geometry_attach_back";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_StructuralEvidenceBundle()
+{
+    return "feature.integration.structural_evidence_bundle";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffIngress()
+{
+    return "feature.integration.torch_handoff_ingress";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffSummary()
+{
+    return "feature.integration.torch_handoff_summary";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffObjectSummary()
+{
+    return "feature.integration.torch_handoff_object_summary";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffPublishedReadback()
+{
+    return "feature.integration.torch_handoff_published_readback";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffTaskSnapshot()
+{
+    return "feature.integration.torch_handoff_task_snapshot";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffTaskSummary()
+{
+    return "feature.integration.torch_handoff_task_summary";
+}
+
+inline const char* TorchGeometryCxscriptFragmentName_TorchHandoffPublishedReview()
+{
+    return "feature.integration.torch_handoff_published_review";
 }
 
 inline std::string TorchGeometryCxscript_InputPriorRoiLinePointSet()
@@ -91,6 +133,126 @@ inline std::string TorchGeometryCxscript_AttachBackToGeometry()
         "cxcore.publish.attach_record(\"attach_cls_001\");\n"
         "cxcore.publish.attach_record(\"attach_seg_001\");\n"
         "cxcore.publish.attach_record(\"attach_kp_001\");\n";
+}
+
+inline std::string TorchGeometryCxscript_StructuralEvidenceBundle()
+{
+    return
+        "Match matcher;\n"
+        "\n"
+        "cxcore.load.fractal_partition_object(\"fract_main\");\n"
+        "cxcore.load.distance_field_object(\"dist_main\");\n"
+        "cxcore.load.skeleton_object(\"skel_main\");\n"
+        "cxcore.load.roi_object(\"roi_main\");\n"
+        "\n"
+        "cxcore.build.topology_bundle_envelope(\"topology_bundle_main\");\n"
+        "cxcore.build.structural_evidence_bundle_envelope(\"matcher\", \"topology_bundle_main\", \"structural_bundle_main\");\n"
+        "cxcore.summarize.structural_evidence_bundle_envelope(\"structural_bundle_main\");\n"
+        "cxcore.route.structural_evidence_bundle_envelope(\"structural_bundle_main\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffIngress()
+{
+    return
+        "TorchGeometryHandoff geom_handoff;\n"
+        "TorchFeatureSemanticHandoff semantic_handoff;\n"
+        "TorchOptimizationHandoff optimization_handoff;\n"
+        "\n"
+        + std::string(TorchGeometryHandoffIngestCommandName()) + "(geom_handoff, \"torch_geom_main\");\n"
+        + std::string(TorchFeatureSemanticHandoffIngestCommandName()) + "(semantic_handoff, \"torch_semantic_main\");\n"
+        + std::string(TorchOptimizationHandoffIngestCommandName()) + "(optimization_handoff, \"torch_optimization_main\");\n"
+        "\n"
+        + std::string(StructuralEvidenceBundleEnvelopeSummarizeCommandName()) + "(\"structural_bundle_main\");\n"
+        + std::string(StructuralEvidenceBundleEnvelopeRouteCommandName()) + "(\"structural_bundle_main\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffSummary()
+{
+    return
+        "TorchGeometryHandoff geom_handoff;\n"
+        "TorchFeatureSemanticHandoff semantic_handoff;\n"
+        "TorchOptimizationHandoff optimization_handoff;\n"
+        "\n"
+        + std::string(TorchGeometryHandoffIngestCommandName()) + "(geom_handoff, \"torch_geom_main\");\n"
+        + std::string(TorchFeatureSemanticHandoffIngestCommandName()) + "(semantic_handoff, \"torch_semantic_main\");\n"
+        + std::string(TorchOptimizationHandoffIngestCommandName()) + "(optimization_handoff, \"torch_optimization_main\");\n"
+        "\n"
+        + std::string(TorchGeometryHandoffSummarizeCommandName()) + "(\"torch_geom_main\");\n"
+        + std::string(TorchGeometryHandoffExportCommandName()) + "(\"torch_geom_main\");\n"
+        + std::string(TorchFeatureSemanticHandoffSummarizeCommandName()) + "(\"torch_semantic_main\");\n"
+        + std::string(TorchFeatureSemanticHandoffExportCommandName()) + "(\"torch_semantic_main\");\n"
+        + std::string(TorchOptimizationHandoffSummarizeCommandName()) + "(\"torch_optimization_main\");\n"
+        + std::string(TorchOptimizationHandoffExportCommandName()) + "(\"torch_optimization_main\");\n"
+        "\n"
+        + std::string(TorchMeasurementKindSummarizeCommandName(TorchMeasurementKind::Circle)) + "(\"circle_measurement_main\");\n"
+        + std::string(TorchMeasurementKindExportCommandName(TorchMeasurementKind::Circle)) + "(\"circle_measurement_main\");\n"
+        + std::string(TorchGeometrySemanticRoleSummarizeCommandName(TorchGeometrySemanticRole_GeometryHandoff())) + "(\"torch_geom_main.geometry_anchor\");\n"
+        + std::string(TorchGeometrySemanticRoleExportCommandName(TorchGeometrySemanticRole_GeometryHandoff())) + "(\"torch_geom_main.geometry_anchor\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffObjectSummary()
+{
+    return
+        TorchGeometryCxscript_TorchHandoffSummary() +
+        std::string("\n") +
+        "cxcore.publish.attach_record(\"attach-torch-geometry-001\");\n"
+        + std::string(TorchGeometrySemanticRolePublishCommandName(TorchGeometrySemanticRole_GeometryHandoff())) + "(\"torch_geom_main.geometry_anchor\");\n"
+        + std::string(TorchMeasurementKindPublishCommandName(TorchMeasurementKind::Circle)) + "(\"circle_measurement_main\");\n"
+        "cxcore.summarize.geometry_detection_anchor(\"torch_geom_main.geometry_anchor\");\n"
+        "cxcore.summarize.circle_measurement_ref(\"circle_measurement_main\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffPublishedReadback()
+{
+    return
+        TorchGeometryCxscript_TorchHandoffObjectSummary() +
+        std::string("\n") +
+        "readresult(\"published_handoff_type\");\n"
+        "readresult(\"published_primary_ref\");\n"
+        "readresult(\"published_route_hint\");\n"
+        "readresult(\"published_route_state\");\n"
+        "readresult(\"published_source_hash\");\n"
+        "readresult(\"published_evidence_ref\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffTaskSnapshot()
+{
+    return
+        TorchGeometryCxscript_TorchHandoffPublishedReadback() +
+        std::string("\n") +
+        "readresult(\"published_result_ref\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffTaskSummary()
+{
+    return
+        TorchGeometryCxscript_TorchHandoffTaskSnapshot() +
+        std::string("\n") +
+        "readresult(\"published_handoff_type\");\n"
+        "readresult(\"published_primary_ref\");\n"
+        "readresult(\"published_route_state\");\n"
+        "readresult(\"published_result_ref\");\n"
+        "readresult(\"published_evidence_ref\");\n"
+        "readresult(\"published_bbox_candidate_list_ref\");\n"
+        "readresult(\"published_template_alignment_ref\");\n"
+        "readresult(\"published_template_test_alignment_status\");\n"
+        "readresult(\"published_roi_diff_candidate_ref\");\n"
+        "readresult(\"published_roi_diff_candidate_count\");\n"
+        "readresult(\"published_prior_roi_region_ref\");\n"
+        "readresult(\"published_roi_crop_packet_ref\");\n"
+        "readresult(\"published_roi_crop_count\");\n"
+        "readresult(\"published_roi_crop_spatial_size\");\n"
+        "readresult(\"published_roi_crop_policy_ref\");\n";
+}
+
+inline std::string TorchGeometryCxscript_TorchHandoffPublishedReview()
+{
+    return
+        TorchGeometryCxscript_TorchHandoffTaskSummary() +
+        std::string("\n") +
+        "readresult(\"published_bbox_candidate_list_ref\");\n"
+        "readresult(\"published_prior_roi_region_ref\");\n"
+        "readresult(\"published_roi_crop_packet_ref\");\n";
 }
 
 inline std::string TorchGeometryCxscript_MinimalEndToEndRoiMaskBoundary()
