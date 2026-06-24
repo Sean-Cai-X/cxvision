@@ -1824,7 +1824,6 @@ void Findline::InflectionPoint(void* points)
         m_measurepoints_w.FindCrossPoints(points);
         return;
     } 
-
 }
 /*void Findline::SeekPoints(PointsShape& seekpoints, gp_Pnt& point, int ivect)
 {

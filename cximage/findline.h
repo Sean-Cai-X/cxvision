@@ -7,8 +7,6 @@
 
 
 
-
-
 class FindObject;
 
 struct EdgeBandCandidate
@@ -253,6 +251,5 @@ private:
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindlineMeasureProfileStats m_lastMeasureProfile;
 };
-
 
 #endif //_findline_Header

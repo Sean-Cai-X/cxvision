@@ -505,8 +505,4 @@ public:
     void ZeroPOS();
 };
 
-
-
-
-
 #endif //FASTMATCH_H
