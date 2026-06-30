@@ -498,6 +498,8 @@ void ViewController::run()
 #endif
   Imgui_OpenCV_Ini0();
   initScriptCatalog();
+  initManualStateTestConsole();
+  m_semanticFlowGraph.Initialize(findRepositoryRoot().generic_string());
   mainloop();
   cleanup();
 }
@@ -569,8 +571,16 @@ void ViewController::initScriptCatalog()
 ViewController::ScriptResult ViewController::RunCxScript(const std::string& theScriptPath)
 {
   ScriptResult result;
+  result.source = "file";
   result.script_path = theScriptPath;
   result.runtime_fillback_status = "pending_real_runtime_fillback";
+  if (theScriptPath.empty())
+  {
+    result.status = "PENDING";
+    result.reason = "no script selected";
+    result.runtime_fillback_status = "not_started";
+    return result;
+  }
   const fs::path root = findRepositoryRoot();
   const fs::path scriptPath = root / fs::path(theScriptPath);
   if (root.empty() || !fs::exists(scriptPath))
@@ -811,6 +821,8 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::Text("Options");
   ImGui::Checkbox("Detachable panels (inside host)", &m_detachablePanels);
   ImGui::SameLine();
+  ImGui::Checkbox("Manual State Test Console", &m_showManualStateTestConsole);
+  ImGui::SameLine();
   ImGui::Checkbox("Show legacy GPU work (debug)", &m_showLegacyGpuWork);
   if (m_selectedScript >= 0 && m_selectedScript < static_cast<int>(m_scriptCatalog.size()))
     ImGui::TextWrapped("Selected: %s", m_scriptCatalog[m_selectedScript].path.c_str());
@@ -844,10 +856,12 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::SetNextWindowPos(ImVec2(rightX, margin + runHeight + margin), layoutCondition);
   ImGui::SetNextWindowSize(ImVec2(rightWidth, contentHeight - runHeight - margin), layoutCondition);
   ImGui::Begin("Result / Log", nullptr, panelFlags);
+  ImGui::TextWrapped("Source: %s", emptyAsNone(m_scriptResult.source));
   ImGui::TextWrapped("Script: %s", emptyAsNone(m_scriptResult.script_path));
   ImGui::Text("Status: %s", emptyAsNone(m_scriptResult.status));
   ImGui::TextWrapped("Reason: %s", emptyAsNone(m_scriptResult.reason));
   ImGui::TextWrapped("runtime_fillback_status: %s", emptyAsNone(m_scriptResult.runtime_fillback_status));
+  ImGui::Text("elapsed_ms: %.3f", m_scriptResult.elapsed_ms);
   ImGui::TextWrapped("image_ref: %s", emptyAsNone(m_scriptResult.image_ref));
   ImGui::TextWrapped("overlay_ref: %s", emptyAsNone(m_scriptResult.overlay_ref));
   ImGui::TextWrapped("result_ref: %s", emptyAsNone(m_scriptResult.result_ref));
@@ -1782,6 +1796,22 @@ void ViewController::mainloop()
              }
 
              drawScriptAcceptancePanels();
+             const SemanticFlowAction flowAction = m_semanticFlowGraph.Draw();
+             if (flowAction.type == SemanticFlowActionType::LoadBoundScript)
+             {
+                 LoadBoundStateToManualConsole(flowAction.node_id, flowAction.script_path);
+             }
+             else if (flowAction.type == SemanticFlowActionType::RunBoundScript)
+             {
+                 const ScriptResult flowResult = RunCxScript(flowAction.script_path);
+                 m_semanticFlowGraph.ApplyScriptResult(flowAction.node_index,
+                                                       flowResult.status,
+                                                       flowResult.result_ref,
+                                                       flowResult.evidence_ref,
+                                                       flowResult.issue_entry_ref,
+                                                       flowResult.reason);
+             }
+             drawManualStateTestConsole();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
              

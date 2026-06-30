@@ -1,0 +1,331 @@
+#include "SemanticFlowGraph.h"
+
+#include <imgui.h>
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <sstream>
+
+namespace
+{
+std::string Trim(const std::string& text)
+{
+  std::size_t first = 0;
+  while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
+  std::size_t last = text.size();
+  while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) --last;
+  return text.substr(first, last - first);
+}
+
+bool SplitField(const std::string& line, std::string& key, std::string& value)
+{
+  const std::size_t separator = line.find(':');
+  if (separator == std::string::npos) return false;
+  key = Trim(line.substr(0, separator));
+  value = Trim(line.substr(separator + 1));
+  return !key.empty();
+}
+
+ImU32 StatusColor(const std::string& status)
+{
+  if (status == "PASS") return IM_COL32(60, 180, 90, 255);
+  if (status == "FAIL") return IM_COL32(220, 70, 70, 255);
+  if (status == "BLOCKED") return IM_COL32(230, 130, 45, 255);
+  if (status == "PENDING" || status == "running") return IM_COL32(215, 180, 55, 255);
+  return IM_COL32(115, 125, 135, 255);
+}
+
+ImU32 EdgeColor(const std::string& type)
+{
+  if (type == "artifact") return IM_COL32(80, 165, 235, 255);
+  if (type == "feedback" || type == "issue") return IM_COL32(235, 125, 70, 255);
+  return IM_COL32(160, 165, 170, 255);
+}
+}
+
+void SemanticFlowGraph::Initialize(const std::string& repository_root)
+{
+  m_repositoryRoot = repository_root;
+  LoadDemoFlow();
+}
+
+void SemanticFlowGraph::LoadDemoFlow()
+{
+  const std::string separator = (!m_repositoryRoot.empty() && m_repositoryRoot.back() != '/' &&
+                                 m_repositoryRoot.back() != '\\') ? "/" : "";
+  LoadFlowFile(m_repositoryRoot + separator + m_demoRelativePath);
+}
+
+bool SemanticFlowGraph::LoadFlowFile(const std::string& path)
+{
+  std::ifstream input(path);
+  if (!input)
+  {
+    m_lastLog = "Flow load failed: " + path;
+    return false;
+  }
+
+  SemanticFlow parsed;
+  SemanticNode* node = nullptr;
+  SemanticEdge* edge = nullptr;
+  std::string line;
+  while (std::getline(input, line))
+  {
+    line = Trim(line);
+    if (line.empty() || line[0] == '#') continue;
+    std::string key;
+    std::string value;
+    if (!SplitField(line, key, value)) continue;
+    if (key == "flow")
+    {
+      parsed.id = value;
+      node = nullptr;
+      edge = nullptr;
+    }
+    else if (key == "description") parsed.description = value;
+    else if (key == "node")
+    {
+      parsed.nodes.push_back(SemanticNode());
+      node = &parsed.nodes.back();
+      node->id = value;
+      node->status = "ready";
+      edge = nullptr;
+    }
+    else if (key == "edge")
+    {
+      const std::size_t arrow = value.find("->");
+      if (arrow == std::string::npos) continue;
+      parsed.edges.push_back(SemanticEdge());
+      edge = &parsed.edges.back();
+      edge->from = Trim(value.substr(0, arrow));
+      edge->to = Trim(value.substr(arrow + 2));
+      node = nullptr;
+    }
+    else if (node != nullptr)
+    {
+      if (key == "stage") node->stage = value;
+      else if (key == "module") node->module = value;
+      else if (key == "title") node->title = value;
+      else if (key == "script") node->script_path = value;
+      else if (key == "status") node->status = value;
+    }
+    else if (edge != nullptr)
+    {
+      if (key == "condition") edge->condition = value;
+      else if (key == "type") edge->type = value;
+    }
+  }
+
+  if (parsed.nodes.empty())
+  {
+    m_lastLog = "Flow contains no nodes: " + path;
+    return false;
+  }
+  parsed.selected_node_index = 0;
+  m_flow = parsed;
+  m_currentFlowPath = path;
+  m_lastLog = "Flow loaded: " + parsed.id;
+  return true;
+}
+
+void SemanticFlowGraph::ClearFlow()
+{
+  m_flow = SemanticFlow();
+  m_currentFlowPath.clear();
+  m_lastLog = "Flow cleared";
+}
+
+SemanticNode* SemanticFlowGraph::SelectedNode()
+{
+  if (m_flow.selected_node_index < 0 ||
+      m_flow.selected_node_index >= static_cast<int>(m_flow.nodes.size())) return nullptr;
+  return &m_flow.nodes[static_cast<std::size_t>(m_flow.selected_node_index)];
+}
+
+const SemanticNode* SemanticFlowGraph::SelectedNode() const
+{
+  if (m_flow.selected_node_index < 0 ||
+      m_flow.selected_node_index >= static_cast<int>(m_flow.nodes.size())) return nullptr;
+  return &m_flow.nodes[static_cast<std::size_t>(m_flow.selected_node_index)];
+}
+
+void SemanticFlowGraph::DrawGraphCanvas()
+{
+  const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+  ImVec2 canvasSize(ImGui::GetContentRegionAvail().x, 250.0f);
+  canvasSize.x = std::max(canvasSize.x, 720.0f);
+  ImGui::Dummy(canvasSize);
+  ImDrawList* draw = ImGui::GetWindowDrawList();
+  draw->AddRectFilled(canvasPos, ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y),
+                      IM_COL32(35, 38, 42, 255));
+
+  const float nodeWidth = 150.0f;
+  const float nodeHeight = 105.0f;
+  const float gap = 45.0f;
+  const float startX = canvasPos.x + 25.0f;
+  const float nodeY = canvasPos.y + 70.0f;
+  auto nodePosition = [&](std::size_t index) { return ImVec2(startX + index * (nodeWidth + gap), nodeY); };
+  auto findNode = [&](const std::string& id) -> int {
+    for (std::size_t i = 0; i < m_flow.nodes.size(); ++i)
+      if (m_flow.nodes[i].id == id) return static_cast<int>(i);
+    return -1;
+  };
+
+  for (const SemanticEdge& edge : m_flow.edges)
+  {
+    const int from = findNode(edge.from);
+    const int to = findNode(edge.to);
+    if (from < 0 || to < 0) continue;
+    const ImVec2 fromPos = nodePosition(static_cast<std::size_t>(from));
+    const ImVec2 toPos = nodePosition(static_cast<std::size_t>(to));
+    ImVec2 a(fromPos.x + nodeWidth, fromPos.y + nodeHeight * 0.5f);
+    ImVec2 b(toPos.x, toPos.y + nodeHeight * 0.5f);
+    if (to <= from)
+    {
+      a = ImVec2(fromPos.x + nodeWidth * 0.5f, fromPos.y + nodeHeight);
+      b = ImVec2(toPos.x + nodeWidth * 0.5f, toPos.y + nodeHeight);
+      const float feedbackY = nodeY + nodeHeight + 45.0f;
+      draw->AddLine(a, ImVec2(a.x, feedbackY), EdgeColor(edge.type), 2.0f);
+      draw->AddLine(ImVec2(a.x, feedbackY), ImVec2(b.x, feedbackY), EdgeColor(edge.type), 2.0f);
+      draw->AddLine(ImVec2(b.x, feedbackY), b, EdgeColor(edge.type), 2.0f);
+    }
+    else draw->AddLine(a, b, EdgeColor(edge.type), 2.0f);
+    draw->AddTriangleFilled(b, ImVec2(b.x - 8.0f, b.y - 5.0f), ImVec2(b.x - 8.0f, b.y + 5.0f),
+                            EdgeColor(edge.type));
+    const ImVec2 label((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f - 18.0f);
+    draw->AddText(label, EdgeColor(edge.type), edge.condition.c_str());
+  }
+
+  for (std::size_t i = 0; i < m_flow.nodes.size(); ++i)
+  {
+    const SemanticNode& node = m_flow.nodes[i];
+    const ImVec2 pos = nodePosition(i);
+    const ImVec2 end(pos.x + nodeWidth, pos.y + nodeHeight);
+    ImGui::SetCursorScreenPos(pos);
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::InvisibleButton("node", ImVec2(nodeWidth, nodeHeight)))
+      m_flow.selected_node_index = static_cast<int>(i);
+    ImGui::PopID();
+    draw->AddRectFilled(pos, end, StatusColor(node.status), 5.0f);
+    draw->AddRect(pos, end,
+                  m_flow.selected_node_index == static_cast<int>(i) ? IM_COL32(80, 170, 255, 255)
+                                                                    : IM_COL32(205, 205, 205, 255),
+                  5.0f, 0, m_flow.selected_node_index == static_cast<int>(i) ? 3.0f : 1.0f);
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 7.0f), IM_COL32_WHITE, (node.id + " [" + node.stage + "]").c_str());
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 29.0f), IM_COL32_WHITE, node.module.c_str());
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 50.0f), IM_COL32_WHITE, node.title.c_str());
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 72.0f), IM_COL32_WHITE, node.status.c_str());
+  }
+  ImGui::SetCursorScreenPos(ImVec2(canvasPos.x, canvasPos.y + canvasSize.y));
+}
+
+void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
+{
+  SemanticNode* node = SelectedNode();
+  if (node == nullptr)
+  {
+    ImGui::TextDisabled("No node selected");
+    return;
+  }
+  ImGui::Text("Node Detail");
+  ImGui::Text("id: %s", node->id.c_str());
+  ImGui::Text("stage: %s", node->stage.c_str());
+  ImGui::Text("module: %s", node->module.c_str());
+  ImGui::TextWrapped("title: %s", node->title.c_str());
+  ImGui::TextWrapped("script_path: %s", node->script_path.c_str());
+  ImGui::Text("status: %s", node->status.c_str());
+  ImGui::TextWrapped("reason: %s", node->reason.empty() ? "(none)" : node->reason.c_str());
+  ImGui::TextWrapped("result_ref: %s", node->result_ref.empty() ? "(none)" : node->result_ref.c_str());
+  ImGui::TextWrapped("evidence_ref: %s", node->evidence_ref.empty() ? "(none)" : node->evidence_ref.c_str());
+  ImGui::TextWrapped("issue_entry_ref: %s", node->issue_entry_ref.empty() ? "(none)" : node->issue_entry_ref.c_str());
+  ImGui::Separator();
+  if (ImGui::Button("Load Node To Manual Console"))
+  {
+    m_sharedBoundNodeId = node->id;
+    m_sharedBoundScriptPath = node->script_path;
+    m_lastLog = "Manual console hook pending";
+    action.type = SemanticFlowActionType::LoadBoundScript;
+    action.node_index = m_flow.selected_node_index;
+    action.node_id = node->id;
+    action.script_path = node->script_path;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Run Bound Script"))
+  {
+    if (node->script_path.empty() || node->script_path == "none")
+    {
+      node->status = "PENDING";
+      node->reason = "no bound script";
+      m_lastLog = "Run blocked: node has no bound script";
+    }
+    else
+    {
+      node->status = "running";
+      action.type = SemanticFlowActionType::RunBoundScript;
+      action.node_index = m_flow.selected_node_index;
+      action.script_path = node->script_path;
+    }
+  }
+  if (ImGui::Button("Mark PASS")) { node->status = "PASS"; node->reason = "manual_mark"; }
+  ImGui::SameLine();
+  if (ImGui::Button("Mark FAIL")) { node->status = "FAIL"; node->reason = "manual_mark"; }
+  ImGui::SameLine();
+  if (ImGui::Button("Mark BLOCKED")) { node->status = "BLOCKED"; node->reason = "manual_mark"; }
+  ImGui::SameLine();
+  if (ImGui::Button("Mark PENDING")) { node->status = "PENDING"; node->reason = "manual_mark"; }
+  if (ImGui::Button("Clear Node Result"))
+  {
+    node->status = "ready";
+    node->reason.clear();
+    node->result_ref.clear();
+    node->evidence_ref.clear();
+    node->issue_entry_ref.clear();
+  }
+  ImGui::TextWrapped("shared_bound_node_id: %s", m_sharedBoundNodeId.empty() ? "(none)" : m_sharedBoundNodeId.c_str());
+  ImGui::TextWrapped("shared_bound_script_path: %s", m_sharedBoundScriptPath.empty() ? "(none)" : m_sharedBoundScriptPath.c_str());
+  ImGui::TextWrapped("log: %s", m_lastLog.empty() ? "(none)" : m_lastLog.c_str());
+}
+
+SemanticFlowAction SemanticFlowGraph::Draw()
+{
+  SemanticFlowAction action;
+  if (!m_open) return action;
+  ImGui::SetNextWindowSize(ImVec2(1050.0f, 680.0f), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin("Semantic Flow Graph", &m_open))
+  {
+    ImGui::End();
+    return action;
+  }
+  ImGui::TextWrapped("Flow File: %s", m_currentFlowPath.empty() ? "(none)" : m_currentFlowPath.c_str());
+  if (ImGui::Button("Load Demo Flow")) LoadDemoFlow();
+  ImGui::SameLine();
+  if (ImGui::Button("Reload Flow") && !m_currentFlowPath.empty()) LoadFlowFile(m_currentFlowPath);
+  ImGui::SameLine();
+  if (ImGui::Button("Clear Flow")) ClearFlow();
+  ImGui::Text("flow: %s", m_flow.id.empty() ? "(none)" : m_flow.id.c_str());
+  ImGui::TextWrapped("description: %s", m_flow.description.empty() ? "(none)" : m_flow.description.c_str());
+  ImGui::Separator();
+  DrawGraphCanvas();
+  ImGui::Separator();
+  DrawNodeDetail(action);
+  ImGui::End();
+  return action;
+}
+
+void SemanticFlowGraph::ApplyScriptResult(int node_index,
+                                          const std::string& status,
+                                          const std::string& result_ref,
+                                          const std::string& evidence_ref,
+                                          const std::string& issue_entry_ref,
+                                          const std::string& reason)
+{
+  if (node_index < 0 || node_index >= static_cast<int>(m_flow.nodes.size())) return;
+  SemanticNode& node = m_flow.nodes[static_cast<std::size_t>(node_index)];
+  node.status = status == "PASS" && result_ref.empty() ? "PENDING" : status;
+  node.reason = status == "PASS" && result_ref.empty() ? "runtime result package missing" : reason;
+  node.result_ref = result_ref;
+  node.evidence_ref = evidence_ref;
+  node.issue_entry_ref = issue_entry_ref;
+  m_lastLog = "ScriptResult filled back to node " + node.id;
+}

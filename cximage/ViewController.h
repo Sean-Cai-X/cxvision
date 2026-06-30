@@ -24,6 +24,8 @@
 #include "imagemanager.h"
 #include "ParserClass.h"
 #include "muParser.h"
+#include "ManualStateTestConsole.h"
+#include "SemanticFlowGraph.h"
 
 //! OCCT view controller hosting interaction, image tools, and shape display.
 class ViewController : protected AIS_ViewController
@@ -35,8 +37,9 @@ class ViewController : protected AIS_ViewController
 
   struct ScriptResult
   {
-    std::string script_path, status, reason, runtime_fillback_status;
+    std::string source, script_path, status, reason, runtime_fillback_status;
     std::string image_ref, overlay_ref, result_ref, evidence_ref, issue_entry_ref;
+    double elapsed_ms = 0.0;
     std::vector<std::string> log_lines;
   };
 public:
@@ -49,10 +52,15 @@ public:
   //! Run the application event loop.
   void run();
 
+  void LoadBoundStateToManualConsole(const std::string& nodeId,
+                                         const std::string& scriptPath);
+
 private:
   void initImGui();
   void initScriptCatalog();
   void drawScriptAcceptancePanels();
+  void drawManualStateTestConsole();
+  void initManualStateTestConsole();
   ScriptResult RunCxScript(const std::string& theScriptPath);
   void FitAll();
   double GetScale();
@@ -297,6 +305,10 @@ private:
     bool m_showAllScripts = false;
     bool m_showLegacyGpuWork = false;
     bool m_detachablePanels = false;
+    bool m_showManualStateTestConsole = true;
+    ManualTestContext m_manualTest;
+    std::vector<ScriptSnippet> m_manualSnippets;
+    SemanticFlowGraph m_semanticFlowGraph;
     bool m_renderImageInOcctBackground = false;
     bool m_showTestPoints = false;
     bool m_showTestRectangle = false;
