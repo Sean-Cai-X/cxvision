@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "CxCoreBoundary.h"
-#include "../../cxgeom/include/CxGeomAnnotationBody.h"
-#include "../../cxgeom/include/CxGeomElementBody.h"
+#include "../cxgeom/include/CxGeomAnnotationBody.h"
+#include "../cxgeom/include/CxGeomElementBody.h"
 
 namespace cxcore {
 

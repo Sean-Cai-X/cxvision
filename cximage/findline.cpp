@@ -1,7 +1,7 @@
 #include "pch.h"
 
 #include "Findline.h"
-#include "../../cxgeom/include/CxSetLineBuild.h"
+#include "../cxgeom/include/CxSetLineBuild.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
 

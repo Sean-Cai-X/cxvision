@@ -26,12 +26,12 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 
 #ifndef CXCORE_ENABLE_VIEWCONTROLLER_CUDA
 #define CXCORE_ENABLE_VIEWCONTROLLER_CUDA 0
 #endif
-
- //gpu
 #if CXCORE_ENABLE_VIEWCONTROLLER_CUDA
 #include <cuda_runtime.h>
 #include "AI_kernels.h"
@@ -47,7 +47,6 @@
 #include <helper_functions.h>
 #include <helper_cuda.h>
 #endif
-
 
 #include <math.h>
 #include <vector>
@@ -71,7 +70,41 @@
 
 namespace
 {
-  //! Convert GLFW mouse button into Aspect_VKeyMouse.
+  namespace fs = std::filesystem;
+
+  fs::path findRepositoryRoot()
+  {
+    const fs::path candidates[] = { fs::current_path(), fs::path(__FILE__).parent_path().parent_path() };
+    for (const fs::path& candidate : candidates)
+    {
+      fs::path current = candidate;
+      while (!current.empty())
+      {
+        if (fs::exists(current / "cxparser" / "cxscript")) return current;
+        const fs::path parent = current.parent_path();
+        if (parent == current) break;
+        current = parent;
+      }
+    }
+    return fs::path();
+  }
+
+  bool pathIsWithin(const fs::path& child, const fs::path& parent)
+  {
+    const fs::path normalizedChild = fs::weakly_canonical(child);
+    const fs::path normalizedParent = fs::weakly_canonical(parent);
+    auto childIt = normalizedChild.begin();
+    for (auto parentIt = normalizedParent.begin(); parentIt != normalizedParent.end(); ++parentIt, ++childIt)
+    {
+      if (childIt == normalizedChild.end() || *childIt != *parentIt) return false;
+    }
+    return true;
+  }
+
+  const char* emptyAsNone(const std::string& value)
+  {
+    return value.empty() ? "(none)" : value.c_str();
+  }
   static Aspect_VKeyMouse mouseButtonFromGlfw (int theButton)
   {
     switch (theButton)
@@ -83,7 +116,6 @@ namespace
     return Aspect_VKeyMouse_NONE;
   }
 
-  //! Convert GLFW key modifiers into Aspect_VKeyFlags.
   static Aspect_VKeyFlags keyFlagsFromGlfw (int theFlags)
   {
     Aspect_VKeyFlags aFlags = Aspect_VKeyFlags_NONE;
@@ -225,7 +257,7 @@ int* pArgc = NULL;
 char** pArgv = NULL;
 
 #define MAX_EPSILON_ERROR 5
-#define REFRESH_DELAY 10  // ms
+#define REFRESH_DELAY 10  
 #define BUFFER_DATA(i) ((char *)0 + i)
 
 void runImageFiltersx(TColor* d_dst, int imageW, int imageH, int g_Kernel, cudaTextureObject_t texImagex) {
@@ -269,8 +301,7 @@ void runImageFiltersx(TColor* d_dst, int imageW, int imageH, int g_Kernel, cudaT
         }
 
         break;
-    }
-    //          同     茫 确      CUDA           
+    }    
     cudaDeviceSynchronize();
     getLastCudaError("Filtering kernel execution failed.\n");
 }
@@ -315,25 +346,21 @@ void runImageFilters(TColor* d_dst) {
         }
 
         break;
-    }
-    //          同     茫 确      CUDA           
+    }       
     cudaDeviceSynchronize();
     getLastCudaError("Filtering kernel execution failed.\n");
 }
 
 void InitializeTextureAndPBO(int imageW, int imageH) {
-    //      PBO
     glGenBuffers(1, &gl_PBO);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, gl_PBO);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, imageW * imageH * sizeof(uchar4), NULL, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // 注   PBO    CUDA
     cudaGraphicsResource* cuda_pbo_resource;
     checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, gl_PBO,
         cudaGraphicsMapFlagsWriteDiscard));
-
-    //      OpenGL     
+  
     GLuint textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
@@ -346,7 +373,6 @@ void InitializeTextureAndPBO(int imageW, int imageH) {
 }
 GLuint UpdateTextureWithCuda(int imageW, int imageH)
 {
-    // Step 1: 映   PBO    CUDA
     TColor* d_dst = NULL;
     size_t num_bytes;
 
@@ -357,16 +383,12 @@ GLuint UpdateTextureWithCuda(int imageW, int imageH)
         (void**)&d_dst, &num_bytes, cuda_pbo_resource));
     getLastCudaError("cudaGraphicsResourceGetMappedPointer failed");
 
-    // Step 2: 使   CUDA     图  
     runImageFilters(d_dst);
-
-    // 同  确     
+ 
     checkCudaErrors(cudaDeviceSynchronize());
 
-    // Step 3:    映  
     checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
 
-    // Step 4:      OpenGL     
     glBindTexture(GL_TEXTURE_2D, texImage);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, imageW, imageH,
         GL_RGBA, GL_UNSIGNED_BYTE, BUFFER_DATA(0));
@@ -403,7 +425,6 @@ GLuint CreateTextureCube(cv::Mat& src) {
         return 0;
     }
 
-    // Step 1:      OpenGL     
     GLuint gl_texture_id;
     glGenTextures(1, &gl_texture_id);
     glBindTexture(GL_TEXTURE_2D, gl_texture_id);
@@ -413,18 +434,15 @@ GLuint CreateTextureCube(cv::Mat& src) {
         GL_RGBA, GL_UNSIGNED_BYTE, src_rgba.data);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Step 2: 注   OpenGL       CUDA
     cudaGraphicsResource* cuda_tex_resource;
     cudaCheckErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
 
-    // Step 3: 映    源   洗    荩      要  
     void* dev_ptr;
     size_t num_bytes;
     cudaCheckErrors(cudaGraphicsMapResources(1, &cuda_tex_resource, 0));
     cudaCheckErrors(cudaGraphicsSubResourceGetMappedArray((cudaArray**)&dev_ptr, cuda_tex_resource, 0, 0));
 
-    //           cudaMemcpyToArray        荩 
     cudaChannelFormatDesc channel_desc = cudaCreateChannelDesc<uchar4>();
     cudaMemcpyToArray((cudaArray*)dev_ptr, 0, 0, src_rgba.data,
         src.cols * src.rows * sizeof(uchar4),
@@ -432,7 +450,6 @@ GLuint CreateTextureCube(cv::Mat& src) {
 
     cudaCheckErrors(cudaGraphicsUnmapResources(1, &cuda_tex_resource, 0));
 
-    //      OpenGL      ID    ImGui
     return gl_texture_id;
 }
 #else
@@ -468,23 +485,19 @@ GLuint UpdateTextureWithCuda(int, int)
 }
 #endif
 
-// ================================================================
-// Function : run
-// Purpose  :
-// ================================================================
 void ViewController::run()
 { 
-    int iw = 2048 / 2;// 1224;
-    int ih = 1536 / 2;// 1024;
+    int iw = 2048 / 2;
+    int ih = 1536 / 2;
   initWindow (iw, ih, "glfw occt image ai");
   initViewer(iw,ih);
   initDemoScene();
 
-  //   始   PBO    Texture
 #if CXCORE_ENABLE_VIEWCONTROLLER_CUDA
   InitializeTextureAndPBO(2048, 1536);
 #endif
   Imgui_OpenCV_Ini0();
+  initScriptCatalog();
   mainloop();
   cleanup();
 }
@@ -494,14 +507,357 @@ void ViewController::initImGui()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    //      ImGui   式
     ImGui::StyleColorsDark();
 
-    //   始   ImGui 平台    染     
     ImGui_ImplGlfw_InitForOpenGL(myOcctWindow->getGlfwWindow(), true);
-    ImGui_ImplOpenGL3_Init("#version 450"); // 确  使    确   GLSL  姹?
+    ImGui_ImplOpenGL3_Init("#version 450");
 }
 
+void ViewController::initScriptCatalog()
+{
+  m_scriptCatalog.clear();
+  m_selectedScript = -1;
+  const fs::path root = findRepositoryRoot();
+  if (root.empty())
+  {
+    m_scriptResult.status = "BLOCKED";
+    m_scriptResult.reason = "cxparser/cxscript directory not found";
+    m_scriptResult.runtime_fillback_status = "not_started";
+    return;
+  }
+
+  const std::pair<const char*, const char*> scanRoots[] = {
+    {"module", "cxparser/cxscript/module"},
+    {"integration", "cxparser/cxscript/integration"}
+  };
+  for (const auto& scanRoot : scanRoots)
+  {
+    const fs::path directory = root / scanRoot.second;
+    if (!fs::exists(directory)) continue;
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(directory))
+    {
+      if (!entry.is_regular_file()) continue;
+      const std::string extension = entry.path().extension().string();
+      if (extension != ".cxs" && extension != ".cxsc") continue;
+      ScriptCatalogEntry item;
+      item.name = entry.path().filename().string();
+      item.path = fs::relative(entry.path(), root).generic_string();
+      item.type = scanRoot.first;
+      item.status = "ready";
+      item.description = item.name == "observe.mlpack_handoff_case.cxs"
+        ? "Observe handoff and pending real runtime fillback."
+        : "CxScript " + item.type + " case.";
+      m_scriptCatalog.push_back(item);
+    }
+  }
+  std::sort(m_scriptCatalog.begin(), m_scriptCatalog.end(),
+    [](const ScriptCatalogEntry& left, const ScriptCatalogEntry& right) { return left.path < right.path; });
+  for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
+  {
+    if (m_scriptCatalog[i].path == "cxparser/cxscript/module/mlpack/observe.mlpack_handoff_case.cxs")
+    {
+      m_selectedScript = static_cast<int>(i);
+      break;
+    }
+  }
+  if (m_selectedScript < 0 && !m_scriptCatalog.empty()) m_selectedScript = 0;
+  m_scriptResult.status = "PENDING";
+  m_scriptResult.reason = "select a script and run it";
+  m_scriptResult.runtime_fillback_status = "not_started";
+}
+
+ViewController::ScriptResult ViewController::RunCxScript(const std::string& theScriptPath)
+{
+  ScriptResult result;
+  result.script_path = theScriptPath;
+  result.runtime_fillback_status = "pending_real_runtime_fillback";
+  const fs::path root = findRepositoryRoot();
+  const fs::path scriptPath = root / fs::path(theScriptPath);
+  if (root.empty() || !fs::exists(scriptPath))
+  {
+    result.status = "FAIL";
+    result.reason = "script file not found";
+    result.log_lines.push_back("RunCxScript rejected a missing script path.");
+    return result;
+  }
+  const fs::path moduleRoot = root / "cxparser" / "cxscript" / "module";
+  const fs::path integrationRoot = root / "cxparser" / "cxscript" / "integration";
+  if (!pathIsWithin(scriptPath, moduleRoot) && !pathIsWithin(scriptPath, integrationRoot))
+  {
+    result.status = "BLOCKED";
+    result.reason = "script path is outside the allowed cxscript runtime roots";
+    result.log_lines.push_back("rag_script_cases is semantic_reference_only.");
+    return result;
+  }
+  std::ifstream stream(scriptPath);
+  const std::string scriptText((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+  if (scriptText.find("dev_analysis_gui_shell.exe") != std::string::npos)
+  {
+    const fs::path localShell = root / "cxparser" / "build" / "Release" / "dev_analysis_gui_shell.exe";
+    const fs::path workspaceShell = root.parent_path().parent_path() /
+      "cxparser" / "build" / "Release" / "dev_analysis_gui_shell.exe";
+    if (!fs::exists(localShell) && !fs::exists(workspaceShell))
+    {
+      result.status = "BLOCKED";
+      result.reason = "dev_analysis_gui_shell.exe missing";
+      result.log_lines.push_back("External GUI capture dependency is unavailable.");
+      result.log_lines.push_back("No runtime result package was produced.");
+      return result;
+    }
+  }
+  result.status = "PENDING";
+  result.reason = "cxparser_ext_cxscript_cli runtime not connected to ViewController";
+  result.log_lines.push_back("Script exists and is inside an allowed runtime root.");
+  result.log_lines.push_back("Waiting for real runtime result package fillback.");
+  return result;
+}
+
+void ViewController::drawScriptAcceptancePanels()
+{
+  ImGuiIO& panelIo = ImGui::GetIO();
+  const ImGuiCond layoutCondition = m_detachablePanels ? ImGuiCond_FirstUseEver : ImGuiCond_Always;
+  const ImGuiWindowFlags panelFlags = m_detachablePanels ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoMove;
+  const ImVec2 displaySize = panelIo.DisplaySize;
+  const float margin = 4.0f;
+  const float contentHeight = std::max(300.0f, displaySize.y - margin * 2.0f);
+  const float leftWidth = std::max(260.0f, displaySize.x * 0.28f);
+  const float rightWidth = std::max(300.0f, displaySize.x * 0.30f);
+  const float middleWidth = std::max(280.0f, displaySize.x - leftWidth - rightWidth - margin * 4.0f);
+  const float catalogHeight = contentHeight * 0.55f;
+  const float runHeight = 155.0f;
+  const float middleX = margin * 2.0f + leftWidth;
+  const float rightX = middleX + middleWidth + margin;
+
+  ImGui::SetNextWindowPos(ImVec2(margin, margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(leftWidth, catalogHeight), layoutCondition);
+  ImGui::Begin("Script Catalog", nullptr, panelFlags);
+  ImGui::Text("Runtime roots: cxparser/cxscript/module + integration");
+  ImGui::TextDisabled("rag_script_cases: semantic_reference_only");
+  ImGui::Checkbox("Show all catalog scripts", &m_showAllScripts);
+  ImGui::Separator();
+  for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
+  {
+    const ScriptCatalogEntry& item = m_scriptCatalog[i];
+    if (!m_showAllScripts &&
+        item.path != "cxparser/cxscript/module/mlpack/observe.mlpack_handoff_case.cxs") continue;
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::Selectable(item.name.c_str(), m_selectedScript == static_cast<int>(i))) m_selectedScript = static_cast<int>(i);
+    ImGui::TextWrapped("path: %s", item.path.c_str());
+    ImGui::Text("type: %s | status: %s", item.type.c_str(), item.status.c_str());
+    ImGui::TextWrapped("description: %s", item.description.c_str());
+    ImGui::Separator();
+    ImGui::PopID();
+  }
+  if (m_scriptCatalog.empty()) ImGui::TextDisabled("No runnable scripts found.");
+  ImGui::End();
+
+  ImGui::SetNextWindowPos(ImVec2(margin, margin + catalogHeight + margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(leftWidth, contentHeight - catalogHeight - margin), layoutCondition);
+  ImGui::Begin("Capability Status", nullptr, panelFlags);
+  ImGui::Text("cxscript:");
+  ImGui::BulletText("ScriptCatalog: %s", m_scriptCatalog.empty() ? "blocked" : "available");
+  ImGui::BulletText("RunCxScript: pending");
+  ImGui::Text("cximage:");
+  ImGui::BulletText("ImageView: available");
+  ImGui::BulletText("OverlayView: pending");
+  ImGui::Text("mlpack:");
+  ImGui::BulletText("observe_handoff: pending");
+  ImGui::Text("ensmallen:");
+  ImGui::BulletText("semantic_lifecycle: listed_only / not_executable");
+  ImGui::Text("torch:");
+  ImGui::BulletText("listed_only / not_executable / pending");
+  ImGui::Text("rag_script_cases:");
+  ImGui::BulletText("semantic_reference_only / not_runtime_target");
+  ImGui::End();
+
+  ImGui::SetNextWindowPos(ImVec2(middleX, margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(middleWidth, contentHeight), layoutCondition);
+  ImGui::Begin("Image View", nullptr, panelFlags);
+  ImGui::Checkbox("Test points", &m_showTestPoints);
+  ImGui::SameLine();
+  ImGui::Checkbox("Test rectangle", &m_showTestRectangle);
+  ImGui::SameLine();
+  ImGui::Checkbox("Test scan line", &m_showTestScanLine);
+  ImGui::Separator();
+  if (m_imageViewTexture == 0 || m_imageViewImage.empty())
+  {
+    ImGui::TextDisabled("Image View: no image loaded");
+  }
+  else
+  {
+    if (ImGui::Button("Reset view"))
+    {
+      m_imageViewZoom = 1.0f;
+      m_imageViewPanX = 0.0f;
+      m_imageViewPanY = 0.0f;
+    }
+    ImGui::SameLine();
+    ImGui::Text("Zoom: %.0f%%", m_imageViewZoom * 100.0f);
+
+    ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+    canvasSize.y = std::max(100.0f, canvasSize.y - 58.0f);
+    const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("ImageCanvas", canvasSize,
+                           ImGuiButtonFlags_MouseButtonLeft);
+    const bool canvasHovered = ImGui::IsItemHovered();
+    const bool canvasActive = ImGui::IsItemActive();
+    ImGuiIO& io = ImGui::GetIO();
+
+    const float imageAspect = static_cast<float>(m_imageViewImage.cols) /
+                              static_cast<float>(m_imageViewImage.rows);
+    ImVec2 fittedSize(canvasSize.x, canvasSize.x / imageAspect);
+    if (fittedSize.y > canvasSize.y)
+    {
+      fittedSize.y = canvasSize.y;
+      fittedSize.x = canvasSize.y * imageAspect;
+    }
+
+    ImVec2 imageSize(fittedSize.x * m_imageViewZoom,
+                     fittedSize.y * m_imageViewZoom);
+    ImVec2 imagePos(canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
+                    canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
+
+    if (canvasHovered && io.MouseWheel != 0.0f)
+    {
+      const float oldZoom = m_imageViewZoom;
+      const float zoomFactor = io.MouseWheel > 0.0f ? 1.15f : (1.0f / 1.15f);
+      m_imageViewZoom = std::max(0.25f, std::min(8.0f, oldZoom * zoomFactor));
+      if (m_imageViewZoom != oldZoom)
+      {
+        const float anchorX = (io.MousePos.x - imagePos.x) / imageSize.x;
+        const float anchorY = (io.MousePos.y - imagePos.y) / imageSize.y;
+        imageSize = ImVec2(fittedSize.x * m_imageViewZoom,
+                           fittedSize.y * m_imageViewZoom);
+        const ImVec2 centeredPos(
+          canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
+          canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
+        m_imageViewPanX += io.MousePos.x - (centeredPos.x + anchorX * imageSize.x);
+        m_imageViewPanY += io.MousePos.y - (centeredPos.y + anchorY * imageSize.y);
+        imagePos = ImVec2(
+          canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
+          canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
+      }
+    }
+
+    if (canvasActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    {
+      m_imageViewPanX += io.MouseDelta.x;
+      m_imageViewPanY += io.MouseDelta.y;
+      imagePos.x += io.MouseDelta.x;
+      imagePos.y += io.MouseDelta.y;
+    }
+
+    const ImVec2 imageEnd(imagePos.x + imageSize.x, imagePos.y + imageSize.y);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->PushClipRect(canvasPos,
+                           ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y),
+                           true);
+    drawList->AddImage((ImTextureID)(uint64_t)m_imageViewTexture,
+                       imagePos, imageEnd);
+    if (m_showTestPoints)
+    {
+      const ImU32 color = IM_COL32(255, 64, 64, 255);
+      const ImVec2 points[] = {
+        imagePos,
+        ImVec2(imageEnd.x, imagePos.y),
+        ImVec2(imagePos.x, imageEnd.y),
+        imageEnd,
+        ImVec2((imagePos.x + imageEnd.x) * 0.5f,
+               (imagePos.y + imageEnd.y) * 0.5f)
+      };
+      for (const ImVec2& point : points)
+      {
+        drawList->AddLine(ImVec2(point.x - 6.0f, point.y),
+                          ImVec2(point.x + 6.0f, point.y), color, 2.0f);
+        drawList->AddLine(ImVec2(point.x, point.y - 6.0f),
+                          ImVec2(point.x, point.y + 6.0f), color, 2.0f);
+      }
+    }
+    if (m_showTestRectangle)
+    {
+      drawList->AddRect(
+        ImVec2(imagePos.x + imageSize.x * 0.2f, imagePos.y + imageSize.y * 0.2f),
+        ImVec2(imagePos.x + imageSize.x * 0.7f, imagePos.y + imageSize.y * 0.7f),
+        IM_COL32(64, 255, 64, 255), 0.0f, 0, 2.0f);
+    }
+    if (m_showTestScanLine)
+    {
+      const float y = imagePos.y + imageSize.y * 0.5f;
+      drawList->AddLine(ImVec2(imagePos.x, y), ImVec2(imageEnd.x, y),
+                        IM_COL32(64, 160, 255, 255), 2.0f);
+    }
+    drawList->PopClipRect();
+
+    const bool mouseOnImage = canvasHovered &&
+      io.MousePos.x >= imagePos.x && io.MousePos.x < imageEnd.x &&
+      io.MousePos.y >= imagePos.y && io.MousePos.y < imageEnd.y;
+    if (mouseOnImage)
+    {
+      const int imageX = static_cast<int>(
+        (io.MousePos.x - imagePos.x) * m_imageViewImage.cols / imageSize.x);
+      const int imageY = static_cast<int>(
+        (io.MousePos.y - imagePos.y) * m_imageViewImage.rows / imageSize.y);
+      ImGui::SetTooltip("image coordinate: %d, %d", imageX, imageY);
+    }
+  }
+  ImGui::TextWrapped("image_ref: %s", emptyAsNone(m_scriptResult.image_ref));
+  ImGui::TextWrapped("overlay_ref: %s", emptyAsNone(m_scriptResult.overlay_ref));
+  ImGui::Text("result_attach_status: %s", m_scriptResult.result_ref.empty() ? "not_attached" : "attached");
+  ImGui::End();
+
+  ImGui::SetNextWindowPos(ImVec2(rightX, margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(rightWidth, runHeight), layoutCondition);
+  ImGui::Begin("Run Control", nullptr, panelFlags);
+  ImGui::Text("Options");
+  ImGui::Checkbox("Detachable panels (inside host)", &m_detachablePanels);
+  ImGui::SameLine();
+  ImGui::Checkbox("Show legacy GPU work (debug)", &m_showLegacyGpuWork);
+  if (m_selectedScript >= 0 && m_selectedScript < static_cast<int>(m_scriptCatalog.size()))
+    ImGui::TextWrapped("Selected: %s", m_scriptCatalog[m_selectedScript].path.c_str());
+  else ImGui::TextDisabled("Selected: none");
+  if (ImGui::Button("Run Selected Script") && m_selectedScript >= 0)
+  {
+    m_scriptRunRequested = true;
+    m_scriptResult = RunCxScript(m_scriptCatalog[m_selectedScript].path);
+    m_scriptRunRequested = false;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Stop"))
+  {
+    m_scriptRunRequested = false;
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = "run stopped by user";
+    m_scriptResult.runtime_fillback_status = "stopped";
+    m_scriptResult.log_lines.push_back("Stop requested.");
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Clear Result"))
+  {
+    m_scriptResult = ScriptResult();
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = "result cleared";
+    m_scriptResult.runtime_fillback_status = "not_started";
+  }
+  ImGui::Text("Run state: %s", m_scriptRunRequested ? "running" : "idle");
+  ImGui::End();
+
+  ImGui::SetNextWindowPos(ImVec2(rightX, margin + runHeight + margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(rightWidth, contentHeight - runHeight - margin), layoutCondition);
+  ImGui::Begin("Result / Log", nullptr, panelFlags);
+  ImGui::TextWrapped("Script: %s", emptyAsNone(m_scriptResult.script_path));
+  ImGui::Text("Status: %s", emptyAsNone(m_scriptResult.status));
+  ImGui::TextWrapped("Reason: %s", emptyAsNone(m_scriptResult.reason));
+  ImGui::TextWrapped("runtime_fillback_status: %s", emptyAsNone(m_scriptResult.runtime_fillback_status));
+  ImGui::TextWrapped("image_ref: %s", emptyAsNone(m_scriptResult.image_ref));
+  ImGui::TextWrapped("overlay_ref: %s", emptyAsNone(m_scriptResult.overlay_ref));
+  ImGui::TextWrapped("result_ref: %s", emptyAsNone(m_scriptResult.result_ref));
+  ImGui::TextWrapped("evidence_ref: %s", emptyAsNone(m_scriptResult.evidence_ref));
+  ImGui::TextWrapped("issue_entry_ref: %s", emptyAsNone(m_scriptResult.issue_entry_ref));
+  ImGui::Separator();
+  ImGui::Text("Log:");
+  for (const std::string& line : m_scriptResult.log_lines) ImGui::BulletText("%s", line.c_str());
+  ImGui::End();
+}
 void ViewController::initWindow (int theWidth, int theHeight, const char* theTitle)
 {
   glfwSetErrorCallback (ViewController::errorCallback);
@@ -516,49 +872,39 @@ void ViewController::initWindow (int theWidth, int theHeight, const char* theTit
 #endif
     glfwWindowHint (GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   }
-  //   示GLFW    希       拇      汀             为  装 未  冢 也    没 斜呖 
-  //glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+
   myOcctWindow = new Window (theWidth, theHeight, theTitle);
   glfwSetWindowUserPointer       (myOcctWindow->getGlfwWindow(), this);
-  // window callback
   glfwSetWindowSizeCallback      (myOcctWindow->getGlfwWindow(), ViewController::onResizeCallback);
 
   glfwSetFramebufferSizeCallback (myOcctWindow->getGlfwWindow(), ViewController::onFBResizeCallback);
-  // mouse callback
+
   glfwSetScrollCallback          (myOcctWindow->getGlfwWindow(), ViewController::onMouseScrollCallback);
-  //  诔 始   锥       臧磁?氐  
+
   glfwSetMouseButtonCallback     (myOcctWindow->getGlfwWindow(), ViewController::onMouseButtonCallback);
-  //         贫  氐  
+
   glfwSetCursorPosCallback       (myOcctWindow->getGlfwWindow(), ViewController::onMouseMoveCallback);
 
-
-  //
   glfwMakeContextCurrent(myOcctWindow->getGlfwWindow());
-  glfwSwapInterval(1); // Enable vsync 
+  glfwSwapInterval(1); 
 
-  //   始   GLAD
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
       std::cerr << "Failed to initialize GLAD" << std::endl;
       return ;
   }
-  //   示GLFW    希       拇      汀             为  装 未  冢 也    没 斜呖 
-  //glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-  // Setup Dear ImGui context
+
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO(); (void)io;
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;    
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  
 
-  // Setup Dear ImGui style
   ImGui::StyleColorsDark();
-  // Setup Platform/Renderer backends
   ImGui_ImplGlfw_InitForOpenGL(myOcctWindow->getGlfwWindow(), true);
 
   const char* glsl_version = "#version 450";
   ImGui_ImplOpenGL3_Init(glsl_version);
 
-  // Our state
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
   (void)clear_color;
 
@@ -568,12 +914,6 @@ double ViewController::GetScale()
 {
     if (!m_myView.IsNull())
     {
-        //  取  图     啪  螅ù   图 谢 取 浠?   
-        //gp_Trsf viewTransformation;
-        //myView->Transformation(viewTransformation);
-
-        ////            樱     通          挪  只  
-        //Standard_Real scaleFactor = viewTransformation.ScaleFactor();
         m_myView->FitAll(0.1, false);
         return m_myView->Scale();
     }
@@ -589,78 +929,35 @@ void ViewController::FitAll()
     {
         if (!m_myView.IsNull())
         {
-            m_myView->FitAll(0.1);  // margin 0.1
-            //double scale = myView->Scale();
-            //myView->SetScale(scale * 0.8);
-            // myView->SetScale(1);
+            m_myView->FitAll(0.1); 
             m_myView->ZFitAll();
             m_myView->Update();
-            //ViewerUpDate();
-            ////   取  图    
-            //Standard_Real vx, vy, vz;
-            //myView->Proj(vx, vy, vz);
-            //Standard_Real zoomX = vx;
-            //Standard_Real zoomY = vy;
 
-            //          械         
-            //zoomX = matrix(1, 1); // X          
-            //zoomY = matrix(2, 2); // Y          
-            //Standard_Real scale = 1;
-            //myView->SetScale(scale);
-
-            //   取  前选 械亩   
-            //Handle(AIS_InteractiveObject) pickedObject = GetDocument()->myAISContext->Current();
-            //if (!pickedObject.IsNull())
-            //{
-            //	//     一   碌  Prs3d_Drawer     
-            //	Handle(Prs3d_Drawer) drawer = pickedObject->Attributes();
-            //	//   取 Aspect_LineStyle          呖 为 洗 值  实 旨哟 效  
-            //	Handle(Prs3d_LineAspect) lineStyle = drawer->LineAspect();
-            //	lineStyle->SetWidth(3.0); //      呖 为3.0     愿     要    
-
-            //	drawer->SetColor(Quantity_NOC_PURPLE);
-            //	//    薷暮      应    选 械亩   
-            //	GetDocument()->myAISContext->HighlightStyle(pickedObject, drawer);
-
-            //	//       示选 械亩   
-            //	GetDocument()->myAISContext->Hilight(pickedObject, true);
-
-            //}
         }
     }
     catch (const Standard_Failure&)
     {
-       // PLOGD << "fitAll Debug: " << e.GetStackString() << endl;
         return;
     }
 };
 
 void ViewController::ViewerUpDate()
 {
-   // pDoc->UpDateViewer(view_Name);
 }
 
 void ViewController::DisplayShape(const Handle(AIS_InteractiveObject)& AShape, Standard_Boolean isShow)
 {
    (void)AShape;
    (void)isShow;
-   // pDoc->ShowShape(AShape, view_Name, isShow);
-    //FitAll();
-    //GetDocument()->myAISContext->SetSelected(AShape,true);
-    //GetDocument()->myAISContext->AddSelect(AShape);
 }
 
 void ViewController::RemoveAllShapes(Standard_Boolean isUpDate)
 {
     (void)isUpDate;
-    //pDoc->GetAISContext(view_Name)->EraseAll(isUpDate);
-    //pDoc->GetAISContext(view_Name)->RemoveAll(isUpDate);
-    // myView->Update();
 }
 
 #include <Graphic3d_Texture2Dmanual.hxx>
 #include <Image_PixMap.hxx> 
-//           蟛⒓   图     莸  GPU
 unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
 {
     unsigned int textureID;
@@ -674,23 +971,31 @@ unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    //      要    转    色  式  OpenCV 默     BGR  
     cv::Mat img;
     if (mat.channels() == 3)
         cv::cvtColor(mat, img, cv::COLOR_BGR2RGB);
     else
         img = mat;
 
-    //      Mat     选    实    馗 式
     GLenum format = (img.channels() == 1) ? GL_RED : (img.channels() == 3) ? GL_RGB : GL_RGBA;
 
-    //  洗 图     莸     
     glTexImage2D(GL_TEXTURE_2D, 0, format, img.cols, img.rows, 0, format, GL_UNSIGNED_BYTE, img.data);
     glGenerateMipmap(GL_TEXTURE_2D);
 
     return textureID;
 }
 
+void ViewController::UpdateImageViewImage(const cv::Mat& image)
+{
+    if (image.empty()) return;
+    image.copyTo(m_imageViewImage);
+    if (m_imageViewTexture != 0)
+    {
+        glDeleteTextures(1, &m_imageViewTexture);
+        m_imageViewTexture = 0;
+    }
+    m_imageViewTexture = CreateTextureFromMat0(m_imageViewImage);
+}
 #include <Prs3d_ShadingAspect.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <TopExp_Explorer.hxx>
@@ -703,41 +1008,32 @@ unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
 #include <gp_Pnt.hxx>
 #include <gp_Dir.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
-//      myContext   一    效   Handle(AIS_InteractiveContext)     
 void ViewController::SetTexturedtoBoxFace(const cv::Mat& image)
 {
-    //      Image_AlienPixMap     
     Handle(Image_AlienPixMap) occtImage = new Image_AlienPixMap();
 
-    //   始   Image_AlienPixMap
     if (!occtImage->InitZero(Image_Format_RGB, image.cols, image.rows))
     {
         std::cerr << "Failed to initialize Image_AlienPixMap." << std::endl;
         return;
     }
-
-    //      荽  cv::Mat        Image_AlienPixMap
     for (int row = 0; row < image.rows; ++row)
     {
         const uchar* sourceRow = image.ptr<uchar>(row);
         memcpy(occtImage->ChangeRow(row), sourceRow, image.cols * image.channels() * sizeof(uchar));
     }
-     
-    //      Graphic3d_Texture2Dmanual      
     Handle(Graphic3d_Texture2D) texture = new Graphic3d_Texture2D(
-        "MemoryTexture" //         
+        "MemoryTexture"       
     );
     texture->SetImage(occtImage);
-    texture->EnableRepeat(); //         平  
-    texture->EnableSmooth(); //         平  
-    texture->EnableModulate(); //            
+    texture->EnableRepeat();
+    texture->EnableSmooth();
+    texture->EnableModulate();          
 
-    //     一   Box
     gp_Ax2 anAxis;
     anAxis.SetLocation(gp_Pnt(0.0, 0.0, 0.0));
     TopoDS_Shape boxShape = BRepPrimAPI_MakeBox(anAxis, 1280, 1024, 50).Shape();
   
-    //   取 Box        妫?      XOY 平    妫?
     TopExp_Explorer explorer(boxShape, TopAbs_FACE);
 
     const  TopoDS_Face& frontFace = TopoDS::Face(explorer.Current());
@@ -747,62 +1043,48 @@ void ViewController::SetTexturedtoBoxFace(const cv::Mat& image)
         std::cerr << "Failed to find the front face of the box." << std::endl;
         return;
     }
-
-    //      AIS_Shape                 
+        
     Handle(AIS_Shape) aBoxAIS = new AIS_Shape(boxShape);
 
-    //           远   
     Handle(Graphic3d_AspectFillArea3d) fillAspect = new Graphic3d_AspectFillArea3d();
     fillAspect->SetTextureMapOn(true);
     fillAspect->SetTextureMap(texture);
 
-    //      Drawer           影    
     Handle(Prs3d_Drawer) drawer = new Prs3d_Drawer();
     Handle(Prs3d_ShadingAspect) shadingAspect = new Prs3d_ShadingAspect();
     shadingAspect->SetAspect(fillAspect);
     drawer->SetShadingAspect(shadingAspect);
 
-    // 应   Drawer         AIS_Shape
     Handle(AIS_Shape) frontFaceAIS = new AIS_Shape(frontFace);
     frontFaceAIS->SetAttributes(drawer);
 
-    //                拥               示
     myContext->Display(aBoxAIS, Standard_True);
     myContext->Display(frontFaceAIS, Standard_True);
-   // myContext->Display(aBox, AIS_Shaded, 0, false);
-    //       图  确        确  示
     myContext->UpdateCurrentViewer();
 
-    //       图为  色模式
     myContext->SetDisplayMode(AIS_Shaded, true);
 }
 
 void ViewController::SetTexturedtoPlane(const cv::Mat& image)
- {
-        //      Image_AlienPixMap     
+ {  
         Handle(Image_AlienPixMap) occtImage = new Image_AlienPixMap();
 
-        //   始   Image_AlienPixMap
         if (!occtImage->InitZero(Image_Format_RGB, image.cols, image.rows))
         {
             std::cerr << "Failed to initialize Image_AlienPixMap." << std::endl;
             return;
         }
 
-        //      荽  cv::Mat        Image_AlienPixMap
         for (int row = 0; row < image.rows; ++row)
         {
             const uchar* sourceRow = image.ptr<uchar>(row);
             memcpy(occtImage->ChangeRow(row), sourceRow, image.cols * image.channels() * sizeof(uchar));
         }
 
-        //      Texture     
         Handle(Graphic3d_Texture2D) texture = CreateTextureFromImage(occtImage);
 
-        //     一  平  ,      XOY 平  
         gp_Pln plane(gp::XOY());
 
-        //     平  谋呓 
         BRepBuilderAPI_MakeEdge mkEdge1(gp_Pnt(0, 0, 0), gp_Pnt(1024, 0, 0));
         BRepBuilderAPI_MakeEdge mkEdge2(gp_Pnt(1024, 0, 0), gp_Pnt(1024, 768, 0));
         BRepBuilderAPI_MakeEdge mkEdge3(gp_Pnt(1024, 768, 0), gp_Pnt(0, 768, 0));
@@ -814,28 +1096,22 @@ void ViewController::SetTexturedtoPlane(const cv::Mat& image)
         mkWire.Add(mkEdge3.Edge());
         mkWire.Add(mkEdge4.Edge());
 
-        // 使   BRepBuilderAPI_MakeFace      TopoDS_Shape 平  
         BRepBuilderAPI_MakeFace mkFace(plane, mkWire.Wire());
         TopoDS_Shape planeShape = mkFace.Face();
-
-        //      AIS_Shape     
+  
         Handle(AIS_Shape) planeAIS = new AIS_Shape(planeShape);
 
-        //           远   
         Handle(Graphic3d_AspectFillArea3d) fillAspect = new Graphic3d_AspectFillArea3d();
         fillAspect->SetTextureMapOn();
         fillAspect->SetTextureMap(texture);
 
-        //      Drawer           影    
         Handle(Prs3d_Drawer) drawer = new Prs3d_Drawer();
         Handle(Prs3d_ShadingAspect) shadingAspect = new Prs3d_ShadingAspect();
         shadingAspect->SetAspect(fillAspect);
         drawer->SetShadingAspect(shadingAspect);
 
-        // 应   Drawer    AIS_Shape
         planeAIS->SetAttributes(drawer);
 
-        //          平    拥               示
         myContext->Display(planeAIS, Standard_True);
 }
 
@@ -847,10 +1123,9 @@ Handle(Graphic3d_Texture2D) ViewController::CreateTextureFromImage(const Handle(
         std::cerr << "Invalid Image_PixMap provided." << std::endl;
         return nullptr;
     }
-
-    //      Graphic3d_Texture2Dmanual     
+   
     Handle(Graphic3d_Texture2D) texture = new Graphic3d_Texture2D(
-        "MemoryTexture" //         
+        "MemoryTexture"     
     );
     texture->SetImage(image);
 
@@ -860,13 +1135,11 @@ Handle(Graphic3d_Texture2D) ViewController::CreateTextureFromImage(const Handle(
 Handle(Image_PixMap)  ViewController::ConvertCvMatToOcctImage(const cv::Mat& mat)
 {
     Handle(Image_AlienPixMap) pixMap = new Image_AlienPixMap();
-
-    //      Image_PixMap        每 取  叨群 通    
+ 
     if (mat.type() == CV_8UC3)
     {
         if (!pixMap->InitZero(Image_Format_RGB, mat.cols, mat.rows))
             return nullptr;
-        //      荽  cv::Mat        Image_PixMap
         for (int row = 0; row < mat.rows; ++row)
         {
             const uchar* sourceRow = mat.ptr<uchar>(row);
@@ -877,19 +1150,16 @@ Handle(Image_PixMap)  ViewController::ConvertCvMatToOcctImage(const cv::Mat& mat
     {
         if (!pixMap->InitZero(Image_Format_RGB32, mat.cols, mat.rows))
             return nullptr; 
-         //      荽  cv::Mat        Image_AlienPixMap        Alpha 通  
         for (int row = 0; row < mat.rows; ++row)
         {
-             const uchar* sourceRow = mat.ptr<uchar>(row); //   取  前 械 指  
-             uchar* destRow = pixMap->ChangeRow(row);     //   取目   械 指  
+             const uchar* sourceRow = mat.ptr<uchar>(row); 
+             uchar* destRow = pixMap->ChangeRow(row);    
              for (int col = 0; col < mat.cols; ++col)
              {
-                // RGB     
-                destRow[col * 4 + 0] = sourceRow[col * 3 + 2]; // R (OpenCV    BGR   式)
-                destRow[col * 4 + 1] = sourceRow[col * 3 + 1]; // G
-                destRow[col * 4 + 2] = sourceRow[col * 3 + 0]; // B
-                // Alpha 通      为 255    全  透    
-                destRow[col * 4 + 3] = 255; // A
+                destRow[col * 4 + 0] = sourceRow[col * 3 + 2]; 
+                destRow[col * 4 + 1] = sourceRow[col * 3 + 1]; 
+                destRow[col * 4 + 2] = sourceRow[col * 3 + 0];  
+                destRow[col * 4 + 3] = 255; 
              }
         } 
     } 
@@ -906,129 +1176,78 @@ Handle(Image_PixMap)  ViewController::ConvertCvMatToOcctImage(const cv::Mat& mat
 void ViewController::AdjustModelBoundingBoxToImageSize(const Handle(V3d_View)& myView, const Standard_CString imagePath)
 {
     (void)imagePath;
-    //   取  前  图   诘某叽 
     Standard_Integer viewWidth, viewHeight;
     myView->Window()->Size(viewWidth, viewHeight);
 
-    //       知      图   实 食叽 
-    int imageWidth = 2048;// 2448; //     图    
-    int imageHeight = 1536;// 2048; //     图    
+    int imageWidth = 2048;
+    int imageHeight = 1536;
 
-    //    帽   图     示模式
-    //myView->SetBackgroundImage(imagePath, Aspect_FM_STRETCH, true);
-
-    // 使 帽   图  某叽   为模 偷谋呓  
     Bnd_Box boundingBox;
     double modelWidth = imageWidth;
     double modelHeight = imageHeight;
-
-    //     模  位  XY平   希 Z     系暮  为0       实           
+         
     boundingBox.Update(0, 0, 0, modelWidth, modelHeight, 0);
 
-    //     模 捅呓       图    
     double centerX = modelWidth / 2.0;
     double centerY = modelHeight / 2.0;
-    double centerZ = 0.0; // 模     牡 Z    
+    double centerZ = 0.0; 
     (void)centerZ;
 
-    //        位 没  咏 
     myView->SetSize(std::max(modelWidth, modelHeight));
     myView->ZFitAll();
     myView->SetCenter(centerX, centerY);
 
-    //       图
     myView->Redraw();
 }
 
 void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& image)
 {
-    //    cv::Mat 转  为 Image_PixMap
+    UpdateImageViewImage(image);
+    if (!m_renderImageInOcctBackground) return;
     Handle(Image_PixMap) occtImage = ConvertCvMatToOcctImage(image);
-   /* if (!occtImage.IsNull())
-    {
-        view->SetBackgroundImage(occtImage);
-        view->Redraw();
-    }
-    else
-    {
-        std::cerr << "Failed to convert image." << std::endl;
-    }
-    */
+
     if (!occtImage.IsNull())
     {
-        //      Texture 
         Handle(Graphic3d_Texture2Dmanual) texture = CreateTextureFromImage(occtImage);
 
         if (!texture.IsNull())
         {
  
-            // Aspect_FM_CENTER: 图       示
-            // Aspect_FM_TILE: 图  平    示
-            // Aspect_FM_STRETCH: 图          应  图
-            //      图  应 酶   
-            //m_myView->ZFitAll();
-            //m_myView->Redraw();
-            //   帽   图  
-            //view->SetBackgroundType(Aspect_BT_TEXTURE);
-            //强   鼗   图 愿     示
-            //view->Redraw();
             Standard_Real scale = 1;
             view->SetScale(scale);
 
-            //       图  投影    为    投影
-            view->SetProj(V3d_XposYposZpos); //    鸥  Z  岱?      投影
+            view->SetProj(V3d_XposYposZpos); 
 
-            //      拥 位 煤 投影平  
-           // Eye位   ( 鄄  )
             view->SetEye(0, 0, -100);
 
-            // At位   ( 鄄 目   )
             view->SetAt(0, 0, 0);
 
-            // Up     (      图   戏   )
             view->SetUp(0, -1, 0);
 
-            //       图    确 围
-            view->SetDepth(100); //  拥愕酵队捌? 木   为 100   位
+            view->SetDepth(100);
 
-            //       图     疟   
-            view->SetZoom(1); //        疟   为 1.0
+            view->SetZoom(1); 
 
-            //   取  前  图   诘某叽 
             Standard_Integer viewWidth, viewHeight;
             view->Window()->Size(viewWidth, viewHeight);
 
-            //       知      图   实 食叽 
-            int imageWidth = image.cols;//   2448; //     图    
-            int imageHeight = image.rows; //2048; //     图    
-
+            int imageWidth = image.cols;
+            int imageHeight = image.rows;
 
             m_dscalex = (1.0*imageWidth)/(1.0* viewWidth);
             m_dscaley = (1.0* imageHeight )/(1.0 * viewHeight);
-            //    帽   图     示模式
-            //view->SetBackgroundImage(imagePath, Aspect_FM_STRETCH, true);
 
-            //       图 谋   图  
             view->SetBackgroundImage(texture, Aspect_FM_STRETCH, true);
-            // 使 帽   图  某叽   为模 偷谋呓  
-           // Bnd_Box boundingBox;
             double modelWidth = imageWidth;
-            double modelHeight = imageHeight;
-
-            //     模  位  XY平   希 Z     系暮  为0       实           
-           // boundingBox.Update(0, 0, 0, modelWidth, modelHeight, 0);
-
-            //     模 捅呓       图    
+            double modelHeight = imageHeight; 
             double centerX = modelWidth / 2.0;
             double centerY = modelHeight / 2.0;
-            double centerZ = 0.0; // 模     牡 Z    
+            double centerZ = 0.0;
 
-            //        位 没  咏 
             view->SetSize(std::max(modelWidth, modelHeight));
             view->ZFitAll();
             view->SetCenter(centerX, centerY);
             
-            //       图
             view->Redraw(); 
             myContext->UpdateCurrentViewer();
             myContext->UpdateCurrent();
@@ -1044,15 +1263,8 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
     }
 }
  
-// ================================================================
-// Function : initViewer
-// Purpose  :
-// ================================================================
 void ViewController::initViewer(int theWidth, int theHeight)
 {
-
-  
-    
     if (myOcctWindow.IsNull()
         || myOcctWindow->getGlfwWindow() == nullptr)
     {
@@ -1064,381 +1276,126 @@ void ViewController::initViewer(int theWidth, int theHeight)
     aViewer->SetDefaultLights();
     aViewer->SetLightOn();
     aViewer->SetDefaultTypeOfView(V3d_ORTHOGRAPHIC);
-    //aViewer->SetDefaultTypeOfView(V3d_ORTHOGRAPHIC);
     if(0)
     aViewer->ActivateGrid(Aspect_GT_Rectangular, Aspect_GDM_Lines);
-    //myView = aViewer->CreateView();
 
     m_myView = new V3d_CustomView(aViewer);
  
     m_myView->SetImmediateUpdate(false);
-    //////////////////////////////////////////////
     m_myView->SetWindow(myOcctWindow, myOcctWindow->NativeGlContext());
     m_myView->ChangeRenderingParams().ToShowStats = true;
     myContext = new AIS_InteractiveContext(aViewer);
  
-    //
     Handle(Prs3d_Drawer) aSelectionStyle = myContext->SelectionStyle();
     aSelectionStyle->SetColor(Quantity_NOC_WHITE);
     myContext->SetSelectionStyle(aSelectionStyle);
 
-  //       图为    投影
     m_myView->SetProj(V3d_TypeOfOrientation::V3d_XposYposZpos);
 
-    //       图 姆         使X      为      Y      为      Z  指    幕  
-    // Eye位   ( 鄄  )
-    Standard_Real eyeX = 0.0, eyeY = 0.0, eyeZ =  -500.0; //  鄄    Z 岣?     
+    Standard_Real eyeX = 0.0, eyeY = 0.0, eyeZ =  -500.0;  
     m_myView->SetEye(eyeX, eyeY, eyeZ);
 
-    // At位   ( 鄄 目   )
-    Standard_Real atX = 0.0, atY = 0.0, atZ = 0.0; //  鄄 目     原  
+    Standard_Real atX = 0.0, atY = 0.0, atZ = 0.0; 
     m_myView->SetAt(atX, atY, atZ);
 
-    // Up     (      图   戏   )
-    Standard_Real upX = 0.0, upY = -1.0, upZ = 0.0; // Y      为      
+    Standard_Real upX = 0.0, upY = -1.0, upZ = 0.0; 
     m_myView->SetUp(upX, upY, upZ);
-   //       图   牡    辖 1024, 800
-   // Standard_Integer screenWidth = 1024;
-   // Standard_Integer screenHeight = 800;
-   // Standard_Real centerX =  (screenWidth / 2);
-   // Standard_Real centerY =  (screenHeight / 2);
 
-    //       图    确 围
-     m_myView->SetDepth(100); //  拥愕酵队捌? 木   为 100   位
+     m_myView->SetDepth(100); 
      m_myView->SetCenter(theWidth, theHeight);
   
      Standard_Real scale = 1;
      m_myView->SetScale(scale);
    
-     //       图  投影    为    投影
-     m_myView->SetProj(V3d_XposYposZpos); //    鸥  Z  岱?      投影
+     m_myView->SetProj(V3d_XposYposZpos);
 
-     //      拥 位 煤 投影平  
-    // Eye位   ( 鄄  )
      m_myView->SetEye(0, 0, -10000);
 
-     // At位   ( 鄄 目   )
      m_myView->SetAt(0, 0, 0);
 
-     // Up     (      图   戏   )
      m_myView->SetUp(0, -1, 0);
 
-     //       图    确 围
-     m_myView->SetDepth(10000); //  拥愕酵队捌? 木   为 100   位
+     m_myView->SetDepth(10000); 
 
-     //       图     疟   
-     m_myView->SetZoom(1); //        疟   为 1.0
+     m_myView->SetZoom(1);
      
-    // m_myView->SetCenter(theWidth+15, theHeight+15);
      m_myView->SetCenter(theWidth , theHeight );
-    //       图  应 酶   
-    // m_myView->FitAll();
-     
-    //       图  应 酶   
+
     m_myView->ZFitAll();
     m_myView->Redraw();
 
 
 }
 void ViewController::drawline()
-{
-    //       始  徒     
+{  
     gp_Pnt pn_Start;
     pn_Start.SetX(10);
     pn_Start.SetY(20);
-    pn_Start.SetZ(0); //     Z    为0
+    pn_Start.SetZ(0); 
 
     gp_Pnt pn_End;
     pn_End.SetX(50);
     pn_End.SetY(60);
-    pn_End.SetZ(0); //     Z    为0
-
-    //        愦?     
+    pn_End.SetZ(0);
+ 
     TopoDS_Vertex V1 = BRepBuilderAPI_MakeVertex(pn_Start);
     TopoDS_Vertex V2 = BRepBuilderAPI_MakeVertex(pn_End);
 
-    //       
     TopoDS_Shape aShape = BRepBuilderAPI_MakeEdge(V1, V2);
-
-    //     AIS_Shape    
+   
     Handle(AIS_Shape) aisLine = new AIS_Shape(aShape);
-
-    //   示  缘        
+   
     myContext->Display(aisLine, AIS_Shaded, 0, false);
 }
 
-// ================================================================
-// Function : initDemoScene
-// Purpose  :
-// ================================================================
 void ViewController::initDemoScene()
 {
   if (myContext.IsNull())
   {
     return;
-  }
-  //      图       转        
+  }  
    SetAllowZooming(Standard_False);
    SetAllowRotation(Standard_False); 
   
   if (1)
   {  
-      //      Manipulator          位  
-     //cxtmp  manipulator = new AIS_Manipulator();
-    
-       //manipulator->sets
       if(0)
       {
-         //      manipulator   一  指    牟          指       
-         // aisShape       要同  位 玫  AIS_Shape     
-
-         //   取 AIS_Shape  木植  浠?   
           gp_Trsf shapeTrsf = aBox->LocalTransformation();
 
-          //  泳植  浠?       取位    息
           gp_Pnt position = gp_Pnt(shapeTrsf.TranslationPart());
 
-          //   取X 岱?  Y 岱? 
-          // 注 猓?   维 占  校 通      要Z 岱?     全确  一      系  
-          //    牵      gp_Ax2 只  要X   Y 幔?  强  约   Z    X   Y  牟 私  
           gp_Dir xAxis;
           gp_Dir yAxis;
 
           if (shapeTrsf.Form() == gp_Identity || shapeTrsf.Form() == gp_Translation) {
-              //    没    转    只  平 疲   使  默 系 X   Y 岱? 
               xAxis = gp::DX();
               yAxis = gp::DY();
           }
           else {
-              // 使 帽浠?    械   转          X   Y  姆   
-              //    然 取 浠?      转    
               gp_Mat rotationMatrix = shapeTrsf.VectorialPart();
 
-              //     X   Y    路   
-              xAxis = gp_Dir(rotationMatrix.Column(1)); //   一 写   X 岱? 
-              yAxis = gp_Dir(rotationMatrix.Column(2)); //  诙  写   Y 岱? 
+              xAxis = gp_Dir(rotationMatrix.Column(1)); 
+              yAxis = gp_Dir(rotationMatrix.Column(2)); 
           }
+   
+          gp_Ax2 axis(position, yAxis, xAxis); 
 
-          //      gp_Ax2     
-          gp_Ax2 axis(position, yAxis, xAxis); // 注  顺  : (位  ,       (Y  ),  慰     (X  ))
-
-          //    貌       位  
-      //cxtmp    manipulator->SetPosition(axis);
       } 
- 
-     //    貌   模式  默      平 啤   转     牛 //AIS_MM_None
-     // manipulator->EnableMode(AIS_MM_Translation);
-     // manipulator->EnableMode(AIS_MM_Rotation);
-     // manipulator->EnableMode(AIS_MM_Scaling);
-      
-     //     Z   平  
-   //cxtmp  manipulator->SetPart(2, AIS_MM_Translation, Standard_False); // 2   示 Z   
-
-     //     Z     转
-     // manipulator->SetPart(2, AIS_MM_Rotation, Standard_False);
-
-      //      要      Z       
-    //cxtmp  manipulator->SetPart(2, AIS_MM_Scaling, Standard_False);
-
-      //     Z     转
-     //cxtmp  manipulator->SetPart(1, AIS_MM_Rotation, Standard_False);
-
-      //      要      Z       
-    //cxtmp   manipulator->SetPart(1, AIS_MM_Scaling, Standard_False);
- 
-      //     Z     转
-    //cxtmp   manipulator->SetPart(0, AIS_MM_Rotation, Standard_False);
-
-      //      要      Z       
-    //cxtmp   manipulator->SetPart(0, AIS_MM_Scaling, Standard_False);
-
-     //cxtmp  manipulator->SetZoomPersistence(Standard_False);
-    //cxtmp   manipulator->SetPart(AIS_MM_Scaling, Standard_False);
-     // manipulator->SetPart(AIS_MM_TranslationPlane, Standard_False);
- 
-     //    呖   使   SetPart     一   越       模式 碌 Z     
-     // manipulator->SetPart(AIS_ManipulatorMode_Translation, Standard_False);
-     // manipulator->SetPart(AIS_ManipulatorMode_Rotation, Standard_False);
-     // manipulator->SetPart(AIS_ManipulatorMode_Scaling, Standard_False);
-
-     //    Manipulator   拥   示      
-   //cxtmp   myContext->Display(manipulator, Standard_True);
-     //    Manipulator   目       拥   示      
-     //    TransformChanged  藕    拥  远  搴? 
   }
 
-  //anAxis.SetLocation (gp_Pnt (25.0, 125.0, 0.0));
-  //Handle(AIS_Shape) aCone = new AIS_Shape (BRepPrimAPI_MakeCone (anAxis, 25, 0, 50).Shape());
-  //myContext->Display (aCone, AIS_Shaded, 0, false);
-  /*
-  //  
-  gp_Pnt mcs_Start;
-  mcs_Start.SetX(10);
-  mcs_Start.SetY(20);
-  mcs_Start.SetZ(0); //     Z    为0  
-  gp_Pnt mcs_End; 
-  mcs_End.SetX(50);
-  mcs_End.SetY(60);
-  mcs_End.SetZ(0); //     Z    为0  
-  gp_Pnt mcs_End2;
-  mcs_End2.SetX(120);
-  mcs_End2.SetY(50);
-  mcs_End2.SetZ(0); //     Z    为0  
-  m_eline.Init();
-  m_eline.mcs_Start = mcs_Start;
-  m_eline.mcs_End = mcs_End;
-  myContext->Display(m_eline.Draw(), AIS_Shaded, 0, false);
-
-  m_eline2.Init();
-  m_eline2.mcs_Start = mcs_Start;
-  m_eline2.mcs_End = mcs_End2;
-  myContext->Display(m_eline2.Draw(), AIS_Shaded, 0, false);
- 
-    gp_Pnt mcs_e;
-    mcs_e.SetX(320);
-    mcs_e.SetY(250);
-    mcs_e.SetZ(0); //     Z    为0  
-    m_ellipse.Init();
-    m_ellipse.maxjorAxis = 80;//    
-    m_ellipse.minorAxis =20;//    
-    m_ellipse.rotateAngle = 20;//  转 嵌 (    )
- 
-    m_ellipse.m_pMCS->McsPosition = mcs_e;
-    myContext->Display(m_ellipse.Draw(), AIS_Shaded, 0, false);
-
-    gp_Pnt mcs_c;
-    mcs_c.SetY(150);
-    mcs_c.SetZ(0); //     Z    为0  
-    m_ecircle.Init();
-    m_ecircle.radius = 280;//   
-    m_ecircle.m_pMCS->McsPosition = mcs_c;
-    myContext->Display(m_ecircle.Draw(), AIS_Shaded, 0, false);
-
-    gp_Pnt mcs_a;
-    mcs_a.SetX(-113);
-    mcs_a.SetY(-115);
-    mcs_a.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_b;
-    mcs_b.SetX(23);
-    mcs_b.SetY(25);
-    mcs_b.SetZ(0); //     Z    为0   
-     
-    m_erectangle.Init();
-    m_erectangle.width = 20;
-    m_erectangle.height = 50;
-    m_erectangle.rotateAngle = 20;
-    m_erectangle.LeftUpPoint = mcs_a;    //        系 
-    m_erectangle.RightDownPoint = mcs_b; //        碌  
-    myContext->Display(m_erectangle.Draw(), AIS_Shaded, 0, false);
-
-    Handle(AIS_TextLabel) textLabel = new AIS_TextLabel();
-    textLabel->SetText("My Label"); //             
-    textLabel->SetPosition(gp_Pnt(30, 40, 0)); //        值 位 茫     选         盏 之   某  位  
-    textLabel->SetColor(Quantity_NOC_GREEN); //           色为  色
-    textLabel->SetFont("Arial"); //         
-    textLabel->SetHeight(19); //        指叨  
-    
-    myContext->Display(textLabel, true); //      直 签  拥   示        
-    
-
-    m_eopencloudline.Init();
-    gp_Pnt mcs_1;
-    mcs_1.SetX(16);
-    mcs_1.SetY(29);
-    mcs_1.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_2;
-    mcs_2.SetX(170);
-    mcs_2.SetY(28);
-    mcs_2.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_3;
-    mcs_3.SetX(108);
-    mcs_3.SetY(27);
-    mcs_3.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_4;
-    mcs_4.SetX(19);
-    mcs_4.SetY(206);
-    mcs_4.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_5;
-    mcs_5.SetX(20);
-    mcs_5.SetY(205);
-    mcs_5.SetZ(0); //     Z    为0   
-
-    gp_Pnt mcs_6;
-    mcs_6.SetX(21);
-    mcs_6.SetY(24);
-    mcs_6.SetZ(0); //     Z    为0   
-
-    m_eopencloudline.CloudLinePoints.push_back(mcs_1);
-    m_eopencloudline.CloudLinePoints.push_back(mcs_2);
-    m_eopencloudline.CloudLinePoints.push_back(mcs_3);
-    m_eopencloudline.CloudLinePoints.push_back(mcs_4);
-    m_eopencloudline.CloudLinePoints.push_back(mcs_5);
-    m_eopencloudline.CloudLinePoints.push_back(mcs_6);
-    myContext->Display(m_eopencloudline.Draw(), AIS_Shaded, 0, false); 
-    */
 gp_Path m_gpath; 
 m_gpath.SetContext(myContext);
 m_gpath.SetView(m_myView);
-/*
- //   m_shape0.setcontext(myContext);
-    m_shape0.settype(Shape::Rectangle);
-    m_shape0.setrect(20, 20, 120, 120);
-//   m_shape1.setcontext(myContext);
-   m_shape1.settype(Shape::Rectangle);
-   m_shape1.setrect(200, 200, 120, 120);
-//    m_shape2.setcontext(myContext);
-    m_shape2.settype(Shape::Rectangle);
-    m_shape2.setrect(380, 380, 120, 120);
-//    m_shape3.setcontext(myContext);
-    m_shape3.settype(Shape::Rectangle);
-    m_shape3.setrect(520, 520, 120, 120);
- //   m_findline.setcontext(myContext);
-    m_findline.setrect(300, 200, 300, 200);
-    */
+
     m_imageparser.ParserInitialClassFunction(0);
     m_imageparser.SetStream(&m_os);
     m_imageparser.SetCreateCodeStream(&m_createcodeos);
 
     initialparser();
-    //m_findline.SetWHgap(2, 2);
-    //m_findline.setshow(4);
-    //m_findline.drawshape();
-   // Handle(AIS_Shape) ashape0 = m_findline.getshape();
-   // manipulator->Attach(ashape0);
-   // m_imageparser.RunOptString("ashape0.translate(100,100);");
-    if (1)
-    {
-     //s_img0 = cv::imread("0.jpg");
-     //SetTexturedtoBoxFace(s_img0); 
-     //SetTexturedtoPlane(s_img0);
-     //m_myView->loadimage();
-    }
-   // SetTexturedtoPlane(s_img0);  
+
     myContext->SetDisplayMode(AIS_Shaded, true);
  
-  /*
-  EleArc m_earc;
-  EleCalculator m_ecalculator;
-  EleCircle m_ecircle;
-  EleCloseCloudLine m_eclosecloudline;
-  EleOpenCloudLine m_eopencloudline;
-  EleDistance m_edistance;
-  EleEllipse m_ellipse;
-  EleGap m_egap;
-  EleGroove m_egroove;
-  EleHint m_ehint;
-  EleOring m_eoring;
-  ElePlane m_eplane;
-  ElePointCloud m_epointcloud;
-  EleRectangle m_erectangle;
-  EleTextDescription m_etextdescription;
-  */
-
   TCollection_AsciiString aGlInfo;
   {
     TColStd_IndexedDataMapOfStringString aRendInfo;
@@ -1450,12 +1407,9 @@ m_gpath.SetView(m_myView);
     }
   }
   Message::DefaultMessenger()->Send (TCollection_AsciiString("OpenGL info:\n") + aGlInfo, Message_Info);
- 
-  //      OpenCV 图  
-  //s_img0 = cv::imread("0.jpg");
 
 }
-//  娲? 一帧 拇   位  
+
 static ImVec2 last_window_pos = ImVec2(0, 0);
 void ViewController::mainloop()
 {
@@ -1474,47 +1428,41 @@ void ViewController::mainloop()
                  || 1 == ifirstrun)
              {
                  ifirstrun = 0;
-                 //      色    然     
-                 //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-                 //      OpenCASCADE   图 母  潞  鼗 
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
              }
-
-             //   始 碌  ImGui    
+ 
              ImGui_ImplOpenGL3_NewFrame();
              ImGui_ImplGlfw_NewFrame();
              ImGui::NewFrame();
-              
-             //        ImGui  丶     
-             ImGui::Begin("GPU work");
+                 
+             if (m_showLegacyGpuWork)
+             {
+               ImGui::Begin("GPU work");
 
-             { //   取  前   诘 位  
+             { 
                  ImVec2 current_window_pos = ImGui::GetWindowPos(); 
                  m_current_window_posx = current_window_pos.x;
                  m_current_window_posy = current_window_pos.y;
 
                   m_imguiw = ImGui::GetWindowWidth();
                   m_imguih = ImGui::GetWindowHeight();
-                 //  卸洗    欠  贫 
                  if (current_window_pos.x != last_window_pos.x || current_window_pos.y != last_window_pos.y)
-                 {  //    诒  贫 
+                 { 
                      ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Window Moved!");
                      ifirstrun = 0;
                      FlushViewEvents(myContext, m_myView, true);
                      m_myView->Redraw();
-                 }  //       一帧  位  
+                 } 
                  last_window_pos = current_window_pos;
              }
 
-             ///////////////////////////////////////////////////////////// 
              ImGui::Text("Parser code input here (%s) (%d)", IMGUI_VERSION, IMGUI_VERSION_NUM); 
              ImGui::Checkbox("Show Image", &m_imageshow);
              ImGui::Checkbox("Pick Points", &m_ipickpoints); 
              ImGui::Checkbox("Line Scan", &m_ilinescan);
              ImGui::Checkbox("Attach Line", &m_iattachline);
-             //ImGui::Checkbox("Plane Rotate", &m_planerotate);
              ImGui::Spacing();
              static char text[512 * 106] =
                  "if(0){aimage1.load(\"1.bmp\");}\n"
@@ -1547,21 +1495,15 @@ void ViewController::mainloop()
                  clearos();
                  clearcreateos();
 
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
-                // main_test_B_9();
-                 //main_ModelConfigTest();
-                 //main_UtilsTest();
-                 //main_NetworkShapeTest();
+
                  if(0)
                  m_imageparser.Compile(text);
                   
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
-                // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();   
@@ -1603,17 +1545,14 @@ void ViewController::mainloop()
                  clearos();
                  clearcreateos();
 
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
 
                  m_imageparser.Compile(text2);
 
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
-                 // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
@@ -1622,13 +1561,6 @@ void ViewController::mainloop()
 
              }
 
-             /*
-aimage1.getshape(ashape0);
-aimage1.roipyrdown(2);
-aimage1.roieasythre(255);
-aimage1.Show(1);
-             */ 
-             //"amatch0.savemodel(\"D:\\test.pat\");\n"
              static char text3[512 * 106] =
                  "aimage1.loadfiles(\"D:\\TestImage\\135\");\n"
                  "aimage1.getshape(ashape0);\n"
@@ -1655,18 +1587,15 @@ aimage1.Show(1);
                  clearos();
                  clearcreateos();
 
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
                
 
                  m_imageparser.Compile(text3);
 
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
-                 // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
@@ -1674,16 +1603,8 @@ aimage1.Show(1);
                  myContext->UpdateCurrent();
 
              }
-             /*afindline.getshape(ashape0);
-             afindline.setwhgap(25, 25);
-             afindline.setlinegap(3);
-             afindline.setthre(28);
-             afindline.setfindsetting(1);
-             afindline.measure(aimage1);
-             */
+
              static char text4[512 * 106] =  
-                // "apoints0.aptfilter();\n"
-                // "apoints0.cluster(1);\n" 
                  "if(0){aimage1.reload();}\n"
                  "aimage2.CopyFrom(aimage1);\n"
                  "aimage1.getshape(ashape0);\n"
@@ -1731,14 +1652,11 @@ aimage1.Show(1);
                  clicked++;
                  clearos();
                  clearcreateos();
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
                  m_imageparser.Compile(text4);
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
-                 // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
@@ -1746,7 +1664,6 @@ aimage1.Show(1);
                  myContext->UpdateCurrent();
              }
              static char text5[512 * 106] = 
-                //"if(0){afindline.setlinesegment(400, 300, 500, 700, 100);afindline.Show(1);}\n"
                  "if(1){apoints0.load(\"D:\\26.data\");apoints0.Show(1);}\n"
                  "if(0){apoints0.save(\"D:\\2.data\");apoints0.Show(1);}\n"
                  "if(0){apoints0.aptfilter(5);apoints0.Show(1);}\n"
@@ -1766,17 +1683,14 @@ aimage1.Show(1);
                  clearos();
                  clearcreateos();
 
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
 
                  m_imageparser.Compile(text5);
 
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
-                 // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
@@ -1800,17 +1714,14 @@ aimage1.Show(1);
                  clearos();
                  clearcreateos();
 
-                 // 使 酶呔   时  
                  auto start = std::chrono::high_resolution_clock::now();
 
                  m_imageparser.Compile(text6);
 
-                 //    憔?   时  
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
-                 // myContext->UpdateCurrentViewer(); // 刷    图 苑 映 浠?
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
@@ -1822,9 +1733,6 @@ aimage1.Show(1);
              if (clicked & 1)
              {
                  clicked = 0;
-                 ///
-                  // lua_runstring(text);
-                 /// 
                   m_imageshow = 1; 
                  strcpy(showtext, getoutputstring().c_str());
                  strcat(showtext, "\n");
@@ -1836,8 +1744,7 @@ aimage1.Show(1);
              std::string strtime = string("elapsed time:")+std::to_string(m_iruntimes)+ string(" ms");
              ImGui::Text(strtime.c_str());
              ImGuiIO& io = ImGui::GetIO();
-             ImGui::TextWrapped(" ");//m_iruntimes
-             //////////////////////////////////////////////////////////////
+             ImGui::TextWrapped(" ");
              if (ImGui::Button("Run"))
              {
                  std::cout << "run!" << std::endl;
@@ -1872,21 +1779,15 @@ aimage1.Show(1);
              }
 
              ImGui::End();
+             }
+
+             drawScriptAcceptancePanels();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
              
-             // bool metricW = true;
-            // ImGui::ShowMetricsWindow(&metricW);
-             //if (1 == m_planerotate)
-             //{
-             //    m_planerotate = 0;
-             //    SetAllowZooming(Standard_True);
-             //    SetAllowRotation(Standard_True); 
-             //}
              if (1 == m_imageshow)
              {
                  m_imageshow = 0;
-                 //image show
                  Image* pshowimage = nullptr;
                  for (int i = 0; i < m_imageparser.GetClassObjSum("Image"); i++)
                  {
@@ -1895,8 +1796,6 @@ aimage1.Show(1);
                          pshowimage = pimage;
                  }
                  
-                 //Module accd1;
-                 //GetBackImage
                  ImageManager* pmodule = (ImageManager*)m_imageparser.GetClassObj("Module", "amodule");
                  Image* pmoduleimage = nullptr;
                  int imoduleshow = 0;
@@ -1907,19 +1806,14 @@ aimage1.Show(1);
                  }
                  if (0 != pmodule&& imoduleshow > 0 )
                  {   
-                     //texture_id0 = CreateTextureFromMat0(pmodule->GetBackImage()->getmat());
                      if(1== imoduleshow)
                         SetBackgroundInView(m_myView, pmodule->GetBackImage()->getmat()); 
                      else if(2== imoduleshow)
                         SetBackgroundInView(m_myView, pmodule->GetMapImage()->getmat());
-
-                     //m_myView->SetCenter(pmodule->GetBackImage()->getWidth()/2 , pmodule->GetBackImage()->getHeight()/2);
                  }
                  else if (nullptr != pshowimage)
                  {
-                    //texture_id0 = CreateTextureFromMat0(pshowimage->getmat());
                     SetBackgroundInView(m_myView, pshowimage->getmat());  
-                    //m_myView->SetCenter(pshowimage->getWidth()/2, pshowimage->getHeight()/2);
                  }
              } 
              m_shapex = (Shape*)m_imageparser.GetClassObj("Shape", "ashape0");
@@ -1929,21 +1823,21 @@ aimage1.Show(1);
              if (opencvSW)
                  Imgui_OpenCV_Window0(&opencvSW);
 
-             //   染 ImGui
              ImGui::Render();
              ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-             // 刷 麓   
              glfwSwapBuffers(myOcctWindow->getGlfwWindow());
          }
      }
 }
-// ================================================================
-// Function : cleanup
-// Purpose  :
-// ================================================================
+
 void ViewController::cleanup()
 {
+  if (m_imageViewTexture != 0)
+  {
+    glDeleteTextures(1, &m_imageViewTexture);
+    m_imageViewTexture = 0;
+  }
   if (!m_myView.IsNull())
   {
       m_myView->Remove();
@@ -1952,7 +1846,7 @@ void ViewController::cleanup()
   {
     myOcctWindow->Close();
   }
-  //      ImGui
+
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
@@ -1962,15 +1856,19 @@ void ViewController::cleanup()
 
 void  ViewController::Imgui_OpenCV_Ini0()
 {
-    //      OpenCV 图  
-    s_img0 = cv::imread("1.jpg");
-    if (s_img0.empty()) {
-        std::cerr << "Failed to load image" << std::endl;
+    const std::string imagePath = "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg";
+    s_img0 = cv::imread(imagePath);
+    if (s_img0.empty())
+    {
+        std::cerr << "Failed to load initial Image View image: " << imagePath << std::endl;
         return;
     }
 
-    //m_myView->SetBackgroundImage(ConvertCvMatToOcctImage(s_img0));
+    UpdateImageViewImage(s_img0);
+    m_scriptResult.image_ref = imagePath;
+    m_scriptResult.log_lines.push_back("Initial Image View image loaded.");
 }
+
 
 vector<float> ViewController::createGaussianKernel(int kernelSize, double sigma) {
     int kernelRadius = kernelSize / 2;
@@ -1986,7 +1884,6 @@ vector<float> ViewController::createGaussianKernel(int kernelSize, double sigma)
         }
     }
 
-    // Normalize the kernel
     for (float& val : kernel) {
         val /= sum;
     }
@@ -2013,8 +1910,7 @@ GLuint CreateTextureCubeX(cv::Mat& src) {
         std::cerr << "Unsupported number of channels: " << src.channels() << std::endl;
         return 0;
     }
-
-    // Step 1:      OpenGL     
+  
     GLuint gl_texture_id;
     glGenTextures(1, &gl_texture_id);
     glBindTexture(GL_TEXTURE_2D, gl_texture_id);
@@ -2026,18 +1922,15 @@ GLuint CreateTextureCubeX(cv::Mat& src) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Step 2: 注   OpenGL       CUDA
     cudaGraphicsResource* cuda_tex_resource;
     cudaCheckErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
 
-    // Step 3: 映    源   洗    荩      要  
     void* dev_ptr;
     size_t num_bytes;
     cudaCheckErrors(cudaGraphicsMapResources(1, &cuda_tex_resource, 0));
     cudaCheckErrors(cudaGraphicsSubResourceGetMappedArray((cudaArray**)&dev_ptr, cuda_tex_resource, 0, 0));
 
-    //           cudaMemcpyToArray        荩 
     cudaChannelFormatDesc channel_desc = cudaCreateChannelDesc<uchar4>();
     cudaMemcpyToArray((cudaArray*)dev_ptr, 0, 0, src_rgba.data,
         src.cols * src.rows * sizeof(uchar4),
@@ -2045,7 +1938,6 @@ GLuint CreateTextureCubeX(cv::Mat& src) {
 
     cudaCheckErrors(cudaGraphicsUnmapResources(1, &cuda_tex_resource, 0));
 
-    //      OpenGL      ID    ImGui
     return gl_texture_id;
 }
 
@@ -2070,7 +1962,6 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
     const int imageW = src.cols;
     const int imageH = src.rows;
 
-    // Step 1:      OpenGL       洗   始   荩   选  
     GLuint gl_texture_id;
     glGenTextures(1, &gl_texture_id);
     glBindTexture(GL_TEXTURE_2D, gl_texture_id);
@@ -2078,16 +1969,14 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageW, imageH, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); //   始  为  
+        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); 
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Step 2: 注   OpenGL       CUDA
     cudaGraphicsResource* cuda_tex_resource;
     cudaCheckErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
-
-    // Step 3:      CUDA        洗 原始图      
+ 
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
     cudaArray* cu_array = nullptr;
     cudaCheckErrors(cudaMallocArray(&cu_array, &channelDesc, imageW, imageH));
@@ -2095,7 +1984,6 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
         imageW * imageH * sizeof(uchar4),
         cudaMemcpyHostToDevice));
 
-    // Step 4:      CUDA       螅ü  runImageFilters 使 茫 
     cudaTextureObject_t texImage0 = 0;
     {
         cudaResourceDesc resDesc = {};
@@ -2110,18 +1998,14 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
         cudaCheckErrors(cudaCreateTextureObject(&texImage0, &resDesc, &texDesc, nullptr));
     }
 
-    // Step 5: 映   OpenGL      曰 取 璞钢? 
     uchar4* d_dst = nullptr;
     cudaCheckErrors(cudaGraphicsMapResources(1, &cuda_tex_resource, 0));
     cudaCheckErrors(cudaGraphicsSubResourceGetMappedArray((cudaArray**)&d_dst, cuda_tex_resource, 0, 0));
-
-    // Step 6:     图   瞬           执        CUDA     
+   
     runImageFiltersx((TColor*)d_dst, imageW, imageH, 0, texImage0);
 
-    // Step 7:    映  
     cudaCheckErrors(cudaGraphicsUnmapResources(1, &cuda_tex_resource, 0));
 
-    // Step 8:       源
     cudaCheckErrors(cudaDestroyTextureObject(texImage0));
     cudaCheckErrors(cudaFreeArray(cu_array));
     cudaCheckErrors(cudaGraphicsUnregisterResource(cuda_tex_resource));
@@ -2150,7 +2034,6 @@ GLuint CreateTextureCubeZ(cv::Mat& src) {
     const int imageW = src.cols;
     const int imageH = src.rows;
 
-    // Step 1:      OpenGL       洗   始   荩   选  
     GLuint gl_texture_id;
     glGenTextures(1, &gl_texture_id);
     glBindTexture(GL_TEXTURE_2D, gl_texture_id);
@@ -2158,50 +2041,41 @@ GLuint CreateTextureCubeZ(cv::Mat& src) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageW, imageH, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); //   始  为  
+        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); 
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Step 2: 注   OpenGL       CUDA
     cudaGraphicsResource* cuda_tex_resource;
     checkCudaErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
-
-    // Step 3: 使   峁?暮    洗 源图     莸  CUDA    椋?      CUDA        
+     
     cudaTextureObject_t texImage = 0;
     uchar4* h_Src = (uchar4*)src_rgba.data;
     checkCudaErrors(CUDA_MallocArray(&h_Src, imageW, imageH));
 
-    // Step 4: 映   OpenGL      曰 取 璞钢? 
     uchar4* d_dst = nullptr;
     checkCudaErrors(cudaGraphicsMapResources(1, &cuda_tex_resource, 0));
     checkCudaErrors(cudaGraphicsSubResourceGetMappedArray((cudaArray**)&d_dst, cuda_tex_resource, 0, 0));
 
-    // Step 5:     图   瞬           执        CUDA     
     runImageFiltersx((TColor*)d_dst, imageW, imageH,0, texImage);
     cudaDeviceSynchronize();
-    // Step 6:    映  
+
     checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_tex_resource, 0));
 
-    // Step 7:       源
     checkCudaErrors(CUDA_FreeArray());
     checkCudaErrors(cudaGraphicsUnregisterResource(cuda_tex_resource));
 
     return gl_texture_id;
 }
 
-// 全 直   示        要    实         
-//bool g_Diag = false;
-//float knnNoise = 1.0f, nlmNoise = 1.0f, lerpC = 0.5f;
-//int g_Kernel = 2; //     为2  选  NLM 瞬   
 void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
-    if (src_host.empty() || src_host.channels() != 4) { // 确    RGBA  式
-        //throw std::invalid_argument("Source image must be RGBA format.");
+    if (src_host.empty() || src_host.channels() != 4) { 
+
         if (src_host.empty() || src_host.channels() != 3) {
             throw std::invalid_argument("Source image must be 24-bit (3 channels).");
         }
         cv::Mat rgba;
-        // Convert from BGR to BGRA by adding an alpha channel with full opacity
+
         cv::cvtColor(src_host, rgba, cv::COLOR_BGR2BGRA);
     }
 
@@ -2209,7 +2083,6 @@ void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
     int imageH = src_host.rows;
     size_t num_bytes = imageW * imageH * sizeof(uchar4);
 
-    //     CUDA   椴? src_host       洗 
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
     cudaArray* cu_array = nullptr;
     checkCudaErrors(cudaMallocArray(&cu_array, &channelDesc, imageW, imageH));
@@ -2235,171 +2108,29 @@ void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
     texDesc.readMode = cudaReadModeElementType;
     texDesc.normalizedCoords = 0;
 
-   // cudaTextureObject_t texImage = 0;
     checkCudaErrors(cudaCreateTextureObject(&texImage, &resDesc, &texDesc, nullptr));
 
-    //     目  图    璞?诖 
     TColor* d_dst = nullptr;
     checkCudaErrors(cudaMalloc(&d_dst, num_bytes));
 
-    //     cuda_Copy    图    
     cuda_Copy(d_dst, imageW, imageH, texImage);
-
-    //         璞?  苹     
+ 
     size_t imageSize = src_host.step * src_host.rows;
     cv::Mat augmented_host(src_host.size(), src_host.type());
     checkCudaErrors(cudaMemcpy(augmented_host.data, d_dst, imageSize, cudaMemcpyDeviceToHost));
 
-    //       源
     checkCudaErrors(cudaDestroyTextureObject(texImage));
     checkCudaErrors(cudaFreeArray(cu_array));
     checkCudaErrors(cudaFree(d_dst));
     dst_host = augmented_host;
 }
-/*
-void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
-    if (src_host.empty() || src_host.channels() != 4) { // 确    RGBA  式
-        throw std::invalid_argument("Source image must be RGBA format.");
-    }
-    int imageW = src_host.cols;
-    int imageH = src_host.rows;
-    size_t num_bytes = imageW * imageH * sizeof(uchar4);
 
-    //     CUDA   椴? src_host       洗 
-    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-    cudaArray* cu_array = nullptr;
-    checkCudaErrors(cudaMallocArray(&cu_array, &channelDesc, imageW, imageH));
-    checkCudaErrors(cudaMemcpyToArray(cu_array, 0, 0, src_host.data, num_bytes, cudaMemcpyHostToDevice));
-
-    //            
-    struct cudaResourceDesc resDesc = {};
-    memset(&resDesc, 0, sizeof(resDesc));
-    resDesc.resType = cudaResourceTypeArray;
-    resDesc.res.array.array = cu_array;
-
-    struct cudaTextureDesc texDesc = {};
-    memset(&texDesc, 0, sizeof(texDesc));
-    texDesc.addressMode[0] = cudaAddressModeClamp;
-    texDesc.addressMode[1] = cudaAddressModeClamp;
-    texDesc.filterMode = cudaFilterModePoint;
-    texDesc.readMode = cudaReadModeElementType;
-    texDesc.normalizedCoords = 0;
-
-    cudaTextureObject_t texImage = 0;
-    checkCudaErrors(cudaCreateTextureObject(&texImage, &resDesc, &texDesc, nullptr));
-
-    //     目  图    璞?诖 
-    uchar4* d_dst = nullptr;
-    checkCudaErrors(cudaMalloc(&d_dst, num_bytes));
-
-    //     cuda_Copy    图    
-    dim3 threads(BLOCKDIM_X, BLOCKDIM_Y); //   要    BLOCKDIM_X    BLOCKDIM_Y
-    dim3 grid(iDivUp(imageW, BLOCKDIM_X), iDivUp(imageH, BLOCKDIM_Y));
-    cuda_Copy(d_dst, imageW, imageH, texImage);
-    cuda_Copy(d_dst, imageW, imageH, texImage);
-
-    //     目  图    璞?诖 
-    imageW = src_host.cols;
-    imageH = src_host.rows;
-    size_t num_bytes = src_host.cols * src_host.rows * sizeof(TColor);
-    TColor* d_dst = NULL;
-    checkCudaErrors(cudaMalloc((void**)&d_dst, num_bytes));
-
-
-
-    //         璞?  苹     
-    checkCudaErrors(cudaMemcpy(dst_host.data, d_dst, num_bytes, cudaMemcpyDeviceToHost));
-
-    //       源
-    checkCudaErrors(cudaDestroyTextureObject(texImage));
-    checkCudaErrors(cudaFreeArray(cu_array));
-    checkCudaErrors(cudaFree(d_dst));
-}
-
-//               (i + j - 1) / j   值
-inline int iDivUp(int i, int j) {
-    return (i + j - 1) / j;
-}
-
-int main_xxxx() {
-    cv::Mat src_24bit = cv::imread("path_to_your_image.jpg");
-    if (src_24bit.empty()) {
-        std::cerr << "Error loading image" << std::endl;
-        return -1;
-    }
-
-    cv::Mat src_32bit;
-    cv::cvtColor(src_24bit, src_32bit, cv::COLOR_BGR2BGRA); // 转  RGBA
-
-    cv::Mat dst_host(src_32bit.size(), src_32bit.type());
-    GPU_NLM(src_32bit, dst_host);
-
-    cv::imshow("Original", src_24bit);
-    cv::imshow("Copied", dst_host);
-    cv::waitKey();
-    return 0;
-}*/
-/*void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host)
-{
-    if (src_host.empty() || src_host.channels() != 4) { // 确    RGBA  式
-        //throw std::invalid_argument("Source image must be RGBA format.");
-        if (src_host.empty() || src_host.channels() != 3) {
-            throw std::invalid_argument("Source image must be 24-bit (3 channels).");
-        }
-        cv::Mat rgba;
-        // Convert from BGR to BGRA by adding an alpha channel with full opacity
-        cv::cvtColor(src_host, rgba, cv::COLOR_BGR2BGRA);
-    }
-    //     CUDA            
-    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
-    cudaArray* cu_array = nullptr;
-    checkCudaErrors(cudaMallocArray(&cu_array, &channelDesc, src_host.cols, src_host.rows));
-    checkCudaErrors(cudaMemcpyToArray(cu_array, 0, 0, src_host.data, src_host.step * src_host.rows, cudaMemcpyHostToDevice));
-
-    struct cudaResourceDesc resDesc = {};
-    memset(&resDesc, 0, sizeof(resDesc));
-    resDesc.resType = cudaResourceTypeArray;
-    resDesc.res.array.array = cu_array;
-
-    struct cudaTextureDesc texDesc = {};
-    memset(&texDesc, 0, sizeof(texDesc));
-    texDesc.addressMode[0] = cudaAddressModeClamp;
-    texDesc.addressMode[1] = cudaAddressModeClamp;
-    texDesc.filterMode = cudaFilterModePoint;
-    texDesc.readMode = cudaReadModeElementType;
-    texDesc.normalizedCoords = 0;
-
-  //  cudaTextureObject_t texImage = 0;
-    checkCudaErrors(cudaCreateTextureObject(&texImage, &resDesc, &texDesc, nullptr));
-   
-   
-    //     目  图    璞?诖 
-    imageW = src_host.cols;
-    imageH = src_host.rows;
-    size_t num_bytes = src_host.cols * src_host.rows * sizeof(TColor);
-    TColor* d_dst = NULL; 
-    checkCudaErrors(cudaMalloc((void**)&d_dst, num_bytes));
-
-    //     全 直         runImageFilters
-    g_Kernel = 0; // 使  NLM 瞬   
-    runImageFilters(d_dst);
-
-    //         苹     
-    checkCudaErrors(cudaMemcpy(dst_host.data, d_dst, num_bytes, cudaMemcpyDeviceToHost));
-
-    //       源
-    checkCudaErrors(cudaDestroyTextureObject(texImage));
-    checkCudaErrors(cudaFreeArray(cu_array));
-    checkCudaErrors(cudaFree(d_dst));
-}
-*/
 void ViewController::Imgui_GPU_NLM_main0(cv::Mat& src_host, cv::Mat& dst_host)
 {
     TColor* d_dst = NULL;
     size_t num_bytes;
-    //uchar4* h_Src = NULL;
     uchar4* h_Src = matToUchar4(src_host);
-    //     目  图    璞?诖 
+
     imageW = src_host.cols;
     imageH = src_host.rows;
     CUDA_MallocArray(&h_Src, imageW, imageH);
@@ -2424,10 +2155,10 @@ void ViewController::Imgui_GPU_NLM_main0(cv::Mat& src_host, cv::Mat& dst_host)
 }
 void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
 {
-    // Select kernel size: 5, 7, or <12
-    int kernelSize = 11; // Change this value to 5, 7, or <12
+
+    int kernelSize = 11; 
     int kernelRadius = kernelSize / 2;
-    double sigma = 0; // If sigma is 0, it will be calculated based on kernel size
+    double sigma = 0; 
 
     if (sigma == 0) {
         sigma = 0.3 * ((kernelRadius - 1) * 0.5 - 1) + 0.8;
@@ -2436,7 +2167,6 @@ void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
     vector<float> h_kernel = createGaussianKernel(kernelSize, sigma);
     float* kernelData = h_kernel.data();
 
-    // Allocate device memory
     unsigned char* d_input = nullptr, * d_output = nullptr;
     float* d_kernel = nullptr;
     size_t imageSize = src_host.step * src_host.rows;
@@ -2446,38 +2176,29 @@ void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
     cudaMemcpy(d_input, src_host.data, imageSize, cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, kernelData, sizeof(float) * h_kernel.size(), cudaMemcpyHostToDevice);
 
-    // Apply Gaussian blur on GPU
     applyGaussianBlurOnGPU(d_input, d_output, src_host.cols, src_host.rows, src_host.channels(), d_kernel, kernelRadius);
 
-    // Copy result back to host
     cv::Mat blurred_host(src_host.size(), src_host.type());
     cudaMemcpy(blurred_host.data, d_output, imageSize, cudaMemcpyDeviceToHost);
 
-    // Apply HSV augmentation
-    float hueDelta = 30.0f; //     色  
-    float saturationScale = 1.2f; //    颖  投 
-    float valueScale = 1.1f; //         
+    float hueDelta = 30.0f;
+    float saturationScale = 1.2f;
+    float valueScale = 1.1f; 
 
-    // Reuse d_input as our working buffer for HSV augmentation
     cudaMemcpy(d_input, blurred_host.data, imageSize, cudaMemcpyHostToDevice);
 
     applyHSVAugmentationOnGPU(d_input, src_host.cols, src_host.rows, hueDelta, saturationScale, valueScale);
 
-    // Copy result back to host after HSV augmentation
     cv::Mat augmented_host(src_host.size(), src_host.type());
     cudaMemcpy(augmented_host.data, d_input, imageSize, cudaMemcpyDeviceToHost);
 
-    // Free device memory
     cudaFree(d_input);
     cudaFree(d_output);
     cudaFree(d_kernel);
     dst_host = augmented_host;
-    //imshow("Blurred Image", blurred_host);
-    //waitKey(0);
 
 }
 
-//   循  
 #else
 void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host)
 {
@@ -2501,12 +2222,11 @@ void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
 #endif
 
 void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
-{//图    
+{ 
     (void)p_open;
-    //     一     诓   示图  
     ImGui::Begin("Image Viewer");
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-    //        疟       应   诖 小
+
     ImVec2 win_size = ImGui::GetWindowSize();
     float aspect_ratio = static_cast<float>(s_img0.cols) / s_img0.rows;
     ImVec2 img_display_size = ImVec2(win_size.x * 0.9f, win_size.y * 0.9f);
@@ -2562,15 +2282,8 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
                 m_occtimage.bitwiseOr(octimage2);
             }
         }
-         /*            
-            //     蚀roi
-            void erodeVerticalROI(int erosionHeight)  
-            //     蚀roi
-            void erodeHorizontalROI(int erosionWidth) 
-         */
 
         SetBackgroundInView(m_myView, m_occtimage.getmat());
-       // SetBackgroundInView(m_myView, m_occtimage.getmat());
     }
     if (ipythre)
     {
@@ -2589,9 +2302,9 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     if (iotsuThreshold)
     {
         m_occtimage.copyFromMat(s_img0);
-        // 应      应  值  值  
+
         Image octimagez0 = m_occtimage.getROI();
-        // 应   Otsu   值  值  
+
         Image otsuBinaryImage = octimagez0.otsuThresholding(255, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
         m_occtimage.colorizeROI(cv::Scalar(0, 0, 0));
@@ -2602,7 +2315,6 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     if (0)
     {
         m_occtimage.copyFromMat(s_img0);
-        // 应      应  值  值  
 
         Image octimagez0 = m_occtimage.getROI();
         Image adaptiveBinaryImage = octimagez0.adaptiveThresholding(255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY, ivalue5, ivalue6);
@@ -2624,7 +2336,6 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
         if (0)
         { 
             m_occtimage.copyFromMat(s_img0);
-            // 应      应  值  值  
             Image adaptiveBinaryImage = m_occtimage.adaptiveThresholding(255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY, 11, 2);
 
             texture_id0 = CreateTextureFromMat0(adaptiveBinaryImage.getmat());
@@ -2640,9 +2351,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
         if (0)
         {
             cv::Mat  blurred;
-            // opencv gaussblur
             GaussianBlur(s_img0, blurred, cv::Size(17, 17), 0);
-            //         
             texture_id0 = CreateTextureFromMat0(blurred);
             SetBackgroundInView(m_myView, blurred);
         }
@@ -2652,11 +2361,8 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             {
                 Image octimagez;
                 octimagez.copyFromMat(s_img0);
-                //   图   械   通    蟹   
-                octimagez.analyzeConnectedComponentsColor(50.0, 100, 0.5, 2.0); //       色  值为50    小   为100      确 围为0.5  2.0
-                //   图   械   通    蟹   
-                octimagez.analyzeConnectedComponentsPyramid(100, 0.5, 2.0); //       小   为100      确 围为0.5  2.0
-                //         
+                octimagez.analyzeConnectedComponentsColor(50.0, 100, 0.5, 2.0); 
+                octimagez.analyzeConnectedComponentsPyramid(100, 0.5, 2.0); 
                 texture_id0 = CreateTextureFromMat0(octimagez.getmat());
 
                 SetBackgroundInView(m_myView, octimagez.getmat());
@@ -2666,9 +2372,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             {
                 Image octimagez;
                 octimagez.copyFromMat(s_img0);
-                // 应 媒       态  值  
-                Image binaryImage = octimagez.pyramidDynamicThresholding(4, 11, 0); // 使  4            小为11  偏    为0
-                //         
+                Image binaryImage = octimagez.pyramidDynamicThresholding(4, 11, 0); 
                 texture_id0 = CreateTextureFromMat0(binaryImage.getmat());
                 SetBackgroundInView(m_myView, binaryImage.getmat());
             }
@@ -2676,7 +2380,6 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             {
                 Image octimagez;
                 octimagez.copyFromMat(s_img0);
-                //          100     铱 群透叨染     50   氐   通   煤 色   
                 Image octimagez0 = octimagez.getROI();
                 octimagez0.colorFillConnectedComponents(100, 50, 50, cv::Scalar(0, 0, 255));
                 //         
@@ -2689,14 +2392,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     else if (1 == gpublur)
     {
         cv::Mat  blurred;
-        // cuda gpu gaussblur
-        // s_img0 = cv::imread("portrait_noise.bmp");
-        
-        // Imgui_GPU_Gauss_main(s_img0, blurred);
-        // Imgui_GPU_NLM_main(s_img0, blurred);
-        //         
-        // texture_id0 = CreateTextureFromMat0(blurred);
-
+     
         texture_id0 = CreateTextureCube(s_img0);
 #if CXCORE_ENABLE_VIEWCONTROLLER_CUDA
         UpdateTextureWithCuda(2048,1536);
@@ -2720,7 +2416,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     }
 
     ImGui::Image((ImTextureID)(uint64_t)texture_id0, img_display_size, ImVec2(0, 0), ImVec2(1, 1));
-    //(ImTextureID)(intptr_t)
+
     if (ImGui::IsItemHovered())
     {
         ImGui::BeginTooltip();
@@ -2747,10 +2443,6 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     ImGui::End();
 
 }
-// ================================================================
-// Function : onResize
-// Purpose  :
-// ================================================================
 void ViewController::onResize(int theWidth, int theHeight)
 {
     if (theWidth != 0
@@ -2763,12 +2455,10 @@ void ViewController::onResize(int theWidth, int theHeight)
         m_myView->Redraw();
     }
 }
-// ================================================================
-// Function : onMouseScroll
-// Purpose  :
-// ================================================================
 void ViewController::onMouseScroll(double theOffsetX, double theOffsetY)
 {
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+        return;
     (void)theOffsetX;
     if (!m_myView.IsNull())
     {
@@ -2786,10 +2476,10 @@ double ViewController::GetParserValue(const string& codestr)
 { 
     double* pdouble = NULL;
     if (!m_imageparser.IsObjectVar((const char*)codestr.c_str()))
-        return 0x00;//0xFFFF; 
+        return 0x00; 
     pdouble = (double*)m_imageparser.GetDoubleValue((const char*)codestr.c_str());
     if (NULL == pdouble)
-        return 0x00;//0xFFFF;
+        return 0x00;
     double dvalue = 0;
     dvalue = (*pdouble);
     if (dvalue < 0.0000001 && dvalue>0)
@@ -2810,7 +2500,6 @@ string ViewController::initialparser()
         str = str + "build Module ok\r\n";
     }
     clearos();
-    //load module
     string strfile = getlocationstring("./static.h");
     string strcode = loadfilestring(strfile);
     bresult = m_imageparser.Compile(strcode.c_str());
@@ -2824,7 +2513,6 @@ string ViewController::initialparser()
         str = str + "build " + strfile + " ok\r\n";
     }
     clearos();
-    //load roi ini 
     vector<string> files;
     files = DirFileFind(getlocationstring(string("./")), string("*.ums"));
     for (int i = 0; i < files.size(); ++i)
@@ -2851,7 +2539,7 @@ string ViewController::initialparser()
     {
         Image* pimage = (Image*)m_imageparser.GetClassObj("Image", i); 
         if (nullptr != pimage)
-            *pimage = Image(2048,1536,CV_32FC3);//Format_ARGB32_Premultiplied
+            *pimage = Image(2048,1536,CV_32FC3);
     }
      
     m_dzoomx = GetParserValue("m_dzoomx");
@@ -2975,21 +2663,22 @@ Shape* ViewController::indexAt(const gp_Pnt& pos)
     }
     return 0;
 }
-// ================================================================
-// Function : onMouseButton
-// Purpose  :
-// ================================================================
+
 void ViewController::onMouseButton(int theButton, int theAction, int theMods)
 {
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+    {
+        if (theAction == GLFW_RELEASE) isDragging = false;
+        return;
+    }
     if (!m_myView.IsNull())
     {
         const Graphic3d_Vec2i aPos = myOcctWindow->CursorPosition();
         if (theAction == GLFW_PRESS)
         {
             m_mousePressPos = gp_Pnt(aPos.x(),aPos.y() ,0);
-            isDragging = true; //    帽  为      拽
-            // 执  选     
-             myContext->Select(true); // true   示   之前 募         录   
+            isDragging = true; 
+             myContext->Select(true); 
              if (true == m_ilinescan 
                  && 0 == theButton)
              {
@@ -2997,8 +2686,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {
-                     //  卸洗     
+                 {  
                  }
                  else
                  if (0 == m_ibtntimes)
@@ -3014,7 +2702,6 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
                  {
-                 //  卸洗     
                  }
                  else
                  {
@@ -3030,8 +2717,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {
-                     //  卸洗     
+                 { 
                  }
                  else
                  {
@@ -3048,8 +2734,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {
-                     //  卸洗     
+                 { 
                  }
                  else
                  {
@@ -3066,8 +2751,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {
-                     //  卸洗      
+                 {  
                  }
                  else
                  {
@@ -3077,29 +2761,15 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                  }
              }
 
-            //     囟    AIS_Shape  欠 选  
-            // if (myContext->IsSelected(selectedShape))
              if (myContext->HasDetected())
              {
                  Handle(AIS_InteractiveObject) detectedShape = myContext->DetectedInteractive();
                  selectedShape = Handle(AIS_Shape)::DownCast(detectedShape);
-              //cxtmp  if (!selectedShape.IsNull())
-              //cxtmp   manipulator->Attach(selectedShape);  //    拥 目     
-              //cxtmp  else
-              //cxtmp  {
-              //cxtmp     selectedTextLabel = Handle(AIS_TextLabel)::DownCast(detectedShape);
-              //cxtmp    if (!selectedTextLabel.IsNull())
-              //cxtmp        manipulator->Attach(selectedTextLabel);  //    拥 目      
-              //cxtmp  }
              }             
              PressMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
         }
         else
         {
-            // m_Match.setcontext(myContext);
-            // m_Match.SetView(m_myView);
-            // m_Match.setrect(m_mousePressPos.X(), m_mousePressPos.Y(), aPos.x()- m_mousePressPos.X(), aPos.y()- m_mousePressPos.Y());
-            // m_shape0.setcontext(myContext); 
           
             ReleaseMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
            
@@ -3108,7 +2778,6 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                 && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                 && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
             {
-                //  卸洗     
             }
             else
             if (true == m_ilinescan && 1 == theButton)
@@ -3118,7 +2787,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                     m_ibtntimes = 1;
                 }
                 else if (1 == m_ibtntimes)
-                {//
+                {
                     m_ibtntimes = 0;
                     m_point1 = gp_Pnt(aPos.x(), aPos.y(), 0);
                     m_afindline->setlinesegment(m_point0.X() * m_dscalex, m_point0.Y() * m_dscaley, m_point1.X() * m_dscalex, m_point1.Y() * m_dscaley, 80);
@@ -3129,8 +2798,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                 && m_mousePressPos.Y() >= m_current_window_posy
                 && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                 && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-            {
-                //  卸洗     
+            {  
             }
             else
             if (true != m_ipickpoints ) 
@@ -3146,17 +2814,13 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
              isDragging = false;
         } 
 
-   //add drag
-   // if (false == m_beditmanagerview)
-   //     return;
-   // mutexupdate();
-   // event->accept();//m_dzoomx, m_dzoomy
+
         if (0)
         {
             double dx = (aPos.x() / m_dzoomx) - m_dmovx;
             double dy = (aPos.y() / m_dzoomy) - m_dmovy;
             gp_Pnt curpos(dx, dy, 0);
-            Shape* pshape = indexAt(curpos);//event->pos());
+            Shape* pshape = indexAt(curpos);
             if (pshape != 0)
             {
                 m_resizeHandlePressed = pshape->resizeHandlez(m_dzoomx, m_dzoomy).contains(curpos);
@@ -3178,12 +2842,11 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
 
 
 }
-// ================================================================
-// Function : onMouseMove
-// Purpose  :
-// ================================================================
+
 void ViewController::onMouseMove(int thePosX, int thePosY)
-{  
+{
+     if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+         return;
      const Graphic3d_Vec2i aNewPos(thePosX, thePosY);
      if (true == isDragging)
      {
@@ -3192,7 +2855,6 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
              && m_mousePressPos.X() < m_current_window_posx + m_imguiw
              && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
          {
-             //  卸洗     
          }
          else
          if (false == m_ipickpoints)
@@ -3228,39 +2890,3 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
      }
 
 }
- 
-
- /*
-// ================================================================
-// Function : onMouseButton
-// Purpose  :
-// ================================================================
-void ViewController::onMouseButton(int theButton, int theAction, int theMods)
-{
-    if (m_myView.IsNull()) { return; }
-
-    const Graphic3d_Vec2i aPos = myOcctWindow->CursorPosition();
-    if (theAction == GLFW_PRESS)
-    {
-        PressMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
-    }
-    else
-    {
-        ReleaseMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
-    }
-}
-
-// ================================================================
-// Function : onMouseMove
-// Purpose  :
-// ================================================================
-void ViewController::onMouseMove(int thePosX, int thePosY)
-{
-    const Graphic3d_Vec2i aNewPos(thePosX, thePosY);
-    if (!m_myView.IsNull())
-    {
-        UpdateMousePosition(aNewPos, PressedMouseButtons(), LastMouseFlags(), false);
-    }
-}
-*/
-

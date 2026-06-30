@@ -2,7 +2,7 @@
 #include "pch.h"
 
 #include "Findcircle.h"
-#include "../../cxgeom/include/CxSetCircleBuild.h"
+#include "../cxgeom/include/CxSetCircleBuild.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
 #include "findobject.h"

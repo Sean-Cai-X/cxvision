@@ -790,12 +790,12 @@
 
 #include <GC_MakeLine.hxx>
 
-#include "../../cxgeom/include/CxGeomAnnotationBody.h"
-#include "../../cxgeom/include/CxGeomElementBody.h"
-#include "../../cxgeom/include/CxSetCircleBuild.h"
-#include "../../cxgeom/include/CxSetCircleDisplay.h"
-#include "../../cxgeom/include/CxSetLineBuild.h"
-#include "../../cxgeom/include/CxSetLineDisplay.h"
+#include "../cxgeom/include/CxGeomAnnotationBody.h"
+#include "../cxgeom/include/CxGeomElementBody.h"
+#include "../cxgeom/include/CxSetCircleBuild.h"
+#include "../cxgeom/include/CxSetCircleDisplay.h"
+#include "../cxgeom/include/CxSetLineBuild.h"
+#include "../cxgeom/include/CxSetLineDisplay.h"
 
 
 

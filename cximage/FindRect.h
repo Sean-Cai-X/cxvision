@@ -5,7 +5,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "Findline.h"
-#include "../../cxgeom/include/CxGeomElementBody.h"
+#include "../cxgeom/include/CxGeomElementBody.h"
 
 class FindRect : public Shape
 {

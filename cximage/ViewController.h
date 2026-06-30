@@ -11,6 +11,8 @@
 
 #include <map>
 #include <Standard_Handle.hxx>
+#include <string>
+#include <vector>
 
 #include "View.h"
 #include "Image.h"
@@ -26,6 +28,17 @@
 //! OCCT view controller hosting interaction, image tools, and shape display.
 class ViewController : protected AIS_ViewController
 {
+  struct ScriptCatalogEntry
+  {
+    std::string name, path, type, status, description;
+  };
+
+  struct ScriptResult
+  {
+    std::string script_path, status, reason, runtime_fillback_status;
+    std::string image_ref, overlay_ref, result_ref, evidence_ref, issue_entry_ref;
+    std::vector<std::string> log_lines;
+  };
 public:
   //! Construct the controller with default interaction state.
   ViewController();
@@ -38,6 +51,9 @@ public:
 
 private:
   void initImGui();
+  void initScriptCatalog();
+  void drawScriptAcceptancePanels();
+  ScriptResult RunCxScript(const std::string& theScriptPath);
   void FitAll();
   double GetScale();
   void ViewerUpDate();
@@ -195,6 +211,7 @@ protected:
 
     //! Create a GPU texture from a cv::Mat image.
     unsigned int CreateTextureFromMat0(const cv::Mat& mat);
+    void UpdateImageViewImage(const cv::Mat& image);
     void SetTexturedtoBoxFace(const cv::Mat& image);
     void SetTexturedtoPlane(const cv::Mat& image);
     Handle(Image_PixMap) ConvertCvMatToOcctImage(const cv::Mat& mat);
@@ -273,6 +290,22 @@ private:
     float m_current_window_posy;
     float m_imguiw;
     float m_imguih;
+    std::vector<ScriptCatalogEntry> m_scriptCatalog;
+    int m_selectedScript = -1;
+    ScriptResult m_scriptResult;
+    bool m_scriptRunRequested = false;
+    bool m_showAllScripts = false;
+    bool m_showLegacyGpuWork = false;
+    bool m_detachablePanels = false;
+    bool m_renderImageInOcctBackground = false;
+    bool m_showTestPoints = false;
+    bool m_showTestRectangle = false;
+    bool m_showTestScanLine = false;
+    unsigned int m_imageViewTexture = 0;
+    cv::Mat m_imageViewImage;
+    float m_imageViewZoom = 1.0f;
+    float m_imageViewPanX = 0.0f;
+    float m_imageViewPanY = 0.0f;
 };
 
 #endif // _ViewController_Header
