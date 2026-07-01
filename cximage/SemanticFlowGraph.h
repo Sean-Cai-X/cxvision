@@ -21,13 +21,14 @@ private:
   bool LoadFlowFile(const std::string& path);
   void LoadDemoFlow();
   void ClearFlow();
-  void DrawGraphCanvas();
+  void DrawGraphCanvas(SemanticFlowAction& action);
   void DrawNodeDetail(SemanticFlowAction& action);
   SemanticNode* SelectedNode();
   const SemanticNode* SelectedNode() const;
 
   std::string m_repositoryRoot;
-  std::string m_demoRelativePath = "cxscript/state_machine/examples/mlpack_handoff_demo.cxflow";
+  std::string m_demoRelativePath =
+    "cxparser/cxscript/state_machine/examples/cximage_find_circle_explore.cxflow";
   std::string m_currentWorkingDir;
   std::string m_resolvedDemoPath;
   std::string m_loadStatus = "PENDING";

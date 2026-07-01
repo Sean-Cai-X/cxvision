@@ -692,6 +692,25 @@ void ViewController::drawScriptAcceptancePanels()
   m_showTestRectangle = m_manualTest.test_rectangle || m_manualTest.show_roi;
   m_showTestScanLine = m_manualTest.line_scan || m_manualTest.attach_line;
   ImGui::Separator();
+  const ScriptLineView* currentScriptLine = nullptr;
+  if (m_manualTest.current_line >= 0 &&
+      m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
+    currentScriptLine = &m_manualTest.line_views[
+      static_cast<std::size_t>(m_manualTest.current_line)];
+  ImGui::TextWrapped("current_script: %s",
+    m_manualTest.loaded_script_path.empty() ? "(none)" :
+    m_manualTest.loaded_script_path.c_str());
+  ImGui::Text("current_line: %d", currentScriptLine == nullptr ? 0 :
+    currentScriptLine->line_no);
+  ImGui::TextWrapped("current_object: %s", currentScriptLine == nullptr ||
+    currentScriptLine->object.empty() ? "(none)" : currentScriptLine->object.c_str());
+  ImGui::TextWrapped("current_method: %s", currentScriptLine == nullptr ||
+    currentScriptLine->method.empty() ? "(none)" : currentScriptLine->method.c_str());
+  ImGui::TextWrapped("current_params: %s", currentScriptLine == nullptr ||
+    currentScriptLine->params.empty() ? "(none)" : currentScriptLine->params.c_str());
+  ImGui::Text("current_status: %s", currentScriptLine == nullptr ?
+    m_manualTest.trace_status.c_str() : currentScriptLine->status.c_str());
+  ImGui::Separator();
   if (!m_manualTest.show_image || m_imageViewTexture == 0 || m_imageViewImage.empty())
   {
     ImGui::TextDisabled("Image View: no image loaded");

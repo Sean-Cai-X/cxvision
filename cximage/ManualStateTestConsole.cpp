@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -366,6 +367,27 @@ void ViewController::initManualStateTestConsole()
     {"Custom Manual Text", "Start with an empty manual editor.",
      "", "manual", true}
   };
+
+  m_directTestModules.clear();
+  const fs::path moduleRoot = ResolveWorkspaceFile("cxparser/cxscript/module");
+  if (fs::exists(moduleRoot) && fs::is_directory(moduleRoot))
+  {
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(moduleRoot))
+    {
+      if (!entry.is_regular_file() || entry.path().extension() != ".cxsc" ||
+          entry.path().filename().string().find("direct_test") == std::string::npos)
+        continue;
+      std::string text;
+      if (!ReadTextFile(entry.path().generic_string(), text)) continue;
+      const std::string relative = fs::relative(entry.path(), moduleRoot).generic_string();
+      m_directTestModules.push_back({relative,
+        "C/C++ statement-level direct test module.", text,
+        "cxparser/cxscript/module/" + relative, true});
+    }
+    std::sort(m_directTestModules.begin(), m_directTestModules.end(),
+      [](const ScriptSnippet& left, const ScriptSnippet& right)
+      { return left.source_path < right.source_path; });
+  }
 }
 
 void ViewController::LoadBoundStateToManualConsole(
@@ -383,6 +405,14 @@ void ViewController::LoadBoundStateToManualConsole(
     m_scriptResult.script_path = scriptPath;
     m_scriptResult.status = "FAIL";
     m_scriptResult.reason = "script file not found";
+    m_scriptResult.runtime_fillback_status = "not_started";
+  }
+  else
+  {
+    m_manualTest.analyzed_text.clear();
+    m_manualTest.current_line = 0;
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = "bound script loaded; runtime not executed";
     m_scriptResult.runtime_fillback_status = "not_started";
   }
 }
@@ -465,7 +495,7 @@ void ViewController::drawManualStateTestConsole()
 
   ImGui::Separator();
   ImGui::Columns(2, "manual_console_columns", true);
-  ImGui::Text("Snippet List");
+  ImGui::Text("Builtin Parser Snippets");
   for (std::size_t i = 0; i < m_manualSnippets.size(); ++i)
   {
     const ScriptSnippet& snippet = m_manualSnippets[i];
@@ -476,10 +506,37 @@ void ViewController::drawManualStateTestConsole()
       m_manualTest.editor_source = "snippet";
       m_manualTest.loaded_script_path = snippet.source_path;
       m_manualTest.editor_dirty = false;
+      m_manualTest.analyzed_text.clear();
+      m_manualTest.current_line = 0;
     }
     ImGui::TextWrapped("%s", snippet.description.c_str());
     ImGui::PopID();
   }
+
+  ImGui::Separator();
+  ImGui::Text("Direct Test Modules");
+  for (std::size_t i = 0; i < m_directTestModules.size(); ++i)
+  {
+    const ScriptSnippet& module = m_directTestModules[i];
+    ImGui::PushID(1000 + static_cast<int>(i));
+    if (ImGui::Selectable(module.name.c_str()))
+    {
+      m_manualTest.editor_text = module.text;
+      m_manualTest.editor_source = "direct_test_module";
+      m_manualTest.loaded_script_path = module.source_path;
+      m_manualTest.script_file_path = module.source_path;
+      m_manualTest.editor_dirty = false;
+      m_manualTest.analyzed_text.clear();
+      m_manualTest.current_line = 0;
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = "direct test module loaded; runtime not executed";
+      m_scriptResult.runtime_fillback_status = "not_started";
+    }
+    ImGui::TextWrapped("%s", module.source_path.c_str());
+    ImGui::PopID();
+  }
+  if (m_directTestModules.empty())
+    ImGui::TextDisabled("No direct_test .cxsc modules found.");
   ImGui::TextDisabled("rag_script_cases: semantic_reference_only / not runnable");
 
   ImGui::NextColumn();

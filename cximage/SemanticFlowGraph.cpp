@@ -199,7 +199,7 @@ const SemanticNode* SemanticFlowGraph::SelectedNode() const
   return &m_flow.nodes[static_cast<std::size_t>(m_flow.selected_node_index)];
 }
 
-void SemanticFlowGraph::DrawGraphCanvas()
+void SemanticFlowGraph::DrawGraphCanvas(SemanticFlowAction& action)
 {
   const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
   ImVec2 canvasSize(ImGui::GetContentRegionAvail().x, 250.0f);
@@ -255,6 +255,24 @@ void SemanticFlowGraph::DrawGraphCanvas()
     ImGui::PushID(static_cast<int>(i));
     if (ImGui::InvisibleButton("node", ImVec2(nodeWidth, nodeHeight)))
       m_flow.selected_node_index = static_cast<int>(i);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+    {
+      m_flow.selected_node_index = static_cast<int>(i);
+      if (node.script_path.empty() || node.script_path == "none")
+      {
+        m_lastLog = "node has no bound script";
+      }
+      else
+      {
+        m_sharedBoundNodeId = node.id;
+        m_sharedBoundScriptPath = node.script_path;
+        m_lastLog = "node script loaded to Manual State Test Console";
+        action.type = SemanticFlowActionType::LoadBoundScript;
+        action.node_index = static_cast<int>(i);
+        action.node_id = node.id;
+        action.script_path = node.script_path;
+      }
+    }
     ImGui::PopID();
     draw->AddRectFilled(pos, end, StatusColor(node.status), 5.0f);
     draw->AddRect(pos, end,
@@ -292,13 +310,20 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
   ImGui::Separator();
   if (ImGui::Button("Load Node To Manual Console"))
   {
-    m_sharedBoundNodeId = node->id;
-    m_sharedBoundScriptPath = node->script_path;
-    m_lastLog = "Manual console hook pending";
-    action.type = SemanticFlowActionType::LoadBoundScript;
-    action.node_index = m_flow.selected_node_index;
-    action.node_id = node->id;
-    action.script_path = node->script_path;
+    if (node->script_path.empty() || node->script_path == "none")
+    {
+      m_lastLog = "node has no bound script";
+    }
+    else
+    {
+      m_sharedBoundNodeId = node->id;
+      m_sharedBoundScriptPath = node->script_path;
+      m_lastLog = "node script loaded to Manual State Test Console";
+      action.type = SemanticFlowActionType::LoadBoundScript;
+      action.node_index = m_flow.selected_node_index;
+      action.node_id = node->id;
+      action.script_path = node->script_path;
+    }
   }
   ImGui::SameLine();
   if (ImGui::Button("Run Bound Script"))
@@ -370,7 +395,7 @@ SemanticFlowAction SemanticFlowGraph::Draw()
       ImGui::BulletText("%s -> %s", edge.from.c_str(), edge.to.c_str());
   }
   ImGui::Separator();
-  DrawGraphCanvas();
+  DrawGraphCanvas(action);
   ImGui::Separator();
   DrawNodeDetail(action);
   ImGui::End();

@@ -317,6 +317,7 @@ private:
     ManualTestContext m_manualTest;
     ImageAnnotationLayer m_annotationLayer;
     std::vector<ScriptSnippet> m_manualSnippets;
+    std::vector<ScriptSnippet> m_directTestModules;
     SemanticFlowGraph m_semanticFlowGraph;
     bool m_renderImageInOcctBackground = false;
     bool m_showTestPoints = false;
