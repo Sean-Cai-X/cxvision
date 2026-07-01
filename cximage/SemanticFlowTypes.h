@@ -11,6 +11,7 @@ struct SemanticNode
   std::string module;
   std::string title;
   std::string script_path;
+  std::string status_from;
   std::string status;
   std::string reason;
   std::string result_ref;

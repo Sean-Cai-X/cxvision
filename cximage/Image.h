@@ -74,6 +74,7 @@ public:
     cv::Mat& getmat() { return matImage; }
     void updateImageProperties();
     void load(const char* pfilename);
+    void savefile(const char* pfilename) { save(pfilename == nullptr ? "" : pfilename); }
 
     void loadfiles(const char* pfilename);
     void reload();

@@ -1,4 +1,4 @@
-﻿#include "viewcontroller.h"
+#include "viewcontroller.h"
 #include <glad/glad.h>
 
 #include "occtinclude.h"
@@ -74,7 +74,7 @@ namespace
 
   fs::path findRepositoryRoot()
   {
-    const fs::path candidates[] = { fs::current_path(), fs::path(__FILE__).parent_path().parent_path() };
+    const fs::path candidates[] = { fs::path(__FILE__).parent_path().parent_path(), fs::current_path() };
     for (const fs::path& candidate : candidates)
     {
       fs::path current = candidate;
@@ -499,6 +499,7 @@ void ViewController::run()
   Imgui_OpenCV_Ini0();
   initScriptCatalog();
   initManualStateTestConsole();
+  initImageEvidenceLayer();
   m_semanticFlowGraph.Initialize(findRepositoryRoot().generic_string());
   mainloop();
   cleanup();
@@ -546,8 +547,8 @@ void ViewController::initScriptCatalog()
       item.path = fs::relative(entry.path(), root).generic_string();
       item.type = scanRoot.first;
       item.status = "ready";
-      item.description = item.name == "observe.mlpack_handoff_case.cxs"
-        ? "Observe handoff and pending real runtime fillback."
+      item.description = item.name.find("direct_test") != std::string::npos
+        ? "C/C++ statement-level direct CxScript case."
         : "CxScript " + item.type + " case.";
       m_scriptCatalog.push_back(item);
     }
@@ -556,7 +557,7 @@ void ViewController::initScriptCatalog()
     [](const ScriptCatalogEntry& left, const ScriptCatalogEntry& right) { return left.path < right.path; });
   for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
   {
-    if (m_scriptCatalog[i].path == "cxparser/cxscript/module/mlpack/observe.mlpack_handoff_case.cxs")
+    if (m_scriptCatalog[i].path == "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc")
     {
       m_selectedScript = static_cast<int>(i);
       break;
@@ -648,8 +649,7 @@ void ViewController::drawScriptAcceptancePanels()
   for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
   {
     const ScriptCatalogEntry& item = m_scriptCatalog[i];
-    if (!m_showAllScripts &&
-        item.path != "cxparser/cxscript/module/mlpack/observe.mlpack_handoff_case.cxs") continue;
+    if (!m_showAllScripts && item.name.find("direct_test") == std::string::npos) continue;
     ImGui::PushID(static_cast<int>(i));
     if (ImGui::Selectable(item.name.c_str(), m_selectedScript == static_cast<int>(i))) m_selectedScript = static_cast<int>(i);
     ImGui::TextWrapped("path: %s", item.path.c_str());
@@ -683,13 +683,16 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::SetNextWindowPos(ImVec2(middleX, margin), layoutCondition);
   ImGui::SetNextWindowSize(ImVec2(middleWidth, contentHeight), layoutCondition);
   ImGui::Begin("Image View", nullptr, panelFlags);
-  ImGui::Checkbox("Test points", &m_showTestPoints);
+  ImGui::Checkbox("Test points", &m_manualTest.test_points);
   ImGui::SameLine();
-  ImGui::Checkbox("Test rectangle", &m_showTestRectangle);
+  ImGui::Checkbox("Test rectangle", &m_manualTest.test_rectangle);
   ImGui::SameLine();
-  ImGui::Checkbox("Test scan line", &m_showTestScanLine);
+  ImGui::Checkbox("Test scan line", &m_manualTest.line_scan);
+  m_showTestPoints = m_manualTest.test_points;
+  m_showTestRectangle = m_manualTest.test_rectangle || m_manualTest.show_roi;
+  m_showTestScanLine = m_manualTest.line_scan || m_manualTest.attach_line;
   ImGui::Separator();
-  if (m_imageViewTexture == 0 || m_imageViewImage.empty())
+  if (!m_manualTest.show_image || m_imageViewTexture == 0 || m_imageViewImage.empty())
   {
     ImGui::TextDisabled("Image View: no image loaded");
   }
@@ -749,7 +752,8 @@ void ViewController::drawScriptAcceptancePanels()
       }
     }
 
-    if (canvasActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    if (canvasActive && m_annotationLayer.ActiveTool() == nullptr &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left))
     {
       m_imageViewPanX += io.MouseDelta.x;
       m_imageViewPanY += io.MouseDelta.y;
@@ -764,6 +768,11 @@ void ViewController::drawScriptAcceptancePanels()
                            true);
     drawList->AddImage((ImTextureID)(uint64_t)m_imageViewTexture,
                        imagePos, imageEnd);
+    m_annotationImagePosX = imagePos.x;
+    m_annotationImagePosY = imagePos.y;
+    m_annotationImageWidth = imageSize.x;
+    m_annotationImageHeight = imageSize.y;
+    drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
     if (m_showTestPoints)
     {
       const ImU32 color = IM_COL32(255, 64, 64, 255);
@@ -1002,6 +1011,11 @@ unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
 void ViewController::UpdateImageViewImage(const cv::Mat& image)
 {
     if (image.empty()) return;
+    if (!m_imageViewImage.empty() && m_imageViewImage.size() != image.size())
+    {
+        m_annotationLayer.Clear();
+        m_annotationStatus = "image size changed; annotation refs cleared";
+    }
     image.copyTo(m_imageViewImage);
     if (m_imageViewTexture != 0)
     {
@@ -1812,6 +1826,7 @@ void ViewController::mainloop()
                                                        flowResult.reason);
              }
              drawManualStateTestConsole();
+             drawImageEvidencePanels();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
              

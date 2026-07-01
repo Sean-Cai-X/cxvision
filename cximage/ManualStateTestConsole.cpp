@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <ctime>
+#include <sstream>
 
 namespace
 {
@@ -49,6 +51,299 @@ bool ReadTextFile(const std::string& path, std::string& text)
               std::istreambuf_iterator<char>());
   return true;
 }
+fs::path ResolveWorkspaceFile(const std::string& path)
+{
+  const fs::path requested(path);
+  if (requested.is_absolute() && fs::exists(requested)) return requested;
+  if (fs::exists(requested)) return fs::absolute(requested);
+  fs::path current = fs::current_path();
+  while (!current.empty())
+  {
+    const fs::path direct = current / requested;
+    const fs::path nested = current / "cxvisionai" / "cxvision_repo" / requested;
+    if (fs::exists(direct)) return fs::absolute(direct);
+    if (fs::exists(nested)) return fs::absolute(nested);
+    const fs::path parent = current.parent_path();
+    if (parent == current) break;
+    current = parent;
+  }
+  return requested;
+}
+
+fs::path ResolveCaseDirectory(const std::string& path)
+{
+  const fs::path requested(path);
+  if (requested.is_absolute()) return requested;
+  fs::path current = fs::current_path();
+  while (!current.empty())
+  {
+    const fs::path roots[] = {current, current / "cxvisionai" / "cxvision_repo"};
+    for (const fs::path& root : roots)
+      if (fs::exists(root / "CMakeLists.txt") && fs::exists(root / "cximage") && fs::exists(root / "cxparser"))
+        return root / requested;
+    const fs::path parent = current.parent_path();
+    if (parent == current) break;
+    current = parent;
+  }
+  return requested;
+}
+
+std::string TrimLine(const std::string& text)
+{
+  const std::size_t first = text.find_first_not_of(" \t\r");
+  if (first == std::string::npos) return std::string();
+  const std::size_t last = text.find_last_not_of(" \t\r");
+  return text.substr(first, last - first + 1);
+}
+
+std::string JsonEscape(const std::string& text)
+{
+  std::ostringstream out;
+  for (const char ch : text)
+  {
+    if (ch == '\\' || ch == '"') out << '\\' << ch;
+    else if (ch == '\n') out << "\\n";
+    else if (ch == '\r') out << "\\r";
+    else if (ch == '\t') out << "\\t";
+    else out << ch;
+  }
+  return out.str();
+}
+
+std::string CurrentTimestamp()
+{
+  const std::time_t now = std::time(nullptr);
+  std::tm local_time = {};
+#if defined(_WIN32)
+  localtime_s(&local_time, &now);
+#else
+  localtime_r(&now, &local_time);
+#endif
+  char buffer[32] = {};
+  std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local_time);
+  return buffer;
+}
+
+std::string ModuleForType(const std::string& type)
+{
+  if (type.rfind("Torch", 0) == 0) return "torch";
+  if (type.rfind("Mlpack", 0) == 0) return "mlpack";
+  if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
+  if (type == "Image" || type.rfind("Find", 0) == 0 || type == "fastmatch" ||
+      type == "FormfitGauge" || type == "CxOverlay") return "cximage";
+  return "cxscript";
+}
+
+std::string ModuleForStatement(const std::string& statement)
+{
+  if (statement.find("torch.") != std::string::npos || statement.find("Torch") != std::string::npos) return "torch";
+  if (statement.find("mlpack.") != std::string::npos || statement.find("Mlpack") != std::string::npos) return "mlpack";
+  if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
+  if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
+      statement.find("Find") != std::string::npos || statement.find("fastmatch") != std::string::npos) return "cximage";
+  return "cxscript";
+}
+
+bool IsObjectType(const std::string& type)
+{
+  return ModuleForType(type) != "cxscript";
+}
+
+void AnalyzeScript(ManualTestContext& context)
+{
+  if (context.analyzed_text == context.editor_text) return;
+  context.analyzed_text = context.editor_text;
+  context.line_views.clear();
+  context.variable_views.clear();
+  context.object_views.clear();
+  context.current_line = 0;
+
+  std::istringstream input(context.editor_text);
+  std::string raw;
+  int line_no = 1;
+  while (std::getline(input, raw))
+  {
+    ScriptLineView line;
+    line.line_no = line_no++;
+    line.statement = raw;
+    const std::string statement = TrimLine(raw);
+    line.module = ModuleForStatement(statement);
+
+    std::istringstream tokens(statement);
+    std::string declared_type;
+    std::string declared_name;
+    tokens >> declared_type >> declared_name;
+    const bool declaration = !declared_type.empty() && !declared_name.empty() &&
+      statement.find('(') == std::string::npos && declared_type != "if" &&
+      declared_type != "else" && declared_type != "return";
+    if (declaration)
+    {
+      const std::size_t suffix = declared_name.find_first_of("=;");
+      if (suffix != std::string::npos) declared_name.erase(suffix);
+      line.object_type = declared_type;
+      line.object = declared_name;
+      if (IsObjectType(declared_type))
+      {
+        line.module = ModuleForType(declared_type);
+        context.object_views.push_back({line.module, declared_type, declared_name,
+                                        line.module == "cximage" ? "declared" : "pending_binding",
+                                        line.line_no});
+      }
+      else
+      {
+        const std::size_t equal = statement.find('=');
+        const std::string value = equal == std::string::npos ? "uninitialized" :
+          TrimLine(statement.substr(equal + 1, statement.size() - equal - 2));
+        context.variable_views.push_back({declared_type, declared_name, value,
+                                          line.line_no, "observed_source"});
+      }
+    }
+
+    const std::size_t assign = statement.find('=');
+    const std::size_t open = statement.find('(');
+    const std::size_t close = statement.rfind(')');
+    const bool has_assignment = assign != std::string::npos &&
+      (open == std::string::npos || assign < open);
+    const std::size_t callable_start = has_assignment ? assign + 1 : 0;
+    if (has_assignment) line.return_variable = TrimLine(statement.substr(0, assign));
+    if (open != std::string::npos)
+    {
+      const std::string callable = TrimLine(statement.substr(callable_start, open - callable_start));
+      const std::size_t dot = callable.rfind('.');
+      if (dot != std::string::npos)
+      {
+        line.object = TrimLine(callable.substr(0, dot));
+        line.method = TrimLine(callable.substr(dot + 1));
+      }
+      else line.method = callable;
+      if (close != std::string::npos && close > open)
+        line.params = statement.substr(open + 1, close - open - 1);
+    }
+    context.line_views.push_back(line);
+  }
+  context.trace_status = "PENDING";
+  context.trace_reason = "source analyzed; runtime line callbacks unavailable";
+}
+
+void SetTraceStatus(ManualTestContext& context,
+                    const std::string& status,
+                    const std::string& reason)
+{
+  AnalyzeScript(context);
+  const std::string timestamp = CurrentTimestamp();
+  for (ScriptLineView& line : context.line_views)
+  {
+    if (TrimLine(line.statement).empty()) continue;
+    line.status = status;
+    line.reason = reason;
+    line.timestamp = timestamp;
+  }
+  context.trace_status = status;
+  context.trace_reason = reason;
+}
+
+bool WriteTextFile(const fs::path& path, const std::string& text)
+{
+  std::ofstream output(path, std::ios::binary);
+  if (!output) return false;
+  output << text;
+  return output.good();
+}
+
+bool SaveCasePackage(const ManualTestContext& context,
+                     const std::string& result_status,
+                     const std::string& result_reason,
+                     const std::string& result_ref,
+                     const std::string& evidence_ref,
+                     const std::vector<std::string>& log_lines,
+                     std::string& reason)
+{
+  std::error_code error;
+  const fs::path root = ResolveCaseDirectory(context.case_directory);
+  fs::create_directories(root, error);
+  if (error) { reason = "case directory create failed"; return false; }
+
+  std::ostringstream global_context;
+  global_context << "{\n"
+    << "  \"script_path\": \"" << JsonEscape(context.loaded_script_path) << "\",\n"
+    << "  \"image_file_path\": \"" << JsonEscape(context.image_file_path) << "\",\n"
+    << "  \"data_file_path\": \"" << JsonEscape(context.data_file_path) << "\",\n"
+    << "  \"model_file_path\": \"" << JsonEscape(context.model_file_path) << "\",\n"
+    << "  \"param_file_path\": \"" << JsonEscape(context.param_file_path) << "\",\n"
+    << "  \"current_status\": \"" << JsonEscape(result_status) << "\"\n}\n";
+
+  std::ostringstream trace;
+  trace << "[\n";
+  for (std::size_t i = 0; i < context.line_views.size(); ++i)
+  {
+    const ScriptLineView& line = context.line_views[i];
+    trace << "  {\"line_no\":" << line.line_no
+      << ",\"statement\":\"" << JsonEscape(line.statement)
+      << "\",\"module\":\"" << JsonEscape(line.module)
+      << "\",\"object\":\"" << JsonEscape(line.object)
+      << "\",\"method\":\"" << JsonEscape(line.method)
+      << "\",\"params\":\"" << JsonEscape(line.params)
+      << "\",\"return_variable\":\"" << JsonEscape(line.return_variable)
+      << "\",\"status\":\"" << JsonEscape(line.status)
+      << "\",\"reason\":\"" << JsonEscape(line.reason)
+      << "\",\"timestamp\":\"" << JsonEscape(line.timestamp) << "\"}"
+      << (i + 1 == context.line_views.size() ? "\n" : ",\n");
+  }
+  trace << "]\n";
+
+  std::ostringstream variables;
+  variables << "[\n";
+  for (std::size_t i = 0; i < context.variable_views.size(); ++i)
+  {
+    const ScriptVariableView& variable = context.variable_views[i];
+    variables << "  {\"type\":\"" << JsonEscape(variable.type)
+      << "\",\"name\":\"" << JsonEscape(variable.name)
+      << "\",\"value\":\"" << JsonEscape(variable.value)
+      << "\",\"declared_line\":" << variable.declared_line
+      << ",\"status\":\"" << JsonEscape(variable.status) << "\"}"
+      << (i + 1 == context.variable_views.size() ? "\n" : ",\n");
+  }
+  variables << "]\n";
+
+  std::ostringstream objects;
+  objects << "[\n";
+  for (std::size_t i = 0; i < context.object_views.size(); ++i)
+  {
+    const ScriptObjectView& object = context.object_views[i];
+    objects << "  {\"module\":\"" << JsonEscape(object.module)
+      << "\",\"type\":\"" << JsonEscape(object.type)
+      << "\",\"name\":\"" << JsonEscape(object.name)
+      << "\",\"status\":\"" << JsonEscape(object.status)
+      << "\",\"declared_line\":" << object.declared_line << "}"
+      << (i + 1 == context.object_views.size() ? "\n" : ",\n");
+  }
+  objects << "]\n";
+
+  std::ostringstream result;
+  result << "{\n  \"status\": \"" << JsonEscape(result_status)
+    << "\",\n  \"reason\": \"" << JsonEscape(result_reason)
+    << "\",\n  \"result_ref\": \"" << JsonEscape(result_ref) << "\"\n}\n";
+  std::ostringstream evidence;
+  evidence << "{\n  \"status\": \"" << (evidence_ref.empty() ? "PENDING" : "AVAILABLE")
+    << "\",\n  \"evidence_ref\": \"" << JsonEscape(evidence_ref)
+    << "\",\n  \"reason\": \""
+    << (evidence_ref.empty() ? "no real runtime result package" : "runtime evidence attached")
+    << "\"\n}\n";
+  std::ostringstream log;
+  for (const std::string& line : log_lines) log << line << '\n';
+
+  const bool saved =
+    WriteTextFile(root / "global_context.json", global_context.str()) &&
+    WriteTextFile(root / "script_snapshot.cxsc", context.editor_text) &&
+    WriteTextFile(root / "line_trace.json", trace.str()) &&
+    WriteTextFile(root / "variable_snapshot.json", variables.str()) &&
+    WriteTextFile(root / "object_state.json", objects.str()) &&
+    WriteTextFile(root / "result.json", result.str()) &&
+    WriteTextFile(root / "evidence.json", evidence.str()) &&
+    WriteTextFile(root / "log.txt", log.str());
+  reason = saved ? "complete eight-file case package saved" : "one or more case files failed to save";
+  return saved;
+}
 }
 
 void ViewController::initManualStateTestConsole()
@@ -81,7 +376,7 @@ void ViewController::LoadBoundStateToManualConsole(
   m_manualTest.editor_source = "bound_state";
   m_manualTest.loaded_script_path = scriptPath;
   m_manualTest.editor_dirty = false;
-  if (!ReadTextFile(scriptPath, m_manualTest.editor_text))
+  if (!ReadTextFile(ResolveWorkspaceFile(scriptPath).generic_string(), m_manualTest.editor_text))
   {
     m_scriptResult = ScriptResult();
     m_scriptResult.source = "bound_state";
@@ -204,7 +499,114 @@ void ViewController::drawManualStateTestConsole()
                      m_manualTest.loaded_script_path.c_str());
   ImGui::Columns(1);
 
+  AnalyzeScript(m_manualTest);
+  if (m_manualTest.current_line >= static_cast<int>(m_manualTest.line_views.size()))
+    m_manualTest.current_line = m_manualTest.line_views.empty() ? 0 :
+      static_cast<int>(m_manualTest.line_views.size()) - 1;
+
   ImGui::Separator();
+  ImGui::Text("CxScript Line View");
+  ImGui::Text("trace status: %s", m_manualTest.trace_status.c_str());
+  ImGui::TextWrapped("trace reason: %s", m_manualTest.trace_reason.c_str());
+  if (ImGui::Button("Previous Line") && m_manualTest.current_line > 0)
+    --m_manualTest.current_line;
+  ImGui::SameLine();
+  if (ImGui::Button("Next Line") &&
+      m_manualTest.current_line + 1 < static_cast<int>(m_manualTest.line_views.size()))
+    ++m_manualTest.current_line;
+  ImGui::SameLine();
+  ImGui::Text("highlight line: %d", m_manualTest.line_views.empty() ? 0 :
+              m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)].line_no);
+
+  ImGui::BeginChild("cxscript_line_view", ImVec2(0.0f, 220.0f), true);
+  for (std::size_t i = 0; i < m_manualTest.line_views.size(); ++i)
+  {
+    const ScriptLineView& line = m_manualTest.line_views[i];
+    const std::string label = std::to_string(line.line_no) + "  [" + line.status + "]  " + line.statement;
+    if (ImGui::Selectable(label.c_str(), m_manualTest.current_line == static_cast<int>(i)))
+      m_manualTest.current_line = static_cast<int>(i);
+  }
+  ImGui::EndChild();
+
+  if (!m_manualTest.line_views.empty())
+  {
+    const ScriptLineView& current =
+      m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)];
+    ImGui::Text("line_no: %d | status: %s", current.line_no, current.status.c_str());
+    ImGui::TextWrapped("statement: %s", current.statement.c_str());
+    ImGui::Text("module: %s | object: %s | method: %s",
+                current.module.c_str(), current.object.c_str(), current.method.c_str());
+    ImGui::TextWrapped("params: %s", current.params.empty() ? "(none)" : current.params.c_str());
+    ImGui::TextWrapped("return variable: %s",
+                       current.return_variable.empty() ? "(none)" : current.return_variable.c_str());
+    ImGui::TextWrapped("reason: %s | timestamp: %s", current.reason.c_str(),
+                       current.timestamp.empty() ? "(none)" : current.timestamp.c_str());
+  }
+
+  ImGui::Separator();
+  ImGui::Text("Variable Snapshot (%d)", static_cast<int>(m_manualTest.variable_views.size()));
+  for (const ScriptVariableView& variable : m_manualTest.variable_views)
+    ImGui::BulletText("%s %s = %s", variable.type.c_str(), variable.name.c_str(), variable.value.c_str());
+
+  ImGui::Separator();
+  ImGui::Text("Object State Panels");
+  const char* modules[] = {"cximage", "torch", "mlpack", "ensmallen"};
+  ImGui::Columns(4, "direct_capability_panels", false);
+  for (const char* module : modules)
+  {
+    ImGui::Text("%s", module);
+    bool found = false;
+    for (const ScriptObjectView& object : m_manualTest.object_views)
+    {
+      if (object.module != module) continue;
+      ImGui::BulletText("%s %s: %s", object.type.c_str(), object.name.c_str(), object.status.c_str());
+      found = true;
+    }
+    if (!found) ImGui::TextDisabled("no object in current script");
+    if (std::string(module) == "cximage")
+    {
+      ImGui::TextDisabled("image / ROI / fit / match / overlay");
+    }
+    else if (std::string(module) == "torch")
+    {
+      ImGui::TextWrapped("model_path: %s", m_manualTest.model_file_path.empty() ? "pending_input" : m_manualTest.model_file_path.c_str());
+      ImGui::TextDisabled("device / tensor shape / raw shape / mask / overlay: pending_runtime");
+    }
+    else if (std::string(module) == "mlpack")
+    {
+      ImGui::TextDisabled("feature shape / dataset shape / prediction / score: pending_runtime");
+    }
+    else
+    {
+      ImGui::TextDisabled("objective / param_space / candidate / metric / best / history: pending_runtime");
+    }
+    ImGui::NextColumn();
+  }
+  ImGui::Columns(1);
+
+  InputTextString("Case directory", m_manualTest.case_directory);
+  if (ImGui::Button("Save Complete Case Package"))
+  {
+    std::string save_reason;
+    const bool saved = SaveCasePackage(m_manualTest,
+                                       m_scriptResult.status.empty() ? "PENDING" : m_scriptResult.status,
+                                       m_scriptResult.reason,
+                                       m_scriptResult.result_ref,
+                                       m_scriptResult.evidence_ref,
+                                       m_scriptResult.log_lines,
+                                       save_reason);
+    m_scriptResult.status = saved ? "PENDING" : "FAIL";
+    m_scriptResult.reason = save_reason;
+  }
+  ImGui::Separator();
+  const OverlayElement* selectedOverlay = m_annotationLayer.Selected();
+  ImGui::Text("selected_element_ref: %s",
+              selectedOverlay == nullptr ? "(none)" : selectedOverlay->ref.c_str());
+  ImGui::Text("selected_roi_ref: %s", m_annotationLayer.SelectedRef(OverlayKind::Rect).c_str());
+  ImGui::Text("selected_point_ref: %s", m_annotationLayer.SelectedRef(OverlayKind::Point).c_str());
+  ImGui::Text("selected_scan_line_ref: %s", m_annotationLayer.SelectedRef(OverlayKind::Line).c_str());
+  ImGui::Text("selected_circle_ref: %s", m_annotationLayer.SelectedRef(OverlayKind::Circle).c_str());
+  ImGui::Text("selected_polyline_ref: %s", m_annotationLayer.SelectedRef(OverlayKind::Polyline).c_str());
   ImGui::Text("Overlay Options");
   ImGui::Checkbox("Show Image", &m_manualTest.show_image); ImGui::SameLine();
   ImGui::Checkbox("Pick Points", &m_manualTest.pick_points); ImGui::SameLine();
@@ -234,6 +636,9 @@ void ViewController::drawManualStateTestConsole()
     m_scriptResult.reason = m_manualTest.editor_text.empty() ?
       "editor text is empty" : "parse validation pending real parser result";
     m_scriptResult.runtime_fillback_status = "not_started";
+    SetTraceStatus(m_manualTest,
+                   m_manualTest.editor_text.empty() ? "BLOCKED" : "PENDING",
+                   m_scriptResult.reason);
   }
   ImGui::SameLine();
   if (ImGui::Button("Run Text"))
@@ -256,6 +661,9 @@ void ViewController::drawManualStateTestConsole()
         "text executed; runtime result package unavailable" : "parser compile failed";
       if (!getoutputstring().empty())
         m_scriptResult.log_lines.push_back(getoutputstring());
+      SetTraceStatus(m_manualTest, compiled ? "PENDING" : "FAIL",
+                     compiled ? "statement callback unavailable; runtime result package pending" :
+                                "parser compile failed; exact statement unavailable");
     }
     const auto end = std::chrono::steady_clock::now();
     m_scriptResult.elapsed_ms =

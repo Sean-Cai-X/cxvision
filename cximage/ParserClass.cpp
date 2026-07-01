@@ -11,6 +11,7 @@
 #include "Findellipse.h"
 #include "findobject.h"
 #include "FastMatch.h"
+#include "CxScriptDirectBindings.h"
 
 //#include "gridobject.h"
 //#include "imageroi.h"
@@ -272,6 +273,7 @@ namespace mu
             m_parser.DefineClass("Image", pimage);
             m_parser.DefineClassFun("Image", pimage, "blur", &Image::blur);
             m_parser.DefineClassFun("Image", pimage, "load", &Image::load);
+            m_parser.DefineClassFun("Image", pimage, "save", &Image::savefile);
             m_parser.DefineClassFun("Image", pimage, "getshow", &Image::getshow);
             m_parser.DefineClassFun("Image", pimage, "Show", &Image::setshow);
             m_parser.DefineClassFun("Image", pimage, "setroi", &Image::setroi);
@@ -284,6 +286,7 @@ namespace mu
             m_parser.DefineClassFun("Image", pimage, "OrROI", &Image::bitwiseOrROI);
             m_parser.DefineClassFun("Image", pimage, "AndROI", &Image::bitwiseAndROI);
             m_parser.DefineClassFun("Image", pimage, "CopyFrom", &Image::CopyFrom);
+            m_parser.DefineClassFun("Image", pimage, "copyFromMat", &Image::CopyFrom);
             m_parser.DefineClassFun("Image", pimage, "erodeROI", &Image::erodeROI);
             m_parser.DefineClassFun("Image", pimage, "erodeVerticalROI", &Image::erodeVerticalROI);
             m_parser.DefineClassFun("Image", pimage, "erodeHorizontalROI", &Image::erodeHorizontalROI);
@@ -391,7 +394,8 @@ namespace mu
             m_parser.DefineClass("Findcircle", pfindcircle);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle2", &Findcircle::setcircle2);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle", &Findcircle::setcircle);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setgap", &Findcircle::Setgap); 
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "setgap", &Findcircle::Setgap);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "Setgap", &Findcircle::Setgap); 
             m_parser.DefineClassFun("Findcircle", pfindcircle, "Show", &Findcircle::setshow);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "measure", &Findcircle::measure);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setlinegap", &Findcircle::setlinegap);
@@ -407,6 +411,7 @@ namespace mu
             m_parser.DefineClassFun("Findcircle", pfindcircle, "getavgdist", &Findcircle::getavgdist);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setfitmeasuregap", &Findcircle::setfitmeasuregap);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "fitmeasure", &Findcircle::FitResultMeasure);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "FitResultMeasure", &Findcircle::FitResultMeasure);
             
             
 
@@ -423,6 +428,8 @@ namespace mu
             Findline* pfindline = nullptr;
             m_parser.DefineClass("Findline", pfindline);
             m_parser.DefineClassFun("Findline", pfindline, "setrect", &Findline::setrect);
+            m_parser.DefineClassFun("Findline", pfindline, "setline", &Findline::setline);
+            m_parser.DefineClassFun("Findline", pfindline, "fitline", &Findline::FitLine);
             m_parser.DefineClassFun("Findline", pfindline, "translate", &Findline::translate);
             m_parser.DefineClassFun("Findline", pfindline, "Show", &Findline::setshow);
             m_parser.DefineClassFun("Findline", pfindline, "clear", &Findline::clear);
@@ -493,6 +500,7 @@ namespace mu
  
             fastmatch* pfastmatch = nullptr;
             m_parser.DefineClass("Match", pfastmatch);
+            m_parser.DefineClass("fastmatch", pfastmatch);
             m_parser.DefineClassFun("Match", pfastmatch, "setrect", &fastmatch::setrect);
             m_parser.DefineClassFun("Match", pfastmatch, "Show", &fastmatch::setshow);
             m_parser.DefineClassFun("Match", pfastmatch, "learn", &fastmatch::learn);
@@ -577,6 +585,15 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "setshownum", &fastmatch::setshownum);
             m_parser.DefineClassFun("Match", pfastmatch, "getresultcentpoints", &fastmatch::getresultcentpoints);
             m_parser.DefineClassFun("Match", pfastmatch, "getshape", &fastmatch::getshape);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrect", &fastmatch::setrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setthre", &fastmatch::setthre);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setlinegap", &fastmatch::setlinegap);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "learn", &fastmatch::learn);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "match", &fastmatch::match);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
+
+            RegisterPendingDirectCxScriptBindings(m_parser);
             
             SmartDouble* avect = nullptr;
             m_parser.DefineClass("vector", avect);

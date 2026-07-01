@@ -1,0 +1,71 @@
+script: cximage.tool_annotation_basic
+method_status: explore
+
+register_class("OverlayElement");
+register_class("AnnotationTool");
+register_enum("OverlayKind");
+
+register_function("register_annotation_tool");
+register_function("create_overlay_point");
+register_function("create_overlay_line");
+register_function("create_overlay_rect");
+register_function("create_overlay_circle");
+register_function("create_overlay_polyline");
+register_function("get_overlay_element");
+register_function("select_overlay_element");
+register_function("save_overlay_elements");
+register_function("load_overlay_elements");
+
+AnnotationTool point_pick;
+point_pick.name = "point_pick";
+point_pick.kind = OverlayKind::Point;
+point_pick.role = "picked_point";
+point_pick.source = "manual";
+point_pick.action = "click_to_create";
+point_pick.module_hint = "cximage,torch,mlpack,ensmallen";
+register_annotation_tool(point_pick);
+
+AnnotationTool roi_rect;
+roi_rect.name = "roi_rect";
+roi_rect.kind = OverlayKind::Rect;
+roi_rect.role = "roi";
+roi_rect.source = "manual";
+roi_rect.action = "drag_to_create";
+roi_rect.module_hint = "cximage,torch,mlpack";
+register_annotation_tool(roi_rect);
+
+AnnotationTool scan_line;
+scan_line.name = "scan_line";
+scan_line.kind = OverlayKind::Line;
+scan_line.role = "scan_line";
+scan_line.source = "manual";
+scan_line.action = "drag_line";
+scan_line.module_hint = "cximage,ensmallen";
+register_annotation_tool(scan_line);
+
+AnnotationTool circle_roi;
+circle_roi.name = "circle_roi";
+circle_roi.kind = OverlayKind::Circle;
+circle_roi.role = "circle_roi";
+circle_roi.source = "manual";
+circle_roi.action = "center_radius";
+circle_roi.module_hint = "cximage,torch,ensmallen";
+register_annotation_tool(circle_roi);
+
+AnnotationTool boundary_polyline;
+boundary_polyline.name = "boundary_polyline";
+boundary_polyline.kind = OverlayKind::Polyline;
+boundary_polyline.role = "boundary";
+boundary_polyline.source = "manual";
+boundary_polyline.action = "multi_click";
+boundary_polyline.module_hint = "cximage,torch,mlpack";
+register_annotation_tool(boundary_polyline);
+
+AnnotationTool attach_line;
+attach_line.name = "attach_line";
+attach_line.kind = OverlayKind::Line;
+attach_line.role = "attach_line";
+attach_line.source = "manual";
+attach_line.action = "connect_refs";
+attach_line.module_hint = "cxscript";
+register_annotation_tool(attach_line);

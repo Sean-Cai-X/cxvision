@@ -1,0 +1,21 @@
+Image m_occtimage;
+fastmatch m_match;
+
+m_occtimage.copyFromMat(global.matInput);
+
+int roi_x = 550;
+int roi_y = 500;
+int roi_w = 1100;
+int roi_h = 1100;
+int threshold = 35;
+
+m_match.setrect(roi_x, roi_y, roi_w, roi_h);
+m_match.setthre(threshold);
+m_match.setlinegap(3);
+m_match.learn(&m_occtimage);
+
+m_match.setmatchrect(50, 50, 2200, 1900);
+m_match.match(&m_occtimage);
+
+global.match_ref = m_match.get_result();
+global.current_status = "PENDING";

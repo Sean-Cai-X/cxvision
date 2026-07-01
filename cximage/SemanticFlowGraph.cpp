@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
 namespace
 {
+namespace fs = std::filesystem;
+
 std::string Trim(const std::string& text)
 {
   std::size_t first = 0;
@@ -38,7 +41,6 @@ ImU32 StatusColor(const std::string& status)
 
 ImU32 EdgeColor(const std::string& type)
 {
-  if (type == "artifact") return IM_COL32(80, 165, 235, 255);
   if (type == "feedback" || type == "issue") return IM_COL32(235, 125, 70, 255);
   return IM_COL32(160, 165, 170, 255);
 }
@@ -52,9 +54,45 @@ void SemanticFlowGraph::Initialize(const std::string& repository_root)
 
 void SemanticFlowGraph::LoadDemoFlow()
 {
-  const std::string separator = (!m_repositoryRoot.empty() && m_repositoryRoot.back() != '/' &&
-                                 m_repositoryRoot.back() != '\\') ? "/" : "";
-  LoadFlowFile(m_repositoryRoot + separator + m_demoRelativePath);
+  m_currentWorkingDir = fs::current_path().generic_string();
+  m_currentFlowPath = m_demoRelativePath;
+  const fs::path repositoryRoot(m_repositoryRoot);
+  fs::path resolved = fs::absolute(repositoryRoot / fs::path(m_demoRelativePath)).lexically_normal();
+  if (!fs::exists(resolved))
+  {
+    fs::path current = fs::current_path();
+    while (!current.empty())
+    {
+      const fs::path directCandidate = current / fs::path(m_demoRelativePath);
+      const fs::path workspaceCandidate = current / "cxvisionai" / "cxvision_repo" /
+                                          fs::path(m_demoRelativePath);
+      if (fs::exists(directCandidate))
+      {
+        resolved = fs::absolute(directCandidate).lexically_normal();
+        break;
+      }
+      if (fs::exists(workspaceCandidate))
+      {
+        resolved = fs::absolute(workspaceCandidate).lexically_normal();
+        break;
+      }
+      const fs::path parent = current.parent_path();
+      if (parent == current) break;
+      current = parent;
+    }
+  }
+  m_resolvedDemoPath = resolved.generic_string();
+  m_demoFileExists = fs::exists(resolved) && fs::is_regular_file(resolved);
+  if (!m_demoFileExists)
+  {
+    m_flow = SemanticFlow();
+    m_flow.selected_node_index = -1;
+    m_loadStatus = "BLOCKED";
+    m_loadReason = "demo flow file not found";
+    m_lastLog = m_loadReason;
+    return;
+  }
+  LoadFlowFile(m_resolvedDemoPath);
 }
 
 bool SemanticFlowGraph::LoadFlowFile(const std::string& path)
@@ -62,7 +100,11 @@ bool SemanticFlowGraph::LoadFlowFile(const std::string& path)
   std::ifstream input(path);
   if (!input)
   {
-    m_lastLog = "Flow load failed: " + path;
+    m_flow = SemanticFlow();
+    m_flow.selected_node_index = -1;
+    m_loadStatus = "BLOCKED";
+    m_loadReason = "flow file open failed";
+    m_lastLog = m_loadReason + ": " + path;
     return false;
   }
 
@@ -108,6 +150,7 @@ bool SemanticFlowGraph::LoadFlowFile(const std::string& path)
       else if (key == "module") node->module = value;
       else if (key == "title") node->title = value;
       else if (key == "script") node->script_path = value;
+      else if (key == "status_from") node->status_from = value;
       else if (key == "status") node->status = value;
     }
     else if (edge != nullptr)
@@ -119,21 +162,27 @@ bool SemanticFlowGraph::LoadFlowFile(const std::string& path)
 
   if (parsed.nodes.empty())
   {
-    m_lastLog = "Flow contains no nodes: " + path;
+    m_flow = SemanticFlow();
+    m_flow.selected_node_index = -1;
+    m_loadStatus = "BLOCKED";
+    m_loadReason = "flow parse produced no nodes";
+    m_lastLog = m_loadReason + ": " + path;
     return false;
   }
   parsed.selected_node_index = 0;
   m_flow = parsed;
-  m_currentFlowPath = path;
-  m_lastLog = "Flow loaded: " + parsed.id;
+  m_loadStatus = "READY";
+  m_loadReason = "demo flow loaded";
+  m_lastLog = m_loadReason + ": " + parsed.id;
   return true;
 }
 
 void SemanticFlowGraph::ClearFlow()
 {
   m_flow = SemanticFlow();
-  m_currentFlowPath.clear();
-  m_lastLog = "Flow cleared";
+  m_loadStatus = "PENDING";
+  m_loadReason = "flow cleared";
+  m_lastLog = m_loadReason;
 }
 
 SemanticNode* SemanticFlowGraph::SelectedNode()
@@ -235,6 +284,7 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
   ImGui::TextWrapped("title: %s", node->title.c_str());
   ImGui::TextWrapped("script_path: %s", node->script_path.c_str());
   ImGui::Text("status: %s", node->status.c_str());
+  ImGui::TextWrapped("status_from: %s", node->status_from.empty() ? "(none)" : node->status_from.c_str());
   ImGui::TextWrapped("reason: %s", node->reason.empty() ? "(none)" : node->reason.c_str());
   ImGui::TextWrapped("result_ref: %s", node->result_ref.empty() ? "(none)" : node->result_ref.c_str());
   ImGui::TextWrapped("evidence_ref: %s", node->evidence_ref.empty() ? "(none)" : node->evidence_ref.c_str());
@@ -298,13 +348,27 @@ SemanticFlowAction SemanticFlowGraph::Draw()
     return action;
   }
   ImGui::TextWrapped("Flow File: %s", m_currentFlowPath.empty() ? "(none)" : m_currentFlowPath.c_str());
+  ImGui::TextWrapped("Current working dir: %s", m_currentWorkingDir.empty() ? "(unknown)" : m_currentWorkingDir.c_str());
+  ImGui::TextWrapped("Default demo path: %s", m_demoRelativePath.c_str());
+  ImGui::TextWrapped("Resolved demo path: %s", m_resolvedDemoPath.empty() ? "(none)" : m_resolvedDemoPath.c_str());
+  ImGui::Text("File exists: %s", m_demoFileExists ? "true" : "false");
+  ImGui::Text("Load status: %s", m_loadStatus.c_str());
+  ImGui::TextWrapped("Reason: %s", m_loadReason.c_str());
+  ImGui::Text("Node count: %d", static_cast<int>(m_flow.nodes.size()));
+  ImGui::Text("Edge count: %d", static_cast<int>(m_flow.edges.size()));
   if (ImGui::Button("Load Demo Flow")) LoadDemoFlow();
   ImGui::SameLine();
-  if (ImGui::Button("Reload Flow") && !m_currentFlowPath.empty()) LoadFlowFile(m_currentFlowPath);
+  if (ImGui::Button("Reload Flow") && !m_resolvedDemoPath.empty()) LoadDemoFlow();
   ImGui::SameLine();
   if (ImGui::Button("Clear Flow")) ClearFlow();
   ImGui::Text("flow: %s", m_flow.id.empty() ? "(none)" : m_flow.id.c_str());
   ImGui::TextWrapped("description: %s", m_flow.description.empty() ? "(none)" : m_flow.description.c_str());
+  if (!m_flow.edges.empty())
+  {
+    ImGui::Text("Connections:");
+    for (const SemanticEdge& edge : m_flow.edges)
+      ImGui::BulletText("%s -> %s", edge.from.c_str(), edge.to.c_str());
+  }
   ImGui::Separator();
   DrawGraphCanvas();
   ImGui::Separator();
@@ -322,8 +386,9 @@ void SemanticFlowGraph::ApplyScriptResult(int node_index,
 {
   if (node_index < 0 || node_index >= static_cast<int>(m_flow.nodes.size())) return;
   SemanticNode& node = m_flow.nodes[static_cast<std::size_t>(node_index)];
-  node.status = status == "PASS" && result_ref.empty() ? "PENDING" : status;
-  node.reason = status == "PASS" && result_ref.empty() ? "runtime result package missing" : reason;
+  const bool missingRuntimePackage = status == "PASS" && result_ref.empty();
+  node.status = missingRuntimePackage ? "PENDING" : status;
+  node.reason = missingRuntimePackage ? "runtime result package missing" : reason;
   node.result_ref = result_ref;
   node.evidence_ref = evidence_ref;
   node.issue_entry_ref = issue_entry_ref;

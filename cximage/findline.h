@@ -70,6 +70,10 @@ public:
     void setshow(int ishow);
     void getshape(void* pshape);
     void setlinesegment(double ix0, double iy0, double ix1, double iy1, double iscale);
+    void setline(int ix0, int iy0, int ix1, int iy1, int iscale)
+    {
+        setlinesegment(ix0, iy0, ix1, iy1, iscale);
+    }
     virtual void setrect(int ix, int iy, int iw, int ih);
     virtual void drawshape();
     void drawshapex( double dmovx, double dmovy,

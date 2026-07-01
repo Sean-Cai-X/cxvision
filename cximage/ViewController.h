@@ -13,6 +13,7 @@
 #include <Standard_Handle.hxx>
 #include <string>
 #include <vector>
+#include <imgui.h>
 
 #include "View.h"
 #include "Image.h"
@@ -25,6 +26,7 @@
 #include "ParserClass.h"
 #include "muParser.h"
 #include "ManualStateTestConsole.h"
+#include "ImageAnnotationLayer.h"
 #include "SemanticFlowGraph.h"
 
 //! OCCT view controller hosting interaction, image tools, and shape display.
@@ -61,6 +63,12 @@ private:
   void drawScriptAcceptancePanels();
   void drawManualStateTestConsole();
   void initManualStateTestConsole();
+  void initImageEvidenceLayer();
+  void drawImageEvidencePanels();
+  void drawImageEvidenceOnCanvas(bool canvasHovered, bool canvasActive,
+                                 ImDrawList* drawList);
+  ImVec2 ImageToScreen(float ix, float iy) const;
+  ImVec2 ScreenToImage(float sx, float sy) const;
   ScriptResult RunCxScript(const std::string& theScriptPath);
   void FitAll();
   double GetScale();
@@ -307,6 +315,7 @@ private:
     bool m_detachablePanels = false;
     bool m_showManualStateTestConsole = true;
     ManualTestContext m_manualTest;
+    ImageAnnotationLayer m_annotationLayer;
     std::vector<ScriptSnippet> m_manualSnippets;
     SemanticFlowGraph m_semanticFlowGraph;
     bool m_renderImageInOcctBackground = false;
@@ -318,6 +327,16 @@ private:
     float m_imageViewZoom = 1.0f;
     float m_imageViewPanX = 0.0f;
     float m_imageViewPanY = 0.0f;
+    float m_annotationImagePosX = 0.0f;
+    float m_annotationImagePosY = 0.0f;
+    float m_annotationImageWidth = 1.0f;
+    float m_annotationImageHeight = 1.0f;
+    bool m_annotationDragging = false;
+    OverlayImagePoint m_annotationDragStart;
+    int m_activePolylineElement = -1;
+    std::string m_annotationManifestPath;
+    std::string m_annotationSessionPath;
+    std::string m_annotationStatus;
 };
 
 #endif // _ViewController_Header

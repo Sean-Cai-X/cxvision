@@ -1,0 +1,33 @@
+Image m_occtimage;
+Findcircle afindcircle0;
+Findcircle afindcircle1;
+
+m_occtimage.copyFromMat(global.matInput);
+log_alg << "copy ok" << endl;
+
+if (m_isetcircle == 0)
+{
+  afindcircle0.setcircle(850, 690, 0, 690);
+  afindcircle0.setmethod(1);
+  afindcircle0.Setgap(5);
+  afindcircle0.setmethod(0);
+  afindcircle0.setthre(20);
+  afindcircle0.setlinegap(3);
+
+  afindcircle1.setcircle(850, 690, 0, 690);
+  afindcircle1.setmethod(1);
+  afindcircle1.Setgap(5);
+  afindcircle1.setmethod(1);
+  afindcircle1.setthre(20);
+  afindcircle1.setlinegap(3);
+
+  m_isetcircle = 1;
+}
+
+afindcircle0.measure(&m_occtimage);
+afindcircle0.fitcircle();
+afindcircle0.setfitmeasuregap(80);
+afindcircle0.FitResultMeasure(&m_occtimage);
+
+global.circle_ref = afindcircle0.get_result();
+global.current_status = "PENDING";

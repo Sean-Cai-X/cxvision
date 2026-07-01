@@ -31,6 +31,8 @@ add_subdirectory("${GLFW_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/glfw")
 set(CXIMAGE_SOURCES
   cximage/GuiMain.cpp
   cximage/ManualStateTestConsole.cpp
+  cximage/ImageAnnotationLayer.cpp
+  cximage/ImageAnnotationUI.cpp
   cximage/Main.cpp
   cximage/ViewController.cpp
   cximage/SemanticFlowGraph.cpp

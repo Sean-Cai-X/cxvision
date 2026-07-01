@@ -28,6 +28,11 @@ private:
 
   std::string m_repositoryRoot;
   std::string m_demoRelativePath = "cxscript/state_machine/examples/mlpack_handoff_demo.cxflow";
+  std::string m_currentWorkingDir;
+  std::string m_resolvedDemoPath;
+  std::string m_loadStatus = "PENDING";
+  std::string m_loadReason = "not loaded";
+  bool m_demoFileExists = false;
   std::string m_currentFlowPath;
   std::string m_lastLog;
   std::string m_sharedBoundNodeId;
