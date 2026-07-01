@@ -683,6 +683,8 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::SetNextWindowPos(ImVec2(middleX, margin), layoutCondition);
   ImGui::SetNextWindowSize(ImVec2(middleWidth, contentHeight), layoutCondition);
   ImGui::Begin("Image View", nullptr, panelFlags);
+  ImGui::Checkbox("Source Preview Overlay (not executed)",
+                  &m_showSourcePreviewOverlay);
   ImGui::TextDisabled("Legacy Demo Overlay");
   ImGui::Checkbox("Test points", &m_manualTest.test_points);
   ImGui::SameLine();

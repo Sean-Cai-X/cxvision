@@ -35,7 +35,24 @@ struct ScriptObjectView
   std::string name;
   std::string status;
   std::string runtime_state;
+  int runtime_source_line = 0;
   int declared_line = 0;
+};
+
+struct RuntimeObjectView
+{
+  std::string name;
+  std::string type;
+  bool exists_in_parser = false;
+  std::string last_runtime_status = "PENDING";
+  std::string last_method;
+  std::string display_summary;
+  bool stale = true;
+  bool has_circle = false;
+  float circle_cx = 0.0f;
+  float circle_cy = 0.0f;
+  float circle_inner = 0.0f;
+  float circle_radius = 0.0f;
 };
 
 struct ManualTestContext
@@ -62,6 +79,10 @@ struct ManualTestContext
   std::vector<ScriptLineView> line_views;
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
+  std::vector<RuntimeObjectView> runtime_objects;
+  std::string runtime_current_status = "PENDING";
+  std::string runtime_current_node;
+  std::string runtime_current_connect;
   bool editor_dirty = false;
   bool stop_requested = false;
   bool show_image = true;

@@ -164,8 +164,9 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 
   auto finalizeElement = [this](OverlayElement& element)
   {
+    element.source = "manual_element";
     m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "manual annotation created; runtime not executed";
+    m_scriptResult.reason = "manual_element created; parser runtime unchanged";
     m_scriptResult.overlay_ref = "overlay:" + element.ref;
     m_scriptResult.evidence_ref = element.evidence_ref;
     m_scriptResult.result_ref = element.result_ref;
@@ -318,9 +319,29 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
         drawList->AddLine(first, second, color, thickness);
       }
     }
+    const ImVec2 sourceLabel = ImageToScreen(element.image_points[0].x,
+                                             element.image_points[0].y);
+    drawList->AddText(ImVec2(sourceLabel.x + 6.0f, sourceLabel.y + 6.0f),
+                      color, element.source.empty() ? "manual_element" :
+                                                    element.source.c_str());
   }
 
-  if (!m_manualTest.line_views.empty() && m_manualTest.current_line >= 0 &&
+  for (const RuntimeObjectView& runtime : m_manualTest.runtime_objects)
+  {
+    if (!runtime.exists_in_parser || runtime.stale || !runtime.has_circle ||
+        runtime.type != "Findcircle") continue;
+    const ImVec2 center = ImageToScreen(runtime.circle_cx, runtime.circle_cy);
+    const float scaleX = m_annotationImageWidth / m_imageViewImage.cols;
+    const float scaleY = m_annotationImageHeight / m_imageViewImage.rows;
+    const float radius = std::fabs(runtime.circle_radius) *
+                         (scaleX + scaleY) * 0.5f;
+    drawList->AddCircle(center, radius, IM_COL32(40, 255, 120, 255), 64, 3.0f);
+    drawList->AddText(ImVec2(center.x + 8.0f, center.y + 8.0f),
+                      IM_COL32(40, 255, 120, 255), "runtime_object");
+  }
+
+  if (m_showSourcePreviewOverlay &&
+      !m_manualTest.line_views.empty() && m_manualTest.current_line >= 0 &&
       m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
   {
     const ScriptLineView& line = m_manualTest.line_views[
@@ -328,27 +349,26 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     std::vector<float> values;
     if (ParseNumericParameters(line.params, values))
     {
-      const ImU32 scriptColor = IM_COL32(255, 170, 40, 235);
+      const ImU32 scriptColor = IM_COL32(255, 170, 40, 130);
       if (line.method == "setcircle" && values.size() >= 4)
       {
         const ImVec2 center = ImageToScreen(values[0], values[1]);
         const float scaleX = m_annotationImageWidth / m_imageViewImage.cols;
         const float scaleY = m_annotationImageHeight / m_imageViewImage.rows;
-        drawList->AddCircle(center, values[3] * (scaleX + scaleY) * 0.5f,
-                            scriptColor, 48, 3.0f);
-      }
-      else if ((line.method == "setrect" || line.method == "setmatchrect") &&
-               values.size() >= 4)
-      {
-        drawList->AddRect(ImageToScreen(values[0], values[1]),
-          ImageToScreen(values[0] + values[2], values[1] + values[3]),
-          scriptColor, 0.0f, 0, 3.0f);
-      }
-      else if (line.method == "setline" && values.size() >= 4)
-      {
-        drawList->AddLine(ImageToScreen(values[0], values[1]),
-                          ImageToScreen(values[2], values[3]),
-                          scriptColor, 3.0f);
+        const float radius = std::fabs(values[3]) * (scaleX + scaleY) * 0.5f;
+        const int segments = 48;
+        for (int segment = 0; segment < segments; segment += 2)
+        {
+          const float a0 = 6.2831853f * segment / segments;
+          const float a1 = 6.2831853f * (segment + 1) / segments;
+          drawList->AddLine(ImVec2(center.x + std::cos(a0) * radius,
+                                   center.y + std::sin(a0) * radius),
+                            ImVec2(center.x + std::cos(a1) * radius,
+                                   center.y + std::sin(a1) * radius),
+                            scriptColor, 2.0f);
+        }
+        drawList->AddText(ImVec2(center.x + 8.0f, center.y + 8.0f),
+                          scriptColor, "source_preview / not_executed");
       }
     }
   }
@@ -504,7 +524,13 @@ void ViewController::drawImageEvidencePanels()
     ImGui::Checkbox("visible##inspector", &selected->visible);
     ImGui::SameLine();
     ImGui::Checkbox("editable", &selected->editable);
-    ImGui::Text("radius: %.3f", selected->radius);
+    if (selected->kind == OverlayKind::Circle && !selected->image_points.empty())
+    {
+      ImGui::Text("cx: %.3f", selected->image_points[0].x);
+      ImGui::Text("cy: %.3f", selected->image_points[0].y);
+      ImGui::Text("r: %.3f", selected->radius);
+    }
+    else ImGui::Text("radius: %.3f", selected->radius);
     for (std::size_t i = 0; i < selected->image_points.size(); ++i)
       ImGui::BulletText("point[%d] image=(%.2f, %.2f)", static_cast<int>(i),
                         selected->image_points[i].x,
@@ -527,6 +553,39 @@ void ViewController::drawImageEvidencePanels()
       m_manualTest.editor_dirty = true;
       m_manualTest.analyzed_text.clear();
       m_annotationStatus = "current script line replaced";
+    }
+    if (selected->kind == OverlayKind::Circle)
+    {
+      if (ImGui::Button("Apply To Script"))
+      {
+        const bool replace = !m_manualTest.line_views.empty() &&
+          m_manualTest.current_line >= 0 &&
+          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+          m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)].method ==
+            "setcircle";
+        if (replace)
+          ReplaceEditorLine(m_manualTest.editor_text, m_manualTest.current_line,
+                            selected->generated_statement);
+        else InsertStatement(m_manualTest.editor_text, selected->generated_statement);
+        m_manualTest.editor_dirty = true;
+        m_manualTest.analyzed_text.clear();
+        m_annotationStatus = "manual_element applied to script only";
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Apply To Parser"))
+      {
+        if (!QueryParserObjectExists("Findcircle", "afindcircle0"))
+          m_imageparser.Compile("Findcircle afindcircle0;");
+        const bool applied = m_imageparser.Compile(
+          selected->generated_statement.c_str());
+        RefreshRuntimeObjectTable("setcircle",
+          applied ? "runtime_executed" : "BLOCKED");
+        m_scriptResult.status = applied ? "PENDING" : "BLOCKED";
+        m_scriptResult.reason = applied ?
+          "manual_element applied to parser; runtime objects refreshed" :
+          "parser rejected manual circle statement";
+        m_annotationStatus = m_scriptResult.reason;
+      }
     }
   }
 

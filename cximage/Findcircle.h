@@ -81,6 +81,10 @@ public:
     double getresultcenty();
     double getradius();
     double getavgdist();
+    int getcirclecentx() const { return m_icentx; }
+    int getcirclecenty() const { return m_icenty; }
+    int getcirclepax() const { return m_ipax; }
+    int getcirclepay() const { return m_ipay; }
     int getdebugprefilterused() const { return m_last_prefilter_used; }
     int getdebugcompactpathused() const { return m_last_compact_path_used; }
     GeomAdaptor_Curve GetCurve(gp_Pnt center_p, Standard_Real radius);

@@ -70,6 +70,13 @@ private:
   ImVec2 ImageToScreen(float ix, float iy) const;
   ImVec2 ScreenToImage(float sx, float sy) const;
   ScriptResult RunCxScript(const std::string& theScriptPath);
+  void RefreshRuntimeObjectTable(const std::string& lastMethod,
+                                 const std::string& runtimeStatus);
+  bool QueryParserObjectExists(const std::string& type,
+                               const std::string& name);
+  Image* QueryParserImage(const std::string& name);
+  bool QueryParserDouble(const std::string& name, double& value);
+  bool SetParserDouble(const std::string& name, double value);
   void FitAll();
   double GetScale();
   void ViewerUpDate();
@@ -338,6 +345,7 @@ private:
     OverlayImagePoint m_annotationDragStart;
     int m_activePolylineElement = -1;
     bool m_attachToScriptMode = false;
+    bool m_showSourcePreviewOverlay = false;
     ImageToolMode m_imageToolMode = ImageToolMode::PointerPan;
     std::string m_annotationManifestPath;
     std::string m_annotationSessionPath;
