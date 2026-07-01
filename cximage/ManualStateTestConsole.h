@@ -34,6 +34,7 @@ struct ScriptObjectView
   std::string type;
   std::string name;
   std::string status;
+  std::string runtime_state;
   int declared_line = 0;
 };
 
@@ -53,6 +54,7 @@ struct ManualTestContext
   std::string case_directory = "docs/notes/cxscript_case";
   std::string trace_status = "PENDING";
   std::string trace_reason = "not executed";
+  std::string run_state = "idle";
   std::string user_expected;
   std::string codex_task;
   std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
@@ -61,6 +63,7 @@ struct ManualTestContext
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   bool editor_dirty = false;
+  bool stop_requested = false;
   bool show_image = true;
   bool pick_points = false;
   bool test_points = false;

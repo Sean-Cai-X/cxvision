@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -196,8 +197,8 @@ void AnalyzeScript(ManualTestContext& context)
       {
         line.module = ModuleForType(declared_type);
         context.object_views.push_back({line.module, declared_type, declared_name,
-                                        line.module == "cximage" ? "declared" : "pending_binding",
-                                        line.line_no});
+                                        line.module == "cximage" ? "registered" : "pending_binding",
+                                        std::string(), line.line_no});
       }
       else
       {
@@ -252,6 +253,55 @@ void SetTraceStatus(ManualTestContext& context,
   context.trace_reason = reason;
 }
 
+bool StepCurrentLine(ManualTestContext& context)
+{
+  AnalyzeScript(context);
+  if (context.current_line < 0 ||
+      context.current_line >= static_cast<int>(context.line_views.size()))
+  {
+    context.run_state = "finished";
+    return false;
+  }
+  ScriptLineView& line = context.line_views[
+    static_cast<std::size_t>(context.current_line)];
+  const std::string statement = TrimLine(line.statement);
+  const std::string pendingMethods[] = {
+    "measure", "fitcircle", "match", "infer", "predict", "optimize_step"
+  };
+  const bool runtimePending = std::any_of(std::begin(pendingMethods),
+    std::end(pendingMethods), [&](const std::string& method)
+    { return line.method == method; });
+  if (statement.empty() || statement.rfind("//", 0) == 0 || statement[0] == '#')
+  {
+    line.status = "runtime_ready";
+    line.reason = "non-executable source line skipped";
+  }
+  else if (runtimePending)
+  {
+    line.status = "PENDING";
+    line.reason = "runtime line callbacks unavailable; runtime not connected";
+  }
+  else
+  {
+    line.status = "runtime_ready";
+    line.reason = "source-level object state updated; algorithm not executed";
+    for (ScriptObjectView& object : context.object_views)
+    {
+      if (object.name != line.object) continue;
+      object.status = "runtime_ready";
+      object.runtime_state = line.method.empty() ? "declared" :
+        line.method + "(" + line.params + ")";
+    }
+  }
+  line.timestamp = CurrentTimestamp();
+  context.trace_status = runtimePending ? "PENDING" : "runtime_ready";
+  context.trace_reason = line.reason;
+  ++context.current_line;
+  if (context.current_line >= static_cast<int>(context.line_views.size()))
+    context.run_state = "finished";
+  return runtimePending;
+}
+
 bool WriteTextFile(const fs::path& path, const std::string& text)
 {
   std::ofstream output(path, std::ios::binary);
@@ -266,6 +316,7 @@ bool SaveCasePackage(const ManualTestContext& context,
                      const std::string& result_ref,
                      const std::string& evidence_ref,
                      const std::vector<std::string>& log_lines,
+                     const std::vector<OverlayElement>& image_elements,
                      std::string& reason)
 {
   std::error_code error;
@@ -324,6 +375,7 @@ bool SaveCasePackage(const ManualTestContext& context,
       << "\",\"type\":\"" << JsonEscape(object.type)
       << "\",\"name\":\"" << JsonEscape(object.name)
       << "\",\"status\":\"" << JsonEscape(object.status)
+      << "\",\"runtime_state\":\"" << JsonEscape(object.runtime_state)
       << "\",\"declared_line\":" << object.declared_line << "}"
       << (i + 1 == context.object_views.size() ? "\n" : ",\n");
   }
@@ -361,12 +413,44 @@ bool SaveCasePackage(const ManualTestContext& context,
     << "  \"codex_task\": \"" << JsonEscape(context.codex_task) << "\",\n"
     << "  \"forbidden_changes\": \"" << JsonEscape(context.forbidden_changes) << "\"\n}\n";
 
+  std::ostringstream image_elements_json;
+  image_elements_json << "{\n  \"elements\": [\n";
+  for (std::size_t i = 0; i < image_elements.size(); ++i)
+  {
+    const OverlayElement& element = image_elements[i];
+    std::string element_type = ImageAnnotationLayer::KindName(element.kind);
+    std::transform(element_type.begin(), element_type.end(), element_type.begin(),
+      [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    image_elements_json << "    {\n"
+      << "      \"id\": \"" << JsonEscape(element.ref) << "\",\n"
+      << "      \"type\": \"" << element_type << "\",\n"
+      << "      \"role\": \"" << JsonEscape(element.role) << "\",\n"
+      << "      \"source\": \"" << JsonEscape(element.source) << "\",\n"
+      << "      \"module_hint\": \"" << JsonEscape(element.module_hint) << "\",\n"
+      << "      \"visible\": " << (element.visible ? "true" : "false") << ",\n"
+      << "      \"points\": [";
+    for (std::size_t point = 0; point < element.image_points.size(); ++point)
+    {
+      image_elements_json << "[" << element.image_points[point].x << ","
+                          << element.image_points[point].y << "]"
+                          << (point + 1 == element.image_points.size() ? "" : ",");
+    }
+    image_elements_json << "],\n"
+      << "      \"radius\": " << element.radius << ",\n"
+      << "      \"generated_statement\": \""
+      << JsonEscape(element.generated_statement) << "\",\n"
+      << "      \"evidence_ref\": \"" << JsonEscape(element.evidence_ref) << "\"\n"
+      << "    }" << (i + 1 == image_elements.size() ? "\n" : ",\n");
+  }
+  image_elements_json << "  ]\n}\n";
+
   const bool saved =
     WriteTextFile(root / "global_context.json", global_context.str()) &&
     WriteTextFile(root / "script_snapshot.cxsc", context.editor_text) &&
     WriteTextFile(root / "line_trace.json", trace.str()) &&
     WriteTextFile(root / "variable_snapshot.json", variables.str()) &&
     WriteTextFile(root / "object_state.json", objects.str()) &&
+    WriteTextFile(root / "image_elements.json", image_elements_json.str()) &&
     WriteTextFile(root / "debug_request.json", debug_request.str()) &&
     WriteTextFile(root / "result.json", result.str()) &&
     WriteTextFile(root / "evidence.json", evidence.str()) &&
@@ -738,6 +822,8 @@ void ViewController::drawManualStateTestConsole()
     {
       if (object.module != module) continue;
       ImGui::BulletText("%s %s: %s", object.type.c_str(), object.name.c_str(), object.status.c_str());
+      if (!object.runtime_state.empty())
+        ImGui::TextWrapped("state: %s", object.runtime_state.c_str());
       found = true;
     }
     if (!found) ImGui::TextDisabled("no object in current script");
@@ -821,6 +907,7 @@ void ViewController::drawManualStateTestConsole()
                                        m_scriptResult.result_ref,
                                        m_scriptResult.evidence_ref,
                                        m_scriptResult.log_lines,
+                                       m_annotationLayer.Elements(),
                                        save_reason);
     m_scriptResult.status = saved ? "PENDING" : "FAIL";
     m_scriptResult.reason = save_reason;
@@ -853,62 +940,99 @@ void ViewController::drawManualStateTestConsole()
     m_scriptResult.overlay_ref.clear();
 
   ImGui::Separator();
-  ImGui::Text("Run");
-  if (ImGui::Button("Parse Only"))
+  ImGui::Text("Script Debug");
+  ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
+  if (ImGui::Button("Compile"))
   {
-    m_scriptResult = ScriptResult();
-    m_scriptResult.source = m_manualTest.editor_source;
-    m_scriptResult.script_path = m_manualTest.loaded_script_path;
-    m_scriptResult.status = m_manualTest.editor_text.empty() ? "BLOCKED" : "PENDING";
+    m_manualTest.analyzed_text.clear();
+    AnalyzeScript(m_manualTest);
+    m_manualTest.current_line = 0;
+    m_manualTest.run_state = m_manualTest.editor_text.empty() ? "blocked" : "compiled";
+    m_scriptResult.status = m_manualTest.editor_text.empty() ? "FAIL" : "PENDING";
     m_scriptResult.reason = m_manualTest.editor_text.empty() ?
-      "editor text is empty" : "parse validation pending real parser result";
+      "editor text is empty" : "source analyzed; runtime not connected";
     m_scriptResult.runtime_fillback_status = "not_started";
-    SetTraceStatus(m_manualTest,
-                   m_manualTest.editor_text.empty() ? "BLOCKED" : "PENDING",
-                   m_scriptResult.reason);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Run Text"))
+  if (ImGui::Button("Run"))
   {
-    m_scriptResult = ScriptResult();
-    m_scriptResult.source = "text";
-    m_scriptResult.script_path = m_manualTest.loaded_script_path;
-    const auto start = std::chrono::steady_clock::now();
-    if (m_manualTest.editor_text.empty())
+    AnalyzeScript(m_manualTest);
+    if (m_manualTest.current_line >= static_cast<int>(m_manualTest.line_views.size()))
+      m_manualTest.current_line = 0;
+    m_manualTest.stop_requested = false;
+    m_manualTest.run_state = "running";
+    bool pending = false;
+    while (!m_manualTest.stop_requested &&
+           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
     {
-      m_scriptResult.status = "BLOCKED";
-      m_scriptResult.reason = "editor text is empty";
+      pending = StepCurrentLine(m_manualTest);
+      if (pending) break;
     }
-    else
-    {
-      clearos();
-      const bool compiled = m_imageparser.Compile(m_manualTest.editor_text.c_str());
-      m_scriptResult.status = compiled ? "PENDING" : "FAIL";
-      m_scriptResult.reason = compiled ?
-        "text executed; runtime result package unavailable" : "parser compile failed";
-      if (!getoutputstring().empty())
-        m_scriptResult.log_lines.push_back(getoutputstring());
-      SetTraceStatus(m_manualTest, compiled ? "PENDING" : "FAIL",
-                     compiled ? "statement callback unavailable; runtime result package pending" :
-                                "parser compile failed; exact statement unavailable");
-    }
-    const auto end = std::chrono::steady_clock::now();
-    m_scriptResult.elapsed_ms =
-      std::chrono::duration<double, std::milli>(end - start).count();
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = pending ?
+      "runtime line callbacks unavailable; runtime not connected" :
+      "source-level steps complete; runtime result package unavailable";
     m_scriptResult.runtime_fillback_status = "pending_real_runtime_fillback";
+    if (pending) m_manualTest.run_state = "pending_runtime";
   }
   ImGui::SameLine();
-  if (ImGui::Button("Run File"))
+  if (ImGui::Button("Step"))
   {
+    m_manualTest.stop_requested = false;
+    m_manualTest.run_state = "stepping";
+    const bool pending = StepCurrentLine(m_manualTest);
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = pending ?
+      "runtime line callbacks unavailable; runtime not connected" :
+      m_manualTest.trace_reason;
+    m_scriptResult.runtime_fillback_status = "pending_real_runtime_fillback";
+    if (pending) m_manualTest.run_state = "pending_runtime";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Continue"))
+  {
+    m_manualTest.stop_requested = false;
+    m_manualTest.run_state = "running";
+    bool pending = false;
+    while (!m_manualTest.stop_requested &&
+           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
+    {
+      pending = StepCurrentLine(m_manualTest);
+      if (pending) break;
+    }
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = pending ?
+      "runtime line callbacks unavailable; runtime not connected" :
+      "continue reached end; runtime result package unavailable";
+    m_scriptResult.runtime_fillback_status = "pending_real_runtime_fillback";
+    if (pending) m_manualTest.run_state = "pending_runtime";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Stop"))
+  {
+    m_manualTest.stop_requested = true;
+    m_manualTest.run_state = "stopped";
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = "debug stepping stopped by user";
+    m_scriptResult.runtime_fillback_status = "stopped";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Reset"))
+  {
+    m_manualTest.analyzed_text.clear();
+    AnalyzeScript(m_manualTest);
+    m_manualTest.current_line = 0;
+    m_manualTest.stop_requested = false;
+    m_manualTest.run_state = "idle";
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = "debug state reset; script text preserved";
+    m_scriptResult.runtime_fillback_status = "not_started";
+  }
+  if (ImGui::Button("Run File (runtime bridge)"))
     m_scriptResult = RunCxScript(m_manualTest.script_file_path);
-    m_scriptResult.source = "file";
-  }
   ImGui::SameLine();
-  if (ImGui::Button("Run Bound State"))
-  {
+  if (ImGui::Button("Run Bound State (runtime bridge)"))
     m_scriptResult = RunCxScript(m_manualTest.bound_state_script_path);
-    m_scriptResult.source = "bound_state";
-  }
   ImGui::SameLine();
   if (ImGui::Button("Clear Result"))
   {

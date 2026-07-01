@@ -19,6 +19,17 @@ enum class OverlayKind
   Polyline
 };
 
+enum class ImageToolMode
+{
+  PointerPan,
+  PointCreate,
+  LineCreate,
+  RectCreate,
+  CircleCreate,
+  PolylineCreate,
+  AttachToScript
+};
+
 struct OverlayElement
 {
   int id = 0;
@@ -34,6 +45,7 @@ struct OverlayElement
   bool editable = true;
   std::string label;
   std::string evidence_ref;
+  std::string generated_statement;
   std::string result_ref;
   std::string issue_entry_ref;
 };

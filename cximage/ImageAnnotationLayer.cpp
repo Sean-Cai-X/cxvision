@@ -222,6 +222,8 @@ bool ImageAnnotationLayer::SaveElements(const std::string& path,
     stream << "module_hint: " << element.module_hint << '\n';
     stream << "radius: " << element.radius << '\n';
     stream << "label: " << element.label << '\n';
+    stream << "generated_statement: " << element.generated_statement << '\n';
+    stream << "evidence_ref: " << element.evidence_ref << '\n';
     stream << "points:";
     for (const OverlayImagePoint& point : element.image_points)
       stream << ' ' << point.x << ',' << point.y;
@@ -264,6 +266,8 @@ bool ImageAnnotationLayer::LoadElements(const std::string& path,
     else if (key == "module_hint") current->module_hint = value;
     else if (key == "radius") current->radius = std::stof(value);
     else if (key == "label") current->label = value;
+    else if (key == "generated_statement") current->generated_statement = value;
+    else if (key == "evidence_ref") current->evidence_ref = value;
     else if (key == "points")
     {
       std::istringstream points(value);

@@ -334,8 +334,11 @@ private:
     float m_annotationImageWidth = 1.0f;
     float m_annotationImageHeight = 1.0f;
     bool m_annotationDragging = false;
+    OverlayKind m_annotationDragKind = OverlayKind::Point;
     OverlayImagePoint m_annotationDragStart;
     int m_activePolylineElement = -1;
+    bool m_attachToScriptMode = false;
+    ImageToolMode m_imageToolMode = ImageToolMode::PointerPan;
     std::string m_annotationManifestPath;
     std::string m_annotationSessionPath;
     std::string m_annotationStatus;
