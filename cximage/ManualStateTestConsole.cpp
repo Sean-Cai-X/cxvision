@@ -97,6 +97,15 @@ std::string TrimLine(const std::string& text)
   return text.substr(first, last - first + 1);
 }
 
+std::vector<std::string> SplitParameters(const std::string& text)
+{
+  std::vector<std::string> result;
+  std::istringstream input(text);
+  std::string value;
+  while (std::getline(input, value, ',')) result.push_back(TrimLine(value));
+  return result;
+}
+
 std::string JsonEscape(const std::string& text)
 {
   std::ostringstream out;
@@ -333,16 +342,37 @@ bool SaveCasePackage(const ManualTestContext& context,
   std::ostringstream log;
   for (const std::string& line : log_lines) log << line << '\n';
 
+  const ScriptLineView* current = nullptr;
+  if (context.current_line >= 0 &&
+      context.current_line < static_cast<int>(context.line_views.size()))
+    current = &context.line_views[static_cast<std::size_t>(context.current_line)];
+  std::ostringstream debug_request;
+  debug_request << "{\n"
+    << "  \"module\": \"" << JsonEscape(current == nullptr ? "" : current->module) << "\",\n"
+    << "  \"script_path\": \"" << JsonEscape(context.loaded_script_path) << "\",\n"
+    << "  \"line_no\": " << (current == nullptr ? 0 : current->line_no) << ",\n"
+    << "  \"statement\": \"" << JsonEscape(current == nullptr ? "" : current->statement) << "\",\n"
+    << "  \"object\": \"" << JsonEscape(current == nullptr ? "" : current->object) << "\",\n"
+    << "  \"method\": \"" << JsonEscape(current == nullptr ? "" : current->method) << "\",\n"
+    << "  \"params\": \"" << JsonEscape(current == nullptr ? "" : current->params) << "\",\n"
+    << "  \"current_status\": \"" << JsonEscape(result_status) << "\",\n"
+    << "  \"current_reason\": \"" << JsonEscape(result_reason) << "\",\n"
+    << "  \"user_expected\": \"" << JsonEscape(context.user_expected) << "\",\n"
+    << "  \"codex_task\": \"" << JsonEscape(context.codex_task) << "\",\n"
+    << "  \"forbidden_changes\": \"" << JsonEscape(context.forbidden_changes) << "\"\n}\n";
+
   const bool saved =
     WriteTextFile(root / "global_context.json", global_context.str()) &&
     WriteTextFile(root / "script_snapshot.cxsc", context.editor_text) &&
     WriteTextFile(root / "line_trace.json", trace.str()) &&
     WriteTextFile(root / "variable_snapshot.json", variables.str()) &&
     WriteTextFile(root / "object_state.json", objects.str()) &&
+    WriteTextFile(root / "debug_request.json", debug_request.str()) &&
     WriteTextFile(root / "result.json", result.str()) &&
     WriteTextFile(root / "evidence.json", evidence.str()) &&
     WriteTextFile(root / "log.txt", log.str());
-  reason = saved ? "complete eight-file case package saved" : "one or more case files failed to save";
+  reason = saved ? "complete collaborative debug case package saved" :
+                   "one or more case files failed to save";
   return saved;
 }
 }
@@ -387,6 +417,53 @@ void ViewController::initManualStateTestConsole()
     std::sort(m_directTestModules.begin(), m_directTestModules.end(),
       [](const ScriptSnippet& left, const ScriptSnippet& right)
       { return left.source_path < right.source_path; });
+  }
+
+  struct CapabilitySeed { const char* module; const char* type; };
+  const CapabilitySeed seeds[] = {
+    {"cximage", "Image"}, {"cximage", "Findcircle"},
+    {"cximage", "Findline"}, {"cximage", "fastmatch"},
+    {"torch", "TorchSegModel"}, {"torch", "TorchTensor"},
+    {"torch", "TorchRawOutput"}, {"torch", "TorchMask"},
+    {"mlpack", "MlpackFeature"}, {"mlpack", "MlpackDataset"},
+    {"mlpack", "MlpackLogRegModel"}, {"mlpack", "MlpackPrediction"},
+    {"mlpack", "MlpackScore"},
+    {"ensmallen", "EnsmallenObjective"},
+    {"ensmallen", "EnsmallenParamSpace"},
+    {"ensmallen", "EnsmallenOptimizer"},
+    {"ensmallen", "EnsmallenCandidate"},
+    {"ensmallen", "EnsmallenMetric"},
+    {"ensmallen", "EnsmallenBestParam"}
+  };
+  m_directCapabilities.clear();
+  for (const CapabilitySeed& seed : seeds)
+  {
+    DirectCapability capability;
+    capability.module = seed.module;
+    capability.type = seed.type;
+    bool declaredByScript = false;
+    for (const ScriptSnippet& snippet : m_directTestModules)
+    {
+      ManualTestContext analyzed;
+      analyzed.editor_text = snippet.text;
+      AnalyzeScript(analyzed);
+      for (const ScriptObjectView& object : analyzed.object_views)
+      {
+        if (object.type != capability.type) continue;
+        declaredByScript = true;
+        for (const ScriptLineView& line : analyzed.line_views)
+        {
+          if (line.object != object.name || line.method.empty()) continue;
+          const bool known = std::any_of(capability.methods.begin(), capability.methods.end(),
+            [&](const DirectCapabilityMethod& method) { return method.name == line.method; });
+          if (!known) capability.methods.push_back({line.method,
+            capability.module == "cximage" ? "registered" : "pending_binding"});
+        }
+      }
+    }
+    capability.status = capability.module == "cximage" ? "registered" :
+      (declaredByScript ? "script_only" : "pending_binding");
+    m_directCapabilities.push_back(capability);
   }
 }
 
@@ -493,6 +570,44 @@ void ViewController::drawManualStateTestConsole()
     m_manualTest = ManualTestContext();
   }
 
+  if (ImGui::Button("Demo: Debug find_circle_direct_test"))
+  {
+    const std::string target =
+      "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc";
+    const auto module = std::find_if(m_directTestModules.begin(),
+      m_directTestModules.end(), [&](const ScriptSnippet& snippet)
+      { return snippet.source_path == target; });
+    if (module == m_directTestModules.end())
+    {
+      m_scriptResult.status = "FAIL";
+      m_scriptResult.reason = "find_circle_direct_test.cxsc not found";
+    }
+    else
+    {
+      const cv::Mat image = cv::imread(m_manualTest.image_file_path);
+      if (!image.empty())
+      {
+        UpdateImageViewImage(image);
+        m_scriptResult.image_ref = m_manualTest.image_file_path;
+      }
+      m_manualTest.editor_text = module->text;
+      m_manualTest.editor_source = "debug_demo";
+      m_manualTest.loaded_script_path = module->source_path;
+      m_manualTest.script_file_path = module->source_path;
+      m_manualTest.editor_dirty = false;
+      m_manualTest.analyzed_text.clear();
+      m_manualTest.current_line = 0;
+      m_manualTest.show_image = true;
+      AnalyzeScript(m_manualTest);
+      SetTraceStatus(m_manualTest, "PENDING",
+                     "runtime line callbacks unavailable; runtime not connected");
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason =
+        "runtime line callbacks unavailable; runtime not connected";
+      m_scriptResult.runtime_fillback_status = "pending_real_runtime_fillback";
+    }
+  }
+
   ImGui::Separator();
   ImGui::Columns(2, "manual_console_columns", true);
   ImGui::Text("Builtin Parser Snippets");
@@ -593,7 +708,13 @@ void ViewController::drawManualStateTestConsole()
     ImGui::TextWrapped("statement: %s", current.statement.c_str());
     ImGui::Text("module: %s | object: %s | method: %s",
                 current.module.c_str(), current.object.c_str(), current.method.c_str());
-    ImGui::TextWrapped("params: %s", current.params.empty() ? "(none)" : current.params.c_str());
+    ImGui::Text("Current Line Inspector");
+    ImGui::TextWrapped("object: %s", current.object.empty() ? "(none)" : current.object.c_str());
+    ImGui::TextWrapped("method: %s", current.method.empty() ? "(none)" : current.method.c_str());
+    const std::vector<std::string> parameters = SplitParameters(current.params);
+    if (parameters.empty()) ImGui::TextDisabled("params: (none)");
+    for (std::size_t i = 0; i < parameters.size(); ++i)
+      ImGui::BulletText("param[%d]: %s", static_cast<int>(i), parameters[i].c_str());
     ImGui::TextWrapped("return variable: %s",
                        current.return_variable.empty() ? "(none)" : current.return_variable.c_str());
     ImGui::TextWrapped("reason: %s | timestamp: %s", current.reason.c_str(),
@@ -641,7 +762,56 @@ void ViewController::drawManualStateTestConsole()
   }
   ImGui::Columns(1);
 
+  ImGui::Separator();
+  ImGui::Text("Direct Capability Directory");
+  std::string currentModule;
+  std::string currentType;
+  std::string currentMethod;
+  if (!m_manualTest.line_views.empty() && m_manualTest.current_line >= 0 &&
+      m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
+  {
+    const ScriptLineView& line = m_manualTest.line_views[
+      static_cast<std::size_t>(m_manualTest.current_line)];
+    currentModule = line.module;
+    currentMethod = line.method;
+    for (const ScriptObjectView& object : m_manualTest.object_views)
+      if (object.name == line.object) currentType = object.type;
+  }
+  for (const char* module : modules)
+  {
+    const bool highlighted = currentModule == module;
+    if (highlighted) ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 220, 70, 255));
+    const bool open = ImGui::TreeNode(module, "%s%s", module,
+                                      highlighted ? "  [current]" : "");
+    if (highlighted) ImGui::PopStyleColor();
+    if (!open) continue;
+    for (const DirectCapability& capability : m_directCapabilities)
+    {
+      if (capability.module != module) continue;
+      ImGui::PushID(capability.type.c_str());
+      const bool typeOpen = ImGui::TreeNode("type", "%s [%s]",
+        capability.type.c_str(), capability.status.c_str());
+      if (typeOpen)
+      {
+        if (capability.methods.empty()) ImGui::TextDisabled("methods: pending_binding");
+        for (const DirectCapabilityMethod& method : capability.methods)
+        {
+          const bool isCurrent = capability.type == currentType &&
+                                 method.name == currentMethod;
+          ImGui::BulletText("%s [%s]", method.name.c_str(),
+            isCurrent ? "pending_runtime" : method.status.c_str());
+        }
+        ImGui::TreePop();
+      }
+      ImGui::PopID();
+    }
+    ImGui::TreePop();
+  }
+
   InputTextString("Case directory", m_manualTest.case_directory);
+  InputTextString("User expected", m_manualTest.user_expected);
+  InputTextString("Codex task", m_manualTest.codex_task);
+  InputTextString("Forbidden changes", m_manualTest.forbidden_changes);
   if (ImGui::Button("Save Complete Case Package"))
   {
     std::string save_reason;

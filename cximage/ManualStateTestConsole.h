@@ -53,6 +53,9 @@ struct ManualTestContext
   std::string case_directory = "docs/notes/cxscript_case";
   std::string trace_status = "PENDING";
   std::string trace_reason = "not executed";
+  std::string user_expected;
+  std::string codex_task;
+  std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
   int current_line = 0;
   std::vector<ScriptLineView> line_views;
   std::vector<ScriptVariableView> variable_views;
@@ -75,6 +78,20 @@ struct ScriptSnippet
   std::string text;
   std::string source_path;
   bool runnable = true;
+};
+
+struct DirectCapabilityMethod
+{
+  std::string name;
+  std::string status;
+};
+
+struct DirectCapability
+{
+  std::string module;
+  std::string type;
+  std::string status;
+  std::vector<DirectCapabilityMethod> methods;
 };
 
 #endif

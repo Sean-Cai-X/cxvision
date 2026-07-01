@@ -318,6 +318,7 @@ private:
     ImageAnnotationLayer m_annotationLayer;
     std::vector<ScriptSnippet> m_manualSnippets;
     std::vector<ScriptSnippet> m_directTestModules;
+    std::vector<DirectCapability> m_directCapabilities;
     SemanticFlowGraph m_semanticFlowGraph;
     bool m_renderImageInOcctBackground = false;
     bool m_showTestPoints = false;
