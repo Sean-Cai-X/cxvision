@@ -342,8 +342,7 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
       action.script_path = node->script_path;
     }
   }
-  if (ImGui::Button("Mark PASS")) { node->status = "PASS"; node->reason = "manual_mark"; }
-  ImGui::SameLine();
+  ImGui::TextDisabled("PASS requires parser runtime result");
   if (ImGui::Button("Mark FAIL")) { node->status = "FAIL"; node->reason = "manual_mark"; }
   ImGui::SameLine();
   if (ImGui::Button("Mark BLOCKED")) { node->status = "BLOCKED"; node->reason = "manual_mark"; }
@@ -366,7 +365,7 @@ SemanticFlowAction SemanticFlowGraph::Draw()
 {
   SemanticFlowAction action;
   if (!m_open) return action;
-  ImGui::SetNextWindowSize(ImVec2(1050.0f, 680.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_Once);
   if (!ImGui::Begin("Semantic Flow Graph", &m_open))
   {
     ImGui::End();
@@ -381,6 +380,13 @@ SemanticFlowAction SemanticFlowGraph::Draw()
   ImGui::TextWrapped("Reason: %s", m_loadReason.c_str());
   ImGui::Text("Node count: %d", static_cast<int>(m_flow.nodes.size()));
   ImGui::Text("Edge count: %d", static_cast<int>(m_flow.edges.size()));
+  ImGui::Text("Runtime Debug Summary");
+  ImGui::Text("current_runtime_node: PENDING (runtime variable unavailable)");
+  ImGui::Text("current_runtime_connect: PENDING (runtime variable unavailable)");
+  ImGui::Text("doutputvalue: %s", m_runtimeDoutputValue.c_str());
+  ImGui::Text("current_status: %s", m_runtimeCurrentStatus.c_str());
+  ImGui::Text("runtime_object_count: %d", m_runtimeObjectCount);
+  ImGui::TextWrapped("last_runtime_reason: %s", m_lastRuntimeReason.c_str());
   if (ImGui::Button("Load Demo Flow")) LoadDemoFlow();
   ImGui::SameLine();
   if (ImGui::Button("Reload Flow") && !m_resolvedDemoPath.empty()) LoadDemoFlow();
@@ -400,6 +406,16 @@ SemanticFlowAction SemanticFlowGraph::Draw()
   DrawNodeDetail(action);
   ImGui::End();
   return action;
+}
+
+void SemanticFlowGraph::SetRuntimeDebugSummary(
+  const std::string& doutputValue, const std::string& currentStatus,
+  int runtimeObjectCount, const std::string& reason)
+{
+  m_runtimeDoutputValue = doutputValue;
+  m_runtimeCurrentStatus = currentStatus;
+  m_runtimeObjectCount = runtimeObjectCount;
+  m_lastRuntimeReason = reason;
 }
 
 void SemanticFlowGraph::ApplyScriptResult(int node_index,

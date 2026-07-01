@@ -24,6 +24,7 @@
 #include "FastMatch.h"
 #include "imagemanager.h"
 #include "ParserClass.h"
+#include "ParserDebugBridge.h"
 #include "muParser.h"
 #include "ManualStateTestConsole.h"
 #include "ImageAnnotationLayer.h"
@@ -279,6 +280,7 @@ private:
     string uniqueName(const string& name);
 
     mu::CxParserRuntime m_imageparser;
+    ParserDebugBridge m_parserDebugBridge;
 
     std::ostringstream m_os;
     std::ostringstream m_createcodeos;

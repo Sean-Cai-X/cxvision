@@ -108,6 +108,28 @@ std::vector<std::string> SplitParameters(const std::string& text)
   return result;
 }
 
+std::vector<std::string> ExtractGlobalNames(const std::string& text)
+{
+  std::vector<std::string> names;
+  const std::string prefix = "global.";
+  std::size_t position = 0;
+  while ((position = text.find(prefix, position)) != std::string::npos)
+  {
+    const std::size_t begin = position + prefix.size();
+    std::size_t end = begin;
+    while (end < text.size() &&
+           (std::isalnum(static_cast<unsigned char>(text[end])) ||
+            text[end] == '_')) ++end;
+    const std::string name = text.substr(begin, end - begin);
+    if (!name.empty() && std::find(names.begin(), names.end(), name) == names.end())
+      names.push_back(name);
+    position = end;
+  }
+  if (std::find(names.begin(), names.end(), "matInput") == names.end())
+    names.insert(names.begin(), "matInput");
+  return names;
+}
+
 std::string JsonEscape(const std::string& text)
 {
   std::ostringstream out;
@@ -161,6 +183,33 @@ bool IsObjectType(const std::string& type)
   return ModuleForType(type) != "cxscript";
 }
 
+void AddObservedGlobalVariables(ManualTestContext& context,
+                                const std::string& statement)
+{
+  std::size_t position = 0;
+  while ((position = statement.find("global.", position)) != std::string::npos)
+  {
+    std::size_t end = position + 7;
+    while (end < statement.size() &&
+           (std::isalnum(static_cast<unsigned char>(statement[end])) ||
+            statement[end] == '_'))
+      ++end;
+    const std::string name = statement.substr(position, end - position);
+    const auto existing = std::find_if(
+      context.global_variable_views.begin(), context.global_variable_views.end(),
+      [&](const ScriptVariableView& variable) { return variable.name == name; });
+    if (existing == context.global_variable_views.end())
+    {
+      const bool is_image = name == "global.matInput";
+      context.global_variable_views.push_back(
+        {is_image ? "Image" : "auto", name, "uninitialized", 0,
+         "observed_source", is_image ? context.image_file_path : std::string(),
+         false});
+    }
+    position = end;
+  }
+}
+
 void AnalyzeScript(ManualTestContext& context)
 {
   if (context.analyzed_text == context.editor_text) return;
@@ -168,6 +217,10 @@ void AnalyzeScript(ManualTestContext& context)
   context.line_views.clear();
   context.variable_views.clear();
   context.object_views.clear();
+  if (context.global_variable_views.size() > 1)
+    context.global_variable_views.erase(
+      context.global_variable_views.begin() + 1,
+      context.global_variable_views.end());
   context.current_line = 0;
 
   std::istringstream input(context.editor_text);
@@ -181,6 +234,7 @@ void AnalyzeScript(ManualTestContext& context)
     line.reason = "not_executed";
     line.statement = raw;
     const std::string statement = TrimLine(raw);
+    AddObservedGlobalVariables(context, statement);
     line.module = ModuleForStatement(statement);
 
     std::istringstream tokens(statement);
@@ -202,6 +256,10 @@ void AnalyzeScript(ManualTestContext& context)
         context.object_views.push_back({line.module, declared_type, declared_name,
                                         line.module == "cximage" ? "declared" : "pending_runtime",
                                         std::string(), 0, line.line_no});
+        if (declared_type == "Image")
+          context.variable_views.push_back(
+            {declared_type, declared_name, "uninitialized", line.line_no,
+             "not_initialized", context.image_file_path, false});
       }
       else
       {
@@ -254,27 +312,6 @@ void SetTraceStatus(ManualTestContext& context,
   }
   context.trace_status = status;
   context.trace_reason = reason;
-}
-
-bool StepCurrentLine(ManualTestContext& context)
-{
-  AnalyzeScript(context);
-  if (context.current_line < 0 ||
-      context.current_line >= static_cast<int>(context.line_views.size()))
-  {
-    context.run_state = "finished";
-    return false;
-  }
-  ScriptLineView& line = context.line_views[
-    static_cast<std::size_t>(context.current_line)];
-  line.status = "source_analyzed";
-  line.reason = "not_executed";
-  context.trace_status = "source_analyzed";
-  context.trace_reason = "not_executed";
-  ++context.current_line;
-  if (context.current_line >= static_cast<int>(context.line_views.size()))
-    context.run_state = "finished";
-  return false;
 }
 
 bool WriteTextFile(const fs::path& path, const std::string& text)
@@ -557,107 +594,117 @@ void ViewController::LoadBoundStateToManualConsole(
 bool ViewController::QueryParserObjectExists(const std::string& type,
                                                    const std::string& name)
 {
-  if (m_imageparser.GetClassObj(type, name) != nullptr) return true;
-  if (type == "Findcircle")
-    return m_imageparser.GetClassObj("findcircle", name) != nullptr;
-  return false;
+  return m_parserDebugBridge.QueryObjectExists(type, name);
 }
 
 Image* ViewController::QueryParserImage(const std::string& name)
 {
-  return static_cast<Image*>(m_imageparser.GetClassObj("Image", name));
+  return m_parserDebugBridge.QueryImage(name);
 }
 
 bool ViewController::QueryParserDouble(const std::string& name, double& value)
 {
-  if (!m_imageparser.IsObjectVar(name.c_str())) return false;
-  double* runtimeValue = static_cast<double*>(m_imageparser.GetDoubleValue(name));
-  if (runtimeValue == nullptr) return false;
-  value = *runtimeValue;
-  return true;
+  return m_parserDebugBridge.QueryDouble(name, value);
 }
 
 bool ViewController::SetParserDouble(const std::string& name, double value)
 {
-  if (!m_imageparser.IsObjectVar(name.c_str())) return false;
-  const std::string statement = name + "=" + std::to_string(value) + ";";
-  return m_imageparser.Compile(statement.c_str());
+  return m_parserDebugBridge.SetDouble(name, value);
 }
 
 void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                                                const std::string& runtimeStatus)
 {
+  int lastUpdateLine = 0;
+  if (m_manualTest.current_line >= 0 &&
+      m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
+    lastUpdateLine = m_manualTest.line_views[
+      static_cast<std::size_t>(m_manualTest.current_line)].line_no;
+  const std::vector<ParserDebugObjectSnapshot> snapshots =
+    m_parserDebugBridge.SnapshotRuntimeObjects(lastMethod, lastUpdateLine,
+                                               runtimeStatus);
   m_manualTest.runtime_objects.clear();
-  auto addObject = [&](const std::string& type, const std::string& name)
+  bool freshParserImage = false;
+  for (const ParserDebugObjectSnapshot& snapshot : snapshots)
   {
     RuntimeObjectView entry;
-    entry.name = name;
-    entry.type = type;
-    entry.exists_in_parser = QueryParserObjectExists(type, name);
-    entry.last_runtime_status = entry.exists_in_parser ? runtimeStatus : "PENDING";
-    entry.last_method = lastMethod;
-    entry.stale = !entry.exists_in_parser ||
-      (runtimeStatus != "runtime_executed" && runtimeStatus != "runtime_queried");
-    entry.display_summary = entry.exists_in_parser ? "runtime object available" :
-                                                     "not found in parser";
-    if (type == "Image" && entry.exists_in_parser)
-    {
-      Image* image = QueryParserImage(name);
-      if (image != nullptr)
-      {
-        const cv::Mat& mat = image->getmat();
-        entry.display_summary = "runtime image " + std::to_string(mat.cols) +
-          "x" + std::to_string(mat.rows);
-        if (!mat.empty())
-        {
-          UpdateImageViewImage(mat);
-          m_scriptResult.image_ref = "runtime_object:" + name;
-        }
-      }
-    }
-    else if (type == "Findcircle" && entry.exists_in_parser)
-    {
-      Findcircle* circle = static_cast<Findcircle*>(
-        m_imageparser.GetClassObj(type, name));
-      if (circle == nullptr)
-        circle = static_cast<Findcircle*>(
-          m_imageparser.GetClassObj("findcircle", name));
-      if (circle != nullptr)
-      {
-        entry.has_circle = true;
-        entry.circle_cx = static_cast<float>(circle->getcirclecentx());
-        entry.circle_cy = static_cast<float>(circle->getcirclecenty());
-        entry.circle_inner = static_cast<float>(circle->getcirclepax());
-        entry.circle_radius = static_cast<float>(circle->getcirclepay());
-        entry.display_summary = "circle=" + std::to_string(circle->getcirclecentx()) +
-          "," + std::to_string(circle->getcirclecenty()) + "," +
-          std::to_string(circle->getcirclepax()) + "," +
-          std::to_string(circle->getcirclepay());
-      }
-    }
+    entry.name = snapshot.name;
+    entry.type = snapshot.type;
+    for (const ScriptObjectView& source : m_manualTest.object_views)
+      if (source.name == entry.name && source.type == entry.type)
+        entry.declared_line = source.declared_line;
+    entry.exists_in_parser = snapshot.exists_in_parser;
+    entry.last_runtime_status = runtimeStatus;
+    entry.runtime_state = snapshot.runtime_state;
+    entry.last_method = snapshot.last_method;
+    entry.last_update_line = snapshot.last_update_line;
+    entry.display_summary = snapshot.value_summary;
+    entry.visualizable = snapshot.visualizable;
+    entry.visual_source = snapshot.visual_source;
+    entry.stale = snapshot.stale;
+    entry.has_circle = snapshot.has_circle;
+    entry.circle_cx = snapshot.circle_cx;
+    entry.circle_cy = snapshot.circle_cy;
+    entry.circle_inner = snapshot.circle_inner;
+    entry.circle_radius = snapshot.circle_radius;
     m_manualTest.runtime_objects.push_back(entry);
-  };
-  addObject("Image", "m_occtimage");
-  addObject("Findcircle", "afindcircle0");
-  addObject("Findcircle", "afindcircle1");
+    if (entry.type == "Image" && entry.exists_in_parser && !entry.stale)
+    {
+      Image* image = m_parserDebugBridge.QueryImage(entry.name);
+      if (image != nullptr && !image->getmat().empty())
+      {
+        UpdateImageViewImage(image->getmat());
+        m_scriptResult.image_ref = "runtime_object:" + entry.name;
+        freshParserImage = true;
+      }
+    }
+  }
 
-  RuntimeObjectView output;
-  output.name = "doutputvalue";
-  output.type = "double";
-  double outputValue = 0.0;
-  output.exists_in_parser = QueryParserDouble(output.name, outputValue);
-  output.last_runtime_status = output.exists_in_parser ? runtimeStatus : "PENDING";
-  output.last_method = lastMethod;
-  output.stale = !output.exists_in_parser ||
-    (runtimeStatus != "runtime_executed" && runtimeStatus != "runtime_queried");
-  output.display_summary = output.exists_in_parser ? std::to_string(outputValue) :
-                                                    "not found in parser";
-  m_manualTest.runtime_objects.push_back(output);
+  if (!freshParserImage && runtimeStatus == "compiled")
+  {
+    const cv::Mat viewImage = cv::imread(m_manualTest.image_file_path);
+    if (!viewImage.empty())
+    {
+      UpdateImageViewImage(viewImage);
+      m_scriptResult.image_ref = m_manualTest.image_file_path;
+    }
+    else m_scriptResult.image_ref.clear();
+  }
 
-  double currentStatus = 0.0;
-  if (QueryParserDouble("current_status", currentStatus))
-    m_manualTest.runtime_current_status = std::to_string(currentStatus);
-  else m_manualTest.runtime_current_status = "PENDING";
+  const std::vector<ParserDebugVariableSnapshot> variables =
+    m_parserDebugBridge.SnapshotRuntimeVariables();
+  std::string doutputValue = "PENDING";
+  for (const ParserDebugVariableSnapshot& variable : variables)
+  {
+    RuntimeObjectView entry;
+    entry.name = variable.name;
+    entry.type = "double";
+    entry.exists_in_parser = variable.exists_in_parser;
+    entry.last_runtime_status = variable.exists_in_parser ? runtimeStatus : "PENDING";
+    entry.runtime_state = variable.exists_in_parser ? "alive" : "PENDING";
+    entry.last_method = lastMethod;
+    entry.last_update_line = lastUpdateLine;
+    entry.display_summary = variable.exists_in_parser ?
+      std::to_string(variable.value) : "not found in parser";
+    entry.visualizable = false;
+    entry.visual_source = variable.exists_in_parser ? "runtime_object" :
+                                                        "stale_runtime";
+    entry.stale = !variable.exists_in_parser;
+    m_manualTest.runtime_objects.push_back(entry);
+    if (variable.name == "doutputvalue")
+      doutputValue = variable.exists_in_parser ? std::to_string(variable.value) :
+                                                "PENDING";
+    if (variable.name == "current_status")
+      m_manualTest.runtime_current_status = variable.exists_in_parser ?
+        std::to_string(variable.value) : "PENDING";
+  }
+  int runtimeObjectCount = 0;
+  for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+    if (object.exists_in_parser) ++runtimeObjectCount;
+  m_semanticFlowGraph.SetRuntimeDebugSummary(
+    doutputValue, m_manualTest.runtime_current_status, runtimeObjectCount,
+    m_scriptResult.reason.empty() ? "runtime table refreshed" :
+                                    m_scriptResult.reason);
 }
 
 void ViewController::drawManualStateTestConsole()
@@ -665,7 +712,7 @@ void ViewController::drawManualStateTestConsole()
   if (!m_showManualStateTestConsole) return;
 
   ImGui::SetNextWindowPos(ImVec2(70, 45), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(980, 720), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(820, 620), ImGuiCond_Once);
   if (!ImGui::Begin("Manual State Test Console",
                     &m_showManualStateTestConsole))
   {
@@ -711,6 +758,7 @@ void ViewController::drawManualStateTestConsole()
     else
     {
       UpdateImageViewImage(image);
+      m_parserDebugBridge.SetGlobalMatInput(image);
       m_scriptResult.image_ref = m_manualTest.image_file_path;
       m_scriptResult.status = "PENDING";
       m_scriptResult.reason = "image loaded; no runtime result package";
@@ -733,7 +781,50 @@ void ViewController::drawManualStateTestConsole()
   ImGui::SameLine();
   if (ImGui::Button("Clear Inputs"))
   {
+    m_parserDebugBridge.ClearGlobalInputs();
     m_manualTest = ManualTestContext();
+  }
+
+  ImGui::Separator();
+  ImGui::Text("Global Runtime Inputs");
+  const std::vector<std::string> globalNames =
+    ExtractGlobalNames(m_manualTest.editor_text);
+  for (const std::string& name : globalNames)
+  {
+    ImGui::BulletText("global.%s", name.c_str());
+    if (name == "matInput")
+    {
+      ImGui::Text("type: Image");
+      ImGui::Text("source: %s", m_parserDebugBridge.HasGlobalMatInput() ?
+                  "view_image" : "none");
+      ImGui::Text("status: %s", m_parserDebugBridge.HasGlobalMatInput() ?
+                  "initialized" : "not_initialized");
+      ImGui::Text("image: %s", m_manualTest.image_file_path.empty() ? "(none)" :
+                                                 m_manualTest.image_file_path.c_str());
+      ImGui::Text("size: %dx%d", m_parserDebugBridge.GlobalMatInputWidth(),
+                  m_parserDebugBridge.GlobalMatInputHeight());
+    }
+    else
+    {
+      ImGui::Text("type: unresolved");
+      ImGui::Text("source: script_reference");
+      ImGui::Text("status: pending_binding");
+    }
+  }
+  if (ImGui::Button("Initialize global.matInput from View Image"))
+  {
+    cv::Mat globalImage = m_imageViewImage;
+    if (globalImage.empty()) globalImage = cv::imread(m_manualTest.image_file_path);
+    const bool initialized = m_parserDebugBridge.SetGlobalMatInput(globalImage);
+    m_manualTest.debug_action = "Initialize global.matInput";
+    m_manualTest.debug_status = initialized ? "PENDING" : "BLOCKED";
+    m_manualTest.debug_reason = initialized ?
+      "global.matInput initialized as parser Image global_matInput" :
+      "global.matInput image is empty or parser binding failed";
+    m_scriptResult.status = m_manualTest.debug_status;
+    m_scriptResult.reason = m_manualTest.debug_reason;
+    RefreshRuntimeObjectTable("global.matInput",
+      initialized ? "runtime_queried" : "BLOCKED");
   }
 
   if (ImGui::Button("Demo: Debug find_circle_direct_test"))
@@ -754,6 +845,7 @@ void ViewController::drawManualStateTestConsole()
       if (!image.empty())
       {
         UpdateImageViewImage(image);
+        m_parserDebugBridge.SetGlobalMatInput(image);
         m_scriptResult.image_ref = m_manualTest.image_file_path;
       }
       m_manualTest.editor_text = module->text;
@@ -823,7 +915,7 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Text("Script Editor");
   if (InputTextMultilineString("##manual_script_editor",
                                m_manualTest.editor_text,
-                               ImVec2(-1.0f, 190.0f)))
+                               ImVec2(-1.0f, 140.0f)))
   {
     m_manualTest.editor_dirty = true;
     if (m_manualTest.editor_source.empty())
@@ -846,10 +938,12 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
   if (ImGui::Button("Compile"))
   {
+    m_manualTest.debug_action = "Compile";
+    clearos();
     m_manualTest.analyzed_text.clear();
     AnalyzeScript(m_manualTest);
-    const bool compiled = !m_manualTest.editor_text.empty() &&
-      m_imageparser.Compile(m_manualTest.editor_text.c_str());
+    const bool compiled = m_parserDebugBridge.CompileScript(
+      m_manualTest.editor_text);
     m_manualTest.current_line = 0;
     m_manualTest.run_state = compiled ? "runtime_compiled" : "blocked";
     m_scriptResult.status = compiled ? "PENDING" : "BLOCKED";
@@ -858,13 +952,23 @@ void ViewController::drawManualStateTestConsole()
       "parser Compile failed or editor text is empty";
     m_scriptResult.runtime_fillback_status = compiled ? "runtime_objects_queried" :
                                                         "not_started";
-    RefreshRuntimeObjectTable("Compile", compiled ? "runtime_executed" : "BLOCKED");
+    RefreshRuntimeObjectTable("Compile", compiled ? "compiled" : "BLOCKED");
+    int runtimeObjectCount = 0;
+    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+      if (object.exists_in_parser) ++runtimeObjectCount;
+    if (compiled && runtimeObjectCount == 0)
+      m_scriptResult.reason = "compiled_no_runtime_object";
+    m_manualTest.debug_status = m_scriptResult.status;
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output = getoutputstring();
   }
   ImGui::SameLine();
   if (ImGui::Button("Run"))
   {
+    m_manualTest.debug_action = "Run";
+    clearos();
     const bool ran = !m_manualTest.editor_text.empty() &&
-      m_imageparser.Compile(m_manualTest.editor_text.c_str());
+      m_parserDebugBridge.RunScript(m_manualTest.editor_text);
     m_manualTest.run_state = ran ? "runtime_executed" : "blocked";
     m_scriptResult.status = ran ? "PENDING" : "BLOCKED";
     m_scriptResult.reason = ran ?
@@ -873,57 +977,106 @@ void ViewController::drawManualStateTestConsole()
     m_scriptResult.runtime_fillback_status = ran ? "runtime_objects_queried" :
                                                    "not_started";
     RefreshRuntimeObjectTable("Run", ran ? "runtime_executed" : "BLOCKED");
+    m_manualTest.debug_status = m_scriptResult.status;
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output = getoutputstring();
   }
   ImGui::SameLine();
   if (ImGui::Button("Step"))
   {
+    m_manualTest.debug_action = "Step";
+    clearos();
     AnalyzeScript(m_manualTest);
     if (m_manualTest.current_line >= 0 &&
         m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
     {
-      const ScriptLineView& line = m_manualTest.line_views[
+      ScriptLineView& line = m_manualTest.line_views[
         static_cast<std::size_t>(m_manualTest.current_line)];
-      const std::string statement = TrimLine(line.statement);
-      const bool executable = !statement.empty() && statement[0] != '#';
-      const bool stepped = !executable || m_imageparser.Compile(statement.c_str());
+      const bool stepped = m_parserDebugBridge.RunPrefixToLine(
+        m_manualTest.editor_text, line.line_no);
       m_scriptResult.status = stepped ? "PENDING" : "BLOCKED";
       m_scriptResult.reason = stepped ?
-        "parser step applied; runtime objects queried; no PASS inferred" :
-        "parser rejected current statement";
+        "RunPrefixToLine executed; runtime objects queried; no PASS inferred" :
+        "parser rejected script prefix";
       m_manualTest.run_state = stepped ? "runtime_step" : "blocked";
+      line.status = stepped ? "runtime_executed" : "BLOCKED";
+      line.reason = m_scriptResult.reason;
       RefreshRuntimeObjectTable(line.method,
-        stepped && executable ? "runtime_executed" : "PENDING");
+        stepped ? "runtime_executed" : "BLOCKED");
+      m_manualTest.debug_status = m_scriptResult.status;
+      m_manualTest.debug_reason = "line " + std::to_string(line.line_no) +
+        ": " + m_scriptResult.reason;
+      m_manualTest.debug_parser_output = getoutputstring();
       if (stepped) ++m_manualTest.current_line;
+    }
+    else
+    {
+      m_scriptResult.status = "BLOCKED";
+      m_scriptResult.reason = "no valid current line selected";
+      m_manualTest.debug_status = "BLOCKED";
+      m_manualTest.debug_reason = m_scriptResult.reason;
+      m_manualTest.debug_parser_output.clear();
     }
   }
   ImGui::SameLine();
   if (ImGui::Button("Continue"))
   {
-    m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "automatic long-chain continue disabled; use Step or Run";
-    m_manualTest.run_state = "PENDING";
+    m_manualTest.debug_action = "Continue";
+    clearos();
+    AnalyzeScript(m_manualTest);
+    const int endLine = static_cast<int>(m_manualTest.line_views.size());
+    const bool continued = endLine > 0 &&
+      m_parserDebugBridge.RunPrefixToLine(m_manualTest.editor_text, endLine);
+    m_manualTest.current_line = continued ? endLine : m_manualTest.current_line;
+    m_manualTest.run_state = continued ? "runtime_continued" : "blocked";
+    m_scriptResult.status = continued ? "PENDING" : "BLOCKED";
+    m_scriptResult.reason = continued ?
+      "Continue used RunPrefixToLine to end; runtime objects refreshed" :
+      "parser rejected continue prefix";
+    RefreshRuntimeObjectTable("Continue",
+      continued ? "runtime_executed" : "BLOCKED");
+    m_manualTest.debug_status = m_scriptResult.status;
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output = getoutputstring();
   }
   ImGui::SameLine();
   if (ImGui::Button("Stop"))
   {
-    m_imageparser.StopRun();
+    m_manualTest.debug_action = "Stop";
+    m_parserDebugBridge.Stop();
     m_manualTest.stop_requested = true;
     m_manualTest.run_state = "stopped";
     m_scriptResult.status = "PENDING";
     m_scriptResult.reason = "parser runtime stopped by user";
+    m_manualTest.debug_status = "PENDING";
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output.clear();
   }
   ImGui::SameLine();
   if (ImGui::Button("Reset"))
   {
-    m_imageparser.ResetRun();
+    m_manualTest.debug_action = "Reset";
+    m_parserDebugBridge.ResetRuntime();
     m_manualTest.analyzed_text.clear();
     AnalyzeScript(m_manualTest);
     m_manualTest.current_line = 0;
     m_manualTest.runtime_objects.clear();
+    const cv::Mat viewImage = cv::imread(m_manualTest.image_file_path);
+    if (!viewImage.empty())
+    {
+      UpdateImageViewImage(viewImage);
+      m_scriptResult.image_ref = m_manualTest.image_file_path;
+    }
+    else m_scriptResult.image_ref.clear();
     m_manualTest.run_state = "idle";
     m_scriptResult.status = "PENDING";
     m_scriptResult.reason = "runtime debug state reset; source preserved";
     m_scriptResult.runtime_fillback_status = "not_started";
+    m_semanticFlowGraph.SetRuntimeDebugSummary(
+      "PENDING", "PENDING", 0, m_scriptResult.reason);
+    m_manualTest.debug_status = "PENDING";
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output.clear();
   }
   if (ImGui::Button("Run File (runtime bridge)"))
     m_scriptResult = RunCxScript(m_manualTest.script_file_path);
@@ -937,8 +1090,28 @@ void ViewController::drawManualStateTestConsole()
     m_scriptResult.status = "PENDING";
     m_scriptResult.reason = "result cleared";
     m_scriptResult.runtime_fillback_status = "not_started";
+    m_manualTest.debug_action = "Clear Result";
+    m_manualTest.debug_status = "PENDING";
+    m_manualTest.debug_reason = m_scriptResult.reason;
+    m_manualTest.debug_parser_output.clear();
   }
 
+  ImGui::Separator();
+  ImGui::Text("Last Debug Result");
+  ImGui::Text("action: %s | status: %s", m_manualTest.debug_action.c_str(),
+              m_manualTest.debug_status.c_str());
+  ImGui::TextWrapped("reason: %s", m_manualTest.debug_reason.c_str());
+  if (!m_manualTest.debug_parser_output.empty())
+  {
+    ImGui::Text("parser output:");
+    ImGui::BeginChild("debug_parser_output", ImVec2(0.0f, 72.0f), true);
+    ImGui::TextUnformatted(m_manualTest.debug_parser_output.c_str());
+    ImGui::EndChild();
+  }
+
+  if (m_manualTest.current_line >= static_cast<int>(m_manualTest.line_views.size()))
+    m_manualTest.current_line = m_manualTest.line_views.empty() ? 0 :
+      static_cast<int>(m_manualTest.line_views.size()) - 1;
   ImGui::Separator();
   ImGui::Text("CxScript Line View");
   ImGui::Text("trace status: %s", m_manualTest.trace_status.c_str());
@@ -953,7 +1126,7 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Text("highlight line: %d", m_manualTest.line_views.empty() ? 0 :
               m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)].line_no);
 
-  ImGui::BeginChild("cxscript_line_view", ImVec2(0.0f, 220.0f), true);
+  ImGui::BeginChild("cxscript_line_view", ImVec2(0.0f, 150.0f), true);
   for (std::size_t i = 0; i < m_manualTest.line_views.size(); ++i)
   {
     const ScriptLineView& line = m_manualTest.line_views[i];
@@ -985,23 +1158,90 @@ void ViewController::drawManualStateTestConsole()
   }
 
   ImGui::Separator();
-  ImGui::Text("Variable Snapshot (%d)", static_cast<int>(m_manualTest.variable_views.size()));
-  for (const ScriptVariableView& variable : m_manualTest.variable_views)
-    ImGui::BulletText("%s %s = %s", variable.type.c_str(), variable.name.c_str(), variable.value.c_str());
+  const auto drawVariableList =
+    [&](const char* title, std::vector<ScriptVariableView>& variables)
+  {
+    ImGui::Text("%s (%d)", title, static_cast<int>(variables.size()));
+    ImGui::PushID(title);
+    for (std::size_t index = 0; index < variables.size(); ++index)
+    {
+      ScriptVariableView& variable = variables[index];
+      ImGui::PushID(static_cast<int>(index));
+      ImGui::BulletText("%s %s = %s", variable.type.c_str(),
+                        variable.name.c_str(), variable.value.c_str());
+      ImGui::SameLine();
+      ImGui::TextDisabled("[%s]", variable.status.c_str());
+      if (variable.type == "Image")
+      {
+        if (variable.image_path.empty())
+          variable.image_path = m_manualTest.image_file_path;
+        ImGui::SetNextItemWidth(420.0f);
+        InputTextString("Image path", variable.image_path);
+        ImGui::SameLine();
+        if (ImGui::Button("Initialize"))
+        {
+          const cv::Mat image = cv::imread(variable.image_path);
+          if (image.empty())
+          {
+            variable.image_initialized = false;
+            variable.status = "load_failed";
+            variable.value = "uninitialized";
+            m_scriptResult.status = "FAIL";
+            m_scriptResult.reason =
+              variable.name + ": image file not found or unreadable";
+          }
+          else
+          {
+            UpdateImageViewImage(image);
+            m_manualTest.image_file_path = variable.image_path;
+            bool runtimeBound = false;
+            if (variable.name == "global.matInput")
+              runtimeBound = m_parserDebugBridge.SetGlobalMatInput(image);
+            else
+            {
+              Image* runtimeImage = QueryParserImage(variable.name);
+              if (runtimeImage != nullptr)
+              {
+                runtimeImage->copyFromMat(image);
+                runtimeBound = true;
+              }
+            }
+            variable.image_initialized = true;
+            variable.status = runtimeBound ? "initialized" :
+                                             "ui_initialized_runtime_binding_pending";
+            variable.value = variable.image_path;
+            m_scriptResult.image_ref = variable.name;
+            m_scriptResult.status = "PENDING";
+            m_scriptResult.reason = runtimeBound ?
+              variable.name + ": image initialized and bound" :
+              variable.name +
+              ": image initialized in variable list; parser binding pending";
+          }
+        }
+      }
+      ImGui::PopID();
+    }
+    ImGui::PopID();
+  };
+  drawVariableList("Global Variables", m_manualTest.global_variable_views);
+  ImGui::Spacing();
+  drawVariableList("Local Variables", m_manualTest.variable_views);
 
   ImGui::Separator();
   ImGui::Text("Runtime Object Table");
-  if (ImGui::Button("Refresh Runtime Objects"))
-    RefreshRuntimeObjectTable("Query", "runtime_queried");
   for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
   {
     ImGui::BulletText("%s %s", object.type.c_str(), object.name.c_str());
+    ImGui::Text("declared_line: %d", object.declared_line);
     ImGui::Text("exists_in_parser: %s", object.exists_in_parser ? "true" : "false");
+    ImGui::Text("runtime_state: %s", object.runtime_state.c_str());
     ImGui::Text("last_runtime_status: %s", object.last_runtime_status.c_str());
     ImGui::Text("last_method: %s", object.last_method.empty() ? "(none)" :
                                                    object.last_method.c_str());
-    ImGui::TextWrapped("display_summary: %s", object.display_summary.c_str());
-    ImGui::Text("source: %s", object.stale ? "stale_runtime" : "runtime_object");
+    ImGui::Text("last_update_line: %d", object.last_update_line);
+    ImGui::TextWrapped("value_summary: %s", object.display_summary.c_str());
+    ImGui::Text("visualizable: %s", object.visualizable ? "true" : "false");
+    ImGui::Text("visual_source: %s", object.visual_source.c_str());
     ImGui::Text("stale: %s", object.stale ? "true" : "false");
   }
   ImGui::Text("Runtime Variables");

@@ -181,6 +181,7 @@ std::string formatNumber(double dvalue)
 
 ViewController::ViewController()
 {
+    m_parserDebugBridge.Bind(&m_imageparser);
     mouseDownPT.SetX(0);
     mouseDownPT.SetY(0);
 
@@ -616,10 +617,15 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
       return result;
     }
   }
-  result.status = "PENDING";
-  result.reason = "cxparser_ext_cxscript_cli runtime not connected to ViewController";
-  result.log_lines.push_back("Script exists and is inside an allowed runtime root.");
-  result.log_lines.push_back("Waiting for real runtime result package fillback.");
+  const bool ran = m_parserDebugBridge.RunScript(scriptText);
+  result.status = ran ? "PENDING" : "BLOCKED";
+  result.reason = ran ?
+    "parser runtime executed; runtime objects require query; no PASS inferred" :
+    "parser runtime rejected script";
+  result.runtime_fillback_status = ran ? "runtime_objects_queried" : "not_started";
+  result.log_lines.push_back(ran ?
+    "Script executed through ParserDebugBridge." :
+    "ParserDebugBridge execution failed.");
   return result;
 }
 
@@ -683,6 +689,34 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::SetNextWindowPos(ImVec2(middleX, margin), layoutCondition);
   ImGui::SetNextWindowSize(ImVec2(middleWidth, contentHeight), layoutCondition);
   ImGui::Begin("Image View", nullptr, panelFlags);
+  const bool parserImage = m_scriptResult.image_ref.rfind("runtime_object:", 0) == 0;
+  const bool baseImageValid = m_imageViewTexture != 0 && !m_imageViewImage.empty();
+  const char* baseImageSource = parserImage ? "parser_image" :
+    (baseImageValid ? "view_image" : "none");
+  ImGui::Text("Layer 0 Base Image");
+  ImGui::Text("source: %s | name: %s | %s", baseImageSource,
+    parserImage ? m_scriptResult.image_ref.c_str() :
+      (baseImageValid ? m_manualTest.image_file_path.c_str() : "(none)"),
+    baseImageValid ? "valid" : "invalid");
+  int runtimeVisualCount = 0;
+  std::string runtimeVisualNames;
+  for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+  {
+    if (!object.exists_in_parser || object.stale || !object.visualizable) continue;
+    ++runtimeVisualCount;
+    if (!runtimeVisualNames.empty()) runtimeVisualNames += ", ";
+    runtimeVisualNames += object.name;
+  }
+  ImGui::Text("Layer 1 Runtime Object");
+  ImGui::TextWrapped("source: parser runtime | count: %d | objects: %s",
+    runtimeVisualCount, runtimeVisualNames.empty() ? "(none)" :
+                                                  runtimeVisualNames.c_str());
+  ImGui::Text("Layer 2 Manual Element");
+  ImGui::Text("source: manual tools | count: %d | not runtime result",
+              static_cast<int>(m_annotationLayer.Elements().size()));
+  ImGui::Text("Layer 3 Source Preview");
+  ImGui::Text("source: static source analysis | %s | not_executed",
+              m_showSourcePreviewOverlay ? "enabled" : "disabled (default)");
   ImGui::Checkbox("Source Preview Overlay (not executed)",
                   &m_showSourcePreviewOverlay);
   ImGui::TextDisabled("Legacy Demo Overlay");
@@ -1840,6 +1874,9 @@ void ViewController::mainloop()
              else if (flowAction.type == SemanticFlowActionType::RunBoundScript)
              {
                  const ScriptResult flowResult = RunCxScript(flowAction.script_path);
+                 m_scriptResult = flowResult;
+                 RefreshRuntimeObjectTable("Flow Run",
+                   flowResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
                  m_semanticFlowGraph.ApplyScriptResult(flowAction.node_index,
                                                        flowResult.status,
                                                        flowResult.result_ref,

@@ -26,6 +26,8 @@ struct ScriptVariableView
   std::string value;
   int declared_line = 0;
   std::string status = "observed_source";
+  std::string image_path;
+  bool image_initialized = false;
 };
 
 struct ScriptObjectView
@@ -43,10 +45,15 @@ struct RuntimeObjectView
 {
   std::string name;
   std::string type;
+  int declared_line = 0;
   bool exists_in_parser = false;
   std::string last_runtime_status = "PENDING";
+  std::string runtime_state = "PENDING";
   std::string last_method;
+  int last_update_line = 0;
   std::string display_summary;
+  bool visualizable = false;
+  std::string visual_source = "stale_runtime";
   bool stale = true;
   bool has_circle = false;
   float circle_cx = 0.0f;
@@ -72,11 +79,19 @@ struct ManualTestContext
   std::string trace_status = "PENDING";
   std::string trace_reason = "not executed";
   std::string run_state = "idle";
+  std::string debug_action = "none";
+  std::string debug_status = "PENDING";
+  std::string debug_reason = "not started";
+  std::string debug_parser_output;
   std::string user_expected;
   std::string codex_task;
   std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
   int current_line = 0;
   std::vector<ScriptLineView> line_views;
+  std::vector<ScriptVariableView> global_variable_views = {
+    {"Image", "global.matInput", "uninitialized", 0, "not_initialized",
+     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg", false}
+  };
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   std::vector<RuntimeObjectView> runtime_objects;

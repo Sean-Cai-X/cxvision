@@ -10,6 +10,10 @@ class SemanticFlowGraph
 public:
   void Initialize(const std::string& repository_root);
   SemanticFlowAction Draw();
+  void SetRuntimeDebugSummary(const std::string& doutputValue,
+                              const std::string& currentStatus,
+                              int runtimeObjectCount,
+                              const std::string& reason);
   void ApplyScriptResult(int node_index,
                          const std::string& status,
                          const std::string& result_ref,
@@ -38,6 +42,10 @@ private:
   std::string m_lastLog;
   std::string m_sharedBoundNodeId;
   std::string m_sharedBoundScriptPath;
+  std::string m_runtimeDoutputValue = "PENDING";
+  std::string m_runtimeCurrentStatus = "PENDING";
+  int m_runtimeObjectCount = 0;
+  std::string m_lastRuntimeReason = "not queried";
   SemanticFlow m_flow;
   bool m_open = true;
 };

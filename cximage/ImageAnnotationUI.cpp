@@ -377,7 +377,7 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 void ViewController::drawImageEvidencePanels()
 {
   ImGui::SetNextWindowPos(ImVec2(350, 40), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(620, 720), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(520, 600), ImGuiCond_Once);
   if (!ImGui::Begin("Image Evidence / Annotation Tools"))
   {
     ImGui::End();
@@ -575,15 +575,15 @@ void ViewController::drawImageEvidencePanels()
       if (ImGui::Button("Apply To Parser"))
       {
         if (!QueryParserObjectExists("Findcircle", "afindcircle0"))
-          m_imageparser.Compile("Findcircle afindcircle0;");
-        const bool applied = m_imageparser.Compile(
-          selected->generated_statement.c_str());
-        RefreshRuntimeObjectTable("setcircle",
-          applied ? "runtime_executed" : "BLOCKED");
+          m_parserDebugBridge.ApplyStatement("Findcircle afindcircle0;");
+        const bool applied = m_parserDebugBridge.ApplyStatement(
+          selected->generated_statement);
         m_scriptResult.status = applied ? "PENDING" : "BLOCKED";
         m_scriptResult.reason = applied ?
           "manual_element applied to parser; runtime objects refreshed" :
           "parser rejected manual circle statement";
+        RefreshRuntimeObjectTable("setcircle",
+          applied ? "runtime_executed" : "BLOCKED");
         m_annotationStatus = m_scriptResult.reason;
       }
     }
