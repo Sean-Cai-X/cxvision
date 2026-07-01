@@ -1,3 +1,5 @@
+int m_isetcircle = 0;
+
 Image m_occtimage;
 Findcircle afindcircle0;
 Findcircle afindcircle1;

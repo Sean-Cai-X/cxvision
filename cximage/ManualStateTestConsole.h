@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 struct ScriptLineView
 {
@@ -95,6 +96,7 @@ struct ManualTestContext
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   std::vector<RuntimeObjectView> runtime_objects;
+  std::unordered_map<std::string, int> runtime_int_vars;
   std::string runtime_current_status = "PENDING";
   std::string runtime_current_node;
   std::string runtime_current_connect;

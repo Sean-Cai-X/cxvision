@@ -1,3 +1,4 @@
+﻿#include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include <glad/glad.h>
 
@@ -824,11 +825,74 @@ void ViewController::drawScriptAcceptancePanels()
                            true);
     drawList->AddImage((ImTextureID)(uint64_t)m_imageViewTexture,
                        imagePos, imageEnd);
+
     m_annotationImagePosX = imagePos.x;
     m_annotationImagePosY = imagePos.y;
     m_annotationImageWidth = imageSize.x;
     m_annotationImageHeight = imageSize.y;
+
+    // Layer 1: Runtime Object Layer.
+    // Only draw real debug-runtime objects.
+    // Do not draw source-analyzed preview here.
+    // Draw this after base image, before manual annotation elements.
+    if (!m_imageViewImage.empty() &&
+        m_imageViewImage.cols > 0 &&
+        m_imageViewImage.rows > 0)
+    {
+        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        {
+            if (object.type != "Findcircle")
+                continue;
+
+            if (!object.visualizable || !object.has_circle)
+                continue;
+
+            if (object.stale)
+                continue;
+
+            const float sx = imageSize.x / static_cast<float>(m_imageViewImage.cols);
+            const float sy = imageSize.y / static_cast<float>(m_imageViewImage.rows);
+            const float sr = (sx + sy) * 0.5f;
+
+            const ImVec2 center(
+                imagePos.x + object.circle_cx * sx,
+                imagePos.y + object.circle_cy * sy
+            );
+
+            const float radius = object.circle_radius * sr;
+
+            drawList->AddCircle(
+                center,
+                radius,
+                IM_COL32(80, 255, 170, 255),
+                96,
+                2.0f
+            );
+
+            // 可选：如果 inner radius 有意义，也可以画内圈
+            if (object.circle_inner > 0.0f)
+            {
+                drawList->AddCircle(
+                    center,
+                    object.circle_inner * sr,
+                    IM_COL32(80, 255, 170, 180),
+                    96,
+                    1.0f
+                );
+            }
+
+            drawList->AddText(
+                ImVec2(center.x + 6.0f, center.y + 6.0f),
+                IM_COL32(80, 255, 170, 255),
+                object.name.c_str()
+            );
+        }
+    }
+
+    // Layer 2: Manual Element / Annotation Tool Layer.
+    // Manual tools are not runtime result.
     drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
+
     if (m_showTestPoints)
     {
       const ImU32 color = IM_COL32(255, 64, 64, 255);

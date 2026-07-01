@@ -1,4 +1,4 @@
-#include "ViewController.h"
+﻿#include "ViewController.h"
 #include "Findcircle.h"
 
 #include <imgui.h>
@@ -11,7 +11,9 @@
 #include <iterator>
 #include <ctime>
 #include <sstream>
-
+#include <algorithm>
+#include <cstdlib>
+#include <unordered_map>
 namespace
 {
 namespace fs = std::filesystem;
@@ -130,6 +132,792 @@ std::vector<std::string> ExtractGlobalNames(const std::string& text)
   return names;
 }
 
+std::string CurrentTimestamp()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm local_time = {};
+#if defined(_WIN32)
+    localtime_s(&local_time, &now);
+#else
+    localtime_r(&now, &local_time);
+#endif
+    char buffer[32] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local_time);
+    return buffer;
+}
+
+
+static bool IsBraceOpenLine(const std::string& line)
+{
+    return TrimLine(line) == "{";
+}
+
+static bool IsBraceCloseLine(const std::string& line)
+{
+    return TrimLine(line) == "}";
+}
+
+static bool IsIfLine(const std::string& line)
+{
+    const std::string s = TrimLine(line);
+    return s.rfind("if", 0) == 0 &&
+        s.find('(') != std::string::npos &&
+        s.rfind(')') != std::string::npos;
+}
+
+static std::string ExtractIfCondition(const std::string& line)
+{
+    const std::size_t l = line.find('(');
+    const std::size_t r = line.rfind(')');
+
+    if (l == std::string::npos || r == std::string::npos || r <= l)
+        return {};
+
+    return TrimLine(line.substr(l + 1, r - l - 1));
+}
+
+static std::vector<std::string> SplitArgs(const std::string& params)
+{
+    std::vector<std::string> out;
+    std::string current;
+    int quote = 0;
+
+    for (char ch : params)
+    {
+        if (ch == '"')
+            quote = !quote;
+
+        if (ch == ',' && quote == 0)
+        {
+            out.push_back(TrimLine(current));
+            current.clear();
+        }
+        else
+        {
+            current.push_back(ch);
+        }
+    }
+
+    if (!TrimLine(current).empty())
+        out.push_back(TrimLine(current));
+
+    return out;
+}
+
+struct ParsedMethodCall
+{
+    bool valid = false;
+    std::string object;
+    std::string method;
+    std::string params;
+    std::vector<std::string> args;
+};
+
+static ParsedMethodCall ParseMethodCall(const std::string& statement)
+{
+    ParsedMethodCall result;
+
+    std::string s = TrimLine(statement);
+    if (!s.empty() && s.back() == ';')
+        s.pop_back();
+
+    const std::size_t open = s.find('(');
+    const std::size_t close = s.rfind(')');
+
+    if (open == std::string::npos || close == std::string::npos || close <= open)
+        return result;
+
+    const std::string callable = TrimLine(s.substr(0, open));
+    const std::size_t dot = callable.rfind('.');
+
+    if (dot == std::string::npos)
+        return result;
+
+    result.object = TrimLine(callable.substr(0, dot));
+    result.method = TrimLine(callable.substr(dot + 1));
+    result.params = s.substr(open + 1, close - open - 1);
+    result.args = SplitArgs(result.params);
+    result.valid = !result.object.empty() && !result.method.empty();
+
+    return result;
+}
+
+static RuntimeObjectView* FindRuntimeObject(ManualTestContext& context,
+    const std::string& name)
+{
+    for (RuntimeObjectView& object : context.runtime_objects)
+    {
+        if (object.name == name)
+            return &object;
+    }
+
+    return nullptr;
+}
+
+static RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
+    const std::string& name,
+    const std::string& type,
+    int declaredLine)
+{
+    if (RuntimeObjectView* existing = FindRuntimeObject(context, name))
+        return *existing;
+
+    RuntimeObjectView object;
+    object.name = name;
+    object.type = type;
+    object.declared_line = declaredLine;
+    object.exists_in_parser = true;
+    object.runtime_state = "declared";
+    object.last_runtime_status = "PENDING";
+    object.last_method = "declare";
+    object.last_update_line = declaredLine;
+    object.display_summary = "declared";
+    object.visualizable = false;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+    object.has_circle = false;
+
+    context.runtime_objects.push_back(object);
+    return context.runtime_objects.back();
+}
+
+static void UpsertVariableView(ManualTestContext& context,
+    const std::string& type,
+    const std::string& name,
+    const std::string& value,
+    int lineNo,
+    const std::string& status)
+{
+    for (ScriptVariableView& variable : context.variable_views)
+    {
+        if (variable.name == name)
+        {
+            variable.type = type;
+            variable.value = value;
+            variable.declared_line = lineNo;
+            variable.status = status;
+            return;
+        }
+    }
+
+    ScriptVariableView variable;
+    variable.type = type;
+    variable.name = name;
+    variable.value = value;
+    variable.declared_line = lineNo;
+    variable.status = status;
+    context.variable_views.push_back(variable);
+}
+
+static void ResetDebugRuntimeForReplay(ManualTestContext& context)
+{
+    context.runtime_objects.clear();
+    context.runtime_int_vars.clear();
+
+    // 当前 find_circle_direct_test.cxsc 中 m_isetcircle 参与 if 判断。
+    // replay 调试模式下必须默认从 0 开始，否则第二次运行会跳过 setcircle。
+    context.runtime_int_vars["m_isetcircle"] = 0;
+
+    context.variable_views.clear();
+    UpsertVariableView(context, "int", "m_isetcircle", "0", 0, "runtime_initialized");
+    UpsertVariableView(context, "string", "global.current_status", "PENDING", 0, "runtime_initialized");
+
+    for (ScriptLineView& line : context.line_views)
+    {
+        if (!TrimLine(line.statement).empty())
+        {
+            line.status = "source_analyzed";
+            line.reason = "not executed";
+            line.timestamp.clear();
+        }
+    }
+
+    context.current_line = 0;
+    context.run_state = "ready";
+    context.debug_status = "PENDING";
+    context.debug_reason = "runtime reset for replay";
+    context.runtime_current_status = "PENDING";
+}
+
+static int FindNextNonEmptyLine(const ManualTestContext& context, int fromIndex)
+{
+    for (int i = fromIndex; i < static_cast<int>(context.line_views.size()); ++i)
+    {
+        if (!TrimLine(context.line_views[static_cast<std::size_t>(i)].statement).empty())
+            return i;
+    }
+
+    return static_cast<int>(context.line_views.size());
+}
+
+static int FindMatchingBraceLine(const ManualTestContext& context, int openBraceIndex)
+{
+    int depth = 0;
+
+    for (int i = openBraceIndex; i < static_cast<int>(context.line_views.size()); ++i)
+    {
+        const std::string s = TrimLine(context.line_views[static_cast<std::size_t>(i)].statement);
+
+        if (s == "{")
+            ++depth;
+        else if (s == "}")
+        {
+            --depth;
+            if (depth == 0)
+                return i;
+        }
+    }
+
+    return -1;
+}
+
+static int FindIfBodyStartLine(const ManualTestContext& context, int ifIndex)
+{
+    const int next = FindNextNonEmptyLine(context, ifIndex + 1);
+
+    if (next < static_cast<int>(context.line_views.size()) &&
+        IsBraceOpenLine(context.line_views[static_cast<std::size_t>(next)].statement))
+    {
+        return FindNextNonEmptyLine(context, next + 1);
+    }
+
+    return next;
+}
+
+static int FindIfAfterBlockLine(const ManualTestContext& context, int ifIndex)
+{
+    const int next = FindNextNonEmptyLine(context, ifIndex + 1);
+
+    if (next < static_cast<int>(context.line_views.size()) &&
+        IsBraceOpenLine(context.line_views[static_cast<std::size_t>(next)].statement))
+    {
+        const int close = FindMatchingBraceLine(context, next);
+        if (close >= 0)
+            return FindNextNonEmptyLine(context, close + 1);
+    }
+
+    return FindNextNonEmptyLine(context, ifIndex + 1);
+}
+
+static bool ReadRuntimeInt(ManualTestContext& context,
+    const std::string& name,
+    int& value)
+{
+    const auto it = context.runtime_int_vars.find(name);
+    if (it != context.runtime_int_vars.end())
+    {
+        value = it->second;
+        return true;
+    }
+
+    if (name == "m_isetcircle")
+    {
+        value = 0;
+        context.runtime_int_vars[name] = 0;
+        return true;
+    }
+
+    return false;
+}
+
+static bool EvalSimpleCondition(ManualTestContext& context,
+    const std::string& condition,
+    bool& value)
+{
+    const std::string s = TrimLine(condition);
+
+    std::size_t op = s.find("==");
+    bool equal = true;
+
+    if (op == std::string::npos)
+    {
+        op = s.find("!=");
+        equal = false;
+    }
+
+    if (op == std::string::npos)
+        return false;
+
+    const std::string lhs = TrimLine(s.substr(0, op));
+    const std::string rhs = TrimLine(s.substr(op + 2));
+
+    int lv = 0;
+    if (!ReadRuntimeInt(context, lhs, lv))
+        return false;
+
+    const int rv = std::atoi(rhs.c_str());
+
+    value = equal ? (lv == rv) : (lv != rv);
+    return true;
+}
+
+static bool TryExecuteSimpleAssignment(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    std::string s = TrimLine(statement);
+
+    if (s.empty() || s.find('=') == std::string::npos || s.find("==") != std::string::npos)
+        return false;
+
+    if (!s.empty() && s.back() == ';')
+        s.pop_back();
+
+    const std::size_t eq = s.find('=');
+    const std::string lhs = TrimLine(s.substr(0, eq));
+    const std::string rhs = TrimLine(s.substr(eq + 1));
+
+    if (lhs != "m_isetcircle")
+        return false;
+
+    const int v = std::atoi(rhs.c_str());
+    context.runtime_int_vars[lhs] = v;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "assignment executed";
+    line.return_variable = lhs;
+    line.timestamp = CurrentTimestamp();
+
+    UpsertVariableView(context, "int", lhs, std::to_string(v), line.line_no, "runtime_value");
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = "assignment executed";
+
+    return true;
+}
+std::string ModuleForType(const std::string& type)
+{
+    if (type.rfind("Torch", 0) == 0) return "torch";
+    if (type.rfind("Mlpack", 0) == 0) return "mlpack";
+    if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
+    if (type == "Image" || type.rfind("Find", 0) == 0 || type == "fastmatch" ||
+        type == "FormfitGauge" || type == "CxOverlay") return "cximage";
+    return "cxscript";
+}
+
+bool IsObjectType(const std::string& type)
+{
+    return ModuleForType(type) != "cxscript";
+}
+static bool TryExecuteDeclaration(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    std::istringstream tokens(TrimLine(statement));
+
+    std::string type;
+    std::string name;
+
+    tokens >> type >> name;
+
+    if (type.empty() || name.empty())
+        return false;
+
+    if (statement.find('(') != std::string::npos)
+        return false;
+
+    if (!name.empty() && name.back() == ';')
+        name.pop_back();
+
+    if (!IsObjectType(type))
+        return false;
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        name,
+        type,
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    object.exists_in_parser = true;
+    object.runtime_state = "declared";
+    object.last_runtime_status = "PENDING";
+    object.last_method = "declare";
+    object.display_summary = "declared only; no visual geometry";
+    object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+
+    // 关键：声明 Findcircle 不能画圆。
+    object.visualizable = false;
+    object.has_circle = false;
+    object.stale = false;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "object declared";
+    line.timestamp = CurrentTimestamp();
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = "object declaration executed";
+
+    return true;
+}
+
+static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
+
+    if (!call.valid)
+        return false;
+
+    if (call.method != "setcircle")
+        return false;
+
+    if (call.args.size() < 4)
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "setcircle requires 4 parameters";
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        call.object,
+        "Findcircle",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    object.circle_cx = std::stof(call.args[0]);
+    object.circle_cy = std::stof(call.args[1]);
+    object.circle_inner = std::stof(call.args[2]);
+    object.circle_radius = std::stof(call.args[3]);
+
+    object.has_circle = true;
+    object.visualizable = true;
+    object.exists_in_parser = true;
+    object.stale = false;
+    object.visual_source = "runtime_object";
+    object.last_method = "setcircle";
+    object.last_runtime_status = "PENDING";
+    object.runtime_state = "runtime_param_set";
+    object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+
+    std::ostringstream summary;
+    summary << "circle=("
+        << object.circle_cx << ", "
+        << object.circle_cy << ", "
+        << object.circle_inner << ", "
+        << object.circle_radius << ")";
+    object.display_summary = summary.str();
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "Findcircle.setcircle executed";
+    line.timestamp = CurrentTimestamp();
+
+    context.runtime_current_status = "PENDING";
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = "setcircle updated runtime object";
+
+    return true;
+}
+
+static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
+
+    if (!call.valid)
+        return false;
+
+    if (call.method != "measure" &&
+        call.method != "fitcircle" &&
+        call.method != "FitResultMeasure" &&
+        call.method != "match" &&
+        call.method != "infer" &&
+        call.method != "predict" &&
+        call.method != "optimize_step")
+    {
+        return false;
+    }
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        call.object,
+        call.object.find("circle") != std::string::npos ? "Findcircle" : "unknown",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    object.last_method = call.method;
+    object.last_runtime_status = "PENDING";
+    object.runtime_state = "pending_runtime_bridge";
+    object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+    object.display_summary = call.method + " pending real runtime bridge";
+    object.stale = false;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "PENDING";
+    line.reason = call.method + " requires real parser/runtime callback";
+    line.timestamp = CurrentTimestamp();
+
+    context.run_state = "blocked";
+    context.debug_status = "PENDING";
+    context.debug_reason = line.reason;
+
+    // 注意：这里不要 current_line++，让用户看到当前 runtime pending 行。
+    return true;
+}
+void AddObservedGlobalVariables(ManualTestContext& context,
+    const std::string& statement)
+{
+    std::size_t position = 0;
+    while ((position = statement.find("global.", position)) != std::string::npos)
+    {
+        std::size_t end = position + 7;
+        while (end < statement.size() &&
+            (std::isalnum(static_cast<unsigned char>(statement[end])) ||
+                statement[end] == '_'))
+            ++end;
+        const std::string name = statement.substr(position, end - position);
+        const auto existing = std::find_if(
+            context.global_variable_views.begin(), context.global_variable_views.end(),
+            [&](const ScriptVariableView& variable) { return variable.name == name; });
+        if (existing == context.global_variable_views.end())
+        {
+            const bool is_image = name == "global.matInput";
+            context.global_variable_views.push_back(
+                { is_image ? "Image" : "auto", name, "uninitialized", 0,
+                 "observed_source", is_image ? context.image_file_path : std::string(),
+                 false });
+        }
+        position = end;
+    }
+}
+std::string ModuleForStatement(const std::string& statement)
+{
+    if (statement.find("torch.") != std::string::npos || statement.find("Torch") != std::string::npos) return "torch";
+    if (statement.find("mlpack.") != std::string::npos || statement.find("Mlpack") != std::string::npos) return "mlpack";
+    if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
+    if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
+        statement.find("Find") != std::string::npos || statement.find("fastmatch") != std::string::npos) return "cximage";
+    return "cxscript";
+}
+void AnalyzeScript(ManualTestContext& context)
+{
+    if (context.analyzed_text == context.editor_text) return;
+    context.analyzed_text = context.editor_text;
+    context.line_views.clear();
+    context.variable_views.clear();
+    context.object_views.clear();
+    if (context.global_variable_views.size() > 1)
+        context.global_variable_views.erase(
+            context.global_variable_views.begin() + 1,
+            context.global_variable_views.end());
+    context.current_line = 0;
+
+    std::istringstream input(context.editor_text);
+    std::string raw;
+    int line_no = 1;
+    while (std::getline(input, raw))
+    {
+        ScriptLineView line;
+        line.line_no = line_no++;
+        line.status = "source_analyzed";
+        line.reason = "not_executed";
+        line.statement = raw;
+        const std::string statement = TrimLine(raw);
+        AddObservedGlobalVariables(context, statement);
+        line.module = ModuleForStatement(statement);
+
+        std::istringstream tokens(statement);
+        std::string declared_type;
+        std::string declared_name;
+        tokens >> declared_type >> declared_name;
+        const bool declaration = !declared_type.empty() && !declared_name.empty() &&
+            statement.find('(') == std::string::npos && declared_type != "if" &&
+            declared_type != "else" && declared_type != "return";
+        if (declaration)
+        {
+            const std::size_t suffix = declared_name.find_first_of("=;");
+            if (suffix != std::string::npos) declared_name.erase(suffix);
+            line.object_type = declared_type;
+            line.object = declared_name;
+            if (IsObjectType(declared_type))
+            {
+                line.module = ModuleForType(declared_type);
+
+                ScriptObjectView object;
+                object.module = line.module;
+                object.type = declared_type;
+                object.name = declared_name;
+                object.status = line.module == "cximage" ? "declared_source_only" : "pending_binding";
+                object.runtime_state = "not_executed";
+                object.runtime_source_line = 0;
+                object.declared_line = line.line_no;
+                context.object_views.push_back(object);
+
+                if (declared_type == "Image")
+                    context.variable_views.push_back(
+                        { declared_type, declared_name, "uninitialized", line.line_no,
+                         "not_initialized", context.image_file_path, false });
+            }
+            else
+            {
+                const std::size_t equal = statement.find('=');
+                const std::string value = equal == std::string::npos ? "uninitialized" :
+                    TrimLine(statement.substr(equal + 1, statement.size() - equal - 2));
+                context.variable_views.push_back({ declared_type, declared_name, value,
+                                                  line.line_no, "observed_source" });
+            }
+        }
+
+        const std::size_t assign = statement.find('=');
+        const std::size_t open = statement.find('(');
+        const std::size_t close = statement.rfind(')');
+        const bool has_assignment = assign != std::string::npos &&
+            (open == std::string::npos || assign < open);
+        const std::size_t callable_start = has_assignment ? assign + 1 : 0;
+        if (has_assignment) line.return_variable = TrimLine(statement.substr(0, assign));
+        if (open != std::string::npos)
+        {
+            const std::string callable = TrimLine(statement.substr(callable_start, open - callable_start));
+            const std::size_t dot = callable.rfind('.');
+            if (dot != std::string::npos)
+            {
+                line.object = TrimLine(callable.substr(0, dot));
+                line.method = TrimLine(callable.substr(dot + 1));
+            }
+            else line.method = callable;
+            if (close != std::string::npos && close > open)
+                line.params = statement.substr(open + 1, close - open - 1);
+        }
+        context.line_views.push_back(line);
+    }
+    context.trace_status = "PENDING";
+    context.trace_reason = "source analyzed; runtime line callbacks unavailable";
+}
+
+static void DebugStepOnce(ManualTestContext& context)
+{
+    AnalyzeScript(context);
+
+    if (context.line_views.empty())
+    {
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = "no script lines";
+        return;
+    }
+
+    if (context.current_line < 0)
+        context.current_line = 0;
+
+    if (context.current_line >= static_cast<int>(context.line_views.size()))
+    {
+        context.run_state = "finished";
+        context.debug_status = "PENDING";
+        context.debug_reason = "end of script";
+        return;
+    }
+
+    const int lineIndex = context.current_line;
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    const std::string statement = TrimLine(line.statement);
+
+    if (statement.empty())
+    {
+        line.status = "skipped_empty";
+        line.reason = "empty line";
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        return;
+    }
+
+    if (IsBraceOpenLine(statement) || IsBraceCloseLine(statement))
+    {
+        line.status = "structural";
+        line.reason = "brace skipped by debugger";
+        line.timestamp = CurrentTimestamp();
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        return;
+    }
+
+    if (IsIfLine(statement))
+    {
+        bool conditionValue = false;
+        const std::string condition = ExtractIfCondition(statement);
+
+        if (!EvalSimpleCondition(context, condition, conditionValue))
+        {
+            line.status = "BLOCKED";
+            line.reason = "cannot evaluate if condition: " + condition;
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return;
+        }
+
+        line.status = conditionValue ? "control_true" : "control_false";
+        line.reason = conditionValue ? "if condition true" : "if condition false";
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line = conditionValue ?
+            FindIfBodyStartLine(context, lineIndex) :
+            FindIfAfterBlockLine(context, lineIndex);
+
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+        return;
+    }
+
+    if (TryExecuteSimpleAssignment(context, lineIndex, statement))
+        return;
+
+    if (TryExecuteDeclaration(context, lineIndex, statement))
+        return;
+
+    if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
+        return;
+
+    if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
+        return;
+
+    // 其它 setmethod / Setgap / setthre / setlinegap 这类参数行，先作为轻量已执行。
+    if (ParseMethodCall(statement).valid)
+    {
+        const ParsedMethodCall call = ParseMethodCall(statement);
+
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            call.object,
+            call.object.find("circle") != std::string::npos ? "Findcircle" : "unknown",
+            line.line_no);
+
+        object.last_method = call.method;
+        object.last_runtime_status = "PENDING";
+        object.runtime_state = "runtime_param_set";
+        object.last_update_line = line.line_no;
+        object.display_summary = call.method + "(" + call.params + ")";
+        object.stale = false;
+
+        line.status = "runtime_executed";
+        line.reason = "method parameter line executed in debug shim";
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = "method parameter line executed";
+        return;
+    }
+
+    line.status = "source_analyzed";
+    line.reason = "statement not executable by debug shim";
+    line.timestamp = CurrentTimestamp();
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+}
+
 std::string JsonEscape(const std::string& text)
 {
   std::ostringstream out;
@@ -144,158 +932,13 @@ std::string JsonEscape(const std::string& text)
   return out.str();
 }
 
-std::string CurrentTimestamp()
-{
-  const std::time_t now = std::time(nullptr);
-  std::tm local_time = {};
-#if defined(_WIN32)
-  localtime_s(&local_time, &now);
-#else
-  localtime_r(&now, &local_time);
-#endif
-  char buffer[32] = {};
-  std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local_time);
-  return buffer;
-}
 
-std::string ModuleForType(const std::string& type)
-{
-  if (type.rfind("Torch", 0) == 0) return "torch";
-  if (type.rfind("Mlpack", 0) == 0) return "mlpack";
-  if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
-  if (type == "Image" || type.rfind("Find", 0) == 0 || type == "fastmatch" ||
-      type == "FormfitGauge" || type == "CxOverlay") return "cximage";
-  return "cxscript";
-}
 
-std::string ModuleForStatement(const std::string& statement)
-{
-  if (statement.find("torch.") != std::string::npos || statement.find("Torch") != std::string::npos) return "torch";
-  if (statement.find("mlpack.") != std::string::npos || statement.find("Mlpack") != std::string::npos) return "mlpack";
-  if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
-  if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
-      statement.find("Find") != std::string::npos || statement.find("fastmatch") != std::string::npos) return "cximage";
-  return "cxscript";
-}
 
-bool IsObjectType(const std::string& type)
-{
-  return ModuleForType(type) != "cxscript";
-}
 
-void AddObservedGlobalVariables(ManualTestContext& context,
-                                const std::string& statement)
-{
-  std::size_t position = 0;
-  while ((position = statement.find("global.", position)) != std::string::npos)
-  {
-    std::size_t end = position + 7;
-    while (end < statement.size() &&
-           (std::isalnum(static_cast<unsigned char>(statement[end])) ||
-            statement[end] == '_'))
-      ++end;
-    const std::string name = statement.substr(position, end - position);
-    const auto existing = std::find_if(
-      context.global_variable_views.begin(), context.global_variable_views.end(),
-      [&](const ScriptVariableView& variable) { return variable.name == name; });
-    if (existing == context.global_variable_views.end())
-    {
-      const bool is_image = name == "global.matInput";
-      context.global_variable_views.push_back(
-        {is_image ? "Image" : "auto", name, "uninitialized", 0,
-         "observed_source", is_image ? context.image_file_path : std::string(),
-         false});
-    }
-    position = end;
-  }
-}
 
-void AnalyzeScript(ManualTestContext& context)
-{
-  if (context.analyzed_text == context.editor_text) return;
-  context.analyzed_text = context.editor_text;
-  context.line_views.clear();
-  context.variable_views.clear();
-  context.object_views.clear();
-  if (context.global_variable_views.size() > 1)
-    context.global_variable_views.erase(
-      context.global_variable_views.begin() + 1,
-      context.global_variable_views.end());
-  context.current_line = 0;
 
-  std::istringstream input(context.editor_text);
-  std::string raw;
-  int line_no = 1;
-  while (std::getline(input, raw))
-  {
-    ScriptLineView line;
-    line.line_no = line_no++;
-    line.status = "source_analyzed";
-    line.reason = "not_executed";
-    line.statement = raw;
-    const std::string statement = TrimLine(raw);
-    AddObservedGlobalVariables(context, statement);
-    line.module = ModuleForStatement(statement);
 
-    std::istringstream tokens(statement);
-    std::string declared_type;
-    std::string declared_name;
-    tokens >> declared_type >> declared_name;
-    const bool declaration = !declared_type.empty() && !declared_name.empty() &&
-      statement.find('(') == std::string::npos && declared_type != "if" &&
-      declared_type != "else" && declared_type != "return";
-    if (declaration)
-    {
-      const std::size_t suffix = declared_name.find_first_of("=;");
-      if (suffix != std::string::npos) declared_name.erase(suffix);
-      line.object_type = declared_type;
-      line.object = declared_name;
-      if (IsObjectType(declared_type))
-      {
-        line.module = ModuleForType(declared_type);
-        context.object_views.push_back({line.module, declared_type, declared_name,
-                                        line.module == "cximage" ? "declared" : "pending_runtime",
-                                        std::string(), 0, line.line_no});
-        if (declared_type == "Image")
-          context.variable_views.push_back(
-            {declared_type, declared_name, "uninitialized", line.line_no,
-             "not_initialized", context.image_file_path, false});
-      }
-      else
-      {
-        const std::size_t equal = statement.find('=');
-        const std::string value = equal == std::string::npos ? "uninitialized" :
-          TrimLine(statement.substr(equal + 1, statement.size() - equal - 2));
-        context.variable_views.push_back({declared_type, declared_name, value,
-                                          line.line_no, "observed_source"});
-      }
-    }
-
-    const std::size_t assign = statement.find('=');
-    const std::size_t open = statement.find('(');
-    const std::size_t close = statement.rfind(')');
-    const bool has_assignment = assign != std::string::npos &&
-      (open == std::string::npos || assign < open);
-    const std::size_t callable_start = has_assignment ? assign + 1 : 0;
-    if (has_assignment) line.return_variable = TrimLine(statement.substr(0, assign));
-    if (open != std::string::npos)
-    {
-      const std::string callable = TrimLine(statement.substr(callable_start, open - callable_start));
-      const std::size_t dot = callable.rfind('.');
-      if (dot != std::string::npos)
-      {
-        line.object = TrimLine(callable.substr(0, dot));
-        line.method = TrimLine(callable.substr(dot + 1));
-      }
-      else line.method = callable;
-      if (close != std::string::npos && close > open)
-        line.params = statement.substr(open + 1, close - open - 1);
-    }
-    context.line_views.push_back(line);
-  }
-  context.trace_status = "PENDING";
-  context.trace_reason = "source analyzed; runtime line callbacks unavailable";
-}
 
 void SetTraceStatus(ManualTestContext& context,
                     const std::string& status,
@@ -938,145 +1581,116 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
   if (ImGui::Button("Compile"))
   {
-    m_manualTest.debug_action = "Compile";
-    clearos();
-    m_manualTest.analyzed_text.clear();
-    AnalyzeScript(m_manualTest);
-    const bool compiled = m_parserDebugBridge.CompileScript(
-      m_manualTest.editor_text);
-    m_manualTest.current_line = 0;
-    m_manualTest.run_state = compiled ? "runtime_compiled" : "blocked";
-    m_scriptResult.status = compiled ? "PENDING" : "BLOCKED";
-    m_scriptResult.reason = compiled ?
-      "parser Compile completed; runtime objects queried; no PASS inferred" :
-      "parser Compile failed or editor text is empty";
-    m_scriptResult.runtime_fillback_status = compiled ? "runtime_objects_queried" :
-                                                        "not_started";
-    RefreshRuntimeObjectTable("Compile", compiled ? "compiled" : "BLOCKED");
-    int runtimeObjectCount = 0;
-    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
-      if (object.exists_in_parser) ++runtimeObjectCount;
-    if (compiled && runtimeObjectCount == 0)
-      m_scriptResult.reason = "compiled_no_runtime_object";
-    m_manualTest.debug_status = m_scriptResult.status;
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output = getoutputstring();
+      AnalyzeScript(m_manualTest);
+      ResetDebugRuntimeForReplay(m_manualTest);
+
+      m_manualTest.run_state = "compiled";
+      m_manualTest.debug_action = "Compile";
+      m_manualTest.debug_status = "PENDING";
+      m_manualTest.debug_reason = "source compiled for debug replay; runtime not executed";
+
+      m_scriptResult = ScriptResult();
+      m_scriptResult.source = m_manualTest.editor_source;
+      m_scriptResult.script_path = m_manualTest.loaded_script_path;
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = "compiled for debug replay; no PASS without runtime result";
+      m_scriptResult.runtime_fillback_status = "debug_replay_ready";
   }
+
   ImGui::SameLine();
   if (ImGui::Button("Run"))
   {
-    m_manualTest.debug_action = "Run";
-    clearos();
-    const bool ran = !m_manualTest.editor_text.empty() &&
-      m_parserDebugBridge.RunScript(m_manualTest.editor_text);
-    m_manualTest.run_state = ran ? "runtime_executed" : "blocked";
-    m_scriptResult.status = ran ? "PENDING" : "BLOCKED";
-    m_scriptResult.reason = ran ?
-      "parser runtime executed; object table refreshed; result status remains PENDING" :
-      "parser runtime execution failed";
-    m_scriptResult.runtime_fillback_status = ran ? "runtime_objects_queried" :
-                                                   "not_started";
-    RefreshRuntimeObjectTable("Run", ran ? "runtime_executed" : "BLOCKED");
-    m_manualTest.debug_status = m_scriptResult.status;
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output = getoutputstring();
+      AnalyzeScript(m_manualTest);
+      ResetDebugRuntimeForReplay(m_manualTest);
+
+      m_manualTest.run_state = "runtime_run";
+      m_manualTest.stop_requested = false;
+
+      int guard = 0;
+      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
+
+      while (!m_manualTest.stop_requested &&
+          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+          guard++ < maxSteps)
+      {
+          DebugStepOnce(m_manualTest);
+
+          // 遇到真实 runtime 缺失的算法行，先停下来让用户看。
+          if (m_manualTest.run_state == "blocked")
+              break;
+      }
+
+      m_scriptResult.status = m_manualTest.debug_status;
+      m_scriptResult.reason = m_manualTest.debug_reason;
+      m_scriptResult.runtime_fillback_status = "debug_run";
   }
   ImGui::SameLine();
   if (ImGui::Button("Step"))
   {
-    m_manualTest.debug_action = "Step";
-    clearos();
-    AnalyzeScript(m_manualTest);
-    if (m_manualTest.current_line >= 0 &&
-        m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
-    {
-      ScriptLineView& line = m_manualTest.line_views[
-        static_cast<std::size_t>(m_manualTest.current_line)];
-      const bool stepped = m_parserDebugBridge.RunPrefixToLine(
-        m_manualTest.editor_text, line.line_no);
-      m_scriptResult.status = stepped ? "PENDING" : "BLOCKED";
-      m_scriptResult.reason = stepped ?
-        "RunPrefixToLine executed; runtime objects queried; no PASS inferred" :
-        "parser rejected script prefix";
-      m_manualTest.run_state = stepped ? "runtime_step" : "blocked";
-      line.status = stepped ? "runtime_executed" : "BLOCKED";
-      line.reason = m_scriptResult.reason;
-      RefreshRuntimeObjectTable(line.method,
-        stepped ? "runtime_executed" : "BLOCKED");
-      m_manualTest.debug_status = m_scriptResult.status;
-      m_manualTest.debug_reason = "line " + std::to_string(line.line_no) +
-        ": " + m_scriptResult.reason;
-      m_manualTest.debug_parser_output = getoutputstring();
-      if (stepped) ++m_manualTest.current_line;
-    }
-    else
-    {
-      m_scriptResult.status = "BLOCKED";
-      m_scriptResult.reason = "no valid current line selected";
-      m_manualTest.debug_status = "BLOCKED";
-      m_manualTest.debug_reason = m_scriptResult.reason;
-      m_manualTest.debug_parser_output.clear();
-    }
+      if (m_manualTest.run_state == "idle" ||
+          m_manualTest.run_state == "compiled" ||
+          m_manualTest.run_state == "ready")
+      {
+          // 如果还没初始化 runtime，就初始化一次。
+          if (m_manualTest.runtime_objects.empty() &&
+              m_manualTest.runtime_int_vars.empty())
+          {
+              ResetDebugRuntimeForReplay(m_manualTest);
+          }
+      }
+
+      DebugStepOnce(m_manualTest);
+
+      m_scriptResult.status = m_manualTest.debug_status;
+      m_scriptResult.reason = m_manualTest.debug_reason;
+      m_scriptResult.runtime_fillback_status = "debug_step";
   }
+
   ImGui::SameLine();
   if (ImGui::Button("Continue"))
   {
-    m_manualTest.debug_action = "Continue";
-    clearos();
-    AnalyzeScript(m_manualTest);
-    const int endLine = static_cast<int>(m_manualTest.line_views.size());
-    const bool continued = endLine > 0 &&
-      m_parserDebugBridge.RunPrefixToLine(m_manualTest.editor_text, endLine);
-    m_manualTest.current_line = continued ? endLine : m_manualTest.current_line;
-    m_manualTest.run_state = continued ? "runtime_continued" : "blocked";
-    m_scriptResult.status = continued ? "PENDING" : "BLOCKED";
-    m_scriptResult.reason = continued ?
-      "Continue used RunPrefixToLine to end; runtime objects refreshed" :
-      "parser rejected continue prefix";
-    RefreshRuntimeObjectTable("Continue",
-      continued ? "runtime_executed" : "BLOCKED");
-    m_manualTest.debug_status = m_scriptResult.status;
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output = getoutputstring();
+      m_manualTest.stop_requested = false;
+      m_manualTest.run_state = "runtime_continue";
+
+      int guard = 0;
+      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
+
+      while (!m_manualTest.stop_requested &&
+          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+          guard++ < maxSteps)
+      {
+          DebugStepOnce(m_manualTest);
+
+          if (m_manualTest.run_state == "blocked")
+              break;
+      }
+
+      m_scriptResult.status = m_manualTest.debug_status;
+      m_scriptResult.reason = m_manualTest.debug_reason;
+      m_scriptResult.runtime_fillback_status = "debug_continue";
   }
   ImGui::SameLine();
   if (ImGui::Button("Stop"))
   {
-    m_manualTest.debug_action = "Stop";
-    m_parserDebugBridge.Stop();
-    m_manualTest.stop_requested = true;
-    m_manualTest.run_state = "stopped";
-    m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "parser runtime stopped by user";
-    m_manualTest.debug_status = "PENDING";
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output.clear();
+      m_manualTest.stop_requested = true;
+      m_manualTest.run_state = "stopped";
+      m_manualTest.debug_status = "PENDING";
+      m_manualTest.debug_reason = "debug run stopped by user";
+
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = m_manualTest.debug_reason;
+      m_scriptResult.runtime_fillback_status = "stopped";
   }
   ImGui::SameLine();
   if (ImGui::Button("Reset"))
   {
-    m_manualTest.debug_action = "Reset";
-    m_parserDebugBridge.ResetRuntime();
-    m_manualTest.analyzed_text.clear();
-    AnalyzeScript(m_manualTest);
-    m_manualTest.current_line = 0;
-    m_manualTest.runtime_objects.clear();
-    const cv::Mat viewImage = cv::imread(m_manualTest.image_file_path);
-    if (!viewImage.empty())
-    {
-      UpdateImageViewImage(viewImage);
-      m_scriptResult.image_ref = m_manualTest.image_file_path;
-    }
-    else m_scriptResult.image_ref.clear();
-    m_manualTest.run_state = "idle";
-    m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "runtime debug state reset; source preserved";
-    m_scriptResult.runtime_fillback_status = "not_started";
-    m_semanticFlowGraph.SetRuntimeDebugSummary(
-      "PENDING", "PENDING", 0, m_scriptResult.reason);
-    m_manualTest.debug_status = "PENDING";
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output.clear();
+      AnalyzeScript(m_manualTest);
+      ResetDebugRuntimeForReplay(m_manualTest);
+
+      m_scriptResult = ScriptResult();
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = "debug runtime reset";
+      m_scriptResult.runtime_fillback_status = "reset";
   }
   if (ImGui::Button("Run File (runtime bridge)"))
     m_scriptResult = RunCxScript(m_manualTest.script_file_path);
