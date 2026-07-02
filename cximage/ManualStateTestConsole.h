@@ -70,6 +70,8 @@ struct RuntimeObjectView
 
     // measure / FitResultMeasure 后的测量点
     bool has_measure_points = false;
+    int measure_points_count = 0;
+    int valid_points_count = 0;
     std::vector<float> measure_points_xy;
 
     // fitcircle 后的拟合结果圆
@@ -84,6 +86,8 @@ struct RuntimeObjectView
 
 struct DebugStepSnapshot
 {
+  std::string script_path;
+  std::string flow_block_id;
   int current_line = 0;
   std::string statement;
   std::string object;
@@ -93,6 +97,8 @@ struct DebugStepSnapshot
   std::string object_summary;
   std::string geometry_summary;
   std::string image_overlay_summary;
+  std::string current_result_ref;
+  std::string last_debug_result;
   std::string reason;
 };
 
@@ -145,6 +151,8 @@ struct ManualTestContext
   bool attach_line = false;
   bool show_roi = false;
   bool show_result_overlay = false;
+  bool source_preview_enabled = false;
+  int manual_elements_count = 0;
 };
 
 struct ScriptSnippet

@@ -999,6 +999,7 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
     PointsShape& points = circle.getresultpoints();
 
     const int pointCount = points.size();
+    object.measure_points_count = pointCount;
 
     for (int i = 0; i < pointCount; ++i)
     {
@@ -1013,6 +1014,8 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
     }
 
     object.has_measure_points = !object.measure_points_xy.empty();
+    object.valid_points_count =
+        static_cast<int>(object.measure_points_xy.size() / 2);
     if (object.has_measure_points || object.has_fit_result)
         object.runtime_state = "geometry_result_available";
 
@@ -1603,12 +1606,18 @@ static void CaptureDebugStepSnapshot(ManualTestContext& context, int lineIndex)
     const ScriptLineView& line =
         context.line_views[static_cast<std::size_t>(lineIndex)];
     DebugStepSnapshot snapshot;
+    snapshot.script_path = context.loaded_script_path;
+    snapshot.flow_block_id = "cximage_find_circle_explore.N0";
     snapshot.current_line = line.line_no;
     snapshot.statement = line.statement;
     snapshot.object = line.object;
     snapshot.method = line.method;
     snapshot.params = line.params;
     snapshot.reason = line.reason;
+    snapshot.last_debug_result = context.debug_status + ": " + context.debug_reason;
+    for (const ScriptVariableView& variable : context.global_variable_views)
+        if (variable.name == "global.circle_ref")
+            snapshot.current_result_ref = variable.value;
 
     RuntimeObjectView* object = line.object.empty() ? nullptr :
         FindRuntimeObject(context, line.object);
@@ -1618,34 +1627,33 @@ static void CaptureDebugStepSnapshot(ManualTestContext& context, int lineIndex)
     {
         snapshot.runtime_state = object->runtime_state;
         snapshot.object_summary = object->display_summary;
-        if (object->has_result_measure)
-            snapshot.geometry_summary = "final result overlay updated";
-        else if (object->has_fit_result)
-            snapshot.geometry_summary = "fit circle: center=(" +
-                std::to_string(object->fit_cx) + "," +
-                std::to_string(object->fit_cy) + "), radius=" +
-                std::to_string(object->fit_radius);
-        else if (object->has_measure_points)
-            snapshot.geometry_summary = "measure points=" +
-                std::to_string(object->measure_points_xy.size() / 2);
-        else if (object->has_circle)
-            snapshot.geometry_summary = "ROI circle: center=(" +
-                std::to_string(object->circle_cx) + "," +
-                std::to_string(object->circle_cy) + "), radius=" +
-                std::to_string(object->circle_radius);
-        else
-            snapshot.geometry_summary = "no runtime geometry";
+        std::ostringstream geometry;
+        geometry << "object=" << object->name << " | roi_circle=";
+        if (object->has_circle)
+            geometry << "(" << object->circle_cx << "," << object->circle_cy
+                     << ",r=" << object->circle_radius << ")";
+        else geometry << "none";
+        geometry << " | measure_points_count=" << object->measure_points_count
+                 << " | valid_points_count=" << object->valid_points_count
+                 << " | fit_circle=";
+        if (object->has_fit_result)
+            geometry << "(" << object->fit_cx << "," << object->fit_cy
+                     << ",r=" << object->fit_radius << ")";
+        else geometry << "none";
+        geometry << " | avgdist=" << object->fit_avgdist
+                 << " | has_result_measure="
+                 << (object->has_result_measure ? "true" : "false")
+                 << " | " << object->display_summary;
+        snapshot.geometry_summary = geometry.str();
 
-        if (object->has_result_measure)
-            snapshot.image_overlay_summary = "runtime ROI + measure points + final fit circle";
-        else if (object->has_fit_result)
-            snapshot.image_overlay_summary = "runtime ROI + measure points + fit circle";
-        else if (object->has_measure_points)
-            snapshot.image_overlay_summary = "runtime ROI + measure points";
-        else if (object->has_circle)
-            snapshot.image_overlay_summary = "runtime ROI circle";
-        else
-            snapshot.image_overlay_summary = "none";
+        std::ostringstream overlay;
+        overlay << "green_roi_circle=" << (object->has_circle ? "true" : "false")
+                << " | red_measure_points=" << object->valid_points_count
+                << " | yellow_fit_circle=" << (object->has_fit_result ? "true" : "false")
+                << " | source_preview_enabled="
+                << (context.source_preview_enabled ? "true" : "false")
+                << " | manual_elements_count=" << context.manual_elements_count;
+        snapshot.image_overlay_summary = overlay.str();
     }
     else
     {
@@ -1730,6 +1738,8 @@ bool SaveCasePackage(const ManualTestContext& context,
   std::ostringstream global_context;
   global_context << "{\n"
     << "  \"script_path\": \"" << JsonEscape(context.loaded_script_path) << "\",\n"
+    << "  \"flow_block_id\": \"cximage_find_circle_explore.N0\",\n"
+    << "  \"current_line\": " << context.current_debug_snapshot.current_line << ",\n"
     << "  \"image_file_path\": \"" << JsonEscape(context.image_file_path) << "\",\n"
     << "  \"data_file_path\": \"" << JsonEscape(context.data_file_path) << "\",\n"
     << "  \"model_file_path\": \"" << JsonEscape(context.model_file_path) << "\",\n"
@@ -1738,7 +1748,9 @@ bool SaveCasePackage(const ManualTestContext& context,
     << "  \"geometry_summary\": \""
     << JsonEscape(context.current_debug_snapshot.geometry_summary) << "\",\n"
     << "  \"image_overlay_summary\": \""
-    << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\"\n}\n";
+    << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\",\n"
+    << "  \"last_debug_result\": \""
+    << JsonEscape(context.current_debug_snapshot.last_debug_result) << "\"\n}\n";
 
   std::ostringstream trace;
   trace << "[\n";
@@ -1796,11 +1808,49 @@ bool SaveCasePackage(const ManualTestContext& context,
       << ",\"fit_cy\":" << object.fit_cy
       << ",\"fit_radius\":" << object.fit_radius
       << ",\"avgdist\":" << object.fit_avgdist
-      << ",\"points_count\":" << object.measure_points_xy.size() / 2
+      << ",\"measure_points_count\":" << object.measure_points_count
+      << ",\"valid_points_count\":" << object.valid_points_count
+      << ",\"has_result_measure\":"
+      << (object.has_result_measure ? "true" : "false")
       << ",\"visual_source\":\"" << JsonEscape(object.visual_source) << "\"}"
       << (i + 1 == context.runtime_objects.size() ? "\n" : ",\n");
   }
   objects << "]\n";
+
+  std::ostringstream sourceObjects;
+  sourceObjects << "[\n";
+  bool firstSourceObject = true;
+  for (const ScriptObjectView& object : context.object_views)
+  {
+    if (object.type != "Image" && object.type != "Findcircle") continue;
+    if (!firstSourceObject) sourceObjects << ",\n";
+    firstSourceObject = false;
+    sourceObjects << "  {\"type\":\"" << JsonEscape(object.type)
+      << "\",\"name\":\"" << JsonEscape(object.name)
+      << "\",\"declared_line\":" << object.declared_line
+      << ",\"status\":\"declared_source_only\""
+      << ",\"execution_status\":\"not_executed\"}";
+  }
+  if (!firstSourceObject) sourceObjects << "\n";
+  sourceObjects << "]\n";
+
+  std::ostringstream findcircleSnapshot;
+  findcircleSnapshot << "{\n"
+    << "  \"script_path\": \""
+    << JsonEscape(context.current_debug_snapshot.script_path) << "\",\n"
+    << "  \"flow_block_id\": \""
+    << JsonEscape(context.current_debug_snapshot.flow_block_id) << "\",\n"
+    << "  \"current_line\": " << context.current_debug_snapshot.current_line << ",\n"
+    << "  \"current_statement\": \""
+    << JsonEscape(context.current_debug_snapshot.statement) << "\",\n"
+    << "  \"current_result_ref\": \""
+    << JsonEscape(context.current_debug_snapshot.current_result_ref) << "\",\n"
+    << "  \"geometry_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.geometry_summary) << "\",\n"
+    << "  \"image_overlay_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\",\n"
+    << "  \"last_debug_result\": \""
+    << JsonEscape(context.current_debug_snapshot.last_debug_result) << "\"\n}\n";
 
   std::ostringstream result;
   result << "{\n  \"status\": \"" << JsonEscape(result_status)
@@ -1822,6 +1872,7 @@ bool SaveCasePackage(const ManualTestContext& context,
   std::ostringstream debug_request;
   debug_request << "{\n"
     << "  \"module\": \"" << JsonEscape(current == nullptr ? "" : current->module) << "\",\n"
+    << "  \"flow_block_id\": \"cximage_find_circle_explore.N0\",\n"
     << "  \"script_path\": \"" << JsonEscape(context.loaded_script_path) << "\",\n"
     << "  \"line_no\": " << (current == nullptr ? 0 : current->line_no) << ",\n"
     << "  \"statement\": \"" << JsonEscape(current == nullptr ? "" : current->statement) << "\",\n"
@@ -1833,6 +1884,8 @@ bool SaveCasePackage(const ManualTestContext& context,
     << JsonEscape(context.current_debug_snapshot.geometry_summary) << "\",\n"
     << "  \"image_overlay_summary\": \""
     << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\",\n"
+    << "  \"last_debug_result\": \""
+    << JsonEscape(context.current_debug_snapshot.last_debug_result) << "\",\n"
     << "  \"current_reason\": \"" << JsonEscape(result_reason) << "\",\n"
     << "  \"user_expected\": \"" << JsonEscape(context.user_expected) << "\",\n"
     << "  \"codex_task\": \"" << JsonEscape(context.codex_task) << "\",\n"
@@ -1874,7 +1927,9 @@ bool SaveCasePackage(const ManualTestContext& context,
     WriteTextFile(root / "script_snapshot.cxsc", context.editor_text) &&
     WriteTextFile(root / "line_trace.json", trace.str()) &&
     WriteTextFile(root / "variable_snapshot.json", variables.str()) &&
+    WriteTextFile(root / "source_object_state.json", sourceObjects.str()) &&
     WriteTextFile(root / "object_state.json", objects.str()) &&
+    WriteTextFile(root / "findcircle_debug_snapshot.json", findcircleSnapshot.str()) &&
     WriteTextFile(root / "image_elements.json", image_elements_json.str()) &&
     WriteTextFile(root / "debug_request.json", debug_request.str()) &&
     WriteTextFile(root / "result.json", result.str()) &&
@@ -2132,6 +2187,10 @@ void ViewController::drawManualStateTestConsole()
     return;
   }
 
+  m_manualTest.source_preview_enabled = m_showSourcePreviewOverlay;
+  m_manualTest.manual_elements_count =
+    static_cast<int>(m_annotationLayer.Elements().size());
+
   ImGui::Text("Input Source");
   InputTextString("Script file path", m_manualTest.script_file_path);
   InputTextString("Image file path", m_manualTest.image_file_path);
@@ -2348,12 +2407,43 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Separator();
   ImGui::Text("Current Flow Block");
   ImGui::Text("Flow Block: cximage_find_circle_explore.N0");
-  ImGui::Text("Script: find_circle_direct_test.cxsc");
-  ImGui::Text("Runtime Objects: m_occtimage / afindcircle0 / afindcircle1");
+  ImGui::TextWrapped("Current Script: %s",
+    m_manualTest.loaded_script_path.empty() ?
+      "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc" :
+      m_manualTest.loaded_script_path.c_str());
+  RuntimeObjectView* currentCircle = FindRuntimeObject(m_manualTest, "afindcircle0");
+  ImGui::Text("Current Runtime Object: afindcircle0");
+  if (currentCircle == nullptr)
+    ImGui::TextDisabled("Current Geometry Result: unavailable");
+  else
+  {
+    ImGui::TextWrapped("Current Geometry Result: %s",
+                       currentCircle->display_summary.c_str());
+    ImGui::Text("fit=(%.3f, %.3f, r=%.3f) | avgdist=%.3f | points=%d",
+                currentCircle->fit_cx, currentCircle->fit_cy,
+                currentCircle->fit_radius, currentCircle->fit_avgdist,
+                static_cast<int>(currentCircle->measure_points_xy.size() / 2));
+  }
+  std::string currentResultRef;
+  for (const ScriptVariableView& variable : m_manualTest.global_variable_views)
+    if (variable.name == "global.circle_ref") currentResultRef = variable.value;
+  ImGui::TextWrapped("Current Result Ref: %s", currentResultRef.empty() ?
+                     "(uninitialized)" : currentResultRef.c_str());
+  if (currentCircle != nullptr &&
+      currentResultRef == "runtime_object:afindcircle0")
+  {
+    ImGui::Text("source_object=afindcircle0 | result_type=FindcircleResult");
+    ImGui::Text("measure_points_count=%d | valid_points_count=%d",
+                currentCircle->measure_points_count,
+                currentCircle->valid_points_count);
+    ImGui::Text("has_result_measure=%s | result_status=%s",
+                currentCircle->has_result_measure ? "true" : "false",
+                currentCircle->runtime_state.c_str());
+  }
   ImGui::TextWrapped("Method Chain: setcircle -> setmethod -> Setgap -> setthre -> setlinegap -> measure -> fitcircle -> setfitmeasuregap -> FitResultMeasure -> get_result");
   ImGui::TextWrapped("Debug Line Targets: copyFromMat / setcircle / measure / fitcircle / setfitmeasuregap / FitResultMeasure / get_result");
   ImGui::TextWrapped("Expected Geometry: ROI circle / measure points / fit circle / final result overlay");
-  ImGui::TextWrapped("Status: runtime_executed = C++ call completed; geometry_result_available = geometry exists; PENDING = case not judged; PASS = judge/rule only; BLOCKED = cannot continue");
+  ImGui::TextWrapped("Status: runtime_executed = C++ call completed; geometry_result_available = geometry exists; PENDING = case not judged; PASS = judge/rule only; BLOCKED = cannot continue; PENDING_BINDING = statement recognized but result binding unavailable");
 
   ImGui::Separator();
   ImGui::Text("Script Debug Compiler");
@@ -2549,8 +2639,12 @@ void ViewController::drawManualStateTestConsole()
               m_manualTest.debug_status.c_str());
   ImGui::TextWrapped("reason: %s", m_manualTest.debug_reason.c_str());
   ImGui::Separator();
-  ImGui::Text("Current Debug Line");
+  ImGui::Text("Findcircle Debug Snapshot Summary");
   const DebugStepSnapshot& debugSnapshot = m_manualTest.current_debug_snapshot;
+  ImGui::TextWrapped("script_path: %s", debugSnapshot.script_path.empty() ?
+                     "(none)" : debugSnapshot.script_path.c_str());
+  ImGui::TextWrapped("flow_block_id: %s", debugSnapshot.flow_block_id.empty() ?
+                     "(none)" : debugSnapshot.flow_block_id.c_str());
   ImGui::Text("line: %d", debugSnapshot.current_line);
   ImGui::TextWrapped("statement: %s", debugSnapshot.statement.empty() ?
                      "(none)" : debugSnapshot.statement.c_str());
@@ -2568,6 +2662,10 @@ void ViewController::drawManualStateTestConsole()
                      "(none)" : debugSnapshot.geometry_summary.c_str());
   ImGui::TextWrapped("image overlay: %s", debugSnapshot.image_overlay_summary.empty() ?
                      "(none)" : debugSnapshot.image_overlay_summary.c_str());
+  ImGui::TextWrapped("current_result_ref: %s", debugSnapshot.current_result_ref.empty() ?
+                     "(uninitialized)" : debugSnapshot.current_result_ref.c_str());
+  ImGui::TextWrapped("last_debug_result: %s", debugSnapshot.last_debug_result.empty() ?
+                     "(none)" : debugSnapshot.last_debug_result.c_str());
   ImGui::TextWrapped("reason: %s", debugSnapshot.reason.empty() ?
                      "(none)" : debugSnapshot.reason.c_str());
   if (!m_manualTest.debug_parser_output.empty())
@@ -2701,11 +2799,17 @@ void ViewController::drawManualStateTestConsole()
     RuntimeObjectView* geometry = FindRuntimeObject(m_manualTest, objectName);
     if (geometry == nullptr) continue;
     ImGui::TextWrapped("circle_ref: %s", variable.value.c_str());
+    ImGui::Text("source_object: %s | result_type: FindcircleResult",
+                objectName.c_str());
     ImGui::Text("fit_cx: %.3f | fit_cy: %.3f | fit_radius: %.3f",
                 geometry->fit_cx, geometry->fit_cy, geometry->fit_radius);
-    ImGui::Text("avgdist: %.3f | points_count: %d",
+    ImGui::Text("avgdist: %.3f | measure_points_count: %d | valid_points_count: %d",
                 geometry->fit_avgdist,
-                static_cast<int>(geometry->measure_points_xy.size() / 2));
+                geometry->measure_points_count,
+                geometry->valid_points_count);
+    ImGui::Text("has_result_measure: %s | result_status: %s",
+                geometry->has_result_measure ? "true" : "false",
+                geometry->runtime_state.c_str());
   }
   ImGui::Spacing();
   drawVariableList("Local Variables", m_manualTest.variable_views);
@@ -2723,6 +2827,14 @@ void ViewController::drawManualStateTestConsole()
                                                    object.last_method.c_str());
     ImGui::Text("last_update_line: %d", object.last_update_line);
     ImGui::TextWrapped("value_summary: %s", object.display_summary.c_str());
+    if (object.type == "Findcircle")
+    {
+      ImGui::Text("fit=(%.3f, %.3f, r=%.3f) | avgdist=%.3f",
+                  object.fit_cx, object.fit_cy,
+                  object.fit_radius, object.fit_avgdist);
+      ImGui::Text("measure_points_count=%d | valid_points_count=%d",
+                  object.measure_points_count, object.valid_points_count);
+    }
     ImGui::Text("visualizable: %s", object.visualizable ? "true" : "false");
     ImGui::Text("visual_source: %s", object.visual_source.c_str());
     ImGui::Text("stale: %s", object.stale ? "true" : "false");
@@ -2738,51 +2850,23 @@ void ViewController::drawManualStateTestConsole()
                     "(none)" : m_manualTest.runtime_current_connect.c_str());
 
   ImGui::Separator();
-  ImGui::Text("Object State Panels");
-  const char* modules[] = {"cximage", "torch", "mlpack", "ensmallen"};
-  ImGui::Columns(4, "direct_capability_panels", false);
-  for (const char* module : modules)
+  ImGui::Text("Source Object Panel");
+  ImGui::TextDisabled("Static .cxsc declarations only; never a runtime result");
+  bool hasSourceObject = false;
+  for (const ScriptObjectView& object : m_manualTest.object_views)
   {
-    ImGui::Text("%s", module);
-    bool found = false;
-    for (const ScriptObjectView& object : m_manualTest.object_views)
-    {
-      if (object.module != module) continue;
-      ImGui::BulletText("object = %s", object.name.c_str());
-      ImGui::Text("type = %s", object.type.c_str());
-      ImGui::Text("visual_adapter = %s",
-                  object.type == "Findcircle" ? "Findcircle" : "none");
-      ImGui::Text("status = %s", object.status.c_str());
-      if (!object.runtime_state.empty())
-        ImGui::TextWrapped("%s", object.runtime_state.c_str());
-      if (object.runtime_source_line > 0)
-        ImGui::Text("source_line = %d", object.runtime_source_line);
-      found = true;
-    }
-    if (!found) ImGui::TextDisabled("no object in current script");
-    if (std::string(module) == "cximage")
-    {
-      ImGui::TextDisabled("image / ROI / fit / match / overlay");
-    }
-    else if (std::string(module) == "torch")
-    {
-      ImGui::TextWrapped("model_path: %s", m_manualTest.model_file_path.empty() ? "pending_input" : m_manualTest.model_file_path.c_str());
-      ImGui::TextDisabled("device / tensor shape / raw shape / mask / overlay: pending_runtime");
-    }
-    else if (std::string(module) == "mlpack")
-    {
-      ImGui::TextDisabled("feature shape / dataset shape / prediction / score: pending_runtime");
-    }
-    else
-    {
-      ImGui::TextDisabled("objective / param_space / candidate / metric / best / history: pending_runtime");
-    }
-    ImGui::NextColumn();
+    if (object.type != "Image" && object.type != "Findcircle") continue;
+    ImGui::BulletText("%s %s", object.type.c_str(), object.name.c_str());
+    ImGui::Text("declared_line: %d | status: declared_source_only",
+                object.declared_line);
+    ImGui::TextDisabled("source_analyzed / not_executed");
+    hasSourceObject = true;
   }
-  ImGui::Columns(1);
+  if (!hasSourceObject) ImGui::TextDisabled("no Image/Findcircle declaration");
 
   ImGui::Separator();
   ImGui::Text("Direct Capability Directory");
+  const char* modules[] = {"cximage", "torch", "mlpack", "ensmallen"};
   std::string currentModule;
   std::string currentType;
   std::string currentMethod;
