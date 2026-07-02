@@ -360,14 +360,16 @@ static RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
     context.runtime_objects.push_back(object);
     return context.runtime_objects.back();
 }
-static void UpsertGlobalVariableView(ManualTestContext& context,
+
+static void UpsertGlobalVariableViewCore(
+    ManualTestContext& context,
     const std::string& type,
     const std::string& name,
     const std::string& value,
     int lineNo,
     const std::string& status,
-    const std::string& imagePath = std::string(),
-    bool imageInitialized = false)
+    const std::string& imagePath,
+    bool imageInitialized)
 {
     for (ScriptVariableView& variable : context.global_variable_views)
     {
@@ -379,9 +381,15 @@ static void UpsertGlobalVariableView(ManualTestContext& context,
             variable.status = status;
 
             if (!imagePath.empty())
+            {
                 variable.image_path = imagePath;
+            }
 
-            variable.image_initialized = imageInitialized || variable.image_initialized;
+            if (imageInitialized)
+            {
+                variable.image_initialized = true;
+            }
+
             return;
         }
     }
@@ -396,6 +404,50 @@ static void UpsertGlobalVariableView(ManualTestContext& context,
     variable.image_initialized = imageInitialized;
 
     context.global_variable_views.push_back(variable);
+}
+
+// 普通 global 变量：global.current_status / global.circle_ref 等。
+// 注意：这个函数只有 6 个参数，不要再给它加默认参数。
+static void UpsertGlobalVariableView(
+    ManualTestContext& context,
+    const std::string& type,
+    const std::string& name,
+    const std::string& value,
+    int lineNo,
+    const std::string& status)
+{
+    UpsertGlobalVariableViewCore(
+        context,
+        type,
+        name,
+        value,
+        lineNo,
+        status,
+        std::string(),
+        false);
+}
+
+// 图像 global 变量：global.matInput。
+// 注意：用不同函数名，避免和普通变量函数重载冲突。
+static void UpsertGlobalImageVariableView(
+    ManualTestContext& context,
+    const std::string& type,
+    const std::string& name,
+    const std::string& value,
+    int lineNo,
+    const std::string& status,
+    const std::string& imagePath,
+    bool imageInitialized)
+{
+    UpsertGlobalVariableViewCore(
+        context,
+        type,
+        name,
+        value,
+        lineNo,
+        status,
+        imagePath,
+        imageInitialized);
 }
 static void UpsertVariableView(ManualTestContext& context,
     const std::string& type,
@@ -425,26 +477,7 @@ static void UpsertVariableView(ManualTestContext& context,
     context.variable_views.push_back(variable);
 }
 
-static void UpsertGlobalVariableView(ManualTestContext& context,
-    const std::string& type,
-    const std::string& name,
-    const std::string& value,
-    int lineNo,
-    const std::string& status)
-{
-    for (ScriptVariableView& variable : context.global_variable_views)
-    {
-        if (variable.name != name) continue;
-        variable.type = type;
-        variable.value = value;
-        variable.declared_line = lineNo;
-        variable.status = status;
-        return;
-    }
 
-    context.global_variable_views.push_back(
-        {type, name, value, lineNo, status, std::string(), false});
-}
 
 static void ResetDebugRuntimeForReplay(ManualTestContext& context)
 {
