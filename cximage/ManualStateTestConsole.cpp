@@ -1,6 +1,7 @@
 ﻿#include "ViewController.h"
 #include "Image.h"
 #include "Findcircle.h"
+#include "findline.h"
 #include "imagemanager.h"
 
 #include <imgui.h>
@@ -715,6 +716,7 @@ struct DebugCximageRuntime
 {
     std::unordered_map<std::string, std::unique_ptr<Image>> images;
     std::unordered_map<std::string, std::unique_ptr<Findcircle>> circles;
+    std::unordered_map<std::string, std::unique_ptr<Findline>> lines;
 };
 
 static std::unordered_map<ManualTestContext*, DebugCximageRuntime> g_cximageRuntime;
@@ -1436,6 +1438,15 @@ static bool TryExecuteDeclaration(ManualTestContext& context,
         object.has_measure_points = false;
         object.has_fit_result = false;
         object.has_result_measure = false;
+    }
+    else if (type == "Findline")
+    {
+        runtime.lines[name] = std::make_unique<Findline>();
+        object.exists_in_parser = true;
+        object.runtime_state = "runtime_object_created";
+        object.last_runtime_status = "runtime_executed";
+        object.display_summary = "Findline runtime object created";
+        object.visualizable = false;
     }
 
 
@@ -2176,7 +2187,7 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref = ResultRefView();
         context.current_result_ref.name = lhs;
         context.current_result_ref.source_object = sourceObjectName;
-        context.current_result_ref.result_type = "FindcircleResult";
+        context.current_result_ref.result_type = "PendingGeometryResult";
         context.current_result_ref.status = "PENDING_BINDING";
         context.current_result_ref.reason = line.reason;
         context.current_result_ref.line_no = line.line_no;
@@ -2196,7 +2207,9 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     if (!hasGeometry)
     {
         line.status = "PENDING_BINDING";
-        line.reason = "get_result requires a valid fit result; no result fabricated";
+        line.reason = sourceObject->type == "Findline" ?
+            "get_result requires a valid Findline fit result" :
+            "get_result requires a valid fit result; no result fabricated";
         AppendCxDebugEvent(
             context,
             "get_result_pending_binding",
@@ -2220,7 +2233,8 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref = ResultRefView();
         context.current_result_ref.name = lhs;
         context.current_result_ref.source_object = sourceObjectName;
-        context.current_result_ref.result_type = "FindcircleResult";
+        context.current_result_ref.result_type = sourceObject->type == "Findline" ?
+            "FindlineResult" : "FindcircleResult";
         context.current_result_ref.status = "PENDING_BINDING";
         context.current_result_ref.reason = line.reason;
         context.current_result_ref.line_no = line.line_no;
@@ -2248,7 +2262,8 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.current_result_ref.name = lhs;
     context.current_result_ref.value = refValue;
     context.current_result_ref.source_object = sourceObjectName;
-    context.current_result_ref.result_type = "FindcircleResult";
+    context.current_result_ref.result_type = sourceObject->type == "Findline" ?
+        "FindlineResult" : "FindcircleResult";
     context.current_result_ref.status = "geometry_result_available";
     context.current_result_ref.reason = "bound to runtime object geometry result";
     context.current_result_ref.fit_cx = sourceObject->fit_cx;
@@ -2257,6 +2272,16 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.current_result_ref.avgdist = sourceObject->fit_avgdist;
     context.current_result_ref.points_count = sourceObject->measure_points_count;
     context.current_result_ref.valid_points_count = sourceObject->valid_points_count;
+    if (sourceObject->type == "Findline")
+    {
+        context.current_result_ref.line_x0 = sourceObject->fit_line_x0;
+        context.current_result_ref.line_y0 = sourceObject->fit_line_y0;
+        context.current_result_ref.line_x1 = sourceObject->fit_line_x1;
+        context.current_result_ref.line_y1 = sourceObject->fit_line_y1;
+        context.current_result_ref.line_avgdist = sourceObject->line_avgdist;
+        context.current_result_ref.line_points_count = sourceObject->line_measure_points_count;
+        context.current_result_ref.valid_line_points_count = sourceObject->valid_line_points_count;
+    }
     context.current_result_ref.line_no = line.line_no;
 
     line.status = "runtime_executed";
@@ -2281,12 +2306,104 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.runtime_current_status = "PENDING";
     context.run_state = "runtime_step";
 
-    UpdateFindcircleDebugSnapshot(context, *sourceObject, line.line_no, statement);
+    if (sourceObject->type == "Findcircle")
+        UpdateFindcircleDebugSnapshot(context, *sourceObject, line.line_no, statement);
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
 
     return true;
 }
+static bool ResolveDebugInt(ManualTestContext& context, const std::string& token, int& value)
+{
+    const std::string key = TrimLine(token);
+    const auto found = context.runtime_int_vars.find(key);
+    if (found != context.runtime_int_vars.end()) { value=found->second; return true; }
+    char* end = nullptr; const long parsed=std::strtol(key.c_str(),&end,10);
+    if (end == key.c_str() || *end != '\0') return false;
+    value=static_cast<int>(parsed); return true;
+}
+
+static const char* FindlineModeName(int mode)
+{
+    static const char* names[]={"Unspecified","LeastSquares","MinimumZone","Ransac","SingleEdge","EdgePairCenter","HorizontalVerticalPriority","WeightedMeasurementPoints"};
+    return mode>=0 && mode<8 ? names[mode] : "Unspecified";
+}
+
+static void FillFindlinePoints(RuntimeObjectView& object, Findline& line)
+{
+    object.line_measure_points_xy.clear();
+    int total=0;
+    auto append=[&](PointsShape& points)
+    {
+        total += points.size();
+        for(int i=0;i<points.size();++i)
+        {
+            const double x=points.getx(i), y=points.gety(i);
+            if(!std::isfinite(x)||!std::isfinite(y)) continue;
+            object.line_measure_points_xy.push_back(static_cast<float>(x));
+            object.line_measure_points_xy.push_back(static_cast<float>(y));
+        }
+    };
+    append(line.getresultpointsw()); append(line.getresultpointsh());
+    object.line_measure_points_count=total;
+    object.valid_line_points_count=static_cast<int>(object.line_measure_points_xy.size()/2);
+    object.has_line_measure_points=!object.line_measure_points_xy.empty();
+}
+
+static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, const std::string& statement)
+{
+    const ParsedMethodCall call=ParseMethodCall(statement);
+    if(!call.valid) return false;
+    DebugCximageRuntime& runtime=CxRuntime(context);
+    auto it=runtime.lines.find(call.object);
+    if(it==runtime.lines.end() || !it->second) return false;
+    Findline& tool=*it->second;
+    RuntimeObjectView& object=EnsureRuntimeObject(context,call.object,"Findline",context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+    ScriptLineView& sourceLine=context.line_views[static_cast<std::size_t>(lineIndex)];
+    bool handled=true;
+    if(call.method=="setline")
+    {
+        if(call.args.size()<5) { sourceLine.status="BLOCKED"; sourceLine.reason="Findline.setline requires 5 parameters"; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        int values[5]={};
+        for(int i=0;i<5;++i) if(!ResolveDebugInt(context,call.args[static_cast<std::size_t>(i)],values[i])) { sourceLine.status="BLOCKED"; sourceLine.reason="Findline.setline unresolved parameter: "+call.args[static_cast<std::size_t>(i)]; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        tool.setline(values[0],values[1],values[2],values[3],values[4]);
+        object.has_line_roi=true; object.line_x0=static_cast<float>(values[0]); object.line_y0=static_cast<float>(values[1]); object.line_x1=static_cast<float>(values[2]); object.line_y1=static_cast<float>(values[3]); object.line_scale=static_cast<float>(values[4]);
+    }
+    else if(call.method=="setmethod" || call.method=="setthre" || call.method=="setlinegap" || call.method=="setfitmode")
+    {
+        if(call.args.empty()) { sourceLine.status="BLOCKED"; sourceLine.reason=call.method+" requires one parameter"; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        int value=0; if(!ResolveDebugInt(context,call.args[0],value)) { sourceLine.status="BLOCKED"; sourceLine.reason=call.method+" unresolved parameter"; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        if(call.method=="setmethod") tool.setmethod(value); else if(call.method=="setthre") tool.setthre(value); else if(call.method=="setlinegap") tool.setlinegap(value); else tool.setfitmode(value);
+    }
+    else if(call.method=="measure")
+    {
+        if(call.args.empty()) { sourceLine.status="BLOCKED"; sourceLine.reason="Findline.measure requires image"; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        const std::string imageName=StripAddressPrefix(call.args[0]); auto image=runtime.images.find(imageName);
+        if(image==runtime.images.end()||!image->second) { sourceLine.status="BLOCKED"; sourceLine.reason="Findline image object missing: "+imageName; context.run_state="blocked"; context.debug_status="BLOCKED"; return true; }
+        tool.measure(image->second.get()); FillFindlinePoints(object,tool);
+    }
+    else if(call.method=="fitline" || call.method=="FitLine")
+    {
+        tool.fitline(); FillFindlinePoints(object,tool);
+        object.has_fit_line=tool.hasfitresult(); object.line_fit_status=tool.getfitstatus(); object.line_fit_mode=FindlineModeName(tool.getfitmodevalue());
+        if(object.has_fit_line)
+        {
+            object.fit_line_x0=static_cast<float>(tool.getresultx0()); object.fit_line_y0=static_cast<float>(tool.getresulty0()); object.fit_line_x1=static_cast<float>(tool.getresultx1()); object.fit_line_y1=static_cast<float>(tool.getresulty1()); object.line_avgdist=static_cast<float>(tool.getavgdist()); object.valid_line_points_count=tool.getvalidpointcount(); object.runtime_state="geometry_result_available";
+        }
+        else object.runtime_state="fitline_pending_binding";
+    }
+    else handled=false;
+    if(!handled) return false;
+    object.exists_in_parser=true; object.type="Findline"; object.last_method=call.method; object.last_update_line=sourceLine.line_no; object.visualizable=true; object.visual_source="runtime_object"; object.stale=false;
+    object.last_runtime_status=object.has_fit_line?"runtime_executed":(call.method=="fitline"?"PENDING_BINDING":"runtime_executed");
+    std::ostringstream summary; summary << call.method << " executed | mode=" << (object.line_fit_mode.empty()?"not_selected":object.line_fit_mode) << " | points=" << object.line_measure_points_count << " | valid_points=" << object.valid_line_points_count;
+    if(object.has_fit_line) summary << " | fit=(" << object.fit_line_x0 << "," << object.fit_line_y0 << ")->(" << object.fit_line_x1 << "," << object.fit_line_y1 << ") | avgdist=" << object.line_avgdist;
+    else if(call.method=="fitline") summary << " | status=" << object.line_fit_status;
+    object.display_summary=summary.str();
+    sourceLine.status=(call.method=="fitline"&&!object.has_fit_line)?"PENDING_BINDING":"runtime_executed"; sourceLine.reason=object.display_summary; sourceLine.timestamp=CurrentTimestamp();
+    context.current_line=FindNextNonEmptyLine(context,lineIndex+1); context.run_state="runtime_step"; context.debug_status="PENDING"; context.debug_reason=sourceLine.reason; context.runtime_current_status="PENDING"; return true;
+}
+
 static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -2674,6 +2791,8 @@ static void DebugStepOnce(ManualTestContext& context)
     if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
         return;
     if (TryExecuteIntDeclarationAssignment(context, lineIndex, statement))
+        return;
+    if (TryExecuteFindlineRuntimeMethod(context, lineIndex, statement))
         return;
     if (TryExecuteGetResultBinding(context, lineIndex, statement))
         return;
@@ -4053,6 +4172,20 @@ void ViewController::drawManualStateTestConsole()
                   object.fit_radius, object.fit_avgdist);
       ImGui::Text("measure_points_count=%d | valid_points_count=%d",
                   object.measure_points_count, object.valid_points_count);
+    }
+    else if (object.type == "Findline")
+    {
+      ImGui::Text("fit_mode=%s | fit_status=%s",
+                  object.line_fit_mode.empty() ? "not_selected" : object.line_fit_mode.c_str(),
+                  object.line_fit_status.empty() ? "not_executed" : object.line_fit_status.c_str());
+      ImGui::Text("points=%d | valid_points=%d | avgdist=%.3f",
+                  object.line_measure_points_count,
+                  object.valid_line_points_count,
+                  object.line_avgdist);
+      if (object.has_fit_line)
+        ImGui::Text("fit=(%.3f, %.3f)->(%.3f, %.3f)",
+                    object.fit_line_x0, object.fit_line_y0,
+                    object.fit_line_x1, object.fit_line_y1);
     }
     ImGui::Text("visualizable: %s", object.visualizable ? "true" : "false");
     ImGui::Text("visual_source: %s", object.visual_source.c_str());

@@ -865,6 +865,10 @@ void ViewController::drawScriptAcceptancePanels()
         m_imageViewImage.cols > 0 &&
         m_imageViewImage.rows > 0)
     {
+        const std::string activeResultObject =
+            m_manualTest.current_result_ref.source_object;
+        const float sx = imageSize.x / static_cast<float>(m_imageViewImage.cols);
+        const float sy = imageSize.y / static_cast<float>(m_imageViewImage.rows);
         for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
         {
             if (object.type != "Findcircle")
@@ -901,11 +905,6 @@ void ViewController::drawScriptAcceptancePanels()
             const ImU32 pointColor = isActiveResultObject
                 ? IM_COL32(255, 80, 80, 255)
                 : IM_COL32(255, 80, 80, 100);
-            const std::string activeResultObject =
-                m_manualTest.current_result_ref.source_object;
-
-            const float sx = imageSize.x / static_cast<float>(m_imageViewImage.cols);
-            const float sy = imageSize.y / static_cast<float>(m_imageViewImage.rows);
             const float sr = (sx + sy) * 0.5f;
 
             const ImVec2 center(
@@ -973,6 +972,37 @@ void ViewController::drawScriptAcceptancePanels()
                         "FitResultMeasure runtime result" :
                         "fitcircle runtime result");
             }
+        }
+
+        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        {
+            if (object.type != "Findline" || object.stale || !object.visualizable)
+                continue;
+            const ImVec2 roi0(imagePos.x + object.line_x0 * sx,
+                              imagePos.y + object.line_y0 * sy);
+            const ImVec2 roi1(imagePos.x + object.line_x1 * sx,
+                              imagePos.y + object.line_y1 * sy);
+            if (object.has_line_roi)
+                drawList->AddLine(roi0, roi1, IM_COL32(80,255,170,255), 2.0f);
+            if (object.has_line_measure_points)
+                for (std::size_t i=0; i+1<object.line_measure_points_xy.size(); i+=2)
+                    drawList->AddCircleFilled(
+                        ImVec2(imagePos.x+object.line_measure_points_xy[i]*sx,
+                               imagePos.y+object.line_measure_points_xy[i+1]*sy),
+                        3.5f, IM_COL32(255,80,80,255), 12);
+            if (object.has_fit_line)
+            {
+                const ImVec2 fit0(imagePos.x+object.fit_line_x0*sx,
+                                  imagePos.y+object.fit_line_y0*sy);
+                const ImVec2 fit1(imagePos.x+object.fit_line_x1*sx,
+                                  imagePos.y+object.fit_line_y1*sy);
+                drawList->AddLine(fit0,fit1,IM_COL32(255,220,80,255),3.0f);
+                drawList->AddText(ImVec2(fit0.x+6.0f,fit0.y-14.0f),
+                                  IM_COL32(255,220,80,255),"fit_line");
+            }
+            else if (object.last_method == "fitline")
+                drawList->AddText(ImVec2(roi0.x+6.0f,roi0.y-14.0f),
+                                  IM_COL32(255,220,80,180),"fitline pending");
         }
     }
 

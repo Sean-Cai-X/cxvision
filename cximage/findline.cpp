@@ -10,6 +10,8 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <vector>
+
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -1825,6 +1827,179 @@ void Findline::InflectionPoint(void* points)
         return;
     } 
 }
+
+namespace
+{
+struct LineFitSample { double x; double y; double weight; };
+struct LineFitResult
+{
+    bool valid = false;
+    double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0, avgdist = 0.0;
+    int valid_points = 0;
+};
+
+LineFitResult FitWeightedTls(const std::vector<LineFitSample>& points)
+{
+    LineFitResult result;
+    if (points.size() < 2) return result;
+    double weight_sum = 0.0, mx = 0.0, my = 0.0;
+    for (const auto& p : points)
+    {
+        const double w = std::isfinite(p.weight) && p.weight > 0.0 ? p.weight : 1.0;
+        weight_sum += w; mx += w * p.x; my += w * p.y;
+    }
+    if (!(weight_sum > 0.0)) return result;
+    mx /= weight_sum; my /= weight_sum;
+    double sxx = 0.0, syy = 0.0, sxy = 0.0;
+    for (const auto& p : points)
+    {
+        const double w = p.weight > 0.0 ? p.weight : 1.0;
+        const double dx = p.x - mx, dy = p.y - my;
+        sxx += w * dx * dx; syy += w * dy * dy; sxy += w * dx * dy;
+    }
+    if (!(sxx + syy > 0.0)) return result;
+    const double theta = 0.5 * std::atan2(2.0 * sxy, sxx - syy);
+    const double vx = std::cos(theta), vy = std::sin(theta);
+    double min_t = std::numeric_limits<double>::infinity();
+    double max_t = -std::numeric_limits<double>::infinity();
+    double distance_sum = 0.0;
+    for (const auto& p : points)
+    {
+        const double dx = p.x - mx, dy = p.y - my;
+        const double t = dx * vx + dy * vy;
+        min_t = std::min(min_t, t); max_t = std::max(max_t, t);
+        distance_sum += std::abs(dx * -vy + dy * vx);
+    }
+    result.valid = std::isfinite(min_t) && std::isfinite(max_t) && max_t > min_t;
+    result.x0 = mx + vx * min_t; result.y0 = my + vy * min_t;
+    result.x1 = mx + vx * max_t; result.y1 = my + vy * max_t;
+    result.avgdist = distance_sum / static_cast<double>(points.size());
+    result.valid_points = static_cast<int>(points.size());
+    return result;
+}
+
+LineFitResult FitMinimumZone(const std::vector<LineFitSample>& points)
+{
+    LineFitResult seed = FitWeightedTls(points);
+    if (!seed.valid) return seed;
+    const double seed_angle = std::atan2(seed.y1 - seed.y0, seed.x1 - seed.x0);
+    double best_zone = std::numeric_limits<double>::infinity();
+    double best_angle = seed_angle, best_min = 0.0, best_max = 0.0;
+    for (int step = -180; step <= 180; ++step)
+    {
+        const double angle = seed_angle + step * (3.14159265358979323846 / 720.0);
+        const double nx = -std::sin(angle), ny = std::cos(angle);
+        double lo = std::numeric_limits<double>::infinity();
+        double hi = -std::numeric_limits<double>::infinity();
+        for (const auto& p : points) { const double d=p.x*nx+p.y*ny; lo=std::min(lo,d); hi=std::max(hi,d); }
+        if (hi - lo < best_zone) { best_zone=hi-lo; best_angle=angle; best_min=lo; best_max=hi; }
+    }
+    const double vx=std::cos(best_angle), vy=std::sin(best_angle), nx=-vy, ny=vx;
+    const double offset=(best_min+best_max)*0.5;
+    double min_t=std::numeric_limits<double>::infinity(), max_t=-min_t, sum=0.0;
+    for (const auto& p:points) { const double t=p.x*vx+p.y*vy; min_t=std::min(min_t,t); max_t=std::max(max_t,t); sum+=std::abs(p.x*nx+p.y*ny-offset); }
+    LineFitResult r; r.valid=max_t>min_t; r.x0=vx*min_t+nx*offset; r.y0=vy*min_t+ny*offset;
+    r.x1=vx*max_t+nx*offset; r.y1=vy*max_t+ny*offset; r.avgdist=sum/points.size(); r.valid_points=static_cast<int>(points.size()); return r;
+}
+
+LineFitResult FitRansac(const std::vector<LineFitSample>& points)
+{
+    if (points.size() < 2) return {};
+    std::vector<std::size_t> best;
+    const int trials = std::min(256, static_cast<int>(points.size() * points.size()));
+    for (int trial=0; trial<trials; ++trial)
+    {
+        const std::size_t a=static_cast<std::size_t>((trial*37+3)%points.size());
+        const std::size_t b=static_cast<std::size_t>((trial*91+17)%points.size());
+        if (a==b) continue;
+        const double dx=points[b].x-points[a].x, dy=points[b].y-points[a].y;
+        const double len=std::hypot(dx,dy); if (!(len>0.0)) continue;
+        std::vector<std::size_t> inliers;
+        for (std::size_t i=0;i<points.size();++i)
+            if (std::abs((points[i].x-points[a].x)*dy-(points[i].y-points[a].y)*dx)/len <= 2.0) inliers.push_back(i);
+        if (inliers.size()>best.size()) best.swap(inliers);
+    }
+    if (best.size()<2) return {};
+    std::vector<LineFitSample> inliers; inliers.reserve(best.size());
+    for (std::size_t i:best) inliers.push_back(points[i]);
+    return FitWeightedTls(inliers);
+}
+
+LineFitResult FitAxisPriority(const std::vector<LineFitSample>& points)
+{
+    LineFitResult seed=FitWeightedTls(points); if(!seed.valid) return seed;
+    const bool horizontal=std::abs(seed.x1-seed.x0)>=std::abs(seed.y1-seed.y0);
+    double mean=0.0, lo=std::numeric_limits<double>::infinity(), hi=-lo, sum=0.0;
+    for(const auto& p:points) mean += horizontal?p.y:p.x;
+    mean/=points.size();
+    for(const auto& p:points) { const double along=horizontal?p.x:p.y; lo=std::min(lo,along); hi=std::max(hi,along); sum+=std::abs((horizontal?p.y:p.x)-mean); }
+    LineFitResult r; r.valid=hi>lo; r.x0=horizontal?lo:mean; r.y0=horizontal?mean:lo; r.x1=horizontal?hi:mean; r.y1=horizontal?mean:hi;
+    r.avgdist=sum/points.size(); r.valid_points=static_cast<int>(points.size()); return r;
+}
+}
+
+void Findline::clearfitresult()
+{
+    m_result_x0=m_result_y0=m_result_x1=m_result_y1=m_result_avgdist=0.0;
+    m_result_valid_points=0; m_has_fit_result=false;
+}
+
+void Findline::setfitmode(int mode)
+{
+    m_fitline_mode = mode >= static_cast<int>(FitlineMode::LeastSquares) &&
+        mode <= static_cast<int>(FitlineMode::WeightedMeasurementPoints)
+        ? static_cast<FitlineMode>(mode) : FitlineMode::Unspecified;
+}
+
+void Findline::setfitpointweight(int index, double weight)
+{
+    if (index < 0) return;
+    if (m_fit_point_weights.size() <= static_cast<std::size_t>(index))
+        m_fit_point_weights.resize(static_cast<std::size_t>(index)+1, 1.0);
+    m_fit_point_weights[static_cast<std::size_t>(index)] = std::isfinite(weight) && weight > 0.0 ? weight : 1.0;
+}
+
+void Findline::fitline() { fitline(m_fitline_mode); }
+
+void Findline::fitline(FitlineMode mode)
+{
+    clearfitresult();
+    if (mode == FitlineMode::Unspecified) mode = FitlineMode::LeastSquares;
+    m_fitline_mode = mode;
+    std::vector<LineFitSample> w, h;
+    auto append=[&](PointsShape& src,std::vector<LineFitSample>& dst)
+    { for(int i=0;i<src.size();++i) { const double x=src.getx(i),y=src.gety(i); if(std::isfinite(x)&&std::isfinite(y)) dst.push_back({x,y,1.0}); } };
+    append(getresultpointsw(),w); append(getresultpointsh(),h);
+    std::vector<LineFitSample> points;
+    if (mode == FitlineMode::SingleEdge) points = w.size() >= 2 ? w : h;
+    else if (mode == FitlineMode::EdgePairCenter)
+    {
+        const std::size_t count=std::min(w.size(),h.size()); points.reserve(count);
+        for(std::size_t i=0;i<count;++i) points.push_back({(w[i].x+h[i].x)*0.5,(w[i].y+h[i].y)*0.5,1.0});
+    }
+    else { points=w; points.insert(points.end(),h.begin(),h.end()); }
+    if (mode == FitlineMode::WeightedMeasurementPoints)
+        for(std::size_t i=0;i<points.size();++i) points[i].weight=i<m_fit_point_weights.size()?m_fit_point_weights[i]:1.0;
+    LineFitResult result;
+    switch(mode)
+    {
+    case FitlineMode::MinimumZone: result=FitMinimumZone(points); break;
+    case FitlineMode::Ransac: result=FitRansac(points); break;
+    case FitlineMode::HorizontalVerticalPriority: result=FitAxisPriority(points); break;
+    default: result=FitWeightedTls(points); break;
+    }
+    static const char* names[]={"Unspecified","LeastSquares","MinimumZone","Ransac","SingleEdge","EdgePairCenter","HorizontalVerticalPriority","WeightedMeasurementPoints"};
+    const int mode_index=static_cast<int>(mode);
+    if (!result.valid)
+    {
+        m_fitline_status=std::string("PENDING_BINDING: ")+names[mode_index]+" requires at least two non-degenerate valid points";
+        return;
+    }
+    m_result_x0=result.x0; m_result_y0=result.y0; m_result_x1=result.x1; m_result_y1=result.y1;
+    m_result_avgdist=result.avgdist; m_result_valid_points=result.valid_points; m_has_fit_result=true;
+    m_fitline_status=std::string("geometry_result_available: ")+names[mode_index];
+}
+
 /*void Findline::SeekPoints(PointsShape& seekpoints, gp_Pnt& point, int ivect)
 {
     //LineMeasurePoints m_l_measure_h_seek;

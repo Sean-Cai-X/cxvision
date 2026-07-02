@@ -4,6 +4,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "findobject.h"
+#include <string>
 
 
 
@@ -59,6 +60,13 @@ struct FindlineMeasureProfileStats
 class Findline :public Shape
 {
 public:
+    enum class FitlineMode
+    {
+        Unspecified = 0, LeastSquares = 1, MinimumZone = 2, Ransac = 3,
+        SingleEdge = 4, EdgePairCenter = 5,
+        HorizontalVerticalPriority = 6, WeightedMeasurementPoints = 7
+    };
+
     Findline();
     ~Findline();
     int wgap() { return m_iwgap; }
@@ -155,16 +163,22 @@ public:
     void translate(int ix, int iy);
     void Translate(const gp_Vec& translationVector);
 
-    void FitLine()
-    {
-      /*  Vec4d lineParams; // 0:Vx,1:Vy,2:X1,3:Y1;
-        fitLine(points, lineParams, DIST_L2, 0, 0.01, 0.01);
-        vector<double> vec4d = vector<double>();
-        vec4d.push_back(lineParams[0]);
-        vec4d.push_back(lineParams[1]);
-        vec4d.push_back(lineParams[2]);
-        vec4d.push_back(lineParams[3]);*/
-    }
+    void fitline();
+    void fitline(FitlineMode mode);
+    void FitLine() { fitline(); }
+    void setfitmode(int mode);
+    int getfitmodevalue() const { return static_cast<int>(m_fitline_mode); }
+    const std::string& getfitstatus() const { return m_fitline_status; }
+    void clearfitresult();
+    void setfitpointweight(int index, double weight);
+    void clearfitpointweights() { m_fit_point_weights.clear(); }
+    double getresultx0() const { return m_result_x0; }
+    double getresulty0() const { return m_result_y0; }
+    double getresultx1() const { return m_result_x1; }
+    double getresulty1() const { return m_result_y1; }
+    double getavgdist() const { return m_result_avgdist; }
+    int getvalidpointcount() const { return m_result_valid_points; }
+    bool hasfitresult() const { return m_has_fit_result; }
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
@@ -254,6 +268,16 @@ private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindlineMeasureProfileStats m_lastMeasureProfile;
+    double m_result_x0 = 0.0;
+    double m_result_y0 = 0.0;
+    double m_result_x1 = 0.0;
+    double m_result_y1 = 0.0;
+    double m_result_avgdist = 0.0;
+    int m_result_valid_points = 0;
+    bool m_has_fit_result = false;
+    FitlineMode m_fitline_mode = FitlineMode::LeastSquares;
+    std::string m_fitline_status = "not_executed";
+    std::vector<double> m_fit_point_weights;
 };
 
 #endif //_findline_Header

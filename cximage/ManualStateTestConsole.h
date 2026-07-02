@@ -91,6 +91,31 @@ struct RuntimeObjectView
     int image_height = 0;
     int back_image_width = 0;
     int back_image_height = 0;
+
+
+    // Findline ROI / measure / fit result snapshot.
+    bool has_line_roi = false;
+    float line_x0 = 0.0f;
+    float line_y0 = 0.0f;
+    float line_x1 = 0.0f;
+    float line_y1 = 0.0f;
+    float line_scale = 1.0f;
+
+    bool has_line_measure_points = false;
+    std::vector<float> line_measure_points_xy;
+    int line_measure_points_count = 0;
+    int valid_line_points_count = 0;
+
+    bool has_fit_line = false;
+    float fit_line_x0 = 0.0f;
+    float fit_line_y0 = 0.0f;
+    float fit_line_x1 = 0.0f;
+    float fit_line_y1 = 0.0f;
+    float line_avgdist = 0.0f;
+    std::string line_fit_status;
+    std::string line_fit_mode;
+
+
 };
 
 struct DebugStepSnapshot
@@ -129,6 +154,16 @@ struct ResultRefView
     int valid_points_count = 0;
 
     int line_no = 0;
+
+    // Line result fields.
+    float line_x0 = 0.0f;
+    float line_y0 = 0.0f;
+    float line_x1 = 0.0f;
+    float line_y1 = 0.0f;
+    float line_avgdist = 0.0f;
+    int line_points_count = 0;
+    int valid_line_points_count = 0;
+
 };
 
 struct ManualTestContext
