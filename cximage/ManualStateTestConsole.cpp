@@ -298,6 +298,30 @@ static std::string StripAddressPrefix(std::string s)
         s.erase(s.begin());
     return TrimLine(s);
 }
+static RuntimeObjectView* FindRuntimeObjectByName(ManualTestContext& context,
+    const std::string& name)
+{
+    for (RuntimeObjectView& object : context.runtime_objects)
+    {
+        if (object.name == name)
+            return &object;
+    }
+
+    return nullptr;
+}
+
+static const RuntimeObjectView* FindRuntimeObjectByName(const ManualTestContext& context,
+    const std::string& name)
+{
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+        if (object.name == name)
+            return &object;
+    }
+
+    return nullptr;
+}
+
 static RuntimeObjectView* FindRuntimeObject(ManualTestContext& context,
     const std::string& name)
 {
@@ -336,7 +360,43 @@ static RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
     context.runtime_objects.push_back(object);
     return context.runtime_objects.back();
 }
+static void UpsertGlobalVariableView(ManualTestContext& context,
+    const std::string& type,
+    const std::string& name,
+    const std::string& value,
+    int lineNo,
+    const std::string& status,
+    const std::string& imagePath = std::string(),
+    bool imageInitialized = false)
+{
+    for (ScriptVariableView& variable : context.global_variable_views)
+    {
+        if (variable.name == name)
+        {
+            variable.type = type;
+            variable.value = value;
+            variable.declared_line = lineNo;
+            variable.status = status;
 
+            if (!imagePath.empty())
+                variable.image_path = imagePath;
+
+            variable.image_initialized = imageInitialized || variable.image_initialized;
+            return;
+        }
+    }
+
+    ScriptVariableView variable;
+    variable.type = type;
+    variable.name = name;
+    variable.value = value;
+    variable.declared_line = lineNo;
+    variable.status = status;
+    variable.image_path = imagePath;
+    variable.image_initialized = imageInitialized;
+
+    context.global_variable_views.push_back(variable);
+}
 static void UpsertVariableView(ManualTestContext& context,
     const std::string& type,
     const std::string& name,
@@ -544,36 +604,99 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
 {
     std::string s = TrimLine(statement);
 
-    if (s.empty() || s.find('=') == std::string::npos || s.find("==") != std::string::npos)
+    if (s.empty() ||
+        s.find('=') == std::string::npos ||
+        s.find("==") != std::string::npos)
+    {
         return false;
+    }
 
     if (!s.empty() && s.back() == ';')
         s.pop_back();
 
     const std::size_t eq = s.find('=');
-    const std::string lhs = TrimLine(s.substr(0, eq));
-    const std::string rhs = TrimLine(s.substr(eq + 1));
 
-    if (lhs != "m_isetcircle")
+    if (eq == std::string::npos)
         return false;
 
-    const int v = std::atoi(rhs.c_str());
-    context.runtime_int_vars[lhs] = v;
+    const std::string lhs = TrimLine(s.substr(0, eq));
+    std::string rhs = TrimLine(s.substr(eq + 1));
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
-    line.status = "runtime_executed";
-    line.reason = "assignment executed";
-    line.return_variable = lhs;
-    line.timestamp = CurrentTimestamp();
 
-    UpsertVariableView(context, "int", lhs, std::to_string(v), line.line_no, "runtime_value");
+    // 1. 调试控制变量：m_isetcircle = 1;
+    if (lhs == "m_isetcircle")
+    {
+        const int v = std::atoi(rhs.c_str());
 
-    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
-    context.run_state = "runtime_step";
-    context.debug_status = "PENDING";
-    context.debug_reason = "assignment executed";
+        context.runtime_int_vars[lhs] = v;
 
-    return true;
+        line.status = "runtime_executed";
+        line.reason = "assignment executed";
+        line.return_variable = lhs;
+        line.timestamp = CurrentTimestamp();
+
+        UpsertVariableView(
+            context,
+            "int",
+            lhs,
+            std::to_string(v),
+            line.line_no,
+            "runtime_value");
+
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = "assignment executed";
+
+        return true;
+    }
+
+    // 2. 全局状态变量：global.current_status = "PENDING";
+    if (lhs == "global.current_status")
+    {
+        // 去掉字符串两侧引号
+        if (!rhs.empty() && rhs.front() == '"')
+            rhs.erase(rhs.begin());
+
+        if (!rhs.empty() && rhs.back() == '"')
+            rhs.pop_back();
+
+        context.runtime_current_status = rhs;
+
+        UpsertGlobalVariableView(
+            context,
+            "string",
+            lhs,
+            rhs,
+            line.line_no,
+            "runtime_value");
+
+        // 同步到 Local Variables / Variable Snapshot，方便界面统一观察
+        UpsertVariableView(
+            context,
+            "string",
+            lhs,
+            rhs,
+            line.line_no,
+            "runtime_initialized");
+
+        line.status = "runtime_executed";
+        line.reason = "global.current_status remains " + rhs + "; judge/rule not executed";
+        line.return_variable = lhs;
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+
+        // 注意：这里不能因为赋值成功就 PASS。
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+
+        return true;
+    }
+
+    return false;
 }
 
 static bool TryExecuteCurrentStatusAssignment(ManualTestContext& context,
@@ -1031,8 +1154,226 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
         << " | valid_points=" << (object.measure_points_xy.size() / 2);
 
     object.display_summary = summary.str();
+
+    object.measure_points_count = pointCount;
+    object.valid_points_count = static_cast<int>(object.measure_points_xy.size() / 2);
+    object.has_measure_points = !object.measure_points_xy.empty();
+}
+static std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "geometry: object=" << object.name;
+
+    if (object.has_circle)
+    {
+        ss << " | roi_circle=("
+            << object.circle_cx << ","
+            << object.circle_cy << ", r="
+            << object.circle_radius << ")";
+    }
+    else
+    {
+        ss << " | roi_circle=(none)";
+    }
+
+    ss << " | measure_points_count=" << object.measure_points_count;
+    ss << " | valid_points_count=" << object.valid_points_count;
+
+    if (object.has_fit_result)
+    {
+        ss << " | fit_circle=("
+            << object.fit_cx << ","
+            << object.fit_cy << ", r="
+            << object.fit_radius << ")"
+            << " | avgdist=" << object.fit_avgdist;
+    }
+    else
+    {
+        ss << " | fit_circle=(none)";
+    }
+
+    ss << " | has_result_measure="
+        << (object.has_result_measure ? "true" : "false");
+
+    if (object.scan_path > 0)
+        ss << " | scan_path=" << object.scan_path;
+
+    if (object.image_width > 0 && object.image_height > 0)
+        ss << " | image=" << object.image_width << "x" << object.image_height;
+
+    if (object.back_image_width > 0 && object.back_image_height > 0)
+        ss << " | back_image=" << object.back_image_width << "x" << object.back_image_height;
+
+    return ss.str();
 }
 
+static std::string BuildFindcircleOverlaySummary(const ManualTestContext& context,
+    const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "image overlay:"
+        << " green_roi_circle=" << (object.has_circle ? "true" : "false")
+        << " | red_measure_points=" << object.valid_points_count
+        << " | yellow_fit_circle=" << (object.has_fit_result ? "true" : "false")
+        << " | source_preview_enabled=false"
+        << " | manual_elements_count=0";
+
+    return ss.str();
+}
+
+static void UpdateFindcircleDebugSnapshot(ManualTestContext& context,
+    const RuntimeObjectView& object,
+    int lineNo,
+    const std::string& statement)
+{
+    context.geometry_summary = BuildFindcircleGeometrySummary(object);
+    context.image_overlay_summary = BuildFindcircleOverlaySummary(context, object);
+
+    std::ostringstream ss;
+
+    ss << "Findcircle Debug Snapshot Summary\n"
+        << "script_path: " << context.loaded_script_path << "\n"
+        << "flow_block_id: cximage_find_circle_explore.N0\n"
+        << "line: " << lineNo << "\n"
+        << "statement: " << statement << "\n"
+        << "object: " << object.name << "\n"
+        << "runtime_state: " << object.runtime_state << "\n"
+        << "last_method: " << object.last_method << "\n"
+        << context.geometry_summary << "\n"
+        << context.image_overlay_summary << "\n";
+
+    if (!context.current_result_ref.name.empty())
+    {
+        ss << "result_ref: "
+            << context.current_result_ref.name
+            << " = "
+            << context.current_result_ref.value
+            << " | status="
+            << context.current_result_ref.status
+            << "\n";
+    }
+
+    context.findcircle_debug_snapshot_summary = ss.str();
+}
+
+static std::string EscapeJsonString(const std::string& s)
+{
+    std::ostringstream out;
+
+    for (char c : s)
+    {
+        switch (c)
+        {
+        case '\\': out << "\\\\"; break;
+        case '"': out << "\\\""; break;
+        case '\n': out << "\\n"; break;
+        case '\r': out << "\\r"; break;
+        case '\t': out << "\\t"; break;
+        default: out << c; break;
+        }
+    }
+
+    return out.str();
+}
+
+static bool SaveFindcircleDebugSnapshotJson(const ManualTestContext& context,
+    std::string& outPath,
+    std::string& outReason)
+{
+    try
+    {
+        fs::path caseDir(context.case_directory.empty()
+            ? "docs/notes/cxscript_case"
+            : context.case_directory);
+
+        fs::create_directories(caseDir);
+
+        fs::path filePath = caseDir / "findcircle_debug_snapshot.json";
+
+        std::ofstream file(filePath.string(), std::ios::out | std::ios::trunc);
+
+        if (!file.is_open())
+        {
+            outReason = "failed to open snapshot file: " + filePath.string();
+            return false;
+        }
+
+        file << "{\n";
+        file << "  \"script_path\": \"" << EscapeJsonString(context.loaded_script_path) << "\",\n";
+        file << "  \"flow_block_id\": \"cximage_find_circle_explore.N0\",\n";
+        file << "  \"current_line\": " << context.current_line << ",\n";
+        file << "  \"runtime_current_status\": \"" << EscapeJsonString(context.runtime_current_status) << "\",\n";
+
+        file << "  \"current_result_ref\": {\n";
+        file << "    \"name\": \"" << EscapeJsonString(context.current_result_ref.name) << "\",\n";
+        file << "    \"value\": \"" << EscapeJsonString(context.current_result_ref.value) << "\",\n";
+        file << "    \"source_object\": \"" << EscapeJsonString(context.current_result_ref.source_object) << "\",\n";
+        file << "    \"result_type\": \"" << EscapeJsonString(context.current_result_ref.result_type) << "\",\n";
+        file << "    \"status\": \"" << EscapeJsonString(context.current_result_ref.status) << "\",\n";
+        file << "    \"reason\": \"" << EscapeJsonString(context.current_result_ref.reason) << "\",\n";
+        file << "    \"fit_cx\": " << context.current_result_ref.fit_cx << ",\n";
+        file << "    \"fit_cy\": " << context.current_result_ref.fit_cy << ",\n";
+        file << "    \"fit_radius\": " << context.current_result_ref.fit_radius << ",\n";
+        file << "    \"avgdist\": " << context.current_result_ref.avgdist << ",\n";
+        file << "    \"points_count\": " << context.current_result_ref.points_count << ",\n";
+        file << "    \"valid_points_count\": " << context.current_result_ref.valid_points_count << "\n";
+        file << "  },\n";
+
+        file << "  \"geometry_summary\": \"" << EscapeJsonString(context.geometry_summary) << "\",\n";
+        file << "  \"image_overlay_summary\": \"" << EscapeJsonString(context.image_overlay_summary) << "\",\n";
+        file << "  \"last_debug_result\": \"" << EscapeJsonString(context.debug_reason) << "\",\n";
+
+        file << "  \"runtime_objects\": [\n";
+
+        for (std::size_t i = 0; i < context.runtime_objects.size(); ++i)
+        {
+            const RuntimeObjectView& object = context.runtime_objects[i];
+
+            file << "    {\n";
+            file << "      \"name\": \"" << EscapeJsonString(object.name) << "\",\n";
+            file << "      \"type\": \"" << EscapeJsonString(object.type) << "\",\n";
+            file << "      \"runtime_state\": \"" << EscapeJsonString(object.runtime_state) << "\",\n";
+            file << "      \"last_method\": \"" << EscapeJsonString(object.last_method) << "\",\n";
+            file << "      \"display_summary\": \"" << EscapeJsonString(object.display_summary) << "\",\n";
+            file << "      \"visualizable\": " << (object.visualizable ? "true" : "false") << ",\n";
+            file << "      \"has_circle\": " << (object.has_circle ? "true" : "false") << ",\n";
+            file << "      \"has_measure_points\": " << (object.has_measure_points ? "true" : "false") << ",\n";
+            file << "      \"has_fit_result\": " << (object.has_fit_result ? "true" : "false") << ",\n";
+            file << "      \"circle\": [" << object.circle_cx << ", " << object.circle_cy << ", "
+                << object.circle_inner << ", " << object.circle_radius << "],\n";
+            file << "      \"fit_circle\": [" << object.fit_cx << ", " << object.fit_cy << ", "
+                << object.fit_radius << "],\n";
+            file << "      \"avgdist\": " << object.fit_avgdist << ",\n";
+            file << "      \"measure_points_count\": " << object.measure_points_count << ",\n";
+            file << "      \"valid_points_count\": " << object.valid_points_count << "\n";
+            file << "    }";
+
+            if (i + 1 < context.runtime_objects.size())
+                file << ",";
+
+            file << "\n";
+        }
+
+        file << "  ]\n";
+        file << "}\n";
+
+        outPath = filePath.string();
+        outReason = "snapshot saved";
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        outReason = std::string("snapshot exception: ") + e.what();
+        return false;
+    }
+    catch (...)
+    {
+        outReason = "snapshot unknown exception";
+        return false;
+    }
+}
 static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -1196,7 +1537,147 @@ static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     return true;
 }
 
+static bool TryExecuteGetResultBinding(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    std::string s = TrimLine(statement);
 
+    if (s.empty())
+        return false;
+
+    if (!s.empty() && s.back() == ';')
+        s.pop_back();
+
+    const std::size_t eq = s.find('=');
+
+    if (eq == std::string::npos)
+        return false;
+
+    const std::string lhs = TrimLine(s.substr(0, eq));
+    const std::string rhs = TrimLine(s.substr(eq + 1));
+
+    const std::string suffix = ".get_result()";
+    const std::size_t getPos = rhs.find(suffix);
+
+    if (getPos == std::string::npos)
+        return false;
+
+    const std::string sourceObjectName = TrimLine(rhs.substr(0, getPos));
+
+    if (lhs.empty() || sourceObjectName.empty())
+        return false;
+
+    RuntimeObjectView* sourceObject = FindRuntimeObjectByName(context, sourceObjectName);
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+
+    if (sourceObject == nullptr)
+    {
+        line.status = "PENDING_BINDING";
+        line.reason = "get_result source object not found: " + sourceObjectName;
+        line.timestamp = CurrentTimestamp();
+
+        UpsertGlobalVariableView(
+            context,
+            "geometry_ref",
+            lhs,
+            "uninitialized",
+            line.line_no,
+            "PENDING_BINDING");
+
+        context.current_result_ref = ResultRefView();
+        context.current_result_ref.name = lhs;
+        context.current_result_ref.source_object = sourceObjectName;
+        context.current_result_ref.result_type = "FindcircleResult";
+        context.current_result_ref.status = "PENDING_BINDING";
+        context.current_result_ref.reason = line.reason;
+        context.current_result_ref.line_no = line.line_no;
+
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+        context.run_state = "runtime_step";
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+
+        return true;
+    }
+
+    const bool hasGeometry =
+        sourceObject->has_fit_result ||
+        sourceObject->runtime_state == "geometry_result_available";
+
+    if (!hasGeometry)
+    {
+        line.status = "PENDING_BINDING";
+        line.reason = "get_result requires a valid fit result; no result fabricated";
+        line.timestamp = CurrentTimestamp();
+
+        UpsertGlobalVariableView(
+            context,
+            "geometry_ref",
+            lhs,
+            "uninitialized",
+            line.line_no,
+            "PENDING_BINDING");
+
+        context.current_result_ref = ResultRefView();
+        context.current_result_ref.name = lhs;
+        context.current_result_ref.source_object = sourceObjectName;
+        context.current_result_ref.result_type = "FindcircleResult";
+        context.current_result_ref.status = "PENDING_BINDING";
+        context.current_result_ref.reason = line.reason;
+        context.current_result_ref.line_no = line.line_no;
+
+        // 注意：这里不 BLOCKED，不伪造 PASS，允许脚本继续到 global.current_status。
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+        context.run_state = "runtime_step";
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+
+        return true;
+    }
+
+    const std::string refValue = "runtime_object:" + sourceObjectName;
+
+    UpsertGlobalVariableView(
+        context,
+        "geometry_ref",
+        lhs,
+        refValue,
+        line.line_no,
+        "geometry_result_available");
+
+    context.current_result_ref = ResultRefView();
+    context.current_result_ref.name = lhs;
+    context.current_result_ref.value = refValue;
+    context.current_result_ref.source_object = sourceObjectName;
+    context.current_result_ref.result_type = "FindcircleResult";
+    context.current_result_ref.status = "geometry_result_available";
+    context.current_result_ref.reason = "bound to runtime object geometry result";
+    context.current_result_ref.fit_cx = sourceObject->fit_cx;
+    context.current_result_ref.fit_cy = sourceObject->fit_cy;
+    context.current_result_ref.fit_radius = sourceObject->fit_radius;
+    context.current_result_ref.avgdist = sourceObject->fit_avgdist;
+    context.current_result_ref.points_count = sourceObject->measure_points_count;
+    context.current_result_ref.valid_points_count = sourceObject->valid_points_count;
+    context.current_result_ref.line_no = line.line_no;
+
+    line.status = "runtime_executed";
+    line.reason = lhs + " bound to " + refValue;
+    line.return_variable = lhs;
+    line.timestamp = CurrentTimestamp();
+
+    context.debug_status = "PENDING";
+    context.debug_reason = "get_result bound; global.current_status remains PENDING until judge/rule";
+    context.runtime_current_status = "PENDING";
+    context.run_state = "runtime_step";
+
+    UpdateFindcircleDebugSnapshot(context, *sourceObject, line.line_no, statement);
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+
+    return true;
+}
 static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -1534,7 +2015,8 @@ static void DebugStepOnce(ManualTestContext& context)
      */
     if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
         return;
-
+    if (TryExecuteGetResultBinding(context, lineIndex, statement))
+        return;
     if (TryHandleFindcircleGetResult(context, lineIndex, statement))
         return;
 
@@ -2427,19 +2909,44 @@ void ViewController::drawManualStateTestConsole()
   std::string currentResultRef;
   for (const ScriptVariableView& variable : m_manualTest.global_variable_views)
     if (variable.name == "global.circle_ref") currentResultRef = variable.value;
-  ImGui::TextWrapped("Current Result Ref: %s", currentResultRef.empty() ?
-                     "(uninitialized)" : currentResultRef.c_str());
-  if (currentCircle != nullptr &&
-      currentResultRef == "runtime_object:afindcircle0")
+ 
+  ImGui::TextWrapped("Current Result Ref: %s",
+      m_manualTest.current_result_ref.name.empty()
+      ? "uninitialized"
+      : m_manualTest.current_result_ref.value.c_str());
+
+  if (!m_manualTest.current_result_ref.name.empty())
   {
-    ImGui::Text("source_object=afindcircle0 | result_type=FindcircleResult");
-    ImGui::Text("measure_points_count=%d | valid_points_count=%d",
-                currentCircle->measure_points_count,
-                currentCircle->valid_points_count);
-    ImGui::Text("has_result_measure=%s | result_status=%s",
-                currentCircle->has_result_measure ? "true" : "false",
-                currentCircle->runtime_state.c_str());
+      ImGui::TextWrapped("result name: %s",
+          m_manualTest.current_result_ref.name.c_str());
+
+      ImGui::TextWrapped("source object: %s",
+          m_manualTest.current_result_ref.source_object.c_str());
+
+      ImGui::TextWrapped("result type: %s",
+          m_manualTest.current_result_ref.result_type.c_str());
+
+      ImGui::TextWrapped("result status: %s",
+          m_manualTest.current_result_ref.status.c_str());
+
+      ImGui::TextWrapped(
+          "fit=(%.3f, %.3f, r=%.3f) | avgdist=%.4f | points=%d | valid_points=%d",
+          m_manualTest.current_result_ref.fit_cx,
+          m_manualTest.current_result_ref.fit_cy,
+          m_manualTest.current_result_ref.fit_radius,
+          m_manualTest.current_result_ref.avgdist,
+          m_manualTest.current_result_ref.points_count,
+          m_manualTest.current_result_ref.valid_points_count);
+
+      if (!m_manualTest.current_result_ref.reason.empty())
+      {
+          ImGui::TextWrapped("result reason: %s",
+              m_manualTest.current_result_ref.reason.c_str());
+      }
   }
+
+
+
   ImGui::TextWrapped("Method Chain: setcircle -> setmethod -> Setgap -> setthre -> setlinegap -> measure -> fitcircle -> setfitmeasuregap -> FitResultMeasure -> get_result");
   ImGui::TextWrapped("Debug Line Targets: copyFromMat / setcircle / measure / fitcircle / setfitmeasuregap / FitResultMeasure / get_result");
   ImGui::TextWrapped("Expected Geometry: ROI circle / measure points / fit circle / final result overlay");
@@ -2816,6 +3323,22 @@ void ViewController::drawManualStateTestConsole()
 
   ImGui::Separator();
   ImGui::Text("Runtime Object Table");
+  if (!m_manualTest.findcircle_debug_snapshot_summary.empty())
+  {
+      ImGui::Separator();
+      ImGui::TextUnformatted("Findcircle Debug Snapshot Summary");
+      ImGui::TextWrapped("%s", m_manualTest.findcircle_debug_snapshot_summary.c_str());
+  }
+
+  if (!m_manualTest.geometry_summary.empty())
+  {
+      ImGui::TextWrapped("%s", m_manualTest.geometry_summary.c_str());
+  }
+
+  if (!m_manualTest.image_overlay_summary.empty())
+  {
+      ImGui::TextWrapped("%s", m_manualTest.image_overlay_summary.c_str());
+  }
   for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
   {
     ImGui::BulletText("%s %s", object.type.c_str(), object.name.c_str());
@@ -2917,6 +3440,21 @@ void ViewController::drawManualStateTestConsole()
   InputTextString("Forbidden changes", m_manualTest.forbidden_changes);
   if (ImGui::Button("Save Complete Case Package"))
   {
+      std::string savedPath;
+      std::string saveReason;
+
+      if (SaveFindcircleDebugSnapshotJson(m_manualTest, savedPath, saveReason))
+      {
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = "Findcircle debug snapshot saved: " + savedPath;
+          m_scriptResult.runtime_fillback_status = "case_snapshot_saved";
+      }
+      else
+      {
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = saveReason;
+          m_scriptResult.runtime_fillback_status = "case_snapshot_save_failed";
+      }
     std::string save_reason;
     const bool saved = SaveCasePackage(m_manualTest,
                                        m_scriptResult.status.empty() ? "PENDING" : m_scriptResult.status,

@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-
+#include <fstream>
+#include <iomanip>
 struct ScriptLineView
 {
   int line_no = 0;
@@ -68,6 +69,7 @@ struct RuntimeObjectView
     float circle_inner = 0.0f;
     float circle_radius = 0.0f;
 
+
     // measure / FitResultMeasure 后的测量点
     bool has_measure_points = false;
     int measure_points_count = 0;
@@ -82,6 +84,13 @@ struct RuntimeObjectView
     float fit_avgdist = 0.0f;
 
     bool has_result_measure = false;
+     
+    // 可选：用于 summary，不强依赖算法内部接口。
+    int scan_path = 0;
+    int image_width = 0;
+    int image_height = 0;
+    int back_image_width = 0;
+    int back_image_height = 0;
 };
 
 struct DebugStepSnapshot
@@ -100,6 +109,26 @@ struct DebugStepSnapshot
   std::string current_result_ref;
   std::string last_debug_result;
   std::string reason;
+};
+
+struct ResultRefView
+{
+    std::string name;             // global.circle_ref
+    std::string value;            // runtime_object:afindcircle0
+    std::string source_object;    // afindcircle0
+    std::string result_type;      // FindcircleResult
+    std::string status = "uninitialized";
+    std::string reason;
+
+    float fit_cx = 0.0f;
+    float fit_cy = 0.0f;
+    float fit_radius = 0.0f;
+    float avgdist = 0.0f;
+
+    int points_count = 0;
+    int valid_points_count = 0;
+
+    int line_no = 0;
 };
 
 struct ManualTestContext
@@ -138,6 +167,12 @@ struct ManualTestContext
   std::vector<DebugStepSnapshot> debug_snapshots;
   DebugStepSnapshot current_debug_snapshot;
   std::unordered_map<std::string, int> runtime_int_vars;
+  ResultRefView current_result_ref;
+
+  std::string geometry_summary;
+  std::string image_overlay_summary;
+  std::string findcircle_debug_snapshot_summary;
+
   std::string runtime_current_status = "PENDING";
   std::string runtime_current_node;
   std::string runtime_current_connect;
