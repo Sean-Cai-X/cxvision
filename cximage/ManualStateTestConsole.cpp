@@ -621,7 +621,7 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
 
     return true;
 }
-
+ 
 static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -631,16 +631,18 @@ static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     if (!call.valid)
         return false;
 
-    if (call.method != "measure" &&
-        call.method != "fitcircle" &&
-        call.method != "FitResultMeasure" &&
-        call.method != "match" &&
-        call.method != "infer" &&
-        call.method != "predict" &&
-        call.method != "optimize_step")
-    {
+    const bool isRuntimeAlgorithmCall =
+        call.method == "measure" ||
+        call.method == "fitcircle" ||
+        call.method == "FitResultMeasure" ||
+        call.method == "match" ||
+        call.method == "learn" ||
+        call.method == "infer" ||
+        call.method == "predict" ||
+        call.method == "optimize_step";
+
+    if (!isRuntimeAlgorithmCall)
         return false;
-    }
 
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
@@ -648,25 +650,40 @@ static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
         call.object.find("circle") != std::string::npos ? "Findcircle" : "unknown",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
+    object.exists_in_parser = true;
     object.last_method = call.method;
     object.last_runtime_status = "PENDING";
-    object.runtime_state = "pending_runtime_bridge";
+    object.runtime_state = "runtime_deferred";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
-    object.display_summary = call.method + " pending real runtime bridge";
+    object.display_summary = call.method + " deferred; real parser/runtime callback not connected";
     object.stale = false;
 
+    /*
+     * 注意：
+     * measure / fitcircle / FitResultMeasure 是真实算法运行行。
+     * 当前 debug shim 不能伪造算法结果。
+     * 但它也不能 BLOCKED，否则后续 fitcircle / setfitmeasuregap / FitResultMeasure 无法继续行级分析。
+     *
+     * 因此这里标记为 runtime_deferred + PENDING，
+     * 允许调试器继续下一行。
+     */
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
-    line.status = "PENDING";
-    line.reason = call.method + " requires real parser/runtime callback";
+    line.status = "runtime_deferred";
+    line.reason = call.method + " deferred; real parser/runtime callback not connected";
     line.timestamp = CurrentTimestamp();
 
-    context.run_state = "blocked";
+    context.runtime_current_status = "PENDING";
+    context.run_state = "runtime_step";
     context.debug_status = "PENDING";
     context.debug_reason = line.reason;
 
-    // 注意：这里不要 current_line++，让用户看到当前 runtime pending 行。
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+
     return true;
 }
+
+
+
 void AddObservedGlobalVariables(ManualTestContext& context,
     const std::string& statement)
 {
@@ -880,13 +897,35 @@ static void DebugStepOnce(ManualTestContext& context)
     if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
         return;
 
+    /*
+     * 真实算法运行行：
+     * measure / fitcircle / FitResultMeasure / match / infer / predict / optimize_step
+     * 必须先拦截为 runtime_deferred。
+     */
     if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
         return;
 
-    // 其它 setmethod / Setgap / setthre / setlinegap 这类参数行，先作为轻量已执行。
     if (ParseMethodCall(statement).valid)
     {
         const ParsedMethodCall call = ParseMethodCall(statement);
+
+        const bool isRuntimeAlgorithmCall =
+            call.method == "measure" ||
+            call.method == "fitcircle" ||
+            call.method == "FitResultMeasure" ||
+            call.method == "match" ||
+            call.method == "learn" ||
+            call.method == "infer" ||
+            call.method == "predict" ||
+            call.method == "optimize_step";
+
+        if (isRuntimeAlgorithmCall)
+        {
+            // 理论上已经被 TryExecutePendingRuntimeMethod 处理。
+            // 这里做二次保护。
+            if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
+                return;
+        }
 
         RuntimeObjectView& object = EnsureRuntimeObject(
             context,
@@ -912,6 +951,7 @@ static void DebugStepOnce(ManualTestContext& context)
         return;
     }
 
+  
     line.status = "source_analyzed";
     line.reason = "statement not executable by debug shim";
     line.timestamp = CurrentTimestamp();
