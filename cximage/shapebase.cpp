@@ -621,41 +621,46 @@ void LineShape::linecopy(Image&srcImage, Image&desImage)
        desImage.setPixel(fpoint.X(),fpoint.Y() ,srcImage.pixel(fpoint.X(), fpoint.Y()));
     }
 }
-void LineShape::linecopyex(Image&srcImage, Image&desImage,int ix,int iy)
+void LineShape::linecopyex(Image& srcImage, Image& desImage, int ix, int iy)
 {
-    //int icount = 1/m_dminpercent ;
-    int icount = m_icount;
-    if(0==ix)
-    { 
-        gp_Pnt aele0 = m_path.ElementAt(0);
-        gp_Pnt aele1 = m_path.ElementAt(1);
-        int ix0,iy0,ix1,iy1;
-             ix0=aele0.X();
-             iy0=aele0.Y();
-             ix1=aele1.X();
-             iy1=aele1.Y();
-        if(ix0>0&&iy0>0&&ix1>0&&iy1>0)
-        for(int i=0;i<icount;i++)
-        {
-            gp_Pnt fpoint = m_path.PointAtPercent(m_dminpercent*i);
-           desImage.setPixel(i,iy,srcImage.pixel(fpoint.X(),fpoint.Y()));
-        }
-    }
-    else if(0==iy)
+    const int sampleCount = m_icount;
+    if (sampleCount <= 0 || srcImage.getWidth() <= 0 ||
+        srcImage.getHeight() <= 0 || desImage.getWidth() <= 0 ||
+        desImage.getHeight() <= 0)
+        return;
+
+    const cv::Vec3b emptyPixel(0, 0, 0);
+    auto copySample = [&](int sample, int destinationX, int destinationY)
     {
-        gp_Pnt aele0 = m_path.ElementAt(0);
-        gp_Pnt aele1 = m_path.ElementAt(1);
-        int ix0,iy0,ix1,iy1;
-        ix0=aele0.X();
-        iy0=aele0.Y();
-        ix1=aele1.X();
-        iy1=aele1.Y();
-        if(ix0>0&&iy0>0&&ix1>0&&iy1>0)
-            for(int i=0;i<icount;i++)
-            {
-                gp_Pnt fpoint = m_path.PointAtPercent(m_dminpercent*i);
-               desImage.setPixel(ix,i,srcImage.pixel(fpoint.X(),fpoint.Y()));
-            }
+        if (destinationX < 0 || destinationY < 0 ||
+            destinationX >= desImage.getWidth() ||
+            destinationY >= desImage.getHeight())
+            return;
+
+        const gp_Pnt sourcePoint =
+            m_path.PointAtPercent(m_dminpercent * sample);
+        const int sourceX = static_cast<int>(std::lround(sourcePoint.X()));
+        const int sourceY = static_cast<int>(std::lround(sourcePoint.Y()));
+        if (sourceX < 0 || sourceY < 0 ||
+            sourceX >= srcImage.getWidth() ||
+            sourceY >= srcImage.getHeight())
+        {
+            desImage.setPixel(destinationX, destinationY, emptyPixel);
+            return;
+        }
+        desImage.setPixel(destinationX, destinationY,
+                          srcImage.pixel(sourceX, sourceY));
+    };
+
+    if (ix == 0)
+    {
+        for (int sample = 0; sample < sampleCount; ++sample)
+            copySample(sample, sample, iy);
+    }
+    else if (iy == 0)
+    {
+        for (int sample = 0; sample < sampleCount; ++sample)
+            copySample(sample, ix, sample);
     }
 }
 gp_Pnt LineShape::getlinepoint(int inum)

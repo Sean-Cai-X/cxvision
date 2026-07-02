@@ -709,15 +709,17 @@ void ViewController::drawScriptAcceptancePanels()
     runtimeVisualNames += object.name;
   }
   ImGui::Text("Layer 1 Runtime Object");
-  ImGui::TextWrapped("source: parser runtime | count: %d | objects: %s",
+  ImGui::TextWrapped("source: cximage direct runtime | count: %d | objects: %s",
     runtimeVisualCount, runtimeVisualNames.empty() ? "(none)" :
                                                   runtimeVisualNames.c_str());
+  ImGui::TextWrapped("geometry colors: green = setcircle ROI; red = measure/result points; yellow = fit/final result");
   ImGui::Text("Layer 2 Manual Element");
   ImGui::Text("source: manual tools | count: %d | not runtime result",
               static_cast<int>(m_annotationLayer.Elements().size()));
   ImGui::Text("Layer 3 Source Preview");
   ImGui::Text("source: static source analysis | %s | not_executed",
               m_showSourcePreviewOverlay ? "enabled" : "disabled (default)");
+  ImGui::TextDisabled("source_preview does not participate in judgment");
   ImGui::Checkbox("Source Preview Overlay (not executed)",
                   &m_showSourcePreviewOverlay);
   ImGui::TextDisabled("Legacy Demo Overlay");

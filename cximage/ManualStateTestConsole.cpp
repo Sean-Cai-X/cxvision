@@ -324,7 +324,7 @@ static RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
     object.declared_line = declaredLine;
     object.exists_in_parser = true;
     object.runtime_state = "declared";
-    object.last_runtime_status = "PENDING";
+    object.last_runtime_status = "runtime_executed";
     object.last_method = "declare";
     object.last_update_line = declaredLine;
     object.display_summary = "declared";
@@ -365,6 +365,27 @@ static void UpsertVariableView(ManualTestContext& context,
     context.variable_views.push_back(variable);
 }
 
+static void UpsertGlobalVariableView(ManualTestContext& context,
+    const std::string& type,
+    const std::string& name,
+    const std::string& value,
+    int lineNo,
+    const std::string& status)
+{
+    for (ScriptVariableView& variable : context.global_variable_views)
+    {
+        if (variable.name != name) continue;
+        variable.type = type;
+        variable.value = value;
+        variable.declared_line = lineNo;
+        variable.status = status;
+        return;
+    }
+
+    context.global_variable_views.push_back(
+        {type, name, value, lineNo, status, std::string(), false});
+}
+
 static void ResetDebugRuntimeForReplay(ManualTestContext& context)
 {
     g_cximageRuntime.erase(&context);
@@ -381,6 +402,12 @@ static void ResetDebugRuntimeForReplay(ManualTestContext& context)
     context.variable_views.clear();
     UpsertVariableView(context, "int", "m_isetcircle", "0", 0, "runtime_initialized");
     UpsertVariableView(context, "string", "global.current_status", "PENDING", 0, "runtime_initialized");
+    for (ScriptVariableView& variable : context.global_variable_views)
+    {
+        if (variable.name == "global.matInput") continue;
+        variable.value = "uninitialized";
+        variable.status = "observed_source";
+    }
 
     for (ScriptLineView& line : context.line_views)
     {
@@ -548,6 +575,29 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
 
     return true;
 }
+
+static bool TryExecuteCurrentStatusAssignment(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const std::string trimmed = TrimLine(statement);
+    if (trimmed.find("global.current_status") == std::string::npos ||
+        trimmed.find("PENDING") == std::string::npos)
+        return false;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    UpsertGlobalVariableView(context, "string", "global.current_status",
+        "PENDING", line.line_no, "runtime_value");
+    context.runtime_current_status = "PENDING";
+    line.status = "runtime_executed";
+    line.reason = "global.current_status remains PENDING; judge/rule not executed";
+    line.timestamp = CurrentTimestamp();
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = line.reason;
+    return true;
+}
 std::string ModuleForType(const std::string& type)
 {
     if (type.rfind("Torch", 0) == 0) return "torch";
@@ -621,7 +671,7 @@ static bool TryExecuteDeclaration(ManualTestContext& context,
 
     object.exists_in_parser = true;
     object.runtime_state = "declared";
-    object.last_runtime_status = "PENDING";
+    object.last_runtime_status = "runtime_executed";
     object.last_method = "declare";
     object.display_summary = "declared only; no visual geometry";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
@@ -721,7 +771,7 @@ static bool TryExecuteImageCopyFromMat(ManualTestContext& context,
 
     object.exists_in_parser = true;
     object.last_method = "copyFromMat";
-    object.last_runtime_status = "PENDING";
+    object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_image_ready";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
     object.display_summary = "image loaded: " + imagePath;
@@ -807,7 +857,7 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     object.stale = false;
     object.visual_source = "runtime_object";
     object.last_method = "setcircle";
-    object.last_runtime_status = "PENDING";
+    object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_param_set";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
 
@@ -896,7 +946,7 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
 
     object.exists_in_parser = true;
     object.last_method = call.method;
-    object.last_runtime_status = "PENDING";
+    object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_param_set";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
     object.display_summary = call.method + "(" + call.params + ")";
@@ -924,8 +974,8 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
     object.visual_source = "runtime_object";
     object.stale = false;
     object.last_method = methodName;
-    object.last_runtime_status = "PENDING";
-    object.runtime_state = "runtime_algorithm_executed";
+    object.last_runtime_status = "runtime_executed";
+    object.runtime_state = "runtime_executed";
 
     object.fit_cx = static_cast<float>(circle.getresultcentx());
     object.fit_cy = static_cast<float>(circle.getresultcenty());
@@ -963,6 +1013,8 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
     }
 
     object.has_measure_points = !object.measure_points_xy.empty();
+    if (object.has_measure_points || object.has_fit_result)
+        object.runtime_state = "geometry_result_available";
 
     std::ostringstream summary;
     summary << methodName
@@ -1214,15 +1266,31 @@ static bool TryHandleFindcircleGetResult(ManualTestContext& context,
         context, call.object, "Findcircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
     object.last_method = call.method;
-    object.last_runtime_status = "PENDING_BINDING";
-    object.runtime_state = "pending_binding";
     object.last_update_line =
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
-    object.display_summary = "get_result binding unavailable; no result fabricated";
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
-    line.status = "PENDING_BINDING";
-    line.reason = object.display_summary;
+    if (object.has_fit_result)
+    {
+        const std::string geometryRef = "runtime_object:" + call.object;
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "geometry_result_available";
+        UpsertGlobalVariableView(context, "geometry_ref", "global.circle_ref",
+            geometryRef, line.line_no, "geometry_result_available");
+        line.status = "runtime_executed";
+        line.reason = "get_result bound global.circle_ref to " + geometryRef;
+    }
+    else
+    {
+        object.last_runtime_status = "PENDING_BINDING";
+        object.runtime_state = "pending_binding";
+        object.display_summary =
+            "get_result requires a valid fit result; no result fabricated";
+        UpsertGlobalVariableView(context, "geometry_ref", "global.circle_ref",
+            "uninitialized", line.line_no, "PENDING_BINDING");
+        line.status = "PENDING_BINDING";
+        line.reason = object.display_summary;
+    }
     line.timestamp = CurrentTimestamp();
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
@@ -1438,6 +1506,9 @@ static void DebugStepOnce(ManualTestContext& context)
         context.debug_reason = line.reason;
         return;
     }
+
+    if (TryExecuteCurrentStatusAssignment(context, lineIndex, statement))
+        return;
 
     if (TryExecuteSimpleAssignment(context, lineIndex, statement))
         return;
@@ -1663,7 +1734,11 @@ bool SaveCasePackage(const ManualTestContext& context,
     << "  \"data_file_path\": \"" << JsonEscape(context.data_file_path) << "\",\n"
     << "  \"model_file_path\": \"" << JsonEscape(context.model_file_path) << "\",\n"
     << "  \"param_file_path\": \"" << JsonEscape(context.param_file_path) << "\",\n"
-    << "  \"current_status\": \"" << JsonEscape(result_status) << "\"\n}\n";
+    << "  \"current_status\": \"" << JsonEscape(result_status) << "\",\n"
+    << "  \"geometry_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.geometry_summary) << "\",\n"
+    << "  \"image_overlay_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\"\n}\n";
 
   std::ostringstream trace;
   trace << "[\n";
@@ -1686,31 +1761,44 @@ bool SaveCasePackage(const ManualTestContext& context,
 
   std::ostringstream variables;
   variables << "[\n";
-  for (std::size_t i = 0; i < context.variable_views.size(); ++i)
+  bool firstVariable = true;
+  const auto appendVariable = [&](const ScriptVariableView& variable)
   {
-    const ScriptVariableView& variable = context.variable_views[i];
-    variables << "  {\"type\":\"" << JsonEscape(variable.type)
+    if (!firstVariable) variables << ",\n";
+    firstVariable = false;
+    variables << "  {\"scope\":\""
+      << (variable.name.rfind("global.", 0) == 0 ? "global" : "local")
+      << "\",\"type\":\"" << JsonEscape(variable.type)
       << "\",\"name\":\"" << JsonEscape(variable.name)
       << "\",\"value\":\"" << JsonEscape(variable.value)
       << "\",\"declared_line\":" << variable.declared_line
-      << ",\"status\":\"" << JsonEscape(variable.status) << "\"}"
-      << (i + 1 == context.variable_views.size() ? "\n" : ",\n");
-  }
+      << ",\"status\":\"" << JsonEscape(variable.status) << "\"}";
+  };
+  for (const ScriptVariableView& variable : context.global_variable_views)
+    appendVariable(variable);
+  for (const ScriptVariableView& variable : context.variable_views)
+    appendVariable(variable);
+  if (!firstVariable) variables << "\n";
   variables << "]\n";
 
   std::ostringstream objects;
   objects << "[\n";
-  for (std::size_t i = 0; i < context.object_views.size(); ++i)
+  for (std::size_t i = 0; i < context.runtime_objects.size(); ++i)
   {
-    const ScriptObjectView& object = context.object_views[i];
-    objects << "  {\"module\":\"" << JsonEscape(object.module)
-      << "\",\"type\":\"" << JsonEscape(object.type)
+    const RuntimeObjectView& object = context.runtime_objects[i];
+    objects << "  {\"type\":\"" << JsonEscape(object.type)
       << "\",\"name\":\"" << JsonEscape(object.name)
-      << "\",\"status\":\"" << JsonEscape(object.status)
       << "\",\"runtime_state\":\"" << JsonEscape(object.runtime_state)
-      << "\",\"runtime_source_line\":" << object.runtime_source_line
-      << ",\"declared_line\":" << object.declared_line << "}"
-      << (i + 1 == context.object_views.size() ? "\n" : ",\n");
+      << "\",\"method_status\":\"" << JsonEscape(object.last_runtime_status)
+      << "\",\"last_method\":\"" << JsonEscape(object.last_method)
+      << "\",\"summary\":\"" << JsonEscape(object.display_summary)
+      << "\",\"fit_cx\":" << object.fit_cx
+      << ",\"fit_cy\":" << object.fit_cy
+      << ",\"fit_radius\":" << object.fit_radius
+      << ",\"avgdist\":" << object.fit_avgdist
+      << ",\"points_count\":" << object.measure_points_xy.size() / 2
+      << ",\"visual_source\":\"" << JsonEscape(object.visual_source) << "\"}"
+      << (i + 1 == context.runtime_objects.size() ? "\n" : ",\n");
   }
   objects << "]\n";
 
@@ -1741,6 +1829,10 @@ bool SaveCasePackage(const ManualTestContext& context,
     << "  \"method\": \"" << JsonEscape(current == nullptr ? "" : current->method) << "\",\n"
     << "  \"params\": \"" << JsonEscape(current == nullptr ? "" : current->params) << "\",\n"
     << "  \"current_status\": \"" << JsonEscape(result_status) << "\",\n"
+    << "  \"geometry_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.geometry_summary) << "\",\n"
+    << "  \"image_overlay_summary\": \""
+    << JsonEscape(context.current_debug_snapshot.image_overlay_summary) << "\",\n"
     << "  \"current_reason\": \"" << JsonEscape(result_reason) << "\",\n"
     << "  \"user_expected\": \"" << JsonEscape(context.user_expected) << "\",\n"
     << "  \"codex_task\": \"" << JsonEscape(context.codex_task) << "\",\n"
@@ -2261,10 +2353,24 @@ void ViewController::drawManualStateTestConsole()
   ImGui::TextWrapped("Method Chain: setcircle -> setmethod -> Setgap -> setthre -> setlinegap -> measure -> fitcircle -> setfitmeasuregap -> FitResultMeasure -> get_result");
   ImGui::TextWrapped("Debug Line Targets: copyFromMat / setcircle / measure / fitcircle / setfitmeasuregap / FitResultMeasure / get_result");
   ImGui::TextWrapped("Expected Geometry: ROI circle / measure points / fit circle / final result overlay");
+  ImGui::TextWrapped("Status: runtime_executed = C++ call completed; geometry_result_available = geometry exists; PENDING = case not judged; PASS = judge/rule only; BLOCKED = cannot continue");
 
   ImGui::Separator();
   ImGui::Text("Script Debug Compiler");
   ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
+  const auto syncGeometryResult = [&]()
+  {
+    for (const ScriptVariableView& variable : m_manualTest.global_variable_views)
+    {
+      if (variable.name != "global.circle_ref" ||
+          variable.value.rfind("runtime_object:", 0) != 0) continue;
+      m_scriptResult.result_ref = variable.value;
+      m_scriptResult.overlay_ref = variable.value;
+      return;
+    }
+    m_scriptResult.result_ref.clear();
+    m_scriptResult.overlay_ref.clear();
+  };
   if (ImGui::Button("Compile"))
   {
       AnalyzeScript(m_manualTest);
@@ -2309,6 +2415,7 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.status = m_manualTest.debug_status;
       m_scriptResult.reason = m_manualTest.debug_reason;
       m_scriptResult.runtime_fillback_status = "debug_run";
+      syncGeometryResult();
   }
   ImGui::SameLine();
   if (ImGui::Button("Step"))
@@ -2330,6 +2437,7 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.status = m_manualTest.debug_status;
       m_scriptResult.reason = m_manualTest.debug_reason;
       m_scriptResult.runtime_fillback_status = "debug_step";
+      syncGeometryResult();
   }
 
   ImGui::SameLine();
@@ -2354,6 +2462,7 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.status = m_manualTest.debug_status;
       m_scriptResult.reason = m_manualTest.debug_reason;
       m_scriptResult.runtime_fillback_status = "debug_continue";
+      syncGeometryResult();
   }
   ImGui::SameLine();
   if (ImGui::Button("Stop"))
@@ -2383,21 +2492,43 @@ void ViewController::drawManualStateTestConsole()
   ImGui::SameLine();
   if (ImGui::Button("Run Bound State (runtime bridge)"))
   {
-    AnalyzeScript(m_manualTest);
-    ResetDebugRuntimeForReplay(m_manualTest);
-    m_manualTest.stop_requested = false;
-    int guard = 0;
-    const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
-    while (!m_manualTest.stop_requested &&
-           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
-           guard++ < maxSteps)
+    std::string boundScript;
+    const bool boundReady = !m_manualTest.bound_state_script_path.empty() &&
+      ReadTextFile(ResolveWorkspaceFile(m_manualTest.bound_state_script_path).generic_string(),
+                   boundScript);
+    if (boundReady)
     {
-      DebugStepOnceWithSnapshot(m_manualTest);
-      if (m_manualTest.run_state == "blocked") break;
+      m_manualTest.editor_text = boundScript;
+      m_manualTest.loaded_script_path = m_manualTest.bound_state_script_path;
+      m_manualTest.editor_source = "bound_state";
+      m_manualTest.analyzed_text.clear();
     }
-    m_scriptResult.status = "PENDING";
+    if (!boundReady)
+    {
+      m_manualTest.run_state = "blocked";
+      m_manualTest.debug_status = "BLOCKED";
+      m_manualTest.debug_reason = "bound N0 script unavailable";
+    }
+    else
+    {
+      AnalyzeScript(m_manualTest);
+      ResetDebugRuntimeForReplay(m_manualTest);
+      m_manualTest.stop_requested = false;
+      int guard = 0;
+      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
+      while (!m_manualTest.stop_requested &&
+             m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+             guard++ < maxSteps)
+      {
+        DebugStepOnceWithSnapshot(m_manualTest);
+        if (m_manualTest.run_state == "blocked") break;
+      }
+    }
+    m_scriptResult.status = m_manualTest.run_state == "blocked" ?
+      "BLOCKED" : "PENDING";
     m_scriptResult.reason = m_manualTest.debug_reason;
     m_scriptResult.runtime_fillback_status = "bound_block_debug_steps";
+    syncGeometryResult();
   }
   ImGui::SameLine();
   if (ImGui::Button("Clear Result"))
@@ -2562,6 +2693,20 @@ void ViewController::drawManualStateTestConsole()
     ImGui::PopID();
   };
   drawVariableList("Global Variables", m_manualTest.global_variable_views);
+  for (const ScriptVariableView& variable : m_manualTest.global_variable_views)
+  {
+    if (variable.name != "global.circle_ref" ||
+        variable.value.rfind("runtime_object:", 0) != 0) continue;
+    const std::string objectName = variable.value.substr(15);
+    RuntimeObjectView* geometry = FindRuntimeObject(m_manualTest, objectName);
+    if (geometry == nullptr) continue;
+    ImGui::TextWrapped("circle_ref: %s", variable.value.c_str());
+    ImGui::Text("fit_cx: %.3f | fit_cy: %.3f | fit_radius: %.3f",
+                geometry->fit_cx, geometry->fit_cy, geometry->fit_radius);
+    ImGui::Text("avgdist: %.3f | points_count: %d",
+                geometry->fit_avgdist,
+                static_cast<int>(geometry->measure_points_xy.size() / 2));
+  }
   ImGui::Spacing();
   drawVariableList("Local Variables", m_manualTest.variable_views);
 

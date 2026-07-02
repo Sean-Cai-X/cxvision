@@ -1242,6 +1242,9 @@ void Findcircle::FitResultMeasure(void* pimage)
         std::isfinite(pre_center_y) &&
         std::isfinite(pre_avg_distance);
 
+    if (!pre_fit_valid)
+        return;
+
     setcircle2(RoundToInt(m_dresultcentx),
         RoundToInt(m_dresultcenty),
         RoundToInt(m_dresultcentx),
@@ -1269,7 +1272,7 @@ void Findcircle::FitResultMeasure(void* pimage)
 }
 void Findcircle::setfitmeasuregap(int igap)
 {
-    m_fitmeasuregap = igap;
+    m_fitmeasuregap = std::max(1, igap);
 }
 
 double Findcircle::getresultcentx()
