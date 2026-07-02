@@ -1,4 +1,4 @@
-#ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
+﻿#ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 #define CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 
 #include <string>
@@ -44,23 +44,56 @@ struct ScriptObjectView
 
 struct RuntimeObjectView
 {
-  std::string name;
-  std::string type;
-  int declared_line = 0;
-  bool exists_in_parser = false;
-  std::string last_runtime_status = "PENDING";
-  std::string runtime_state = "PENDING";
-  std::string last_method;
-  int last_update_line = 0;
-  std::string display_summary;
-  bool visualizable = false;
-  std::string visual_source = "stale_runtime";
-  bool stale = true;
-  bool has_circle = false;
-  float circle_cx = 0.0f;
-  float circle_cy = 0.0f;
-  float circle_inner = 0.0f;
-  float circle_radius = 0.0f;
+    std::string name;
+    std::string type;
+    int declared_line = 0;
+
+    bool exists_in_parser = false;
+
+    std::string last_runtime_status = "PENDING";
+    std::string runtime_state = "PENDING";
+    std::string last_method;
+    int last_update_line = 0;
+
+    std::string display_summary;
+
+    bool visualizable = false;
+    std::string visual_source = "stale_runtime";
+    bool stale = true;
+
+    // setcircle(...) 参数圆
+    bool has_circle = false;
+    float circle_cx = 0.0f;
+    float circle_cy = 0.0f;
+    float circle_inner = 0.0f;
+    float circle_radius = 0.0f;
+
+    // measure / FitResultMeasure 后的测量点
+    bool has_measure_points = false;
+    std::vector<float> measure_points_xy;
+
+    // fitcircle 后的拟合结果圆
+    bool has_fit_result = false;
+    float fit_cx = 0.0f;
+    float fit_cy = 0.0f;
+    float fit_radius = 0.0f;
+    float fit_avgdist = 0.0f;
+
+    bool has_result_measure = false;
+};
+
+struct DebugStepSnapshot
+{
+  int current_line = 0;
+  std::string statement;
+  std::string object;
+  std::string method;
+  std::string params;
+  std::string runtime_state;
+  std::string object_summary;
+  std::string geometry_summary;
+  std::string image_overlay_summary;
+  std::string reason;
 };
 
 struct ManualTestContext
@@ -96,6 +129,8 @@ struct ManualTestContext
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   std::vector<RuntimeObjectView> runtime_objects;
+  std::vector<DebugStepSnapshot> debug_snapshots;
+  DebugStepSnapshot current_debug_snapshot;
   std::unordered_map<std::string, int> runtime_int_vars;
   std::string runtime_current_status = "PENDING";
   std::string runtime_current_node;

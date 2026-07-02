@@ -886,6 +886,39 @@ void ViewController::drawScriptAcceptancePanels()
                 IM_COL32(80, 255, 170, 255),
                 object.name.c_str()
             );
+
+            if (object.has_measure_points)
+            {
+                for (std::size_t pointIndex = 0;
+                     pointIndex + 1 < object.measure_points_xy.size();
+                     pointIndex += 2)
+                {
+                    const ImVec2 point(
+                        imagePos.x + object.measure_points_xy[pointIndex] * sx,
+                        imagePos.y + object.measure_points_xy[pointIndex + 1] * sy);
+                    drawList->AddCircleFilled(
+                        point, 3.5f, IM_COL32(255, 70, 70, 255), 12);
+                }
+            }
+
+            if (object.has_fit_result && object.fit_radius > 0.0f)
+            {
+                const ImVec2 fitCenter(
+                    imagePos.x + object.fit_cx * sx,
+                    imagePos.y + object.fit_cy * sy);
+                drawList->AddCircle(
+                    fitCenter,
+                    object.fit_radius * sr,
+                    IM_COL32(255, 220, 40, 255),
+                    96,
+                    object.has_result_measure ? 3.0f : 2.0f);
+                drawList->AddText(
+                    ImVec2(fitCenter.x + 6.0f, fitCenter.y - 18.0f),
+                    IM_COL32(255, 220, 40, 255),
+                    object.has_result_measure ?
+                        "FitResultMeasure runtime result" :
+                        "fitcircle runtime result");
+            }
         }
     }
 

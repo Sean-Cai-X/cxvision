@@ -1,5 +1,7 @@
 ﻿#include "ViewController.h"
+#include "Image.h"
 #include "Findcircle.h"
+#include "imagemanager.h"
 
 #include <imgui.h>
 
@@ -14,6 +16,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <unordered_map>
+
+#include <memory>
+#include <cmath>
+#include <exception>
+#include <opencv2/imgcodecs.hpp>
 namespace
 {
 namespace fs = std::filesystem;
@@ -241,7 +248,56 @@ static ParsedMethodCall ParseMethodCall(const std::string& statement)
 
     return result;
 }
+struct DebugCximageRuntime
+{
+    std::unordered_map<std::string, std::unique_ptr<Image>> images;
+    std::unordered_map<std::string, std::unique_ptr<Findcircle>> circles;
+};
 
+static std::unordered_map<ManualTestContext*, DebugCximageRuntime> g_cximageRuntime;
+
+static DebugCximageRuntime& CxRuntime(ManualTestContext& context)
+{
+    return g_cximageRuntime[&context];
+}
+
+static void PrepareFindcircleDebugRuntime()
+{
+    // Findcircle resolves its scratch image from the current ImageManager
+    // module during construction. The direct debugger owns module slot 1.
+    ImageManager::m_imodulid = 1;
+    ImageManager::GetBackImage(1);
+}
+
+static std::string GetGlobalMatInputPath(const ManualTestContext& context)
+{
+    if (!context.image_file_path.empty())
+        return context.image_file_path;
+
+    for (const ScriptVariableView& variable : context.global_variable_views)
+    {
+        if (variable.name == "global.matInput")
+        {
+            if (!variable.image_path.empty())
+                return variable.image_path;
+
+            if (!variable.value.empty() &&
+                variable.value != "uninitialized" &&
+                variable.value != "none")
+                return variable.value;
+        }
+    }
+
+    return {};
+}
+
+static std::string StripAddressPrefix(std::string s)
+{
+    s = TrimLine(s);
+    if (!s.empty() && s.front() == '&')
+        s.erase(s.begin());
+    return TrimLine(s);
+}
 static RuntimeObjectView* FindRuntimeObject(ManualTestContext& context,
     const std::string& name)
 {
@@ -311,7 +367,11 @@ static void UpsertVariableView(ManualTestContext& context,
 
 static void ResetDebugRuntimeForReplay(ManualTestContext& context)
 {
+    g_cximageRuntime.erase(&context);
+
     context.runtime_objects.clear();
+    context.debug_snapshots.clear();
+    context.current_debug_snapshot = DebugStepSnapshot();
     context.runtime_int_vars.clear();
 
     // 当前 find_circle_direct_test.cxsc 中 m_isetcircle 参与 if 判断。
@@ -531,6 +591,34 @@ static bool TryExecuteDeclaration(ManualTestContext& context,
         type,
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    if (type == "Image")
+    {
+        runtime.images[name] = std::make_unique<Image>();
+        object.exists_in_parser = true;
+        object.runtime_state = "runtime_object_created";
+        object.last_runtime_status = "PENDING";
+        object.display_summary = "Image runtime object created";
+        object.visualizable = false;
+    }
+    else if (type == "Findcircle")
+    {
+        PrepareFindcircleDebugRuntime();
+        runtime.circles[name] = std::make_unique<Findcircle>();
+        object.exists_in_parser = true;
+        object.runtime_state = "runtime_object_created";
+        object.last_runtime_status = "PENDING";
+        object.display_summary = "Findcircle runtime object created";
+        object.visualizable = false;
+        object.has_circle = false;
+        object.has_measure_points = false;
+        object.has_fit_result = false;
+        object.has_result_measure = false;
+    }
+
+
+
     object.exists_in_parser = true;
     object.runtime_state = "declared";
     object.last_runtime_status = "PENDING";
@@ -555,7 +643,103 @@ static bool TryExecuteDeclaration(ManualTestContext& context,
 
     return true;
 }
+static bool TryExecuteImageCopyFromMat(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
 
+    if (!call.valid)
+        return false;
+
+    if (call.method != "copyFromMat")
+        return false;
+
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    auto imageIt = runtime.images.find(call.object);
+    if (imageIt == runtime.images.end() || !imageIt->second)
+    {
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            call.object,
+            "Image",
+            context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+        object.last_runtime_status = "BLOCKED";
+        object.runtime_state = "missing_runtime_image_object";
+        object.display_summary = "Image object was not created before copyFromMat";
+
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "Image object missing before copyFromMat";
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    const std::string imagePath = GetGlobalMatInputPath(context);
+
+    if (imagePath.empty())
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "global.matInput image path is empty";
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    cv::Mat src = cv::imread(imagePath, cv::IMREAD_COLOR);
+
+    if (src.empty())
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "failed to load image: " + imagePath;
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    imageIt->second->copyFromMat(src);
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        call.object,
+        "Image",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    object.exists_in_parser = true;
+    object.last_method = "copyFromMat";
+    object.last_runtime_status = "PENDING";
+    object.runtime_state = "runtime_image_ready";
+    object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+    object.display_summary = "image loaded: " + imagePath;
+    object.visualizable = false;
+    object.stale = false;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "Image.copyFromMat executed from global.matInput";
+    line.timestamp = CurrentTimestamp();
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = "image runtime object ready";
+
+    return true;
+}
 static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -590,6 +774,33 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     object.circle_inner = std::stof(call.args[2]);
     object.circle_radius = std::stof(call.args[3]);
 
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    auto circleIt = runtime.circles.find(call.object);
+    if (circleIt == runtime.circles.end() || !circleIt->second)
+    {
+        PrepareFindcircleDebugRuntime();
+        runtime.circles[call.object] = std::make_unique<Findcircle>();
+        circleIt = runtime.circles.find(call.object);
+    }
+
+    const int cx = static_cast<int>(object.circle_cx);
+    const int cy = static_cast<int>(object.circle_cy);
+    const int scriptThird = static_cast<int>(object.circle_inner);
+    const int scriptFourth = static_cast<int>(object.circle_radius);
+    int perimeterX = scriptThird;
+    int perimeterY = scriptFourth;
+
+    // Direct-test scripts use setcircle(cx, cy, 0, radius). The native
+    // Findcircle API expects a perimeter point instead of a radius.
+    if (scriptThird == 0 && scriptFourth > 0)
+    {
+        perimeterX = cx;
+        perimeterY = cy + scriptFourth;
+    }
+
+    circleIt->second->setcircle(cx, cy, perimeterX, perimeterY);
+
     object.has_circle = true;
     object.visualizable = true;
     object.exists_in_parser = true;
@@ -605,7 +816,8 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
         << object.circle_cx << ", "
         << object.circle_cy << ", "
         << object.circle_inner << ", "
-        << object.circle_radius << ")";
+        << object.circle_radius << ")"
+        << " | native_perimeter=(" << perimeterX << ", " << perimeterY << ")";
     object.display_summary = summary.str();
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
@@ -621,7 +833,315 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
 
     return true;
 }
- 
+static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
+
+    if (!call.valid)
+        return false;
+
+    const bool isCircleParamMethod =
+        call.method == "setmethod" ||
+        call.method == "Setgap" ||
+        call.method == "setthre" ||
+        call.method == "setlinegap" ||
+        call.method == "setfitmeasuregap";
+
+    if (!isCircleParamMethod)
+        return false;
+
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    auto circleIt = runtime.circles.find(call.object);
+    if (circleIt == runtime.circles.end() || !circleIt->second)
+    {
+        PrepareFindcircleDebugRuntime();
+        runtime.circles[call.object] = std::make_unique<Findcircle>();
+        circleIt = runtime.circles.find(call.object);
+    }
+
+    if (call.args.empty())
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = call.method + " requires one parameter";
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    const int value = std::atoi(call.args[0].c_str());
+
+    if (call.method == "setmethod")
+        circleIt->second->setmethod(value);
+    else if (call.method == "Setgap")
+        circleIt->second->Setgap(value);
+    else if (call.method == "setthre")
+        circleIt->second->setthre(value);
+    else if (call.method == "setlinegap")
+        circleIt->second->setlinegap(value);
+    else if (call.method == "setfitmeasuregap")
+        circleIt->second->setfitmeasuregap(value);
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        call.object,
+        "Findcircle",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    object.exists_in_parser = true;
+    object.last_method = call.method;
+    object.last_runtime_status = "PENDING";
+    object.runtime_state = "runtime_param_set";
+    object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+    object.display_summary = call.method + "(" + call.params + ")";
+    object.stale = false;
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "Findcircle." + call.method + " executed";
+    line.timestamp = CurrentTimestamp();
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = "Findcircle parameter method executed";
+
+    return true;
+}
+
+static void FillFindcircleResultView(RuntimeObjectView& object,
+    Findcircle& circle,
+    const std::string& methodName)
+{
+    object.exists_in_parser = true;
+    object.visualizable = true;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+    object.last_method = methodName;
+    object.last_runtime_status = "PENDING";
+    object.runtime_state = "runtime_algorithm_executed";
+
+    object.fit_cx = static_cast<float>(circle.getresultcentx());
+    object.fit_cy = static_cast<float>(circle.getresultcenty());
+    object.fit_radius = static_cast<float>(circle.getradius());
+    object.fit_avgdist = static_cast<float>(circle.getavgdist());
+
+    object.has_fit_result = false;
+
+    if (methodName != "measure" &&
+        std::isfinite(object.fit_cx) &&
+        std::isfinite(object.fit_cy) &&
+        std::isfinite(object.fit_radius) &&
+        object.fit_radius > 0.0f)
+    {
+        object.has_fit_result = true;
+    }
+
+    object.has_measure_points = false;
+    object.measure_points_xy.clear();
+
+    PointsShape& points = circle.getresultpoints();
+
+    const int pointCount = points.size();
+
+    for (int i = 0; i < pointCount; ++i)
+    {
+        const double x = points.getx(i);
+        const double y = points.gety(i);
+
+        if (!std::isfinite(x) || !std::isfinite(y))
+            continue;
+
+        object.measure_points_xy.push_back(static_cast<float>(x));
+        object.measure_points_xy.push_back(static_cast<float>(y));
+    }
+
+    object.has_measure_points = !object.measure_points_xy.empty();
+
+    std::ostringstream summary;
+    summary << methodName
+        << " executed"
+        << " | fit=(" << object.fit_cx
+        << "," << object.fit_cy
+        << ", r=" << object.fit_radius
+        << ")"
+        << " | avgdist=" << object.fit_avgdist
+        << " | points=" << pointCount
+        << " | valid_points=" << (object.measure_points_xy.size() / 2);
+
+    object.display_summary = summary.str();
+}
+
+static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
+
+    if (!call.valid)
+        return false;
+
+    const bool isFindcircleRuntimeMethod =
+        call.method == "measure" ||
+        call.method == "fitcircle" ||
+        call.method == "FitResultMeasure";
+
+    if (!isFindcircleRuntimeMethod)
+        return false;
+
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    auto circleIt = runtime.circles.find(call.object);
+    if (circleIt == runtime.circles.end() || !circleIt->second)
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "Findcircle runtime object missing: " + call.object;
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    Image* image = nullptr;
+
+    if (call.method == "measure" || call.method == "FitResultMeasure")
+    {
+        if (call.args.empty())
+        {
+            ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+            line.status = "BLOCKED";
+            line.reason = call.method + " requires image argument";
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        const std::string imageName = StripAddressPrefix(call.args[0]);
+
+        auto imageIt = runtime.images.find(imageName);
+        if (imageIt == runtime.images.end() || !imageIt->second)
+        {
+            ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+            line.status = "BLOCKED";
+            line.reason = "Image runtime object missing: " + imageName;
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        image = imageIt->second.get();
+    }
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        call.object,
+        "Findcircle",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+
+    try
+    {
+        bool balancedFallbackUsed = false;
+        if (call.method == "measure")
+        {
+            circleIt->second->measure(image);
+            if (circleIt->second->getresultpoints().size() == 0 && image != nullptr)
+            {
+                circleIt->second->MeasureBalanced(*image);
+                balancedFallbackUsed = true;
+            }
+            FillFindcircleResultView(object, *circleIt->second, "measure");
+        }
+        else if (call.method == "fitcircle")
+        {
+            circleIt->second->fitcircle();
+            FillFindcircleResultView(object, *circleIt->second, "fitcircle");
+        }
+        else if (call.method == "FitResultMeasure")
+        {
+            circleIt->second->FitResultMeasure(image);
+            FillFindcircleResultView(object, *circleIt->second, "FitResultMeasure");
+            object.has_result_measure =
+                object.has_fit_result || object.has_measure_points;
+        }
+
+        std::ostringstream diagnostics;
+        diagnostics << object.display_summary
+            << " | scan_path=" << circleIt->second->getpath().ElementCount();
+        if (image != nullptr)
+            diagnostics << " | image=" << image->getWidth() << "x" << image->getHeight();
+        Image* backImage = ImageManager::GetBackImage(1);
+        diagnostics << " | back_image="
+            << (backImage == nullptr ? "null" :
+                std::to_string(backImage->getWidth()) + "x" +
+                std::to_string(backImage->getHeight()));
+        if (balancedFallbackUsed)
+            diagnostics << " | fallback=MeasureBalanced";
+        object.display_summary = diagnostics.str();
+    }
+    catch (const std::exception& e)
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = std::string("Findcircle runtime exception: ") + e.what();
+        line.timestamp = CurrentTimestamp();
+
+        object.last_runtime_status = "BLOCKED";
+        object.runtime_state = "runtime_exception";
+        object.display_summary = line.reason;
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+    catch (...)
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "Findcircle runtime unknown exception";
+        line.timestamp = CurrentTimestamp();
+
+        object.last_runtime_status = "BLOCKED";
+        object.runtime_state = "runtime_exception";
+        object.display_summary = line.reason;
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "runtime_executed";
+    line.reason = "Findcircle." + call.method +
+        " executed by direct runtime bridge | " + object.display_summary;
+    line.timestamp = CurrentTimestamp();
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = line.reason;
+    context.runtime_current_status = "PENDING";
+
+    return true;
+}
+
+
 static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -679,6 +1199,37 @@ static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
 
+    return true;
+}
+
+static bool TryHandleFindcircleGetResult(ManualTestContext& context,
+    int lineIndex,
+    const std::string& statement)
+{
+    const ParsedMethodCall call = ParseMethodCall(statement);
+    if (!call.valid || call.method != "get_result")
+        return false;
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context, call.object, "Findcircle",
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+    object.last_method = call.method;
+    object.last_runtime_status = "PENDING_BINDING";
+    object.runtime_state = "pending_binding";
+    object.last_update_line =
+        context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+    object.display_summary = "get_result binding unavailable; no result fabricated";
+
+    ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+    line.status = "PENDING_BINDING";
+    line.reason = object.display_summary;
+    line.timestamp = CurrentTimestamp();
+
+    context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    context.run_state = "runtime_step";
+    context.debug_status = "PENDING";
+    context.debug_reason = line.reason;
+    context.runtime_current_status = "PENDING";
     return true;
 }
 
@@ -894,13 +1445,27 @@ static void DebugStepOnce(ManualTestContext& context)
     if (TryExecuteDeclaration(context, lineIndex, statement))
         return;
 
+    if (TryExecuteImageCopyFromMat(context, lineIndex, statement))
+        return;
+
     if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
         return;
 
+    if (TryExecuteFindcircleParamMethod(context, lineIndex, statement))
+        return;
+
     /*
-     * 真实算法运行行：
-     * measure / fitcircle / FitResultMeasure / match / infer / predict / optimize_step
-     * 必须先拦截为 runtime_deferred。
+     * Findcircle 的 measure / fitcircle / FitResultMeasure
+     * 当前必须优先走真实 direct runtime bridge。
+     */
+    if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
+        return;
+
+    if (TryHandleFindcircleGetResult(context, lineIndex, statement))
+        return;
+
+    /*
+     * 其它模块暂时才走 deferred。
      */
     if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
         return;
@@ -956,6 +1521,78 @@ static void DebugStepOnce(ManualTestContext& context)
     line.reason = "statement not executable by debug shim";
     line.timestamp = CurrentTimestamp();
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+}
+
+static void CaptureDebugStepSnapshot(ManualTestContext& context, int lineIndex)
+{
+    if (lineIndex < 0 ||
+        lineIndex >= static_cast<int>(context.line_views.size()))
+        return;
+
+    const ScriptLineView& line =
+        context.line_views[static_cast<std::size_t>(lineIndex)];
+    DebugStepSnapshot snapshot;
+    snapshot.current_line = line.line_no;
+    snapshot.statement = line.statement;
+    snapshot.object = line.object;
+    snapshot.method = line.method;
+    snapshot.params = line.params;
+    snapshot.reason = line.reason;
+
+    RuntimeObjectView* object = line.object.empty() ? nullptr :
+        FindRuntimeObject(context, line.object);
+    if (object == nullptr)
+        object = FindRuntimeObject(context, "afindcircle0");
+    if (object != nullptr)
+    {
+        snapshot.runtime_state = object->runtime_state;
+        snapshot.object_summary = object->display_summary;
+        if (object->has_result_measure)
+            snapshot.geometry_summary = "final result overlay updated";
+        else if (object->has_fit_result)
+            snapshot.geometry_summary = "fit circle: center=(" +
+                std::to_string(object->fit_cx) + "," +
+                std::to_string(object->fit_cy) + "), radius=" +
+                std::to_string(object->fit_radius);
+        else if (object->has_measure_points)
+            snapshot.geometry_summary = "measure points=" +
+                std::to_string(object->measure_points_xy.size() / 2);
+        else if (object->has_circle)
+            snapshot.geometry_summary = "ROI circle: center=(" +
+                std::to_string(object->circle_cx) + "," +
+                std::to_string(object->circle_cy) + "), radius=" +
+                std::to_string(object->circle_radius);
+        else
+            snapshot.geometry_summary = "no runtime geometry";
+
+        if (object->has_result_measure)
+            snapshot.image_overlay_summary = "runtime ROI + measure points + final fit circle";
+        else if (object->has_fit_result)
+            snapshot.image_overlay_summary = "runtime ROI + measure points + fit circle";
+        else if (object->has_measure_points)
+            snapshot.image_overlay_summary = "runtime ROI + measure points";
+        else if (object->has_circle)
+            snapshot.image_overlay_summary = "runtime ROI circle";
+        else
+            snapshot.image_overlay_summary = "none";
+    }
+    else
+    {
+        snapshot.runtime_state = line.status;
+        snapshot.object_summary = "no runtime object for current line";
+        snapshot.geometry_summary = "none";
+        snapshot.image_overlay_summary = "none";
+    }
+
+    context.current_debug_snapshot = snapshot;
+    context.debug_snapshots.push_back(snapshot);
+}
+
+static void DebugStepOnceWithSnapshot(ManualTestContext& context)
+{
+    const int lineIndex = context.current_line;
+    DebugStepOnce(context);
+    CaptureDebugStepSnapshot(context, lineIndex);
 }
 
 std::string JsonEscape(const std::string& text)
@@ -1617,6 +2254,15 @@ void ViewController::drawManualStateTestConsole()
       static_cast<int>(m_manualTest.line_views.size()) - 1;
 
   ImGui::Separator();
+  ImGui::Text("Current Flow Block");
+  ImGui::Text("Flow Block: cximage_find_circle_explore.N0");
+  ImGui::Text("Script: find_circle_direct_test.cxsc");
+  ImGui::Text("Runtime Objects: m_occtimage / afindcircle0 / afindcircle1");
+  ImGui::TextWrapped("Method Chain: setcircle -> setmethod -> Setgap -> setthre -> setlinegap -> measure -> fitcircle -> setfitmeasuregap -> FitResultMeasure -> get_result");
+  ImGui::TextWrapped("Debug Line Targets: copyFromMat / setcircle / measure / fitcircle / setfitmeasuregap / FitResultMeasure / get_result");
+  ImGui::TextWrapped("Expected Geometry: ROI circle / measure points / fit circle / final result overlay");
+
+  ImGui::Separator();
   ImGui::Text("Script Debug Compiler");
   ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
   if (ImGui::Button("Compile"))
@@ -1653,7 +2299,7 @@ void ViewController::drawManualStateTestConsole()
           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
           guard++ < maxSteps)
       {
-          DebugStepOnce(m_manualTest);
+          DebugStepOnceWithSnapshot(m_manualTest);
 
           // 遇到真实 runtime 缺失的算法行，先停下来让用户看。
           if (m_manualTest.run_state == "blocked")
@@ -1679,7 +2325,7 @@ void ViewController::drawManualStateTestConsole()
           }
       }
 
-      DebugStepOnce(m_manualTest);
+      DebugStepOnceWithSnapshot(m_manualTest);
 
       m_scriptResult.status = m_manualTest.debug_status;
       m_scriptResult.reason = m_manualTest.debug_reason;
@@ -1699,7 +2345,7 @@ void ViewController::drawManualStateTestConsole()
           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
           guard++ < maxSteps)
       {
-          DebugStepOnce(m_manualTest);
+          DebugStepOnceWithSnapshot(m_manualTest);
 
           if (m_manualTest.run_state == "blocked")
               break;
@@ -1736,7 +2382,23 @@ void ViewController::drawManualStateTestConsole()
     m_scriptResult = RunCxScript(m_manualTest.script_file_path);
   ImGui::SameLine();
   if (ImGui::Button("Run Bound State (runtime bridge)"))
-    m_scriptResult = RunCxScript(m_manualTest.bound_state_script_path);
+  {
+    AnalyzeScript(m_manualTest);
+    ResetDebugRuntimeForReplay(m_manualTest);
+    m_manualTest.stop_requested = false;
+    int guard = 0;
+    const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
+    while (!m_manualTest.stop_requested &&
+           m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+           guard++ < maxSteps)
+    {
+      DebugStepOnceWithSnapshot(m_manualTest);
+      if (m_manualTest.run_state == "blocked") break;
+    }
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.reason = m_manualTest.debug_reason;
+    m_scriptResult.runtime_fillback_status = "bound_block_debug_steps";
+  }
   ImGui::SameLine();
   if (ImGui::Button("Clear Result"))
   {
@@ -1755,6 +2417,28 @@ void ViewController::drawManualStateTestConsole()
   ImGui::Text("action: %s | status: %s", m_manualTest.debug_action.c_str(),
               m_manualTest.debug_status.c_str());
   ImGui::TextWrapped("reason: %s", m_manualTest.debug_reason.c_str());
+  ImGui::Separator();
+  ImGui::Text("Current Debug Line");
+  const DebugStepSnapshot& debugSnapshot = m_manualTest.current_debug_snapshot;
+  ImGui::Text("line: %d", debugSnapshot.current_line);
+  ImGui::TextWrapped("statement: %s", debugSnapshot.statement.empty() ?
+                     "(none)" : debugSnapshot.statement.c_str());
+  ImGui::TextWrapped("object: %s | method: %s | params: %s",
+                     debugSnapshot.object.empty() ? "(none)" : debugSnapshot.object.c_str(),
+                     debugSnapshot.method.empty() ? "(none)" : debugSnapshot.method.c_str(),
+                     debugSnapshot.params.empty() ? "(none)" : debugSnapshot.params.c_str());
+  ImGui::Text("Current Runtime Object");
+  ImGui::TextWrapped("state: %s", debugSnapshot.runtime_state.empty() ?
+                     "(none)" : debugSnapshot.runtime_state.c_str());
+  ImGui::TextWrapped("summary: %s", debugSnapshot.object_summary.empty() ?
+                     "(none)" : debugSnapshot.object_summary.c_str());
+  ImGui::Text("Current Geometry Result");
+  ImGui::TextWrapped("geometry: %s", debugSnapshot.geometry_summary.empty() ?
+                     "(none)" : debugSnapshot.geometry_summary.c_str());
+  ImGui::TextWrapped("image overlay: %s", debugSnapshot.image_overlay_summary.empty() ?
+                     "(none)" : debugSnapshot.image_overlay_summary.c_str());
+  ImGui::TextWrapped("reason: %s", debugSnapshot.reason.empty() ?
+                     "(none)" : debugSnapshot.reason.c_str());
   if (!m_manualTest.debug_parser_output.empty())
   {
     ImGui::Text("parser output:");
