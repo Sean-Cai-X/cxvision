@@ -851,6 +851,8 @@ void ViewController::drawScriptAcceptancePanels()
 
             if (object.stale)
                 continue;
+            const std::string activeResultObject =
+                m_manualTest.current_result_ref.source_object;
 
             const float sx = imageSize.x / static_cast<float>(m_imageViewImage.cols);
             const float sy = imageSize.y / static_cast<float>(m_imageViewImage.rows);
