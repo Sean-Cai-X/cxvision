@@ -701,12 +701,36 @@ void ViewController::drawScriptAcceptancePanels()
     baseImageValid ? "valid" : "invalid");
   int runtimeVisualCount = 0;
   std::string runtimeVisualNames;
+
+  const std::string activeResultObject =
+      m_manualTest.current_result_ref.source_object;
+
   for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
   {
-    if (!object.exists_in_parser || object.stale || !object.visualizable) continue;
-    ++runtimeVisualCount;
-    if (!runtimeVisualNames.empty()) runtimeVisualNames += ", ";
-    runtimeVisualNames += object.name;
+      if (!object.exists_in_parser || object.stale || !object.visualizable)
+          continue;
+
+      const bool isActiveResultObject =
+          !activeResultObject.empty() && object.name == activeResultObject;
+
+      const bool hasGeometryResult =
+          object.has_fit_result || object.has_result_measure ||
+          object.runtime_state == "geometry_result_available";
+
+      /*
+       * Layer 1 的 count 默认只统计真正 result object。
+       * 纯 ROI 参数对象，例如 afindcircle1，只保留在 Runtime Object Table，
+       * 不参与当前图像结果统计。
+       */
+      if (!isActiveResultObject && !hasGeometryResult)
+          continue;
+
+      ++runtimeVisualCount;
+
+      if (!runtimeVisualNames.empty())
+          runtimeVisualNames += ", ";
+
+      runtimeVisualNames += object.name;
   }
   ImGui::Text("Layer 1 Runtime Object");
   ImGui::TextWrapped("source: cximage direct runtime | count: %d | objects: %s",
@@ -851,6 +875,32 @@ void ViewController::drawScriptAcceptancePanels()
 
             if (object.stale)
                 continue;
+
+            const bool isActiveResultObject =
+                !activeResultObject.empty() && object.name == activeResultObject;
+
+            const bool hasGeometryResult =
+                object.has_fit_result || object.has_result_measure ||
+                object.runtime_state == "geometry_result_available";
+
+            /*
+             * 默认只画 active result object。
+             * 没有 result 的 ROI 参数对象不要干扰当前结果判断。
+             */
+            if (!isActiveResultObject && !hasGeometryResult)
+                continue;
+
+            const ImU32 roiColor = isActiveResultObject
+                ? IM_COL32(80, 255, 170, 255)
+                : IM_COL32(80, 255, 170, 80);
+
+            const ImU32 fitColor = isActiveResultObject
+                ? IM_COL32(255, 220, 80, 255)
+                : IM_COL32(255, 220, 80, 100);
+
+            const ImU32 pointColor = isActiveResultObject
+                ? IM_COL32(255, 80, 80, 255)
+                : IM_COL32(255, 80, 80, 100);
             const std::string activeResultObject =
                 m_manualTest.current_result_ref.source_object;
 
@@ -868,7 +918,7 @@ void ViewController::drawScriptAcceptancePanels()
             drawList->AddCircle(
                 center,
                 radius,
-                IM_COL32(80, 255, 170, 255),
+                roiColor,
                 96,
                 2.0f
             );
@@ -901,7 +951,7 @@ void ViewController::drawScriptAcceptancePanels()
                         imagePos.x + object.measure_points_xy[pointIndex] * sx,
                         imagePos.y + object.measure_points_xy[pointIndex + 1] * sy);
                     drawList->AddCircleFilled(
-                        point, 3.5f, IM_COL32(255, 70, 70, 255), 12);
+                        point, 3.5f, pointColor, 12);
                 }
             }
 
@@ -913,7 +963,7 @@ void ViewController::drawScriptAcceptancePanels()
                 drawList->AddCircle(
                     fitCenter,
                     object.fit_radius * sr,
-                    IM_COL32(255, 220, 40, 255),
+                    fitColor,
                     96,
                     object.has_result_measure ? 3.0f : 2.0f);
                 drawList->AddText(

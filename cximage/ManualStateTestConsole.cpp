@@ -429,7 +429,49 @@ static void RefreshSnapshotFromCurrentResultRef(ManualTestContext& context)
         context.current_result_ref.line_no,
         context.current_result_ref.name + " = " + context.current_result_ref.value);
 }
-static bool SaveCxDebugSnapshotText(const ManualTestContext& context,
+ 
+static std::string BuildDebugCursorText(const ManualTestContext& context)
+{
+    if (context.run_state == "runtime_finished" ||
+        context.current_line >= static_cast<int>(context.line_views.size()))
+    {
+        return "END";
+    }
+
+    if (context.current_line >= 0 &&
+        context.current_line < static_cast<int>(context.line_views.size()))
+    {
+        const ScriptLineView& line =
+            context.line_views[static_cast<std::size_t>(context.current_line)];
+
+        std::ostringstream ss;
+        ss << "line_no=" << line.line_no
+            << ", index=" << context.current_line;
+        return ss.str();
+    }
+
+    return "INVALID";
+}
+static int LastExecutedLineNo(const ManualTestContext& context)
+{
+    int last = 0;
+
+    for (const ScriptLineView& line : context.line_views)
+    {
+        if (line.status == "runtime_executed" ||
+            line.status == "runtime_deferred" ||
+            line.status == "control_true" ||
+            line.status == "control_false" ||
+            line.status == "structural")
+        {
+            last = line.line_no;
+        }
+    }
+
+    return last;
+}
+
+static bool SaveCxDebugSnapshotText(ManualTestContext& context,
     std::string& outPath,
     std::string& outReason)
 {
@@ -456,7 +498,9 @@ static bool SaveCxDebugSnapshotText(const ManualTestContext& context,
         file << "runtime_current_status: " << context.runtime_current_status << "\n";
         file << "debug_status: " << context.debug_status << "\n";
         file << "debug_reason: " << context.debug_reason << "\n";
-        file << "current_line: " << context.current_line << "\n\n";
+        file << "current_line_index: " << context.current_line << "\n";
+        file << "execution_cursor: " << BuildDebugCursorText(context) << "\n";
+        file << "last_executed_line_no: " << LastExecutedLineNo(context) << "\n\n";
 
         file << "Current Result Ref\n";
         file << "------------------\n";
@@ -999,6 +1043,87 @@ static int FindIfAfterBlockLine(const ManualTestContext& context, int ifIndex)
     return FindNextNonEmptyLine(context, ifIndex + 1);
 }
 
+static void MarkDebugRunFinishedIfAtEnd(ManualTestContext& context)
+{
+    const int next = FindNextNonEmptyLine(context, context.current_line);
+
+    if (context.current_line >= static_cast<int>(context.line_views.size()) ||
+        next >= static_cast<int>(context.line_views.size()))
+    {
+        context.current_line = static_cast<int>(context.line_views.size());
+        context.run_state = "runtime_finished";
+        context.debug_status = "PENDING";
+        context.debug_reason =
+            "script finished; global.current_status remains PENDING; judge/rule not executed";
+
+        AppendCxDebugEvent(
+            context,
+            "debug_run_finished",
+            context.current_line,
+            "",
+            "",
+            "",
+            context.debug_status,
+            context.debug_reason,
+            "script reached end");
+    }
+}
+
+ 
+static void MarkLineAsStructural(ManualTestContext& context,
+    int lineIndex,
+    const std::string& reason)
+{
+    if (lineIndex < 0 ||
+        lineIndex >= static_cast<int>(context.line_views.size()))
+    {
+        return;
+    }
+
+    ScriptLineView& line =
+        context.line_views[static_cast<std::size_t>(lineIndex)];
+
+    line.status = "structural";
+    line.reason = reason;
+    line.timestamp = CurrentTimestamp();
+
+    AppendCxDebugEvent(
+        context,
+        "structural_line",
+        line.line_no,
+        line.statement,
+        line.object,
+        line.method,
+        line.status,
+        line.reason,
+        "structural line marked by debugger");
+}
+
+static void MarkIfBlockBracesStructural(ManualTestContext& context,
+    int ifLineIndex,
+    bool markCloseBrace)
+{
+    const int next = FindNextNonEmptyLine(context, ifLineIndex + 1);
+
+    if (next >= static_cast<int>(context.line_views.size()))
+        return;
+
+    if (!IsBraceOpenLine(context.line_views[static_cast<std::size_t>(next)].statement))
+        return;
+
+    MarkLineAsStructural(context, next, "open brace skipped by if debugger");
+
+    if (markCloseBrace)
+    {
+        const int close = FindMatchingBraceLine(context, next);
+
+        if (close >= 0)
+        {
+            MarkLineAsStructural(context, close, "close brace skipped by if debugger");
+        }
+    }
+}
+
 static bool ReadRuntimeInt(ManualTestContext& context,
     const std::string& name,
     int& value)
@@ -1050,27 +1175,7 @@ static bool EvalSimpleCondition(ManualTestContext& context,
     value = equal ? (lv == rv) : (lv != rv);
     return true;
 }
-static void MarkDebugRunFinishedIfAtEnd(ManualTestContext& context)
-{
-    if (context.current_line >= static_cast<int>(context.line_views.size()))
-    {
-        context.current_line = static_cast<int>(context.line_views.size());
-        context.run_state = "runtime_finished";
-        context.debug_status = "PENDING";
-        context.debug_reason = "script finished; global.current_status remains PENDING; judge/rule not executed";
 
-        AppendCxDebugEvent(
-            context,
-            "debug_run_finished",
-            context.current_line,
-            "",
-            "",
-            "",
-            context.debug_status,
-            context.debug_reason,
-            "script reached end");
-    }
-}
 static bool TryExecuteIntDeclarationAssignment(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -1190,7 +1295,7 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
         context.run_state = "runtime_step";
         context.debug_status = "PENDING";
         context.debug_reason = "assignment executed";
-
+        MarkDebugRunFinishedIfAtEnd(context);
         return true;
     }
 
@@ -2503,6 +2608,7 @@ static void DebugStepOnce(ManualTestContext& context)
             line.status = "BLOCKED";
             line.reason = "cannot evaluate if condition: " + condition;
             line.timestamp = CurrentTimestamp();
+
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
             context.debug_reason = line.reason;
@@ -2513,6 +2619,14 @@ static void DebugStepOnce(ManualTestContext& context)
         line.reason = conditionValue ? "if condition true" : "if condition false";
         line.timestamp = CurrentTimestamp();
 
+        /*
+         * if 为 true 时，调试器会跳过 “{” 直接进入 block 第一条语句；
+         * if 为 false 时，会跳过整个 block。
+         * 因此这里必须主动把被跳过的大括号标成 structural，
+         * 否则 snapshot 里 “{” 会残留 source_analyzed。
+         */
+        MarkIfBlockBracesStructural(context, lineIndex, !conditionValue);
+
         context.current_line = conditionValue ?
             FindIfBodyStartLine(context, lineIndex) :
             FindIfAfterBlockLine(context, lineIndex);
@@ -2520,6 +2634,18 @@ static void DebugStepOnce(ManualTestContext& context)
         context.run_state = "runtime_step";
         context.debug_status = "PENDING";
         context.debug_reason = line.reason;
+
+        AppendCxDebugEvent(
+            context,
+            "if_control",
+            line.line_no,
+            statement,
+            "",
+            "if",
+            line.status,
+            line.reason,
+            condition);
+
         return;
     }
 
@@ -2612,6 +2738,8 @@ static void DebugStepOnce(ManualTestContext& context)
     line.timestamp = CurrentTimestamp();
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
 }
+
+
 
 static void CaptureDebugStepSnapshot(ManualTestContext& context, int lineIndex)
 {
@@ -3680,9 +3808,9 @@ void ViewController::drawManualStateTestConsole()
    
   if (ImGui::Button("Save Debug Log Snapshot"))
   {
+      RefreshSnapshotFromCurrentResultRef(m_manualTest);
       std::string savedPath;
       std::string reason;
-      RefreshSnapshotFromCurrentResultRef(m_manualTest);
       if (SaveCxDebugSnapshotText(m_manualTest, savedPath, reason))
       {
           m_scriptResult.status = "PENDING";
