@@ -176,6 +176,12 @@ enum EParamCodes
 	Param_any_Return_double,
 	Param_double_charp_2,
 	Param_double_charp_2_Return_double,
+	Param_int_double_2,
+	Param_double_int_2,
+	Param_int_double_2_Return_int,
+	Param_double_int_2_Return_int,
+	Param_int_double_2_Return_double,
+	Param_double_int_2_Return_double,
 	Param_charp_any,
 	Param_charp_any_Return_int,
 	Param_charp_any_Return_double

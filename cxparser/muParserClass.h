@@ -83,6 +83,15 @@ namespace mu
                         return {ClassFunParamFixedDoubleCharp, ClassFunReturnVoid, false};
                 case Param_double_charp_2_Return_double:
                         return {ClassFunParamFixedDoubleCharp, ClassFunReturnDouble, false};
+                case Param_int_double_2:
+                case Param_double_int_2:
+                        return {ClassFunParamFixedDouble, ClassFunReturnVoid, false};
+                case Param_int_double_2_Return_int:
+                case Param_double_int_2_Return_int:
+                        return {ClassFunParamFixedDouble, ClassFunReturnInt, false};
+                case Param_int_double_2_Return_double:
+                case Param_double_int_2_Return_double:
+                        return {ClassFunParamFixedDouble, ClassFunReturnDouble, false};
                 case Param_charp_any:
                         return {ClassFunParamAnyCharp, ClassFunReturnVoid, true};
                 case Param_charp_any_Return_int:
@@ -192,6 +201,12 @@ namespace mu
                 typedef double (ACLASS::*PIF1_R_D)(int );
                 typedef double (ACLASS::*PIF2_R_D)(int,int);
                 typedef double (ACLASS::*PIF3_R_D)(int,int,int);
+                typedef void (ACLASS::*PIFD2)(int,double);
+                typedef void (ACLASS::*PDFI2)(double,int);
+                typedef int (ACLASS::*PIFD2_R_I)(int,double);
+                typedef int (ACLASS::*PDFI2_R_I)(double,int);
+                typedef double (ACLASS::*PIFD2_R_D)(int,double);
+                typedef double (ACLASS::*PDFI2_R_D)(double,int);
 
                 typedef void (ACLASS::*PCF1)(const char_type *);
                 typedef void (ACLASS::*PDFC2)(double, const char_type *);
@@ -229,6 +244,12 @@ namespace mu
                 PIF1_R_D m_pif1_re_double;
                 PIF2_R_D m_pif2_re_double;
                 PIF3_R_D m_pif3_re_double;
+                PIFD2 m_pifd2;
+                PDFI2 m_pdfi2;
+                PIFD2_R_I m_pifd2_re_int;
+                PDFI2_R_I m_pdfi2_re_int;
+                PIFD2_R_D m_pifd2_re_double;
+                PDFI2_R_D m_pdfi2_re_double;
 
                 PCF1 m_pfc1;
                 PDFC2 m_pdfc2;
@@ -292,6 +313,13 @@ namespace mu
                         case Param_double_charp_2:
                                 return 2;
                         case Param_double_charp_2_Return_double:
+                                return 2;
+                        case Param_int_double_2:
+                        case Param_double_int_2:
+                        case Param_int_double_2_Return_int:
+                        case Param_double_int_2_Return_int:
+                        case Param_int_double_2_Return_double:
+                        case Param_double_int_2_Return_double:
                                 return 2;
                         case Param_charp_any:
                                 return -1;
@@ -373,6 +401,14 @@ namespace mu
                         case Param_int_2:
                                 if(m_parm.size()>=2)
                                         (m_pclass->*m_pif2)(static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
+                                break;
+                        case Param_int_double_2:
+                                if(m_parm.size()>=2)
+                                        (m_pclass->*m_pifd2)(static_cast<int>(m_parm[1]),static_cast<double>(m_parm[0]));
+                                break;
+                        case Param_double_int_2:
+                                if(m_parm.size()>=2)
+                                        (m_pclass->*m_pdfi2)(static_cast<double>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         case Param_int_3:
                                 if(m_parm.size()>=3)
@@ -533,6 +569,14 @@ namespace mu
                         case Param_int_2_Return_int:
                                 if(m_parm.size()>=2)
                                         return (m_pclass->*m_pif2_re_int)(m_parm[1],m_parm[0]);
+                        case Param_int_double_2_Return_int:
+                                if(m_parm.size()>=2)
+                                        return (m_pclass->*m_pifd2_re_int)(static_cast<int>(m_parm[1]),static_cast<double>(m_parm[0]));
+                                break;
+                        case Param_double_int_2_Return_int:
+                                if(m_parm.size()>=2)
+                                        return (m_pclass->*m_pdfi2_re_int)(static_cast<double>(m_parm[1]),static_cast<int>(m_parm[0]));
+                                break;
 
                         case Param_int_1_Return_double:
                                 if(m_parm.size()>=1)
@@ -545,6 +589,14 @@ namespace mu
                         case Param_int_3_Return_double:
                                 if(m_parm.size()>=3)
                                         return (m_pclass->*m_pif3_re_double)(m_parm[2],m_parm[1],m_parm[0]);
+                                break;
+                        case Param_int_double_2_Return_double:
+                                if(m_parm.size()>=2)
+                                        return (m_pclass->*m_pifd2_re_double)(static_cast<int>(m_parm[1]),static_cast<double>(m_parm[0]));
+                                break;
+                        case Param_double_int_2_Return_double:
+                                if(m_parm.size()>=2)
+                                        return (m_pclass->*m_pdfi2_re_double)(static_cast<double>(m_parm[1]),static_cast<int>(m_parm[0]));
                                 break;
                         default :
                                 break;
@@ -614,6 +666,16 @@ namespace mu
                 {
                         m_pif2=pif2;
                         m_ifunctype = Param_int_2 ;
+                }
+                void StorageFUNC(void (ACLASS::*pifd2)(int,double))
+                {
+                        m_pifd2=pifd2;
+                        m_ifunctype = Param_int_double_2;
+                }
+                void StorageFUNC(void (ACLASS::*pdfi2)(double,int))
+                {
+                        m_pdfi2=pdfi2;
+                        m_ifunctype = Param_double_int_2;
                 }
                 void StorageFUNC(void (ACLASS::*pif3)(int,int,int))
                 {
@@ -689,6 +751,16 @@ namespace mu
                         m_pif2_re_int=pif2_re_int;
                         m_ifunctype = Param_int_2_Return_int ;
                 }
+                void StorageFUNC(int (ACLASS::*pifd2_re_int)(int,double))
+                {
+                        m_pifd2_re_int=pifd2_re_int;
+                        m_ifunctype = Param_int_double_2_Return_int;
+                }
+                void StorageFUNC(int (ACLASS::*pdfi2_re_int)(double,int))
+                {
+                        m_pdfi2_re_int=pdfi2_re_int;
+                        m_ifunctype = Param_double_int_2_Return_int;
+                }
                 void StorageFUNC(double (ACLASS::*pif1_re_db)(int))
                 {
                         m_pif1_re_double=pif1_re_db;
@@ -698,6 +770,16 @@ namespace mu
                 {
                         m_pif2_re_double=pif2_re_db;
                         m_ifunctype = Param_int_2_Return_double ;
+                }
+                void StorageFUNC(double (ACLASS::*pifd2_re_db)(int,double))
+                {
+                        m_pifd2_re_double=pifd2_re_db;
+                        m_ifunctype = Param_int_double_2_Return_double;
+                }
+                void StorageFUNC(double (ACLASS::*pdfi2_re_db)(double,int))
+                {
+                        m_pdfi2_re_double=pdfi2_re_db;
+                        m_ifunctype = Param_double_int_2_Return_double;
                 }
                 void StorageFUNC(double (ACLASS::*pif3_re_db)(int,int,int))
                 {
@@ -1438,6 +1520,14 @@ namespace mu
                 {
                         StoreRuntimeClassFun(strname, pif2);
                 }
+                void AddClassFun(const string_type & strname,void (TCLASS::*pifd2)(int,double))
+                {
+                        StoreRuntimeClassFun(strname, pifd2);
+                }
+                void AddClassFun(const string_type & strname,void (TCLASS::*pdfi2)(double,int))
+                {
+                        StoreRuntimeClassFun(strname, pdfi2);
+                }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pif3)(int,int,int))
                 {
                         StoreRuntimeClassFun(strname, pif3);
@@ -1497,6 +1587,14 @@ namespace mu
                 {
                         StoreRuntimeClassFun(strname, pif2_re_db);
                 }
+                void AddClassFun(const string_type & strname,double (TCLASS::*pifd2_re_db)(int,double))
+                {
+                        StoreRuntimeClassFun(strname, pifd2_re_db);
+                }
+                void AddClassFun(const string_type & strname,double (TCLASS::*pdfi2_re_db)(double,int))
+                {
+                        StoreRuntimeClassFun(strname, pdfi2_re_db);
+                }
 
                 void AddClassFun(const string_type & strname,double (TCLASS::*pif3_re_db)(int,int,int))
                 {
@@ -1506,6 +1604,14 @@ namespace mu
                 void AddClassFun(const string_type & strname,int (TCLASS::*pif2_re_int)(int,int))
                 {
                         StoreRuntimeClassFun(strname, pif2_re_int);
+                }
+                void AddClassFun(const string_type & strname,int (TCLASS::*pifd2_re_int)(int,double))
+                {
+                        StoreRuntimeClassFun(strname, pifd2_re_int);
+                }
+                void AddClassFun(const string_type & strname,int (TCLASS::*pdfi2_re_int)(double,int))
+                {
+                        StoreRuntimeClassFun(strname, pdfi2_re_int);
                 }
                 void AddClassFun(const string_type & strname,int (TCLASS::*pif1_re_int)(int))
                 {

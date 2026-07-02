@@ -431,7 +431,11 @@ namespace mu
             m_parser.DefineClassFun("Findline", pfindline, "setline", &Findline::setline);
             m_parser.DefineClassFun("Findline", pfindline, "fitline", &Findline::FitLine);
             m_parser.DefineClassFun("Findline", pfindline, "setfitmode", &Findline::setfitmode);
-            m_parser.DefineClassFun("Findline", pfindline, "setfitpointweight", &Findline::setfitpointweight);
+            m_parser.DefineClassFun(
+                "Findline",
+                pfindline,
+                "setfitpointweight",
+                static_cast<void (Findline::*)(int, double)>(&Findline::setfitpointweight));
             m_parser.DefineClassFun("Findline", pfindline, "translate", &Findline::translate);
             m_parser.DefineClassFun("Findline", pfindline, "Show", &Findline::setshow);
             m_parser.DefineClassFun("Findline", pfindline, "clear", &Findline::clear);
