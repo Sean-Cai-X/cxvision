@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <unordered_map>
 
+
+#include <iomanip>
 #include <memory>
 #include <cmath>
 #include <exception>
@@ -108,6 +110,310 @@ std::string TrimLine(const std::string& text)
   return text.substr(first, last - first + 1);
 }
 
+static std::string CxDebugJsonEscape(const std::string& text)
+{
+    std::ostringstream out;
+
+    for (char ch : text)
+    {
+        switch (ch)
+        {
+        case '\\':
+            out << "\\\\";
+            break;
+        case '"':
+            out << "\\\"";
+            break;
+        case '\n':
+            out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
+            break;
+        case '\t':
+            out << "\\t";
+            break;
+        default:
+            out << ch;
+            break;
+        }
+    }
+
+    return out.str();
+}
+
+static fs::path CxDebugLogDirectory()
+{
+    return fs::path("docs") / "notes" / "cxscript_case";
+}
+
+static fs::path CxDebugRuntimeLogPath()
+{
+    return CxDebugLogDirectory() / "cxscript_debug_runtime_latest.jsonl";
+}
+
+static fs::path CxDebugSnapshotPath()
+{
+    return CxDebugLogDirectory() / "cxscript_debug_snapshot_latest.txt";
+}
+std::string CurrentTimestamp()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm local_time = {};
+#if defined(_WIN32)
+    localtime_s(&local_time, &now);
+#else
+    localtime_r(&now, &local_time);
+#endif
+    char buffer[32] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local_time);
+    return buffer;
+}
+
+static void ResetCxDebugRuntimeLog(const ManualTestContext& context,
+    const std::string& reason)
+{
+    try
+    {
+        fs::create_directories(CxDebugLogDirectory());
+
+        std::ofstream file(CxDebugRuntimeLogPath().string(),
+            std::ios::out | std::ios::trunc);
+
+        if (!file.is_open())
+            return;
+
+        file << "{"
+            << "\"event\":\"log_reset\","
+            << "\"time\":\"" << CxDebugJsonEscape(CurrentTimestamp()) << "\","
+            << "\"reason\":\"" << CxDebugJsonEscape(reason) << "\","
+            << "\"script_path\":\"" << CxDebugJsonEscape(context.loaded_script_path) << "\","
+            << "\"flow_block\":\"cximage_find_circle_explore.N0\""
+            << "}\n";
+    }
+    catch (...)
+    {
+        // log 不能影响主调试流程
+    }
+}
+
+static void AppendCxDebugEvent(const ManualTestContext& context,
+    const std::string& event,
+    int lineNo,
+    const std::string& statement,
+    const std::string& object,
+    const std::string& method,
+    const std::string& status,
+    const std::string& reason,
+    const std::string& summary)
+{
+    try
+    {
+        fs::create_directories(CxDebugLogDirectory());
+
+        std::ofstream file(CxDebugRuntimeLogPath().string(),
+            std::ios::out | std::ios::app);
+
+        if (!file.is_open())
+            return;
+
+        file << "{"
+            << "\"event\":\"" << CxDebugJsonEscape(event) << "\","
+            << "\"time\":\"" << CxDebugJsonEscape(CurrentTimestamp()) << "\","
+            << "\"flow_block\":\"cximage_find_circle_explore.N0\","
+            << "\"script_path\":\"" << CxDebugJsonEscape(context.loaded_script_path) << "\","
+            << "\"line_no\":" << lineNo << ","
+            << "\"statement\":\"" << CxDebugJsonEscape(statement) << "\","
+            << "\"object\":\"" << CxDebugJsonEscape(object) << "\","
+            << "\"method\":\"" << CxDebugJsonEscape(method) << "\","
+            << "\"status\":\"" << CxDebugJsonEscape(status) << "\","
+            << "\"reason\":\"" << CxDebugJsonEscape(reason) << "\","
+            << "\"run_state\":\"" << CxDebugJsonEscape(context.run_state) << "\","
+            << "\"runtime_current_status\":\"" << CxDebugJsonEscape(context.runtime_current_status) << "\","
+            << "\"debug_status\":\"" << CxDebugJsonEscape(context.debug_status) << "\","
+            << "\"debug_reason\":\"" << CxDebugJsonEscape(context.debug_reason) << "\","
+            << "\"summary\":\"" << CxDebugJsonEscape(summary) << "\""
+            << "}\n";
+    }
+    catch (...)
+    {
+        // log 不能影响主调试流程
+    }
+}
+static void AppendCxDebugRuntimeObjectsSnapshot(const ManualTestContext& context,
+    const std::string& event)
+{
+    try
+    {
+        fs::create_directories(CxDebugLogDirectory());
+
+        std::ofstream file(CxDebugRuntimeLogPath().string(),
+            std::ios::out | std::ios::app);
+
+        if (!file.is_open())
+            return;
+
+        file << "{"
+            << "\"event\":\"" << CxDebugJsonEscape(event) << "\","
+            << "\"time\":\"" << CxDebugJsonEscape(CurrentTimestamp()) << "\","
+            << "\"script_path\":\"" << CxDebugJsonEscape(context.loaded_script_path) << "\","
+            << "\"flow_block\":\"cximage_find_circle_explore.N0\","
+            << "\"runtime_objects\":[";
+
+        for (std::size_t i = 0; i < context.runtime_objects.size(); ++i)
+        {
+            const RuntimeObjectView& object = context.runtime_objects[i];
+
+            file << "{"
+                << "\"name\":\"" << CxDebugJsonEscape(object.name) << "\","
+                << "\"type\":\"" << CxDebugJsonEscape(object.type) << "\","
+                << "\"declared_line\":" << object.declared_line << ","
+                << "\"exists_in_parser\":" << (object.exists_in_parser ? "true" : "false") << ","
+                << "\"runtime_state\":\"" << CxDebugJsonEscape(object.runtime_state) << "\","
+                << "\"last_runtime_status\":\"" << CxDebugJsonEscape(object.last_runtime_status) << "\","
+                << "\"last_method\":\"" << CxDebugJsonEscape(object.last_method) << "\","
+                << "\"last_update_line\":" << object.last_update_line << ","
+                << "\"display_summary\":\"" << CxDebugJsonEscape(object.display_summary) << "\","
+                << "\"visualizable\":" << (object.visualizable ? "true" : "false") << ","
+                << "\"visual_source\":\"" << CxDebugJsonEscape(object.visual_source) << "\","
+                << "\"stale\":" << (object.stale ? "true" : "false") << ","
+                << "\"has_circle\":" << (object.has_circle ? "true" : "false") << ","
+                << "\"circle\":[" << object.circle_cx << ","
+                << object.circle_cy << ","
+                << object.circle_inner << ","
+                << object.circle_radius << "],"
+                << "\"has_measure_points\":" << (object.has_measure_points ? "true" : "false") << ","
+                << "\"measure_points_count\":" << object.measure_points_count << ","
+                << "\"valid_points_count\":" << object.valid_points_count << ","
+                << "\"has_fit_result\":" << (object.has_fit_result ? "true" : "false") << ","
+                << "\"fit_circle\":[" << object.fit_cx << ","
+                << object.fit_cy << ","
+                << object.fit_radius << "],"
+                << "\"avgdist\":" << object.fit_avgdist
+                << "}";
+
+            if (i + 1 < context.runtime_objects.size())
+                file << ",";
+        }
+
+        file << "]}";
+        file << "\n";
+    }
+    catch (...)
+    {
+    }
+}
+static bool SaveCxDebugSnapshotText(const ManualTestContext& context,
+    std::string& outPath,
+    std::string& outReason)
+{
+    try
+    {
+        fs::create_directories(CxDebugLogDirectory());
+
+        const fs::path path = CxDebugSnapshotPath();
+
+        std::ofstream file(path.string(), std::ios::out | std::ios::trunc);
+
+        if (!file.is_open())
+        {
+            outReason = "failed to open debug snapshot file: " + path.string();
+            return false;
+        }
+
+        file << "CxScript Debug Snapshot\n";
+        file << "=======================\n";
+        file << "time: " << CurrentTimestamp() << "\n";
+        file << "flow_block: cximage_find_circle_explore.N0\n";
+        file << "script_path: " << context.loaded_script_path << "\n";
+        file << "run_state: " << context.run_state << "\n";
+        file << "runtime_current_status: " << context.runtime_current_status << "\n";
+        file << "debug_status: " << context.debug_status << "\n";
+        file << "debug_reason: " << context.debug_reason << "\n";
+        file << "current_line: " << context.current_line << "\n\n";
+
+        file << "Current Result Ref\n";
+        file << "------------------\n";
+        file << "name: " << context.current_result_ref.name << "\n";
+        file << "value: " << context.current_result_ref.value << "\n";
+        file << "source_object: " << context.current_result_ref.source_object << "\n";
+        file << "result_type: " << context.current_result_ref.result_type << "\n";
+        file << "status: " << context.current_result_ref.status << "\n";
+        file << "reason: " << context.current_result_ref.reason << "\n";
+        file << "fit: (" << context.current_result_ref.fit_cx
+            << ", " << context.current_result_ref.fit_cy
+            << ", r=" << context.current_result_ref.fit_radius << ")\n";
+        file << "avgdist: " << context.current_result_ref.avgdist << "\n";
+        file << "points_count: " << context.current_result_ref.points_count << "\n";
+        file << "valid_points_count: " << context.current_result_ref.valid_points_count << "\n\n";
+
+        file << "Geometry Summary\n";
+        file << "----------------\n";
+        file << context.geometry_summary << "\n\n";
+
+        file << "Image Overlay Summary\n";
+        file << "---------------------\n";
+        file << context.image_overlay_summary << "\n\n";
+
+        file << "Runtime Objects\n";
+        file << "---------------\n";
+
+        for (const RuntimeObjectView& object : context.runtime_objects)
+        {
+            file << "* " << object.type << " " << object.name << "\n";
+            file << "  declared_line: " << object.declared_line << "\n";
+            file << "  exists_in_parser: " << (object.exists_in_parser ? "true" : "false") << "\n";
+            file << "  runtime_state: " << object.runtime_state << "\n";
+            file << "  last_runtime_status: " << object.last_runtime_status << "\n";
+            file << "  last_method: " << object.last_method << "\n";
+            file << "  last_update_line: " << object.last_update_line << "\n";
+            file << "  display_summary: " << object.display_summary << "\n";
+            file << "  visualizable: " << (object.visualizable ? "true" : "false") << "\n";
+            file << "  stale: " << (object.stale ? "true" : "false") << "\n";
+            file << "  roi_circle: "
+                << object.circle_cx << ", "
+                << object.circle_cy << ", "
+                << object.circle_inner << ", "
+                << object.circle_radius << "\n";
+            file << "  measure_points_count: " << object.measure_points_count << "\n";
+            file << "  valid_points_count: " << object.valid_points_count << "\n";
+            file << "  fit_circle: "
+                << object.fit_cx << ", "
+                << object.fit_cy << ", r="
+                << object.fit_radius << "\n";
+            file << "  avgdist: " << object.fit_avgdist << "\n\n";
+        }
+
+        file << "Line Trace\n";
+        file << "----------\n";
+
+        for (const ScriptLineView& line : context.line_views)
+        {
+            file << line.line_no
+                << " [" << line.status << "] "
+                << line.statement
+                << " | object=" << line.object
+                << " | method=" << line.method
+                << " | params=" << line.params
+                << " | reason=" << line.reason
+                << "\n";
+        }
+
+        outPath = path.string();
+        outReason = "debug snapshot saved";
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        outReason = std::string("debug snapshot exception: ") + e.what();
+        return false;
+    }
+    catch (...)
+    {
+        outReason = "debug snapshot unknown exception";
+        return false;
+    }
+}
 std::vector<std::string> SplitParameters(const std::string& text)
 {
   std::vector<std::string> result;
@@ -139,19 +445,6 @@ std::vector<std::string> ExtractGlobalNames(const std::string& text)
   return names;
 }
 
-std::string CurrentTimestamp()
-{
-    const std::time_t now = std::time(nullptr);
-    std::tm local_time = {};
-#if defined(_WIN32)
-    localtime_s(&local_time, &now);
-#else
-    localtime_r(&now, &local_time);
-#endif
-    char buffer[32] = {};
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local_time);
-    return buffer;
-}
 
 
 static bool IsBraceOpenLine(const std::string& line)
@@ -517,6 +810,18 @@ static void ResetDebugRuntimeForReplay(ManualTestContext& context)
     context.debug_status = "PENDING";
     context.debug_reason = "runtime reset for replay";
     context.runtime_current_status = "PENDING";
+
+    ResetCxDebugRuntimeLog(context, "ResetDebugRuntimeForReplay");
+    AppendCxDebugEvent(
+        context,
+        "runtime_reset",
+        0,
+        "",
+        "",
+        "",
+        context.debug_status,
+        context.debug_reason,
+        "runtime reset for replay");
 }
 
 static int FindNextNonEmptyLine(const ManualTestContext& context, int fromIndex)
@@ -666,9 +971,19 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
 
         line.status = "runtime_executed";
         line.reason = "assignment executed";
+
         line.return_variable = lhs;
         line.timestamp = CurrentTimestamp();
-
+        AppendCxDebugEvent(
+            context,
+            "global_current_status_set",
+            line.line_no,
+            statement,
+            lhs,
+            "assignment",
+            line.status,
+            line.reason,
+            "current_status=" + rhs);
         UpsertVariableView(
             context,
             "int",
@@ -1036,7 +1351,18 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     context.run_state = "runtime_step";
     context.debug_status = "PENDING";
     context.debug_reason = "setcircle updated runtime object";
+    AppendCxDebugEvent(
+        context,
+        "findcircle_setcircle",
+        line.line_no,
+        statement,
+        call.object,
+        call.method,
+        line.status,
+        line.reason,
+        object.display_summary);
 
+    AppendCxDebugRuntimeObjectsSnapshot(context, "runtime_objects_after_setcircle");
     return true;
 }
 static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
@@ -1560,7 +1886,20 @@ static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     line.reason = "Findcircle." + call.method +
         " executed by direct runtime bridge | " + object.display_summary;
     line.timestamp = CurrentTimestamp();
+    AppendCxDebugEvent(
+        context,
+        "findcircle_runtime_method",
+        line.line_no,
+        statement,
+        call.object,
+        call.method,
+        line.status,
+        line.reason,
+        object.display_summary);
 
+    AppendCxDebugRuntimeObjectsSnapshot(
+        context,
+        "runtime_objects_after_" + call.method);
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
     context.run_state = "runtime_step";
     context.debug_status = "PENDING";
@@ -1609,6 +1948,16 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     {
         line.status = "PENDING_BINDING";
         line.reason = "get_result source object not found: " + sourceObjectName;
+        AppendCxDebugEvent(
+            context,
+            "get_result_pending_binding",
+            line.line_no,
+            statement,
+            sourceObjectName,
+            "get_result",
+            line.status,
+            line.reason,
+            "get_result did not bind");
         line.timestamp = CurrentTimestamp();
 
         UpsertGlobalVariableView(
@@ -1643,6 +1992,16 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     {
         line.status = "PENDING_BINDING";
         line.reason = "get_result requires a valid fit result; no result fabricated";
+        AppendCxDebugEvent(
+            context,
+            "get_result_pending_binding",
+            line.line_no,
+            statement,
+            sourceObjectName,
+            "get_result",
+            line.status,
+            line.reason,
+            "get_result did not bind");
         line.timestamp = CurrentTimestamp();
 
         UpsertGlobalVariableView(
@@ -1697,6 +2056,18 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
 
     line.status = "runtime_executed";
     line.reason = lhs + " bound to " + refValue;
+    AppendCxDebugEvent(
+        context,
+        "get_result_bound",
+        line.line_no,
+        statement,
+        sourceObjectName,
+        "get_result",
+        line.status,
+        line.reason,
+        context.geometry_summary);
+
+    AppendCxDebugRuntimeObjectsSnapshot(context, "runtime_objects_after_get_result");
     line.return_variable = lhs;
     line.timestamp = CurrentTimestamp();
 
@@ -1976,6 +2347,16 @@ static void DebugStepOnce(ManualTestContext& context)
     const int lineIndex = context.current_line;
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     const std::string statement = TrimLine(line.statement);
+    AppendCxDebugEvent(
+        context,
+        "step_enter",
+        line.line_no,
+        statement,
+        line.object,
+        line.method,
+        line.status,
+        line.reason,
+        "enter debug step");
 
     if (statement.empty())
     {
@@ -3003,6 +3384,7 @@ void ViewController::drawManualStateTestConsole()
   };
   if (ImGui::Button("Compile"))
   {
+      ResetCxDebugRuntimeLog(m_manualTest, "Compile");
       AnalyzeScript(m_manualTest);
       ResetDebugRuntimeForReplay(m_manualTest);
 
@@ -3022,6 +3404,7 @@ void ViewController::drawManualStateTestConsole()
   ImGui::SameLine();
   if (ImGui::Button("Run"))
   {
+      ResetCxDebugRuntimeLog(m_manualTest, "Run");
       AnalyzeScript(m_manualTest);
       ResetDebugRuntimeForReplay(m_manualTest);
 
@@ -3122,6 +3505,7 @@ void ViewController::drawManualStateTestConsole()
   ImGui::SameLine();
   if (ImGui::Button("Run Bound State (runtime bridge)"))
   {
+      ResetCxDebugRuntimeLog(m_manualTest, "Run Bound State");
     std::string boundScript;
     const bool boundReady = !m_manualTest.bound_state_script_path.empty() &&
       ReadTextFile(ResolveWorkspaceFile(m_manualTest.bound_state_script_path).generic_string(),
@@ -3171,6 +3555,36 @@ void ViewController::drawManualStateTestConsole()
     m_manualTest.debug_status = "PENDING";
     m_manualTest.debug_reason = m_scriptResult.reason;
     m_manualTest.debug_parser_output.clear();
+  }
+   
+  if (ImGui::Button("Save Debug Log Snapshot"))
+  {
+      std::string savedPath;
+      std::string reason;
+
+      if (SaveCxDebugSnapshotText(m_manualTest, savedPath, reason))
+      {
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = "debug snapshot saved: " + savedPath;
+          m_scriptResult.runtime_fillback_status = "debug_snapshot_saved";
+      }
+      else
+      {
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = reason;
+          m_scriptResult.runtime_fillback_status = "debug_snapshot_save_failed";
+      }
+  }
+
+  ImGui::SameLine();
+
+  if (ImGui::Button("Clear Debug Log"))
+  {
+      ResetCxDebugRuntimeLog(m_manualTest, "manual clear debug log");
+
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = "debug runtime log cleared";
+      m_scriptResult.runtime_fillback_status = "debug_log_cleared";
   }
 
   ImGui::Separator();
