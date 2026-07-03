@@ -9,6 +9,10 @@ class SemanticFlowGraph
 {
 public:
   void Initialize(const std::string& repository_root);
+  bool BindScriptToNode(int node_index,
+                        const std::string& script_path,
+                        const std::string& title_hint,
+                        std::string& out_reason);
   SemanticFlowAction Draw();
   void SetRuntimeDebugSummary(const std::string& doutputValue,
                               const std::string& currentStatus,

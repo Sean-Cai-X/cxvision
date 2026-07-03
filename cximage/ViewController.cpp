@@ -1,4 +1,4 @@
-﻿#include "ManualStateTestConsole.h"
+#include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include <glad/glad.h>
 
@@ -571,6 +571,92 @@ void ViewController::initScriptCatalog()
   m_scriptResult.runtime_fillback_status = "not_started";
 }
 
+bool ViewController::GetSelectedCatalogScript(std::string& outPath,
+                                              std::string& outName) const
+{
+  outPath.clear();
+  outName.clear();
+
+  if (m_selectedScript < 0 ||
+      m_selectedScript >= static_cast<int>(m_scriptCatalog.size()))
+  {
+    return false;
+  }
+
+  const ScriptCatalogEntry& entry =
+    m_scriptCatalog[static_cast<std::size_t>(m_selectedScript)];
+
+  outPath = entry.path;
+  outName = entry.name;
+  return !outPath.empty();
+}
+
+void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
+{
+  if (action.type == SemanticFlowActionType::None)
+    return;
+
+  if (action.type == SemanticFlowActionType::BindCatalogScriptToSelectedNode)
+  {
+    std::string scriptPath;
+    std::string scriptName;
+
+    if (!GetSelectedCatalogScript(scriptPath, scriptName))
+    {
+      m_scriptResult.source = "semantic_flow";
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = "no Script Catalog item selected";
+      m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
+      return;
+    }
+
+    std::string reason;
+    if (!m_semanticFlowGraph.BindScriptToNode(action.node_index, scriptPath, scriptName, reason))
+    {
+      m_scriptResult.source = "semantic_flow";
+      m_scriptResult.status = "PENDING";
+      m_scriptResult.reason = reason;
+      m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
+      return;
+    }
+
+    m_scriptResult.source = "semantic_flow";
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.script_path = scriptPath;
+    m_scriptResult.reason = reason;
+    m_scriptResult.runtime_fillback_status = "semantic_node_bound_from_catalog";
+    return;
+  }
+
+  if (action.type == SemanticFlowActionType::LoadBoundScript)
+  {
+    LoadBoundStateToManualConsole(action.node_id, action.script_path);
+
+    m_scriptResult.source = "semantic_flow";
+    m_scriptResult.status = "PENDING";
+    m_scriptResult.script_path = action.script_path;
+    m_scriptResult.reason = "semantic node script loaded to Manual State Test Console";
+    m_scriptResult.runtime_fillback_status = "semantic_node_loaded";
+    return;
+  }
+
+  if (action.type == SemanticFlowActionType::RunBoundScript)
+  {
+    LoadBoundStateToManualConsole(action.node_id, action.script_path);
+
+    m_scriptResult = RunCxScript(action.script_path);
+    RefreshRuntimeObjectTable("Flow Run",
+      m_scriptResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
+    m_semanticFlowGraph.ApplyScriptResult(action.node_index,
+                                          m_scriptResult.status,
+                                          m_scriptResult.result_ref,
+                                          m_scriptResult.evidence_ref,
+                                          m_scriptResult.issue_entry_ref,
+                                          m_scriptResult.reason);
+    m_scriptResult.runtime_fillback_status = "semantic_bound_script_run_requested";
+    return;
+  }
+}
 ViewController::ScriptResult ViewController::RunCxScript(const std::string& theScriptPath)
 {
   ScriptResult result;
@@ -2048,23 +2134,7 @@ void ViewController::mainloop()
 
              drawScriptAcceptancePanels();
              const SemanticFlowAction flowAction = m_semanticFlowGraph.Draw();
-             if (flowAction.type == SemanticFlowActionType::LoadBoundScript)
-             {
-                 LoadBoundStateToManualConsole(flowAction.node_id, flowAction.script_path);
-             }
-             else if (flowAction.type == SemanticFlowActionType::RunBoundScript)
-             {
-                 const ScriptResult flowResult = RunCxScript(flowAction.script_path);
-                 m_scriptResult = flowResult;
-                 RefreshRuntimeObjectTable("Flow Run",
-                   flowResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
-                 m_semanticFlowGraph.ApplyScriptResult(flowAction.node_index,
-                                                       flowResult.status,
-                                                       flowResult.result_ref,
-                                                       flowResult.evidence_ref,
-                                                       flowResult.issue_entry_ref,
-                                                       flowResult.reason);
-             }
+             HandleSemanticFlowAction(flowAction);
              drawManualStateTestConsole();
              drawImageEvidencePanels();
 

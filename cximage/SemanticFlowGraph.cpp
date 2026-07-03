@@ -30,6 +30,36 @@ bool SplitField(const std::string& line, std::string& key, std::string& value)
   return !key.empty();
 }
 
+std::string TitleFromCatalogScriptName(const std::string& name)
+{
+  std::string title = name;
+
+  const std::string directSuffix = "_direct_test.cxsc";
+  const std::size_t directPos = title.find(directSuffix);
+  if (directPos != std::string::npos)
+  {
+    title.erase(directPos);
+  }
+
+  const std::string cxscSuffix = ".cxsc";
+  const std::size_t cxscPos = title.find(cxscSuffix);
+  if (cxscPos != std::string::npos)
+  {
+    title.erase(cxscPos);
+  }
+
+  for (char& ch : title)
+  {
+    if (ch == '_' || ch == '-')
+      ch = ' ';
+  }
+
+  if (title.empty())
+    title = "catalog script";
+
+  return title;
+}
+
 ImU32 StatusColor(const std::string& status)
 {
   if (status == "PASS") return IM_COL32(60, 180, 90, 255);
@@ -199,6 +229,53 @@ const SemanticNode* SemanticFlowGraph::SelectedNode() const
   return &m_flow.nodes[static_cast<std::size_t>(m_flow.selected_node_index)];
 }
 
+bool SemanticFlowGraph::BindScriptToNode(int node_index,
+                                         const std::string& script_path,
+                                         const std::string& title_hint,
+                                         std::string& out_reason)
+{
+  if (node_index < 0 ||
+      node_index >= static_cast<int>(m_flow.nodes.size()))
+  {
+    out_reason = "no selected semantic flow node";
+    m_lastLog = out_reason;
+    return false;
+  }
+
+  if (script_path.empty())
+  {
+    out_reason = "selected catalog script path is empty";
+    m_lastLog = out_reason;
+    return false;
+  }
+
+  SemanticNode& node = m_flow.nodes[static_cast<std::size_t>(node_index)];
+  node.script_path = script_path;
+  node.status = "ready";
+  node.reason = "script bound from Script Catalog";
+  node.result_ref.clear();
+  node.evidence_ref.clear();
+  node.issue_entry_ref.clear();
+
+  if (!title_hint.empty())
+  {
+    node.title = TitleFromCatalogScriptName(title_hint);
+  }
+
+  if (node.module.empty())
+  {
+    node.module = script_path.find("/cximage/") != std::string::npos ? "cximage" : "cxscript";
+  }
+
+  m_sharedBoundNodeId = node.id;
+  m_sharedBoundScriptPath = node.script_path;
+
+  m_lastLog = "catalog script bound to selected node: " + node.script_path;
+  out_reason = m_lastLog;
+
+  return true;
+}
+
 void SemanticFlowGraph::DrawGraphCanvas(SemanticFlowAction& action)
 {
   const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
@@ -308,6 +385,14 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
   ImGui::TextWrapped("evidence_ref: %s", node->evidence_ref.empty() ? "(none)" : node->evidence_ref.c_str());
   ImGui::TextWrapped("issue_entry_ref: %s", node->issue_entry_ref.empty() ? "(none)" : node->issue_entry_ref.c_str());
   ImGui::Separator();
+  if (ImGui::Button("Bind Catalog Script To Node"))
+  {
+    action.type = SemanticFlowActionType::BindCatalogScriptToSelectedNode;
+    action.node_index = m_flow.selected_node_index;
+    action.node_id = node->id;
+    m_lastLog = "bind catalog script requested";
+  }
+  ImGui::SameLine();
   if (ImGui::Button("Load Node To Manual Console"))
   {
     if (node->script_path.empty() || node->script_path == "none")

@@ -39,6 +39,16 @@ struct SemanticFlow
 enum class SemanticFlowActionType
 {
   None,
+
+  /*
+   * Request ViewController to bind the currently selected Script Catalog
+   * item to the currently selected semantic flow node.
+   *
+   * SemanticFlowGraph does not know the catalog list. It only raises
+   * this action. ViewController owns the catalog selection.
+   */
+  BindCatalogScriptToSelectedNode,
+
   LoadBoundScript,
   RunBoundScript
 };

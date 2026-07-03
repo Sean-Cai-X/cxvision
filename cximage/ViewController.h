@@ -1,4 +1,4 @@
-﻿#ifndef _ViewController_Header
+#ifndef _ViewController_Header
 #define _ViewController_Header
 
 #include "Window.h"
@@ -61,6 +61,9 @@ public:
 private:
   void initImGui();
   void initScriptCatalog();
+  bool GetSelectedCatalogScript(std::string& outPath,
+                                std::string& outName) const;
+  void HandleSemanticFlowAction(const SemanticFlowAction& action);
   void drawScriptAcceptancePanels();
   void drawManualStateTestConsole();
   void initManualStateTestConsole();

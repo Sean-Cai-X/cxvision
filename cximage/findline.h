@@ -5,7 +5,8 @@
 #include "shapebase.h"
 #include "findobject.h"
 #include <string>
-
+#include <map>
+#include <string>
 
 
 class FindObject;
