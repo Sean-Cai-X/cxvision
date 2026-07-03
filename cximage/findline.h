@@ -125,6 +125,17 @@ struct FindlineMeasureInputDebug
     std::string image_source;
     std::string failure_stage;
     std::string detail;
+
+    bool fallback_allowed = false;
+    bool fallback_used = false;
+
+    std::string measure_source;
+    std::string original_failure_stage;
+    std::string original_detail;
+
+    int original_point_count = 0;
+    int original_edgeband_count = 0;
+    int original_chain_length = 0;
 };
 
 class Findline :public Shape
@@ -255,6 +266,14 @@ public:
     {
         return m_lastMeasureInputDebug;
     }
+    void setmeasurefallback(int mode)
+    {
+        m_measure_fallback_mode = mode;
+    }
+    int getmeasurefallback() const
+    {
+        return m_measure_fallback_mode;
+    }
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
@@ -354,6 +373,7 @@ private:
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindlineMeasureProfileStats m_lastMeasureProfile;
     FindlineMeasureInputDebug m_lastMeasureInputDebug;
+    int m_measure_fallback_mode = 0;
     double m_result_x0 = 0.0;
     double m_result_y0 = 0.0;
     double m_result_x1 = 0.0;

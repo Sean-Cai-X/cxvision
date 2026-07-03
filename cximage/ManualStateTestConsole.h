@@ -177,6 +177,17 @@ struct RuntimeObjectView
     std::string line_measure_input_failure_stage;
     std::string line_measure_input_detail;
 
+    bool line_measure_fallback_allowed = false;
+    bool line_measure_fallback_used = false;
+
+    std::string line_measure_source;
+    std::string line_measure_original_failure_stage;
+    std::string line_measure_original_detail;
+
+    int line_measure_original_point_count = 0;
+    int line_measure_original_edgeband_count = 0;
+    int line_measure_original_chain_length = 0;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;
@@ -242,6 +253,9 @@ struct ResultRefView
     std::string line_result_status;
     std::string line_result_reason;
     std::string line_measure_status;
+
+    std::string line_measure_source;
+    bool line_measure_fallback_used = false;
 
 };
 

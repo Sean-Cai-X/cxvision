@@ -457,6 +457,11 @@ namespace mu
             m_parser.DefineClassFun("Findline", pfindline, "getshape", &Findline::getshape);
             m_parser.DefineClassFun("Findline", pfindline, "sfilter", &Findline::SmartFilter); 
             m_parser.DefineClassFun("Findline", pfindline, "inflectionpoint", &Findline::InflectionPoint);
+            m_parser.DefineClassFun(
+                "Findline",
+                pfindline,
+                "setmeasurefallback",
+                static_cast<void (Findline::*)(int)>(&Findline::setmeasurefallback));
 
            // m_parser.DefineClassFun("Findline", pfindline, "setlinesegment", &Findline::setlinesegment);
             

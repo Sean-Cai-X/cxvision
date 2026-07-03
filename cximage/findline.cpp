@@ -1203,7 +1203,33 @@ void Findline::MeasureBalanced(Image& image)
     stats.point_count = m_measurepoints_w.size() + m_measurepoints_h.size();
     stats.chain_length = static_cast<int>(m_bestEdgeChain.size());
 
-    if (stats.point_count <= 0 && stats.edgeband_count <= 0)
+    m_lastMeasureInputDebug.original_point_count = stats.point_count;
+    m_lastMeasureInputDebug.original_edgeband_count = stats.edgeband_count;
+    m_lastMeasureInputDebug.original_chain_length = stats.chain_length;
+
+    m_lastMeasureInputDebug.original_failure_stage =
+        m_lastMeasureInputDebug.failure_stage;
+
+    m_lastMeasureInputDebug.original_detail =
+        m_lastMeasureInputDebug.detail;
+
+    m_lastMeasureInputDebug.fallback_allowed =
+        (m_measure_fallback_mode > 0);
+
+    m_lastMeasureInputDebug.fallback_used = false;
+
+    if (stats.point_count > 0)
+    {
+        m_lastMeasureInputDebug.measure_source = "original_measure_pipeline";
+    }
+    else
+    {
+        m_lastMeasureInputDebug.measure_source = "original_measure_pipeline_no_result";
+    }
+
+    if (stats.point_count <= 0 &&
+        stats.edgeband_count <= 0 &&
+        m_measure_fallback_mode == 2)
     {
         FindlineMeasureProfileStats fallbackStats;
 
@@ -1211,17 +1237,24 @@ void Findline::MeasureBalanced(Image& image)
         {
             stats = fallbackStats;
 
-            if (m_lastMeasureInputDebug.failure_stage.empty() ||
-                m_lastMeasureInputDebug.failure_stage == "no_edge_band_candidates")
-            {
-                m_lastMeasureInputDebug.failure_stage =
-                    "simple_roi_gradient_fallback_used";
+            m_lastMeasureInputDebug.fallback_used = true;
+            m_lastMeasureInputDebug.measure_source =
+                "simple_roi_gradient_fallback";
 
-                m_lastMeasureInputDebug.detail =
-                    "Original Findline edge-band pipeline produced zero candidates; "
-                    "fallback generated measure points from ROI normal gradient.";
-            }
+            m_lastMeasureInputDebug.failure_stage =
+                "simple_roi_gradient_fallback_used";
+
+            m_lastMeasureInputDebug.detail =
+                "Original Findline Measure produced zero points; "
+                "fallback generated measure points from ROI normal gradient.";
         }
+    }
+    else if (stats.point_count <= 0 &&
+             stats.edgeband_count <= 0 &&
+             m_measure_fallback_mode == 1)
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_diagnostics_only";
     }
 
     stats.total_ms = ElapsedMilliseconds(total_begin, std::chrono::steady_clock::now());
@@ -1882,29 +1915,6 @@ void Findline::measure(void* pimage)
 
     ProbeDisplayRoiGrayStats(*image);
     Measure(*image);
-
-    const int pointCount = m_measurepoints_w.size() + m_measurepoints_h.size();
-
-    if (pointCount <= 0)
-    {
-        FindlineMeasureProfileStats fallbackStats;
-
-        if (MeasureSimpleRoiGradientPoints(*image, fallbackStats))
-        {
-            if (m_lastMeasureInputDebug.failure_stage.empty() ||
-                m_lastMeasureInputDebug.failure_stage == "no_edge_band_candidates")
-            {
-                m_lastMeasureInputDebug.failure_stage =
-                    "simple_roi_gradient_fallback_used";
-
-                m_lastMeasureInputDebug.detail =
-                    "Original Findline Measure produced zero points; "
-                    "fallback generated measure points from ROI normal gradient.";
-            }
-
-            m_lastMeasureProfile = fallbackStats;
-        }
-    }
 }
 
 void Findline::ProbeDisplayRoiGrayStats(Image& image)

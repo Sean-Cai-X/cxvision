@@ -432,6 +432,15 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | max_gradient=" << object.line_measure_max_gradient
        << " | profile_count=" << object.line_measure_profile_count
        << " | sampled_pixels=" << object.line_measure_sampled_pixel_count
+       << " | measure_source=" << object.line_measure_source
+       << " | fallback_used="
+       << (object.line_measure_fallback_used ? "true" : "false")
+       << " | original_points="
+       << object.line_measure_original_point_count
+       << " | original_edgebands="
+       << object.line_measure_original_edgeband_count
+       << " | original_chain="
+       << object.line_measure_original_chain_length
        << " | fit_mode=" << object.line_fit_mode
        << " | fit_status=" << object.line_fit_status
        << " | has_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
@@ -797,6 +806,30 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
 
                 file << "  line_measure_input_detail: "
                      << object.line_measure_input_detail << "\n";
+
+                file << "  line_measure_source: "
+                     << object.line_measure_source << "\n";
+
+                file << "  line_measure_fallback_allowed: "
+                     << (object.line_measure_fallback_allowed ? "true" : "false") << "\n";
+
+                file << "  line_measure_fallback_used: "
+                     << (object.line_measure_fallback_used ? "true" : "false") << "\n";
+
+                file << "  line_measure_original_point_count: "
+                     << object.line_measure_original_point_count << "\n";
+
+                file << "  line_measure_original_edgeband_count: "
+                     << object.line_measure_original_edgeband_count << "\n";
+
+                file << "  line_measure_original_chain_length: "
+                     << object.line_measure_original_chain_length << "\n";
+
+                file << "  line_measure_original_failure_stage: "
+                     << object.line_measure_original_failure_stage << "\n";
+
+                file << "  line_measure_original_detail: "
+                     << object.line_measure_original_detail << "\n";
 
                 file << "  display_version: " << object.display_version << "\n";
             }
@@ -2644,6 +2677,12 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref.line_avgdist = sourceObject->line_avgdist;
         context.current_result_ref.line_points_count = sourceObject->line_measure_points_count;
         context.current_result_ref.valid_line_points_count = sourceObject->valid_line_points_count;
+
+        context.current_result_ref.line_measure_source =
+            sourceObject->line_measure_source;
+
+        context.current_result_ref.line_measure_fallback_used =
+            sourceObject->line_measure_fallback_used;
     }
     context.current_result_ref.line_no = line.line_no;
 
@@ -2839,14 +2878,41 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_input_failure_stage = input.failure_stage;
     object.line_measure_input_detail = input.detail;
 
+    object.line_measure_fallback_allowed = input.fallback_allowed;
+    object.line_measure_fallback_used = input.fallback_used;
+    object.line_measure_source = input.measure_source;
+
+    object.line_measure_original_failure_stage =
+        input.original_failure_stage;
+
+    object.line_measure_original_detail =
+        input.original_detail;
+
+    object.line_measure_original_point_count =
+        input.original_point_count;
+
+    object.line_measure_original_edgeband_count =
+        input.original_edgeband_count;
+
+    object.line_measure_original_chain_length =
+        input.original_chain_length;
+
     std::ostringstream status;
-    status << "image_ready=" << (object.line_measure_image_ready ? "true" : "false")
+    status << "source=" << object.line_measure_source
+           << ", fallback_used="
+           << (object.line_measure_fallback_used ? "true" : "false")
+           << ", image_ready="
+           << (object.line_measure_image_ready ? "true" : "false")
            << ", image=" << object.line_measure_image_width
            << "x" << object.line_measure_image_height
            << "x" << object.line_measure_image_channels
-           << ", roi_intersects=" << (object.line_measure_roi_intersects_image ? "true" : "false")
+           << ", roi_intersects="
+           << (object.line_measure_roi_intersects_image ? "true" : "false")
            << ", threshold=" << object.line_measure_threshold
            << ", max_gradient=" << object.line_measure_max_gradient
+           << ", original_points=" << object.line_measure_original_point_count
+           << ", original_edgebands=" << object.line_measure_original_edgeband_count
+           << ", original_chain=" << object.line_measure_original_chain_length
            << ", pointsw=" << object.line_pointsw_count
            << ", pointsh=" << object.line_pointsh_count
            << ", valid_xy=" << object.valid_line_points_count

@@ -1012,6 +1012,23 @@ void ViewController::drawScriptAcceptancePanels()
                 drawList->AddLine(fit0, fit1, fitColor, 3.0f);
                 drawList->AddText(ImVec2(fit0.x + 6.0f, fit0.y - 14.0f), fitColor, "fit_line");
             }
+
+            if (object.line_measure_fallback_used)
+            {
+                const ImVec2 p = ImageToScreen(object.line_x0, object.line_y0);
+                drawList->AddText(
+                    ImVec2(p.x + 6.0f, p.y + 40.0f),
+                    IM_COL32(255, 180, 80, 220),
+                    "fallback measure");
+            }
+            else if (object.line_measure_source == "original_measure_pipeline")
+            {
+                const ImVec2 p = ImageToScreen(object.line_x0, object.line_y0);
+                drawList->AddText(
+                    ImVec2(p.x + 6.0f, p.y + 40.0f),
+                    IM_COL32(80, 255, 170, 220),
+                    "original measure");
+            }
         }
 
         if (m_runtimeLineDragHandle != RuntimeLineDragHandle::None &&
