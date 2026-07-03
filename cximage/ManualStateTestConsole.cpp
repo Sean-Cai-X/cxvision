@@ -418,6 +418,10 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | valid_points_count=" << object.valid_line_points_count
        << " | pointsw=" << object.line_pointsw_count
        << " | pointsh=" << object.line_pointsh_count
+       << " | seek_points=" << object.line_seek_points_count
+       << " | edgebands=" << object.line_edgeband_count
+       << " | chain=" << object.line_chain_length
+       << " | measure_failure_stage=" << object.line_measure_failure_stage
        << " | fit_mode=" << object.line_fit_mode
        << " | fit_status=" << object.line_fit_status
        << " | has_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
@@ -457,6 +461,7 @@ static std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
     ss << "image overlay:"
        << " green_line_roi=" << (object.has_line_roi ? "true" : "false")
        << " | green_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
+       << " | blue_seek_points=" << object.line_seek_points_count
        << " | red_measure_points=" << object.valid_line_points_count
        << " | yellow_fit_line=" << (object.has_fit_line ? "true" : "false")
        << " | fitline_pending="
@@ -718,6 +723,11 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_fit_mode: " << object.line_fit_mode << "\n";
                 file << "  line_fit_status: " << object.line_fit_status << "\n";
                 file << "  line_measure_status: " << object.line_measure_status << "\n";
+                file << "  line_seek_points_count: " << object.line_seek_points_count << "\n";
+                file << "  line_edgeband_count: " << object.line_edgeband_count << "\n";
+                file << "  line_chain_length: " << object.line_chain_length << "\n";
+                file << "  line_profile_point_count: " << object.line_profile_point_count << "\n";
+                file << "  line_measure_failure_stage: " << object.line_measure_failure_stage << "\n";
                 file << "  display_version: " << object.display_version << "\n";
             }
 
@@ -2693,10 +2703,47 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.valid_points_count = object.valid_line_points_count;
     object.has_measure_points = object.has_line_measure_points;
 
+    object.line_seek_points_xy.clear();
+    lineTool.exportmeasuredebugpoints(object.line_seek_points_xy);
+
+    object.line_seek_points_count =
+        static_cast<int>(object.line_seek_points_xy.size() / 2);
+
+    object.has_line_seek_points =
+        !object.line_seek_points_xy.empty();
+
+    const FindlineMeasureProfileStats& stats =
+        lineTool.lastmeasureprofilestats();
+
+    object.line_profile_point_count = stats.point_count;
+    object.line_edgeband_count = stats.edgeband_count;
+    object.line_chain_length = stats.chain_length;
+
+    if (object.valid_line_points_count > 0)
+    {
+        object.line_measure_failure_stage = "result_points_available";
+    }
+    else if (object.line_edgeband_count <= 0)
+    {
+        object.line_measure_failure_stage = "no_edge_band_candidates";
+    }
+    else if (object.line_chain_length <= 0)
+    {
+        object.line_measure_failure_stage = "no_valid_edge_chain";
+    }
+    else
+    {
+        object.line_measure_failure_stage = "chain_not_converted_to_measure_points";
+    }
+
     std::ostringstream status;
     status << "pointsw=" << object.line_pointsw_count
            << ", pointsh=" << object.line_pointsh_count
-           << ", valid_xy=" << object.valid_line_points_count;
+           << ", valid_xy=" << object.valid_line_points_count
+           << ", seek_points=" << object.line_seek_points_count
+           << ", edgebands=" << object.line_edgeband_count
+           << ", chain=" << object.line_chain_length
+           << ", failure_stage=" << object.line_measure_failure_stage;
 
     object.line_measure_status = status.str();
 }

@@ -159,6 +159,23 @@ private:
 
 private:
 
+  enum class RuntimeLineDragHandle
+  {
+      None = 0,
+      StartPoint,
+      EndPoint,
+      Body
+  };
+
+  RuntimeLineDragHandle m_runtimeLineDragHandle = RuntimeLineDragHandle::None;
+  std::string m_runtimeLineDragObject;
+  float m_runtimeLineDragStartMouseX = 0.0f;
+  float m_runtimeLineDragStartMouseY = 0.0f;
+  float m_runtimeLineDragStartX0 = 0.0f;
+  float m_runtimeLineDragStartY0 = 0.0f;
+  float m_runtimeLineDragStartX1 = 0.0f;
+  float m_runtimeLineDragStartY1 = 0.0f;
+
   Handle(Window) myOcctWindow;
   Handle(V3d_CustomView) m_myView;
   Handle(AIS_InteractiveContext) myContext;

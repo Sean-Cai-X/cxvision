@@ -914,14 +914,50 @@ void ViewController::drawScriptAcceptancePanels()
                 const ImVec2 c0 = ImageToScreen(object.line_x0, object.line_y0);
                 const ImVec2 c1 = ImageToScreen(object.line_x1, object.line_y1);
                 drawList->AddLine(c0, c1, roiColor, 2.0f);
-                drawList->AddCircleFilled(c0, 4.0f, roiColor);
-                drawList->AddCircleFilled(c1, 4.0f, roiColor);
+                drawList->AddCircleFilled(c0, 4.5f, roiColor);
+                drawList->AddCircleFilled(c1, 4.5f, roiColor);
                 drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 6.0f), roiColor, object.name.c_str());
 
                 if (object.runtime_state == "fitline_pending_binding" ||
                     object.runtime_state == "fitline_pending_implementation")
                 {
                     drawList->AddText(ImVec2(c0.x + 6.0f, c0.y - 14.0f), pendingColor, "fitline pending");
+                }
+
+                const float handleRadius = 7.0f;
+                const ImVec2 mouse = ImGui::GetIO().MousePos;
+
+                auto HitTestCircle = [](const ImVec2& m, const ImVec2& center, float r) -> bool
+                {
+                    const float dx = m.x - center.x;
+                    const float dy = m.y - center.y;
+                    return (dx * dx + dy * dy) <= r * r;
+                };
+
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    if (HitTestCircle(mouse, c0, handleRadius))
+                    {
+                        m_runtimeLineDragHandle = RuntimeLineDragHandle::StartPoint;
+                        m_runtimeLineDragObject = object.name;
+                        m_runtimeLineDragStartMouseX = mouse.x;
+                        m_runtimeLineDragStartMouseY = mouse.y;
+                        m_runtimeLineDragStartX0 = object.line_x0;
+                        m_runtimeLineDragStartY0 = object.line_y0;
+                        m_runtimeLineDragStartX1 = object.line_x1;
+                        m_runtimeLineDragStartY1 = object.line_y1;
+                    }
+                    else if (HitTestCircle(mouse, c1, handleRadius))
+                    {
+                        m_runtimeLineDragHandle = RuntimeLineDragHandle::EndPoint;
+                        m_runtimeLineDragObject = object.name;
+                        m_runtimeLineDragStartMouseX = mouse.x;
+                        m_runtimeLineDragStartMouseY = mouse.y;
+                        m_runtimeLineDragStartX0 = object.line_x0;
+                        m_runtimeLineDragStartY0 = object.line_y0;
+                        m_runtimeLineDragStartX1 = object.line_x1;
+                        m_runtimeLineDragStartY1 = object.line_y1;
+                    }
                 }
             }
 
@@ -935,6 +971,22 @@ void ViewController::drawScriptAcceptancePanels()
                 drawList->AddLine(p1, p2, roiColor, 1.5f);
                 drawList->AddLine(p2, p3, roiColor, 1.5f);
                 drawList->AddLine(p3, p0, roiColor, 1.5f);
+            }
+
+            const ImU32 seekPointColor = IM_COL32(80, 180, 255, 180);
+
+            if (object.has_line_seek_points)
+            {
+                for (std::size_t i = 0;
+                     i + 1 < object.line_seek_points_xy.size();
+                     i += 2)
+                {
+                    const ImVec2 p = ImageToScreen(
+                        object.line_seek_points_xy[i],
+                        object.line_seek_points_xy[i + 1]);
+
+                    drawList->AddCircleFilled(p, 2.0f, seekPointColor);
+                }
             }
 
             if (object.has_line_measure_points)
@@ -959,6 +1011,56 @@ void ViewController::drawScriptAcceptancePanels()
                 const ImVec2 fit1 = ImageToScreen(object.fit_line_x1, object.fit_line_y1);
                 drawList->AddLine(fit0, fit1, fitColor, 3.0f);
                 drawList->AddText(ImVec2(fit0.x + 6.0f, fit0.y - 14.0f), fitColor, "fit_line");
+            }
+        }
+
+        if (m_runtimeLineDragHandle != RuntimeLineDragHandle::None &&
+            !m_runtimeLineDragObject.empty())
+        {
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                const ImVec2 mouseNow = ImGui::GetIO().MousePos;
+
+                const ImVec2 imageStart = ScreenToImage(
+                    m_runtimeLineDragStartMouseX,
+                    m_runtimeLineDragStartMouseY);
+
+                const ImVec2 imageNow = ScreenToImage(mouseNow.x, mouseNow.y);
+
+                const float dx = imageNow.x - imageStart.x;
+                const float dy = imageNow.y - imageStart.y;
+
+                float x0 = m_runtimeLineDragStartX0;
+                float y0 = m_runtimeLineDragStartY0;
+                float x1 = m_runtimeLineDragStartX1;
+                float y1 = m_runtimeLineDragStartY1;
+
+                if (m_runtimeLineDragHandle == RuntimeLineDragHandle::StartPoint)
+                {
+                    x0 += dx;
+                    y0 += dy;
+                }
+                else if (m_runtimeLineDragHandle == RuntimeLineDragHandle::EndPoint)
+                {
+                    x1 += dx;
+                    y1 += dy;
+                }
+
+                std::string reason;
+                UpdateRuntimeFindlineSetlineFromUi(
+                    m_manualTest,
+                    m_runtimeLineDragObject,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    1.0f,
+                    reason);
+            }
+            else
+            {
+                m_runtimeLineDragHandle = RuntimeLineDragHandle::None;
+                m_runtimeLineDragObject.clear();
             }
         }
 

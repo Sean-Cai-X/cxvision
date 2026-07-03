@@ -141,6 +141,15 @@ struct RuntimeObjectView
     std::string line_result_status;
     std::string line_result_reason;
 
+    bool has_line_seek_points = false;
+    std::vector<float> line_seek_points_xy;
+    int line_seek_points_count = 0;
+
+    int line_profile_point_count = 0;
+    int line_edgeband_count = 0;
+    int line_chain_length = 0;
+    std::string line_measure_failure_stage;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;
@@ -291,5 +300,15 @@ struct DirectCapability
   std::string status;
   std::vector<DirectCapabilityMethod> methods;
 };
+
+bool UpdateRuntimeFindlineSetlineFromUi(
+    ManualTestContext& context,
+    const std::string& objectName,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float scale,
+    std::string& outReason);
 
 #endif

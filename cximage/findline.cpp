@@ -1895,6 +1895,26 @@ bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
     return true;
 }
 
+void Findline::exportmeasuredebugpoints(std::vector<float>& outXY) const
+{
+    outXY.clear();
+
+    for (const ScanLineEdgeBands& scan : m_scanEdgeBands)
+    {
+        for (const EdgeBandCandidate& band : scan.bands)
+        {
+            if (!band.valid)
+                continue;
+
+            if (!std::isfinite(band.x) || !std::isfinite(band.y))
+                continue;
+
+            outXY.push_back(static_cast<float>(band.x));
+            outXY.push_back(static_cast<float>(band.y));
+        }
+    }
+}
+
 namespace
 {
 struct LineFitSample { double x; double y; double weight; };

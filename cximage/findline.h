@@ -211,6 +211,7 @@ public:
     int getvalidpointcount() const { return m_result_valid_points; }
     bool hasfitresult() const { return m_has_fit_result; }
     bool getdisplaysnapshot(FindlineDisplaySnapshot& out) const;
+    void exportmeasuredebugpoints(std::vector<float>& outXY) const;
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
