@@ -2683,6 +2683,9 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
 
         context.current_result_ref.line_measure_fallback_used =
             sourceObject->line_measure_fallback_used;
+
+        context.current_result_ref.line_measure_status =
+            sourceObject->line_measure_status;
     }
     context.current_result_ref.line_no = line.line_no;
 
@@ -2882,6 +2885,18 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_fallback_used = input.fallback_used;
     object.line_measure_source = input.measure_source;
 
+    if (object.line_measure_source.empty())
+    {
+        if (object.valid_line_points_count > 0)
+        {
+            object.line_measure_source = "unknown_source_with_result";
+        }
+        else
+        {
+            object.line_measure_source = "original_measure_pipeline_no_result";
+        }
+    }
+
     object.line_measure_original_failure_stage =
         input.original_failure_stage;
 
@@ -3028,7 +3043,8 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "setlinegap" ||
         call.method == "setfitmode" ||
         call.method == "SetWHgap" ||
-        call.method == "setwhgap";
+        call.method == "setwhgap" ||
+        call.method == "setmeasurefallback";
 
     if (!isFindlineParamMethod)
         return false;
@@ -3165,6 +3181,8 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     }
     else if (call.method == "setfitmode")
         it->second->setfitmode(value);
+    else if (call.method == "setmeasurefallback")
+        it->second->setmeasurefallback(value);
 
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
@@ -3184,6 +3202,13 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
 
     if (call.method == "setfitmode")
         object.line_fit_mode = FindlineModeName(value);
+
+    if (call.method == "setmeasurefallback")
+    {
+        object.line_measure_fallback_allowed = value > 0;
+        object.line_measure_fallback_used = false;
+        object.line_measure_source.clear();
+    }
 
     if (updatedLineGap)
     {

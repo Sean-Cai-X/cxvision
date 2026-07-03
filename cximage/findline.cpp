@@ -205,6 +205,16 @@ void Findline::setcomparegap(int igap)
 {
     m_icomparegap = igap;
 }
+void Findline::setmeasurefallback(int mode)
+{
+    if (mode < 0)
+        mode = 0;
+
+    if (mode > 2)
+        mode = 2;
+
+    m_measure_fallback_mode = mode;
+}
 void Findline::setshow(int ishow)
 {
     if (ishow & 0x02)

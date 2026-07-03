@@ -266,10 +266,7 @@ public:
     {
         return m_lastMeasureInputDebug;
     }
-    void setmeasurefallback(int mode)
-    {
-        m_measure_fallback_mode = mode;
-    }
+    void setmeasurefallback(int mode);
     int getmeasurefallback() const
     {
         return m_measure_fallback_mode;
