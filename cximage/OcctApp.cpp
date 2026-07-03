@@ -1,38 +1,38 @@
 #include "OcctApp.h"
 
-#include u003cglad/glad.hu003e
+#include <glad/glad.h>
 
-#include u003cimgui.hu003e
-#include u003cimgui_impl_glfw.hu003e
-#include u003cimgui_impl_opengl3.hu003e
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
-#include u003cAIS_InteractiveContext.hxxu003e
-#include u003cAspect_DisplayConnection.hxxu003e
-#include u003cBRepPrimAPI_MakeBox.hxxu003e
-#include u003cGraphic3d_GraphicDriver.hxxu003e
-#include u003cMessage.hxxu003e
-#include u003cOpenGl_GraphicDriver.hxxu003e
-#include u003cPrs3d_PointAspect.hxxu003e
-#include u003cQuantity_Color.hxxu003e
-#include u003cTCollection_ExtendedString.hxxu003e
-#include u003cTColgp_HArray1OfDir.hxxu003e
-#include u003cTColgp_HArray1OfPnt.hxxu003e
+#include <AIS_InteractiveContext.hxx>
+#include <Aspect_DisplayConnection.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <Graphic3d_GraphicDriver.hxx>
+#include <Message.hxx>
+#include <OpenGl_GraphicDriver.hxx>
+#include <Prs3d_PointAspect.hxx>
+#include <Quantity_Color.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TColgp_HArray1OfDir.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 
-#include u003cGLFW/glfw3.hu003e
+#include <GLFW/glfw3.h>
 
-#include u003ciostreamu003e
-#include u003cstdexceptu003e
+#include <iostream>
+#include <stdexcept>
 
 namespace
 {
-bool HasPointNormals(const std::vectoru003cCxOcctPointCloudPointu003eu0026 points, bool requested)
+bool HasPointNormals(const std::vector<CxOcctPointCloudPoint>& points, bool requested)
 {
   if (!requested || points.empty())
   {
     return false;
   }
 
-  for (const CxOcctPointCloudPointu0026 point : points)
+  for (const CxOcctPointCloudPoint& point : points)
   {
     if (!point.has_normal)
     {
@@ -43,8 +43,8 @@ bool HasPointNormals(const std::vectoru003cCxOcctPointCloudPointu003eu0026 point
 }
 
 Handle(AIS_PointCloud) MakePointCloudPresentation(
-    const std::vectoru003cCxOcctPointCloudPointu003eu0026 points,
-    const CxOcctPointCloudStyleu0026 style,
+    const std::vector<CxOcctPointCloudPoint>& points,
+    const CxOcctPointCloudStyle& style,
     const bool hasNormals)
 {
   if (points.empty())
@@ -52,7 +52,7 @@ Handle(AIS_PointCloud) MakePointCloudPresentation(
     return Handle(AIS_PointCloud)();
   }
 
-  const Standard_Integer pointCount = static_castu003cStandard_Integeru003e(points.size());
+  const Standard_Integer pointCount = static_cast<Standard_Integer>(points.size());
   Handle(TColgp_HArray1OfPnt) coords = new TColgp_HArray1OfPnt(1, pointCount);
   Handle(TColgp_HArray1OfDir) normals;
   if (hasNormals)
@@ -60,112 +60,112 @@ Handle(AIS_PointCloud) MakePointCloudPresentation(
     normals = new TColgp_HArray1OfDir(1, pointCount);
   }
 
-  for (Standard_Integer index = 1; index u003c= pointCount; ++index)
+  for (Standard_Integer index = 1; index <= pointCount; ++index)
   {
-    const CxOcctPointCloudPointu0026 point = points[static_castu003cstd::size_tu003e(index - 1)];
-    coords-u003eSetValue(index, gp_Pnt(point.x, point.y, point.z));
+    const CxOcctPointCloudPoint& point = points[static_cast<std::size_t>(index - 1)];
+    coords->SetValue(index, gp_Pnt(point.x, point.y, point.z));
     if (!normals.IsNull())
     {
-      normals-u003eSetValue(index, gp_Dir(point.nx, point.ny, point.nz));
+      normals->SetValue(index, gp_Dir(point.nx, point.ny, point.nz));
     }
   }
 
   Handle(AIS_PointCloud) cloud = new AIS_PointCloud();
-  cloud-u003eSetPoints(coords, Handle(Quantity_HArray1OfColor)(), normals);
-  cloud-u003eSetDisplayMode(AIS_PointCloud::DM_Points);
+  cloud->SetPoints(coords, Handle(Quantity_HArray1OfColor)(), normals);
+  cloud->SetDisplayMode(AIS_PointCloud::DM_Points);
 
-  const Standard_Real pointScale = style.point_size u003e 0.0 ? style.point_size : 1.0;
+  const Standard_Real pointScale = style.point_size > 0.0 ? style.point_size : 1.0;
   Handle(Prs3d_PointAspect) pointAspect = new Prs3d_PointAspect(
       Aspect_TOM_POINT,
       Quantity_Color(Quantity_NOC_WHITE),
       pointScale);
-  cloud-u003eAttributes()-u003eSetPointAspect(pointAspect);
+  cloud->Attributes()->SetPointAspect(pointAspect);
   return cloud;
 }
 }
 
 void OcctApp::Run()
 {
-  std::cout u003cu003c "[occt_smoke] init_window.begin" u003cu003c std::endl;
+  std::cout << "[occt_smoke] init_window.begin" << std::endl;
   InitWindow();
-  std::cout u003cu003c "[occt_smoke] init_window.done" u003cu003c std::endl;
-  std::cout u003cu003c "[occt_smoke] init_occt.begin" u003cu003c std::endl;
+  std::cout << "[occt_smoke] init_window.done" << std::endl;
+  std::cout << "[occt_smoke] init_occt.begin" << std::endl;
   InitOcctViewer();
-  std::cout u003cu003c "[occt_smoke] init_occt.done" u003cu003c std::endl;
-  std::cout u003cu003c "[occt_smoke] init_scene.begin" u003cu003c std::endl;
+  std::cout << "[occt_smoke] init_occt.done" << std::endl;
+  std::cout << "[occt_smoke] init_scene.begin" << std::endl;
   InitScene();
-  std::cout u003cu003c "[occt_smoke] init_scene.done" u003cu003c std::endl;
-  std::cout u003cu003c "[occt_smoke] init_imgui.begin" u003cu003c std::endl;
+  std::cout << "[occt_smoke] init_scene.done" << std::endl;
+  std::cout << "[occt_smoke] init_imgui.begin" << std::endl;
   InitImGui();
-  std::cout u003cu003c "[occt_smoke] init_imgui.done" u003cu003c std::endl;
-  std::cout u003cu003c "[occt_smoke] runtime_ready" u003cu003c std::endl;
+  std::cout << "[occt_smoke] init_imgui.done" << std::endl;
+  std::cout << "[occt_smoke] runtime_ready" << std::endl;
   Cleanup();
-  std::cout u003cu003c "[occt_smoke] cleanup.done" u003cu003c std::endl;
+  std::cout << "[occt_smoke] cleanup.done" << std::endl;
 }
 
-cxgeom::CxSetCircleBuildResult OcctApp::BuildSetCircleGeometry(const cxgeom::CxSetCircleRequestu0026 request) const
+cxgeom::CxSetCircleBuildResult OcctApp::BuildSetCircleGeometry(const cxgeom::CxSetCircleRequest& request) const
 {
   cxgeom::CxSetCircleBuild builder;
   return builder.Build(request);
 }
 
-cxgeom::CxSetCircleDisplayResult OcctApp::BuildSetCircleDisplayBatch(const cxgeom::CxSetCircleDisplayRequestu0026 request) const
+cxgeom::CxSetCircleDisplayResult OcctApp::BuildSetCircleDisplayBatch(const cxgeom::CxSetCircleDisplayRequest& request) const
 {
   cxgeom::CxSetCircleDisplay displayBuilder;
   return displayBuilder.MakeBatch(request);
 }
 
-bool OcctApp::DisplaySetCircleBatch(const cxgeom::CxSetCircleDisplayResultu0026 result)
+bool OcctApp::DisplaySetCircleBatch(const cxgeom::CxSetCircleDisplayResult& result)
 {
   if (myContext.IsNull() || !result.success || !result.presentation.HasPresentation())
   {
     return false;
   }
 
-  myContext-u003eDisplay(result.presentation.NativePresentation(), Standard_True);
+  myContext->Display(result.presentation.NativePresentation(), Standard_True);
   return true;
 }
 
-cxgeom::CxSetLineBuildResult OcctApp::BuildSetLineGeometry(const cxgeom::CxSetLineRequestu0026 request) const
+cxgeom::CxSetLineBuildResult OcctApp::BuildSetLineGeometry(const cxgeom::CxSetLineRequest& request) const
 {
   cxgeom::CxSetLineBuild builder;
   return builder.Build(request);
 }
 
-cxgeom::CxSetLineDisplayResult OcctApp::BuildSetLineDisplayBatch(const cxgeom::CxSetLineDisplayRequestu0026 request) const
+cxgeom::CxSetLineDisplayResult OcctApp::BuildSetLineDisplayBatch(const cxgeom::CxSetLineDisplayRequest& request) const
 {
   cxgeom::CxSetLineDisplay displayBuilder;
   return displayBuilder.MakeBatch(request);
 }
 
-bool OcctApp::DisplaySetLineBatch(const cxgeom::CxSetLineDisplayResultu0026 result)
+bool OcctApp::DisplaySetLineBatch(const cxgeom::CxSetLineDisplayResult& result)
 {
   if (myContext.IsNull() || !result.success || !result.presentation.HasPresentation())
   {
     return false;
   }
 
-  myContext-u003eDisplay(result.presentation.NativePresentation(), Standard_True);
+  myContext->Display(result.presentation.NativePresentation(), Standard_True);
   return true;
 }
 
-CxOcctPointCloudBody OcctApp::BuildPointCloudBody(const CxOcctPointCloudRequestu0026 request) const
+CxOcctPointCloudBody OcctApp::BuildPointCloudBody(const CxOcctPointCloudRequest& request) const
 {
   CxOcctPointCloudBody body;
   body.entity_id = request.entity_id;
   body.name = request.name;
-  body.point_count = static_castu003cintu003e(request.points.size());
+  body.point_count = static_cast<int>(request.points.size());
   body.has_normals = HasPointNormals(request.points, true);
   body.visible = request.style.visible;
   body.point_size = request.style.point_size;
   return body;
 }
 
-CxOcctPointCloudResult OcctApp::BuildPointCloudPresentation(const CxOcctPointCloudRequestu0026 request) const
+CxOcctPointCloudResult OcctApp::BuildPointCloudPresentation(const CxOcctPointCloudRequest& request) const
 {
   CxOcctPointCloudResult result;
   result.entity_id = request.entity_id;
-  result.point_count = static_castu003cintu003e(request.points.size());
+  result.point_count = static_cast<int>(request.points.size());
   result.has_normals = HasPointNormals(request.points, request.style.color_by_normals);
   result.style = request.style;
   result.presentation = MakePointCloudPresentation(request.points, request.style, result.has_normals);
@@ -173,34 +173,34 @@ CxOcctPointCloudResult OcctApp::BuildPointCloudPresentation(const CxOcctPointClo
   return result;
 }
 
-CxOcctPointCloudBatchResult OcctApp::BuildPointCloudBatchPresentation(const CxOcctPointCloudBatchRequestu0026 request) const
+CxOcctPointCloudBatchResult OcctApp::BuildPointCloudBatchPresentation(const CxOcctPointCloudBatchRequest& request) const
 {
   CxOcctPointCloudBatchResult result;
   result.batch_id = request.batch_id;
-  result.source_count = static_castu003cintu003e(request.clouds.size());
+  result.source_count = static_cast<int>(request.clouds.size());
   result.style = request.style;
 
-  std::vectoru003cCxOcctPointCloudPointu003e mergedPoints;
+  std::vector<CxOcctPointCloudPoint> mergedPoints;
   std::size_t totalPoints = 0;
-  for (const CxOcctPointCloudRequestu0026 cloud : request.clouds)
+  for (const CxOcctPointCloudRequest& cloud : request.clouds)
   {
     totalPoints += cloud.points.size();
   }
   mergedPoints.reserve(totalPoints);
 
-  for (const CxOcctPointCloudRequestu0026 cloud : request.clouds)
+  for (const CxOcctPointCloudRequest& cloud : request.clouds)
   {
     mergedPoints.insert(mergedPoints.end(), cloud.points.begin(), cloud.points.end());
   }
 
-  result.point_count = static_castu003cintu003e(mergedPoints.size());
+  result.point_count = static_cast<int>(mergedPoints.size());
   result.has_normals = HasPointNormals(mergedPoints, request.style.color_by_normals);
   result.presentation = MakePointCloudPresentation(mergedPoints, request.style, result.has_normals);
   result.success = !result.presentation.IsNull();
   return result;
 }
 
-bool OcctApp::DisplayPointCloud(const CxOcctPointCloudResultu0026 result)
+bool OcctApp::DisplayPointCloud(const CxOcctPointCloudResult& result)
 {
   if (myContext.IsNull() || !result.success || result.presentation.IsNull())
   {
@@ -209,15 +209,15 @@ bool OcctApp::DisplayPointCloud(const CxOcctPointCloudResultu0026 result)
 
   if (!result.style.visible)
   {
-    myContext-u003eErase(result.presentation, Standard_True);
+    myContext->Erase(result.presentation, Standard_True);
     return true;
   }
 
-  myContext-u003eDisplay(result.presentation, Standard_True);
+  myContext->Display(result.presentation, Standard_True);
   return true;
 }
 
-bool OcctApp::DisplayPointCloudBatch(const CxOcctPointCloudBatchResultu0026 result)
+bool OcctApp::DisplayPointCloudBatch(const CxOcctPointCloudBatchResult& result)
 {
   if (myContext.IsNull() || !result.success || result.presentation.IsNull())
   {
@@ -226,22 +226,22 @@ bool OcctApp::DisplayPointCloudBatch(const CxOcctPointCloudBatchResultu0026 resu
 
   if (!result.style.visible)
   {
-    myContext-u003eErase(result.presentation, Standard_True);
+    myContext->Erase(result.presentation, Standard_True);
     return true;
   }
 
-  myContext-u003eDisplay(result.presentation, Standard_True);
+  myContext->Display(result.presentation, Standard_True);
   return true;
 }
 
-CxOcctPointCloudAnnotationDisplayResult OcctApp::BuildPointCloudAnnotationDisplay(const CxOcctPointCloudAnnotationDisplayRequestu0026 request) const
+CxOcctPointCloudAnnotationDisplayResult OcctApp::BuildPointCloudAnnotationDisplay(const CxOcctPointCloudAnnotationDisplayRequest& request) const
 {
   CxOcctPointCloudAnnotationDisplayResult result;
   result.layer_id = request.layer_id;
-  result.annotation_count = static_castu003cintu003e(request.annotations.size());
+  result.annotation_count = static_cast<int>(request.annotations.size());
   result.visible = request.visible;
 
-  for (const CxOcctPointCloudAnnotationu0026 annotation : request.annotations)
+  for (const CxOcctPointCloudAnnotation& annotation : request.annotations)
   {
     if (annotation.text.empty())
     {
@@ -249,9 +249,9 @@ CxOcctPointCloudAnnotationDisplayResult OcctApp::BuildPointCloudAnnotationDispla
     }
 
     Handle(AIS_TextLabel) label = new AIS_TextLabel();
-    label-u003eSetText(TCollection_ExtendedString(annotation.text.c_str()));
-    label-u003eSetPosition(gp_Pnt(annotation.anchor_x, annotation.anchor_y, annotation.anchor_z));
-    label-u003eSetColor(Quantity_NOC_WHITE);
+    label->SetText(TCollection_ExtendedString(annotation.text.c_str()));
+    label->SetPosition(gp_Pnt(annotation.anchor_x, annotation.anchor_y, annotation.anchor_z));
+    label->SetColor(Quantity_NOC_WHITE);
     result.labels.push_back(label);
   }
 
@@ -259,7 +259,7 @@ CxOcctPointCloudAnnotationDisplayResult OcctApp::BuildPointCloudAnnotationDispla
   return result;
 }
 
-bool OcctApp::DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDisplayResultu0026 result)
+bool OcctApp::DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDisplayResult& result)
 {
   if (myContext.IsNull() || !result.success)
   {
@@ -267,7 +267,7 @@ bool OcctApp::DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDispl
   }
 
   bool changed = false;
-  for (const Handle(AIS_TextLabel)u0026 label : result.labels)
+  for (const Handle(AIS_TextLabel)& label : result.labels)
   {
     if (label.IsNull())
     {
@@ -276,18 +276,18 @@ bool OcctApp::DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDispl
 
     if (result.visible)
     {
-      myContext-u003eDisplay(label, Standard_False);
+      myContext->Display(label, Standard_False);
     }
     else
     {
-      myContext-u003eErase(label, Standard_False);
+      myContext->Erase(label, Standard_False);
     }
     changed = true;
   }
 
   if (changed)
   {
-    myContext-u003eUpdateCurrentViewer();
+    myContext->UpdateCurrentViewer();
   }
 
   return changed;
@@ -298,7 +298,7 @@ void OcctApp::InitWindow()
   glfwSetErrorCallback(
       [](int theError, const char* theDescription)
       {
-        Message::DefaultMessenger()-u003eSend(
+        Message::DefaultMessenger()->Send(
             TCollection_AsciiString("GLFW error ") + theError + ": " + theDescription,
             Message_Fail);
       });
@@ -313,13 +313,13 @@ void OcctApp::InitWindow()
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
   myWindow = new Window(myViewportWidth, myViewportHeight, "cxcore");
-  if (myWindow.IsNull() || myWindow-u003egetGlfwWindow() == nullptr)
+  if (myWindow.IsNull() || myWindow->getGlfwWindow() == nullptr)
   {
     glfwTerminate();
     throw std::runtime_error("Failed to create GLFW window");
   }
 
-  glfwMakeContextCurrent(myWindow-u003egetGlfwWindow());
+  glfwMakeContextCurrent(myWindow->getGlfwWindow());
   glfwSwapInterval(1);
 
   if (gladLoadGL() == 0)
@@ -327,11 +327,11 @@ void OcctApp::InitWindow()
     throw std::runtime_error("gladLoadGL() failed");
   }
 
-  glfwSetWindowUserPointer(myWindow-u003egetGlfwWindow(), this);
-  glfwSetFramebufferSizeCallback(myWindow-u003egetGlfwWindow(), u0026OcctApp::OnFramebufferResize);
-  glfwSetMouseButtonCallback(myWindow-u003egetGlfwWindow(), u0026OcctApp::OnMouseButton);
-  glfwSetCursorPosCallback(myWindow-u003egetGlfwWindow(), u0026OcctApp::OnCursorPos);
-  glfwSetScrollCallback(myWindow-u003egetGlfwWindow(), u0026OcctApp::OnScroll);
+  glfwSetWindowUserPointer(myWindow->getGlfwWindow(), this);
+  glfwSetFramebufferSizeCallback(myWindow->getGlfwWindow(), &OcctApp::OnFramebufferResize);
+  glfwSetMouseButtonCallback(myWindow->getGlfwWindow(), &OcctApp::OnMouseButton);
+  glfwSetCursorPosCallback(myWindow->getGlfwWindow(), &OcctApp::OnCursorPos);
+  glfwSetScrollCallback(myWindow->getGlfwWindow(), &OcctApp::OnScroll);
 }
 
 void OcctApp::InitOcctViewer()
@@ -339,27 +339,27 @@ void OcctApp::InitOcctViewer()
   myDisplayConnection = new Aspect_DisplayConnection();
   myGraphicDriver = new OpenGl_GraphicDriver(myDisplayConnection, false);
   myViewer = new V3d_Viewer(myGraphicDriver);
-  myViewer-u003eSetDefaultLights();
-  myViewer-u003eSetLightOn();
+  myViewer->SetDefaultLights();
+  myViewer->SetLightOn();
 
   myContext = new AIS_InteractiveContext(myViewer);
-  myView = myViewer-u003eCreateView();
-  myView-u003eSetWindow(myWindow);
-  if (!myWindow-u003eIsMapped())
+  myView = myViewer->CreateView();
+  myView->SetWindow(myWindow);
+  if (!myWindow->IsMapped())
   {
-    myWindow-u003eMap();
+    myWindow->Map();
   }
 
-  myView-u003eSetBackgroundColor(Quantity_NOC_BLACK);
-  myView-u003eTriedronDisplay(Aspect_TOTP_LEFT_LOWER, Quantity_NOC_WHITE, 0.08, V3d_ZBUFFER);
-  myView-u003eMustBeResized();
+  myView->SetBackgroundColor(Quantity_NOC_BLACK);
+  myView->TriedronDisplay(Aspect_TOTP_LEFT_LOWER, Quantity_NOC_WHITE, 0.08, V3d_ZBUFFER);
+  myView->MustBeResized();
 }
 
 void OcctApp::InitScene()
 {
   myBox = new AIS_Shape(BRepPrimAPI_MakeBox(120.0, 80.0, 60.0).Shape());
-  myContext-u003eDisplay(myBox, Standard_True);
-  myView-u003eFitAll(0.01, Standard_True);
+  myContext->Display(myBox, Standard_True);
+  myView->FitAll(0.01, Standard_True);
 }
 
 void OcctApp::InitImGui()
@@ -368,16 +368,16 @@ void OcctApp::InitImGui()
   ImGui::CreateContext();
   ImGui::StyleColorsDark();
 
-  ImGui_ImplGlfw_InitForOpenGL(myWindow-u003egetGlfwWindow(), true);
+  ImGui_ImplGlfw_InitForOpenGL(myWindow->getGlfwWindow(), true);
   ImGui_ImplOpenGL3_Init("#version 330");
 }
 
 void OcctApp::Cleanup()
 {
-  if (!myWindow.IsNull() u0026u0026 myWindow-u003egetGlfwWindow() != nullptr)
+  if (!myWindow.IsNull() && myWindow->getGlfwWindow() != nullptr)
   {
-    glfwMakeContextCurrent(myWindow-u003egetGlfwWindow());
-    glfwSetWindowUserPointer(myWindow-u003egetGlfwWindow(), nullptr);
+    glfwMakeContextCurrent(myWindow->getGlfwWindow());
+    glfwSetWindowUserPointer(myWindow->getGlfwWindow(), nullptr);
   }
 
   ImGui_ImplOpenGL3_Shutdown();
@@ -393,7 +393,7 @@ void OcctApp::Cleanup()
 
   if (!myWindow.IsNull())
   {
-    myWindow-u003eClose();
+    myWindow->Close();
     myWindow.Nullify();
   }
 
@@ -416,21 +416,21 @@ void OcctApp::DrawUi()
 
   if (ImGui::Button("Fit All"))
   {
-    myView-u003eFitAll(0.01, Standard_True);
+    myView->FitAll(0.01, Standard_True);
   }
 
   ImGui::SameLine();
   if (ImGui::Button("Front"))
   {
-    myView-u003eSetProj(V3d_Yneg);
-    myView-u003eFitAll(0.01, Standard_True);
+    myView->SetProj(V3d_Yneg);
+    myView->FitAll(0.01, Standard_True);
   }
 
   ImGui::SameLine();
   if (ImGui::Button("Iso"))
   {
-    myView-u003eSetProj(V3d_XposYnegZpos);
-    myView-u003eFitAll(0.01, Standard_True);
+    myView->SetProj(V3d_XposYnegZpos);
+    myView->FitAll(0.01, Standard_True);
   }
 
   ImGui::Text("Mouse left: rotate");
@@ -446,16 +446,16 @@ void OcctApp::Resize(int theWidth, int theHeight)
   myViewportHeight = theHeight;
   if (!myView.IsNull())
   {
-    myView-u003eMustBeResized();
+    myView->MustBeResized();
   }
 }
 
 void OcctApp::OnFramebufferResize(GLFWwindow* theWindow, int theWidth, int theHeight)
 {
-  auto* anApp = static_castu003cOcctApp*u003e(glfwGetWindowUserPointer(theWindow));
+  auto* anApp = static_cast<OcctApp*>(glfwGetWindowUserPointer(theWindow));
   if (anApp != nullptr)
   {
-    anApp-u003eResize(theWidth, theHeight);
+    anApp->Resize(theWidth, theHeight);
   }
 }
 
@@ -467,42 +467,42 @@ void OcctApp::OnMouseButton(GLFWwindow* theWindow, int theButton, int theAction,
     return;
   }
 
-  auto* anApp = static_castu003cOcctApp*u003e(glfwGetWindowUserPointer(theWindow));
-  if (anApp == nullptr || anApp-u003emyView.IsNull())
+  auto* anApp = static_cast<OcctApp*>(glfwGetWindowUserPointer(theWindow));
+  if (anApp == nullptr || anApp->myView.IsNull())
   {
     return;
   }
 
   double aX = 0.0;
   double aY = 0.0;
-  glfwGetCursorPos(theWindow, u0026aX, u0026aY);
-  anApp-u003emyLastX = aX;
-  anApp-u003emyLastY = aY;
+  glfwGetCursorPos(theWindow, &aX, &aY);
+  anApp->myLastX = aX;
+  anApp->myLastY = aY;
 
   if (theAction == GLFW_PRESS)
   {
     if (theButton == GLFW_MOUSE_BUTTON_LEFT)
     {
-      anApp-u003emyLeftPressed = true;
-      anApp-u003emyView-u003eStartRotation(static_castu003cintu003e(aX), static_castu003cintu003e(aY));
+      anApp->myLeftPressed = true;
+      anApp->myView->StartRotation(static_cast<int>(aX), static_cast<int>(aY));
     }
     else if (theButton == GLFW_MOUSE_BUTTON_RIGHT)
     {
-      anApp-u003emyRightPressed = true;
+      anApp->myRightPressed = true;
     }
 
-    anApp-u003emyContext-u003eMoveTo(static_castu003cintu003e(aX), static_castu003cintu003e(aY), anApp-u003emyView, Standard_True);
-    anApp-u003emyContext-u003eSelectDetected(AIS_SelectionScheme_Replace);
+    anApp->myContext->MoveTo(static_cast<int>(aX), static_cast<int>(aY), anApp->myView, Standard_True);
+    anApp->myContext->SelectDetected(AIS_SelectionScheme_Replace);
   }
   else if (theAction == GLFW_RELEASE)
   {
     if (theButton == GLFW_MOUSE_BUTTON_LEFT)
     {
-      anApp-u003emyLeftPressed = false;
+      anApp->myLeftPressed = false;
     }
     else if (theButton == GLFW_MOUSE_BUTTON_RIGHT)
     {
-      anApp-u003emyRightPressed = false;
+      anApp->myRightPressed = false;
     }
   }
 }
@@ -515,29 +515,29 @@ void OcctApp::OnCursorPos(GLFWwindow* theWindow, double theX, double theY)
     return;
   }
 
-  auto* anApp = static_castu003cOcctApp*u003e(glfwGetWindowUserPointer(theWindow));
-  if (anApp == nullptr || anApp-u003emyView.IsNull())
+  auto* anApp = static_cast<OcctApp*>(glfwGetWindowUserPointer(theWindow));
+  if (anApp == nullptr || anApp->myView.IsNull())
   {
     return;
   }
 
-  if (anApp-u003emyLeftPressed)
+  if (anApp->myLeftPressed)
   {
-    anApp-u003emyView-u003eRotation(static_castu003cintu003e(theX), static_castu003cintu003e(theY));
+    anApp->myView->Rotation(static_cast<int>(theX), static_cast<int>(theY));
   }
-  else if (anApp-u003emyRightPressed)
+  else if (anApp->myRightPressed)
   {
-    const int aDx = static_castu003cintu003e(theX - anApp-u003emyLastX);
-    const int aDy = static_castu003cintu003e(theY - anApp-u003emyLastY);
-    anApp-u003emyView-u003ePan(aDx, -aDy);
+    const int aDx = static_cast<int>(theX - anApp->myLastX);
+    const int aDy = static_cast<int>(theY - anApp->myLastY);
+    anApp->myView->Pan(aDx, -aDy);
   }
   else
   {
-    anApp-u003emyContext-u003eMoveTo(static_castu003cintu003e(theX), static_castu003cintu003e(theY), anApp-u003emyView, Standard_True);
+    anApp->myContext->MoveTo(static_cast<int>(theX), static_cast<int>(theY), anApp->myView, Standard_True);
   }
 
-  anApp-u003emyLastX = theX;
-  anApp-u003emyLastY = theY;
+  anApp->myLastX = theX;
+  anApp->myLastY = theY;
 }
 
 void OcctApp::OnScroll(GLFWwindow* theWindow, double theOffsetX, double theOffsetY)
@@ -548,17 +548,17 @@ void OcctApp::OnScroll(GLFWwindow* theWindow, double theOffsetX, double theOffse
     return;
   }
 
-  auto* anApp = static_castu003cOcctApp*u003e(glfwGetWindowUserPointer(theWindow));
-  if (anApp == nullptr || anApp-u003emyView.IsNull())
+  auto* anApp = static_cast<OcctApp*>(glfwGetWindowUserPointer(theWindow));
+  if (anApp == nullptr || anApp->myView.IsNull())
   {
     return;
   }
 
   double aX = 0.0;
   double aY = 0.0;
-  glfwGetCursorPos(theWindow, u0026aX, u0026aY);
+  glfwGetCursorPos(theWindow, &aX, &aY);
 
-  const Standard_Integer aDelta = theOffsetY u003e 0.0 ? 24 : -24;
-  anApp-u003emyView-u003eStartZoomAtPoint(static_castu003cintu003e(aX), static_castu003cintu003e(aY));
-  anApp-u003emyView-u003eZoomAtPoint(static_castu003cintu003e(aX), static_castu003cintu003e(aY), static_castu003cintu003e(aX), static_castu003cintu003e(aY + aDelta));
+  const Standard_Integer aDelta = theOffsetY > 0.0 ? 24 : -24;
+  anApp->myView->StartZoomAtPoint(static_cast<int>(aX), static_cast<int>(aY));
+  anApp->myView->ZoomAtPoint(static_cast<int>(aX), static_cast<int>(aY), static_cast<int>(aX), static_cast<int>(aY + aDelta));
 }

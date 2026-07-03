@@ -6,16 +6,16 @@
 #include "../../cxgeom/include/CxSetLineBuild.h"
 #include "../../cxgeom/include/CxSetLineDisplay.h"
 
-#include u003cAIS_InteractiveContext.hxxu003e
-#include u003cAIS_PointCloud.hxxu003e
-#include u003cAIS_Shape.hxxu003e
-#include u003cAIS_TextLabel.hxxu003e
-#include u003cOpenGl_GraphicDriver.hxxu003e
-#include u003cV3d_View.hxxu003e
-#include u003cV3d_Viewer.hxxu003e
+#include <AIS_InteractiveContext.hxx>
+#include <AIS_PointCloud.hxx>
+#include <AIS_Shape.hxx>
+#include <AIS_TextLabel.hxx>
+#include <OpenGl_GraphicDriver.hxx>
+#include <V3d_View.hxx>
+#include <V3d_Viewer.hxx>
 
-#include u003cstringu003e
-#include u003cvectoru003e
+#include <string>
+#include <vector>
 
 struct CxOcctPointCloudPoint
 {
@@ -39,7 +39,7 @@ struct CxOcctPointCloudRequest
 {
   int entity_id = 0;
   std::string name;
-  std::vectoru003cCxOcctPointCloudPointu003e points;
+  std::vector<CxOcctPointCloudPoint> points;
   CxOcctPointCloudStyle style;
 };
 
@@ -68,7 +68,7 @@ struct CxOcctPointCloudBatchRequest
 {
   int batch_id = 0;
   std::string name;
-  std::vectoru003cCxOcctPointCloudRequestu003e clouds;
+  std::vector<CxOcctPointCloudRequest> clouds;
   CxOcctPointCloudStyle style;
 };
 
@@ -96,7 +96,7 @@ struct CxOcctPointCloudResult
 struct CxOcctPointCloudAnnotationDisplayRequest
 {
   int layer_id = 0;
-  std::vectoru003cCxOcctPointCloudAnnotationu003e annotations;
+  std::vector<CxOcctPointCloudAnnotation> annotations;
   bool visible = true;
 };
 
@@ -105,7 +105,7 @@ struct CxOcctPointCloudAnnotationDisplayResult
   int layer_id = 0;
   int annotation_count = 0;
   bool visible = true;
-  std::vectoru003cHandle(AIS_TextLabel)u003e labels;
+  std::vector<Handle(AIS_TextLabel)> labels;
   bool success = false;
 };
 
@@ -113,20 +113,20 @@ class OcctApp
 {
 public:
   void Run();
-  cxgeom::CxSetCircleBuildResult BuildSetCircleGeometry(const cxgeom::CxSetCircleRequestu0026 request) const;
-  cxgeom::CxSetCircleDisplayResult BuildSetCircleDisplayBatch(const cxgeom::CxSetCircleDisplayRequestu0026 request) const;
-  bool DisplaySetCircleBatch(const cxgeom::CxSetCircleDisplayResultu0026 result);
-  cxgeom::CxSetLineBuildResult BuildSetLineGeometry(const cxgeom::CxSetLineRequestu0026 request) const;
-  cxgeom::CxSetLineDisplayResult BuildSetLineDisplayBatch(const cxgeom::CxSetLineDisplayRequestu0026 request) const;
-  bool DisplaySetLineBatch(const cxgeom::CxSetLineDisplayResultu0026 result);
+  cxgeom::CxSetCircleBuildResult BuildSetCircleGeometry(const cxgeom::CxSetCircleRequest& request) const;
+  cxgeom::CxSetCircleDisplayResult BuildSetCircleDisplayBatch(const cxgeom::CxSetCircleDisplayRequest& request) const;
+  bool DisplaySetCircleBatch(const cxgeom::CxSetCircleDisplayResult& result);
+  cxgeom::CxSetLineBuildResult BuildSetLineGeometry(const cxgeom::CxSetLineRequest& request) const;
+  cxgeom::CxSetLineDisplayResult BuildSetLineDisplayBatch(const cxgeom::CxSetLineDisplayRequest& request) const;
+  bool DisplaySetLineBatch(const cxgeom::CxSetLineDisplayResult& result);
 
-  CxOcctPointCloudBody BuildPointCloudBody(const CxOcctPointCloudRequestu0026 request) const;
-  CxOcctPointCloudResult BuildPointCloudPresentation(const CxOcctPointCloudRequestu0026 request) const;
-  CxOcctPointCloudBatchResult BuildPointCloudBatchPresentation(const CxOcctPointCloudBatchRequestu0026 request) const;
-  bool DisplayPointCloud(const CxOcctPointCloudResultu0026 result);
-  bool DisplayPointCloudBatch(const CxOcctPointCloudBatchResultu0026 result);
-  CxOcctPointCloudAnnotationDisplayResult BuildPointCloudAnnotationDisplay(const CxOcctPointCloudAnnotationDisplayRequestu0026 request) const;
-  bool DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDisplayResultu0026 result);
+  CxOcctPointCloudBody BuildPointCloudBody(const CxOcctPointCloudRequest& request) const;
+  CxOcctPointCloudResult BuildPointCloudPresentation(const CxOcctPointCloudRequest& request) const;
+  CxOcctPointCloudBatchResult BuildPointCloudBatchPresentation(const CxOcctPointCloudBatchRequest& request) const;
+  bool DisplayPointCloud(const CxOcctPointCloudResult& result);
+  bool DisplayPointCloudBatch(const CxOcctPointCloudBatchResult& result);
+  CxOcctPointCloudAnnotationDisplayResult BuildPointCloudAnnotationDisplay(const CxOcctPointCloudAnnotationDisplayRequest& request) const;
+  bool DisplayPointCloudAnnotations(const CxOcctPointCloudAnnotationDisplayResult& result);
 
 private:
   static void OnFramebufferResize(GLFWwindow* theWindow, int theWidth, int theHeight);
