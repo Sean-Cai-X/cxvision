@@ -334,6 +334,10 @@ struct ManualTestContext
   std::string image_overlay_summary;
   std::string findcircle_debug_snapshot_summary;
 
+  std::string active_script_case_name;
+  std::string active_script_case_path;
+  std::string active_script_case_purpose;
+
   std::string runtime_current_status = "PENDING";
   std::string runtime_current_node;
   std::string runtime_current_connect;

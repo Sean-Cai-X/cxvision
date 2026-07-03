@@ -637,6 +637,19 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
         file << "time: " << CurrentTimestamp() << "\n";
         file << "flow_block: cximage_find_circle_explore.N0\n";
         file << "script_path: " << context.loaded_script_path << "\n";
+
+        if (!context.active_script_case_name.empty())
+        {
+            file << "active_script_case_name: "
+                 << context.active_script_case_name << "\n";
+
+            file << "active_script_case_path: "
+                 << context.active_script_case_path << "\n";
+
+            file << "active_script_case_purpose: "
+                 << context.active_script_case_purpose << "\n";
+        }
+
         file << "run_state: " << context.run_state << "\n";
         file << "runtime_current_status: " << context.runtime_current_status << "\n";
         file << "debug_status: " << context.debug_status << "\n";
@@ -4410,7 +4423,19 @@ void ViewController::initManualStateTestConsole()
     {"Parser Run 6", "Empty integration observation fragment.",
      "# enter one manual integration statement\n", "builtin", true},
     {"Custom Manual Text", "Start with an empty manual editor.",
-     "", "manual", true}
+     "", "manual", true},
+    {"Findline Original Direct", "Findline original Measure request/cache path. No fallback.",
+     "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true},
+    {"Findline Native Width Compare", "Findline original Measure compare path using setline measure_scale=32.",
+     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
+    {"Findline Fallback Debug", "Findline fallback debug path. Not original Measure validation.",
+     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true},
+    {"Findline Vertical Direct", "Findline vertical ROI direction test.",
+     "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
+    {"Findcircle Original Direct", "Findcircle original Measure request/cache path.",
+     "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true},
+    {"Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
+     "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true}
   };
 
   m_directTestModules.clear();
@@ -4797,10 +4822,27 @@ void ViewController::drawManualStateTestConsole()
   {
     for (std::size_t i = 0; i < m_manualSnippets.size(); ++i)
     {
-      const ScriptSnippet& snippet = m_manualSnippets[i];
+      ScriptSnippet& snippet = m_manualSnippets[i];
       ImGui::PushID(static_cast<int>(i));
       if (ImGui::Selectable(snippet.name.c_str()))
       {
+        if (snippet.source_path != "builtin" && snippet.source_path != "manual")
+        {
+          std::string text;
+          if (ReadTextFile(ResolveWorkspaceFile(snippet.source_path).generic_string(), text))
+          {
+            snippet.text = text;
+          }
+          m_manualTest.active_script_case_name = snippet.name;
+          m_manualTest.active_script_case_path = snippet.source_path;
+          m_manualTest.active_script_case_purpose = snippet.description;
+        }
+        else
+        {
+          m_manualTest.active_script_case_name.clear();
+          m_manualTest.active_script_case_path.clear();
+          m_manualTest.active_script_case_purpose.clear();
+        }
         m_manualTest.editor_text = snippet.text;
         m_manualTest.editor_source = "snippet";
         m_manualTest.loaded_script_path = snippet.source_path;

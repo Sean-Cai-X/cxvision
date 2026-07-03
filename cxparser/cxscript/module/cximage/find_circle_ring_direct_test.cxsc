@@ -7,6 +7,7 @@ int cx = 765;
 int cy = 471;
 int inner = 0;
 int radius = 477;
+int circleGap = 80;
 
 int method = 0;
 int threshold = 20;
@@ -15,6 +16,7 @@ int linegap = 3;
 int fitMeasureGap = 80;
 
 m_circle.setcircle(cx, cy, inner, radius);
+m_circle.setcirclegap(circleGap);
 m_circle.setmethod(method);
 m_circle.Setgap(gap);
 m_circle.setthre(threshold);
