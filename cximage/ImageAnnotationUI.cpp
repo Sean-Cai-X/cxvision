@@ -376,8 +376,20 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 
 void ViewController::drawImageEvidencePanels()
 {
-  ImGui::SetNextWindowPos(ImVec2(350, 40), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(520, 600), ImGuiCond_Once);
+  ImGuiIO& io = ImGui::GetIO();
+  if (m_detachablePanels)
+  {
+    ImGui::SetNextWindowPos(ImVec2(350, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(520, 600), ImGuiCond_Once);
+  }
+  else
+  {
+    const float width = std::max(420.0f, io.DisplaySize.x * 0.24f);
+    const float height = std::max(520.0f, io.DisplaySize.y - 80.0f);
+    const float x = std::max(20.0f, io.DisplaySize.x - width - 20.0f);
+    ImGui::SetNextWindowPos(ImVec2(x, 40.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+  }
   if (!ImGui::Begin("Image Evidence / Annotation Tools"))
   {
     ImGui::End();

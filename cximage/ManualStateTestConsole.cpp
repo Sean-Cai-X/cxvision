@@ -2,6 +2,7 @@
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
+#include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
 
 #include <imgui.h>
@@ -291,6 +292,12 @@ static void AppendCxDebugRuntimeObjectsSnapshot(const ManualTestContext& context
                 << object.fit_cy << ","
                 << object.fit_radius << "],"
                 << "\"avgdist\":" << object.fit_avgdist
+                << ",\"has_circle_roi_outer_polyline\":" << (object.has_circle_roi_outer_polyline ? "true" : "false")
+                << ",\"has_circle_roi_inner_polyline\":" << (object.has_circle_roi_inner_polyline ? "true" : "false")
+                << ",\"circle_roi_segment_count\":" << object.circle_roi_segment_count
+                << ",\"has_fit_circle_polyline\":" << (object.has_fit_circle_polyline ? "true" : "false")
+                << ",\"fit_circle_segment_count\":" << object.fit_circle_segment_count
+                << ",\"display_version\":" << object.display_version
                 << ",\"has_line_roi\":" << (object.has_line_roi ? "true" : "false")
                 << ",\"line_roi\":[" << object.line_x0 << ","
                 << object.line_y0 << ","
@@ -298,6 +305,11 @@ static void AppendCxDebugRuntimeObjectsSnapshot(const ManualTestContext& context
                 << object.line_y1 << "]"
                 << ",\"has_line_scan_box\":" << (object.has_line_scan_box ? "true" : "false")
                 << ",\"line_scan_half_width\":" << object.line_scan_half_width
+                << ",\"line_scan_box_xy\":["
+                << object.line_scan_box_xy[0] << "," << object.line_scan_box_xy[1] << ","
+                << object.line_scan_box_xy[2] << "," << object.line_scan_box_xy[3] << ","
+                << object.line_scan_box_xy[4] << "," << object.line_scan_box_xy[5] << ","
+                << object.line_scan_box_xy[6] << "," << object.line_scan_box_xy[7] << "]"
                 << ",\"line_pointsw_count\":" << object.line_pointsw_count
                 << ",\"line_pointsh_count\":" << object.line_pointsh_count
                 << ",\"line_measure_points_count\":" << object.line_measure_points_count
@@ -344,25 +356,24 @@ static std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& objec
     if (object.has_circle)
     {
         ss << " | roi_circle=("
-            << object.circle_cx << ","
-            << object.circle_cy << ", r="
-            << object.circle_radius << ")";
+           << object.circle_cx << "," << object.circle_cy
+           << ", inner=" << object.circle_inner
+           << ", r=" << object.circle_radius << ")";
     }
     else
     {
         ss << " | roi_circle=(none)";
     }
 
-    ss << " | measure_points_count=" << object.measure_points_count;
-    ss << " | valid_points_count=" << object.valid_points_count;
+    ss << " | measure_points_count=" << object.measure_points_count
+       << " | valid_points_count=" << object.valid_points_count;
 
     if (object.has_fit_result)
     {
         ss << " | fit_circle=("
-            << object.fit_cx << ","
-            << object.fit_cy << ", r="
-            << object.fit_radius << ")"
-            << " | avgdist=" << object.fit_avgdist;
+           << object.fit_cx << "," << object.fit_cy
+           << ", r=" << object.fit_radius << ")"
+           << " | avgdist=" << object.fit_avgdist;
     }
     else
     {
@@ -370,20 +381,16 @@ static std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& objec
     }
 
     ss << " | has_result_measure="
-        << (object.has_result_measure ? "true" : "false");
-
-    if (object.scan_path > 0)
-        ss << " | scan_path=" << object.scan_path;
-
-    if (object.image_width > 0 && object.image_height > 0)
-        ss << " | image=" << object.image_width << "x" << object.image_height;
-
-    if (object.back_image_width > 0 && object.back_image_height > 0)
-        ss << " | back_image=" << object.back_image_width << "x" << object.back_image_height;
+       << (object.has_result_measure ? "true" : "false")
+       << " | roi_outer_polyline=" << (object.has_circle_roi_outer_polyline ? "true" : "false")
+       << " | roi_inner_polyline=" << (object.has_circle_roi_inner_polyline ? "true" : "false")
+       << " | roi_segments=" << object.circle_roi_segment_count
+       << " | fit_circle_polyline=" << (object.has_fit_circle_polyline ? "true" : "false")
+       << " | fit_segments=" << object.fit_circle_segment_count
+       << " | display_version=" << object.display_version;
 
     return ss.str();
 }
-
 static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
 {
     std::ostringstream ss;
@@ -403,28 +410,21 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
 
     ss << " | scan_half_width=" << object.line_scan_half_width
        << " | linegap=" << object.linegap
+       << " | line_scan_box_xy=[" << object.line_scan_box_xy[0] << "," << object.line_scan_box_xy[1] << ","
+       << object.line_scan_box_xy[2] << "," << object.line_scan_box_xy[3] << ","
+       << object.line_scan_box_xy[4] << "," << object.line_scan_box_xy[5] << ","
+       << object.line_scan_box_xy[6] << "," << object.line_scan_box_xy[7] << "]"
        << " | measure_points_count=" << object.line_measure_points_count
        << " | valid_points_count=" << object.valid_line_points_count
        << " | pointsw=" << object.line_pointsw_count
        << " | pointsh=" << object.line_pointsh_count
        << " | fit_mode=" << object.line_fit_mode
-       << " | fit_status=" << object.line_fit_status;
-
-    if (object.has_fit_line)
-    {
-        ss << " | fit_line=("
-           << object.fit_line_x0 << "," << object.fit_line_y0
-           << ")->(" << object.fit_line_x1 << "," << object.fit_line_y1 << ")"
-           << " | avgdist=" << object.line_avgdist;
-    }
-    else
-    {
-        ss << " | fit_line=(pending)";
-    }
+       << " | fit_status=" << object.line_fit_status
+       << " | has_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
+       << " | display_version=" << object.display_version;
 
     return ss.str();
 }
-
 static std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
     if (object.type == "Findline")
@@ -439,15 +439,16 @@ static std::string BuildFindcircleOverlaySummary(const ManualTestContext& contex
     std::ostringstream ss;
 
     ss << "image overlay:"
-        << " green_roi_circle=" << (object.has_circle ? "true" : "false")
-        << " | red_measure_points=" << object.valid_points_count
-        << " | yellow_fit_circle=" << (object.has_fit_result ? "true" : "false")
-        << " | source_preview_enabled=false"
-        << " | manual_elements_count=0";
+       << " green_roi_circle=" << (object.has_circle ? "true" : "false")
+       << " | green_roi_polyline=" << (object.has_circle_roi_outer_polyline ? "true" : "false")
+       << " | red_measure_points=" << object.valid_points_count
+       << " | yellow_fit_circle=" << (object.has_fit_result ? "true" : "false")
+       << " | yellow_fit_polyline=" << (object.has_fit_circle_polyline ? "true" : "false")
+       << " | source_preview_enabled=" << (context.source_preview_enabled ? "true" : "false")
+       << " | manual_elements_count=" << context.manual_elements_count;
 
     return ss.str();
 }
-
 static std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
@@ -652,6 +653,21 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 << object.fit_cy << ", r="
                 << object.fit_radius << "\n";
             file << "  avgdist: " << object.fit_avgdist << "\n";
+            file << "  display_version: " << object.display_version << "\n";
+
+            if (object.type == "Findcircle")
+            {
+                file << "  circle_roi_outer_polyline: "
+                     << (object.has_circle_roi_outer_polyline ? "true" : "false") << "\n";
+                file << "  circle_roi_inner_polyline: "
+                     << (object.has_circle_roi_inner_polyline ? "true" : "false") << "\n";
+                file << "  circle_roi_segment_count: "
+                     << object.circle_roi_segment_count << "\n";
+                file << "  fit_circle_polyline: "
+                     << (object.has_fit_circle_polyline ? "true" : "false") << "\n";
+                file << "  fit_circle_segment_count: "
+                     << object.fit_circle_segment_count << "\n";
+            }
 
             if (object.type == "Findline")
             {
@@ -685,10 +701,21 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                      << object.fit_line_x1 << ", "
                      << object.fit_line_y1 << "\n";
 
+                file << "  line_scan_box_xy: "
+                     << object.line_scan_box_xy[0] << ", "
+                     << object.line_scan_box_xy[1] << " | "
+                     << object.line_scan_box_xy[2] << ", "
+                     << object.line_scan_box_xy[3] << " | "
+                     << object.line_scan_box_xy[4] << ", "
+                     << object.line_scan_box_xy[5] << " | "
+                     << object.line_scan_box_xy[6] << ", "
+                     << object.line_scan_box_xy[7] << "\n";
+
                 file << "  line_avgdist: " << object.line_avgdist << "\n";
                 file << "  line_fit_mode: " << object.line_fit_mode << "\n";
                 file << "  line_fit_status: " << object.line_fit_status << "\n";
                 file << "  line_measure_status: " << object.line_measure_status << "\n";
+                file << "  display_version: " << object.display_version << "\n";
             }
 
             file << "\n";
@@ -1723,6 +1750,67 @@ static bool TryExecuteImageCopyFromMat(ManualTestContext& context,
 
     return true;
 }
+static void RefreshFindcircleDisplaySnapshot(ManualTestContext& context,
+    RuntimeObjectView& object)
+{
+    if (object.type != "Findcircle")
+        return;
+
+    object.has_circle_roi_outer_polyline = false;
+    object.has_circle_roi_inner_polyline = false;
+    object.circle_roi_outer_xy.clear();
+    object.circle_roi_inner_xy.clear();
+    object.circle_roi_segment_count = 0;
+
+    if (object.has_circle)
+    {
+        const CxCirclePolylineSnapshot outer = BuildCxCirclePolylineSnapshot(
+            object.circle_cx,
+            object.circle_cy,
+            object.circle_radius);
+
+        object.has_circle_roi_outer_polyline = outer.valid;
+        if (outer.valid)
+        {
+            object.circle_roi_outer_xy = outer.xy;
+            object.circle_roi_segment_count = outer.segment_count;
+        }
+
+        if (object.circle_inner > 0.0f)
+        {
+            const CxCirclePolylineSnapshot inner = BuildCxCirclePolylineSnapshot(
+                object.circle_cx,
+                object.circle_cy,
+                object.circle_inner);
+
+            object.has_circle_roi_inner_polyline = inner.valid;
+            if (inner.valid)
+                object.circle_roi_inner_xy = inner.xy;
+        }
+    }
+
+    object.has_fit_circle_polyline = false;
+    object.fit_circle_xy.clear();
+    object.fit_circle_segment_count = 0;
+
+    if (object.has_fit_result)
+    {
+        const CxCirclePolylineSnapshot fit = BuildCxCirclePolylineSnapshot(
+            object.fit_cx,
+            object.fit_cy,
+            object.fit_radius);
+
+        object.has_fit_circle_polyline = fit.valid;
+        if (fit.valid)
+        {
+            object.fit_circle_xy = fit.xy;
+            object.fit_circle_segment_count = fit.segment_count;
+        }
+    }
+
+    ++object.display_version;
+    ++context.runtime_overlay_version;
+}
 static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -1785,6 +1873,7 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     circleIt->second->setcircle(cx, cy, perimeterX, perimeterY);
 
     object.has_circle = true;
+    RefreshFindcircleDisplaySnapshot(context, object);
     object.visualizable = true;
     object.exists_in_parser = true;
     object.stale = false;
@@ -2219,6 +2308,8 @@ static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
                 object.has_fit_result || object.has_measure_points;
         }
 
+        RefreshFindcircleDisplaySnapshot(context, object);
+
         std::ostringstream diagnostics;
         diagnostics << object.display_summary
             << " | scan_path=" << circleIt->second->getpath().ElementCount();
@@ -2511,6 +2602,39 @@ static void AppendPointsShapeToXY(PointsShape& points, std::vector<float>& outXY
     }
 }
 
+static void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
+    RuntimeObjectView& object)
+{
+    if (object.type != "Findline")
+        return;
+
+    object.has_line_scan_box = false;
+    object.line_scan_box_xy = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    if (object.has_line_roi)
+    {
+        const CxLineScanBoxSnapshot scanBox = BuildCxLineScanBoxSnapshot(
+            object.line_x0,
+            object.line_y0,
+            object.line_x1,
+            object.line_y1,
+            object.line_scale,
+            object.linegap);
+
+        object.has_line_scan_box = scanBox.valid;
+        if (scanBox.valid)
+        {
+            object.line_scan_box_xy = scanBox.xy;
+            object.line_scan_half_width = scanBox.half_width;
+        }
+    }
+
+    ++object.display_version;
+    ++context.runtime_overlay_version;
+}
+
+
+
 static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     Findline& lineTool)
 {
@@ -2608,12 +2732,8 @@ static bool TryExecuteFindlineSetline(ManualTestContext& context,
     object.line_y1 = static_cast<float>(values[3]);
     object.line_scale = static_cast<float>(values[4]);
 
-    object.has_line_scan_box = true;
     object.linegap = object.linegap > 0 ? object.linegap : 3;
-    object.line_scan_half_width =
-        std::max(2.0f,
-                 static_cast<float>(object.linegap) *
-                 std::max(1.0f, object.line_scale));
+    RefreshFindlineDisplaySnapshot(context, object);
 
     object.visualizable = true;
     object.visual_source = "runtime_object";
@@ -2728,11 +2848,7 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     if (updatedLineGap)
     {
         object.linegap = updatedLineGapValue;
-        object.has_line_scan_box = object.has_line_roi;
-        object.line_scan_half_width =
-            std::max(2.0f,
-                     static_cast<float>(updatedLineGapValue) *
-                     std::max(1.0f, object.line_scale));
+        RefreshFindlineDisplaySnapshot(context, object);
     }
 
     object.display_summary = "Findline." + call.method + "(" + call.params + ")";
@@ -2805,6 +2921,7 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
         tool.measure(static_cast<void*>(image));
 
         RefreshFindlineMeasureSnapshot(object, tool);
+        RefreshFindlineDisplaySnapshot(context, object);
 
         object.exists_in_parser = true;
         object.type = "Findline";
@@ -2836,6 +2953,7 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
     {
         tool.fitline();
         RefreshFindlineMeasureSnapshot(object, tool);
+        RefreshFindlineDisplaySnapshot(context, object);
 
         object.exists_in_parser = true;
         object.type = "Findline";
@@ -2865,6 +2983,8 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
             object.runtime_state = "fitline_pending_binding";
             object.last_runtime_status = "PENDING_BINDING";
         }
+
+        RefreshFindlineDisplaySnapshot(context, object);
 
         std::ostringstream summary;
         summary << "Findline." << call.method << " executed"

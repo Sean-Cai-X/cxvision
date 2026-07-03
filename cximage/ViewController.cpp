@@ -788,283 +788,109 @@ void ViewController::drawScriptAcceptancePanels()
   int runtimeVisualCount = 0;
   std::string runtimeVisualNames;
 
-  const std::string activeResultObject =
-      m_manualTest.current_result_ref.source_object;
-
-  for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+  if (ImGui::Button("Reset view"))
   {
-      if (!object.exists_in_parser || object.stale || !object.visualizable)
-          continue;
-
-      const bool isActiveResultObject =
-          !activeResultObject.empty() && object.name == activeResultObject;
-
-      const bool hasGeometryResult =
-          object.has_fit_result || object.has_result_measure ||
-          object.runtime_state == "geometry_result_available";
-
-      /*
-       * Layer 1 的 count 默认只统计真正 result object。
-       * 纯 ROI 参数对象，例如 afindcircle1，只保留在 Runtime Object Table，
-       * 不参与当前图像结果统计。
-       */
-      if (!isActiveResultObject && !hasGeometryResult)
-          continue;
-
-      ++runtimeVisualCount;
-
-      if (!runtimeVisualNames.empty())
-          runtimeVisualNames += ", ";
-
-      runtimeVisualNames += object.name;
+    m_imageViewZoom = 1.0f;
+    m_imageViewPanX = 0.0f;
+    m_imageViewPanY = 0.0f;
   }
-  ImGui::Text("Layer 1 Runtime Object");
-  ImGui::TextWrapped("source: cximage direct runtime | count: %d | objects: %s",
-    runtimeVisualCount, runtimeVisualNames.empty() ? "(none)" :
-                                                  runtimeVisualNames.c_str());
-  ImGui::TextWrapped("geometry colors: green = setcircle ROI; red = measure/result points; yellow = fit/final result");
-  ImGui::Text("Layer 2 Manual Element");
-  ImGui::Text("source: manual tools | count: %d | not runtime result",
-              static_cast<int>(m_annotationLayer.Elements().size()));
-  ImGui::Text("Layer 3 Source Preview");
-  ImGui::Text("source: static source analysis | %s | not_executed",
-              m_showSourcePreviewOverlay ? "enabled" : "disabled (default)");
-  ImGui::TextDisabled("source_preview does not participate in judgment");
-  ImGui::Checkbox("Source Preview Overlay (not executed)",
-                  &m_showSourcePreviewOverlay);
-  ImGui::TextDisabled("Legacy Demo Overlay");
-  ImGui::Checkbox("Test points", &m_manualTest.test_points);
   ImGui::SameLine();
-  ImGui::Checkbox("Test rectangle", &m_manualTest.test_rectangle);
-  ImGui::SameLine();
-  ImGui::Checkbox("Test scan line", &m_manualTest.line_scan);
-  m_showTestPoints = m_manualTest.test_points;
-  m_showTestRectangle = m_manualTest.test_rectangle || m_manualTest.show_roi;
-  m_showTestScanLine = m_manualTest.line_scan || m_manualTest.attach_line;
-  ImGui::Separator();
-  const ScriptLineView* currentScriptLine = nullptr;
-  if (m_manualTest.current_line >= 0 &&
-      m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()))
-    currentScriptLine = &m_manualTest.line_views[
-      static_cast<std::size_t>(m_manualTest.current_line)];
-  ImGui::TextWrapped("current_script: %s",
-    m_manualTest.loaded_script_path.empty() ? "(none)" :
-    m_manualTest.loaded_script_path.c_str());
-  ImGui::Text("current_line: %d", currentScriptLine == nullptr ? 0 :
-    currentScriptLine->line_no);
-  ImGui::TextWrapped("current_object: %s", currentScriptLine == nullptr ||
-    currentScriptLine->object.empty() ? "(none)" : currentScriptLine->object.c_str());
-  ImGui::TextWrapped("current_method: %s", currentScriptLine == nullptr ||
-    currentScriptLine->method.empty() ? "(none)" : currentScriptLine->method.c_str());
-  ImGui::TextWrapped("current_params: %s", currentScriptLine == nullptr ||
-    currentScriptLine->params.empty() ? "(none)" : currentScriptLine->params.c_str());
-  ImGui::Text("current_status: %s", currentScriptLine == nullptr ?
-    m_manualTest.trace_status.c_str() : currentScriptLine->status.c_str());
-  ImGui::Separator();
-  if (!m_manualTest.show_image || m_imageViewTexture == 0 || m_imageViewImage.empty())
+  ImGui::Text("Zoom: %.0f%%  Move: middle-drag  Zoom: wheel", m_imageViewZoom * 100.0f);
+
+  const ImVec2 canvasSize(
+    std::max(120.0f, ImGui::GetContentRegionAvail().x),
+    std::max(160.0f, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing() * 3.0f));
+  ImGui::InvisibleButton("image_view_canvas", canvasSize,
+                         ImGuiButtonFlags_MouseButtonLeft |
+                         ImGuiButtonFlags_MouseButtonMiddle |
+                         ImGuiButtonFlags_MouseButtonRight);
+  ImGuiIO& io = ImGui::GetIO();
+  const bool canvasHovered = ImGui::IsItemHovered();
+  const bool canvasActive = ImGui::IsItemActive();
+  const ImVec2 canvasMin = ImGui::GetItemRectMin();
+  const ImVec2 canvasMax = ImGui::GetItemRectMax();
+  ImDrawList* drawList = ImGui::GetWindowDrawList();
+  drawList->AddRectFilled(canvasMin, canvasMax, IM_COL32(18, 18, 18, 255));
+  drawList->AddRect(canvasMin, canvasMax, IM_COL32(90, 90, 90, 255));
+
+  if (canvasHovered && io.MouseWheel != 0.0f && baseImageValid)
   {
-    ImGui::TextDisabled("Image View: no image loaded");
+    const float oldZoom = m_imageViewZoom;
+    const float newZoom = std::clamp(oldZoom * (1.0f + io.MouseWheel * 0.1f), 0.05f, 20.0f);
+    if (std::fabs(newZoom - oldZoom) > 0.0001f)
+    {
+      const float localX = io.MousePos.x - canvasMin.x - m_imageViewPanX;
+      const float localY = io.MousePos.y - canvasMin.y - m_imageViewPanY;
+      const float imageXAtMouse = localX / oldZoom;
+      const float imageYAtMouse = localY / oldZoom;
+      m_imageViewZoom = newZoom;
+      m_imageViewPanX = (io.MousePos.x - canvasMin.x) - imageXAtMouse * newZoom;
+      m_imageViewPanY = (io.MousePos.y - canvasMin.y) - imageYAtMouse * newZoom;
+    }
+  }
+  if (canvasHovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
+  {
+    const ImVec2 delta = io.MouseDelta;
+    m_imageViewPanX += delta.x;
+    m_imageViewPanY += delta.y;
+  }
+
+  const ImVec2 imageSize = baseImageValid
+      ? ImVec2(static_cast<float>(m_imageViewImage.cols) * m_imageViewZoom,
+               static_cast<float>(m_imageViewImage.rows) * m_imageViewZoom)
+      : ImVec2(0.0f, 0.0f);
+  const ImVec2 imagePos(canvasMin.x + m_imageViewPanX,
+                        canvasMin.y + m_imageViewPanY);
+  const ImVec2 imageEnd(imagePos.x + imageSize.x,
+                        imagePos.y + imageSize.y);
+  m_annotationImagePosX = imagePos.x;
+  m_annotationImagePosY = imagePos.y;
+  m_annotationImageWidth = std::max(1.0f, imageSize.x);
+  m_annotationImageHeight = std::max(1.0f, imageSize.y);
+  drawList->PushClipRect(canvasMin, canvasMax, true);
+  if (baseImageValid)
+  {
+    drawList->AddImage((ImTextureID)(uint64_t)m_imageViewTexture,
+                       imagePos,
+                       imageEnd,
+                       ImVec2(0, 0),
+                       ImVec2(1, 1));
   }
   else
   {
-    if (ImGui::Button("Reset view"))
-    {
-      m_imageViewZoom = 1.0f;
-      m_imageViewPanX = 0.0f;
-      m_imageViewPanY = 0.0f;
-    }
-    ImGui::SameLine();
-    ImGui::Text("Zoom: %.0f%%", m_imageViewZoom * 100.0f);
+    drawList->AddText(ImVec2(canvasMin.x + 8.0f, canvasMin.y + 8.0f),
+                      IM_COL32(200, 200, 200, 255),
+                      "Image View: no image loaded");
+  }
+  const float sx = m_imageViewZoom;
+  const float sy = m_imageViewZoom;
 
-    ImVec2 canvasSize = ImGui::GetContentRegionAvail();
-    canvasSize.y = std::max(100.0f, canvasSize.y - 58.0f);
-    const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("ImageCanvas", canvasSize,
-                           ImGuiButtonFlags_MouseButtonLeft);
-    const bool canvasHovered = ImGui::IsItemHovered();
-    const bool canvasActive = ImGui::IsItemActive();
-    ImGuiIO& io = ImGui::GetIO();
-
-    const float imageAspect = static_cast<float>(m_imageViewImage.cols) /
-                              static_cast<float>(m_imageViewImage.rows);
-    ImVec2 fittedSize(canvasSize.x, canvasSize.x / imageAspect);
-    if (fittedSize.y > canvasSize.y)
-    {
-      fittedSize.y = canvasSize.y;
-      fittedSize.x = canvasSize.y * imageAspect;
-    }
-
-    ImVec2 imageSize(fittedSize.x * m_imageViewZoom,
-                     fittedSize.y * m_imageViewZoom);
-    ImVec2 imagePos(canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
-                    canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
-
-    if (canvasHovered && io.MouseWheel != 0.0f)
-    {
-      const float oldZoom = m_imageViewZoom;
-      const float zoomFactor = io.MouseWheel > 0.0f ? 1.15f : (1.0f / 1.15f);
-      m_imageViewZoom = std::max(0.25f, std::min(8.0f, oldZoom * zoomFactor));
-      if (m_imageViewZoom != oldZoom)
-      {
-        const float anchorX = (io.MousePos.x - imagePos.x) / imageSize.x;
-        const float anchorY = (io.MousePos.y - imagePos.y) / imageSize.y;
-        imageSize = ImVec2(fittedSize.x * m_imageViewZoom,
-                           fittedSize.y * m_imageViewZoom);
-        const ImVec2 centeredPos(
-          canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
-          canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
-        m_imageViewPanX += io.MousePos.x - (centeredPos.x + anchorX * imageSize.x);
-        m_imageViewPanY += io.MousePos.y - (centeredPos.y + anchorY * imageSize.y);
-        imagePos = ImVec2(
-          canvasPos.x + (canvasSize.x - imageSize.x) * 0.5f + m_imageViewPanX,
-          canvasPos.y + (canvasSize.y - imageSize.y) * 0.5f + m_imageViewPanY);
-      }
-    }
-
-    if (canvasActive && m_annotationLayer.ActiveTool() == nullptr &&
-        ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-    {
-      m_imageViewPanX += io.MouseDelta.x;
-      m_imageViewPanY += io.MouseDelta.y;
-      imagePos.x += io.MouseDelta.x;
-      imagePos.y += io.MouseDelta.y;
-    }
-
-    const ImVec2 imageEnd(imagePos.x + imageSize.x, imagePos.y + imageSize.y);
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-    drawList->PushClipRect(canvasPos,
-                           ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y),
-                           true);
-    drawList->AddImage((ImTextureID)(uint64_t)m_imageViewTexture,
-                       imagePos, imageEnd);
-
-    m_annotationImagePosX = imagePos.x;
-    m_annotationImagePosY = imagePos.y;
-    m_annotationImageWidth = imageSize.x;
-    m_annotationImageHeight = imageSize.y;
-
-    // Layer 1: Runtime Object Layer.
-    // Only draw real debug-runtime objects.
-    // Do not draw source-analyzed preview here.
-    // Draw this after base image, before manual annotation elements.
-    if (!m_imageViewImage.empty() &&
-        m_imageViewImage.cols > 0 &&
-        m_imageViewImage.rows > 0)
-    {
-        const std::string activeResultObject =
-            m_manualTest.current_result_ref.source_object;
-        const float sx = imageSize.x / static_cast<float>(m_imageViewImage.cols);
-        const float sy = imageSize.y / static_cast<float>(m_imageViewImage.rows);
-        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        auto ImageToScreen = [&](float x, float y) -> ImVec2
         {
-            if (object.type != "Findcircle")
-                continue;
+            return ImVec2(imagePos.x + x * sx, imagePos.y + y * sy);
+        };
 
-            if (!object.visualizable || !object.has_circle)
-                continue;
+        auto DrawImagePolylineClosed = [&](const std::vector<float>& xy, ImU32 color, float thickness)
+        {
+            const std::size_t count = xy.size() / 2;
+            if (count < 2)
+                return;
 
-            if (object.stale)
-                continue;
-
-            const bool isActiveResultObject =
-                !activeResultObject.empty() && object.name == activeResultObject;
-
-            const bool hasGeometryResult =
-                object.has_fit_result || object.has_result_measure ||
-                object.runtime_state == "geometry_result_available";
-
-            /*
-             * 默认只画 active result object。
-             * 没有 result 的 ROI 参数对象不要干扰当前结果判断。
-             */
-            if (!isActiveResultObject && !hasGeometryResult)
-                continue;
-
-            const ImU32 roiColor = isActiveResultObject
-                ? IM_COL32(80, 255, 170, 255)
-                : IM_COL32(80, 255, 170, 80);
-
-            const ImU32 fitColor = isActiveResultObject
-                ? IM_COL32(255, 220, 80, 255)
-                : IM_COL32(255, 220, 80, 100);
-
-            const ImU32 pointColor = isActiveResultObject
-                ? IM_COL32(255, 80, 80, 255)
-                : IM_COL32(255, 80, 80, 100);
-            const float sr = (sx + sy) * 0.5f;
-
-            const ImVec2 center(
-                imagePos.x + object.circle_cx * sx,
-                imagePos.y + object.circle_cy * sy
-            );
-
-            const float radius = object.circle_radius * sr;
-
-            drawList->AddCircle(
-                center,
-                radius,
-                roiColor,
-                96,
-                2.0f
-            );
-
-            // 可选：如果 inner radius 有意义，也可以画内圈
-            if (object.circle_inner > 0.0f)
+            for (std::size_t i = 0; i < count; ++i)
             {
-                drawList->AddCircle(
-                    center,
-                    object.circle_inner * sr,
-                    IM_COL32(80, 255, 170, 180),
-                    96,
-                    1.0f
-                );
+                const std::size_t j = (i + 1) % count;
+                drawList->AddLine(
+                    ImageToScreen(xy[i * 2], xy[i * 2 + 1]),
+                    ImageToScreen(xy[j * 2], xy[j * 2 + 1]),
+                    color,
+                    thickness);
             }
-
-            drawList->AddText(
-                ImVec2(center.x + 6.0f, center.y + 6.0f),
-                IM_COL32(80, 255, 170, 255),
-                object.name.c_str()
-            );
-
-            if (object.has_measure_points)
-            {
-                for (std::size_t pointIndex = 0;
-                     pointIndex + 1 < object.measure_points_xy.size();
-                     pointIndex += 2)
-                {
-                    const ImVec2 point(
-                        imagePos.x + object.measure_points_xy[pointIndex] * sx,
-                        imagePos.y + object.measure_points_xy[pointIndex + 1] * sy);
-                    drawList->AddCircleFilled(
-                        point, 3.5f, pointColor, 12);
-                }
-            }
-
-            if (object.has_fit_result && object.fit_radius > 0.0f)
-            {
-                const ImVec2 fitCenter(
-                    imagePos.x + object.fit_cx * sx,
-                    imagePos.y + object.fit_cy * sy);
-                drawList->AddCircle(
-                    fitCenter,
-                    object.fit_radius * sr,
-                    fitColor,
-                    96,
-                    object.has_result_measure ? 3.0f : 2.0f);
-                drawList->AddText(
-                    ImVec2(fitCenter.x + 6.0f, fitCenter.y - 18.0f),
-                    IM_COL32(255, 220, 40, 255),
-                    object.has_result_measure ?
-                        "FitResultMeasure runtime result" :
-                        "fitcircle runtime result");
-            }
-        }
+        };
 
         for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
         {
             if (object.type != "Findline")
                 continue;
-
             if (!object.visualizable || object.stale)
                 continue;
 
@@ -1075,45 +901,19 @@ void ViewController::drawScriptAcceptancePanels()
             const ImU32 roiColor = isActiveResultObject
                 ? IM_COL32(80, 255, 170, 255)
                 : IM_COL32(80, 255, 170, 160);
-
             const ImU32 pointColor = isActiveResultObject
                 ? IM_COL32(255, 80, 80, 255)
                 : IM_COL32(255, 80, 80, 160);
-
             const ImU32 fitColor = isActiveResultObject
                 ? IM_COL32(255, 220, 80, 255)
                 : IM_COL32(255, 220, 80, 160);
-
             const ImU32 pendingColor = IM_COL32(255, 220, 80, 180);
 
             if (object.has_line_roi)
             {
-                const ImVec2 c0(
-                    imagePos.x + object.line_x0 * sx,
-                    imagePos.y + object.line_y0 * sy);
-
-                const ImVec2 c1(
-                    imagePos.x + object.line_x1 * sx,
-                    imagePos.y + object.line_y1 * sy);
-
+                const ImVec2 c0 = ImageToScreen(object.line_x0, object.line_y0);
+                const ImVec2 c1 = ImageToScreen(object.line_x1, object.line_y1);
                 drawList->AddLine(c0, c1, roiColor, 2.0f);
-
-                if (object.has_line_scan_box)
-                {
-                    ImVec2 p0;
-                    ImVec2 p1;
-                    ImVec2 p2;
-                    ImVec2 p3;
-
-                    if (BuildLineScanBoxPoints(object, imagePos, sx, sy, p0, p1, p2, p3))
-                    {
-                        drawList->AddLine(p0, p1, roiColor, 1.5f);
-                        drawList->AddLine(p1, p2, roiColor, 1.5f);
-                        drawList->AddLine(p2, p3, roiColor, 1.5f);
-                        drawList->AddLine(p3, p0, roiColor, 1.5f);
-                    }
-                }
-
                 drawList->AddCircleFilled(c0, 4.0f, roiColor);
                 drawList->AddCircleFilled(c1, 4.0f, roiColor);
                 drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 6.0f), roiColor, object.name.c_str());
@@ -1125,38 +925,108 @@ void ViewController::drawScriptAcceptancePanels()
                 }
             }
 
+            if (object.has_line_scan_box)
+            {
+                const ImVec2 p0 = ImageToScreen(object.line_scan_box_xy[0], object.line_scan_box_xy[1]);
+                const ImVec2 p1 = ImageToScreen(object.line_scan_box_xy[2], object.line_scan_box_xy[3]);
+                const ImVec2 p2 = ImageToScreen(object.line_scan_box_xy[4], object.line_scan_box_xy[5]);
+                const ImVec2 p3 = ImageToScreen(object.line_scan_box_xy[6], object.line_scan_box_xy[7]);
+                drawList->AddLine(p0, p1, roiColor, 1.5f);
+                drawList->AddLine(p1, p2, roiColor, 1.5f);
+                drawList->AddLine(p2, p3, roiColor, 1.5f);
+                drawList->AddLine(p3, p0, roiColor, 1.5f);
+            }
+
             if (object.has_line_measure_points)
             {
                 for (std::size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
                 {
-                    const float px = object.line_measure_points_xy[i];
-                    const float py = object.line_measure_points_xy[i + 1];
-                    const ImVec2 p(imagePos.x + px * sx, imagePos.y + py * sy);
-                    drawList->AddCircleFilled(p, 3.0f, pointColor);
+                    drawList->AddCircleFilled(
+                        ImageToScreen(object.line_measure_points_xy[i], object.line_measure_points_xy[i + 1]),
+                        3.0f,
+                        pointColor);
                 }
             }
             else if (object.has_line_roi)
             {
-                const ImVec2 c0(imagePos.x + object.line_x0 * sx,
-                                imagePos.y + object.line_y0 * sy);
+                const ImVec2 c0 = ImageToScreen(object.line_x0, object.line_y0);
                 drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 22.0f), pendingColor, "measure points: 0");
             }
 
             if (object.has_fit_line)
             {
-                const ImVec2 p0(imagePos.x + object.fit_line_x0 * sx,
-                                imagePos.y + object.fit_line_y0 * sy);
-                const ImVec2 p1(imagePos.x + object.fit_line_x1 * sx,
-                                imagePos.y + object.fit_line_y1 * sy);
-                drawList->AddLine(p0, p1, fitColor, 3.0f);
-                drawList->AddText(ImVec2(p0.x + 6.0f, p0.y - 14.0f), fitColor, "fit_line");
+                const ImVec2 fit0 = ImageToScreen(object.fit_line_x0, object.fit_line_y0);
+                const ImVec2 fit1 = ImageToScreen(object.fit_line_x1, object.fit_line_y1);
+                drawList->AddLine(fit0, fit1, fitColor, 3.0f);
+                drawList->AddText(ImVec2(fit0.x + 6.0f, fit0.y - 14.0f), fitColor, "fit_line");
             }
         }
-    }
 
-    // Layer 2: Manual Element / Annotation Tool Layer.
-    // Manual tools are not runtime result.
-    drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
+        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        {
+            if (object.type != "Findcircle")
+                continue;
+            if (!object.visualizable || object.stale)
+                continue;
+
+            const bool isActiveResultObject =
+                !m_manualTest.current_result_ref.source_object.empty() &&
+                object.name == m_manualTest.current_result_ref.source_object;
+
+            const ImU32 roiColor = isActiveResultObject
+                ? IM_COL32(80, 255, 170, 255)
+                : IM_COL32(80, 255, 170, 160);
+            const ImU32 pointColor = isActiveResultObject
+                ? IM_COL32(255, 80, 80, 255)
+                : IM_COL32(255, 80, 80, 160);
+            const ImU32 fitColor = isActiveResultObject
+                ? IM_COL32(255, 220, 80, 255)
+                : IM_COL32(255, 220, 80, 160);
+            const ImU32 pendingColor = IM_COL32(255, 220, 80, 180);
+
+            if (object.has_circle_roi_outer_polyline)
+                DrawImagePolylineClosed(object.circle_roi_outer_xy, roiColor, 2.0f);
+            if (object.has_circle_roi_inner_polyline)
+                DrawImagePolylineClosed(object.circle_roi_inner_xy, roiColor, 1.5f);
+
+            if (object.has_circle)
+            {
+                const ImVec2 center = ImageToScreen(object.circle_cx, object.circle_cy);
+                drawList->AddCircleFilled(center, 3.5f, roiColor);
+                drawList->AddText(ImVec2(center.x + 6.0f, center.y + 6.0f), roiColor, object.name.c_str());
+            }
+
+            if (object.has_measure_points)
+            {
+                for (std::size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
+                {
+                    drawList->AddCircleFilled(
+                        ImageToScreen(object.measure_points_xy[i], object.measure_points_xy[i + 1]),
+                        2.5f,
+                        pointColor);
+                }
+            }
+            else if (object.has_circle)
+            {
+                const ImVec2 center = ImageToScreen(object.circle_cx, object.circle_cy);
+                drawList->AddText(ImVec2(center.x + 6.0f, center.y + 22.0f), pendingColor, "measure points: 0");
+            }
+
+            if (object.has_fit_circle_polyline)
+                DrawImagePolylineClosed(object.fit_circle_xy, fitColor, 3.0f);
+
+            if (object.has_fit_result)
+            {
+                const ImVec2 fitCenter = ImageToScreen(object.fit_cx, object.fit_cy);
+                drawList->AddCircleFilled(fitCenter, 3.0f, fitColor);
+                drawList->AddText(ImVec2(fitCenter.x + 6.0f, fitCenter.y - 14.0f), fitColor, "fit_circle");
+            }
+        }
+
+        // Layer 2: Manual Element / Annotation Tool Layer.
+
+        // Manual tools are not runtime result.
+        drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
 
     if (m_showTestPoints)
     {
@@ -1203,7 +1073,6 @@ void ViewController::drawScriptAcceptancePanels()
         (io.MousePos.y - imagePos.y) * m_imageViewImage.rows / imageSize.y);
       ImGui::SetTooltip("image coordinate: %d, %d", imageX, imageY);
     }
-  }
   ImGui::TextWrapped("image_ref: %s", emptyAsNone(m_scriptResult.image_ref));
   ImGui::TextWrapped("overlay_ref: %s", emptyAsNone(m_scriptResult.overlay_ref));
   ImGui::Text("result_attach_status: %s", m_scriptResult.result_ref.empty() ? "not_attached" : "attached");

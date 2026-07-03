@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <fstream>
 #include <iomanip>
+#include <array>
+#include <cstdint>
 struct ScriptLineView
 {
   int line_no = 0;
@@ -105,6 +107,12 @@ struct RuntimeObjectView
     bool has_line_scan_box = false;
     float line_scan_half_width = 3.0f;
     int linegap = 3;
+    std::array<float, 8> line_scan_box_xy = {
+        0.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 0.0f
+    };
 
     // Findline measure points.
     bool has_line_measure_points = false;
@@ -127,6 +135,19 @@ struct RuntimeObjectView
     std::string line_fit_status;
     std::string line_fit_mode;
     std::string line_measure_status;
+
+    // Findcircle display snapshot.
+    bool has_circle_roi_outer_polyline = false;
+    std::vector<float> circle_roi_outer_xy;
+    bool has_circle_roi_inner_polyline = false;
+    std::vector<float> circle_roi_inner_xy;
+    std::uint32_t circle_roi_segment_count = 0;
+
+    bool has_fit_circle_polyline = false;
+    std::vector<float> fit_circle_xy;
+    std::uint32_t fit_circle_segment_count = 0;
+
+    std::uint64_t display_version = 0;
 
 
 };
@@ -212,6 +233,7 @@ struct ManualTestContext
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   std::vector<RuntimeObjectView> runtime_objects;
+  std::uint64_t runtime_overlay_version = 0;
   std::vector<DebugStepSnapshot> debug_snapshots;
   DebugStepSnapshot current_debug_snapshot;
   std::unordered_map<std::string, int> runtime_int_vars;
