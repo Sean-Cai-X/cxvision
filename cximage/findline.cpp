@@ -1852,13 +1852,27 @@ bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
     out.hgap = m_ihgap;
     out.linegap = m_iSelectPointGap;
 
-    int toolHalfWidth = std::max(m_iwgap, m_ihgap);
+    const float dx = out.x1 - out.x0;
+    const float dy = out.y1 - out.y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
 
-    if (toolHalfWidth <= 0)
-        toolHalfWidth = 24;
+    float scanHalfWidth = 0.0f;
 
-    out.scan_half_width =
-        std::max(2.0f, static_cast<float>(toolHalfWidth));
+    if (len > 1.0e-5f)
+    {
+        const float nx = std::abs(-dy / len);
+        const float ny = std::abs(dx / len);
+
+        const float wx = static_cast<float>(std::max(0, m_iwgap));
+        const float hy = static_cast<float>(std::max(0, m_ihgap));
+
+        scanHalfWidth = nx * wx + ny * hy;
+    }
+
+    if (scanHalfWidth <= 0.0f)
+        scanHalfWidth = 24.0f;
+
+    out.scan_half_width = std::max(2.0f, scanHalfWidth);
 
     const CxLineScanBoxSnapshot box =
         BuildCxLineScanBoxSnapshotFromHalfWidth(

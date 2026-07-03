@@ -2471,9 +2471,18 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
     if (!hasGeometry)
     {
         line.status = "PENDING_BINDING";
-        line.reason = sourceObject->type == "Findline" ?
-            "get_result requires a valid Findline fit result" :
-            "get_result requires a valid fit result; no result fabricated";
+
+        if (sourceObject->type == "Findline")
+        {
+            line.reason = sourceObject->line_result_reason.empty()
+                ? "get_result requires a valid Findline fit result"
+                : sourceObject->line_result_reason;
+        }
+        else
+        {
+            line.reason = "get_result requires a valid fit result; no result fabricated";
+        }
+
         AppendCxDebugEvent(
             context,
             "get_result_pending_binding",
@@ -2502,6 +2511,16 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref.status = "PENDING_BINDING";
         context.current_result_ref.reason = line.reason;
         context.current_result_ref.line_no = line.line_no;
+
+        if (sourceObject->type == "Findline")
+        {
+            context.current_result_ref.line_result_status =
+                sourceObject->line_result_status;
+            context.current_result_ref.line_result_reason =
+                sourceObject->line_result_reason;
+            context.current_result_ref.line_measure_status =
+                sourceObject->line_measure_status;
+        }
 
         // 注意：这里不 BLOCKED，不伪造 PASS，允许脚本继续到 global.current_status。
         context.debug_status = "PENDING";
@@ -2784,7 +2803,9 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "setmethod" ||
         call.method == "setthre" ||
         call.method == "setlinegap" ||
-        call.method == "setfitmode";
+        call.method == "setfitmode" ||
+        call.method == "SetWHgap" ||
+        call.method == "setwhgap";
 
     if (!isFindlineParamMethod)
         return false;
@@ -2806,6 +2827,91 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         context.run_state = "blocked";
         context.debug_status = "BLOCKED";
         context.debug_reason = line.reason;
+        return true;
+    }
+
+    if (call.method == "SetWHgap" || call.method == "setwhgap")
+    {
+        if (call.args.size() < 2)
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findline.SetWHgap requires wgap and hgap";
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        int wgap = 0;
+        int hgap = 0;
+
+        if (!ResolveDebugInt(context, call.args[0], wgap) ||
+            !ResolveDebugInt(context, call.args[1], hgap))
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findline.SetWHgap failed to resolve arguments";
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        it->second->SetWHgap(wgap, hgap);
+
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            call.object,
+            "Findline",
+            line.line_no);
+
+        RefreshFindlineDisplaySnapshot(context, object, *it->second);
+
+        object.exists_in_parser = true;
+        object.type = "Findline";
+        object.last_method = call.method;
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "runtime_param_set";
+        object.last_update_line = line.line_no;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.stale = false;
+
+        std::ostringstream summary;
+        summary << "Findline.SetWHgap executed"
+                << " | wgap=" << wgap
+                << " | hgap=" << hgap
+                << " | scan_half_width=" << object.line_scan_half_width;
+
+        object.display_summary = summary.str();
+
+        line.status = "runtime_executed";
+        line.reason = object.display_summary;
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+
+        AppendCxDebugEvent(
+            context,
+            "findline_param_method",
+            line.line_no,
+            statement,
+            call.object,
+            call.method,
+            line.status,
+            line.reason,
+            object.display_summary);
+
+        AppendCxDebugRuntimeObjectsSnapshot(
+            context,
+            "runtime_objects_after_findline_setwhgap");
+
         return true;
     }
 
@@ -2992,13 +3098,27 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
         {
             object.runtime_state = "fitline_pending_binding";
             object.last_runtime_status = "PENDING_BINDING";
+
+            if (object.valid_line_points_count < 2)
+            {
+                object.line_result_status = "NO_VALID_MEASURE_POINTS";
+                object.line_result_reason =
+                    "Findline.fitline requires at least two valid measure points; "
+                    + object.line_measure_status;
+            }
+            else
+            {
+                object.line_result_status = "FITLINE_PENDING_BINDING";
+                object.line_result_reason = tool.getfitstatus();
+            }
         }
 
         RefreshFindlineDisplaySnapshot(context, object, tool);
 
         std::ostringstream summary;
         summary << "Findline." << call.method << " executed"
-                << " | " << object.line_measure_status
+                << " | result_status=" << object.line_result_status
+                << " | reason=" << object.line_result_reason
                 << " | fit_mode=" << object.line_fit_mode
                 << " | fit_status=" << object.line_fit_status;
         if (object.has_fit_line)

@@ -1,4 +1,4 @@
-﻿#include "muParserDef.h"
+#include "muParserDef.h"
 #include "muParserTest.h" 
 #include "ParserClass.h"
 
@@ -440,6 +440,7 @@ namespace mu
             m_parser.DefineClassFun("Findline", pfindline, "Show", &Findline::setshow);
             m_parser.DefineClassFun("Findline", pfindline, "clear", &Findline::clear);
             m_parser.DefineClassFun("Findline", pfindline, "setwhgap", &Findline::SetWHgap);
+            m_parser.DefineClassFun("Findline", pfindline, "SetWHgap", &Findline::SetWHgap);
             m_parser.DefineClassFun("Findline", pfindline, "measure", &Findline::measure);
             m_parser.DefineClassFun("Findline", pfindline, "setlinesample", &Findline::setlinesamplerate);
             m_parser.DefineClassFun("Findline", pfindline, "setlinegap", &Findline::setlinegap);

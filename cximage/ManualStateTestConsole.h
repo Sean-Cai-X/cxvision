@@ -138,6 +138,8 @@ struct RuntimeObjectView
     std::string line_fit_status;
     std::string line_fit_mode;
     std::string line_measure_status;
+    std::string line_result_status;
+    std::string line_result_reason;
 
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
@@ -200,6 +202,10 @@ struct ResultRefView
     float line_avgdist = 0.0f;
     int line_points_count = 0;
     int valid_line_points_count = 0;
+
+    std::string line_result_status;
+    std::string line_result_reason;
+    std::string line_measure_status;
 
 };
 
