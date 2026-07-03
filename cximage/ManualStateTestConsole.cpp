@@ -679,6 +679,9 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
 
                 file << "  line_scale: " << object.line_scale << "\n";
                 file << "  linegap: " << object.linegap << "\n";
+                file << "  line_tool_wgap: " << object.line_tool_wgap << "\n";
+                file << "  line_tool_hgap: " << object.line_tool_hgap << "\n";
+                file << "  line_display_source: " << object.line_display_source << "\n";
                 file << "  has_line_scan_box: "
                      << (object.has_line_scan_box ? "true" : "false") << "\n";
                 file << "  line_scan_half_width: "
@@ -2603,31 +2606,40 @@ static void AppendPointsShapeToXY(PointsShape& points, std::vector<float>& outXY
 }
 
 static void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
-    RuntimeObjectView& object)
+                                           RuntimeObjectView& object,
+                                           Findline& lineTool)
 {
     if (object.type != "Findline")
-        return;
-
-    object.has_line_scan_box = false;
-    object.line_scan_box_xy = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-
-    if (object.has_line_roi)
     {
-        const CxLineScanBoxSnapshot scanBox = BuildCxLineScanBoxSnapshot(
-            object.line_x0,
-            object.line_y0,
-            object.line_x1,
-            object.line_y1,
-            object.line_scale,
-            object.linegap);
-
-        object.has_line_scan_box = scanBox.valid;
-        if (scanBox.valid)
-        {
-            object.line_scan_box_xy = scanBox.xy;
-            object.line_scan_half_width = scanBox.half_width;
-        }
+        object.has_line_scan_box = false;
+        return;
     }
+
+    FindlineDisplaySnapshot snapshot;
+
+    if (!lineTool.getdisplaysnapshot(snapshot))
+    {
+        object.has_line_roi = false;
+        object.has_line_scan_box = false;
+        object.line_display_source = "Findline::getdisplaysnapshot unavailable";
+        return;
+    }
+
+    object.has_line_roi = snapshot.has_line_roi;
+    object.line_x0 = snapshot.x0;
+    object.line_y0 = snapshot.y0;
+    object.line_x1 = snapshot.x1;
+    object.line_y1 = snapshot.y1;
+    object.line_scale = snapshot.scale;
+
+    object.line_tool_wgap = snapshot.wgap;
+    object.line_tool_hgap = snapshot.hgap;
+    object.linegap = snapshot.linegap;
+
+    object.has_line_scan_box = snapshot.has_scan_box;
+    object.line_scan_half_width = snapshot.scan_half_width;
+    object.line_scan_box_xy = snapshot.scan_box_xy;
+    object.line_display_source = snapshot.source;
 
     ++object.display_version;
     ++context.runtime_overlay_version;
@@ -2732,8 +2744,7 @@ static bool TryExecuteFindlineSetline(ManualTestContext& context,
     object.line_y1 = static_cast<float>(values[3]);
     object.line_scale = static_cast<float>(values[4]);
 
-    object.linegap = object.linegap > 0 ? object.linegap : 3;
-    RefreshFindlineDisplaySnapshot(context, object);
+    RefreshFindlineDisplaySnapshot(context, object, *it->second);
 
     object.visualizable = true;
     object.visual_source = "runtime_object";
@@ -2847,8 +2858,7 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
 
     if (updatedLineGap)
     {
-        object.linegap = updatedLineGapValue;
-        RefreshFindlineDisplaySnapshot(context, object);
+        RefreshFindlineDisplaySnapshot(context, object, *it->second);
     }
 
     object.display_summary = "Findline." + call.method + "(" + call.params + ")";
@@ -2921,7 +2931,7 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
         tool.measure(static_cast<void*>(image));
 
         RefreshFindlineMeasureSnapshot(object, tool);
-        RefreshFindlineDisplaySnapshot(context, object);
+        RefreshFindlineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
         object.type = "Findline";
@@ -2953,7 +2963,7 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
     {
         tool.fitline();
         RefreshFindlineMeasureSnapshot(object, tool);
-        RefreshFindlineDisplaySnapshot(context, object);
+        RefreshFindlineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
         object.type = "Findline";
@@ -2984,7 +2994,7 @@ static bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int line
             object.last_runtime_status = "PENDING_BINDING";
         }
 
-        RefreshFindlineDisplaySnapshot(context, object);
+        RefreshFindlineDisplaySnapshot(context, object, tool);
 
         std::ostringstream summary;
         summary << "Findline." << call.method << " executed"

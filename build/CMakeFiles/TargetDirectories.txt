@@ -1,0 +1,10 @@
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/CMakeFiles/cxvision_imgui_acceptance.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/CMakeFiles/INSTALL.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/CMakeFiles/ALL_BUILD.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/CMakeFiles/ZERO_CHECK.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/CMakeFiles/uninstall.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/CMakeFiles/INSTALL.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/CMakeFiles/ALL_BUILD.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/src/CMakeFiles/update_mappings.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/src/CMakeFiles/glfw.dir
+D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/build/_deps/glfw/src/CMakeFiles/INSTALL.dir

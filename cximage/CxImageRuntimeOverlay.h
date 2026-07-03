@@ -18,35 +18,36 @@ struct CxLineScanBoxSnapshot
     float half_width = 0.0f;
 };
 
-inline CxLineScanBoxSnapshot BuildCxLineScanBoxSnapshot(float x0,
-                                                        float y0,
-                                                        float x1,
-                                                        float y1,
-                                                        float scale,
-                                                        int linegap)
+inline CxLineScanBoxSnapshot BuildCxLineScanBoxSnapshotFromHalfWidth(
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float halfWidth)
 {
     CxLineScanBoxSnapshot result;
 
     const float dx = x1 - x0;
     const float dy = y1 - y0;
     const float len = std::sqrt(dx * dx + dy * dy);
+
     if (len <= 1.0e-5f)
         return result;
 
     const float nx = -dy / len;
     const float ny = dx / len;
-    const float safeScale = std::max(1.0f, scale);
-    const float safeGap = static_cast<float>(std::max(1, linegap));
-    const float halfWidth = std::max(2.0f, safeGap * safeScale);
 
-    const float ax0 = x0 + nx * halfWidth;
-    const float ay0 = y0 + ny * halfWidth;
-    const float ax1 = x1 + nx * halfWidth;
-    const float ay1 = y1 + ny * halfWidth;
-    const float bx0 = x0 - nx * halfWidth;
-    const float by0 = y0 - ny * halfWidth;
-    const float bx1 = x1 - nx * halfWidth;
-    const float by1 = y1 - ny * halfWidth;
+    const float hw = std::max(2.0f, halfWidth);
+
+    const float ax0 = x0 + nx * hw;
+    const float ay0 = y0 + ny * hw;
+    const float ax1 = x1 + nx * hw;
+    const float ay1 = y1 + ny * hw;
+
+    const float bx0 = x0 - nx * hw;
+    const float by0 = y0 - ny * hw;
+    const float bx1 = x1 - nx * hw;
+    const float by1 = y1 - ny * hw;
 
     result.xy = {
         ax0, ay0,
@@ -54,9 +55,23 @@ inline CxLineScanBoxSnapshot BuildCxLineScanBoxSnapshot(float x0,
         bx1, by1,
         bx0, by0
     };
-    result.half_width = halfWidth;
+
+    result.half_width = hw;
     result.valid = true;
     return result;
+}
+
+inline CxLineScanBoxSnapshot BuildCxLineScanBoxSnapshot(float x0,
+                                                        float y0,
+                                                        float x1,
+                                                        float y1,
+                                                        float scale,
+                                                        int linegap)
+{
+    const float safeScale = std::max(1.0f, scale);
+    const float safeGap = static_cast<float>(std::max(1, linegap));
+    const float halfWidth = std::max(2.0f, safeGap * safeScale);
+    return BuildCxLineScanBoxSnapshotFromHalfWidth(x0, y0, x1, y1, halfWidth);
 }
 
 struct CxCirclePolylineSnapshot

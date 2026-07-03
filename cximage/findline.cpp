@@ -449,6 +449,12 @@ void Findline::setlinesegment(double ix0, double iy0,
         ptRect[2].X(), ptRect[2].Y(), ptRect[3].X(), ptRect[3].Y()
     );
 
+    m_has_display_line_roi = true;
+    m_display_line_x0 = ix0;
+    m_display_line_y0 = iy0;
+    m_display_line_x1 = ix1;
+    m_display_line_y1 = iy1;
+    m_display_line_scale = dscale;
 }
 void Findline::setrect(int ix, int iy, int iw, int ih)
 { 
@@ -1826,6 +1832,53 @@ void Findline::InflectionPoint(void* points)
         m_measurepoints_w.FindCrossPoints(points);
         return;
     } 
+}
+
+bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
+{
+    out = FindlineDisplaySnapshot();
+
+    if (!m_has_display_line_roi)
+        return false;
+
+    out.has_line_roi = true;
+    out.x0 = static_cast<float>(m_display_line_x0);
+    out.y0 = static_cast<float>(m_display_line_y0);
+    out.x1 = static_cast<float>(m_display_line_x1);
+    out.y1 = static_cast<float>(m_display_line_y1);
+    out.scale = static_cast<float>(m_display_line_scale);
+
+    out.wgap = m_iwgap;
+    out.hgap = m_ihgap;
+    out.linegap = m_iSelectPointGap;
+
+    int toolHalfWidth = std::max(m_iwgap, m_ihgap);
+
+    if (toolHalfWidth <= 0)
+        toolHalfWidth = 24;
+
+    out.scan_half_width =
+        std::max(2.0f, static_cast<float>(toolHalfWidth));
+
+    const CxLineScanBoxSnapshot box =
+        BuildCxLineScanBoxSnapshotFromHalfWidth(
+            out.x0,
+            out.y0,
+            out.x1,
+            out.y1,
+            out.scan_half_width);
+
+    out.has_scan_box = box.valid;
+
+    if (box.valid)
+    {
+        out.scan_box_xy = box.xy;
+        out.scan_half_width = box.half_width;
+    }
+
+    out.source = "Findline::getdisplaysnapshot";
+
+    return true;
 }
 
 namespace

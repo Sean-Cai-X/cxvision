@@ -4,12 +4,42 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "findobject.h"
+#include "CxImageRuntimeOverlay.h"
 #include <string>
 #include <map>
 #include <string>
+#include <array>
 
 
 class FindObject;
+
+struct FindlineDisplaySnapshot
+{
+    bool has_line_roi = false;
+
+    float x0 = 0.0f;
+    float y0 = 0.0f;
+    float x1 = 0.0f;
+    float y1 = 0.0f;
+    float scale = 1.0f;
+
+    int wgap = 0;
+    int hgap = 0;
+    int linegap = 0;
+
+    float scan_half_width = 0.0f;
+
+    bool has_scan_box = false;
+
+    std::array<float, 8> scan_box_xy = {
+        0.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 0.0f
+    };
+
+    std::string source;
+};
 
 struct EdgeBandCandidate
 {
@@ -180,11 +210,18 @@ public:
     double getavgdist() const { return m_result_avgdist; }
     int getvalidpointcount() const { return m_result_valid_points; }
     bool hasfitresult() const { return m_has_fit_result; }
+    bool getdisplaysnapshot(FindlineDisplaySnapshot& out) const;
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
     PointsShape m_modelpoints_org;     
 
+    bool m_has_display_line_roi = false;
+    double m_display_line_x0 = 0.0;
+    double m_display_line_y0 = 0.0;
+    double m_display_line_x1 = 0.0;
+    double m_display_line_y1 = 0.0;
+    double m_display_line_scale = 1.0;
 
     vector<PointsShape>  m_modelsegments;
 

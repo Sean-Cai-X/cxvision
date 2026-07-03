@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\build\CMakeFiles\38583810c14ec577dc62c1076ed84f35\uninstall.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\glfw-3.3.10\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\build\_deps\glfw\CMakeFiles\uninstall" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{BB8F82D9-3678-3848-8103-288326CC4681}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

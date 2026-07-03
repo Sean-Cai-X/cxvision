@@ -107,6 +107,9 @@ struct RuntimeObjectView
     bool has_line_scan_box = false;
     float line_scan_half_width = 3.0f;
     int linegap = 3;
+    int line_tool_wgap = 0;
+    int line_tool_hgap = 0;
+    std::string line_display_source;
     std::array<float, 8> line_scan_box_xy = {
         0.0f, 0.0f,
         0.0f, 0.0f,
