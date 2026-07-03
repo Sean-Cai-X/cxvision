@@ -387,7 +387,21 @@ static std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& objec
        << " | roi_segments=" << object.circle_roi_segment_count
        << " | fit_circle_polyline=" << (object.has_fit_circle_polyline ? "true" : "false")
        << " | fit_segments=" << object.fit_circle_segment_count
-       << " | display_version=" << object.display_version;
+       << " | display_version=" << object.display_version
+       << " | circle_geometry_ready="
+       << (object.circle_measure_geometry_ready ? "true" : "false")
+       << " | circle_dirty="
+       << (object.circle_measure_geometry_dirty ? "true" : "false")
+       << " | circle_scan_lines="
+       << object.circle_scan_line_count
+       << " | circle_scan_len="
+       << object.circle_scan_line_length
+       << " | circle_process_w="
+       << object.circle_process_width
+       << " | circle_measure_source="
+       << object.circle_measure_source
+       << " | circle_failure_stage="
+       << object.circle_measure_failure_stage;
 
     return ss.str();
 }
@@ -444,7 +458,11 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | fit_mode=" << object.line_fit_mode
        << " | fit_status=" << object.line_fit_status
        << " | has_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
-       << " | display_version=" << object.display_version;
+       << " | display_version=" << object.display_version
+       << " | geometry_request_valid=" << (object.line_measure_geometry_request_valid ? "true" : "false")
+       << " | geometry_ready=" << (object.line_measure_geometry_ready ? "true" : "false")
+       << " | geometry_dirty=" << (object.line_measure_geometry_dirty ? "true" : "false")
+       << " | geometry_half_width=" << object.line_measure_geometry_half_width;
 
     return ss.str();
 }
@@ -691,6 +709,59 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                      << (object.has_fit_circle_polyline ? "true" : "false") << "\n";
                 file << "  fit_circle_segment_count: "
                      << object.fit_circle_segment_count << "\n";
+
+                file << "  circle_measure_geometry_request_valid: "
+                     << (object.circle_measure_geometry_request_valid ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_geometry_dirty: "
+                     << (object.circle_measure_geometry_dirty ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_geometry_ready: "
+                     << (object.circle_measure_geometry_ready ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_geometry_version: "
+                     << object.circle_measure_geometry_version << "\n";
+
+                file << "  circle_measure_geometry_built_version: "
+                     << object.circle_measure_geometry_built_version << "\n";
+
+                file << "  circle_scan_line_count: "
+                     << object.circle_scan_line_count << "\n";
+
+                file << "  circle_scan_line_length: "
+                     << object.circle_scan_line_length << "\n";
+
+                file << "  circle_process_width: "
+                     << object.circle_process_width << "\n";
+
+                file << "  circle_measure_image_ready: "
+                     << (object.circle_measure_image_ready ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_image_size: "
+                     << object.circle_measure_image_width << "x"
+                     << object.circle_measure_image_height << "x"
+                     << object.circle_measure_image_channels << "\n";
+
+                file << "  circle_measure_backimage_ready: "
+                     << (object.circle_measure_backimage_ready ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_findobject_ready: "
+                     << (object.circle_measure_findobject_ready ? "true" : "false")
+                     << "\n";
+
+                file << "  circle_measure_source: "
+                     << object.circle_measure_source << "\n";
+
+                file << "  circle_measure_failure_stage: "
+                     << object.circle_measure_failure_stage << "\n";
+
+                file << "  circle_measure_detail: "
+                     << object.circle_measure_detail << "\n";
             }
 
             if (object.type == "Findline")
@@ -830,6 +901,27 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
 
                 file << "  line_measure_original_detail: "
                      << object.line_measure_original_detail << "\n";
+
+                file << "  line_measure_geometry_request_valid: "
+                     << (object.line_measure_geometry_request_valid ? "true" : "false")
+                     << "\n";
+
+                file << "  line_measure_geometry_dirty: "
+                     << (object.line_measure_geometry_dirty ? "true" : "false")
+                     << "\n";
+
+                file << "  line_measure_geometry_ready: "
+                     << (object.line_measure_geometry_ready ? "true" : "false")
+                     << "\n";
+
+                file << "  line_measure_geometry_version: "
+                     << object.line_measure_geometry_version << "\n";
+
+                file << "  line_measure_geometry_built_version: "
+                     << object.line_measure_geometry_built_version << "\n";
+
+                file << "  line_measure_geometry_half_width: "
+                     << object.line_measure_geometry_half_width << "\n";
 
                 file << "  display_version: " << object.display_version << "\n";
             }
@@ -1927,6 +2019,65 @@ static void RefreshFindcircleDisplaySnapshot(ManualTestContext& context,
     ++object.display_version;
     ++context.runtime_overlay_version;
 }
+static void RefreshFindcircleMeasureGeometrySnapshot(
+    RuntimeObjectView& object,
+    Findcircle& circle)
+{
+    const FindcircleMeasureGeometryDebug& dbg =
+        circle.lastmeasuregeometrydebug();
+
+    object.circle_measure_geometry_request_valid =
+        dbg.request_valid;
+
+    object.circle_measure_geometry_dirty =
+        dbg.geometry_dirty;
+
+    object.circle_measure_geometry_ready =
+        dbg.geometry_ready;
+
+    object.circle_measure_geometry_version =
+        dbg.geometry_version;
+
+    object.circle_measure_geometry_built_version =
+        dbg.geometry_built_version;
+
+    object.circle_scan_line_count =
+        dbg.scan_line_count;
+
+    object.circle_scan_line_length =
+        dbg.scan_line_length;
+
+    object.circle_process_width =
+        dbg.process_width;
+
+    object.circle_measure_image_ready =
+        dbg.image_ready;
+
+    object.circle_measure_image_width =
+        dbg.image_width;
+
+    object.circle_measure_image_height =
+        dbg.image_height;
+
+    object.circle_measure_image_channels =
+        dbg.image_channels;
+
+    object.circle_measure_backimage_ready =
+        dbg.backimage_ready;
+
+    object.circle_measure_findobject_ready =
+        dbg.findobject_ready;
+
+    object.circle_measure_source =
+        dbg.measure_source;
+
+    object.circle_measure_failure_stage =
+        dbg.failure_stage;
+
+    object.circle_measure_detail =
+        dbg.detail;
+}
+
 static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -1988,6 +2139,8 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
 
     circleIt->second->setcircle(cx, cy, perimeterX, perimeterY);
 
+    RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+
     object.has_circle = true;
     RefreshFindcircleDisplaySnapshot(context, object);
     object.visualizable = true;
@@ -2000,12 +2153,16 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
 
     std::ostringstream summary;
-    summary << "circle=("
-        << object.circle_cx << ", "
-        << object.circle_cy << ", "
-        << object.circle_inner << ", "
-        << object.circle_radius << ")"
-        << " | native_perimeter=(" << perimeterX << ", " << perimeterY << ")";
+    summary << "Findcircle.setcircle executed"
+            << " | script_circle=("
+            << object.circle_cx << ", "
+            << object.circle_cy << ", "
+            << object.circle_inner << ", "
+            << object.circle_radius << ")"
+            << " | native_perimeter=("
+            << perimeterX << ", "
+            << perimeterY << ")"
+            << " | request_cache=updated";
     object.display_summary = summary.str();
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
@@ -2046,7 +2203,12 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         call.method == "Setgap" ||
         call.method == "setthre" ||
         call.method == "setlinegap" ||
-        call.method == "setfitmeasuregap";
+        call.method == "setfitmeasuregap" ||
+        call.method == "setcirclegap" ||
+        call.method == "setlinesamplerate" ||
+        call.method == "setgamarate" ||
+        call.method == "setfindsetting" ||
+        call.method == "setselectedgenum";
 
     if (!isCircleParamMethod)
         return false;
@@ -2091,6 +2253,25 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         circleIt->second->setlinegap(value);
     else if (call.method == "setfitmeasuregap")
         circleIt->second->setfitmeasuregap(value);
+    else if (call.method == "setcirclegap")
+        circleIt->second->setcirclegap(value);
+    else if (call.method == "setgamarate")
+        circleIt->second->setgamarate(value);
+    else if (call.method == "setfindsetting")
+        circleIt->second->setfindsetting(value);
+    else if (call.method == "setselectedgenum")
+        circleIt->second->setselectedgenum(value);
+    else if (call.method == "setlinesamplerate")
+        circleIt->second->setlinesamplerate(
+            std::atof(call.args[0].c_str()));
+
+    RefreshFindcircleMeasureGeometrySnapshot(
+        EnsureRuntimeObject(
+            context,
+            call.object,
+            "Findcircle",
+            context.line_views[static_cast<std::size_t>(lineIndex)].line_no),
+        *circleIt->second);
 
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
@@ -2188,8 +2369,9 @@ static void FillFindcircleResultView(RuntimeObjectView& object,
     object.measure_points_count = pointCount;
     object.valid_points_count = static_cast<int>(object.measure_points_xy.size() / 2);
     object.has_measure_points = !object.measure_points_xy.empty();
-}
 
+    RefreshFindcircleMeasureGeometrySnapshot(object, circle);
+}
 
 
 
@@ -2911,6 +3093,24 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
 
     object.line_measure_original_chain_length =
         input.original_chain_length;
+
+    object.line_measure_geometry_request_valid =
+        input.measure_geometry_request_valid;
+
+    object.line_measure_geometry_dirty =
+        input.measure_geometry_dirty;
+
+    object.line_measure_geometry_ready =
+        input.measure_geometry_ready;
+
+    object.line_measure_geometry_version =
+        input.measure_geometry_version;
+
+    object.line_measure_geometry_built_version =
+        input.measure_geometry_built_version;
+
+    object.line_measure_geometry_half_width =
+        input.measure_geometry_half_width;
 
     std::ostringstream status;
     status << "source=" << object.line_measure_source

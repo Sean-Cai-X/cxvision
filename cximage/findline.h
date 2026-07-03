@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 #include <array>
+#include <cstdint>
 
 
 class FindObject;
@@ -39,6 +40,26 @@ struct FindlineDisplaySnapshot
     };
 
     std::string source;
+};
+
+struct FindlineMeasureGeometryRequest
+{
+    bool valid = false;
+
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+
+    double script_scale = 1.0;
+
+    double measure_half_width = 1.0;
+
+    int wgap = 0;
+    int hgap = 0;
+    int linegap = 0;
+
+    std::uint64_t version = 0;
 };
 
 struct EdgeBandCandidate
@@ -136,6 +157,15 @@ struct FindlineMeasureInputDebug
     int original_point_count = 0;
     int original_edgeband_count = 0;
     int original_chain_length = 0;
+
+    bool measure_geometry_request_valid = false;
+    bool measure_geometry_dirty = false;
+    bool measure_geometry_ready = false;
+
+    std::uint64_t measure_geometry_version = 0;
+    std::uint64_t measure_geometry_built_version = 0;
+
+    double measure_geometry_half_width = 0.0;
 };
 
 class Findline :public Shape
@@ -365,12 +395,45 @@ private:
     void ProbeDisplayRoiGrayStats(Image& image);
     bool MeasureSimpleRoiGradientPoints(Image& image,
                                         FindlineMeasureProfileStats& stats);
+
+    void MarkMeasureGeometryDirty();
+
+    double ComputeMeasureHalfWidthForLine(double x0,
+                                          double y0,
+                                          double x1,
+                                          double y1) const;
+
+    void UpdateMeasureGeometryRequest(double x0,
+                                      double y0,
+                                      double x1,
+                                      double y1,
+                                      double scriptScale);
+
+    bool EnsureOriginalMeasureGeometryReady();
+
+    bool BuildOriginalMeasureGeometryFromRequest(
+        const FindlineMeasureGeometryRequest& request);
+
+    void BuildOriginalMeasureGeometryCore(double ix0,
+                                          double iy0,
+                                          double ix1,
+                                          double iy1,
+                                          double measureHalfWidth);
 private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindlineMeasureProfileStats m_lastMeasureProfile;
     FindlineMeasureInputDebug m_lastMeasureInputDebug;
     int m_measure_fallback_mode = 0;
+
+    FindlineMeasureGeometryRequest m_measure_geometry_request;
+
+    bool m_measure_geometry_dirty = true;
+    bool m_measure_geometry_ready = false;
+
+    std::uint64_t m_measure_geometry_version = 0;
+    std::uint64_t m_measure_geometry_built_version = 0;
+
     double m_result_x0 = 0.0;
     double m_result_y0 = 0.0;
     double m_result_x1 = 0.0;

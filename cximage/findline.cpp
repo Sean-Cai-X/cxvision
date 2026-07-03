@@ -327,34 +327,19 @@ void Findline::SetWHgap(int wgap, int hgap)
     m_iwgap = PositiveGap(wgap);
     m_ihgap = PositiveGap(hgap);
 
-    gp_Path path = getpath();
-    if (path.ElementCount() < 4)
-        return;
-    gp_Pnt p0 = path.ElementAt(0);
-    gp_Pnt p1 = path.ElementAt(1);
-    gp_Pnt p2 = path.ElementAt(2);
-    gp_Pnt p3 = path.ElementAt(3);
-    (void)p2;
-    (void)p3;
-  
-    if (p0.X() == p1.X() || p0.Y() == p1.Y())
+    if (m_measure_geometry_request.valid)
     {
-
-        int ix = RoundToInt(rect().TopLeft().X());
-        int iy = RoundToInt(rect().TopLeft().Y());
-
-        int iw = RoundToInt(rect().Width());
-        int ih = RoundToInt(rect().Height());
-        setrect(ix, iy, iw, ih); 
-        Shape::setrect(ix, iy, iw, ih);
+        UpdateMeasureGeometryRequest(
+            m_measure_geometry_request.x0,
+            m_measure_geometry_request.y0,
+            m_measure_geometry_request.x1,
+            m_measure_geometry_request.y1,
+            m_measure_geometry_request.script_scale);
     }
     else
     {
-       // setlinesegment(double ix0, double iy0,
-       //    double ix1, double iy1, double dscale);
+        MarkMeasureGeometryDirty();
     }
-
-
 }
 void Findline::setlinesegment(double ix0, double iy0,
     double ix1, double iy1, double dscale)
@@ -485,6 +470,8 @@ void Findline::setlinesegment(double ix0, double iy0,
     m_display_line_x1 = ix1;
     m_display_line_y1 = iy1;
     m_display_line_scale = dscale;
+
+    UpdateMeasureGeometryRequest(ix0, iy0, ix1, iy1, dscale);
 }
 void Findline::setrect(int ix, int iy, int iw, int ih)
 { 
@@ -887,7 +874,14 @@ void Findline::setlinesamplerate(double dsamplerate)
 }
 void Findline::setlinegap(int igap)
 {
-    m_iSelectPointGap = igap;
+    m_iSelectPointGap = std::max(1, igap);
+
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.linegap = m_iSelectPointGap;
+    }
+
+    MarkMeasureGeometryDirty();
 }
 void Findline::setmethod(int imethod)
 {
@@ -1846,6 +1840,24 @@ void Findline::measure(void* pimage)
     m_lastMeasureInputDebug.wgap = m_iwgap;
     m_lastMeasureInputDebug.hgap = m_ihgap;
 
+    m_lastMeasureInputDebug.measure_geometry_request_valid =
+        m_measure_geometry_request.valid;
+
+    m_lastMeasureInputDebug.measure_geometry_dirty =
+        m_measure_geometry_dirty;
+
+    m_lastMeasureInputDebug.measure_geometry_ready =
+        m_measure_geometry_ready;
+
+    m_lastMeasureInputDebug.measure_geometry_version =
+        m_measure_geometry_version;
+
+    m_lastMeasureInputDebug.measure_geometry_built_version =
+        m_measure_geometry_built_version;
+
+    m_lastMeasureInputDebug.measure_geometry_half_width =
+        m_measure_geometry_request.measure_half_width;
+
     if (pimage == nullptr)
     {
         m_lastMeasureInputDebug.failure_stage = "image_pointer_null";
@@ -1924,6 +1936,13 @@ void Findline::measure(void* pimage)
     }
 
     ProbeDisplayRoiGrayStats(*image);
+
+    if (!EnsureOriginalMeasureGeometryReady())
+    {
+        ClearMeasureState();
+        return;
+    }
+
     Measure(*image);
 }
 
@@ -2543,3 +2562,258 @@ void Findline::fitline(FitlineMode mode)
 
    
 }*/
+
+void Findline::MarkMeasureGeometryDirty()
+{
+    m_measure_geometry_dirty = true;
+    m_measure_geometry_ready = false;
+    ++m_measure_geometry_version;
+}
+
+double Findline::ComputeMeasureHalfWidthForLine(double x0,
+                                                double y0,
+                                                double x1,
+                                                double y1) const
+{
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+
+    if (len <= 1.0e-9)
+        return 1.0;
+
+    const double nx = std::abs(-dy / len);
+    const double ny = std::abs(dx / len);
+
+    const double wx = static_cast<double>(std::max(1, m_iwgap));
+    const double hy = static_cast<double>(std::max(1, m_ihgap));
+
+    const double projectedHalfWidth = nx * wx + ny * hy;
+
+    return std::max(1.0, projectedHalfWidth);
+}
+
+void Findline::UpdateMeasureGeometryRequest(double x0,
+                                            double y0,
+                                            double x1,
+                                            double y1,
+                                            double scriptScale)
+{
+    m_measure_geometry_request.valid = true;
+
+    m_measure_geometry_request.x0 = x0;
+    m_measure_geometry_request.y0 = y0;
+    m_measure_geometry_request.x1 = x1;
+    m_measure_geometry_request.y1 = y1;
+
+    m_measure_geometry_request.script_scale = scriptScale;
+
+    m_measure_geometry_request.measure_half_width =
+        ComputeMeasureHalfWidthForLine(x0, y0, x1, y1);
+
+    m_measure_geometry_request.wgap = m_iwgap;
+    m_measure_geometry_request.hgap = m_ihgap;
+    m_measure_geometry_request.linegap = m_iSelectPointGap;
+    m_measure_geometry_request.version = m_measure_geometry_version;
+
+    MarkMeasureGeometryDirty();
+}
+
+void Findline::BuildOriginalMeasureGeometryCore(double ix0,
+                                                double iy0,
+                                                double ix1,
+                                                double iy1,
+                                                double measureHalfWidth)
+{
+    if (!std::isfinite(ix0) || !std::isfinite(iy0) || !std::isfinite(ix1) || !std::isfinite(iy1) ||
+        !std::isfinite(measureHalfWidth) || measureHalfWidth <= 0.0)
+        return;
+
+    const double dx = ix1 - ix0;
+    const double dy = iy1 - iy0;
+    const double dDist = std::sqrt(dx * dx + dy * dy);
+    if (!std::isfinite(dDist) || dDist <= 1.0e-9)
+        return;
+
+    m_iwgap = PositiveGap(m_iwgap);
+    m_ihgap = PositiveGap(m_ihgap);
+
+    gp_Pnt ptRect[4];
+    double kk2;
+
+    if (iy0 == iy1)
+    {
+        ptRect[0].SetX(ix0);
+        ptRect[0].SetY(iy0 - measureHalfWidth);
+        ptRect[1].SetX(ix0);
+        ptRect[1].SetY(iy0 + measureHalfWidth);
+        ptRect[2].SetX(ix1);
+        ptRect[2].SetY(iy1 + measureHalfWidth);
+        ptRect[3].SetX(ix1);
+        ptRect[3].SetY(iy1 - measureHalfWidth);
+
+    }
+    else
+    {
+        kk2 = (ix0 - ix1) / (iy0 - iy1);
+        double theta = std::atan(kk2);
+        if (theta < 0)
+        {
+            theta += CV_PI;
+        }
+
+        ptRect[0].SetX(ix0 + measureHalfWidth * std::cos(theta));
+        ptRect[0].SetY(iy0 - measureHalfWidth * std::sin(theta));
+        ptRect[1].SetX(ix0 - measureHalfWidth * std::cos(theta));
+        ptRect[1].SetY(iy0 + measureHalfWidth * std::sin(theta));
+        ptRect[2].SetX(ix1 - measureHalfWidth * std::cos(theta));
+        ptRect[2].SetY(iy1 + measureHalfWidth * std::sin(theta));
+        ptRect[3].SetX(ix1 + measureHalfWidth * std::cos(theta));
+        ptRect[3].SetY(iy1 - measureHalfWidth * std::sin(theta));
+    }
+    m_LineA.setline(RoundToInt(ptRect[0].X()), RoundToInt(ptRect[0].Y()),
+        RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()));
+    m_LineB.setline(RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()),
+        RoundToInt(ptRect[2].X()), RoundToInt(ptRect[2].Y()));
+    m_LineA.setshow(0);
+    m_LineB.setshow(0);
+    for (int i = 0; i < m_lines_w.size(); i++)
+    {
+        m_lines_w[i].clear();
+    }
+    for (int i = 0; i < m_lines_h.size(); i++)
+    {
+        m_lines_h[i].clear();
+    }
+    m_lines_w.clear();
+    m_lines_h.clear();
+
+    for (int i = 0; i < m_l_measure_w_seek.size(); i++)
+    {
+        m_l_measure_w_seek[i].clear();
+    }
+
+    for (int i = 0; i < m_l_measure_h_seek.size(); i++)
+    {
+        m_l_measure_h_seek[i].clear();
+    }
+    m_l_measure_w_seek.clear();
+    m_l_measure_h_seek.clear();
+
+    double ilinesizeA = m_LineA.getlinedistance();
+    double ilinesizeB = m_LineB.getlinedistance();
+    const int roi_width_hint = CeilPositiveToInt(std::abs(ptRect[2].X() - ptRect[0].X()));
+    const int roi_height_hint = CeilPositiveToInt(std::abs(ptRect[2].Y() - ptRect[0].Y()));
+    const cxgeom::CxSetLineBuildMeta line_a_meta =
+        BuildLineScanMeta(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(), m_iwgap, roi_width_hint, roi_height_hint);
+    const cxgeom::CxSetLineBuildMeta line_b_meta =
+        BuildLineScanMeta(ptRect[1].X(), ptRect[1].Y(), ptRect[2].X(), ptRect[2].Y(), m_ihgap, roi_width_hint, roi_height_hint);
+    const int dplinewsize = ComputeLineScanCount(ilinesizeA, m_iwgap, line_a_meta);
+    const int dplinehsize = ComputeLineScanCount(ilinesizeB, m_ihgap, line_b_meta);
+
+    double dlineax = (ptRect[1].X() - ptRect[0].X()) / dplinewsize;
+    double dlineay = (ptRect[1].Y() - ptRect[0].Y()) / dplinewsize;
+
+    double dlinebx = (ptRect[2].X() - ptRect[1].X()) / dplinehsize;
+    double dlineby = (ptRect[2].Y() - ptRect[1].Y()) / dplinehsize;
+
+
+    LineShape aline1, aline2;
+    for (int i = 0; i < dplinewsize; i++)
+    {
+        m_lines_w.push_back(aline1);
+        m_lines_w[i].copy(m_LineB);
+        m_lines_w[i].Move(RoundToInt(-dlineax * static_cast<double>(i)),
+            RoundToInt(-dlineay * static_cast<double>(i)));
+        m_lines_w[i].setPercent(m_dsamplerate);
+        m_lines_w[i].setshow(0);
+    }
+    for (int i = 0; i < dplinehsize; i++)
+    {
+        m_lines_h.push_back(aline2);
+        m_lines_h[i].copy(m_LineA);
+        m_lines_h[i].Move(RoundToInt(dlinebx * static_cast<double>(i)),
+            RoundToInt(dlineby * static_cast<double>(i)));
+        m_lines_h[i].setPercent(m_dsamplerate);
+        m_lines_h[i].setshow(0);
+    }
+
+    Shape::setrect2(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(),
+        ptRect[2].X(), ptRect[2].Y(), ptRect[3].X(), ptRect[3].Y()
+    );
+}
+
+bool Findline::BuildOriginalMeasureGeometryFromRequest(
+    const FindlineMeasureGeometryRequest& request)
+{
+    if (!request.valid)
+        return false;
+
+    const bool oldHasDisplay = m_has_display_line_roi;
+    const double oldX0 = m_display_line_x0;
+    const double oldY0 = m_display_line_y0;
+    const double oldX1 = m_display_line_x1;
+    const double oldY1 = m_display_line_y1;
+    const double oldScale = m_display_line_scale;
+
+    BuildOriginalMeasureGeometryCore(
+        request.x0,
+        request.y0,
+        request.x1,
+        request.y1,
+        request.measure_half_width);
+
+    m_has_display_line_roi = oldHasDisplay;
+    m_display_line_x0 = oldX0;
+    m_display_line_y0 = oldY0;
+    m_display_line_x1 = oldX1;
+    m_display_line_y1 = oldY1;
+    m_display_line_scale = oldScale;
+
+    return true;
+}
+
+bool Findline::EnsureOriginalMeasureGeometryReady()
+{
+    if (!m_measure_geometry_request.valid)
+    {
+        m_lastMeasureInputDebug.failure_stage =
+            "measure_geometry_request_invalid";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline measure geometry request is invalid; call setline before measure.";
+
+        return false;
+    }
+
+    if (!m_measure_geometry_dirty &&
+        m_measure_geometry_ready &&
+        m_measure_geometry_built_version ==
+            m_measure_geometry_request.version)
+    {
+        return true;
+    }
+
+    const bool ok =
+        BuildOriginalMeasureGeometryFromRequest(
+            m_measure_geometry_request);
+
+    m_measure_geometry_ready = ok;
+    m_measure_geometry_dirty = !ok;
+
+    if (ok)
+    {
+        m_measure_geometry_built_version =
+            m_measure_geometry_request.version;
+    }
+    else
+    {
+        m_lastMeasureInputDebug.failure_stage =
+            "measure_geometry_build_failed";
+
+        m_lastMeasureInputDebug.detail =
+            "BuildOriginalMeasureGeometryFromRequest failed.";
+    }
+
+    return ok;
+}

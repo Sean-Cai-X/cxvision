@@ -188,6 +188,15 @@ struct RuntimeObjectView
     int line_measure_original_edgeband_count = 0;
     int line_measure_original_chain_length = 0;
 
+    bool line_measure_geometry_request_valid = false;
+    bool line_measure_geometry_dirty = false;
+    bool line_measure_geometry_ready = false;
+
+    std::uint64_t line_measure_geometry_version = 0;
+    std::uint64_t line_measure_geometry_built_version = 0;
+
+    double line_measure_geometry_half_width = 0.0;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;
@@ -200,6 +209,29 @@ struct RuntimeObjectView
     std::uint32_t fit_circle_segment_count = 0;
 
     std::uint64_t display_version = 0;
+
+    bool circle_measure_geometry_request_valid = false;
+    bool circle_measure_geometry_dirty = false;
+    bool circle_measure_geometry_ready = false;
+
+    std::uint64_t circle_measure_geometry_version = 0;
+    std::uint64_t circle_measure_geometry_built_version = 0;
+
+    int circle_scan_line_count = 0;
+    int circle_scan_line_length = 0;
+    int circle_process_width = 0;
+
+    bool circle_measure_image_ready = false;
+    int circle_measure_image_width = 0;
+    int circle_measure_image_height = 0;
+    int circle_measure_image_channels = 0;
+
+    bool circle_measure_backimage_ready = false;
+    bool circle_measure_findobject_ready = false;
+
+    std::string circle_measure_source;
+    std::string circle_measure_failure_stage;
+    std::string circle_measure_detail;
 
 
 };

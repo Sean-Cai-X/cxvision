@@ -412,8 +412,30 @@ namespace mu
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setfitmeasuregap", &Findcircle::setfitmeasuregap);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "fitmeasure", &Findcircle::FitResultMeasure);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "FitResultMeasure", &Findcircle::FitResultMeasure);
-            
-            
+
+            m_parser.DefineClassFun(
+                "Findcircle",
+                pfindcircle,
+                "setlinesamplerate",
+                static_cast<void (Findcircle::*)(double)>(&Findcircle::setlinesamplerate));
+
+            m_parser.DefineClassFun(
+                "Findcircle",
+                pfindcircle,
+                "setgamarate",
+                static_cast<void (Findcircle::*)(int)>(&Findcircle::setgamarate));
+
+            m_parser.DefineClassFun(
+                "Findcircle",
+                pfindcircle,
+                "setfindsetting",
+                static_cast<void (Findcircle::*)(int)>(&Findcircle::setfindsetting));
+
+            m_parser.DefineClassFun(
+                "Findcircle",
+                pfindcircle,
+                "setselectedgenum",
+                static_cast<void (Findcircle::*)(int)>(&Findcircle::setselectedgenum));
 
             Findellipse* pfindellipse = nullptr;
             m_parser.DefineClass("Findellipse", pfindellipse);

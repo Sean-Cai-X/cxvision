@@ -359,7 +359,8 @@ void Findcircle::getshape(void* pshape)
 
 void Findcircle::setcirclegap(int ivalue)
 {
-    m_idisgap = ivalue;
+    m_idisgap = std::max(0, ivalue);
+
     setcircle2(m_icentx, m_icenty, m_ipax, m_ipay, m_idisgap);
 }
 void Findcircle::clear()
@@ -368,138 +369,57 @@ void Findcircle::clear()
 }
 void Findcircle::Setgap(int gap)
 {
-    m_igap = gap; 
+    m_igap = std::max(1, gap);
 
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.gap_degrees = m_igap;
+        MarkCircleMeasureGeometryDirty();
+        m_measure_geometry_request.version = m_measure_geometry_version;
+    }
+    else
+    {
+        MarkCircleMeasureGeometryDirty();
+    }
 }
 void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
 {
-    Shape::clear();
     m_icentx = icentx;
     m_icenty = icenty;
     m_ipax = ipax;
-    m_ipay = ipay; 
-    Shape::setcircle(icentx, icenty, ipax, ipay);
+    m_ipay = ipay;
 
-    for (std::size_t i = 0; i < m_lines.size(); ++i)
+    UpdateCircleMeasureGeometryRequest(false);
+
+    BuildCircleMeasureGeometryFromRequest(m_measure_geometry_request);
+
+    m_measure_geometry_ready = !m_lines.empty();
+    m_measure_geometry_dirty = !m_measure_geometry_ready;
+
+    if (m_measure_geometry_ready)
     {
-        m_lines[i].clear();
+        m_measure_geometry_built_version = m_measure_geometry_request.version;
     }
-    m_lines.clear();
-    int isize = ClampSizeToInt(getpath().ElementCount());
-    const cxgeom::CxSetCircleBuildMeta scan_meta =
-        BuildCircleScanMeta(icentx, icenty, ipax, ipay, m_igap);
-    if (m_igap > 0)
-    {
-        const int igapadd = ComputeCircleLineStep(isize, m_igap, scan_meta);
-        LineShape aline1;
-        int iadd = 0;
-        for (int i = 0; i < isize; )
-        {
-            gp_Pnt apoint = getpath().ElementAt(i);
-            m_lines.push_back(aline1);
-            m_lines[iadd].setline(icentx, icenty, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
-            m_lines[iadd].setPercent(m_dsamplerate);
-            iadd = iadd + 1;
-            i = i + igapadd;
-        }
-    }
-    /*
-    m_Line.setline(icentx, icenty, ipax, ipay); 
-    m_Line.setshow(false); 
-    for (std::size_t i = 0; i < m_lines.size(); ++i)
-    {
-        m_lines[i].clear();
-    }  
-    m_lines.clear(); 
-    int iplinesize = m_igap > 0 ? (360 / m_igap) : 0; 
-    LineShape aline1 ;
-    for (int i = 0; i < iplinesize; i++)
-    { 
-        m_lines.push_back(aline1);
-        m_lines[i].copy(m_Line);
-        m_lines_w[i].Move(m_iwgap * i, 0);
-        m_lines_w[i].setPercent(m_dsamplerate);
-        m_lines_w[i].setshow(false);
-    }
-    for (int i = 0; i < iplinehsize; i++)
-    { 
-        m_lines_h.push_back(aline2);
-        m_lines_h[i].copy(m_LineA);
-        m_lines_h[i].Move(0, m_ihgap * i);
-        m_lines_h[i].setPercent(m_dsamplerate);
-        m_lines_h[i].setshow(false);
-    }
-    */
 }
-void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay,int idis)
+void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay, int idis)
 {
-    Shape::clear();
     m_icentx = icentx;
     m_icenty = icenty;
     m_ipax = ipax;
     m_ipay = ipay;
     m_idisgap = idis;
-    Shape::setcircle2(icentx, icenty, ipax, ipay,idis);
-    for (std::size_t i = 0; i < m_lines.size(); ++i)
+
+    UpdateCircleMeasureGeometryRequest(true);
+
+    BuildCircleMeasureGeometryFromRequest(m_measure_geometry_request);
+
+    m_measure_geometry_ready = !m_lines.empty();
+    m_measure_geometry_dirty = !m_measure_geometry_ready;
+
+    if (m_measure_geometry_ready)
     {
-        m_lines[i].clear();
+        m_measure_geometry_built_version = m_measure_geometry_request.version;
     }
-    m_lines.clear();
-    int isize = ClampSizeToInt(getpath().ElementCount());
-    const cxgeom::CxSetCircleBuildMeta scan_meta =
-        BuildCircleScanMeta(icentx, icenty, ipax, ipay, m_igap);
-    if (m_igap > 0)
-    {
-        const int igapadd = ComputeCircleLineStep(isize, m_igap, scan_meta);
-        int iadd = 0;
-        int icx0 = icentx ;
-        int icy0 = icenty ;
-        for (int i = 0; i < isize; )
-        {
-            LineShape aline1;
-            gp_Pnt apoint = getpath().ElementAt(i); 
-            aline1.setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
-            std::vector<gp_Pnt> acrosspoints = aline1.getpath().IntersectPaths(getpath2());
-            if (acrosspoints.size() > 0)
-            {
-                LineShape aline2;
-                //aline2.setline(acrosspoints[0].X(), acrosspoints[0].Y(), apoint.X(), apoint.Y());
-                m_lines.push_back(aline2);
-                m_lines[m_lines.size() - 1].setline(RoundToInt(acrosspoints[0].X()), RoundToInt(acrosspoints[0].Y()), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
-                m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
-            }
-            aline1.clear();
-            iadd = iadd + 1;
-            i = i + igapadd;
-        }
-    }
-    /*
-    m_Line.setline(icentx, icenty, ipax, ipay);
-    m_Line.setshow(false);
-    for (std::size_t i = 0; i < m_lines.size(); ++i)
-    {
-        m_lines[i].clear();
-    }
-    m_lines.clear();
-    int iplinesize = m_igap > 0 ? (360 / m_igap) : 0;
-    LineShape aline1 ;
-    for (int i = 0; i < iplinesize; i++)
-    {
-        m_lines.push_back(aline1);
-        m_lines[i].copy(m_Line);
-        m_lines_w[i].Move(m_iwgap * i, 0);
-        m_lines_w[i].setPercent(m_dsamplerate);
-        m_lines_w[i].setshow(false);
-    }
-    for (int i = 0; i < iplinehsize; i++)
-    {
-        m_lines_h.push_back(aline2);
-        m_lines_h[i].copy(m_LineA);
-        m_lines_h[i].Move(0, m_ihgap * i);
-        m_lines_h[i].setPercent(m_dsamplerate);
-        m_lines_h[i].setshow(false);
-    }
-    */
 }
 void Findcircle::translate(int ix,int iy)
 {
@@ -632,10 +552,29 @@ void Findcircle::drawshapex(
 void Findcircle::setlinesamplerate(double dsamplerate)
 {
     m_dsamplerate = dsamplerate;
+
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.sample_rate = m_dsamplerate;
+
+        MarkCircleMeasureGeometryDirty();
+        m_measure_geometry_request.version = m_measure_geometry_version;
+    }
 }
 void Findcircle::setlinegap(int igap)
 {
-    m_iSelectPointGap = igap;
+    m_iSelectPointGap = std::max(1, igap);
+
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.linegap = m_iSelectPointGap;
+        MarkCircleMeasureGeometryDirty();
+        m_measure_geometry_request.version = m_measure_geometry_version;
+    }
+    else
+    {
+        MarkCircleMeasureGeometryDirty();
+    }
 }
 void Findcircle::setmethod(int imethod)
 {
@@ -685,6 +624,27 @@ void Findcircle::MeasureT(void *pimage)
 }
 void Findcircle::Measure(Image& image)
 {
+    m_lastMeasureGeometryDebug.image_ready =
+        image.getmat().empty() ? false : true;
+
+    m_lastMeasureGeometryDebug.image_width =
+        image.getWidth();
+
+    m_lastMeasureGeometryDebug.image_height =
+        image.getHeight();
+
+    m_lastMeasureGeometryDebug.image_channels =
+        image.getmat().empty() ? 0 : image.getmat().channels();
+
+    m_lastMeasureGeometryDebug.backimage_ready =
+        (g_pbackimage != nullptr);
+
+    m_lastMeasureGeometryDebug.findobject_ready =
+        (g_pbackfindobject != nullptr);
+
+    m_lastMeasureGeometryDebug.measure_source =
+        "original_circle_measure_pipeline";
+
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
@@ -698,8 +658,30 @@ void Findcircle::Measure(Image& image)
     m_last_prefilter_used = 0;
     const int stage_limit = ReadCircleMeasureStageLimit();
     int isize = ClampSizeToInt(m_lines.size());
-    if (isize <= 0 || g_pbackimage == 0)
+
+    m_lastMeasureGeometryDebug.scan_line_count = isize;
+
+    if (isize <= 0)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_scan_lines_empty";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle Measure has zero scan lines; check setcircle/setcircle2, Setgap and geometry cache.";
+
         return;
+    }
+
+    if (g_pbackimage == nullptr)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_backimage_null";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle Measure requires g_pbackimage prepared by debug/runtime environment.";
+
+        return;
+    }
     if (stage_limit == 1)
         return;
 
@@ -707,6 +689,21 @@ void Findcircle::Measure(Image& image)
     if (isize > 0)
         ilineslen1 = m_lines[0].getlinesize();
     int iprocessw = ilineslen1;
+
+    m_lastMeasureGeometryDebug.scan_line_length = ilineslen1;
+    m_lastMeasureGeometryDebug.process_width = iprocessw;
+
+    if (iprocessw <= 0)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_process_width_zero";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle scan lines exist, but scan line length is zero.";
+
+        return;
+    }
+
     if (stage_limit == 2)
         return;
 
@@ -893,17 +890,32 @@ void Findcircle::Measure(Image& image)
                 m_measurepoints.addpoint(apoint);
             }
 
- 
-
         }
-
-
 
     }
 
+    m_lastMeasureGeometryDebug.measure_points_count =
+        m_measurepoints.size();
 
+    m_lastMeasureGeometryDebug.valid_points_count =
+        m_measurepoints.size();
 
-    
+    if (m_measurepoints.size() > 0)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "result_points_available";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle original Measure produced result points.";
+    }
+    else
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_measure_no_result_points";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle original Measure completed, but produced zero result points.";
+    }
 }
 
 void Findcircle::MeasureBalanced(Image& image)
@@ -1337,6 +1349,10 @@ void Findcircle::measure(void* pimage)
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
+
+    if (!EnsureCircleMeasureGeometryReady())
+        return;
+
     Measure(*pgetimage);
 }
 void Findcircle::automeasure(void* pimage)
@@ -1392,6 +1408,241 @@ void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
         if (inumsum > iclusternum)
         {
             getresultpoints().addpoint(ix0, iy0);
+        }
+    }
+}
+
+void Findcircle::MarkCircleMeasureGeometryDirty()
+{
+    m_measure_geometry_dirty = true;
+    m_measure_geometry_ready = false;
+    ++m_measure_geometry_version;
+}
+
+void Findcircle::UpdateCircleMeasureGeometryRequest(bool hasInnerGap)
+{
+    m_measure_geometry_request.valid = true;
+
+    m_measure_geometry_request.center_x = m_icentx;
+    m_measure_geometry_request.center_y = m_icenty;
+    m_measure_geometry_request.pass_x = m_ipax;
+    m_measure_geometry_request.pass_y = m_ipay;
+
+    m_measure_geometry_request.has_inner_gap = hasInnerGap;
+    m_measure_geometry_request.inner_gap =
+        hasInnerGap ? std::max(0, m_idisgap) : 0;
+
+    m_measure_geometry_request.gap_degrees = m_igap;
+    m_measure_geometry_request.linegap = m_iSelectPointGap;
+    m_measure_geometry_request.sample_rate = m_dsamplerate;
+
+    MarkCircleMeasureGeometryDirty();
+
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+bool Findcircle::EnsureCircleMeasureGeometryReady()
+{
+    if (!m_measure_geometry_request.valid)
+    {
+        m_lastMeasureGeometryDebug.request_valid = false;
+        m_lastMeasureGeometryDebug.geometry_ready = false;
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_measure_request_invalid";
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle measure request is invalid; call setcircle or setcircle2 before measure.";
+        return false;
+    }
+
+    if (!m_measure_geometry_dirty &&
+        m_measure_geometry_ready &&
+        m_measure_geometry_built_version ==
+            m_measure_geometry_request.version)
+    {
+        return true;
+    }
+
+    const bool ok =
+        BuildCircleMeasureGeometryFromRequest(
+            m_measure_geometry_request);
+
+    m_measure_geometry_ready = ok;
+    m_measure_geometry_dirty = !ok;
+
+    if (ok)
+    {
+        m_measure_geometry_built_version =
+            m_measure_geometry_request.version;
+    }
+    else
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_measure_geometry_build_failed";
+        m_lastMeasureGeometryDebug.detail =
+            "BuildCircleMeasureGeometryFromRequest failed.";
+    }
+
+    return ok;
+}
+
+bool Findcircle::BuildCircleMeasureGeometryFromRequest(
+    const FindcircleMeasureGeometryRequest& request)
+{
+    if (!request.valid)
+        return false;
+
+    BuildCircleMeasureGeometryCore(request);
+
+    const bool ok = !m_lines.empty();
+
+    m_lastMeasureGeometryDebug.request_valid = request.valid;
+    m_lastMeasureGeometryDebug.geometry_ready = ok;
+    m_lastMeasureGeometryDebug.geometry_dirty = false;
+    m_lastMeasureGeometryDebug.geometry_version =
+        m_measure_geometry_version;
+    m_lastMeasureGeometryDebug.geometry_built_version =
+        request.version;
+
+    m_lastMeasureGeometryDebug.center_x = request.center_x;
+    m_lastMeasureGeometryDebug.center_y = request.center_y;
+    m_lastMeasureGeometryDebug.pass_x = request.pass_x;
+    m_lastMeasureGeometryDebug.pass_y = request.pass_y;
+    m_lastMeasureGeometryDebug.inner_gap = request.inner_gap;
+    m_lastMeasureGeometryDebug.gap_degrees = request.gap_degrees;
+    m_lastMeasureGeometryDebug.linegap = request.linegap;
+    m_lastMeasureGeometryDebug.scan_line_count =
+        static_cast<int>(m_lines.size());
+
+    if (!m_lines.empty())
+    {
+        m_lastMeasureGeometryDebug.scan_line_length =
+            m_lines[0].getlinesize();
+        m_lastMeasureGeometryDebug.process_width =
+            m_lastMeasureGeometryDebug.scan_line_length;
+    }
+
+    if (!ok)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_scan_lines_empty";
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle geometry build produced zero scan lines; check setcircle/setcircle2 request and gap.";
+    }
+
+    return ok;
+}
+
+void Findcircle::BuildCircleMeasureGeometryCore(
+    const FindcircleMeasureGeometryRequest& request)
+{
+    Shape::clear();
+
+    m_icentx = request.center_x;
+    m_icenty = request.center_y;
+    m_ipax = request.pass_x;
+    m_ipay = request.pass_y;
+    m_idisgap = request.inner_gap;
+
+    if (request.has_inner_gap)
+    {
+        Shape::setcircle2(
+            request.center_x,
+            request.center_y,
+            request.pass_x,
+            request.pass_y,
+            request.inner_gap);
+    }
+    else
+    {
+        Shape::setcircle(
+            request.center_x,
+            request.center_y,
+            request.pass_x,
+            request.pass_y);
+    }
+
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
+    {
+        m_lines[i].clear();
+    }
+
+    m_lines.clear();
+
+    const int isize =
+        ClampSizeToInt(getpath().ElementCount());
+
+    const cxgeom::CxSetCircleBuildMeta scan_meta =
+        BuildCircleScanMeta(
+            request.center_x,
+            request.center_y,
+            request.pass_x,
+            request.pass_y,
+            request.gap_degrees);
+
+    if (request.gap_degrees <= 0 || isize <= 0)
+        return;
+
+    const int igapadd =
+        ComputeCircleLineStep(
+            isize,
+            request.gap_degrees,
+            scan_meta);
+
+    if (request.has_inner_gap)
+    {
+        int iadd = 0;
+
+        for (int i = 0; i < isize; )
+        {
+            LineShape ray;
+            const gp_Pnt apoint = getpath().ElementAt(i);
+
+            ray.setline(
+                request.center_x,
+                request.center_y,
+                RoundToInt(apoint.X()),
+                RoundToInt(apoint.Y()));
+
+            std::vector<gp_Pnt> acrosspoints =
+                ray.getpath().IntersectPaths(getpath2());
+
+            if (!acrosspoints.empty())
+            {
+                LineShape scanLine;
+                scanLine.setline(
+                    RoundToInt(acrosspoints[0].X()),
+                    RoundToInt(acrosspoints[0].Y()),
+                    RoundToInt(apoint.X()),
+                    RoundToInt(apoint.Y()));
+
+                scanLine.setPercent(request.sample_rate);
+                m_lines.push_back(scanLine);
+            }
+
+            ++iadd;
+            i += igapadd;
+        }
+    }
+    else
+    {
+        int iadd = 0;
+
+        for (int i = 0; i < isize; )
+        {
+            LineShape scanLine;
+            const gp_Pnt apoint = getpath().ElementAt(i);
+
+            scanLine.setline(
+                request.center_x,
+                request.center_y,
+                RoundToInt(apoint.X()),
+                RoundToInt(apoint.Y()));
+
+            scanLine.setPercent(request.sample_rate);
+            m_lines.push_back(scanLine);
+
+            ++iadd;
+            i += igapadd;
         }
     }
 }

@@ -3,7 +3,69 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
+#include <cstdint>
+#include <string>
 class FindObject;
+
+struct FindcircleMeasureGeometryRequest
+{
+    bool valid = false;
+
+    int center_x = 0;
+    int center_y = 0;
+
+    int pass_x = 0;
+    int pass_y = 0;
+
+    bool has_inner_gap = false;
+    int inner_gap = 0;
+
+    int gap_degrees = 0;
+
+    int linegap = 0;
+
+    double sample_rate = 1.0;
+
+    std::uint64_t version = 0;
+};
+
+struct FindcircleMeasureGeometryDebug
+{
+    bool request_valid = false;
+    bool geometry_dirty = false;
+    bool geometry_ready = false;
+
+    std::uint64_t geometry_version = 0;
+    std::uint64_t geometry_built_version = 0;
+
+    int center_x = 0;
+    int center_y = 0;
+    int pass_x = 0;
+    int pass_y = 0;
+    int inner_gap = 0;
+
+    int gap_degrees = 0;
+    int linegap = 0;
+
+    int scan_line_count = 0;
+    int scan_line_length = 0;
+    int process_width = 0;
+
+    bool image_ready = false;
+    int image_width = 0;
+    int image_height = 0;
+    int image_channels = 0;
+
+    bool backimage_ready = false;
+    bool findobject_ready = false;
+
+    int measure_points_count = 0;
+    int valid_points_count = 0;
+
+    std::string measure_source;
+    std::string failure_stage;
+    std::string detail;
+};
 class Findcircle :public Shape
 {
 public:
@@ -87,6 +149,10 @@ public:
     int getcirclepay() const { return m_ipay; }
     int getdebugprefilterused() const { return m_last_prefilter_used; }
     int getdebugcompactpathused() const { return m_last_compact_path_used; }
+    const FindcircleMeasureGeometryDebug& lastmeasuregeometrydebug() const
+    {
+        return m_lastMeasureGeometryDebug;
+    }
     GeomAdaptor_Curve GetCurve(gp_Pnt center_p, Standard_Real radius);
 
     gp_Pnt FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint);
@@ -151,6 +217,27 @@ private:
     gp_Rectangle m_measurepointsboundingRect;
     int m_last_prefilter_used;
     int m_last_compact_path_used;
+
+    FindcircleMeasureGeometryRequest m_measure_geometry_request;
+    FindcircleMeasureGeometryDebug m_lastMeasureGeometryDebug;
+
+    bool m_measure_geometry_dirty = true;
+    bool m_measure_geometry_ready = false;
+
+    std::uint64_t m_measure_geometry_version = 0;
+    std::uint64_t m_measure_geometry_built_version = 0;
+
+    void MarkCircleMeasureGeometryDirty();
+
+    void UpdateCircleMeasureGeometryRequest(bool hasInnerGap);
+
+    bool EnsureCircleMeasureGeometryReady();
+
+    bool BuildCircleMeasureGeometryFromRequest(
+        const FindcircleMeasureGeometryRequest& request);
+
+    void BuildCircleMeasureGeometryCore(
+        const FindcircleMeasureGeometryRequest& request);
 public:
     void easycluster(int igapx = 10, int igapy = 10, int iclusternum = 5);
     gp_Rectangle measurepointsboundingrect() { return m_measurepointsboundingRect; }
