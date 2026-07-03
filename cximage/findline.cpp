@@ -1202,6 +1202,28 @@ void Findline::MeasureBalanced(Image& image)
 
     stats.point_count = m_measurepoints_w.size() + m_measurepoints_h.size();
     stats.chain_length = static_cast<int>(m_bestEdgeChain.size());
+
+    if (stats.point_count <= 0 && stats.edgeband_count <= 0)
+    {
+        FindlineMeasureProfileStats fallbackStats;
+
+        if (MeasureSimpleRoiGradientPoints(image, fallbackStats))
+        {
+            stats = fallbackStats;
+
+            if (m_lastMeasureInputDebug.failure_stage.empty() ||
+                m_lastMeasureInputDebug.failure_stage == "no_edge_band_candidates")
+            {
+                m_lastMeasureInputDebug.failure_stage =
+                    "simple_roi_gradient_fallback_used";
+
+                m_lastMeasureInputDebug.detail =
+                    "Original Findline edge-band pipeline produced zero candidates; "
+                    "fallback generated measure points from ROI normal gradient.";
+            }
+        }
+    }
+
     stats.total_ms = ElapsedMilliseconds(total_begin, std::chrono::steady_clock::now());
     m_lastMeasureProfile = stats;
 
@@ -1860,6 +1882,29 @@ void Findline::measure(void* pimage)
 
     ProbeDisplayRoiGrayStats(*image);
     Measure(*image);
+
+    const int pointCount = m_measurepoints_w.size() + m_measurepoints_h.size();
+
+    if (pointCount <= 0)
+    {
+        FindlineMeasureProfileStats fallbackStats;
+
+        if (MeasureSimpleRoiGradientPoints(*image, fallbackStats))
+        {
+            if (m_lastMeasureInputDebug.failure_stage.empty() ||
+                m_lastMeasureInputDebug.failure_stage == "no_edge_band_candidates")
+            {
+                m_lastMeasureInputDebug.failure_stage =
+                    "simple_roi_gradient_fallback_used";
+
+                m_lastMeasureInputDebug.detail =
+                    "Original Findline Measure produced zero points; "
+                    "fallback generated measure points from ROI normal gradient.";
+            }
+
+            m_lastMeasureProfile = fallbackStats;
+        }
+    }
 }
 
 void Findline::ProbeDisplayRoiGrayStats(Image& image)
@@ -1952,6 +1997,162 @@ void Findline::ProbeDisplayRoiGrayStats(Image& image)
         m_lastMeasureInputDebug.gray_mean = sum / static_cast<double>(count);
         m_lastMeasureInputDebug.max_gradient = maxGrad;
     }
+}
+
+bool Findline::MeasureSimpleRoiGradientPoints(Image& image,
+                                              FindlineMeasureProfileStats& stats)
+{
+    cv::Mat src = image.getmat();
+
+    if (src.empty())
+        return false;
+
+    cv::Mat gray;
+
+    if (src.channels() == 1)
+    {
+        gray = src;
+    }
+    else
+    {
+        cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+    }
+
+    FindlineDisplaySnapshot roi;
+
+    if (!getdisplaysnapshot(roi) || !roi.has_line_roi || !roi.has_scan_box)
+        return false;
+
+    const double x0 = roi.x0;
+    const double y0 = roi.y0;
+    const double x1 = roi.x1;
+    const double y1 = roi.y1;
+
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+
+    if (len <= 1.0e-6)
+        return false;
+
+    const double ux = dx / len;
+    const double uy = dy / len;
+
+    const double nx = -uy;
+    const double ny = ux;
+
+    const int alongStep = std::max(1, m_iSelectPointGap);
+    const int scanCount = std::max(2, static_cast<int>(len / alongStep));
+
+    const int halfWidth =
+        std::max(2, static_cast<int>(std::round(roi.scan_half_width)));
+
+    const int edgeThreshold = std::max(1, m_iThreshold);
+
+    m_scanEdgeBands.clear();
+    m_bestEdgeChain.clear();
+    m_measurepoints_w.clear();
+    m_measurepoints_h.clear();
+
+    int candidateCount = 0;
+
+    for (int i = 0; i <= scanCount; ++i)
+    {
+        const double t =
+            static_cast<double>(i) / static_cast<double>(scanCount);
+
+        const double cx = x0 + ux * len * t;
+        const double cy = y0 + uy * len * t;
+
+        double bestStrength = 0.0;
+        int bestS = 0;
+        double bestPolarity = 0.0;
+
+        for (int s = -halfWidth; s < halfWidth; ++s)
+        {
+            const double ax = cx + nx * static_cast<double>(s);
+            const double ay = cy + ny * static_cast<double>(s);
+
+            const double bx = cx + nx * static_cast<double>(s + 1);
+            const double by = cy + ny * static_cast<double>(s + 1);
+
+            const int iax = static_cast<int>(std::lround(ax));
+            const int iay = static_cast<int>(std::lround(ay));
+            const int ibx = static_cast<int>(std::lround(bx));
+            const int iby = static_cast<int>(std::lround(by));
+
+            if (iax < 0 || iax >= gray.cols ||
+                ibx < 0 || ibx >= gray.cols ||
+                iay < 0 || iay >= gray.rows ||
+                iby < 0 || iby >= gray.rows)
+            {
+                continue;
+            }
+
+            const int va = static_cast<int>(gray.at<uchar>(iay, iax));
+            const int vb = static_cast<int>(gray.at<uchar>(iby, ibx));
+
+            const int diff = vb - va;
+            const double strength = std::abs(diff);
+
+            if (strength > bestStrength)
+            {
+                bestStrength = strength;
+                bestS = s;
+                bestPolarity = diff >= 0 ? 1.0 : -1.0;
+            }
+        }
+
+        if (bestStrength < static_cast<double>(edgeThreshold))
+            continue;
+
+        const double px = cx + nx * (static_cast<double>(bestS) + 0.5);
+        const double py = cy + ny * (static_cast<double>(bestS) + 0.5);
+
+        if (!std::isfinite(px) || !std::isfinite(py))
+            continue;
+
+        EdgeBandCandidate candidate;
+        candidate.scan_index = i;
+        candidate.scan_type = 0;
+        candidate.line_index = 0;
+        candidate.candidate_index = candidateCount;
+        candidate.start_index = bestS;
+        candidate.end_index = bestS + 1;
+        candidate.center_index = bestS;
+        candidate.x = px;
+        candidate.y = py;
+        candidate.response_strength = bestStrength;
+        candidate.polarity = bestPolarity;
+        candidate.width = 1.0;
+        candidate.edge_rank = 0;
+        candidate.valid = true;
+
+        ScanLineEdgeBands scan;
+        scan.scan_index = i;
+        scan.scan_type = 0;
+        scan.bands.push_back(candidate);
+
+        m_scanEdgeBands.push_back(scan);
+        m_bestEdgeChain.push_back(candidate);
+
+        m_measurepoints_w.addpoint(
+            static_cast<Standard_Real>(px),
+            static_cast<Standard_Real>(py));
+
+        ++candidateCount;
+    }
+
+    stats.point_count = m_measurepoints_w.size();
+    stats.edgeband_count = candidateCount;
+    stats.chain_length = static_cast<int>(m_bestEdgeChain.size());
+
+    if (stats.point_count > 0)
+    {
+        m_measurepointsboundingRect = m_measurepoints_w.boundingRect();
+    }
+
+    return stats.point_count >= 2;
 }
 
 void Findline::pyrimage(void* pimage)

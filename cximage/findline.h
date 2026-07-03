@@ -347,6 +347,8 @@ private:
     void FitWeightedLeastSquares(FindlineMeasureProfileStats& stats);
     void RefineJointConsistency(FindlineMeasureProfileStats& stats);
     void ProbeDisplayRoiGrayStats(Image& image);
+    bool MeasureSimpleRoiGradientPoints(Image& image,
+                                        FindlineMeasureProfileStats& stats);
 private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
