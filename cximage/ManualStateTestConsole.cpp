@@ -422,6 +422,16 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | edgebands=" << object.line_edgeband_count
        << " | chain=" << object.line_chain_length
        << " | measure_failure_stage=" << object.line_measure_failure_stage
+       << " | image_ready=" << (object.line_measure_image_ready ? "true" : "false")
+       << " | image_size=" << object.line_measure_image_width
+       << "x" << object.line_measure_image_height
+       << "x" << object.line_measure_image_channels
+       << " | roi_intersects_image="
+       << (object.line_measure_roi_intersects_image ? "true" : "false")
+       << " | threshold=" << object.line_measure_threshold
+       << " | max_gradient=" << object.line_measure_max_gradient
+       << " | profile_count=" << object.line_measure_profile_count
+       << " | sampled_pixels=" << object.line_measure_sampled_pixel_count
        << " | fit_mode=" << object.line_fit_mode
        << " | fit_status=" << object.line_fit_status
        << " | has_line_scan_box=" << (object.has_line_scan_box ? "true" : "false")
@@ -728,6 +738,66 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_chain_length: " << object.line_chain_length << "\n";
                 file << "  line_profile_point_count: " << object.line_profile_point_count << "\n";
                 file << "  line_measure_failure_stage: " << object.line_measure_failure_stage << "\n";
+
+                file << "  line_measure_image_ready: "
+                     << (object.line_measure_image_ready ? "true" : "false") << "\n";
+
+                file << "  line_measure_image_size: "
+                     << object.line_measure_image_width << "x"
+                     << object.line_measure_image_height << "x"
+                     << object.line_measure_image_channels << "\n";
+
+                file << "  line_measure_image_type: "
+                     << object.line_measure_image_type << "\n";
+
+                file << "  line_measure_image_source: "
+                     << object.line_measure_image_source << "\n";
+
+                file << "  line_measure_roi_intersects_image: "
+                     << (object.line_measure_roi_intersects_image ? "true" : "false") << "\n";
+
+                file << "  line_measure_roi_fully_inside_image: "
+                     << (object.line_measure_roi_fully_inside_image ? "true" : "false") << "\n";
+
+                file << "  line_measure_method: "
+                     << object.line_measure_method << "\n";
+
+                file << "  line_measure_threshold: "
+                     << object.line_measure_threshold << "\n";
+
+                file << "  line_measure_linegap: "
+                     << object.line_measure_linegap << "\n";
+
+                file << "  line_measure_wgap: "
+                     << object.line_measure_wgap << "\n";
+
+                file << "  line_measure_hgap: "
+                     << object.line_measure_hgap << "\n";
+
+                file << "  line_measure_profile_count: "
+                     << object.line_measure_profile_count << "\n";
+
+                file << "  line_measure_sampled_pixel_count: "
+                     << object.line_measure_sampled_pixel_count << "\n";
+
+                file << "  line_measure_gray_min: "
+                     << object.line_measure_gray_min << "\n";
+
+                file << "  line_measure_gray_max: "
+                     << object.line_measure_gray_max << "\n";
+
+                file << "  line_measure_gray_mean: "
+                     << object.line_measure_gray_mean << "\n";
+
+                file << "  line_measure_max_gradient: "
+                     << object.line_measure_max_gradient << "\n";
+
+                file << "  line_measure_input_failure_stage: "
+                     << object.line_measure_input_failure_stage << "\n";
+
+                file << "  line_measure_input_detail: "
+                     << object.line_measure_input_detail << "\n";
+
                 file << "  display_version: " << object.display_version << "\n";
             }
 
@@ -2736,8 +2806,48 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
         object.line_measure_failure_stage = "chain_not_converted_to_measure_points";
     }
 
+    const FindlineMeasureInputDebug& input =
+        lineTool.lastmeasureinputdebug();
+
+    object.line_measure_image_ready = input.image_mat_ready;
+    object.line_measure_image_width = input.image_width;
+    object.line_measure_image_height = input.image_height;
+    object.line_measure_image_channels = input.image_channels;
+    object.line_measure_image_type = input.image_type;
+
+    object.line_measure_roi_intersects_image =
+        input.roi_intersects_image;
+
+    object.line_measure_roi_fully_inside_image =
+        input.roi_fully_inside_image;
+
+    object.line_measure_method = input.method;
+    object.line_measure_threshold = input.threshold;
+    object.line_measure_linegap = input.linegap;
+    object.line_measure_wgap = input.wgap;
+    object.line_measure_hgap = input.hgap;
+
+    object.line_measure_profile_count = input.profile_count;
+    object.line_measure_sampled_pixel_count = input.sampled_pixel_count;
+
+    object.line_measure_gray_min = input.gray_min;
+    object.line_measure_gray_max = input.gray_max;
+    object.line_measure_gray_mean = input.gray_mean;
+    object.line_measure_max_gradient = input.max_gradient;
+
+    object.line_measure_image_source = input.image_source;
+    object.line_measure_input_failure_stage = input.failure_stage;
+    object.line_measure_input_detail = input.detail;
+
     std::ostringstream status;
-    status << "pointsw=" << object.line_pointsw_count
+    status << "image_ready=" << (object.line_measure_image_ready ? "true" : "false")
+           << ", image=" << object.line_measure_image_width
+           << "x" << object.line_measure_image_height
+           << "x" << object.line_measure_image_channels
+           << ", roi_intersects=" << (object.line_measure_roi_intersects_image ? "true" : "false")
+           << ", threshold=" << object.line_measure_threshold
+           << ", max_gradient=" << object.line_measure_max_gradient
+           << ", pointsw=" << object.line_pointsw_count
            << ", pointsh=" << object.line_pointsh_count
            << ", valid_xy=" << object.valid_line_points_count
            << ", seek_points=" << object.line_seek_points_count

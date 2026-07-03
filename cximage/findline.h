@@ -88,6 +88,45 @@ struct FindlineMeasureProfileStats
     int neighbor_inconsistency_count = 0;
 };
 
+struct FindlineMeasureInputDebug
+{
+    bool image_ptr_valid = false;
+    bool image_mat_ready = false;
+
+    int image_width = 0;
+    int image_height = 0;
+    int image_channels = 0;
+    int image_type = 0;
+
+    bool has_line_roi = false;
+    double roi_x0 = 0.0;
+    double roi_y0 = 0.0;
+    double roi_x1 = 0.0;
+    double roi_y1 = 0.0;
+    double roi_scan_half_width = 0.0;
+
+    bool roi_intersects_image = false;
+    bool roi_fully_inside_image = false;
+
+    int method = 0;
+    int threshold = 0;
+    int linegap = 0;
+    int wgap = 0;
+    int hgap = 0;
+
+    int profile_count = 0;
+    int sampled_pixel_count = 0;
+
+    double gray_min = 0.0;
+    double gray_max = 0.0;
+    double gray_mean = 0.0;
+    double max_gradient = 0.0;
+
+    std::string image_source;
+    std::string failure_stage;
+    std::string detail;
+};
+
 class Findline :public Shape
 {
 public:
@@ -212,6 +251,10 @@ public:
     bool hasfitresult() const { return m_has_fit_result; }
     bool getdisplaysnapshot(FindlineDisplaySnapshot& out) const;
     void exportmeasuredebugpoints(std::vector<float>& outXY) const;
+    const FindlineMeasureInputDebug& lastmeasureinputdebug() const
+    {
+        return m_lastMeasureInputDebug;
+    }
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
@@ -303,10 +346,12 @@ private:
     void FilterMeasurePoints(FindlineMeasureProfileStats& stats);
     void FitWeightedLeastSquares(FindlineMeasureProfileStats& stats);
     void RefineJointConsistency(FindlineMeasureProfileStats& stats);
+    void ProbeDisplayRoiGrayStats(Image& image);
 private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindlineMeasureProfileStats m_lastMeasureProfile;
+    FindlineMeasureInputDebug m_lastMeasureInputDebug;
     double m_result_x0 = 0.0;
     double m_result_y0 = 0.0;
     double m_result_x1 = 0.0;

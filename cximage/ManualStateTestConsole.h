@@ -150,6 +150,33 @@ struct RuntimeObjectView
     int line_chain_length = 0;
     std::string line_measure_failure_stage;
 
+    bool line_measure_image_ready = false;
+    int line_measure_image_width = 0;
+    int line_measure_image_height = 0;
+    int line_measure_image_channels = 0;
+    int line_measure_image_type = 0;
+
+    bool line_measure_roi_intersects_image = false;
+    bool line_measure_roi_fully_inside_image = false;
+
+    int line_measure_method = 0;
+    int line_measure_threshold = 0;
+    int line_measure_linegap = 0;
+    int line_measure_wgap = 0;
+    int line_measure_hgap = 0;
+
+    int line_measure_profile_count = 0;
+    int line_measure_sampled_pixel_count = 0;
+
+    double line_measure_gray_min = 0.0;
+    double line_measure_gray_max = 0.0;
+    double line_measure_gray_mean = 0.0;
+    double line_measure_max_gradient = 0.0;
+
+    std::string line_measure_image_source;
+    std::string line_measure_input_failure_stage;
+    std::string line_measure_input_detail;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;

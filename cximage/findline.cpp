@@ -67,6 +67,26 @@ int CeilPositiveToInt(double value)
     const double max_value = static_cast<double>(std::numeric_limits<int>::max());
     return static_cast<int>(std::ceil(std::min(value, max_value)));
 }
+
+bool CxRectIntersectsImage(double minX,
+                           double minY,
+                           double maxX,
+                           double maxY,
+                           int width,
+                           int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+
+    if (maxX < 0.0 || maxY < 0.0)
+        return false;
+
+    if (minX >= static_cast<double>(width) ||
+        minY >= static_cast<double>(height))
+        return false;
+
+    return true;
+}
 cxgeom::CxSetLineBuildMeta BuildLineScanMeta(double x0,
                                              double y0,
                                              double x1,
@@ -1246,6 +1266,7 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
         g_pbackfindobject->Measure(*g_pbackimage);
     }
 
+    m_lastMeasureInputDebug.profile_count = iwsize + ihsize;
     stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
@@ -1344,6 +1365,17 @@ void Findline::CollectAllEdgeBands(Image& image, FindlineMeasureProfileStats& st
     stats.edgeband_count = 0;
     for (size_t i = 0; i < m_scanEdgeBands.size(); ++i)
         stats.edgeband_count += static_cast<int>(m_scanEdgeBands[i].bands.size());
+
+    if (stats.edgeband_count <= 0)
+    {
+        m_lastMeasureInputDebug.failure_stage = "no_edge_band_candidates";
+        m_lastMeasureInputDebug.detail =
+            "CollectAllEdgeBands produced zero candidates; check image binding, threshold, polarity, method, ROI width";
+    }
+    else
+    {
+        m_lastMeasureInputDebug.failure_stage = "edge_band_candidates_available";
+    }
 
     stats.edgeband_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
@@ -1741,11 +1773,187 @@ PointsShape& Findline::getresultpointsh()
 }
 void Findline::measure(void* pimage)
 {
-    Image* pgetimage = (Image*)pimage;
-    if (pgetimage == nullptr)
+    m_lastMeasureInputDebug = FindlineMeasureInputDebug();
+    m_lastMeasureInputDebug.image_ptr_valid = (pimage != nullptr);
+    m_lastMeasureInputDebug.method = m_iMethod;
+    m_lastMeasureInputDebug.threshold = m_iThreshold;
+    m_lastMeasureInputDebug.linegap = m_iSelectPointGap;
+    m_lastMeasureInputDebug.wgap = m_iwgap;
+    m_lastMeasureInputDebug.hgap = m_ihgap;
+
+    if (pimage == nullptr)
+    {
+        m_lastMeasureInputDebug.failure_stage = "image_pointer_null";
+        m_lastMeasureInputDebug.detail = "Findline.measure received null image pointer";
+        ClearMeasureState();
         return;
-    Measure(*pgetimage);
+    }
+
+    Image* image = static_cast<Image*>(pimage);
+    g_pbackimage = image;
+
+    cv::Mat mat = image->getmat();
+    m_lastMeasureInputDebug.image_mat_ready = !mat.empty();
+
+    if (mat.empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "image_mat_empty";
+        m_lastMeasureInputDebug.detail = "Image.getmat() is empty in Findline.measure";
+        ClearMeasureState();
+        return;
+    }
+
+    m_lastMeasureInputDebug.image_width = mat.cols;
+    m_lastMeasureInputDebug.image_height = mat.rows;
+    m_lastMeasureInputDebug.image_channels = mat.channels();
+    m_lastMeasureInputDebug.image_type = mat.type();
+    m_lastMeasureInputDebug.image_source = "Findline.measure(void*) parameter";
+
+    FindlineDisplaySnapshot displaySnapshot;
+    if (getdisplaysnapshot(displaySnapshot))
+    {
+        m_lastMeasureInputDebug.has_line_roi = true;
+        m_lastMeasureInputDebug.roi_x0 = displaySnapshot.x0;
+        m_lastMeasureInputDebug.roi_y0 = displaySnapshot.y0;
+        m_lastMeasureInputDebug.roi_x1 = displaySnapshot.x1;
+        m_lastMeasureInputDebug.roi_y1 = displaySnapshot.y1;
+        m_lastMeasureInputDebug.roi_scan_half_width = displaySnapshot.scan_half_width;
+
+        const double minX =
+            std::min(displaySnapshot.scan_box_xy[0],
+            std::min(displaySnapshot.scan_box_xy[2],
+            std::min(displaySnapshot.scan_box_xy[4],
+                     displaySnapshot.scan_box_xy[6])));
+
+        const double maxX =
+            std::max(displaySnapshot.scan_box_xy[0],
+            std::max(displaySnapshot.scan_box_xy[2],
+            std::max(displaySnapshot.scan_box_xy[4],
+                     displaySnapshot.scan_box_xy[6])));
+
+        const double minY =
+            std::min(displaySnapshot.scan_box_xy[1],
+            std::min(displaySnapshot.scan_box_xy[3],
+            std::min(displaySnapshot.scan_box_xy[5],
+                     displaySnapshot.scan_box_xy[7])));
+
+        const double maxY =
+            std::max(displaySnapshot.scan_box_xy[1],
+            std::max(displaySnapshot.scan_box_xy[3],
+            std::max(displaySnapshot.scan_box_xy[5],
+                     displaySnapshot.scan_box_xy[7])));
+
+        m_lastMeasureInputDebug.roi_intersects_image =
+            CxRectIntersectsImage(minX, minY, maxX, maxY, mat.cols, mat.rows);
+
+        m_lastMeasureInputDebug.roi_fully_inside_image =
+            minX >= 0.0 &&
+            minY >= 0.0 &&
+            maxX < static_cast<double>(mat.cols) &&
+            maxY < static_cast<double>(mat.rows);
+    }
+    else
+    {
+        m_lastMeasureInputDebug.failure_stage = "line_roi_not_initialized";
+        m_lastMeasureInputDebug.detail = "Findline display snapshot unavailable before measure";
+    }
+
+    ProbeDisplayRoiGrayStats(*image);
+    Measure(*image);
 }
+
+void Findline::ProbeDisplayRoiGrayStats(Image& image)
+{
+    cv::Mat src = image.getmat();
+    if (src.empty())
+        return;
+
+    cv::Mat gray;
+    if (src.channels() == 1)
+    {
+        gray = src;
+    }
+    else
+    {
+        cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+    }
+
+    FindlineDisplaySnapshot snapshot;
+    if (!getdisplaysnapshot(snapshot) || !snapshot.has_line_roi)
+        return;
+
+    const double dx = snapshot.x1 - snapshot.x0;
+    const double dy = snapshot.y1 - snapshot.y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+
+    if (len <= 1.0e-6)
+        return;
+
+    const double ux = dx / len;
+    const double uy = dy / len;
+    const double nx = -uy;
+    const double ny = ux;
+
+    const int alongStep = std::max(1, m_iSelectPointGap);
+    const int alongCount = std::max(1, static_cast<int>(len / alongStep));
+    const int halfWidth =
+        std::max(2, static_cast<int>(std::round(snapshot.scan_half_width)));
+
+    double sum = 0.0;
+    int count = 0;
+    int minV = 255;
+    int maxV = 0;
+    double maxGrad = 0.0;
+
+    for (int i = 0; i <= alongCount; ++i)
+    {
+        const double t =
+            static_cast<double>(i) / static_cast<double>(alongCount);
+
+        const double cx = snapshot.x0 + ux * len * t;
+        const double cy = snapshot.y0 + uy * len * t;
+
+        int prev = -1;
+
+        for (int s = -halfWidth; s <= halfWidth; ++s)
+        {
+            const int px =
+                static_cast<int>(std::lround(cx + nx * s));
+            const int py =
+                static_cast<int>(std::lround(cy + ny * s));
+
+            if (px < 0 || py < 0 || px >= gray.cols || py >= gray.rows)
+                continue;
+
+            const int v = static_cast<int>(gray.at<uchar>(py, px));
+
+            minV = std::min(minV, v);
+            maxV = std::max(maxV, v);
+            sum += static_cast<double>(v);
+            ++count;
+
+            if (prev >= 0)
+            {
+                maxGrad = std::max(
+                    maxGrad,
+                    static_cast<double>(std::abs(v - prev)));
+            }
+
+            prev = v;
+        }
+    }
+
+    m_lastMeasureInputDebug.sampled_pixel_count = count;
+
+    if (count > 0)
+    {
+        m_lastMeasureInputDebug.gray_min = static_cast<double>(minV);
+        m_lastMeasureInputDebug.gray_max = static_cast<double>(maxV);
+        m_lastMeasureInputDebug.gray_mean = sum / static_cast<double>(count);
+        m_lastMeasureInputDebug.max_gradient = maxGrad;
+    }
+}
+
 void Findline::pyrimage(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
