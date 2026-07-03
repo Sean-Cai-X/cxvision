@@ -259,7 +259,7 @@ int* pArgc = NULL;
 char** pArgv = NULL;
 
 #define MAX_EPSILON_ERROR 5
-#define REFRESH_DELAY 10  
+#define REFRESH_DELAY 10
 #define BUFFER_DATA(i) ((char *)0 + i)
 
 void runImageFiltersx(TColor* d_dst, int imageW, int imageH, int g_Kernel, cudaTextureObject_t texImagex) {
@@ -303,7 +303,7 @@ void runImageFiltersx(TColor* d_dst, int imageW, int imageH, int g_Kernel, cudaT
         }
 
         break;
-    }    
+    }
     cudaDeviceSynchronize();
     getLastCudaError("Filtering kernel execution failed.\n");
 }
@@ -348,7 +348,7 @@ void runImageFilters(TColor* d_dst) {
         }
 
         break;
-    }       
+    }
     cudaDeviceSynchronize();
     getLastCudaError("Filtering kernel execution failed.\n");
 }
@@ -362,7 +362,7 @@ void InitializeTextureAndPBO(int imageW, int imageH) {
     cudaGraphicsResource* cuda_pbo_resource;
     checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, gl_PBO,
         cudaGraphicsMapFlagsWriteDiscard));
-  
+
     GLuint textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
@@ -371,7 +371,7 @@ void InitializeTextureAndPBO(int imageW, int imageH) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageW, imageH, 0,
         GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glBindTexture(GL_TEXTURE_2D, 0);
- 
+
 }
 GLuint UpdateTextureWithCuda(int imageW, int imageH)
 {
@@ -386,7 +386,7 @@ GLuint UpdateTextureWithCuda(int imageW, int imageH)
     getLastCudaError("cudaGraphicsResourceGetMappedPointer failed");
 
     runImageFilters(d_dst);
- 
+
     checkCudaErrors(cudaDeviceSynchronize());
 
     checkCudaErrors(cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0));
@@ -488,7 +488,7 @@ GLuint UpdateTextureWithCuda(int, int)
 #endif
 
 void ViewController::run()
-{ 
+{
     int iw = 2048 / 2;
     int ih = 1536 / 2;
   initWindow (iw, ih, "glfw occt image ai");
@@ -1062,33 +1062,95 @@ void ViewController::drawScriptAcceptancePanels()
 
         for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
         {
-            if (object.type != "Findline" || object.stale || !object.visualizable)
+            if (object.type != "Findline")
                 continue;
-            const ImVec2 roi0(imagePos.x + object.line_x0 * sx,
-                              imagePos.y + object.line_y0 * sy);
-            const ImVec2 roi1(imagePos.x + object.line_x1 * sx,
-                              imagePos.y + object.line_y1 * sy);
+
+            if (!object.visualizable || object.stale)
+                continue;
+
+            const bool isActiveResultObject =
+                !m_manualTest.current_result_ref.source_object.empty() &&
+                object.name == m_manualTest.current_result_ref.source_object;
+
+            const ImU32 roiColor = isActiveResultObject
+                ? IM_COL32(80, 255, 170, 255)
+                : IM_COL32(80, 255, 170, 160);
+
+            const ImU32 pointColor = isActiveResultObject
+                ? IM_COL32(255, 80, 80, 255)
+                : IM_COL32(255, 80, 80, 160);
+
+            const ImU32 fitColor = isActiveResultObject
+                ? IM_COL32(255, 220, 80, 255)
+                : IM_COL32(255, 220, 80, 160);
+
+            const ImU32 pendingColor = IM_COL32(255, 220, 80, 180);
+
             if (object.has_line_roi)
-                drawList->AddLine(roi0, roi1, IM_COL32(80,255,170,255), 2.0f);
+            {
+                const ImVec2 c0(
+                    imagePos.x + object.line_x0 * sx,
+                    imagePos.y + object.line_y0 * sy);
+
+                const ImVec2 c1(
+                    imagePos.x + object.line_x1 * sx,
+                    imagePos.y + object.line_y1 * sy);
+
+                drawList->AddLine(c0, c1, roiColor, 2.0f);
+
+                if (object.has_line_scan_box)
+                {
+                    ImVec2 p0;
+                    ImVec2 p1;
+                    ImVec2 p2;
+                    ImVec2 p3;
+
+                    if (BuildLineScanBoxPoints(object, imagePos, sx, sy, p0, p1, p2, p3))
+                    {
+                        drawList->AddLine(p0, p1, roiColor, 1.5f);
+                        drawList->AddLine(p1, p2, roiColor, 1.5f);
+                        drawList->AddLine(p2, p3, roiColor, 1.5f);
+                        drawList->AddLine(p3, p0, roiColor, 1.5f);
+                    }
+                }
+
+                drawList->AddCircleFilled(c0, 4.0f, roiColor);
+                drawList->AddCircleFilled(c1, 4.0f, roiColor);
+                drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 6.0f), roiColor, object.name.c_str());
+
+                if (object.runtime_state == "fitline_pending_binding" ||
+                    object.runtime_state == "fitline_pending_implementation")
+                {
+                    drawList->AddText(ImVec2(c0.x + 6.0f, c0.y - 14.0f), pendingColor, "fitline pending");
+                }
+            }
+
             if (object.has_line_measure_points)
-                for (std::size_t i=0; i+1<object.line_measure_points_xy.size(); i+=2)
-                    drawList->AddCircleFilled(
-                        ImVec2(imagePos.x+object.line_measure_points_xy[i]*sx,
-                               imagePos.y+object.line_measure_points_xy[i+1]*sy),
-                        3.5f, IM_COL32(255,80,80,255), 12);
+            {
+                for (std::size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
+                {
+                    const float px = object.line_measure_points_xy[i];
+                    const float py = object.line_measure_points_xy[i + 1];
+                    const ImVec2 p(imagePos.x + px * sx, imagePos.y + py * sy);
+                    drawList->AddCircleFilled(p, 3.0f, pointColor);
+                }
+            }
+            else if (object.has_line_roi)
+            {
+                const ImVec2 c0(imagePos.x + object.line_x0 * sx,
+                                imagePos.y + object.line_y0 * sy);
+                drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 22.0f), pendingColor, "measure points: 0");
+            }
+
             if (object.has_fit_line)
             {
-                const ImVec2 fit0(imagePos.x+object.fit_line_x0*sx,
-                                  imagePos.y+object.fit_line_y0*sy);
-                const ImVec2 fit1(imagePos.x+object.fit_line_x1*sx,
-                                  imagePos.y+object.fit_line_y1*sy);
-                drawList->AddLine(fit0,fit1,IM_COL32(255,220,80,255),3.0f);
-                drawList->AddText(ImVec2(fit0.x+6.0f,fit0.y-14.0f),
-                                  IM_COL32(255,220,80,255),"fit_line");
+                const ImVec2 p0(imagePos.x + object.fit_line_x0 * sx,
+                                imagePos.y + object.fit_line_y0 * sy);
+                const ImVec2 p1(imagePos.x + object.fit_line_x1 * sx,
+                                imagePos.y + object.fit_line_y1 * sy);
+                drawList->AddLine(p0, p1, fitColor, 3.0f);
+                drawList->AddText(ImVec2(p0.x + 6.0f, p0.y - 14.0f), fitColor, "fit_line");
             }
-            else if (object.last_method == "fitline")
-                drawList->AddText(ImVec2(roi0.x+6.0f,roi0.y-14.0f),
-                                  IM_COL32(255,220,80,180),"fitline pending");
         }
     }
 
@@ -1232,7 +1294,7 @@ void ViewController::initWindow (int theWidth, int theHeight, const char* theTit
   glfwSetCursorPosCallback       (myOcctWindow->getGlfwWindow(), ViewController::onMouseMoveCallback);
 
   glfwMakeContextCurrent(myOcctWindow->getGlfwWindow());
-  glfwSwapInterval(1); 
+  glfwSwapInterval(1);
 
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
       std::cerr << "Failed to initialize GLAD" << std::endl;
@@ -1242,8 +1304,8 @@ void ViewController::initWindow (int theWidth, int theHeight, const char* theTit
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO(); (void)io;
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;    
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
   ImGui::StyleColorsDark();
   ImGui_ImplGlfw_InitForOpenGL(myOcctWindow->getGlfwWindow(), true);
@@ -1275,7 +1337,7 @@ void ViewController::FitAll()
     {
         if (!m_myView.IsNull())
         {
-            m_myView->FitAll(0.1); 
+            m_myView->FitAll(0.1);
             m_myView->ZFitAll();
             m_myView->Update();
 
@@ -1303,7 +1365,7 @@ void ViewController::RemoveAllShapes(Standard_Boolean isUpDate)
 }
 
 #include <Graphic3d_Texture2Dmanual.hxx>
-#include <Image_PixMap.hxx> 
+#include <Image_PixMap.hxx>
 unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
 {
     unsigned int textureID;
@@ -1311,7 +1373,7 @@ unsigned int  ViewController::CreateTextureFromMat0(const cv::Mat& mat)
 
     glBindTexture(GL_TEXTURE_2D, textureID);
 
-    //            
+    //
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1374,27 +1436,27 @@ void ViewController::SetTexturedtoBoxFace(const cv::Mat& image)
         memcpy(occtImage->ChangeRow(row), sourceRow, image.cols * image.channels() * sizeof(uchar));
     }
     Handle(Graphic3d_Texture2D) texture = new Graphic3d_Texture2D(
-        "MemoryTexture"       
+        "MemoryTexture"
     );
     texture->SetImage(occtImage);
     texture->EnableRepeat();
     texture->EnableSmooth();
-    texture->EnableModulate();          
+    texture->EnableModulate();
 
     gp_Ax2 anAxis;
     anAxis.SetLocation(gp_Pnt(0.0, 0.0, 0.0));
     TopoDS_Shape boxShape = BRepPrimAPI_MakeBox(anAxis, 1280, 1024, 50).Shape();
-  
+
     TopExp_Explorer explorer(boxShape, TopAbs_FACE);
 
     const  TopoDS_Face& frontFace = TopoDS::Face(explorer.Current());
- 
+
     if (frontFace.IsNull())
     {
         std::cerr << "Failed to find the front face of the box." << std::endl;
         return;
     }
-        
+
     Handle(AIS_Shape) aBoxAIS = new AIS_Shape(boxShape);
 
     Handle(Graphic3d_AspectFillArea3d) fillAspect = new Graphic3d_AspectFillArea3d();
@@ -1417,7 +1479,7 @@ void ViewController::SetTexturedtoBoxFace(const cv::Mat& image)
 }
 
 void ViewController::SetTexturedtoPlane(const cv::Mat& image)
- {  
+ {
         Handle(Image_AlienPixMap) occtImage = new Image_AlienPixMap();
 
         if (!occtImage->InitZero(Image_Format_RGB, image.cols, image.rows))
@@ -1449,7 +1511,7 @@ void ViewController::SetTexturedtoPlane(const cv::Mat& image)
 
         BRepBuilderAPI_MakeFace mkFace(plane, mkWire.Wire());
         TopoDS_Shape planeShape = mkFace.Face();
-  
+
         Handle(AIS_Shape) planeAIS = new AIS_Shape(planeShape);
 
         Handle(Graphic3d_AspectFillArea3d) fillAspect = new Graphic3d_AspectFillArea3d();
@@ -1474,9 +1536,9 @@ Handle(Graphic3d_Texture2D) ViewController::CreateTextureFromImage(const Handle(
         std::cerr << "Invalid Image_PixMap provided." << std::endl;
         return nullptr;
     }
-   
+
     Handle(Graphic3d_Texture2D) texture = new Graphic3d_Texture2D(
-        "MemoryTexture"     
+        "MemoryTexture"
     );
     texture->SetImage(image);
 
@@ -1486,7 +1548,7 @@ Handle(Graphic3d_Texture2D) ViewController::CreateTextureFromImage(const Handle(
 Handle(Image_PixMap)  ViewController::ConvertCvMatToOcctImage(const cv::Mat& mat)
 {
     Handle(Image_AlienPixMap) pixMap = new Image_AlienPixMap();
- 
+
     if (mat.type() == CV_8UC3)
     {
         if (!pixMap->InitZero(Image_Format_RGB, mat.cols, mat.rows))
@@ -1500,20 +1562,20 @@ Handle(Image_PixMap)  ViewController::ConvertCvMatToOcctImage(const cv::Mat& mat
     else if (mat.type() == CV_8UC4)
     {
         if (!pixMap->InitZero(Image_Format_RGB32, mat.cols, mat.rows))
-            return nullptr; 
+            return nullptr;
         for (int row = 0; row < mat.rows; ++row)
         {
-             const uchar* sourceRow = mat.ptr<uchar>(row); 
-             uchar* destRow = pixMap->ChangeRow(row);    
+             const uchar* sourceRow = mat.ptr<uchar>(row);
+             uchar* destRow = pixMap->ChangeRow(row);
              for (int col = 0; col < mat.cols; ++col)
              {
-                destRow[col * 4 + 0] = sourceRow[col * 3 + 2]; 
-                destRow[col * 4 + 1] = sourceRow[col * 3 + 1]; 
-                destRow[col * 4 + 2] = sourceRow[col * 3 + 0];  
-                destRow[col * 4 + 3] = 255; 
+                destRow[col * 4 + 0] = sourceRow[col * 3 + 2];
+                destRow[col * 4 + 1] = sourceRow[col * 3 + 1];
+                destRow[col * 4 + 2] = sourceRow[col * 3 + 0];
+                destRow[col * 4 + 3] = 255;
              }
-        } 
-    } 
+        }
+    }
 
 
     return pixMap;
@@ -1536,12 +1598,12 @@ void ViewController::AdjustModelBoundingBoxToImageSize(const Handle(V3d_View)& m
     Bnd_Box boundingBox;
     double modelWidth = imageWidth;
     double modelHeight = imageHeight;
-         
+
     boundingBox.Update(0, 0, 0, modelWidth, modelHeight, 0);
 
     double centerX = modelWidth / 2.0;
     double centerY = modelHeight / 2.0;
-    double centerZ = 0.0; 
+    double centerZ = 0.0;
     (void)centerZ;
 
     myView->SetSize(std::max(modelWidth, modelHeight));
@@ -1563,11 +1625,11 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
 
         if (!texture.IsNull())
         {
- 
+
             Standard_Real scale = 1;
             view->SetScale(scale);
 
-            view->SetProj(V3d_XposYposZpos); 
+            view->SetProj(V3d_XposYposZpos);
 
             view->SetEye(0, 0, -100);
 
@@ -1577,7 +1639,7 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
 
             view->SetDepth(100);
 
-            view->SetZoom(1); 
+            view->SetZoom(1);
 
             Standard_Integer viewWidth, viewHeight;
             view->Window()->Size(viewWidth, viewHeight);
@@ -1590,7 +1652,7 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
 
             view->SetBackgroundImage(texture, Aspect_FM_STRETCH, true);
             double modelWidth = imageWidth;
-            double modelHeight = imageHeight; 
+            double modelHeight = imageHeight;
             double centerX = modelWidth / 2.0;
             double centerY = modelHeight / 2.0;
             double centerZ = 0.0;
@@ -1598,8 +1660,8 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
             view->SetSize(std::max(modelWidth, modelHeight));
             view->ZFitAll();
             view->SetCenter(centerX, centerY);
-            
-            view->Redraw(); 
+
+            view->Redraw();
             myContext->UpdateCurrentViewer();
             myContext->UpdateCurrent();
         }
@@ -1613,7 +1675,7 @@ void ViewController::SetBackgroundInView(Handle(V3d_View)& view, const cv::Mat& 
         std::cerr << "Failed to convert image." << std::endl;
     }
 }
- 
+
 void ViewController::initViewer(int theWidth, int theHeight)
 {
     if (myOcctWindow.IsNull()
@@ -1631,33 +1693,33 @@ void ViewController::initViewer(int theWidth, int theHeight)
     aViewer->ActivateGrid(Aspect_GT_Rectangular, Aspect_GDM_Lines);
 
     m_myView = new V3d_CustomView(aViewer);
- 
+
     m_myView->SetImmediateUpdate(false);
     m_myView->SetWindow(myOcctWindow, myOcctWindow->NativeGlContext());
     m_myView->ChangeRenderingParams().ToShowStats = true;
     myContext = new AIS_InteractiveContext(aViewer);
- 
+
     Handle(Prs3d_Drawer) aSelectionStyle = myContext->SelectionStyle();
     aSelectionStyle->SetColor(Quantity_NOC_WHITE);
     myContext->SetSelectionStyle(aSelectionStyle);
 
     m_myView->SetProj(V3d_TypeOfOrientation::V3d_XposYposZpos);
 
-    Standard_Real eyeX = 0.0, eyeY = 0.0, eyeZ =  -500.0;  
+    Standard_Real eyeX = 0.0, eyeY = 0.0, eyeZ =  -500.0;
     m_myView->SetEye(eyeX, eyeY, eyeZ);
 
-    Standard_Real atX = 0.0, atY = 0.0, atZ = 0.0; 
+    Standard_Real atX = 0.0, atY = 0.0, atZ = 0.0;
     m_myView->SetAt(atX, atY, atZ);
 
-    Standard_Real upX = 0.0, upY = -1.0, upZ = 0.0; 
+    Standard_Real upX = 0.0, upY = -1.0, upZ = 0.0;
     m_myView->SetUp(upX, upY, upZ);
 
-     m_myView->SetDepth(100); 
+     m_myView->SetDepth(100);
      m_myView->SetCenter(theWidth, theHeight);
-  
+
      Standard_Real scale = 1;
      m_myView->SetScale(scale);
-   
+
      m_myView->SetProj(V3d_XposYposZpos);
 
      m_myView->SetEye(0, 0, -10000);
@@ -1666,10 +1728,10 @@ void ViewController::initViewer(int theWidth, int theHeight)
 
      m_myView->SetUp(0, -1, 0);
 
-     m_myView->SetDepth(10000); 
+     m_myView->SetDepth(10000);
 
      m_myView->SetZoom(1);
-     
+
      m_myView->SetCenter(theWidth , theHeight );
 
     m_myView->ZFitAll();
@@ -1678,24 +1740,24 @@ void ViewController::initViewer(int theWidth, int theHeight)
 
 }
 void ViewController::drawline()
-{  
+{
     gp_Pnt pn_Start;
     pn_Start.SetX(10);
     pn_Start.SetY(20);
-    pn_Start.SetZ(0); 
+    pn_Start.SetZ(0);
 
     gp_Pnt pn_End;
     pn_End.SetX(50);
     pn_End.SetY(60);
     pn_End.SetZ(0);
- 
+
     TopoDS_Vertex V1 = BRepBuilderAPI_MakeVertex(pn_Start);
     TopoDS_Vertex V2 = BRepBuilderAPI_MakeVertex(pn_End);
 
     TopoDS_Shape aShape = BRepBuilderAPI_MakeEdge(V1, V2);
-   
+
     Handle(AIS_Shape) aisLine = new AIS_Shape(aShape);
-   
+
     myContext->Display(aisLine, AIS_Shaded, 0, false);
 }
 
@@ -1704,12 +1766,12 @@ void ViewController::initDemoScene()
   if (myContext.IsNull())
   {
     return;
-  }  
+  }
    SetAllowZooming(Standard_False);
-   SetAllowRotation(Standard_False); 
-  
+   SetAllowRotation(Standard_False);
+
   if (1)
-  {  
+  {
       if(0)
       {
           gp_Trsf shapeTrsf = aBox->LocalTransformation();
@@ -1726,16 +1788,16 @@ void ViewController::initDemoScene()
           else {
               gp_Mat rotationMatrix = shapeTrsf.VectorialPart();
 
-              xAxis = gp_Dir(rotationMatrix.Column(1)); 
-              yAxis = gp_Dir(rotationMatrix.Column(2)); 
+              xAxis = gp_Dir(rotationMatrix.Column(1));
+              yAxis = gp_Dir(rotationMatrix.Column(2));
           }
-   
-          gp_Ax2 axis(position, yAxis, xAxis); 
 
-      } 
+          gp_Ax2 axis(position, yAxis, xAxis);
+
+      }
   }
 
-gp_Path m_gpath; 
+gp_Path m_gpath;
 m_gpath.SetContext(myContext);
 m_gpath.SetView(m_myView);
 
@@ -1746,7 +1808,7 @@ m_gpath.SetView(m_myView);
     initialparser();
 
     myContext->SetDisplayMode(AIS_Shaded, true);
- 
+
   TCollection_AsciiString aGlInfo;
   {
     TColStd_IndexedDataMapOfStringString aRendInfo;
@@ -1783,35 +1845,35 @@ void ViewController::mainloop()
                  FlushViewEvents(myContext, m_myView, true);
                  m_myView->Redraw();
              }
- 
+
              ImGui_ImplOpenGL3_NewFrame();
              ImGui_ImplGlfw_NewFrame();
              ImGui::NewFrame();
-                 
+
              if (m_showLegacyGpuWork)
              {
                ImGui::Begin("GPU work");
 
-             { 
-                 ImVec2 current_window_pos = ImGui::GetWindowPos(); 
+             {
+                 ImVec2 current_window_pos = ImGui::GetWindowPos();
                  m_current_window_posx = current_window_pos.x;
                  m_current_window_posy = current_window_pos.y;
 
                   m_imguiw = ImGui::GetWindowWidth();
                   m_imguih = ImGui::GetWindowHeight();
                  if (current_window_pos.x != last_window_pos.x || current_window_pos.y != last_window_pos.y)
-                 { 
+                 {
                      ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Window Moved!");
                      ifirstrun = 0;
                      FlushViewEvents(myContext, m_myView, true);
                      m_myView->Redraw();
-                 } 
+                 }
                  last_window_pos = current_window_pos;
              }
 
-             ImGui::Text("Parser code input here (%s) (%d)", IMGUI_VERSION, IMGUI_VERSION_NUM); 
+             ImGui::Text("Parser code input here (%s) (%d)", IMGUI_VERSION, IMGUI_VERSION_NUM);
              ImGui::Checkbox("Show Image", &m_imageshow);
-             ImGui::Checkbox("Pick Points", &m_ipickpoints); 
+             ImGui::Checkbox("Pick Points", &m_ipickpoints);
              ImGui::Checkbox("Line Scan", &m_ilinescan);
              ImGui::Checkbox("Attach Line", &m_iattachline);
              ImGui::Spacing();
@@ -1833,7 +1895,7 @@ void ViewController::mainloop()
                  "if(0){amatch0.patternsample(3);}\n"
                  "if(0){amatch0.modelzero();amatch0.modelrotate(15.0);}\n"
                  "amatch0.Show(8);\n"
-                 ; 
+                 ;
 
              static char showtext[512 * 106];
              static ImGuiInputTextFlags flags = ImGuiInputTextFlags_AllowTabInput;
@@ -1850,19 +1912,19 @@ void ViewController::mainloop()
 
                  if(0)
                  m_imageparser.Compile(text);
-                  
+
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
 
                  ifirstrun = 0;
                  FlushViewEvents(myContext, m_myView, true);
-                 m_myView->Redraw();   
+                 m_myView->Redraw();
              }
-             static char text2[512 * 106] = 
+             static char text2[512 * 106] =
                  "amatch0.loadmodel(\"D:\\test.pat\");\n"
                  "amatch0.loadrotatemodel(\"D:\\test.pat\");\n"
-                 "amatch0.samplemodel(100);\n" 
+                 "amatch0.samplemodel(100);\n"
                  "amatch0.setmatchrect(50,50,2200,1900);\n"
                  "amatch0.matchstepgap(10, 10);\n"
                  "amatch0.setmatchthre(10);\n"
@@ -1876,7 +1938,7 @@ void ViewController::mainloop()
                  "amatch0.setanglescale(-10,10);\n"
                  "amatch0.rotatematchAB(aimage1);\n"
                  "}\n"
-                 "if(0){\n" 
+                 "if(0){\n"
                  "amatch0.reorgpattern();\n"
                  "amatch0.patterngap(0.2); \n"
                  "amatch0.matchmore(aimage1);\n"
@@ -1884,10 +1946,10 @@ void ViewController::mainloop()
                  "amatch0.Show(8);\n"
                  "dvalue1 = amatch0.getmaxresult();\n"
                  "dvalue2 = amatch0.getresultcentx(-1);\n"
-                 "dvalue3 = amatch0.getresultcenty(-1);\n" 
+                 "dvalue3 = amatch0.getresultcenty(-1);\n"
                  ;
-              
-             static char showtext2[512 * 106]; 
+
+             static char showtext2[512 * 106];
              static ImGuiInputTextFlags flags2 = ImGuiInputTextFlags_AllowTabInput;
              ImGui::InputTextMultiline("##source2", text2, IM_ARRAYSIZE(text2), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 6), flags2);
              if (ImGui::Button("Parser Run2"))
@@ -1917,9 +1979,9 @@ void ViewController::mainloop()
                  "aimage1.getshape(ashape0);\n"
                  "if(0){\n"
                  "aimage1.roipyrdown(5);\n"
-                 "aimage1.roieasythre(255);\n" 
+                 "aimage1.roieasythre(255);\n"
                  "}\n"
-                 "aimage1.Show(1); \n" 
+                 "aimage1.Show(1); \n"
                  "if(0){aimage1.rotate(10);}\n"
                  "if(0){aimage1.roi_5bgmb(3,1,0,2);}\n"
                  "if(0){aimage1.roi_5bgmbh(3,1,0,2);}\n"
@@ -1939,7 +2001,7 @@ void ViewController::mainloop()
                  clearcreateos();
 
                  auto start = std::chrono::high_resolution_clock::now();
-               
+
 
                  m_imageparser.Compile(text3);
 
@@ -1955,7 +2017,7 @@ void ViewController::mainloop()
 
              }
 
-             static char text4[512 * 106] =  
+             static char text4[512 * 106] =
                  "if(0){aimage1.reload();}\n"
                  "aimage2.CopyFrom(aimage1);\n"
                  "aimage1.getshape(ashape0);\n"
@@ -1973,9 +2035,9 @@ void ViewController::mainloop()
                  "afindline.setthre(38);\n"
                  "afindline.setmethod(0);\n"
                  "afindline.setobjfilter(0);\n"
-                 "afindline.measure(aimage1);\n" 
+                 "afindline.measure(aimage1);\n"
                  "afindline.sfilter(-1, -1); \n"
-                 "afindline.Show(1);\n" 
+                 "afindline.Show(1);\n"
                  "afindline.inflectionpoint(apoints1);\n"
                  "apoints1.setcolor(255,0,0);\n"
                  "apoints1.Show(1);\n"
@@ -1984,11 +2046,11 @@ void ViewController::mainloop()
                  "afindcircle.setgap(5);\n"
                  "afindcircle.getshape(ashape0);\n"
                  "afindcircle.setmethod(0);\n"
-                 "afindcircle.setthre(20);\n" 
+                 "afindcircle.setthre(20);\n"
                  "afindcircle.setlinegap(3);\n"
                  "afindcircle.setcirclegap(380);\n"
-                 "afindcircle.measure(aimage1);\n" 
-                 "afindcircle.fitcircle();\n" 
+                 "afindcircle.measure(aimage1);\n"
+                 "afindcircle.fitcircle();\n"
                  "afindcircle.setfitmeasuregap(80);\n"
                  "afindcircle.fitmeasure(aimage1);\n"
                  "afindcircle.Show(1);\n"
@@ -2014,13 +2076,13 @@ void ViewController::mainloop()
                  myContext->UpdateCurrentViewer();
                  myContext->UpdateCurrent();
              }
-             static char text5[512 * 106] = 
+             static char text5[512 * 106] =
                  "if(1){apoints0.load(\"D:\\26.data\");apoints0.Show(1);}\n"
                  "if(0){apoints0.save(\"D:\\2.data\");apoints0.Show(1);}\n"
                  "if(0){apoints0.aptfilter(5);apoints0.Show(1);}\n"
                  "if(0){apoints0.cluster(10,8);apoints0.Show(16);}\n"
                  "if(0){apoints0.sortpoints(80,0,10,45);apoints0.Show(16);}\n"
-                 "if(0){apoints0.clear();apoints0.Show(1);}\n" 
+                 "if(0){apoints0.clear();apoints0.Show(1);}\n"
                  "if(0){apoints0.obbanglecenter(apoints1);}\n"
                  "if(0){apoints0.filter(20, 1); apoints0.Show(1);}\n"
                  "if(0){apoints0.findcross(apoints1);apoints1.Show(1);}\n"
@@ -2049,12 +2111,12 @@ void ViewController::mainloop()
                  myContext->UpdateCurrent();
 
              }
-              
+
              static char text6[512 * 106] =
                  "TestRun arun;\n"
-                 "arun.testrun();\n"  
+                 "arun.testrun();\n"
                  "ahttp.runserver(); \n"
-                 "ahttp.runclient(); \n" 
+                 "ahttp.runclient(); \n"
                  ;
              static char showtext6[512 * 106];
              static ImGuiInputTextFlags flags6 = ImGuiInputTextFlags_AllowTabInput;
@@ -2084,7 +2146,7 @@ void ViewController::mainloop()
              if (clicked & 1)
              {
                  clicked = 0;
-                  m_imageshow = 1; 
+                  m_imageshow = 1;
                  strcpy(showtext, getoutputstring().c_str());
                  strcat(showtext, "\n");
 
@@ -2101,9 +2163,9 @@ void ViewController::mainloop()
                  std::cout << "run!" << std::endl;
              }
              ImGui::Text("run gpu and ai.");
-            
+
              if (ImGui::CollapsingHeader("OpenCV Editor"))
-             { 
+             {
                  ImGui::Checkbox("Show OpenCV Editor", &opencvSW);
                  ImGui::Checkbox("Show OpenCV Blur", &opencvblur);
                  ImGui::SliderInt("slider thre", &ivalue1, 1, 255);
@@ -2114,11 +2176,11 @@ void ViewController::mainloop()
 
                  ImGui::Checkbox("pyramid thre Image", &ipythre);
                  ImGui::Checkbox("iotsuThreshold thre Image", &iotsuThreshold);
-                 
+
                  ImGui::Checkbox("H run", &ihedge);
                  ImGui::Checkbox("V run", &iwedge);
                  ImGui::Checkbox("B2W", &ib2wedge);
-                 ImGui::Checkbox("W2B", &iw2bedge); 
+                 ImGui::Checkbox("W2B", &iw2bedge);
                  ImGui::SliderInt("pyramidDynamicThreshold levels", &ivalue3, 1, 8);
                  ImGui::SliderInt("pyramidDynamicThreshold blockSize", &ivalue4, 1, 19);
                  ImGui::SliderInt("value 5", &ivalue5, 1, 255);
@@ -2139,7 +2201,7 @@ void ViewController::mainloop()
              drawImageEvidencePanels();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
-             
+
              if (1 == m_imageshow)
              {
                  m_imageshow = 0;
@@ -2150,7 +2212,7 @@ void ViewController::mainloop()
                      if (pimage->getshow() == 1)
                          pshowimage = pimage;
                  }
-                 
+
                  ImageManager* pmodule = (ImageManager*)m_imageparser.GetClassObj("Module", "amodule");
                  Image* pmoduleimage = nullptr;
                  int imoduleshow = 0;
@@ -2160,17 +2222,17 @@ void ViewController::mainloop()
                      imoduleshow = pmodule->getshow();
                  }
                  if (0 != pmodule&& imoduleshow > 0 )
-                 {   
+                 {
                      if(1== imoduleshow)
-                        SetBackgroundInView(m_myView, pmodule->GetBackImage()->getmat()); 
+                        SetBackgroundInView(m_myView, pmodule->GetBackImage()->getmat());
                      else if(2== imoduleshow)
                         SetBackgroundInView(m_myView, pmodule->GetMapImage()->getmat());
                  }
                  else if (nullptr != pshowimage)
                  {
-                    SetBackgroundInView(m_myView, pshowimage->getmat());  
+                    SetBackgroundInView(m_myView, pshowimage->getmat());
                  }
-             } 
+             }
              m_shapex = (Shape*)m_imageparser.GetClassObj("Shape", "ashape0");
              m_apoints = (PointsShape*)m_imageparser.GetClassObj("PointsShape", "apoints0");
              m_bpoints = (PointsShape*)m_imageparser.GetClassObj("PointsShape", "apoints1");
@@ -2265,7 +2327,7 @@ GLuint CreateTextureCubeX(cv::Mat& src) {
         std::cerr << "Unsupported number of channels: " << src.channels() << std::endl;
         return 0;
     }
-  
+
     GLuint gl_texture_id;
     glGenTextures(1, &gl_texture_id);
     glBindTexture(GL_TEXTURE_2D, gl_texture_id);
@@ -2324,14 +2386,14 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageW, imageH, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); 
+        GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
     cudaGraphicsResource* cuda_tex_resource;
     cudaCheckErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
- 
+
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<uchar4>();
     cudaArray* cu_array = nullptr;
     cudaCheckErrors(cudaMallocArray(&cu_array, &channelDesc, imageW, imageH));
@@ -2356,7 +2418,7 @@ GLuint CreateTextureCubeY(cv::Mat& src) {
     uchar4* d_dst = nullptr;
     cudaCheckErrors(cudaGraphicsMapResources(1, &cuda_tex_resource, 0));
     cudaCheckErrors(cudaGraphicsSubResourceGetMappedArray((cudaArray**)&d_dst, cuda_tex_resource, 0, 0));
-   
+
     runImageFiltersx((TColor*)d_dst, imageW, imageH, 0, texImage0);
 
     cudaCheckErrors(cudaGraphicsUnmapResources(1, &cuda_tex_resource, 0));
@@ -2396,14 +2458,14 @@ GLuint CreateTextureCubeZ(cv::Mat& src) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageW, imageH, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, nullptr); 
+        GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
     cudaGraphicsResource* cuda_tex_resource;
     checkCudaErrors(cudaGraphicsGLRegisterImage(&cuda_tex_resource, gl_texture_id,
         GL_TEXTURE_2D, cudaGraphicsMapFlagsWriteDiscard));
-     
+
     cudaTextureObject_t texImage = 0;
     uchar4* h_Src = (uchar4*)src_rgba.data;
     checkCudaErrors(CUDA_MallocArray(&h_Src, imageW, imageH));
@@ -2424,7 +2486,7 @@ GLuint CreateTextureCubeZ(cv::Mat& src) {
 }
 
 void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
-    if (src_host.empty() || src_host.channels() != 4) { 
+    if (src_host.empty() || src_host.channels() != 4) {
 
         if (src_host.empty() || src_host.channels() != 3) {
             throw std::invalid_argument("Source image must be 24-bit (3 channels).");
@@ -2449,7 +2511,7 @@ void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
         checkCudaErrors(cudaMemcpyToArray(cu_array, 0, 0, src_host.data, num_bytes, cudaMemcpyHostToDevice));
     }
 
-    //            
+    //
     struct cudaResourceDesc resDesc = {};
     memset(&resDesc, 0, sizeof(resDesc));
     resDesc.resType = cudaResourceTypeArray;
@@ -2469,7 +2531,7 @@ void ViewController::Imgui_GPU_NLM_main(cv::Mat& src_host, cv::Mat& dst_host) {
     checkCudaErrors(cudaMalloc(&d_dst, num_bytes));
 
     cuda_Copy(d_dst, imageW, imageH, texImage);
- 
+
     size_t imageSize = src_host.step * src_host.rows;
     cv::Mat augmented_host(src_host.size(), src_host.type());
     checkCudaErrors(cudaMemcpy(augmented_host.data, d_dst, imageSize, cudaMemcpyDeviceToHost));
@@ -2493,17 +2555,17 @@ void ViewController::Imgui_GPU_NLM_main0(cv::Mat& src_host, cv::Mat& dst_host)
     unsigned char* h_dst = NULL;
     cudaMalloc((void**)&d_dst, imageW * imageH * sizeof(TColor));
     h_dst = (unsigned char*)malloc(imageH * imageW * 4);
-     
-    int kernel = 1 ; 
+
+    int kernel = 1 ;
 
     runImageFiltersx(d_dst,imageH,imageW,0, texImage);
 
     cudaDeviceSynchronize();
 
     cudaMemcpy(dst_host.data, d_dst, imageW * imageH * sizeof(TColor),cudaMemcpyDeviceToHost);
-     
+
     CUDA_FreeArray();
-    free(h_Src); 
+    free(h_Src);
     cudaFree(d_dst);
     free(h_dst);
 
@@ -2511,9 +2573,9 @@ void ViewController::Imgui_GPU_NLM_main0(cv::Mat& src_host, cv::Mat& dst_host)
 void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
 {
 
-    int kernelSize = 11; 
+    int kernelSize = 11;
     int kernelRadius = kernelSize / 2;
-    double sigma = 0; 
+    double sigma = 0;
 
     if (sigma == 0) {
         sigma = 0.3 * ((kernelRadius - 1) * 0.5 - 1) + 0.8;
@@ -2538,7 +2600,7 @@ void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
 
     float hueDelta = 30.0f;
     float saturationScale = 1.2f;
-    float valueScale = 1.1f; 
+    float valueScale = 1.1f;
 
     cudaMemcpy(d_input, blurred_host.data, imageSize, cudaMemcpyHostToDevice);
 
@@ -2577,7 +2639,7 @@ void ViewController::Imgui_GPU_Gauss_main(cv::Mat& src_host, cv::Mat& dst_host)
 #endif
 
 void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
-{ 
+{
     (void)p_open;
     ImGui::Begin("Image Viewer");
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
@@ -2599,7 +2661,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     ImVec4 border_col = ImGui::GetStyleColorVec4(ImGuiCol_Border);
 
     if (irunedge)
-    { 
+    {
         m_occtimage.copyFromMat(s_img0);
         m_occtimage.colorizeROI(cv::Scalar(0, 0, 0));
         if (iwedge)
@@ -2650,7 +2712,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
         m_occtimage.colorizeROI(cv::Scalar(0, 0, 0));
         m_occtimage.copyResizedToROI(binaryImage.getmat());
 
-        //         
+        //
         texture_id0 = CreateTextureFromMat0(m_occtimage.getmat());
         SetBackgroundInView(m_myView, m_occtimage.getmat());
     }
@@ -2680,7 +2742,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
         SetBackgroundInView(m_myView, m_occtimage.getmat());
     }
 
-    
+
     if (1 == opencvblur)
     {
         if (1)
@@ -2689,16 +2751,16 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             SetTexturedtoBoxFace(s_img0);
         }
         if (0)
-        { 
+        {
             m_occtimage.copyFromMat(s_img0);
             Image adaptiveBinaryImage = m_occtimage.adaptiveThresholding(255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY, 11, 2);
 
             texture_id0 = CreateTextureFromMat0(adaptiveBinaryImage.getmat());
             SetBackgroundInView(m_myView, adaptiveBinaryImage.getmat());
-             
+
             if (0)
             {
-                m_occtimage.copyFromMat(s_img0); 
+                m_occtimage.copyFromMat(s_img0);
                 texture_id0 = CreateTextureFromMat0(m_occtimage.getmat());
                 SetBackgroundInView(m_myView, m_occtimage.getmat());
             }
@@ -2711,13 +2773,13 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             SetBackgroundInView(m_myView, blurred);
         }
         else
-        { 
+        {
             if (0)
             {
                 Image octimagez;
                 octimagez.copyFromMat(s_img0);
-                octimagez.analyzeConnectedComponentsColor(50.0, 100, 0.5, 2.0); 
-                octimagez.analyzeConnectedComponentsPyramid(100, 0.5, 2.0); 
+                octimagez.analyzeConnectedComponentsColor(50.0, 100, 0.5, 2.0);
+                octimagez.analyzeConnectedComponentsPyramid(100, 0.5, 2.0);
                 texture_id0 = CreateTextureFromMat0(octimagez.getmat());
 
                 SetBackgroundInView(m_myView, octimagez.getmat());
@@ -2727,7 +2789,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
             {
                 Image octimagez;
                 octimagez.copyFromMat(s_img0);
-                Image binaryImage = octimagez.pyramidDynamicThresholding(4, 11, 0); 
+                Image binaryImage = octimagez.pyramidDynamicThresholding(4, 11, 0);
                 texture_id0 = CreateTextureFromMat0(binaryImage.getmat());
                 SetBackgroundInView(m_myView, binaryImage.getmat());
             }
@@ -2737,7 +2799,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
                 octimagez.copyFromMat(s_img0);
                 Image octimagez0 = octimagez.getROI();
                 octimagez0.colorFillConnectedComponents(100, 50, 50, cv::Scalar(0, 0, 255));
-                //         
+                //
                 texture_id0 = CreateTextureFromMat0(octimagez0.getmat());
                 SetBackgroundInView(m_myView, octimagez0.getmat());
             }
@@ -2747,7 +2809,7 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     else if (1 == gpublur)
     {
         cv::Mat  blurred;
-     
+
         texture_id0 = CreateTextureCube(s_img0);
 #if CXCORE_ENABLE_VIEWCONTROLLER_CUDA
         UpdateTextureWithCuda(2048,1536);
@@ -2758,13 +2820,13 @@ void  ViewController::Imgui_OpenCV_Window0(bool* p_open)
     }
     else if (0 == opencvblur && 0 == texture_id0)
     {
-        //         
+        //
         texture_id0 = CreateTextureFromMat0(s_img0);
         SetBackgroundInView(m_myView, s_img0);
     }
     else if (1 == opencvreset)
     {
-        //         
+        //
         texture_id0 = CreateTextureFromMat0(s_img0);
         SetBackgroundInView(m_myView, s_img0);
         opencvreset = 0;
@@ -2821,17 +2883,17 @@ void ViewController::onMouseScroll(double theOffsetX, double theOffsetY)
     }
 }
 void ViewController::SetParserValue(const string& codestr, double dvalue)
-{ 
+{
     if (!m_imageparser.IsObjectVar(codestr.c_str()))
-        return; 
+        return;
     string astr(codestr+"="+formatNumber(dvalue)+";");
     m_imageparser.Compile(astr.c_str());
 }
 double ViewController::GetParserValue(const string& codestr)
-{ 
+{
     double* pdouble = NULL;
     if (!m_imageparser.IsObjectVar((const char*)codestr.c_str()))
-        return 0x00; 
+        return 0x00;
     pdouble = (double*)m_imageparser.GetDoubleValue((const char*)codestr.c_str());
     if (NULL == pdouble)
         return 0x00;
@@ -2873,9 +2935,9 @@ string ViewController::initialparser()
     for (int i = 0; i < files.size(); ++i)
     {
         string filename = files[i];
-       
+
         string getfilename = getFullFileName(filename);
-          
+
         m_strcode = loadfilestring(filename);
 
         bresult = m_imageparser.Compile(m_strcode.c_str());
@@ -2892,11 +2954,11 @@ string ViewController::initialparser()
     }
     for (int i = 0; i < m_imageparser.GetClassObjSum("Image"); i++)
     {
-        Image* pimage = (Image*)m_imageparser.GetClassObj("Image", i); 
+        Image* pimage = (Image*)m_imageparser.GetClassObj("Image", i);
         if (nullptr != pimage)
             *pimage = Image(2048,1536,CV_32FC3);
     }
-     
+
     m_dzoomx = GetParserValue("m_dzoomx");
     m_dzoomy = GetParserValue("m_dzoomy");
     if (0.0 == m_dzoomx)
@@ -2914,7 +2976,7 @@ void ViewController::clearcreateos()
 {
     m_createcodeos.str("");
     m_createcodeos.clear();
-}   
+}
 void ViewController::clearparserobject()
 {
     m_imageparser.ClearAll();
@@ -2922,7 +2984,7 @@ void ViewController::clearparserobject()
 void ViewController::resetparser()
 {
     clearparserobject();
-    initialparser(); 
+    initialparser();
 }
 Shape* ViewController::indexAt(const gp_Pnt& pos)
 {
@@ -2993,7 +3055,7 @@ Shape* ViewController::indexAt(const gp_Pnt& pos)
     for (int i = 0; i < isize; i++)
     {
         Shape* pshape = (Shape*)m_imageparser.GetClassObj("gridobject", i);
-        
+
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
@@ -3032,24 +3094,24 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
         if (theAction == GLFW_PRESS)
         {
             m_mousePressPos = gp_Pnt(aPos.x(),aPos.y() ,0);
-            isDragging = true; 
-             myContext->Select(true); 
-             if (true == m_ilinescan 
+            isDragging = true;
+             myContext->Select(true);
+             if (true == m_ilinescan
                  && 0 == theButton)
              {
                  if (m_mousePressPos.X() >= m_current_window_posx
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {  
+                 {
                  }
                  else
                  if (0 == m_ibtntimes)
                  {
                      m_point0 = gp_Pnt(aPos.x() , aPos.y() , 0);
                  }
-             } 
-             else if (true == m_ipickpoints 
+             }
+             else if (true == m_ipickpoints
                  && 0 == theButton)
              {
                  if (m_mousePressPos.X() >= m_current_window_posx
@@ -3072,7 +3134,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 { 
+                 {
                  }
                  else
                  {
@@ -3089,7 +3151,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 { 
+                 {
                  }
                  else
                  {
@@ -3106,7 +3168,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                      && m_mousePressPos.Y() >= m_current_window_posy
                      && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                      && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-                 {  
+                 {
                  }
                  else
                  {
@@ -3120,14 +3182,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
              {
                  Handle(AIS_InteractiveObject) detectedShape = myContext->DetectedInteractive();
                  selectedShape = Handle(AIS_Shape)::DownCast(detectedShape);
-             }             
+             }
              PressMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
         }
         else
         {
-          
+
             ReleaseMouseButton(aPos, mouseButtonFromGlfw(theButton), keyFlagsFromGlfw(theMods), false);
-           
+
             if (m_mousePressPos.X() >= m_current_window_posx
                 && m_mousePressPos.Y() >= m_current_window_posy
                 && m_mousePressPos.X() < m_current_window_posx + m_imguiw
@@ -3138,7 +3200,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
             if (true == m_ilinescan && 1 == theButton)
             {
                 if(0==m_ibtntimes)
-                { 
+                {
                     m_ibtntimes = 1;
                 }
                 else if (1 == m_ibtntimes)
@@ -3147,16 +3209,16 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                     m_point1 = gp_Pnt(aPos.x(), aPos.y(), 0);
                     m_afindline->setlinesegment(m_point0.X() * m_dscalex, m_point0.Y() * m_dscaley, m_point1.X() * m_dscalex, m_point1.Y() * m_dscaley, 80);
                     m_afindline->setshow(1);
-                } 
+                }
             }
             if (m_mousePressPos.X() >= m_current_window_posx
                 && m_mousePressPos.Y() >= m_current_window_posy
                 && m_mousePressPos.X() < m_current_window_posx + m_imguiw
                 && m_mousePressPos.Y() < m_current_window_posy + m_imguih)
-            {  
+            {
             }
             else
-            if (true != m_ipickpoints ) 
+            if (true != m_ipickpoints )
                 if (aPos.x() - m_mousePressPos.X() > 100 && aPos.y() - m_mousePressPos.Y() > 100)
             {
                 m_shapex->settype(Shape::Rectangle);
@@ -3167,7 +3229,7 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods)
                 m_shapex->setshow(1);
             }
              isDragging = false;
-        } 
+        }
 
 
         if (0)
@@ -3223,7 +3285,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
              m_shapex->setshow(1);
          }
          if(0)
-         if (false == ismove) 
+         if (false == ismove)
          {
             ismove = true;
             m_shape0.setcontext(myContext);
@@ -3237,7 +3299,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 
      }
      if (!m_myView.IsNull())
-     { 
+     {
          if (myContext->HasDetected())
          {
              UpdateMousePosition(aNewPos, PressedMouseButtons(), LastMouseFlags(), false);

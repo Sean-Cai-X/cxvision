@@ -1,4 +1,4 @@
-﻿#ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
+#ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 #define CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 
 #include <string>
@@ -84,7 +84,7 @@ struct RuntimeObjectView
     float fit_avgdist = 0.0f;
 
     bool has_result_measure = false;
-     
+
     // 可选：用于 summary，不强依赖算法内部接口。
     int scan_path = 0;
     int image_width = 0;
@@ -93,7 +93,7 @@ struct RuntimeObjectView
     int back_image_height = 0;
 
 
-    // Findline ROI / measure / fit result snapshot.
+    // Findline ROI center line.
     bool has_line_roi = false;
     float line_x0 = 0.0f;
     float line_y0 = 0.0f;
@@ -101,19 +101,32 @@ struct RuntimeObjectView
     float line_y1 = 0.0f;
     float line_scale = 1.0f;
 
+    // Findline scan box / scan band.
+    bool has_line_scan_box = false;
+    float line_scan_half_width = 3.0f;
+    int linegap = 3;
+
+    // Findline measure points.
     bool has_line_measure_points = false;
     std::vector<float> line_measure_points_xy;
     int line_measure_points_count = 0;
     int valid_line_points_count = 0;
 
+    // Raw split counts, used to determine whether tool produced w/h points.
+    int line_pointsw_count = 0;
+    int line_pointsh_count = 0;
+
+    // Findline fit result.
     bool has_fit_line = false;
     float fit_line_x0 = 0.0f;
     float fit_line_y0 = 0.0f;
     float fit_line_x1 = 0.0f;
     float fit_line_y1 = 0.0f;
     float line_avgdist = 0.0f;
+
     std::string line_fit_status;
     std::string line_fit_mode;
+    std::string line_measure_status;
 
 
 };
