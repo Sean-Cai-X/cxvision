@@ -5151,3 +5151,68 @@ void ViewController::drawManualStateTestConsole()
 
   ImGui::End();
 }
+
+bool UpdateRuntimeFindlineSetlineFromUi(
+    ManualTestContext& context,
+    const std::string& objectName,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float scale,
+    std::string& outReason)
+{
+    outReason.clear();
+
+    DebugCximageRuntime& runtime = CxRuntime(context);
+
+    auto it = runtime.lines.find(objectName);
+    if (it == runtime.lines.end() || !it->second)
+    {
+        outReason = "Findline runtime object not found: " + objectName;
+        return false;
+    }
+
+    const int ix0 = static_cast<int>(std::lround(x0));
+    const int iy0 = static_cast<int>(std::lround(y0));
+    const int ix1 = static_cast<int>(std::lround(x1));
+    const int iy1 = static_cast<int>(std::lround(y1));
+    const int iscale = static_cast<int>(std::max(1.0f, scale));
+
+    it->second->setline(ix0, iy0, ix1, iy1, iscale);
+
+    RuntimeObjectView* object =
+        FindRuntimeObjectByName(context, objectName);
+
+    if (object == nullptr)
+    {
+        outReason = "RuntimeObjectView not found: " + objectName;
+        return false;
+    }
+
+    object->exists_in_parser = true;
+    object->type = "Findline";
+    object->last_method = "ui_drag_setline";
+    object->last_runtime_status = "runtime_executed";
+    object->runtime_state = "runtime_param_set";
+    object->visualizable = true;
+    object->visual_source = "runtime_object";
+    object->stale = false;
+
+    RefreshFindlineDisplaySnapshot(context, *object, *it->second);
+
+    std::ostringstream ss;
+    ss << "Findline UI drag updated setline"
+       << " | line_roi=("
+       << object->line_x0 << "," << object->line_y0
+       << ")->("
+       << object->line_x1 << "," << object->line_y1
+       << ")"
+       << " | scan_half_width=" << object->line_scan_half_width
+       << " | source=" << object->line_display_source;
+
+    object->display_summary = ss.str();
+    outReason = object->display_summary;
+
+    return true;
+}
