@@ -143,6 +143,11 @@ public:
     double getresultcenty();
     double getradius();
     double getavgdist();
+
+    int getvalidpointcount();
+    bool hasfitresult();
+    bool canfitresultmeasure();
+
     int getcirclecentx() const { return m_icentx; }
     int getcirclecenty() const { return m_icenty; }
     int getcirclepax() const { return m_ipax; }

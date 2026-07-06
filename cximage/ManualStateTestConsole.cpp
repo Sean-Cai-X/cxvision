@@ -2613,6 +2613,48 @@ static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
         }
         else if (call.method == "FitResultMeasure")
         {
+            if (!circleIt->second->canfitresultmeasure())
+            {
+                object.exists_in_parser = true;
+                object.type = "Findcircle";
+                object.last_method = "FitResultMeasure";
+                object.last_runtime_status = "PENDING_BINDING";
+                object.runtime_state = "fitresultmeasure_skipped";
+                object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+                object.visualizable = true;
+                object.stale = false;
+
+                object.display_summary =
+                    "Findcircle.FitResultMeasure skipped | reason=fitcircle result is not valid";
+
+                ScriptLineView& skipLine = context.line_views[static_cast<std::size_t>(lineIndex)];
+                skipLine.status = "PENDING_BINDING";
+                skipLine.reason = object.display_summary;
+                skipLine.timestamp = CurrentTimestamp();
+
+                context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+                context.run_state = "runtime_step";
+                context.debug_status = "PENDING";
+                context.debug_reason = skipLine.reason;
+
+                RefreshFindcircleDisplaySnapshot(context, object);
+                RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+
+                std::ostringstream diagnostics;
+                diagnostics << object.display_summary
+                    << " | scan_path=" << circleIt->second->getpath().ElementCount();
+                if (image != nullptr)
+                    diagnostics << " | image=" << image->getWidth() << "x" << image->getHeight();
+                Image* backImage = ImageManager::GetBackImage(1);
+                diagnostics << " | back_image="
+                    << (backImage == nullptr ? "null" :
+                        std::to_string(backImage->getWidth()) + "x" +
+                        std::to_string(backImage->getHeight()));
+                object.display_summary = diagnostics.str();
+
+                return true;
+            }
+
             circleIt->second->FitResultMeasure(image);
             FillFindcircleResultView(object, *circleIt->second, "FitResultMeasure");
             object.has_result_measure =
@@ -3860,6 +3902,9 @@ static void DebugStepOnce(ManualTestContext& context)
         return;
     }
 
+    try
+    {
+
     const int lineIndex = context.current_line;
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     const std::string statement = TrimLine(line.statement);
@@ -4057,6 +4102,53 @@ static void DebugStepOnce(ManualTestContext& context)
     line.reason = "statement not executable by debug shim";
     line.timestamp = CurrentTimestamp();
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+    }
+    catch (const std::exception& ex)
+    {
+        const int lineIndex = context.current_line;
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = std::string("runtime exception: ") + ex.what();
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+
+        AppendCxDebugEvent(
+            context,
+            "runtime_exception",
+            line.line_no,
+            line.statement,
+            "",
+            "",
+            line.status,
+            line.reason,
+            "");
+    }
+    catch (...)
+    {
+        const int lineIndex = context.current_line;
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "runtime exception: unknown";
+        line.timestamp = CurrentTimestamp();
+
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+
+        AppendCxDebugEvent(
+            context,
+            "runtime_exception",
+            line.line_no,
+            line.statement,
+            "",
+            "",
+            line.status,
+            line.reason,
+            "");
+    }
 }
 
 
@@ -4432,8 +4524,10 @@ void ViewController::initManualStateTestConsole()
      "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true},
     {"Findline Vertical Direct", "Findline vertical ROI direction test.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
-    {"Findcircle Original Direct", "Findcircle original Measure request/cache path.",
+    {"Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
      "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true},
+    {"Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
+     "", "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", true},
     {"Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
      "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true}
   };

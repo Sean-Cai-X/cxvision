@@ -24,6 +24,7 @@ m_circle.setcircle(cx, cy, px, py);
 
 m_circle.measure(&m_image);
 m_circle.fitcircle();
+m_circle.FitResultMeasure(&m_image);
 
 global.circle_ref = m_circle.get_result();
 global.current_status = "PENDING";

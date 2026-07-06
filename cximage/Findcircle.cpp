@@ -624,6 +624,13 @@ void Findcircle::MeasureT(void *pimage)
 }
 void Findcircle::Measure(Image& image)
 {
+    m_measurepoints.clear();
+    m_dresultcentx = 0.0;
+    m_dresultcenty = 0.0;
+    m_dradius = 0.0;
+    m_avgdist = 0.0;
+    m_last_prefilter_used = 0;
+
     m_lastMeasureGeometryDebug.image_ready =
         image.getmat().empty() ? false : true;
 
@@ -645,19 +652,30 @@ void Findcircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.measure_source =
         "original_circle_measure_pipeline";
 
-    if (image.getWidth() < rect().TopLeft().X() + rect().Width()
-        || image.getHeight() < rect().TopLeft().Y() + rect().Height())
-        return;//error process
-    if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
-        return;//error process
-    m_measurepoints.clear();
-    m_dresultcentx = 0.0;
-    m_dresultcenty = 0.0;
-    m_dradius = 0.0;
-    m_avgdist = 0.0;
-    m_last_prefilter_used = 0;
-    const int stage_limit = ReadCircleMeasureStageLimit();
-    int isize = ClampSizeToInt(m_lines.size());
+    if (image.getmat().empty())
+    {
+        return;
+    }
+
+    const gp_Rectangle roi = rect();
+
+    const double left = roi.TopLeft().X();
+    const double top = roi.TopLeft().Y();
+    const double right = left + roi.Width();
+    const double bottom = top + roi.Height();
+
+    if (left < 0.0 || top < 0.0)
+    {
+        return;
+    }
+
+    if (right >= static_cast<double>(image.getWidth()) ||
+        bottom >= static_cast<double>(image.getHeight()))
+    {
+        return;
+    }
+
+    const int isize = ClampSizeToInt(m_lines.size());
 
     m_lastMeasureGeometryDebug.scan_line_count = isize;
 
@@ -682,16 +700,29 @@ void Findcircle::Measure(Image& image)
 
         return;
     }
-    if (stage_limit == 1)
+
+    if (g_pbackfindobject == nullptr)
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_findobject_null";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle Measure requires g_pbackfindobject prepared by debug/runtime environment.";
+
         return;
+    }
 
     int ilineslen1 = 0;
     if (isize > 0)
         ilineslen1 = m_lines[0].getlinesize();
+
     int iprocessw = ilineslen1;
 
-    m_lastMeasureGeometryDebug.scan_line_length = ilineslen1;
-    m_lastMeasureGeometryDebug.process_width = iprocessw;
+    m_lastMeasureGeometryDebug.scan_line_length =
+        ilineslen1;
+
+    m_lastMeasureGeometryDebug.process_width =
+        iprocessw;
 
     if (iprocessw <= 0)
     {
@@ -703,6 +734,11 @@ void Findcircle::Measure(Image& image)
 
         return;
     }
+
+    const int stage_limit = ReadCircleMeasureStageLimit();
+
+    if (stage_limit == 1)
+        return;
 
     if (stage_limit == 2)
         return;
@@ -1237,9 +1273,22 @@ void Findcircle::fitcircle()
 }
 void Findcircle::FitResultMeasure(void* pimage)
 {
-    Image* pgetimage = (Image*)pimage;
+    Image* pgetimage = static_cast<Image*>(pimage);
+
     if (pgetimage == nullptr)
+    {
         return;
+    }
+
+    if (pgetimage->getmat().empty())
+    {
+        return;
+    }
+
+    if (!canfitresultmeasure())
+    {
+        return;
+    }
 
     const PointsShape pre_measurepoints = m_measurepoints;
     const int pre_points = m_measurepoints.size();
@@ -1304,6 +1353,27 @@ double Findcircle::getavgdist()
 {
     return m_avgdist;
 }
+
+int Findcircle::getvalidpointcount()
+{
+    return static_cast<int>(m_measurepoints.size());
+}
+
+bool Findcircle::hasfitresult()
+{
+    return m_measurepoints.size() >= 3 &&
+           m_dradius > 0.0 &&
+           std::isfinite(m_dresultcentx) &&
+           std::isfinite(m_dresultcenty) &&
+           std::isfinite(m_dradius) &&
+           std::isfinite(m_avgdist);
+}
+
+bool Findcircle::canfitresultmeasure()
+{
+    return hasfitresult() && m_fitmeasuregap > 0;
+}
+
 GeomAdaptor_Curve Findcircle::GetCurve(gp_Pnt center_p, Standard_Real radius)
 {
     GeomAdaptor_Curve adaptorCurve;
@@ -1346,12 +1416,37 @@ gp_Pnt Findcircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt exte
 }
 void Findcircle::measure(void* pimage)
 {
-    Image* pgetimage = (Image*)pimage;
+    Image* pgetimage = static_cast<Image*>(pimage);
+
     if (pgetimage == nullptr)
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
         return;
+    }
+
+    if (pgetimage->getmat().empty())
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        return;
+    }
 
     if (!EnsureCircleMeasureGeometryReady())
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
         return;
+    }
 
     Measure(*pgetimage);
 }
