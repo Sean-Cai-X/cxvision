@@ -172,6 +172,23 @@ struct FindlineMeasureInputDebug
     int original_scan_w_length = 0;
     int original_scan_h_length = 0;
     int original_process_width = 0;
+
+    bool backimage_ready = false;
+    bool findobject_ready = false;
+
+    int objfilterset = 0;
+    int filter_borw = 0;
+    int filter_min = 0;
+    int filter_max = 0;
+
+    bool findobject_measure_called = false;
+    bool findobject_measure_skipped = false;
+
+    int binary_foreground_pixels = 0;
+    int binary_roi_width = 0;
+    int binary_roi_height = 0;
+
+    std::string result_empty_reason;
 };
 
 class Findline :public Shape

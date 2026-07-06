@@ -1,0 +1,40 @@
+Image m_image;
+Findline m_line;
+
+m_image.copyFromMat(global.matInput);
+
+int x0 = 120;
+int y0 = 240;
+int x1 = 980;
+int y1 = 240;
+
+int method = 0;
+int threshold = 20;
+int linegap = 6;
+int fitmode = 1;
+
+int wgap = 8;
+int hgap = 32;
+int script_scale = 1;
+
+int objfilter = 1;
+int filter_borw = 21;
+int filter_min = 1;
+int filter_max = 100000;
+
+m_line.SetWHgap(wgap, hgap);
+m_line.setline(x0, y0, x1, y1, script_scale);
+
+m_line.setobjfilter(objfilter);
+m_line.setfilter(filter_borw, filter_min, filter_max);
+
+m_line.setmethod(method);
+m_line.setthre(threshold);
+m_line.setlinegap(linegap);
+m_line.setfitmode(fitmode);
+
+m_line.measure(&m_image);
+m_line.fitline();
+
+global.line_ref = m_line.get_result();
+global.current_status = "PENDING";

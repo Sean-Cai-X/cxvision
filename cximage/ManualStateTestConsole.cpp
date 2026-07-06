@@ -872,6 +872,42 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_measure_hgap: "
                      << object.line_measure_hgap << "\n";
 
+                file << "  line_measure_backimage_ready: "
+                     << (object.line_measure_backimage_ready ? "true" : "false") << "\n";
+
+                file << "  line_measure_findobject_ready: "
+                     << (object.line_measure_findobject_ready ? "true" : "false") << "\n";
+
+                file << "  line_measure_objfilterset: "
+                     << object.line_measure_objfilterset << "\n";
+
+                file << "  line_measure_filter_borw: "
+                     << object.line_measure_filter_borw << "\n";
+
+                file << "  line_measure_filter_min: "
+                     << object.line_measure_filter_min << "\n";
+
+                file << "  line_measure_filter_max: "
+                     << object.line_measure_filter_max << "\n";
+
+                file << "  line_measure_findobject_called: "
+                     << (object.line_measure_findobject_called ? "true" : "false") << "\n";
+
+                file << "  line_measure_findobject_skipped: "
+                     << (object.line_measure_findobject_skipped ? "true" : "false") << "\n";
+
+                file << "  line_measure_binary_foreground_pixels: "
+                     << object.line_measure_binary_foreground_pixels << "\n";
+
+                file << "  line_measure_binary_roi: "
+                     << object.line_measure_binary_roi_width
+                     << "x"
+                     << object.line_measure_binary_roi_height
+                     << "\n";
+
+                file << "  line_measure_result_empty_reason: "
+                     << object.line_measure_result_empty_reason << "\n";
+
                 file << "  line_measure_profile_count: "
                      << object.line_measure_profile_count << "\n";
 
@@ -1620,13 +1656,35 @@ static bool TryExecuteIntDeclarationAssignment(ManualTestContext& context,
     if (lhs.empty())
         return false;
 
-    const int v = std::atoi(rhs.c_str());
+    int v = 0;
+    if (!ReadRuntimeInt(context, rhs, v))
+    {
+        char* end = nullptr;
+        const long parsed = std::strtol(rhs.c_str(), &end, 10);
+        if (end == rhs.c_str() || *end != '\0')
+        {
+            ScriptLineView& line =
+                context.line_views[static_cast<std::size_t>(lineIndex)];
+            line.status = "BLOCKED";
+            line.reason = "int initializer unresolved: " + rhs;
+            line.return_variable = lhs;
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        v = static_cast<int>(parsed);
+    }
 
     context.runtime_int_vars[lhs] = v;
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_executed";
-    line.reason = "int variable initialized";
+    line.reason =
+        "int variable initialized | " + lhs + "=" + std::to_string(v);
     line.return_variable = lhs;
     line.timestamp = CurrentTimestamp();
 
@@ -1641,7 +1699,7 @@ static bool TryExecuteIntDeclarationAssignment(ManualTestContext& context,
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
     context.run_state = "runtime_step";
     context.debug_status = "PENDING";
-    context.debug_reason = "int variable initialized";
+    context.debug_reason = line.reason;
 
     AppendCxDebugEvent(
         context,
@@ -3164,6 +3222,42 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_wgap = input.wgap;
     object.line_measure_hgap = input.hgap;
 
+    object.line_measure_backimage_ready =
+        input.backimage_ready;
+
+    object.line_measure_findobject_ready =
+        input.findobject_ready;
+
+    object.line_measure_objfilterset =
+        input.objfilterset;
+
+    object.line_measure_filter_borw =
+        input.filter_borw;
+
+    object.line_measure_filter_min =
+        input.filter_min;
+
+    object.line_measure_filter_max =
+        input.filter_max;
+
+    object.line_measure_findobject_called =
+        input.findobject_measure_called;
+
+    object.line_measure_findobject_skipped =
+        input.findobject_measure_skipped;
+
+    object.line_measure_binary_foreground_pixels =
+        input.binary_foreground_pixels;
+
+    object.line_measure_binary_roi_width =
+        input.binary_roi_width;
+
+    object.line_measure_binary_roi_height =
+        input.binary_roi_height;
+
+    object.line_measure_result_empty_reason =
+        input.result_empty_reason;
+
     object.line_measure_profile_count = input.profile_count;
     object.line_measure_sampled_pixel_count = input.sampled_pixel_count;
 
@@ -3267,7 +3361,29 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
            << ", seek_points=" << object.line_seek_points_count
            << ", edgebands=" << object.line_edgeband_count
            << ", chain=" << object.line_chain_length
-           << ", failure_stage=" << object.line_measure_failure_stage;
+           << ", failure_stage=" << object.line_measure_failure_stage
+           << ", backimage_ready="
+           << (object.line_measure_backimage_ready ? "true" : "false")
+           << ", findobject_ready="
+           << (object.line_measure_findobject_ready ? "true" : "false")
+           << ", objfilterset="
+           << object.line_measure_objfilterset
+           << ", filter_borw="
+           << object.line_measure_filter_borw
+           << ", filter_min="
+           << object.line_measure_filter_min
+           << ", filter_max="
+           << object.line_measure_filter_max
+           << ", findobject_called="
+           << (object.line_measure_findobject_called ? "true" : "false")
+           << ", binary_foreground="
+           << object.line_measure_binary_foreground_pixels;
+
+    if (!object.line_measure_result_empty_reason.empty())
+    {
+        status << ", empty_reason="
+               << object.line_measure_result_empty_reason;
+    }
 
     object.line_measure_status = status.str();
 }
@@ -3450,7 +3566,9 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "setfitmode" ||
         call.method == "SetWHgap" ||
         call.method == "setwhgap" ||
-        call.method == "setmeasurefallback";
+        call.method == "setmeasurefallback" ||
+        call.method == "setobjfilter" ||
+        call.method == "setfilter";
 
     if (!isFindlineParamMethod)
         return false;
@@ -3569,6 +3687,82 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         return true;
     }
 
+    if (call.method == "setfilter")
+    {
+        if (call.args.size() < 3)
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findline.setfilter requires borw, min, max";
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        int borw = 0;
+        int minArea = 0;
+        int maxArea = 0;
+
+        if (!ResolveDebugInt(context, call.args[0], borw) ||
+            !ResolveDebugInt(context, call.args[1], minArea) ||
+            !ResolveDebugInt(context, call.args[2], maxArea))
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findline.setfilter failed to resolve parameters";
+            line.timestamp = CurrentTimestamp();
+
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        it->second->setfilter(borw, minArea, maxArea);
+
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            call.object,
+            "Findline",
+            line.line_no);
+
+        object.exists_in_parser = true;
+        object.type = "Findline";
+        object.last_method = "setfilter";
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "line_param_updated_measure_pending";
+        object.last_update_line = line.line_no;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.stale = false;
+
+        RefreshFindlineDisplaySnapshot(context, object, *it->second);
+        RefreshFindlineMeasureSnapshot(object, *it->second);
+
+        std::ostringstream summary;
+        summary << "Findline.setfilter executed"
+                << " | borw=" << borw
+                << " | min=" << minArea
+                << " | max=" << maxArea
+                << " | measure_pending=true";
+
+        object.display_summary = summary.str();
+
+        line.status = "runtime_executed";
+        line.reason = object.display_summary;
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line =
+            FindNextNonEmptyLine(context, lineIndex + 1);
+
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+
+        return true;
+    }
+
     int value = 0;
     if (!ResolveDebugInt(context, call.args[0], value))
     {
@@ -3598,6 +3792,8 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         it->second->setfitmode(value);
     else if (call.method == "setmeasurefallback")
         it->second->setmeasurefallback(value);
+    else if (call.method == "setobjfilter")
+        it->second->setobjfilter(value);
 
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,

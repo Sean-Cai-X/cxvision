@@ -203,6 +203,23 @@ struct RuntimeObjectView
     int line_original_scan_h_length = 0;
     int line_original_process_width = 0;
 
+    bool line_measure_backimage_ready = false;
+    bool line_measure_findobject_ready = false;
+
+    int line_measure_objfilterset = 0;
+    int line_measure_filter_borw = 0;
+    int line_measure_filter_min = 0;
+    int line_measure_filter_max = 0;
+
+    bool line_measure_findobject_called = false;
+    bool line_measure_findobject_skipped = false;
+
+    int line_measure_binary_foreground_pixels = 0;
+    int line_measure_binary_roi_width = 0;
+    int line_measure_binary_roi_height = 0;
+
+    std::string line_measure_result_empty_reason;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;

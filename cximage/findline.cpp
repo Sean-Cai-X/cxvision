@@ -1030,6 +1030,24 @@ void Findline::Measure(Image& image)
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
 
+    m_lastMeasureInputDebug.backimage_ready =
+        g_pbackimage != nullptr;
+
+    m_lastMeasureInputDebug.findobject_ready =
+        g_pbackfindobject != nullptr;
+
+    m_lastMeasureInputDebug.objfilterset = m_iobjfilterset;
+    m_lastMeasureInputDebug.filter_borw = m_ifilterborw;
+    m_lastMeasureInputDebug.filter_min = m_ifiltermin;
+    m_lastMeasureInputDebug.filter_max = m_ifiltermax;
+
+    m_lastMeasureInputDebug.findobject_measure_called = false;
+    m_lastMeasureInputDebug.findobject_measure_skipped = false;
+    m_lastMeasureInputDebug.binary_foreground_pixels = 0;
+    m_lastMeasureInputDebug.binary_roi_width = 0;
+    m_lastMeasureInputDebug.binary_roi_height = 0;
+    m_lastMeasureInputDebug.result_empty_reason.clear();
+
     if (g_pbackimage == nullptr)
         return;
 
@@ -1119,14 +1137,57 @@ void Findline::Measure(Image& image)
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
+    m_lastMeasureInputDebug.binary_roi_width = iprocessw;
+    m_lastMeasureInputDebug.binary_roi_height = iwsize + ihsize;
+
+    try
+    {
+        const cv::Mat& bw = g_pbackimage->getmat();
+
+        if (!bw.empty())
+        {
+            cv::Mat roi = bw;
+
+            if (bw.channels() > 1)
+            {
+                cv::cvtColor(bw, roi, cv::COLOR_BGR2GRAY);
+            }
+
+            m_lastMeasureInputDebug.binary_foreground_pixels =
+                cv::countNonZero(roi);
+        }
+    }
+    catch (...)
+    {
+        m_lastMeasureInputDebug.binary_foreground_pixels = -1;
+    }
+
     if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
-         g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
-         g_pbackfindobject->setbrow(m_ifilterborw);//21 22
-         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)),
-             ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
-         g_pbackfindobject->Measure(*g_pbackimage);
-         //mask 
+        m_lastMeasureInputDebug.findobject_measure_called = true;
+
+        g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
+        g_pbackfindobject->setbrow(m_ifilterborw);//21 22
+        g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)),
+            ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
+
+        g_pbackfindobject->Measure(*g_pbackimage);
+        //mask
+    }
+    else
+    {
+        m_lastMeasureInputDebug.findobject_measure_skipped = true;
+
+        if ((m_iobjfilterset & 0x01) == 0)
+        {
+            m_lastMeasureInputDebug.result_empty_reason =
+                "findobject skipped because objfilterset bit0 is disabled";
+        }
+        else if (g_pbackfindobject == nullptr)
+        {
+            m_lastMeasureInputDebug.result_empty_reason =
+                "findobject skipped because g_pbackfindobject is null";
+        }
     }
 
     int irecordpoint[100];
@@ -1300,8 +1361,7 @@ void Findline::Measure(Image& image)
         ClampSizeToInt(m_measurepoints_w.size()) +
         ClampSizeToInt(m_measurepoints_h.size());
 
-    m_lastMeasureInputDebug.original_point_count =
-        resultPointCount;
+    m_lastMeasureInputDebug.original_point_count = resultPointCount;
 
     m_lastMeasureInputDebug.original_edgeband_count = 0;
     m_lastMeasureInputDebug.original_chain_length = 0;
@@ -1322,11 +1382,56 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.measure_source =
             "original_measure_pipeline_no_result";
 
-        m_lastMeasureInputDebug.failure_stage =
-            "no_edge_band_candidates";
+        if (!m_lastMeasureInputDebug.backimage_ready)
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "backimage_not_ready";
 
-        m_lastMeasureInputDebug.detail =
-            "Findline original Measure completed but produced zero result points.";
+            m_lastMeasureInputDebug.detail =
+                "Findline original Measure failed because g_pbackimage is null.";
+        }
+        else if ((m_iobjfilterset & 0x01) &&
+                 !m_lastMeasureInputDebug.findobject_ready)
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "findobject_not_ready";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline original Measure requires FindObject, but g_pbackfindobject is null.";
+        }
+        else if (iprocessw <= 0 ||
+                 (iwsize <= 0 && ihsize <= 0))
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "original_scan_geometry_empty";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline original Measure has no valid scan geometry.";
+        }
+        else if (m_lastMeasureInputDebug.binary_foreground_pixels == 0)
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "binary_threshold_no_foreground";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline scan image has gradient, but thresholded binary image has no foreground. Check threshold, method, and gamma.";
+        }
+        else if (m_lastMeasureInputDebug.findobject_measure_called)
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "findobject_filter_result_empty";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline FindObject Measure was called, but no result points were accepted. Check filter_min/filter_max/filter_borw and method polarity.";
+        }
+        else
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "original_measure_result_points_empty";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline original Measure had valid scan geometry and image response, but produced zero result points.";
+        }
     }
 
     /*
@@ -2117,8 +2222,56 @@ void Findline::measure(void* pimage)
     }
 
     Measure(*image);
-}
 
+    const int originalPointCount =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+
+    m_lastMeasureInputDebug.fallback_allowed =
+        m_measure_fallback_mode > 0;
+    m_lastMeasureInputDebug.fallback_used = false;
+
+    if (originalPointCount == 0 &&
+        m_measure_fallback_mode == 2)
+    {
+        m_lastMeasureInputDebug.original_failure_stage =
+            m_lastMeasureInputDebug.failure_stage;
+        m_lastMeasureInputDebug.original_detail =
+            m_lastMeasureInputDebug.detail;
+
+        FindlineMeasureProfileStats fallbackStats;
+        if (MeasureSimpleRoiGradientPoints(*image, fallbackStats))
+        {
+            fallbackStats.total_ms = m_lastMeasureProfile.total_ms;
+            m_lastMeasureProfile = fallbackStats;
+
+            m_lastMeasureInputDebug.fallback_used = true;
+            m_lastMeasureInputDebug.measure_source =
+                "simple_roi_gradient_fallback";
+            m_lastMeasureInputDebug.failure_stage =
+                "simple_roi_gradient_fallback_used";
+            m_lastMeasureInputDebug.detail =
+                "Original Findline Measure produced zero points; "
+                "explicit fallback generated measure points from ROI normal gradients.";
+        }
+        else
+        {
+            m_lastMeasureInputDebug.measure_source =
+                "simple_roi_gradient_fallback_no_result";
+            m_lastMeasureInputDebug.failure_stage =
+                "simple_roi_gradient_fallback_no_result";
+            m_lastMeasureInputDebug.detail =
+                "Original Findline Measure and explicit ROI gradient fallback "
+                "both produced fewer than two valid measure points.";
+        }
+    }
+    else if (originalPointCount == 0 &&
+             m_measure_fallback_mode == 1)
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_diagnostics_only";
+    }
+}
 void Findline::ProbeDisplayRoiGrayStats(Image& image)
 {
     cv::Mat src = image.getmat();
@@ -2473,27 +2626,9 @@ bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
     out.hgap = m_ihgap;
     out.linegap = m_iSelectPointGap;
 
-    const float dx = out.x1 - out.x0;
-    const float dy = out.y1 - out.y0;
-    const float len = std::sqrt(dx * dx + dy * dy);
-
-    float scanHalfWidth = 0.0f;
-
-    if (len > 1.0e-5f)
-    {
-        const float nx = std::abs(-dy / len);
-        const float ny = std::abs(dx / len);
-
-        const float wx = static_cast<float>(std::max(0, m_iwgap));
-        const float hy = static_cast<float>(std::max(0, m_ihgap));
-
-        scanHalfWidth = nx * wx + ny * hy;
-    }
-
-    if (scanHalfWidth <= 0.0f)
-        scanHalfWidth = 24.0f;
-
-    out.scan_half_width = std::max(2.0f, scanHalfWidth);
+    out.scan_half_width = std::max(
+        1.0f,
+        static_cast<float>(std::abs(m_display_line_scale)));
 
     const CxLineScanBoxSnapshot box =
         BuildCxLineScanBoxSnapshotFromHalfWidth(
@@ -2782,7 +2917,7 @@ void Findline::UpdateMeasureGeometryRequest(double x0,
     m_measure_geometry_request.script_scale = scriptScale;
 
     m_measure_geometry_request.measure_half_width =
-        ComputeMeasureHalfWidthForLine(x0, y0, x1, y1);
+        std::max(1.0, std::abs(scriptScale));
 
     m_measure_geometry_request.wgap = m_iwgap;
     m_measure_geometry_request.hgap = m_ihgap;
