@@ -959,6 +959,42 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_findobject_area_mean_observed: "
                      << object.line_findobject_area_mean_observed << "\n";
 
+                file << "  line_measure_cc_selected_foreground: "
+                     << object.line_measure_cc_selected_foreground << "\n";
+
+                file << "  line_measure_cc_white_total: "
+                     << object.line_measure_cc_white_total << "\n";
+                file << "  line_measure_cc_white_accepted: "
+                     << object.line_measure_cc_white_accepted << "\n";
+                file << "  line_measure_cc_white_rejected_min: "
+                     << object.line_measure_cc_white_rejected_min << "\n";
+                file << "  line_measure_cc_white_area_median: "
+                     << object.line_measure_cc_white_area_median << "\n";
+                file << "  line_measure_cc_white_area_p90: "
+                     << object.line_measure_cc_white_area_p90 << "\n";
+
+                file << "  line_measure_cc_black_total: "
+                     << object.line_measure_cc_black_total << "\n";
+                file << "  line_measure_cc_black_accepted: "
+                     << object.line_measure_cc_black_accepted << "\n";
+                file << "  line_measure_cc_black_rejected_min: "
+                     << object.line_measure_cc_black_rejected_min << "\n";
+                file << "  line_measure_cc_black_area_median: "
+                     << object.line_measure_cc_black_area_median << "\n";
+                file << "  line_measure_cc_black_area_p90: "
+                     << object.line_measure_cc_black_area_p90 << "\n";
+
+                file << "  line_measure_cc_selected_total: "
+                     << object.line_measure_cc_selected_total << "\n";
+                file << "  line_measure_cc_selected_accepted: "
+                     << object.line_measure_cc_selected_accepted << "\n";
+                file << "  line_measure_cc_selected_rejected_min: "
+                     << object.line_measure_cc_selected_rejected_min << "\n";
+                file << "  line_measure_cc_selected_area_median: "
+                     << object.line_measure_cc_selected_area_median << "\n";
+                file << "  line_measure_cc_selected_area_p90: "
+                     << object.line_measure_cc_selected_area_p90 << "\n";
+
                 file << "  line_measure_profile_count: "
                      << object.line_measure_profile_count << "\n";
 
@@ -3437,6 +3473,27 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
 
     object.line_findobject_area_mean_observed =
         input.findobject_area_mean_observed;
+
+    object.line_measure_cc_selected_foreground =
+        input.cc_selected_foreground;
+
+    object.line_measure_cc_white_total = input.cc_white.component_total;
+    object.line_measure_cc_white_accepted = input.cc_white.accepted_by_area;
+    object.line_measure_cc_white_rejected_min = input.cc_white.rejected_by_min;
+    object.line_measure_cc_white_area_median = input.cc_white.area_median;
+    object.line_measure_cc_white_area_p90 = input.cc_white.area_p90;
+
+    object.line_measure_cc_black_total = input.cc_black.component_total;
+    object.line_measure_cc_black_accepted = input.cc_black.accepted_by_area;
+    object.line_measure_cc_black_rejected_min = input.cc_black.rejected_by_min;
+    object.line_measure_cc_black_area_median = input.cc_black.area_median;
+    object.line_measure_cc_black_area_p90 = input.cc_black.area_p90;
+
+    object.line_measure_cc_selected_total = input.cc_selected.component_total;
+    object.line_measure_cc_selected_accepted = input.cc_selected.accepted_by_area;
+    object.line_measure_cc_selected_rejected_min = input.cc_selected.rejected_by_min;
+    object.line_measure_cc_selected_area_median = input.cc_selected.area_median;
+    object.line_measure_cc_selected_area_p90 = input.cc_selected.area_p90;
 
     object.line_measure_profile_count = input.profile_count;
     object.line_measure_sampled_pixel_count = input.sampled_pixel_count;
@@ -6621,7 +6678,23 @@ static bool SaveCxScriptHeadlessSummaryJson(
                 file << "      \"line_findobject_component_accepted\": " << object.line_findobject_component_accepted << ",\n";
                 file << "      \"line_findobject_component_rejected_by_min\": " << object.line_findobject_component_rejected_by_min << ",\n";
                 file << "      \"line_findobject_component_rejected_by_max\": " << object.line_findobject_component_rejected_by_max << ",\n";
-                file << "      \"line_findobject_area_mean_observed\": " << object.line_findobject_area_mean_observed;
+                file << "      \"line_findobject_area_mean_observed\": " << object.line_findobject_area_mean_observed << ",\n";
+                file << "      \"line_measure_cc_selected_foreground\": \"" << CxDebugJsonEscape(object.line_measure_cc_selected_foreground) << "\",\n";
+                file << "      \"line_measure_cc_white_total\": " << object.line_measure_cc_white_total << ",\n";
+                file << "      \"line_measure_cc_white_accepted\": " << object.line_measure_cc_white_accepted << ",\n";
+                file << "      \"line_measure_cc_white_rejected_min\": " << object.line_measure_cc_white_rejected_min << ",\n";
+                file << "      \"line_measure_cc_white_area_median\": " << object.line_measure_cc_white_area_median << ",\n";
+                file << "      \"line_measure_cc_white_area_p90\": " << object.line_measure_cc_white_area_p90 << ",\n";
+                file << "      \"line_measure_cc_black_total\": " << object.line_measure_cc_black_total << ",\n";
+                file << "      \"line_measure_cc_black_accepted\": " << object.line_measure_cc_black_accepted << ",\n";
+                file << "      \"line_measure_cc_black_rejected_min\": " << object.line_measure_cc_black_rejected_min << ",\n";
+                file << "      \"line_measure_cc_black_area_median\": " << object.line_measure_cc_black_area_median << ",\n";
+                file << "      \"line_measure_cc_black_area_p90\": " << object.line_measure_cc_black_area_p90 << ",\n";
+                file << "      \"line_measure_cc_selected_total\": " << object.line_measure_cc_selected_total << ",\n";
+                file << "      \"line_measure_cc_selected_accepted\": " << object.line_measure_cc_selected_accepted << ",\n";
+                file << "      \"line_measure_cc_selected_rejected_min\": " << object.line_measure_cc_selected_rejected_min << ",\n";
+                file << "      \"line_measure_cc_selected_area_median\": " << object.line_measure_cc_selected_area_median << ",\n";
+                file << "      \"line_measure_cc_selected_area_p90\": " << object.line_measure_cc_selected_area_p90;
             }
             else if (object.type == "Findcircle")
             {

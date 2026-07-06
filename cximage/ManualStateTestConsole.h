@@ -237,6 +237,26 @@ struct RuntimeObjectView
     int line_findobject_area_max_observed = 0;
     double line_findobject_area_mean_observed = 0.0;
 
+    std::string line_measure_cc_selected_foreground;
+
+    int line_measure_cc_white_total = 0;
+    int line_measure_cc_white_accepted = 0;
+    int line_measure_cc_white_rejected_min = 0;
+    double line_measure_cc_white_area_median = 0.0;
+    double line_measure_cc_white_area_p90 = 0.0;
+
+    int line_measure_cc_black_total = 0;
+    int line_measure_cc_black_accepted = 0;
+    int line_measure_cc_black_rejected_min = 0;
+    double line_measure_cc_black_area_median = 0.0;
+    double line_measure_cc_black_area_p90 = 0.0;
+
+    int line_measure_cc_selected_total = 0;
+    int line_measure_cc_selected_accepted = 0;
+    int line_measure_cc_selected_rejected_min = 0;
+    double line_measure_cc_selected_area_median = 0.0;
+    double line_measure_cc_selected_area_p90 = 0.0;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;

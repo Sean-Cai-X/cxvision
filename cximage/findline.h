@@ -210,6 +210,28 @@ struct FindlineMeasureInputDebug
     std::vector<int> findobject_top_component_areas;
     std::vector<double> findobject_top_component_x;
     std::vector<double> findobject_top_component_y;
+
+    struct ComponentStats
+    {
+        int component_total = 0;
+        int accepted_by_area = 0;
+        int rejected_by_min = 0;
+        int rejected_by_max = 0;
+
+        int area_min = 0;
+        int area_max = 0;
+        double area_mean = 0.0;
+        double area_median = 0.0;
+        double area_p90 = 0.0;
+
+        std::vector<int> top_areas;
+    };
+
+    ComponentStats cc_white;
+    ComponentStats cc_black;
+    ComponentStats cc_selected;
+
+    std::string cc_selected_foreground;
 };
 
 class Findline :public Shape

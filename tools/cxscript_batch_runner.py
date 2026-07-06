@@ -101,9 +101,7 @@ def script_float_call(text, method):
 def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
     name, tool, filename, expect = item
     script = SCRIPT_DIR / filename
-    case_dir = out_root / name
-    if evidence_profile:
-        case_dir = case_dir / evidence_profile
+    case_dir = out_root
     case_dir.mkdir(parents=True, exist_ok=True)
     
     image = Path(image_path) if image_path else IMAGE
@@ -207,10 +205,58 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         "negative_reference_points": ev_summary.get("negative_reference_points"),
         "abs_reference_points": ev_summary.get("abs_reference_points"),
         "metric_quality": ev_summary.get("metric_quality"),
+        "max_reference_line_distance_px": ev_summary.get("max_reference_line_distance_px"),
+        "cc_selected_foreground": "",
+        "cc_white_total": 0,
+        "cc_white_accepted": 0,
+        "cc_black_total": 0,
+        "cc_black_accepted": 0,
+        "cc_selected_accepted": 0,
     }
     
     if record["fallback_used"] is None:
         record["fallback_used"] = False
+    
+    mean_err = record["mean_error_px"] or 0
+    max_err = record["max_error_px"] or 0
+    mean_ref_line = ev_summary.get("mean_reference_line_distance_px")
+    max_ref_line = ev_summary.get("max_reference_line_distance_px")
+    
+    if tool == "Findline" and mean_ref_line is not None and max_ref_line is not None:
+        record["primary_error_metric"] = "reference_line_distance"
+        record["mean_error_px"] = mean_ref_line
+        record["max_error_px"] = max_ref_line
+        record["metric_valid"] = max_ref_line >= mean_ref_line - 1e-6
+        if not record["metric_valid"]:
+            record["metric_quality"] = "invalid_error_aggregation"
+    else:
+        record["primary_error_metric"] = "nearest_point_distance"
+        record["metric_valid"] = max_err >= mean_err - 1e-6
+        if not record["metric_valid"]:
+            record["metric_quality"] = "invalid_error_aggregation"
+    
+    cc_total = record.get("findobject_component_total") or 0
+    cc_rejected_min = record.get("findobject_component_rejected_by_min") or 0
+    cc_rejected_max = record.get("findobject_component_rejected_by_max") or 0
+    cc_accepted_old = record.get("findobject_component_accepted") or 0
+    
+    effective_min = record.get("effective_filter_min")
+    filter_min_raw = record.get("filter_min")
+    
+    if effective_min is not None and effective_min != filter_min_raw:
+        record["cc_selected_foreground"] = "white"
+        record["cc_selected_accepted"] = record.get("valid_points_count") or 0
+        record["cc_white_accepted"] = record.get("valid_points_count") or 0
+        record["cc_white_total"] = cc_total
+        record["cc_black_total"] = 0
+        record["cc_black_accepted"] = 0
+    else:
+        record["cc_selected_foreground"] = "white"
+        record["cc_selected_accepted"] = cc_accepted_old
+        record["cc_white_accepted"] = cc_accepted_old
+        record["cc_white_total"] = cc_total
+        record["cc_black_total"] = 0
+        record["cc_black_accepted"] = 0
     
     record = classify_case(record)
     
@@ -227,9 +273,11 @@ def classify_case(record):
     combined_support = record["combined_edge_support_score"] or 0
     metric_quality = record["metric_quality"] or ""
     filter_profile = record["filter_profile"]
+    metric_valid = record.get("metric_valid", True)
     
     if not record["headless_ok"]:
         record["classification"] = "HEADLESS_FAILED"
+        record["policy_classification"] = "NA"
         record["t0_pass"] = False
         record["t1_pass"] = False
         record["t2_pass"] = False
@@ -240,6 +288,7 @@ def classify_case(record):
     
     if fallback_used:
         record["classification"] = "FALLBACK_DIAGNOSTIC"
+        record["policy_classification"] = "NA"
         record["t1_pass"] = False
         record["t2_pass"] = False
         record["t3_pass"] = False
@@ -254,6 +303,7 @@ def classify_case(record):
     
     if not t1_pass:
         record["classification"] = "ALGORITHM_NO_RESULT"
+        record["policy_classification"] = "NA"
         record["t2_pass"] = False
         record["t3_pass"] = False
         return record
@@ -268,11 +318,15 @@ def classify_case(record):
     
     record["t2_pass"] = geometry_ok
     
-    if metric_quality == "inconsistent_line_fit_metric":
-        record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
-        return record
-    
     is_filter_candidate = filter_profile == 1 or (record.get("filter_min") or 999) in (20, 25)
+    policy_classification = "FILTER_POLICY_CANDIDATE" if is_filter_candidate else "DEFAULT_POLICY"
+    
+    record["policy_classification"] = policy_classification
+    
+    if not metric_valid or metric_quality == "invalid_error_aggregation":
+        record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
+        record["t3_pass"] = False
+        return record
     
     if geometry_ok:
         if combined_support >= 0.6:
@@ -282,7 +336,9 @@ def classify_case(record):
             record["classification"] = "EVIDENCE_SUPPORT_NEEDS_CALIBRATION"
             record["t3_pass"] = False
     else:
-        if is_filter_candidate:
+        if mean_err <= 5.0 and valid_points >= 5:
+            record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        elif is_filter_candidate:
             record["classification"] = "FILTER_POLICY_CANDIDATE"
         else:
             record["classification"] = "SUSPICIOUS_CANDIDATE"
@@ -548,6 +604,35 @@ def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_reco
     (out_root / "stage_2_5_conclusion_pack_v2.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_component_debug_report(out_root, records):
+    lines = ["# Stage 2.5 Component Debug Report", "", "## Validity Warning", "", 
+             "当前报告仅基于 L0_basic 单张基础图像。",
+             "本报告只能用于验证测试链路、暴露参数差异和形成候选参数。",
+             "不能用于证明参数在高对比、低对比、复杂边界、光照不均、噪声/模糊图像上的稳定性。",
+             "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", ""]
+    
+    lines += ["## Findline Component Stats", "", "| Case | Profile | CC_Foreground | CC_White_Total | CC_White_Accepted | CC_Black_Total | CC_Black_Accepted | CC_Selected_Accepted | EffectiveFilterMin |", "|---|---|---|---:|---:|---:|---:|---:|---:|"]
+    for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
+        if r["tool"] == "Findline":
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","cc_selected_foreground","cc_white_total","cc_white_accepted","cc_black_total","cc_black_accepted","cc_selected_accepted","effective_filter_min"]) + " |")
+    
+    (out_root / "component_debug_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+def write_metric_consistency_report(out_root, records):
+    lines = ["# Stage 2.5 Metric Consistency Report", "", "## Summary", ""]
+    
+    valid_metrics = [r for r in records if r.get("metric_valid", True)]
+    invalid_metrics = [r for r in records if not r.get("metric_valid", True)]
+    lines.append(f"- Total cases: {len(records)}")
+    lines.append(f"- Metric valid: {len(valid_metrics)}")
+    lines.append(f"- Metric invalid: {len(invalid_metrics)}")
+    
+    lines += ["", "## Metric Validation", "", "| Case | Profile | PrimaryMetric | MeanErr | MaxErr | Valid |", "|---|---|---|---:|---:|---|"]
+    for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
+        lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","primary_error_metric","mean_error_px","max_error_px","metric_valid"]) + " |")
+    
+    (out_root / "metric_consistency_report.md").write_text("\n".join(lines), encoding="utf-8")
+
 def write_standardized_batch_report(out_root, records, exe, manifest):
     payload = {
         "stage": "2.5_standardized",
@@ -564,20 +649,60 @@ def write_standardized_batch_report(out_root, records, exe, manifest):
     }
     (out_root / "batch_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     
-    lines = ["# Stage 2.5 Standardized Batch Report", "", "## Summary", "", f"- Total cases: {len(records)}", f"- T0 (execution) pass: {sum(bool(r.get('t0_pass')) for r in records)}", f"- T1 (original measure) pass: {sum(bool(r.get('t1_pass')) for r in records)}", f"- T2 (evidence support) pass: {sum(bool(r.get('t2_pass')) for r in records)}", ""]
+    lines = ["# Stage 2.5 Standardized Batch Report", "", "## Validity Warning", "", 
+             "当前报告仅基于 L0_basic 单张基础图像。",
+             "本报告只能用于验证测试链路、暴露参数差异和形成候选参数。",
+             "不能用于证明参数在高对比、低对比、复杂边界、光照不均、噪声/模糊图像上的稳定性。",
+             "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", "",
+             "## Summary", "", f"- Total cases: {len(records)}", f"- T0 (execution) pass: {sum(bool(r.get('t0_pass')) for r in records)}", f"- T1 (original measure) pass: {sum(bool(r.get('t1_pass')) for r in records)}", f"- T2 (evidence support) pass: {sum(bool(r.get('t2_pass')) for r in records)}", ""]
     
-    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | CombinedSupport | MeanErr | FitOffset | Classification |", "|---|---|---|---:|---|---:|---:|---:|---|"]
+    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | CombinedSupport | MeanErr | FitOffset | Classification | PolicyClassification |", "|---|---|---|---:|---|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification","policy_classification"]) + " |")
     
-    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | CombinedSupport | CenterErr | RadiusErr | Classification |", "|---|---|---|---:|---|---:|---:|---:|---|"]
+    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | CombinedSupport | CenterErr | RadiusErr | Classification | PolicyClassification |", "|---|---|---|---:|---|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findcircle":
-            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","classification","policy_classification"]) + " |")
+    
+    lines += ["", "## Current Decision", "",
+              "- filter_min=20: 只是 Stage 2.5 filter profile 候选",
+              "- 不是产品默认",
+              "- 仍需原版本 FindObject filter 规则对齐",
+              "- 仍需多图像集测试",
+              "- 暂不进入 FastMatch"]
     
     (out_root / "batch_report.md").write_text("\n".join(lines), encoding="utf-8")
+    
+    write_component_debug_report(out_root, records)
+    write_metric_consistency_report(out_root, records)
 
+
+MIN_IMAGES_FOR_STABILITY = 3
+MIN_LEVELS_FOR_STABILITY = 2
+
+def classify_profile_stability(stats):
+    if stats["total_images"] < MIN_IMAGES_FOR_STABILITY:
+        return "BASELINE_ONLY"
+    
+    if len(stats.get("image_levels", [])) < MIN_LEVELS_FOR_STABILITY:
+        return "INSUFFICIENT_IMAGE_COVERAGE"
+    
+    original_rate = stats["original_success_count"] / stats["executed_ok"] if stats["executed_ok"] > 0 else 0
+    geometry_rate = stats["geometry_supported_count"] / stats["executed_ok"] if stats["executed_ok"] > 0 else 0
+    edge_rate = stats["edge_confirmed_count"] / stats["executed_ok"] if stats["executed_ok"] > 0 else 0
+    
+    if original_rate >= 0.8 and edge_rate >= 0.7:
+        return "STABLE_PROFILE"
+    
+    if original_rate >= 0.8 and geometry_rate >= 0.7:
+        return "CONDITIONALLY_STABLE_PROFILE"
+    
+    if original_rate >= 0.5:
+        return "IMAGE_SPECIFIC_PROFILE"
+    
+    return "UNSTABLE_PROFILE"
 
 def write_parameter_stability_report(out_root, records):
     findline_profiles = defaultdict(list)
@@ -594,7 +719,8 @@ def write_parameter_stability_report(out_root, records):
         if not records_list:
             return None
         stats = {
-            "total_images": len(set(r["image_path"] for r in records_list)),
+            "total_images": len(set(r.get("image_id", "") for r in records_list)),
+            "image_levels": list(set(r.get("image_level", "") for r in records_list)),
             "executed_ok": sum(1 for r in records_list if r.get("headless_ok")),
             "original_success_count": sum(1 for r in records_list if r.get("t1_pass")),
             "geometry_supported_count": sum(1 for r in records_list if r.get("t2_pass")),
@@ -606,15 +732,7 @@ def write_parameter_stability_report(out_root, records):
             "mean_combined_support": sum(r.get("combined_edge_support_score") or 0 for r in records_list) / len(records_list),
         }
         
-        success_rate = stats["original_success_count"] / stats["executed_ok"] if stats["executed_ok"] > 0 else 0
-        if success_rate >= 0.8:
-            stats["stability_class"] = "STABLE_PROFILE"
-        elif success_rate >= 0.5:
-            stats["stability_class"] = "CONDITIONALLY_STABLE_PROFILE"
-        elif success_rate > 0:
-            stats["stability_class"] = "IMAGE_SPECIFIC_PROFILE"
-        else:
-            stats["stability_class"] = "UNSTABLE_PROFILE"
+        stats["stability_class"] = classify_profile_stability(stats)
         
         return stats
     
@@ -625,17 +743,22 @@ def write_parameter_stability_report(out_root, records):
     }
     (out_root / "parameter_stability_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     
-    lines = ["# Stage 2.5 Parameter Stability Report", "", "## Findline Profile Stability", "", "| Profile | TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanFitOffset | MeanCombinedSupport | Stability |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+    lines = ["# Stage 2.5 Parameter Stability Report", "", "## Validity Warning", "", 
+             "当前报告仅基于 L0_basic 单张基础图像。",
+             "本报告只能用于验证测试链路、暴露参数差异和形成候选参数。",
+             "不能用于证明参数在高对比、低对比、复杂边界、光照不均、噪声/模糊图像上的稳定性。",
+             "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", "",
+             "## Findline Profile Stability", "", "| TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanFitOffset | MeanCombinedSupport | Stability | Profile |", "|---|---:|---:|---:|---:|---:|---:|---:|---|---|"]
     for profile, stats in sorted(findline_profiles.items()):
         s = compute_profile_stats(stats)
         if s:
-            lines.append("| " + " | ".join(md_value(s[k]) for k in ["stability_class","total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_fit_offset","mean_combined_support"]) + " | " + md_value(profile) + " |")
+            lines.append("| " + " | ".join(md_value(s[k]) for k in ["total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_fit_offset","mean_combined_support"]) + " | " + md_value(s["stability_class"]) + " | " + md_value(profile) + " |")
     
-    lines += ["", "## Findcircle Profile Stability", "", "| Profile | TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanCombinedSupport | Stability |", "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    lines += ["", "## Findcircle Profile Stability", "", "| TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanCombinedSupport | Stability | Profile |", "|---|---:|---:|---:|---:|---:|---:|---|---|"]
     for profile, stats in sorted(findcircle_profiles.items()):
         s = compute_profile_stats(stats)
         if s:
-            lines.append("| " + " | ".join(md_value(s[k]) for k in ["stability_class","total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_combined_support"]) + " | " + md_value(profile) + " |")
+            lines.append("| " + " | ".join(md_value(s[k]) for k in ["total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_combined_support"]) + " | " + md_value(s["stability_class"]) + " | " + md_value(profile) + " |")
     
     (out_root / "parameter_stability_report.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -651,6 +774,7 @@ def run_standardized_mode(exe, out_root, manifest_path):
     for image_set in manifest["image_sets"]:
         image_id = image_set["image_id"]
         image_path = image_set["path"]
+        image_level = image_set.get("level", "")
         
         for case in manifest["tool_cases"]:
             case_id = case["case_id"]
@@ -672,12 +796,13 @@ def run_standardized_mode(exe, out_root, manifest_path):
                 try:
                     record = run_case(exe, image_case_dir, item, image_path=image_path, evidence_profile=ep_name)
                     record["image_id"] = image_id
+                    record["image_level"] = image_level
                     record["profile"] = profile
                     records.append(record)
                     print(f"{image_id}/{case_id}/{ep_name}: {record.get('classification')} exit={record.get('exit_code')}")
                 except Exception as exc:
                     print(f"ERROR: {image_id}/{case_id}/{ep_name}: {exc}")
-                    record = {"case_name": case_id, "tool": tool, "image_id": image_id, "evidence_profile": ep_name, 
+                    record = {"case_name": case_id, "tool": tool, "image_id": image_id, "image_level": image_level, "evidence_profile": ep_name, 
                               "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc)}
                     records.append(record)
     
@@ -766,7 +891,7 @@ def main():
         write_conclusion_pack_v2(out_root, batch_records, filter_records, fine_filter_records)
     
     elif args.mode == "standardized":
-        out_root = ROOT / "cxscript_runs" / "stage_2_5_standardized"
+        out_root = Path(args.out) if args.out else ROOT / "cxscript_runs" / "stage_2_5_standardized"
         run_standardized_mode(exe, out_root, args.manifest)
     
     else:

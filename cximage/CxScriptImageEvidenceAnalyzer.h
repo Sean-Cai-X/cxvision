@@ -38,7 +38,10 @@ struct CxPointEvidence
     double reference_y = 0.0;
 
     double nearest_reference_distance_px = 0.0;
+
     double reference_line_distance_px = 0.0;
+
+    double radial_error_px = 0.0;
 
     double local_gradient = 0.0;
     double reference_gradient = 0.0;
@@ -64,16 +67,23 @@ struct CxImageEvidenceSummary
     int supported_points_count = 0;
     int unsupported_points_count = 0;
 
+    double mean_nearest_point_error_px = 0.0;
+    double max_nearest_point_error_px = 0.0;
+
+    double mean_reference_line_distance_px = 0.0;
+    double max_reference_line_distance_px = 0.0;
+
+    double mean_radial_error_px = 0.0;
+    double max_radial_error_px = 0.0;
+
     double mean_error_px = 0.0;
     double max_error_px = 0.0;
+
     double edge_support_score = 0.0;
 
     double distance_support_score = 0.0;
     double gradient_support_score = 0.0;
     double combined_edge_support_score = 0.0;
-
-    double mean_reference_line_distance_px = 0.0;
-    double max_reference_line_distance_px = 0.0;
 
     double mean_gradient_ratio = 0.0;
 
@@ -98,7 +108,10 @@ struct CxImageEvidenceSummary
     double mean_error_negative = 0.0;
     double mean_error_abs = 0.0;
 
+    std::string primary_error_metric;
     std::string metric_quality;
+    bool metric_valid = true;
+
     std::string conclusion;
     std::string support_conclusion;
 

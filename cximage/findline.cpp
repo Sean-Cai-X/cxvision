@@ -1205,75 +1205,98 @@ void Findline::Measure(Image& image)
                 cv::cvtColor(bw, roi, cv::COLOR_BGR2GRAY);
             }
 
-            cv::Mat labels, stats, centroids;
-            int numComponents = cv::connectedComponentsWithStats(roi, labels, stats, centroids, 8);
+            m_effective_filter_borw = effectivefilterborw();
+            m_effective_filter_min = effectivefiltermin();
+            m_effective_filter_max = effectivefiltermax();
 
-            m_lastMeasureInputDebug.findobject_component_total = numComponents - 1;
-            m_lastMeasureInputDebug.findobject_component_accepted = 0;
-            m_lastMeasureInputDebug.findobject_component_rejected_by_min = 0;
-            m_lastMeasureInputDebug.findobject_component_rejected_by_max = 0;
+            auto ComputeComponentStats = [&](const cv::Mat& binary, bool whiteForeground, int minArea, int maxArea) -> FindlineMeasureInputDebug::ComponentStats {
+                FindlineMeasureInputDebug::ComponentStats statsOut;
+
+                cv::Mat mask;
+                if (whiteForeground)
+                {
+                    cv::threshold(binary, mask, 0, 255, cv::THRESH_BINARY);
+                }
+                else
+                {
+                    cv::threshold(binary, mask, 0, 255, cv::THRESH_BINARY_INV);
+                }
+
+                cv::Mat labels, stats, centroids;
+                int numComponents = cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8);
+
+                std::vector<int> areas;
+                for (int i = 1; i < numComponents; i++)
+                {
+                    int area = stats.at<int>(i, cv::CC_STAT_AREA);
+                    if (area <= 0)
+                        continue;
+
+                    areas.push_back(area);
+
+                    if (area < minArea)
+                        statsOut.rejected_by_min++;
+                    else if (area > maxArea)
+                        statsOut.rejected_by_max++;
+                    else
+                        statsOut.accepted_by_area++;
+                }
+
+                statsOut.component_total = static_cast<int>(areas.size());
+
+                if (!areas.empty())
+                {
+                    std::sort(areas.begin(), areas.end());
+                    statsOut.area_min = areas.front();
+                    statsOut.area_max = areas.back();
+
+                    long long sum = 0;
+                    for (int area : areas)
+                        sum += area;
+                    statsOut.area_mean = static_cast<double>(sum) / static_cast<double>(areas.size());
+                    statsOut.area_median = areas[areas.size() / 2];
+
+                    const std::size_t p90Index = std::min<std::size_t>(
+                        areas.size() - 1,
+                        static_cast<std::size_t>(std::floor(static_cast<double>(areas.size() - 1) * 0.9)));
+                    statsOut.area_p90 = areas[p90Index];
+
+                    for (auto it = areas.rbegin(); it != areas.rend() && statsOut.top_areas.size() < 10; ++it)
+                    {
+                        statsOut.top_areas.push_back(*it);
+                    }
+                }
+
+                return statsOut;
+            };
+
+            m_lastMeasureInputDebug.cc_white = ComputeComponentStats(roi, true, m_effective_filter_min, m_effective_filter_max);
+            m_lastMeasureInputDebug.cc_black = ComputeComponentStats(roi, false, m_effective_filter_min, m_effective_filter_max);
+
+            if (m_effective_filter_borw == 21)
+            {
+                m_lastMeasureInputDebug.cc_selected = m_lastMeasureInputDebug.cc_white;
+                m_lastMeasureInputDebug.cc_selected_foreground = "white";
+            }
+            else
+            {
+                m_lastMeasureInputDebug.cc_selected = m_lastMeasureInputDebug.cc_black;
+                m_lastMeasureInputDebug.cc_selected_foreground = "black";
+            }
+
+            m_lastMeasureInputDebug.findobject_component_total = m_lastMeasureInputDebug.cc_selected.component_total;
+            m_lastMeasureInputDebug.findobject_component_accepted = m_lastMeasureInputDebug.cc_selected.accepted_by_area;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_min = m_lastMeasureInputDebug.cc_selected.rejected_by_min;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_max = m_lastMeasureInputDebug.cc_selected.rejected_by_max;
             m_lastMeasureInputDebug.findobject_component_rejected_by_borw = 0;
 
-            m_lastMeasureInputDebug.findobject_area_min_observed = INT_MAX;
-            m_lastMeasureInputDebug.findobject_area_max_observed = 0;
-            m_lastMeasureInputDebug.findobject_area_mean_observed = 0.0;
+            m_lastMeasureInputDebug.findobject_area_min_observed = m_lastMeasureInputDebug.cc_selected.area_min;
+            m_lastMeasureInputDebug.findobject_area_max_observed = m_lastMeasureInputDebug.cc_selected.area_max;
+            m_lastMeasureInputDebug.findobject_area_mean_observed = m_lastMeasureInputDebug.cc_selected.area_mean;
 
-            m_lastMeasureInputDebug.findobject_top_component_areas.clear();
+            m_lastMeasureInputDebug.findobject_top_component_areas = m_lastMeasureInputDebug.cc_selected.top_areas;
             m_lastMeasureInputDebug.findobject_top_component_x.clear();
             m_lastMeasureInputDebug.findobject_top_component_y.clear();
-
-            int totalArea = 0;
-            int validAreaCount = 0;
-
-            for (int i = 1; i < numComponents; i++)
-            {
-                int area = stats.at<int>(i, cv::CC_STAT_AREA);
-                int x = stats.at<int>(i, cv::CC_STAT_LEFT);
-                int y = stats.at<int>(i, cv::CC_STAT_TOP);
-                int w = stats.at<int>(i, cv::CC_STAT_WIDTH);
-                int h = stats.at<int>(i, cv::CC_STAT_HEIGHT);
-
-                if (area > 0)
-                {
-                    if (area < m_lastMeasureInputDebug.findobject_area_min_observed)
-                        m_lastMeasureInputDebug.findobject_area_min_observed = area;
-                    if (area > m_lastMeasureInputDebug.findobject_area_max_observed)
-                        m_lastMeasureInputDebug.findobject_area_max_observed = area;
-                    totalArea += area;
-                    validAreaCount++;
-                }
-
-                bool rejected = false;
-
-                if (area < m_ifiltermin)
-                {
-                    m_lastMeasureInputDebug.findobject_component_rejected_by_min++;
-                    rejected = true;
-                }
-                if (area > m_ifiltermax)
-                {
-                    m_lastMeasureInputDebug.findobject_component_rejected_by_max++;
-                    rejected = true;
-                }
-
-                if (!rejected)
-                {
-                    m_lastMeasureInputDebug.findobject_component_accepted++;
-                }
-
-                if (m_lastMeasureInputDebug.findobject_top_component_areas.size() < 10)
-                {
-                    m_lastMeasureInputDebug.findobject_top_component_areas.push_back(area);
-                    m_lastMeasureInputDebug.findobject_top_component_x.push_back(x + w / 2.0);
-                    m_lastMeasureInputDebug.findobject_top_component_y.push_back(y + h / 2.0);
-                }
-            }
-
-            if (validAreaCount > 0)
-            {
-                m_lastMeasureInputDebug.findobject_area_mean_observed =
-                    static_cast<double>(totalArea) / validAreaCount;
-            }
         }
     }
     catch (...)
