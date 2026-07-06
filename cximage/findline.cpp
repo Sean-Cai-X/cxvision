@@ -1293,6 +1293,8 @@ void Findline::Measure(Image& image)
             m_lastMeasureInputDebug.findobject_area_min_observed = m_lastMeasureInputDebug.cc_selected.area_min;
             m_lastMeasureInputDebug.findobject_area_max_observed = m_lastMeasureInputDebug.cc_selected.area_max;
             m_lastMeasureInputDebug.findobject_area_mean_observed = m_lastMeasureInputDebug.cc_selected.area_mean;
+            m_lastMeasureInputDebug.findobject_area_median_observed = m_lastMeasureInputDebug.cc_selected.area_median;
+            m_lastMeasureInputDebug.findobject_area_p90_observed = m_lastMeasureInputDebug.cc_selected.area_p90;
 
             m_lastMeasureInputDebug.findobject_top_component_areas = m_lastMeasureInputDebug.cc_selected.top_areas;
             m_lastMeasureInputDebug.findobject_top_component_x.clear();

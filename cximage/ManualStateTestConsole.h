@@ -236,6 +236,10 @@ struct RuntimeObjectView
     int line_findobject_area_min_observed = 0;
     int line_findobject_area_max_observed = 0;
     double line_findobject_area_mean_observed = 0.0;
+    int line_findobject_area_min = 0;
+    int line_findobject_area_max = 0;
+    double line_findobject_area_median = 0.0;
+    double line_findobject_area_p90 = 0.0;
 
     std::string line_measure_cc_selected_foreground;
 

@@ -35,6 +35,119 @@ static double ComputeGradientAt(const cv::Mat& gray, int y, int x)
     return std::sqrt(dx * dx + dy * dy);
 }
 
+static double SampleGrayBilinear(const cv::Mat& gray, double x, double y)
+{
+    if (x < 0.0 || x >= gray.cols - 1.0 || y < 0.0 || y >= gray.rows - 1.0)
+        return 0.0;
+
+    int x0 = static_cast<int>(x);
+    int y0 = static_cast<int>(y);
+    int x1 = x0 + 1;
+    int y1 = y0 + 1;
+
+    double fx = x - x0;
+    double fy = y - y0;
+
+    double v00 = gray.at<uchar>(y0, x0);
+    double v10 = gray.at<uchar>(y0, x1);
+    double v01 = gray.at<uchar>(y1, x0);
+    double v11 = gray.at<uchar>(y1, x1);
+
+    return v00 * (1.0 - fx) * (1.0 - fy) +
+           v10 * fx * (1.0 - fy) +
+           v01 * (1.0 - fx) * fy +
+           v11 * fx * fy;
+}
+
+static CxMeasuredLocalEdgeEvidence FindNearestLocalEdgeAlongNormal(
+    const cv::Mat& gray,
+    double measuredX,
+    double measuredY,
+    double nx,
+    double ny,
+    double searchHalfWidth,
+    const std::string& preferredPolarity)
+{
+    CxMeasuredLocalEdgeEvidence out;
+    out.measured_x = measuredX;
+    out.measured_y = measuredY;
+
+    double bestScore = -1.0;
+    double bestAbsOffset = std::numeric_limits<double>::max();
+
+    for (double t = -searchHalfWidth; t <= searchHalfWidth; t += 0.5)
+    {
+        const double x0 = measuredX + nx * (t - 1.0);
+        const double y0 = measuredY + ny * (t - 1.0);
+        const double x1 = measuredX + nx * (t + 1.0);
+        const double y1 = measuredY + ny * (t + 1.0);
+
+        const double g0 = SampleGrayBilinear(gray, x0, y0);
+        const double g1 = SampleGrayBilinear(gray, x1, y1);
+        const double grad = g1 - g0;
+
+        double score = std::abs(grad);
+
+        if (preferredPolarity == "positive")
+            score = grad;
+        else if (preferredPolarity == "negative")
+            score = -grad;
+
+        if (score <= 0.0)
+            continue;
+
+        const double absOffset = std::abs(t);
+
+        const bool better =
+            !out.found ||
+            (absOffset < bestAbsOffset && score >= bestScore * 0.60) ||
+            (score > bestScore * 1.50);
+
+        if (better)
+        {
+            out.found = true;
+            out.local_edge_x = measuredX + nx * t;
+            out.local_edge_y = measuredY + ny * t;
+            out.local_distance_px = absOffset;
+            out.local_gradient = grad;
+            out.polarity = preferredPolarity;
+            bestScore = score;
+            bestAbsOffset = absOffset;
+        }
+    }
+
+    return out;
+}
+
+static CxMeasuredLocalEdgeEvidence FindNearestLocalRadialEdge(
+    const cv::Mat& gray,
+    double cx,
+    double cy,
+    double measuredX,
+    double measuredY,
+    double searchHalfWidth,
+    const std::string& preferredPolarity)
+{
+    const double dx = measuredX - cx;
+    const double dy = measuredY - cy;
+    const double len = std::sqrt(dx * dx + dy * dy);
+
+    if (!std::isfinite(len) || len <= 1.0e-6)
+        return {};
+
+    const double ux = dx / len;
+    const double uy = dy / len;
+
+    return FindNearestLocalEdgeAlongNormal(
+        gray,
+        measuredX,
+        measuredY,
+        ux,
+        uy,
+        searchHalfWidth,
+        preferredPolarity);
+}
+
 static bool FindSubpixelEdgePeak(
     const std::vector<double>& profile,
     const std::vector<double>& gradient,
@@ -435,6 +548,12 @@ static void AnalyzeFindlineEvidence(
     int gradRatioCount = 0;
     int lineDistCount = 0;
 
+    double totalLocalDistance = 0.0;
+    double maxLocalDistance = 0.0;
+    double totalLocalGradient = 0.0;
+    int localEdgeFoundCount = 0;
+    int localEdgeSupportedCount = 0;
+
     CxLineNormalForm bestReferenceLineNorm;
     if (bestRefFit)
     {
@@ -478,15 +597,26 @@ static void AnalyzeFindlineEvidence(
             ? std::abs(localGradient) / refGradient
             : 0.0;
 
-        bool distanceSupported = false;
+        CxMeasuredLocalEdgeEvidence localEdge = FindNearestLocalEdgeAlongNormal(
+            gray, mx, my, normalX, normalY,
+            options.measured_local_search_px,
+            summary.best_reference_polarity);
+
+        bool referenceDistanceSupported = false;
         if (options.use_line_distance_for_findline_support && bestReferenceLineNorm.valid)
         {
-            distanceSupported = lineDistance <= options.line_distance_support_px;
+            referenceDistanceSupported = lineDistance <= options.reference_line_support_px;
         }
         else
         {
-            distanceSupported = minDist <= options.nearest_point_support_px;
+            referenceDistanceSupported = minDist <= options.nearest_point_support_px;
         }
+
+        bool localEdgeSupported =
+            localEdge.found &&
+            localEdge.local_distance_px <= options.measured_local_support_px;
+
+        bool distanceSupported = referenceDistanceSupported || localEdgeSupported;
 
         bool gradientSupported =
             std::abs(localGradient) >= options.min_gradient ||
@@ -508,6 +638,10 @@ static void AnalyzeFindlineEvidence(
         pe.gradient_supported = gradientSupported;
         pe.combined_supported = combinedSupported;
         pe.reference_polarity = summary.best_reference_polarity;
+        pe.local_edge_found = localEdge.found;
+        pe.local_edge_distance_px = localEdge.local_distance_px;
+        pe.local_edge_gradient = localEdge.local_gradient;
+        pe.local_edge_supported = localEdgeSupported;
 
         std::vector<std::string> reasons;
         if (!distanceSupported)
@@ -560,6 +694,18 @@ static void AnalyzeFindlineEvidence(
             totalGradientRatio += gradientRatio;
             gradRatioCount++;
         }
+
+        if (localEdge.found)
+        {
+            localEdgeFoundCount++;
+            totalLocalDistance += localEdge.local_distance_px;
+            if (localEdge.local_distance_px > maxLocalDistance)
+                maxLocalDistance = localEdge.local_distance_px;
+            totalLocalGradient += std::abs(localEdge.local_gradient);
+        }
+
+        if (localEdgeSupported)
+            localEdgeSupportedCount++;
     }
 
     if (summary.measured_points_count > 0)
@@ -596,6 +742,17 @@ static void AnalyzeFindlineEvidence(
         summary.gradient_support_score = (double)summary.gradient_supported_points / summary.measured_points_count;
         summary.combined_edge_support_score = (double)summary.combined_supported_points / summary.measured_points_count;
         summary.edge_support_score = summary.combined_edge_support_score;
+
+        summary.measured_local_support_score = (double)localEdgeSupportedCount / summary.measured_points_count;
+        summary.measured_local_supported_points = localEdgeSupportedCount;
+        summary.measured_local_missing_points = summary.measured_points_count - localEdgeFoundCount;
+
+        if (localEdgeFoundCount > 0)
+        {
+            summary.measured_local_mean_distance_px = totalLocalDistance / localEdgeFoundCount;
+            summary.measured_local_max_distance_px = maxLocalDistance;
+            summary.measured_local_mean_gradient = totalLocalGradient / localEdgeFoundCount;
+        }
     }
 
     if (gradRatioCount > 0)
@@ -888,6 +1045,12 @@ static void AnalyzeFindcircleEvidence(
     int gradRatioCount = 0;
     int radialCount = 0;
 
+    int localEdgeFoundCount = 0;
+    int localEdgeSupportedCount = 0;
+    double totalLocalDistance = 0.0;
+    double maxLocalDistance = 0.0;
+    double totalLocalGradient = 0.0;
+
     for (size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
     {
         double mx = object.measure_points_xy[i];
@@ -916,7 +1079,11 @@ static void AnalyzeFindcircleEvidence(
             ? std::abs(localGradient) / refGradient
             : 0.0;
 
-        bool distanceSupported = minDist <= options.nearest_point_support_px;
+        CxMeasuredLocalEdgeEvidence localEdge = FindNearestLocalRadialEdge(
+            gray, cx, cy, mx, my, options.measured_local_search_px, summary.best_reference_polarity);
+
+        bool distanceSupported = minDist <= options.nearest_point_support_px ||
+            (localEdge.found && localEdge.local_distance_px <= options.measured_local_support_px);
         bool gradientSupported =
             std::abs(localGradient) >= options.min_gradient ||
             gradientRatio >= options.min_gradient_ratio;
@@ -992,6 +1159,17 @@ static void AnalyzeFindcircleEvidence(
             totalGradientRatio += gradientRatio;
             gradRatioCount++;
         }
+
+        if (localEdge.found)
+        {
+            localEdgeFoundCount++;
+            totalLocalDistance += localEdge.local_distance_px;
+            totalLocalGradient += std::abs(localEdge.local_gradient);
+            if (localEdge.local_distance_px > maxLocalDistance)
+                maxLocalDistance = localEdge.local_distance_px;
+            if (localEdge.local_distance_px <= options.measured_local_support_px)
+                localEdgeSupportedCount++;
+        }
     }
 
     if (summary.measured_points_count > 0)
@@ -1028,7 +1206,18 @@ static void AnalyzeFindcircleEvidence(
         summary.gradient_support_score = (double)summary.gradient_supported_points / summary.measured_points_count;
         summary.combined_edge_support_score = (double)summary.combined_supported_points / summary.measured_points_count;
         summary.edge_support_score = summary.combined_edge_support_score;
+
+        summary.circle_local_support_score = (double)localEdgeSupportedCount / summary.measured_points_count;
+
+        if (localEdgeFoundCount > 0)
+        {
+            summary.circle_local_mean_radial_distance_px = totalLocalDistance / localEdgeFoundCount;
+            summary.circle_local_max_radial_distance_px = maxLocalDistance;
+            summary.circle_local_mean_gradient = totalLocalGradient / localEdgeFoundCount;
+        }
     }
+
+    summary.circle_reference_mode = object.has_fit_result ? "measured_local_radial" : "global_radial";
 
     if (gradRatioCount > 0)
     {
@@ -1237,6 +1426,17 @@ static bool SaveEvidenceSummaryJson(
             file << "      \"mean_error_abs\": " << s.mean_error_abs << ",\n";
             file << "      \"metric_quality\": \"" << CxDebugJsonEscape(s.metric_quality) << "\",\n";
             file << "      \"metric_valid\": " << (s.metric_valid ? "true" : "false") << ",\n";
+            file << "      \"measured_local_support_score\": " << s.measured_local_support_score << ",\n";
+            file << "      \"measured_local_mean_distance_px\": " << s.measured_local_mean_distance_px << ",\n";
+            file << "      \"measured_local_max_distance_px\": " << s.measured_local_max_distance_px << ",\n";
+            file << "      \"measured_local_mean_gradient\": " << s.measured_local_mean_gradient << ",\n";
+            file << "      \"measured_local_supported_points\": " << s.measured_local_supported_points << ",\n";
+            file << "      \"measured_local_missing_points\": " << s.measured_local_missing_points << ",\n";
+            file << "      \"circle_local_support_score\": " << s.circle_local_support_score << ",\n";
+            file << "      \"circle_local_mean_radial_distance_px\": " << s.circle_local_mean_radial_distance_px << ",\n";
+            file << "      \"circle_local_max_radial_distance_px\": " << s.circle_local_max_radial_distance_px << ",\n";
+            file << "      \"circle_local_mean_gradient\": " << s.circle_local_mean_gradient << ",\n";
+            file << "      \"circle_reference_mode\": \"" << CxDebugJsonEscape(s.circle_reference_mode) << "\",\n";
             file << "      \"conclusion\": \"" << CxDebugJsonEscape(s.conclusion) << "\"\n";
             file << "    }";
 

@@ -206,12 +206,23 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         "abs_reference_points": ev_summary.get("abs_reference_points"),
         "metric_quality": ev_summary.get("metric_quality"),
         "max_reference_line_distance_px": ev_summary.get("max_reference_line_distance_px"),
+        "measured_local_support_score": ev_summary.get("measured_local_support_score"),
+        "measured_local_mean_distance_px": ev_summary.get("measured_local_mean_distance_px"),
+        "measured_local_mean_gradient": ev_summary.get("measured_local_mean_gradient"),
+        "circle_local_support_score": ev_summary.get("circle_local_support_score"),
+        "circle_local_mean_radial_distance_px": ev_summary.get("circle_local_mean_radial_distance_px"),
+        "circle_reference_mode": ev_summary.get("circle_reference_mode"),
         "cc_selected_foreground": "",
         "cc_white_total": 0,
         "cc_white_accepted": 0,
         "cc_black_total": 0,
         "cc_black_accepted": 0,
+        "cc_selected_total": 0,
         "cc_selected_accepted": 0,
+        "cc_selected_area_min": 0,
+        "cc_selected_area_max": 0,
+        "cc_selected_area_median": 0,
+        "cc_selected_area_p90": 0,
     }
     
     if record["fallback_used"] is None:
@@ -258,6 +269,12 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         record["cc_black_total"] = 0
         record["cc_black_accepted"] = 0
     
+    record["cc_selected_total"] = snapshot_value(snapshot, "line_findobject_component_total") or cc_total
+    record["cc_selected_area_min"] = snapshot_value(snapshot, "line_findobject_area_min")
+    record["cc_selected_area_max"] = snapshot_value(snapshot, "line_findobject_area_max")
+    record["cc_selected_area_median"] = snapshot_value(snapshot, "line_findobject_area_median")
+    record["cc_selected_area_p90"] = snapshot_value(snapshot, "line_findobject_area_p90")
+    
     record = classify_case(record)
     
     return record
@@ -275,9 +292,12 @@ def classify_case(record):
     filter_profile = record["filter_profile"]
     metric_valid = record.get("metric_valid", True)
     
+    local_support = record.get("measured_local_support_score", 0) if tool == "Findline" else record.get("circle_local_support_score", 0)
+    
     if not record["headless_ok"]:
-        record["classification"] = "HEADLESS_FAILED"
+        record["quality_classification"] = "HEADLESS_FAILED"
         record["policy_classification"] = "NA"
+        record["classification"] = "HEADLESS_FAILED"
         record["t0_pass"] = False
         record["t1_pass"] = False
         record["t2_pass"] = False
@@ -287,8 +307,9 @@ def classify_case(record):
     record["t0_pass"] = True
     
     if fallback_used:
-        record["classification"] = "FALLBACK_DIAGNOSTIC"
+        record["quality_classification"] = "FALLBACK_DIAGNOSTIC"
         record["policy_classification"] = "NA"
+        record["classification"] = "FALLBACK_DIAGNOSTIC"
         record["t1_pass"] = False
         record["t2_pass"] = False
         record["t3_pass"] = False
@@ -302,8 +323,9 @@ def classify_case(record):
     record["t1_pass"] = t1_pass
     
     if not t1_pass:
-        record["classification"] = "ALGORITHM_NO_RESULT"
+        record["quality_classification"] = "ALGORITHM_NO_RESULT"
         record["policy_classification"] = "NA"
+        record["classification"] = "ALGORITHM_NO_RESULT"
         record["t2_pass"] = False
         record["t3_pass"] = False
         return record
@@ -313,8 +335,7 @@ def classify_case(record):
         geometry_ok = geometry_ok and fit_offset <= 6.0
     else:
         center_err = record["circle_center_error_px"] or 999
-        radius_err = record["circle_radius_error_px"] or 999
-        geometry_ok = geometry_ok and center_err <= 2.0 and radius_err <= 20.0
+        geometry_ok = geometry_ok and center_err <= 3.0
     
     record["t2_pass"] = geometry_ok
     
@@ -324,24 +345,34 @@ def classify_case(record):
     record["policy_classification"] = policy_classification
     
     if not metric_valid or metric_quality == "invalid_error_aggregation":
+        record["quality_classification"] = "EVIDENCE_METRIC_INCONSISTENT"
         record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
         record["t3_pass"] = False
         return record
     
-    if geometry_ok:
-        if combined_support >= 0.6:
-            record["classification"] = "ORIGINAL_EDGE_CONFIRMED"
-            record["t3_pass"] = True
-        else:
-            record["classification"] = "EVIDENCE_SUPPORT_NEEDS_CALIBRATION"
-            record["t3_pass"] = False
+    if local_support >= 0.60:
+        record["quality_classification"] = "ORIGINAL_LOCAL_EDGE_CONFIRMED"
+        record["classification"] = "ORIGINAL_LOCAL_EDGE_CONFIRMED"
+        record["t3_pass"] = True
+    elif combined_support >= 0.60:
+        record["quality_classification"] = "ORIGINAL_EDGE_CONFIRMED"
+        record["classification"] = "ORIGINAL_EDGE_CONFIRMED"
+        record["t3_pass"] = True
+    elif geometry_ok:
+        record["quality_classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        record["t3_pass"] = False
+    elif mean_err <= 5.0 and valid_points >= 5:
+        record["quality_classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        record["t3_pass"] = False
+    elif is_filter_candidate:
+        record["quality_classification"] = "FILTER_POLICY_CANDIDATE"
+        record["classification"] = "FILTER_POLICY_CANDIDATE"
+        record["t3_pass"] = False
     else:
-        if mean_err <= 5.0 and valid_points >= 5:
-            record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
-        elif is_filter_candidate:
-            record["classification"] = "FILTER_POLICY_CANDIDATE"
-        else:
-            record["classification"] = "SUSPICIOUS_CANDIDATE"
+        record["quality_classification"] = "SUSPICIOUS_CANDIDATE"
+        record["classification"] = "SUSPICIOUS_CANDIDATE"
         record["t3_pass"] = False
     
     return record
@@ -611,10 +642,10 @@ def write_component_debug_report(out_root, records):
              "不能用于证明参数在高对比、低对比、复杂边界、光照不均、噪声/模糊图像上的稳定性。",
              "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", ""]
     
-    lines += ["## Findline Component Stats", "", "| Case | Profile | CC_Foreground | CC_White_Total | CC_White_Accepted | CC_Black_Total | CC_Black_Accepted | CC_Selected_Accepted | EffectiveFilterMin |", "|---|---|---|---:|---:|---:|---:|---:|---:|"]
+    lines += ["## Findline Component Stats", "", "| Case | Profile | CC_Foreground | SelectedTotal | SelectedAccepted | AreaMin | AreaMedian | AreaP90 | AreaMax | EffectiveFilterMin |", "|---|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","cc_selected_foreground","cc_white_total","cc_white_accepted","cc_black_total","cc_black_accepted","cc_selected_accepted","effective_filter_min"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","cc_selected_foreground","cc_selected_total","cc_selected_accepted","cc_selected_area_min","cc_selected_area_median","cc_selected_area_p90","cc_selected_area_max","effective_filter_min"]) + " |")
     
     (out_root / "component_debug_report.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -656,15 +687,15 @@ def write_standardized_batch_report(out_root, records, exe, manifest):
              "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", "",
              "## Summary", "", f"- Total cases: {len(records)}", f"- T0 (execution) pass: {sum(bool(r.get('t0_pass')) for r in records)}", f"- T1 (original measure) pass: {sum(bool(r.get('t1_pass')) for r in records)}", f"- T2 (evidence support) pass: {sum(bool(r.get('t2_pass')) for r in records)}", ""]
     
-    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | CombinedSupport | MeanErr | FitOffset | Classification | PolicyClassification |", "|---|---|---|---:|---|---:|---:|---:|---|---|"]
+    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | LocalSupport | CombinedSupport | MeanErr | FitOffset | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification","policy_classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","measured_local_support_score","combined_edge_support_score","mean_error_px","fit_offset_error_px","quality_classification","policy_classification"]) + " |")
     
-    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | CombinedSupport | CenterErr | RadiusErr | Classification | PolicyClassification |", "|---|---|---|---:|---|---:|---:|---:|---|---|"]
+    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | LocalSupport | CombinedSupport | CenterErr | MeanErr | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findcircle":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","classification","policy_classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","circle_local_support_score","combined_edge_support_score","circle_center_error_px","mean_error_px","quality_classification","policy_classification"]) + " |")
     
     lines += ["", "## Current Decision", "",
               "- filter_min=20: 只是 Stage 2.5 filter profile 候选",

@@ -7,6 +7,41 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
+enum class CxFindlineEvidenceMode
+{
+    StrongestReferenceEdge = 0,
+    MeasuredLocalEdge = 1,
+    DualCompare = 2
+};
+
+struct CxMeasuredLocalEdgeEvidence
+{
+    bool found = false;
+
+    double measured_x = 0.0;
+    double measured_y = 0.0;
+
+    double local_edge_x = 0.0;
+    double local_edge_y = 0.0;
+
+    double local_distance_px = 0.0;
+    double local_gradient = 0.0;
+
+    std::string polarity;
+};
+
+struct CxCircleLocalSupportStats
+{
+    int measured_points = 0;
+    int local_edge_found = 0;
+    int local_supported = 0;
+
+    double mean_local_radial_distance_px = 0.0;
+    double max_local_radial_distance_px = 0.0;
+    double mean_local_gradient = 0.0;
+    double local_support_score = 0.0;
+};
+
 struct CxImageEvidenceOptions
 {
     bool enabled = true;
@@ -27,6 +62,12 @@ struct CxImageEvidenceOptions
     bool save_profile_debug = false;
 
     std::string profile_name = "normal";
+
+    CxFindlineEvidenceMode findline_mode = CxFindlineEvidenceMode::DualCompare;
+
+    double measured_local_search_px = 8.0;
+    double measured_local_support_px = 3.0;
+    double reference_line_support_px = 4.0;
 };
 
 struct CxPointEvidence
@@ -50,6 +91,11 @@ struct CxPointEvidence
     bool distance_supported = false;
     bool gradient_supported = false;
     bool combined_supported = false;
+
+    bool local_edge_found = false;
+    double local_edge_distance_px = 0.0;
+    double local_edge_gradient = 0.0;
+    bool local_edge_supported = false;
 
     std::string reference_polarity;
     std::string reason;
@@ -114,6 +160,19 @@ struct CxImageEvidenceSummary
 
     std::string conclusion;
     std::string support_conclusion;
+
+    double measured_local_support_score = 0.0;
+    double measured_local_mean_distance_px = 0.0;
+    double measured_local_max_distance_px = 0.0;
+    double measured_local_mean_gradient = 0.0;
+    int measured_local_supported_points = 0;
+    int measured_local_missing_points = 0;
+
+    double circle_local_support_score = 0.0;
+    double circle_local_mean_radial_distance_px = 0.0;
+    double circle_local_max_radial_distance_px = 0.0;
+    double circle_local_mean_gradient = 0.0;
+    std::string circle_reference_mode;
 
     std::vector<CxPointEvidence> point_evidences;
 };
