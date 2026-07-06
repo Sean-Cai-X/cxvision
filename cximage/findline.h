@@ -430,6 +430,9 @@ private:
 
     void SyncMeasureGeometryCacheAfterNativeBuild(double nativeHalfWidth);
 
+    void InvalidateMeasureAndFitAfterParamChange(
+        const char* reason);
+
 private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;

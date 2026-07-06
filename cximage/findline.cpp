@@ -324,21 +324,39 @@ void Findline::clear()
 }
 void Findline::SetWHgap(int wgap, int hgap)
 {
-    m_iwgap = PositiveGap(wgap);
-    m_ihgap = PositiveGap(hgap);
+    const int newWgap = std::max(1, wgap);
+    const int newHgap = std::max(1, hgap);
 
-    if (m_measure_geometry_request.valid)
+    const bool changed =
+        (newWgap != m_iwgap) ||
+        (newHgap != m_ihgap);
+
+    m_iwgap = newWgap;
+    m_ihgap = newHgap;
+
+    if (!m_has_display_line_roi)
     {
-        UpdateMeasureGeometryRequest(
-            m_measure_geometry_request.x0,
-            m_measure_geometry_request.y0,
-            m_measure_geometry_request.x1,
-            m_measure_geometry_request.y1,
-            m_measure_geometry_request.script_scale);
+        if (changed)
+        {
+            MarkMeasureGeometryDirty();
+            InvalidateMeasureAndFitAfterParamChange(
+                "SetWHgap_changed_before_setline");
+        }
+
+        return;
     }
-    else
+
+    UpdateMeasureGeometryRequest(
+        m_display_line_x0,
+        m_display_line_y0,
+        m_display_line_x1,
+        m_display_line_y1,
+        m_display_line_scale);
+
+    if (changed)
     {
-        MarkMeasureGeometryDirty();
+        InvalidateMeasureAndFitAfterParamChange(
+            "SetWHgap_changed");
     }
 }
 void Findline::setlinesegment(double ix0, double iy0,
@@ -474,6 +492,9 @@ void Findline::setlinesegment(double ix0, double iy0,
     UpdateMeasureGeometryRequest(ix0, iy0, ix1, iy1, dscale);
 
     SyncMeasureGeometryCacheAfterNativeBuild(dscale);
+
+    InvalidateMeasureAndFitAfterParamChange(
+        "setline_changed");
 }
 
 bool Findline::HasOriginalMeasureScanGeometry() const
@@ -508,6 +529,29 @@ void Findline::SyncMeasureGeometryCacheAfterNativeBuild(
         m_measure_geometry_ready = false;
         m_measure_geometry_dirty = true;
     }
+}
+
+void Findline::InvalidateMeasureAndFitAfterParamChange(
+    const char* reason)
+{
+    m_measurepoints_w.clear();
+    m_measurepoints_h.clear();
+
+    m_scanEdgeBands.clear();
+    m_bestEdgeChain.clear();
+
+    m_lastMeasureProfile = FindlineMeasureProfileStats();
+
+    clearfitresult();
+
+    m_lastMeasureInputDebug.measure_source =
+        "measure_invalidated_by_parameter_change";
+
+    m_lastMeasureInputDebug.failure_stage =
+        reason != nullptr ? reason : "parameter_changed";
+
+    m_lastMeasureInputDebug.detail =
+        "Findline parameter changed; previous measure points and fitline were invalidated. Run measure and fitline again.";
 }
 
 void Findline::setrect(int ix, int iy, int iw, int ih)

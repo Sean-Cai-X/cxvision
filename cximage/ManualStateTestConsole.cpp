@@ -2111,6 +2111,10 @@ static void RefreshFindcircleMeasureGeometrySnapshot(
         dbg.detail;
 }
 
+static bool ResolveDebugInt(ManualTestContext& context,
+    const std::string& token,
+    int& value);
+
 static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -2140,10 +2144,31 @@ static bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
         "Findcircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
-    object.circle_cx = std::stof(call.args[0]);
-    object.circle_cy = std::stof(call.args[1]);
-    object.circle_inner = std::stof(call.args[2]);
-    object.circle_radius = std::stof(call.args[3]);
+    int circleValues[4] = {};
+    for (int index = 0; index < 4; ++index)
+    {
+        if (!ResolveDebugInt(
+                context,
+                call.args[static_cast<std::size_t>(index)],
+                circleValues[index]))
+        {
+            ScriptLineView& line =
+                context.line_views[static_cast<std::size_t>(lineIndex)];
+            line.status = "BLOCKED";
+            line.reason = "Findcircle.setcircle unresolved parameter: " +
+                call.args[static_cast<std::size_t>(index)];
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+    }
+
+    object.circle_cx = static_cast<float>(circleValues[0]);
+    object.circle_cy = static_cast<float>(circleValues[1]);
+    object.circle_inner = static_cast<float>(circleValues[2]);
+    object.circle_radius = static_cast<float>(circleValues[3]);
 
     DebugCximageRuntime& runtime = CxRuntime(context);
 
@@ -2274,7 +2299,20 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         return true;
     }
 
-    const int value = std::atoi(call.args[0].c_str());
+    int value = 0;
+    if (!ResolveDebugInt(context, call.args[0], value))
+    {
+        ScriptLineView& line =
+            context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "BLOCKED";
+        line.reason = "Findcircle." + call.method +
+            " unresolved parameter: " + call.args[0];
+        line.timestamp = CurrentTimestamp();
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
 
     if (call.method == "setmethod")
         circleIt->second->setmethod(value);
@@ -2296,7 +2334,7 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         circleIt->second->setselectedgenum(value);
     else if (call.method == "setlinesamplerate")
         circleIt->second->setlinesamplerate(
-            std::atof(call.args[0].c_str()));
+            static_cast<double>(value));
 
     RefreshFindcircleMeasureGeometrySnapshot(
         EnsureRuntimeObject(
@@ -3234,6 +3272,79 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_status = status.str();
 }
 
+static bool ApplyRuntimeFindlineWHgap(
+    ManualTestContext& context,
+    const std::string& objectName,
+    int wgap,
+    int hgap,
+    int updateLineNo,
+    const char* updateSource,
+    std::string& outReason)
+{
+    if (wgap <= 0 || hgap <= 0)
+    {
+        std::ostringstream ss;
+        ss << "Findline.SetWHgap rejected invalid value"
+           << " | wgap=" << wgap
+           << " | hgap=" << hgap;
+        outReason = ss.str();
+        return false;
+    }
+
+    DebugCximageRuntime& runtime = CxRuntime(context);
+    auto it = runtime.lines.find(objectName);
+    if (it == runtime.lines.end() || it->second == nullptr)
+    {
+        outReason = "Findline runtime object not found: " + objectName;
+        return false;
+    }
+
+    Findline& lineTool = *it->second;
+    lineTool.SetWHgap(wgap, hgap);
+
+    RuntimeObjectView& object = EnsureRuntimeObject(
+        context,
+        objectName,
+        "Findline",
+        updateLineNo);
+
+    object.exists_in_parser = true;
+    object.type = "Findline";
+    object.last_method = "SetWHgap";
+    object.last_runtime_status = "runtime_executed";
+    object.runtime_state = "line_param_updated_measure_pending";
+    object.last_update_line = updateLineNo;
+    object.visualizable = true;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+    object.line_tool_wgap = wgap;
+    object.line_tool_hgap = hgap;
+
+    RefreshFindlineDisplaySnapshot(context, object, lineTool);
+    RefreshFindlineMeasureSnapshot(object, lineTool);
+
+    std::ostringstream ss;
+    ss << "Findline.SetWHgap applied"
+       << " | source="
+       << (updateSource != nullptr ? updateSource : "unknown")
+       << " | wgap=" << wgap
+       << " | hgap=" << hgap;
+
+    if (object.has_line_scan_box)
+    {
+        ss << " | scan_half_width=" << object.line_scan_half_width
+           << " | measure_pending=true";
+    }
+    else
+    {
+        ss << " | line_roi_pending=true";
+    }
+
+    object.display_summary = ss.str();
+    outReason = object.display_summary;
+    return true;
+}
+
 static bool TryExecuteFindlineSetline(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
@@ -3385,7 +3496,7 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             !ResolveDebugInt(context, call.args[1], hgap))
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.SetWHgap failed to resolve arguments";
+            line.reason = "Findline.SetWHgap failed to resolve wgap/hgap";
             line.timestamp = CurrentTimestamp();
 
             context.run_state = "blocked";
@@ -3394,36 +3505,45 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             return true;
         }
 
-        it->second->SetWHgap(wgap, hgap);
+        if (wgap <= 0 || hgap <= 0)
+        {
+            line.status = "BLOCKED";
 
-        RuntimeObjectView& object = EnsureRuntimeObject(
-            context,
-            call.object,
-            "Findline",
-            line.line_no);
+            std::ostringstream reason;
+            reason << "Findline.SetWHgap blocked"
+                   << " | invalid wgap=" << wgap
+                   << " | invalid hgap=" << hgap;
 
-        RefreshFindlineDisplaySnapshot(context, object, *it->second);
+            line.reason = reason.str();
+            line.timestamp = CurrentTimestamp();
 
-        object.exists_in_parser = true;
-        object.type = "Findline";
-        object.last_method = call.method;
-        object.last_runtime_status = "runtime_executed";
-        object.runtime_state = "runtime_param_set";
-        object.last_update_line = line.line_no;
-        object.visualizable = true;
-        object.visual_source = "runtime_object";
-        object.stale = false;
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
 
-        std::ostringstream summary;
-        summary << "Findline.SetWHgap executed"
-                << " | wgap=" << wgap
-                << " | hgap=" << hgap
-                << " | scan_half_width=" << object.line_scan_half_width;
-
-        object.display_summary = summary.str();
+        std::string applyReason;
+        if (!ApplyRuntimeFindlineWHgap(
+                context,
+                call.object,
+                wgap,
+                hgap,
+                line.line_no,
+                "script",
+                applyReason))
+        {
+            line.status = "BLOCKED";
+            line.reason = applyReason;
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
 
         line.status = "runtime_executed";
-        line.reason = object.display_summary;
+        line.reason = applyReason;
         line.timestamp = CurrentTimestamp();
 
         context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
@@ -3440,7 +3560,7 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             call.method,
             line.status,
             line.reason,
-            object.display_summary);
+            applyReason);
 
         AppendCxDebugRuntimeObjectsSnapshot(
             context,
@@ -4060,16 +4180,16 @@ static void DebugStepOnce(ManualTestContext& context)
     if (TryExecuteFindlineSetline(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
-        return;
-
     if (TryExecuteFindlineParamMethod(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindcircleParamMethod(context, lineIndex, statement))
+    if (TryExecuteFindlineRuntimeMethod(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindlineRuntimeMethod(context, lineIndex, statement))
+    if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
+        return;
+
+    if (TryExecuteFindcircleParamMethod(context, lineIndex, statement))
         return;
 
     /*
@@ -4556,8 +4676,12 @@ void ViewController::initManualStateTestConsole()
      "# enter one manual integration statement\n", "builtin", true},
     {"Custom Manual Text", "Start with an empty manual editor.",
      "", "manual", true},
-    {"Findline Original Direct H", "Original Findline Measure. Native width. Horizontal.",
+    {"Findline Legacy Direct", "Legacy direct line ROI, scan box, original measure points, and fitline.",
      "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true},
+    {"Findline WHgap Update", "SetWHgap before and after setline; previous measure and fit must be invalidated.",
+     "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true},
+    {"Findline Native Width Compare", "Original Measure comparison with setline scale 32.",
+     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
     {"Findline Original Direct V", "Original Findline Measure. Native width. Vertical.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
     {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
@@ -5538,7 +5662,7 @@ void ViewController::drawManualStateTestConsole()
   {
       ImGui::TextWrapped("%s", m_manualTest.image_overlay_summary.c_str());
   }
-  for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+  for (RuntimeObjectView& object : m_manualTest.runtime_objects)
   {
     ImGui::BulletText("%s %s", object.type.c_str(), object.name.c_str());
     ImGui::Text("declared_line: %d", object.declared_line);
@@ -5570,6 +5694,35 @@ void ViewController::drawManualStateTestConsole()
         ImGui::Text("fit=(%.3f, %.3f)->(%.3f, %.3f)",
                     object.fit_line_x0, object.fit_line_y0,
                     object.fit_line_x1, object.fit_line_y1);
+      ImGui::PushID(object.name.c_str());
+      ImGui::SeparatorText("Findline Params");
+      int editWgap = object.line_tool_wgap > 0 ?
+        object.line_tool_wgap : std::max(1, object.line_measure_wgap);
+      int editHgap = object.line_tool_hgap > 0 ?
+        object.line_tool_hgap : std::max(1, object.line_measure_hgap);
+      ImGui::InputInt("wgap##findline", &editWgap);
+      ImGui::InputInt("hgap##findline", &editHgap);
+      if (ImGui::Button("Apply WHgap##findline"))
+      {
+        std::string updateReason;
+        const bool updated = ApplyRuntimeFindlineWHgap(
+            m_manualTest,
+            object.name,
+            editWgap,
+            editHgap,
+            0,
+            "manual_console",
+            updateReason);
+        if (!updated)
+        {
+          object.last_runtime_status = "BLOCKED";
+          object.runtime_state = "line_param_update_failed";
+          object.display_summary = updateReason;
+        }
+        m_scriptResult.status = updated ? "PENDING" : "BLOCKED";
+        m_scriptResult.reason = updateReason;
+      }
+      ImGui::PopID();
     }
     ImGui::Text("visualizable: %s", object.visualizable ? "true" : "false");
     ImGui::Text("visual_source: %s", object.visual_source.c_str());

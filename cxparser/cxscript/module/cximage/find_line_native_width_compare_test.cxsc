@@ -19,6 +19,7 @@ int measure_scale = 32;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setline(x0, y0, x1, y1, measure_scale);
+
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
