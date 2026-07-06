@@ -23,7 +23,7 @@ m_line.setline(x0, y0, x1, y1, tool_half_width);
 
 int objfilter = 1;
 int filter_borw = 21;
-int filter_min = 40;
+int filter_min = 35;
 int filter_max = 100000;
 
 m_line.setobjfilter(objfilter);

@@ -902,6 +902,21 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_measure_filter_max: "
                      << object.line_measure_filter_max << "\n";
 
+                file << "  line_measure_filter_profile: "
+                     << object.line_measure_filter_profile << "\n";
+
+                file << "  line_measure_filter_explicit: "
+                     << (object.line_measure_filter_explicit ? "true" : "false") << "\n";
+
+                file << "  line_measure_effective_filter_borw: "
+                     << object.line_measure_effective_filter_borw << "\n";
+
+                file << "  line_measure_effective_filter_min: "
+                     << object.line_measure_effective_filter_min << "\n";
+
+                file << "  line_measure_effective_filter_max: "
+                     << object.line_measure_effective_filter_max << "\n";
+
                 file << "  line_measure_findobject_called: "
                      << (object.line_measure_findobject_called ? "true" : "false") << "\n";
 
@@ -3366,6 +3381,21 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_filter_max =
         input.filter_max;
 
+    object.line_measure_filter_profile =
+        input.filter_profile;
+
+    object.line_measure_filter_explicit =
+        input.filter_explicit;
+
+    object.line_measure_effective_filter_borw =
+        input.effective_filter_borw;
+
+    object.line_measure_effective_filter_min =
+        input.effective_filter_min;
+
+    object.line_measure_effective_filter_max =
+        input.effective_filter_max;
+
     object.line_measure_findobject_called =
         input.findobject_measure_called;
 
@@ -3719,7 +3749,8 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "setmeasurefallback" ||
         call.method == "setgamarate" ||
         call.method == "setobjfilter" ||
-        call.method == "setfilter";
+        call.method == "setfilter" ||
+        call.method == "setfilterprofile";
 
     if (!isFindlineParamMethod)
         return false;
@@ -3896,6 +3927,63 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
                 << " | borw=" << borw
                 << " | min=" << minArea
                 << " | max=" << maxArea
+                << " | measure_pending=true";
+
+        object.display_summary = summary.str();
+
+        line.status = "runtime_executed";
+        line.reason = object.display_summary;
+        line.timestamp = CurrentTimestamp();
+
+        context.current_line =
+            FindNextNonEmptyLine(context, lineIndex + 1);
+
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+
+        return true;
+    }
+
+    if (call.method == "setfilterprofile")
+    {
+        int profile = 0;
+        if (!ResolveDebugInt(context, call.args[0], profile))
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findline.setfilterprofile unresolved parameter";
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        it->second->setfilterprofile(profile);
+
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            call.object,
+            "Findline",
+            line.line_no);
+
+        object.exists_in_parser = true;
+        object.type = "Findline";
+        object.last_method = "setfilterprofile";
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "line_param_updated_measure_pending";
+        object.last_update_line = line.line_no;
+
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.stale = false;
+
+        RefreshFindlineDisplaySnapshot(context, object, *it->second);
+        RefreshFindlineMeasureSnapshot(object, *it->second);
+
+        std::ostringstream summary;
+        summary << "Findline.setfilterprofile executed"
+                << " | profile=" << profile
                 << " | measure_pending=true";
 
         object.display_summary = summary.str();

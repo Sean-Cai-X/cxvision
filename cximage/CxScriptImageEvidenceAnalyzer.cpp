@@ -174,6 +174,62 @@ static bool FitCircleFromPoints(
     return true;
 }
 
+struct CxLineNormalForm
+{
+    double nx = 0.0;
+    double ny = 0.0;
+    double c = 0.0;
+    bool valid = false;
+};
+
+static CxLineNormalForm BuildLineNormalForm(
+    double x0,
+    double y0,
+    double x1,
+    double y1)
+{
+    CxLineNormalForm out;
+
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+
+    if (!std::isfinite(len) || len <= 1.0e-9)
+        return out;
+
+    out.nx = -dy / len;
+    out.ny = dx / len;
+    out.c = -(out.nx * x0 + out.ny * y0);
+    out.valid = true;
+
+    return out;
+}
+
+static void AlignLineNormalDirection(
+    CxLineNormalForm& ref,
+    const CxLineNormalForm& measured)
+{
+    const double dot = ref.nx * measured.nx + ref.ny * measured.ny;
+
+    if (dot < 0.0)
+    {
+        ref.nx = -ref.nx;
+        ref.ny = -ref.ny;
+        ref.c = -ref.c;
+    }
+}
+
+static double PointToLineDistance(
+    const CxLineNormalForm& line,
+    double x,
+    double y)
+{
+    if (!line.valid)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    return std::abs(line.nx * x + line.ny * y + line.c);
+}
+
 static void AnalyzeFindlineEvidence(
     const cv::Mat& image,
     const RuntimeObjectView& object,
@@ -280,17 +336,85 @@ static void AnalyzeFindlineEvidence(
         }
     }
 
-    cv::Vec4d referenceLine;
-    std::vector<cv::Point2d> bestReferencePoints = referenceAbsPoints;
+    summary.positive_reference_points = (int)referencePositivePoints.size();
+    summary.negative_reference_points = (int)referenceNegativePoints.size();
+    summary.abs_reference_points = (int)referenceAbsPoints.size();
 
-    if (bestReferencePoints.empty())
+    cv::Vec4d referenceLinePositive, referenceLineNegative, referenceLineAbs;
+    bool refFitPos = FitLineFromPoints(referencePositivePoints, referenceLinePositive);
+    bool refFitNeg = FitLineFromPoints(referenceNegativePoints, referenceLineNegative);
+    bool refFitAbs = FitLineFromPoints(referenceAbsPoints, referenceLineAbs);
+
+    auto ComputeMeanErrorForReference = [&](const std::vector<cv::Point2d>& refPts) -> double {
+        if (refPts.empty() || object.line_measure_points_xy.size() < 2)
+            return std::numeric_limits<double>::max();
+
+        double totalDist = 0.0;
+        int count = 0;
+
+        for (size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
+        {
+            double mx = object.line_measure_points_xy[i];
+            double my = object.line_measure_points_xy[i + 1];
+
+            double minDist = options.support_distance_px + 1.0;
+
+            for (const auto& refPt : refPts)
+            {
+                double dx = mx - refPt.x;
+                double dy = my - refPt.y;
+                double dist = std::sqrt(dx * dx + dy * dy);
+                if (dist < minDist)
+                    minDist = dist;
+            }
+
+            if (minDist <= options.support_distance_px)
+            {
+                totalDist += minDist;
+                count++;
+            }
+        }
+
+        return count > 0 ? totalDist / count : std::numeric_limits<double>::max();
+    };
+
+    summary.mean_error_positive = ComputeMeanErrorForReference(referencePositivePoints);
+    summary.mean_error_negative = ComputeMeanErrorForReference(referenceNegativePoints);
+    summary.mean_error_abs = ComputeMeanErrorForReference(referenceAbsPoints);
+
+    std::vector<cv::Point2d> bestReferencePoints;
+    cv::Vec4d bestReferenceLine;
+    bool bestRefFit = false;
+
+    if (summary.mean_error_positive <= summary.mean_error_negative &&
+        summary.mean_error_positive <= summary.mean_error_abs &&
+        !referencePositivePoints.empty())
+    {
+        summary.best_reference_polarity = "positive";
         bestReferencePoints = referencePositivePoints;
-    if (bestReferencePoints.empty())
+        bestReferenceLine = referenceLinePositive;
+        bestRefFit = refFitPos;
+    }
+    else if (summary.mean_error_negative <= summary.mean_error_positive &&
+             summary.mean_error_negative <= summary.mean_error_abs &&
+             !referenceNegativePoints.empty())
+    {
+        summary.best_reference_polarity = "negative";
         bestReferencePoints = referenceNegativePoints;
+        bestReferenceLine = referenceLineNegative;
+        bestRefFit = refFitNeg;
+    }
+    else
+    {
+        summary.best_reference_polarity = "abs";
+        bestReferencePoints = referenceAbsPoints;
+        bestReferenceLine = referenceLineAbs;
+        bestRefFit = refFitAbs;
+    }
 
     summary.reference_points_count = (int)bestReferencePoints.size();
 
-    if (FitLineFromPoints(bestReferencePoints, referenceLine))
+    if (bestRefFit)
     {
         summary.reference_fit_available = true;
         summary.reference_available = true;
@@ -363,18 +487,42 @@ static void AnalyzeFindlineEvidence(
     {
         summary.measured_fit_available = true;
 
-        double lineAngle = std::atan2(object.line_y1 - object.line_y0, object.line_x1 - object.line_x0);
-        double refAngle = std::atan2(referenceLine[1], referenceLine[0]);
-        double angleDiff = std::abs(lineAngle - refAngle);
-        while (angleDiff > CV_PI) angleDiff -= 2.0 * CV_PI;
-        summary.fit_angle_error_deg = angleDiff * 180.0 / CV_PI;
+        CxLineNormalForm measuredLine = BuildLineNormalForm(
+            object.fit_line_x0,
+            object.fit_line_y0,
+            object.fit_line_x1,
+            object.fit_line_y1);
 
-        double fitX = object.line_x0;
-        double fitY = object.line_y0;
+        CxLineNormalForm referenceLine = BuildLineNormalForm(
+            object.line_x0,
+            object.line_y0,
+            object.line_x1,
+            object.line_y1);
 
-        double distToRefLine = std::abs(referenceLine[2] - fitX * referenceLine[0] - fitY * referenceLine[1])
-            / std::sqrt(referenceLine[0] * referenceLine[0] + referenceLine[1] * referenceLine[1]);
-        summary.fit_offset_error_px = distToRefLine;
+        if (measuredLine.valid && referenceLine.valid)
+        {
+            AlignLineNormalDirection(referenceLine, measuredLine);
+
+            const double mx = 0.5 * (object.fit_line_x0 + object.fit_line_x1);
+            const double my = 0.5 * (object.fit_line_y0 + object.fit_line_y1);
+
+            summary.fit_offset_error_px = PointToLineDistance(referenceLine, mx, my);
+
+            const double dirDot =
+                std::abs(measuredLine.nx * referenceLine.nx +
+                         measuredLine.ny * referenceLine.ny);
+
+            const double clampedDot =
+                std::max(-1.0, std::min(1.0, dirDot));
+
+            summary.fit_angle_error_deg =
+                std::acos(clampedDot) * 180.0 / CV_PI;
+        }
+        else
+        {
+            summary.fit_offset_error_px = -1.0;
+            summary.fit_angle_error_deg = -1.0;
+        }
     }
 
     if (!summary.reference_available)
@@ -384,6 +532,14 @@ static void AnalyzeFindlineEvidence(
     else if (summary.measured_points_count == 0)
     {
         summary.conclusion = "Original Measure produced no points, but image has detectable edges";
+    }
+    else if (summary.mean_error_px <= 2.0 &&
+             summary.fit_offset_error_px > 50.0 &&
+             summary.fit_offset_error_px > 0.0)
+    {
+        summary.metric_quality = "inconsistent_line_fit_metric";
+        summary.conclusion =
+            "Point evidence is close, but fit offset is abnormally large. Check reference line selection or fit error calculation.";
     }
     else if (summary.edge_support_score >= 0.7 && summary.mean_error_px <= 2.0)
     {
@@ -430,6 +586,13 @@ static void AnalyzeFindcircleEvidence(
     double cy = object.circle_cy;
     double radius = object.circle_radius;
 
+    if (object.has_fit_result)
+    {
+        cx = object.fit_cx;
+        cy = object.fit_cy;
+        radius = object.fit_radius;
+    }
+
     if (radius < 1.0)
     {
         summary.conclusion = "Findcircle radius too small";
@@ -440,6 +603,7 @@ static void AnalyzeFindcircleEvidence(
     double angleStep = 2.0 * CV_PI / numAngles;
 
     int halfWidth = options.profile_half_width;
+    int effectiveHalfWidth = halfWidth;
 
     std::vector<cv::Point2d> referencePositivePoints;
     std::vector<cv::Point2d> referenceNegativePoints;
@@ -453,7 +617,7 @@ static void AnalyzeFindcircleEvidence(
 
         std::vector<double> profile;
 
-        for (int j = -halfWidth; j <= halfWidth; ++j)
+        for (int j = -effectiveHalfWidth; j <= effectiveHalfWidth; ++j)
         {
             double px = cx + (radius + j) * dirX;
             double py = cy + (radius + j) * dirY;
@@ -505,17 +669,85 @@ static void AnalyzeFindcircleEvidence(
         }
     }
 
-    cv::Vec3d referenceCircle;
-    std::vector<cv::Point2d> bestReferencePoints = referenceAbsPoints;
+    summary.positive_reference_points = (int)referencePositivePoints.size();
+    summary.negative_reference_points = (int)referenceNegativePoints.size();
+    summary.abs_reference_points = (int)referenceAbsPoints.size();
 
-    if (bestReferencePoints.empty())
+    cv::Vec3d referenceCirclePositive, referenceCircleNegative, referenceCircleAbs;
+    bool refFitPos = FitCircleFromPoints(referencePositivePoints, referenceCirclePositive);
+    bool refFitNeg = FitCircleFromPoints(referenceNegativePoints, referenceCircleNegative);
+    bool refFitAbs = FitCircleFromPoints(referenceAbsPoints, referenceCircleAbs);
+
+    auto ComputeMeanRadialErrorForReference = [&](const cv::Vec3d& refCircle, const std::vector<cv::Point2d>& refPts) -> double {
+        if (refPts.empty() || object.measure_points_xy.size() < 2)
+            return std::numeric_limits<double>::max();
+
+        double totalDist = 0.0;
+        int count = 0;
+
+        for (size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
+        {
+            double mx = object.measure_points_xy[i];
+            double my = object.measure_points_xy[i + 1];
+
+            double minDist = options.support_distance_px + 1.0;
+
+            for (const auto& refPt : refPts)
+            {
+                double dx = mx - refPt.x;
+                double dy = my - refPt.y;
+                double dist = std::sqrt(dx * dx + dy * dy);
+                if (dist < minDist)
+                    minDist = dist;
+            }
+
+            if (minDist <= options.support_distance_px)
+            {
+                totalDist += minDist;
+                count++;
+            }
+        }
+
+        return count > 0 ? totalDist / count : std::numeric_limits<double>::max();
+    };
+
+    summary.mean_error_positive = ComputeMeanRadialErrorForReference(referenceCirclePositive, referencePositivePoints);
+    summary.mean_error_negative = ComputeMeanRadialErrorForReference(referenceCircleNegative, referenceNegativePoints);
+    summary.mean_error_abs = ComputeMeanRadialErrorForReference(referenceCircleAbs, referenceAbsPoints);
+
+    cv::Vec3d bestReferenceCircle;
+    std::vector<cv::Point2d> bestReferencePoints;
+    bool bestRefFit = false;
+
+    if (summary.mean_error_positive <= summary.mean_error_negative &&
+        summary.mean_error_positive <= summary.mean_error_abs &&
+        !referencePositivePoints.empty())
+    {
+        summary.best_reference_polarity = "positive";
         bestReferencePoints = referencePositivePoints;
-    if (bestReferencePoints.empty())
+        bestReferenceCircle = referenceCirclePositive;
+        bestRefFit = refFitPos;
+    }
+    else if (summary.mean_error_negative <= summary.mean_error_positive &&
+             summary.mean_error_negative <= summary.mean_error_abs &&
+             !referenceNegativePoints.empty())
+    {
+        summary.best_reference_polarity = "negative";
         bestReferencePoints = referenceNegativePoints;
+        bestReferenceCircle = referenceCircleNegative;
+        bestRefFit = refFitNeg;
+    }
+    else
+    {
+        summary.best_reference_polarity = "abs";
+        bestReferencePoints = referenceAbsPoints;
+        bestReferenceCircle = referenceCircleAbs;
+        bestRefFit = refFitAbs;
+    }
 
     summary.reference_points_count = (int)bestReferencePoints.size();
 
-    if (FitCircleFromPoints(bestReferencePoints, referenceCircle))
+    if (bestRefFit)
     {
         summary.reference_fit_available = true;
         summary.reference_available = true;
@@ -588,10 +820,10 @@ static void AnalyzeFindcircleEvidence(
     {
         summary.measured_fit_available = true;
 
-        double dcx = object.fit_cx - referenceCircle[0];
-        double dcy = object.fit_cy - referenceCircle[1];
+        double dcx = object.fit_cx - bestReferenceCircle[0];
+        double dcy = object.fit_cy - bestReferenceCircle[1];
         summary.circle_center_error_px = std::sqrt(dcx * dcx + dcy * dcy);
-        summary.circle_radius_error_px = std::abs(object.fit_radius - referenceCircle[2]);
+        summary.circle_radius_error_px = std::abs(object.fit_radius - bestReferenceCircle[2]);
     }
 
     if (!summary.reference_available)
@@ -763,6 +995,14 @@ static bool SaveEvidenceSummaryJson(
             file << "      \"fit_angle_error_deg\": " << s.fit_angle_error_deg << ",\n";
             file << "      \"circle_center_error_px\": " << s.circle_center_error_px << ",\n";
             file << "      \"circle_radius_error_px\": " << s.circle_radius_error_px << ",\n";
+            file << "      \"best_reference_polarity\": \"" << CxDebugJsonEscape(s.best_reference_polarity) << "\",\n";
+            file << "      \"positive_reference_points\": " << s.positive_reference_points << ",\n";
+            file << "      \"negative_reference_points\": " << s.negative_reference_points << ",\n";
+            file << "      \"abs_reference_points\": " << s.abs_reference_points << ",\n";
+            file << "      \"mean_error_positive\": " << s.mean_error_positive << ",\n";
+            file << "      \"mean_error_negative\": " << s.mean_error_negative << ",\n";
+            file << "      \"mean_error_abs\": " << s.mean_error_abs << ",\n";
+            file << "      \"metric_quality\": \"" << CxDebugJsonEscape(s.metric_quality) << "\",\n";
             file << "      \"conclusion\": \"" << CxDebugJsonEscape(s.conclusion) << "\"\n";
             file << "    }";
 

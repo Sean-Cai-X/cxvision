@@ -211,6 +211,13 @@ struct RuntimeObjectView
     int line_measure_filter_min = 0;
     int line_measure_filter_max = 0;
 
+    int line_measure_filter_profile = 0;
+    bool line_measure_filter_explicit = false;
+
+    int line_measure_effective_filter_borw = 0;
+    int line_measure_effective_filter_min = 0;
+    int line_measure_effective_filter_max = 0;
+
     bool line_measure_findobject_called = false;
     bool line_measure_findobject_skipped = false;
 

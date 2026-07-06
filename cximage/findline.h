@@ -181,6 +181,13 @@ struct FindlineMeasureInputDebug
     int filter_min = 0;
     int filter_max = 0;
 
+    int filter_profile = 0;
+    bool filter_explicit = false;
+
+    int effective_filter_borw = 0;
+    int effective_filter_min = 0;
+    int effective_filter_max = 0;
+
     bool findobject_measure_called = false;
     bool findobject_measure_skipped = false;
 
@@ -292,6 +299,10 @@ public:
     void setgamarate(int igama);
     void setobjfilter(int ifindset);
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
+    void setfilterprofile(int profile);
+    int effectivefiltermin() const;
+    int effectivefiltermax() const;
+    int effectivefilterborw() const;
     void setselectedgenum(int iedgenum);
 
     void setshowlines(int ilines) { m_ishowlines = ilines; }
@@ -399,6 +410,12 @@ private:
     int m_ifilterborw;//21 w ,22 b ,23
     int64 m_ifiltermax;
     int64 m_ifiltermin;
+
+    int m_filter_profile = 0;
+    bool m_filter_explicit = false;
+    int m_effective_filter_borw = 0;
+    int m_effective_filter_min = 0;
+    int m_effective_filter_max = 0;
 
     int m_iselectedgenum;
     int m_ineedfixs;

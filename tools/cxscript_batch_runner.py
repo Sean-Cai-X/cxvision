@@ -41,6 +41,16 @@ FILTER_SWEEP_CASES = [
     ("find_line_filter_min80", "Findline", "find_line_filter_min80_test.cxsc", "filter_sweep"),
 ]
 
+FILTER_FINE_SWEEP_CASES = [
+    ("find_line_filter_min15", "Findline", "find_line_filter_min15_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min20", "Findline", "find_line_filter_min20_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min25", "Findline", "find_line_filter_min25_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min30", "Findline", "find_line_filter_min30_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min35", "Findline", "find_line_filter_min35_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min38", "Findline", "find_line_filter_min38_test.cxsc", "filter_sweep"),
+    ("find_line_filter_min40", "Findline", "find_line_filter_min40_test.cxsc", "filter_sweep"),
+]
+
 SCRIPT_DIR = REPO / "cxparser" / "cxscript" / "module" / "cximage"
 
 
@@ -171,6 +181,15 @@ def run_case(exe, out_root, item):
         "findobject_component_accepted": snapshot_value(snapshot, "line_findobject_component_accepted"),
         "findobject_component_rejected_by_min": snapshot_value(snapshot, "line_findobject_component_rejected_by_min"),
         "findobject_area_mean_observed": snapshot_value(snapshot, "line_findobject_area_mean_observed"),
+        "filter_profile": snapshot_value(snapshot, "line_measure_filter_profile"),
+        "filter_explicit": snapshot_value(snapshot, "line_measure_filter_explicit"),
+        "effective_filter_min": snapshot_value(snapshot, "line_measure_effective_filter_min"),
+        "effective_filter_max": snapshot_value(snapshot, "line_measure_effective_filter_max"),
+        "best_reference_polarity": ev_summary.get("best_reference_polarity"),
+        "positive_reference_points": ev_summary.get("positive_reference_points"),
+        "negative_reference_points": ev_summary.get("negative_reference_points"),
+        "abs_reference_points": ev_summary.get("abs_reference_points"),
+        "metric_quality": ev_summary.get("metric_quality"),
     }
     if record["fallback_used"] is None:
         record["fallback_used"] = False
@@ -195,14 +214,19 @@ def run_case(exe, out_root, item):
         valid = record["valid_points_count"] or 0
         support = record["edge_support_score"] or 0
         mean_err = record["mean_error_px"] or 999
-        if valid >= 20 and support >= 0.75 and mean_err <= 2.0:
-            record["classification"] = "STRONG_ORIGINAL_CANDIDATE"
+        fit_offset = record["fit_offset_error_px"] or 0
+        metric_quality = record["metric_quality"] or ""
+        
+        if metric_quality == "inconsistent_line_fit_metric":
+            record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
+        elif valid >= 20 and support >= 0.75 and mean_err <= 2.0:
+            record["classification"] = "ORIGINAL_STRONG_CANDIDATE"
         elif 2 <= valid < 20 and support >= 0.75 and mean_err <= 2.0:
-            record["classification"] = "SPARSE_BUT_GOOD_CANDIDATE"
-        elif support < 0.6:
-            record["classification"] = "SUSPICIOUS_CANDIDATE"
+            record["classification"] = "ORIGINAL_SPARSE_CANDIDATE"
+        elif support >= 0.6 and mean_err <= 3.0:
+            record["classification"] = "ORIGINAL_WEAK_CANDIDATE"
         else:
-            record["classification"] = "ORIGINAL_CANDIDATE"
+            record["classification"] = "SUSPICIOUS_CANDIDATE"
     else:
         record["classification"] = "ALGORITHM_NO_RESULT"
     
@@ -363,11 +387,114 @@ def write_conclusion_pack(out_root, records, filter_records):
     (out_root / "stage_2_5_conclusion_pack.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_fine_sweep_report(out_root, records, exe):
+    payload = {"stage": "2.5_filter_fine_sweep", "exe": str(exe), "image": str(IMAGE), "cases": records}
+    (out_root / "filter_fine_sweep_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    lines = ["# Findline Filter Fine Sweep Report", "", "## Summary", "", "| Case | FilterMin | Components | Accepted | RejectedMin | Points | Fit | AvgDist | EdgeSupport | Failure |", "|---|---:|---:|---:|---:|---:|---|---:|---:|---|"]
+    for r in sorted(records, key=lambda x: x.get("filter_min") or 999):
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_min","findobject_component_total","findobject_component_accepted","findobject_component_rejected_by_min","valid_points_count","has_fit_line","line_avgdist","edge_support_score","failure_stage"]) + " |")
+    
+    lines += ["", "## Analysis", ""]
+    
+    records_sorted = sorted(records, key=lambda x: x.get("filter_min") or 999)
+    working_min = None
+    failing_min = None
+    for r in records_sorted:
+        if (r.get("valid_points_count") or 0) >= 2 and r.get("has_fit_line"):
+            working_min = r.get("filter_min")
+        else:
+            failing_min = r.get("filter_min")
+            break
+    
+    if working_min is not None:
+        lines.append(f"- filter_min <= {working_min} 时可产出有效点")
+    if failing_min is not None:
+        lines.append(f"- filter_min >= {failing_min} 时产出点消失")
+        lines.append(f"- 断崖点位于 filter_min={working_min} 和 filter_min={failing_min} 之间")
+    
+    avg_area = records_sorted[0].get("findobject_area_mean_observed")
+    if avg_area:
+        lines.append(f"- 平均对象面积: {avg_area:.1f} 像素")
+    
+    lines += ["", "- 默认 filter_min=50 是否过严: " + ("是" if failing_min and failing_min <= 50 else "否"), ""]
+    (out_root / "filter_fine_sweep_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_records):
+    findline_records = [r for r in records if r["tool"] == "Findline" and r["expect"] != "fallback_only"]
+    findcircle_records = [r for r in records if r["tool"] == "Findcircle"]
+    fallback_records = [r for r in records if r.get("fallback_used")]
+    
+    payload = {
+        "stage": "2.5_conclusion_pack_v2",
+        "image": str(IMAGE),
+        "findline_candidates": findline_records,
+        "findcircle_candidates": findcircle_records,
+        "filter_sweep": filter_records,
+        "filter_fine_sweep": fine_filter_records,
+        "fallback_cases": fallback_records,
+    }
+    (out_root / "stage_2_5_conclusion_pack_v2.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    lines = ["# Stage 2.5 Conclusion Pack v2", "", "## 1. Current Status", ""]
+    lines.append(f"- Headless status: {'OK' if all(r.get('headless_ok') for r in records) else 'FAILED'}")
+    lines.append(f"- Findline candidate count: {sum(1 for r in findline_records if r.get('original_candidate'))}")
+    lines.append(f"- Findcircle candidate count: {sum(1 for r in findcircle_records if r.get('original_candidate'))}")
+    lines.append("- FastMatch status: not ready")
+    
+    lines += ["", "## 2. Findline Original Candidates", "", "| Case | Points | AvgDist | EdgeSupport | MeanErr | FitOffset | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---|---|"]
+    for r in findline_records:
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","line_avgdist","edge_support_score","mean_error_px","fit_offset_error_px","best_reference_polarity","classification"]) + " |")
+    
+    lines += ["", "## 3. Findline Filter Fine Sweep", "", "| FilterMin | Components | Accepted | Points | Fit | AvgDist | EdgeSupport |", "|---:|---:|---:|---:|---|---:|---:|"]
+    for r in sorted(fine_filter_records, key=lambda x: x.get("filter_min") or 999):
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["filter_min","findobject_component_total","findobject_component_accepted","valid_points_count","has_fit_line","line_avgdist","edge_support_score"]) + " |")
+    
+    lines += ["", "## 4. Findline Default Failure Analysis", ""]
+    direct_case = next((r for r in findline_records if r["case_name"] == "find_line_direct"), None)
+    if direct_case:
+        lines.append(f"- direct failure stage: {direct_case.get('failure_stage') or 'unknown'}")
+        lines.append(f"- direct filter_min: {direct_case.get('filter_min')}")
+        lines.append(f"- filter_relax behavior: {[r['case_name'] for r in findline_records if r['case_name'] == 'find_line_filter_relax']}")
+        lines.append("- likely reason: filter_min=50 过严，二值图中大部分对象面积小于 50")
+        lines.append("- recommended next step: 找出原版本默认 filter_min 值，或调整当前默认值")
+    
+    lines += ["", "## 5. Findcircle Candidate Ranking", "", "| Case | Points | Radius | AvgDist | EdgeSupport | CenterErr | RadiusErr | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---:|---|---|"]
+    for r in findcircle_records:
+        classification = r.get("classification")
+        if r["case_name"] == "find_circle_fitresult_guard":
+            classification = "post_fit_refine_candidate"
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","fit_circle_radius","circle_avgdist","edge_support_score","circle_center_error_px","circle_radius_error_px","best_reference_polarity"]) + " | " + md_value(classification) + " |")
+    
+    lines += ["", "## 6. Fallback Diagnostic", ""]
+    if fallback_records:
+        for r in fallback_records:
+            lines.append(f"- fallback case: {r['case_name']}")
+            lines.append(f"- fallback points: {r.get('valid_points_count')}")
+            lines.append("- conclusion: 仅用于显示链/拟合链诊断")
+            lines.append("- whether counted as original: no")
+    else:
+        lines.append("- no fallback cases")
+    
+    lines += ["", "## 7. Decision", ""]
+    lines.append("- enter FastMatch: no")
+    
+    findline_ok = any(r.get("evidence_supported") for r in findline_records)
+    findcircle_ok = any(r.get("evidence_supported") for r in findcircle_records)
+    if findline_ok and findcircle_ok:
+        lines.append("- next action: 依据 image evidence 结果选择推荐参数，准备原版本对齐")
+    else:
+        lines.append("- next action: 继续对齐原 Measure，调整 filter_min 参数")
+    
+    (out_root / "stage_2_5_conclusion_pack_v2.md").write_text("\n".join(lines), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--mode", choices=["full", "filter_sweep", "conclusion"], default="full")
+    parser.add_argument("--mode", choices=["full", "filter_sweep", "filter_fine_sweep", "conclusion", "conclusion_v2"], default="full")
     args = parser.parse_args()
     exe = find_exe(args.exe)
     
@@ -383,6 +510,19 @@ def main():
             records.append(record)
             print(f"{record['case_name']}: {record.get('classification')} exit={record.get('exit_code')}")
         write_filter_sweep_report(out_root, records, exe)
+    
+    elif args.mode == "filter_fine_sweep":
+        out_root = ROOT / "cxscript_runs" / "stage_2_5_filter_fine_sweep"
+        out_root.mkdir(parents=True, exist_ok=True)
+        records = []
+        for item in FILTER_FINE_SWEEP_CASES:
+            try:
+                record = run_case(exe, out_root, item)
+            except Exception as exc:
+                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc), "original_candidate": False}
+            records.append(record)
+            print(f"{record['case_name']}: {record.get('classification')} exit={record.get('exit_code')}")
+        write_fine_sweep_report(out_root, records, exe)
     
     elif args.mode == "conclusion":
         out_root = ROOT / "cxscript_runs"
@@ -401,6 +541,31 @@ def main():
                 filter_records = json.loads(summary_path.read_text(encoding="utf-8-sig")).get("cases", [])
         
         write_conclusion_pack(out_root, batch_records, filter_records)
+    
+    elif args.mode == "conclusion_v2":
+        out_root = ROOT / "cxscript_runs"
+        batch_records = []
+        batch_dir = out_root / "stage_2_5"
+        if batch_dir.exists():
+            summary_path = batch_dir / "batch_report.json"
+            if summary_path.exists():
+                batch_records = json.loads(summary_path.read_text(encoding="utf-8-sig")).get("cases", [])
+        
+        filter_records = []
+        filter_dir = out_root / "stage_2_5_filter_sweep"
+        if filter_dir.exists():
+            summary_path = filter_dir / "filter_sweep_report.json"
+            if summary_path.exists():
+                filter_records = json.loads(summary_path.read_text(encoding="utf-8-sig")).get("cases", [])
+        
+        fine_filter_records = []
+        fine_filter_dir = out_root / "stage_2_5_filter_fine_sweep"
+        if fine_filter_dir.exists():
+            summary_path = fine_filter_dir / "filter_fine_sweep_report.json"
+            if summary_path.exists():
+                fine_filter_records = json.loads(summary_path.read_text(encoding="utf-8-sig")).get("cases", [])
+        
+        write_conclusion_pack_v2(out_root, batch_records, filter_records, fine_filter_records)
     
     else:
         out_root = Path(args.out)

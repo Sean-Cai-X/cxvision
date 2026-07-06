@@ -54,6 +54,15 @@ struct CxImageEvidenceSummary
     double circle_center_error_px = 0.0;
     double circle_radius_error_px = 0.0;
 
+    std::string best_reference_polarity;
+    int positive_reference_points = 0;
+    int negative_reference_points = 0;
+    int abs_reference_points = 0;
+    double mean_error_positive = 0.0;
+    double mean_error_negative = 0.0;
+    double mean_error_abs = 0.0;
+
+    std::string metric_quality;
     std::string conclusion;
 
     std::vector<CxPointEvidence> point_evidences;
