@@ -6895,9 +6895,11 @@ bool RunCxScriptHeadless(
     CxImageEvidenceOptions evidenceOptions;
     evidenceOptions.enabled = true;
     evidenceOptions.profile_half_width = 40;
-    evidenceOptions.min_gradient = 8;
+    evidenceOptions.min_gradient = 6.0;
+    evidenceOptions.min_gradient_ratio = 0.35;
     evidenceOptions.max_profiles = 200;
-    evidenceOptions.support_distance_px = 2.0;
+    evidenceOptions.nearest_point_support_px = 3.0;
+    evidenceOptions.line_distance_support_px = 3.0;
     evidenceOptions.save_profile_debug = false;
 
     std::string evidenceReason;

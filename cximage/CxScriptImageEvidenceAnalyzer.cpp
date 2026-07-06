@@ -357,7 +357,7 @@ static void AnalyzeFindlineEvidence(
             double mx = object.line_measure_points_xy[i];
             double my = object.line_measure_points_xy[i + 1];
 
-            double minDist = options.support_distance_px + 1.0;
+            double minDist = options.nearest_point_support_px + 1.0;
 
             for (const auto& refPt : refPts)
             {
@@ -368,7 +368,7 @@ static void AnalyzeFindlineEvidence(
                     minDist = dist;
             }
 
-            if (minDist <= options.support_distance_px)
+            if (minDist <= options.nearest_point_support_px)
             {
                 totalDist += minDist;
                 count++;
@@ -423,17 +423,34 @@ static void AnalyzeFindlineEvidence(
     summary.measured_points_count = (int)(object.line_measure_points_xy.size() / 2);
     summary.supported_points_count = 0;
     summary.unsupported_points_count = 0;
+    summary.distance_supported_points = 0;
+    summary.gradient_supported_points = 0;
+    summary.combined_supported_points = 0;
 
     double totalError = 0.0;
     double maxError = 0.0;
+    double totalLineDistance = 0.0;
+    double maxLineDistance = 0.0;
+    double totalGradientRatio = 0.0;
+    int gradRatioCount = 0;
+
+    CxLineNormalForm bestReferenceLineNorm;
+    if (bestRefFit)
+    {
+        bestReferenceLineNorm = BuildLineNormalForm(
+            bestReferenceLine[2], bestReferenceLine[3],
+            bestReferenceLine[2] + bestReferenceLine[0],
+            bestReferenceLine[3] + bestReferenceLine[1]);
+    }
 
     for (size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
     {
         double mx = object.line_measure_points_xy[i];
         double my = object.line_measure_points_xy[i + 1];
 
-        double minDist = options.support_distance_px + 1.0;
+        double minDist = options.nearest_point_support_px + 1.0;
         double refX = 0.0, refY = 0.0;
+        double refGradient = 0.0;
 
         for (const auto& refPt : bestReferencePoints)
         {
@@ -445,34 +462,104 @@ static void AnalyzeFindlineEvidence(
                 minDist = dist;
                 refX = refPt.x;
                 refY = refPt.y;
+                refGradient = ComputeGradientAt(gray, (int)refPt.y, (int)refPt.x);
             }
         }
 
-        double grad = ComputeGradientAt(gray, (int)my, (int)mx);
-        bool supported = minDist <= options.support_distance_px && grad >= options.min_gradient;
+        double lineDistance = std::numeric_limits<double>::quiet_NaN();
+        if (options.use_line_distance_for_findline_support && bestReferenceLineNorm.valid)
+        {
+            lineDistance = PointToLineDistance(bestReferenceLineNorm, mx, my);
+        }
+
+        double localGradient = ComputeGradientAt(gray, (int)my, (int)mx);
+        double gradientRatio = refGradient > 1.0e-6
+            ? std::abs(localGradient) / refGradient
+            : 0.0;
+
+        bool distanceSupported = false;
+        if (options.use_line_distance_for_findline_support && bestReferenceLineNorm.valid)
+        {
+            distanceSupported = lineDistance <= options.line_distance_support_px;
+        }
+        else
+        {
+            distanceSupported = minDist <= options.nearest_point_support_px;
+        }
+
+        bool gradientSupported =
+            std::abs(localGradient) >= options.min_gradient ||
+            gradientRatio >= options.min_gradient_ratio;
+
+        bool combinedSupported = distanceSupported && gradientSupported;
 
         CxPointEvidence pe;
         pe.measured_x = mx;
         pe.measured_y = my;
         pe.reference_x = refX;
         pe.reference_y = refY;
-        pe.distance_px = minDist;
-        pe.gradient = grad;
-        pe.supported = supported;
-        pe.reason = supported ? "edge supported" : (minDist > options.support_distance_px ? "too far from reference" : "low gradient");
+        pe.nearest_reference_distance_px = minDist;
+        pe.reference_line_distance_px = lineDistance;
+        pe.local_gradient = localGradient;
+        pe.reference_gradient = refGradient;
+        pe.gradient_ratio = gradientRatio;
+        pe.distance_supported = distanceSupported;
+        pe.gradient_supported = gradientSupported;
+        pe.combined_supported = combinedSupported;
+        pe.reference_polarity = summary.best_reference_polarity;
+
+        std::vector<std::string> reasons;
+        if (!distanceSupported)
+        {
+            if (options.use_line_distance_for_findline_support && bestReferenceLineNorm.valid)
+                reasons.push_back("line_distance_exceeds");
+            else
+                reasons.push_back("too_far_from_reference");
+        }
+        if (!gradientSupported)
+        {
+            if (std::abs(localGradient) < options.min_gradient)
+                reasons.push_back("low_local_gradient");
+            if (gradientRatio < options.min_gradient_ratio)
+                reasons.push_back("low_gradient_ratio");
+        }
+        pe.reason = combinedSupported ? "combined_supported" : (reasons.empty() ? "unknown" : reasons[0]);
 
         summary.point_evidences.push_back(pe);
 
-        if (supported)
+        if (combinedSupported)
+        {
             summary.supported_points_count++;
+            summary.combined_supported_points++;
+        }
         else
+        {
             summary.unsupported_points_count++;
+        }
 
-        if (minDist <= options.support_distance_px)
+        if (distanceSupported)
+            summary.distance_supported_points++;
+        if (gradientSupported)
+            summary.gradient_supported_points++;
+
+        if (minDist <= options.nearest_point_support_px)
         {
             totalError += minDist;
             if (minDist > maxError)
                 maxError = minDist;
+        }
+
+        if (std::isfinite(lineDistance))
+        {
+            totalLineDistance += lineDistance;
+            if (lineDistance > maxLineDistance)
+                maxLineDistance = lineDistance;
+        }
+
+        if (gradientRatio > 0.0)
+        {
+            totalGradientRatio += gradientRatio;
+            gradRatioCount++;
         }
     }
 
@@ -480,7 +567,25 @@ static void AnalyzeFindlineEvidence(
     {
         summary.mean_error_px = totalError / summary.supported_points_count;
         summary.max_error_px = maxError;
-        summary.edge_support_score = (double)summary.supported_points_count / summary.measured_points_count;
+    }
+
+    if (summary.measured_points_count > 0)
+    {
+        summary.distance_support_score = (double)summary.distance_supported_points / summary.measured_points_count;
+        summary.gradient_support_score = (double)summary.gradient_supported_points / summary.measured_points_count;
+        summary.combined_edge_support_score = (double)summary.combined_supported_points / summary.measured_points_count;
+        summary.edge_support_score = summary.combined_edge_support_score;
+    }
+
+    if (summary.measured_points_count > 0 && std::isfinite(totalLineDistance))
+    {
+        summary.mean_reference_line_distance_px = totalLineDistance / summary.measured_points_count;
+        summary.max_reference_line_distance_px = maxLineDistance;
+    }
+
+    if (gradRatioCount > 0)
+    {
+        summary.mean_gradient_ratio = totalGradientRatio / gradRatioCount;
     }
 
     if (object.has_fit_line && summary.reference_fit_available)
@@ -690,7 +795,7 @@ static void AnalyzeFindcircleEvidence(
             double mx = object.measure_points_xy[i];
             double my = object.measure_points_xy[i + 1];
 
-            double minDist = options.support_distance_px + 1.0;
+            double minDist = options.nearest_point_support_px + 1.0;
 
             for (const auto& refPt : refPts)
             {
@@ -701,7 +806,7 @@ static void AnalyzeFindcircleEvidence(
                     minDist = dist;
             }
 
-            if (minDist <= options.support_distance_px)
+            if (minDist <= options.nearest_point_support_px)
             {
                 totalDist += minDist;
                 count++;
@@ -756,17 +861,23 @@ static void AnalyzeFindcircleEvidence(
     summary.measured_points_count = object.measure_points_count;
     summary.supported_points_count = 0;
     summary.unsupported_points_count = 0;
+    summary.distance_supported_points = 0;
+    summary.gradient_supported_points = 0;
+    summary.combined_supported_points = 0;
 
     double totalError = 0.0;
     double maxError = 0.0;
+    double totalGradientRatio = 0.0;
+    int gradRatioCount = 0;
 
     for (size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
     {
         double mx = object.measure_points_xy[i];
         double my = object.measure_points_xy[i + 1];
 
-        double minDist = options.support_distance_px + 1.0;
+        double minDist = options.nearest_point_support_px + 1.0;
         double refX = 0.0, refY = 0.0;
+        double refGradient = 0.0;
 
         for (const auto& refPt : bestReferencePoints)
         {
@@ -778,34 +889,75 @@ static void AnalyzeFindcircleEvidence(
                 minDist = dist;
                 refX = refPt.x;
                 refY = refPt.y;
+                refGradient = ComputeGradientAt(gray, (int)refPt.y, (int)refPt.x);
             }
         }
 
-        double grad = ComputeGradientAt(gray, (int)my, (int)mx);
-        bool supported = minDist <= options.support_distance_px && grad >= options.min_gradient;
+        double localGradient = ComputeGradientAt(gray, (int)my, (int)mx);
+        double gradientRatio = refGradient > 1.0e-6
+            ? std::abs(localGradient) / refGradient
+            : 0.0;
+
+        bool distanceSupported = minDist <= options.nearest_point_support_px;
+        bool gradientSupported =
+            std::abs(localGradient) >= options.min_gradient ||
+            gradientRatio >= options.min_gradient_ratio;
+        bool combinedSupported = distanceSupported && gradientSupported;
 
         CxPointEvidence pe;
         pe.measured_x = mx;
         pe.measured_y = my;
         pe.reference_x = refX;
         pe.reference_y = refY;
-        pe.distance_px = minDist;
-        pe.gradient = grad;
-        pe.supported = supported;
-        pe.reason = supported ? "edge supported" : (minDist > options.support_distance_px ? "too far from reference" : "low gradient");
+        pe.nearest_reference_distance_px = minDist;
+        pe.local_gradient = localGradient;
+        pe.reference_gradient = refGradient;
+        pe.gradient_ratio = gradientRatio;
+        pe.distance_supported = distanceSupported;
+        pe.gradient_supported = gradientSupported;
+        pe.combined_supported = combinedSupported;
+        pe.reference_polarity = summary.best_reference_polarity;
+
+        std::vector<std::string> reasons;
+        if (!distanceSupported)
+            reasons.push_back("too_far_from_reference");
+        if (!gradientSupported)
+        {
+            if (std::abs(localGradient) < options.min_gradient)
+                reasons.push_back("low_local_gradient");
+            if (gradientRatio < options.min_gradient_ratio)
+                reasons.push_back("low_gradient_ratio");
+        }
+        pe.reason = combinedSupported ? "combined_supported" : (reasons.empty() ? "unknown" : reasons[0]);
 
         summary.point_evidences.push_back(pe);
 
-        if (supported)
+        if (combinedSupported)
+        {
             summary.supported_points_count++;
+            summary.combined_supported_points++;
+        }
         else
+        {
             summary.unsupported_points_count++;
+        }
 
-        if (minDist <= options.support_distance_px)
+        if (distanceSupported)
+            summary.distance_supported_points++;
+        if (gradientSupported)
+            summary.gradient_supported_points++;
+
+        if (minDist <= options.nearest_point_support_px)
         {
             totalError += minDist;
             if (minDist > maxError)
                 maxError = minDist;
+        }
+
+        if (gradientRatio > 0.0)
+        {
+            totalGradientRatio += gradientRatio;
+            gradRatioCount++;
         }
     }
 
@@ -813,7 +965,19 @@ static void AnalyzeFindcircleEvidence(
     {
         summary.mean_error_px = totalError / summary.supported_points_count;
         summary.max_error_px = maxError;
-        summary.edge_support_score = (double)summary.supported_points_count / summary.measured_points_count;
+    }
+
+    if (summary.measured_points_count > 0)
+    {
+        summary.distance_support_score = (double)summary.distance_supported_points / summary.measured_points_count;
+        summary.gradient_support_score = (double)summary.gradient_supported_points / summary.measured_points_count;
+        summary.combined_edge_support_score = (double)summary.combined_supported_points / summary.measured_points_count;
+        summary.edge_support_score = summary.combined_edge_support_score;
+    }
+
+    if (gradRatioCount > 0)
+    {
+        summary.mean_gradient_ratio = totalGradientRatio / gradRatioCount;
     }
 
     if (object.has_fit_result && summary.reference_fit_available)
@@ -940,7 +1104,7 @@ static bool SaveEvidenceOverlay(
                     cv::Point((int)pe.reference_x, (int)pe.reference_y),
                     3, cv::Scalar(255, 255, 0), -1);
 
-                if (pe.supported)
+                if (pe.combined_supported)
                 {
                     cv::line(canvas,
                         cv::Point((int)pe.measured_x, (int)pe.measured_y),
@@ -989,6 +1153,15 @@ static bool SaveEvidenceSummaryJson(
             file << "      \"mean_error_px\": " << s.mean_error_px << ",\n";
             file << "      \"max_error_px\": " << s.max_error_px << ",\n";
             file << "      \"edge_support_score\": " << s.edge_support_score << ",\n";
+            file << "      \"distance_support_score\": " << s.distance_support_score << ",\n";
+            file << "      \"gradient_support_score\": " << s.gradient_support_score << ",\n";
+            file << "      \"combined_edge_support_score\": " << s.combined_edge_support_score << ",\n";
+            file << "      \"mean_reference_line_distance_px\": " << s.mean_reference_line_distance_px << ",\n";
+            file << "      \"max_reference_line_distance_px\": " << s.max_reference_line_distance_px << ",\n";
+            file << "      \"mean_gradient_ratio\": " << s.mean_gradient_ratio << ",\n";
+            file << "      \"distance_supported_points\": " << s.distance_supported_points << ",\n";
+            file << "      \"gradient_supported_points\": " << s.gradient_supported_points << ",\n";
+            file << "      \"combined_supported_points\": " << s.combined_supported_points << ",\n";
             file << "      \"reference_fit_available\": " << (s.reference_fit_available ? "true" : "false") << ",\n";
             file << "      \"measured_fit_available\": " << (s.measured_fit_available ? "true" : "false") << ",\n";
             file << "      \"fit_offset_error_px\": " << s.fit_offset_error_px << ",\n";
@@ -1034,7 +1207,7 @@ static bool SavePointEvidenceCsv(
         if (!file.is_open())
             return false;
 
-        file << "tool,object_name,point_index,measured_x,measured_y,reference_x,reference_y,distance_px,gradient,supported,reason\n";
+        file << "tool,object_name,point_index,measured_x,measured_y,reference_x,reference_y,nearest_reference_distance_px,reference_line_distance_px,local_gradient,reference_gradient,gradient_ratio,distance_supported,gradient_supported,combined_supported,reference_polarity,reason\n";
 
         for (const CxImageEvidenceSummary& s : summaries)
         {
@@ -1048,9 +1221,15 @@ static bool SavePointEvidenceCsv(
                      << pe.measured_y << ","
                      << pe.reference_x << ","
                      << pe.reference_y << ","
-                     << pe.distance_px << ","
-                     << pe.gradient << ","
-                     << (pe.supported ? "true" : "false") << ","
+                     << pe.nearest_reference_distance_px << ","
+                     << pe.reference_line_distance_px << ","
+                     << pe.local_gradient << ","
+                     << pe.reference_gradient << ","
+                     << pe.gradient_ratio << ","
+                     << (pe.distance_supported ? "true" : "false") << ","
+                     << (pe.gradient_supported ? "true" : "false") << ","
+                     << (pe.combined_supported ? "true" : "false") << ","
+                     << pe.reference_polarity << ","
                      << pe.reason << "\n";
             }
         }

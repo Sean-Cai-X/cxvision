@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from collections import defaultdict
 
 ROOT = Path(r"D:\Codex-WorkDir\Sean_WorkDir\cxvisionai")
 REPO = ROOT / "cxvision_repo"
@@ -97,14 +98,21 @@ def script_float_call(text, method):
     return float(m.group(1)) if m else None
 
 
-def run_case(exe, out_root, item):
+def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
     name, tool, filename, expect = item
     script = SCRIPT_DIR / filename
     case_dir = out_root / name
+    if evidence_profile:
+        case_dir = case_dir / evidence_profile
     case_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [str(exe), "--cxscript-headless", "--image", str(IMAGE),
-           "--script", str(script), "--out", str(case_dir), "--case-name", name]
+    
+    image = Path(image_path) if image_path else IMAGE
+    evidence_arg = ["--evidence-profile", evidence_profile] if evidence_profile else []
+    
+    cmd = [str(exe), "--cxscript-headless", "--image", str(image),
+           "--script", str(script), "--out", str(case_dir), "--case-name", name] + evidence_arg
     proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    
     summary_path = case_dir / "result_summary.json"
     snapshot_path = case_dir / "snapshot.txt"
     overlay_path = case_dir / "result_overlay.png"
@@ -140,7 +148,10 @@ def run_case(exe, out_root, item):
     
     record = {
         "case_name": name, "tool": tool, "script": str(script), "expect": expect,
-        "exit_code": proc.returncode, "headless_ok": summary_path.exists() and snapshot_path.exists() and overlay_path.exists(),
+        "image_path": str(image),
+        "evidence_profile": evidence_profile,
+        "exit_code": proc.returncode, 
+        "headless_ok": summary_path.exists() and snapshot_path.exists() and overlay_path.exists(),
         "run_state": summary.get("run_state"), "debug_status": summary.get("debug_status"),
         "debug_reason": summary.get("debug_reason"), "stdout": proc.stdout.strip(), "stderr": proc.stderr.strip(),
         "snapshot_path": str(snapshot_path), "overlay_path": str(overlay_path), "summary_path": str(summary_path),
@@ -172,11 +183,17 @@ def run_case(exe, out_root, item):
         "mean_error_px": ev_summary.get("mean_error_px"),
         "max_error_px": ev_summary.get("max_error_px"),
         "edge_support_score": ev_summary.get("edge_support_score"),
+        "distance_support_score": ev_summary.get("distance_support_score"),
+        "gradient_support_score": ev_summary.get("gradient_support_score"),
+        "combined_edge_support_score": ev_summary.get("combined_edge_support_score"),
+        "mean_reference_line_distance_px": ev_summary.get("mean_reference_line_distance_px"),
+        "mean_gradient_ratio": ev_summary.get("mean_gradient_ratio"),
         "fit_offset_error_px": ev_summary.get("fit_offset_error_px"),
         "fit_angle_error_deg": ev_summary.get("fit_angle_error_deg"),
         "circle_center_error_px": ev_summary.get("circle_center_error_px"),
         "circle_radius_error_px": ev_summary.get("circle_radius_error_px"),
         "evidence_conclusion": ev_summary.get("conclusion"),
+        "support_conclusion": ev_summary.get("support_conclusion"),
         "findobject_component_total": snapshot_value(snapshot, "line_findobject_component_total"),
         "findobject_component_accepted": snapshot_value(snapshot, "line_findobject_component_accepted"),
         "findobject_component_rejected_by_min": snapshot_value(snapshot, "line_findobject_component_rejected_by_min"),
@@ -191,44 +208,85 @@ def run_case(exe, out_root, item):
         "abs_reference_points": ev_summary.get("abs_reference_points"),
         "metric_quality": ev_summary.get("metric_quality"),
     }
+    
     if record["fallback_used"] is None:
         record["fallback_used"] = False
     
-    edge_support_ok = (record["edge_support_score"] or 0) >= 0.7
-    error_ok = False
-    if tool == "Findline":
-        error_ok = (record["mean_error_px"] or 999) <= 2.0 and (record["fit_offset_error_px"] or 999) <= 2.0
-        candidate = record["fallback_used"] is False and (record["valid_points_count"] or 0) >= 2 and record["has_fit_line"] is True
-    else:
-        error_ok = (record["circle_center_error_px"] or 999) <= 2.0 and (record["circle_radius_error_px"] or 999) <= 2.0
-        candidate = record["fallback_used"] is False and (record["valid_points_count"] or 0) >= 3 and record["has_fit_circle"] is True
+    record = classify_case(record)
     
-    record["evidence_supported"] = edge_support_ok and error_ok
-    record["original_candidate"] = candidate
+    return record
+
+
+def classify_case(record):
+    tool = record["tool"]
+    fallback_used = record["fallback_used"]
+    valid_points = record["valid_points_count"] or 0
+    has_fit = record["has_fit_line"] if tool == "Findline" else record["has_fit_circle"]
+    mean_err = record["mean_error_px"] or 999
+    fit_offset = record["fit_offset_error_px"] or 0
+    combined_support = record["combined_edge_support_score"] or 0
+    metric_quality = record["metric_quality"] or ""
+    filter_profile = record["filter_profile"]
     
     if not record["headless_ok"]:
         record["classification"] = "HEADLESS_FAILED"
-    elif record["fallback_used"]:
+        record["t0_pass"] = False
+        record["t1_pass"] = False
+        record["t2_pass"] = False
+        record["t3_pass"] = False
+        return record
+    
+    record["t0_pass"] = True
+    
+    if fallback_used:
         record["classification"] = "FALLBACK_DIAGNOSTIC"
-    elif candidate:
-        valid = record["valid_points_count"] or 0
-        support = record["edge_support_score"] or 0
-        mean_err = record["mean_error_px"] or 999
-        fit_offset = record["fit_offset_error_px"] or 0
-        metric_quality = record["metric_quality"] or ""
-        
-        if metric_quality == "inconsistent_line_fit_metric":
-            record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
-        elif valid >= 20 and support >= 0.75 and mean_err <= 2.0:
-            record["classification"] = "ORIGINAL_STRONG_CANDIDATE"
-        elif 2 <= valid < 20 and support >= 0.75 and mean_err <= 2.0:
-            record["classification"] = "ORIGINAL_SPARSE_CANDIDATE"
-        elif support >= 0.6 and mean_err <= 3.0:
-            record["classification"] = "ORIGINAL_WEAK_CANDIDATE"
+        record["t1_pass"] = False
+        record["t2_pass"] = False
+        record["t3_pass"] = False
+        return record
+    
+    if tool == "Findline":
+        t1_pass = valid_points >= 2 and has_fit is True
+    else:
+        t1_pass = valid_points >= 3 and has_fit is True
+    
+    record["t1_pass"] = t1_pass
+    
+    if not t1_pass:
+        record["classification"] = "ALGORITHM_NO_RESULT"
+        record["t2_pass"] = False
+        record["t3_pass"] = False
+        return record
+    
+    geometry_ok = mean_err <= 2.0
+    if tool == "Findline":
+        geometry_ok = geometry_ok and fit_offset <= 6.0
+    else:
+        center_err = record["circle_center_error_px"] or 999
+        radius_err = record["circle_radius_error_px"] or 999
+        geometry_ok = geometry_ok and center_err <= 2.0 and radius_err <= 20.0
+    
+    record["t2_pass"] = geometry_ok
+    
+    if metric_quality == "inconsistent_line_fit_metric":
+        record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
+        return record
+    
+    is_filter_candidate = filter_profile == 1 or (record.get("filter_min") or 999) in (20, 25)
+    
+    if geometry_ok:
+        if combined_support >= 0.6:
+            record["classification"] = "ORIGINAL_EDGE_CONFIRMED"
+            record["t3_pass"] = True
+        else:
+            record["classification"] = "EVIDENCE_SUPPORT_NEEDS_CALIBRATION"
+            record["t3_pass"] = False
+    else:
+        if is_filter_candidate:
+            record["classification"] = "FILTER_POLICY_CANDIDATE"
         else:
             record["classification"] = "SUSPICIOUS_CANDIDATE"
-    else:
-        record["classification"] = "ALGORITHM_NO_RESULT"
+        record["t3_pass"] = False
     
     return record
 
@@ -240,9 +298,9 @@ def md_value(value):
 def write_reports(out_root, records, exe):
     payload = {"stage": "2.5", "exe": str(exe), "image": str(IMAGE), "cases": records,
                "summary": {"total": len(records), "headless_ok": sum(bool(r["headless_ok"]) for r in records),
-                           "findline_original_candidates": [r["case_name"] for r in records if r["tool"] == "Findline" and r["original_candidate"]],
-                           "findcircle_original_candidates": [r["case_name"] for r in records if r["tool"] == "Findcircle" and r["original_candidate"]],
-                           "evidence_supported_cases": [r["case_name"] for r in records if r.get("evidence_supported")]}}
+                           "findline_original_candidates": [r["case_name"] for r in records if r["tool"] == "Findline" and r.get("t1_pass")],
+                           "findcircle_original_candidates": [r["case_name"] for r in records if r["tool"] == "Findcircle" and r.get("t1_pass")],
+                           "evidence_supported_cases": [r["case_name"] for r in records if r.get("t2_pass")]}}
     (out_root / "batch_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     
     lines = ["# Stage 2.5 CxScript Batch Report", "", "## Summary", "", "| Tool | Case | Exit | Source | Fallback | Points | Valid | Fit | Failure Stage |", "|---|---|---:|---|---|---:|---:|---|---|"]
@@ -250,15 +308,15 @@ def write_reports(out_root, records, exe):
         fit = r["has_fit_line"] if r["tool"] == "Findline" else r["has_fit_circle"]
         lines.append("| " + " | ".join(md_value(x) for x in [r["tool"], r["case_name"], r["exit_code"], r["measure_source"], r["fallback_used"], r["points_count"], r["valid_points_count"], fit, r["failure_stage"]]) + " |")
     
-    lines += ["", "## Findline Cases with Image Evidence", "", "| Case | Method | Threshold | Linegap | Points | Fit | RefPts | Support | MeanErr | FitOffsetErr | Classification |", "|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---|"]
+    lines += ["", "## Findline Cases with Image Evidence", "", "| Case | Method | Threshold | Linegap | Points | Fit | RefPts | CombinedSupport | MeanErr | FitOffsetErr | Classification |", "|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---|"]
     for r in records:
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","method","threshold","linegap","valid_points_count","has_fit_line","reference_points_count","edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","method","threshold","linegap","valid_points_count","has_fit_line","reference_points_count","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
     
-    lines += ["", "## Findcircle Cases with Image Evidence", "", "| Case | Method | Threshold | Gap | Linegap | Points | FitCircle | RefPts | Support | CenterErr | RadiusErr | Classification |", "|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---|"]
+    lines += ["", "## Findcircle Cases with Image Evidence", "", "| Case | Method | Threshold | Gap | Linegap | Points | FitCircle | RefPts | CombinedSupport | CenterErr | RadiusErr | Classification |", "|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---|"]
     for r in records:
         if r["tool"] == "Findcircle":
-            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","method","threshold","gap","linegap","valid_points_count","has_fit_circle","reference_points_count","edge_support_score","circle_center_error_px","circle_radius_error_px","classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","method","threshold","gap","linegap","valid_points_count","has_fit_circle","reference_points_count","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","classification"]) + " |")
     
     lines += ["", "## Image Evidence Conclusions", "", "### Findline", ""]
     findline_records = [r for r in records if r["tool"] == "Findline"]
@@ -266,11 +324,11 @@ def write_reports(out_root, records, exe):
         lines.append("- 图像证据中存在清晰边缘")
     else:
         lines.append("- 图像证据中边缘证据弱")
-    lines.append("- Original Measure 是否抓到这些边缘: " + ("是" if any(r["original_candidate"] for r in findline_records) else "否"))
-    method0_ok = any(r["method"] == 0 and r["original_candidate"] for r in findline_records)
-    method1_ok = any(r["method"] == 1 and r["original_candidate"] for r in findline_records)
+    lines.append("- Original Measure 是否抓到这些边缘: " + ("是" if any(r.get("t1_pass") for r in findline_records) else "否"))
+    method0_ok = any(r["method"] == 0 and r.get("t1_pass") for r in findline_records)
+    method1_ok = any(r["method"] == 1 and r.get("t1_pass") for r in findline_records)
     lines.append(f"- method=0 成功: {method0_ok}, method=1 成功: {method1_ok}")
-    lines.append("- edge_support_score >= 0.7 的 case: " + ", ".join([r["case_name"] for r in findline_records if (r.get("edge_support_score") or 0) >= 0.7] or ["none"]))
+    lines.append("- combined_edge_support_score >= 0.6 的 case: " + ", ".join([r["case_name"] for r in findline_records if (r.get("combined_edge_support_score") or 0) >= 0.6] or ["none"]))
     
     lines += ["", "### Findcircle", ""]
     findcircle_records = [r for r in records if r["tool"] == "Findcircle"]
@@ -278,10 +336,10 @@ def write_reports(out_root, records, exe):
         lines.append("- 图像证据中存在圆边缘")
     else:
         lines.append("- 图像证据中圆边缘证据弱")
-    lines.append("- Original Measure 是否抓到这些圆边缘: " + ("是" if any(r["original_candidate"] for r in findcircle_records) else "否"))
-    lines.append("- edge_support_score >= 0.7 的 case: " + ", ".join([r["case_name"] for r in findcircle_records if (r.get("edge_support_score") or 0) >= 0.7] or ["none"]))
+    lines.append("- Original Measure 是否抓到这些圆边缘: " + ("是" if any(r.get("t1_pass") for r in findcircle_records) else "否"))
+    lines.append("- combined_edge_support_score >= 0.6 的 case: " + ", ".join([r["case_name"] for r in findcircle_records if (r.get("combined_edge_support_score") or 0) >= 0.6] or ["none"]))
     
-    lines += ["", "## Fallback Note", "", "`fallback_used=true` 仅作为显示链/拟合链诊断，不计入 original Measure 成功。", "", "## Candidate Conclusions", "", f"- Findline original candidates: {', '.join(payload['summary']['findline_original_candidates']) or 'none'}", f"- Findcircle original candidates: {', '.join(payload['summary']['findcircle_original_candidates']) or 'none'}", f"- Evidence supported cases: {', '.join(payload['summary']['evidence_supported_cases']) or 'none'}", "- 下一步建议：依据失败 case 的 failure_stage 和 edge_support_score 继续对齐原 Measure，不进入 FastMatch。", ""]
+    lines += ["", "## Fallback Note", "", "`fallback_used=true` 仅作为显示链/拟合链诊断，不计入 original Measure 成功。", "", "## Candidate Conclusions", "", f"- Findline original candidates: {', '.join(payload['summary']['findline_original_candidates']) or 'none'}", f"- Findcircle original candidates: {', '.join(payload['summary']['findcircle_original_candidates']) or 'none'}", f"- Evidence supported cases: {', '.join(payload['summary']['evidence_supported_cases']) or 'none'}", "- 下一步建议：依据失败 case 的 failure_stage 和 combined_edge_support_score 继续对齐原 Measure，不进入 FastMatch。", ""]
     (out_root / "batch_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -336,17 +394,17 @@ def write_conclusion_pack(out_root, records, filter_records):
     
     lines = ["# Stage 2.5 Conclusion Pack", "", "## 1. Current Status", ""]
     lines.append(f"- Headless status: {'OK' if all(r.get('headless_ok') for r in records) else 'FAILED'}")
-    lines.append(f"- Findline candidate count: {sum(1 for r in findline_records if r.get('original_candidate'))}")
-    lines.append(f"- Findcircle candidate count: {sum(1 for r in findcircle_records if r.get('original_candidate'))}")
+    lines.append(f"- Findline candidate count: {sum(1 for r in findline_records if r.get('t1_pass'))}")
+    lines.append(f"- Findcircle candidate count: {sum(1 for r in findcircle_records if r.get('t1_pass'))}")
     lines.append("- FastMatch status: not ready")
     
-    lines += ["", "## 2. Findline Original Candidates", "", "| Case | Points | AvgDist | EdgeSupport | MeanErr | FitOffset | Classification |", "|---|---:|---:|---:|---:|---:|---|"]
+    lines += ["", "## 2. Findline Original Candidates", "", "| Case | Points | AvgDist | CombinedSupport | MeanErr | FitOffset | Classification |", "|---|---:|---:|---:|---:|---:|---|"]
     for r in findline_records:
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","line_avgdist","edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","line_avgdist","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
     
-    lines += ["", "## 3. Findline Filter Sweep", "", "| FilterMin | Components | Accepted | Points | Fit | AvgDist | EdgeSupport |", "|---:|---:|---:|---:|---|---:|---:|"]
+    lines += ["", "## 3. Findline Filter Sweep", "", "| FilterMin | Components | Accepted | Points | Fit | AvgDist | CombinedSupport |", "|---:|---:|---:|---:|---|---:|---:|"]
     for r in sorted(filter_records, key=lambda x: x.get("filter_min") or 999):
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["filter_min","findobject_component_total","findobject_component_accepted","valid_points_count","has_fit_line","line_avgdist","edge_support_score"]) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["filter_min","findobject_component_total","findobject_component_accepted","valid_points_count","has_fit_line","line_avgdist","combined_edge_support_score"]) + " |")
     
     lines += ["", "## 4. Findline Default Failure Analysis", ""]
     direct_case = next((r for r in findline_records if r["case_name"] == "find_line_direct"), None)
@@ -357,12 +415,12 @@ def write_conclusion_pack(out_root, records, filter_records):
         lines.append("- likely reason: filter_min=50 过严，二值图中大部分对象面积小于 50")
         lines.append("- recommended next step: 找出原版本默认 filter_min 值，或调整当前默认值")
     
-    lines += ["", "## 5. Findcircle Candidate Ranking", "", "| Case | Points | Radius | AvgDist | EdgeSupport | CenterErr | RadiusErr | Classification |", "|---|---:|---:|---:|---:|---:|---:|---|"]
+    lines += ["", "## 5. Findcircle Candidate Ranking", "", "| Case | Points | Radius | AvgDist | CombinedSupport | CenterErr | RadiusErr | Classification |", "|---|---:|---:|---:|---:|---:|---:|---|"]
     for r in findcircle_records:
         classification = r.get("classification")
         if r["case_name"] == "find_circle_fitresult_guard":
             classification = "post_fit_refine_candidate"
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","fit_circle_radius","circle_avgdist","edge_support_score","circle_center_error_px","circle_radius_error_px"]) + " | " + md_value(classification) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","fit_circle_radius","circle_avgdist","combined_edge_support_score","circle_center_error_px","circle_radius_error_px"]) + " | " + md_value(classification) + " |")
     
     lines += ["", "## 6. Fallback Diagnostic", ""]
     if fallback_records:
@@ -377,8 +435,8 @@ def write_conclusion_pack(out_root, records, filter_records):
     lines += ["", "## 7. Decision", ""]
     lines.append("- enter FastMatch: no")
     
-    findline_ok = any(r.get("evidence_supported") for r in findline_records)
-    findcircle_ok = any(r.get("evidence_supported") for r in findcircle_records)
+    findline_ok = any(r.get("t2_pass") for r in findline_records)
+    findcircle_ok = any(r.get("t2_pass") for r in findcircle_records)
     if findline_ok and findcircle_ok:
         lines.append("- next action: 依据 image evidence 结果选择推荐参数，准备原版本对齐")
     else:
@@ -391,9 +449,9 @@ def write_fine_sweep_report(out_root, records, exe):
     payload = {"stage": "2.5_filter_fine_sweep", "exe": str(exe), "image": str(IMAGE), "cases": records}
     (out_root / "filter_fine_sweep_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     
-    lines = ["# Findline Filter Fine Sweep Report", "", "## Summary", "", "| Case | FilterMin | Components | Accepted | RejectedMin | Points | Fit | AvgDist | EdgeSupport | Failure |", "|---|---:|---:|---:|---:|---:|---|---:|---:|---|"]
+    lines = ["# Findline Filter Fine Sweep Report", "", "## Summary", "", "| Case | FilterMin | Components | Accepted | RejectedMin | Points | Fit | AvgDist | CombinedSupport | Failure |", "|---|---:|---:|---:|---:|---:|---|---:|---:|---|"]
     for r in sorted(records, key=lambda x: x.get("filter_min") or 999):
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_min","findobject_component_total","findobject_component_accepted","findobject_component_rejected_by_min","valid_points_count","has_fit_line","line_avgdist","edge_support_score","failure_stage"]) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_min","findobject_component_total","findobject_component_accepted","findobject_component_rejected_by_min","valid_points_count","has_fit_line","line_avgdist","combined_edge_support_score","failure_stage"]) + " |")
     
     lines += ["", "## Analysis", ""]
     
@@ -439,17 +497,17 @@ def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_reco
     
     lines = ["# Stage 2.5 Conclusion Pack v2", "", "## 1. Current Status", ""]
     lines.append(f"- Headless status: {'OK' if all(r.get('headless_ok') for r in records) else 'FAILED'}")
-    lines.append(f"- Findline candidate count: {sum(1 for r in findline_records if r.get('original_candidate'))}")
-    lines.append(f"- Findcircle candidate count: {sum(1 for r in findcircle_records if r.get('original_candidate'))}")
+    lines.append(f"- Findline candidate count: {sum(1 for r in findline_records if r.get('t1_pass'))}")
+    lines.append(f"- Findcircle candidate count: {sum(1 for r in findcircle_records if r.get('t1_pass'))}")
     lines.append("- FastMatch status: not ready")
     
-    lines += ["", "## 2. Findline Original Candidates", "", "| Case | Points | AvgDist | EdgeSupport | MeanErr | FitOffset | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---|---|"]
+    lines += ["", "## 2. Findline Original Candidates", "", "| Case | Points | AvgDist | CombinedSupport | MeanErr | FitOffset | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---|---|"]
     for r in findline_records:
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","line_avgdist","edge_support_score","mean_error_px","fit_offset_error_px","best_reference_polarity","classification"]) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","line_avgdist","combined_edge_support_score","mean_error_px","fit_offset_error_px","best_reference_polarity","classification"]) + " |")
     
-    lines += ["", "## 3. Findline Filter Fine Sweep", "", "| FilterMin | Components | Accepted | Points | Fit | AvgDist | EdgeSupport |", "|---:|---:|---:|---:|---|---:|---:|"]
+    lines += ["", "## 3. Findline Filter Fine Sweep", "", "| FilterMin | Components | Accepted | Points | Fit | AvgDist | CombinedSupport |", "|---:|---:|---:|---:|---|---:|---:|"]
     for r in sorted(fine_filter_records, key=lambda x: x.get("filter_min") or 999):
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["filter_min","findobject_component_total","findobject_component_accepted","valid_points_count","has_fit_line","line_avgdist","edge_support_score"]) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["filter_min","findobject_component_total","findobject_component_accepted","valid_points_count","has_fit_line","line_avgdist","combined_edge_support_score"]) + " |")
     
     lines += ["", "## 4. Findline Default Failure Analysis", ""]
     direct_case = next((r for r in findline_records if r["case_name"] == "find_line_direct"), None)
@@ -460,12 +518,12 @@ def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_reco
         lines.append("- likely reason: filter_min=50 过严，二值图中大部分对象面积小于 50")
         lines.append("- recommended next step: 找出原版本默认 filter_min 值，或调整当前默认值")
     
-    lines += ["", "## 5. Findcircle Candidate Ranking", "", "| Case | Points | Radius | AvgDist | EdgeSupport | CenterErr | RadiusErr | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---:|---|---|"]
+    lines += ["", "## 5. Findcircle Candidate Ranking", "", "| Case | Points | Radius | AvgDist | CombinedSupport | CenterErr | RadiusErr | Polarity | Classification |", "|---|---:|---:|---:|---:|---:|---:|---|---|"]
     for r in findcircle_records:
         classification = r.get("classification")
         if r["case_name"] == "find_circle_fitresult_guard":
             classification = "post_fit_refine_candidate"
-        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","fit_circle_radius","circle_avgdist","edge_support_score","circle_center_error_px","circle_radius_error_px","best_reference_polarity"]) + " | " + md_value(classification) + " |")
+        lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","valid_points_count","fit_circle_radius","circle_avgdist","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","best_reference_polarity"]) + " | " + md_value(classification) + " |")
     
     lines += ["", "## 6. Fallback Diagnostic", ""]
     if fallback_records:
@@ -480,8 +538,8 @@ def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_reco
     lines += ["", "## 7. Decision", ""]
     lines.append("- enter FastMatch: no")
     
-    findline_ok = any(r.get("evidence_supported") for r in findline_records)
-    findcircle_ok = any(r.get("evidence_supported") for r in findcircle_records)
+    findline_ok = any(r.get("t2_pass") for r in findline_records)
+    findcircle_ok = any(r.get("t2_pass") for r in findcircle_records)
     if findline_ok and findcircle_ok:
         lines.append("- next action: 依据 image evidence 结果选择推荐参数，准备原版本对齐")
     else:
@@ -490,11 +548,151 @@ def write_conclusion_pack_v2(out_root, records, filter_records, fine_filter_reco
     (out_root / "stage_2_5_conclusion_pack_v2.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_standardized_batch_report(out_root, records, exe, manifest):
+    payload = {
+        "stage": "2.5_standardized",
+        "exe": str(exe),
+        "manifest": manifest,
+        "cases": records,
+        "summary": {
+            "total": len(records),
+            "headless_ok": sum(bool(r["headless_ok"]) for r in records),
+            "t0_pass": sum(bool(r.get("t0_pass")) for r in records),
+            "t1_pass": sum(bool(r.get("t1_pass")) for r in records),
+            "t2_pass": sum(bool(r.get("t2_pass")) for r in records),
+        }
+    }
+    (out_root / "batch_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    lines = ["# Stage 2.5 Standardized Batch Report", "", "## Summary", "", f"- Total cases: {len(records)}", f"- T0 (execution) pass: {sum(bool(r.get('t0_pass')) for r in records)}", f"- T1 (original measure) pass: {sum(bool(r.get('t1_pass')) for r in records)}", f"- T2 (evidence support) pass: {sum(bool(r.get('t2_pass')) for r in records)}", ""]
+    
+    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | CombinedSupport | MeanErr | FitOffset | Classification |", "|---|---|---|---:|---|---:|---:|---:|---|"]
+    for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
+        if r["tool"] == "Findline":
+            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","combined_edge_support_score","mean_error_px","fit_offset_error_px","classification"]) + " |")
+    
+    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | CombinedSupport | CenterErr | RadiusErr | Classification |", "|---|---|---|---:|---|---:|---:|---:|---|"]
+    for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
+        if r["tool"] == "Findcircle":
+            lines.append("| " + " | ".join(md_value(r[k]) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","combined_edge_support_score","circle_center_error_px","circle_radius_error_px","classification"]) + " |")
+    
+    (out_root / "batch_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_parameter_stability_report(out_root, records):
+    findline_profiles = defaultdict(list)
+    findcircle_profiles = defaultdict(list)
+    
+    for r in records:
+        profile_key = str(r.get("filter_profile")) if r.get("filter_profile") is not None else (r.get("profile") or "default")
+        if r["tool"] == "Findline":
+            findline_profiles[profile_key].append(r)
+        else:
+            findcircle_profiles[profile_key].append(r)
+    
+    def compute_profile_stats(records_list):
+        if not records_list:
+            return None
+        stats = {
+            "total_images": len(set(r["image_path"] for r in records_list)),
+            "executed_ok": sum(1 for r in records_list if r.get("headless_ok")),
+            "original_success_count": sum(1 for r in records_list if r.get("t1_pass")),
+            "geometry_supported_count": sum(1 for r in records_list if r.get("t2_pass")),
+            "edge_confirmed_count": sum(1 for r in records_list if r.get("classification") == "ORIGINAL_EDGE_CONFIRMED"),
+            "mean_points": sum(r.get("valid_points_count") or 0 for r in records_list) / len(records_list),
+            "mean_fit_offset": sum(r.get("fit_offset_error_px") or 0 for r in records_list) / len(records_list),
+            "mean_distance_support": sum(r.get("distance_support_score") or 0 for r in records_list) / len(records_list),
+            "mean_gradient_support": sum(r.get("gradient_support_score") or 0 for r in records_list) / len(records_list),
+            "mean_combined_support": sum(r.get("combined_edge_support_score") or 0 for r in records_list) / len(records_list),
+        }
+        
+        success_rate = stats["original_success_count"] / stats["executed_ok"] if stats["executed_ok"] > 0 else 0
+        if success_rate >= 0.8:
+            stats["stability_class"] = "STABLE_PROFILE"
+        elif success_rate >= 0.5:
+            stats["stability_class"] = "CONDITIONALLY_STABLE_PROFILE"
+        elif success_rate > 0:
+            stats["stability_class"] = "IMAGE_SPECIFIC_PROFILE"
+        else:
+            stats["stability_class"] = "UNSTABLE_PROFILE"
+        
+        return stats
+    
+    payload = {
+        "stage": "2.5_parameter_stability",
+        "findline_profiles": {k: compute_profile_stats(v) for k, v in findline_profiles.items()},
+        "findcircle_profiles": {k: compute_profile_stats(v) for k, v in findcircle_profiles.items()},
+    }
+    (out_root / "parameter_stability_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    lines = ["# Stage 2.5 Parameter Stability Report", "", "## Findline Profile Stability", "", "| Profile | TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanFitOffset | MeanCombinedSupport | Stability |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for profile, stats in sorted(findline_profiles.items()):
+        s = compute_profile_stats(stats)
+        if s:
+            lines.append("| " + " | ".join(md_value(s[k]) for k in ["stability_class","total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_fit_offset","mean_combined_support"]) + " | " + md_value(profile) + " |")
+    
+    lines += ["", "## Findcircle Profile Stability", "", "| Profile | TotalImages | ExecutedOk | OriginalSuccess | GeometrySupported | EdgeConfirmed | MeanPoints | MeanCombinedSupport | Stability |", "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for profile, stats in sorted(findcircle_profiles.items()):
+        s = compute_profile_stats(stats)
+        if s:
+            lines.append("| " + " | ".join(md_value(s[k]) for k in ["stability_class","total_images","executed_ok","original_success_count","geometry_supported_count","edge_confirmed_count","mean_points","mean_combined_support"]) + " | " + md_value(profile) + " |")
+    
+    (out_root / "parameter_stability_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def run_standardized_mode(exe, out_root, manifest_path):
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = json.load(f)
+    
+    out_root = Path(out_root)
+    out_root.mkdir(parents=True, exist_ok=True)
+    
+    records = []
+    for image_set in manifest["image_sets"]:
+        image_id = image_set["image_id"]
+        image_path = image_set["path"]
+        
+        for case in manifest["tool_cases"]:
+            case_id = case["case_id"]
+            tool = case["tool"]
+            script_rel = case["script"]
+            profile = case["profile"]
+            
+            script_path = REPO / script_rel
+            if not script_path.exists():
+                print(f"WARNING: script not found {script_path}")
+                continue
+            
+            item = (case_id, tool, script_path.name, case["expect"])
+            
+            for evidence_profile in manifest["evidence_profiles"]:
+                ep_name = evidence_profile["name"]
+                image_case_dir = out_root / image_id / case_id / ep_name
+                
+                try:
+                    record = run_case(exe, image_case_dir, item, image_path=image_path, evidence_profile=ep_name)
+                    record["image_id"] = image_id
+                    record["profile"] = profile
+                    records.append(record)
+                    print(f"{image_id}/{case_id}/{ep_name}: {record.get('classification')} exit={record.get('exit_code')}")
+                except Exception as exc:
+                    print(f"ERROR: {image_id}/{case_id}/{ep_name}: {exc}")
+                    record = {"case_name": case_id, "tool": tool, "image_id": image_id, "evidence_profile": ep_name, 
+                              "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc)}
+                    records.append(record)
+    
+    write_standardized_batch_report(out_root, records, exe, manifest)
+    write_parameter_stability_report(out_root, records)
+    
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--mode", choices=["full", "filter_sweep", "filter_fine_sweep", "conclusion", "conclusion_v2"], default="full")
+    parser.add_argument("--mode", choices=["full", "filter_sweep", "filter_fine_sweep", "conclusion", "conclusion_v2", "standardized"], default="full")
+    parser.add_argument("--manifest", default=str(REPO / "tools" / "cxscript_stage25_manifest.json"))
     args = parser.parse_args()
     exe = find_exe(args.exe)
     
@@ -506,7 +704,7 @@ def main():
             try:
                 record = run_case(exe, out_root, item)
             except Exception as exc:
-                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc), "original_candidate": False}
+                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc)}
             records.append(record)
             print(f"{record['case_name']}: {record.get('classification')} exit={record.get('exit_code')}")
         write_filter_sweep_report(out_root, records, exe)
@@ -519,7 +717,7 @@ def main():
             try:
                 record = run_case(exe, out_root, item)
             except Exception as exc:
-                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc), "original_candidate": False}
+                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc)}
             records.append(record)
             print(f"{record['case_name']}: {record.get('classification')} exit={record.get('exit_code')}")
         write_fine_sweep_report(out_root, records, exe)
@@ -567,6 +765,10 @@ def main():
         
         write_conclusion_pack_v2(out_root, batch_records, filter_records, fine_filter_records)
     
+    elif args.mode == "standardized":
+        out_root = ROOT / "cxscript_runs" / "stage_2_5_standardized"
+        run_standardized_mode(exe, out_root, args.manifest)
+    
     else:
         out_root = Path(args.out)
         out_root.mkdir(parents=True, exist_ok=True)
@@ -575,7 +777,7 @@ def main():
             try:
                 record = run_case(exe, out_root, item)
             except Exception as exc:
-                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc), "original_candidate": False}
+                record = {"case_name": item[0], "tool": item[1], "script": item[2], "expect": item[3], "exit_code": None, "headless_ok": False, "classification": "RUNNER_EXCEPTION", "error": str(exc)}
             records.append(record)
             print(f"{record['case_name']}: {record.get('classification')} exit={record.get('exit_code')}")
         write_reports(out_root, records, exe)

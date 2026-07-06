@@ -1072,9 +1072,6 @@ void Findline::Measure(Image& image)
 
     m_lastMeasureInputDebug.filter_profile = m_filter_profile;
     m_lastMeasureInputDebug.filter_explicit = m_filter_explicit;
-    m_lastMeasureInputDebug.effective_filter_borw = m_effective_filter_borw;
-    m_lastMeasureInputDebug.effective_filter_min = m_effective_filter_min;
-    m_lastMeasureInputDebug.effective_filter_max = m_effective_filter_max;
 
     m_lastMeasureInputDebug.findobject_measure_called = false;
     m_lastMeasureInputDebug.findobject_measure_skipped = false;
@@ -1292,6 +1289,10 @@ void Findline::Measure(Image& image)
         m_effective_filter_borw = effectivefilterborw();
         m_effective_filter_min = effectivefiltermin();
         m_effective_filter_max = effectivefiltermax();
+
+        m_lastMeasureInputDebug.effective_filter_borw = m_effective_filter_borw;
+        m_lastMeasureInputDebug.effective_filter_min = m_effective_filter_min;
+        m_lastMeasureInputDebug.effective_filter_max = m_effective_filter_max;
 
         g_pbackfindobject->setbrow(m_effective_filter_borw);//21 22
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
@@ -1727,6 +1728,10 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
         m_effective_filter_borw = effectivefilterborw();
         m_effective_filter_min = effectivefiltermin();
         m_effective_filter_max = effectivefiltermax();
+
+        m_lastMeasureInputDebug.effective_filter_borw = m_effective_filter_borw;
+        m_lastMeasureInputDebug.effective_filter_min = m_effective_filter_min;
+        m_lastMeasureInputDebug.effective_filter_max = m_effective_filter_max;
 
         g_pbackfindobject->setbrow(m_effective_filter_borw);
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
