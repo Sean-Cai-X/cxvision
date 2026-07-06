@@ -3,23 +3,23 @@ Findline m_line;
 
 m_image.copyFromMat(global.matInput);
 
-int x0 = 380;
-int y0 = 120;
-int x1 = 380;
-int y1 = 820;
+int x0 = 120;
+int y0 = 240;
+int x1 = 980;
+int y1 = 240;
 
 int method = 0;
 int threshold = 20;
 int linegap = 6;
 int fitmode = 1;
 
-int wgap = 32;
-int hgap = 8;
-int measure_scale = wgap;
+int wgap = 8;
+int hgap = 32;
+int script_scale = 1;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setlinegap(linegap);
-m_line.setline(x0, y0, x1, y1, measure_scale);
+m_line.setline(x0, y0, x1, y1, script_scale);
 
 m_line.setmethod(method);
 m_line.setthre(threshold);

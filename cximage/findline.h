@@ -166,6 +166,12 @@ struct FindlineMeasureInputDebug
     std::uint64_t measure_geometry_built_version = 0;
 
     double measure_geometry_half_width = 0.0;
+
+    int original_scan_w_count = 0;
+    int original_scan_h_count = 0;
+    int original_scan_w_length = 0;
+    int original_scan_h_length = 0;
+    int original_process_width = 0;
 };
 
 class Findline :public Shape
@@ -419,6 +425,11 @@ private:
                                           double ix1,
                                           double iy1,
                                           double measureHalfWidth);
+
+    bool HasOriginalMeasureScanGeometry() const;
+
+    void SyncMeasureGeometryCacheAfterNativeBuild(double nativeHalfWidth);
+
 private:
     std::vector<ScanLineEdgeBands> m_scanEdgeBands;
     std::vector<EdgeBandCandidate> m_bestEdgeChain;

@@ -462,7 +462,12 @@ static std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | geometry_request_valid=" << (object.line_measure_geometry_request_valid ? "true" : "false")
        << " | geometry_ready=" << (object.line_measure_geometry_ready ? "true" : "false")
        << " | geometry_dirty=" << (object.line_measure_geometry_dirty ? "true" : "false")
-       << " | geometry_half_width=" << object.line_measure_geometry_half_width;
+       << " | geometry_half_width=" << object.line_measure_geometry_half_width
+       << " | scan_w=" << object.line_original_scan_w_count
+       << " | scan_h=" << object.line_original_scan_h_count
+       << " | scan_w_len=" << object.line_original_scan_w_length
+       << " | scan_h_len=" << object.line_original_scan_h_length
+       << " | process_w=" << object.line_original_process_width;
 
     return ss.str();
 }
@@ -935,6 +940,21 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
 
                 file << "  line_measure_geometry_half_width: "
                      << object.line_measure_geometry_half_width << "\n";
+
+                file << "  line_original_scan_w_count: "
+                     << object.line_original_scan_w_count << "\n";
+
+                file << "  line_original_scan_h_count: "
+                     << object.line_original_scan_h_count << "\n";
+
+                file << "  line_original_scan_w_length: "
+                     << object.line_original_scan_w_length << "\n";
+
+                file << "  line_original_scan_h_length: "
+                     << object.line_original_scan_h_length << "\n";
+
+                file << "  line_original_process_width: "
+                     << object.line_original_process_width << "\n";
 
                 file << "  display_version: " << object.display_version << "\n";
             }
@@ -3167,12 +3187,32 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_geometry_half_width =
         input.measure_geometry_half_width;
 
+    object.line_original_scan_w_count =
+        input.original_scan_w_count;
+
+    object.line_original_scan_h_count =
+        input.original_scan_h_count;
+
+    object.line_original_scan_w_length =
+        input.original_scan_w_length;
+
+    object.line_original_scan_h_length =
+        input.original_scan_h_length;
+
+    object.line_original_process_width =
+        input.original_process_width;
+
     std::ostringstream status;
     status << "source=" << object.line_measure_source
            << ", fallback_used="
            << (object.line_measure_fallback_used ? "true" : "false")
            << ", image_ready="
            << (object.line_measure_image_ready ? "true" : "false")
+           << ", scan_w=" << object.line_original_scan_w_count
+           << ", scan_h=" << object.line_original_scan_h_count
+           << ", scan_w_len=" << object.line_original_scan_w_length
+           << ", scan_h_len=" << object.line_original_scan_h_length
+           << ", process_w=" << object.line_original_process_width
            << ", image=" << object.line_measure_image_width
            << "x" << object.line_measure_image_height
            << "x" << object.line_measure_image_channels
@@ -4516,14 +4556,14 @@ void ViewController::initManualStateTestConsole()
      "# enter one manual integration statement\n", "builtin", true},
     {"Custom Manual Text", "Start with an empty manual editor.",
      "", "manual", true},
-    {"Findline Original Direct", "Findline original Measure request/cache path. No fallback.",
+    {"Findline Original Direct H", "Original Findline Measure. Native width. Horizontal.",
      "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true},
-    {"Findline Native Width Compare", "Findline original Measure compare path using setline measure_scale=32.",
-     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
-    {"Findline Fallback Debug", "Findline fallback debug path. Not original Measure validation.",
-     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true},
-    {"Findline Vertical Direct", "Findline vertical ROI direction test.",
+    {"Findline Original Direct V", "Original Findline Measure. Native width. Vertical.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
+    {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
+     "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true},
+    {"Findline Fallback Debug", "Fallback debug only. Not original Measure validation.",
+     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true},
     {"Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
      "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true},
     {"Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",

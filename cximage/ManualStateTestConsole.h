@@ -197,6 +197,12 @@ struct RuntimeObjectView
 
     double line_measure_geometry_half_width = 0.0;
 
+    int line_original_scan_w_count = 0;
+    int line_original_scan_h_count = 0;
+    int line_original_scan_w_length = 0;
+    int line_original_scan_h_length = 0;
+    int line_original_process_width = 0;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;

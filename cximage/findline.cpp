@@ -472,7 +472,44 @@ void Findline::setlinesegment(double ix0, double iy0,
     m_display_line_scale = dscale;
 
     UpdateMeasureGeometryRequest(ix0, iy0, ix1, iy1, dscale);
+
+    SyncMeasureGeometryCacheAfterNativeBuild(dscale);
 }
+
+bool Findline::HasOriginalMeasureScanGeometry() const
+{
+    return !m_lines_w.empty() || !m_lines_h.empty();
+}
+
+void Findline::SyncMeasureGeometryCacheAfterNativeBuild(
+    double nativeHalfWidth)
+{
+    if (!m_measure_geometry_request.valid)
+        return;
+
+    const double expectedHalfWidth =
+        m_measure_geometry_request.measure_half_width;
+
+    const bool halfWidthMatched =
+        std::abs(nativeHalfWidth - expectedHalfWidth) <= 0.5;
+
+    const bool scanGeometryReady =
+        HasOriginalMeasureScanGeometry();
+
+    if (halfWidthMatched && scanGeometryReady)
+    {
+        m_measure_geometry_ready = true;
+        m_measure_geometry_dirty = false;
+        m_measure_geometry_built_version =
+            m_measure_geometry_request.version;
+    }
+    else
+    {
+        m_measure_geometry_ready = false;
+        m_measure_geometry_dirty = true;
+    }
+}
+
 void Findline::setrect(int ix, int iy, int iw, int ih)
 { 
     m_iwgap = PositiveGap(m_iwgap);
@@ -946,6 +983,9 @@ void Findline::MeasureT(void *pimage)
 }
 void Findline::Measure(Image& image)
 {
+    m_measurepoints_w.clear();
+    m_measurepoints_h.clear();
+
     if (g_pbackimage == nullptr)
         return;
 
@@ -954,10 +994,47 @@ void Findline::Measure(Image& image)
         return;//error process
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
         return;//error process
-    m_measurepoints_w.clear();
-    m_measurepoints_h.clear();
+
     int iwsize = ClampSizeToInt(m_lines_w.size());
     int ihsize = ClampSizeToInt(m_lines_h.size());
+
+    m_lastMeasureInputDebug.original_scan_w_count = iwsize;
+    m_lastMeasureInputDebug.original_scan_h_count = ihsize;
+    m_lastMeasureInputDebug.profile_count = iwsize + ihsize;
+
+    m_lastMeasureInputDebug.measure_geometry_request_valid =
+        m_measure_geometry_request.valid;
+
+    m_lastMeasureInputDebug.measure_geometry_dirty =
+        m_measure_geometry_dirty;
+
+    m_lastMeasureInputDebug.measure_geometry_ready =
+        m_measure_geometry_ready;
+
+    m_lastMeasureInputDebug.measure_geometry_version =
+        m_measure_geometry_version;
+
+    m_lastMeasureInputDebug.measure_geometry_built_version =
+        m_measure_geometry_built_version;
+
+    m_lastMeasureInputDebug.measure_geometry_half_width =
+        m_measure_geometry_request.measure_half_width;
+
+    if (iwsize <= 0 && ihsize <= 0)
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_no_scan_geometry";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "original_scan_lines_empty";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline original Measure has zero m_lines_w/m_lines_h. "
+            "Use native width script or make request-cache build ready before measure.";
+
+        return;
+    }
+
     for (int i = 0; i < iwsize; i++)
     {
         m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
@@ -975,6 +1052,24 @@ void Findline::Measure(Image& image)
         ilineslen2 = m_lines_h[0].getlinesize();
 
     int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
+
+    m_lastMeasureInputDebug.original_scan_w_length = ilineslen1;
+    m_lastMeasureInputDebug.original_scan_h_length = ilineslen2;
+    m_lastMeasureInputDebug.original_process_width = iprocessw;
+
+    if (iprocessw <= 0)
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_invalid_scan_width";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "original_process_width_zero";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline original Measure scan lines exist but process width is zero.";
+
+        return;
+    }
 
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
 
@@ -1156,6 +1251,40 @@ void Findline::Measure(Image& image)
             bcollectBegin = false;
         }
     }
+
+    const int resultPointCount =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+
+    m_lastMeasureInputDebug.original_point_count =
+        resultPointCount;
+
+    m_lastMeasureInputDebug.original_edgeband_count = 0;
+    m_lastMeasureInputDebug.original_chain_length = 0;
+
+    if (resultPointCount > 0)
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "result_points_available";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline original Measure produced result points.";
+    }
+    else
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_no_result";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "no_edge_band_candidates";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline original Measure completed but produced zero result points.";
+    }
+
     /*
     int iwpointstotal = 0;
     int ihpointstotal = 0;
