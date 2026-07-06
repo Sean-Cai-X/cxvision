@@ -9,7 +9,7 @@ int px = 1200;
 int py = 471;
 int method = 0;
 int threshold = 20;
-int gap = 5;
+int gap = 8;
 int linegap = 3;
 
 m_circle.Setgap(gap);

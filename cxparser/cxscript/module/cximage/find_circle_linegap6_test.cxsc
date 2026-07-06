@@ -10,7 +10,7 @@ int py = 471;
 int method = 0;
 int threshold = 20;
 int gap = 5;
-int linegap = 3;
+int linegap = 6;
 
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);

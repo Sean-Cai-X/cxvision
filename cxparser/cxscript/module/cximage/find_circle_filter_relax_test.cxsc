@@ -16,7 +16,12 @@ m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
 m_circle.setthre(threshold);
 m_circle.setmethod(method);
-
+int findsetting = 1;
+int filter_borw = 21;
+int filter_min = 1;
+int filter_max = 100000;
+m_circle.setfindsetting(findsetting);
+m_circle.setfilter(filter_borw, filter_min, filter_max);
 m_circle.setcircle(cx, cy, px, py);
 m_circle.measure(&m_image);
 m_circle.fitcircle();

@@ -20,16 +20,20 @@ int measure_fallback = 0;
 m_line.setmeasurefallback(measure_fallback);
 m_line.SetWHgap(wgap, hgap);
 m_line.setline(x0, y0, x1, y1, tool_half_width);
+
 int objfilter = 1;
 int filter_borw = 21;
-int filter_min = 1;
+int filter_min = 10;
 int filter_max = 100000;
+
 m_line.setobjfilter(objfilter);
 m_line.setfilter(filter_borw, filter_min, filter_max);
+
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
 m_line.setfitmode(fitmode);
+
 m_line.measure(&m_image);
 m_line.fitline();
 

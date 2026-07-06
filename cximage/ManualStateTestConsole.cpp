@@ -1,9 +1,10 @@
-#include "ViewController.h"
+﻿#include "ViewController.h"
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
+#include "CxScriptImageEvidenceAnalyzer.h"
 
 #include <imgui.h>
 
@@ -195,7 +196,7 @@ static void ResetCxDebugRuntimeLog(const ManualTestContext& context,
     }
     catch (...)
     {
-        // log 不能影响主调试流程
+        // log ä¸èƒ½å½±å“ä¸»è°ƒè¯•æµç¨‹
     }
 }
 
@@ -239,7 +240,7 @@ static void AppendCxDebugEvent(const ManualTestContext& context,
     }
     catch (...)
     {
-        // log 不能影响主调试流程
+        // log ä¸èƒ½å½±å“ä¸»è°ƒè¯•æµç¨‹
     }
 }
 static void AppendCxDebugRuntimeObjectsSnapshot(const ManualTestContext& context,
@@ -620,14 +621,25 @@ static int LastExecutedLineNo(const ManualTestContext& context)
 }
 
 static bool SaveCxDebugSnapshotText(ManualTestContext& context,
+    const fs::path& path,
+    std::string& outReason);
+
+static bool SaveCxDebugSnapshotText(ManualTestContext& context,
     std::string& outPath,
+    std::string& outReason)
+{
+    fs::path path = CxDebugSnapshotPath();
+    outPath = path.string();
+    return SaveCxDebugSnapshotText(context, path, outReason);
+}
+
+static bool SaveCxDebugSnapshotText(ManualTestContext& context,
+    const fs::path& path,
     std::string& outReason)
 {
     try
     {
-        fs::create_directories(CxDebugLogDirectory());
-
-        const fs::path path = CxDebugSnapshotPath();
+        fs::create_directories(path.parent_path());
 
         std::ofstream file(path.string(), std::ios::out | std::ios::trunc);
 
@@ -908,6 +920,30 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_measure_result_empty_reason: "
                      << object.line_measure_result_empty_reason << "\n";
 
+                file << "  line_findobject_component_total: "
+                     << object.line_findobject_component_total << "\n";
+
+                file << "  line_findobject_component_accepted: "
+                     << object.line_findobject_component_accepted << "\n";
+
+                file << "  line_findobject_component_rejected_by_min: "
+                     << object.line_findobject_component_rejected_by_min << "\n";
+
+                file << "  line_findobject_component_rejected_by_max: "
+                     << object.line_findobject_component_rejected_by_max << "\n";
+
+                file << "  line_findobject_component_rejected_by_borw: "
+                     << object.line_findobject_component_rejected_by_borw << "\n";
+
+                file << "  line_findobject_area_min_observed: "
+                     << object.line_findobject_area_min_observed << "\n";
+
+                file << "  line_findobject_area_max_observed: "
+                     << object.line_findobject_area_max_observed << "\n";
+
+                file << "  line_findobject_area_mean_observed: "
+                     << object.line_findobject_area_mean_observed << "\n";
+
                 file << "  line_measure_profile_count: "
                      << object.line_measure_profile_count << "\n";
 
@@ -1013,7 +1049,6 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 << "\n";
         }
 
-        outPath = path.string();
         outReason = "debug snapshot saved";
         return true;
     }
@@ -1315,8 +1350,8 @@ static void UpsertGlobalVariableViewCore(
     context.global_variable_views.push_back(variable);
 }
 
-// 普通 global 变量：global.current_status / global.circle_ref 等。
-// 注意：这个函数只有 6 个参数，不要再给它加默认参数。
+// æ™®é€š global å˜é‡ï¼šglobal.current_status / global.circle_ref ç­‰ã€‚
+// æ³¨æ„ï¼šè¿™ä¸ªå‡½æ•°åªæœ‰ 6 ä¸ªå‚æ•°ï¼Œä¸è¦å†ç»™å®ƒåŠ é»˜è®¤å‚æ•°ã€‚
 static void UpsertGlobalVariableView(
     ManualTestContext& context,
     const std::string& type,
@@ -1336,8 +1371,8 @@ static void UpsertGlobalVariableView(
         false);
 }
 
-// 图像 global 变量：global.matInput。
-// 注意：用不同函数名，避免和普通变量函数重载冲突。
+// å›¾åƒ global å˜é‡ï¼šglobal.matInputã€‚
+// æ³¨æ„ï¼šç”¨ä¸åŒå‡½æ•°åï¼Œé¿å…å’Œæ™®é€šå˜é‡å‡½æ•°é‡è½½å†²çªã€‚
 static void UpsertGlobalImageVariableView(
     ManualTestContext& context,
     const std::string& type,
@@ -1397,8 +1432,8 @@ static void ResetDebugRuntimeForReplay(ManualTestContext& context)
     context.current_debug_snapshot = DebugStepSnapshot();
     context.runtime_int_vars.clear();
 
-    // 当前 find_circle_direct_test.cxsc 中 m_isetcircle 参与 if 判断。
-    // replay 调试模式下必须默认从 0 开始，否则第二次运行会跳过 setcircle。
+    // å½“å‰ find_circle_direct_test.cxsc ä¸­ m_isetcircle å‚ä¸Ž if åˆ¤æ–­ã€‚
+    // replay è°ƒè¯•æ¨¡å¼ä¸‹å¿…é¡»é»˜è®¤ä»Ž 0 å¼€å§‹ï¼Œå¦åˆ™ç¬¬äºŒæ¬¡è¿è¡Œä¼šè·³è¿‡ setcircleã€‚
     context.runtime_int_vars["m_isetcircle"] = 0;
 
     context.variable_views.clear();
@@ -1740,7 +1775,7 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
 
-    // 1. 调试控制变量：m_isetcircle = 1;
+    // 1. è°ƒè¯•æŽ§åˆ¶å˜é‡ï¼šm_isetcircle = 1;
     if (lhs == "m_isetcircle")
     {
         const int v = std::atoi(rhs.c_str());
@@ -1778,10 +1813,10 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
         return true;
     }
 
-    // 2. 全局状态变量：global.current_status = "PENDING";
+    // 2. å…¨å±€çŠ¶æ€å˜é‡ï¼šglobal.current_status = "PENDING";
     if (lhs == "global.current_status")
     {
-        // 去掉字符串两侧引号
+        // åŽ»æŽ‰å­—ç¬¦ä¸²ä¸¤ä¾§å¼•å·
         if (!rhs.empty() && rhs.front() == '"')
             rhs.erase(rhs.begin());
 
@@ -1798,7 +1833,7 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
             line.line_no,
             "runtime_value");
 
-        // 同步到 Local Variables / Variable Snapshot，方便界面统一观察
+        // åŒæ­¥åˆ° Local Variables / Variable Snapshotï¼Œæ–¹ä¾¿ç•Œé¢ç»Ÿä¸€è§‚å¯Ÿ
         UpsertVariableView(
             context,
             "string",
@@ -1816,7 +1851,7 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
         MarkDebugRunFinishedIfAtEnd(context);
         context.run_state = "runtime_step";
 
-        // 注意：这里不能因为赋值成功就 PASS。
+        // æ³¨æ„ï¼šè¿™é‡Œä¸èƒ½å› ä¸ºèµ‹å€¼æˆåŠŸå°± PASSã€‚
         context.debug_status = "PENDING";
         context.debug_reason = line.reason;
 
@@ -1935,7 +1970,7 @@ static bool TryExecuteDeclaration(ManualTestContext& context,
     object.display_summary = "declared only; no visual geometry";
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
 
-    // 关键：声明 Findcircle 不能画圆。
+    // å…³é”®ï¼šå£°æ˜Ž Findcircle ä¸èƒ½ç”»åœ†ã€‚
     object.visualizable = false;
     object.has_circle = false;
     object.stale = false;
@@ -2324,7 +2359,8 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         call.method == "setlinesamplerate" ||
         call.method == "setgamarate" ||
         call.method == "setfindsetting" ||
-        call.method == "setselectedgenum";
+        call.method == "setselectedgenum" ||
+        call.method == "setfilter";
 
     if (!isCircleParamMethod)
         return false;
@@ -2353,6 +2389,96 @@ static bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
 
         context.run_state = "blocked";
         context.debug_status = "BLOCKED";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    if (call.method == "setfilter")
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        if (call.args.size() < 3)
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findcircle.setfilter requires borw, min, max";
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        int borw = 0;
+        int minArea = 0;
+        int maxArea = 0;
+        if (!ResolveDebugInt(context, call.args[0], borw) ||
+            !ResolveDebugInt(context, call.args[1], minArea) ||
+            !ResolveDebugInt(context, call.args[2], maxArea))
+        {
+            line.status = "BLOCKED";
+            line.reason = "Findcircle.setfilter unresolved parameter";
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+
+        circleIt->second->setfilter(borw, minArea, maxArea);
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context, call.object, "Findcircle", line.line_no);
+        RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+        object.exists_in_parser = true;
+        object.last_method = call.method;
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "runtime_param_set";
+        object.last_update_line = line.line_no;
+        object.display_summary = "setfilter(" + call.params + ")";
+        object.stale = false;
+        line.status = "runtime_executed";
+        line.reason = "Findcircle.setfilter executed";
+        line.timestamp = CurrentTimestamp();
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
+        context.debug_reason = line.reason;
+        return true;
+    }
+
+    if (call.method == "setlinesamplerate")
+    {
+        const std::string token = TrimLine(call.args[0]);
+        char* end = nullptr;
+        const double sampleRate = std::strtod(token.c_str(), &end);
+        if (end == token.c_str() || *end != '\0')
+        {
+            ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+            line.status = "BLOCKED";
+            line.reason = "Findcircle.setlinesamplerate unresolved parameter: " + token;
+            line.timestamp = CurrentTimestamp();
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = line.reason;
+            return true;
+        }
+        circleIt->second->setlinesamplerate(sampleRate);
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context, call.object, "Findcircle",
+            context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+        RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+        object.exists_in_parser = true;
+        object.last_method = call.method;
+        object.last_runtime_status = "runtime_executed";
+        object.runtime_state = "runtime_param_set";
+        object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
+        object.display_summary = "setlinesamplerate(" + token + ")";
+        object.stale = false;
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        line.status = "runtime_executed";
+        line.reason = "Findcircle.setlinesamplerate executed";
+        line.timestamp = CurrentTimestamp();
+        context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        context.run_state = "runtime_step";
+        context.debug_status = "PENDING";
         context.debug_reason = line.reason;
         return true;
     }
@@ -2988,7 +3114,7 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
                 sourceObject->line_measure_status;
         }
 
-        // 注意：这里不 BLOCKED，不伪造 PASS，允许脚本继续到 global.current_status。
+        // æ³¨æ„ï¼šè¿™é‡Œä¸ BLOCKEDï¼Œä¸ä¼ªé€  PASSï¼Œå…è®¸è„šæœ¬ç»§ç»­åˆ° global.current_statusã€‚
         context.debug_status = "PENDING";
         context.debug_reason = line.reason;
         context.run_state = "runtime_step";
@@ -3257,6 +3383,30 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
 
     object.line_measure_result_empty_reason =
         input.result_empty_reason;
+
+    object.line_findobject_component_total =
+        input.findobject_component_total;
+
+    object.line_findobject_component_accepted =
+        input.findobject_component_accepted;
+
+    object.line_findobject_component_rejected_by_min =
+        input.findobject_component_rejected_by_min;
+
+    object.line_findobject_component_rejected_by_max =
+        input.findobject_component_rejected_by_max;
+
+    object.line_findobject_component_rejected_by_borw =
+        input.findobject_component_rejected_by_borw;
+
+    object.line_findobject_area_min_observed =
+        input.findobject_area_min_observed;
+
+    object.line_findobject_area_max_observed =
+        input.findobject_area_max_observed;
+
+    object.line_findobject_area_mean_observed =
+        input.findobject_area_mean_observed;
 
     object.line_measure_profile_count = input.profile_count;
     object.line_measure_sampled_pixel_count = input.sampled_pixel_count;
@@ -3567,6 +3717,7 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "SetWHgap" ||
         call.method == "setwhgap" ||
         call.method == "setmeasurefallback" ||
+        call.method == "setgamarate" ||
         call.method == "setobjfilter" ||
         call.method == "setfilter";
 
@@ -3792,6 +3943,8 @@ static bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         it->second->setfitmode(value);
     else if (call.method == "setmeasurefallback")
         it->second->setmeasurefallback(value);
+    else if (call.method == "setgamarate")
+        it->second->setgamarate(value);
     else if (call.method == "setobjfilter")
         it->second->setobjfilter(value);
 
@@ -4033,13 +4186,13 @@ static bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     object.stale = false;
 
     /*
-     * 注意：
-     * measure / fitcircle / FitResultMeasure 是真实算法运行行。
-     * 当前 debug shim 不能伪造算法结果。
-     * 但它也不能 BLOCKED，否则后续 fitcircle / setfitmeasuregap / FitResultMeasure 无法继续行级分析。
+     * æ³¨æ„ï¼š
+     * measure / fitcircle / FitResultMeasure æ˜¯çœŸå®žç®—æ³•è¿è¡Œè¡Œã€‚
+     * å½“å‰ debug shim ä¸èƒ½ä¼ªé€ ç®—æ³•ç»“æžœã€‚
+     * ä½†å®ƒä¹Ÿä¸èƒ½ BLOCKEDï¼Œå¦åˆ™åŽç»­ fitcircle / setfitmeasuregap / FitResultMeasure æ— æ³•ç»§ç»­è¡Œçº§åˆ†æžã€‚
      *
-     * 因此这里标记为 runtime_deferred + PENDING，
-     * 允许调试器继续下一行。
+     * å› æ­¤è¿™é‡Œæ ‡è®°ä¸º runtime_deferred + PENDINGï¼Œ
+     * å…è®¸è°ƒè¯•å™¨ç»§ç»­ä¸‹ä¸€è¡Œã€‚
      */
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_deferred";
@@ -4332,10 +4485,10 @@ static void DebugStepOnce(ManualTestContext& context)
         line.timestamp = CurrentTimestamp();
 
         /*
-         * if 为 true 时，调试器会跳过 “{” 直接进入 block 第一条语句；
-         * if 为 false 时，会跳过整个 block。
-         * 因此这里必须主动把被跳过的大括号标成 structural，
-         * 否则 snapshot 里 “{” 会残留 source_analyzed。
+         * if ä¸º true æ—¶ï¼Œè°ƒè¯•å™¨ä¼šè·³è¿‡ â€œ{â€ ç›´æŽ¥è¿›å…¥ block ç¬¬ä¸€æ¡è¯­å¥ï¼›
+         * if ä¸º false æ—¶ï¼Œä¼šè·³è¿‡æ•´ä¸ª blockã€‚
+         * å› æ­¤è¿™é‡Œå¿…é¡»ä¸»åŠ¨æŠŠè¢«è·³è¿‡çš„å¤§æ‹¬å·æ ‡æˆ structuralï¼Œ
+         * å¦åˆ™ snapshot é‡Œ â€œ{â€ ä¼šæ®‹ç•™ source_analyzedã€‚
          */
         MarkIfBlockBracesStructural(context, lineIndex, !conditionValue);
 
@@ -4389,8 +4542,8 @@ static void DebugStepOnce(ManualTestContext& context)
         return;
 
     /*
-     * Findcircle 的 measure / fitcircle / FitResultMeasure
-     * 当前必须优先走真实 direct runtime bridge。
+     * Findcircle çš„ measure / fitcircle / FitResultMeasure
+     * å½“å‰å¿…é¡»ä¼˜å…ˆèµ°çœŸå®ž direct runtime bridgeã€‚
      */
     if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
         return;
@@ -4402,7 +4555,7 @@ static void DebugStepOnce(ManualTestContext& context)
         return;
 
     /*
-     * 其它模块暂时才走 deferred。
+     * å…¶å®ƒæ¨¡å—æš‚æ—¶æ‰èµ° deferredã€‚
      */
     if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
         return;
@@ -4423,8 +4576,8 @@ static void DebugStepOnce(ManualTestContext& context)
 
         if (isRuntimeAlgorithmCall)
         {
-            // 理论上已经被 TryExecutePendingRuntimeMethod 处理。
-            // 这里做二次保护。
+            // ç†è®ºä¸Šå·²ç»è¢« TryExecutePendingRuntimeMethod å¤„ç†ã€‚
+            // è¿™é‡ŒåšäºŒæ¬¡ä¿æŠ¤ã€‚
             if (TryExecutePendingRuntimeMethod(context, lineIndex, statement))
                 return;
         }
@@ -5484,7 +5637,7 @@ void ViewController::drawManualStateTestConsole()
       {
           DebugStepOnceWithSnapshot(m_manualTest);
 
-          // 遇到真实 runtime 缺失的算法行，先停下来让用户看。
+          // é‡åˆ°çœŸå®ž runtime ç¼ºå¤±çš„ç®—æ³•è¡Œï¼Œå…ˆåœä¸‹æ¥è®©ç”¨æˆ·çœ‹ã€‚
           if (m_manualTest.run_state == "blocked")
               break;
       }
@@ -5501,7 +5654,7 @@ void ViewController::drawManualStateTestConsole()
           m_manualTest.run_state == "compiled" ||
           m_manualTest.run_state == "ready")
       {
-          // 如果还没初始化 runtime，就初始化一次。
+          // å¦‚æžœè¿˜æ²¡åˆå§‹åŒ– runtimeï¼Œå°±åˆå§‹åŒ–ä¸€æ¬¡ã€‚
           if (m_manualTest.runtime_objects.empty() &&
               m_manualTest.runtime_int_vars.empty())
           {
@@ -6141,4 +6294,527 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     outReason = object->display_summary;
 
     return true;
+}
+
+static bool SaveCxScriptOverlayImage(
+    const ManualTestContext& context,
+    const cv::Mat& sourceImage,
+    const fs::path& outputPath,
+    std::string& outReason)
+{
+    try
+    {
+        cv::Mat canvas;
+        sourceImage.copyTo(canvas);
+
+        if (canvas.channels() == 1)
+        {
+            cv::cvtColor(canvas, canvas, cv::COLOR_GRAY2BGR);
+        }
+
+        for (std::size_t idx = 0; idx < context.runtime_objects.size(); ++idx)
+        {
+            const RuntimeObjectView& object = context.runtime_objects[idx];
+
+            if (object.type == "Findline")
+            {
+                if (object.has_line_roi)
+                {
+                    cv::line(
+                        canvas,
+                        cv::Point((int)object.line_x0, (int)object.line_y0),
+                        cv::Point((int)object.line_x1, (int)object.line_y1),
+                        cv::Scalar(0, 255, 0),
+                        2);
+                }
+
+                if (object.has_line_scan_box)
+                {
+                    std::vector<cv::Point> box;
+                    for (std::size_t i = 0; i + 1 < object.line_scan_box_xy.size(); i += 2)
+                    {
+                        box.emplace_back(
+                            (int)object.line_scan_box_xy[i],
+                            (int)object.line_scan_box_xy[i + 1]);
+                    }
+
+                    if (box.size() >= 4)
+                    {
+                        cv::polylines(
+                            canvas,
+                            box,
+                            true,
+                            cv::Scalar(0, 180, 0),
+                            1);
+                    }
+                }
+
+                for (std::size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
+                {
+                    cv::circle(
+                        canvas,
+                        cv::Point(
+                            (int)object.line_measure_points_xy[i],
+                            (int)object.line_measure_points_xy[i + 1]),
+                        3,
+                        cv::Scalar(0, 0, 255),
+                        -1);
+                }
+
+                if (object.has_fit_line)
+                {
+                    cv::line(
+                        canvas,
+                        cv::Point((int)object.fit_line_x0, (int)object.fit_line_y0),
+                        cv::Point((int)object.fit_line_x1, (int)object.fit_line_y1),
+                        cv::Scalar(0, 255, 255),
+                        2);
+                }
+
+                cv::putText(
+                    canvas,
+                    object.name + " | valid=" + std::to_string(object.valid_line_points_count) + " | fit=" + (object.has_fit_line ? "true" : "false"),
+                    cv::Point(20, 30 + (int)idx * 30),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(0, 255, 255),
+                    2);
+            }
+            else if (object.type == "Findcircle")
+            {
+                if (object.has_circle)
+                {
+                    cv::circle(
+                        canvas,
+                        cv::Point((int)object.circle_cx, (int)object.circle_cy),
+                        (int)object.circle_radius,
+                        cv::Scalar(0, 255, 0),
+                        2);
+
+                    cv::circle(
+                        canvas,
+                        cv::Point((int)object.circle_cx, (int)object.circle_cy),
+                        (int)object.circle_inner,
+                        cv::Scalar(0, 180, 0),
+                        1);
+                }
+
+                if (object.has_measure_points)
+                {
+                    for (std::size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
+                    {
+                        cv::circle(
+                            canvas,
+                            cv::Point(
+                                (int)object.measure_points_xy[i],
+                                (int)object.measure_points_xy[i + 1]),
+                            3,
+                            cv::Scalar(0, 0, 255),
+                            -1);
+                    }
+                }
+
+                if (object.has_fit_result)
+                {
+                    cv::circle(
+                        canvas,
+                        cv::Point((int)object.fit_cx, (int)object.fit_cy),
+                        (int)object.fit_radius,
+                        cv::Scalar(0, 255, 255),
+                        2);
+                }
+
+                cv::putText(
+                    canvas,
+                    object.name + " | valid=" + std::to_string(object.valid_points_count) + " | fit=" + (object.has_fit_result ? "true" : "false"),
+                    cv::Point(20, 30 + (int)idx * 30),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(0, 255, 255),
+                    2);
+            }
+        }
+
+        fs::create_directories(outputPath.parent_path());
+
+        if (!cv::imwrite(outputPath.string(), canvas))
+        {
+            outReason = "failed to write overlay image: " + outputPath.string();
+            return false;
+        }
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        outReason = "SaveCxScriptOverlayImage exception: " + std::string(e.what());
+        return false;
+    }
+}
+
+static bool SaveCxScriptHeadlessSummaryJson(
+    const ManualTestContext& context,
+    const CxScriptHeadlessOptions& options,
+    const CxScriptHeadlessResult& result,
+    const fs::path& outputPath,
+    std::string& outReason)
+{
+    try
+    {
+        fs::create_directories(outputPath.parent_path());
+
+        std::ofstream file(outputPath.string(), std::ios::out | std::ios::trunc);
+
+        if (!file.is_open())
+        {
+            outReason = "failed to open summary json file: " + outputPath.string();
+            return false;
+        }
+
+        file << "{\n";
+        file << "  \"ok\": " << (result.ok ? "true" : "false") << ",\n";
+        file << "  \"case_name\": \"" << CxDebugJsonEscape(options.case_name) << "\",\n";
+        file << "  \"image_path\": \"" << CxDebugJsonEscape(options.image_path) << "\",\n";
+        file << "  \"script_path\": \"" << CxDebugJsonEscape(options.script_path) << "\",\n";
+        file << "  \"run_state\": \"" << CxDebugJsonEscape(context.run_state) << "\",\n";
+        file << "  \"debug_status\": \"" << CxDebugJsonEscape(context.debug_status) << "\",\n";
+        file << "  \"debug_reason\": \"" << CxDebugJsonEscape(context.debug_reason) << "\",\n";
+        file << "  \"snapshot_path\": \"" << CxDebugJsonEscape(result.snapshot_path) << "\",\n";
+        file << "  \"overlay_path\": \"" << CxDebugJsonEscape(result.overlay_path) << "\",\n";
+
+        file << "  \"current_result_ref\": {\n";
+        file << "    \"name\": \"" << CxDebugJsonEscape(context.current_result_ref.name) << "\",\n";
+        file << "    \"source_object\": \"" << CxDebugJsonEscape(context.current_result_ref.source_object) << "\",\n";
+        file << "    \"result_type\": \"" << CxDebugJsonEscape(context.current_result_ref.result_type) << "\",\n";
+        file << "    \"status\": \"" << CxDebugJsonEscape(context.current_result_ref.status) << "\",\n";
+        file << "    \"reason\": \"" << CxDebugJsonEscape(context.current_result_ref.reason) << "\",\n";
+        file << "    \"points_count\": " << context.current_result_ref.points_count << ",\n";
+        file << "    \"valid_points_count\": " << context.current_result_ref.valid_points_count << ",\n";
+        file << "    \"has_fit_line\": " << (context.current_result_ref.result_type == "FindlineResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << ",\n";
+        file << "    \"has_fit_circle\": " << (context.current_result_ref.result_type == "FindcircleResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << "\n";
+        file << "  },\n";
+
+        file << "  \"runtime_objects\": [\n";
+
+        for (std::size_t i = 0; i < context.runtime_objects.size(); ++i)
+        {
+            const RuntimeObjectView& object = context.runtime_objects[i];
+
+            file << "    {\n";
+            file << "      \"name\": \"" << CxDebugJsonEscape(object.name) << "\",\n";
+            file << "      \"type\": \"" << CxDebugJsonEscape(object.type) << "\",\n";
+            file << "      \"runtime_state\": \"" << CxDebugJsonEscape(object.runtime_state) << "\"";
+
+            if (object.type == "Findline")
+            {
+                file << ",\n";
+                file << "      \"line_roi\": [" << object.line_x0 << "," << object.line_y0 << "," << object.line_x1 << "," << object.line_y1 << "],\n";
+                file << "      \"has_line_scan_box\": " << (object.has_line_scan_box ? "true" : "false") << ",\n";
+                file << "      \"line_scan_half_width\": " << object.line_scan_half_width << ",\n";
+                file << "      \"valid_line_points_count\": " << object.valid_line_points_count << ",\n";
+                file << "      \"has_fit_line\": " << (object.has_fit_line ? "true" : "false") << ",\n";
+                file << "      \"line_avgdist\": " << object.line_avgdist << ",\n";
+                file << "      \"line_measure_method\": " << object.line_measure_method << ",\n";
+                file << "      \"line_measure_threshold\": " << object.line_measure_threshold << ",\n";
+                file << "      \"line_measure_linegap\": " << object.line_measure_linegap << ",\n";
+                file << "      \"line_measure_wgap\": " << object.line_measure_wgap << ",\n";
+                file << "      \"line_measure_hgap\": " << object.line_measure_hgap << ",\n";
+                file << "      \"line_measure_max_gradient\": " << object.line_measure_max_gradient << ",\n";
+                file << "      \"line_measure_binary_foreground_pixels\": " << object.line_measure_binary_foreground_pixels << ",\n";
+                file << "      \"line_measure_findobject_called\": " << (object.line_measure_findobject_called ? "true" : "false") << ",\n";
+                file << "      \"line_measure_filter_min\": " << object.line_measure_filter_min << ",\n";
+                file << "      \"line_measure_filter_max\": " << object.line_measure_filter_max << ",\n";
+                file << "      \"line_measure_source\": \"" << CxDebugJsonEscape(object.line_measure_source) << "\",\n";
+                file << "      \"line_measure_failure_stage\": \"" << CxDebugJsonEscape(object.line_measure_failure_stage) << "\",\n";
+                file << "      \"line_measure_fallback_used\": " << (object.line_measure_fallback_used ? "true" : "false") << ",\n";
+                file << "      \"line_measure_status\": \"" << CxDebugJsonEscape(object.line_measure_status) << "\",\n";
+                file << "      \"line_fit_status\": \"" << CxDebugJsonEscape(object.line_fit_status) << "\",\n";
+                file << "      \"line_findobject_component_total\": " << object.line_findobject_component_total << ",\n";
+                file << "      \"line_findobject_component_accepted\": " << object.line_findobject_component_accepted << ",\n";
+                file << "      \"line_findobject_component_rejected_by_min\": " << object.line_findobject_component_rejected_by_min << ",\n";
+                file << "      \"line_findobject_component_rejected_by_max\": " << object.line_findobject_component_rejected_by_max << ",\n";
+                file << "      \"line_findobject_area_mean_observed\": " << object.line_findobject_area_mean_observed;
+            }
+            else if (object.type == "Findcircle")
+            {
+                file << ",\n";
+                file << "      \"circle_roi\": [" << object.circle_cx << "," << object.circle_cy << "," << object.circle_inner << "," << object.circle_radius << "],\n";
+                file << "      \"has_circle\": " << (object.has_circle ? "true" : "false") << ",\n";
+                file << "      \"measure_points_count\": " << object.measure_points_count << ",\n";
+                file << "      \"valid_points_count\": " << object.valid_points_count << ",\n";
+                file << "      \"has_fit_result\": " << (object.has_fit_result ? "true" : "false") << ",\n";
+                file << "      \"fit_circle_center_x\": " << object.fit_cx << ",\n";
+                file << "      \"fit_circle_center_y\": " << object.fit_cy << ",\n";
+                file << "      \"fit_circle_radius\": " << object.fit_radius << ",\n";
+                file << "      \"circle_avgdist\": " << object.fit_avgdist << ",\n";
+                file << "      \"has_result_measure\": " << (object.has_result_measure ? "true" : "false") << ",\n";
+                file << "      \"circle_measure_source\": \"" << CxDebugJsonEscape(object.circle_measure_source) << "\",\n";
+                file << "      \"circle_measure_failure_stage\": \"" << CxDebugJsonEscape(object.circle_measure_failure_stage) << "\"";
+            }
+
+            file << "\n    }";
+
+            if (i < context.runtime_objects.size() - 1)
+            {
+                file << ",";
+            }
+
+            file << "\n";
+        }
+
+        file << "  ]\n";
+        file << "}\n";
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        outReason = "SaveCxScriptHeadlessSummaryJson exception: " + std::string(e.what());
+        return false;
+    }
+}
+
+bool ParseCxScriptHeadlessArgs(int argc, char** argv, CxScriptHeadlessOptions& options)
+{
+    options.enabled = false;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+
+        if (arg == "--cxscript-headless")
+        {
+            options.enabled = true;
+        }
+        else if (arg == "--image" && i + 1 < argc)
+        {
+            options.image_path = argv[++i];
+        }
+        else if (arg == "--script" && i + 1 < argc)
+        {
+            options.script_path = argv[++i];
+        }
+        else if (arg == "--out" && i + 1 < argc)
+        {
+            options.output_dir = argv[++i];
+        }
+        else if (arg == "--case-name" && i + 1 < argc)
+        {
+            options.case_name = argv[++i];
+        }
+        else if (arg == "--snapshot" && i + 1 < argc)
+        {
+            options.snapshot_path = argv[++i];
+        }
+        else if (arg == "--overlay" && i + 1 < argc)
+        {
+            options.overlay_path = argv[++i];
+        }
+        else if (arg == "--summary" && i + 1 < argc)
+        {
+            options.summary_path = argv[++i];
+        }
+        else if (arg == "--max-steps" && i + 1 < argc)
+        {
+            try
+            {
+                options.max_steps = std::stoi(argv[++i]);
+            }
+            catch (...)
+            {
+                options.max_steps = 10000;
+            }
+        }
+        else if (arg == "--no-overlay")
+        {
+            options.save_overlay = false;
+        }
+    }
+
+    return true;
+}
+
+bool RunCxScriptHeadless(
+    const CxScriptHeadlessOptions& options,
+    CxScriptHeadlessResult& result)
+{
+    result.ok = false;
+    result.exit_code = 1;
+
+    if (!options.enabled)
+    {
+        result.reason = "headless mode not enabled";
+        return false;
+    }
+
+    if (options.image_path.empty())
+    {
+        result.reason = "image path is empty";
+        result.exit_code = 3;
+        return false;
+    }
+
+    if (options.script_path.empty())
+    {
+        result.reason = "script path is empty";
+        result.exit_code = 3;
+        return false;
+    }
+
+    if (options.output_dir.empty())
+    {
+        result.reason = "output directory is empty";
+        result.exit_code = 3;
+        return false;
+    }
+
+    try
+    {
+        fs::create_directories(options.output_dir);
+    }
+    catch (...)
+    {
+        result.reason = "failed to create output directory: " + options.output_dir;
+        result.exit_code = 3;
+        return false;
+    }
+
+    cv::Mat mat = cv::imread(options.image_path, cv::IMREAD_COLOR);
+
+    if (mat.empty())
+    {
+        result.reason = "failed to load image: " + options.image_path;
+        result.exit_code = 3;
+        return false;
+    }
+
+    std::ifstream scriptFile(options.script_path);
+
+    if (!scriptFile.is_open())
+    {
+        result.reason = "failed to open script: " + options.script_path;
+        result.exit_code = 3;
+        return false;
+    }
+
+    std::string scriptText((std::istreambuf_iterator<char>(scriptFile)),
+                           std::istreambuf_iterator<char>());
+
+    ManualTestContext context;
+    context.editor_text = scriptText;
+    context.loaded_script_path = options.script_path;
+    context.script_file_path = options.script_path;
+    context.editor_source = "headless";
+    context.active_script_case_name = options.case_name.empty()
+        ? fs::path(options.script_path).stem().string()
+        : options.case_name;
+    context.active_script_case_path = options.script_path;
+    context.active_script_case_purpose = "headless cxscript image test";
+
+    for (auto& var : context.global_variable_views)
+    {
+        if (var.name == "global.matInput")
+        {
+            var.image_path = options.image_path;
+            break;
+        }
+    }
+
+    AnalyzeScript(context);
+
+    ResetDebugRuntimeForReplay(context);
+
+    context.run_state = "runtime_step";
+    context.current_line = 0;
+
+    int steps = 0;
+
+    while (context.run_state != "runtime_finished" &&
+           context.run_state != "finished" &&
+           context.run_state != "blocked" &&
+           context.current_line < static_cast<int>(context.line_views.size()) &&
+           steps < options.max_steps)
+    {
+        DebugStepOnceWithSnapshot(context);
+        ++steps;
+    }
+
+    if (steps >= options.max_steps)
+    {
+        result.reason = "max steps exceeded";
+        result.exit_code = 4;
+        return false;
+    }
+
+    MarkDebugRunFinishedIfAtEnd(context);
+
+    fs::path snapshotPath = options.snapshot_path.empty()
+        ? fs::path(options.output_dir) / "snapshot.txt"
+        : fs::path(options.snapshot_path);
+
+    std::string snapshotReason;
+
+    if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
+    {
+        result.reason = "failed to save snapshot: " + snapshotReason;
+        result.exit_code = 5;
+        return false;
+    }
+
+    result.snapshot_path = snapshotPath.string();
+
+    if (options.save_overlay)
+    {
+        fs::path overlayPath = options.overlay_path.empty()
+            ? fs::path(options.output_dir) / "result_overlay.png"
+            : fs::path(options.overlay_path);
+
+        std::string overlayReason;
+
+        if (!SaveCxScriptOverlayImage(context, mat, overlayPath, overlayReason))
+        {
+            result.reason = "failed to save overlay: " + overlayReason;
+            result.exit_code = 5;
+            return false;
+        }
+
+        result.overlay_path = overlayPath.string();
+    }
+
+    result.run_state = context.run_state;
+    result.debug_status = context.debug_status;
+    result.debug_reason = context.debug_reason;
+    result.current_result_name = context.current_result_ref.name;
+    result.current_result_status = context.current_result_ref.status;
+    result.current_result_reason = context.current_result_ref.reason;
+    result.ok = true;
+    result.exit_code = (context.run_state == "blocked") ? 2 : 0;
+    fs::path summaryPath = options.summary_path.empty()
+        ? fs::path(options.output_dir) / "result_summary.json"
+        : fs::path(options.summary_path);
+
+    std::string summaryReason;
+
+    if (!SaveCxScriptHeadlessSummaryJson(context, options, result, summaryPath, summaryReason))
+    {
+        result.reason = "failed to save summary: " + summaryReason;
+        result.exit_code = 5;
+        return false;
+    }
+
+    result.summary_path = summaryPath.string();
+
+    CxImageEvidenceOptions evidenceOptions;
+    evidenceOptions.enabled = true;
+    evidenceOptions.profile_half_width = 40;
+    evidenceOptions.min_gradient = 8;
+    evidenceOptions.max_profiles = 200;
+    evidenceOptions.support_distance_px = 2.0;
+    evidenceOptions.save_profile_debug = false;
+
+    std::string evidenceReason;
+    AnalyzeCxScriptImageEvidence(mat, context, evidenceOptions, fs::path(options.output_dir), evidenceReason);
+
+    return true;
+
 }

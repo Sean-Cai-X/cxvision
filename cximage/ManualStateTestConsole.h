@@ -220,6 +220,16 @@ struct RuntimeObjectView
 
     std::string line_measure_result_empty_reason;
 
+    int line_findobject_component_total = 0;
+    int line_findobject_component_accepted = 0;
+    int line_findobject_component_rejected_by_min = 0;
+    int line_findobject_component_rejected_by_max = 0;
+    int line_findobject_component_rejected_by_borw = 0;
+
+    int line_findobject_area_min_observed = 0;
+    int line_findobject_area_max_observed = 0;
+    double line_findobject_area_mean_observed = 0.0;
+
     // Findcircle display snapshot.
     bool has_circle_roi_outer_polyline = false;
     std::vector<float> circle_roi_outer_xy;
@@ -386,6 +396,50 @@ struct ScriptSnippet
   std::string source_path;
   bool runnable = true;
 };
+
+struct CxScriptHeadlessOptions
+{
+    bool enabled = false;
+
+    std::string image_path;
+    std::string script_path;
+    std::string output_dir;
+
+    std::string case_name;
+    std::string snapshot_path;
+    std::string overlay_path;
+    std::string summary_path;
+    std::string runtime_log_path;
+
+    bool save_overlay = true;
+    int max_steps = 10000;
+};
+
+struct CxScriptHeadlessResult
+{
+    bool ok = false;
+
+    int exit_code = 0;
+
+    std::string reason;
+
+    std::string snapshot_path;
+    std::string overlay_path;
+    std::string summary_path;
+    std::string runtime_log_path;
+
+    std::string run_state;
+    std::string debug_status;
+    std::string debug_reason;
+
+    std::string current_result_name;
+    std::string current_result_status;
+    std::string current_result_reason;
+};
+
+bool RunCxScriptHeadless(
+    const CxScriptHeadlessOptions& options,
+    CxScriptHeadlessResult& result);
 
 struct DirectCapabilityMethod
 {

@@ -1162,6 +1162,92 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.binary_foreground_pixels = -1;
     }
 
+    try
+    {
+        const cv::Mat& bw = g_pbackimage->getmat();
+        if (!bw.empty())
+        {
+            cv::Mat roi = bw;
+            if (bw.channels() > 1)
+            {
+                cv::cvtColor(bw, roi, cv::COLOR_BGR2GRAY);
+            }
+
+            cv::Mat labels, stats, centroids;
+            int numComponents = cv::connectedComponentsWithStats(roi, labels, stats, centroids, 8);
+
+            m_lastMeasureInputDebug.findobject_component_total = numComponents - 1;
+            m_lastMeasureInputDebug.findobject_component_accepted = 0;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_min = 0;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_max = 0;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_borw = 0;
+
+            m_lastMeasureInputDebug.findobject_area_min_observed = INT_MAX;
+            m_lastMeasureInputDebug.findobject_area_max_observed = 0;
+            m_lastMeasureInputDebug.findobject_area_mean_observed = 0.0;
+
+            m_lastMeasureInputDebug.findobject_top_component_areas.clear();
+            m_lastMeasureInputDebug.findobject_top_component_x.clear();
+            m_lastMeasureInputDebug.findobject_top_component_y.clear();
+
+            int totalArea = 0;
+            int validAreaCount = 0;
+
+            for (int i = 1; i < numComponents; i++)
+            {
+                int area = stats.at<int>(i, cv::CC_STAT_AREA);
+                int x = stats.at<int>(i, cv::CC_STAT_LEFT);
+                int y = stats.at<int>(i, cv::CC_STAT_TOP);
+                int w = stats.at<int>(i, cv::CC_STAT_WIDTH);
+                int h = stats.at<int>(i, cv::CC_STAT_HEIGHT);
+
+                if (area > 0)
+                {
+                    if (area < m_lastMeasureInputDebug.findobject_area_min_observed)
+                        m_lastMeasureInputDebug.findobject_area_min_observed = area;
+                    if (area > m_lastMeasureInputDebug.findobject_area_max_observed)
+                        m_lastMeasureInputDebug.findobject_area_max_observed = area;
+                    totalArea += area;
+                    validAreaCount++;
+                }
+
+                bool rejected = false;
+
+                if (area < m_ifiltermin)
+                {
+                    m_lastMeasureInputDebug.findobject_component_rejected_by_min++;
+                    rejected = true;
+                }
+                if (area > m_ifiltermax)
+                {
+                    m_lastMeasureInputDebug.findobject_component_rejected_by_max++;
+                    rejected = true;
+                }
+
+                if (!rejected)
+                {
+                    m_lastMeasureInputDebug.findobject_component_accepted++;
+                }
+
+                if (m_lastMeasureInputDebug.findobject_top_component_areas.size() < 10)
+                {
+                    m_lastMeasureInputDebug.findobject_top_component_areas.push_back(area);
+                    m_lastMeasureInputDebug.findobject_top_component_x.push_back(x + w / 2.0);
+                    m_lastMeasureInputDebug.findobject_top_component_y.push_back(y + h / 2.0);
+                }
+            }
+
+            if (validAreaCount > 0)
+            {
+                m_lastMeasureInputDebug.findobject_area_mean_observed =
+                    static_cast<double>(totalArea) / validAreaCount;
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+
     if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
         m_lastMeasureInputDebug.findobject_measure_called = true;

@@ -189,6 +189,20 @@ struct FindlineMeasureInputDebug
     int binary_roi_height = 0;
 
     std::string result_empty_reason;
+
+    int findobject_component_total = 0;
+    int findobject_component_accepted = 0;
+    int findobject_component_rejected_by_min = 0;
+    int findobject_component_rejected_by_max = 0;
+    int findobject_component_rejected_by_borw = 0;
+
+    int findobject_area_min_observed = 0;
+    int findobject_area_max_observed = 0;
+    double findobject_area_mean_observed = 0.0;
+
+    std::vector<int> findobject_top_component_areas;
+    std::vector<double> findobject_top_component_x;
+    std::vector<double> findobject_top_component_y;
 };
 
 class Findline :public Shape

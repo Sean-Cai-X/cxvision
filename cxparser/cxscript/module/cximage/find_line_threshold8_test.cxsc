@@ -12,19 +12,19 @@ int method = 0;
 int threshold = 8;
 int linegap = 6;
 int fitmode = 1;
-
 int wgap = 8;
 int hgap = 32;
-int script_scale = 1;
+int tool_half_width = 32;
+int measure_fallback = 0;
 
+m_line.setmeasurefallback(measure_fallback);
 m_line.SetWHgap(wgap, hgap);
-m_line.setline(x0, y0, x1, y1, script_scale);
+m_line.setline(x0, y0, x1, y1, tool_half_width);
 
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
 m_line.setfitmode(fitmode);
-
 m_line.measure(&m_image);
 m_line.fitline();
 
