@@ -206,6 +206,8 @@ struct FindlineMeasureInputDebug
     int findobject_area_min_observed = 0;
     int findobject_area_max_observed = 0;
     double findobject_area_mean_observed = 0.0;
+    double findobject_area_median_observed = 0.0;
+    double findobject_area_p90_observed = 0.0;
 
     std::vector<int> findobject_top_component_areas;
     std::vector<double> findobject_top_component_x;

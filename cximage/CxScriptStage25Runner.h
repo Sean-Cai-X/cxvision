@@ -1,0 +1,72 @@
+#ifndef CXIMAGE_CXSCRIPT_STAGE25_RUNNER_H
+#define CXIMAGE_CXSCRIPT_STAGE25_RUNNER_H
+
+#include <string>
+#include <vector>
+#include <filesystem>
+#include "CxScriptStage25Manifest.h"
+
+struct Stage25CaseResult
+{
+    std::string case_id;
+    std::string image_id;
+    std::string level;
+    std::string target_id;
+    std::string tool;
+    std::string profile_id;
+    std::string evidence_profile;
+
+    bool t0_pass = false;
+    bool t1_pass = false;
+    bool t2_pass = false;
+
+    int valid_points_count = 0;
+    bool has_fit = false;
+
+    double measured_local_support_score = 0.0;
+    double measured_local_mean_distance_px = 0.0;
+    double global_reference_mean_distance_px = 0.0;
+    double fit_offset_error_px = 0.0;
+
+    double circle_local_support_score = 0.0;
+    double circle_local_mean_radial_distance_px = 0.0;
+    double circle_global_reference_mean_distance_px = 0.0;
+    double circle_center_error_px = 0.0;
+
+    std::string quality_classification;
+    std::string policy_classification;
+};
+
+struct Stage25RunOptions
+{
+    std::filesystem::path manifest_path;
+    std::filesystem::path out_root;
+    bool stop_on_error = false;
+    bool run_preflight = true;
+    bool run_evidence = true;
+};
+
+struct Stage25RunResult
+{
+    bool ok = false;
+    std::string reason;
+
+    int total_cases = 0;
+    int t0_pass = 0;
+    int t1_pass = 0;
+    int t2_pass = 0;
+
+    std::filesystem::path batch_report_path;
+    std::filesystem::path coverage_report_path;
+    std::filesystem::path stability_report_path;
+    std::filesystem::path policy_report_path;
+    std::filesystem::path preflight_report_path;
+
+    std::vector<Stage25CaseResult> case_results;
+};
+
+bool RunStage25ManifestFile(
+    const Stage25RunOptions& options,
+    Stage25RunResult& result);
+
+#endif

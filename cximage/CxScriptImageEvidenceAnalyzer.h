@@ -168,11 +168,18 @@ struct CxImageEvidenceSummary
     int measured_local_supported_points = 0;
     int measured_local_missing_points = 0;
 
+    double global_reference_mean_distance_px = 0.0;
+    double global_reference_max_distance_px = 0.0;
+    double global_reference_fit_offset_px = 0.0;
+
     double circle_local_support_score = 0.0;
     double circle_local_mean_radial_distance_px = 0.0;
     double circle_local_max_radial_distance_px = 0.0;
     double circle_local_mean_gradient = 0.0;
     std::string circle_reference_mode;
+
+    double circle_global_reference_mean_distance_px = 0.0;
+    double circle_global_reference_max_distance_px = 0.0;
 
     std::vector<CxPointEvidence> point_evidences;
 };

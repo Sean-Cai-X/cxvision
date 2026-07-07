@@ -1,0 +1,128 @@
+{
+  "stage": "2.5_l1_l3",
+  "image_manifest": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/stage25_image_manifest.json",
+  "findline_profiles": [
+    {
+      "profile_id": "legacy_default",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "linegap": 6,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 0,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "stage25_filter20",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "linegap": 6,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 1,
+      "policy_classification": "FILTER_POLICY_CANDIDATE"
+    },
+    {
+      "profile_id": "threshold8",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 8,
+      "linegap": 6,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 0,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "linegap10",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "linegap": 10,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 0,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "filter_relax_min1",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "linegap": 6,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 0,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "gamma",
+      "template": "cxparser/cxscript/module/cximage/templates/find_line_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "linegap": 6,
+      "fitmode": 1,
+      "script_scale": 1,
+      "filter_profile": 0,
+      "policy_classification": "DEFAULT_POLICY"
+    }
+  ],
+  "findcircle_profiles": [
+    {
+      "profile_id": "direct",
+      "template": "cxparser/cxscript/module/cximage/templates/find_circle_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "gap": 5,
+      "linegap": 3,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "threshold8",
+      "template": "cxparser/cxscript/module/cximage/templates/find_circle_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 8,
+      "gap": 5,
+      "linegap": 3,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "method1",
+      "template": "cxparser/cxscript/module/cximage/templates/find_circle_stage25_template.cxsc.in",
+      "method": 1,
+      "threshold": 20,
+      "gap": 5,
+      "linegap": 3,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "filter_relax",
+      "template": "cxparser/cxscript/module/cximage/templates/find_circle_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "gap": 5,
+      "linegap": 3,
+      "policy_classification": "DEFAULT_POLICY"
+    },
+    {
+      "profile_id": "fitresult_guard",
+      "template": "cxparser/cxscript/module/cximage/templates/find_circle_stage25_template.cxsc.in",
+      "method": 0,
+      "threshold": 20,
+      "gap": 5,
+      "linegap": 3,
+      "policy_classification": "DEFAULT_POLICY"
+    }
+  ],
+  "evidence_profiles": [
+    {
+      "name": "normal",
+      "nearest_point_support_px": 3.0,
+      "line_distance_support_px": 3.0,
+      "min_gradient": 6.0,
+      "min_gradient_ratio": 0.35
+    }
+  ]
+}

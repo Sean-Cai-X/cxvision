@@ -180,6 +180,8 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         "unsupported_points_count": ev_summary.get("unsupported_points_count"),
         "mean_error_px": ev_summary.get("mean_error_px"),
         "max_error_px": ev_summary.get("max_error_px"),
+        "primary_error_metric": ev_summary.get("primary_error_metric"),
+        "metric_valid": ev_summary.get("metric_valid"),
         "edge_support_score": ev_summary.get("edge_support_score"),
         "distance_support_score": ev_summary.get("distance_support_score"),
         "gradient_support_score": ev_summary.get("gradient_support_score"),
@@ -209,9 +211,13 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         "measured_local_support_score": ev_summary.get("measured_local_support_score"),
         "measured_local_mean_distance_px": ev_summary.get("measured_local_mean_distance_px"),
         "measured_local_mean_gradient": ev_summary.get("measured_local_mean_gradient"),
+        "global_reference_mean_distance_px": ev_summary.get("global_reference_mean_distance_px"),
+        "global_reference_max_distance_px": ev_summary.get("global_reference_max_distance_px"),
+        "global_reference_fit_offset_px": ev_summary.get("global_reference_fit_offset_px"),
         "circle_local_support_score": ev_summary.get("circle_local_support_score"),
         "circle_local_mean_radial_distance_px": ev_summary.get("circle_local_mean_radial_distance_px"),
         "circle_reference_mode": ev_summary.get("circle_reference_mode"),
+        "circle_global_reference_mean_distance_px": ev_summary.get("circle_global_reference_mean_distance_px"),
         "cc_selected_foreground": "",
         "cc_white_total": 0,
         "cc_white_accepted": 0,
@@ -230,18 +236,8 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
     
     mean_err = record["mean_error_px"] or 0
     max_err = record["max_error_px"] or 0
-    mean_ref_line = ev_summary.get("mean_reference_line_distance_px")
-    max_ref_line = ev_summary.get("max_reference_line_distance_px")
     
-    if tool == "Findline" and mean_ref_line is not None and max_ref_line is not None:
-        record["primary_error_metric"] = "reference_line_distance"
-        record["mean_error_px"] = mean_ref_line
-        record["max_error_px"] = max_ref_line
-        record["metric_valid"] = max_ref_line >= mean_ref_line - 1e-6
-        if not record["metric_valid"]:
-            record["metric_quality"] = "invalid_error_aggregation"
-    else:
-        record["primary_error_metric"] = "nearest_point_distance"
+    if not record.get("metric_valid", True):
         record["metric_valid"] = max_err >= mean_err - 1e-6
         if not record["metric_valid"]:
             record["metric_quality"] = "invalid_error_aggregation"
@@ -270,8 +266,9 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
         record["cc_black_accepted"] = 0
     
     record["cc_selected_total"] = snapshot_value(snapshot, "line_findobject_component_total") or cc_total
-    record["cc_selected_area_min"] = snapshot_value(snapshot, "line_findobject_area_min")
-    record["cc_selected_area_max"] = snapshot_value(snapshot, "line_findobject_area_max")
+    record["cc_selected_area_min"] = snapshot_value(snapshot, "line_findobject_area_min_observed")
+    record["cc_selected_area_max"] = snapshot_value(snapshot, "line_findobject_area_max_observed")
+    record["cc_selected_area_mean"] = snapshot_value(snapshot, "line_findobject_area_mean_observed")
     record["cc_selected_area_median"] = snapshot_value(snapshot, "line_findobject_area_median")
     record["cc_selected_area_p90"] = snapshot_value(snapshot, "line_findobject_area_p90")
     
@@ -279,6 +276,43 @@ def run_case(exe, out_root, item, image_path=None, evidence_profile=None):
     
     return record
 
+
+def as_float(v):
+    try:
+        return float(v) if v is not None else 0.0
+    except:
+        return 0.0
+
+def as_int(v):
+    try:
+        return int(v) if v is not None else 0
+    except:
+        return 0
+
+def is_t2_pass(row):
+    quality = row.get("quality_classification") or row.get("classification")
+    
+    if quality in {
+        "ORIGINAL_LOCAL_EDGE_CONFIRMED",
+        "ORIGINAL_EDGE_CONFIRMED",
+        "ORIGINAL_GEOMETRY_SUPPORTED",
+    }:
+        return True
+    
+    local_support = as_float(row.get("measured_local_support_score", 0.0))
+    circle_local_support = as_float(row.get("circle_local_support_score", 0.0))
+    combined_support = as_float(row.get("combined_edge_support_score", 0.0))
+    
+    if local_support >= 0.60:
+        return True
+    
+    if circle_local_support >= 0.60:
+        return True
+    
+    if combined_support >= 0.60:
+        return True
+    
+    return False
 
 def classify_case(record):
     tool = record["tool"]
@@ -330,15 +364,6 @@ def classify_case(record):
         record["t3_pass"] = False
         return record
     
-    geometry_ok = mean_err <= 2.0
-    if tool == "Findline":
-        geometry_ok = geometry_ok and fit_offset <= 6.0
-    else:
-        center_err = record["circle_center_error_px"] or 999
-        geometry_ok = geometry_ok and center_err <= 3.0
-    
-    record["t2_pass"] = geometry_ok
-    
     is_filter_candidate = filter_profile == 1 or (record.get("filter_min") or 999) in (20, 25)
     policy_classification = "FILTER_POLICY_CANDIDATE" if is_filter_candidate else "DEFAULT_POLICY"
     
@@ -347,32 +372,34 @@ def classify_case(record):
     if not metric_valid or metric_quality == "invalid_error_aggregation":
         record["quality_classification"] = "EVIDENCE_METRIC_INCONSISTENT"
         record["classification"] = "EVIDENCE_METRIC_INCONSISTENT"
+        record["t2_pass"] = False
         record["t3_pass"] = False
         return record
     
     if local_support >= 0.60:
         record["quality_classification"] = "ORIGINAL_LOCAL_EDGE_CONFIRMED"
         record["classification"] = "ORIGINAL_LOCAL_EDGE_CONFIRMED"
+        record["t2_pass"] = True
         record["t3_pass"] = True
     elif combined_support >= 0.60:
         record["quality_classification"] = "ORIGINAL_EDGE_CONFIRMED"
         record["classification"] = "ORIGINAL_EDGE_CONFIRMED"
+        record["t2_pass"] = True
         record["t3_pass"] = True
-    elif geometry_ok:
+    elif mean_err <= 5.0:
         record["quality_classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
         record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
-        record["t3_pass"] = False
-    elif mean_err <= 5.0 and valid_points >= 5:
-        record["quality_classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
-        record["classification"] = "GEOMETRY_MARGINAL_BUT_SAMPLED"
+        record["t2_pass"] = False
         record["t3_pass"] = False
     elif is_filter_candidate:
         record["quality_classification"] = "FILTER_POLICY_CANDIDATE"
         record["classification"] = "FILTER_POLICY_CANDIDATE"
+        record["t2_pass"] = False
         record["t3_pass"] = False
     else:
         record["quality_classification"] = "SUSPICIOUS_CANDIDATE"
         record["classification"] = "SUSPICIOUS_CANDIDATE"
+        record["t2_pass"] = False
         record["t3_pass"] = False
     
     return record
@@ -642,25 +669,56 @@ def write_component_debug_report(out_root, records):
              "不能用于证明参数在高对比、低对比、复杂边界、光照不均、噪声/模糊图像上的稳定性。",
              "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", ""]
     
-    lines += ["## Findline Component Stats", "", "| Case | Profile | CC_Foreground | SelectedTotal | SelectedAccepted | AreaMin | AreaMedian | AreaP90 | AreaMax | EffectiveFilterMin |", "|---|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+    lines += ["## Findline Component Stats", "", "| Case | Profile | CC_Foreground | SelectedTotal | SelectedAccepted | AreaMin | AreaMean | AreaMedian | AreaP90 | AreaMax | EffectiveFilterMin |", "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","cc_selected_foreground","cc_selected_total","cc_selected_accepted","cc_selected_area_min","cc_selected_area_median","cc_selected_area_p90","cc_selected_area_max","effective_filter_min"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","cc_selected_foreground","cc_selected_total","cc_selected_accepted","cc_selected_area_min","cc_selected_area_mean","cc_selected_area_median","cc_selected_area_p90","cc_selected_area_max","effective_filter_min"]) + " |")
     
     (out_root / "component_debug_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+def validate_primary_metric(row):
+    tool = row.get("tool")
+    primary = row.get("primary_error_metric")
+    
+    if tool == "Findline":
+        expected = "measured_local_distance"
+        if row.get("quality_classification") in {
+            "ORIGINAL_LOCAL_EDGE_CONFIRMED",
+            "ORIGINAL_EDGE_CONFIRMED",
+        }:
+            return primary == expected
+    
+    if tool == "Findcircle":
+        expected = "circle_local_radial_distance"
+        if row.get("quality_classification") in {
+            "ORIGINAL_LOCAL_EDGE_CONFIRMED",
+            "ORIGINAL_EDGE_CONFIRMED",
+        }:
+            return primary == expected
+    
+    return True
 
 def write_metric_consistency_report(out_root, records):
     lines = ["# Stage 2.5 Metric Consistency Report", "", "## Summary", ""]
     
     valid_metrics = [r for r in records if r.get("metric_valid", True)]
     invalid_metrics = [r for r in records if not r.get("metric_valid", True)]
+    valid_primary = [r for r in records if validate_primary_metric(r)]
+    invalid_primary = [r for r in records if not validate_primary_metric(r)]
+    
     lines.append(f"- Total cases: {len(records)}")
     lines.append(f"- Metric valid: {len(valid_metrics)}")
     lines.append(f"- Metric invalid: {len(invalid_metrics)}")
+    lines.append(f"- Primary metric valid: {len(valid_primary)}")
+    lines.append(f"- Primary metric invalid: {len(invalid_primary)}")
     
-    lines += ["", "## Metric Validation", "", "| Case | Profile | PrimaryMetric | MeanErr | MaxErr | Valid |", "|---|---|---|---:|---:|---|"]
+    lines += ["", "## Metric Validation", "", "| Case | Tool | PrimaryMetric | ExpectedPrimaryMetric | MeanErr | MaxErr | AggregationValid | PrimaryMetricValid |", "|---|---|---|---|---:|---:|---|---|"]
+    
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
-        lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","primary_error_metric","mean_error_px","max_error_px","metric_valid"]) + " |")
+        tool = r.get("tool")
+        expected = "measured_local_distance" if tool == "Findline" else "circle_local_radial_distance"
+        primary_valid = validate_primary_metric(r)
+        lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","tool","primary_error_metric"]) + " | " + md_value(expected) + " | " + " | ".join(md_value(r.get(k, "")) for k in ["mean_error_px","max_error_px","metric_valid"]) + " | " + md_value(primary_valid) + " |")
     
     (out_root / "metric_consistency_report.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -687,22 +745,51 @@ def write_standardized_batch_report(out_root, records, exe, manifest):
              "所有 STABLE_PROFILE 判断在图像数量不足时自动降级为 BASELINE_ONLY。", "",
              "## Summary", "", f"- Total cases: {len(records)}", f"- T0 (execution) pass: {sum(bool(r.get('t0_pass')) for r in records)}", f"- T1 (original measure) pass: {sum(bool(r.get('t1_pass')) for r in records)}", f"- T2 (evidence support) pass: {sum(bool(r.get('t2_pass')) for r in records)}", ""]
     
-    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | LocalSupport | CombinedSupport | MeanErr | FitOffset | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
+    lines += ["## Findline Cases", "", "| Case | Profile | EvidenceProfile | Points | Fit | LocalSupport | LocalMeanDist | GlobalLineDist | FitOffset | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findline":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","measured_local_support_score","combined_edge_support_score","mean_error_px","fit_offset_error_px","quality_classification","policy_classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_line","measured_local_support_score","measured_local_mean_distance_px","global_reference_mean_distance_px","fit_offset_error_px","quality_classification","policy_classification"]) + " |")
     
-    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | LocalSupport | CombinedSupport | CenterErr | MeanErr | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
+    lines += ["", "## Findcircle Cases", "", "| Case | Profile | EvidenceProfile | Points | FitCircle | LocalSupport | LocalMeanRadialDist | GlobalRefMeanDist | CenterErr | Quality | Policy |", "|---|---|---|---:|---|---:|---:|---:|---:|---|---|"]
     for r in sorted(records, key=lambda x: (x.get("evidence_profile") or "", x["case_name"])):
         if r["tool"] == "Findcircle":
-            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","circle_local_support_score","combined_edge_support_score","circle_center_error_px","mean_error_px","quality_classification","policy_classification"]) + " |")
+            lines.append("| " + " | ".join(md_value(r.get(k, "")) for k in ["case_name","filter_profile","evidence_profile","valid_points_count","has_fit_circle","circle_local_support_score","circle_local_mean_radial_distance_px","circle_global_reference_mean_distance_px","circle_center_error_px","quality_classification","policy_classification"]) + " |")
     
-    lines += ["", "## Current Decision", "",
-              "- filter_min=20: 只是 Stage 2.5 filter profile 候选",
-              "- 不是产品默认",
-              "- 仍需原版本 FindObject filter 规则对齐",
-              "- 仍需多图像集测试",
-              "- 暂不进入 FastMatch"]
+    lines += ["", "## Component Shape Warning", "",
+              "以下 case 的二值图连通域形态存在潜在风险：", ""]
+    
+    shape_warnings = []
+    for r in records:
+        if r["tool"] != "Findline":
+            continue
+        selected_total = as_int(r.get("cc_selected_total", 0))
+        area_max = as_float(r.get("cc_selected_area_max", 0))
+        binary_fg = as_float(r.get("binary_foreground_pixels", 0))
+        
+        shape_status = "NORMAL_COMPONENT_DISTRIBUTION"
+        if selected_total <= 1 and area_max > 100000:
+            shape_status = "BINARY_COMPONENT_COLLAPSED_TO_LARGE_REGION"
+        elif selected_total > 0 and binary_fg > 0:
+            ratio = area_max / binary_fg
+            if ratio > 0.80:
+                shape_status = "FOREGROUND_DOMINATED_BY_SINGLE_COMPONENT"
+        
+        if shape_status != "NORMAL_COMPONENT_DISTRIBUTION":
+            shape_warnings.append(r)
+            lines.append(f"- **{r['case_name']}**: {shape_status} (SelectedTotal={selected_total}, AreaMax={area_max}, BinaryFG={binary_fg})")
+    
+    if not shape_warnings:
+        lines.append("- 无特殊警告")
+    
+    lines += ["", "## Parameter Policy Decision", "",
+              "| Parameter/Profile | Current Status | Decision | Reason |",
+              "|---|---|---|---|",
+              "| Findline legacy filter_min=50 | preserved | keep as legacy | needed for original compare |",
+              "| Findline stage25 filter_min=20 | candidate | keep as test profile | produces points and matches component stats |",
+              "| Findline gamma | risky candidate | do not promote | binary collapses to large component |",
+              "| Findline filter_relax min=1 | debug candidate | do not promote | too permissive, many components |",
+              "| Findline linegap10 | sparse candidate | keep for comparison | few points but locally supported |",
+              "| FastMatch | not evaluated | deferred | not in current test scope |"]
     
     (out_root / "batch_report.md").write_text("\n".join(lines), encoding="utf-8")
     

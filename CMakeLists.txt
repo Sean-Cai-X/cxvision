@@ -53,6 +53,12 @@ set(CXIMAGE_SOURCES
   cximage/FastMatch.cpp
   cximage/Run.cpp
   cximage/ParserClass.cpp
+  cximage/CxScriptStage25Manifest.cpp
+  cximage/CxScriptStage25Template.cpp
+  cximage/CxScriptImagePreflight.cpp
+  cximage/CxScriptStage25Runner.cpp
+  cximage/CxScriptStage25ReportWriter.cpp
+  cximage/CxScriptStage25Register.cpp
 )
 
 set(CXGEOM_SOURCES
@@ -146,9 +152,9 @@ endif()
 
 set_target_properties(cxvision_imgui_acceptance PROPERTIES
   OUTPUT_NAME "cxvision_imgui_acceptance"
-  RUNTIME_OUTPUT_DIRECTORY "D:/Codex-WorkDir/Sean_WorkDir/cxparser/build"
-  RUNTIME_OUTPUT_DIRECTORY_RELEASE "D:/Codex-WorkDir/Sean_WorkDir/cxparser/build/Release"
-  RUNTIME_OUTPUT_DIRECTORY_DEBUG "D:/Codex-WorkDir/Sean_WorkDir/cxparser/build/Debug"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
 )
 
 add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
@@ -156,4 +162,11 @@ add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
           "${OCCT_ROOT}/win64/vc14/bin"
           "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
   COMMENT "Copy matching OpenCASCADE runtime DLLs"
+)
+
+add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "${OpenCV_DIR}/x64/vc16/bin/opencv_world490.dll"
+          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+  COMMENT "Copy OpenCV runtime DLL"
 )

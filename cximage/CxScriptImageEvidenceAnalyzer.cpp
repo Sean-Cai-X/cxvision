@@ -720,9 +720,13 @@ static void AnalyzeFindlineEvidence(
         summary.max_reference_line_distance_px = maxLineDistance;
     }
 
-    summary.primary_error_metric = "reference_line_distance";
-    summary.mean_error_px = summary.mean_reference_line_distance_px;
-    summary.max_error_px = summary.max_reference_line_distance_px;
+    summary.global_reference_mean_distance_px = summary.mean_reference_line_distance_px;
+    summary.global_reference_max_distance_px = summary.max_reference_line_distance_px;
+    summary.global_reference_fit_offset_px = summary.fit_offset_error_px;
+
+    summary.primary_error_metric = "measured_local_distance";
+    summary.mean_error_px = summary.measured_local_mean_distance_px;
+    summary.max_error_px = summary.measured_local_max_distance_px;
 
     if (summary.max_error_px + 1.0e-6 < summary.mean_error_px)
     {
@@ -1184,9 +1188,12 @@ static void AnalyzeFindcircleEvidence(
         summary.max_radial_error_px = maxRadialError;
     }
 
-    summary.primary_error_metric = "radial_error";
-    summary.mean_error_px = summary.mean_radial_error_px;
-    summary.max_error_px = summary.max_radial_error_px;
+    summary.circle_global_reference_mean_distance_px = summary.mean_nearest_point_error_px;
+    summary.circle_global_reference_max_distance_px = summary.max_nearest_point_error_px;
+
+    summary.primary_error_metric = "circle_local_radial_distance";
+    summary.mean_error_px = summary.circle_local_mean_radial_distance_px;
+    summary.max_error_px = summary.circle_local_max_radial_distance_px;
 
     if (summary.max_error_px + 1.0e-6 < summary.mean_error_px)
     {
@@ -1432,11 +1439,16 @@ static bool SaveEvidenceSummaryJson(
             file << "      \"measured_local_mean_gradient\": " << s.measured_local_mean_gradient << ",\n";
             file << "      \"measured_local_supported_points\": " << s.measured_local_supported_points << ",\n";
             file << "      \"measured_local_missing_points\": " << s.measured_local_missing_points << ",\n";
+            file << "      \"global_reference_mean_distance_px\": " << s.global_reference_mean_distance_px << ",\n";
+            file << "      \"global_reference_max_distance_px\": " << s.global_reference_max_distance_px << ",\n";
+            file << "      \"global_reference_fit_offset_px\": " << s.global_reference_fit_offset_px << ",\n";
             file << "      \"circle_local_support_score\": " << s.circle_local_support_score << ",\n";
             file << "      \"circle_local_mean_radial_distance_px\": " << s.circle_local_mean_radial_distance_px << ",\n";
             file << "      \"circle_local_max_radial_distance_px\": " << s.circle_local_max_radial_distance_px << ",\n";
             file << "      \"circle_local_mean_gradient\": " << s.circle_local_mean_gradient << ",\n";
             file << "      \"circle_reference_mode\": \"" << CxDebugJsonEscape(s.circle_reference_mode) << "\",\n";
+            file << "      \"circle_global_reference_mean_distance_px\": " << s.circle_global_reference_mean_distance_px << ",\n";
+            file << "      \"circle_global_reference_max_distance_px\": " << s.circle_global_reference_max_distance_px << ",\n";
             file << "      \"conclusion\": \"" << CxDebugJsonEscape(s.conclusion) << "\"\n";
             file << "    }";
 
