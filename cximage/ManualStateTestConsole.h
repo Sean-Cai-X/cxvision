@@ -138,6 +138,7 @@ struct RuntimeObjectView
     std::string line_fit_status;
     std::string line_fit_mode;
     std::string line_measure_status;
+    std::string line_measure_hint;
     std::string line_result_status;
     std::string line_result_reason;
 
@@ -349,6 +350,7 @@ struct ResultRefView
     std::string line_result_status;
     std::string line_result_reason;
     std::string line_measure_status;
+    std::string line_measure_hint;
 
     std::string line_measure_source;
     bool line_measure_fallback_used = false;

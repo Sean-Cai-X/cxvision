@@ -32,6 +32,8 @@ set(CXIMAGE_SOURCES
   cximage/GuiMain.cpp
   cximage/ManualStateTestConsole.cpp
   cximage/CxScriptImageEvidenceAnalyzer.cpp
+  cximage/CxScriptGeometryFrameProbe.cpp
+  cximage/CxScriptGeometryFrameOverlay.cpp
   cximage/ParserDebugBridge.cpp
   cximage/ImageAnnotationLayer.cpp
   cximage/ImageAnnotationUI.cpp

@@ -1,10 +1,11 @@
-﻿#include "ViewController.h"
+#include "ViewController.h"
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
 #include "CxScriptImageEvidenceAnalyzer.h"
+#include "CxScriptGeometryFrameProbe.h"
 
 #include <imgui.h>
 
@@ -324,6 +325,7 @@ static void AppendCxDebugRuntimeObjectsSnapshot(const ManualTestContext& context
                 << ",\"line_fit_mode\":\"" << CxDebugJsonEscape(object.line_fit_mode) << "\""
                 << ",\"line_fit_status\":\"" << CxDebugJsonEscape(object.line_fit_status) << "\""
                 << ",\"line_measure_status\":\"" << CxDebugJsonEscape(object.line_measure_status) << "\""
+                << ",\"line_measure_hint\":\"" << CxDebugJsonEscape(object.line_measure_hint) << "\""
                 << "}";
 
             if (i + 1 < context.runtime_objects.size())
@@ -843,6 +845,7 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_fit_mode: " << object.line_fit_mode << "\n";
                 file << "  line_fit_status: " << object.line_fit_status << "\n";
                 file << "  line_measure_status: " << object.line_measure_status << "\n";
+                file << "  line_measure_hint: " << object.line_measure_hint << "\n";
                 file << "  line_seek_points_count: " << object.line_seek_points_count << "\n";
                 file << "  line_edgeband_count: " << object.line_edgeband_count << "\n";
                 file << "  line_chain_length: " << object.line_chain_length << "\n";
@@ -3169,6 +3172,8 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
                 sourceObject->line_result_reason;
             context.current_result_ref.line_measure_status =
                 sourceObject->line_measure_status;
+            context.current_result_ref.line_measure_hint =
+                sourceObject->line_measure_hint;
         }
 
         // æ³¨æ„ï¼šè¿™é‡Œä¸ BLOCKEDï¼Œä¸ä¼ªé€  PASSï¼Œå…è®¸è„šæœ¬ç»§ç»­åˆ° global.current_statusã€‚
@@ -3222,6 +3227,8 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
 
         context.current_result_ref.line_measure_status =
             sourceObject->line_measure_status;
+        context.current_result_ref.line_measure_hint =
+            sourceObject->line_measure_hint;
     }
     context.current_result_ref.line_no = line.line_no;
 
@@ -3324,6 +3331,40 @@ static void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
 
 
 
+static std::string BuildFindlineMeasureHint(const RuntimeObjectView& object)
+{
+    if (object.valid_line_points_count > 0)
+        return "";
+
+    if (!object.line_measure_roi_intersects_image)
+        return "Findline ROI does not intersect image.";
+
+    if (object.line_measure_findobject_called &&
+        object.line_measure_cc_selected_accepted == 0 &&
+        object.line_measure_cc_selected_total > 0 &&
+        object.line_measure_effective_filter_min > object.line_measure_cc_selected_area_p90)
+    {
+        return "Findline original Measure produced no points because FindObject accepted no connected components. effective_filter_min is higher than selected component P90. Try Stage25 filter profile: m_line.setfilterprofile(1).";
+    }
+
+    if (object.line_measure_binary_foreground_pixels > 0 &&
+        object.line_measure_cc_selected_total == 0)
+    {
+        return "Binary foreground exists but no selected connected components. Check filter_borw / foreground polarity.";
+    }
+
+    if (object.line_measure_findobject_called &&
+        object.line_measure_cc_selected_total > 0 &&
+        object.line_measure_cc_selected_accepted == 0)
+    {
+        return "FindObject was called but accepted no selected connected components. Check filter_min/filter_max/filter_borw and polarity.";
+    }
+
+    if (object.line_measure_binary_foreground_pixels == 0)
+        return "Findline binary foreground is empty. Check threshold, method polarity, and gamma.";
+
+    return "Findline original Measure produced no valid points. Check ROI, scan width, threshold, polarity, and filter settings.";
+}
 static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     Findline& lineTool)
 {
@@ -3556,6 +3597,13 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_original_chain_length =
         input.original_chain_length;
 
+    if (!input.failure_stage.empty())
+    {
+        object.line_measure_failure_stage = input.failure_stage;
+    }
+
+    object.line_measure_hint = BuildFindlineMeasureHint(object);
+
     object.line_measure_geometry_request_valid =
         input.measure_geometry_request_valid;
 
@@ -3629,6 +3677,16 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
            << object.line_measure_filter_min
            << ", filter_max="
            << object.line_measure_filter_max
+           << ", filter_profile="
+           << object.line_measure_filter_profile
+           << ", effective_filter_min="
+           << object.line_measure_effective_filter_min
+           << ", cc_selected_total="
+           << object.line_measure_cc_selected_total
+           << ", cc_selected_accepted="
+           << object.line_measure_cc_selected_accepted
+           << ", cc_selected_area_p90="
+           << object.line_measure_cc_selected_area_p90
            << ", findobject_called="
            << (object.line_measure_findobject_called ? "true" : "false")
            << ", binary_foreground="
@@ -5194,7 +5252,9 @@ void ViewController::initManualStateTestConsole()
      "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true},
     {"Findline Native Width Compare", "Original Measure comparison with setline scale 32.",
      "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
-    {"Findline Original Direct V", "Original Findline Measure. Native width. Vertical.",
+    {"Findline Vertical / Stage25 Filter20", "Recommended vertical Findline Stage 2.5 candidate; enables filter_profile=1 / effective_filter_min=20.",
+     "", "cxparser/cxscript/module/cximage/find_line_vertical_stage25_filter20_test.cxsc", true},
+    {"Findline Vertical / Legacy Direct", "Legacy direct failure control; keeps filter_profile=0 / effective_filter_min=50.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
     {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
      "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true},
@@ -5546,6 +5606,38 @@ void ViewController::drawManualStateTestConsole()
         initialized ? "runtime_queried" : "BLOCKED");
     }
 
+    if (ImGui::Button("Export Gauge Frame Probe"))
+    {
+      std::string scriptPath = !m_manualTest.loaded_script_path.empty()
+        ? m_manualTest.loaded_script_path
+        : m_manualTest.script_file_path;
+      fs::path resolvedScript = ResolveWorkspaceFile(scriptPath);
+      if (!fs::exists(resolvedScript) && fs::exists(fs::path(scriptPath)))
+        resolvedScript = fs::path(scriptPath);
+
+      GaugeFrameProbeOptions options;
+      options.enabled = true;
+      options.image_path = m_manualTest.image_file_path;
+      options.script_path = resolvedScript;
+      const std::string caseName = resolvedScript.stem().string().empty()
+        ? "manual_frame_probe"
+        : resolvedScript.stem().string();
+      options.case_name = caseName;
+      options.out_root = fs::path("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/gauge_frame_probe_manual") / caseName;
+
+      GaugeFrameProbeResult probeResult;
+      const bool exported = RunGaugeFrameProbe(options, probeResult);
+      m_scriptResult.status = exported ? "PASS" : "BLOCKED";
+      std::ostringstream reason;
+      reason << (exported ? "Gauge frame probe exported" : "Gauge frame probe export failed")
+             << " | reason=" << probeResult.reason
+             << " | frame_black=" << probeResult.frame_black_path.string()
+             << " | frame_on_image=" << probeResult.frame_on_image_path.string()
+             << " | frame_geometry=" << probeResult.frame_geometry_path.string()
+             << " | frame_report=" << probeResult.frame_report_path.string();
+      m_scriptResult.reason = reason.str();
+      m_scriptResult.runtime_fillback_status = exported ? "gauge_frame_probe_exported" : "gauge_frame_probe_failed";
+    }
     if (ImGui::Button("Demo: Debug find_circle_direct_test"))
     {
       const std::string target =
@@ -6202,6 +6294,16 @@ void ViewController::drawManualStateTestConsole()
                   object.line_measure_points_count,
                   object.valid_line_points_count,
                   object.line_avgdist);
+      ImGui::Text("filter_profile=%d | raw_filter_min=%d | effective_filter_min=%d",
+                  object.line_measure_filter_profile,
+                  object.line_measure_filter_min,
+                  object.line_measure_effective_filter_min);
+      ImGui::Text("cc_selected total=%d accepted=%d p90=%.3f",
+                  object.line_measure_cc_selected_total,
+                  object.line_measure_cc_selected_accepted,
+                  object.line_measure_cc_selected_area_p90);
+      if (!object.line_measure_hint.empty())
+        ImGui::TextWrapped("measure_hint: %s", object.line_measure_hint.c_str());
       if (object.has_fit_line)
         ImGui::Text("fit=(%.3f, %.3f)->(%.3f, %.3f)",
                     object.fit_line_x0, object.fit_line_y0,
@@ -6651,6 +6753,7 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "    \"result_type\": \"" << CxDebugJsonEscape(context.current_result_ref.result_type) << "\",\n";
         file << "    \"status\": \"" << CxDebugJsonEscape(context.current_result_ref.status) << "\",\n";
         file << "    \"reason\": \"" << CxDebugJsonEscape(context.current_result_ref.reason) << "\",\n";
+        file << "    \"line_measure_hint\": \"" << CxDebugJsonEscape(context.current_result_ref.line_measure_hint) << "\",\n";
         file << "    \"points_count\": " << context.current_result_ref.points_count << ",\n";
         file << "    \"valid_points_count\": " << context.current_result_ref.valid_points_count << ",\n";
         file << "    \"has_fit_line\": " << (context.current_result_ref.result_type == "FindlineResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << ",\n";
@@ -6687,10 +6790,15 @@ static bool SaveCxScriptHeadlessSummaryJson(
                 file << "      \"line_measure_findobject_called\": " << (object.line_measure_findobject_called ? "true" : "false") << ",\n";
                 file << "      \"line_measure_filter_min\": " << object.line_measure_filter_min << ",\n";
                 file << "      \"line_measure_filter_max\": " << object.line_measure_filter_max << ",\n";
+                file << "      \"line_measure_filter_profile\": " << object.line_measure_filter_profile << ",\n";
+                file << "      \"line_measure_effective_filter_borw\": " << object.line_measure_effective_filter_borw << ",\n";
+                file << "      \"line_measure_effective_filter_min\": " << object.line_measure_effective_filter_min << ",\n";
+                file << "      \"line_measure_effective_filter_max\": " << object.line_measure_effective_filter_max << ",\n";
                 file << "      \"line_measure_source\": \"" << CxDebugJsonEscape(object.line_measure_source) << "\",\n";
                 file << "      \"line_measure_failure_stage\": \"" << CxDebugJsonEscape(object.line_measure_failure_stage) << "\",\n";
                 file << "      \"line_measure_fallback_used\": " << (object.line_measure_fallback_used ? "true" : "false") << ",\n";
                 file << "      \"line_measure_status\": \"" << CxDebugJsonEscape(object.line_measure_status) << "\",\n";
+                file << "      \"line_measure_hint\": \"" << CxDebugJsonEscape(object.line_measure_hint) << "\",\n";
                 file << "      \"line_fit_status\": \"" << CxDebugJsonEscape(object.line_fit_status) << "\",\n";
                 file << "      \"line_findobject_component_total\": " << object.line_findobject_component_total << ",\n";
                 file << "      \"line_findobject_component_accepted\": " << object.line_findobject_component_accepted << ",\n";

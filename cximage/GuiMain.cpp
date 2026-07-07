@@ -1,12 +1,27 @@
 #include "Main.h"
 #include "ManualStateTestConsole.h"
 #include "CxScriptStage25Runner.h"
+#include "CxScriptGeometryFrameProbe.h"
 #include <iostream>
 
 int main(int argc, char** argv)
 {
     CxScriptHeadlessOptions headlessOptions;
-
+    GaugeFrameProbeOptions frameProbeOptions;
+    if (ParseGaugeFrameProbeArgs(argc, argv, frameProbeOptions) &&
+        frameProbeOptions.enabled)
+    {
+        GaugeFrameProbeResult result;
+        const bool ok = RunGaugeFrameProbe(frameProbeOptions, result);
+        std::cout << "frame_probe_ok=" << (ok ? "true" : "false") << "\n";
+        std::cout << "reason=" << result.reason << "\n";
+        std::cout << "tool=" << result.tool << "\n";
+        std::cout << "frame_black=" << result.frame_black_path.string() << "\n";
+        std::cout << "frame_on_image=" << result.frame_on_image_path.string() << "\n";
+        std::cout << "frame_geometry=" << result.frame_geometry_path.string() << "\n";
+        std::cout << "frame_report=" << result.frame_report_path.string() << "\n";
+        return result.exit_code;
+    }
     if (ParseCxScriptHeadlessArgs(argc, argv, headlessOptions) &&
         headlessOptions.enabled)
     {

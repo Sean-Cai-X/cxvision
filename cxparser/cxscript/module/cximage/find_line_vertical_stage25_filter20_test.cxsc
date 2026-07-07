@@ -1,0 +1,38 @@
+Image m_image;
+Findline m_line;
+
+m_image.copyFromMat(global.matInput);
+
+int x0 = 380;
+int y0 = 120;
+int x1 = 380;
+int y1 = 820;
+
+int method = 0;
+int threshold = 20;
+int linegap = 6;
+int fitmode = 1;
+
+int wgap = 32;
+int hgap = 8;
+int measure_scale = wgap;
+
+m_line.SetWHgap(wgap, hgap);
+m_line.setlinegap(linegap);
+m_line.setline(x0, y0, x1, y1, measure_scale);
+
+m_line.setmethod(method);
+m_line.setthre(threshold);
+m_line.setfitmode(fitmode);
+
+/*
+ * Stage 2.5 candidate profile.
+ * Only for current test template; not product default.
+ */
+m_line.setfilterprofile(1);
+
+m_line.measure(&m_image);
+m_line.fitline();
+
+global.line_ref = m_line.get_result();
+global.current_status = "PENDING";
