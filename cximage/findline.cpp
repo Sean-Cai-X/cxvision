@@ -2334,6 +2334,26 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.roi_x1 = displaySnapshot.x1;
         m_lastMeasureInputDebug.roi_y1 = displaySnapshot.y1;
         m_lastMeasureInputDebug.roi_scan_half_width = displaySnapshot.scan_half_width;
+        m_lastMeasureInputDebug.line_dx =
+            displaySnapshot.x1 - displaySnapshot.x0;
+        m_lastMeasureInputDebug.line_dy =
+            displaySnapshot.y1 - displaySnapshot.y0;
+        m_lastMeasureInputDebug.line_length = std::sqrt(
+            m_lastMeasureInputDebug.line_dx * m_lastMeasureInputDebug.line_dx +
+            m_lastMeasureInputDebug.line_dy * m_lastMeasureInputDebug.line_dy);
+        if (std::abs(m_lastMeasureInputDebug.line_dx) >=
+            std::abs(m_lastMeasureInputDebug.line_dy))
+        {
+            m_lastMeasureInputDebug.line_orientation = "horizontal_like";
+        }
+        else
+        {
+            m_lastMeasureInputDebug.line_orientation = "vertical_like";
+        }
+        m_lastMeasureInputDebug.requested_tool_half_width =
+            displaySnapshot.scale;
+        m_lastMeasureInputDebug.effective_tool_half_width =
+            displaySnapshot.scan_half_width;
 
         const double minX =
             std::min(displaySnapshot.scan_box_xy[0],

@@ -161,6 +161,10 @@ struct CxImageEvidenceSummary
     std::string conclusion;
     std::string support_conclusion;
 
+    std::string line_orientation;
+    double line_normal_x = 0.0;
+    double line_normal_y = 0.0;
+
     double measured_local_support_score = 0.0;
     double measured_local_mean_distance_px = 0.0;
     double measured_local_max_distance_px = 0.0;

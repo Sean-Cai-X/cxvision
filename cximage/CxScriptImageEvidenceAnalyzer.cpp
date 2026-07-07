@@ -386,6 +386,15 @@ static void AnalyzeFindlineEvidence(
     double normalX = -dirY;
     double normalY = dirX;
 
+    summary.line_orientation = object.line_orientation;
+    if (summary.line_orientation.empty())
+    {
+        summary.line_orientation = std::abs(dx) >= std::abs(dy) ?
+            "horizontal_like" : "vertical_like";
+    }
+    summary.line_normal_x = normalX;
+    summary.line_normal_y = normalY;
+
     int halfWidth = options.profile_half_width;
     if (object.line_scan_half_width > 0)
     {
@@ -1396,6 +1405,9 @@ static bool SaveEvidenceSummaryJson(
             file << "    {\n";
             file << "      \"tool\": \"" << CxDebugJsonEscape(s.tool) << "\",\n";
             file << "      \"object_name\": \"" << CxDebugJsonEscape(s.object_name) << "\",\n";
+            file << "      \"line_orientation\": \"" << CxDebugJsonEscape(s.line_orientation) << "\",\n";
+            file << "      \"line_normal_x\": " << s.line_normal_x << ",\n";
+            file << "      \"line_normal_y\": " << s.line_normal_y << ",\n";
             file << "      \"reference_available\": " << (s.reference_available ? "true" : "false") << ",\n";
             file << "      \"reference_points_count\": " << s.reference_points_count << ",\n";
             file << "      \"measured_points_count\": " << s.measured_points_count << ",\n";

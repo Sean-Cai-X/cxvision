@@ -814,6 +814,14 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                      << (object.has_line_scan_box ? "true" : "false") << "\n";
                 file << "  line_scan_half_width: "
                      << object.line_scan_half_width << "\n";
+                file << "  line_orientation: " << object.line_orientation << "\n";
+                file << "  line_dx: " << object.line_dx << "\n";
+                file << "  line_dy: " << object.line_dy << "\n";
+                file << "  line_length: " << object.line_length << "\n";
+                file << "  requested_tool_half_width: "
+                     << object.requested_tool_half_width << "\n";
+                file << "  effective_tool_half_width: "
+                     << object.effective_tool_half_width << "\n";
 
                 file << "  line_pointsw_count: "
                      << object.line_pointsw_count << "\n";
@@ -847,6 +855,10 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  line_fit_status: " << object.line_fit_status << "\n";
                 file << "  line_measure_status: " << object.line_measure_status << "\n";
                 file << "  line_measure_hint: " << object.line_measure_hint << "\n";
+                file << "  line_filter_min_exceeds_component_p90: "
+                     << (object.line_filter_min_exceeds_component_p90 ? "true" : "false") << "\n";
+                file << "  line_measure_failure_hint: "
+                     << object.line_measure_failure_hint << "\n";
                 file << "  line_seek_points_count: " << object.line_seek_points_count << "\n";
                 file << "  line_edgeband_count: " << object.line_edgeband_count << "\n";
                 file << "  line_chain_length: " << object.line_chain_length << "\n";
@@ -3190,6 +3202,10 @@ static bool TryExecuteGetResultBinding(ManualTestContext& context,
                 sourceObject->line_measure_status;
             context.current_result_ref.line_measure_hint =
                 sourceObject->line_measure_hint;
+            context.current_result_ref.line_measure_failure_hint =
+                sourceObject->line_measure_failure_hint;
+            context.current_result_ref.line_filter_min_exceeds_component_p90 =
+                sourceObject->line_filter_min_exceeds_component_p90;
         }
 
         // æ³¨æ„ï¼šè¿™é‡Œä¸ BLOCKEDï¼Œä¸ä¼ªé€  PASSï¼Œå…è®¸è„šæœ¬ç»§ç»­åˆ° global.current_statusã€‚
@@ -3462,6 +3478,13 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_wgap = input.wgap;
     object.line_measure_hgap = input.hgap;
 
+    object.line_orientation = input.line_orientation;
+    object.line_dx = input.line_dx;
+    object.line_dy = input.line_dy;
+    object.line_length = input.line_length;
+    object.requested_tool_half_width = input.requested_tool_half_width;
+    object.effective_tool_half_width = input.effective_tool_half_width;
+
     object.line_measure_backimage_ready =
         input.backimage_ready;
 
@@ -3619,6 +3642,13 @@ static void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     }
 
     object.line_measure_hint = BuildFindlineMeasureHint(object);
+    object.line_filter_min_exceeds_component_p90 =
+        object.line_measure_failure_stage == "findobject_filter_result_empty" &&
+        object.line_measure_effective_filter_min > 0 &&
+        object.line_measure_cc_selected_area_p90 > 0.0 &&
+        object.line_measure_effective_filter_min > object.line_measure_cc_selected_area_p90;
+    object.line_measure_failure_hint = object.line_filter_min_exceeds_component_p90 ?
+        object.line_measure_hint : std::string();
 
     object.line_measure_geometry_request_valid =
         input.measure_geometry_request_valid;
@@ -5268,9 +5298,9 @@ void ViewController::initManualStateTestConsole()
      "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true},
     {"Findline Native Width Compare", "Original Measure comparison with setline scale 32.",
      "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
-    {"Findline Vertical / Stage25 Filter20", "Recommended vertical Findline Stage 2.5 candidate; enables filter_profile=1 / effective_filter_min=20.",
+    {"Recommended: Findline Vertical - Stage25 Filter20", "Stage25 / Findline / Recommended: produces original Measure points using filter_profile=1; no fallback; not product default.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_stage25_filter20_test.cxsc", true},
-    {"Findline Vertical / Legacy Direct", "Legacy direct failure control; keeps filter_profile=0 / effective_filter_min=50.",
+    {"Compare: Findline Vertical - Legacy Direct", "Stage25 / Findline / Compare: expected filter failure when effective_filter_min=50; preserved baseline.",
      "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
     {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
      "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true},
@@ -6791,6 +6821,8 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "    \"status\": \"" << CxDebugJsonEscape(context.current_result_ref.status) << "\",\n";
         file << "    \"reason\": \"" << CxDebugJsonEscape(context.current_result_ref.reason) << "\",\n";
         file << "    \"line_measure_hint\": \"" << CxDebugJsonEscape(context.current_result_ref.line_measure_hint) << "\",\n";
+        file << "    \"line_filter_min_exceeds_component_p90\": " << (context.current_result_ref.line_filter_min_exceeds_component_p90 ? "true" : "false") << ",\n";
+        file << "    \"line_measure_failure_hint\": \"" << CxDebugJsonEscape(context.current_result_ref.line_measure_failure_hint) << "\",\n";
         file << "    \"points_count\": " << context.current_result_ref.points_count << ",\n";
         file << "    \"valid_points_count\": " << context.current_result_ref.valid_points_count << ",\n";
         file << "    \"has_fit_line\": " << (context.current_result_ref.result_type == "FindlineResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << ",\n";
@@ -6814,6 +6846,12 @@ static bool SaveCxScriptHeadlessSummaryJson(
                 file << "      \"line_roi\": [" << object.line_x0 << "," << object.line_y0 << "," << object.line_x1 << "," << object.line_y1 << "],\n";
                 file << "      \"has_line_scan_box\": " << (object.has_line_scan_box ? "true" : "false") << ",\n";
                 file << "      \"line_scan_half_width\": " << object.line_scan_half_width << ",\n";
+                file << "      \"line_orientation\": \"" << CxDebugJsonEscape(object.line_orientation) << "\",\n";
+                file << "      \"line_dx\": " << object.line_dx << ",\n";
+                file << "      \"line_dy\": " << object.line_dy << ",\n";
+                file << "      \"line_length\": " << object.line_length << ",\n";
+                file << "      \"requested_tool_half_width\": " << object.requested_tool_half_width << ",\n";
+                file << "      \"effective_tool_half_width\": " << object.effective_tool_half_width << ",\n";
                 file << "      \"valid_line_points_count\": " << object.valid_line_points_count << ",\n";
                 file << "      \"has_fit_line\": " << (object.has_fit_line ? "true" : "false") << ",\n";
                 file << "      \"line_avgdist\": " << object.line_avgdist << ",\n";
@@ -6836,6 +6874,8 @@ static bool SaveCxScriptHeadlessSummaryJson(
                 file << "      \"line_measure_fallback_used\": " << (object.line_measure_fallback_used ? "true" : "false") << ",\n";
                 file << "      \"line_measure_status\": \"" << CxDebugJsonEscape(object.line_measure_status) << "\",\n";
                 file << "      \"line_measure_hint\": \"" << CxDebugJsonEscape(object.line_measure_hint) << "\",\n";
+                file << "      \"line_filter_min_exceeds_component_p90\": " << (object.line_filter_min_exceeds_component_p90 ? "true" : "false") << ",\n";
+                file << "      \"line_measure_failure_hint\": \"" << CxDebugJsonEscape(object.line_measure_failure_hint) << "\",\n";
                 file << "      \"line_fit_status\": \"" << CxDebugJsonEscape(object.line_fit_status) << "\",\n";
                 file << "      \"line_findobject_component_total\": " << object.line_findobject_component_total << ",\n";
                 file << "      \"line_findobject_component_accepted\": " << object.line_findobject_component_accepted << ",\n";

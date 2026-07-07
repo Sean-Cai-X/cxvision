@@ -126,6 +126,13 @@ struct FindlineMeasureInputDebug
     double roi_y1 = 0.0;
     double roi_scan_half_width = 0.0;
 
+    std::string line_orientation;
+    double line_dx = 0.0;
+    double line_dy = 0.0;
+    double line_length = 0.0;
+    double requested_tool_half_width = 0.0;
+    double effective_tool_half_width = 0.0;
+
     bool roi_intersects_image = false;
     bool roi_fully_inside_image = false;
 
@@ -309,11 +316,11 @@ public:
     void setpattern(PointsShape& apattern) { m_modelpoints = apattern; }
 
     void SetWHgap(int wgap = 2, int hgap = 2);
-    
+
     void measure(void* pimage);
     void pyrimage(void* pimage);
 
-    
+
     void findpattern(void* pimage);
 
     void setlinesamplerate(double dsamplerate);
@@ -376,7 +383,7 @@ public:
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
-    PointsShape m_modelpoints_org;     
+    PointsShape m_modelpoints_org;
 
     bool m_has_display_line_roi = false;
     double m_display_line_x0 = 0.0;
@@ -397,7 +404,7 @@ private:
     PointsShape m_measurepointsA_;
     PointsShape m_measurepointsB_;
 
-    Image* g_pbackimage; 
+    Image* g_pbackimage;
     FindObject* g_pbackfindobject;
 
     Image* g_pyrimage0;
@@ -448,7 +455,7 @@ private:
     int m_nscansize;
 
     int resultsize();
-     
+
     static int m_curfindlinenum;
 
     int m_ishowlines;

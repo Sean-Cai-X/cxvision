@@ -102,6 +102,12 @@ struct RuntimeObjectView
     float line_x1 = 0.0f;
     float line_y1 = 0.0f;
     float line_scale = 1.0f;
+    std::string line_orientation;
+    double line_dx = 0.0;
+    double line_dy = 0.0;
+    double line_length = 0.0;
+    double requested_tool_half_width = 0.0;
+    double effective_tool_half_width = 0.0;
 
     // Findline scan box / scan band.
     bool has_line_scan_box = false;
@@ -153,6 +159,8 @@ struct RuntimeObjectView
     std::string line_fit_mode;
     std::string line_measure_status;
     std::string line_measure_hint;
+    std::string line_measure_failure_hint;
+    bool line_filter_min_exceeds_component_p90 = false;
     std::string line_result_status;
     std::string line_result_reason;
 
@@ -365,6 +373,8 @@ struct ResultRefView
     std::string line_result_reason;
     std::string line_measure_status;
     std::string line_measure_hint;
+    std::string line_measure_failure_hint;
+    bool line_filter_min_exceeds_component_p90 = false;
 
     std::string line_measure_source;
     bool line_measure_fallback_used = false;
