@@ -59,6 +59,7 @@ set(CXIMAGE_SOURCES
   cximage/CxScriptStage25Runner.cpp
   cximage/CxScriptStage25ReportWriter.cpp
   cximage/CxScriptStage25Register.cpp
+  cximage/CxScriptStage25JsonLite.cpp
 )
 
 set(CXGEOM_SOURCES

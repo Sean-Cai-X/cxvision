@@ -3,8 +3,8 @@
 #include "CxScriptImagePreflight.h"
 #include "CxScriptStage25ReportWriter.h"
 #include "CxScriptStage25Register.h"
+#include "CxScriptStage25JsonLite.h"
 #include "ManualStateTestConsole.h"
-#include "CxScriptImageEvidenceAnalyzer.h"
 #include "muParser.h"
 #include <fstream>
 #include <sstream>
@@ -104,17 +104,160 @@ namespace
         return ctx;
     }
 
-    std::string ClassifyQuality(const Stage25CaseResult& r)
+    static bool LoadStage25CaseResultFromFiles(
+        const std::filesystem::path& summaryPath,
+        const std::filesystem::path& evidenceSummaryPath,
+        Stage25CaseResult& out)
     {
-        if (!r.t0_pass) return "HEADLESS_FAILED";
-        if (!r.t1_pass) return "ALGORITHM_NO_RESULT";
+        Stage25JsonLite summary;
+        Stage25JsonLite evidence;
 
-        double local_support = r.tool == "Findline" ?
-            r.measured_local_support_score : r.circle_local_support_score;
+        const bool hasSummary = summary.LoadFile(summaryPath);
+        const bool hasEvidence = evidence.LoadFile(evidenceSummaryPath);
 
-        if (local_support >= 0.60) return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
+        if (!hasSummary)
+        {
+            out.failure_stage = "summary_missing";
+            out.failure_reason = "result_summary.json not found or unreadable";
+            return false;
+        }
 
-        return "GEOMETRY_MARGINAL_BUT_SAMPLED";
+        out.summary_path = summaryPath.string();
+
+        out.measure_source = summary.GetString("measure_source");
+        out.fallback_used = summary.GetBool("fallback_used", false);
+
+        std::string currentResultReason = summary.GetString("current_result_ref.reason", "");
+        if (!currentResultReason.empty())
+        {
+            size_t pos = currentResultReason.find("failure_stage=");
+            if (pos != std::string::npos)
+            {
+                size_t end = currentResultReason.find(",", pos);
+                out.failure_stage = currentResultReason.substr(pos + 14, end - pos - 14);
+            }
+        }
+
+        out.failure_reason = summary.GetString("debug_reason", "");
+        out.run_state = summary.GetString("run_state", "");
+
+        out.points_count = summary.GetInt("current_result_ref.points_count", 0);
+        out.valid_points_count = summary.GetInt("current_result_ref.valid_points_count", 0);
+        out.has_fit_line = summary.GetBool("current_result_ref.has_fit_line", false);
+        out.has_fit_circle = summary.GetBool("current_result_ref.has_fit_circle", false);
+        out.has_fit = out.has_fit_line || out.has_fit_circle;
+
+        out.line_avgdist = summary.GetDouble("line_avgdist", 0.0);
+        out.circle_avgdist = summary.GetDouble("circle_avgdist", 0.0);
+
+        out.snapshot_path = summary.GetString("snapshot_path", "");
+        out.overlay_path = summary.GetString("overlay_path", "");
+
+        if (hasEvidence)
+        {
+            out.evidence_summary_path = evidenceSummaryPath.string();
+
+            out.measured_local_support_score =
+                evidence.GetDouble("measured_local_support_score", 0.0);
+            out.measured_local_mean_distance_px =
+                evidence.GetDouble("measured_local_mean_distance_px", 0.0);
+            out.global_reference_mean_distance_px =
+                evidence.GetDouble("global_reference_mean_distance_px", 0.0);
+            out.fit_offset_error_px =
+                evidence.GetDouble("fit_offset_error_px", 0.0);
+
+            out.circle_local_support_score =
+                evidence.GetDouble("circle_local_support_score", 0.0);
+            out.circle_local_mean_radial_distance_px =
+                evidence.GetDouble("circle_local_mean_radial_distance_px", 0.0);
+            out.circle_global_reference_mean_distance_px =
+                evidence.GetDouble("circle_global_reference_mean_distance_px", 0.0);
+            out.circle_center_error_px =
+                evidence.GetDouble("circle_center_error_px", 0.0);
+        }
+        else
+        {
+            out.evidence_summary_path = "EVIDENCE_MISSING";
+        }
+
+        return true;
+    }
+
+    static bool ComputeT1Pass(const Stage25CaseResult& r)
+    {
+        if (!r.t0_pass)
+            return false;
+
+        if (r.fallback_used)
+            return false;
+
+        if (r.tool == "Findline")
+        {
+            return r.valid_points_count >= 2 && r.has_fit_line;
+        }
+
+        if (r.tool == "Findcircle")
+        {
+            return r.valid_points_count >= 3 && r.has_fit_circle;
+        }
+
+        return false;
+    }
+
+    static bool ComputeT2Pass(const Stage25CaseResult& r)
+    {
+        if (!r.t1_pass)
+            return false;
+
+        if (r.evidence_summary_path == "EVIDENCE_MISSING")
+            return false;
+
+        if (r.tool == "Findline")
+        {
+            return r.measured_local_support_score >= 0.60;
+        }
+
+        if (r.tool == "Findcircle")
+        {
+            return r.circle_local_support_score >= 0.60;
+        }
+
+        return false;
+    }
+
+    static std::string ClassifyQuality(const Stage25CaseResult& r)
+    {
+        if (r.skipped_by_preflight)
+            return "SKIPPED_BY_PREFLIGHT";
+
+        if (!r.t0_pass)
+            return "HEADLESS_FAILED";
+
+        if (!r.t1_pass)
+        {
+            if (!r.failure_stage.empty())
+                return "ALGORITHM_NO_RESULT";
+            return "ALGORITHM_NO_RESULT";
+        }
+
+        if (r.evidence_summary_path == "EVIDENCE_MISSING")
+            return "EVIDENCE_MISSING";
+
+        if (r.tool == "Findline")
+        {
+            if (r.measured_local_support_score >= 0.60)
+                return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
+            return "SUSPICIOUS_CANDIDATE";
+        }
+
+        if (r.tool == "Findcircle")
+        {
+            if (r.circle_local_support_score >= 0.60)
+                return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
+            return "SUSPICIOUS_CANDIDATE";
+        }
+
+        return "UNKNOWN_TOOL";
     }
 }
 
@@ -189,7 +332,58 @@ bool RunStage25ManifestFile(
             preflight_results.push_back(preflight);
 
             if (!preflight.roi_valid)
+            {
+                for (const auto& ev_profile : manifest.evidence_profiles)
+                {
+                    if (target.tool == "Findline")
+                    {
+                        for (const auto& profile : manifest.findline_profiles)
+                        {
+                            Stage25CaseResult skipped;
+                            skipped.case_id = GenerateCaseId(
+                                img.image_id, target.target_id, profile.profile_id, ev_profile.name);
+                            skipped.image_id = img.image_id;
+                            skipped.level = img.level;
+                            skipped.target_id = target.target_id;
+                            skipped.tool = target.tool;
+                            skipped.profile_id = profile.profile_id;
+                            skipped.evidence_profile = ev_profile.name;
+                            skipped.policy_classification = profile.policy;
+                            skipped.skipped_by_preflight = true;
+                            skipped.skip_reason = preflight.preflight_class;
+                            skipped.t0_pass = false;
+                            skipped.t1_pass = false;
+                            skipped.t2_pass = false;
+                            skipped.quality_classification = "SKIPPED_BY_PREFLIGHT";
+                            result.case_results.push_back(skipped);
+                        }
+                    }
+                    else if (target.tool == "Findcircle")
+                    {
+                        for (const auto& profile : manifest.findcircle_profiles)
+                        {
+                            Stage25CaseResult skipped;
+                            skipped.case_id = GenerateCaseId(
+                                img.image_id, target.target_id, profile.profile_id, ev_profile.name);
+                            skipped.image_id = img.image_id;
+                            skipped.level = img.level;
+                            skipped.target_id = target.target_id;
+                            skipped.tool = target.tool;
+                            skipped.profile_id = profile.profile_id;
+                            skipped.evidence_profile = ev_profile.name;
+                            skipped.policy_classification = profile.policy;
+                            skipped.skipped_by_preflight = true;
+                            skipped.skip_reason = preflight.preflight_class;
+                            skipped.t0_pass = false;
+                            skipped.t1_pass = false;
+                            skipped.t2_pass = false;
+                            skipped.quality_classification = "SKIPPED_BY_PREFLIGHT";
+                            result.case_results.push_back(skipped);
+                        }
+                    }
+                }
                 continue;
+            }
 
             for (const auto& ev_profile : manifest.evidence_profiles)
             {
@@ -234,35 +428,21 @@ bool RunStage25ManifestFile(
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
+                        case_result.generated_script_path = generated_script.string();
 
+                        case_result.headless_ok = headlessResult.ok;
                         case_result.t0_pass = headlessResult.ok;
-                        case_result.t1_pass = false;
 
                         if (headlessResult.ok)
                         {
-                            std::ifstream summaryFile(headlessResult.summary_path);
-                            if (summaryFile.is_open())
-                            {
-                                std::stringstream buffer;
-                                buffer << summaryFile.rdbuf();
-                                std::string summaryStr = buffer.str();
+                            std::filesystem::path summaryPath = case_dir / "result_summary.json";
+                            std::filesystem::path evidencePath = case_dir / "evidence_summary.json";
 
-                                size_t pos = summaryStr.find("valid_points_count");
-                                if (pos != std::string::npos)
-                                {
-                                    size_t start = summaryStr.find(":", pos) + 1;
-                                    size_t end = summaryStr.find(",", start);
-                                    case_result.valid_points_count =
-                                        std::stoi(summaryStr.substr(start, end - start));
-                                }
-
-                                case_result.t1_pass =
-                                    case_result.valid_points_count >= 2;
-                            }
+                            LoadStage25CaseResultFromFiles(summaryPath, evidencePath, case_result);
                         }
 
-                        case_result.t2_pass = case_result.t1_pass &&
-                            (case_result.measured_local_support_score >= 0.60);
+                        case_result.t1_pass = ComputeT1Pass(case_result);
+                        case_result.t2_pass = ComputeT2Pass(case_result);
                         case_result.quality_classification = ClassifyQuality(case_result);
 
                         result.case_results.push_back(case_result);
@@ -309,17 +489,21 @@ bool RunStage25ManifestFile(
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
+                        case_result.generated_script_path = generated_script.string();
 
+                        case_result.headless_ok = headlessResult.ok;
                         case_result.t0_pass = headlessResult.ok;
-                        case_result.t1_pass = false;
 
                         if (headlessResult.ok)
                         {
-                            case_result.t1_pass = true;
+                            std::filesystem::path summaryPath = case_dir / "result_summary.json";
+                            std::filesystem::path evidencePath = case_dir / "evidence_summary.json";
+
+                            LoadStage25CaseResultFromFiles(summaryPath, evidencePath, case_result);
                         }
 
-                        case_result.t2_pass = case_result.t1_pass &&
-                            (case_result.circle_local_support_score >= 0.60);
+                        case_result.t1_pass = ComputeT1Pass(case_result);
+                        case_result.t2_pass = ComputeT2Pass(case_result);
                         case_result.quality_classification = ClassifyQuality(case_result);
 
                         result.case_results.push_back(case_result);
@@ -342,6 +526,7 @@ bool RunStage25ManifestFile(
     Stage25ReportWriter::WriteCoverageReport(options.out_root, manifest);
     Stage25ReportWriter::WriteStabilityReport(options.out_root, result.case_results, manifest);
     Stage25ReportWriter::WritePolicyReport(options.out_root);
+    Stage25ReportWriter::WriteCaseFileIndex(options.out_root, result.case_results);
 
     result.ok = true;
     return true;

@@ -29,6 +29,10 @@ public:
 
     static void WritePolicyReport(
         const std::filesystem::path& out_root);
+
+    static void WriteCaseFileIndex(
+        const std::filesystem::path& out_root,
+        const std::vector<Stage25CaseResult>& results);
 };
 
 #endif

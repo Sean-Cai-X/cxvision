@@ -16,12 +16,30 @@ struct Stage25CaseResult
     std::string profile_id;
     std::string evidence_profile;
 
+    std::string policy_classification;
+    std::string quality_classification;
+
+    bool skipped_by_preflight = false;
+    std::string skip_reason;
+
     bool t0_pass = false;
     bool t1_pass = false;
     bool t2_pass = false;
 
+    bool headless_ok = false;
+    std::string run_state;
+    std::string failure_stage;
+    std::string failure_reason;
+
+    int points_count = 0;
     int valid_points_count = 0;
+
     bool has_fit = false;
+    bool has_fit_line = false;
+    bool has_fit_circle = false;
+
+    double line_avgdist = 0.0;
+    double circle_avgdist = 0.0;
 
     double measured_local_support_score = 0.0;
     double measured_local_mean_distance_px = 0.0;
@@ -33,8 +51,15 @@ struct Stage25CaseResult
     double circle_global_reference_mean_distance_px = 0.0;
     double circle_center_error_px = 0.0;
 
-    std::string quality_classification;
-    std::string policy_classification;
+    std::string measure_source;
+    bool fallback_used = false;
+
+    std::string summary_path;
+    std::string evidence_summary_path;
+    std::string snapshot_path;
+    std::string overlay_path;
+    std::string evidence_overlay_path;
+    std::string generated_script_path;
 };
 
 struct Stage25RunOptions

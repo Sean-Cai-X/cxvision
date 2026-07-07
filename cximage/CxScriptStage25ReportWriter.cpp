@@ -28,34 +28,48 @@ void Stage25ReportWriter::WriteBatchReport(
     file << "- T2 (evidence support) pass: " << t2_pass << "\n\n";
 
     file << "## Findline Cases\n\n";
-    file << "| Level | Image | Target | Profile | Points | Fit | LocalSupport | LocalMeanDist | GlobalLineDist | Quality | Policy |\n";
-    file << "|---|---|---|---|---:|---|---:|---:|---:|---|---|\n";
+    file << "| Level | Image | Target | Profile | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | Quality | Policy | Summary | Evidence |\n";
+    file << "|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
 
     for (const auto& r : results)
     {
         if (r.tool != "Findline") continue;
         file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
-             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit ? "true" : "false")
+             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit_line ? "true" : "false")
+             << " | " << (r.t1_pass ? "true" : "false")
+             << " | " << (r.t2_pass ? "true" : "false")
              << " | " << std::fixed << std::setprecision(3) << r.measured_local_support_score
              << " | " << r.measured_local_mean_distance_px
-             << " | " << r.global_reference_mean_distance_px
-             << " | " << r.quality_classification << " | " << r.policy_classification << " |\n";
+             << " | " << r.quality_classification << " | " << r.policy_classification << " | "
+             << r.summary_path << " | " << r.evidence_summary_path << " |\n";
     }
 
     file << "\n## Findcircle Cases\n\n";
-    file << "| Level | Image | Target | Profile | Points | FitCircle | LocalSupport | LocalMeanRadialDist | GlobalRefMeanDist | CenterErr | Quality | Policy |\n";
-    file << "|---|---|---|---|---:|---|---:|---:|---:|---:|---|---|\n";
+    file << "| Level | Image | Target | Profile | Points | FitCircle | T1 | T2 | LocalSupport | LocalMeanRadialDist | Quality | Policy | Summary | Evidence |\n";
+    file << "|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
 
     for (const auto& r : results)
     {
         if (r.tool != "Findcircle") continue;
         file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
-             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit ? "true" : "false")
+             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit_circle ? "true" : "false")
+             << " | " << (r.t1_pass ? "true" : "false")
+             << " | " << (r.t2_pass ? "true" : "false")
              << " | " << std::fixed << std::setprecision(3) << r.circle_local_support_score
              << " | " << r.circle_local_mean_radial_distance_px
-             << " | " << r.circle_global_reference_mean_distance_px
-             << " | " << r.circle_center_error_px
-             << " | " << r.quality_classification << " | " << r.policy_classification << " |\n";
+             << " | " << r.quality_classification << " | " << r.policy_classification << " | "
+             << r.summary_path << " | " << r.evidence_summary_path << " |\n";
+    }
+
+    file << "\n## Skipped By Preflight\n\n";
+    file << "| Level | Image | Target | Tool | Reason |\n";
+    file << "|---|---|---|---|---|\n";
+
+    for (const auto& r : results)
+    {
+        if (!r.skipped_by_preflight) continue;
+        file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
+             << r.tool << " | " << r.skip_reason << " |\n";
     }
 }
 
@@ -178,7 +192,7 @@ void Stage25ReportWriter::WriteStabilityReport(
     {
         std::vector<Stage25CaseResult> tool_results;
         std::copy_if(results.begin(), results.end(), std::back_inserter(tool_results),
-            [&tool](const auto& r) { return r.tool == tool; });
+            [&tool](const auto& r) { return r.tool == tool && !r.skipped_by_preflight; });
 
         std::map<std::string, std::vector<Stage25CaseResult>> profile_results;
         for (const auto& r : tool_results)
@@ -293,4 +307,23 @@ void Stage25ReportWriter::WritePolicyReport(
     file << "| Findcircle method1 | risky | do not promote | polarity risk observed |\n";
     file << "| Findcircle filter_relax | debug | do not promote | may introduce false positives |\n";
     file << "| FastMatch | not evaluated | deferred | not in current test scope |\n";
+}
+
+void Stage25ReportWriter::WriteCaseFileIndex(
+    const std::filesystem::path& out_root,
+    const std::vector<Stage25CaseResult>& results)
+{
+    std::ofstream file(out_root / "case_file_index.md");
+
+    file << "# Stage25 Case File Index\n\n";
+    file << "| CaseId | Level | Image | Target | Tool | Profile | GeneratedScript | Snapshot | Summary | EvidenceSummary |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---|\n";
+
+    for (const auto& r : results)
+    {
+        file << "| " << r.case_id << " | " << r.level << " | " << r.image_id << " | "
+             << r.target_id << " | " << r.tool << " | " << r.profile_id << " | "
+             << r.generated_script_path << " | " << r.snapshot_path << " | "
+             << r.summary_path << " | " << r.evidence_summary_path << " |\n";
+    }
 }
