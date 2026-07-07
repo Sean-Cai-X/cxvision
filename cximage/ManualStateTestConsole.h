@@ -127,6 +127,20 @@ struct RuntimeObjectView
     int line_pointsw_count = 0;
     int line_pointsh_count = 0;
 
+    // CircleRingGauge fields
+    bool has_ring_gauge = false;
+    double ring_outer_radius = 0.0;
+    double ring_inner_radius = 0.0;
+    double ring_thickness = 0.0;
+    double ring_center_distance = 0.0;
+    bool ring_concentric_ok = false;
+    bool ring_inside_ok = false;
+    bool ring_thickness_ok = false;
+    double ring_score = 0.0;
+    std::string ring_status;
+    std::string ring_reason;
+    std::string ring_result_ref;
+
     // Findline fit result.
     bool has_fit_line = false;
     float fit_line_x0 = 0.0f;

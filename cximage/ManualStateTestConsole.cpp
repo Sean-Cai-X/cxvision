@@ -2,6 +2,7 @@
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
+#include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
 #include "CxScriptImageEvidenceAnalyzer.h"
@@ -1091,6 +1092,21 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  display_version: " << object.display_version << "\n";
             }
 
+            if (object.type == "CircleRingGauge")
+            {
+                file << "  ring_outer_radius: " << object.ring_outer_radius << "\n";
+                file << "  ring_inner_radius: " << object.ring_inner_radius << "\n";
+                file << "  ring_thickness: " << object.ring_thickness << "\n";
+                file << "  ring_center_distance: " << object.ring_center_distance << "\n";
+                file << "  ring_concentric_ok: " << (object.ring_concentric_ok ? "true" : "false") << "\n";
+                file << "  ring_inside_ok: " << (object.ring_inside_ok ? "true" : "false") << "\n";
+                file << "  ring_thickness_ok: " << (object.ring_thickness_ok ? "true" : "false") << "\n";
+                file << "  ring_score: " << object.ring_score << "\n";
+                file << "  ring_status: " << object.ring_status << "\n";
+                file << "  ring_reason: " << object.ring_reason << "\n";
+                file << "  ring_result_ref: " << object.ring_result_ref << "\n";
+            }
+
             file << "\n";
         }
 
@@ -1949,7 +1965,7 @@ std::string ModuleForType(const std::string& type)
     if (type.rfind("Mlpack", 0) == 0) return "mlpack";
     if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
     if (type == "Image" || type.rfind("Find", 0) == 0 || type == "fastmatch" ||
-        type == "FormfitGauge" || type == "CxOverlay") return "cximage";
+        type == "FormfitGauge" || type == "CxOverlay" || type == "CircleRingGauge") return "cximage";
     return "cxscript";
 }
 
@@ -5420,6 +5436,27 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     entry.circle_cy = snapshot.circle_cy;
     entry.circle_inner = snapshot.circle_inner;
     entry.circle_radius = snapshot.circle_radius;
+
+    if (entry.type == "CircleRingGauge" && entry.exists_in_parser && !entry.stale)
+    {
+        CircleRingGauge* gauge = static_cast<CircleRingGauge*>(m_parserDebugBridge.QueryClassObject("CircleRingGauge", entry.name));
+        if (gauge != nullptr)
+        {
+            entry.has_ring_gauge = true;
+            entry.ring_outer_radius = gauge->outer_radius();
+            entry.ring_inner_radius = gauge->inner_radius();
+            entry.ring_thickness = gauge->thickness();
+            entry.ring_center_distance = gauge->center_distance();
+            entry.ring_concentric_ok = gauge->concentric_ok() != 0;
+            entry.ring_inside_ok = gauge->inside_ok() != 0;
+            entry.ring_thickness_ok = gauge->thickness_ok() != 0;
+            entry.ring_score = gauge->m_score;
+            entry.ring_status = gauge->m_status;
+            entry.ring_reason = gauge->m_reason;
+            entry.ring_result_ref = gauge->m_result_ref;
+        }
+    }
+
     m_manualTest.runtime_objects.push_back(entry);
     if (entry.type == "Image" && entry.exists_in_parser && !entry.stale)
     {

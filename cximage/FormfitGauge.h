@@ -31,7 +31,9 @@ enum class GaugeRelationType
     Concentric,
     Inside,
     Adjacent,
-    Distance
+    Distance,
+
+    RadiusDifference
 };
 
 enum class GaugeConstraintType
@@ -123,6 +125,21 @@ FormfitGauge MakeRectCircleLineMatchGauge(const OutputRect& rect,
                                           const MatchOutput& match,
                                           const char* gauge_id,
                                           const char* name);
+FormfitGauge MakeCircleRingGauge(
+    const CircleMeasurementOutput& outer_circle,
+    const CircleMeasurementOutput& inner_circle,
+    const char* gauge_id,
+    const char* name,
+    double center_tolerance = 3.0,
+    double thickness_tolerance = 5.0);
+FormfitGauge MakeCircleRingLineGauge(
+    const CircleMeasurementOutput& outer_circle,
+    const CircleMeasurementOutput& inner_circle,
+    const LineMeasurementOutput& line,
+    const char* gauge_id,
+    const char* name,
+    double center_tolerance = 3.0,
+    double thickness_tolerance = 5.0);
 FitTaskSpec MakeTaskSpecFromGauge(const FormfitGauge& gauge, const char* task_id, FitTaskType task_type);
 FitProblem MakeFitProblemFromGauge(const FormfitGauge& gauge, const char* problem_id);
 

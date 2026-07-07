@@ -331,6 +331,167 @@ FormfitGauge MakeRectCircleLineMatchGauge(const OutputRect& rect,
     return gauge;
 }
 
+FormfitGauge MakeCircleRingGauge(
+    const CircleMeasurementOutput& outer_circle,
+    const CircleMeasurementOutput& inner_circle,
+    const char* gauge_id,
+    const char* name,
+    double center_tolerance,
+    double thickness_tolerance)
+{
+    FormfitGauge gauge = MakeGauge(gauge_id, name);
+
+    GaugeElement outer =
+        MakeCircleGaugeElement(
+            outer_circle,
+            "outer_circle",
+            "outer_circle",
+            outer_circle.has_direct_fit ? 1.0 : 0.75);
+
+    GaugeElement inner =
+        MakeCircleGaugeElement(
+            inner_circle,
+            "inner_circle",
+            "inner_circle",
+            inner_circle.has_direct_fit ? 1.0 : 0.75);
+
+    gauge.elements.push_back(outer);
+    gauge.elements.push_back(inner);
+
+    const double outer_radius =
+        ClampPositive(outer_circle.radius, 1.0);
+
+    const double inner_radius =
+        ClampPositive(inner_circle.radius, 1.0);
+
+    const double thickness =
+        std::max(0.0, outer_radius - inner_radius);
+
+    GaugeRelation concentric;
+    concentric.relation_id = "ring_concentric";
+    concentric.lhs_element_id = "outer_circle";
+    concentric.rhs_element_id = "inner_circle";
+    concentric.relation_type = GaugeRelationType::Concentric;
+    concentric.target_value = 0.0;
+    concentric.tolerance = ClampPositive(center_tolerance, 3.0);
+    concentric.weight = 2.0;
+    gauge.relations.push_back(concentric);
+
+    GaugeRelation inside;
+    inside.relation_id = "ring_inner_inside_outer";
+    inside.lhs_element_id = "inner_circle";
+    inside.rhs_element_id = "outer_circle";
+    inside.relation_type = GaugeRelationType::Inside;
+    inside.target_value = 1.0;
+    inside.tolerance = 0.0;
+    inside.weight = 1.5;
+    gauge.relations.push_back(inside);
+
+    GaugeRelation radius_diff;
+    radius_diff.relation_id = "ring_radius_difference";
+    radius_diff.lhs_element_id = "outer_circle";
+    radius_diff.rhs_element_id = "inner_circle";
+    radius_diff.relation_type = GaugeRelationType::RadiusDifference;
+    radius_diff.target_value = thickness;
+    radius_diff.tolerance =
+        ClampPositive(thickness_tolerance, std::max(1.0, thickness * 0.05));
+    radius_diff.weight = 1.5;
+    gauge.relations.push_back(radius_diff);
+
+    GaugeConstraint outer_radius_constraint;
+    outer_radius_constraint.constraint_id = "outer_radius";
+    outer_radius_constraint.target_element_id = "outer_circle";
+    outer_radius_constraint.constraint_type = GaugeConstraintType::Radius;
+    outer_radius_constraint.target_value = outer_radius;
+    outer_radius_constraint.tolerance = std::max(1.0, outer_radius * 0.05);
+    outer_radius_constraint.weight = 1.0;
+    gauge.constraints.push_back(outer_radius_constraint);
+
+    GaugeConstraint inner_radius_constraint;
+    inner_radius_constraint.constraint_id = "inner_radius";
+    inner_radius_constraint.target_element_id = "inner_circle";
+    inner_radius_constraint.constraint_type = GaugeConstraintType::Radius;
+    inner_radius_constraint.target_value = inner_radius;
+    inner_radius_constraint.tolerance = std::max(1.0, inner_radius * 0.05);
+    inner_radius_constraint.weight = 1.0;
+    gauge.constraints.push_back(inner_radius_constraint);
+
+    const double center_distance =
+        std::hypot(
+            outer_circle.center.x - inner_circle.center.x,
+            outer_circle.center.y - inner_circle.center.y);
+
+    const bool center_ok =
+        std::isfinite(center_distance) &&
+        center_distance <= concentric.tolerance;
+
+    const bool thickness_ok =
+        std::isfinite(thickness) &&
+        thickness > 0.0;
+
+    const bool inner_inside_outer =
+        std::isfinite(outer_radius) &&
+        std::isfinite(inner_radius) &&
+        inner_radius < outer_radius;
+
+    double score = 0.0;
+    score += center_ok ? 0.4 : 0.0;
+    score += inner_inside_outer ? 0.3 : 0.0;
+    score += thickness_ok ? 0.3 : 0.0;
+
+    gauge.learn_score = score;
+
+    return gauge;
+}
+
+FormfitGauge MakeCircleRingLineGauge(
+    const CircleMeasurementOutput& outer_circle,
+    const CircleMeasurementOutput& inner_circle,
+    const LineMeasurementOutput& line,
+    const char* gauge_id,
+    const char* name,
+    double center_tolerance,
+    double thickness_tolerance)
+{
+    FormfitGauge gauge = MakeCircleRingGauge(
+        outer_circle,
+        inner_circle,
+        gauge_id,
+        name,
+        center_tolerance,
+        thickness_tolerance);
+
+    gauge.elements.push_back(MakeLineGaugeElement(line, "line_0", "line", 1.0));
+
+    const double outer_center_x = FiniteOr(outer_circle.center.x, outer_circle.measure_bounds.x + outer_circle.measure_bounds.width * 0.5);
+    const double outer_center_y = FiniteOr(outer_circle.center.y, outer_circle.measure_bounds.y + outer_circle.measure_bounds.height * 0.5);
+    const OutputRect line_bounds = NormalizeRect(line.measure_bounds);
+    const double line_center_x = line_bounds.x + line_bounds.width * 0.5;
+    const double line_center_y = line_bounds.y + line_bounds.height * 0.5;
+    const double line_center_distance = std::hypot(outer_center_x - line_center_x, outer_center_y - line_center_y);
+
+    GaugeRelation ring_line_distance;
+    ring_line_distance.relation_id = "ring_line_center_distance";
+    ring_line_distance.lhs_element_id = "outer_circle";
+    ring_line_distance.rhs_element_id = "line_0";
+    ring_line_distance.relation_type = GaugeRelationType::Distance;
+    ring_line_distance.target_value = line_center_distance;
+    ring_line_distance.tolerance = std::max(2.0, ClampPositive(outer_circle.radius, 1.0) * 0.20);
+    ring_line_distance.weight = 1.0;
+    gauge.relations.push_back(ring_line_distance);
+
+    GaugeConstraint line_length;
+    line_length.constraint_id = "line_length";
+    line_length.target_element_id = "line_0";
+    line_length.constraint_type = GaugeConstraintType::Length;
+    line_length.target_value = EstimateLineLength(line);
+    line_length.tolerance = std::max(2.0, line_length.target_value * 0.2);
+    line_length.weight = 1.0;
+    gauge.constraints.push_back(line_length);
+
+    gauge.learn_score = (gauge.learn_score + 1.0) * 0.5;
+    return gauge;
+}
 FitTaskSpec MakeTaskSpecFromGauge(const FormfitGauge& gauge, const char* task_id, FitTaskType task_type)
 {
     FitTaskSpec task = MakeFitTaskSpec(task_id ? task_id : gauge.gauge_id.c_str(), task_type);
@@ -478,6 +639,8 @@ const char* GaugeRelationTypeName(GaugeRelationType relation_type)
         return "adjacent";
     case GaugeRelationType::Distance:
         return "distance";
+    case GaugeRelationType::RadiusDifference:
+        return "radius_difference";
     case GaugeRelationType::Unknown:
     default:
         return "unknown";

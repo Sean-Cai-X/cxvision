@@ -22,6 +22,7 @@ public:
     static FitOperationConfig MakeRectCircleCompositeConfig();
     static FitOperationConfig MakeRectCircleLineCompositeConfig();
     static FitOperationConfig MakeRectCircleLineMatchCompositeConfig();
+    static FitOperationConfig MakeCircleRingCompositeConfig();
     static PrototypeRunResult BuildAndRunRectCirclePrototype(const FindRect& rect,
                                                              Findcircle& circle,
                                                              const FitOperationConfig& operation_config,
@@ -38,6 +39,11 @@ public:
                                                                       const FitOperationConfig& operation_config,
                                                                       int rect_index = 0,
                                                                       int max_candidates = 1);
+    static PrototypeRunResult BuildAndRunCircleRingPrototype(Findcircle& outer_circle,
+                                                             Findcircle& inner_circle,
+                                                             const FitOperationConfig& operation_config,
+                                                             double center_tolerance = 3.0,
+                                                             double thickness_tolerance = 5.0);
 };
 
 } // namespace formfit

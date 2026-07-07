@@ -28,6 +28,17 @@ struct ParserDebugObjectSnapshot
   float circle_cy = 0.0f;
   float circle_inner = 0.0f;
   float circle_radius = 0.0f;
+  double ring_outer_radius = 0.0;
+  double ring_inner_radius = 0.0;
+  double ring_thickness = 0.0;
+  double ring_center_distance = 0.0;
+  bool ring_concentric_ok = false;
+  bool ring_inside_ok = false;
+  bool ring_thickness_ok = false;
+  double ring_score = 0.0;
+  std::string ring_status;
+  std::string ring_reason;
+  std::string ring_result_ref;
 };
 
 struct ParserDebugVariableSnapshot

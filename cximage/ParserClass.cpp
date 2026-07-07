@@ -1,21 +1,22 @@
 #include "muParserDef.h"
-#include "muParserTest.h" 
+#include "muParserTest.h"
 #include "ParserClass.h"
 
 #include "shapebase.h"
 #include "Shape.h"
 #include "imagemanager.h"
- 
+
 #include "Findline.h"
 #include "Findcircle.h"
 #include "Findellipse.h"
 #include "findobject.h"
 #include "FastMatch.h"
 #include "CxScriptDirectBindings.h"
+#include "CircleRingGauge.h"
 
 //#include "gridobject.h"
 //#include "imageroi.h"
- 
+
 #include "Run.h"
 
 //#include "tts.h"
@@ -147,7 +148,7 @@ public:
         {
             vector<string> strdr = split(strnumlist[i], '$');
             double dvalue = std::stod(strdr.at(0));
-            double dresult = std::stod(strdr.at(1)); 
+            double dresult = std::stod(strdr.at(1));
             push(dvalue,dresult);
         }
         delete []pcharget;
@@ -219,8 +220,8 @@ public:
     }
 
 void print()
-{ 
-       
+{
+
 }
 
 };
@@ -240,12 +241,12 @@ namespace mu
         {
             double* apdouble = 0;
             m_parser.DefineOrgClass("double", apdouble);
-             
+
                 RunClass* prun = 0;
             m_parser.DefineClass("TestRun", prun);
             m_parser.DefineClassFun("TestRun", prun, "run", &RunClass::Run);
             m_parser.DefineClassFun("TestRun", prun, "testrun", &RunClass::testrun);
-             
+
             ImageManager* pmodule = 0;
             m_parser.DefineClass("Module", pmodule);
             m_parser.DefineClassFun("Module", pmodule, "Show", &ImageManager::setshow);
@@ -257,7 +258,7 @@ namespace mu
             m_parser.DefineClassFun("SmartDouble", psmartd, "save", &SmartDouble::save);
             m_parser.DefineClassFun("SmartDouble", psmartd, "load", &SmartDouble::load);
             m_parser.DefineClassFun("SmartDouble", psmartd, "getvalue", &SmartDouble::getvalue);
-            
+
             SmartTable* psmart = 0;
             m_parser.DefineClass("SmartTable", psmart);
             m_parser.DefineClassFun("SmartTable", psmart, "push", &SmartTable::push);
@@ -278,7 +279,7 @@ namespace mu
             m_parser.DefineClassFun("Image", pimage, "Show", &Image::setshow);
             m_parser.DefineClassFun("Image", pimage, "setroi", &Image::setroi);
             m_parser.DefineClassFun("Image", pimage, "Or", &Image::bitwiseOr);
-            m_parser.DefineClassFun("Image", pimage, "And", &Image::bitwiseAnd); 
+            m_parser.DefineClassFun("Image", pimage, "And", &Image::bitwiseAnd);
             m_parser.DefineClassFun("Image", pimage, "roi_7blur_gap_mud_thre_bw", &Image::roi_7blur_gap_mud_thre_bw);
             m_parser.DefineClassFun("Image", pimage, "roi_7blur_gap_mud_thre_bw_h", &Image::roi_7blur_gap_mud_thre_bw_h);
             m_parser.DefineClassFun("Image", pimage, "pyramidThresholding", &Image::pyramidThresholding);
@@ -298,7 +299,7 @@ namespace mu
             m_parser.DefineClassFun("Image", pimage, "roipyrdown", &Image::ROIpyrDown);
             m_parser.DefineClassFun("Image", pimage, "getshape", &Image::getshape);
             m_parser.DefineClassFun("Image", pimage, "loadfiles", &Image::loadfiles);
-            m_parser.DefineClassFun("Image", pimage, "reload", &Image::reload); 
+            m_parser.DefineClassFun("Image", pimage, "reload", &Image::reload);
             m_parser.DefineClassFun("Image", pimage, "rotate", &Image::rotateImage);
             m_parser.DefineClassFun("Image", pimage, "roisobel", &Image::ROISobel);
             m_parser.DefineClassFun("Image", pimage, "roischarr", &Image::ROIScharr);
@@ -309,14 +310,14 @@ namespace mu
             m_parser.DefineClassFun("Image", pimage, "roi_7bgmbh", &Image::roi_7blur_gap_mud_bw_h);
             m_parser.DefineClassFun("Image", pimage, "roimean", &Image::roimean);
             m_parser.DefineClassFun("Image", pimage, "roimagnitude", &Image::roimagnitude);
-             
+
             m_parser.DefineClassFun("Image", pimage, "test", &Image::Test);
 
 
-            
 
-            
-             
+
+
+
             Shape* pshape = nullptr;
             m_parser.DefineClass("Shape", pshape);
             m_parser.DefineClassFun("Shape", pshape, "settype", &Shape::settype);
@@ -328,15 +329,15 @@ namespace mu
             m_parser.DefineClassFun("Shape", pshape, "Show", &Shape::setshow);
             m_parser.DefineClassFun("Shape", pshape, "getshape", &Shape::shapesetroi);
             m_parser.DefineClassFun("Shape", pshape, "cutedge", &Shape::cutedge);
-            
 
-            
+
+
 
             ShapeBase* pshapebase = nullptr;
             m_parser.DefineClass("ShapeBase", pshapebase);
             m_parser.DefineClassFun("ShapeBase", pshapebase, "setshape", &ShapeBase::setShape);
             m_parser.DefineClassFun("ShapeBase", pshapebase, "Show", &ShapeBase::setshow);
-                
+
             PointsShape* apoints = nullptr;
             m_parser.DefineClass("PointsShape", apoints);
             m_parser.DefineClassFun("PointsShape", apoints, "Show", &PointsShape::setshow);
@@ -361,22 +362,22 @@ namespace mu
             m_parser.DefineClassFun("PointsShape", apoints, "makeshape", &PointsShape::MakeShape);
             m_parser.DefineClassFun("PointsShape", apoints, "load", &PointsShape::load);
             m_parser.DefineClassFun("PointsShape", apoints, "save", &PointsShape::save);
-            
+
             m_parser.DefineClassFun("PointsShape", apoints, "makeshape", &PointsShape::MakeShape);
 
             m_parser.DefineClassFun("PointsShape", apoints, "clusterA", &PointsShape::ClusterPointCloud);
-            
+
             m_parser.DefineClassFun("PointsShape", apoints, "aptfilter", &PointsShape::AdaptiveDistfilter);
             m_parser.DefineClassFun("PointsShape", apoints, "obbanglecenter", &PointsShape::OBBCenterAngleSort);
             m_parser.DefineClassFun("PointsShape", apoints, "sortpoints", &PointsShape::SortPoints);
-            
+
             m_parser.DefineClassFun("PointsShape", apoints, "cluster", &PointsShape::ClusterPoints);
             m_parser.DefineClassFun("PointsShape", apoints, "filter", &PointsShape::FilterPoints);
 
             m_parser.DefineClassFun("PointsShape", apoints, "findcross", &PointsShape::FindCrossPoints);
 
 
-            
+
 
             LineShape* plineshape = nullptr;
             m_parser.DefineClass("LineShape", plineshape);
@@ -395,7 +396,7 @@ namespace mu
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle2", &Findcircle::setcircle2);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle", &Findcircle::setcircle);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setgap", &Findcircle::Setgap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "Setgap", &Findcircle::Setgap); 
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "Setgap", &Findcircle::Setgap);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "Show", &Findcircle::setshow);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "measure", &Findcircle::measure);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setlinegap", &Findcircle::setlinegap);
@@ -437,6 +438,23 @@ namespace mu
                 "setselectedgenum",
                 static_cast<void (Findcircle::*)(int)>(&Findcircle::setselectedgenum));
 
+            CircleRingGauge* pcircle_ring_gauge = nullptr;
+            m_parser.DefineClass("CircleRingGauge", pcircle_ring_gauge);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "settolerance", &CircleRingGauge::settolerance);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "setouter", &CircleRingGauge::setouter);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "setinner", &CircleRingGauge::setinner);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "build", &CircleRingGauge::build);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "has_result", &CircleRingGauge::has_result);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "outer_radius", &CircleRingGauge::outer_radius);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "inner_radius", &CircleRingGauge::inner_radius);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "thickness", &CircleRingGauge::thickness);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "center_distance", &CircleRingGauge::center_distance);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "concentric_ok", &CircleRingGauge::concentric_ok);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "inside_ok", &CircleRingGauge::inside_ok);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "thickness_ok", &CircleRingGauge::thickness_ok);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "score", &CircleRingGauge::score);
+            m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "status_code", &CircleRingGauge::status_code);
+
             Findellipse* pfindellipse = nullptr;
             m_parser.DefineClass("Findellipse", pfindellipse);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setellipse2", &Findellipse::setellipse2);
@@ -477,7 +495,7 @@ namespace mu
             m_parser.DefineClassFun("Findline", pfindline, "setselectedgenum", &Findline::setselectedgenum);
             m_parser.DefineClassFun("Findline", pfindline, "patternfilter", &Findline::patternfilter);
             m_parser.DefineClassFun("Findline", pfindline, "getshape", &Findline::getshape);
-            m_parser.DefineClassFun("Findline", pfindline, "sfilter", &Findline::SmartFilter); 
+            m_parser.DefineClassFun("Findline", pfindline, "sfilter", &Findline::SmartFilter);
             m_parser.DefineClassFun("Findline", pfindline, "inflectionpoint", &Findline::InflectionPoint);
             m_parser.DefineClassFun(
                 "Findline",
@@ -486,9 +504,9 @@ namespace mu
                 static_cast<void (Findline::*)(int)>(&Findline::setmeasurefallback));
 
            // m_parser.DefineClassFun("Findline", pfindline, "setlinesegment", &Findline::setlinesegment);
-            
- 
-            FindObject* pfobj = nullptr; 
+
+
+            FindObject* pfobj = nullptr;
             m_parser.DefineClass("Findobject", pfobj);
             m_parser.DefineClassFun("Findobject", pfobj, "setrect", &FindObject::setrect);
             m_parser.DefineClassFun("Findobject", pfobj, "measure", &FindObject::measure);
@@ -531,7 +549,7 @@ namespace mu
             m_parser.DefineClassFun("Findobject", pfobj, "roiedgeh", &FindObject::ImageROIedgeH);
             m_parser.DefineClassFun("Findobject", pfobj, "shapesetroi", &FindObject::shapesetroi);
             m_parser.DefineClassFun("Findobject", pfobj, "getshape", &FindObject::getshape);
- 
+
             fastmatch* pfastmatch = nullptr;
             m_parser.DefineClass("Match", pfastmatch);
             m_parser.DefineClass("fastmatch", pfastmatch);
@@ -571,7 +589,7 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "pattern2org", &fastmatch::pattern2org);
             m_parser.DefineClassFun("Match", pfastmatch, "reorgpattern", &fastmatch::org2pattern);
             m_parser.DefineClassFun("Match", pfastmatch, "patternsize", &fastmatch::ABpatternsize);
-            m_parser.DefineClassFun("Match", pfastmatch, "samplemodel", &fastmatch::samplemodelAB); 
+            m_parser.DefineClassFun("Match", pfastmatch, "samplemodel", &fastmatch::samplemodelAB);
             m_parser.DefineClassFun("Match", pfastmatch, "loadrotatemodel", &fastmatch::loadrotatemodelfile);
             m_parser.DefineClassFun("Match", pfastmatch, "loadrotate05model", &fastmatch::loadrotate05modelfile);
             m_parser.DefineClassFun("Match", pfastmatch, "loadrotate025model", &fastmatch::loadrotate025modelfile);
@@ -628,12 +646,12 @@ namespace mu
             m_parser.DefineClassFun("fastmatch", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
 
             RegisterPendingDirectCxScriptBindings(m_parser);
-            
+
             SmartDouble* avect = nullptr;
             m_parser.DefineClass("vector", avect);
             m_parser.DefineClassFun("vector", avect, "push", &SmartDouble::push);
             m_parser.DefineClassFun("vector", avect, "get", &SmartDouble::getvalue);
-            m_parser.DefineClassFun("vector", avect, "get", &SmartDouble::getresult); 
+            m_parser.DefineClassFun("vector", avect, "get", &SmartDouble::getresult);
             m_parser.DefineClassFun("vector", avect, "set", &SmartDouble::set);
             m_parser.DefineClassFun("vector", avect, "clear", &SmartDouble::clear);
             m_parser.DefineClassFun("vector", avect, "size", &SmartDouble::size);
@@ -780,7 +798,7 @@ namespace mu
         }
         return 0;
     }
-   
+
     void CxParserRuntime::SetExpr(const string & str)
     {
 
@@ -877,7 +895,7 @@ namespace mu
 
     void CxParserRuntime::RunOptString(const char *a_szName)
     {
-     
+
         __try {
             m_parser.RunOptString(a_szName);
         }
@@ -885,7 +903,7 @@ namespace mu
         {
             *m_stream  << a_szName ;
             *m_stream  << "\n RunOptString RunTime Error \n";
-           
+
         }
 
     }
@@ -1329,7 +1347,7 @@ namespace mu
     }
     //---------------------------------------------------------------------------
     bool CxParserRuntime::Compile(const char *a_szLine)
-    { 
+    {
         try
         {
             if (CommandLine(a_szLine))
@@ -1360,7 +1378,7 @@ namespace mu
         }
         return 1;
     }
-     
+
     void CxParserRuntime::ResetRun()
     {
         mu::Parser &Pparser=m_parser;
@@ -1368,7 +1386,7 @@ namespace mu
         if(!classmap.size())
             return;
         classbasemap_type::const_iterator item = classmap.end();
-         
+
         for (; item!=classmap.begin(); )
         {
             --item;
@@ -1388,7 +1406,7 @@ namespace mu
         if(!classmap.size())
             return;
         classbasemap_type::const_iterator item = classmap.end();
-         
+
     }
     //---------------------------------------------------------------------------
     void CxParserRuntime::HitTestImageParserElement(int ipointx,int ipointy)
@@ -1410,7 +1428,7 @@ namespace mu
 #endif
             }
 
-        } 
+        }
     }
     //---------------------------------------------------------------------------
     void CxParserRuntime::MouseDownParserElement(int PointX,int PointY)
@@ -1581,7 +1599,7 @@ namespace mu
                                         <<";\r\n";
                     }
                 }
-            } 
+            }
         }
     }
 

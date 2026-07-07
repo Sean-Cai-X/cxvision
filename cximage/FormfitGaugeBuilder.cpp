@@ -111,6 +111,11 @@ FitOperationConfig GaugeBuilder::MakeRectCircleLineMatchCompositeConfig()
     return MakeRectCircleLineMatchCompositeOperationConfig();
 }
 
+FitOperationConfig GaugeBuilder::MakeCircleRingCompositeConfig()
+{
+    return MakeCircleRingCompositeOperationConfig();
+}
+`n
 PrototypeRunResult GaugeBuilder::BuildAndRunRectCirclePrototype(const FindRect& rect,
                                                                 Findcircle& circle,
                                                                 const FitOperationConfig& operation_config,
@@ -148,5 +153,41 @@ PrototypeRunResult GaugeBuilder::BuildAndRunRectCircleLineMatchPrototype(const F
     return RunRectCircleLineMatchPrototype(rect_output, circle_output, line_output, match_output, operation_config);
 }
 
+PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingPrototype(Findcircle& outer_circle,
+                                                               Findcircle& inner_circle,
+                                                               const FitOperationConfig& operation_config,
+                                                               double center_tolerance,
+                                                               double thickness_tolerance)
+{
+    CircleMeasurementOutput outer_output = MakeCircleOutput(outer_circle);
+    CircleMeasurementOutput inner_output = MakeCircleOutput(inner_circle);
+
+    return RunCircleRingPrototype(
+        outer_output,
+        inner_output,
+        operation_config,
+        center_tolerance,
+        thickness_tolerance);
+}
+
+PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingLinePrototype(Findcircle& outer_circle,
+                                                                   Findcircle& inner_circle,
+                                                                   Findline& line,
+                                                                   const FitOperationConfig& operation_config,
+                                                                   double center_tolerance,
+                                                                   double thickness_tolerance)
+{
+    CircleMeasurementOutput outer_output = MakeCircleOutput(outer_circle);
+    CircleMeasurementOutput inner_output = MakeCircleOutput(inner_circle);
+    LineMeasurementOutput line_output = MakeLineOutput(line);
+
+    return RunCircleRingLinePrototype(
+        outer_output,
+        inner_output,
+        line_output,
+        operation_config,
+        center_tolerance,
+        thickness_tolerance);
+}
 } // namespace formfit
 } // namespace cxcore

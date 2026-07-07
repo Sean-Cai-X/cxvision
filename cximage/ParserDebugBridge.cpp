@@ -2,6 +2,7 @@
 
 #include "Findcircle.h"
 #include "Image.h"
+#include "CircleRingGauge.h"
 
 #include <sstream>
 #include <utility>
@@ -136,7 +137,8 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
   const std::pair<const char*, const char*> objects[] = {
     {"Image", "global_matInput"}, {"Image", "m_occtimage"},
     {"Findcircle", "afindcircle0"},
-    {"Findcircle", "afindcircle1"}
+    {"Findcircle", "afindcircle1"},
+    {"CircleRingGauge", "ring_gauge"}
   };
   std::vector<ParserDebugObjectSnapshot> snapshots;
   for (const auto& item : objects)
@@ -178,6 +180,27 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
           std::to_string(circle->getcirclecenty()) + "," +
           std::to_string(circle->getcirclepax()) + "," +
           std::to_string(circle->getcirclepay());
+      }
+    }
+    else if (snapshot.type == "CircleRingGauge" && snapshot.exists_in_parser)
+    {
+      CircleRingGauge* ring_gauge = static_cast<CircleRingGauge*>(
+        QueryClassObject(snapshot.type, snapshot.name));
+      if (ring_gauge != nullptr)
+      {
+        snapshot.ring_outer_radius = ring_gauge->m_outer_radius;
+        snapshot.ring_inner_radius = ring_gauge->m_inner_radius;
+        snapshot.ring_thickness = ring_gauge->m_thickness;
+        snapshot.ring_center_distance = ring_gauge->m_center_distance;
+        snapshot.ring_concentric_ok = ring_gauge->m_concentric_ok;
+        snapshot.ring_inside_ok = ring_gauge->m_inside_ok;
+        snapshot.ring_thickness_ok = ring_gauge->m_thickness_ok;
+        snapshot.ring_score = ring_gauge->m_score;
+        snapshot.ring_status = ring_gauge->m_status;
+        snapshot.ring_reason = ring_gauge->m_reason;
+        snapshot.ring_result_ref = ring_gauge->m_result_ref;
+        snapshot.value_summary = "CircleRingGauge: status=" + ring_gauge->m_status +
+          ", score=" + std::to_string(ring_gauge->m_score);
       }
     }
     snapshots.push_back(snapshot);

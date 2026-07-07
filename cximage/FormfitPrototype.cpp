@@ -262,6 +262,71 @@ FitOperationConfig MakeRectCircleLineMatchCompositeOperationConfig()
     return NormalizeOperationConfig(config);
 }
 
+FitOperationConfig MakeCircleRingLineCompositeOperationConfig()
+{
+    FitOperationConfig config = MakeCircleRingCompositeOperationConfig();
+    config.config_id = "circle_ring_line_composite_config";
+    config.has_global_weight_scale = true;
+    config.global_weight_scale = 1.1;
+    return NormalizeOperationConfig(config);
+}
+
+FitOperationConfig MakeCircleRingCompositeOperationConfig()
+{
+    FitOperationConfig config;
+
+    config.config_id = "circle_ring_composite_config";
+    config.operation_kind = FitOperationKind::SetStage;
+    config.has_global_tolerance_scale = true;
+    config.global_tolerance_scale = 1.0;
+    config.has_global_weight_scale = true;
+    config.global_weight_scale = 1.0;
+
+    FitStageSetting coarse;
+    coarse.stage_id = "coarse";
+    coarse.has_method = true;
+    coarse.method_type = FitMethodType::LeastSquares;
+    coarse.has_order_index = true;
+    coarse.order_index = 0;
+    coarse.has_stage_weight = true;
+    coarse.stage_weight = 0.75;
+    coarse.has_tolerance_scale = true;
+    coarse.tolerance_scale = 1.20;
+    coarse.has_max_iterations = true;
+    coarse.max_iterations = 16;
+    config.stage_settings.push_back(coarse);
+
+    FitStageSetting refine;
+    refine.stage_id = "refine";
+    refine.has_method = true;
+    refine.method_type = FitMethodType::WeightedLeastSquares;
+    refine.has_order_index = true;
+    refine.order_index = 1;
+    refine.has_stage_weight = true;
+    refine.stage_weight = 1.00;
+    refine.has_tolerance_scale = true;
+    refine.tolerance_scale = 1.00;
+    refine.has_max_iterations = true;
+    refine.max_iterations = 32;
+    config.stage_settings.push_back(refine);
+
+    FitStageSetting final_stage;
+    final_stage.stage_id = "final";
+    final_stage.has_method = true;
+    final_stage.method_type = FitMethodType::Constrained;
+    final_stage.has_order_index = true;
+    final_stage.order_index = 2;
+    final_stage.has_stage_weight = true;
+    final_stage.stage_weight = 1.25;
+    final_stage.has_tolerance_scale = true;
+    final_stage.tolerance_scale = 0.85;
+    final_stage.has_max_iterations = true;
+    final_stage.max_iterations = 24;
+    config.stage_settings.push_back(final_stage);
+
+    return NormalizeOperationConfig(config);
+}
+
 PrototypeRunResult RunRectCirclePrototype(const OutputRect& rect,
                                           const CircleMeasurementOutput& circle,
                                           const FitOperationConfig& operation_config)
@@ -561,5 +626,83 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
     return run_single(match, -1);
 }
 
+PrototypeRunResult RunCircleRingPrototype(const CircleMeasurementOutput& outer_circle,
+                                          const CircleMeasurementOutput& inner_circle,
+                                          const FitOperationConfig& operation_config,
+                                          double center_tolerance,
+                                          double thickness_tolerance)
+{
+    PrototypeRunResult result;
+
+    result.operation_config = operation_config;
+
+    result.gauge =
+        MakeCircleRingGauge(
+            outer_circle,
+            inner_circle,
+            "circle_ring_gauge",
+            "Circle Ring Gauge",
+            center_tolerance,
+            thickness_tolerance);
+
+    result.task =
+        MakeTaskSpecFromGauge(
+            result.gauge,
+            "circle_ring_task",
+            FitTaskType::GaugeFit);
+
+    result.problem =
+        MakeFitProblemFromGauge(
+            result.gauge,
+            "circle_ring_problem");
+
+    result.configured_problem = result.problem;
+
+    result.group_score = result.gauge.learn_score;
+    result.evaluation_score = result.gauge.learn_score;
+
+    return result;
+}
+
+PrototypeRunResult RunCircleRingLinePrototype(const CircleMeasurementOutput& outer_circle,
+                                              const CircleMeasurementOutput& inner_circle,
+                                              const LineMeasurementOutput& line,
+                                              const FitOperationConfig& operation_config,
+                                              double center_tolerance,
+                                              double thickness_tolerance)
+{
+    PrototypeRunResult result;
+
+    result.operation_config = operation_config;
+
+    result.gauge =
+        MakeCircleRingLineGauge(
+            outer_circle,
+            inner_circle,
+            line,
+            "circle_ring_line_gauge",
+            "Circle Ring + Line Gauge",
+            center_tolerance,
+            thickness_tolerance);
+
+    result.task =
+        MakeTaskSpecFromGauge(
+            result.gauge,
+            "circle_ring_line_task",
+            FitTaskType::StructureFit);
+
+    result.problem =
+        MakeFitProblemFromGauge(
+            result.gauge,
+            "circle_ring_line_problem");
+
+    result.configured_problem = result.problem;
+    FitOperationController::Apply(result.operation_config, result.configured_problem);
+
+    result.group_score = result.gauge.learn_score;
+    result.evaluation_score = result.gauge.learn_score;
+
+    return result;
+}
 } // namespace formfit
 } // namespace cxcore

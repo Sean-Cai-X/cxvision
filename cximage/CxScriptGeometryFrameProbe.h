@@ -1,4 +1,4 @@
-﻿#ifndef CXIMAGE_CXSCRIPT_GEOMETRY_FRAME_PROBE_H
+#ifndef CXIMAGE_CXSCRIPT_GEOMETRY_FRAME_PROBE_H
 #define CXIMAGE_CXSCRIPT_GEOMETRY_FRAME_PROBE_H
 
 #include <filesystem>
@@ -81,6 +81,35 @@ struct GaugeCircleFrameProbe
     std::string frame_compare_reason;
 };
 
+struct GaugeCircleRingFrameProbe
+{
+    std::string tool = "CircleRingGauge";
+    int image_width = 0;
+    int image_height = 0;
+    double outer_cx = 0.0;
+    double outer_cy = 0.0;
+    double outer_px = 0.0;
+    double outer_py = 0.0;
+    double outer_radius = 0.0;
+    double inner_cx = 0.0;
+    double inner_cy = 0.0;
+    double inner_px = 0.0;
+    double inner_py = 0.0;
+    double inner_radius = 0.0;
+    double center_distance = 0.0;
+    double ring_thickness = 0.0;
+    int outer_gap = 0;
+    int inner_gap = 0;
+    int linegap = 0;
+    int scan_line_count = 0;
+    bool outer_circle_intersects_image = false;
+    bool outer_circle_fully_inside_image = false;
+    bool inner_circle_intersects_image = false;
+    bool inner_circle_fully_inside_image = false;
+    bool ring_geometry_valid = false;
+    std::string frame_compare_status;
+    std::string frame_compare_reason;
+};
 bool ParseGaugeFrameProbeArgs(int argc, char** argv, GaugeFrameProbeOptions& options);
 bool RunGaugeFrameProbe(const GaugeFrameProbeOptions& options, GaugeFrameProbeResult& result);
 

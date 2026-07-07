@@ -39,6 +39,8 @@ struct PrototypeRunResult
 FitOperationConfig MakeRectCircleCompositeOperationConfig();
 FitOperationConfig MakeRectCircleLineCompositeOperationConfig();
 FitOperationConfig MakeRectCircleLineMatchCompositeOperationConfig();
+FitOperationConfig MakeCircleRingCompositeOperationConfig();
+FitOperationConfig MakeCircleRingLineCompositeOperationConfig();
 
 PrototypeRunResult RunRectCirclePrototype(const OutputRect& rect,
                                           const CircleMeasurementOutput& circle,
@@ -52,6 +54,17 @@ PrototypeRunResult RunRectCircleLineMatchPrototype(const OutputRect& rect,
                                                    const LineMeasurementOutput& line,
                                                    const MatchOutput& match,
                                                    const FitOperationConfig& operation_config);
+PrototypeRunResult RunCircleRingPrototype(const CircleMeasurementOutput& outer_circle,
+                                          const CircleMeasurementOutput& inner_circle,
+                                          const FitOperationConfig& operation_config,
+                                          double center_tolerance = 3.0,
+                                          double thickness_tolerance = 5.0);
+PrototypeRunResult RunCircleRingLinePrototype(const CircleMeasurementOutput& outer_circle,
+                                              const CircleMeasurementOutput& inner_circle,
+                                              const LineMeasurementOutput& line,
+                                              const FitOperationConfig& operation_config,
+                                              double center_tolerance = 3.0,
+                                              double thickness_tolerance = 5.0);
 
 } // namespace formfit
 } // namespace cxcore

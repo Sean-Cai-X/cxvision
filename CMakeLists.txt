@@ -62,6 +62,10 @@ set(CXIMAGE_SOURCES
   cximage/CxScriptStage25ReportWriter.cpp
   cximage/CxScriptStage25Register.cpp
   cximage/CxScriptStage25JsonLite.cpp
+  cximage/CircleRingGauge.cpp
+  cximage/FormfitFitMethod.cpp
+  cximage/FormfitGauge.cpp
+  cximage/FormfitPrototype.cpp
 )
 
 set(CXGEOM_SOURCES
