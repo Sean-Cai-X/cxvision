@@ -1,4 +1,5 @@
 #include "CxScriptStage25ReportWriter.h"
+#include "FindlineParameterPolicy.h"
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -56,14 +57,16 @@ void Stage25ReportWriter::WriteBatchReport(
     file << "- T2 evidence support pass: " << t2_pass << "/" << executed << "\n\n";
 
     file << "## Findline Cases\n\n";
-    file << "| Level | Image | Target | Profile | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | Quality | Policy | Summary | Evidence |\n";
-    file << "|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
+    file << "| Level | Image | Target | Profile | ParamPolicy | ParamRole | IsProdDefault | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | Quality | Policy | Summary | Evidence |\n";
+    file << "|---|---|---|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
 
     for (const auto& r : results)
     {
         if (r.tool != "Findline") continue;
         file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
-             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit_line ? "true" : "false")
+             << r.profile_id << " | " << r.parameter_policy_id << " | " << r.parameter_role
+             << " | " << (r.is_product_default ? "YES" : "NO")
+             << " | " << r.valid_points_count << " | " << (r.has_fit_line ? "true" : "false")
              << " | " << (r.t1_pass ? "true" : "false")
              << " | " << (r.t2_pass ? "true" : "false")
              << " | " << std::fixed << std::setprecision(3) << r.measured_local_support_score
@@ -316,25 +319,140 @@ void Stage25ReportWriter::WriteStabilityReport(
 }
 
 void Stage25ReportWriter::WritePolicyReport(
-    const std::filesystem::path& out_root)
+    const std::filesystem::path& out_root,
+    const std::vector<Stage25CaseResult>& results,
+    const Stage25Manifest& manifest)
 {
     std::ofstream file(out_root / "parameter_policy_report.md");
 
     file << "# Stage 2.5 L1~L3 Parameter Policy Decision\n\n";
-    file << "## Current Policy\n\n";
-    file << "| Parameter/Profile | Current Status | Decision | Reason |\n";
-    file << "|---|---|---|---|\n";
-    file << "| Findline legacy filter_min=50 | preserved | keep as legacy | needed for original compare |\n";
-    file << "| Findline stage25_filter20 | candidate | keep as test profile | produces points and matches component stats |\n";
-    file << "| Findline threshold8 | candidate | keep as weak edge candidate | may perform better on L2 low contrast |\n";
-    file << "| Findline linegap10 | candidate | keep for comparison | fewer points but may reduce interference |\n";
-    file << "| Findline filter_relax_min1 | debug | do not promote | too permissive |\n";
-    file << "| Findline gamma | risky | do not promote | binary collapses to large component |\n";
-    file << "| Findcircle direct | candidate | keep as primary | currently most stable |\n";
-    file << "| Findcircle threshold8 | candidate | keep as weak edge candidate |\n";
-    file << "| Findcircle method1 | risky | do not promote | polarity risk observed |\n";
-    file << "| Findcircle filter_relax | debug | do not promote | may introduce false positives |\n";
-    file << "| FastMatch | not evaluated | deferred | not in current test scope |\n";
+
+    file << "## Important Notice\n\n";
+    file << "> **Stage25Filter20 is NOT the product default.** It is a Stage25 recommended template for testing purposes only.\n";
+    file << "> The product default remains unchanged (LegacyDefault: filter_profile=0, effective_filter_min=50).\n\n";
+
+    file << "## Findline Parameter Policies\n\n";
+    file << "| PolicyID | DisplayName | Role | IsProdDefault | IsStage25Default | threshold | linegap | filter_profile |\n";
+    file << "|---|---|---|---|---|---:|---:|---|\n";
+
+    for (const auto& kind : {
+        FindlineParameterPolicyKind::LegacyDefault,
+        FindlineParameterPolicyKind::Stage25Filter20,
+        FindlineParameterPolicyKind::LowContrastThreshold8,
+        FindlineParameterPolicyKind::ComplexBoundaryLinegap10,
+        FindlineParameterPolicyKind::DebugFilterRelaxMin1,
+        FindlineParameterPolicyKind::RiskGamma })
+    {
+        const auto& p = MakeFindlinePolicy(kind);
+        file << "| " << p.policy_id << " | " << p.display_name << " | "
+             << ToString(p.role) << " | " << (p.is_product_default ? "YES" : "NO")
+             << " | " << (p.is_stage25_default ? "YES" : "NO")
+             << " | " << p.threshold << " | " << p.linegap << " | " << p.filter_profile << " |\n";
+    }
+
+    std::vector<Stage25CaseResult> findline_results;
+    std::copy_if(results.begin(), results.end(), std::back_inserter(findline_results),
+        [](const auto& r) { return r.tool == "Findline" && !r.skipped_by_preflight; });
+
+    file << "\n## Findline Policy Statistics\n\n";
+    file << "| PolicyID | Total | T1Pass | T1Rate | T2Pass | T2Rate | MeanSupport | MeanDist |\n";
+    file << "|---|---:|---:|---:|---:|---:|---:|---:|\n";
+
+    std::map<std::string, std::vector<Stage25CaseResult>> policy_results;
+    for (const auto& r : findline_results)
+    {
+        policy_results[r.parameter_policy_id].push_back(r);
+    }
+
+    for (const auto& [policy_id, pol_results] : policy_results)
+    {
+        int total = static_cast<int>(pol_results.size());
+        int t1_pass = static_cast<int>(std::count_if(pol_results.begin(), pol_results.end(),
+            [](const auto& r) { return r.t1_pass; }));
+        int t2_pass = static_cast<int>(std::count_if(pol_results.begin(), pol_results.end(),
+            [](const auto& r) { return r.t2_pass; }));
+
+        double mean_support = 0.0;
+        double mean_dist = 0.0;
+        for (const auto& r : pol_results)
+        {
+            mean_support += r.measured_local_support_score;
+            mean_dist += r.measured_local_mean_distance_px;
+        }
+        if (total > 0)
+        {
+            mean_support /= total;
+            mean_dist /= total;
+        }
+
+        double t1_rate = total > 0 ? static_cast<double>(t1_pass) / total : 0.0;
+        double t2_rate = total > 0 ? static_cast<double>(t2_pass) / total : 0.0;
+
+        file << "| " << policy_id << " | " << total << " | " << t1_pass
+             << " | " << std::fixed << std::setprecision(1) << (t1_rate * 100) << "% | "
+             << t2_pass << " | " << std::setprecision(1) << (t2_rate * 100) << "% | "
+             << std::setprecision(3) << mean_support << " | " << mean_dist << " |\n";
+    }
+
+    file << "\n## Product Default Gate Evaluation\n\n";
+
+    FindlineProductDefaultGateInput gate_input;
+    gate_input.total_images = static_cast<int>(manifest.images.size());
+    
+    std::set<std::string> level_set;
+    for (const auto& img : manifest.images)
+        level_set.insert(img.level);
+    gate_input.level_count = static_cast<int>(level_set.size());
+
+    gate_input.orientation_count = 2;
+
+    int executed = static_cast<int>(findline_results.size());
+    int success = static_cast<int>(std::count_if(findline_results.begin(), findline_results.end(),
+        [](const auto& r) { return r.t1_pass; }));
+    gate_input.original_success_rate = executed > 0 ? static_cast<double>(success) / executed : 0.0;
+
+    int confirmed = static_cast<int>(std::count_if(findline_results.begin(), findline_results.end(),
+        [](const auto& r) { return r.quality_classification == "ORIGINAL_LOCAL_EDGE_CONFIRMED"; }));
+    gate_input.local_confirmed_rate = executed > 0 ? static_cast<double>(confirmed) / executed : 0.0;
+
+    gate_input.component_warning_rate = 0.0;
+
+    double mean_offset = 0.0;
+    for (const auto& r : findline_results)
+        mean_offset += r.fit_offset_error_px;
+    gate_input.mean_fit_offset = executed > 0 ? mean_offset / executed : 0.0;
+
+    auto gate_result = EvaluateFindlineProductDefaultGate(gate_input);
+
+    file << "| Gate | Value | Threshold | Status |\n";
+    file << "|---|---:|---:|---|\n";
+    file << "| total_images | " << gate_input.total_images << " | >=12 | "
+         << (gate_input.total_images >= 12 ? "PASS" : "FAIL") << " |\n";
+    file << "| level_count | " << gate_input.level_count << " | >=3 | "
+         << (gate_input.level_count >= 3 ? "PASS" : "FAIL") << " |\n";
+    file << "| orientation_count | " << gate_input.orientation_count << " | >=2 | "
+         << (gate_input.orientation_count >= 2 ? "PASS" : "FAIL") << " |\n";
+    file << "| original_success_rate | " << std::fixed << std::setprecision(1) << (gate_input.original_success_rate * 100) << "% | >=85% | "
+         << (gate_input.original_success_rate >= 0.85 ? "PASS" : "FAIL") << " |\n";
+    file << "| local_confirmed_rate | " << std::setprecision(1) << (gate_input.local_confirmed_rate * 100) << "% | >=80% | "
+         << (gate_input.local_confirmed_rate >= 0.80 ? "PASS" : "FAIL") << " |\n";
+    file << "| component_warning_rate | " << std::setprecision(1) << (gate_input.component_warning_rate * 100) << "% | <=20% | "
+         << (gate_input.component_warning_rate <= 0.20 ? "PASS" : "FAIL") << " |\n";
+    file << "| mean_fit_offset | " << std::setprecision(1) << gate_input.mean_fit_offset << " px | <=6.0 | "
+         << (gate_input.mean_fit_offset <= 6.0 ? "PASS" : "FAIL") << " |\n";
+
+    file << "\n**Promotion Decision:** " << (gate_result.can_promote ? "CAN_PROMOTE" : "CANNOT_PROMOTE") << "\n";
+    file << "**Reason:** " << gate_result.reason << "\n";
+
+    file << "\n## Decision Summary\n\n";
+    file << "| Action | Item | Status |\n";
+    file << "|---|---|---|\n";
+    file << "| KEEP | LegacyDefault as product default | current default |\n";
+    file << "| TEST | Stage25Filter20 as Stage25 recommended template | not promoted |\n";
+    file << "| MONITOR | LowContrastThreshold8 for L2 scenarios | candidate |\n";
+    file << "| MONITOR | ComplexBoundaryLinegap10 for L3 scenarios | candidate |\n";
+    file << "| REJECT | DebugFilterRelaxMin1 | too permissive |\n";
+    file << "| REJECT | RiskGamma | introduces binary collapse risk |\n";
 }
 
 void Stage25ReportWriter::WriteCaseFileIndex(

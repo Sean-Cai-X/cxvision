@@ -28,7 +28,9 @@ public:
         const Stage25Manifest& manifest);
 
     static void WritePolicyReport(
-        const std::filesystem::path& out_root);
+        const std::filesystem::path& out_root,
+        const std::vector<Stage25CaseResult>& results,
+        const Stage25Manifest& manifest);
 
     static void WriteCaseFileIndex(
         const std::filesystem::path& out_root,

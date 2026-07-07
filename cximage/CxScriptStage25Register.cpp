@@ -210,6 +210,30 @@ public:
             g_current_findline_profile->policy = value ? value : "";
     }
 
+    void findline_setparameterpolicyid(const char* value)
+    {
+        if (g_current_findline_profile)
+            g_current_findline_profile->parameter_policy_id = value ? value : "";
+    }
+
+    void findline_setparameterrole(const char* value)
+    {
+        if (g_current_findline_profile)
+            g_current_findline_profile->parameter_role = value ? value : "";
+    }
+
+    void findline_setisproductdefault(double value)
+    {
+        if (g_current_findline_profile)
+            g_current_findline_profile->is_product_default = (value != 0);
+    }
+
+    void findline_setisstage25default(double value)
+    {
+        if (g_current_findline_profile)
+            g_current_findline_profile->is_stage25_default = (value != 0);
+    }
+
     void addfindcircleprofile(const char* value)
     {
         Stage25FindcircleProfile profile;
@@ -277,6 +301,30 @@ public:
     {
         if (g_current_findcircle_profile)
             g_current_findcircle_profile->policy = value ? value : "";
+    }
+
+    void findcircle_setparameterpolicyid(const char* value)
+    {
+        if (g_current_findcircle_profile)
+            g_current_findcircle_profile->parameter_policy_id = value ? value : "";
+    }
+
+    void findcircle_setparameterrole(const char* value)
+    {
+        if (g_current_findcircle_profile)
+            g_current_findcircle_profile->parameter_role = value ? value : "";
+    }
+
+    void findcircle_setisproductdefault(double value)
+    {
+        if (g_current_findcircle_profile)
+            g_current_findcircle_profile->is_product_default = (value != 0);
+    }
+
+    void findcircle_setisstage25default(double value)
+    {
+        if (g_current_findcircle_profile)
+            g_current_findcircle_profile->is_stage25_default = (value != 0);
     }
 
     void addevidenceprofile(const char* value)
@@ -397,6 +445,18 @@ void RegisterStage25CxScriptBindings(mu::Parser& parser)
     parser.DefineClassFun("Stage25Manifest", manifest, "findline_setpolicy",
                           &Stage25ManifestBinding::findline_setpolicy);
 
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setparameterpolicyid",
+                          &Stage25ManifestBinding::findline_setparameterpolicyid);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setparameterrole",
+                          &Stage25ManifestBinding::findline_setparameterrole);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setisproductdefault",
+                          &Stage25ManifestBinding::findline_setisproductdefault);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setisstage25default",
+                          &Stage25ManifestBinding::findline_setisstage25default);
+
     parser.DefineClassFun("Stage25Manifest", manifest, "addfindcircleprofile",
                           &Stage25ManifestBinding::addfindcircleprofile);
 
@@ -423,6 +483,18 @@ void RegisterStage25CxScriptBindings(mu::Parser& parser)
 
     parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setpolicy",
                           &Stage25ManifestBinding::findcircle_setpolicy);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setparameterpolicyid",
+                          &Stage25ManifestBinding::findcircle_setparameterpolicyid);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setparameterrole",
+                          &Stage25ManifestBinding::findcircle_setparameterrole);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setisproductdefault",
+                          &Stage25ManifestBinding::findcircle_setisproductdefault);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setisstage25default",
+                          &Stage25ManifestBinding::findcircle_setisstage25default);
 
     parser.DefineClassFun("Stage25Manifest", manifest, "addevidenceprofile",
                           &Stage25ManifestBinding::addevidenceprofile);

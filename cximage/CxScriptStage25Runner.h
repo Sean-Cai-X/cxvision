@@ -54,6 +54,11 @@ struct Stage25CaseResult
     std::string measure_source;
     bool fallback_used = false;
 
+    std::string parameter_policy_id;
+    std::string parameter_role;
+    bool is_product_default = false;
+    bool is_stage25_default = false;
+
     std::string summary_path;
     std::string evidence_summary_path;
     std::string snapshot_path;

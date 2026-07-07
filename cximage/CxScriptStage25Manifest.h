@@ -67,6 +67,11 @@ struct Stage25FindlineProfile
     int gamma = 0;
 
     std::string policy;
+
+    std::string parameter_policy_id;
+    std::string parameter_role;
+    bool is_product_default = false;
+    bool is_stage25_default = false;
 };
 
 struct Stage25FindcircleProfile
@@ -88,6 +93,11 @@ struct Stage25FindcircleProfile
     double samplerate = 0.0;
 
     std::string policy;
+
+    std::string parameter_policy_id;
+    std::string parameter_role;
+    bool is_product_default = false;
+    bool is_stage25_default = false;
 };
 
 struct Stage25EvidenceProfile

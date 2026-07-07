@@ -1,7 +1,14 @@
+// WARNING: This is a Stage25 test template.
+// Stage25Filter20 (filter_profile=1) is NOT the product default.
+// Product default remains LegacyDefault (filter_profile=0, effective_filter_min=50).
+//
 // stage25_case_id: {{case_id}}
 // image_id: {{image_id}}
 // target_id: {{target_id}}
 // profile_id: {{profile_id}}
+// parameter_policy_id: {{parameter_policy_id}}
+// parameter_role: {{parameter_role}}
+// is_product_default: {{is_product_default}}
 // roi: {{x0}},{{y0}} -> {{x1}},{{y1}}
 // wgap/hgap: {{wgap}},{{hgap}}
 // tool_half_width: {{tool_half_width}}

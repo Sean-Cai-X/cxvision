@@ -452,6 +452,12 @@ struct ScriptSnippet
   std::string text;
   std::string source_path;
   bool runnable = true;
+
+  std::string parameter_policy_id;
+  std::string parameter_role;
+  bool is_product_default = false;
+  bool is_stage25_default = false;
+  bool recommended = false;
 };
 
 struct CxScriptHeadlessOptions

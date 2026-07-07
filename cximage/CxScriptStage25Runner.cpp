@@ -32,6 +32,9 @@ namespace
         ctx.values["image_id"] = image_id;
         ctx.values["target_id"] = target_id;
         ctx.values["profile_id"] = profile.profile_id;
+        ctx.values["parameter_policy_id"] = profile.parameter_policy_id;
+        ctx.values["parameter_role"] = profile.parameter_role;
+        ctx.values["is_product_default"] = profile.is_product_default ? "true" : "false";
         ctx.values["x0"] = std::to_string(target.x0);
         ctx.values["y0"] = std::to_string(target.y0);
         ctx.values["x1"] = std::to_string(target.x1);
@@ -378,6 +381,10 @@ bool RunStage25ManifestFile(
                             skipped.profile_id = profile.profile_id;
                             skipped.evidence_profile = ev_profile.name;
                             skipped.policy_classification = profile.policy;
+                            skipped.parameter_policy_id = profile.parameter_policy_id;
+                            skipped.parameter_role = profile.parameter_role;
+                            skipped.is_product_default = profile.is_product_default;
+                            skipped.is_stage25_default = profile.is_stage25_default;
                             skipped.skipped_by_preflight = true;
                             skipped.skip_reason = preflight.preflight_class;
                             skipped.t0_pass = false;
@@ -457,6 +464,10 @@ bool RunStage25ManifestFile(
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
+                        case_result.parameter_policy_id = profile.parameter_policy_id;
+                        case_result.parameter_role = profile.parameter_role;
+                        case_result.is_product_default = profile.is_product_default;
+                        case_result.is_stage25_default = profile.is_stage25_default;
                         case_result.generated_script_path = generated_script.string();
 
                         case_result.headless_ok = headlessResult.ok;
@@ -532,6 +543,10 @@ bool RunStage25ManifestFile(
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
+                        case_result.parameter_policy_id = profile.parameter_policy_id;
+                        case_result.parameter_role = profile.parameter_role;
+                        case_result.is_product_default = profile.is_product_default;
+                        case_result.is_stage25_default = profile.is_stage25_default;
                         case_result.generated_script_path = generated_script.string();
 
                         case_result.headless_ok = headlessResult.ok;
@@ -582,7 +597,7 @@ bool RunStage25ManifestFile(
     Stage25ReportWriter::WritePreflightReport(options.out_root, preflight_results);
     Stage25ReportWriter::WriteCoverageReport(options.out_root, manifest);
     Stage25ReportWriter::WriteStabilityReport(options.out_root, result.case_results, manifest);
-    Stage25ReportWriter::WritePolicyReport(options.out_root);
+    Stage25ReportWriter::WritePolicyReport(options.out_root, result.case_results, manifest);
     Stage25ReportWriter::WriteCaseFileIndex(options.out_root, result.case_results);
     Stage25ReportWriter::WriteDiagnosticReport(options.out_root, result.case_results);
 

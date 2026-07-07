@@ -7,6 +7,7 @@
 #include "imagemanager.h"
 #include "CxScriptImageEvidenceAnalyzer.h"
 #include "CxScriptGeometryFrameProbe.h"
+#include "FindlineParameterPolicy.h"
 
 #include <imgui.h>
 
@@ -5279,39 +5280,39 @@ void ViewController::initManualStateTestConsole()
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg";
   m_manualSnippets = {
     {"Parser Run 1", "Image and shape visibility test.",
-     "aimage1.Show(1);\nashape0.Show(1);\n", "builtin", true},
+     "aimage1.Show(1);\nashape0.Show(1);\n", "builtin", true, "", "", false, false, false},
     {"Parser Run 2", "Pattern model setup fragment.",
-     "amatch0.setmatchrect(50,50,2200,1900);\n", "builtin", true},
+     "amatch0.setmatchrect(50,50,2200,1900);\n", "builtin", true, "", "", false, false, false},
     {"Parser Run 3", "Image ROI threshold fragment.",
-     "aimage1.roieasythre(255);\naimage1.Show(1);\n", "builtin", true},
+     "aimage1.roieasythre(255);\naimage1.Show(1);\n", "builtin", true, "", "", false, false, false},
     {"Parser Run 4", "Point and line inspection fragment.",
-     "apoints0.Show(1);\nafindline.Show(1);\n", "builtin", true},
+     "apoints0.Show(1);\nafindline.Show(1);\n", "builtin", true, "", "", false, false, false},
     {"Parser Run 5", "Manual runtime call fragment.",
-     "arun.testrun();\n", "builtin", true},
+     "arun.testrun();\n", "builtin", true, "", "", false, false, false},
     {"Parser Run 6", "Empty integration observation fragment.",
-     "# enter one manual integration statement\n", "builtin", true},
+     "# enter one manual integration statement\n", "builtin", true, "", "", false, false, false},
     {"Custom Manual Text", "Start with an empty manual editor.",
-     "", "manual", true},
+     "", "manual", true, "", "", false, false, false},
     {"Findline Legacy Direct", "Legacy direct line ROI, scan box, original measure points, and fitline.",
-     "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
     {"Findline WHgap Update", "SetWHgap before and after setline; previous measure and fit must be invalidated.",
-     "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
     {"Findline Native Width Compare", "Original Measure comparison with setline scale 32.",
-     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
     {"Recommended: Findline Vertical - Stage25 Filter20", "Stage25 / Findline / Recommended: produces original Measure points using filter_profile=1; no fallback; not product default.",
-     "", "cxparser/cxscript/module/cximage/find_line_vertical_stage25_filter20_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_vertical_stage25_filter20_test.cxsc", true, "stage25_filter20", "STAGE25_RECOMMENDED_TEMPLATE", false, true, true},
     {"Compare: Findline Vertical - Legacy Direct", "Stage25 / Findline / Compare: expected filter failure when effective_filter_min=50; preserved baseline.",
-     "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
     {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
-     "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true, "", "", false, false, false},
     {"Findline Fallback Debug", "Fallback debug only. Not original Measure validation.",
-     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true, "filter_relax_min1", "DEBUG_ONLY", false, false, false},
     {"Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
-     "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true, "", "", false, false, false},
     {"Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
-     "", "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", true},
+     "", "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", true, "", "", false, false, false},
     {"Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
-     "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true}
+     "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true, "", "", false, false, false}
   };
 
   m_directTestModules.clear();
@@ -5328,7 +5329,7 @@ void ViewController::initManualStateTestConsole()
       const std::string relative = fs::relative(entry.path(), moduleRoot).generic_string();
       m_directTestModules.push_back({relative,
         "C/C++ statement-level direct test module.", text,
-        "cxparser/cxscript/module/" + relative, true});
+        "cxparser/cxscript/module/" + relative, true, "", "", false, false, false});
     }
     std::sort(m_directTestModules.begin(), m_directTestModules.end(),
       [](const ScriptSnippet& left, const ScriptSnippet& right)
