@@ -39,11 +39,17 @@ struct CxScriptStatement
   std::string argument_text;
   std::string declared_type;
   std::string initializer_text;
+  std::string lhs_object_name;
+  std::string lhs_type_name;
+  std::string source_object_name;
+  std::string method_name;
+  std::string return_object_ref;
   std::string lhs_text;
   std::string operator_text;
   std::string rhs_text;
   CxScriptSourceSpan span;
   int block_depth = 0;
+  bool returns_object_assignment = false;
 };
 
 struct CxScriptFlow

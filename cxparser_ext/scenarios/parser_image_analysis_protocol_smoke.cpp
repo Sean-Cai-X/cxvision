@@ -66,6 +66,9 @@ int main()
   if (!Expect(result.match_results[0].image_model_score == result.match_results[0].score, "image model score mismatch")) return 1;
   if (!Expect(!result.trace_entries.empty(), "trace should not be empty")) return 1;
   if (!Expect(!result.log_entries.empty(), "log should not be empty")) return 1;
+  if (!Expect(result.multimodal_slices.size() >= 3, "multimodal slices should be exported")) return 1;
+  if (!Expect(result.operation_atoms.size() >= 1, "operation atoms should be exported")) return 1;
+  if (!Expect(result.multimodal_slices[0].modality == "image", "first slice modality mismatch")) return 1;
 
   std::cout << "[PASS] task=" << result.task_id
             << " roi=" << result.roi_results[0].roi_id

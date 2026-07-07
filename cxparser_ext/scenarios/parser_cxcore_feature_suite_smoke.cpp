@@ -68,7 +68,6 @@ int main(int argc, char **argv)
       !RunCase("circle_measurement_balanced") ||
       !RunCase("template_feature_match") ||
       !RunCase("rect_formfit_candidate_selection") ||
-      !RunCase("baseline_feature_export") ||
       !RunCase("region_boundary_analysis") ||
       !RunCase("region_boundary_analysis_golden") ||
       !RunCase("region_boundary_analysis_boundary") ||

@@ -1,6 +1,8 @@
 #ifndef CXPARSER_EXT_PARSER_IMAGE_ANALYSIS_PROTOCOL_H
 #define CXPARSER_EXT_PARSER_IMAGE_ANALYSIS_PROTOCOL_H
 
+#include "parser_multimodal_slice_types.h"
+
 #include <string>
 #include <vector>
 
@@ -147,6 +149,8 @@ struct ImageAnalysisResult
   std::vector<std::string> warnings;
   std::vector<ImageAnalysisTraceEntry> trace_entries;
   std::vector<ImageAnalysisLogEntry> log_entries;
+  std::vector<MultimodalSlice> multimodal_slices;
+  std::vector<OperationAtom> operation_atoms;
 };
 }
 

@@ -175,6 +175,24 @@ int main()
   mlpack_score.case_id = "baseline_classification_flow_min";
   mlpack_score.mode = "build-run";
 
+  cxparser_ext::ParserDispatchRequest mlpack_cluster_ref;
+  mlpack_cluster_ref.layer = "score";
+  mlpack_cluster_ref.module = "mlpack";
+  mlpack_cluster_ref.case_id = "baseline_cluster_ref_min";
+  mlpack_cluster_ref.mode = "build-run";
+
+  cxparser_ext::ParserDispatchRequest mlpack_distance_ref;
+  mlpack_distance_ref.layer = "score";
+  mlpack_distance_ref.module = "mlpack";
+  mlpack_distance_ref.case_id = "baseline_distance_ref_min";
+  mlpack_distance_ref.mode = "build-run";
+
+  cxparser_ext::ParserDispatchRequest mlpack_anomaly_ref;
+  mlpack_anomaly_ref.layer = "score";
+  mlpack_anomaly_ref.module = "mlpack";
+  mlpack_anomaly_ref.case_id = "baseline_anomaly_ref_min";
+  mlpack_anomaly_ref.mode = "build-run";
+
   cxparser_ext::ParserDispatchRequest mlpack_rf_train;
   mlpack_rf_train.layer = "train";
   mlpack_rf_train.module = "mlpack";
@@ -226,6 +244,12 @@ int main()
                                    "mlpack.infer.baseline_knn_flow_min") ||
       !RunActiveMlpackBaselineCase(mlpack_score,
                                    "mlpack.score.baseline_classification_flow_min") ||
+      !RunActiveMlpackBaselineCase(mlpack_cluster_ref,
+                                   "mlpack.score.baseline_cluster_ref_min") ||
+      !RunActiveMlpackBaselineCase(mlpack_distance_ref,
+                                   "mlpack.score.baseline_distance_ref_min") ||
+      !RunActiveMlpackBaselineCase(mlpack_anomaly_ref,
+                                   "mlpack.score.baseline_anomaly_ref_min") ||
       !RunActiveMlpackBaselineCase(mlpack_rf_train,
                                    "mlpack.train.baseline_rf_flow_min") ||
       !RunActiveMlpackBaselineCase(mlpack_rf_infer,

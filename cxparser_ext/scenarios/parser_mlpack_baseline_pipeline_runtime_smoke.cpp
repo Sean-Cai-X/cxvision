@@ -65,6 +65,9 @@ struct RuntimeCase
   bool expect_scalar_equals_feature_dim;
   bool expect_prediction_count_positive;
   bool expect_baseline_class_ref;
+  const char *expected_cluster_ref;
+  const char *expected_distance_ref;
+  const char *expected_anomaly_ref;
 };
 
 bool RunRuntimeCase(const std::string &repo_root,
@@ -116,10 +119,10 @@ bool RunRuntimeCase(const std::string &repo_root,
         result.infer_time_ms < 0.0 ||
         !runtime_case.expect_prediction_count_positive ||
         result.prediction_count <= 0.0 ||
+        result.predictions_csv != runtime_case.expected_predictions_csv ||
         (runtime_case.expect_baseline_class_ref &&
          !HasNamedResultField(result, "refs", "baseline_class_ref",
                               runtime_case.expected_predictions_csv)) ||
-        result.predictions_csv != runtime_case.expected_predictions_csv ||
         !HasExactDetail(result, runtime_case.expected_detail))
     {
       std::cerr << "[FAIL] " << runtime_case.label << " infer contract mismatch\n";
@@ -139,6 +142,30 @@ bool RunRuntimeCase(const std::string &repo_root,
       std::cerr << "[FAIL] " << runtime_case.label << " score contract mismatch\n";
       return false;
     }
+  }
+
+  if (runtime_case.expected_cluster_ref != 0 &&
+      !HasNamedResultField(result, "refs", "cluster_ref",
+                           runtime_case.expected_cluster_ref))
+  {
+    std::cerr << "[FAIL] " << runtime_case.label << " cluster ref mismatch\n";
+    return false;
+  }
+
+  if (runtime_case.expected_distance_ref != 0 &&
+      !HasNamedResultField(result, "refs", "distance_ref",
+                           runtime_case.expected_distance_ref))
+  {
+    std::cerr << "[FAIL] " << runtime_case.label << " distance ref mismatch\n";
+    return false;
+  }
+
+  if (runtime_case.expected_anomaly_ref != 0 &&
+      !HasNamedResultField(result, "refs", "anomaly_ref",
+                           runtime_case.expected_anomaly_ref))
+  {
+    std::cerr << "[FAIL] " << runtime_case.label << " anomaly ref mismatch\n";
+    return false;
   }
 
   if (runtime_case.expect_scalar_equals_feature_dim &&
@@ -169,7 +196,11 @@ int main()
      false,
      true,
      true,
-     false},
+     false,
+     false,
+     0,
+     0,
+     0},
     {"logreg_train",
      "/cxscript/module/mlpack/train/baseline_logreg_flow_min.cxscript",
      "baseline_logreg_train_ready",
@@ -183,7 +214,11 @@ int main()
      false,
      false,
      false,
-     false},
+     false,
+     false,
+     0,
+     0,
+     0},
     {"logreg_infer",
      "/cxscript/module/mlpack/infer/baseline_logreg_flow_min.cxscript",
      "baseline_logreg_infer_ready",
@@ -198,7 +233,10 @@ int main()
      false,
      false,
      true,
-     true},
+     true,
+     0,
+     0,
+     0},
     {"knn_train",
      "/cxscript/module/mlpack/train/baseline_knn_flow_min.cxscript",
      "baseline_knn_train_ready",
@@ -212,7 +250,11 @@ int main()
      false,
      false,
      false,
-     false},
+     false,
+     false,
+     0,
+     0,
+     0},
     {"knn_infer",
      "/cxscript/module/mlpack/infer/baseline_knn_flow_min.cxscript",
      "baseline_knn_infer_ready",
@@ -227,7 +269,10 @@ int main()
      false,
      false,
      true,
-     true},
+     true,
+     0,
+     0,
+     0},
     {"rf_train",
      "/cxscript/module/mlpack/train/baseline_rf_flow_min.cxscript",
      "baseline_rf_train_ready",
@@ -241,7 +286,11 @@ int main()
      false,
      false,
      false,
-     false},
+     false,
+     false,
+     0,
+     0,
+     0},
     {"rf_infer",
      "/cxscript/module/mlpack/infer/baseline_rf_flow_min.cxscript",
      "baseline_rf_infer_ready",
@@ -256,7 +305,10 @@ int main()
      false,
      false,
      true,
-     true},
+     true,
+     0,
+     0,
+     0},
     {"score",
      "/cxscript/module/mlpack/score/baseline_classification_flow_min.cxscript",
      "baseline_score_ready",
@@ -270,7 +322,65 @@ int main()
      true,
      false,
      false,
-     false}
+     false,
+     false,
+     0,
+     0,
+     0},
+    {"cluster_ref",
+     "/cxscript/module/mlpack/score.baseline_cluster_ref_min.cxs",
+     "baseline_cluster_ref_ready",
+     "MlpackSemanticRefBundle",
+     0,
+     0,
+     0,
+     "[MLPACK_CONTRACT] baseline_cluster_ref_min",
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     "artifacts/semantic/cluster_all_v1.json",
+     0,
+     0},
+    {"distance_ref",
+     "/cxscript/module/mlpack/score.baseline_distance_ref_min.cxs",
+     "baseline_distance_ref_ready",
+     "MlpackSemanticRefBundle",
+     0,
+     0,
+     0,
+     "[MLPACK_CONTRACT] baseline_distance_ref_min",
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     0,
+     "artifacts/semantic/distance_all_v1.json",
+     0},
+    {"anomaly_ref",
+     "/cxscript/module/mlpack/score.baseline_anomaly_ref_min.cxs",
+     "baseline_anomaly_ref_ready",
+     "MlpackSemanticRefBundle",
+     0,
+     0,
+     0,
+     "[MLPACK_CONTRACT] baseline_anomaly_ref_min",
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     false,
+     0,
+     0,
+     "artifacts/semantic/anomaly_all_v1.json"}
   };
 
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)

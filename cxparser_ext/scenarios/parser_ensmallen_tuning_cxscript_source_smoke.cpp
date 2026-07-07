@@ -23,17 +23,25 @@ struct SourceScriptCase
   const char *layer;
   const char *case_id;
   const char *relative_path;
+  const char *feature_marker;
   const char *must_contain_a;
   const char *must_contain_b;
   const char *must_contain_c;
   const char *must_contain_d;
   const char *must_contain_e;
+  const char *must_contain_f;
+  const char *must_contain_g;
+  const char *must_contain_h;
+  const char *must_contain_i;
+  const char *must_contain_j;
+  const char *must_contain_k;
+  const char *must_contain_l;
 };
 
 bool ContainsText(const std::string &text,
                   const char *pattern)
 {
-  return pattern != 0 && text.find(pattern) != std::string::npos;
+  return pattern == 0 || text.find(pattern) != std::string::npos;
 }
 
 bool RunCase(const SourceScriptCase &script_case)
@@ -74,11 +82,19 @@ bool RunCase(const SourceScriptCase &script_case)
     return false;
   }
 
-  if (!ContainsText(script_text, script_case.must_contain_a) ||
+  if (!ContainsText(script_text, script_case.feature_marker) ||
+      !ContainsText(script_text, script_case.must_contain_a) ||
       !ContainsText(script_text, script_case.must_contain_b) ||
       !ContainsText(script_text, script_case.must_contain_c) ||
       !ContainsText(script_text, script_case.must_contain_d) ||
-      !ContainsText(script_text, script_case.must_contain_e))
+      !ContainsText(script_text, script_case.must_contain_e) ||
+      !ContainsText(script_text, script_case.must_contain_f) ||
+      !ContainsText(script_text, script_case.must_contain_g) ||
+      !ContainsText(script_text, script_case.must_contain_h) ||
+      !ContainsText(script_text, script_case.must_contain_i) ||
+      !ContainsText(script_text, script_case.must_contain_j) ||
+      !ContainsText(script_text, script_case.must_contain_k) ||
+      !ContainsText(script_text, script_case.must_contain_l))
   {
     std::cerr << "[FAIL] required contract markers missing: " << identity.file_path << "\n";
     return false;
@@ -135,17 +151,37 @@ int main()
   const SourceScriptCase cases[] = {
     {"ensmallen_layer", "feature", "geometry_fit_tuning",
      "cxparser/rag_script_cases/cxcore/feature/ensmallen_layer_geometry_fit_tuning_feature.cxsc",
+     "flow.set_feature(\"FormfitGeometryFitTuning\")",
+     "flow.call(\"RunBaselineEval\")",
      "flow.call(\"RunGeometryFitTuning\")",
      "flow.call(\"CompareBaselineVsBest\")",
      "flow.expect_output(\"MeasuredOptimizeResult\")",
+     "flow.expect_output(\"MeasuredCompareResult\")",
      "flow.expect_output(\"MeasuredReplayResult\")",
+     "flow.call(\"BuildRagExplainPacket\")",
+     "flow.expect_output(\"RagWritebackNote\")",
+     "flow.check_trace_contains(\"ExportReplayLog\")",
+     "flow.input_param(\"objective_ref\",\"torch.optimization.objective_ref\")",
+     "flow.input_param(\"boundary_error_ref\",\"torch.optimization.boundary_error_ref\")",
+     "flow.input_param(\"alignment_error_ref\",\"torch.optimization.alignment_error_ref\")",
      "flow.expect_field(\"replay_log_path\")"},
     {"ensmallen_layer", "feature", "match_score_tuning",
      "cxparser/rag_script_cases/cxcore/feature/ensmallen_layer_match_score_tuning_feature.cxsc",
+     "flow.set_feature(\"FastMatchScoreTuning\")",
+     "flow.input_dataset(\"dataset.cxcore.phase1.ensmallen\")",
+     "flow.input_sample(\"template_match.template_scene\")",
+     "flow.call(\"RunBaselineEval\")",
      "flow.call(\"RunMatchScoreTuning\")",
      "flow.call(\"CompareBaselineVsBest\")",
      "flow.expect_output(\"MeasuredOptimizeResult\")",
+     "flow.expect_output(\"MeasuredCompareResult\")",
      "flow.expect_output(\"MeasuredReplayResult\")",
+     "flow.call(\"BuildRagExplainPacket\")",
+     "flow.expect_output(\"RagWritebackNote\")",
+     "flow.input_artifact(\"template_image\",\"phase1.template_match.template_patch\")",
+     "flow.input_param(\"objective_ref\",\"torch.optimization.objective_ref\")",
+     "flow.input_param(\"threshold_ref\",\"torch.optimization.threshold_ref\")",
+     "flow.input_param(\"crop_policy_ref\",\"torch.optimization.crop_policy_ref\")",
      "flow.expect_field(\"replay_log_path\")"}
   };
 

@@ -18,22 +18,6 @@ bool ContainsText(const std::string &text, const char *pattern)
   return pattern != 0 && text.find(pattern) != std::string::npos;
 }
 
-bool MatchesRequestedCase(const std::string &requested_case, const ContractScriptCase &script_case)
-{
-  return requested_case.empty() || requested_case == script_case.case_id;
-}
-
-std::string BuildContractScriptPath(const ContractScriptCase &script_case)
-{
-  const std::string relative_path = std::string("cxscript/integration/torch_geometry/") +
-                                    script_case.layer + "." + script_case.case_id + ".cxsc";
-#ifdef CXPARSER_WORKSPACE_ROOT
-  return std::string(CXPARSER_WORKSPACE_ROOT) + "/" + relative_path;
-#else
-  return relative_path;
-#endif
-}
-
 bool RunCase(const ContractScriptCase &script_case)
 {
   cxparser_ext::CxscriptExecutionArgs args;
@@ -41,7 +25,6 @@ bool RunCase(const ContractScriptCase &script_case)
   args.integration_name = "torch_geometry";
   args.layer = script_case.layer;
   args.case_id = script_case.case_id;
-  args.script_path = BuildContractScriptPath(script_case);
 
   cxparser_ext::CxscriptIdentity identity;
   if (!cxparser_ext::BuildCxscriptIdentity(args, identity))
@@ -110,8 +93,6 @@ bool RunCase(const ContractScriptCase &script_case)
 
 int main(int argc, char **argv)
 {
-  const std::string requested_case = argc > 1 ? argv[1] : "";
-
   const ContractScriptCase cases[] = {
     {"feature", "input_prior_contract",
      "input_contract_ok=geom_check_input_ready(",
@@ -127,19 +108,26 @@ int main(int argc, char **argv)
      "replay_contract_ok;"}
   };
 
-  bool matched_case = requested_case.empty();
+  const char *requested_case_id = argc > 1 ? argv[1] : 0;
+  bool matched_requested_case = requested_case_id == 0;
+
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
   {
-    if (!MatchesRequestedCase(requested_case, cases[i]))
+    if (requested_case_id != 0 &&
+        std::string(cases[i].case_id) != requested_case_id)
+    {
       continue;
-    matched_case = true;
+    }
+
+    matched_requested_case = true;
     if (!RunCase(cases[i]))
       return 1;
   }
 
-  if (!matched_case)
+  if (!matched_requested_case)
   {
-    std::cerr << "[FAIL] unknown torch_geometry contract case: " << requested_case << "\n";
+    std::cerr << "[FAIL] unknown torch_geometry contract case: "
+              << requested_case_id << "\n";
     return 1;
   }
 

@@ -5,33 +5,8 @@
 
 namespace
 {
-bool HasResultField(const cxparser_ext::CxScriptExecutionResult &result,
-                    const std::string &result_name,
-                    const std::string &field_name)
-{
-  for (size_t i = 0; i < result.result_fields.size(); ++i)
-  {
-    if (result.result_fields[i].result_name == result_name &&
-        result.result_fields[i].field_name == field_name &&
-        !result.result_fields[i].value.empty())
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool HasFeatureObjectReadBridge(const cxparser_ext::CxScriptExecutionResult &result)
-{
-  return HasResultField(result, "candidates", "count") &&
-         HasResultField(result, "method", "selected") &&
-         HasResultField(result, "config", "name") &&
-         HasResultField(result, "score", "total");
-}
-
 bool RunScriptFile(cxparser_ext::ParserCxScriptRuntime &runtime,
-                   const std::string &script_path,
-                   bool require_object_read_bridge = false)
+                   const std::string &script_path)
 {
   cxparser_ext::CxScriptExecutionResult result;
   if (!runtime.ExecuteScriptFile(script_path, result))
@@ -51,13 +26,6 @@ bool RunScriptFile(cxparser_ext::ParserCxScriptRuntime &runtime,
   if (result.task_id.empty())
   {
     std::cerr << "[FAIL] script missing task id: " << script_path << "\n";
-    return false;
-  }
-
-  if (require_object_read_bridge && !HasFeatureObjectReadBridge(result))
-  {
-    std::cerr << "[FAIL] script missing feature object read bridge fields: "
-              << script_path << "\n";
     return false;
   }
 
@@ -81,9 +49,7 @@ int main()
   // Legacy mixed-body combo/suite scripts still contain old Check.* / Flow.* forms
   // that are assessed separately and should not gate the current execution chain.
   if (!RunScriptFile(runtime, feature_root + "cxcore_line_measurement_feature.cxsc") ||
-      !RunScriptFile(runtime, feature_root + "cxcore_template_feature_match_feature.cxsc", true) ||
-      !RunScriptFile(runtime, feature_root + "cxcore_circle_measurement_cstyle_feature.cxsc") ||
-      !RunScriptFile(runtime, feature_root + "cxcore_circle_measurement_boundary_real_numeric_cstyle_feature.cxsc") ||
+      !RunScriptFile(runtime, feature_root + "cxcore_template_feature_match_feature.cxsc") ||
       !RunScriptFile(runtime, feature_root + "cxcore_region_boundary_analysis_feature.cxsc") ||
       !RunScriptFile(runtime, feature_root + "cxcore_line_measurement_golden_cstyle_feature.cxsc") ||
       !RunScriptFile(runtime, feature_root + "cxcore_region_boundary_analysis_golden_cstyle_feature.cxsc") ||

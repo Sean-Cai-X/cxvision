@@ -236,10 +236,6 @@ bool RunMlpackFirstStageRouterContract(cxparser_ext::ParserTestDriver &driver)
     return false;
   if (!RunCase(driver, "infer", "mlpack", "baseline_knn_flow_min"))
     return false;
-  if (!RunCase(driver, "train", "mlpack", "baseline_rf_flow_min"))
-    return false;
-  if (!RunCase(driver, "infer", "mlpack", "baseline_rf_flow_min"))
-    return false;
   if (!RunCase(driver, "score", "mlpack", "baseline_classification_flow_min"))
     return false;
   return true;

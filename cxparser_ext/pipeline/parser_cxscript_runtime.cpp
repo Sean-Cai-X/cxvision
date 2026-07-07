@@ -2661,6 +2661,68 @@ bool TryParseVariableDeclaration(const std::string &trimmed,
   return IsIdentifier(variable_name);
 }
 
+bool TryParseObjectReturnAssignment(const std::string &trimmed,
+                                    const std::vector<CxScriptTypeSpec> &types,
+                                    std::string &lhs_type,
+                                    std::string &lhs_object,
+                                    std::string &source_object,
+                                    std::string &method_name,
+                                    std::string &argument_text,
+                                    std::string &initializer_text,
+                                    bool &declares_object)
+{
+  lhs_type.clear();
+  lhs_object.clear();
+  source_object.clear();
+  method_name.clear();
+  argument_text.clear();
+  initializer_text.clear();
+  declares_object = false;
+
+  std::string text = trimmed;
+  if (text.empty() || text[text.size() - 1] != ';')
+    return false;
+  text = Trim(text.substr(0, text.size() - 1));
+
+  const size_t eq = text.find('=');
+  if (eq == std::string::npos || eq == 0)
+    return false;
+
+  const std::string lhs = Trim(text.substr(0, eq));
+  const std::string rhs = Trim(text.substr(eq + 1));
+  if (lhs.empty() || rhs.empty())
+    return false;
+
+  const size_t open = rhs.find('(');
+  const size_t close = rhs.rfind(')');
+  if (open == std::string::npos || close != rhs.size() - 1 || close <= open)
+    return false;
+
+  const std::string callee = Trim(rhs.substr(0, open));
+  const size_t dot = callee.rfind('.');
+  if (dot == std::string::npos || dot == 0 || dot + 1 >= callee.size())
+    return false;
+
+  source_object = Trim(callee.substr(0, dot));
+  method_name = Trim(callee.substr(dot + 1));
+  if (!IsIdentifier(source_object) || !IsIdentifier(method_name))
+    return false;
+
+  argument_text = Trim(rhs.substr(open + 1, close - open - 1));
+  initializer_text = rhs;
+
+  const size_t lhs_space = lhs.find(' ');
+  if (lhs_space != std::string::npos)
+  {
+    lhs_type = Trim(lhs.substr(0, lhs_space));
+    lhs_object = Trim(lhs.substr(lhs_space + 1));
+    declares_object = true;
+    return IsKnownTypeName(types, lhs_type) && IsIdentifier(lhs_object);
+  }
+
+  lhs_object = lhs;
+  return IsIdentifier(lhs_object);
+}
 bool LooksLikeTypeDeclaration(const std::string &trimmed,
                               std::string &type_name,
                               std::string &variable_name)
@@ -3396,6 +3458,60 @@ bool ParserCxScriptRuntime::ParseScriptText(const std::string &script_name,
       continue;
     }
 
+    std::string object_lhs_type;
+    std::string object_lhs_name;
+    std::string object_source_name;
+    std::string object_method_name;
+    std::string object_argument_text;
+    std::string object_initializer_text;
+    bool object_declares_value = false;
+    if (TryParseObjectReturnAssignment(trimmed,
+                                       flow.declared_types,
+                                       object_lhs_type,
+                                       object_lhs_name,
+                                       object_source_name,
+                                       object_method_name,
+                                       object_argument_text,
+                                       object_initializer_text,
+                                       object_declares_value))
+    {
+      CxScriptStatement stmt = MakeStatement(cxssk_var_decl,
+                                             (object_lhs_type.empty()
+                                                ? object_lhs_name
+                                                : object_lhs_type + " " + object_lhs_name),
+                                             object_lhs_name,
+                                             current_step,
+                                             line_number,
+                                             block_depth);
+      stmt.declared_type = object_lhs_type;
+      stmt.initializer_text = object_initializer_text;
+      stmt.lhs_object_name = object_lhs_name;
+      stmt.lhs_type_name = object_lhs_type;
+      stmt.source_object_name = object_source_name;
+      stmt.method_name = object_method_name;
+      stmt.argument_text = object_argument_text;
+      stmt.callee_name = object_source_name + "." + object_method_name;
+      stmt.return_object_ref = object_lhs_name + "<=" + object_source_name + "." + object_method_name;
+      stmt.returns_object_assignment = true;
+      flow.statements.push_back(stmt);
+
+      if (object_declares_value)
+      {
+        CxScriptVariableDecl variable;
+        variable.type_name = object_lhs_type;
+        variable.variable_name = object_lhs_name;
+        variable.step_name = current_step;
+        variable.span = flow.statements.back().span;
+        variable.block_depth = block_depth;
+        variable.initialized = true;
+        variable.known_type = true;
+        flow.variables.push_back(variable);
+      }
+
+      block_depth += open_count - close_count;
+      continue;
+    }
+
     std::string declared_type;
     std::string declared_variable;
     bool initialized = false;
@@ -3819,8 +3935,16 @@ bool ApplyFlowImpl(const CxScriptFlow &flow,
       if (!stmt.name.empty())
       {
         std::string value;
-        if (!stmt.initializer_text.empty())
+        if (stmt.returns_object_assignment)
+        {
+          value = stmt.return_object_ref.empty()
+                    ? (stmt.name + "<=" + stmt.callee_name)
+                    : stmt.return_object_ref;
+        }
+        else if (!stmt.initializer_text.empty())
+        {
           value = ResolveScriptValue(result, variable_values, stmt.initializer_text);
+        }
         variable_values[stmt.name] = value;
       }
       if (collect_debug)
@@ -3834,6 +3958,20 @@ bool ApplyFlowImpl(const CxScriptFlow &flow,
         result.replay_frames.push_back(replay_frame);
         result.execution_steps.push_back(execution_step);
       }
+      if (stmt.returns_object_assignment)
+      {
+        AppendRuntimeDetail(result,
+                            "[OBJECT_ASSIGN] lhs=" + stmt.name +
+                              (stmt.lhs_type_name.empty() ? std::string() :
+                               " type=" + stmt.lhs_type_name) +
+                              " source=" + stmt.source_object_name +
+                              " method=" + stmt.method_name +
+                              (stmt.argument_text.empty() ? std::string() :
+                               " args=" + stmt.argument_text) +
+                              " return_ref=" + variable_values[stmt.name],
+                            collect_debug,
+                            true);
+      }
       AppendRuntimeDetail(result,
                           "[VAR] " + stmt.text +
                             (stmt.name.empty() ? std::string() :
@@ -3842,7 +3980,6 @@ bool ApplyFlowImpl(const CxScriptFlow &flow,
                           false);
       continue;
     }
-
     if (stmt.kind == cxssk_input)
     {
       std::string assignment_lhs;

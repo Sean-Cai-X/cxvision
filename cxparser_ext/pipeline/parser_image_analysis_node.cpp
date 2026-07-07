@@ -2,6 +2,148 @@
 
 namespace cxparser_ext
 {
+namespace
+{
+void BuildImageAnalysisSlices(ImageAnalysisResult &result)
+{
+  result.multimodal_slices.clear();
+  result.operation_atoms.clear();
+
+  OperationAtom validate_atom;
+  validate_atom.atom_id = result.task_id + ".atom.validate_request";
+  validate_atom.stage = "input_layer";
+  validate_atom.action_kind = "validate_request";
+  validate_atom.input_ref = result.task_id;
+  validate_atom.output_ref = result.task_id + ".validated";
+  validate_atom.status = result.status == "ok" ? "ok" : "failed";
+  validate_atom.summary = result.status == "ok"
+    ? "image analysis request validated"
+    : "image analysis request validation failed";
+  result.operation_atoms.push_back(validate_atom);
+
+  MultimodalSlice visual_slice;
+  visual_slice.slice_id = result.task_id + ".visual_slice_v1";
+  visual_slice.source_ref = result.task_id;
+  visual_slice.source_hash = BuildPseudoSourceHash(result.task_id + result.trace_id);
+  visual_slice.modality = "image";
+  visual_slice.analysis_kind = "image_analysis";
+  visual_slice.result_ref = result.task_id;
+  visual_slice.evidence_ref = result.trace_id;
+  visual_slice.log_path = result.trace_id;
+  visual_slice.confidence = result.status == "ok" ? 1.0 : 0.0;
+  visual_slice.next_action = result.status == "ok"
+    ? "consume geometry or feature slices"
+    : "fix invalid image analysis request";
+  visual_slice.tags.push_back("visual_slice_v1");
+  visual_slice.tags.push_back("private_local_only");
+
+  for (size_t i = 0; i < result.roi_results.size(); ++i)
+  {
+    const ImageAnalysisRoiResult &roi = result.roi_results[i];
+    MultimodalSliceObject object;
+    object.object_id = roi.roi_id;
+    object.object_kind = "roi";
+    object.geometry_ref = roi.roi_id + ".bounds";
+    object.semantic_label = roi.accepted ? "accepted" : "rejected";
+    object.summary = "roi bounds exported for downstream geometry and feature steps";
+    object.confidence = roi.accepted ? 1.0 : 0.0;
+    visual_slice.objects.push_back(object);
+  }
+  result.multimodal_slices.push_back(visual_slice);
+
+  if (!result.boundary_results.empty() ||
+      !result.fit_results.empty() ||
+      !result.circle_results.empty() ||
+      !result.ellipse_results.empty())
+  {
+    MultimodalSlice geometry_slice;
+    geometry_slice.slice_id = result.task_id + ".geometry_slice_v1";
+    geometry_slice.source_ref = result.task_id;
+    geometry_slice.source_hash = BuildPseudoSourceHash(result.task_id + ".geometry");
+    geometry_slice.modality = "geometry";
+    geometry_slice.analysis_kind = "reverse_geometry";
+    geometry_slice.result_ref = result.task_id + ".geometry";
+    geometry_slice.evidence_ref = result.trace_id;
+    geometry_slice.log_path = result.trace_id;
+    geometry_slice.confidence = 0.95;
+    geometry_slice.next_action = "consume geometry reconstruction or attach contracts";
+    geometry_slice.tags.push_back("geometry_slice_v1");
+
+    for (size_t i = 0; i < result.boundary_results.size(); ++i)
+    {
+      const ImageAnalysisBoundaryResult &boundary = result.boundary_results[i];
+      MultimodalSliceObject object;
+      object.object_id = boundary.roi_id + ".boundary";
+      object.object_kind = "boundary";
+      object.geometry_ref = boundary.roi_id;
+      object.semantic_label = "contour";
+      object.summary = "boundary contour extracted from roi";
+      object.confidence = boundary.contour.empty() ? 0.0 : 1.0;
+      geometry_slice.objects.push_back(object);
+    }
+
+    for (size_t i = 0; i < result.circle_results.size(); ++i)
+    {
+      const ImageAnalysisCircleResult &circle = result.circle_results[i];
+      MultimodalSliceObject object;
+      object.object_id = circle.roi_id + ".circle";
+      object.object_kind = "circle";
+      object.geometry_ref = circle.roi_id;
+      object.semantic_label = "fit_circle";
+      object.summary = "circle fit exported with center and radius";
+      object.confidence = circle.radius > 0 ? 1.0 : 0.0;
+      geometry_slice.objects.push_back(object);
+    }
+
+    for (size_t i = 0; i < result.ellipse_results.size(); ++i)
+    {
+      const ImageAnalysisEllipseResult &ellipse = result.ellipse_results[i];
+      MultimodalSliceObject object;
+      object.object_id = ellipse.roi_id + ".ellipse";
+      object.object_kind = "ellipse";
+      object.geometry_ref = ellipse.roi_id;
+      object.semantic_label = "fit_ellipse";
+      object.summary = "ellipse fit sample points exported";
+      object.confidence = ellipse.sample_points.empty() ? 0.0 : 1.0;
+      geometry_slice.objects.push_back(object);
+    }
+
+    result.multimodal_slices.push_back(geometry_slice);
+  }
+
+  if (!result.match_results.empty())
+  {
+    MultimodalSlice feature_slice;
+    feature_slice.slice_id = result.task_id + ".feature_slice_v1";
+    feature_slice.source_ref = result.task_id;
+    feature_slice.source_hash = BuildPseudoSourceHash(result.task_id + ".feature");
+    feature_slice.modality = "feature_map";
+    feature_slice.analysis_kind = "template_match_feature";
+    feature_slice.result_ref = result.task_id + ".feature";
+    feature_slice.evidence_ref = result.trace_id;
+    feature_slice.log_path = result.trace_id;
+    feature_slice.confidence = 0.9;
+    feature_slice.next_action = "consume feature semantics or compare slices";
+    feature_slice.tags.push_back("feature_slice_v1");
+
+    for (size_t i = 0; i < result.match_results.size(); ++i)
+    {
+      const ImageAnalysisMatchResult &match = result.match_results[i];
+      MultimodalSliceObject object;
+      object.object_id = match.roi_id + ".match";
+      object.object_kind = "match_candidate_group";
+      object.geometry_ref = match.roi_id;
+      object.semantic_label = match.matched ? "matched" : "not_matched";
+      object.summary = "template match score and candidate packet exported";
+      object.confidence = match.score;
+      feature_slice.objects.push_back(object);
+    }
+
+    result.multimodal_slices.push_back(feature_slice);
+  }
+}
+}
+
 bool ParserImageAnalysisNode::HasOperation(const ImageAnalysisRequest &request,
                                            ImageAnalysisOperation operation) const
 {
@@ -210,6 +352,7 @@ bool ParserImageAnalysisNode::Execute(const ImageAnalysisRequest &request,
   result.status = "ok";
   AppendTrace(result, "image_analysis", "ok", "image analysis node completed");
   AppendLog(result, "info", "image_analysis_completed", "image analysis result is ready");
+  BuildImageAnalysisSlices(result);
   return true;
 }
 }
