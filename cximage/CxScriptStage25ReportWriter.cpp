@@ -14,18 +14,46 @@ void Stage25ReportWriter::WriteBatchReport(
     file << "# Stage 2.5 L1~L3 Parameter Consistency Report\n\n";
     file << "## Summary\n\n";
 
-    int total = static_cast<int>(results.size());
-    int t0_pass = static_cast<int>(std::count_if(results.begin(), results.end(),
-        [](const auto& r) { return r.t0_pass; }));
-    int t1_pass = static_cast<int>(std::count_if(results.begin(), results.end(),
-        [](const auto& r) { return r.t1_pass; }));
-    int t2_pass = static_cast<int>(std::count_if(results.begin(), results.end(),
-        [](const auto& r) { return r.t2_pass; }));
+    const int total = static_cast<int>(results.size());
 
-    file << "- Total cases: " << total << "\n";
-    file << "- T0 (execution) pass: " << t0_pass << "\n";
-    file << "- T1 (algorithm) pass: " << t1_pass << "\n";
-    file << "- T2 (evidence support) pass: " << t2_pass << "\n\n";
+    const int skipped =
+        static_cast<int>(std::count_if(
+            results.begin(),
+            results.end(),
+            [](const auto& r) { return r.skipped_by_preflight; }));
+
+    const int executed = total - skipped;
+
+    const int t0_pass =
+        static_cast<int>(std::count_if(
+            results.begin(),
+            results.end(),
+            [](const auto& r) {
+                return !r.skipped_by_preflight && r.t0_pass;
+            }));
+
+    const int t1_pass =
+        static_cast<int>(std::count_if(
+            results.begin(),
+            results.end(),
+            [](const auto& r) {
+                return !r.skipped_by_preflight && r.t1_pass;
+            }));
+
+    const int t2_pass =
+        static_cast<int>(std::count_if(
+            results.begin(),
+            results.end(),
+            [](const auto& r) {
+                return !r.skipped_by_preflight && r.t2_pass;
+            }));
+
+    file << "- Total scheduled cases: " << total << "\n";
+    file << "- Skipped by preflight: " << skipped << "\n";
+    file << "- Executed cases: " << executed << "\n";
+    file << "- T0 execution pass: " << t0_pass << "/" << executed << "\n";
+    file << "- T1 algorithm pass: " << t1_pass << "/" << executed << "\n";
+    file << "- T2 evidence support pass: " << t2_pass << "/" << executed << "\n\n";
 
     file << "## Findline Cases\n\n";
     file << "| Level | Image | Target | Profile | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | Quality | Policy | Summary | Evidence |\n";
@@ -325,5 +353,96 @@ void Stage25ReportWriter::WriteCaseFileIndex(
              << r.target_id << " | " << r.tool << " | " << r.profile_id << " | "
              << r.generated_script_path << " | " << r.snapshot_path << " | "
              << r.summary_path << " | " << r.evidence_summary_path << " |\n";
+    }
+}
+
+static std::string DiagnoseStage25Case(const Stage25CaseResult& r)
+{
+    if (r.skipped_by_preflight)
+        return "Skipped by preflight: " + r.skip_reason;
+
+    if (!r.t0_pass)
+        return "Headless execution failed";
+
+    if (!r.summary_exists)
+        return "Missing result_summary.json";
+
+    if (!r.evidence_summary_exists)
+        return "Missing evidence_summary.json";
+
+    const double support =
+        r.tool == "Findline"
+            ? r.measured_local_support_score
+            : r.circle_local_support_score;
+
+    if (!r.t1_pass && support >= 0.60)
+    {
+        return "Image edge exists but original Measure produced no fitted result; check generated cxscript, ROI geometry, tool parameters, and SetLine/SetCircle mapping.";
+    }
+
+    if (!r.t1_pass)
+    {
+        return "Original Measure produced no result; check failure_stage/failure_reason and ROI.";
+    }
+
+    if (!r.t2_pass)
+    {
+        return "Original Measure produced result but local evidence support is weak.";
+    }
+
+    return "OK";
+}
+
+void Stage25ReportWriter::WriteDiagnosticReport(
+    const std::filesystem::path& out_root,
+    const std::vector<Stage25CaseResult>& results)
+{
+    std::ofstream file(out_root / "case_diagnostic_report.md");
+
+    file << "# Stage25 Case Diagnostic Report\n\n";
+    file << "## Summary\n\n";
+
+    const int total = static_cast<int>(results.size());
+    const int skipped = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const auto& r) { return r.skipped_by_preflight; }));
+    const int executed = total - skipped;
+
+    const int headless_failed = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const auto& r) { return !r.skipped_by_preflight && !r.t0_pass; }));
+
+    const int no_result = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const auto& r) { return !r.skipped_by_preflight && r.t0_pass && !r.t1_pass; }));
+
+    const int no_result_with_edge = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const auto& r) { return r.quality_classification == "ALGORITHM_NO_RESULT_WITH_IMAGE_EDGE"; }));
+
+    const int ok = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const auto& r) { return r.t2_pass; }));
+
+    file << "- Total scheduled cases: " << total << "\n";
+    file << "- Skipped by preflight: " << skipped << "\n";
+    file << "- Executed cases: " << executed << "\n";
+    file << "- Headless failed: " << headless_failed << "\n";
+    file << "- Algorithm no result: " << no_result << "\n";
+    file << "- Algorithm no result but image edge detected: " << no_result_with_edge << "\n";
+    file << "- Fully verified (T2 pass): " << ok << "\n\n";
+
+    file << "## Case Diagnostics\n\n";
+    file << "| CaseId | Tool | Profile | Points | Fit | FailureStage | FailureReason | LocalSupport | Diagnosis |\n";
+    file << "|---|---|---|---:|---|---|---|---:|---|\n";
+
+    for (const auto& r : results)
+    {
+        const double support =
+            r.tool == "Findline"
+                ? r.measured_local_support_score
+                : r.circle_local_support_score;
+
+        file << "| " << r.case_id << " | " << r.tool << " | " << r.profile_id << " | "
+             << r.valid_points_count << " | "
+             << (r.tool == "Findline" ? (r.has_fit_line ? "true" : "false") : (r.has_fit_circle ? "true" : "false"))
+             << " | " << r.failure_stage << " | " << r.failure_reason << " | "
+             << std::fixed << std::setprecision(3) << support << " | "
+             << DiagnoseStage25Case(r) << " |\n";
     }
 }

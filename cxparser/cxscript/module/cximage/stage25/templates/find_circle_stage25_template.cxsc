@@ -1,3 +1,11 @@
+// stage25_case_id: {{case_id}}
+// image_id: {{image_id}}
+// target_id: {{target_id}}
+// profile_id: {{profile_id}}
+// circle: center={{cx}},{{cy}} pass={{px}},{{py}}
+// gap/linegap: {{gap}},{{linegap}}
+// method/threshold: {{method}},{{threshold}}
+
 Image m_image;
 Findcircle m_circle;
 

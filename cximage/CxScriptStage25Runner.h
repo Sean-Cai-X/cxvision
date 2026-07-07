@@ -60,6 +60,13 @@ struct Stage25CaseResult
     std::string overlay_path;
     std::string evidence_overlay_path;
     std::string generated_script_path;
+
+    bool generated_script_exists = false;
+    bool summary_exists = false;
+    bool evidence_summary_exists = false;
+    bool snapshot_exists = false;
+    bool overlay_exists = false;
+    bool evidence_overlay_exists = false;
 };
 
 struct Stage25RunOptions

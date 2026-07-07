@@ -1,3 +1,12 @@
+// stage25_case_id: {{case_id}}
+// image_id: {{image_id}}
+// target_id: {{target_id}}
+// profile_id: {{profile_id}}
+// roi: {{x0}},{{y0}} -> {{x1}},{{y1}}
+// wgap/hgap: {{wgap}},{{hgap}}
+// tool_half_width: {{tool_half_width}}
+// method/threshold/linegap/filter_profile: {{method}},{{threshold}},{{linegap}},{{filter_profile}}
+
 Image m_image;
 Findline m_line;
 
@@ -16,11 +25,12 @@ int fitmode = {{fitmode}};
 int wgap = {{wgap}};
 int hgap = {{hgap}};
 int script_scale = {{script_scale}};
+int tool_half_width = {{tool_half_width}};
 
 int filter_profile = {{filter_profile}};
 
 m_line.SetWHgap(wgap, hgap);
-m_line.setline(x0, y0, x1, y1, script_scale);
+m_line.setline(x0, y0, x1, y1, tool_half_width);
 
 m_line.setmethod(method);
 m_line.setthre(threshold);

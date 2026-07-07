@@ -33,6 +33,10 @@ public:
     static void WriteCaseFileIndex(
         const std::filesystem::path& out_root,
         const std::vector<Stage25CaseResult>& results);
+
+    static void WriteDiagnosticReport(
+        const std::filesystem::path& out_root,
+        const std::vector<Stage25CaseResult>& results);
 };
 
 #endif

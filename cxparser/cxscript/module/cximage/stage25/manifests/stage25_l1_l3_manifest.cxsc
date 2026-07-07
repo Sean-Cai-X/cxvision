@@ -3,7 +3,7 @@ Stage25Manifest m;
 m.reset();
 
 m.setname("stage25_l1_l3");
-m.setoutroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/stage_2_5_l1_l3");
+m.setoutroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/stage_2_5_l1_l3_v3");
 m.setimageroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images");
 
 m.setminimagesforstability(3);

@@ -21,10 +21,17 @@ namespace
     }
 
     Stage25TemplateContext BuildFindlineContext(
+        const std::string& case_id,
+        const std::string& image_id,
+        const std::string& target_id,
         const Stage25ImageTarget& target,
         const Stage25FindlineProfile& profile)
     {
         Stage25TemplateContext ctx;
+        ctx.values["case_id"] = case_id;
+        ctx.values["image_id"] = image_id;
+        ctx.values["target_id"] = target_id;
+        ctx.values["profile_id"] = profile.profile_id;
         ctx.values["x0"] = std::to_string(target.x0);
         ctx.values["y0"] = std::to_string(target.y0);
         ctx.values["x1"] = std::to_string(target.x1);
@@ -35,6 +42,16 @@ namespace
         ctx.values["threshold"] = std::to_string(profile.threshold);
         ctx.values["linegap"] = std::to_string(profile.linegap);
         ctx.values["fitmode"] = std::to_string(profile.fitmode);
+        // Findline::setline(..., fifth_arg) uses the tool scan half-width in
+        // the current CxScript binding, not an image scale factor. Older
+        // Stage25 manifests used findline_setscript_scale(1), which collapsed
+        // the generated ROI to a 2px-wide scan box and made otherwise valid
+        // line cases produce zero measure points. Keep the manifest field for
+        // compatibility, but treat <=1 as "use target hgap as the explicit
+        // tool half-width".
+        const int tool_half_width =
+            profile.script_scale > 1 ? profile.script_scale : target.hgap;
+        ctx.values["tool_half_width"] = std::to_string(tool_half_width);
         ctx.values["script_scale"] = std::to_string(profile.script_scale);
         ctx.values["filter_profile"] = std::to_string(profile.filter_profile);
 
@@ -65,10 +82,17 @@ namespace
     }
 
     Stage25TemplateContext BuildFindcircleContext(
+        const std::string& case_id,
+        const std::string& image_id,
+        const std::string& target_id,
         const Stage25ImageTarget& target,
         const Stage25FindcircleProfile& profile)
     {
         Stage25TemplateContext ctx;
+        ctx.values["case_id"] = case_id;
+        ctx.values["image_id"] = image_id;
+        ctx.values["target_id"] = target_id;
+        ctx.values["profile_id"] = profile.profile_id;
         ctx.values["cx"] = std::to_string(target.cx);
         ctx.values["cy"] = std::to_string(target.cy);
         ctx.values["px"] = std::to_string(target.px);
@@ -214,12 +238,14 @@ namespace
 
         if (r.tool == "Findline")
         {
-            return r.measured_local_support_score >= 0.60;
+            return r.measured_local_support_score >= 0.60 &&
+                   r.measured_local_mean_distance_px <= 3.0;
         }
 
         if (r.tool == "Findcircle")
         {
-            return r.circle_local_support_score >= 0.60;
+            return r.circle_local_support_score >= 0.60 &&
+                   r.circle_local_mean_radial_distance_px <= 3.0;
         }
 
         return false;
@@ -233,31 +259,34 @@ namespace
         if (!r.t0_pass)
             return "HEADLESS_FAILED";
 
+        const double localSupport =
+            r.tool == "Findline"
+                ? r.measured_local_support_score
+                : r.circle_local_support_score;
+
+        const double localDist =
+            r.tool == "Findline"
+                ? r.measured_local_mean_distance_px
+                : r.circle_local_mean_radial_distance_px;
+
         if (!r.t1_pass)
         {
-            if (!r.failure_stage.empty())
-                return "ALGORITHM_NO_RESULT";
+            if (localSupport >= 0.60)
+                return "ALGORITHM_NO_RESULT_WITH_IMAGE_EDGE";
+
             return "ALGORITHM_NO_RESULT";
         }
 
         if (r.evidence_summary_path == "EVIDENCE_MISSING")
             return "EVIDENCE_MISSING";
 
-        if (r.tool == "Findline")
-        {
-            if (r.measured_local_support_score >= 0.60)
-                return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
-            return "SUSPICIOUS_CANDIDATE";
-        }
+        if (r.t2_pass)
+            return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
 
-        if (r.tool == "Findcircle")
-        {
-            if (r.circle_local_support_score >= 0.60)
-                return "ORIGINAL_LOCAL_EDGE_CONFIRMED";
-            return "SUSPICIOUS_CANDIDATE";
-        }
+        if (localSupport >= 0.60)
+            return "GEOMETRY_MARGINAL_BUT_SAMPLED";
 
-        return "UNKNOWN_TOOL";
+        return "SUSPICIOUS_CANDIDATE";
     }
 }
 
@@ -398,7 +427,7 @@ bool RunStage25ManifestFile(
                             "generated_scripts" / img.image_id / target.target_id /
                             (profile.profile_id + ".cxsc");
 
-                        Stage25TemplateContext ctx = BuildFindlineContext(target, profile);
+                        Stage25TemplateContext ctx = BuildFindlineContext(case_id, img.image_id, target.target_id, target, profile);
                         Stage25TemplateEngine engine;
                         std::string reason;
                         engine.RenderFile(
@@ -433,12 +462,26 @@ bool RunStage25ManifestFile(
                         case_result.headless_ok = headlessResult.ok;
                         case_result.t0_pass = headlessResult.ok;
 
+                        case_result.generated_script_exists =
+                            std::filesystem::exists(generated_script);
+
                         if (headlessResult.ok)
                         {
                             std::filesystem::path summaryPath = case_dir / "result_summary.json";
                             std::filesystem::path evidencePath = case_dir / "evidence_summary.json";
 
                             LoadStage25CaseResultFromFiles(summaryPath, evidencePath, case_result);
+
+                            case_result.snapshot_path = headlessResult.snapshot_path;
+                            case_result.overlay_path = headlessResult.overlay_path;
+                            case_result.snapshot_exists =
+                                std::filesystem::exists(std::filesystem::path(headlessResult.snapshot_path));
+                            case_result.overlay_exists =
+                                std::filesystem::exists(std::filesystem::path(headlessResult.overlay_path));
+                            case_result.summary_exists =
+                                std::filesystem::exists(summaryPath);
+                            case_result.evidence_summary_exists =
+                                std::filesystem::exists(evidencePath);
                         }
 
                         case_result.t1_pass = ComputeT1Pass(case_result);
@@ -459,7 +502,7 @@ bool RunStage25ManifestFile(
                             "generated_scripts" / img.image_id / target.target_id /
                             (profile.profile_id + ".cxsc");
 
-                        Stage25TemplateContext ctx = BuildFindcircleContext(target, profile);
+                        Stage25TemplateContext ctx = BuildFindcircleContext(case_id, img.image_id, target.target_id, target, profile);
                         Stage25TemplateEngine engine;
                         std::string reason;
                         engine.RenderFile(
@@ -494,12 +537,26 @@ bool RunStage25ManifestFile(
                         case_result.headless_ok = headlessResult.ok;
                         case_result.t0_pass = headlessResult.ok;
 
+                        case_result.generated_script_exists =
+                            std::filesystem::exists(generated_script);
+
                         if (headlessResult.ok)
                         {
                             std::filesystem::path summaryPath = case_dir / "result_summary.json";
                             std::filesystem::path evidencePath = case_dir / "evidence_summary.json";
 
                             LoadStage25CaseResultFromFiles(summaryPath, evidencePath, case_result);
+
+                            case_result.snapshot_path = headlessResult.snapshot_path;
+                            case_result.overlay_path = headlessResult.overlay_path;
+                            case_result.snapshot_exists =
+                                std::filesystem::exists(std::filesystem::path(headlessResult.snapshot_path));
+                            case_result.overlay_exists =
+                                std::filesystem::exists(std::filesystem::path(headlessResult.overlay_path));
+                            case_result.summary_exists =
+                                std::filesystem::exists(summaryPath);
+                            case_result.evidence_summary_exists =
+                                std::filesystem::exists(evidencePath);
                         }
 
                         case_result.t1_pass = ComputeT1Pass(case_result);
@@ -527,6 +584,7 @@ bool RunStage25ManifestFile(
     Stage25ReportWriter::WriteStabilityReport(options.out_root, result.case_results, manifest);
     Stage25ReportWriter::WritePolicyReport(options.out_root);
     Stage25ReportWriter::WriteCaseFileIndex(options.out_root, result.case_results);
+    Stage25ReportWriter::WriteDiagnosticReport(options.out_root, result.case_results);
 
     result.ok = true;
     return true;
