@@ -1,205 +1,205 @@
-Stage25Manifest manifest;
+Stage25Manifest m;
 
-manifest.setname("stage25_l1_l3");
-manifest.setoutroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/stage_2_5_l1_l3");
-manifest.setimageroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images");
+m.reset();
 
-manifest.setminimagesforstability(3);
-manifest.setminlevelsforstability(2);
+m.setname("stage25_l1_l3");
+m.setoutroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/stage_2_5_l1_l3");
+m.setimageroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images");
 
-ImageSet img1 = manifest.addimage(
+m.setminimagesforstability(3);
+m.setminlevelsforstability(2);
+
+m.addimage(
     "line_high_contrast_001",
     "L1_high_contrast",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_001.jpg");
 
-img1.addtag("line");
-img1.addtag("high_contrast");
-img1.addtag("clear_edge");
-img1.setexpectededge("clear");
-img1.setlighting("normal");
-img1.setcontrast("high");
+m.image_addtag("line");
+m.image_addtag("high_contrast");
+m.image_addtag("clear_edge");
+m.image_setexpectededge("clear");
+m.image_setlighting("normal");
+m.image_setcontrast("high");
 
-img1.addfindlinetarget(
-    "main_line_edge",
-    120, 240,
-    980, 240,
-    8, 32);
+m.image_addfindlinetarget(
+    "plate_top_edge",
+    "82", "183",
+    "1210", "183",
+    "8", "32");
 
-ImageSet img2 = manifest.addimage(
+m.addimage(
     "circle_high_contrast_001",
     "L1_high_contrast",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/circle_high_contrast_001.jpg");
 
-img2.addtag("circle");
-img2.addtag("high_contrast");
-img2.addtag("clear_edge");
+m.image_addtag("circle");
+m.image_addtag("high_contrast");
+m.image_addtag("clear_edge");
 
-img2.addfindcircletarget(
-    "main_circle_edge",
-    765, 471,
-    1200, 471,
-    5,
-    3);
+m.image_addfindcircletarget(
+    "isolated_plate_circle",
+    "498", "704",
+    "563", "704",
+    "5",
+    "3");
 
-ImageSet img3 = manifest.addimage(
+m.addimage(
     "line_low_contrast_001",
     "L2_low_contrast_illumination",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/line_low_contrast_001.jpg");
 
-img3.addtag("line");
-img3.addtag("low_contrast");
-img3.addtag("ambient_illumination");
-img3.setexpectededge("faint");
-img3.setlighting("ambient");
-img3.setcontrast("low");
+m.image_addtag("line");
+m.image_addtag("low_contrast");
+m.image_addtag("ambient_illumination");
+m.image_setexpectededge("weak_but_visible");
+m.image_setlighting("ambient");
+m.image_setcontrast("low");
 
-img3.addfindlinetarget(
-    "faint_line_edge",
-    100, 300,
-    1000, 300,
-    8, 32);
+m.image_addfindlinetarget(
+    "weak_vertical_scratch",
+    "181", "20",
+    "244", "407",
+    "8", "24");
 
-ImageSet img4 = manifest.addimage(
+m.addimage(
     "circle_low_contrast_001",
     "L2_low_contrast_illumination",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/circle_low_contrast_001.jpg");
 
-img4.addtag("circle");
-img4.addtag("low_contrast");
-img4.addtag("ambient_illumination");
+m.image_addtag("circle");
+m.image_addtag("low_contrast");
+m.image_addtag("ambient_illumination");
 
-img4.addfindcircletarget(
-    "faint_circle_edge",
-    600, 400,
-    1000, 400,
-    5,
-    3);
+m.image_addfindcircletarget(
+    "cap_outer_boundary",
+    "635", "516",
+    "932", "516",
+    "6",
+    "3");
 
-ImageSet img5 = manifest.addimage(
+m.addimage(
     "line_complex_boundary_001",
     "L3_complex_boundary",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/line_complex_boundary_001.jpg");
 
-img5.addtag("line");
-img5.addtag("complex_boundary");
-img5.addtag("interference");
-img5.setexpectededge("mixed");
-img5.setlighting("complex");
-img5.setcontrast("medium");
+m.image_addtag("line");
+m.image_addtag("complex_boundary");
+m.image_addtag("interference");
+m.image_setexpectededge("complex_nearby_edges");
+m.image_setlighting("complex");
+m.image_setcontrast("medium");
 
-img5.addfindlinetarget(
-    "complex_line_edge",
-    150, 280,
-    950, 280,
-    8, 32);
+m.image_addfindlinetarget(
+    "central_screw_shaft_edge",
+    "1440", "555",
+    "1625", "1300",
+    "10", "34");
 
-ImageSet img6 = manifest.addimage(
+m.addimage(
     "circle_complex_boundary_001",
     "L3_complex_boundary",
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/circle_complex_boundary_001.jpg");
 
-img6.addtag("circle");
-img6.addtag("complex_boundary");
-img6.addtag("interference");
+m.image_addtag("circle");
+m.image_addtag("complex_boundary");
+m.image_addtag("interference");
 
-img6.addfindcircletarget(
-    "complex_circle_edge",
-    700, 500,
-    1100, 500,
-    5,
-    3);
+m.image_addfindcircletarget(
+    "brake_disk_inner_circle",
+    "704", "522",
+    "960", "522",
+    "6",
+    "3");
 
-FindlineProfile flLegacy = manifest.addfindlineprofile("legacy_default");
-flLegacy.setmethod(0);
-flLegacy.setthreshold(20);
-flLegacy.setlinegap(6);
-flLegacy.setfitmode(1);
-flLegacy.setscript_scale(1);
-flLegacy.setfilterprofile(0);
-flLegacy.setpolicy("LEGACY_COMPARE");
+m.addfindlineprofile("legacy_default");
+m.findline_setmethod(0);
+m.findline_setthreshold(20);
+m.findline_setlinegap(6);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(0);
+m.findline_setpolicy("LEGACY_COMPARE");
 
-FindlineProfile flStage25 = manifest.addfindlineprofile("stage25_filter20");
-flStage25.setmethod(0);
-flStage25.setthreshold(20);
-flStage25.setlinegap(6);
-flStage25.setfitmode(1);
-flStage25.setscript_scale(1);
-flStage25.setfilterprofile(1);
-flStage25.setpolicy("FILTER_POLICY_CANDIDATE");
+m.addfindlineprofile("stage25_filter20");
+m.findline_setmethod(0);
+m.findline_setthreshold(20);
+m.findline_setlinegap(6);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(1);
+m.findline_setpolicy("FILTER_POLICY_CANDIDATE");
 
-FindlineProfile flThreshold8 = manifest.addfindlineprofile("threshold8");
-flThreshold8.setmethod(0);
-flThreshold8.setthreshold(8);
-flThreshold8.setlinegap(6);
-flThreshold8.setfitmode(1);
-flThreshold8.setscript_scale(1);
-flThreshold8.setfilterprofile(0);
-flThreshold8.setpolicy("LOW_CONTRAST_CANDIDATE");
+m.addfindlineprofile("threshold8");
+m.findline_setmethod(0);
+m.findline_setthreshold(8);
+m.findline_setlinegap(6);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(0);
+m.findline_setpolicy("LOW_CONTRAST_CANDIDATE");
 
-FindlineProfile flLinegap10 = manifest.addfindlineprofile("linegap10");
-flLinegap10.setmethod(0);
-flLinegap10.setthreshold(20);
-flLinegap10.setlinegap(10);
-flLinegap10.setfitmode(1);
-flLinegap10.setscript_scale(1);
-flLinegap10.setfilterprofile(0);
-flLinegap10.setpolicy("SPARSE_SAMPLE_CANDIDATE");
+m.addfindlineprofile("linegap10");
+m.findline_setmethod(0);
+m.findline_setthreshold(20);
+m.findline_setlinegap(10);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(0);
+m.findline_setpolicy("SPARSE_SAMPLE_CANDIDATE");
 
-FindlineProfile flRelax = manifest.addfindlineprofile("filter_relax_min1");
-flRelax.setmethod(0);
-flRelax.setthreshold(20);
-flRelax.setlinegap(6);
-flRelax.setfitmode(1);
-flRelax.setscript_scale(1);
-flRelax.setfilterprofile(0);
-flRelax.setobjfilter(1);
-flRelax.setfilter(21, 1, 100000);
-flRelax.setpolicy("DEBUG_ONLY");
+m.addfindlineprofile("filter_relax_min1");
+m.findline_setmethod(0);
+m.findline_setthreshold(20);
+m.findline_setlinegap(6);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(0);
+m.findline_setobjfilter(1);
+m.findline_setfilter("21", "1", "100000");
+m.findline_setpolicy("DEBUG_ONLY");
 
-FindlineProfile flGamma = manifest.addfindlineprofile("gamma");
-flGamma.setmethod(0);
-flGamma.setthreshold(20);
-flGamma.setlinegap(6);
-flGamma.setfitmode(1);
-flGamma.setscript_scale(1);
-flGamma.setfilterprofile(0);
-flGamma.setgamarate(1);
-flGamma.setpolicy("RISK_CANDIDATE");
+m.addfindlineprofile("gamma");
+m.findline_setmethod(0);
+m.findline_setthreshold(20);
+m.findline_setlinegap(6);
+m.findline_setfitmode(1);
+m.findline_setscript_scale(1);
+m.findline_setfilterprofile(0);
+m.findline_setgamarate(1);
+m.findline_setpolicy("RISK_CANDIDATE");
 
-FindcircleProfile fcDirect = manifest.addfindcircleprofile("direct");
-fcDirect.setmethod(0);
-fcDirect.setthreshold(20);
-fcDirect.setgap(5);
-fcDirect.setlinegap(3);
-fcDirect.setpolicy("DEFAULT_POLICY");
+m.addfindcircleprofile("direct");
+m.findcircle_setmethod(0);
+m.findcircle_setthreshold(20);
+m.findcircle_setgap(5);
+m.findcircle_setlinegap(3);
+m.findcircle_setpolicy("DEFAULT_POLICY");
 
-FindcircleProfile fcThreshold8 = manifest.addfindcircleprofile("threshold8");
-fcThreshold8.setmethod(0);
-fcThreshold8.setthreshold(8);
-fcThreshold8.setgap(5);
-fcThreshold8.setlinegap(3);
-fcThreshold8.setpolicy("LOW_CONTRAST_CANDIDATE");
+m.addfindcircleprofile("threshold8");
+m.findcircle_setmethod(0);
+m.findcircle_setthreshold(8);
+m.findcircle_setgap(5);
+m.findcircle_setlinegap(3);
+m.findcircle_setpolicy("LOW_CONTRAST_CANDIDATE");
 
-FindcircleProfile fcMethod1 = manifest.addfindcircleprofile("method1");
-fcMethod1.setmethod(1);
-fcMethod1.setthreshold(20);
-fcMethod1.setgap(5);
-fcMethod1.setlinegap(3);
-fcMethod1.setpolicy("POLARITY_RISK");
+m.addfindcircleprofile("method1");
+m.findcircle_setmethod(1);
+m.findcircle_setthreshold(20);
+m.findcircle_setgap(5);
+m.findcircle_setlinegap(3);
+m.findcircle_setpolicy("POLARITY_RISK");
 
-FindcircleProfile fcRelax = manifest.addfindcircleprofile("filter_relax");
-fcRelax.setmethod(0);
-fcRelax.setthreshold(20);
-fcRelax.setgap(5);
-fcRelax.setlinegap(3);
-fcRelax.setfindsetting(1);
-fcRelax.setfilter(21, 1, 100000);
-fcRelax.setpolicy("INTERFERENCE_CHECK");
+m.addfindcircleprofile("filter_relax");
+m.findcircle_setmethod(0);
+m.findcircle_setthreshold(20);
+m.findcircle_setgap(5);
+m.findcircle_setlinegap(3);
+m.findcircle_setfindsetting(1);
+m.findcircle_setfilter("21", "1", "100000");
+m.findcircle_setpolicy("INTERFERENCE_CHECK");
 
-EvidenceProfile evNormal = manifest.addevidenceprofile("normal");
-evNormal.setnearestpointsupportpx(3.0);
-evNormal.setlinedistancesupportpx(3.0);
-evNormal.setmingradient(6.0);
-evNormal.setmingradientratio(0.35);
-
-RunStage25Manifest(manifest);
+m.addevidenceprofile("normal");
+m.evidence_setnearestpointsupportpx(3.0);
+m.evidence_setlinedistancesupportpx(3.0);
+m.evidence_setmingradient(6.0);
+m.evidence_setmingradientratio(0.35);

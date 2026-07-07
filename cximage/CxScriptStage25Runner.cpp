@@ -125,7 +125,8 @@ bool RunStage25ManifestFile(
     std::filesystem::create_directories(options.out_root);
 
     auto manifest_dir = options.manifest_path.parent_path();
-    auto templates_dir = manifest_dir / "templates";
+    auto stage25_dir = manifest_dir.parent_path();
+    auto templates_dir = stage25_dir / "templates";
 
     std::ifstream manifestFile(options.manifest_path);
     if (!manifestFile.is_open())
@@ -137,6 +138,12 @@ bool RunStage25ManifestFile(
     std::stringstream buffer;
     buffer << manifestFile.rdbuf();
     std::string manifest_script = buffer.str();
+
+    g_stage25_manifest = Stage25Manifest{};
+    g_current_image = nullptr;
+    g_current_findline_profile = nullptr;
+    g_current_findcircle_profile = nullptr;
+    g_current_evidence_profile = nullptr;
 
     mu::Parser parser;
     parser.UsingClass(true);

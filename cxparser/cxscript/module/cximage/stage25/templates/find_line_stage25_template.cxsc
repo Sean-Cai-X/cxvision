@@ -22,14 +22,24 @@ int filter_profile = {{filter_profile}};
 m_line.SetWHgap(wgap, hgap);
 m_line.setline(x0, y0, x1, y1, script_scale);
 
-m_line.setfilterprofile(filter_profile);
-
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
 m_line.setfitmode(fitmode);
 
 {{optional_findline_filter}}
+
+if (filter_profile == 1)
+{
+    m_line.setfilterprofile(filter_profile);
+    m_line.setobjfilter(1);
+    m_line.setfilter(21, 20, 100000);
+}
+else
+{
+    m_line.setfilterprofile(filter_profile);
+}
+
 {{optional_findline_gamma}}
 
 m_line.measure(&m_image);

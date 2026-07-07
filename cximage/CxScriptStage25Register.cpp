@@ -3,392 +3,439 @@
 #include "CxScriptStage25Runner.h"
 
 Stage25Manifest g_stage25_manifest;
-
-namespace
-{
-    Stage25ImageCase* g_current_image = nullptr;
-    Stage25FindlineProfile* g_current_findline_profile = nullptr;
-    Stage25FindcircleProfile* g_current_findcircle_profile = nullptr;
-    Stage25EvidenceProfile* g_current_evidence_profile = nullptr;
-}
+Stage25ImageCase* g_current_image = nullptr;
+Stage25FindlineProfile* g_current_findline_profile = nullptr;
+Stage25FindcircleProfile* g_current_findcircle_profile = nullptr;
+Stage25EvidenceProfile* g_current_evidence_profile = nullptr;
 
 class Stage25ManifestBinding
 {
 public:
-    void setname(mu::charpvect& params)
+    void reset()
     {
-        if (params.size() > 0)
-            g_stage25_manifest.name = params[0];
+        g_stage25_manifest = Stage25Manifest{};
+        g_current_image = nullptr;
+        g_current_findline_profile = nullptr;
+        g_current_findcircle_profile = nullptr;
+        g_current_evidence_profile = nullptr;
     }
 
-    void setoutroot(mu::charpvect& params)
+    void setname(const char* value)
     {
-        if (params.size() > 0)
-            g_stage25_manifest.outroot = params[0];
+        g_stage25_manifest.name = value ? value : "";
     }
 
-    void setimageroot(mu::charpvect& params)
+    void setoutroot(const char* value)
     {
-        if (params.size() > 0)
-            g_stage25_manifest.imageroot = params[0];
+        g_stage25_manifest.outroot = value ? value : "";
     }
 
-    void setminimagesforstability(int value)
+    void setimageroot(const char* value)
     {
-        g_stage25_manifest.min_images_for_stability = value;
+        g_stage25_manifest.imageroot = value ? value : "";
     }
 
-    void setminlevelsforstability(int value)
+    void setminimagesforstability(double value)
     {
-        g_stage25_manifest.min_levels_for_stability = value;
+        g_stage25_manifest.min_images_for_stability =
+            static_cast<int>(value);
     }
 
-    int addimage(mu::charpvect& params)
+    void setminlevelsforstability(double value)
     {
-        if (params.size() >= 3)
-        {
-            Stage25ImageCase img;
-            img.image_id = params[0];
-            img.level = params[1];
-            img.path = params[2];
-            g_stage25_manifest.images.push_back(img);
-            g_current_image = &g_stage25_manifest.images.back();
-        }
-        return 0;
+        g_stage25_manifest.min_levels_for_stability =
+            static_cast<int>(value);
     }
 
-    int addfindlineprofile(mu::charpvect& params)
+    void addimage(mu::charpvect& params)
     {
-        if (params.size() >= 1)
-        {
-            Stage25FindlineProfile profile;
-            profile.profile_id = params[0];
-            g_stage25_manifest.findline_profiles.push_back(profile);
-            g_current_findline_profile = &g_stage25_manifest.findline_profiles.back();
-        }
-        return 0;
+        if (params.size() < 3)
+            return;
+
+        Stage25ImageCase img;
+        img.image_id = params[0];
+        img.level = params[1];
+        img.path = params[2];
+
+        g_stage25_manifest.images.push_back(img);
+        g_current_image = &g_stage25_manifest.images.back();
     }
 
-    int addfindcircleprofile(mu::charpvect& params)
+    void image_addtag(const char* value)
     {
-        if (params.size() >= 1)
-        {
-            Stage25FindcircleProfile profile;
-            profile.profile_id = params[0];
-            g_stage25_manifest.findcircle_profiles.push_back(profile);
-            g_current_findcircle_profile = &g_stage25_manifest.findcircle_profiles.back();
-        }
-        return 0;
+        if (!g_current_image)
+            return;
+
+        g_current_image->tags.push_back(value ? value : "");
     }
 
-    int addevidenceprofile(mu::charpvect& params)
+    void image_setexpectededge(const char* value)
     {
-        if (params.size() >= 1)
-        {
-            Stage25EvidenceProfile profile;
-            profile.name = params[0];
-            g_stage25_manifest.evidence_profiles.push_back(profile);
-            g_current_evidence_profile = &g_stage25_manifest.evidence_profiles.back();
-        }
-        return 0;
-    }
-};
+        if (!g_current_image)
+            return;
 
-class Stage25ImageSetBinding
-{
-public:
-    void addtag(mu::charpvect& params)
-    {
-        if (g_current_image && params.size() > 0)
-            g_current_image->tags.push_back(params[0]);
+        g_current_image->expected_edge = value ? value : "";
     }
 
-    void setexpectededge(mu::charpvect& params)
+    void image_setlighting(const char* value)
     {
-        if (g_current_image && params.size() > 0)
-            g_current_image->expected_edge = params[0];
+        if (!g_current_image)
+            return;
+
+        g_current_image->lighting = value ? value : "";
     }
 
-    void setlighting(mu::charpvect& params)
+    void image_setcontrast(const char* value)
     {
-        if (g_current_image && params.size() > 0)
-            g_current_image->lighting = params[0];
+        if (!g_current_image)
+            return;
+
+        g_current_image->contrast = value ? value : "";
     }
 
-    void setcontrast(mu::charpvect& params)
+    void image_addfindlinetarget(mu::charpvect& params)
     {
-        if (g_current_image && params.size() > 0)
-            g_current_image->contrast = params[0];
+        if (!g_current_image || params.size() < 7)
+            return;
+
+        Stage25ImageTarget target;
+        target.target_id = params[0];
+        target.tool = "Findline";
+        target.x0 = std::stoi(params[1]);
+        target.y0 = std::stoi(params[2]);
+        target.x1 = std::stoi(params[3]);
+        target.y1 = std::stoi(params[4]);
+        target.wgap = std::stoi(params[5]);
+        target.hgap = std::stoi(params[6]);
+
+        g_current_image->targets.push_back(target);
     }
 
-    void addfindlinetarget(mu::charpvect& params)
+    void image_addfindcircletarget(mu::charpvect& params)
     {
-        if (g_current_image && params.size() >= 7)
-        {
-            Stage25ImageTarget target;
-            target.target_id = params[0];
-            target.tool = "Findline";
-            target.x0 = std::stoi(params[1]);
-            target.y0 = std::stoi(params[2]);
-            target.x1 = std::stoi(params[3]);
-            target.y1 = std::stoi(params[4]);
-            target.wgap = std::stoi(params[5]);
-            target.hgap = std::stoi(params[6]);
-            g_current_image->targets.push_back(target);
-        }
+        if (!g_current_image || params.size() < 7)
+            return;
+
+        Stage25ImageTarget target;
+        target.target_id = params[0];
+        target.tool = "Findcircle";
+        target.cx = std::stoi(params[1]);
+        target.cy = std::stoi(params[2]);
+        target.px = std::stoi(params[3]);
+        target.py = std::stoi(params[4]);
+        target.gap = std::stoi(params[5]);
+        target.linegap = std::stoi(params[6]);
+
+        g_current_image->targets.push_back(target);
     }
 
-    void addfindcircletarget(mu::charpvect& params)
+    void addfindlineprofile(const char* value)
     {
-        if (g_current_image && params.size() >= 6)
-        {
-            Stage25ImageTarget target;
-            target.target_id = params[0];
-            target.tool = "Findcircle";
-            target.cx = std::stoi(params[1]);
-            target.cy = std::stoi(params[2]);
-            target.px = std::stoi(params[3]);
-            target.py = std::stoi(params[4]);
-            target.gap = std::stoi(params[5]);
-            target.linegap = std::stoi(params[6]);
-            g_current_image->targets.push_back(target);
-        }
-    }
-};
+        Stage25FindlineProfile profile;
+        profile.profile_id = value ? value : "";
 
-class Stage25FindlineProfileBinding
-{
-public:
-    void setmethod(int value)
+        g_stage25_manifest.findline_profiles.push_back(profile);
+        g_current_findline_profile =
+            &g_stage25_manifest.findline_profiles.back();
+    }
+
+    void findline_setmethod(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->method = value;
+            g_current_findline_profile->method = static_cast<int>(value);
     }
 
-    void setthreshold(int value)
+    void findline_setthreshold(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->threshold = value;
+            g_current_findline_profile->threshold = static_cast<int>(value);
     }
 
-    void setlinegap(int value)
+    void findline_setlinegap(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->linegap = value;
+            g_current_findline_profile->linegap = static_cast<int>(value);
     }
 
-    void setfitmode(int value)
+    void findline_setfitmode(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->fitmode = value;
+            g_current_findline_profile->fitmode = static_cast<int>(value);
     }
 
-    void setscript_scale(int value)
+    void findline_setscript_scale(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->script_scale = value;
+            g_current_findline_profile->script_scale = static_cast<int>(value);
     }
 
-    void setfilterprofile(int value)
+    void findline_setfilterprofile(double value)
     {
         if (g_current_findline_profile)
-            g_current_findline_profile->filter_profile = value;
+            g_current_findline_profile->filter_profile = static_cast<int>(value);
     }
 
-    void setobjfilter(int value)
+    void findline_setobjfilter(double value)
+    {
+        if (!g_current_findline_profile)
+            return;
+
+        g_current_findline_profile->has_explicit_filter = true;
+        g_current_findline_profile->objfilter = static_cast<int>(value);
+    }
+
+    void findline_setfilter(mu::charpvect& params)
+    {
+        if (!g_current_findline_profile || params.size() < 3)
+            return;
+
+        g_current_findline_profile->has_explicit_filter = true;
+        g_current_findline_profile->filter_borw = std::stoi(params[0]);
+        g_current_findline_profile->filter_min = std::stoi(params[1]);
+        g_current_findline_profile->filter_max = std::stoi(params[2]);
+    }
+
+    void findline_setgamarate(double value)
+    {
+        if (!g_current_findline_profile)
+            return;
+
+        g_current_findline_profile->has_gamma = true;
+        g_current_findline_profile->gamma = static_cast<int>(value);
+    }
+
+    void findline_setpolicy(const char* value)
     {
         if (g_current_findline_profile)
-        {
-            g_current_findline_profile->has_explicit_filter = true;
-            g_current_findline_profile->objfilter = value;
-        }
+            g_current_findline_profile->policy = value ? value : "";
     }
 
-    void setfilter(mu::charpvect& params)
+    void addfindcircleprofile(const char* value)
     {
-        if (g_current_findline_profile && params.size() >= 3)
-        {
-            g_current_findline_profile->has_explicit_filter = true;
-            g_current_findline_profile->filter_borw = std::stoi(params[0]);
-            g_current_findline_profile->filter_min = std::stoi(params[1]);
-            g_current_findline_profile->filter_max = std::stoi(params[2]);
-        }
+        Stage25FindcircleProfile profile;
+        profile.profile_id = value ? value : "";
+
+        g_stage25_manifest.findcircle_profiles.push_back(profile);
+        g_current_findcircle_profile =
+            &g_stage25_manifest.findcircle_profiles.back();
     }
 
-    void setgamarate(int value)
-    {
-        if (g_current_findline_profile)
-        {
-            g_current_findline_profile->has_gamma = true;
-            g_current_findline_profile->gamma = value;
-        }
-    }
-
-    void setpolicy(mu::charpvect& params)
-    {
-        if (g_current_findline_profile && params.size() > 0)
-            g_current_findline_profile->policy = params[0];
-    }
-};
-
-class Stage25FindcircleProfileBinding
-{
-public:
-    void setmethod(int value)
+    void findcircle_setmethod(double value)
     {
         if (g_current_findcircle_profile)
-            g_current_findcircle_profile->method = value;
+            g_current_findcircle_profile->method = static_cast<int>(value);
     }
 
-    void setthreshold(int value)
+    void findcircle_setthreshold(double value)
     {
         if (g_current_findcircle_profile)
-            g_current_findcircle_profile->threshold = value;
+            g_current_findcircle_profile->threshold = static_cast<int>(value);
     }
 
-    void setgap(int value)
+    void findcircle_setgap(double value)
     {
         if (g_current_findcircle_profile)
-            g_current_findcircle_profile->gap = value;
+            g_current_findcircle_profile->gap = static_cast<int>(value);
     }
 
-    void setlinegap(int value)
+    void findcircle_setlinegap(double value)
     {
         if (g_current_findcircle_profile)
-            g_current_findcircle_profile->linegap = value;
+            g_current_findcircle_profile->linegap = static_cast<int>(value);
     }
 
-    void setfindsetting(int value)
+    void findcircle_setfindsetting(double value)
+    {
+        if (!g_current_findcircle_profile)
+            return;
+
+        g_current_findcircle_profile->has_filter = true;
+        g_current_findcircle_profile->findsetting = static_cast<int>(value);
+    }
+
+    void findcircle_setfilter(mu::charpvect& params)
+    {
+        if (!g_current_findcircle_profile || params.size() < 3)
+            return;
+
+        g_current_findcircle_profile->has_filter = true;
+        g_current_findcircle_profile->filter_borw = std::stoi(params[0]);
+        g_current_findcircle_profile->filter_min = std::stoi(params[1]);
+        g_current_findcircle_profile->filter_max = std::stoi(params[2]);
+    }
+
+    void findcircle_setsamplerate(double value)
+    {
+        if (!g_current_findcircle_profile)
+            return;
+
+        g_current_findcircle_profile->has_samplerate = true;
+        g_current_findcircle_profile->samplerate = value;
+    }
+
+    void findcircle_setpolicy(const char* value)
     {
         if (g_current_findcircle_profile)
-        {
-            g_current_findcircle_profile->has_filter = true;
-            g_current_findcircle_profile->findsetting = value;
-        }
+            g_current_findcircle_profile->policy = value ? value : "";
     }
 
-    void setfilter(mu::charpvect& params)
+    void addevidenceprofile(const char* value)
     {
-        if (g_current_findcircle_profile && params.size() >= 3)
-        {
-            g_current_findcircle_profile->has_filter = true;
-            g_current_findcircle_profile->filter_borw = std::stoi(params[0]);
-            g_current_findcircle_profile->filter_min = std::stoi(params[1]);
-            g_current_findcircle_profile->filter_max = std::stoi(params[2]);
-        }
+        Stage25EvidenceProfile profile;
+        profile.name = value ? value : "";
+
+        g_stage25_manifest.evidence_profiles.push_back(profile);
+        g_current_evidence_profile =
+            &g_stage25_manifest.evidence_profiles.back();
     }
 
-    void setsamplerate(double value)
-    {
-        if (g_current_findcircle_profile)
-        {
-            g_current_findcircle_profile->has_samplerate = true;
-            g_current_findcircle_profile->samplerate = value;
-        }
-    }
-
-    void setpolicy(mu::charpvect& params)
-    {
-        if (g_current_findcircle_profile && params.size() > 0)
-            g_current_findcircle_profile->policy = params[0];
-    }
-};
-
-class Stage25EvidenceProfileBinding
-{
-public:
-    void setnearestpointsupportpx(double value)
+    void evidence_setnearestpointsupportpx(double value)
     {
         if (g_current_evidence_profile)
             g_current_evidence_profile->nearest_point_support_px = value;
     }
 
-    void setlinedistancesupportpx(double value)
+    void evidence_setlinedistancesupportpx(double value)
     {
         if (g_current_evidence_profile)
             g_current_evidence_profile->line_distance_support_px = value;
     }
 
-    void setmingradient(double value)
+    void evidence_setmingradient(double value)
     {
         if (g_current_evidence_profile)
             g_current_evidence_profile->min_gradient = value;
     }
 
-    void setmingradientratio(double value)
+    void evidence_setmingradientratio(double value)
     {
         if (g_current_evidence_profile)
             g_current_evidence_profile->min_gradient_ratio = value;
     }
 };
 
-mu::value_type RunStage25Manifest(const mu::value_type* params, int num_params)
-{
-    (void)params;
-    (void)num_params;
-    
-    Stage25RunOptions options;
-    options.out_root = g_stage25_manifest.outroot;
-    options.manifest_path = g_stage25_manifest.outroot;
-    
-    Stage25RunResult result;
-    RunStage25ManifestFile(options, result);
-    return result.ok ? 1.0 : 0.0;
-}
-
 void RegisterStage25CxScriptBindings(mu::Parser& parser)
 {
+    double* org_double = nullptr;
+    parser.DefineOrgClass("double", org_double);
+
+    parser.UsingClass(true);
+
     Stage25ManifestBinding* manifest = nullptr;
+
     parser.DefineClass("Stage25Manifest", manifest);
-    parser.DefineClassFun("Stage25Manifest", manifest, "setname", &Stage25ManifestBinding::setname);
-    parser.DefineClassFun("Stage25Manifest", manifest, "setoutroot", &Stage25ManifestBinding::setoutroot);
-    parser.DefineClassFun("Stage25Manifest", manifest, "setimageroot", &Stage25ManifestBinding::setimageroot);
-    parser.DefineClassFun("Stage25Manifest", manifest, "setminimagesforstability", &Stage25ManifestBinding::setminimagesforstability);
-    parser.DefineClassFun("Stage25Manifest", manifest, "setminlevelsforstability", &Stage25ManifestBinding::setminlevelsforstability);
-    parser.DefineClassFun("Stage25Manifest", manifest, "addimage", &Stage25ManifestBinding::addimage);
-    parser.DefineClassFun("Stage25Manifest", manifest, "addfindlineprofile", &Stage25ManifestBinding::addfindlineprofile);
-    parser.DefineClassFun("Stage25Manifest", manifest, "addfindcircleprofile", &Stage25ManifestBinding::addfindcircleprofile);
-    parser.DefineClassFun("Stage25Manifest", manifest, "addevidenceprofile", &Stage25ManifestBinding::addevidenceprofile);
 
-    Stage25ImageSetBinding* image_set = nullptr;
-    parser.DefineClass("ImageSet", image_set);
-    parser.DefineClassFun("ImageSet", image_set, "addtag", &Stage25ImageSetBinding::addtag);
-    parser.DefineClassFun("ImageSet", image_set, "setexpectededge", &Stage25ImageSetBinding::setexpectededge);
-    parser.DefineClassFun("ImageSet", image_set, "setlighting", &Stage25ImageSetBinding::setlighting);
-    parser.DefineClassFun("ImageSet", image_set, "setcontrast", &Stage25ImageSetBinding::setcontrast);
-    parser.DefineClassFun("ImageSet", image_set, "addfindlinetarget", &Stage25ImageSetBinding::addfindlinetarget);
-    parser.DefineClassFun("ImageSet", image_set, "addfindcircletarget", &Stage25ImageSetBinding::addfindcircletarget);
+    parser.DefineClassFun("Stage25Manifest", manifest, "reset",
+                          &Stage25ManifestBinding::reset);
 
-    Stage25FindlineProfileBinding* fl_profile = nullptr;
-    parser.DefineClass("FindlineProfile", fl_profile);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setmethod", &Stage25FindlineProfileBinding::setmethod);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setthreshold", &Stage25FindlineProfileBinding::setthreshold);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setlinegap", &Stage25FindlineProfileBinding::setlinegap);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setfitmode", &Stage25FindlineProfileBinding::setfitmode);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setscript_scale", &Stage25FindlineProfileBinding::setscript_scale);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setfilterprofile", &Stage25FindlineProfileBinding::setfilterprofile);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setobjfilter", &Stage25FindlineProfileBinding::setobjfilter);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setfilter", &Stage25FindlineProfileBinding::setfilter);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setgamarate", &Stage25FindlineProfileBinding::setgamarate);
-    parser.DefineClassFun("FindlineProfile", fl_profile, "setpolicy", &Stage25FindlineProfileBinding::setpolicy);
+    parser.DefineClassFun("Stage25Manifest", manifest, "setname",
+                          &Stage25ManifestBinding::setname);
 
-    Stage25FindcircleProfileBinding* fc_profile = nullptr;
-    parser.DefineClass("FindcircleProfile", fc_profile);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setmethod", &Stage25FindcircleProfileBinding::setmethod);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setthreshold", &Stage25FindcircleProfileBinding::setthreshold);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setgap", &Stage25FindcircleProfileBinding::setgap);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setlinegap", &Stage25FindcircleProfileBinding::setlinegap);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setfindsetting", &Stage25FindcircleProfileBinding::setfindsetting);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setfilter", &Stage25FindcircleProfileBinding::setfilter);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setsamplerate", &Stage25FindcircleProfileBinding::setsamplerate);
-    parser.DefineClassFun("FindcircleProfile", fc_profile, "setpolicy", &Stage25FindcircleProfileBinding::setpolicy);
+    parser.DefineClassFun("Stage25Manifest", manifest, "setoutroot",
+                          &Stage25ManifestBinding::setoutroot);
 
-    Stage25EvidenceProfileBinding* ev_profile = nullptr;
-    parser.DefineClass("EvidenceProfile", ev_profile);
-    parser.DefineClassFun("EvidenceProfile", ev_profile, "setnearestpointsupportpx", &Stage25EvidenceProfileBinding::setnearestpointsupportpx);
-    parser.DefineClassFun("EvidenceProfile", ev_profile, "setlinedistancesupportpx", &Stage25EvidenceProfileBinding::setlinedistancesupportpx);
-    parser.DefineClassFun("EvidenceProfile", ev_profile, "setmingradient", &Stage25EvidenceProfileBinding::setmingradient);
-    parser.DefineClassFun("EvidenceProfile", ev_profile, "setmingradientratio", &Stage25EvidenceProfileBinding::setmingradientratio);
+    parser.DefineClassFun("Stage25Manifest", manifest, "setimageroot",
+                          &Stage25ManifestBinding::setimageroot);
 
-    parser.DefineFun("RunStage25Manifest", (mu::multfun_type)RunStage25Manifest);
+    parser.DefineClassFun("Stage25Manifest", manifest, "setminimagesforstability",
+                          &Stage25ManifestBinding::setminimagesforstability);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "setminlevelsforstability",
+                          &Stage25ManifestBinding::setminlevelsforstability);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "addimage",
+                          &Stage25ManifestBinding::addimage);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_addtag",
+                          &Stage25ManifestBinding::image_addtag);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_setexpectededge",
+                          &Stage25ManifestBinding::image_setexpectededge);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_setlighting",
+                          &Stage25ManifestBinding::image_setlighting);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_setcontrast",
+                          &Stage25ManifestBinding::image_setcontrast);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_addfindlinetarget",
+                          &Stage25ManifestBinding::image_addfindlinetarget);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_addfindcircletarget",
+                          &Stage25ManifestBinding::image_addfindcircletarget);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "addfindlineprofile",
+                          &Stage25ManifestBinding::addfindlineprofile);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setmethod",
+                          &Stage25ManifestBinding::findline_setmethod);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setthreshold",
+                          &Stage25ManifestBinding::findline_setthreshold);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setlinegap",
+                          &Stage25ManifestBinding::findline_setlinegap);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setfitmode",
+                          &Stage25ManifestBinding::findline_setfitmode);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setscript_scale",
+                          &Stage25ManifestBinding::findline_setscript_scale);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setfilterprofile",
+                          &Stage25ManifestBinding::findline_setfilterprofile);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setobjfilter",
+                          &Stage25ManifestBinding::findline_setobjfilter);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setfilter",
+                          &Stage25ManifestBinding::findline_setfilter);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setgamarate",
+                          &Stage25ManifestBinding::findline_setgamarate);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findline_setpolicy",
+                          &Stage25ManifestBinding::findline_setpolicy);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "addfindcircleprofile",
+                          &Stage25ManifestBinding::addfindcircleprofile);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setmethod",
+                          &Stage25ManifestBinding::findcircle_setmethod);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setthreshold",
+                          &Stage25ManifestBinding::findcircle_setthreshold);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setgap",
+                          &Stage25ManifestBinding::findcircle_setgap);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setlinegap",
+                          &Stage25ManifestBinding::findcircle_setlinegap);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setfindsetting",
+                          &Stage25ManifestBinding::findcircle_setfindsetting);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setfilter",
+                          &Stage25ManifestBinding::findcircle_setfilter);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setsamplerate",
+                          &Stage25ManifestBinding::findcircle_setsamplerate);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "findcircle_setpolicy",
+                          &Stage25ManifestBinding::findcircle_setpolicy);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "addevidenceprofile",
+                          &Stage25ManifestBinding::addevidenceprofile);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "evidence_setnearestpointsupportpx",
+                          &Stage25ManifestBinding::evidence_setnearestpointsupportpx);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "evidence_setlinedistancesupportpx",
+                          &Stage25ManifestBinding::evidence_setlinedistancesupportpx);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "evidence_setmingradient",
+                          &Stage25ManifestBinding::evidence_setmingradient);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "evidence_setmingradientratio",
+                          &Stage25ManifestBinding::evidence_setmingradientratio);
 }
