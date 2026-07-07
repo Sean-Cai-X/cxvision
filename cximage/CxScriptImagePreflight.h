@@ -54,4 +54,8 @@ public:
         int gap = 5, int linegap = 3);
 };
 
+bool ShouldRunCaseAfterPreflight(
+    const Stage25ImagePreflightResult& preflight,
+    std::string& reason);
+
 #endif

@@ -57,39 +57,51 @@ void Stage25ReportWriter::WriteBatchReport(
     file << "- T2 evidence support pass: " << t2_pass << "/" << executed << "\n\n";
 
     file << "## Findline Cases\n\n";
-    file << "| Level | Image | Target | Profile | ParamPolicy | ParamRole | IsProdDefault | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | Quality | Policy | Summary | Evidence |\n";
-    file << "|---|---|---|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
+    file << "| Level | Image | Target | Orientation | Profile | ParamPolicy | ParamRole | ProductDefault | Stage25Default | Points | Fit | T1 | T2 | LocalSupport | LocalMeanDist | ComponentWarning | Quality |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---:|---|---|---|---:|---:|---|---|\n";
 
     for (const auto& r : results)
     {
         if (r.tool != "Findline") continue;
+
+        std::string component_warning = "";
+        if (r.component_shape == "FOREGROUND_DOMINATED_BY_SINGLE_COMPONENT")
+            component_warning = "FOREGROUND_DOMINATED";
+        else if (r.component_shape == "BINARY_COMPONENT_COLLAPSED_TO_LARGE_REGION")
+            component_warning = "BINARY_COLLAPSED";
+        else if (r.line_filter_min_exceeds_component_p90)
+            component_warning = "FILTER_EXCEEDS_P90";
+
         file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
-             << r.profile_id << " | " << r.parameter_policy_id << " | " << r.parameter_role
-             << " | " << (r.is_product_default ? "YES" : "NO")
+             << r.orientation << " | " << r.profile_id << " | " << r.parameter_policy_id
+             << " | " << r.parameter_role << " | " << (r.is_product_default ? "YES" : "NO")
+             << " | " << (r.is_stage25_default ? "YES" : "NO")
              << " | " << r.valid_points_count << " | " << (r.has_fit_line ? "true" : "false")
              << " | " << (r.t1_pass ? "true" : "false")
              << " | " << (r.t2_pass ? "true" : "false")
              << " | " << std::fixed << std::setprecision(3) << r.measured_local_support_score
              << " | " << r.measured_local_mean_distance_px
-             << " | " << r.quality_classification << " | " << r.policy_classification << " | "
-             << r.summary_path << " | " << r.evidence_summary_path << " |\n";
+             << " | " << component_warning
+             << " | " << r.quality_classification << " |\n";
     }
 
     file << "\n## Findcircle Cases\n\n";
-    file << "| Level | Image | Target | Profile | Points | FitCircle | T1 | T2 | LocalSupport | LocalMeanRadialDist | Quality | Policy | Summary | Evidence |\n";
-    file << "|---|---|---|---|---:|---|---|---|---:|---:|---|---|---|---|\n";
+    file << "| Level | Image | Target | Orientation | Profile | ParamPolicy | ParamRole | ProductDefault | Stage25Default | Points | FitCircle | T1 | T2 | LocalSupport | LocalMeanRadialDist | Quality |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---:|---|---|---|---:|---:|---|\n";
 
     for (const auto& r : results)
     {
         if (r.tool != "Findcircle") continue;
         file << "| " << r.level << " | " << r.image_id << " | " << r.target_id << " | "
-             << r.profile_id << " | " << r.valid_points_count << " | " << (r.has_fit_circle ? "true" : "false")
+             << r.orientation << " | " << r.profile_id << " | " << r.parameter_policy_id
+             << " | " << r.parameter_role << " | " << (r.is_product_default ? "YES" : "NO")
+             << " | " << (r.is_stage25_default ? "YES" : "NO")
+             << " | " << r.valid_points_count << " | " << (r.has_fit_circle ? "true" : "false")
              << " | " << (r.t1_pass ? "true" : "false")
              << " | " << (r.t2_pass ? "true" : "false")
              << " | " << std::fixed << std::setprecision(3) << r.circle_local_support_score
              << " | " << r.circle_local_mean_radial_distance_px
-             << " | " << r.quality_classification << " | " << r.policy_classification << " | "
-             << r.summary_path << " | " << r.evidence_summary_path << " |\n";
+             << " | " << r.quality_classification << " |\n";
     }
 
     file << "\n## Skipped By Preflight\n\n";
@@ -315,6 +327,91 @@ void Stage25ReportWriter::WriteStabilityReport(
                  << " | " << std::fixed << std::setprecision(1) << score
                  << " | " << recommendation << " |\n";
         }
+
+        if (tool == "Findline")
+        {
+            file << "\n## Findline Product Default Gate\n\n";
+            file << "| Profile | ParamPolicy | Role | Images | Levels | Orientations | T1Rate | T2Rate | LocalConfirmedRate | ComponentWarningRate | MeanFitOffset | CanPromote | GateReason |\n";
+            file << "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|\n";
+
+            for (const auto& [profile_id, prof_results] : profile_results)
+            {
+                Stage25ProfileAggregate agg;
+                agg.profile_id = profile_id;
+                agg.tool = "Findline";
+
+                if (!prof_results.empty())
+                {
+                    agg.parameter_policy_id = prof_results[0].parameter_policy_id;
+                    agg.parameter_role = prof_results[0].parameter_role;
+                }
+
+                agg.total_cases = static_cast<int>(prof_results.size());
+
+                std::set<std::string> image_set;
+                std::set<std::string> level_set;
+                std::set<std::string> orient_set;
+
+                for (const auto& r : prof_results)
+                {
+                    image_set.insert(r.image_id);
+                    level_set.insert(r.level);
+                    if (!r.orientation.empty())
+                        orient_set.insert(r.orientation);
+
+                    if (r.t1_pass) agg.t1_pass++;
+                    if (r.t2_pass) agg.t2_pass++;
+                    if (r.quality_classification == "ORIGINAL_LOCAL_EDGE_CONFIRMED")
+                        agg.local_confirmed++;
+                    if (r.component_shape == "FOREGROUND_DOMINATED_BY_SINGLE_COMPONENT" ||
+                        r.component_shape == "BINARY_COMPONENT_COLLAPSED_TO_LARGE_REGION" ||
+                        r.line_filter_min_exceeds_component_p90)
+                        agg.component_warning++;
+
+                    agg.mean_local_support += r.measured_local_support_score;
+                    agg.mean_local_distance += r.measured_local_mean_distance_px;
+                    agg.mean_fit_offset += r.fit_offset_error_px;
+                }
+
+                agg.total_images = static_cast<int>(image_set.size());
+                agg.level_count = static_cast<int>(level_set.size());
+                agg.orientation_count = static_cast<int>(orient_set.size());
+
+                if (agg.total_cases > 0)
+                {
+                    agg.original_success_rate = static_cast<double>(agg.t1_pass) / agg.total_cases;
+                    agg.local_confirmed_rate = static_cast<double>(agg.local_confirmed) / agg.total_cases;
+                    agg.component_warning_rate = static_cast<double>(agg.component_warning) / agg.total_cases;
+                    agg.mean_local_support /= agg.total_cases;
+                    agg.mean_local_distance /= agg.total_cases;
+                    agg.mean_fit_offset /= agg.total_cases;
+                }
+
+                FindlineProductDefaultGateInput gate_input;
+                gate_input.total_images = agg.total_images;
+                gate_input.level_count = agg.level_count;
+                gate_input.orientation_count = agg.orientation_count;
+                gate_input.original_success_rate = agg.original_success_rate;
+                gate_input.local_confirmed_rate = agg.local_confirmed_rate;
+                gate_input.component_warning_rate = agg.component_warning_rate;
+                gate_input.mean_fit_offset = agg.mean_fit_offset;
+
+                auto gate = EvaluateFindlineProductDefaultGate(gate_input);
+
+                agg.can_promote_to_product_default = gate.can_promote;
+                agg.product_default_gate_reason = gate.reason;
+
+                file << "| " << agg.profile_id << " | " << agg.parameter_policy_id << " | " << agg.parameter_role
+                     << " | " << agg.total_images << " | " << agg.level_count << " | " << agg.orientation_count
+                     << " | " << std::fixed << std::setprecision(1) << (agg.original_success_rate * 100) << "% | "
+                     << std::setprecision(1) << (static_cast<double>(agg.t2_pass) / agg.total_cases * 100) << "% | "
+                     << std::setprecision(1) << (agg.local_confirmed_rate * 100) << "% | "
+                     << std::setprecision(1) << (agg.component_warning_rate * 100) << "% | "
+                     << std::setprecision(1) << agg.mean_fit_offset << " | "
+                     << (agg.can_promote_to_product_default ? "YES" : "NO") << " | "
+                     << agg.product_default_gate_reason << " |\n";
+            }
+        }
     }
 }
 
@@ -453,6 +550,85 @@ void Stage25ReportWriter::WritePolicyReport(
     file << "| MONITOR | ComplexBoundaryLinegap10 for L3 scenarios | candidate |\n";
     file << "| REJECT | DebugFilterRelaxMin1 | too permissive |\n";
     file << "| REJECT | RiskGamma | introduces binary collapse risk |\n";
+}
+
+void Stage25ReportWriter::WritePolicyValidationReport(
+    const std::filesystem::path& out_root,
+    const Stage25PolicyValidationResult& validation)
+{
+    std::ofstream file(out_root / "parameter_policy_validation_report.md");
+
+    file << "# Stage 2.5 L1~L3 Parameter Policy Validation Report\n\n";
+
+    if (validation.ok)
+    {
+        file << "## Validation Status: PASSED\n\n";
+        file << "All parameter policies are correctly configured.\n";
+    }
+    else
+    {
+        file << "## Validation Status: FAILED\n\n";
+        file << "One or more parameter policies have configuration errors.\n";
+    }
+
+    file << "\n## Issues\n\n";
+    file << "| Severity | Scope | ProfileID | Message |\n";
+    file << "|---|---|---|---|\n";
+
+    if (validation.issues.empty())
+    {
+        file << "| - | - | - | No issues found |\n";
+    }
+    else
+    {
+        for (const auto& issue : validation.issues)
+        {
+            file << "| " << issue.severity << " | " << issue.scope
+                 << " | " << issue.profile_id << " | " << issue.message << " |\n";
+        }
+    }
+
+    int error_count = static_cast<int>(std::count_if(validation.issues.begin(),
+        validation.issues.end(), [](const auto& i) { return i.severity == "error"; }));
+    int warning_count = static_cast<int>(std::count_if(validation.issues.begin(),
+        validation.issues.end(), [](const auto& i) { return i.severity == "warning"; }));
+
+    file << "\n## Summary\n\n";
+    file << "- Errors: " << error_count << "\n";
+    file << "- Warnings: " << warning_count << "\n";
+    file << "- Result: " << (validation.ok ? "PASS" : "FAIL") << "\n";
+}
+
+void Stage25ReportWriter::WriteCaseMatrixReport(
+    const std::filesystem::path& out_root,
+    const std::vector<Stage25CaseMatrixEntry>& matrix)
+{
+    std::ofstream file(out_root / "stage25_case_matrix_report.md");
+
+    file << "# Stage 2.5 L1~L3 Case Matrix Report\n\n";
+
+    file << "## Summary\n\n";
+    int enabled_count = static_cast<int>(std::count_if(matrix.begin(), matrix.end(),
+        [](const auto& e) { return e.enabled; }));
+    int disabled_count = static_cast<int>(matrix.size()) - enabled_count;
+
+    file << "- Total entries: " << matrix.size() << "\n";
+    file << "- Enabled cases: " << enabled_count << "\n";
+    file << "- Disabled cases: " << disabled_count << "\n\n";
+
+    file << "## Case Matrix\n\n";
+    file << "| Level | Image | Target | Tool | Profile | ParamPolicy | ParamRole | Evidence | Enabled | Reason |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---|\n";
+
+    for (const auto& entry : matrix)
+    {
+        file << "| " << entry.level << " | " << entry.image_id << " | " << entry.target_id
+             << " | " << entry.tool << " | " << entry.profile_id
+             << " | " << entry.parameter_policy_id << " | " << entry.parameter_role
+             << " | " << entry.evidence_profile
+             << " | " << (entry.enabled ? "YES" : "NO")
+             << " | " << entry.reason << " |\n";
+    }
 }
 
 void Stage25ReportWriter::WriteCaseFileIndex(

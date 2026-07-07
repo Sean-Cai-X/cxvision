@@ -10,6 +10,10 @@ struct Stage25ImageTarget
     std::string target_id;
     std::string tool;
 
+    std::string orientation;
+    std::string target_level;
+    std::string target_role;
+
     int x0 = 0;
     int y0 = 0;
     int x1 = 0;

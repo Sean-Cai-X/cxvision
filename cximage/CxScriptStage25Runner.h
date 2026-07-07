@@ -15,6 +15,7 @@ struct Stage25CaseResult
     std::string tool;
     std::string profile_id;
     std::string evidence_profile;
+    std::string orientation;
 
     std::string policy_classification;
     std::string quality_classification;
@@ -54,6 +55,9 @@ struct Stage25CaseResult
     std::string measure_source;
     bool fallback_used = false;
 
+    std::string component_shape;
+    bool line_filter_min_exceeds_component_p90 = false;
+
     std::string parameter_policy_id;
     std::string parameter_role;
     bool is_product_default = false;
@@ -81,6 +85,35 @@ struct Stage25RunOptions
     bool stop_on_error = false;
     bool run_preflight = true;
     bool run_evidence = true;
+};
+
+struct Stage25ProfileAggregate
+{
+    std::string tool;
+    std::string profile_id;
+    std::string parameter_policy_id;
+    std::string parameter_role;
+
+    int total_cases = 0;
+    int total_images = 0;
+    int level_count = 0;
+    int orientation_count = 0;
+
+    int t1_pass = 0;
+    int t2_pass = 0;
+    int local_confirmed = 0;
+    int component_warning = 0;
+
+    double original_success_rate = 0.0;
+    double local_confirmed_rate = 0.0;
+    double component_warning_rate = 0.0;
+
+    double mean_local_support = 0.0;
+    double mean_local_distance = 0.0;
+    double mean_fit_offset = 0.0;
+
+    bool can_promote_to_product_default = false;
+    std::string product_default_gate_reason;
 };
 
 struct Stage25RunResult

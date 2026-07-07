@@ -148,3 +148,29 @@ Stage25ImagePreflightResult Stage25ImagePreflight::Run(
     result.roi_valid = true;
     return result;
 }
+
+bool ShouldRunCaseAfterPreflight(
+    const Stage25ImagePreflightResult& preflight,
+    std::string& reason)
+{
+    if (!preflight.image_loaded)
+    {
+        reason = "image load failed";
+        return false;
+    }
+
+    if (!preflight.roi_valid)
+    {
+        reason = "roi invalid";
+        return false;
+    }
+
+    if (!preflight.roi_inside_image)
+    {
+        reason = "roi outside image";
+        return false;
+    }
+
+    reason.clear();
+    return true;
+}

@@ -4,6 +4,8 @@
 #include "CxScriptStage25ReportWriter.h"
 #include "CxScriptStage25Register.h"
 #include "CxScriptStage25JsonLite.h"
+#include "CxScriptStage25PolicyValidator.h"
+#include "CxScriptStage25CaseMatrix.h"
 #include "ManualStateTestConsole.h"
 #include "muParser.h"
 #include <fstream>
@@ -342,6 +344,20 @@ bool RunStage25ManifestFile(
         manifest.outroot = options.out_root.string();
     }
 
+    auto policy_validation = ValidateStage25ParameterPolicies(manifest);
+    if (!policy_validation.ok)
+    {
+        result.ok = false;
+        result.reason = "Stage25 parameter policy validation failed";
+        Stage25ReportWriter::WritePolicyValidationReport(
+            options.out_root,
+            policy_validation);
+        return false;
+    }
+    Stage25ReportWriter::WritePolicyValidationReport(
+        options.out_root,
+        policy_validation);
+
     std::vector<Stage25ImagePreflightResult> preflight_results;
 
     for (const auto& img : manifest.images)
@@ -461,6 +477,7 @@ bool RunStage25ManifestFile(
                         case_result.level = img.level;
                         case_result.target_id = target.target_id;
                         case_result.tool = target.tool;
+                        case_result.orientation = target.orientation;
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
@@ -540,6 +557,7 @@ bool RunStage25ManifestFile(
                         case_result.level = img.level;
                         case_result.target_id = target.target_id;
                         case_result.tool = target.tool;
+                        case_result.orientation = target.orientation;
                         case_result.profile_id = profile.profile_id;
                         case_result.evidence_profile = ev_profile.name;
                         case_result.policy_classification = profile.policy;
@@ -592,6 +610,9 @@ bool RunStage25ManifestFile(
         result.case_results.end(), [](const auto& r) { return r.t1_pass; }));
     result.t2_pass = static_cast<int>(std::count_if(result.case_results.begin(),
         result.case_results.end(), [](const auto& r) { return r.t2_pass; }));
+
+    auto case_matrix = BuildStage25CaseMatrix(manifest);
+    Stage25ReportWriter::WriteCaseMatrixReport(options.out_root, case_matrix);
 
     Stage25ReportWriter::WriteBatchReport(options.out_root, result.case_results);
     Stage25ReportWriter::WritePreflightReport(options.out_root, preflight_results);

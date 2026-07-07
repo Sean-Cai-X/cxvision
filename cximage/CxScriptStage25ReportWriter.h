@@ -5,6 +5,8 @@
 #include <vector>
 #include "CxScriptStage25Runner.h"
 #include "CxScriptStage25Manifest.h"
+#include "CxScriptStage25PolicyValidator.h"
+#include "CxScriptStage25CaseMatrix.h"
 #include "CxScriptImagePreflight.h"
 
 class Stage25ReportWriter
@@ -31,6 +33,14 @@ public:
         const std::filesystem::path& out_root,
         const std::vector<Stage25CaseResult>& results,
         const Stage25Manifest& manifest);
+
+    static void WritePolicyValidationReport(
+        const std::filesystem::path& out_root,
+        const Stage25PolicyValidationResult& validation);
+
+    static void WriteCaseMatrixReport(
+        const std::filesystem::path& out_root,
+        const std::vector<Stage25CaseMatrixEntry>& matrix);
 
     static void WriteCaseFileIndex(
         const std::filesystem::path& out_root,

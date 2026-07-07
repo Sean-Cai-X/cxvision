@@ -129,6 +129,27 @@ public:
         g_current_image->targets.push_back(target);
     }
 
+    void image_lasttarget_setorientation(const char* value)
+    {
+        if (!g_current_image || g_current_image->targets.empty())
+            return;
+        g_current_image->targets.back().orientation = value ? value : "";
+    }
+
+    void image_lasttarget_settargetlevel(const char* value)
+    {
+        if (!g_current_image || g_current_image->targets.empty())
+            return;
+        g_current_image->targets.back().target_level = value ? value : "";
+    }
+
+    void image_lasttarget_settargetrole(const char* value)
+    {
+        if (!g_current_image || g_current_image->targets.empty())
+            return;
+        g_current_image->targets.back().target_role = value ? value : "";
+    }
+
     void addfindlineprofile(const char* value)
     {
         Stage25FindlineProfile profile;
@@ -411,6 +432,15 @@ void RegisterStage25CxScriptBindings(mu::Parser& parser)
 
     parser.DefineClassFun("Stage25Manifest", manifest, "image_addfindcircletarget",
                           &Stage25ManifestBinding::image_addfindcircletarget);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_lasttarget_setorientation",
+                          &Stage25ManifestBinding::image_lasttarget_setorientation);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_lasttarget_settargetlevel",
+                          &Stage25ManifestBinding::image_lasttarget_settargetlevel);
+
+    parser.DefineClassFun("Stage25Manifest", manifest, "image_lasttarget_settargetrole",
+                          &Stage25ManifestBinding::image_lasttarget_settargetrole);
 
     parser.DefineClassFun("Stage25Manifest", manifest, "addfindlineprofile",
                           &Stage25ManifestBinding::addfindlineprofile);

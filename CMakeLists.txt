@@ -67,6 +67,8 @@ set(CXIMAGE_SOURCES
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp
   cximage/FindlineParameterPolicy.cpp
+  cximage/CxScriptStage25PolicyValidator.cpp
+  cximage/CxScriptStage25CaseMatrix.cpp
 )
 
 set(CXGEOM_SOURCES
