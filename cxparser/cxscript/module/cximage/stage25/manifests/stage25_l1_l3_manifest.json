@@ -1,0 +1,177 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Stage25 L1-L3 Parameter Consistency",
+  "selection_policy": "full",
+  "images": [
+    {
+      "image_id": "basic_01",
+      "level": "L0_basic",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L0_basic/basic_01.jpg",
+      "width": 1280,
+      "height": 960,
+      "tool_targets": []
+    },
+    {
+      "image_id": "line_high_contrast_001",
+      "level": "L1_high_contrast",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_001.jpg",
+      "width": 1280,
+      "height": 1024,
+      "tool_targets": [
+        {
+          "tool": "Findline",
+          "roi_name": "plate_top_edge",
+          "x0": 82,
+          "y0": 183,
+          "x1": 1210,
+          "y1": 183,
+          "wgap": 8,
+          "hgap": 32
+        }
+      ]
+    },
+    {
+      "image_id": "line_high_contrast_002",
+      "level": "L1_high_contrast",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_002.jpg",
+      "width": 1280,
+      "height": 960,
+      "tool_targets": []
+    },
+    {
+      "image_id": "circle_high_contrast_001",
+      "level": "L1_high_contrast",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/circle_high_contrast_001.jpg",
+      "width": 1280,
+      "height": 1024,
+      "tool_targets": [
+        {
+          "tool": "Findcircle",
+          "roi_name": "isolated_plate_circle",
+          "cx": 498,
+          "cy": 704,
+          "px": 563,
+          "py": 704,
+          "gap": 5,
+          "linegap": 3
+        }
+      ]
+    },
+    {
+      "image_id": "circle_high_contrast_002",
+      "level": "L1_high_contrast",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/circle_high_contrast_002.jpg",
+      "width": 640,
+      "height": 512,
+      "tool_targets": []
+    },
+    {
+      "image_id": "line_low_contrast_001",
+      "level": "L2_low_contrast_illumination",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/line_low_contrast_001.jpg",
+      "width": 652,
+      "height": 494,
+      "tool_targets": [
+        {
+          "tool": "Findline",
+          "roi_name": "weak_vertical_scratch",
+          "x0": 181,
+          "y0": 20,
+          "x1": 244,
+          "y1": 407,
+          "wgap": 8,
+          "hgap": 24
+        }
+      ]
+    },
+    {
+      "image_id": "line_uneven_light_001",
+      "level": "L2_low_contrast_illumination",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/line_uneven_light_001.jpg",
+      "width": 2448,
+      "height": 2048,
+      "tool_targets": []
+    },
+    {
+      "image_id": "circle_low_contrast_001",
+      "level": "L2_low_contrast_illumination",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/circle_low_contrast_001.jpg",
+      "width": 1280,
+      "height": 1024,
+      "tool_targets": [
+        {
+          "tool": "Findcircle",
+          "roi_name": "cap_outer_boundary",
+          "cx": 635,
+          "cy": 516,
+          "px": 932,
+          "py": 516,
+          "gap": 6,
+          "linegap": 3
+        }
+      ]
+    },
+    {
+      "image_id": "circle_reflection_001",
+      "level": "L2_low_contrast_illumination",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L2_low_contrast_illumination/circle_reflection_001.jpg",
+      "width": 640,
+      "height": 512,
+      "tool_targets": []
+    },
+    {
+      "image_id": "line_complex_boundary_001",
+      "level": "L3_complex_boundary",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/line_complex_boundary_001.jpg",
+      "width": 3840,
+      "height": 2748,
+      "tool_targets": [
+        {
+          "tool": "Findline",
+          "roi_name": "central_screw_shaft_edge",
+          "x0": 1440,
+          "y0": 555,
+          "x1": 1625,
+          "y1": 1300,
+          "wgap": 10,
+          "hgap": 34
+        }
+      ]
+    },
+    {
+      "image_id": "line_near_interference_001",
+      "level": "L3_complex_boundary",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/line_near_interference_001.jpg",
+      "width": 640,
+      "height": 480,
+      "tool_targets": []
+    },
+    {
+      "image_id": "circle_complex_boundary_001",
+      "level": "L3_complex_boundary",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/circle_complex_boundary_001.jpg",
+      "width": 1280,
+      "height": 1024,
+      "tool_targets": [
+        {
+          "tool": "Findcircle",
+          "roi_name": "brake_disk_inner_circle",
+          "cx": 704,
+          "cy": 522,
+          "px": 960,
+          "py": 522,
+          "gap": 6,
+          "linegap": 3
+        }
+      ]
+    },
+    {
+      "image_id": "circle_partial_edge_001",
+      "level": "L3_complex_boundary",
+      "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L3_complex_boundary/circle_partial_edge_001.jpg",
+      "width": 2016,
+      "height": 1512,
+      "tool_targets": []
+    }
+  ]
+}

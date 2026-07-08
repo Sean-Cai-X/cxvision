@@ -1,9 +1,12 @@
 #include "Main.h"
 #include "ManualStateTestConsole.h"
-#include "CxScriptStage25Runner.h"
 #include "CxScriptGeometryFrameProbe.h"
-#include "CxScriptSuiteRuntime.h"
-#include "CxScriptCatalogRuntime.h"
+#include "CxScriptSuiteRunner.h"
+
+#if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
+#include "CxScriptStage25Runner.h"
+#endif
+
 #include <iostream>
 
 int main(int argc, char** argv)
@@ -60,6 +63,7 @@ int main(int argc, char** argv)
         return result.exit_code;
     }
 
+#if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
     Stage25RunOptions stage25Options;
     for (int i = 1; i < argc; ++i)
     {
@@ -109,69 +113,46 @@ int main(int argc, char** argv)
 
         return ok ? 0 : 1;
     }
+#endif
 
-    std::string suite_path;
+    CxScriptSuiteRunOptions suiteOptions;
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
-        if (arg == "--cxscript-suite")
+
+        if (arg == "--cxscript-suite" && i + 1 < argc)
         {
-            if (i + 1 < argc)
-            {
-                suite_path = argv[++i];
-            }
+            suiteOptions.enabled = true;
+            suiteOptions.suite_path = argv[++i];
+        }
+        else if (arg == "--image-manifest" && i + 1 < argc)
+        {
+            suiteOptions.image_manifest_path = argv[++i];
+        }
+        else if (arg == "--catalog" && i + 1 < argc)
+        {
+            suiteOptions.catalog_path_override = argv[++i];
+        }
+        else if (arg == "--out" && i + 1 < argc)
+        {
+            suiteOptions.out_root_override = argv[++i];
         }
     }
 
-    if (!suite_path.empty())
+    if (suiteOptions.enabled)
     {
-        CxScriptSuiteRuntime suite;
-        std::string suite_reason;
+        CxScriptSuiteRunResult result;
+        const bool ok = RunCxScriptSuite(suiteOptions, result);
 
-        if (!LoadCxScriptSuiteFile(suite_path, suite, suite_reason))
-        {
-            std::cout << "suite_load_ok=false\n";
-            std::cout << "reason=" << suite_reason << "\n";
-            return 1;
-        }
+        std::cout << "suite_run_ok=" << (ok ? "true" : "false") << "\n";
+        std::cout << "reason=" << result.reason << "\n";
+        std::cout << "total_cases=" << result.total_cases << "\n";
+        std::cout << "executed_cases=" << result.executed_cases << "\n";
+        std::cout << "contract_pass=" << result.contract_pass << "\n";
+        std::cout << "contract_fail=" << result.contract_fail << "\n";
+        std::cout << "report_root=" << result.report_root << "\n";
 
-        std::cout << "suite_load_ok=true\n";
-        std::cout << "suite_id=" << suite.suite_id << "\n";
-        std::cout << "suite_name=" << suite.name << "\n";
-        std::cout << "catalog_path=" << suite.catalog_path << "\n";
-        std::cout << "output_root=" << suite.output_root << "\n";
-        std::cout << "case_count=" << suite.cases.size() << "\n";
-
-        for (const auto& case_entry : suite.cases)
-        {
-            std::cout << "case_id=" << case_entry.case_id << "\n";
-            std::cout << "  script_id=" << case_entry.script_id << "\n";
-            std::cout << "  expected=" << case_entry.expected_result << "\n";
-            std::cout << "  policy_guard=" << case_entry.expected_policy_guard << "\n";
-            std::cout << "  image=" << case_entry.image_id << "\n";
-            std::cout << "  level=" << case_entry.level << "\n";
-        }
-
-        if (!suite.catalog_path.empty())
-        {
-            CxScriptCatalogRuntime catalog;
-            std::string catalog_reason;
-
-            if (LoadCxScriptCatalogFile(suite.catalog_path, catalog, catalog_reason))
-            {
-                std::cout << "catalog_load_ok=true\n";
-                std::cout << "catalog_name=" << catalog.name << "\n";
-                std::cout << "catalog_version=" << catalog.version << "\n";
-                std::cout << "catalog_script_count=" << catalog.scripts.size() << "\n";
-            }
-            else
-            {
-                std::cout << "catalog_load_ok=false\n";
-                std::cout << "catalog_reason=" << catalog_reason << "\n";
-            }
-        }
-
-        return 0;
+        return ok ? 0 : 1;
     }
 
     return glfw_occ_main();

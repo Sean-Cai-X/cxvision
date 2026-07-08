@@ -27,12 +27,16 @@ option(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC
        "Embed cxparser_ext debug layer into cxvision_imgui_acceptance"
        ON)
 
+option(CXVISION_ENABLE_LEGACY_STAGE25_CPP
+       "Build deprecated C++ Stage25 manifest/runner implementation"
+       OFF)
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GLFW_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/glfw")
 
-set(CXIMAGE_SOURCES
+set(CXIMAGE_CORE_SOURCES
   cximage/GuiMain.cpp
   cximage/ManualStateTestConsole.cpp
   cximage/CxScriptImageEvidenceAnalyzer.cpp
@@ -61,25 +65,48 @@ set(CXIMAGE_SOURCES
   cximage/FastMatchDiagnostic.cpp
   cximage/Run.cpp
   cximage/ParserClass.cpp
-  cximage/CxScriptStage25Manifest.cpp
-  cximage/CxScriptStage25Template.cpp
   cximage/CxScriptImagePreflight.cpp
-  cximage/CxScriptStage25Runner.cpp
-  cximage/CxScriptStage25ReportWriter.cpp
-  cximage/CxScriptStage25Register.cpp
-  cximage/CxScriptStage25JsonLite.cpp
   cximage/CircleRingGauge.cpp
   cximage/FormfitFitMethod.cpp
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp
-  cximage/FindlineParameterPolicy.cpp
-  cximage/CxScriptStage25PolicyValidator.cpp
-  cximage/CxScriptStage25CaseMatrix.cpp
+)
+
+set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxScriptCatalogRuntime.cpp
   cximage/CxScriptCatalogRegister.cpp
   cximage/CxScriptSuiteRuntime.cpp
   cximage/CxScriptSuiteRegister.cpp
+  cximage/CxScriptImageManifestRuntime.cpp
+  cximage/CxScriptSuiteRunner.cpp
+  cximage/CxScriptSuiteReportWriter.cpp
+  cximage/CxScriptToolDisplayExporter.cpp
+  cximage/CxScriptBestCaseSelector.cpp
 )
+
+set(CXSCRIPT_LEGACY_STAGE25_SOURCES
+  cximage/CxScriptStage25Manifest.cpp
+  cximage/CxScriptStage25Template.cpp
+  cximage/CxScriptStage25Runner.cpp
+  cximage/CxScriptStage25ReportWriter.cpp
+  cximage/CxScriptStage25Register.cpp
+  cximage/CxScriptStage25JsonLite.cpp
+  cximage/CxScriptStage25PolicyValidator.cpp
+  cximage/CxScriptStage25CaseMatrix.cpp
+  cximage/FindlineParameterPolicy.cpp
+)
+
+set(CXIMAGE_SOURCES
+  ${CXIMAGE_CORE_SOURCES}
+  ${CXSCRIPT_RUNTIME_SOURCES}
+)
+
+if(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
+  list(APPEND CXIMAGE_SOURCES
+    ${CXSCRIPT_LEGACY_STAGE25_SOURCES}
+  )
+  add_compile_definitions(CXVISION_ENABLE_LEGACY_STAGE25_CPP=1)
+endif()
 
 set(CXGEOM_SOURCES
   cxgeom/src/CxShapeHandle.cpp
