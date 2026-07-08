@@ -36,6 +36,9 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GLFW_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/glfw")
 
+set(LIBTORCH_ROOT "D:/libtorch" CACHE PATH "LibTorch root")
+add_subdirectory("libtorch_module" "${CMAKE_CURRENT_BINARY_DIR}/_deps/libtorch_module")
+
 set(CXIMAGE_CORE_SOURCES
   cximage/GuiMain.cpp
   cximage/ManualStateTestConsole.cpp
@@ -70,6 +73,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FormfitFitMethod.cpp
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp
+  cximage/TorchRuntimeBridge.cpp
+  cximage/TorchRuntimeResultAdapter.cpp
 )
 
 set(CXSCRIPT_RUNTIME_SOURCES
@@ -165,6 +170,7 @@ target_include_directories(cxvision_imgui_acceptance PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/cxparser_ext/debug"
   "${CMAKE_CURRENT_SOURCE_DIR}/cxgeom/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
+  "${CMAKE_CURRENT_SOURCE_DIR}/libtorch_module"
   "${GLAD_ROOT}/.."
   "${OCCT_ROOT}/inc"
   ${OpenCV_INCLUDE_DIRS}
@@ -233,4 +239,23 @@ add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
           "${OpenCV_DIR}/x64/vc16/bin/opencv_world490.dll"
           "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
   COMMENT "Copy OpenCV runtime DLL"
+)
+
+set(CXPARSER_MODULE_CXSCRIPT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/cxparser/cxscript/module"
+    CACHE PATH "cxparser module cxscript root")
+
+add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+          "${CXPARSER_MODULE_CXSCRIPT_ROOT}"
+          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>/cxscript/module"
+  COMMENT "Copy cxparser module cxscript assets for GUI module acceptance"
+)
+
+add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "$<TARGET_FILE:libtorch_module_runtime>"
+          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+  COMMENT "Copy libtorch_module_runtime.dll for torch module acceptance"
+  DEPENDS libtorch_module_runtime
 )

@@ -96,6 +96,13 @@ double CxScriptCatalog_script_setexpectedpolicyguard(const char* value)
     return 0.0;
 }
 
+double CxScriptCatalog_script_setcontract(const char* value)
+{
+    if (g_current_catalog_entry)
+        g_current_catalog_entry->contract_path = value ? value : "";
+    return 0.0;
+}
+
 double CxScriptCatalog_script_setfrozen(double value)
 {
     if (g_current_catalog_entry)
@@ -139,6 +146,7 @@ void RegisterCxScriptCatalogBindings(mu::Parser& parser)
     parser.DefineFun("CxScriptCatalog_script_setexpected", (mu::strfun_type1)&CxScriptCatalog_script_setexpected);
     parser.DefineFun("CxScriptCatalog_script_setexpectedstatus", (mu::strfun_type1)&CxScriptCatalog_script_setexpectedstatus);
     parser.DefineFun("CxScriptCatalog_script_setexpectedpolicyguard", (mu::strfun_type1)&CxScriptCatalog_script_setexpectedpolicyguard);
+    parser.DefineFun("CxScriptCatalog_script_setcontract", (mu::strfun_type1)&CxScriptCatalog_script_setcontract);
     parser.DefineFun("CxScriptCatalog_script_setfrozen", (mu::fun_type1)&CxScriptCatalog_script_setfrozen);
     parser.DefineFun("CxScriptCatalog_script_setmanualvisible", (mu::fun_type1)&CxScriptCatalog_script_setmanualvisible);
     parser.DefineFun("CxScriptCatalog_script_setregressionvisible", (mu::fun_type1)&CxScriptCatalog_script_setregressionvisible);

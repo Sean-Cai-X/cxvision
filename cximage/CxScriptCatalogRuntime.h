@@ -16,6 +16,7 @@ struct CxScriptCatalogEntry
     std::string expected_result;
     std::string expected_status;
     std::string expected_policy_guard;
+    std::string contract_path;
 
     bool frozen = false;
     bool manual_visible = false;

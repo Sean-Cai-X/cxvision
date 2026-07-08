@@ -2,6 +2,7 @@
 #define CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 
 #include "ParserDebugBridge.h"
+#include "CxScriptCatalogRuntime.h"
 
 #include <string>
 #include <vector>
@@ -420,6 +421,10 @@ struct ManualTestContext
   std::string user_expected;
   std::string codex_task;
   std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
+
+  std::string catalog_path;
+  bool catalog_loaded = false;
+  std::vector<CxScriptCatalogEntry> catalog_entries;
   int current_line = 0;
   std::vector<ScriptLineView> line_views;
   std::vector<CxScriptLineView> cxparser_ext_line_views;
@@ -476,6 +481,18 @@ struct ScriptSnippet
   bool is_product_default = false;
   bool is_stage25_default = false;
   bool recommended = false;
+
+  std::string script_id;
+  std::string expected_result;
+  std::string expected_result_status;
+  std::string expected_policy_guard;
+  std::string contract_path;
+  std::string label;
+  std::string category;
+  std::string failure_hint;
+  bool expects_measure_points = false;
+  bool expects_fit_line = false;
+  bool expected_filter_failure = false;
 };
 
 struct CxScriptHeadlessOptions
@@ -494,6 +511,48 @@ struct CxScriptHeadlessOptions
 
     bool save_overlay = true;
     int max_steps = 10000;
+
+    std::string stage25_image_id;
+    std::string stage25_level;
+    std::string stage25_target_id;
+    std::string stage25_tool;
+
+    int roi_x0 = 0;
+    int roi_y0 = 0;
+    int roi_x1 = 0;
+    int roi_y1 = 0;
+
+    int circle_cx = 0;
+    int circle_cy = 0;
+    int circle_px = 0;
+    int circle_py = 0;
+
+    int tool_half_width = 20;
+    int wgap = 32;
+    int hgap = 8;
+    int gap = 5;
+    int linegap = 6;
+    int threshold = 20;
+    int method = 2;
+
+    bool contract_context_enabled = false;
+    int contract_headless_ok = 0;
+    int contract_pass_initial = 1;
+    int points_count = 0;
+    int valid_points_count = 0;
+    int has_fit_line = 0;
+    int has_fit_circle = 0;
+    double local_support = 0.0;
+    double local_mean_distance = 0.0;
+    double fit_offset = 0.0;
+    double circle_radius = 0.0;
+    double avgdist = 0.0;
+    std::string policy_guard;
+    std::string result_status;
+    std::string failure_stage;
+    std::string result_overlay_path;
+    std::string evidence_overlay_path;
+    std::string tool_display_path;
 };
 
 struct CxScriptHeadlessResult

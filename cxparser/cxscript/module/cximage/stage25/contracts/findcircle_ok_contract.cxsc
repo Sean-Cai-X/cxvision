@@ -1,0 +1,35 @@
+if (global.headless_ok == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findcircle_ok_failed";
+    global.contract_conclusion = "Headless execution failed";
+}
+
+if (global.valid_points_count < 3) {
+    global.contract_pass = 0;
+    global.contract_status = "findcircle_ok_failed";
+    global.contract_conclusion = "Findcircle requires at least three valid points";
+}
+
+if (global.has_fit_circle == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findcircle_ok_failed";
+    global.contract_conclusion = "Findcircle requires fit circle";
+}
+
+if (global.circle_radius <= 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findcircle_ok_failed";
+    global.contract_conclusion = "Findcircle radius must be positive";
+}
+
+if (global.avgdist > 8.0) {
+    global.contract_pass = 0;
+    global.contract_status = "findcircle_ok_failed";
+    global.contract_conclusion = "Findcircle avgdist is too large";
+}
+
+if (global.contract_pass != 0) {
+    global.contract_pass = 1;
+    global.contract_status = "findcircle_ok_passed";
+    global.contract_conclusion = "Findcircle OK: circle points, fitted circle, overlay and tool display are available.";
+}

@@ -1,0 +1,26 @@
+Image m_image;
+Findcircle m_circle;
+
+m_image.copyFromMat(global.matInput);
+
+int cx = global.circle_cx;
+int cy = global.circle_cy;
+int px = global.circle_px;
+int py = global.circle_py;
+
+int method = global.method;
+int threshold = global.threshold;
+int gap = global.gap;
+int linegap = global.linegap;
+
+m_circle.Setgap(gap);
+m_circle.setlinegap(linegap);
+m_circle.setthre(threshold);
+m_circle.setmethod(method);
+m_circle.setcircle(cx, cy, px, py);
+
+m_circle.measure(&m_image);
+m_circle.fitcircle();
+
+global.circle_ref = m_circle.get_result();
+global.current_status = "geometry_result_available";

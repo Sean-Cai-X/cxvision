@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdlib>
 
+#include "torch_runtime_core.h"
 #include "torch_test_host.h"
 
 namespace {
@@ -191,20 +192,34 @@ int main(int argc, char** argv) {
         }
     }
 
-    TorchTestHost host;
-    const auto report = selected_spec != nullptr
-        ? host.run_task_report(selected_spec->task_id, requested_device)
-        : host.run_profile_report(profile);
-    std::cout << "ACTUAL_DEVICE=" << report.actual_device << "\n";
-    std::cout << "RUNTIME_MS=" << report.runtime_ms << "\n";
-    std::cout << "demo summary = " << report.summary << "\n";
-    std::cout << "demo report  = " << TorchTestHost::format_report_line(report) << "\n";
-    for (const auto& line : TorchTestHost::demo_focus_lines(profile)) {
-        std::cout << "demo focus   = " << line << "\n";
-    }
-    for (const auto& line : TorchTestHost::format_check_lines(report)) {
-        std::cout << "demo check   = " << line << "\n";
-    }
+    if (!selected_task.empty()) {
+        TorchRuntimeCoreConfig config;
+        config.device = requested_device;
 
-    return report.failures;
+        TorchTaskRequestCpp request;
+        request.task = selected_task;
+
+        TorchTaskResultCpp result = RunTorchTask(config, request);
+
+        std::cout << "ACTUAL_DEVICE=" << result.actual_device << "\n";
+        std::cout << "RUNTIME_MS=" << (result.train_runtime_ms + result.infer_runtime_ms + result.algorithm_runtime_ms) << "\n";
+        std::cout << "demo summary = " << result.result_json << "\n";
+        std::cout << "demo result  = ok=" << (result.ok ? "true" : "false") << "\n";
+        return result.ok ? 0 : 1;
+    } else {
+        TorchTestHost host;
+        const auto report = host.run_profile_report(profile);
+        std::cout << "ACTUAL_DEVICE=" << report.actual_device << "\n";
+        std::cout << "RUNTIME_MS=" << report.runtime_ms << "\n";
+        std::cout << "demo summary = " << report.summary << "\n";
+        std::cout << "demo report  = " << TorchTestHost::format_report_line(report) << "\n";
+        for (const auto& line : TorchTestHost::demo_focus_lines(profile)) {
+            std::cout << "demo focus   = " << line << "\n";
+        }
+        for (const auto& line : TorchTestHost::format_check_lines(report)) {
+            std::cout << "demo check   = " << line << "\n";
+        }
+
+        return report.failures;
+    }
 }

@@ -24,6 +24,9 @@ struct CxScriptImageTargetRoi
     int hgap = 8;
     int gap = 5;
     int linegap = 6;
+    int tool_half_width = 20;
+    int threshold = 20;
+    int method = 2;
 
     std::string expected_edge;
     std::string edge_polarity_hint;
@@ -92,3 +95,8 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
 const CxScriptImageManifestEntry* FindImageById(
     const CxScriptImageManifestRuntime& manifest,
     const std::string& image_id);
+
+const CxScriptImageTargetRoi* FindTargetRoiByImageAndTargetId(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& image_id,
+    const std::string& target_id);

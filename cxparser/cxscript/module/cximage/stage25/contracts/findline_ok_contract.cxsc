@@ -1,0 +1,29 @@
+if (global.headless_ok == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
+    global.contract_conclusion = "Headless execution failed";
+}
+
+if (global.valid_points_count < 2) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
+    global.contract_conclusion = "Findline requires at least two valid points";
+}
+
+if (global.has_fit_line == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
+    global.contract_conclusion = "Findline requires fit line";
+}
+
+if (global.policy_guard != "MEASURE_AND_FIT_AVAILABLE") {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
+    global.contract_conclusion = "Findline policy guard mismatch";
+}
+
+if (global.contract_pass != 0) {
+    global.contract_pass = 1;
+    global.contract_status = "findline_ok_passed";
+    global.contract_conclusion = "Findline OK: points, fitted line, overlay and tool display are available.";
+}

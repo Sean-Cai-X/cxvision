@@ -1826,34 +1826,162 @@ static bool ReadRuntimeInt(ManualTestContext& context,
     return false;
 }
 
+static std::string StripCxScriptQuotes(std::string value)
+{
+    value = TrimLine(value);
+    if (!value.empty() && value.back() == ';')
+        value.pop_back();
+    value = TrimLine(value);
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+        value = value.substr(1, value.size() - 2);
+    return value;
+}
+
+static bool ReadRuntimeVariableValue(const ManualTestContext& context,
+    const std::string& name,
+    std::string& value)
+{
+    const std::string key = TrimLine(name);
+
+    for (const auto& variable : context.variable_views)
+    {
+        if (variable.name == key)
+        {
+            value = variable.value;
+            return true;
+        }
+    }
+
+    for (const auto& variable : context.global_variable_views)
+    {
+        if (variable.name == key)
+        {
+            value = variable.value;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ReadRuntimeNumber(ManualTestContext& context,
+    const std::string& token,
+    double& value)
+{
+    const std::string key = TrimLine(token);
+
+    int intValue = 0;
+    if (ReadRuntimeInt(context, key, intValue))
+    {
+        value = static_cast<double>(intValue);
+        return true;
+    }
+
+    std::string variableValue;
+    if (ReadRuntimeVariableValue(context, key, variableValue))
+    {
+        char* end = nullptr;
+        const double parsed = std::strtod(variableValue.c_str(), &end);
+        if (end != variableValue.c_str())
+        {
+            value = parsed;
+            return true;
+        }
+    }
+
+    char* end = nullptr;
+    const double parsed = std::strtod(key.c_str(), &end);
+    if (end == key.c_str() || *end != '\0')
+        return false;
+
+    value = parsed;
+    return true;
+}
+
+static bool ReadRuntimeString(const ManualTestContext& context,
+    const std::string& token,
+    std::string& value)
+{
+    const std::string key = TrimLine(token);
+
+    if (key.size() >= 2 && key.front() == '"' && key.back() == '"')
+    {
+        value = StripCxScriptQuotes(key);
+        return true;
+    }
+
+    return ReadRuntimeVariableValue(context, key, value);
+}
+
 static bool EvalSimpleCondition(ManualTestContext& context,
     const std::string& condition,
     bool& value)
 {
     const std::string s = TrimLine(condition);
 
-    std::size_t op = s.find("==");
-    bool equal = true;
+    const char* ops[] = {"==", "!=", "<=", ">=", "<", ">"};
+    std::string opText;
+    std::size_t op = std::string::npos;
 
-    if (op == std::string::npos)
+    for (const char* candidate : ops)
     {
-        op = s.find("!=");
-        equal = false;
+        op = s.find(candidate);
+        if (op != std::string::npos)
+        {
+            opText = candidate;
+            break;
+        }
     }
 
-    if (op == std::string::npos)
+    if (op == std::string::npos || opText.empty())
         return false;
 
     const std::string lhs = TrimLine(s.substr(0, op));
-    const std::string rhs = TrimLine(s.substr(op + 2));
+    const std::string rhs = TrimLine(s.substr(op + opText.size()));
 
-    int lv = 0;
-    if (!ReadRuntimeInt(context, lhs, lv))
+    if (lhs.empty() || rhs.empty())
         return false;
 
-    const int rv = std::atoi(rhs.c_str());
+    if (lhs.find('"') != std::string::npos ||
+        rhs.find('"') != std::string::npos)
+    {
+        std::string lv;
+        std::string rv;
+        if (!ReadRuntimeString(context, lhs, lv) ||
+            !ReadRuntimeString(context, rhs, rv))
+            return false;
 
-    value = equal ? (lv == rv) : (lv != rv);
+        if (opText == "==")
+            value = (lv == rv);
+        else if (opText == "!=")
+            value = (lv != rv);
+        else
+            return false;
+
+        return true;
+    }
+
+    double lv = 0.0;
+    double rv = 0.0;
+    if (!ReadRuntimeNumber(context, lhs, lv) ||
+        !ReadRuntimeNumber(context, rhs, rv))
+        return false;
+
+    if (opText == "==")
+        value = (lv == rv);
+    else if (opText == "!=")
+        value = (lv != rv);
+    else if (opText == "<")
+        value = (lv < rv);
+    else if (opText == ">")
+        value = (lv > rv);
+    else if (opText == "<=")
+        value = (lv <= rv);
+    else if (opText == ">=")
+        value = (lv >= rv);
+    else
+        return false;
+
     return true;
 }
 
@@ -2045,6 +2173,90 @@ static bool TryExecuteSimpleAssignment(ManualTestContext& context,
         context.debug_reason = line.reason;
 
         return true;
+    }
+
+    if (lhs.rfind("global.", 0) == 0)
+    {
+        const bool isStringValue =
+            rhs.size() >= 2 && rhs.front() == '"' && rhs.back() == '"';
+
+        if (isStringValue)
+        {
+            const std::string stringValue = StripCxScriptQuotes(rhs);
+
+            UpsertGlobalVariableView(
+                context,
+                "string",
+                lhs,
+                stringValue,
+                line.line_no,
+                "runtime_value");
+
+            UpsertVariableView(
+                context,
+                "string",
+                lhs,
+                stringValue,
+                line.line_no,
+                "runtime_value");
+
+            line.status = "runtime_executed";
+            line.reason = "global string assignment executed | " + lhs + "=" + stringValue;
+            line.return_variable = lhs;
+            line.timestamp = CurrentTimestamp();
+
+            context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+            context.run_state = "runtime_step";
+            context.debug_status = "PENDING";
+            context.debug_reason = line.reason;
+            MarkDebugRunFinishedIfAtEnd(context);
+            return true;
+        }
+
+        double numericValue = 0.0;
+        if (ReadRuntimeNumber(context, rhs, numericValue))
+        {
+            const int intValue = static_cast<int>(numericValue);
+            const bool integerLike =
+                std::fabs(numericValue - static_cast<double>(intValue)) < 0.000001;
+
+            if (integerLike)
+                context.runtime_int_vars[lhs] = intValue;
+
+            std::ostringstream valueStream;
+            valueStream << numericValue;
+            const std::string valueText = integerLike
+                ? std::to_string(intValue)
+                : valueStream.str();
+
+            UpsertGlobalVariableView(
+                context,
+                integerLike ? "int" : "double",
+                lhs,
+                valueText,
+                line.line_no,
+                "runtime_value");
+
+            UpsertVariableView(
+                context,
+                integerLike ? "int" : "double",
+                lhs,
+                valueText,
+                line.line_no,
+                "runtime_value");
+
+            line.status = "runtime_executed";
+            line.reason = "global numeric assignment executed | " + lhs + "=" + valueText;
+            line.return_variable = lhs;
+            line.timestamp = CurrentTimestamp();
+
+            context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+            context.run_state = "runtime_step";
+            context.debug_status = "PENDING";
+            context.debug_reason = line.reason;
+            MarkDebugRunFinishedIfAtEnd(context);
+            return true;
+        }
     }
 
     return false;
@@ -5414,10 +5626,62 @@ void ViewController::initManualStateTestConsole()
   static constexpr const char* kDefaultCxImageCatalogPath =
       "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
 
+  m_manualTest.catalog_path = kDefaultCxImageCatalogPath;
+  m_manualSnippets.clear();
+
+  auto addBuiltin = [this](const std::string& name, const std::string& desc, const std::string& text, const std::string& path) {
+    ScriptSnippet s;
+    s.name = name;
+    s.description = desc;
+    s.text = text;
+    s.source_path = path;
+    s.runnable = true;
+    m_manualSnippets.push_back(s);
+  };
+
+  auto addScript = [this](const std::string& name, const std::string& desc, const std::string& path, const std::string& policy, const std::string& role) {
+    ScriptSnippet s;
+    s.name = name;
+    s.description = desc;
+    s.text = "";
+    s.source_path = path;
+    s.runnable = true;
+    s.parameter_policy_id = policy;
+    s.parameter_role = role;
+    m_manualSnippets.push_back(s);
+  };
+
+  addBuiltin("Parser Run 1", "Image and shape visibility test.", "aimage1.Show(1);\nashape0.Show(1);\n", "builtin");
+  addBuiltin("Parser Run 2", "Pattern model setup fragment.", "amatch0.setmatchrect(50,50,2200,1900);\n", "builtin");
+  addBuiltin("Parser Run 3", "Image ROI threshold fragment.", "aimage1.roieasythre(255);\naimage1.Show(1);\n", "builtin");
+  addBuiltin("Parser Run 4", "Point and line inspection fragment.", "apoints0.Show(1);\nafindline.Show(1);\n", "builtin");
+  addBuiltin("Parser Run 5", "Manual runtime call fragment.", "arun.testrun();\n", "builtin");
+  addBuiltin("Parser Run 6", "Empty integration observation fragment.", "# enter one manual integration statement\n", "builtin");
+  addBuiltin("Custom Manual Text", "Start with an empty manual editor.", "", "manual");
+
+  addScript("CxParserExt Debug Object Assignment Smoke", "A-line debug layer smoke: Class obj = source.method();",
+            "cxparser_ext/cxscript/debug_smoke/object_assignment_smoke.cxsc", "cxparser_ext_debug", "DEBUG_LAYER_SMOKE");
+  addScript("CxParserExt Debug Return Object Smoke", "A-line debug layer smoke: returned object assignment with input ref.",
+            "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", "cxparser_ext_debug", "DEBUG_LAYER_SMOKE");
+  addScript("Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
+            "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", "", "");
+  addScript("Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
+            "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", "", "");
+  addScript("Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
+            "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", "", "");
+
   CxScriptCatalogRuntime catalog;
   std::string catalog_reason;
   if (LoadCxScriptCatalogFile(kDefaultCxImageCatalogPath, catalog, catalog_reason))
   {
+    m_manualTest.catalog_loaded = true;
+    m_manualTest.catalog_entries.clear();
+    m_manualTest.catalog_entries.reserve(catalog.scripts.size());
+    for (const auto& entry : catalog.scripts)
+    {
+      m_manualTest.catalog_entries.push_back(entry);
+    }
+
     for (const auto& script : catalog.scripts)
     {
       if (!script.manual_visible)
@@ -5430,19 +5694,38 @@ void ViewController::initManualStateTestConsole()
           script.expected_result != "ng_expected")
         continue;
 
-      m_manualSnippets.push_back({
-        script.label,
-        "CxScript Catalog: " + script.script_id,
-        "",
-        script.path,
-        true,
-        script.parameter_policy_id,
-        script.parameter_role,
-        (script.parameter_role == "PRODUCT_LEGACY_DEFAULT"),
-        (script.parameter_role == "STAGE25_RECOMMENDED_TEMPLATE"),
-        (script.expected_result == "ok")
-      });
+      ScriptSnippet snippet;
+      snippet.name = script.label;
+      snippet.description = "CxScript Catalog: " + script.script_id;
+      snippet.text = "";
+      snippet.source_path = script.path;
+      snippet.runnable = true;
+      snippet.parameter_policy_id = script.parameter_policy_id;
+      snippet.parameter_role = script.parameter_role;
+      snippet.is_product_default = (script.parameter_role == "PRODUCT_LEGACY_DEFAULT");
+      snippet.is_stage25_default = (script.parameter_role == "STAGE25_RECOMMENDED_TEMPLATE");
+      snippet.recommended = (script.expected_result == "ok");
+
+      snippet.script_id = script.script_id;
+      snippet.expected_result = script.expected_result;
+      snippet.expected_result_status = script.expected_status;
+      snippet.expected_policy_guard = script.expected_policy_guard;
+      snippet.contract_path = script.contract_path;
+      snippet.label = script.label;
+      snippet.category = (script.expected_result == "ok") ? "Frozen / OK" : "Frozen / NG Expected";
+      snippet.failure_hint = "[" + script.expected_result + "] " + script.tool + " / " + script.parameter_policy_id + " / " + script.expected_policy_guard;
+      snippet.expects_measure_points = (script.expected_result == "ok");
+      snippet.expects_fit_line = (script.expected_result == "ok");
+      snippet.expected_filter_failure = (script.expected_result == "ng_expected");
+
+      m_manualSnippets.push_back(snippet);
     }
+  }
+  else
+  {
+    m_manualTest.catalog_loaded = false;
+    m_manualTest.debug_status = "CATALOG_LOAD_EMPTY";
+    m_manualTest.debug_reason = "Failed to load cxscript catalog: " + catalog_reason;
   }
 
   m_directTestModules.clear();
@@ -5991,6 +6274,119 @@ void ViewController::drawManualStateTestConsole()
       }
       ImGui::TextWrapped("%s", snippet.description.c_str());
       ImGui::PopID();
+    }
+  }
+
+  ImGui::Separator();
+  ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
+  if (ImGui::CollapsingHeader("CxScript Catalog Review"))
+  {
+    ImGui::Text("Catalog Path: %s", m_manualTest.catalog_path.c_str());
+    ImGui::Text("Loaded: %s", m_manualTest.catalog_loaded ? "yes" : "no");
+    ImGui::Text("Total entries: %d", static_cast<int>(m_manualTest.catalog_entries.size()));
+
+    if (!m_manualTest.catalog_entries.empty())
+    {
+      ImGui::Separator();
+      ImGui::Text("Manual-visible scripts (visible in normal list):");
+      ImGui::BeginChild("visible_catalog_list", ImVec2(-1, 150), true);
+      for (const auto& entry : m_manualTest.catalog_entries)
+      {
+        bool isVisible = entry.manual_visible && entry.frozen &&
+            (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
+        if (!isVisible) continue;
+
+        ImGui::Text("[%s] %s", entry.expected_result.c_str(), entry.label.c_str());
+        ImGui::Text("  ScriptId: %s", entry.script_id.c_str());
+        ImGui::Text("  Tool: %s | Policy: %s", entry.tool.c_str(), entry.parameter_policy_id.c_str());
+        ImGui::Text("  Contract: %s", entry.contract_path.empty() ? "(none)" : entry.contract_path.c_str());
+        ImGui::Text("  Path: %s", entry.path.c_str());
+        ImGui::Separator();
+      }
+      ImGui::EndChild();
+
+      ImGui::Separator();
+      ImGui::Text("Hidden scripts (with reason):");
+      ImGui::BeginChild("hidden_catalog_list", ImVec2(-1, 150), true);
+      for (const auto& entry : m_manualTest.catalog_entries)
+      {
+        bool isVisible = entry.manual_visible && entry.frozen &&
+            (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
+        if (isVisible) continue;
+
+        std::string reason;
+        if (!entry.manual_visible)
+          reason = "manual_visible=0";
+        else if (!entry.frozen)
+          reason = "frozen=0";
+        else if (entry.expected_result != "ok" && entry.expected_result != "ng_expected")
+          reason = "expected_result is not ok/ng_expected";
+        else if (entry.path.find("/diagnostic/") != std::string::npos)
+          reason = "diagnostic path hidden from normal list";
+        else if (entry.path.find("/draft/") != std::string::npos)
+          reason = "draft path hidden";
+        else if (entry.path.find("/deprecated/") != std::string::npos)
+          reason = "deprecated path hidden";
+        else
+          reason = "other";
+
+        ImGui::Text("[%s] %s", reason.c_str(), entry.label.c_str());
+        ImGui::Text("  ScriptId: %s", entry.script_id.c_str());
+        ImGui::Text("  Tool: %s | Expected: %s", entry.tool.c_str(), entry.expected_result.c_str());
+        ImGui::Text("  Path: %s", entry.path.c_str());
+        ImGui::Separator();
+      }
+      ImGui::EndChild();
+    }
+    else
+    {
+      ImGui::TextDisabled("No catalog entries loaded.");
+    }
+  }
+
+  ImGui::Separator();
+  ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
+  if (ImGui::CollapsingHeader("Advanced Diagnostic Scripts"))
+  {
+    bool hasAdvanced = false;
+    for (const auto& entry : m_manualTest.catalog_entries)
+    {
+      if (entry.advanced_visible && entry.expected_result == "diagnostic")
+      {
+        hasAdvanced = true;
+        break;
+      }
+    }
+
+    if (hasAdvanced)
+    {
+      for (const auto& entry : m_manualTest.catalog_entries)
+      {
+        if (!entry.advanced_visible || entry.expected_result != "diagnostic")
+          continue;
+
+        ImGui::PushID(entry.script_id.c_str());
+        if (ImGui::Selectable(entry.label.c_str()))
+        {
+          std::string text;
+          if (ReadTextFile(ResolveWorkspaceFile(entry.path).generic_string(), text))
+          {
+            m_manualTest.editor_text = text;
+            m_manualTest.editor_source = "diagnostic_script";
+            m_manualTest.loaded_script_path = entry.path;
+            m_manualTest.editor_dirty = false;
+            m_manualTest.analyzed_text.clear();
+            m_manualTest.current_line = 0;
+          }
+        }
+        ImGui::TextWrapped("Tool: %s | Contract: %s", entry.tool.c_str(),
+            entry.contract_path.empty() ? "(none)" : entry.contract_path.c_str());
+        ImGui::PopID();
+      }
+    }
+    else
+    {
+      ImGui::TextDisabled("No advanced diagnostic scripts available.");
     }
   }
 
@@ -7059,6 +7455,86 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "  \"snapshot_path\": \"" << CxDebugJsonEscape(result.snapshot_path) << "\",\n";
         file << "  \"overlay_path\": \"" << CxDebugJsonEscape(result.overlay_path) << "\",\n";
 
+        const bool hasFitLine =
+            context.current_result_ref.result_type == "FindlineResult" &&
+            context.current_result_ref.status == "geometry_result_available";
+        const bool hasFitCircle =
+            context.current_result_ref.result_type == "FindcircleResult" &&
+            context.current_result_ref.status == "geometry_result_available";
+        std::string policyGuard = "GEOMETRY_RESULT_UNAVAILABLE";
+        if (hasFitLine)
+            policyGuard = "MEASURE_AND_FIT_AVAILABLE";
+        else if (hasFitCircle)
+            policyGuard = "CIRCLE_MEASURE_AND_FIT_AVAILABLE";
+        if (options.contract_context_enabled && !options.policy_guard.empty())
+            policyGuard = options.policy_guard;
+
+        const int summaryPointsCount = options.contract_context_enabled
+            ? options.points_count
+            : context.current_result_ref.points_count;
+        const int summaryValidPointsCount = options.contract_context_enabled
+            ? options.valid_points_count
+            : context.current_result_ref.valid_points_count;
+        const bool summaryHasFitLine = options.contract_context_enabled
+            ? options.has_fit_line != 0
+            : hasFitLine;
+        const bool summaryHasFitCircle = options.contract_context_enabled
+            ? options.has_fit_circle != 0
+            : hasFitCircle;
+        const double summaryCircleRadius = options.contract_context_enabled
+            ? options.circle_radius
+            : context.current_result_ref.fit_radius;
+        const double summaryAvgdist = options.contract_context_enabled
+            ? options.avgdist
+            : context.current_result_ref.avgdist;
+        const double summaryLocalSupport = options.contract_context_enabled
+            ? options.local_support
+            : 0.0;
+        const double summaryLocalMeanDistance = options.contract_context_enabled
+            ? options.local_mean_distance
+            : context.current_result_ref.line_avgdist;
+        const double summaryFitOffset = options.contract_context_enabled
+            ? options.fit_offset
+            : 0.0;
+        const std::string summaryResultStatus = options.contract_context_enabled
+            ? options.result_status
+            : context.current_result_ref.status;
+        const std::string summaryFailureStage = options.contract_context_enabled
+            ? options.failure_stage
+            : context.current_result_ref.line_measure_failure_hint;
+
+        std::string contractPass = "0";
+        std::string contractStatus;
+        std::string contractConclusion;
+        const auto contractPassIt = context.runtime_int_vars.find("global.contract_pass");
+        if (contractPassIt != context.runtime_int_vars.end())
+            contractPass = std::to_string(contractPassIt->second);
+        ReadRuntimeVariableValue(context, "global.contract_status", contractStatus);
+        ReadRuntimeVariableValue(context, "global.contract_conclusion", contractConclusion);
+
+        file << "  \"tool\": \"" << CxDebugJsonEscape(options.stage25_tool) << "\",\n";
+        file << "  \"stage25_image_id\": \"" << CxDebugJsonEscape(options.stage25_image_id) << "\",\n";
+        file << "  \"stage25_target_id\": \"" << CxDebugJsonEscape(options.stage25_target_id) << "\",\n";
+        file << "  \"stage25_level\": \"" << CxDebugJsonEscape(options.stage25_level) << "\",\n";
+        file << "  \"points_count\": " << summaryPointsCount << ",\n";
+        file << "  \"valid_points_count\": " << summaryValidPointsCount << ",\n";
+        file << "  \"has_fit_line\": " << (summaryHasFitLine ? "true" : "false") << ",\n";
+        file << "  \"has_fit_circle\": " << (summaryHasFitCircle ? "true" : "false") << ",\n";
+        file << "  \"circle_radius\": " << summaryCircleRadius << ",\n";
+        file << "  \"avgdist\": " << summaryAvgdist << ",\n";
+        file << "  \"local_support\": " << summaryLocalSupport << ",\n";
+        file << "  \"local_mean_distance\": " << summaryLocalMeanDistance << ",\n";
+        file << "  \"fit_offset\": " << summaryFitOffset << ",\n";
+        file << "  \"policy_guard\": \"" << CxDebugJsonEscape(policyGuard) << "\",\n";
+        file << "  \"result_status\": \"" << CxDebugJsonEscape(summaryResultStatus) << "\",\n";
+        file << "  \"failure_stage\": \"" << CxDebugJsonEscape(summaryFailureStage) << "\",\n";
+        file << "  \"result_overlay_path\": \"" << CxDebugJsonEscape(options.contract_context_enabled ? options.result_overlay_path : result.overlay_path) << "\",\n";
+        file << "  \"evidence_overlay_path\": \"" << CxDebugJsonEscape(options.evidence_overlay_path) << "\",\n";
+        file << "  \"tool_display_path\": \"" << CxDebugJsonEscape(options.tool_display_path) << "\",\n";
+        file << "  \"contract_pass\": " << contractPass << ",\n";
+        file << "  \"contract_status\": \"" << CxDebugJsonEscape(contractStatus) << "\",\n";
+        file << "  \"contract_conclusion\": \"" << CxDebugJsonEscape(contractConclusion) << "\",\n";
+
         file << "  \"current_result_ref\": {\n";
         file << "    \"name\": \"" << CxDebugJsonEscape(context.current_result_ref.name) << "\",\n";
         file << "    \"source_object\": \"" << CxDebugJsonEscape(context.current_result_ref.source_object) << "\",\n";
@@ -7071,7 +7547,9 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "    \"points_count\": " << context.current_result_ref.points_count << ",\n";
         file << "    \"valid_points_count\": " << context.current_result_ref.valid_points_count << ",\n";
         file << "    \"has_fit_line\": " << (context.current_result_ref.result_type == "FindlineResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << ",\n";
-        file << "    \"has_fit_circle\": " << (context.current_result_ref.result_type == "FindcircleResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << "\n";
+        file << "    \"has_fit_circle\": " << (context.current_result_ref.result_type == "FindcircleResult" && context.current_result_ref.status == "geometry_result_available" ? "true" : "false") << ",\n";
+        file << "    \"circle_radius\": " << context.current_result_ref.fit_radius << ",\n";
+        file << "    \"avgdist\": " << context.current_result_ref.avgdist << "\n";
         file << "  },\n";
 
         file << "  \"runtime_objects\": [\n";
@@ -7336,6 +7814,85 @@ bool RunCxScriptHeadless(
     AnalyzeScript(context);
 
     ResetDebugRuntimeForReplay(context);
+
+    const auto injectString = [&](const std::string& name, const std::string& value)
+    {
+        UpsertGlobalVariableView(context, "string", name, value, 0, "runtime_initialized");
+        UpsertVariableView(context, "string", name, value, 0, "runtime_initialized");
+    };
+
+    const auto injectInt = [&](const std::string& name, int value)
+    {
+        context.runtime_int_vars[name] = value;
+        UpsertGlobalVariableView(context, "int", name, std::to_string(value), 0, "runtime_initialized");
+        UpsertVariableView(context, "int", name, std::to_string(value), 0, "runtime_initialized");
+    };
+
+    const auto injectDouble = [&](const std::string& name, double value)
+    {
+        std::ostringstream valueStream;
+        valueStream << value;
+        UpsertGlobalVariableView(context, "double", name, valueStream.str(), 0, "runtime_initialized");
+        UpsertVariableView(context, "double", name, valueStream.str(), 0, "runtime_initialized");
+    };
+
+    if (!options.stage25_image_id.empty())
+    {
+        injectString("global.stage25_image_id", options.stage25_image_id);
+    }
+    if (!options.stage25_level.empty())
+    {
+        injectString("global.stage25_level", options.stage25_level);
+    }
+    if (!options.stage25_target_id.empty())
+    {
+        injectString("global.stage25_target_id", options.stage25_target_id);
+    }
+    if (!options.stage25_tool.empty())
+    {
+        injectString("global.stage25_tool", options.stage25_tool);
+    }
+
+    injectInt("global.roi_x0", options.roi_x0);
+    injectInt("global.roi_y0", options.roi_y0);
+    injectInt("global.roi_x1", options.roi_x1);
+    injectInt("global.roi_y1", options.roi_y1);
+
+    injectInt("global.circle_cx", options.circle_cx);
+    injectInt("global.circle_cy", options.circle_cy);
+    injectInt("global.circle_px", options.circle_px);
+    injectInt("global.circle_py", options.circle_py);
+
+    injectInt("global.tool_half_width", options.tool_half_width);
+    injectInt("global.wgap", options.wgap);
+    injectInt("global.hgap", options.hgap);
+    injectInt("global.gap", options.gap);
+    injectInt("global.linegap", options.linegap);
+    injectInt("global.threshold", options.threshold);
+    injectInt("global.method", options.method);
+
+    if (options.contract_context_enabled)
+    {
+        injectInt("global.headless_ok", options.contract_headless_ok);
+        injectInt("global.contract_pass", options.contract_pass_initial);
+        injectInt("global.points_count", options.points_count);
+        injectInt("global.valid_points_count", options.valid_points_count);
+        injectInt("global.has_fit_line", options.has_fit_line);
+        injectInt("global.has_fit_circle", options.has_fit_circle);
+        injectDouble("global.local_support", options.local_support);
+        injectDouble("global.local_mean_distance", options.local_mean_distance);
+        injectDouble("global.fit_offset", options.fit_offset);
+        injectDouble("global.circle_radius", options.circle_radius);
+        injectDouble("global.avgdist", options.avgdist);
+        injectString("global.policy_guard", options.policy_guard);
+        injectString("global.result_status", options.result_status);
+        injectString("global.failure_stage", options.failure_stage);
+        injectString("global.result_overlay_path", options.result_overlay_path);
+        injectString("global.evidence_overlay_path", options.evidence_overlay_path);
+        injectString("global.tool_display_path", options.tool_display_path);
+        injectString("global.contract_status", "");
+        injectString("global.contract_conclusion", "");
+    }
 
     context.run_state = "runtime_step";
     context.current_line = 0;

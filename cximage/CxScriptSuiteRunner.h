@@ -35,6 +35,7 @@ struct CxScriptSuiteCaseResult
     std::string expected_result;
     std::string expected_policy_guard;
     std::string actual_policy_guard;
+    std::string contract_path;
 
     bool headless_ok = false;
     bool contract_pass = false;
@@ -50,7 +51,11 @@ struct CxScriptSuiteCaseResult
 
     std::string result_status;
     std::string failure_stage;
+    std::string contract_status;
     std::string conclusion;
+
+    double circle_radius = 0.0;
+    double avgdist = 0.0;
 
     std::string case_dir;
     std::string snapshot_path;

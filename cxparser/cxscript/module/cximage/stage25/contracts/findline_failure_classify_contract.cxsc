@@ -1,0 +1,23 @@
+global.contract_pass = 0;
+global.contract_status = "findline_fail_unknown";
+global.contract_conclusion = "Findline failure classification not determined";
+
+if (global.failure_stage == "findobject_filter_result_empty") {
+    global.contract_status = "findline_fail_filter_reject";
+    global.contract_conclusion = "Findline failed because component filter rejected all candidates.";
+}
+
+if (global.valid_points_count > 0 && global.has_fit_line == 0) {
+    global.contract_status = "findline_fail_fit_degenerate";
+    global.contract_conclusion = "Findline produced points but fit line was degenerate.";
+}
+
+if (global.local_support < 0.6) {
+    global.contract_status = "findline_fail_low_support";
+    global.contract_conclusion = "Findline local evidence support is too low.";
+}
+
+if (global.valid_points_count == 0) {
+    global.contract_status = "findline_fail_no_points";
+    global.contract_conclusion = "Findline failed to produce any valid points.";
+}

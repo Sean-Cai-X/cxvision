@@ -260,6 +260,12 @@ namespace
                                         target.gap = ParseInt(text, tp);
                                     else if (tkey == "linegap")
                                         target.linegap = ParseInt(text, tp);
+                                    else if (tkey == "tool_half_width")
+                                        target.tool_half_width = ParseInt(text, tp);
+                                    else if (tkey == "threshold")
+                                        target.threshold = ParseInt(text, tp);
+                                    else if (tkey == "method")
+                                        target.method = ParseInt(text, tp);
                                     else if (tkey == "expected_edge")
                                         target.expected_edge = ParseString(text, tp);
                                     else if (tkey == "edge_polarity_hint")
@@ -666,6 +672,23 @@ const CxScriptImageManifestEntry* FindImageById(
     {
         if (image.image_id == image_id)
             return &image;
+    }
+    return nullptr;
+}
+
+const CxScriptImageTargetRoi* FindTargetRoiByImageAndTargetId(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& image_id,
+    const std::string& target_id)
+{
+    const CxScriptImageManifestEntry* image = FindImageById(manifest, image_id);
+    if (!image)
+        return nullptr;
+
+    for (const auto& target : image->targets)
+    {
+        if (target.target_id == target_id)
+            return &target;
     }
     return nullptr;
 }

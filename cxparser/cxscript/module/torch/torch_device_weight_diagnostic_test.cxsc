@@ -1,0 +1,7 @@
+global.torch_task = "torch.smoke.resnet50";
+global.torch_device = "auto";
+global.torch_input_image = "";
+
+global.current_status = "torch_diagnostic_start";
+
+global.current_status = "torch_diagnostic_completed";

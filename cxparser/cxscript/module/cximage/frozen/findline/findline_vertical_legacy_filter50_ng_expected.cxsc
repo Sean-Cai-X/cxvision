@@ -3,26 +3,26 @@ Findline m_line;
 
 m_image.copyFromMat(global.matInput);
 
-int row_start = 100;
-int col_start = 200;
-int row_end = 1100;
-int col_end = 200;
-int method = 0;
-int threshold = 50;
-int linegap = 6;
-int filter_profile = 0;
+int x0 = global.roi_x0;
+int y0 = global.roi_y0;
+int x1 = global.roi_x1;
+int y1 = global.roi_y1;
 
-m_line.setrowstart(row_start);
-m_line.setcolstart(col_start);
-m_line.setrowend(row_end);
-m_line.setcolend(col_end);
+int tool_half_width = global.tool_half_width;
+int wgap = global.wgap;
+int hgap = global.hgap;
+int linegap = global.linegap;
+int threshold = global.threshold;
+int method = global.method;
+
+m_line.SetWHgap(wgap, hgap);
+m_line.setlinegap(linegap);
+m_line.setline(x0, y0, x1, y1, tool_half_width);
 m_line.setmethod(method);
 m_line.setthre(threshold);
-m_line.setlinegap(linegap);
-m_line.setfilterprofile(filter_profile);
 
 m_line.measure(&m_image);
 m_line.fitline();
 
 global.line_ref = m_line.get_result();
-global.current_status = "PENDING_BINDING";
+global.current_status = "PENDING";

@@ -32,4 +32,16 @@ public:
     static void WriteToolDisplayIndex(
         const std::filesystem::path& outRoot,
         const std::vector<CxScriptSuiteCaseResult>& caseResults);
+
+    static void WriteFindlineAlgorithmIterationReport(
+        const std::filesystem::path& outRoot,
+        const std::vector<CxScriptSuiteCaseResult>& caseResults);
+
+    static void WriteFindcircleAlgorithmIterationReport(
+        const std::filesystem::path& outRoot,
+        const std::vector<CxScriptSuiteCaseResult>& caseResults);
+
+    static void WriteFailureClassificationReport(
+        const std::filesystem::path& outRoot,
+        const std::vector<CxScriptSuiteCaseResult>& caseResults);
 };

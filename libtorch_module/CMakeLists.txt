@@ -16,6 +16,7 @@ option(LIBTORCH_MODULE_BUILD_CONTRACT "Build low-coupling contract smoke target"
 option(LIBTORCH_MODULE_BUILD_MOBILEVIT "Build MobileViTv2 train/infer validation target" ON)
 option(LIBTORCH_MODULE_BUILD_SEGMENTATION "Build segmentation train/infer validation target" ON)
 option(LIBTORCH_MODULE_BUILD_DEMO "Build demo entry for staged validation runs" ON)
+option(LIBTORCH_MODULE_BUILD_RUNTIME_DLL "Build runtime DLL for GUI integration" ON)
 option(LIBTORCH_MODULE_FULL_ENABLE_OPENCV_IMAGE "Enable OpenCV image-processing validation in full target" ON)
 option(LIBTORCH_MODULE_FULL_ENABLE_OPENCV_ANNOTATION "Enable OpenCV image+annotation validation in full target" ON)
 option(LIBTORCH_MODULE_FULL_ENABLE_DATASET_STAGE "Enable dataset-backed validation in full target" ON)
@@ -41,7 +42,7 @@ set(OpenCV_DIR "D:/opencv4.9/opencv/build" CACHE PATH "OpenCV build directory")
 find_package(OpenCV QUIET)
 find_package(CUDAToolkit REQUIRED)
 
-set(LIBTORCH_ROOT "D:/libtorch2.2.2/libtorch" CACHE PATH "LibTorch root")
+set(LIBTORCH_ROOT "D:/libtorch" CACHE PATH "LibTorch root")
 set(GPUSDK_ROOT "D:/GPUSDK" CACHE PATH "GPU SDK root")
 set(TORCH_INSTALL_PREFIX "${LIBTORCH_ROOT}")
 
@@ -238,11 +239,52 @@ if(LIBTORCH_MODULE_BUILD_DEMO)
     if(OpenCV_FOUND)
         add_executable(libtorch_module_demo
             torch_demo_main.cpp
+            torch_runtime_core.cpp
+            torch_test_host.h
+            torch_alltest.h
+            torch_alltest_2.h
         )
         configure_libtorch_module_target(libtorch_module_demo)
         target_link_libraries(libtorch_module_demo PRIVATE ${OpenCV_LIBS})
         configure_libtorch_module_full_definitions(libtorch_module_demo)
     else()
         message(STATUS "OpenCV not found. Skipping libtorch_module_demo target.")
+    endif()
+endif()
+
+if(LIBTORCH_MODULE_BUILD_RUNTIME_DLL)
+    if(OpenCV_FOUND)
+        set(LIBTORCH_MODULE_CORE_SOURCES
+            torch_runtime_core.cpp
+            torch_test_host.h
+            torch_alltest.h
+            torch_alltest_2.h
+        )
+
+        add_library(libtorch_module_runtime SHARED
+            torch_runtime_c_api.cpp
+            ${LIBTORCH_MODULE_CORE_SOURCES}
+        )
+
+        target_compile_definitions(libtorch_module_runtime PRIVATE
+            LIBTORCH_MODULE_RUNTIME_EXPORTS=1
+        )
+
+        target_include_directories(libtorch_module_runtime PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+
+        configure_libtorch_module_target(libtorch_module_runtime)
+        target_link_libraries(libtorch_module_runtime PRIVATE ${OpenCV_LIBS})
+        configure_libtorch_module_full_definitions(libtorch_module_runtime)
+
+        set_target_properties(libtorch_module_runtime PROPERTIES
+            OUTPUT_NAME "libtorch_module_runtime"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
+            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
+        )
+    else()
+        message(STATUS "OpenCV not found. Skipping libtorch_module_runtime DLL target.")
     endif()
 endif()

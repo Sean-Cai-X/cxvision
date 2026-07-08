@@ -1,6 +1,7 @@
 #include "CxScriptSuiteReportWriter.h"
 #include <fstream>
 #include <iomanip>
+#include <map>
 
 void CxScriptSuiteReportWriter::WriteSuiteRunReport(
     const std::filesystem::path& outRoot,
@@ -273,5 +274,194 @@ void CxScriptSuiteReportWriter::WriteToolDisplayIndex(
         file << (!result.result_overlay_path.empty() ? "yes" : "no") << " | ";
         file << (!result.evidence_overlay_path.empty() ? "yes" : "no") << " | ";
         file << (!result.tool_display_path.empty() ? "yes" : "no") << " |\n";
+    }
+}
+
+void CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
+    const std::filesystem::path& outRoot,
+    const std::vector<CxScriptSuiteCaseResult>& caseResults)
+{
+    const std::filesystem::path reportsDir = outRoot / "reports";
+    std::filesystem::create_directories(reportsDir);
+
+    const std::filesystem::path reportPath = reportsDir / "findline_algorithm_iteration_report.md";
+    std::ofstream file(reportPath);
+
+    if (!file.is_open())
+        return;
+
+    file << "# Findline Algorithm Iteration Report\n\n";
+    file << "| Level | Image | Target | Script | Points | FitLine | Support | MeanDist | FitOffset | Contract | Status | Conclusion | ToolDisplay |\n";
+    file << "|-------|-------|--------|--------|--------|---------|---------|----------|-----------|----------|--------|------------|-------------|\n";
+
+    int passed = 0, failed = 0;
+    for (const auto& result : caseResults)
+    {
+        if (result.tool != "Findline")
+            continue;
+
+        file << "| " << result.level << " | ";
+        file << result.image_id << " | ";
+        file << result.target_id << " | ";
+        file << result.script_id << " | ";
+        file << result.valid_points_count << " | ";
+        file << (result.has_fit_line ? "yes" : "no") << " | ";
+        file << std::fixed << std::setprecision(2) << result.local_support << " | ";
+        file << std::fixed << std::setprecision(2) << result.local_mean_distance << " | ";
+        file << std::fixed << std::setprecision(2) << result.fit_offset << " | ";
+        file << (result.contract_pass ? "yes" : "no") << " | ";
+        file << result.contract_status << " | ";
+        file << result.conclusion << " | ";
+        file << (!result.tool_display_path.empty() ? "yes" : "no") << " |\n";
+
+        if (result.contract_pass) passed++;
+        else failed++;
+    }
+
+    file << "\n## Summary\n\n";
+    file << "- Total Findline cases: " << (passed + failed) << "\n";
+    file << "- Contract pass: " << passed << "\n";
+    file << "- Contract fail: " << failed << "\n";
+}
+
+void CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
+    const std::filesystem::path& outRoot,
+    const std::vector<CxScriptSuiteCaseResult>& caseResults)
+{
+    const std::filesystem::path reportsDir = outRoot / "reports";
+    std::filesystem::create_directories(reportsDir);
+
+    const std::filesystem::path reportPath = reportsDir / "findcircle_algorithm_iteration_report.md";
+    std::ofstream file(reportPath);
+
+    if (!file.is_open())
+        return;
+
+    file << "# Findcircle Algorithm Iteration Report\n\n";
+    file << "| Level | Image | Target | Script | Points | FitCircle | Radius | AvgDist | Contract | Status | Conclusion | ToolDisplay |\n";
+    file << "|-------|-------|--------|--------|--------|-----------|--------|---------|----------|--------|------------|-------------|\n";
+
+    int passed = 0, failed = 0;
+    for (const auto& result : caseResults)
+    {
+        if (result.tool != "Findcircle")
+            continue;
+
+        file << "| " << result.level << " | ";
+        file << result.image_id << " | ";
+        file << result.target_id << " | ";
+        file << result.script_id << " | ";
+        file << result.valid_points_count << " | ";
+        file << (result.has_fit_circle ? "yes" : "no") << " | ";
+        file << std::fixed << std::setprecision(2) << result.circle_radius << " | ";
+        file << std::fixed << std::setprecision(2) << result.avgdist << " | ";
+        file << (result.contract_pass ? "yes" : "no") << " | ";
+        file << result.contract_status << " | ";
+        file << result.conclusion << " | ";
+        file << (!result.tool_display_path.empty() ? "yes" : "no") << " |\n";
+
+        if (result.contract_pass) passed++;
+        else failed++;
+    }
+
+    file << "\n## Summary\n\n";
+    file << "- Total Findcircle cases: " << (passed + failed) << "\n";
+    file << "- Contract pass: " << passed << "\n";
+    file << "- Contract fail: " << failed << "\n";
+}
+
+void CxScriptSuiteReportWriter::WriteFailureClassificationReport(
+    const std::filesystem::path& outRoot,
+    const std::vector<CxScriptSuiteCaseResult>& caseResults)
+{
+    const std::filesystem::path reportsDir = outRoot / "reports";
+    std::filesystem::create_directories(reportsDir);
+
+    const std::filesystem::path reportPath = reportsDir / "failure_classification_report.md";
+    std::ofstream file(reportPath);
+
+    if (!file.is_open())
+        return;
+
+    file << "# Failure Classification Report\n\n";
+    file << "## Failure Classification\n\n";
+    file << "| Tool | FailureClass | Count | Images | Suggested Next Action |\n";
+    file << "|------|--------------|-------|--------|-----------------------|\n";
+
+    std::map<std::string, std::vector<std::string>> failureMap;
+    std::map<std::string, std::string> suggestions = {
+        {"findline_fail_filter_reject", "优先调整 filter_profile / threshold / polarity，不改 fitline"},
+        {"findline_fail_fit_degenerate", "检查 valid point 去重、共线判断、最小点数策略"},
+        {"findline_fail_low_support", "检查 ROI、采样方向、line normal、局部 evidence"},
+        {"findcircle_fail_insufficient_points", "检查 gap / linegap / threshold / circle ROI 半径"},
+        {"findcircle_fail_no_fit_circle", "检查拟合方法、异常点、圆弧覆盖比例"},
+        {"findcircle_fail_high_residual", "检查拟合方法、异常点、圆弧覆盖比例"}
+    };
+
+    for (const auto& result : caseResults)
+    {
+        if (result.contract_pass)
+            continue;
+
+        std::string key = result.tool + ":" + result.contract_status;
+        failureMap[key].push_back(result.image_id);
+    }
+
+    for (const auto& [key, images] : failureMap)
+    {
+        size_t colon = key.find(':');
+        std::string tool = key.substr(0, colon);
+        std::string status = key.substr(colon + 1);
+
+        std::string imagesList;
+        for (size_t i = 0; i < images.size(); ++i)
+        {
+            if (i > 0) imagesList += ", ";
+            imagesList += images[i];
+        }
+
+        std::string suggestion = "";
+        auto it = suggestions.find(status);
+        if (it != suggestions.end())
+            suggestion = it->second;
+
+        file << "| " << tool << " | ";
+        file << status << " | ";
+        file << images.size() << " | ";
+        file << imagesList << " | ";
+        file << suggestion << " |\n";
+    }
+
+    file << "\n## Detailed Failure Analysis\n\n";
+
+    for (const auto& result : caseResults)
+    {
+        if (result.contract_pass)
+            continue;
+
+        file << "### " << result.case_id << "\n\n";
+        file << "- **Image**: " << result.image_id << "\n";
+        file << "- **Target**: " << result.target_id << "\n";
+        file << "- **Tool**: " << result.tool << "\n";
+        file << "- **Script**: " << result.script_id << "\n";
+        file << "- **Level**: " << result.level << "\n";
+        file << "- **Failure Status**: " << result.contract_status << "\n";
+        file << "- **Conclusion**: " << result.conclusion << "\n";
+        file << "- **Valid Points**: " << result.valid_points_count << "\n";
+
+        if (result.tool == "Findline")
+        {
+            file << "- **Has Fit Line**: " << (result.has_fit_line ? "yes" : "no") << "\n";
+            file << "- **Local Support**: " << std::fixed << std::setprecision(2) << result.local_support << "\n";
+            file << "- **Mean Distance**: " << std::fixed << std::setprecision(2) << result.local_mean_distance << "\n";
+        }
+        else if (result.tool == "Findcircle")
+        {
+            file << "- **Has Fit Circle**: " << (result.has_fit_circle ? "yes" : "no") << "\n";
+            file << "- **Circle Radius**: " << std::fixed << std::setprecision(2) << result.circle_radius << "\n";
+            file << "- **Avg Dist**: " << std::fixed << std::setprecision(2) << result.avgdist << "\n";
+        }
+
+        file << "\n";
     }
 }
