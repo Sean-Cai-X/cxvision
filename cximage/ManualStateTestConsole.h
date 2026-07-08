@@ -1,6 +1,8 @@
 #ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 #define CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 
+#include "ParserDebugBridge.h"
+
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -401,12 +403,18 @@ struct ManualTestContext
   std::string debug_action = "none";
   std::string debug_status = "PENDING";
   std::string debug_reason = "not started";
+  bool cxparser_ext_debug_ok = false;
+  std::string cxparser_ext_debug_status;
+  std::string cxparser_ext_debug_reason;
   std::string debug_parser_output;
   std::string user_expected;
   std::string codex_task;
   std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
   int current_line = 0;
   std::vector<ScriptLineView> line_views;
+  std::vector<CxScriptLineView> cxparser_ext_line_views;
+  std::vector<CxScriptStatementView> cxparser_ext_statement_views;
+  std::vector<CxScriptObjectAssignmentView> cxparser_ext_object_assignments;
   std::vector<ScriptVariableView> global_variable_views = {
     {"Image", "global.matInput", "uninitialized", 0, "not_initialized",
      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg", false}

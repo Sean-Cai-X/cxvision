@@ -47,6 +47,52 @@ struct ParserDebugVariableSnapshot
   bool exists_in_parser = false;
   double value = 0.0;
 };
+struct CxScriptLineView
+{
+  int line_no = 0;
+  std::string source_line;
+  std::string statement_type;
+  std::string status;
+  std::string reason;
+};
+
+struct CxScriptStatementView
+{
+  int statement_id = 0;
+  int line_no = 0;
+  std::string statement_type;
+  std::string lhs_variable;
+  std::string lhs_type;
+  std::string source_object;
+  std::string method_name;
+  std::string returned_object_ref;
+  std::string status;
+  std::string reason;
+};
+
+struct CxScriptObjectAssignmentView
+{
+  std::string lhs_variable;
+  std::string lhs_type;
+  std::string source_object;
+  std::string method_name;
+  std::string returned_object_ref;
+  std::string source_line;
+  int line_no = 0;
+  std::string status;
+  std::string reason;
+};
+
+struct CxScriptSemanticBridgeResult
+{
+  bool ok = false;
+  std::string status;
+  std::string reason;
+  std::string raw_log;
+  std::vector<CxScriptLineView> line_views;
+  std::vector<CxScriptStatementView> statement_views;
+  std::vector<CxScriptObjectAssignmentView> object_assignments;
+};
 
 class ParserDebugBridge
 {
@@ -70,6 +116,9 @@ public:
     const std::string& lastMethod, int lastUpdateLine,
     const std::string& runtimeStatus) const;
   std::vector<ParserDebugVariableSnapshot> SnapshotRuntimeVariables() const;
+  bool RunCxParserExtDebugInProcess(
+    const std::string& scriptPath,
+    CxScriptSemanticBridgeResult& outResult);
   void Stop();
   void ResetRuntime();
 

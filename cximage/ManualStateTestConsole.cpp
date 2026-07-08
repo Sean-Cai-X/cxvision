@@ -675,10 +675,51 @@ static bool SaveCxDebugSnapshotText(ManualTestContext& context,
         file << "runtime_current_status: " << context.runtime_current_status << "\n";
         file << "debug_status: " << context.debug_status << "\n";
         file << "debug_reason: " << context.debug_reason << "\n";
+        file << "cxparser_ext_debug_ok: "
+             << (context.cxparser_ext_debug_ok ? "true" : "false") << "\n";
+        file << "cxparser_ext_debug_status: "
+             << context.cxparser_ext_debug_status << "\n";
+        file << "cxparser_ext_debug_reason: "
+             << context.cxparser_ext_debug_reason << "\n";
         file << "current_line_index: " << context.current_line << "\n";
         file << "execution_cursor: " << BuildDebugCursorText(context) << "\n";
         file << "last_executed_line_no: " << LastExecutedLineNo(context) << "\n\n";
 
+
+        file << "CxParserExt Debug Layer\n";
+        file << "------------------------\n";
+        file << "line_views: " << context.cxparser_ext_line_views.size() << "\n";
+        for (const CxScriptLineView& line : context.cxparser_ext_line_views)
+        {
+            file << "* line " << line.line_no
+                 << " type=" << line.statement_type
+                 << " status=" << line.status << "\n";
+            file << "  source: " << line.source_line << "\n";
+            file << "  reason: " << line.reason << "\n";
+        }
+        file << "statement_views: " << context.cxparser_ext_statement_views.size() << "\n";
+        for (const CxScriptStatementView& stmt : context.cxparser_ext_statement_views)
+        {
+            file << "* #" << stmt.statement_id
+                 << " line=" << stmt.line_no
+                 << " type=" << stmt.statement_type
+                 << " status=" << stmt.status << "\n";
+            file << "  lhs: " << stmt.lhs_variable << " : " << stmt.lhs_type << "\n";
+            file << "  call: " << stmt.source_object << "." << stmt.method_name << "()\n";
+            file << "  return_ref: " << stmt.returned_object_ref << "\n";
+            file << "  reason: " << stmt.reason << "\n";
+        }
+        file << "object_assignments: " << context.cxparser_ext_object_assignments.size() << "\n";
+        for (const CxScriptObjectAssignmentView& item : context.cxparser_ext_object_assignments)
+        {
+            file << "* " << item.lhs_variable << " : " << item.lhs_type << "\n";
+            file << "  from: " << item.source_object << "." << item.method_name << "()\n";
+            file << "  ref: " << item.returned_object_ref << "\n";
+            file << "  line " << item.line_no << ": " << item.source_line << "\n";
+            file << "  status: " << item.status << "\n";
+            file << "  reason: " << item.reason << "\n";
+        }
+        file << "\n";
         file << "Current Result Ref\n";
         file << "------------------\n";
         file << "name: " << context.current_result_ref.name << "\n";
@@ -1462,6 +1503,64 @@ static void UpsertGlobalVariableView(
 
 // å›¾åƒ global å˜é‡ï¼šglobal.matInputã€‚
 // æ³¨æ„ï¼šç”¨ä¸åŒå‡½æ•°åï¼Œé¿å…å’Œæ™®é€šå˜é‡å‡½æ•°é‡è½½å†²çªã€‚
+
+static void ApplyCxParserExtDebugResultToManualConsole(
+    ManualTestContext& context,
+    const CxScriptSemanticBridgeResult& result)
+{
+    context.cxparser_ext_debug_ok = result.ok;
+    context.cxparser_ext_debug_status = result.status;
+    context.cxparser_ext_debug_reason = result.reason;
+    context.debug_parser_output = result.raw_log;
+    context.cxparser_ext_line_views = result.line_views;
+    context.cxparser_ext_statement_views = result.statement_views;
+    context.cxparser_ext_object_assignments = result.object_assignments;
+
+    if (!result.ok)
+    {
+        context.debug_status = "CXPARSER_EXT_DEBUG_FAILED";
+        context.debug_reason = result.reason;
+        return;
+    }
+
+    context.debug_status = "CXPARSER_EXT_DEBUG_OK";
+    context.debug_reason = result.status;
+
+    for (const CxScriptObjectAssignmentView& assignment :
+         result.object_assignments)
+    {
+        UpsertGlobalVariableView(
+            context,
+            assignment.lhs_type,
+            assignment.lhs_variable,
+            assignment.returned_object_ref,
+            assignment.line_no,
+            "cxparser_ext_debug_object_assignment");
+
+        RuntimeObjectView& object = EnsureRuntimeObject(
+            context,
+            assignment.lhs_variable,
+            assignment.lhs_type,
+            assignment.line_no);
+
+        object.exists_in_parser = true;
+        object.type = assignment.lhs_type;
+        object.runtime_state = "cxparser_ext_debug_assigned";
+        object.last_runtime_status = assignment.status;
+        object.last_method = assignment.method_name;
+        object.last_update_line = assignment.line_no;
+        object.display_summary =
+            assignment.lhs_variable +
+            " <= " +
+            assignment.source_object +
+            "." +
+            assignment.method_name +
+            "()";
+        object.visualizable = false;
+        object.visual_source = "cxparser_ext_debug";
+        object.stale = false;
+    }
+}
 static void UpsertGlobalImageVariableView(
     ManualTestContext& context,
     const std::string& type,
@@ -4566,6 +4665,12 @@ void AnalyzeScript(ManualTestContext& context)
     if (context.analyzed_text == context.editor_text) return;
     context.analyzed_text = context.editor_text;
     context.line_views.clear();
+    context.cxparser_ext_line_views.clear();
+    context.cxparser_ext_statement_views.clear();
+    context.cxparser_ext_object_assignments.clear();
+    context.cxparser_ext_debug_ok = false;
+    context.cxparser_ext_debug_status.clear();
+    context.cxparser_ext_debug_reason.clear();
     context.variable_views.clear();
     context.object_views.clear();
     if (context.global_variable_views.size() > 1)
@@ -5293,6 +5398,10 @@ void ViewController::initManualStateTestConsole()
      "# enter one manual integration statement\n", "builtin", true, "", "", false, false, false},
     {"Custom Manual Text", "Start with an empty manual editor.",
      "", "manual", true, "", "", false, false, false},
+    {"CxParserExt Debug Object Assignment Smoke", "A-line debug layer smoke: Class obj = source.method();",
+     "", "cxparser_ext/cxscript/debug_smoke/object_assignment_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
+    {"CxParserExt Debug Return Object Smoke", "A-line debug layer smoke: returned object assignment with input ref.",
+     "", "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
     {"Findline Legacy Direct", "Legacy direct line ROI, scan box, original measure points, and fitline.",
      "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
     {"Findline WHgap Update", "SetWHgap before and after setline; previous measure and fit must be invalidated.",
@@ -5548,6 +5657,85 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                                     m_scriptResult.reason);
 }
 
+
+static void DrawCxParserExtLineViewsPanel(const ManualTestContext& context)
+{
+  if (!ImGui::CollapsingHeader("CxParserExt Line Views"))
+    return;
+
+  ImGui::Text("status: %s | ok: %s",
+              context.cxparser_ext_debug_status.c_str(),
+              context.cxparser_ext_debug_ok ? "true" : "false");
+  if (!context.cxparser_ext_debug_reason.empty())
+    ImGui::TextWrapped("reason: %s",
+                       context.cxparser_ext_debug_reason.c_str());
+
+  for (const CxScriptLineView& line : context.cxparser_ext_line_views)
+  {
+    ImGui::Text("%d | %s | %s",
+                line.line_no,
+                line.statement_type.c_str(),
+                line.status.c_str());
+    ImGui::TextWrapped("%s", line.source_line.c_str());
+    if (!line.reason.empty())
+      ImGui::TextWrapped("reason: %s", line.reason.c_str());
+    ImGui::Separator();
+  }
+}
+
+static void DrawCxParserExtStatementViewsPanel(const ManualTestContext& context)
+{
+  if (!ImGui::CollapsingHeader("CxParserExt Statement Views"))
+    return;
+
+  for (const CxScriptStatementView& stmt : context.cxparser_ext_statement_views)
+  {
+    ImGui::Text("#%d line=%d type=%s",
+                stmt.statement_id,
+                stmt.line_no,
+                stmt.statement_type.c_str());
+    if (!stmt.lhs_variable.empty())
+      ImGui::Text("lhs: %s : %s",
+                  stmt.lhs_variable.c_str(),
+                  stmt.lhs_type.c_str());
+    if (!stmt.source_object.empty())
+      ImGui::Text("call: %s.%s()",
+                  stmt.source_object.c_str(),
+                  stmt.method_name.c_str());
+    if (!stmt.returned_object_ref.empty())
+      ImGui::Text("return ref: %s",
+                  stmt.returned_object_ref.c_str());
+    ImGui::Text("status: %s", stmt.status.c_str());
+    if (!stmt.reason.empty())
+      ImGui::TextWrapped("reason: %s", stmt.reason.c_str());
+    ImGui::Separator();
+  }
+}
+
+static void DrawCxParserExtObjectAssignmentsPanel(const ManualTestContext& context)
+{
+  if (!ImGui::CollapsingHeader("CxParserExt Object Assignments"))
+    return;
+
+  for (const CxScriptObjectAssignmentView& item :
+       context.cxparser_ext_object_assignments)
+  {
+    ImGui::Text("%s : %s",
+                item.lhs_variable.c_str(),
+                item.lhs_type.c_str());
+    ImGui::Text("from: %s.%s()",
+                item.source_object.c_str(),
+                item.method_name.c_str());
+    ImGui::Text("ref: %s", item.returned_object_ref.c_str());
+    ImGui::Text("line %d: %s",
+                item.line_no,
+                item.source_line.c_str());
+    ImGui::Text("status: %s", item.status.c_str());
+    if (!item.reason.empty())
+      ImGui::TextWrapped("reason: %s", item.reason.c_str());
+    ImGui::Separator();
+  }
+}
 void ViewController::drawManualStateTestConsole()
 {
   if (!m_showManualStateTestConsole) return;
@@ -6128,6 +6316,36 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.runtime_fillback_status = "debug_log_cleared";
   }
 
+
+  ImGui::SameLine();
+
+  if (ImGui::Button("Run CxParserExt Debug"))
+  {
+      const std::string scriptPath = !m_manualTest.loaded_script_path.empty() ?
+          m_manualTest.loaded_script_path : m_manualTest.active_script_case_path;
+      CxScriptSemanticBridgeResult debugResult;
+      if (scriptPath.empty())
+      {
+          debugResult.ok = false;
+          debugResult.status = "missing_script_path";
+          debugResult.reason =
+              "CxParserExt debug in-process requires a script file path";
+      }
+      else
+      {
+          const fs::path resolvedScript = ResolveWorkspaceFile(scriptPath);
+          m_parserDebugBridge.RunCxParserExtDebugInProcess(
+              resolvedScript.generic_string(),
+              debugResult);
+      }
+      ApplyCxParserExtDebugResultToManualConsole(m_manualTest, debugResult);
+      m_manualTest.debug_action = "Run CxParserExt Debug";
+      m_scriptResult.status = debugResult.ok ? "PENDING" : "FAIL";
+      m_scriptResult.reason = debugResult.ok ?
+          "cxparser_ext debug layer parsed script" : debugResult.reason;
+      m_scriptResult.runtime_fillback_status = debugResult.ok ?
+          "cxparser_ext_debug_ok" : "cxparser_ext_debug_failed";
+  }
   ImGui::Separator();
   ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
   if (ImGui::CollapsingHeader("Last Debug Result"))
@@ -6178,6 +6396,11 @@ void ViewController::drawManualStateTestConsole()
   if (m_manualTest.current_line >= static_cast<int>(m_manualTest.line_views.size()))
     m_manualTest.current_line = m_manualTest.line_views.empty() ? 0 :
       static_cast<int>(m_manualTest.line_views.size()) - 1;
+  ImGui::Separator();
+  DrawCxParserExtLineViewsPanel(m_manualTest);
+  DrawCxParserExtStatementViewsPanel(m_manualTest);
+  DrawCxParserExtObjectAssignmentsPanel(m_manualTest);
+
   ImGui::Separator();
   ImGui::Text("CxScript Line View");
   ImGui::Text("trace status: %s", m_manualTest.trace_status.c_str());

@@ -83,33 +83,15 @@ endif()
 # --- 3. cxparser_ext_cxscript_cli (The main application target) ---
 
 add_executable(cxparser_ext_cxscript_cli
-  ../cxparser_ext/runtime/cxscript_runtime.cpp
-  ../cxparser_ext/runtime/cxscript_c_frontend.cpp
-  ../cxparser_ext/catalog/parser_case_catalog.cpp
-  ../cxparser_ext/drivers/parser_dispatch_driver.cpp
-  ../cxparser_ext/pipeline/parser_analysis_bridge_exporter.cpp
-  ../cxparser_ext/pipeline/parser_delivery_api.cpp
-  ../cxparser_ext/pipeline/parser_binding_builder.cpp
-  ../cxparser_ext/pipeline/parser_cxcore_classical_adapter.cpp
-  ../cxparser_ext/pipeline/parser_cxscript_runtime.cpp
-  ../cxparser_ext/pipeline/parser_flow_router.cpp
-  ../cxparser_ext/pipeline/parser_image_analysis_node.cpp
-  ../cxparser_ext/pipeline/parser_ir_clang_bridge.cpp
-  ../cxparser_ext/pipeline/parser_runtime_facade.cpp
-  ../cxparser_ext/pipeline/parser_pipeline.cpp
-  ../cxparser_ext/pipeline/parser_task_coordinator.cpp
-  ../cxparser_ext/pipeline/parser_test_driver.cpp
-  ../cxparser_ext/pipeline/parser_test_reporter.cpp
-  ../cxparser_ext/pipeline/parser_test_router.cpp
-  ../cxparser_ext/pipeline/parser_unified_entry.cpp
-  ../cxparser_ext/validation/parser_validation_engine.cpp
-  ../cxparser_ext/scenarios/image_probe_wrapper.cpp
+  ../cxparser_ext/debug/cxscript_debug_embedded_runner.cpp
+  ../cxparser_ext/debug/cxscript_debug_log_builder.cpp
   ../cxparser_ext/scenarios/parser_cxscript_cli.cpp
 )
 
 target_include_directories(cxparser_ext_cxscript_cli PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cxparser_ext/debug
 )
 
 target_link_libraries(cxparser_ext_cxscript_cli PRIVATE cxparser_core)

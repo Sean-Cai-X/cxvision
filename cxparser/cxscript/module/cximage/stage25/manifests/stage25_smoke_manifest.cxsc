@@ -26,6 +26,8 @@ m.findline_setfitmode(1);
 m.findline_setscript_scale(1);
 m.findline_setfilterprofile(1);
 m.findline_setpolicy("FILTER_POLICY_CANDIDATE");
+m.findline_setparameterpolicyid("stage25_filter20");
+m.findline_setparameterrole("candidate");
 
 m.addevidenceprofile("normal");
 m.evidence_setnearestpointsupportpx(3.0);

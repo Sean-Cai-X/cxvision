@@ -23,6 +23,10 @@ endif()
 
 find_package(OpenCV REQUIRED CONFIG)
 
+option(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC
+       "Embed cxparser_ext debug layer into cxvision_imgui_acceptance"
+       ON)
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -53,6 +57,8 @@ set(CXIMAGE_SOURCES
   cximage/Findellipse.cpp
   cximage/findobject.cpp
   cximage/FastMatch.cpp
+  cximage/FastMatchPolicy.cpp
+  cximage/FastMatchDiagnostic.cpp
   cximage/Run.cpp
   cximage/ParserClass.cpp
   cximage/CxScriptStage25Manifest.cpp
@@ -104,10 +110,19 @@ set(IMGUI_SOURCES
   imgui/imgui_impl_opengl3.cpp
 )
 
+set(CXPARSER_EXT_DEBUG_SOURCES)
+if(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
+  list(APPEND CXPARSER_EXT_DEBUG_SOURCES
+    cxparser_ext/debug/cxscript_debug_embedded_runner.cpp
+    cxparser_ext/debug/cxscript_debug_log_builder.cpp
+  )
+endif()
+
 add_executable(cxvision_imgui_acceptance
   ${CXIMAGE_SOURCES}
   ${CXGEOM_SOURCES}
   ${CXPARSER_SOURCES}
+  ${CXPARSER_EXT_DEBUG_SOURCES}
   ${IMGUI_SOURCES}
   "${GLAD_ROOT}/glad.cpp"
 )
@@ -115,6 +130,8 @@ add_executable(cxvision_imgui_acceptance
 target_include_directories(cxvision_imgui_acceptance PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/cximage"
   "${CMAKE_CURRENT_SOURCE_DIR}/cxparser"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cxparser_ext"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cxparser_ext/debug"
   "${CMAKE_CURRENT_SOURCE_DIR}/cxgeom/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/imgui"
   "${GLAD_ROOT}/.."
@@ -132,6 +149,12 @@ target_compile_definitions(cxvision_imgui_acceptance PRIVATE
   ImTextureID=ImU64
 )
 
+
+if(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
+  target_compile_definitions(cxvision_imgui_acceptance PRIVATE
+    CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC=1
+  )
+endif()
 target_link_libraries(cxvision_imgui_acceptance PRIVATE
   glfw
   opengl32

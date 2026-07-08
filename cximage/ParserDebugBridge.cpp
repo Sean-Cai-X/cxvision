@@ -4,6 +4,10 @@
 #include "Image.h"
 #include "CircleRingGauge.h"
 
+#if defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
+#include "cxscript_debug_embedded_runner.h"
+#endif
+
 #include <sstream>
 #include <utility>
 
@@ -223,6 +227,85 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
   return snapshots;
 }
 
+
+bool ParserDebugBridge::RunCxParserExtDebugInProcess(
+  const std::string& scriptPath,
+  CxScriptSemanticBridgeResult& outResult)
+{
+  outResult = CxScriptSemanticBridgeResult{};
+
+#if !defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
+  outResult.ok = false;
+  outResult.status = "disabled";
+  outResult.reason =
+    "CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC is not enabled";
+  return false;
+#else
+  cxparser_ext::debug::EmbeddedDebugRunRequest request;
+  request.script_path = scriptPath;
+  request.capture_structured_log = true;
+  request.enable_line_view = true;
+  request.enable_statement_view = true;
+  request.enable_object_assignment = true;
+  request.enable_method_trace = true;
+  request.enable_return_object_trace = true;
+
+  const cxparser_ext::debug::EmbeddedDebugRunResult result =
+    cxparser_ext::debug::RunCxScriptDebugEmbedded(request);
+
+  outResult.ok = result.ok;
+  outResult.status = result.status;
+  outResult.reason = result.reason;
+  outResult.raw_log = result.raw_log;
+
+  for (const cxparser_ext::debug::EmbeddedDebugLineView& item :
+       result.line_views)
+  {
+    CxScriptLineView view;
+    view.line_no = item.line_no;
+    view.source_line = item.source_line;
+    view.statement_type = item.statement_type;
+    view.status = item.status;
+    view.reason = item.reason;
+    outResult.line_views.push_back(view);
+  }
+
+  for (const cxparser_ext::debug::EmbeddedDebugStatementView& item :
+       result.statement_views)
+  {
+    CxScriptStatementView view;
+    view.statement_id = item.statement_id;
+    view.line_no = item.line_no;
+    view.statement_type = item.statement_type;
+    view.lhs_variable = item.lhs_variable;
+    view.lhs_type = item.lhs_type;
+    view.source_object = item.source_object;
+    view.method_name = item.method_name;
+    view.returned_object_ref = item.returned_object_ref;
+    view.status = item.status;
+    view.reason = item.reason;
+    outResult.statement_views.push_back(view);
+  }
+
+  for (const cxparser_ext::debug::EmbeddedDebugObjectAssignment& item :
+       result.object_assignments)
+  {
+    CxScriptObjectAssignmentView view;
+    view.lhs_variable = item.lhs_variable;
+    view.lhs_type = item.lhs_type;
+    view.source_object = item.source_object;
+    view.method_name = item.method_name;
+    view.returned_object_ref = item.returned_object_ref;
+    view.source_line = item.source_line;
+    view.line_no = item.line_no;
+    view.status = item.status;
+    view.reason = item.reason;
+    outResult.object_assignments.push_back(view);
+  }
+
+  return outResult.ok;
+#endif
+}
 void ParserDebugBridge::Stop()
 {
   if (myRuntime != nullptr) myRuntime->StopRun();

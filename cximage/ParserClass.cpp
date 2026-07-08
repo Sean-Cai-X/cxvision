@@ -11,6 +11,7 @@
 #include "Findellipse.h"
 #include "findobject.h"
 #include "FastMatch.h"
+#include "FastMatchDiagnostic.h"
 #include "CxScriptDirectBindings.h"
 #include "CircleRingGauge.h"
 
@@ -454,6 +455,24 @@ namespace mu
             m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "thickness_ok", &CircleRingGauge::thickness_ok);
             m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "score", &CircleRingGauge::score);
             m_parser.DefineClassFun("CircleRingGauge", pcircle_ring_gauge, "status_code", &CircleRingGauge::status_code);
+
+            FastMatchDiagnostic* fastmatch_diagnostic = nullptr;
+            m_parser.DefineClass("FastMatchDiagnostic", fastmatch_diagnostic);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "setpolicy", &FastMatchDiagnostic::setpolicy);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "setsource", &FastMatchDiagnostic::setsource);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "setlevel", &FastMatchDiagnostic::setlevel);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "setprofile", &FastMatchDiagnostic::setprofile);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_l1_l3_coverage_ok", &FastMatchDiagnostic::set_l1_l3_coverage_ok);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_parameter_policy_valid", &FastMatchDiagnostic::set_parameter_policy_valid);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_product_default_changed", &FastMatchDiagnostic::set_product_default_changed);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_original_measure_available", &FastMatchDiagnostic::set_original_measure_available);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_local_evidence_confirmed", &FastMatchDiagnostic::set_local_evidence_confirmed);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_component_warning", &FastMatchDiagnostic::set_component_warning);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "run", &FastMatchDiagnostic::run);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "allowed", &FastMatchDiagnostic::allowed);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "status", &FastMatchDiagnostic::status);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "reason", &FastMatchDiagnostic::reason);
+            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "result_ref", &FastMatchDiagnostic::result_ref);
 
             Findellipse* pfindellipse = nullptr;
             m_parser.DefineClass("Findellipse", pfindellipse);
