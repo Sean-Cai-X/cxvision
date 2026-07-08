@@ -8,6 +8,7 @@
 #include "CxScriptImageEvidenceAnalyzer.h"
 #include "CxScriptGeometryFrameProbe.h"
 #include "FindlineParameterPolicy.h"
+#include "CxScriptCatalogRuntime.h"
 
 #include <imgui.h>
 
@@ -5402,20 +5403,6 @@ void ViewController::initManualStateTestConsole()
      "", "cxparser_ext/cxscript/debug_smoke/object_assignment_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
     {"CxParserExt Debug Return Object Smoke", "A-line debug layer smoke: returned object assignment with input ref.",
      "", "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
-    {"Findline Legacy Direct", "Legacy direct line ROI, scan box, original measure points, and fitline.",
-     "", "cxparser/cxscript/module/cximage/find_line_direct_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
-    {"Findline WHgap Update", "SetWHgap before and after setline; previous measure and fit must be invalidated.",
-     "", "cxparser/cxscript/module/cximage/find_line_whgap_update_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
-    {"Findline Native Width Compare", "Original Measure comparison with setline scale 32.",
-     "", "cxparser/cxscript/module/cximage/find_line_native_width_compare_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
-    {"Recommended: Findline Vertical - Stage25 Filter20", "Stage25 / Findline / Recommended: produces original Measure points using filter_profile=1; no fallback; not product default.",
-     "", "cxparser/cxscript/module/cximage/find_line_vertical_stage25_filter20_test.cxsc", true, "stage25_filter20", "STAGE25_RECOMMENDED_TEMPLATE", false, true, true},
-    {"Compare: Findline Vertical - Legacy Direct", "Stage25 / Findline / Compare: expected filter failure when effective_filter_min=50; preserved baseline.",
-     "", "cxparser/cxscript/module/cximage/find_line_vertical_direct_test.cxsc", true, "legacy_default", "PRODUCT_LEGACY_DEFAULT", true, false, false},
-    {"Findline Request Cache", "Request/cache path. script_scale=1. Requires geometry_ready=true.",
-     "", "cxparser/cxscript/module/cximage/find_line_request_cache_test.cxsc", true, "", "", false, false, false},
-    {"Findline Fallback Debug", "Fallback debug only. Not original Measure validation.",
-     "", "cxparser/cxscript/module/cximage/find_line_fallback_debug_test.cxsc", true, "filter_relax_min1", "DEBUG_ONLY", false, false, false},
     {"Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
      "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true, "", "", false, false, false},
     {"Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
@@ -5423,6 +5410,40 @@ void ViewController::initManualStateTestConsole()
     {"Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
      "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true, "", "", false, false, false}
   };
+
+  static constexpr const char* kDefaultCxImageCatalogPath =
+      "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
+
+  CxScriptCatalogRuntime catalog;
+  std::string catalog_reason;
+  if (LoadCxScriptCatalogFile(kDefaultCxImageCatalogPath, catalog, catalog_reason))
+  {
+    for (const auto& script : catalog.scripts)
+    {
+      if (!script.manual_visible)
+        continue;
+
+      if (!script.frozen)
+        continue;
+
+      if (script.expected_result != "ok" &&
+          script.expected_result != "ng_expected")
+        continue;
+
+      m_manualSnippets.push_back({
+        script.label,
+        "CxScript Catalog: " + script.script_id,
+        "",
+        script.path,
+        true,
+        script.parameter_policy_id,
+        script.parameter_role,
+        (script.parameter_role == "PRODUCT_LEGACY_DEFAULT"),
+        (script.parameter_role == "STAGE25_RECOMMENDED_TEMPLATE"),
+        (script.expected_result == "ok")
+      });
+    }
+  }
 
   m_directTestModules.clear();
   const fs::path moduleRoot = ResolveWorkspaceFile("cxparser/cxscript/module");

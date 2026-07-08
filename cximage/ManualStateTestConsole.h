@@ -322,6 +322,16 @@ struct RuntimeObjectView
     std::string circle_measure_failure_stage;
     std::string circle_measure_detail;
 
+    bool has_fastmatch_diagnostic = false;
+    bool fastmatch_allowed = false;
+
+    std::string fastmatch_status;
+    std::string fastmatch_reason;
+    std::string fastmatch_result_ref;
+    std::string fastmatch_policy;
+    std::string fastmatch_source_tool;
+    std::string fastmatch_profile;
+    std::string fastmatch_level;
 
 };
 

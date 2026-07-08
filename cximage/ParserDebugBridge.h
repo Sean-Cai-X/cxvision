@@ -39,6 +39,12 @@ struct ParserDebugObjectSnapshot
   std::string ring_status;
   std::string ring_reason;
   std::string ring_result_ref;
+
+  bool has_fastmatch_diagnostic = false;
+  bool fastmatch_allowed = false;
+  std::string fastmatch_status;
+  std::string fastmatch_reason;
+  std::string fastmatch_result_ref;
 };
 
 struct ParserDebugVariableSnapshot

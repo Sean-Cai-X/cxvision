@@ -73,6 +73,26 @@ void FastMatchDiagnostic::run()
     m_status = readiness.status;
     m_reason = readiness.reason;
 
+    if (m_status == "not_run")
+        m_status_code = 0;
+    else if (m_status == "blocked")
+        m_status_code = 1;
+    else if (m_status == "allowed_diagnostic")
+        m_status_code = 2;
+
+    if (m_reason.find("product default was changed") != std::string::npos)
+        m_reason_code = 1;
+    else if (m_reason.find("parameter policy validation") != std::string::npos)
+        m_reason_code = 2;
+    else if (m_reason.find("L1/L2/L3 coverage") != std::string::npos)
+        m_reason_code = 3;
+    else if (m_reason.find("original Measure result is unavailable") != std::string::npos)
+        m_reason_code = 4;
+    else if (m_reason.find("reserved for L3 or component-warning") != std::string::npos)
+        m_reason_code = 5;
+    else if (m_reason.find("diagnostic is allowed") != std::string::npos)
+        m_reason_code = 6;
+
     std::ostringstream ref;
     ref << "fastmatch_diagnostic<="
         << m_source_tool
@@ -88,14 +108,14 @@ int FastMatchDiagnostic::allowed() const
     return m_allowed ? 1 : 0;
 }
 
-const char* FastMatchDiagnostic::status() const
+int FastMatchDiagnostic::status_code() const
 {
-    return m_status.c_str();
+    return m_status_code;
 }
 
-const char* FastMatchDiagnostic::reason() const
+int FastMatchDiagnostic::reason_code() const
 {
-    return m_reason.c_str();
+    return m_reason_code;
 }
 
 const char* FastMatchDiagnostic::result_ref() const

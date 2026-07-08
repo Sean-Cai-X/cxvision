@@ -619,6 +619,7 @@ bool RunStage25ManifestFile(
     Stage25ReportWriter::WriteCoverageReport(options.out_root, manifest);
     Stage25ReportWriter::WriteStabilityReport(options.out_root, result.case_results, manifest);
     Stage25ReportWriter::WritePolicyReport(options.out_root, result.case_results, manifest);
+    Stage25ReportWriter::WriteFastMatchReadinessReport(options.out_root, result.case_results);
     Stage25ReportWriter::WriteCaseFileIndex(options.out_root, result.case_results);
     Stage25ReportWriter::WriteDiagnosticReport(options.out_root, result.case_results);
 

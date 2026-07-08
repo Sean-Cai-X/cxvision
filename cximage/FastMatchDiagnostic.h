@@ -20,8 +20,8 @@ public:
     void run();
 
     int allowed() const;
-    const char* status() const;
-    const char* reason() const;
+    int status_code() const;
+    int reason_code() const;
     const char* result_ref() const;
 
 private:
@@ -41,4 +41,6 @@ private:
     std::string m_status = "not_run";
     std::string m_reason;
     std::string m_result_ref;
+    int m_status_code = 0;
+    int m_reason_code = 0;
 };

@@ -3,6 +3,7 @@
 #include "Findcircle.h"
 #include "Image.h"
 #include "CircleRingGauge.h"
+#include "FastMatchDiagnostic.h"
 
 #if defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
 #include "cxscript_debug_embedded_runner.h"
@@ -142,7 +143,8 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
     {"Image", "global_matInput"}, {"Image", "m_occtimage"},
     {"Findcircle", "afindcircle0"},
     {"Findcircle", "afindcircle1"},
-    {"CircleRingGauge", "ring_gauge"}
+    {"CircleRingGauge", "ring_gauge"},
+    {"FastMatchDiagnostic", "fm"}
   };
   std::vector<ParserDebugObjectSnapshot> snapshots;
   for (const auto& item : objects)
@@ -205,6 +207,22 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
         snapshot.ring_result_ref = ring_gauge->m_result_ref;
         snapshot.value_summary = "CircleRingGauge: status=" + ring_gauge->m_status +
           ", score=" + std::to_string(ring_gauge->m_score);
+      }
+    }
+    else if (snapshot.type == "FastMatchDiagnostic" && snapshot.exists_in_parser)
+    {
+      FastMatchDiagnostic* fm = static_cast<FastMatchDiagnostic*>(
+        QueryClassObject(snapshot.type, snapshot.name));
+      if (fm != nullptr)
+      {
+        snapshot.has_fastmatch_diagnostic = true;
+        snapshot.fastmatch_allowed = fm->allowed() != 0;
+        snapshot.fastmatch_status = std::to_string(fm->status_code());
+        snapshot.fastmatch_reason = std::to_string(fm->reason_code());
+        snapshot.fastmatch_result_ref = fm->result_ref();
+        snapshot.value_summary = "FastMatchDiagnostic: allowed=" +
+          std::string(fm->allowed() ? "true" : "false") +
+          ", status_code=" + std::to_string(fm->status_code());
       }
     }
     snapshots.push_back(snapshot);

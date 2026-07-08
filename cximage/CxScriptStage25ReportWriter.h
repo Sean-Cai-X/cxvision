@@ -42,6 +42,10 @@ public:
         const std::filesystem::path& out_root,
         const std::vector<Stage25CaseMatrixEntry>& matrix);
 
+    static void WriteFastMatchReadinessReport(
+        const std::filesystem::path& out_root,
+        const std::vector<Stage25CaseResult>& results);
+
     static void WriteCaseFileIndex(
         const std::filesystem::path& out_root,
         const std::vector<Stage25CaseResult>& results);

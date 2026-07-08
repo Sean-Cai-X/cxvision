@@ -469,10 +469,6 @@ namespace mu
             m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_local_evidence_confirmed", &FastMatchDiagnostic::set_local_evidence_confirmed);
             m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "set_component_warning", &FastMatchDiagnostic::set_component_warning);
             m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "run", &FastMatchDiagnostic::run);
-            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "allowed", &FastMatchDiagnostic::allowed);
-            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "status", &FastMatchDiagnostic::status);
-            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "reason", &FastMatchDiagnostic::reason);
-            m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "result_ref", &FastMatchDiagnostic::result_ref);
 
             Findellipse* pfindellipse = nullptr;
             m_parser.DefineClass("Findellipse", pfindellipse);

@@ -631,6 +631,124 @@ void Stage25ReportWriter::WriteCaseMatrixReport(
     }
 }
 
+void Stage25ReportWriter::WriteFastMatchReadinessReport(
+    const std::filesystem::path& out_root,
+    const std::vector<Stage25CaseResult>& results)
+{
+    std::ofstream file(out_root / "fastmatch_readiness_report.md");
+
+    file << "# Stage 2.5 FastMatch Readiness Report\n\n";
+
+    file << "## Important Notice\n\n";
+    file << "> **FastMatch is in Readiness/Diagnostic Shell stage.**\n";
+    file << "> It does NOT replace Findline/Findcircle Measure.\n";
+    file << "> It does NOT affect Product Default.\n";
+    file << "> It is only allowed as a diagnostic candidate for L3 or component-warning cases.\n\n";
+
+    file << "## FastMatch Readiness Summary\n\n";
+
+    int allowed_count = 0;
+    int blocked_count = 0;
+    int no_fastmatch_count = 0;
+
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic")
+        {
+            no_fastmatch_count++;
+            continue;
+        }
+
+        if (r.fastmatch_allowed)
+            allowed_count++;
+        else
+            blocked_count++;
+    }
+
+    file << "- Total cases: " << results.size() << "\n";
+    file << "- Non-FastMatch cases: " << no_fastmatch_count << "\n";
+    file << "- FastMatch allowed: " << allowed_count << "\n";
+    file << "- FastMatch blocked: " << blocked_count << "\n\n";
+
+    file << "## FastMatch Readiness Gate Details\n\n";
+    file << "| Case | Tool | Level | Profile | L1L3Coverage | PolicyValid | ProductDefaultChanged | OriginalMeasure | LocalEvidence | ComponentWarning | Allowed | Status | Reason |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
+
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic")
+            continue;
+
+        file << "| " << r.case_id << " | " << r.tool << " | " << r.level << " | "
+             << r.profile_id << " | "
+             << (r.l1_l3_coverage_ok ? "YES" : "NO") << " | "
+             << (r.parameter_policy_valid ? "YES" : "NO") << " | "
+             << (r.product_default_changed ? "YES" : "NO") << " | "
+             << (r.original_measure_available ? "YES" : "NO") << " | "
+             << (r.local_evidence_confirmed ? "YES" : "NO") << " | "
+             << (r.component_warning ? "YES" : "NO") << " | "
+             << (r.fastmatch_allowed ? "YES" : "NO") << " | "
+             << r.fastmatch_status << " | " << r.fastmatch_reason << " |\n";
+    }
+
+    file << "\n## Classification\n\n";
+
+    file << "### FASTMATCH_BLOCKED_NO_COVERAGE\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (!r.fastmatch_allowed && r.fastmatch_reason.find("L1/L2/L3 coverage") != std::string::npos)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n### FASTMATCH_BLOCKED_POLICY_INVALID\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (!r.fastmatch_allowed && r.fastmatch_reason.find("parameter policy validation") != std::string::npos)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n### FASTMATCH_BLOCKED_PRODUCT_DEFAULT_CHANGED\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (!r.fastmatch_allowed && r.fastmatch_reason.find("product default was changed") != std::string::npos)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n### FASTMATCH_BLOCKED_NO_ORIGINAL_MEASURE\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (!r.fastmatch_allowed && r.fastmatch_reason.find("original Measure result is unavailable") != std::string::npos)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n### FASTMATCH_BLOCKED_NOT_L3_NO_COMPONENT_WARNING\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (!r.fastmatch_allowed && r.fastmatch_reason.find("reserved for L3 or component-warning") != std::string::npos)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n### FASTMATCH_ALLOWED_DIAGNOSTIC\n";
+    for (const auto& r : results)
+    {
+        if (r.tool != "FastMatchDiagnostic") continue;
+        if (r.fastmatch_allowed)
+            file << "- " << r.case_id << ": " << r.fastmatch_reason << "\n";
+    }
+
+    file << "\n## Important Reminder\n\n";
+    file << "Even when **Allowed=true**, FastMatch remains:\n";
+    file << "- allowed for diagnostic only\n";
+    file << "- NOT promoted to Measure default\n";
+    file << "- NOT replacing original Measure\n";
+    file << "- NOT affecting product default parameters\n";
+}
+
 void Stage25ReportWriter::WriteCaseFileIndex(
     const std::filesystem::path& out_root,
     const std::vector<Stage25CaseResult>& results)

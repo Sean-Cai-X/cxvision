@@ -2,6 +2,8 @@
 #include "ManualStateTestConsole.h"
 #include "CxScriptStage25Runner.h"
 #include "CxScriptGeometryFrameProbe.h"
+#include "CxScriptSuiteRuntime.h"
+#include "CxScriptCatalogRuntime.h"
 #include <iostream>
 
 int main(int argc, char** argv)
@@ -106,6 +108,70 @@ int main(int argc, char** argv)
                   << "\n";
 
         return ok ? 0 : 1;
+    }
+
+    std::string suite_path;
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--cxscript-suite")
+        {
+            if (i + 1 < argc)
+            {
+                suite_path = argv[++i];
+            }
+        }
+    }
+
+    if (!suite_path.empty())
+    {
+        CxScriptSuiteRuntime suite;
+        std::string suite_reason;
+
+        if (!LoadCxScriptSuiteFile(suite_path, suite, suite_reason))
+        {
+            std::cout << "suite_load_ok=false\n";
+            std::cout << "reason=" << suite_reason << "\n";
+            return 1;
+        }
+
+        std::cout << "suite_load_ok=true\n";
+        std::cout << "suite_id=" << suite.suite_id << "\n";
+        std::cout << "suite_name=" << suite.name << "\n";
+        std::cout << "catalog_path=" << suite.catalog_path << "\n";
+        std::cout << "output_root=" << suite.output_root << "\n";
+        std::cout << "case_count=" << suite.cases.size() << "\n";
+
+        for (const auto& case_entry : suite.cases)
+        {
+            std::cout << "case_id=" << case_entry.case_id << "\n";
+            std::cout << "  script_id=" << case_entry.script_id << "\n";
+            std::cout << "  expected=" << case_entry.expected_result << "\n";
+            std::cout << "  policy_guard=" << case_entry.expected_policy_guard << "\n";
+            std::cout << "  image=" << case_entry.image_id << "\n";
+            std::cout << "  level=" << case_entry.level << "\n";
+        }
+
+        if (!suite.catalog_path.empty())
+        {
+            CxScriptCatalogRuntime catalog;
+            std::string catalog_reason;
+
+            if (LoadCxScriptCatalogFile(suite.catalog_path, catalog, catalog_reason))
+            {
+                std::cout << "catalog_load_ok=true\n";
+                std::cout << "catalog_name=" << catalog.name << "\n";
+                std::cout << "catalog_version=" << catalog.version << "\n";
+                std::cout << "catalog_script_count=" << catalog.scripts.size() << "\n";
+            }
+            else
+            {
+                std::cout << "catalog_load_ok=false\n";
+                std::cout << "catalog_reason=" << catalog_reason << "\n";
+            }
+        }
+
+        return 0;
     }
 
     return glfw_occ_main();

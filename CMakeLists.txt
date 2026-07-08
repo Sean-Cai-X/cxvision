@@ -75,6 +75,10 @@ set(CXIMAGE_SOURCES
   cximage/FindlineParameterPolicy.cpp
   cximage/CxScriptStage25PolicyValidator.cpp
   cximage/CxScriptStage25CaseMatrix.cpp
+  cximage/CxScriptCatalogRuntime.cpp
+  cximage/CxScriptCatalogRegister.cpp
+  cximage/CxScriptSuiteRuntime.cpp
+  cximage/CxScriptSuiteRegister.cpp
 )
 
 set(CXGEOM_SOURCES

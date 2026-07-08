@@ -76,6 +76,17 @@ struct Stage25CaseResult
     bool snapshot_exists = false;
     bool overlay_exists = false;
     bool evidence_overlay_exists = false;
+
+    bool l1_l3_coverage_ok = false;
+    bool parameter_policy_valid = false;
+    bool product_default_changed = false;
+    bool original_measure_available = false;
+    bool local_evidence_confirmed = false;
+    bool component_warning = false;
+
+    bool fastmatch_allowed = false;
+    std::string fastmatch_status;
+    std::string fastmatch_reason;
 };
 
 struct Stage25RunOptions
