@@ -605,4 +605,43 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     float scale,
     std::string& outReason);
 
+struct ManualCatalogVisibleEntry
+{
+    std::string script_id;
+    std::string label;
+    std::string path;
+    std::string tool;
+    std::string expected_result;
+    std::string expected_policy_guard;
+    std::string contract_path;
+    std::string parameter_policy_id;
+    std::string parameter_role;
+};
+
+struct ManualCatalogHiddenEntry
+{
+    std::string script_id;
+    std::string label;
+    std::string path;
+    std::string tool;
+    std::string expected_result;
+    std::string hidden_reason;
+    std::string contract_path;
+};
+
+struct ManualCatalogUiState
+{
+    bool loaded = false;
+    std::string catalog_path;
+    std::string load_status;
+    std::string load_reason;
+
+    std::vector<ManualCatalogVisibleEntry> visible_scripts;
+    std::vector<ManualCatalogHiddenEntry> hidden_scripts;
+    std::vector<ManualCatalogHiddenEntry> advanced_scripts;
+};
+
+static constexpr const char* kCxImageCatalogPath =
+    "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
+
 #endif

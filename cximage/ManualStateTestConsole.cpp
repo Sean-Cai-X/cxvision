@@ -5596,6 +5596,12 @@ void ViewController::initManualStateTestConsole()
 {
   m_manualTest.image_file_path =
     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg";
+  static constexpr const char* kDefaultCxImageCatalogPath =
+      "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
+
+  m_manualTest.catalog_path = kDefaultCxImageCatalogPath;
+  m_manualSnippets.clear();
+
   m_manualSnippets = {
     {"Parser Run 1", "Image and shape visibility test.",
      "aimage1.Show(1);\nashape0.Show(1);\n", "builtin", true, "", "", false, false, false},
@@ -5614,61 +5620,8 @@ void ViewController::initManualStateTestConsole()
     {"CxParserExt Debug Object Assignment Smoke", "A-line debug layer smoke: Class obj = source.method();",
      "", "cxparser_ext/cxscript/debug_smoke/object_assignment_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
     {"CxParserExt Debug Return Object Smoke", "A-line debug layer smoke: returned object assignment with input ref.",
-     "", "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false},
-    {"Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
-     "", "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", true, "", "", false, false, false},
-    {"Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
-     "", "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", true, "", "", false, false, false},
-    {"Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
-     "", "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", true, "", "", false, false, false}
+     "", "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", true, "cxparser_ext_debug", "DEBUG_LAYER_SMOKE", false, false, false}
   };
-
-  static constexpr const char* kDefaultCxImageCatalogPath =
-      "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
-
-  m_manualTest.catalog_path = kDefaultCxImageCatalogPath;
-  m_manualSnippets.clear();
-
-  auto addBuiltin = [this](const std::string& name, const std::string& desc, const std::string& text, const std::string& path) {
-    ScriptSnippet s;
-    s.name = name;
-    s.description = desc;
-    s.text = text;
-    s.source_path = path;
-    s.runnable = true;
-    m_manualSnippets.push_back(s);
-  };
-
-  auto addScript = [this](const std::string& name, const std::string& desc, const std::string& path, const std::string& policy, const std::string& role) {
-    ScriptSnippet s;
-    s.name = name;
-    s.description = desc;
-    s.text = "";
-    s.source_path = path;
-    s.runnable = true;
-    s.parameter_policy_id = policy;
-    s.parameter_role = role;
-    m_manualSnippets.push_back(s);
-  };
-
-  addBuiltin("Parser Run 1", "Image and shape visibility test.", "aimage1.Show(1);\nashape0.Show(1);\n", "builtin");
-  addBuiltin("Parser Run 2", "Pattern model setup fragment.", "amatch0.setmatchrect(50,50,2200,1900);\n", "builtin");
-  addBuiltin("Parser Run 3", "Image ROI threshold fragment.", "aimage1.roieasythre(255);\naimage1.Show(1);\n", "builtin");
-  addBuiltin("Parser Run 4", "Point and line inspection fragment.", "apoints0.Show(1);\nafindline.Show(1);\n", "builtin");
-  addBuiltin("Parser Run 5", "Manual runtime call fragment.", "arun.testrun();\n", "builtin");
-  addBuiltin("Parser Run 6", "Empty integration observation fragment.", "# enter one manual integration statement\n", "builtin");
-  addBuiltin("Custom Manual Text", "Start with an empty manual editor.", "", "manual");
-
-  addScript("CxParserExt Debug Object Assignment Smoke", "A-line debug layer smoke: Class obj = source.method();",
-            "cxparser_ext/cxscript/debug_smoke/object_assignment_smoke.cxsc", "cxparser_ext_debug", "DEBUG_LAYER_SMOKE");
-  addScript("CxParserExt Debug Return Object Smoke", "A-line debug layer smoke: returned object assignment with input ref.",
-            "cxparser_ext/cxscript/debug_smoke/return_object_trace_smoke.cxsc", "cxparser_ext_debug", "DEBUG_LAYER_SMOKE");
-  addScript("Findcircle Direct Safe", "Findcircle measure + fitcircle only. No FitResultMeasure.",
-            "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc", "", "");
-  addScript("Findcircle FitResult Safe", "Findcircle measure + fitcircle + guarded FitResultMeasure.",
-            "cxparser/cxscript/module/cximage/find_circle_fitresult_test.cxsc", "", "");
-  addScript("Findcircle Ring Direct", "Findcircle ring ROI setcirclegap request/cache path.",
-            "cxparser/cxscript/module/cximage/find_circle_ring_direct_test.cxsc", "", "");
 
   CxScriptCatalogRuntime catalog;
   std::string catalog_reason;
@@ -6245,26 +6198,15 @@ void ViewController::drawManualStateTestConsole()
     for (std::size_t i = 0; i < m_manualSnippets.size(); ++i)
     {
       ScriptSnippet& snippet = m_manualSnippets[i];
+      if (snippet.source_path != "builtin" && snippet.source_path != "manual")
+        continue;
+
       ImGui::PushID(static_cast<int>(i));
       if (ImGui::Selectable(snippet.name.c_str()))
       {
-        if (snippet.source_path != "builtin" && snippet.source_path != "manual")
-        {
-          std::string text;
-          if (ReadTextFile(ResolveWorkspaceFile(snippet.source_path).generic_string(), text))
-          {
-            snippet.text = text;
-          }
-          m_manualTest.active_script_case_name = snippet.name;
-          m_manualTest.active_script_case_path = snippet.source_path;
-          m_manualTest.active_script_case_purpose = snippet.description;
-        }
-        else
-        {
-          m_manualTest.active_script_case_name.clear();
-          m_manualTest.active_script_case_path.clear();
-          m_manualTest.active_script_case_purpose.clear();
-        }
+        m_manualTest.active_script_case_name.clear();
+        m_manualTest.active_script_case_path.clear();
+        m_manualTest.active_script_case_purpose.clear();
         m_manualTest.editor_text = snippet.text;
         m_manualTest.editor_source = "snippet";
         m_manualTest.loaded_script_path = snippet.source_path;
@@ -6274,6 +6216,79 @@ void ViewController::drawManualStateTestConsole()
       }
       ImGui::TextWrapped("%s", snippet.description.c_str());
       ImGui::PopID();
+    }
+  }
+
+  ImGui::Separator();
+  ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+  if (ImGui::CollapsingHeader("Script Catalog"))
+  {
+    ImGui::Text("Catalog: %s", m_manualTest.catalog_path.c_str());
+    ImGui::Text("Status: %s", m_manualTest.catalog_loaded ? "LOADED" : "NOT_LOADED");
+
+    if (ImGui::Button("Reload cximage_catalog.cxsc"))
+    {
+      CxScriptCatalogRuntime catalog;
+      std::string catalog_reason;
+      m_manualTest.catalog_entries.clear();
+      if (LoadCxScriptCatalogFile(m_manualTest.catalog_path, catalog, catalog_reason))
+      {
+        m_manualTest.catalog_loaded = true;
+        for (const auto& entry : catalog.scripts)
+        {
+          m_manualTest.catalog_entries.push_back(entry);
+        }
+      }
+      else
+      {
+        m_manualTest.catalog_loaded = false;
+      }
+    }
+
+    ImGui::Separator();
+
+    if (!m_manualTest.catalog_entries.empty())
+    {
+      for (const auto& entry : m_manualTest.catalog_entries)
+      {
+        bool isVisible = entry.manual_visible && entry.frozen &&
+            (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
+        if (!isVisible) continue;
+
+        const bool selected =
+            m_manualTest.loaded_script_path == entry.path;
+
+        ImGui::PushID(entry.script_id.c_str());
+        if (ImGui::Selectable(entry.label.c_str(), selected))
+        {
+          std::string text;
+          if (ReadTextFile(ResolveWorkspaceFile(entry.path).generic_string(), text))
+          {
+            m_manualTest.editor_text = text;
+          }
+          m_manualTest.active_script_case_name = entry.label;
+          m_manualTest.active_script_case_path = entry.path;
+          m_manualTest.active_script_case_purpose = "CxScript Catalog: " + entry.script_id;
+          m_manualTest.editor_source = "catalog";
+          m_manualTest.loaded_script_path = entry.path;
+          m_manualTest.editor_dirty = false;
+          m_manualTest.analyzed_text.clear();
+          m_manualTest.current_line = 0;
+        }
+
+        ImGui::Text("  script_id: %s", entry.script_id.c_str());
+        ImGui::Text("  path: %s", entry.path.c_str());
+        ImGui::Text("  tool: %s | expected: %s",
+            entry.tool.c_str(),
+            entry.expected_result.c_str());
+        ImGui::Text("  contract: %s", entry.contract_path.empty() ? "(none)" : entry.contract_path.c_str());
+        ImGui::Separator();
+        ImGui::PopID();
+      }
+    }
+    else
+    {
+      ImGui::TextDisabled("No catalog entries loaded.");
     }
   }
 
@@ -6299,7 +6314,14 @@ void ViewController::drawManualStateTestConsole()
         ImGui::Text("[%s] %s", entry.expected_result.c_str(), entry.label.c_str());
         ImGui::Text("  ScriptId: %s", entry.script_id.c_str());
         ImGui::Text("  Tool: %s | Policy: %s", entry.tool.c_str(), entry.parameter_policy_id.c_str());
-        ImGui::Text("  Contract: %s", entry.contract_path.empty() ? "(none)" : entry.contract_path.c_str());
+        if (entry.contract_path.empty())
+        {
+          ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "  Contract: (MISSING)");
+        }
+        else
+        {
+          ImGui::Text("  Contract: %s", entry.contract_path.c_str());
+        }
         ImGui::Text("  Path: %s", entry.path.c_str());
         ImGui::Separator();
       }
@@ -6392,31 +6414,44 @@ void ViewController::drawManualStateTestConsole()
 
   ImGui::Separator();
   ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
-  if (ImGui::CollapsingHeader("Direct Test Modules"))
+  if (ImGui::CollapsingHeader("Legacy Recursive Scan Debug"))
   {
-    for (std::size_t i = 0; i < m_directTestModules.size(); ++i)
+    static bool showLegacyRecursiveScanDebug = false;
+    ImGui::Checkbox(
+        "Enable legacy recursive script scan",
+        &showLegacyRecursiveScanDebug);
+
+    if (showLegacyRecursiveScanDebug)
     {
-      const ScriptSnippet& module = m_directTestModules[i];
-      ImGui::PushID(1000 + static_cast<int>(i));
-      if (ImGui::Selectable(module.name.c_str()))
+      for (std::size_t i = 0; i < m_directTestModules.size(); ++i)
       {
-        m_manualTest.editor_text = module.text;
-        m_manualTest.editor_source = "direct_test_module";
-        m_manualTest.loaded_script_path = module.source_path;
-        m_manualTest.script_file_path = module.source_path;
-        m_manualTest.editor_dirty = false;
-        m_manualTest.analyzed_text.clear();
-        m_manualTest.current_line = 0;
-        m_scriptResult.status = "PENDING";
-        m_scriptResult.reason = "direct test module loaded; runtime not executed";
-        m_scriptResult.runtime_fillback_status = "not_started";
+        const ScriptSnippet& module = m_directTestModules[i];
+        ImGui::PushID(1000 + static_cast<int>(i));
+        if (ImGui::Selectable(module.name.c_str()))
+        {
+          m_manualTest.editor_text = module.text;
+          m_manualTest.editor_source = "direct_test_module";
+          m_manualTest.loaded_script_path = module.source_path;
+          m_manualTest.script_file_path = module.source_path;
+          m_manualTest.editor_dirty = false;
+          m_manualTest.analyzed_text.clear();
+          m_manualTest.current_line = 0;
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = "direct test module loaded; runtime not executed";
+          m_scriptResult.runtime_fillback_status = "not_started";
+        }
+        ImGui::TextWrapped("%s", module.source_path.c_str());
+        ImGui::PopID();
       }
-      ImGui::TextWrapped("%s", module.source_path.c_str());
-      ImGui::PopID();
+      if (m_directTestModules.empty())
+        ImGui::TextDisabled("No direct_test .cxsc modules found.");
+      ImGui::TextDisabled("rag_script_cases: semantic_reference_only / not runnable");
     }
-    if (m_directTestModules.empty())
-      ImGui::TextDisabled("No direct_test .cxsc modules found.");
-    ImGui::TextDisabled("rag_script_cases: semantic_reference_only / not runnable");
+    else
+    {
+      ImGui::TextDisabled("Legacy recursive scan is disabled.");
+      ImGui::TextDisabled("Normal Script Catalog uses cximage_catalog.cxsc as single source.");
+    }
   }
 
   ImGui::NextColumn();
