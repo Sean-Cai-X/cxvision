@@ -7814,11 +7814,12 @@ bool RunCxScriptHeadless(
         return false;
     }
 
-    std::ifstream scriptFile(options.script_path);
+    const fs::path resolvedScriptPath = ResolveWorkspaceFile(options.script_path);
+    std::ifstream scriptFile(resolvedScriptPath);
 
     if (!scriptFile.is_open())
     {
-        result.reason = "failed to open script: " + options.script_path;
+        result.reason = "failed to open script: " + options.script_path + " (resolved: " + resolvedScriptPath.generic_string() + ")";
         result.exit_code = 3;
         return false;
     }

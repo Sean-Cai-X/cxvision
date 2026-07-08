@@ -5,6 +5,7 @@
 #include "CxScriptImageManifestRuntime.h"
 #include <string>
 #include <vector>
+#include <utility>
 
 struct CxScriptSuiteRunOptions
 {
@@ -63,6 +64,26 @@ struct CxScriptSuiteCaseResult
     std::string result_overlay_path;
     std::string evidence_overlay_path;
     std::string tool_display_path;
+
+    int roi_x0 = 0;
+    int roi_y0 = 0;
+    int roi_x1 = 0;
+    int roi_y1 = 0;
+
+    int circle_cx = 0;
+    int circle_cy = 0;
+    int circle_px = 0;
+    int circle_py = 0;
+
+    double fit_line_x0 = 0.0;
+    double fit_line_y0 = 0.0;
+    double fit_line_x1 = 0.0;
+    double fit_line_y1 = 0.0;
+
+    double circle_center_x = 0.0;
+    double circle_center_y = 0.0;
+
+    std::vector<std::pair<double, double>> measure_points_xy;
 };
 
 struct CxScriptSuiteRunResult

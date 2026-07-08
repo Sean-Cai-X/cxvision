@@ -21,6 +21,62 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     if (evidenceOverlay.empty())
         evidenceOverlay = original.clone();
 
+    cv::Mat resultView = resultOverlay.clone();
+
+    if (result.tool == "Findline" && (result.roi_x0 != 0 || result.roi_y0 != 0 || result.roi_x1 != 0 || result.roi_y1 != 0))
+    {
+        cv::line(
+            resultView,
+            cv::Point(result.roi_x0, result.roi_y0),
+            cv::Point(result.roi_x1, result.roi_y1),
+            cv::Scalar(0, 255, 0),
+            2,
+            cv::LINE_AA);
+    }
+
+    if (result.tool == "Findcircle" && result.circle_radius > 0)
+    {
+        double centerX = result.circle_center_x;
+        double centerY = result.circle_center_y;
+        if (centerX == 0 && centerY == 0)
+        {
+            centerX = result.circle_cx;
+            centerY = result.circle_cy;
+        }
+        cv::circle(
+            resultView,
+            cv::Point(static_cast<int>(centerX), static_cast<int>(centerY)),
+            static_cast<int>(result.circle_radius),
+            cv::Scalar(0, 255, 255),
+            2,
+            cv::LINE_AA);
+    }
+
+    if (result.headless_ok)
+    {
+        cv::putText(
+            resultView,
+            result.contract_pass ? "PASS" : "FAIL",
+            {20, 40},
+            cv::FONT_HERSHEY_SIMPLEX,
+            1.0,
+            result.contract_pass ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255),
+            2,
+            cv::LINE_AA);
+    }
+    else
+    {
+        cv::putText(
+            resultView,
+            "HEADLESS_FAILED",
+            {20, 40},
+            cv::FONT_HERSHEY_SIMPLEX,
+            1.0,
+            cv::Scalar(0, 0, 255),
+            2,
+            cv::LINE_AA);
+    }
+
     const int targetW = 480;
 
     auto resizeKeep = [](const cv::Mat& src, int width)
@@ -32,7 +88,7 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     };
 
     cv::Mat a = resizeKeep(original, targetW);
-    cv::Mat b = resizeKeep(resultOverlay, targetW);
+    cv::Mat b = resizeKeep(resultView, targetW);
     cv::Mat c = resizeKeep(evidenceOverlay, targetW);
 
     const int h = std::max({a.rows, b.rows, c.rows});

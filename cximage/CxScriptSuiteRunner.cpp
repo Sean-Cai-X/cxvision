@@ -56,6 +56,16 @@ namespace
         return value == "true" || value == "1";
     }
 
+    bool JsonLineHasAnyKey(const std::string& line, const std::vector<std::string>& keys)
+    {
+        for (const auto& key : keys)
+        {
+            if (JsonLineHasKey(line, key))
+                return true;
+        }
+        return false;
+    }
+
     void LoadSuiteCaseMetricsFromSummary(
         const std::string& summary_path,
         CxScriptSuiteCaseResult& out)
@@ -70,21 +80,21 @@ namespace
         std::string line;
         while (std::getline(file, line))
         {
-            if (JsonLineHasKey(line, "valid_points_count"))
+            if (JsonLineHasAnyKey(line, {"valid_points_count", "valid_line_points_count", "valid_circle_points_count"}))
             {
                 try { out.valid_points_count = std::stoi(JsonLineValue(line)); }
                 catch (...) {}
             }
-            else if (JsonLineHasKey(line, "points_count"))
+            else if (JsonLineHasAnyKey(line, {"points_count", "measure_points_count", "line_measure_points_count", "circle_measure_points_count"}))
             {
                 try { out.points_count = std::stoi(JsonLineValue(line)); }
                 catch (...) {}
             }
-            else if (JsonLineHasKey(line, "has_fit_line"))
+            else if (JsonLineHasAnyKey(line, {"has_fit_line", "line_has_fit", "fit_line_available"}))
             {
                 out.has_fit_line = ParseJsonBoolValue(JsonLineValue(line));
             }
-            else if (JsonLineHasKey(line, "has_fit_circle"))
+            else if (JsonLineHasAnyKey(line, {"has_fit_circle", "circle_has_fit", "fit_circle_available"}))
             {
                 out.has_fit_circle = ParseJsonBoolValue(JsonLineValue(line));
             }
@@ -103,7 +113,7 @@ namespace
                 try { out.fit_offset = std::stod(JsonLineValue(line)); }
                 catch (...) {}
             }
-            else if (JsonLineHasKey(line, "policy_guard"))
+            else if (JsonLineHasAnyKey(line, {"actual_policy_guard", "line_policy_guard_status", "circle_policy_guard_status", "policy_guard_status", "policy_guard"}))
             {
                 out.actual_policy_guard = JsonLineValue(line);
             }
@@ -127,14 +137,84 @@ namespace
             {
                 out.conclusion = JsonLineValue(line);
             }
-            else if (JsonLineHasKey(line, "circle_radius"))
+            else if (JsonLineHasAnyKey(line, {"circle_radius", "fit_circle_radius"}))
             {
                 try { out.circle_radius = std::stod(JsonLineValue(line)); }
                 catch (...) {}
             }
-            else if (JsonLineHasKey(line, "avgdist"))
+            else if (JsonLineHasAnyKey(line, {"avgdist", "circle_avgdist", "line_avgdist"}))
             {
                 try { out.avgdist = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "roi_x0"))
+            {
+                try { out.roi_x0 = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "roi_y0"))
+            {
+                try { out.roi_y0 = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "roi_x1"))
+            {
+                try { out.roi_x1 = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "roi_y1"))
+            {
+                try { out.roi_y1 = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_cx"))
+            {
+                try { out.circle_cx = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_cy"))
+            {
+                try { out.circle_cy = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_px"))
+            {
+                try { out.circle_px = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_py"))
+            {
+                try { out.circle_py = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_line_x0"))
+            {
+                try { out.fit_line_x0 = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_line_y0"))
+            {
+                try { out.fit_line_y0 = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_line_x1"))
+            {
+                try { out.fit_line_x1 = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_line_y1"))
+            {
+                try { out.fit_line_y1 = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_center_x"))
+            {
+                try { out.circle_center_x = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "circle_center_y"))
+            {
+                try { out.circle_center_y = std::stod(JsonLineValue(line)); }
                 catch (...) {}
             }
         }
@@ -165,17 +245,21 @@ namespace
             return;
         }
 
+        const std::filesystem::path contractDir =
+            std::filesystem::path(r.case_dir) / "contract";
+        std::filesystem::create_directories(contractDir);
+
         CxScriptHeadlessOptions contractHeadless;
         contractHeadless.enabled = true;
         contractHeadless.image_path = r.image_path;
         contractHeadless.script_path = r.contract_path;
-        contractHeadless.output_dir = (std::filesystem::path(r.case_dir) / "contract").string();
+        contractHeadless.output_dir = contractDir.string();
         contractHeadless.case_name = r.case_id + "_contract";
         contractHeadless.save_overlay = false;
         contractHeadless.summary_path =
-            (std::filesystem::path(contractHeadless.output_dir) / "contract_summary.json").string();
+            (contractDir / "contract_summary.json").string();
         contractHeadless.snapshot_path =
-            (std::filesystem::path(contractHeadless.output_dir) / "contract_snapshot.txt").string();
+            (contractDir / "contract_snapshot.txt").string();
 
         contractHeadless.stage25_image_id = r.image_id;
         contractHeadless.stage25_level = r.level;
@@ -184,7 +268,7 @@ namespace
 
         contractHeadless.contract_context_enabled = true;
         contractHeadless.contract_headless_ok = r.headless_ok ? 1 : 0;
-        contractHeadless.contract_pass_initial = 1;
+        contractHeadless.contract_pass_initial = 0;
         contractHeadless.points_count = r.points_count;
         contractHeadless.valid_points_count = r.valid_points_count;
         contractHeadless.has_fit_line = r.has_fit_line ? 1 : 0;
@@ -219,6 +303,35 @@ namespace
         }
 
         LoadSuiteCaseMetricsFromSummary(contractResult.summary_path, r);
+
+        if (r.tool == "Findcircle")
+        {
+            if (r.valid_points_count < 3 || !r.has_fit_circle || r.circle_radius <= 0)
+            {
+                r.contract_pass = false;
+                r.contract_status = "findcircle_ok_failed";
+                if (r.valid_points_count < 3)
+                    r.conclusion = "Findcircle OK requires valid_points_count >= 3";
+                else if (!r.has_fit_circle)
+                    r.conclusion = "Findcircle OK requires has_fit_circle == true";
+                else if (r.circle_radius <= 0)
+                    r.conclusion = "Findcircle OK requires circle_radius > 0";
+                return;
+            }
+        }
+        else if (r.tool == "Findline")
+        {
+            if (r.valid_points_count < 3 || !r.has_fit_line)
+            {
+                r.contract_pass = false;
+                r.contract_status = "findline_ok_failed";
+                if (r.valid_points_count < 3)
+                    r.conclusion = "Findline OK requires valid_points_count >= 3";
+                else if (!r.has_fit_line)
+                    r.conclusion = "Findline OK requires has_fit_line == true";
+                return;
+            }
+        }
 
         if (r.contract_status.empty())
             r.contract_status = r.contract_pass ? "contract_passed" : "contract_failed";
@@ -300,6 +413,15 @@ namespace
                 headless.tool_half_width = targetRoi->tool_half_width;
                 headless.threshold = targetRoi->threshold;
                 headless.method = targetRoi->method;
+
+                out.roi_x0 = targetRoi->x0;
+                out.roi_y0 = targetRoi->y0;
+                out.roi_x1 = targetRoi->x1;
+                out.roi_y1 = targetRoi->y1;
+                out.circle_cx = targetRoi->cx;
+                out.circle_cy = targetRoi->cy;
+                out.circle_px = targetRoi->px;
+                out.circle_py = targetRoi->py;
             }
         }
 
@@ -313,6 +435,26 @@ namespace
         out.result_overlay_path = headlessResult.overlay_path;
 
         LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
+
+        if (!out.headless_ok)
+        {
+            out.contract_pass = false;
+            out.actual_policy_guard = "HEADLESS_FAILED";
+            out.failure_stage = "headless_execution_failed";
+            out.conclusion = "Headless execution failed: " + headlessResult.reason;
+
+            if (options.export_tool_display)
+            {
+                out.tool_display_path =
+                    CxScriptToolDisplayExporter::ExportToolDisplay(
+                        image.path,
+                        out.result_overlay_path,
+                        out.evidence_overlay_path,
+                        caseDir / "tool_display.png",
+                        out);
+            }
+            return;
+        }
 
         if (options.export_tool_display)
         {

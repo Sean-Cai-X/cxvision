@@ -537,7 +537,7 @@ struct CxScriptHeadlessOptions
 
     bool contract_context_enabled = false;
     int contract_headless_ok = 0;
-    int contract_pass_initial = 1;
+    int contract_pass_initial = 0;
     int points_count = 0;
     int valid_points_count = 0;
     int has_fit_line = 0;
