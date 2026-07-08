@@ -1,6 +1,0 @@
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/libtorch_module_minimal_tests.dir
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/libtorch_module_contract_tests.dir
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/libtorch_module_segmentation_stage_tests.dir
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/RUN_TESTS.dir
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/ALL_BUILD.dir
-D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/torchbuild/CMakeFiles/ZERO_CHECK.dir
