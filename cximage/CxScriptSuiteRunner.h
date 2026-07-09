@@ -75,7 +75,9 @@ struct CxScriptSuiteCaseResult
     std::string result_status;
     std::string failure_stage;
     std::string contract_status;
+    std::string contract_conclusion;
     std::string conclusion;
+    std::string policy_guard;
 
     double circle_radius = 0.0;
     double avgdist = 0.0;

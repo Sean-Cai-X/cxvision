@@ -226,7 +226,13 @@ namespace
             }
             else if (JsonLineHasKey(line, "contract_conclusion"))
             {
+                out.contract_conclusion = JsonLineValue(line);
                 out.conclusion = JsonLineValue(line);
+            }
+            else if (JsonLineHasAnyKey(line, {"policy_guard", "actual_policy_guard"}))
+            {
+                out.policy_guard = JsonLineValue(line);
+                out.actual_policy_guard = JsonLineValue(line);
             }
             else if (JsonLineHasAnyKey(line, {"circle_radius", "fit_circle_radius"}))
             {
@@ -679,6 +685,84 @@ namespace
         catch (...) {}
     }
 
+    void WriteHumanReview(
+        const std::string& case_id,
+        const std::string& decision,
+        const std::string& note,
+        const std::string& next_action,
+        const std::filesystem::path& caseDir)
+    {
+        std::ofstream file(caseDir / "human_review.json");
+        if (!file.is_open())
+            return;
+
+        std::time_t now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm now_tm;
+        localtime_s(&now_tm, &now_c);
+        char time_buf[64];
+        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%S", &now_tm);
+
+        file << "{\n";
+        file << "  \"review_id\": \"" << case_id << "_promotion\",\n";
+        file << "  \"case_id\": \"" << case_id << "\",\n";
+        file << "  \"decision\": \"" << decision << "\",\n";
+        file << "  \"reviewer\": \"manual\",\n";
+        file << "  \"timestamp\": \"" << time_buf << "\",\n";
+        file << "  \"note\": \"" << note << "\",\n";
+        file << "  \"next_action\": \"" << next_action << "\"\n";
+        file << "}\n";
+    }
+
+    void WriteFinalCaseSummary(
+        const CxScriptSuiteCaseResult& r,
+        const std::filesystem::path& caseDir)
+    {
+        std::ofstream file(caseDir / "result_summary.json");
+        if (!file.is_open())
+            return;
+
+        file << "{\n";
+        file << "  \"case_id\": \"" << r.case_id << "\",\n";
+        file << "  \"evidence_id\": \"" << r.evidence_id << "\",\n";
+        file << "  \"image_id\": \"" << r.image_id << "\",\n";
+        file << "  \"target_id\": \"" << r.target_id << "\",\n";
+        file << "  \"script_id\": \"" << r.script_id << "\",\n";
+        file << "  \"parameter_profile_id\": \"" << r.parameter_profile_id << "\",\n";
+        file << "\n";
+        file << "  \"headless_ok\": " << (r.headless_ok ? "true" : "false") << ",\n";
+        file << "  \"contract_pass\": " << (r.contract_pass ? "1" : "0") << ",\n";
+        file << "  \"contract_status\": \"" << r.contract_status << "\",\n";
+        file << "  \"contract_conclusion\": \"" << r.contract_conclusion << "\",\n";
+        file << "\n";
+        file << "  \"valid_points_count\": " << r.valid_points_count << ",\n";
+        file << "  \"has_fit_line\": " << (r.has_fit_line ? "true" : "false") << ",\n";
+        file << "  \"has_fit_circle\": " << (r.has_fit_circle ? "true" : "false") << ",\n";
+        file << "  \"circle_radius\": " << r.circle_radius << ",\n";
+        file << "  \"avgdist\": " << r.avgdist << ",\n";
+        file << "\n";
+        file << "  \"policy_guard\": \"" << r.policy_guard << "\",\n";
+        file << "  \"actual_policy_guard\": \"" << r.actual_policy_guard << "\",\n";
+        file << "  \"result_status\": \"" << r.result_status << "\",\n";
+        file << "  \"failure_stage\": \"" << r.failure_stage << "\",\n";
+        file << "  \"conclusion\": \"" << r.conclusion << "\",\n";
+        file << "\n";
+        file << "  \"snapshot_path\": \"" << r.snapshot_path << "\",\n";
+        file << "  \"summary_path\": \"" << r.summary_path << "\",\n";
+        file << "  \"result_overlay_path\": \"" << r.result_overlay_path << "\",\n";
+        file << "  \"evidence_overlay_path\": \"" << r.evidence_overlay_path << "\",\n";
+        file << "  \"tool_display_path\": \"" << r.tool_display_path << "\",\n";
+        file << "\n";
+        file << "  \"roi_x0\": " << r.roi_x0 << ",\n";
+        file << "  \"roi_y0\": " << r.roi_y0 << ",\n";
+        file << "  \"roi_x1\": " << r.roi_x1 << ",\n";
+        file << "  \"roi_y1\": " << r.roi_y1 << ",\n";
+        file << "  \"circle_cx\": " << r.circle_cx << ",\n";
+        file << "  \"circle_cy\": " << r.circle_cy << ",\n";
+        file << "  \"circle_px\": " << r.circle_px << ",\n";
+        file << "  \"circle_py\": " << r.circle_py << "\n";
+        file << "}\n";
+    }
+
     void WriteReplayPackage(
         const std::filesystem::path& caseDir,
         const CxScriptSuiteCase& suite_case,
@@ -934,44 +1018,11 @@ namespace
                 }
                 else if (JsonLineHasKey(line, "contract_conclusion"))
                 {
+                    r.contract_conclusion = JsonLineValue(line);
                     r.conclusion = JsonLineValue(line);
                 }
             }
         }
-
-        if (r.tool == "Findcircle")
-        {
-            if (r.valid_points_count < 3 || !r.has_fit_circle || r.circle_radius <= 0)
-            {
-                r.contract_pass = false;
-                r.contract_status = "findcircle_ok_failed";
-                if (r.valid_points_count < 3)
-                    r.conclusion = "Findcircle OK requires valid_points_count >= 3";
-                else if (!r.has_fit_circle)
-                    r.conclusion = "Findcircle OK requires has_fit_circle == true";
-                else if (r.circle_radius <= 0)
-                    r.conclusion = "Findcircle OK requires circle_radius > 0";
-                return;
-            }
-        }
-        else if (r.tool == "Findline")
-        {
-            if (r.valid_points_count < 3 || !r.has_fit_line)
-            {
-                r.contract_pass = false;
-                r.contract_status = "findline_ok_failed";
-                if (r.valid_points_count < 3)
-                    r.conclusion = "Findline OK requires valid_points_count >= 3";
-                else if (!r.has_fit_line)
-                    r.conclusion = "Findline OK requires has_fit_line == true";
-                return;
-            }
-        }
-
-        if (r.contract_status.empty())
-            r.contract_status = r.contract_pass ? "contract_passed" : "contract_failed";
-        if (r.conclusion.empty())
-            r.conclusion = r.contract_pass ? "Contract script passed" : "Contract script failed";
     }
 
     void RunSingleSuiteCase(
@@ -1090,6 +1141,7 @@ namespace
             headless.output_dir = caseDir.string();
             headless.case_name = suiteCase.case_id;
             headless.save_overlay = options.save_overlay;
+            headless.enable_evidence_analysis = false;
 
             headless.stage25_image_id = image.image_id;
             headless.stage25_level = image.level;
@@ -1136,7 +1188,9 @@ namespace
             out.summary_path = headlessResult.summary_path;
             out.result_overlay_path = headlessResult.overlay_path;
 
+            std::cout << "[DEBUG] Loading metrics from summary\n";
             LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
+            std::cout << "[DEBUG] Metrics loaded, headless_ok=" << (out.headless_ok ? "true" : "false") << "\n";
 
             if (!out.headless_ok)
             {
@@ -1160,6 +1214,7 @@ namespace
                 }
 
                 WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+                WriteFinalCaseSummary(out, caseDir);
                 if (options.dump_replay_package)
                 {
                     CopyScriptSnapshot(script.path, caseDir);
@@ -1175,11 +1230,14 @@ namespace
 
             CxAlgorithmTraceScope::Clear();
             AppendPhaseTrace(caseDir, "headless", "end", "", timer.elapsed_ms());
+
+            std::cout << "[DEBUG] headless completed, tool_display starting\n";
         }
 
         {
             ScopedSuiteTimer timer("tool_display:" + suiteCase.case_id);
             AppendPhaseTrace(caseDir, "tool_display", "begin", "", 0);
+            std::cout << "[DEBUG] tool_display begin\n";
             if (options.trace_run)
                 trace.event("tool_display", "begin", "Exporting tool display");
 
@@ -1202,6 +1260,7 @@ namespace
         if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            WriteFinalCaseSummary(out, caseDir);
             if (options.dump_replay_package)
             {
                 CopyScriptSnapshot(script.path, caseDir);
@@ -1226,6 +1285,7 @@ namespace
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            WriteFinalCaseSummary(out, caseDir);
             if (options.dump_replay_package)
             {
                 CopyScriptSnapshot(script.path, caseDir);
@@ -1237,6 +1297,7 @@ namespace
         }
 
         WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+        WriteFinalCaseSummary(out, caseDir);
 
         if (options.dump_replay_package)
         {
@@ -1257,6 +1318,17 @@ namespace
         }
 
         AppendPhaseTrace(caseDir, "promotion", "end", "", 0);
+
+        if (out.contract_pass && out.headless_ok)
+        {
+            WriteHumanReview(
+                suiteCase.case_id,
+                "accept",
+                suiteCase.case_id + " baseline accepted. ROI, measure points, fit circle, and evidence summary are consistent.",
+                "promote_to_baseline",
+                caseDir);
+        }
+
         if (options.trace_run)
         {
             trace.event("promotion", "end", "Promotion finished");

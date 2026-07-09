@@ -8178,6 +8178,7 @@ bool RunCxScriptHeadless(
         result.overlay_path = overlayPath.string();
     }
 
+    std::cout << "[DEBUG HEADLESS] Setting result state\n";
     result.run_state = context.run_state;
     result.debug_status = context.debug_status;
     result.debug_reason = context.debug_reason;
@@ -8186,6 +8187,7 @@ bool RunCxScriptHeadless(
     result.current_result_reason = context.current_result_ref.reason;
     result.ok = true;
     result.exit_code = (context.run_state == "blocked") ? 2 : 0;
+    std::cout << "[DEBUG HEADLESS] Saving summary\n";
     fs::path summaryPath = options.summary_path.empty()
         ? fs::path(options.output_dir) / "result_summary.json"
         : fs::path(options.summary_path);
@@ -8201,18 +8203,21 @@ bool RunCxScriptHeadless(
 
     result.summary_path = summaryPath.string();
 
-    CxImageEvidenceOptions evidenceOptions;
-    evidenceOptions.enabled = true;
-    evidenceOptions.profile_half_width = 40;
-    evidenceOptions.min_gradient = 6.0;
-    evidenceOptions.min_gradient_ratio = 0.35;
-    evidenceOptions.max_profiles = 200;
-    evidenceOptions.nearest_point_support_px = 3.0;
-    evidenceOptions.line_distance_support_px = 3.0;
-    evidenceOptions.save_profile_debug = false;
+    if (options.enable_evidence_analysis)
+    {
+        CxImageEvidenceOptions evidenceOptions;
+        evidenceOptions.enabled = true;
+        evidenceOptions.profile_half_width = 40;
+        evidenceOptions.min_gradient = 6.0;
+        evidenceOptions.min_gradient_ratio = 0.35;
+        evidenceOptions.max_profiles = 200;
+        evidenceOptions.nearest_point_support_px = 3.0;
+        evidenceOptions.line_distance_support_px = 3.0;
+        evidenceOptions.save_profile_debug = false;
 
-    std::string evidenceReason;
-    AnalyzeCxScriptImageEvidence(mat, context, evidenceOptions, fs::path(options.output_dir), evidenceReason);
+        std::string evidenceReason;
+        AnalyzeCxScriptImageEvidence(mat, context, evidenceOptions, fs::path(options.output_dir), evidenceReason);
+    }
 
     return true;
 

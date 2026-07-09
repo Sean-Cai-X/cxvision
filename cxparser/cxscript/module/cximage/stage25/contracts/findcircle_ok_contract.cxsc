@@ -1,15 +1,40 @@
-global.contract_pass = 0;
-global.contract_status = "findcircle_ok_failed";
-global.contract_conclusion = "Findcircle OK failed";
+contract.reset();
 
-if (global.headless_ok == 1) {
-    if (global.valid_points_count >= 3) {
-        if (global.has_fit_circle == 1) {
-            if (global.circle_radius > 0) {
-                global.contract_pass = 1;
-                global.contract_status = "findcircle_ok_passed";
-                global.contract_conclusion = "Findcircle OK: circle points and fitted circle are available.";
-            }
-        }
-    }
+if (case.get_bool("headless_ok") == 0) {
+    contract.fail("headless execution failed");
+}
+
+if (case.get_int("valid_points_count") < 3) {
+    contract.fail("Findcircle OK requires valid_points_count >= 3");
+}
+
+if (case.get_bool("has_fit_circle") == 0) {
+    contract.fail("Findcircle OK requires has_fit_circle == true");
+}
+
+if (case.get_double("circle_radius") <= 0) {
+    contract.fail("Findcircle OK requires circle_radius > 0");
+}
+
+if (case.string_equals("policy_guard", "CIRCLE_MEASURE_AND_FIT_AVAILABLE") == 0) {
+    contract.fail("Findcircle OK requires CIRCLE_MEASURE_AND_FIT_AVAILABLE");
+}
+
+if (case.file_exists("result_overlay_path") == 0) {
+    contract.fail("missing result_overlay.png");
+}
+
+if (case.file_exists("tool_display_path") == 0) {
+    contract.fail("missing tool_display.png");
+}
+
+if (contract.failed() == 1) {
+    contract.setstatus("findcircle_ok_failed");
+    contract.setconclusion("Findcircle OK failed.");
+}
+
+if (contract.failed() == 0) {
+    contract.pass("Findcircle OK passed.");
+    contract.setstatus("findcircle_ok_passed");
+    contract.setconclusion("Findcircle OK: circle points, fitted circle, overlay and tool display are available.");
 }

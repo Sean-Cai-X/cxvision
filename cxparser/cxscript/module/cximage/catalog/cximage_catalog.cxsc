@@ -82,6 +82,22 @@ CxScriptCatalog_script_setmanualvisible(1);
 CxScriptCatalog_script_setregressionvisible(1);
 CxScriptCatalog_script_setadvancedvisible(0);
 
+CxScriptCatalog_addscript("findline_stage25_profile_ok");
+CxScriptCatalog_script_setlabel("[OK] Findline - Stage25 Profile Driven");
+CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/frozen/findline/findline_stage25_profile_ok.cxsc");
+CxScriptCatalog_script_settool("Findline");
+CxScriptCatalog_script_setorientation("any");
+CxScriptCatalog_script_setparameterpolicy("profile_driven");
+CxScriptCatalog_script_setparameterrole("STAGE25_RECOMMENDED_TEMPLATE");
+CxScriptCatalog_script_setexpected("ok");
+CxScriptCatalog_script_setexpectedstatus("geometry_result_available");
+CxScriptCatalog_script_setexpectedpolicyguard("MEASURE_AND_FIT_AVAILABLE");
+CxScriptCatalog_script_setcontract("cxparser/cxscript/module/cximage/stage25/contracts/findline_ok_contract.cxsc");
+CxScriptCatalog_script_setfrozen(1);
+CxScriptCatalog_script_setmanualvisible(1);
+CxScriptCatalog_script_setregressionvisible(1);
+CxScriptCatalog_script_setadvancedvisible(0);
+
 CxScriptCatalog_addscript("fastmatch_findline_candidate_diagnostic");
 CxScriptCatalog_script_setlabel("[Diagnostic] FastMatch Findline Candidate");
 CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_findline_candidate_diagnostic.cxsc");

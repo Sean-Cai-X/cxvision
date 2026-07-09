@@ -545,6 +545,7 @@ struct CxScriptHeadlessOptions
     int filterprofile = 0;
 
     bool contract_context_enabled = false;
+    bool enable_evidence_analysis = true;
     int contract_headless_ok = 0;
     int contract_pass_initial = 0;
     int points_count = 0;

@@ -1,6 +1,26 @@
 CxParameterProfile_reset(0);
 CxParameterProfile_settool("Findline");
 
+CxParameterProfile_add("findline_threshold8_baseline");
+CxParameterProfile_setrole("BASELINE_OK");
+CxParameterProfile_setmethod(0);
+CxParameterProfile_setthreshold(8);
+CxParameterProfile_setlinegap(6);
+CxParameterProfile_setwgap(8);
+CxParameterProfile_sethgap(32);
+CxParameterProfile_setfilterprofile(1);
+CxParameterProfile_setdescription("Findline baseline profile from Stage2.5 threshold8 original measure.");
+
+CxParameterProfile_add("findline_linegap10_baseline");
+CxParameterProfile_setrole("BASELINE_OK");
+CxParameterProfile_setmethod(0);
+CxParameterProfile_setthreshold(20);
+CxParameterProfile_setlinegap(10);
+CxParameterProfile_setwgap(8);
+CxParameterProfile_sethgap(32);
+CxParameterProfile_setfilterprofile(1);
+CxParameterProfile_setdescription("Findline baseline profile from Stage2.5 linegap10 original measure.");
+
 CxParameterProfile_add("findline_stage25_filter20");
 CxParameterProfile_setrole("BASELINE_OK");
 CxParameterProfile_setmethod(0);
@@ -11,15 +31,25 @@ CxParameterProfile_sethgap(8);
 CxParameterProfile_setfilterprofile(1);
 CxParameterProfile_setdescription("Baseline Findline profile from verified Stage25 filter20 case.");
 
-CxParameterProfile_add("findline_threshold8");
-CxParameterProfile_setrole("DIAGNOSTIC_LOW_CONTRAST");
+CxParameterProfile_add("findline_filter_relax_diagnostic");
+CxParameterProfile_setrole("DIAGNOSTIC");
 CxParameterProfile_setmethod(0);
-CxParameterProfile_setthreshold(8);
+CxParameterProfile_setthreshold(20);
+CxParameterProfile_setlinegap(6);
+CxParameterProfile_setwgap(8);
+CxParameterProfile_sethgap(32);
+CxParameterProfile_setfilterprofile(0);
+CxParameterProfile_setdescription("Diagnostic relaxed filter profile; not formal baseline.");
+
+CxParameterProfile_add("findline_gamma_diagnostic");
+CxParameterProfile_setrole("DIAGNOSTIC");
+CxParameterProfile_setmethod(0);
+CxParameterProfile_setthreshold(20);
 CxParameterProfile_setlinegap(6);
 CxParameterProfile_setwgap(32);
 CxParameterProfile_sethgap(8);
-CxParameterProfile_setfilterprofile(1);
-CxParameterProfile_setdescription("Lower threshold diagnostic profile for weak contrast.");
+CxParameterProfile_setfilterprofile(0);
+CxParameterProfile_setdescription("Diagnostic gamma profile for contrast adjustment.");
 
 CxParameterProfile_add("findline_wgap24");
 CxParameterProfile_setrole("DIAGNOSTIC_NARROW_SEARCH");
@@ -30,13 +60,3 @@ CxParameterProfile_setwgap(24);
 CxParameterProfile_sethgap(8);
 CxParameterProfile_setfilterprofile(1);
 CxParameterProfile_setdescription("Narrower wgap for more focused search area.");
-
-CxParameterProfile_add("findline_filter0");
-CxParameterProfile_setrole("DIAGNOSTIC_NO_FILTER");
-CxParameterProfile_setmethod(0);
-CxParameterProfile_setthreshold(20);
-CxParameterProfile_setlinegap(6);
-CxParameterProfile_setwgap(32);
-CxParameterProfile_sethgap(8);
-CxParameterProfile_setfilterprofile(0);
-CxParameterProfile_setdescription("No filter profile for diagnostic comparison.");

@@ -1,0 +1,23 @@
+Image m_image;
+Findline m_line;
+
+m_image.copyFromMat(global.matInput);
+
+m_line.SetWHgap(global.wgap, global.hgap);
+m_line.setlinegap(global.linegap);
+m_line.setline(
+    global.roi_x0,
+    global.roi_y0,
+    global.roi_x1,
+    global.roi_y1,
+    global.tool_half_width);
+
+m_line.setmethod(global.method);
+m_line.setthre(global.threshold);
+m_line.setfilterprofile(global.filterprofile);
+
+m_line.measure(&m_image);
+m_line.fitline();
+
+global.line_ref = m_line.get_result();
+global.current_status = "geometry_result_available";
