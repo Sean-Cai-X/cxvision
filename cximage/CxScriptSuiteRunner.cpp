@@ -78,7 +78,46 @@ namespace
             return;
 
         std::string line;
+        std::string jsonContent;
         while (std::getline(file, line))
+        {
+            jsonContent += line + "\n";
+        }
+
+        size_t pointsArrayStart = jsonContent.find("\"measure_points_xy\": [");
+        if (pointsArrayStart != std::string::npos)
+        {
+            pointsArrayStart += std::string("\"measure_points_xy\": [").size();
+            size_t pointsArrayEnd = jsonContent.find("]", pointsArrayStart);
+            if (pointsArrayEnd != std::string::npos)
+            {
+                std::string pointsArray = jsonContent.substr(pointsArrayStart, pointsArrayEnd - pointsArrayStart);
+                size_t pos = 0;
+                while ((pos = pointsArray.find("[", pos)) != std::string::npos)
+                {
+                    size_t endPos = pointsArray.find("]", pos);
+                    if (endPos != std::string::npos)
+                    {
+                        std::string pointPair = pointsArray.substr(pos + 1, endPos - pos - 1);
+                        size_t commaPos = pointPair.find(",");
+                        if (commaPos != std::string::npos)
+                        {
+                            try
+                            {
+                                double x = std::stod(pointPair.substr(0, commaPos));
+                                double y = std::stod(pointPair.substr(commaPos + 1));
+                                out.measure_points_xy.emplace_back(x, y);
+                            }
+                            catch (...) {}
+                        }
+                    }
+                    pos = endPos + 1;
+                }
+            }
+        }
+
+        std::istringstream contentStream(jsonContent);
+        while (std::getline(contentStream, line))
         {
             if (JsonLineHasAnyKey(line, {"valid_points_count", "valid_line_points_count", "valid_circle_points_count"}))
             {
@@ -302,7 +341,26 @@ namespace
             return;
         }
 
-        LoadSuiteCaseMetricsFromSummary(contractResult.summary_path, r);
+        std::ifstream contractFile(contractResult.summary_path);
+        if (contractFile.is_open())
+        {
+            std::string line;
+            while (std::getline(contractFile, line))
+            {
+                if (JsonLineHasKey(line, "contract_pass"))
+                {
+                    r.contract_pass = ParseJsonBoolValue(JsonLineValue(line));
+                }
+                else if (JsonLineHasKey(line, "contract_status"))
+                {
+                    r.contract_status = JsonLineValue(line);
+                }
+                else if (JsonLineHasKey(line, "contract_conclusion"))
+                {
+                    r.conclusion = JsonLineValue(line);
+                }
+            }
+        }
 
         if (r.tool == "Findcircle")
         {
@@ -422,6 +480,25 @@ namespace
                 out.circle_cy = targetRoi->cy;
                 out.circle_px = targetRoi->px;
                 out.circle_py = targetRoi->py;
+
+                std::cout << "[DEBUG] Found target: " << suiteCase.target_id 
+                          << " for image: " << image.image_id 
+                          << " cx=" << targetRoi->cx << " cy=" << targetRoi->cy 
+                          << " px=" << targetRoi->px << " py=" << targetRoi->py << "\n";
+            }
+            else
+            {
+                std::cout << "[DEBUG] Target NOT found: " << suiteCase.target_id 
+                          << " for image: " << image.image_id << "\n";
+                const CxScriptImageManifestEntry* img = FindImageById(manifest, image.image_id);
+                if (img)
+                {
+                    std::cout << "[DEBUG] Image has " << img->targets.size() << " targets:\n";
+                    for (const auto& t : img->targets)
+                    {
+                        std::cout << "[DEBUG]   target_id=" << t.target_id << "\n";
+                    }
+                }
             }
         }
 

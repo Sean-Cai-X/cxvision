@@ -224,7 +224,8 @@ namespace
                             const auto targetEnd = FindObjectEnd(text, elemPos);
                             if (targetEnd != std::string::npos)
                             {
-                                size_t tp = elemPos;
+                                size_t tp = elemPos + 1;
+                                SkipWhitespace(text, tp);
                                 while (tp < targetEnd)
                                 {
                                     const std::string tkey = ParseString(text, tp);

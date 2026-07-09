@@ -9,7 +9,18 @@
       "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L0_basic/basic_01.jpg",
       "width": 1280,
       "height": 960,
-      "tool_targets": []
+      "tool_targets": [
+        {
+          "tool": "Findcircle",
+          "roi_name": "basic_dot",
+          "cx": 640,
+          "cy": 480,
+          "px": 960,
+          "py": 480,
+          "gap": 5,
+          "linegap": 3
+        }
+      ]
     },
     {
       "image_id": "line_high_contrast_001",

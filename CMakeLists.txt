@@ -241,16 +241,7 @@ add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
   COMMENT "Copy OpenCV runtime DLL"
 )
 
-set(CXPARSER_MODULE_CXSCRIPT_ROOT
-    "${CMAKE_CURRENT_SOURCE_DIR}/cxparser/cxscript/module"
-    CACHE PATH "cxparser module cxscript root")
 
-add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_directory
-          "${CXPARSER_MODULE_CXSCRIPT_ROOT}"
-          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>/cxscript/module"
-  COMMENT "Copy cxparser module cxscript assets for GUI module acceptance"
-)
 
 add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different

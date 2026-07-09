@@ -1,6 +1,103 @@
 #include "CxScriptToolDisplayExporter.h"
 #include <opencv2/opencv.hpp>
 
+static void DrawMeasurePoints(
+    cv::Mat& image,
+    const std::vector<std::pair<double, double>>& pts)
+{
+    for (const auto& p : pts)
+    {
+        cv::circle(
+            image,
+            cv::Point(
+                static_cast<int>(std::round(p.first)),
+                static_cast<int>(std::round(p.second))),
+            3,
+            cv::Scalar(0, 0, 255),
+            -1,
+            cv::LINE_AA);
+    }
+}
+
+static void DrawFindlineGeometry(
+    cv::Mat& image,
+    const CxScriptSuiteCaseResult& r)
+{
+    if (r.roi_x0 != 0 || r.roi_y0 != 0 || r.roi_x1 != 0 || r.roi_y1 != 0)
+    {
+        cv::line(
+            image,
+            cv::Point(r.roi_x0, r.roi_y0),
+            cv::Point(r.roi_x1, r.roi_y1),
+            cv::Scalar(0, 255, 0),
+            2,
+            cv::LINE_AA);
+    }
+
+    DrawMeasurePoints(image, r.measure_points_xy);
+
+    if (r.has_fit_line)
+    {
+        cv::line(
+            image,
+            cv::Point(
+                static_cast<int>(std::round(r.fit_line_x0)),
+                static_cast<int>(std::round(r.fit_line_y0))),
+            cv::Point(
+                static_cast<int>(std::round(r.fit_line_x1)),
+                static_cast<int>(std::round(r.fit_line_y1))),
+            cv::Scalar(0, 255, 255),
+            2,
+            cv::LINE_AA);
+    }
+}
+
+static void DrawFindcircleGeometry(
+    cv::Mat& image,
+    const CxScriptSuiteCaseResult& r)
+{
+    if (r.circle_cx != 0 || r.circle_cy != 0 || r.circle_px != 0 || r.circle_py != 0)
+    {
+        const double roiRadius =
+            std::hypot(
+                static_cast<double>(r.circle_px - r.circle_cx),
+                static_cast<double>(r.circle_py - r.circle_cy));
+
+        if (roiRadius > 1.0)
+        {
+            cv::circle(
+                image,
+                cv::Point(r.circle_cx, r.circle_cy),
+                static_cast<int>(std::round(roiRadius)),
+                cv::Scalar(0, 255, 0),
+                2,
+                cv::LINE_AA);
+        }
+    }
+
+    DrawMeasurePoints(image, r.measure_points_xy);
+
+    if (r.has_fit_circle && r.circle_radius > 0)
+    {
+        double centerX = r.circle_center_x;
+        double centerY = r.circle_center_y;
+        if (centerX == 0 && centerY == 0)
+        {
+            centerX = r.circle_cx;
+            centerY = r.circle_cy;
+        }
+        cv::circle(
+            image,
+            cv::Point(
+                static_cast<int>(std::round(centerX)),
+                static_cast<int>(std::round(centerY))),
+            static_cast<int>(std::round(r.circle_radius)),
+            cv::Scalar(0, 255, 255),
+            2,
+            cv::LINE_AA);
+    }
+}
+
 std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     const std::string& original_path,
     const std::string& result_overlay_path,
@@ -23,33 +120,13 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
 
     cv::Mat resultView = resultOverlay.clone();
 
-    if (result.tool == "Findline" && (result.roi_x0 != 0 || result.roi_y0 != 0 || result.roi_x1 != 0 || result.roi_y1 != 0))
+    if (result.tool == "Findline")
     {
-        cv::line(
-            resultView,
-            cv::Point(result.roi_x0, result.roi_y0),
-            cv::Point(result.roi_x1, result.roi_y1),
-            cv::Scalar(0, 255, 0),
-            2,
-            cv::LINE_AA);
+        DrawFindlineGeometry(resultView, result);
     }
-
-    if (result.tool == "Findcircle" && result.circle_radius > 0)
+    else if (result.tool == "Findcircle")
     {
-        double centerX = result.circle_center_x;
-        double centerY = result.circle_center_y;
-        if (centerX == 0 && centerY == 0)
-        {
-            centerX = result.circle_cx;
-            centerY = result.circle_cy;
-        }
-        cv::circle(
-            resultView,
-            cv::Point(static_cast<int>(centerX), static_cast<int>(centerY)),
-            static_cast<int>(result.circle_radius),
-            cv::Scalar(0, 255, 255),
-            2,
-            cv::LINE_AA);
+        DrawFindcircleGeometry(resultView, result);
     }
 
     if (result.headless_ok)
@@ -75,6 +152,19 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
             cv::Scalar(0, 0, 255),
             2,
             cv::LINE_AA);
+
+        if (!result.failure_stage.empty())
+        {
+            cv::putText(
+                resultView,
+                result.failure_stage,
+                {20, 80},
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.7,
+                cv::Scalar(0, 0, 255),
+                2,
+                cv::LINE_AA);
+        }
     }
 
     const int targetW = 480;

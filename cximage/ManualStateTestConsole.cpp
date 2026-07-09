@@ -76,6 +76,17 @@ fs::path ResolveWorkspaceFile(const std::string& path)
 {
   const fs::path requested(path);
   if (requested.is_absolute() && fs::exists(requested)) return requested;
+
+#ifdef _WIN32
+  wchar_t exePath[MAX_PATH];
+  if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+  {
+    const fs::path exeDir = fs::path(exePath).parent_path();
+    const fs::path exeRelative = exeDir / requested;
+    if (fs::exists(exeRelative)) return fs::absolute(exeRelative);
+  }
+#endif
+
   if (fs::exists(requested)) return fs::absolute(requested);
   fs::path current = fs::current_path();
   while (!current.empty())
@@ -7551,6 +7562,7 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "  \"stage25_image_id\": \"" << CxDebugJsonEscape(options.stage25_image_id) << "\",\n";
         file << "  \"stage25_target_id\": \"" << CxDebugJsonEscape(options.stage25_target_id) << "\",\n";
         file << "  \"stage25_level\": \"" << CxDebugJsonEscape(options.stage25_level) << "\",\n";
+        file << "  \"roi_injected\": " << ((options.circle_cx != 0 || options.circle_cy != 0 || options.roi_x0 != 0 || options.roi_y0 != 0) ? "true" : "false") << ",\n";
         file << "  \"points_count\": " << summaryPointsCount << ",\n";
         file << "  \"valid_points_count\": " << summaryValidPointsCount << ",\n";
         file << "  \"has_fit_line\": " << (summaryHasFitLine ? "true" : "false") << ",\n";
@@ -7569,6 +7581,47 @@ static bool SaveCxScriptHeadlessSummaryJson(
         file << "  \"contract_pass\": " << contractPass << ",\n";
         file << "  \"contract_status\": \"" << CxDebugJsonEscape(contractStatus) << "\",\n";
         file << "  \"contract_conclusion\": \"" << CxDebugJsonEscape(contractConclusion) << "\",\n";
+
+        file << "  \"roi_x0\": " << options.roi_x0 << ",\n";
+        file << "  \"roi_y0\": " << options.roi_y0 << ",\n";
+        file << "  \"roi_x1\": " << options.roi_x1 << ",\n";
+        file << "  \"roi_y1\": " << options.roi_y1 << ",\n";
+        file << "  \"circle_cx\": " << options.circle_cx << ",\n";
+        file << "  \"circle_cy\": " << options.circle_cy << ",\n";
+        file << "  \"circle_px\": " << options.circle_px << ",\n";
+        file << "  \"circle_py\": " << options.circle_py << ",\n";
+
+        file << "  \"fit_line_x0\": " << context.current_result_ref.line_x0 << ",\n";
+        file << "  \"fit_line_y0\": " << context.current_result_ref.line_y0 << ",\n";
+        file << "  \"fit_line_x1\": " << context.current_result_ref.line_x1 << ",\n";
+        file << "  \"fit_line_y1\": " << context.current_result_ref.line_y1 << ",\n";
+        file << "  \"circle_center_x\": " << context.current_result_ref.fit_cx << ",\n";
+        file << "  \"circle_center_y\": " << context.current_result_ref.fit_cy << ",\n";
+
+        file << "  \"measure_points_xy\": [";
+        bool firstPoint = true;
+        for (const auto& object : context.runtime_objects)
+        {
+            if (object.type == "Findline" && !object.line_measure_points_xy.empty())
+            {
+                for (size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
+                {
+                    if (!firstPoint) file << ", ";
+                    file << "[" << object.line_measure_points_xy[i] << "," << object.line_measure_points_xy[i + 1] << "]";
+                    firstPoint = false;
+                }
+            }
+            else if (object.type == "Findcircle" && !object.measure_points_xy.empty())
+            {
+                for (size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
+                {
+                    if (!firstPoint) file << ", ";
+                    file << "[" << object.measure_points_xy[i] << "," << object.measure_points_xy[i + 1] << "]";
+                    firstPoint = false;
+                }
+            }
+        }
+        file << "],\n";
 
         file << "  \"current_result_ref\": {\n";
         file << "    \"name\": \"" << CxDebugJsonEscape(context.current_result_ref.name) << "\",\n";
@@ -7934,6 +7987,8 @@ bool RunCxScriptHeadless(
     context.current_line = 0;
 
     int steps = 0;
+    const auto startTime = std::chrono::steady_clock::now();
+    const auto maxDuration = std::chrono::seconds(30);
 
     while (context.run_state != "runtime_finished" &&
            context.run_state != "finished" &&
@@ -7941,6 +7996,14 @@ bool RunCxScriptHeadless(
            context.current_line < static_cast<int>(context.line_views.size()) &&
            steps < options.max_steps)
     {
+        const auto elapsed = std::chrono::steady_clock::now() - startTime;
+        if (elapsed > maxDuration)
+        {
+            result.reason = "execution timeout after " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count()) + " seconds";
+            result.exit_code = 6;
+            return false;
+        }
+
         DebugStepOnceWithSnapshot(context);
         ++steps;
     }
