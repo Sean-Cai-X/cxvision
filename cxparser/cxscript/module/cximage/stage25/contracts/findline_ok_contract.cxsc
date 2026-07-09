@@ -1,39 +1,27 @@
-global.contract_pass = 0;
-global.contract_status = "findline_ok_failed";
-global.contract_conclusion = "Findline OK failed";
+global.contract_pass = 1;
+global.contract_status = "findline_ok_passed";
+global.contract_conclusion = "Findline OK: points and fitted line are available.";
 
-int ok1 = 0;
-if (global.headless_ok == 1) {
-    ok1 = 1;
-}
-
-int ok2 = 0;
-if (global.valid_points_count >= 2) {
-    ok2 = 1;
-}
-
-int ok3 = 0;
-if (global.has_fit_line == 1) {
-    ok3 = 1;
-}
-
-int all_ok = ok1 * ok2 * ok3;
-if (all_ok == 1) {
-    global.contract_pass = 1;
-    global.contract_status = "findline_ok_passed";
-    global.contract_conclusion = "Findline OK: points and fitted line are available.";
-}
-
-if (ok1 == 0) {
+if (global.headless_ok == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
     global.contract_conclusion = "Headless execution failed";
 }
 
-int check2 = ok1 * (1 - ok2);
-if (check2 == 1) {
+if (global.valid_points_count < 2) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
     global.contract_conclusion = "Findline OK requires valid_points_count >= 2";
 }
 
-int check3 = ok1 * ok2 * (1 - ok3);
-if (check3 == 1) {
+if (global.has_fit_line == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
     global.contract_conclusion = "Findline OK requires has_fit_line == true";
+}
+
+if (global.policy_guard_match == 0) {
+    global.contract_pass = 0;
+    global.contract_status = "findline_ok_failed";
+    global.contract_conclusion = "Findline OK requires MEASURE_AND_FIT_AVAILABLE";
 }

@@ -13,8 +13,11 @@
 #include "ManualStateTestConsole.h"
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <chrono>
+#include <functional>
+#include <iomanip>
 #include <opencv2/opencv.hpp>
 
 class ScopedSuiteTimer
@@ -137,6 +140,54 @@ namespace
         return value == "true" || value == "1";
     }
 
+    std::string SanitizePathToken(const std::string& value)
+    {
+        std::string out;
+        out.reserve(value.size());
+        for (char ch : value)
+        {
+            const bool ok =
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') ||
+                ch == '_' || ch == '-' || ch == '.';
+            out.push_back(ok ? ch : '_');
+        }
+        return out.empty() ? "case" : out;
+    }
+
+    std::string CompactCaseDirectoryName(const std::string& caseId)
+    {
+        const std::string safe = SanitizePathToken(caseId);
+        if (safe.size() <= 72)
+            return safe;
+
+        std::ostringstream hash;
+        hash << std::hex << std::setw(8) << std::setfill('0')
+             << (static_cast<unsigned int>(std::hash<std::string>{}(safe)) & 0xffffffffu);
+
+        return safe.substr(0, 56) + "_" + hash.str();
+    }
+
+    std::string JsonEscape(const std::string& value)
+    {
+        std::string out;
+        out.reserve(value.size() + 8);
+        for (char ch : value)
+        {
+            switch (ch)
+            {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(ch); break;
+            }
+        }
+        return out;
+    }
+
     bool JsonLineHasAnyKey(const std::string& line, const std::vector<std::string>& keys)
     {
         for (const auto& key : keys)
@@ -171,14 +222,24 @@ namespace
         if (pointsArrayStart != std::string::npos)
         {
             pointsArrayStart += std::string("\"measure_points_xy\": [").size();
-            size_t pointsArrayEnd = jsonContent.find("]", pointsArrayStart);
+            size_t pointsArrayEnd = jsonContent.find("\n        ]", pointsArrayStart);
+            if (pointsArrayEnd == std::string::npos)
+                pointsArrayEnd = jsonContent.find("\n      ]", pointsArrayStart);
+            if (pointsArrayEnd == std::string::npos)
+                pointsArrayEnd = jsonContent.find("]\n", pointsArrayStart);
             if (pointsArrayEnd != std::string::npos)
             {
                 std::string pointsArray = jsonContent.substr(pointsArrayStart, pointsArrayEnd - pointsArrayStart);
                 size_t pos = 0;
-                while ((pos = pointsArray.find("[", pos)) != std::string::npos)
+                int parsedPointCount = 0;
+                const int maxParsedPointCount = 2000;
+                while ((pos = pointsArray.find("[", pos)) != std::string::npos &&
+                       parsedPointCount < maxParsedPointCount)
                 {
                     size_t endPos = pointsArray.find("]", pos);
+                    if (endPos == std::string::npos)
+                        break;
+
                     if (endPos != std::string::npos)
                     {
                         std::string pointPair = pointsArray.substr(pos + 1, endPos - pos - 1);
@@ -190,6 +251,7 @@ namespace
                                 double x = std::stod(pointPair.substr(0, commaPos));
                                 double y = std::stod(pointPair.substr(commaPos + 1));
                                 out.measure_points_xy.emplace_back(x, y);
+                                ++parsedPointCount;
                             }
                             catch (...) {}
                         }
@@ -238,6 +300,7 @@ namespace
             else if (JsonLineHasAnyKey(line, {"actual_policy_guard", "line_policy_guard_status", "circle_policy_guard_status", "policy_guard_status", "policy_guard"}))
             {
                 out.actual_policy_guard = JsonLineValue(line);
+                out.policy_guard = out.actual_policy_guard;
             }
             else if (JsonLineHasKey(line, "result_status"))
             {
@@ -753,17 +816,17 @@ namespace
             return;
 
         file << "{\n";
-        file << "  \"case_id\": \"" << r.case_id << "\",\n";
-        file << "  \"evidence_id\": \"" << r.evidence_id << "\",\n";
-        file << "  \"image_id\": \"" << r.image_id << "\",\n";
-        file << "  \"target_id\": \"" << r.target_id << "\",\n";
-        file << "  \"script_id\": \"" << r.script_id << "\",\n";
-        file << "  \"parameter_profile_id\": \"" << r.parameter_profile_id << "\",\n";
+        file << "  \"case_id\": \"" << JsonEscape(r.case_id) << "\",\n";
+        file << "  \"evidence_id\": \"" << JsonEscape(r.evidence_id) << "\",\n";
+        file << "  \"image_id\": \"" << JsonEscape(r.image_id) << "\",\n";
+        file << "  \"target_id\": \"" << JsonEscape(r.target_id) << "\",\n";
+        file << "  \"script_id\": \"" << JsonEscape(r.script_id) << "\",\n";
+        file << "  \"parameter_profile_id\": \"" << JsonEscape(r.parameter_profile_id) << "\",\n";
         file << "\n";
         file << "  \"headless_ok\": " << (r.headless_ok ? "true" : "false") << ",\n";
         file << "  \"contract_pass\": " << (r.contract_pass ? "1" : "0") << ",\n";
-        file << "  \"contract_status\": \"" << r.contract_status << "\",\n";
-        file << "  \"contract_conclusion\": \"" << r.contract_conclusion << "\",\n";
+        file << "  \"contract_status\": \"" << JsonEscape(r.contract_status) << "\",\n";
+        file << "  \"contract_conclusion\": \"" << JsonEscape(r.contract_conclusion) << "\",\n";
         file << "\n";
         file << "  \"valid_points_count\": " << r.valid_points_count << ",\n";
         file << "  \"has_fit_line\": " << (r.has_fit_line ? "true" : "false") << ",\n";
@@ -771,17 +834,17 @@ namespace
         file << "  \"circle_radius\": " << r.circle_radius << ",\n";
         file << "  \"avgdist\": " << r.avgdist << ",\n";
         file << "\n";
-        file << "  \"policy_guard\": \"" << r.policy_guard << "\",\n";
-        file << "  \"actual_policy_guard\": \"" << r.actual_policy_guard << "\",\n";
-        file << "  \"result_status\": \"" << r.result_status << "\",\n";
-        file << "  \"failure_stage\": \"" << r.failure_stage << "\",\n";
-        file << "  \"conclusion\": \"" << r.conclusion << "\",\n";
+        file << "  \"policy_guard\": \"" << JsonEscape(r.policy_guard) << "\",\n";
+        file << "  \"actual_policy_guard\": \"" << JsonEscape(r.actual_policy_guard) << "\",\n";
+        file << "  \"result_status\": \"" << JsonEscape(r.result_status) << "\",\n";
+        file << "  \"failure_stage\": \"" << JsonEscape(r.failure_stage) << "\",\n";
+        file << "  \"conclusion\": \"" << JsonEscape(r.conclusion) << "\",\n";
         file << "\n";
-        file << "  \"snapshot_path\": \"" << r.snapshot_path << "\",\n";
-        file << "  \"summary_path\": \"" << r.summary_path << "\",\n";
-        file << "  \"result_overlay_path\": \"" << r.result_overlay_path << "\",\n";
-        file << "  \"evidence_overlay_path\": \"" << r.evidence_overlay_path << "\",\n";
-        file << "  \"tool_display_path\": \"" << r.tool_display_path << "\",\n";
+        file << "  \"snapshot_path\": \"" << JsonEscape(r.snapshot_path) << "\",\n";
+        file << "  \"summary_path\": \"" << JsonEscape(r.summary_path) << "\",\n";
+        file << "  \"result_overlay_path\": \"" << JsonEscape(r.result_overlay_path) << "\",\n";
+        file << "  \"evidence_overlay_path\": \"" << JsonEscape(r.evidence_overlay_path) << "\",\n";
+        file << "  \"tool_display_path\": \"" << JsonEscape(r.tool_display_path) << "\",\n";
         file << "\n";
         file << "  \"roi_x0\": " << r.roi_x0 << ",\n";
         file << "  \"roi_y0\": " << r.roi_y0 << ",\n";
@@ -987,6 +1050,7 @@ namespace
         contractHeadless.output_dir = contractDir.string();
         contractHeadless.case_name = r.case_id + "_contract";
         contractHeadless.save_overlay = false;
+        contractHeadless.timeout_sec = 10;
         contractHeadless.summary_path =
             (contractDir / "contract_summary.json").string();
         contractHeadless.snapshot_path =
@@ -1010,6 +1074,12 @@ namespace
         contractHeadless.circle_radius = r.circle_radius;
         contractHeadless.avgdist = r.avgdist;
         contractHeadless.policy_guard = r.actual_policy_guard;
+        contractHeadless.policy_guard_match =
+            (r.expected_policy_guard.empty()
+                 ? !r.actual_policy_guard.empty()
+                 : r.actual_policy_guard == r.expected_policy_guard)
+                ? 1
+                : 0;
         contractHeadless.result_status = r.result_status;
         contractHeadless.failure_stage = r.failure_stage;
         contractHeadless.result_overlay_path = r.result_overlay_path;
@@ -1095,9 +1165,7 @@ namespace
             outRoot /
             "cases" /
             image.level /
-            image.image_id /
-            script.script_id /
-            suiteCase.case_id;
+            CompactCaseDirectoryName(suiteCase.case_id);
 
         std::filesystem::create_directories(caseDir);
         out.case_dir = caseDir.string();
@@ -1173,6 +1241,7 @@ namespace
             headless.case_name = suiteCase.case_id;
             headless.save_overlay = options.save_overlay;
             headless.enable_evidence_analysis = false;
+            headless.timeout_sec = std::max(1, options.case_timeout_sec);
 
             headless.stage25_image_id = image.image_id;
             headless.stage25_level = image.level;
@@ -1211,25 +1280,72 @@ namespace
             }
 
             CxScriptHeadlessResult headlessResult;
-            std::cout << "[DEBUG] Calling RunCxScriptHeadless\n";
-            RunCxScriptHeadless(headless, headlessResult);
-            std::cout << "[DEBUG] RunCxScriptHeadless returned, ok=" << (headlessResult.ok ? "true" : "false") << "\n";
-            std::cout << "[DEBUG] headlessResult.snapshot_path=" << headlessResult.snapshot_path << "\n";
-            std::cout << "[DEBUG] headlessResult.summary_path=" << headlessResult.summary_path << "\n";
-            std::cout << "[DEBUG] headlessResult.overlay_path=" << headlessResult.overlay_path << "\n";
+            AppendPhaseTrace(caseDir, "headless_call", "begin", "", 0);
+            std::cout << "[SUITE] before RunCxScriptHeadless case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
+            if (options.trace_run)
+                trace.event("headless_call", "begin", "before RunCxScriptHeadless");
 
-            std::cout << "[DEBUG] Setting out fields\n";
+            auto headlessStartTime = std::chrono::steady_clock::now();
+            bool headlessRet = RunCxScriptHeadless(headless, headlessResult);
+            auto headlessElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - headlessStartTime).count();
+
+            std::cout << "[SUITE] after RunCxScriptHeadless case_id="
+                      << suiteCase.case_id
+                      << " ret=" << (headlessRet ? "true" : "false")
+                      << " ok=" << (headlessResult.ok ? "true" : "false")
+                      << " elapsed_ms=" << headlessElapsed
+                      << "\n" << std::flush;
+            std::cout << "[SUITE] headless paths snapshot=" << headlessResult.snapshot_path
+                      << " summary=" << headlessResult.summary_path
+                      << " overlay=" << headlessResult.overlay_path
+                      << " exit_code=" << headlessResult.exit_code
+                      << " reason=" << headlessResult.reason
+                      << "\n" << std::flush;
+            AppendPhaseTrace(caseDir, "headless_call", headlessRet ? "end" : "error", "", static_cast<int>(headlessElapsed));
+            if (options.trace_run)
+                trace.event("headless_call", headlessRet ? "end" : "error", "after RunCxScriptHeadless");
+
+            std::cout << "[SUITE] post-headless begin case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
+
             out.headless_ok = headlessResult.ok;
             out.case_dir = caseDir.string();
             out.snapshot_path = headlessResult.snapshot_path;
             out.summary_path = headlessResult.summary_path;
             out.result_overlay_path = headlessResult.overlay_path;
 
-            std::cout << "[DEBUG] Loading metrics from summary: " << out.summary_path << "\n";
+            std::cout << "[SUITE] metrics begin summary=" << out.summary_path << "\n" << std::flush;
             LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
-            std::cout << "[DEBUG] Metrics loaded, headless_ok=" << (out.headless_ok ? "true" : "false") << "\n";
-            std::cout << "[DEBUG] valid_points_count=" << out.valid_points_count << "\n";
-            std::cout << "[DEBUG] has_fit_circle=" << (out.has_fit_circle ? "true" : "false") << "\n";
+            std::cout << "[SUITE] metrics end headless_ok=" << (out.headless_ok ? "true" : "false")
+                      << " valid_points_count=" << out.valid_points_count
+                      << " has_fit_circle=" << (out.has_fit_circle ? "true" : "false")
+                      << " policy_guard=" << out.policy_guard
+                      << "\n" << std::flush;
+
+            if (options.stop_after_headless)
+            {
+                std::cout << "[SUITE] stop_after_headless requested case_id="
+                          << suiteCase.case_id << "\n" << std::flush;
+                out.contract_pass = out.headless_ok;
+                out.contract_status = "stopped_after_headless";
+                out.contract_conclusion = "--suite-stop-after-headless requested";
+                out.conclusion = out.headless_ok
+                    ? "Stopped after headless by --suite-stop-after-headless"
+                    : "Stopped after failed headless by --suite-stop-after-headless";
+                WriteFinalCaseSummary(out, caseDir);
+                if (options.dump_replay_package)
+                {
+                    CopyScriptSnapshot(script.path, caseDir);
+                    WriteReplayPackage(caseDir, suiteCase, resolved, out);
+                }
+                if (options.trace_run)
+                    trace.close();
+                std::cout << "[SUITE] post-headless end case_id="
+                          << suiteCase.case_id
+                          << " reason=stop_after_headless\n" << std::flush;
+                return;
+            }
 
             if (!out.headless_ok)
             {
@@ -1243,6 +1359,8 @@ namespace
 
                 if (options.export_tool_display)
                 {
+                    std::cout << "[SUITE] tool_display begin case_id="
+                              << suiteCase.case_id << " reason=headless_failed\n" << std::flush;
                     out.tool_display_path =
                         CxScriptToolDisplayExporter::ExportToolDisplay(
                             image.path,
@@ -1250,9 +1368,23 @@ namespace
                             out.evidence_overlay_path,
                             caseDir / "tool_display.png",
                             out);
+                    std::cout << "[SUITE] tool_display end case_id="
+                              << suiteCase.case_id << " reason=headless_failed\n" << std::flush;
+                }
+                else
+                {
+                    std::cout << "[SUITE] tool_display skipped case_id="
+                              << suiteCase.case_id << "\n" << std::flush;
                 }
 
-                WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+                if (options.export_evidence_summary)
+                {
+                    std::cout << "[SUITE] evidence_packet begin case_id="
+                              << suiteCase.case_id << " reason=headless_failed\n" << std::flush;
+                    WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+                    std::cout << "[SUITE] evidence_packet end case_id="
+                              << suiteCase.case_id << " reason=headless_failed\n" << std::flush;
+                }
                 WriteFinalCaseSummary(out, caseDir);
                 if (options.dump_replay_package)
                 {
@@ -1261,6 +1393,9 @@ namespace
                 }
                 if (options.trace_run)
                     trace.close();
+                std::cout << "[SUITE] post-headless end case_id="
+                          << suiteCase.case_id
+                          << " reason=headless_failed\n" << std::flush;
                 return;
             }
 
@@ -1270,14 +1405,16 @@ namespace
             CxAlgorithmTraceScope::Clear();
             AppendPhaseTrace(caseDir, "headless", "end", "", timer.elapsed_ms());
 
-            std::cout << "[DEBUG] headless completed, tool_display starting\n";
+            std::cout << "[SUITE] headless phase end case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
         }
 
         {
             ScopedSuiteTimer timer("tool_display:" + suiteCase.case_id);
             AppendPhaseTrace(caseDir, "tool_display", "begin", "", 0);
             AppendNodeTrace(caseDir, "N110_tool_display", "tool_display", "begin", "Exporting tool display");
-            std::cout << "[DEBUG] tool_display begin\n";
+            std::cout << "[SUITE] tool_display begin case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
             if (options.trace_run)
                 trace.event("tool_display", "begin", "Exporting tool display");
 
@@ -1288,14 +1425,21 @@ namespace
                         image.path,
                         out.result_overlay_path,
                         out.evidence_overlay_path,
-                        caseDir / "tool_display.png",
-                        out);
+                    caseDir / "tool_display.png",
+                    out);
+            }
+            else
+            {
+                std::cout << "[SUITE] tool_display skipped case_id="
+                          << suiteCase.case_id << "\n" << std::flush;
             }
 
             if (options.trace_run)
                 trace.event("tool_display", "end", "Tool display exported");
             AppendPhaseTrace(caseDir, "tool_display", "end", "", timer.elapsed_ms());
             AppendNodeTrace(caseDir, "N110_tool_display", "tool_display", "end", "Tool display exported", timer.elapsed_ms());
+            std::cout << "[SUITE] tool_display end case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
@@ -1316,15 +1460,33 @@ namespace
             ScopedSuiteTimer timer("contract:" + suiteCase.case_id);
             AppendPhaseTrace(caseDir, "contract", "begin", "", 0);
             AppendNodeTrace(caseDir, "N120_contract", "contract", "begin", "Running contract cxscript");
+            std::cout << "[SUITE] contract begin case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
             if (options.trace_run)
                 trace.event("contract", "begin", "Running contract cxscript");
-            EvaluateSuiteCaseContract(out);
+            if (options.run_contract)
+            {
+                EvaluateSuiteCaseContract(out);
+            }
+            else
+            {
+                out.contract_pass = out.headless_ok;
+                out.contract_status = "contract_skipped";
+                out.contract_conclusion = "--no-contract requested; contract evaluation skipped";
+                out.conclusion = out.contract_conclusion;
+                std::cout << "[SUITE] contract skipped case_id="
+                          << suiteCase.case_id << "\n" << std::flush;
+            }
             if (options.trace_run)
                 trace.event("contract", "end", "Contract finished");
             AppendPhaseTrace(caseDir, "contract", "end", "", timer.elapsed_ms());
             AppendNodeTrace(caseDir, "N120_contract", "contract", "end", 
                 "Contract finished, pass=" + std::to_string(out.contract_pass ? 1 : 0), 
                 timer.elapsed_ms());
+            std::cout << "[SUITE] contract end case_id="
+                      << suiteCase.case_id
+                      << " pass=" << (out.contract_pass ? "true" : "false")
+                      << "\n" << std::flush;
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
@@ -1341,16 +1503,39 @@ namespace
             return;
         }
 
-        WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+        if (options.export_evidence_summary)
+        {
+            std::cout << "[SUITE] evidence_packet begin case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
+            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            std::cout << "[SUITE] evidence_packet end case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
+        }
+        else
+        {
+            std::cout << "[SUITE] evidence_packet skipped case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
+        }
+
+        std::cout << "[SUITE] final_summary begin case_id="
+                  << suiteCase.case_id << "\n" << std::flush;
         WriteFinalCaseSummary(out, caseDir);
+        std::cout << "[SUITE] final_summary end case_id="
+                  << suiteCase.case_id << "\n" << std::flush;
 
         if (options.dump_replay_package)
         {
+            std::cout << "[SUITE] replay_package begin case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
             CopyScriptSnapshot(script.path, caseDir);
             WriteReplayPackage(caseDir, suiteCase, resolved, out);
+            std::cout << "[SUITE] replay_package end case_id="
+                      << suiteCase.case_id << "\n" << std::flush;
         }
 
         AppendPhaseTrace(caseDir, "promotion", "begin", "", 0);
+        std::cout << "[SUITE] promotion begin case_id="
+                  << suiteCase.case_id << "\n" << std::flush;
         if (options.trace_run)
             trace.event("promotion", "begin", "Promotion stage");
 
@@ -1363,6 +1548,8 @@ namespace
         }
 
         AppendPhaseTrace(caseDir, "promotion", "end", "", 0);
+        std::cout << "[SUITE] promotion end case_id="
+                  << suiteCase.case_id << "\n" << std::flush;
 
         if (out.contract_pass && out.headless_ok)
         {
@@ -1379,6 +1566,9 @@ namespace
             trace.event("promotion", "end", "Promotion finished");
             trace.close();
         }
+
+        std::cout << "[SUITE] post-headless end case_id="
+                  << suiteCase.case_id << "\n" << std::flush;
     }
 
     int CountExecuted(const std::vector<CxScriptSuiteCaseResult>& cases)
@@ -1626,9 +1816,7 @@ bool RunCxScriptSuite(
                     outRoot /
                     "cases" /
                     suiteCase.level /
-                    suiteCase.image_id /
-                    suiteCase.script_id /
-                    suiteCase.case_id;
+                    CompactCaseDirectoryName(suiteCase.case_id);
                 std::filesystem::create_directories(caseDir);
 
                 WriteCaseTrace(caseDir, suiteCase, resolved);
@@ -1675,9 +1863,7 @@ bool RunCxScriptSuite(
                 outRoot /
                 "cases" /
                 suiteCase.level /
-                suiteCase.image_id /
-                suiteCase.script_id /
-                suiteCase.case_id;
+                CompactCaseDirectoryName(suiteCase.case_id);
             std::filesystem::create_directories(caseDir);
 
             caseResult.case_id = suiteCase.case_id;
@@ -1751,30 +1937,64 @@ bool RunCxScriptSuite(
 
     if (options.export_best_examples)
     {
+        std::cout << "[SUITE] best_examples begin\n" << std::flush;
         CxScriptBestCaseSelector::SelectAndExportBestExamples(
             outRoot,
             result.case_results);
+        std::cout << "[SUITE] best_examples end\n" << std::flush;
+    }
+    else
+    {
+        std::cout << "[SUITE] best_examples skipped\n" << std::flush;
     }
 
-    CxScriptSuiteReportWriter::WriteSuiteRunReport(
-        outRoot,
-        result.case_results);
+    if (options.export_final_report)
+    {
+        std::cout << "[SUITE] final_report begin\n" << std::flush;
 
-    CxScriptSuiteReportWriter::WriteBestDetectionGallery(
-        outRoot,
-        result.case_results);
+        std::cout << "[SUITE] report suite_run begin\n" << std::flush;
+        CxScriptSuiteReportWriter::WriteSuiteRunReport(
+            outRoot,
+            result.case_results);
+        std::cout << "[SUITE] report suite_run end\n" << std::flush;
 
-    CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
-        outRoot,
-        result.case_results);
+        if (options.export_best_examples)
+        {
+            std::cout << "[SUITE] report best_detection_gallery begin\n" << std::flush;
+            CxScriptSuiteReportWriter::WriteBestDetectionGallery(
+                outRoot,
+                result.case_results);
+            std::cout << "[SUITE] report best_detection_gallery end\n" << std::flush;
+        }
+        else
+        {
+            std::cout << "[SUITE] report best_detection_gallery skipped\n" << std::flush;
+        }
 
-    CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
-        outRoot,
-        result.case_results);
+        std::cout << "[SUITE] report findline_algorithm begin\n" << std::flush;
+        CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
+            outRoot,
+            result.case_results);
+        std::cout << "[SUITE] report findline_algorithm end\n" << std::flush;
 
-    CxScriptSuiteReportWriter::WriteFailureClassificationReport(
-        outRoot,
-        result.case_results);
+        std::cout << "[SUITE] report findcircle_algorithm begin\n" << std::flush;
+        CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
+            outRoot,
+            result.case_results);
+        std::cout << "[SUITE] report findcircle_algorithm end\n" << std::flush;
+
+        std::cout << "[SUITE] report failure_classification begin\n" << std::flush;
+        CxScriptSuiteReportWriter::WriteFailureClassificationReport(
+            outRoot,
+            result.case_results);
+        std::cout << "[SUITE] report failure_classification end\n" << std::flush;
+
+        std::cout << "[SUITE] final_report end\n" << std::flush;
+    }
+    else
+    {
+        std::cout << "[SUITE] final_report skipped\n" << std::flush;
+    }
 
     result.total_cases = static_cast<int>(result.case_results.size());
     result.executed_cases = CountExecuted(result.case_results);
@@ -1801,6 +2021,11 @@ bool RunCxScriptSuite(
 
     result.ok = result.contract_fail == 0;
     result.reason = result.ok ? "suite passed" : "suite has contract failures";
+
+    std::cout << "[SUITE] RunCxScriptSuite returning ok="
+              << (result.ok ? "true" : "false")
+              << " reason=" << result.reason
+              << "\n" << std::flush;
 
     return result.ok;
 }

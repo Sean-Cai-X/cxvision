@@ -105,9 +105,16 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     const std::filesystem::path& output_path,
     const CxScriptSuiteCaseResult& result)
 {
-    cv::Mat original = cv::imread(original_path);
-    cv::Mat resultOverlay = cv::imread(result_overlay_path);
-    cv::Mat evidenceOverlay = cv::imread(evidence_overlay_path);
+    cv::Mat original;
+    cv::Mat resultOverlay;
+    cv::Mat evidenceOverlay;
+
+    if (!original_path.empty())
+        original = cv::imread(original_path);
+    if (!result_overlay_path.empty())
+        resultOverlay = cv::imread(result_overlay_path);
+    if (!evidence_overlay_path.empty())
+        evidenceOverlay = cv::imread(evidence_overlay_path);
 
     if (original.empty())
         return "";

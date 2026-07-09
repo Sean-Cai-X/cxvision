@@ -519,6 +519,7 @@ struct CxScriptHeadlessOptions
 
     bool save_overlay = true;
     int max_steps = 10000;
+    int timeout_sec = 30;
 
     std::string stage25_image_id;
     std::string stage25_level;
@@ -558,6 +559,7 @@ struct CxScriptHeadlessOptions
     double circle_radius = 0.0;
     double avgdist = 0.0;
     std::string policy_guard;
+    int policy_guard_match = 0;
     std::string result_status;
     std::string failure_stage;
     std::string result_overlay_path;

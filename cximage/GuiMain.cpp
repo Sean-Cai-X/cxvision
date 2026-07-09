@@ -195,18 +195,40 @@ int main(int argc, char** argv)
         }
         else if (arg == "--no-contract")
         {
-            suiteOptions.require_human_review = false;
+            suiteOptions.run_contract = false;
         }
         else if (arg == "--no-tool-display")
         {
             suiteOptions.export_tool_display = false;
         }
+        else if (arg == "--no-evidence-summary")
+        {
+            suiteOptions.export_evidence_summary = false;
+        }
+        else if (arg == "--no-final-report")
+        {
+            suiteOptions.export_final_report = false;
+        }
+        else if (arg == "--no-best-gallery")
+        {
+            suiteOptions.export_best_examples = false;
+        }
+        else if (arg == "--suite-stop-after-headless")
+        {
+            suiteOptions.stop_after_headless = true;
+        }
     }
 
     if (suiteOptions.enabled)
     {
+        std::cout << "[MAIN] suite mode begin\n" << std::flush;
         CxScriptSuiteRunResult result;
         const bool ok = RunCxScriptSuite(suiteOptions, result);
+
+        std::cout << "[MAIN] suite mode end ok="
+                  << (ok ? "true" : "false")
+                  << " reason=" << result.reason
+                  << "\n" << std::flush;
 
         std::cout << "suite_run_ok=" << (ok ? "true" : "false") << "\n";
         std::cout << "reason=" << result.reason << "\n";
@@ -218,11 +240,14 @@ int main(int argc, char** argv)
 
         if (result.reason == "REVIEW_REQUIRED")
         {
+            std::cout << "[MAIN] exiting process from suite mode with review required\n" << std::flush;
             return 10;
         }
 
+        std::cout << "[MAIN] exiting process from suite mode\n" << std::flush;
         return ok ? 0 : 1;
     }
 
+    std::cout << "[MAIN] entering GUI mode\n" << std::flush;
     return glfw_occ_main();
 }

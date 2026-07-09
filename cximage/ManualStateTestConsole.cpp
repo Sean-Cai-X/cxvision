@@ -17,6 +17,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <ctime>
 #include <sstream>
@@ -1689,18 +1690,25 @@ static int FindNextNonEmptyLine(const ManualTestContext& context, int fromIndex)
 static int FindMatchingBraceLine(const ManualTestContext& context, int openBraceIndex)
 {
     int depth = 0;
+    bool seenOpenBrace = false;
 
     for (int i = openBraceIndex; i < static_cast<int>(context.line_views.size()); ++i)
     {
         const std::string s = TrimLine(context.line_views[static_cast<std::size_t>(i)].statement);
 
-        if (s == "{")
-            ++depth;
-        else if (s == "}")
+        for (char ch : s)
         {
-            --depth;
-            if (depth == 0)
-                return i;
+            if (ch == '{')
+            {
+                ++depth;
+                seenOpenBrace = true;
+            }
+            else if (ch == '}' && seenOpenBrace)
+            {
+                --depth;
+                if (depth == 0)
+                    return i;
+            }
         }
     }
 
@@ -1722,6 +1730,16 @@ static int FindIfBodyStartLine(const ManualTestContext& context, int ifIndex)
 
 static int FindIfAfterBlockLine(const ManualTestContext& context, int ifIndex)
 {
+    const std::string ifStatement =
+        TrimLine(context.line_views[static_cast<std::size_t>(ifIndex)].statement);
+
+    if (ifStatement.find('{') != std::string::npos)
+    {
+        const int close = FindMatchingBraceLine(context, ifIndex);
+        if (close >= 0)
+            return FindNextNonEmptyLine(context, close + 1);
+    }
+
     const int next = FindNextNonEmptyLine(context, ifIndex + 1);
 
     if (next < static_cast<int>(context.line_views.size()) &&
@@ -3271,11 +3289,6 @@ static bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
         if (call.method == "measure")
         {
             circleIt->second->measure(image);
-            if (circleIt->second->getresultpoints().size() == 0 && image != nullptr)
-            {
-                circleIt->second->MeasureBalanced(*image);
-                balancedFallbackUsed = true;
-            }
             FillFindcircleResultView(object, *circleIt->second, "measure");
         }
         else if (call.method == "fitcircle")
@@ -7975,6 +7988,16 @@ bool RunCxScriptHeadless(
     const CxScriptHeadlessOptions& options,
     CxScriptHeadlessResult& result)
 {
+    struct HeadlessScopeSentinel
+    {
+        ~HeadlessScopeSentinel()
+        {
+            std::cout << "[DEBUG HEADLESS] function scope destroyed\n" << std::flush;
+        }
+    } headlessScopeSentinel;
+
+    std::cout << "[DEBUG HEADLESS] function begin\n" << std::flush;
+
     result.ok = false;
     result.exit_code = 1;
 
@@ -8133,6 +8156,7 @@ bool RunCxScriptHeadless(
         injectDouble("global.circle_radius", options.circle_radius);
         injectDouble("global.avgdist", options.avgdist);
         injectString("global.policy_guard", options.policy_guard);
+        injectInt("global.policy_guard_match", options.policy_guard_match);
         injectString("global.result_status", options.result_status);
         injectString("global.failure_stage", options.failure_stage);
         injectString("global.result_overlay_path", options.result_overlay_path);
@@ -8147,7 +8171,10 @@ bool RunCxScriptHeadless(
 
     int steps = 0;
     const auto startTime = std::chrono::steady_clock::now();
-    const auto maxDuration = std::chrono::seconds(30);
+    const auto maxDuration = std::chrono::seconds(std::max(1, options.timeout_sec));
+    int lastLine = context.current_line;
+    std::string lastRunState = context.run_state;
+    int noProgressSteps = 0;
 
     std::cout << "[DEBUG HEADLESS] Starting script execution loop\n";
 
@@ -8167,6 +8194,32 @@ bool RunCxScriptHeadless(
 
         DebugStepOnceWithSnapshot(context);
         ++steps;
+
+        if (context.current_line == lastLine &&
+            context.run_state == lastRunState)
+        {
+            ++noProgressSteps;
+        }
+        else
+        {
+            noProgressSteps = 0;
+            lastLine = context.current_line;
+            lastRunState = context.run_state;
+        }
+
+        if (noProgressSteps >= 8)
+        {
+            result.reason =
+                "script execution made no line progress for " +
+                std::to_string(noProgressSteps) +
+                " steps at line " +
+                std::to_string(context.current_line);
+            result.exit_code = 7;
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = result.reason;
+            return false;
+        }
 
         if (steps % 10 == 0 || steps < 50)
         {

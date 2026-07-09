@@ -21,6 +21,10 @@ struct CxScriptSuiteRunOptions
     bool save_overlay = true;
     bool export_tool_display = true;
     bool export_best_examples = true;
+    bool run_contract = true;
+    bool export_evidence_summary = true;
+    bool export_final_report = true;
+    bool stop_after_headless = false;
 
     bool require_human_review = false;
     std::string review_stage;
