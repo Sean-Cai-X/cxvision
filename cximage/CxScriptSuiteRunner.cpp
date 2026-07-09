@@ -74,6 +74,37 @@ namespace
         const CxScriptHumanReview& review,
         std::string& reason);
 
+    void AppendNodeTrace(
+        const std::filesystem::path& caseDir,
+        const std::string& node_id,
+        const std::string& phase,
+        const std::string& status,
+        const std::string& message = "",
+        int elapsed_ms = 0,
+        int valid_points = 0)
+    {
+        auto path = caseDir / "evidence_node_trace.jsonl";
+        std::ofstream file(path, std::ios::app);
+        if (!file.is_open())
+            return;
+
+        std::time_t now = std::time(nullptr);
+        char time_buf[64];
+        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+
+        file << "{\"node_id\":\"" << node_id << "\","
+             << "\"phase\":\"" << phase << "\","
+             << "\"status\":\"" << status << "\","
+             << "\"timestamp\":\"" << time_buf << "\","
+             << "\"phase_elapsed_ms\":" << elapsed_ms << ","
+             << "\"valid_points\":" << valid_points;
+
+        if (!message.empty())
+            file << ",\"message\":\"" << message << "\"";
+
+        file << "}\n";
+    }
+
     std::string TrimJsonScalar(std::string value)
     {
         const size_t comment = value.find(',');
@@ -1130,7 +1161,7 @@ namespace
                             e.message + " scan=" + std::to_string(e.scan_index) +
                             " samples=" + std::to_string(e.sample_count) +
                             " valid=" + std::to_string(e.valid_points) +
-                            " elapsed_ms=" + std::to_string(e.elapsed_ms));
+                            " algorithm_elapsed_ms=" + std::to_string(e.elapsed_ms));
                     });
             }
 
@@ -1237,6 +1268,7 @@ namespace
         {
             ScopedSuiteTimer timer("tool_display:" + suiteCase.case_id);
             AppendPhaseTrace(caseDir, "tool_display", "begin", "", 0);
+            AppendNodeTrace(caseDir, "N110_tool_display", "tool_display", "begin", "Exporting tool display");
             std::cout << "[DEBUG] tool_display begin\n";
             if (options.trace_run)
                 trace.event("tool_display", "begin", "Exporting tool display");
@@ -1255,6 +1287,7 @@ namespace
             if (options.trace_run)
                 trace.event("tool_display", "end", "Tool display exported");
             AppendPhaseTrace(caseDir, "tool_display", "end", "", timer.elapsed_ms());
+            AppendNodeTrace(caseDir, "N110_tool_display", "tool_display", "end", "Tool display exported", timer.elapsed_ms());
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
@@ -1274,12 +1307,16 @@ namespace
         {
             ScopedSuiteTimer timer("contract:" + suiteCase.case_id);
             AppendPhaseTrace(caseDir, "contract", "begin", "", 0);
+            AppendNodeTrace(caseDir, "N120_contract", "contract", "begin", "Running contract cxscript");
             if (options.trace_run)
                 trace.event("contract", "begin", "Running contract cxscript");
             EvaluateSuiteCaseContract(out);
             if (options.trace_run)
                 trace.event("contract", "end", "Contract finished");
             AppendPhaseTrace(caseDir, "contract", "end", "", timer.elapsed_ms());
+            AppendNodeTrace(caseDir, "N120_contract", "contract", "end", 
+                "Contract finished, pass=" + std::to_string(out.contract_pass ? 1 : 0), 
+                timer.elapsed_ms());
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))

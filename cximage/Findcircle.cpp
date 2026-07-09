@@ -972,6 +972,7 @@ void Findcircle::Measure(Image& image)
                                 {
                                     gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
                                     m_measurepoints.addpoint(apoint);
+                                    valid_points_count = m_measurepoints.size();
                                     break;
                                 }
                             }
@@ -1011,6 +1012,7 @@ void Findcircle::Measure(Image& image)
                         {
                             gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
                             m_measurepoints.addpoint(apoint);
+                            valid_points_count = m_measurepoints.size();
                             break;
                         }
                     }
@@ -1024,6 +1026,7 @@ void Findcircle::Measure(Image& image)
             {
                 gp_Pnt apoint = m_lines[inumy].getlinepoint(best_line_position);
                 m_measurepoints.addpoint(apoint);
+                valid_points_count = m_measurepoints.size();
             }
 
         }
@@ -1323,7 +1326,19 @@ void Findcircle::fitcircle()
    //     m_groundBias.push_back(apoint);
    // }
     
+    auto begin_time = std::chrono::steady_clock::now();
+    int initial_points = m_measurepoints.size();
 
+    CxAlgorithmTraceScope::Emit({
+        "Findcircle",
+        "fitcircle",
+        "begin",
+        "Findcircle fitcircle begin",
+        0,
+        0,
+        initial_points,
+        0
+    });
 
     vector<cv::Point2f>  vecResult;
     int isize = ClampSizeToInt(m_measurepoints.size());
@@ -1341,6 +1356,18 @@ void Findcircle::fitcircle()
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
+
+        auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+        CxAlgorithmTraceScope::Emit({
+            "Findcircle",
+            "fitcircle",
+            "fail",
+            "Findcircle fitcircle failed: insufficient points",
+            0,
+            0,
+            initial_points,
+            elapsed_ms
+        });
         return ;
     }
     auto [center, radius] = Image::CircleFit_(vecResult);
@@ -1353,6 +1380,18 @@ void Findcircle::fitcircle()
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
+
+        auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+        CxAlgorithmTraceScope::Emit({
+            "Findcircle",
+            "fitcircle",
+            "fail",
+            "Findcircle fitcircle failed: degenerate or non-finite result",
+            0,
+            0,
+            initial_points,
+            elapsed_ms
+        });
         return;
     }
     int icentx = RoundToInt(dOut_x);
@@ -1392,6 +1431,18 @@ void Findcircle::fitcircle()
          m_dradius = 0.0;
          m_avgdist = 0.0;
      }
+
+     auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+     CxAlgorithmTraceScope::Emit({
+         "Findcircle",
+         "fitcircle",
+         "end",
+         "Findcircle fitcircle end radius=" + std::to_string(m_dradius),
+         0,
+         0,
+         initial_points,
+         elapsed_ms
+     });
 }
 void Findcircle::FitResultMeasure(void* pimage)
 {

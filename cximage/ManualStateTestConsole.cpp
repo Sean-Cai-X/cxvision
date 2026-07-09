@@ -8118,6 +8118,8 @@ bool RunCxScriptHeadless(
     const auto startTime = std::chrono::steady_clock::now();
     const auto maxDuration = std::chrono::seconds(30);
 
+    std::cout << "[DEBUG HEADLESS] Starting script execution loop\n";
+
     while (context.run_state != "runtime_finished" &&
            context.run_state != "finished" &&
            context.run_state != "blocked" &&
@@ -8134,7 +8136,28 @@ bool RunCxScriptHeadless(
 
         DebugStepOnceWithSnapshot(context);
         ++steps;
+
+        if (steps % 100 == 0)
+        {
+            std::cout << "[DEBUG HEADLESS] Step " << steps << ", run_state=" << context.run_state 
+                      << ", current_line=" << context.current_line 
+                      << ", line_views.size=" << context.line_views.size() << "\n";
+        }
+
+        if (steps > 0 && steps % 500 == 0)
+        {
+            std::cout << "[DEBUG HEADLESS] Loop conditions: "
+                      << "run_state!=" << context.run_state << " "
+                      << "current_line=" << context.current_line << " "
+                      << "line_views.size=" << context.line_views.size() << " "
+                      << "steps=" << steps << "/" << options.max_steps << "\n";
+        }
     }
+
+    std::cout << "[DEBUG HEADLESS] Script execution loop ended, steps=" << steps 
+              << ", run_state=" << context.run_state 
+              << ", current_line=" << context.current_line
+              << ", line_views.size=" << context.line_views.size() << "\n";
 
     if (steps >= options.max_steps)
     {
@@ -8203,6 +8226,7 @@ bool RunCxScriptHeadless(
 
     result.summary_path = summaryPath.string();
 
+    std::cout << "[DEBUG HEADLESS] Evidence analysis: " << (options.enable_evidence_analysis ? "enabled" : "disabled") << "\n";
     if (options.enable_evidence_analysis)
     {
         CxImageEvidenceOptions evidenceOptions;
@@ -8219,6 +8243,7 @@ bool RunCxScriptHeadless(
         AnalyzeCxScriptImageEvidence(mat, context, evidenceOptions, fs::path(options.output_dir), evidenceReason);
     }
 
+    std::cout << "[DEBUG HEADLESS] Returning true\n";
     return true;
 
 }
