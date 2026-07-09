@@ -1211,17 +1211,25 @@ namespace
             }
 
             CxScriptHeadlessResult headlessResult;
+            std::cout << "[DEBUG] Calling RunCxScriptHeadless\n";
             RunCxScriptHeadless(headless, headlessResult);
+            std::cout << "[DEBUG] RunCxScriptHeadless returned, ok=" << (headlessResult.ok ? "true" : "false") << "\n";
+            std::cout << "[DEBUG] headlessResult.snapshot_path=" << headlessResult.snapshot_path << "\n";
+            std::cout << "[DEBUG] headlessResult.summary_path=" << headlessResult.summary_path << "\n";
+            std::cout << "[DEBUG] headlessResult.overlay_path=" << headlessResult.overlay_path << "\n";
 
+            std::cout << "[DEBUG] Setting out fields\n";
             out.headless_ok = headlessResult.ok;
             out.case_dir = caseDir.string();
             out.snapshot_path = headlessResult.snapshot_path;
             out.summary_path = headlessResult.summary_path;
             out.result_overlay_path = headlessResult.overlay_path;
 
-            std::cout << "[DEBUG] Loading metrics from summary\n";
+            std::cout << "[DEBUG] Loading metrics from summary: " << out.summary_path << "\n";
             LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
             std::cout << "[DEBUG] Metrics loaded, headless_ok=" << (out.headless_ok ? "true" : "false") << "\n";
+            std::cout << "[DEBUG] valid_points_count=" << out.valid_points_count << "\n";
+            std::cout << "[DEBUG] has_fit_circle=" << (out.has_fit_circle ? "true" : "false") << "\n";
 
             if (!out.headless_ok)
             {

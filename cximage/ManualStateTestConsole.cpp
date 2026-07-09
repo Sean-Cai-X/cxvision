@@ -5003,6 +5003,15 @@ void AnalyzeScript(ManualTestContext& context)
     context.trace_reason = "source analyzed; runtime line callbacks unavailable";
 }
 
+static void DebugScriptLineEnd(ManualTestContext& context, int lineIndex, const std::string& status)
+{
+    if (lineIndex >= 0 && lineIndex < static_cast<int>(context.line_views.size()))
+    {
+        ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
+        std::cout << "[DEBUG SCRIPT LINE] line=" << line.line_no << " end status=" << status << "\n" << std::flush;
+    }
+}
+
 static void DebugStepOnce(ManualTestContext& context)
 {
     AnalyzeScript(context);
@@ -5032,6 +5041,9 @@ static void DebugStepOnce(ManualTestContext& context)
     const int lineIndex = context.current_line;
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     const std::string statement = TrimLine(line.statement);
+    
+    std::cout << "[DEBUG SCRIPT LINE] line=" << line.line_no << " begin: " << statement << "\n" << std::flush;
+
     AppendCxDebugEvent(
         context,
         "step_enter",
@@ -5048,6 +5060,7 @@ static void DebugStepOnce(ManualTestContext& context)
         line.status = "skipped_empty";
         line.reason = "empty line";
         context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
+        DebugScriptLineEnd(context, lineIndex, "skipped_empty");
         return;
     }
 
@@ -5074,7 +5087,7 @@ static void DebugStepOnce(ManualTestContext& context)
         context.debug_status = "PENDING";
         context.debug_reason = line.reason;
 
-
+        DebugScriptLineEnd(context, lineIndex, "structural");
         return;
     }
 
@@ -5130,10 +5143,16 @@ static void DebugStepOnce(ManualTestContext& context)
     }
 
     if (TryExecuteCurrentStatusAssignment(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "current_status_assignment");
         return;
+    }
 
     if (TryExecuteSimpleAssignment(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "simple_assignment");
         return;
+    }
 
     if (TryExecuteDeclaration(context, lineIndex, statement))
         return;
@@ -5161,13 +5180,25 @@ static void DebugStepOnce(ManualTestContext& context)
      * å½“å‰å¿…é¡»ä¼˜å…ˆèµ°çœŸå®ž direct runtime bridgeã€‚
      */
     if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "runtime_executed");
         return;
+    }
     if (TryExecuteIntDeclarationAssignment(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "executed");
         return;
+    }
     if (TryExecuteGetResultBinding(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "get_result_bound");
         return;
+    }
     if (TryHandleFindcircleGetResult(context, lineIndex, statement))
+    {
+        DebugScriptLineEnd(context, lineIndex, "findcircle_get_result");
         return;
+    }
 
     /*
      * å…¶å®ƒæ¨¡å—æš‚æ—¶æ‰èµ° deferredã€‚
@@ -8007,7 +8038,7 @@ bool RunCxScriptHeadless(
     std::string scriptText((std::istreambuf_iterator<char>(scriptFile)),
                            std::istreambuf_iterator<char>());
 
-    ManualTestContext context;
+    static ManualTestContext context;
     context.editor_text = scriptText;
     context.loaded_script_path = options.script_path;
     context.script_file_path = options.script_path;
@@ -8137,7 +8168,7 @@ bool RunCxScriptHeadless(
         DebugStepOnceWithSnapshot(context);
         ++steps;
 
-        if (steps % 100 == 0)
+        if (steps % 10 == 0 || steps < 50)
         {
             std::cout << "[DEBUG HEADLESS] Step " << steps << ", run_state=" << context.run_state 
                       << ", current_line=" << context.current_line 
@@ -8157,7 +8188,7 @@ bool RunCxScriptHeadless(
     std::cout << "[DEBUG HEADLESS] Script execution loop ended, steps=" << steps 
               << ", run_state=" << context.run_state 
               << ", current_line=" << context.current_line
-              << ", line_views.size=" << context.line_views.size() << "\n";
+              << ", line_views.size=" << context.line_views.size() << "\n" << std::flush;
 
     if (steps >= options.max_steps)
     {
@@ -8166,8 +8197,11 @@ bool RunCxScriptHeadless(
         return false;
     }
 
+    std::cout << "[DEBUG HEADLESS] MarkDebugRunFinishedIfAtEnd begin\n" << std::flush;
     MarkDebugRunFinishedIfAtEnd(context);
+    std::cout << "[DEBUG HEADLESS] MarkDebugRunFinishedIfAtEnd end\n" << std::flush;
 
+    std::cout << "[DEBUG HEADLESS] snapshot begin\n" << std::flush;
     fs::path snapshotPath = options.snapshot_path.empty()
         ? fs::path(options.output_dir) / "snapshot.txt"
         : fs::path(options.snapshot_path);
@@ -8182,7 +8216,9 @@ bool RunCxScriptHeadless(
     }
 
     result.snapshot_path = snapshotPath.string();
+    std::cout << "[DEBUG HEADLESS] snapshot end, path=" << snapshotPath.string() << "\n" << std::flush;
 
+    std::cout << "[DEBUG HEADLESS] overlay begin\n" << std::flush;
     if (options.save_overlay)
     {
         fs::path overlayPath = options.overlay_path.empty()
@@ -8200,8 +8236,9 @@ bool RunCxScriptHeadless(
 
         result.overlay_path = overlayPath.string();
     }
+    std::cout << "[DEBUG HEADLESS] overlay end\n" << std::flush;
 
-    std::cout << "[DEBUG HEADLESS] Setting result state\n";
+    std::cout << "[DEBUG HEADLESS] Setting result state\n" << std::flush;
     result.run_state = context.run_state;
     result.debug_status = context.debug_status;
     result.debug_reason = context.debug_reason;
@@ -8210,7 +8247,7 @@ bool RunCxScriptHeadless(
     result.current_result_reason = context.current_result_ref.reason;
     result.ok = true;
     result.exit_code = (context.run_state == "blocked") ? 2 : 0;
-    std::cout << "[DEBUG HEADLESS] Saving summary\n";
+    std::cout << "[DEBUG HEADLESS] summary begin\n" << std::flush;
     fs::path summaryPath = options.summary_path.empty()
         ? fs::path(options.output_dir) / "result_summary.json"
         : fs::path(options.summary_path);
@@ -8225,8 +8262,9 @@ bool RunCxScriptHeadless(
     }
 
     result.summary_path = summaryPath.string();
+    std::cout << "[DEBUG HEADLESS] summary end, path=" << summaryPath.string() << "\n" << std::flush;
 
-    std::cout << "[DEBUG HEADLESS] Evidence analysis: " << (options.enable_evidence_analysis ? "enabled" : "disabled") << "\n";
+    std::cout << "[DEBUG HEADLESS] Evidence analysis: " << (options.enable_evidence_analysis ? "enabled" : "disabled") << "\n" << std::flush;
     if (options.enable_evidence_analysis)
     {
         CxImageEvidenceOptions evidenceOptions;
@@ -8243,7 +8281,8 @@ bool RunCxScriptHeadless(
         AnalyzeCxScriptImageEvidence(mat, context, evidenceOptions, fs::path(options.output_dir), evidenceReason);
     }
 
-    std::cout << "[DEBUG HEADLESS] Returning true\n";
+    std::cout << "[DEBUG HEADLESS] Before return - run_state=" << context.run_state << "\n" << std::flush;
+    std::cout << "[DEBUG HEADLESS] Returning true\n" << std::flush;
     return true;
 
 }

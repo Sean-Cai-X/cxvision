@@ -819,6 +819,9 @@ void Findcircle::Measure(Image& image)
       int total_samples = 0;
       int valid_points_count = 0;
 
+      auto now = std::chrono::steady_clock::now();
+      int elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count());
+
       CxAlgorithmTraceScope::Emit({
           "Findcircle",
           "measure",
@@ -827,7 +830,7 @@ void Findcircle::Measure(Image& image)
           0,
           0,
           0,
-          0
+          elapsed_ms
       });
 
       auto budgetExceeded = [&]() -> bool {
@@ -906,6 +909,7 @@ void Findcircle::Measure(Image& image)
                     }
 
                     auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+                    std::cout << "[DEBUG MEASURE] progress elapsed_ms=" << elapsed_ms << ", valid=" << valid_points_count << "\n";
                     CxAlgorithmTraceScope::Emit({
                         "Findcircle",
                         "measure",
