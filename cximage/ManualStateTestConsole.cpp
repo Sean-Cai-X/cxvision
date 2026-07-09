@@ -6180,6 +6180,109 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.reason = reason.str();
       m_scriptResult.runtime_fillback_status = exported ? "gauge_frame_probe_exported" : "gauge_frame_probe_failed";
     }
+    ImGui::Separator();
+    ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
+    if (ImGui::CollapsingHeader("Evidence Replay"))
+    {
+      static std::string replay_package_path;
+      static std::string replay_case_id;
+      static std::string replay_image_path;
+      static std::string replay_script_path;
+      static std::string replay_script_snapshot_path;
+      static bool replay_loaded = false;
+
+      ImGui::Text("Load replay package to manually reproduce a test case");
+      ImGui::SetNextItemWidth(420.0f);
+      InputTextString("Replay package path", replay_package_path);
+      ImGui::SameLine();
+      if (ImGui::Button("Load Replay"))
+      {
+        std::ifstream pkgFile(replay_package_path);
+        if (!pkgFile.is_open())
+        {
+          m_scriptResult.status = "FAIL";
+          m_scriptResult.reason = "replay_package.json not found";
+          replay_loaded = false;
+        }
+        else
+        {
+          std::string jsonContent((std::istreambuf_iterator<char>(pkgFile)),
+                                  std::istreambuf_iterator<char>());
+
+          auto findField = [&](const std::string& field) -> std::string {
+            size_t pos = jsonContent.find("\"" + field + "\":");
+            if (pos == std::string::npos) return "";
+            pos = jsonContent.find(":", pos);
+            pos = jsonContent.find_first_not_of(" \t:", pos);
+            if (jsonContent[pos] == '"')
+            {
+              pos++;
+              size_t end = jsonContent.find("\"", pos);
+              return jsonContent.substr(pos, end - pos);
+            }
+            else
+            {
+              size_t end = jsonContent.find_first_of(",}\n", pos);
+              return jsonContent.substr(pos, end - pos);
+            }
+          };
+
+          replay_case_id = findField("case_id");
+          replay_image_path = findField("path");
+          replay_script_path = findField("path");
+          replay_script_snapshot_path = findField("snapshot_path");
+
+          std::filesystem::path pkgDir = std::filesystem::path(replay_package_path).parent_path();
+          if (!replay_script_snapshot_path.empty())
+          {
+            std::filesystem::path snapshotFull = pkgDir / replay_script_snapshot_path;
+            if (std::filesystem::exists(snapshotFull))
+            {
+              if (ReadTextFile(snapshotFull.string(), m_manualTest.editor_text))
+              {
+                m_manualTest.editor_source = "replay";
+                m_manualTest.loaded_script_path = snapshotFull.string();
+                m_manualTest.script_file_path = snapshotFull.string();
+                m_manualTest.editor_dirty = false;
+              }
+            }
+          }
+
+          if (!replay_image_path.empty())
+          {
+            cv::Mat image = cv::imread(replay_image_path);
+            if (!image.empty())
+            {
+              UpdateImageViewImage(image);
+              m_parserDebugBridge.SetGlobalMatInput(image);
+              m_manualTest.image_file_path = replay_image_path;
+            }
+          }
+
+          replay_loaded = true;
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = "Replay package loaded: " + replay_case_id;
+        }
+      }
+
+      if (replay_loaded)
+      {
+        ImGui::Separator();
+        ImGui::Text("Case ID: %s", replay_case_id.c_str());
+        ImGui::Text("Image: %s", replay_image_path.c_str());
+        ImGui::Text("Script: %s", replay_script_path.c_str());
+        ImGui::Text("Snapshot: %s", replay_script_snapshot_path.c_str());
+
+        if (ImGui::Button("Initialize Replay Globals"))
+        {
+          m_parserDebugBridge.ClearGlobalInputs();
+          m_manualTest.debug_action = "Initialize Replay Globals";
+          m_scriptResult.status = "PENDING";
+          m_scriptResult.reason = "Replay globals initialized from replay_package.json";
+        }
+      }
+    }
+
     if (ImGui::Button("Demo: Debug find_circle_direct_test"))
     {
       const std::string target =
@@ -7983,6 +8086,7 @@ bool RunCxScriptHeadless(
     injectInt("global.linegap", options.linegap);
     injectInt("global.threshold", options.threshold);
     injectInt("global.method", options.method);
+    injectInt("global.filterprofile", options.filterprofile);
 
     if (options.contract_context_enabled)
     {

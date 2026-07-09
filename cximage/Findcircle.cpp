@@ -6,6 +6,7 @@
 #include "occtinclude.h"
 #include "imagemanager.h"
 #include "findobject.h"
+#include "CxAlgorithmTraceSink.h"
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -816,6 +817,18 @@ void Findcircle::Measure(Image& image)
       auto begin_time = std::chrono::steady_clock::now();
       int scan_lines_processed = 0;
       int total_samples = 0;
+      int valid_points_count = 0;
+
+      CxAlgorithmTraceScope::Emit({
+          "Findcircle",
+          "measure",
+          "begin",
+          "Findcircle measure begin",
+          0,
+          0,
+          0,
+          0
+      });
 
       auto budgetExceeded = [&]() -> bool {
           auto now = std::chrono::steady_clock::now();
@@ -850,6 +863,17 @@ void Findcircle::Measure(Image& image)
               ++scan_lines_processed;
 
               if (budgetExceeded()) {
+                  auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+                  CxAlgorithmTraceScope::Emit({
+                      "Findcircle",
+                      "measure",
+                      "abort",
+                      "budget exceeded: " + m_lastMeasureGeometryDebug.failure_stage,
+                      scan_lines_processed,
+                      total_samples,
+                      valid_points_count,
+                      elapsed_ms
+                  });
                   m_measurepoints.clear();
                   return;
               }
@@ -864,9 +888,34 @@ void Findcircle::Measure(Image& image)
             { 
                 ++total_samples;
 
-                if ((total_samples % 4096) == 0 && budgetExceeded()) {
-                    m_measurepoints.clear();
-                    return;
+                if ((total_samples % 4096) == 0) {
+                    if (budgetExceeded()) {
+                        auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+                        CxAlgorithmTraceScope::Emit({
+                            "Findcircle",
+                            "measure",
+                            "abort",
+                            "budget exceeded: " + m_lastMeasureGeometryDebug.failure_stage,
+                            scan_lines_processed,
+                            total_samples,
+                            valid_points_count,
+                            elapsed_ms
+                        });
+                        m_measurepoints.clear();
+                        return;
+                    }
+
+                    auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
+                    CxAlgorithmTraceScope::Emit({
+                        "Findcircle",
+                        "measure",
+                        "progress",
+                        "sampling circle edge",
+                        scan_lines_processed,
+                        total_samples,
+                        valid_points_count,
+                        elapsed_ms
+                    });
                 }
 
                 icolor = g_pbackimage->pixel(inumx, inumy);
@@ -1014,6 +1063,17 @@ void Findcircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.budget_max_scan_lines = budget.max_scan_lines;
     m_lastMeasureGeometryDebug.budget_max_samples = budget.max_samples;
     m_lastMeasureGeometryDebug.budget_max_elapsed_ms = budget.max_elapsed_ms;
+
+    CxAlgorithmTraceScope::Emit({
+        "Findcircle",
+        "measure",
+        "end",
+        "Findcircle measure end",
+        scan_lines_processed,
+        total_samples,
+        static_cast<int>(m_measurepoints.size()),
+        m_lastMeasureGeometryDebug.elapsed_ms
+    });
 }
 
 void Findcircle::MeasureBalanced(Image& image)

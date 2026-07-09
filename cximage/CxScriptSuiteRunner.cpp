@@ -8,6 +8,8 @@
 #include "CxParameterProfileRuntime.h"
 #include "CxScriptEvidenceChainRuntime.h"
 #include "CxScriptReviewGateRuntime.h"
+#include "CxScriptRunTraceRuntime.h"
+#include "CxAlgorithmTraceSink.h"
 #include "ManualStateTestConsole.h"
 #include <filesystem>
 #include <fstream>
@@ -33,6 +35,13 @@ public:
 
         std::cout << "[phase-end] " << name_
                   << " elapsed_ms=" << ms << "\n" << std::flush;
+    }
+
+    long long elapsed_ms() const
+    {
+        auto end = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            end - begin_).count();
     }
 
 private:
@@ -359,11 +368,6 @@ namespace
         }
 
         out.contract_path = out.script->contract_path;
-        if (out.contract_path.empty())
-        {
-            reason = "MISSING_CONTRACT: no contract path for script " + suite_case.script_id;
-            return false;
-        }
 
         if (out.target)
         {
@@ -407,11 +411,20 @@ namespace
         const CxScriptSuiteCase& suite_case,
         const ResolvedEvidenceCase& resolved)
     {
-        std::ofstream traceFile(caseDir / "case_trace.txt");
+        std::filesystem::path tracePath = caseDir / "case_trace.txt";
+        bool exists = std::filesystem::exists(tracePath);
+        std::ofstream traceFile(tracePath, exists ? std::ios::app : std::ios::out);
         if (traceFile.is_open())
         {
+            std::time_t now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            std::tm now_tm;
+            localtime_s(&now_tm, &now_c);
+            char time_buf[64];
+            std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &now_tm);
+
             traceFile << "Case Trace\n";
             traceFile << "==========\n\n";
+            traceFile << "started_at: " << time_buf << "\n";
             traceFile << "case_id: " << suite_case.case_id << "\n";
             traceFile << "image_id: " << suite_case.image_id << "\n";
             traceFile << "target_id: " << suite_case.target_id << "\n";
@@ -446,6 +459,48 @@ namespace
                 traceFile << "  tool: " << resolved.target->tool << "\n";
                 traceFile << "  x0,y0,x1,y1: " << resolved.target->x0 << "," << resolved.target->y0 << "," << resolved.target->x1 << "," << resolved.target->y1 << "\n";
                 traceFile << "  cx,cy,px,py: " << resolved.target->cx << "," << resolved.target->cy << "," << resolved.target->px << "," << resolved.target->py << "\n";
+            }
+
+            traceFile << "\nPhase Timeline:\n";
+            traceFile << "---------------\n";
+        }
+    }
+
+    void AppendPhaseTrace(
+        const std::filesystem::path& caseDir,
+        const std::string& phase,
+        const std::string& event_type,
+        const std::string& message,
+        long long elapsed_ms)
+    {
+        std::ofstream traceFile(caseDir / "case_trace.txt", std::ios::app);
+        if (traceFile.is_open())
+        {
+            std::time_t now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            std::tm now_tm;
+            localtime_s(&now_tm, &now_c);
+            char time_buf[64];
+            std::strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &now_tm);
+
+            if (event_type == "begin")
+            {
+                traceFile << "[" << time_buf << "] " << phase << " BEGIN\n";
+            }
+            else if (event_type == "end")
+            {
+                traceFile << "[" << time_buf << "] " << phase << " END   elapsed_ms=" << elapsed_ms << "\n";
+            }
+            else if (event_type == "progress")
+            {
+                traceFile << "[" << time_buf << "] " << phase << " PROGRESS " << message << "\n";
+            }
+            else if (event_type == "abort")
+            {
+                traceFile << "[" << time_buf << "] " << phase << " ABORT  " << message << " elapsed_ms=" << elapsed_ms << "\n";
+            }
+            else
+            {
+                traceFile << "[" << time_buf << "] " << phase << " " << event_type << " " << message << "\n";
             }
         }
     }
@@ -604,6 +659,181 @@ namespace
         packetFile << "    \"conclusion\": \"" << result.conclusion << "\"\n";
         packetFile << "  }\n";
         packetFile << "}\n";
+    }
+
+    void CopyScriptSnapshot(
+        const std::filesystem::path& scriptPath,
+        const std::filesystem::path& caseDir)
+    {
+        std::filesystem::path snapshotPath = caseDir / "script_snapshot.cxsc";
+        try
+        {
+            if (std::filesystem::exists(scriptPath))
+            {
+                std::filesystem::copy_file(
+                    scriptPath,
+                    snapshotPath,
+                    std::filesystem::copy_options::overwrite_existing);
+            }
+        }
+        catch (...) {}
+    }
+
+    void WriteReplayPackage(
+        const std::filesystem::path& caseDir,
+        const CxScriptSuiteCase& suite_case,
+        const ResolvedEvidenceCase& resolved,
+        const CxScriptSuiteCaseResult& result)
+    {
+        std::ofstream file(caseDir / "replay_package.json");
+        if (!file.is_open())
+            return;
+
+        file << "{\n";
+        file << "  \"replay_version\": \"stage25-replay-v1\",\n";
+
+        std::time_t now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm now_tm;
+        localtime_s(&now_tm, &now_c);
+        std::stringstream ss;
+        ss << std::put_time(&now_tm, "%Y-%m-%dT%H:%M:%S");
+        file << "  \"created_at\": \"" << ss.str() << "\",\n";
+
+        file << "\n";
+        file << "  \"case_id\": \"" << suite_case.case_id << "\",\n";
+        file << "  \"evidence_id\": \"" << suite_case.case_id << "\",\n";
+
+        file << "\n";
+        file << "  \"image\": {\n";
+        file << "    \"image_id\": \"" << suite_case.image_id << "\",\n";
+        if (resolved.image)
+            file << "    \"path\": \"" << resolved.image->path << "\"\n";
+        else
+            file << "    \"path\": \"\"\n";
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"target\": {\n";
+        file << "    \"target_id\": \"" << suite_case.target_id << "\",\n";
+        if (resolved.target)
+        {
+            file << "    \"tool\": \"" << resolved.target->tool << "\",\n";
+            file << "    \"circle_cx\": " << resolved.target->cx << ",\n";
+            file << "    \"circle_cy\": " << resolved.target->cy << ",\n";
+            file << "    \"circle_px\": " << resolved.target->px << ",\n";
+            file << "    \"circle_py\": " << resolved.target->py << ",\n";
+            file << "    \"roi_x0\": " << resolved.target->x0 << ",\n";
+            file << "    \"roi_y0\": " << resolved.target->y0 << ",\n";
+            file << "    \"roi_x1\": " << resolved.target->x1 << ",\n";
+            file << "    \"roi_y1\": " << resolved.target->y1 << ",\n";
+            file << "    \"tool_half_width\": " << resolved.target->tool_half_width << "\n";
+        }
+        else
+        {
+            file << "    \"tool\": \"\",\n";
+            file << "    \"circle_cx\": 0,\n";
+            file << "    \"circle_cy\": 0,\n";
+            file << "    \"circle_px\": 0,\n";
+            file << "    \"circle_py\": 0,\n";
+            file << "    \"roi_x0\": 0,\n";
+            file << "    \"roi_y0\": 0,\n";
+            file << "    \"roi_x1\": 0,\n";
+            file << "    \"roi_y1\": 0,\n";
+            file << "    \"tool_half_width\": 0\n";
+        }
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"script\": {\n";
+        file << "    \"script_id\": \"" << suite_case.script_id << "\",\n";
+        if (resolved.script)
+            file << "    \"path\": \"" << resolved.script->path << "\",\n";
+        else
+            file << "    \"path\": \"\",\n";
+        file << "    \"snapshot_path\": \"script_snapshot.cxsc\"\n";
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"parameter\": {\n";
+        file << "    \"profile_id\": \"" << suite_case.parameter_profile_id << "\",\n";
+        if (resolved.profile)
+        {
+            file << "    \"method\": " << resolved.profile->method << ",\n";
+            file << "    \"threshold\": " << resolved.profile->threshold << ",\n";
+            file << "    \"gap\": " << resolved.profile->gap << ",\n";
+            file << "    \"linegap\": " << resolved.profile->linegap << ",\n";
+            file << "    \"wgap\": " << resolved.profile->wgap << ",\n";
+            file << "    \"hgap\": " << resolved.profile->hgap << ",\n";
+            file << "    \"filterprofile\": " << resolved.profile->filterprofile << "\n";
+        }
+        else
+        {
+            file << "    \"method\": 0,\n";
+            file << "    \"threshold\": 0,\n";
+            file << "    \"gap\": 0,\n";
+            file << "    \"linegap\": 0,\n";
+            file << "    \"wgap\": 0,\n";
+            file << "    \"hgap\": 0,\n";
+            file << "    \"filterprofile\": 0\n";
+        }
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"globals\": {\n";
+        if (resolved.target)
+        {
+            file << "    \"global.circle_cx\": " << resolved.target->cx << ",\n";
+            file << "    \"global.circle_cy\": " << resolved.target->cy << ",\n";
+            file << "    \"global.circle_px\": " << resolved.target->px << ",\n";
+            file << "    \"global.circle_py\": " << resolved.target->py << ",\n";
+            file << "    \"global.roi_x0\": " << resolved.target->x0 << ",\n";
+            file << "    \"global.roi_y0\": " << resolved.target->y0 << ",\n";
+            file << "    \"global.roi_x1\": " << resolved.target->x1 << ",\n";
+            file << "    \"global.roi_y1\": " << resolved.target->y1 << ",\n";
+            file << "    \"global.wgap\": " << resolved.target->wgap << ",\n";
+            file << "    \"global.hgap\": " << resolved.target->hgap << ",\n";
+            file << "    \"global.gap\": " << resolved.target->gap << ",\n";
+            file << "    \"global.linegap\": " << resolved.target->linegap << ",\n";
+            file << "    \"global.tool_half_width\": " << resolved.target->tool_half_width << ",\n";
+        }
+        if (resolved.profile)
+        {
+            file << "    \"global.method\": " << resolved.profile->method << ",\n";
+            file << "    \"global.threshold\": " << resolved.profile->threshold << ",\n";
+            file << "    \"global.gap\": " << resolved.profile->gap << ",\n";
+            file << "    \"global.linegap\": " << resolved.profile->linegap << ",\n";
+            file << "    \"global.wgap\": " << resolved.profile->wgap << ",\n";
+            file << "    \"global.hgap\": " << resolved.profile->hgap << ",\n";
+            file << "    \"global.filterprofile\": " << resolved.profile->filterprofile << "\n";
+        }
+        else
+        {
+            file << "    \"global.method\": 0,\n";
+            file << "    \"global.threshold\": 0,\n";
+            file << "    \"global.gap\": 0,\n";
+            file << "    \"global.linegap\": 0,\n";
+            file << "    \"global.wgap\": 0,\n";
+            file << "    \"global.hgap\": 0,\n";
+            file << "    \"global.filterprofile\": 0\n";
+        }
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"last_status\": {\n";
+        file << "    \"phase\": \"evidence_resolved\",\n";
+        file << "    \"status\": \"completed\",\n";
+        file << "    \"message\": \"Replay package generated before headless\",\n";
+        file << "    \"elapsed_ms\": 0\n";
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"artifacts\": {\n";
+        file << "    \"roi_preview\": \"roi_preview.png\",\n";
+        file << "    \"live_status\": \"live_status.json\",\n";
+        file << "    \"run_trace\": \"run_trace.jsonl\",\n";
+        file << "    \"cxparser_ext_trace\": \"cxparser_ext_trace.json\"\n";
+        file << "  }\n";
+        file << "}\n";
     }
 
     void EvaluateSuiteCaseContract(CxScriptSuiteCaseResult& r)
@@ -790,21 +1020,68 @@ namespace
         std::filesystem::create_directories(caseDir);
         out.case_dir = caseDir.string();
 
+        CxScriptRunTraceRuntime trace;
+        std::string traceReason;
+
+        if (options.trace_run)
+        {
+            std::string sessionId = suiteCase.case_id;
+            trace.open(caseDir, sessionId, suiteCase.case_id, traceReason);
+            trace.set_case_context(
+                suiteCase.case_id,
+                suiteCase.image_id,
+                suiteCase.target_id,
+                suiteCase.script_id,
+                suiteCase.parameter_profile_id);
+        }
+
+        if (options.trace_run)
+            trace.event("resolve_evidence", "end", "Evidence resolved");
+
         {
             ScopedSuiteTimer timer("roi_preview:" + suiteCase.case_id);
             WriteCaseTrace(caseDir, suiteCase, resolved);
+            AppendPhaseTrace(caseDir, "roi_preview", "begin", "", 0);
+            if (options.trace_run)
+                trace.event("roi_preview", "begin", "Generating ROI preview");
             ExportRoiPreview(image.path, caseDir, suiteCase, resolved);
             out.roi_preview_path = (caseDir / "roi_preview.png").string();
+            if (options.trace_run)
+                trace.event("roi_preview", "end", "ROI preview generated");
+            AppendPhaseTrace(caseDir, "roi_preview", "end", "", timer.elapsed_ms());
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "roi", "accept_roi or reject_roi"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            if (options.dump_replay_package)
+            {
+                CopyScriptSnapshot(script.path, caseDir);
+                WriteReplayPackage(caseDir, suiteCase, resolved, out);
+            }
             return;
         }
 
         {
             ScopedSuiteTimer timer("headless:" + suiteCase.case_id);
+            AppendPhaseTrace(caseDir, "headless", "begin", "", 0);
+            if (options.trace_run)
+                trace.event("headless", "begin", "Running cxscript headless");
+
+            if (options.trace_run)
+            {
+                CxAlgorithmTraceScope::SetCallback(
+                    [&](const CxAlgorithmTraceEvent& e)
+                    {
+                        trace.event(
+                            "algorithm." + e.tool + "." + e.phase,
+                            e.status,
+                            e.message + " scan=" + std::to_string(e.scan_index) +
+                            " samples=" + std::to_string(e.sample_count) +
+                            " valid=" + std::to_string(e.valid_points) +
+                            " elapsed_ms=" + std::to_string(e.elapsed_ms));
+                    });
+            }
 
             CxScriptHeadlessOptions headless;
             headless.enabled = true;
@@ -868,6 +1145,9 @@ namespace
                 out.failure_stage = "headless_execution_failed";
                 out.conclusion = "Headless execution failed: " + headlessResult.reason;
 
+                if (options.trace_run)
+                    trace.event("headless", "error", "Headless execution failed: " + headlessResult.reason);
+
                 if (options.export_tool_display)
                 {
                     out.tool_display_path =
@@ -880,12 +1160,28 @@ namespace
                 }
 
                 WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+                if (options.dump_replay_package)
+                {
+                    CopyScriptSnapshot(script.path, caseDir);
+                    WriteReplayPackage(caseDir, suiteCase, resolved, out);
+                }
+                if (options.trace_run)
+                    trace.close();
                 return;
             }
+
+            if (options.trace_run)
+                trace.event("headless", "end", "Headless finished");
+
+            CxAlgorithmTraceScope::Clear();
+            AppendPhaseTrace(caseDir, "headless", "end", "", timer.elapsed_ms());
         }
 
         {
             ScopedSuiteTimer timer("tool_display:" + suiteCase.case_id);
+            AppendPhaseTrace(caseDir, "tool_display", "begin", "", 0);
+            if (options.trace_run)
+                trace.event("tool_display", "begin", "Exporting tool display");
 
             if (options.export_tool_display)
             {
@@ -897,30 +1193,74 @@ namespace
                         caseDir / "tool_display.png",
                         out);
             }
+
+            if (options.trace_run)
+                trace.event("tool_display", "end", "Tool display exported");
+            AppendPhaseTrace(caseDir, "tool_display", "end", "", timer.elapsed_ms());
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            if (options.dump_replay_package)
+            {
+                CopyScriptSnapshot(script.path, caseDir);
+                WriteReplayPackage(caseDir, suiteCase, resolved, out);
+            }
+            if (options.trace_run)
+                trace.close();
             return;
         }
 
         {
             ScopedSuiteTimer timer("contract:" + suiteCase.case_id);
+            AppendPhaseTrace(caseDir, "contract", "begin", "", 0);
+            if (options.trace_run)
+                trace.event("contract", "begin", "Running contract cxscript");
             EvaluateSuiteCaseContract(out);
+            if (options.trace_run)
+                trace.event("contract", "end", "Contract finished");
+            AppendPhaseTrace(caseDir, "contract", "end", "", timer.elapsed_ms());
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            if (options.dump_replay_package)
+            {
+                CopyScriptSnapshot(script.path, caseDir);
+                WriteReplayPackage(caseDir, suiteCase, resolved, out);
+            }
+            if (options.trace_run)
+                trace.close();
             return;
         }
 
         WriteEvidencePacket(caseDir, suiteCase, resolved, out);
 
+        if (options.dump_replay_package)
+        {
+            CopyScriptSnapshot(script.path, caseDir);
+            WriteReplayPackage(caseDir, suiteCase, resolved, out);
+        }
+
+        AppendPhaseTrace(caseDir, "promotion", "begin", "", 0);
+        if (options.trace_run)
+            trace.event("promotion", "begin", "Promotion stage");
+
         if (StopForHumanReviewIfNeeded(options, out, "promotion", "accept_to_regression or derive_diagnostic_profile"))
         {
+            AppendPhaseTrace(caseDir, "promotion", "end", "", 0);
+            if (options.trace_run)
+                trace.close();
             return;
+        }
+
+        AppendPhaseTrace(caseDir, "promotion", "end", "", 0);
+        if (options.trace_run)
+        {
+            trace.event("promotion", "end", "Promotion finished");
+            trace.close();
         }
     }
 
@@ -1232,14 +1572,41 @@ bool RunCxScriptSuite(
             caseResult.contract_id = resolved.script ? resolved.script->contract_path : "";
             caseResult.case_dir = caseDir.string();
 
+            CxScriptRunTraceRuntime trace;
+            std::string traceReason;
+            if (options.trace_run)
+            {
+                trace.open(caseDir, suiteCase.case_id, suiteCase.case_id, traceReason);
+                trace.set_case_context(
+                    suiteCase.case_id,
+                    suiteCase.image_id,
+                    suiteCase.target_id,
+                    suiteCase.script_id,
+                    suiteCase.parameter_profile_id);
+                trace.event("resolve_evidence", "end", "Evidence resolved");
+            }
+
             {
                 ScopedSuiteTimer timer("roi_preview:" + suiteCase.case_id);
+                if (options.trace_run)
+                    trace.event("roi_preview", "begin", "Generating ROI preview");
                 WriteCaseTrace(caseDir, suiteCase, resolved);
                 ExportRoiPreview(resolved.image->path, caseDir, suiteCase, resolved);
                 caseResult.roi_preview_path = (caseDir / "roi_preview.png").string();
+                if (options.trace_run)
+                    trace.event("roi_preview", "end", "ROI preview generated");
             }
 
             WriteEvidencePacket(caseDir, suiteCase, resolved, caseResult);
+
+            if (options.dump_replay_package)
+            {
+                CopyScriptSnapshot(resolved.script ? resolved.script->path : "", caseDir);
+                WriteReplayPackage(caseDir, suiteCase, resolved, caseResult);
+            }
+
+            if (options.trace_run)
+                trace.close();
 
             if (StopForHumanReviewIfNeeded(options, caseResult, "roi", "accept_roi or reject_roi"))
             {

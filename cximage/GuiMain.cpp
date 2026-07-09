@@ -169,6 +169,30 @@ int main(int argc, char** argv)
         {
             suiteOptions.case_timeout_sec = std::stoi(argv[++i]);
         }
+        else if (arg == "--trace-run")
+        {
+            suiteOptions.trace_run = true;
+        }
+        else if (arg == "--dump-replay-package")
+        {
+            suiteOptions.dump_replay_package = true;
+        }
+        else if (arg == "--no-replay-package")
+        {
+            suiteOptions.dump_replay_package = false;
+        }
+        else if (arg == "--dump-cxparser-ext-trace")
+        {
+            suiteOptions.dump_cxparser_ext_trace = true;
+        }
+        else if (arg == "--heartbeat-ms" && i + 1 < argc)
+        {
+            suiteOptions.heartbeat_ms = std::stoi(argv[++i]);
+        }
+        else if (arg == "--trace-dir" && i + 1 < argc)
+        {
+            suiteOptions.trace_dir = argv[++i];
+        }
         else if (arg == "--no-contract")
         {
             suiteOptions.require_human_review = false;

@@ -30,6 +30,13 @@ struct CxScriptSuiteRunOptions
     bool dry_run = false;
     bool preview_only = false;
 
+    bool trace_run = false;
+    bool dump_replay_package = true;
+    bool dump_cxparser_ext_trace = true;
+
+    std::string trace_dir;
+    int heartbeat_ms = 1000;
+
     int case_timeout_sec = 120;
 };
 
