@@ -137,6 +137,10 @@ int main(int argc, char** argv)
         {
             suiteOptions.out_root_override = argv[++i];
         }
+        else if (arg == "--cxscript-parameter-profile" && i + 1 < argc)
+        {
+            suiteOptions.parameter_profile_path = argv[++i];
+        }
     }
 
     if (suiteOptions.enabled)

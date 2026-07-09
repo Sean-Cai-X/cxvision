@@ -14,6 +14,7 @@ struct CxScriptSuiteRunOptions
     std::string suite_path;
     std::string image_manifest_path;
     std::string catalog_path_override;
+    std::string parameter_profile_path;
     std::string out_root_override;
 
     bool save_overlay = true;

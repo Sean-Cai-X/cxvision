@@ -87,6 +87,13 @@ double CxScriptSuite_case_settarget(const char* value)
     return 0.0;
 }
 
+double CxScriptSuite_case_setparameter(const char* value)
+{
+    if (g_current_suite_case)
+        g_current_suite_case->parameter_profile_id = value ? value : "";
+    return 0.0;
+}
+
 void RegisterCxScriptSuiteBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxScriptSuite_reset", (mu::fun_type1)&CxScriptSuite_reset);
@@ -101,4 +108,5 @@ void RegisterCxScriptSuiteBindings(mu::Parser& parser)
     parser.DefineFun("CxScriptSuite_case_setexpected", (mu::strfun_type1)&CxScriptSuite_case_setexpected);
     parser.DefineFun("CxScriptSuite_case_setexpectedpolicyguard", (mu::strfun_type1)&CxScriptSuite_case_setexpectedpolicyguard);
     parser.DefineFun("CxScriptSuite_case_settarget", (mu::strfun_type1)&CxScriptSuite_case_settarget);
+    parser.DefineFun("CxScriptSuite_case_setparameter", (mu::strfun_type1)&CxScriptSuite_case_setparameter);
 }

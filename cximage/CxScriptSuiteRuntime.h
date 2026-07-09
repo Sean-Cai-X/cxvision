@@ -10,6 +10,7 @@ struct CxScriptSuiteCase
     std::string script_id;
     std::string image_id;
     std::string target_id;
+    std::string parameter_profile_id;
     std::string level;
     std::string expected_result;
     std::string expected_policy_guard;

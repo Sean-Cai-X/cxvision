@@ -87,6 +87,10 @@ set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxScriptSuiteReportWriter.cpp
   cximage/CxScriptToolDisplayExporter.cpp
   cximage/CxScriptBestCaseSelector.cpp
+  cximage/CxParameterProfileRuntime.cpp
+  cximage/CxParameterProfileRegister.cpp
+  cximage/CxScriptEvidenceChainRuntime.cpp
+  cximage/CxScriptEvidenceChainRegister.cpp
 )
 
 set(CXSCRIPT_LEGACY_STAGE25_SOURCES

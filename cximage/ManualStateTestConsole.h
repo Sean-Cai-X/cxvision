@@ -534,6 +534,7 @@ struct CxScriptHeadlessOptions
     int linegap = 6;
     int threshold = 20;
     int method = 2;
+    int filterprofile = 0;
 
     bool contract_context_enabled = false;
     int contract_headless_ok = 0;

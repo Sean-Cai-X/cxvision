@@ -7,7 +7,8 @@ CxScriptSuite_setoutputroot("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_r
 CxScriptSuite_addcase("L0_basic_findcircle_basic_dot_ok");
 CxScriptSuite_case_setscriptid("findcircle_stage25_direct_ok");
 CxScriptSuite_case_setexpected("ok");
-CxScriptSuite_case_setexpectedpolicyguard("MEASURE_AND_FIT_AVAILABLE");
+CxScriptSuite_case_setexpectedpolicyguard("CIRCLE_MEASURE_AND_FIT_AVAILABLE");
 CxScriptSuite_case_setimage("basic_01");
 CxScriptSuite_case_settarget("basic_dot");
+CxScriptSuite_case_setparameter("findcircle_stage25_direct");
 CxScriptSuite_case_setlevel("L0_basic");

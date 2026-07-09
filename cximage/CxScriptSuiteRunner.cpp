@@ -5,10 +5,13 @@
 #include "CxScriptSuiteReportWriter.h"
 #include "CxScriptToolDisplayExporter.h"
 #include "CxScriptBestCaseSelector.h"
+#include "CxParameterProfileRuntime.h"
+#include "CxScriptEvidenceChainRuntime.h"
 #include "ManualStateTestConsole.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <opencv2/opencv.hpp>
 
 const CxScriptCatalogEntry* FindCatalogScriptById(
     const CxScriptCatalogRuntime& catalog,
@@ -76,6 +79,8 @@ namespace
         std::ifstream file(summary_path);
         if (!file.is_open())
             return;
+
+        std::cout << "[DEBUG] Loading summary from: " << summary_path << "\n";
 
         std::string line;
         std::string jsonContent;
@@ -257,6 +262,310 @@ namespace
                 catch (...) {}
             }
         }
+
+        std::cout << "[DEBUG] Loaded metrics: points=" << out.points_count 
+                  << ", valid=" << out.valid_points_count
+                  << ", has_fit_circle=" << out.has_fit_circle
+                  << ", circle_radius=" << out.circle_radius << "\n";
+    }
+
+    struct ResolvedEvidenceCase
+    {
+        const CxScriptCatalogEntry* script = nullptr;
+        const CxScriptImageManifestEntry* image = nullptr;
+        const CxScriptImageTargetRoi* target = nullptr;
+        const CxParameterProfile* profile = nullptr;
+        std::string contract_path;
+    };
+
+    bool ResolveEvidenceCase(
+        const CxScriptSuiteCase& suite_case,
+        const CxScriptCatalogRuntime& catalog,
+        const CxScriptImageManifestRuntime& manifest,
+        const CxParameterProfileRuntime& profiles,
+        ResolvedEvidenceCase& out,
+        std::string& reason)
+    {
+        out.script = FindCatalogScriptById(catalog, suite_case.script_id);
+        if (!out.script)
+        {
+            reason = "MISSING_SCRIPT: " + suite_case.script_id;
+            return false;
+        }
+
+        out.image = FindImageById(manifest, suite_case.image_id);
+        if (!out.image)
+        {
+            reason = "MISSING_IMAGE: " + suite_case.image_id;
+            return false;
+        }
+
+        if (!suite_case.target_id.empty())
+        {
+            out.target = FindTargetRoiByImageAndTargetId(manifest, suite_case.image_id, suite_case.target_id);
+            if (!out.target)
+            {
+                reason = "MISSING_TARGET: " + suite_case.target_id + " for image " + suite_case.image_id;
+                return false;
+            }
+        }
+
+        if (!suite_case.parameter_profile_id.empty())
+        {
+            out.profile = profiles.FindProfile(suite_case.parameter_profile_id);
+            if (!out.profile)
+            {
+                reason = "MISSING_PARAMETER_PROFILE: " + suite_case.parameter_profile_id;
+                return false;
+            }
+        }
+
+        out.contract_path = out.script->contract_path;
+        if (out.contract_path.empty())
+        {
+            reason = "MISSING_CONTRACT: no contract path for script " + suite_case.script_id;
+            return false;
+        }
+
+        if (out.target)
+        {
+            if (out.target->tool == "Findcircle")
+            {
+                if (out.target->cx == 0 || out.target->cy == 0 || out.target->px == 0 || out.target->py == 0)
+                {
+                    reason = "INVALID_ROI: circle ROI coordinates are zero";
+                    return false;
+                }
+            }
+            else if (out.target->tool == "Findline")
+            {
+                if (out.target->x0 == 0 && out.target->y0 == 0 && out.target->x1 == 0 && out.target->y1 == 0)
+                {
+                    reason = "INVALID_ROI: line ROI coordinates are zero";
+                    return false;
+                }
+            }
+        }
+
+        reason = "OK";
+        return true;
+    }
+
+    void InjectParameterGlobals(
+        CxScriptHeadlessOptions& headless,
+        const CxParameterProfile& profile)
+    {
+        headless.method = profile.method;
+        headless.threshold = profile.threshold;
+        headless.gap = profile.gap;
+        headless.linegap = profile.linegap;
+        headless.wgap = profile.wgap;
+        headless.hgap = profile.hgap;
+        headless.filterprofile = profile.filterprofile;
+    }
+
+    void WriteCaseTrace(
+        const std::filesystem::path& caseDir,
+        const CxScriptSuiteCase& suite_case,
+        const ResolvedEvidenceCase& resolved)
+    {
+        std::ofstream traceFile(caseDir / "case_trace.txt");
+        if (traceFile.is_open())
+        {
+            traceFile << "Case Trace\n";
+            traceFile << "==========\n\n";
+            traceFile << "case_id: " << suite_case.case_id << "\n";
+            traceFile << "image_id: " << suite_case.image_id << "\n";
+            traceFile << "target_id: " << suite_case.target_id << "\n";
+            traceFile << "script_id: " << suite_case.script_id << "\n";
+            traceFile << "parameter_profile_id: " << suite_case.parameter_profile_id << "\n";
+            traceFile << "expected_result: " << suite_case.expected_result << "\n";
+            traceFile << "expected_policy_guard: " << suite_case.expected_policy_guard << "\n\n";
+
+            if (resolved.image)
+                traceFile << "Image: " << resolved.image->path << "\n";
+            if (resolved.script)
+                traceFile << "Script: " << resolved.script->path << "\n";
+            if (resolved.contract_path.empty())
+                traceFile << "Contract: NOT FOUND\n";
+            else
+                traceFile << "Contract: " << resolved.contract_path << "\n";
+            if (resolved.profile)
+            {
+                traceFile << "\nParameter Profile:\n";
+                traceFile << "  profile_id: " << resolved.profile->profile_id << "\n";
+                traceFile << "  method: " << resolved.profile->method << "\n";
+                traceFile << "  threshold: " << resolved.profile->threshold << "\n";
+                traceFile << "  gap: " << resolved.profile->gap << "\n";
+                traceFile << "  linegap: " << resolved.profile->linegap << "\n";
+                traceFile << "  wgap: " << resolved.profile->wgap << "\n";
+                traceFile << "  hgap: " << resolved.profile->hgap << "\n";
+                traceFile << "  filterprofile: " << resolved.profile->filterprofile << "\n";
+            }
+            if (resolved.target)
+            {
+                traceFile << "\nTarget ROI:\n";
+                traceFile << "  tool: " << resolved.target->tool << "\n";
+                traceFile << "  x0,y0,x1,y1: " << resolved.target->x0 << "," << resolved.target->y0 << "," << resolved.target->x1 << "," << resolved.target->y1 << "\n";
+                traceFile << "  cx,cy,px,py: " << resolved.target->cx << "," << resolved.target->cy << "," << resolved.target->px << "," << resolved.target->py << "\n";
+            }
+        }
+    }
+
+    void ExportRoiPreview(
+        const std::string& imagePath,
+        const std::filesystem::path& caseDir,
+        const CxScriptSuiteCase& suite_case,
+        const ResolvedEvidenceCase& resolved)
+    {
+        cv::Mat img = cv::imread(imagePath);
+        if (img.empty())
+            return;
+
+        cv::Mat preview = img.clone();
+
+        if (resolved.target)
+        {
+            if (resolved.target->tool == "Findcircle")
+            {
+                const double roiRadius = std::hypot(
+                    static_cast<double>(resolved.target->px - resolved.target->cx),
+                    static_cast<double>(resolved.target->py - resolved.target->cy));
+
+                if (roiRadius > 1.0)
+                {
+                    cv::circle(
+                        preview,
+                        cv::Point(resolved.target->cx, resolved.target->cy),
+                        static_cast<int>(std::round(roiRadius)),
+                        cv::Scalar(0, 255, 0),
+                        2,
+                        cv::LINE_AA);
+                }
+            }
+            else if (resolved.target->tool == "Findline")
+            {
+                cv::line(
+                    preview,
+                    cv::Point(resolved.target->x0, resolved.target->y0),
+                    cv::Point(resolved.target->x1, resolved.target->y1),
+                    cv::Scalar(0, 255, 0),
+                    2,
+                    cv::LINE_AA);
+            }
+        }
+
+        int y = 30;
+        cv::putText(preview, "image_id: " + suite_case.image_id, {20, y},
+            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+        y += 25;
+        cv::putText(preview, "target_id: " + suite_case.target_id, {20, y},
+            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+        y += 25;
+        cv::putText(preview, "tool: " + (resolved.script ? resolved.script->tool : "unknown"), {20, y},
+            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+        y += 25;
+        cv::putText(preview, "param: " + suite_case.parameter_profile_id, {20, y},
+            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+        y += 25;
+        cv::putText(preview, "script: " + suite_case.script_id, {20, y},
+            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+
+        cv::imwrite((caseDir / "roi_preview.png").string(), preview);
+    }
+
+    void WriteEvidencePacket(
+        const std::filesystem::path& caseDir,
+        const CxScriptSuiteCase& suite_case,
+        const ResolvedEvidenceCase& resolved,
+        const CxScriptSuiteCaseResult& result)
+    {
+        std::ofstream packetFile(caseDir / "evidence_packet.json");
+        if (!packetFile.is_open())
+            return;
+
+        packetFile << "{\n";
+        packetFile << "  \"evidence_id\": \"" << suite_case.case_id << "\",\n";
+        packetFile << "  \"case_id\": \"" << suite_case.case_id << "\",\n";
+        packetFile << "\n";
+        packetFile << "  \"image\": {\n";
+        packetFile << "    \"image_id\": \"" << suite_case.image_id << "\",\n";
+        if (resolved.image)
+            packetFile << "    \"path\": \"" << resolved.image->path << "\",\n";
+        else
+            packetFile << "    \"path\": \"\",\n";
+        packetFile << "    \"level\": \"" << suite_case.level << "\"\n";
+        packetFile << "  },\n";
+        packetFile << "\n";
+        packetFile << "  \"target\": {\n";
+        packetFile << "    \"target_id\": \"" << suite_case.target_id << "\",\n";
+        if (resolved.target)
+        {
+            packetFile << "    \"tool\": \"" << resolved.target->tool << "\",\n";
+            packetFile << "    \"cx\": " << resolved.target->cx << ",\n";
+            packetFile << "    \"cy\": " << resolved.target->cy << ",\n";
+            packetFile << "    \"px\": " << resolved.target->px << ",\n";
+            packetFile << "    \"py\": " << resolved.target->py << ",\n";
+            packetFile << "    \"roi_valid\": true\n";
+        }
+        else
+        {
+            packetFile << "    \"tool\": \"\",\n";
+            packetFile << "    \"cx\": 0,\n";
+            packetFile << "    \"cy\": 0,\n";
+            packetFile << "    \"px\": 0,\n";
+            packetFile << "    \"py\": 0,\n";
+            packetFile << "    \"roi_valid\": false\n";
+        }
+        packetFile << "  },\n";
+        packetFile << "\n";
+        packetFile << "  \"script\": {\n";
+        packetFile << "    \"script_id\": \"" << suite_case.script_id << "\",\n";
+        if (resolved.script)
+            packetFile << "    \"path\": \"" << resolved.script->path << "\",\n";
+        else
+            packetFile << "    \"path\": \"\",\n";
+        packetFile << "    \"expected_result\": \"" << suite_case.expected_result << "\"\n";
+        packetFile << "  },\n";
+        packetFile << "\n";
+        packetFile << "  \"parameter\": {\n";
+        packetFile << "    \"profile_id\": \"" << suite_case.parameter_profile_id << "\",\n";
+        if (resolved.profile)
+        {
+            packetFile << "    \"method\": " << resolved.profile->method << ",\n";
+            packetFile << "    \"threshold\": " << resolved.profile->threshold << ",\n";
+            packetFile << "    \"gap\": " << resolved.profile->gap << ",\n";
+            packetFile << "    \"linegap\": " << resolved.profile->linegap << ",\n";
+            packetFile << "    \"wgap\": " << resolved.profile->wgap << ",\n";
+            packetFile << "    \"hgap\": " << resolved.profile->hgap << ",\n";
+            packetFile << "    \"filterprofile\": " << resolved.profile->filterprofile << "\n";
+        }
+        else
+        {
+            packetFile << "    \"method\": 0,\n";
+            packetFile << "    \"threshold\": 0,\n";
+            packetFile << "    \"gap\": 0,\n";
+            packetFile << "    \"linegap\": 0,\n";
+            packetFile << "    \"wgap\": 0,\n";
+            packetFile << "    \"hgap\": 0,\n";
+            packetFile << "    \"filterprofile\": 0\n";
+        }
+        packetFile << "  },\n";
+        packetFile << "\n";
+        packetFile << "  \"contract\": {\n";
+        packetFile << "    \"path\": \"" << resolved.contract_path << "\",\n";
+        packetFile << "    \"expected_policy_guard\": \"" << suite_case.expected_policy_guard << "\"\n";
+        packetFile << "  },\n";
+        packetFile << "\n";
+        packetFile << "  \"result\": {\n";
+        packetFile << "    \"valid_points_count\": " << result.valid_points_count << ",\n";
+        packetFile << "    \"has_fit_circle\": " << (result.has_fit_circle ? "true" : "false") << ",\n";
+        packetFile << "    \"has_fit_line\": " << (result.has_fit_line ? "true" : "false") << ",\n";
+        packetFile << "    \"contract_pass\": " << (result.contract_pass ? "true" : "false") << ",\n";
+        packetFile << "    \"failure_stage\": \"" << result.failure_stage << "\",\n";
+        packetFile << "    \"conclusion\": \"" << result.conclusion << "\"\n";
+        packetFile << "  }\n";
+        packetFile << "}\n";
     }
 
     void EvaluateSuiteCaseContract(CxScriptSuiteCaseResult& r)
@@ -402,6 +711,8 @@ namespace
         const CxScriptCatalogEntry& script,
         const CxScriptImageManifestEntry& image,
         const CxScriptImageManifestRuntime& manifest,
+        const CxParameterProfileRuntime& profiles,
+        const ResolvedEvidenceCase& resolved,
         const std::filesystem::path& outRoot,
         const CxScriptSuiteRunOptions& options,
         CxScriptSuiteCaseResult& out)
@@ -424,7 +735,7 @@ namespace
                 ? suiteCase.expected_policy_guard
                 : script.expected_policy_guard;
 
-        out.contract_path = script.contract_path;
+        out.contract_path = resolved.contract_path;
 
         const std::filesystem::path caseDir =
             outRoot /
@@ -435,6 +746,9 @@ namespace
             suiteCase.case_id;
 
         std::filesystem::create_directories(caseDir);
+
+        WriteCaseTrace(caseDir, suiteCase, resolved);
+        ExportRoiPreview(image.path, caseDir, suiteCase, resolved);
 
         CxScriptHeadlessOptions headless;
         headless.enabled = true;
@@ -449,57 +763,35 @@ namespace
         headless.stage25_target_id = suiteCase.target_id;
         headless.stage25_tool = script.tool;
 
-        if (!suiteCase.target_id.empty())
+        if (resolved.target)
         {
-            const CxScriptImageTargetRoi* targetRoi =
-                FindTargetRoiByImageAndTargetId(manifest, image.image_id, suiteCase.target_id);
+            headless.roi_x0 = resolved.target->x0;
+            headless.roi_y0 = resolved.target->y0;
+            headless.roi_x1 = resolved.target->x1;
+            headless.roi_y1 = resolved.target->y1;
+            headless.circle_cx = resolved.target->cx;
+            headless.circle_cy = resolved.target->cy;
+            headless.circle_px = resolved.target->px;
+            headless.circle_py = resolved.target->py;
+            headless.wgap = resolved.target->wgap;
+            headless.hgap = resolved.target->hgap;
+            headless.gap = resolved.target->gap;
+            headless.linegap = resolved.target->linegap;
+            headless.tool_half_width = resolved.target->tool_half_width;
 
-            if (targetRoi)
-            {
-                headless.roi_x0 = targetRoi->x0;
-                headless.roi_y0 = targetRoi->y0;
-                headless.roi_x1 = targetRoi->x1;
-                headless.roi_y1 = targetRoi->y1;
-                headless.circle_cx = targetRoi->cx;
-                headless.circle_cy = targetRoi->cy;
-                headless.circle_px = targetRoi->px;
-                headless.circle_py = targetRoi->py;
-                headless.wgap = targetRoi->wgap;
-                headless.hgap = targetRoi->hgap;
-                headless.gap = targetRoi->gap;
-                headless.linegap = targetRoi->linegap;
-                headless.tool_half_width = targetRoi->tool_half_width;
-                headless.threshold = targetRoi->threshold;
-                headless.method = targetRoi->method;
+            out.roi_x0 = resolved.target->x0;
+            out.roi_y0 = resolved.target->y0;
+            out.roi_x1 = resolved.target->x1;
+            out.roi_y1 = resolved.target->y1;
+            out.circle_cx = resolved.target->cx;
+            out.circle_cy = resolved.target->cy;
+            out.circle_px = resolved.target->px;
+            out.circle_py = resolved.target->py;
+        }
 
-                out.roi_x0 = targetRoi->x0;
-                out.roi_y0 = targetRoi->y0;
-                out.roi_x1 = targetRoi->x1;
-                out.roi_y1 = targetRoi->y1;
-                out.circle_cx = targetRoi->cx;
-                out.circle_cy = targetRoi->cy;
-                out.circle_px = targetRoi->px;
-                out.circle_py = targetRoi->py;
-
-                std::cout << "[DEBUG] Found target: " << suiteCase.target_id 
-                          << " for image: " << image.image_id 
-                          << " cx=" << targetRoi->cx << " cy=" << targetRoi->cy 
-                          << " px=" << targetRoi->px << " py=" << targetRoi->py << "\n";
-            }
-            else
-            {
-                std::cout << "[DEBUG] Target NOT found: " << suiteCase.target_id 
-                          << " for image: " << image.image_id << "\n";
-                const CxScriptImageManifestEntry* img = FindImageById(manifest, image.image_id);
-                if (img)
-                {
-                    std::cout << "[DEBUG] Image has " << img->targets.size() << " targets:\n";
-                    for (const auto& t : img->targets)
-                    {
-                        std::cout << "[DEBUG]   target_id=" << t.target_id << "\n";
-                    }
-                }
-            }
+        if (resolved.profile)
+        {
+            InjectParameterGlobals(headless, *resolved.profile);
         }
 
         CxScriptHeadlessResult headlessResult;
@@ -530,6 +822,8 @@ namespace
                         caseDir / "tool_display.png",
                         out);
             }
+
+            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
             return;
         }
 
@@ -545,6 +839,8 @@ namespace
         }
 
         EvaluateSuiteCaseContract(out);
+
+        WriteEvidencePacket(caseDir, suiteCase, resolved, out);
     }
 
     int CountExecuted(const std::vector<CxScriptSuiteCaseResult>& cases)
@@ -626,36 +922,52 @@ bool RunCxScriptSuite(
         return false;
     }
 
+    CxParameterProfileRuntime parameterProfiles;
+    if (!options.parameter_profile_path.empty())
+    {
+        std::string loadReason;
+        if (LoadCxParameterProfileFile(options.parameter_profile_path, parameterProfiles, loadReason))
+        {
+            std::cout << "[DEBUG] Loaded " << parameterProfiles.profiles.size() << " parameter profiles\n";
+        }
+        else
+        {
+            std::cerr << "[WARN] Failed to load parameter profiles: " << loadReason << "\n";
+        }
+    }
+
     for (const auto& suiteCase : suite.cases)
     {
-        const CxScriptCatalogEntry* script =
-            FindCatalogScriptById(catalog, suiteCase.script_id);
+        ResolvedEvidenceCase resolved;
+        std::string resolveReason;
 
-        if (!script)
+        if (!ResolveEvidenceCase(suiteCase, catalog, imageManifest, parameterProfiles, resolved, resolveReason))
         {
-            CxScriptSuiteCaseResult missingCase;
-            missingCase.case_id = suiteCase.case_id;
-            missingCase.script_id = suiteCase.script_id;
-            missingCase.headless_ok = false;
-            missingCase.contract_pass = false;
-            missingCase.conclusion = "Script not found in catalog: " + suiteCase.script_id;
-            result.case_results.push_back(missingCase);
-            continue;
-        }
+            CxScriptSuiteCaseResult failCase;
+            failCase.case_id = suiteCase.case_id;
+            failCase.script_id = suiteCase.script_id;
+            failCase.image_id = suiteCase.image_id;
+            failCase.headless_ok = false;
+            failCase.contract_pass = false;
+            failCase.failure_stage = "evidence_resolution_failed";
+            failCase.conclusion = resolveReason;
 
-        const CxScriptImageManifestEntry* image =
-            FindImageById(imageManifest, suiteCase.image_id);
+            const std::filesystem::path caseDir =
+                outRoot /
+                "cases" /
+                suiteCase.level /
+                suiteCase.image_id /
+                suiteCase.script_id /
+                suiteCase.case_id;
+            std::filesystem::create_directories(caseDir);
 
-        if (!image)
-        {
-            CxScriptSuiteCaseResult missingCase;
-            missingCase.case_id = suiteCase.case_id;
-            missingCase.script_id = suiteCase.script_id;
-            missingCase.image_id = suiteCase.image_id;
-            missingCase.headless_ok = false;
-            missingCase.contract_pass = false;
-            missingCase.conclusion = "Image not found in manifest: " + suiteCase.image_id;
-            result.case_results.push_back(missingCase);
+            WriteCaseTrace(caseDir, suiteCase, resolved);
+            WriteEvidencePacket(caseDir, suiteCase, resolved, failCase);
+
+            if (resolved.image)
+                ExportRoiPreview(resolved.image->path, caseDir, suiteCase, resolved);
+
+            result.case_results.push_back(failCase);
             continue;
         }
 
@@ -663,9 +975,11 @@ bool RunCxScriptSuite(
 
         RunSingleSuiteCase(
             suiteCase,
-            *script,
-            *image,
+            *resolved.script,
+            *resolved.image,
             imageManifest,
+            parameterProfiles,
+            resolved,
             outRoot,
             options,
             caseResult);
