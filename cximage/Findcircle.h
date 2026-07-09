@@ -65,6 +65,14 @@ struct FindcircleMeasureGeometryDebug
     std::string measure_source;
     std::string failure_stage;
     std::string detail;
+
+    int scan_lines_processed = 0;
+    int total_samples = 0;
+    int elapsed_ms = 0;
+
+    int budget_max_scan_lines = 2048;
+    int budget_max_samples = 2000000;
+    int budget_max_elapsed_ms = 3000;
 };
 class Findcircle :public Shape
 {

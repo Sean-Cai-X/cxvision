@@ -157,6 +157,26 @@ int main(int argc, char** argv)
         {
             suiteOptions.resume_review_id = argv[++i];
         }
+        else if (arg == "--suite-dry-run")
+        {
+            suiteOptions.dry_run = true;
+        }
+        else if (arg == "--suite-preview-only")
+        {
+            suiteOptions.preview_only = true;
+        }
+        else if (arg == "--case-timeout-sec" && i + 1 < argc)
+        {
+            suiteOptions.case_timeout_sec = std::stoi(argv[++i]);
+        }
+        else if (arg == "--no-contract")
+        {
+            suiteOptions.require_human_review = false;
+        }
+        else if (arg == "--no-tool-display")
+        {
+            suiteOptions.export_tool_display = false;
+        }
     }
 
     if (suiteOptions.enabled)

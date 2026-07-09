@@ -27,6 +27,9 @@ struct CxScriptSuiteRunOptions
     std::string review_decision;
     std::string resume_review_id;
 
+    bool dry_run = false;
+    bool preview_only = false;
+
     int case_timeout_sec = 120;
 };
 

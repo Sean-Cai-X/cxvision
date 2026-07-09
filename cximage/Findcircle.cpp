@@ -804,12 +804,56 @@ void Findcircle::Measure(Image& image)
       const int left_margin = ComputeCircleEdgeMargin(ilineslen1, m_iSelectPointGap);
       const int right_margin = ComputeCircleEdgeMargin(ilineslen1, m_iSelectPointGap);
       const int max_edge_width = ComputeCircleMaxEdgeWidth(ilineslen1);
+
+      struct MeasureBudget {
+          int max_scan_lines = 2048;
+          int max_samples = 2000000;
+          int max_elapsed_ms = 3000;
+      };
+
+      MeasureBudget budget;
+
+      auto begin_time = std::chrono::steady_clock::now();
+      int scan_lines_processed = 0;
+      int total_samples = 0;
+
+      auto budgetExceeded = [&]() -> bool {
+          auto now = std::chrono::steady_clock::now();
+          auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count();
+
+          if (scan_lines_processed > budget.max_scan_lines) {
+              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_scan_lines_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure scan lines exceeded budget: " + std::to_string(scan_lines_processed) + " > " + std::to_string(budget.max_scan_lines);
+              return true;
+          }
+
+          if (total_samples > budget.max_samples) {
+              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_samples_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure samples exceeded budget: " + std::to_string(total_samples) + " > " + std::to_string(budget.max_samples);
+              return true;
+          }
+
+          if (elapsed_ms > budget.max_elapsed_ms) {
+              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_time_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure time exceeded budget: " + std::to_string(elapsed_ms) + "ms > " + std::to_string(budget.max_elapsed_ms) + "ms";
+              return true;
+          }
+
+          return false;
+      };
  
     if (1) 
     {
         cv::Vec3b icolor = 0;
           for (int inumy = 0; inumy < iscanlines; inumy++)
           {
+              ++scan_lines_processed;
+
+              if (budgetExceeded()) {
+                  m_measurepoints.clear();
+                  return;
+              }
+
               irecordnum = 0;
               icurlinenum = 0;
               bcollectBegin = false;
@@ -818,6 +862,13 @@ void Findcircle::Measure(Image& image)
              
             for (int inumx = 0; inumx < ilineslen1; inumx++)
             { 
+                ++total_samples;
+
+                if ((total_samples % 4096) == 0 && budgetExceeded()) {
+                    m_measurepoints.clear();
+                    return;
+                }
+
                 icolor = g_pbackimage->pixel(inumx, inumy);
                   if ((icolor[0]) > 0)
                   {
@@ -952,6 +1003,17 @@ void Findcircle::Measure(Image& image)
         m_lastMeasureGeometryDebug.detail =
             "Findcircle original Measure completed, but produced zero result points.";
     }
+
+    m_lastMeasureGeometryDebug.scan_lines_processed = scan_lines_processed;
+    m_lastMeasureGeometryDebug.total_samples = total_samples;
+    auto end_time = std::chrono::steady_clock::now();
+    m_lastMeasureGeometryDebug.elapsed_ms =
+        static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            end_time - begin_time).count());
+
+    m_lastMeasureGeometryDebug.budget_max_scan_lines = budget.max_scan_lines;
+    m_lastMeasureGeometryDebug.budget_max_samples = budget.max_samples;
+    m_lastMeasureGeometryDebug.budget_max_elapsed_ms = budget.max_elapsed_ms;
 }
 
 void Findcircle::MeasureBalanced(Image& image)

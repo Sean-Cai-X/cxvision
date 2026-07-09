@@ -97,6 +97,14 @@ struct RuntimeObjectView
     int back_image_width = 0;
     int back_image_height = 0;
 
+    // Findcircle measure budget stats
+    int circle_scan_lines_processed = 0;
+    int circle_total_samples = 0;
+    int circle_elapsed_ms = 0;
+    int circle_budget_max_scan_lines = 2048;
+    int circle_budget_max_samples = 2000000;
+    int circle_budget_max_elapsed_ms = 3000;
+
 
     // Findline ROI center line.
     bool has_line_roi = false;

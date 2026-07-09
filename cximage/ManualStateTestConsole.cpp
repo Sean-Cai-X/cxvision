@@ -2614,6 +2614,24 @@ static void RefreshFindcircleMeasureGeometrySnapshot(
 
     object.circle_measure_detail =
         dbg.detail;
+
+    object.circle_scan_lines_processed =
+        dbg.scan_lines_processed;
+
+    object.circle_total_samples =
+        dbg.total_samples;
+
+    object.circle_elapsed_ms =
+        dbg.elapsed_ms;
+
+    object.circle_budget_max_scan_lines =
+        dbg.budget_max_scan_lines;
+
+    object.circle_budget_max_samples =
+        dbg.budget_max_samples;
+
+    object.circle_budget_max_elapsed_ms =
+        dbg.budget_max_elapsed_ms;
 }
 
 static bool ResolveDebugInt(ManualTestContext& context,
@@ -7728,7 +7746,13 @@ static bool SaveCxScriptHeadlessSummaryJson(
                 file << "      \"circle_avgdist\": " << object.fit_avgdist << ",\n";
                 file << "      \"has_result_measure\": " << (object.has_result_measure ? "true" : "false") << ",\n";
                 file << "      \"circle_measure_source\": \"" << CxDebugJsonEscape(object.circle_measure_source) << "\",\n";
-                file << "      \"circle_measure_failure_stage\": \"" << CxDebugJsonEscape(object.circle_measure_failure_stage) << "\"";
+                file << "      \"circle_measure_failure_stage\": \"" << CxDebugJsonEscape(object.circle_measure_failure_stage) << "\",\n";
+                file << "      \"circle_scan_lines_processed\": " << object.circle_scan_lines_processed << ",\n";
+                file << "      \"circle_total_samples\": " << object.circle_total_samples << ",\n";
+                file << "      \"circle_elapsed_ms\": " << object.circle_elapsed_ms << ",\n";
+                file << "      \"circle_budget_max_scan_lines\": " << object.circle_budget_max_scan_lines << ",\n";
+                file << "      \"circle_budget_max_samples\": " << object.circle_budget_max_samples << ",\n";
+                file << "      \"circle_budget_max_elapsed_ms\": " << object.circle_budget_max_elapsed_ms;
             }
 
             file << "\n    }";

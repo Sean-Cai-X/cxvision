@@ -12,7 +12,33 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <chrono>
 #include <opencv2/opencv.hpp>
+
+class ScopedSuiteTimer
+{
+public:
+    explicit ScopedSuiteTimer(const std::string& name)
+        : name_(name),
+          begin_(std::chrono::steady_clock::now())
+    {
+        std::cout << "[phase-begin] " << name_ << "\n" << std::flush;
+    }
+
+    ~ScopedSuiteTimer()
+    {
+        auto end = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end - begin_).count();
+
+        std::cout << "[phase-end] " << name_
+                  << " elapsed_ms=" << ms << "\n" << std::flush;
+    }
+
+private:
+    std::string name_;
+    std::chrono::steady_clock::time_point begin_;
+};
 
 const CxScriptCatalogEntry* FindCatalogScriptById(
     const CxScriptCatalogRuntime& catalog,
@@ -764,9 +790,12 @@ namespace
         std::filesystem::create_directories(caseDir);
         out.case_dir = caseDir.string();
 
-        WriteCaseTrace(caseDir, suiteCase, resolved);
-        ExportRoiPreview(image.path, caseDir, suiteCase, resolved);
-        out.roi_preview_path = (caseDir / "roi_preview.png").string();
+        {
+            ScopedSuiteTimer timer("roi_preview:" + suiteCase.case_id);
+            WriteCaseTrace(caseDir, suiteCase, resolved);
+            ExportRoiPreview(image.path, caseDir, suiteCase, resolved);
+            out.roi_preview_path = (caseDir / "roi_preview.png").string();
+        }
 
         if (StopForHumanReviewIfNeeded(options, out, "roi", "accept_roi or reject_roi"))
         {
@@ -774,67 +803,89 @@ namespace
             return;
         }
 
-        CxScriptHeadlessOptions headless;
-        headless.enabled = true;
-        headless.image_path = image.path;
-        headless.script_path = script.path;
-        headless.output_dir = caseDir.string();
-        headless.case_name = suiteCase.case_id;
-        headless.save_overlay = options.save_overlay;
-
-        headless.stage25_image_id = image.image_id;
-        headless.stage25_level = image.level;
-        headless.stage25_target_id = suiteCase.target_id;
-        headless.stage25_tool = script.tool;
-
-        if (resolved.target)
         {
-            headless.roi_x0 = resolved.target->x0;
-            headless.roi_y0 = resolved.target->y0;
-            headless.roi_x1 = resolved.target->x1;
-            headless.roi_y1 = resolved.target->y1;
-            headless.circle_cx = resolved.target->cx;
-            headless.circle_cy = resolved.target->cy;
-            headless.circle_px = resolved.target->px;
-            headless.circle_py = resolved.target->py;
-            headless.wgap = resolved.target->wgap;
-            headless.hgap = resolved.target->hgap;
-            headless.gap = resolved.target->gap;
-            headless.linegap = resolved.target->linegap;
-            headless.tool_half_width = resolved.target->tool_half_width;
+            ScopedSuiteTimer timer("headless:" + suiteCase.case_id);
 
-            out.roi_x0 = resolved.target->x0;
-            out.roi_y0 = resolved.target->y0;
-            out.roi_x1 = resolved.target->x1;
-            out.roi_y1 = resolved.target->y1;
-            out.circle_cx = resolved.target->cx;
-            out.circle_cy = resolved.target->cy;
-            out.circle_px = resolved.target->px;
-            out.circle_py = resolved.target->py;
+            CxScriptHeadlessOptions headless;
+            headless.enabled = true;
+            headless.image_path = image.path;
+            headless.script_path = script.path;
+            headless.output_dir = caseDir.string();
+            headless.case_name = suiteCase.case_id;
+            headless.save_overlay = options.save_overlay;
+
+            headless.stage25_image_id = image.image_id;
+            headless.stage25_level = image.level;
+            headless.stage25_target_id = suiteCase.target_id;
+            headless.stage25_tool = script.tool;
+
+            if (resolved.target)
+            {
+                headless.roi_x0 = resolved.target->x0;
+                headless.roi_y0 = resolved.target->y0;
+                headless.roi_x1 = resolved.target->x1;
+                headless.roi_y1 = resolved.target->y1;
+                headless.circle_cx = resolved.target->cx;
+                headless.circle_cy = resolved.target->cy;
+                headless.circle_px = resolved.target->px;
+                headless.circle_py = resolved.target->py;
+                headless.wgap = resolved.target->wgap;
+                headless.hgap = resolved.target->hgap;
+                headless.gap = resolved.target->gap;
+                headless.linegap = resolved.target->linegap;
+                headless.tool_half_width = resolved.target->tool_half_width;
+
+                out.roi_x0 = resolved.target->x0;
+                out.roi_y0 = resolved.target->y0;
+                out.roi_x1 = resolved.target->x1;
+                out.roi_y1 = resolved.target->y1;
+                out.circle_cx = resolved.target->cx;
+                out.circle_cy = resolved.target->cy;
+                out.circle_px = resolved.target->px;
+                out.circle_py = resolved.target->py;
+            }
+
+            if (resolved.profile)
+            {
+                InjectParameterGlobals(headless, *resolved.profile);
+            }
+
+            CxScriptHeadlessResult headlessResult;
+            RunCxScriptHeadless(headless, headlessResult);
+
+            out.headless_ok = headlessResult.ok;
+            out.case_dir = caseDir.string();
+            out.snapshot_path = headlessResult.snapshot_path;
+            out.summary_path = headlessResult.summary_path;
+            out.result_overlay_path = headlessResult.overlay_path;
+
+            LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
+
+            if (!out.headless_ok)
+            {
+                out.contract_pass = false;
+                out.actual_policy_guard = "HEADLESS_FAILED";
+                out.failure_stage = "headless_execution_failed";
+                out.conclusion = "Headless execution failed: " + headlessResult.reason;
+
+                if (options.export_tool_display)
+                {
+                    out.tool_display_path =
+                        CxScriptToolDisplayExporter::ExportToolDisplay(
+                            image.path,
+                            out.result_overlay_path,
+                            out.evidence_overlay_path,
+                            caseDir / "tool_display.png",
+                            out);
+                }
+
+                WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+                return;
+            }
         }
 
-        if (resolved.profile)
         {
-            InjectParameterGlobals(headless, *resolved.profile);
-        }
-
-        CxScriptHeadlessResult headlessResult;
-        RunCxScriptHeadless(headless, headlessResult);
-
-        out.headless_ok = headlessResult.ok;
-        out.case_dir = caseDir.string();
-        out.snapshot_path = headlessResult.snapshot_path;
-        out.summary_path = headlessResult.summary_path;
-        out.result_overlay_path = headlessResult.overlay_path;
-
-        LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
-
-        if (!out.headless_ok)
-        {
-            out.contract_pass = false;
-            out.actual_policy_guard = "HEADLESS_FAILED";
-            out.failure_stage = "headless_execution_failed";
-            out.conclusion = "Headless execution failed: " + headlessResult.reason;
+            ScopedSuiteTimer timer("tool_display:" + suiteCase.case_id);
 
             if (options.export_tool_display)
             {
@@ -846,20 +897,6 @@ namespace
                         caseDir / "tool_display.png",
                         out);
             }
-
-            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
-            return;
-        }
-
-        if (options.export_tool_display)
-        {
-            out.tool_display_path =
-                CxScriptToolDisplayExporter::ExportToolDisplay(
-                    image.path,
-                    out.result_overlay_path,
-                    out.evidence_overlay_path,
-                    caseDir / "tool_display.png",
-                    out);
         }
 
         if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
@@ -868,7 +905,10 @@ namespace
             return;
         }
 
-        EvaluateSuiteCaseContract(out);
+        {
+            ScopedSuiteTimer timer("contract:" + suiteCase.case_id);
+            EvaluateSuiteCaseContract(out);
+        }
 
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
         {
@@ -1112,17 +1152,68 @@ bool RunCxScriptSuite(
         ResolvedEvidenceCase resolved;
         std::string resolveReason;
 
-        if (!ResolveEvidenceCase(suiteCase, catalog, imageManifest, parameterProfiles, resolved, resolveReason))
         {
-            CxScriptSuiteCaseResult failCase;
-            failCase.case_id = suiteCase.case_id;
-            failCase.script_id = suiteCase.script_id;
-            failCase.image_id = suiteCase.image_id;
-            failCase.headless_ok = false;
-            failCase.contract_pass = false;
-            failCase.failure_stage = "evidence_resolution_failed";
-            failCase.conclusion = resolveReason;
+            ScopedSuiteTimer timer("resolve_evidence:" + suiteCase.case_id);
+            if (!ResolveEvidenceCase(suiteCase, catalog, imageManifest, parameterProfiles, resolved, resolveReason))
+            {
+                CxScriptSuiteCaseResult failCase;
+                failCase.case_id = suiteCase.case_id;
+                failCase.script_id = suiteCase.script_id;
+                failCase.image_id = suiteCase.image_id;
+                failCase.headless_ok = false;
+                failCase.contract_pass = false;
+                failCase.failure_stage = "evidence_resolution_failed";
+                failCase.conclusion = resolveReason;
 
+                const std::filesystem::path caseDir =
+                    outRoot /
+                    "cases" /
+                    suiteCase.level /
+                    suiteCase.image_id /
+                    suiteCase.script_id /
+                    suiteCase.case_id;
+                std::filesystem::create_directories(caseDir);
+
+                WriteCaseTrace(caseDir, suiteCase, resolved);
+                WriteEvidencePacket(caseDir, suiteCase, resolved, failCase);
+
+                if (resolved.image)
+                    ExportRoiPreview(resolved.image->path, caseDir, suiteCase, resolved);
+
+                result.case_results.push_back(failCase);
+                continue;
+            }
+        }
+
+        if (options.dry_run)
+        {
+            CxScriptSuiteCaseResult dryCase;
+            dryCase.case_id = suiteCase.case_id;
+            dryCase.script_id = suiteCase.script_id;
+            dryCase.image_id = suiteCase.image_id;
+            dryCase.target_id = suiteCase.target_id;
+            dryCase.parameter_profile_id = suiteCase.parameter_profile_id;
+            dryCase.headless_ok = false;
+            dryCase.contract_pass = false;
+            dryCase.failure_stage = "dry_run_completed";
+            dryCase.conclusion = "Dry run: all evidence chain components resolved successfully";
+
+            std::cout << "[dry-run] case_id=" << suiteCase.case_id
+                      << " script_found=" << (resolved.script ? "true" : "false")
+                      << " image_found=" << (resolved.image ? "true" : "false")
+                      << " target_found=" << (resolved.target ? "true" : "false")
+                      << " parameter_found=" << (resolved.profile ? "true" : "false")
+                      << " contract_found=" << (!resolved.contract_path.empty() ? "true" : "false")
+                      << "\n";
+
+            result.case_results.push_back(dryCase);
+            continue;
+        }
+
+        CxScriptSuiteCaseResult caseResult;
+
+        if (options.preview_only)
+        {
             const std::filesystem::path caseDir =
                 outRoot /
                 "cases" /
@@ -1132,17 +1223,33 @@ bool RunCxScriptSuite(
                 suiteCase.case_id;
             std::filesystem::create_directories(caseDir);
 
-            WriteCaseTrace(caseDir, suiteCase, resolved);
-            WriteEvidencePacket(caseDir, suiteCase, resolved, failCase);
+            caseResult.case_id = suiteCase.case_id;
+            caseResult.evidence_id = suiteCase.case_id;
+            caseResult.script_id = suiteCase.script_id;
+            caseResult.image_id = suiteCase.image_id;
+            caseResult.target_id = suiteCase.target_id;
+            caseResult.parameter_profile_id = suiteCase.parameter_profile_id;
+            caseResult.contract_id = resolved.script ? resolved.script->contract_path : "";
+            caseResult.case_dir = caseDir.string();
 
-            if (resolved.image)
+            {
+                ScopedSuiteTimer timer("roi_preview:" + suiteCase.case_id);
+                WriteCaseTrace(caseDir, suiteCase, resolved);
                 ExportRoiPreview(resolved.image->path, caseDir, suiteCase, resolved);
+                caseResult.roi_preview_path = (caseDir / "roi_preview.png").string();
+            }
 
-            result.case_results.push_back(failCase);
+            WriteEvidencePacket(caseDir, suiteCase, resolved, caseResult);
+
+            if (StopForHumanReviewIfNeeded(options, caseResult, "roi", "accept_roi or reject_roi"))
+            {
+                caseResult.stopped_for_review = true;
+                caseResult.review_stage = "roi";
+            }
+
+            result.case_results.push_back(caseResult);
             continue;
         }
-
-        CxScriptSuiteCaseResult caseResult;
 
         RunSingleSuiteCase(
             suiteCase,
