@@ -141,6 +141,22 @@ int main(int argc, char** argv)
         {
             suiteOptions.parameter_profile_path = argv[++i];
         }
+        else if (arg == "--require-review")
+        {
+            suiteOptions.require_human_review = true;
+        }
+        else if (arg == "--review-stage" && i + 1 < argc)
+        {
+            suiteOptions.review_stage = argv[++i];
+        }
+        else if (arg == "--review-decision" && i + 1 < argc)
+        {
+            suiteOptions.review_decision = argv[++i];
+        }
+        else if (arg == "--resume-review" && i + 1 < argc)
+        {
+            suiteOptions.resume_review_id = argv[++i];
+        }
     }
 
     if (suiteOptions.enabled)
@@ -155,6 +171,11 @@ int main(int argc, char** argv)
         std::cout << "contract_pass=" << result.contract_pass << "\n";
         std::cout << "contract_fail=" << result.contract_fail << "\n";
         std::cout << "report_root=" << result.report_root << "\n";
+
+        if (result.reason == "REVIEW_REQUIRED")
+        {
+            return 10;
+        }
 
         return ok ? 0 : 1;
     }

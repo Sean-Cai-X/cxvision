@@ -3,6 +3,7 @@
 #include "CxScriptSuiteRuntime.h"
 #include "CxScriptCatalogRuntime.h"
 #include "CxScriptImageManifestRuntime.h"
+#include "CxScriptReviewGateRuntime.h"
 #include <string>
 #include <vector>
 #include <utility>
@@ -20,11 +21,19 @@ struct CxScriptSuiteRunOptions
     bool save_overlay = true;
     bool export_tool_display = true;
     bool export_best_examples = true;
+
+    bool require_human_review = false;
+    std::string review_stage;
+    std::string review_decision;
+    std::string resume_review_id;
+
+    int case_timeout_sec = 120;
 };
 
 struct CxScriptSuiteCaseResult
 {
     std::string case_id;
+    std::string evidence_id;
     std::string script_id;
     std::string script_path;
 
@@ -33,6 +42,8 @@ struct CxScriptSuiteCaseResult
     std::string level;
     std::string target_id;
     std::string tool;
+    std::string parameter_profile_id;
+    std::string contract_id;
 
     std::string expected_result;
     std::string expected_policy_guard;
@@ -65,6 +76,12 @@ struct CxScriptSuiteCaseResult
     std::string result_overlay_path;
     std::string evidence_overlay_path;
     std::string tool_display_path;
+    std::string roi_preview_path;
+    std::string evidence_packet_path;
+    std::string contract_result_path;
+
+    bool stopped_for_review = false;
+    std::string review_stage;
 
     int roi_x0 = 0;
     int roi_y0 = 0;

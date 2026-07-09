@@ -40,66 +40,66 @@ double CxParameterProfile_setrole(const char* role)
     return 0.0;
 }
 
-double CxParameterProfile_setmethod(int method)
+double CxParameterProfile_setmethod(double method)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->method = method;
+    g_current_parameter_profile->method = static_cast<int>(method);
     return 0.0;
 }
 
-double CxParameterProfile_setthreshold(int threshold)
+double CxParameterProfile_setthreshold(double threshold)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->threshold = threshold;
+    g_current_parameter_profile->threshold = static_cast<int>(threshold);
     return 0.0;
 }
 
-double CxParameterProfile_setgap(int gap)
+double CxParameterProfile_setgap(double gap)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->gap = gap;
+    g_current_parameter_profile->gap = static_cast<int>(gap);
     return 0.0;
 }
 
-double CxParameterProfile_setlinegap(int linegap)
+double CxParameterProfile_setlinegap(double linegap)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->linegap = linegap;
+    g_current_parameter_profile->linegap = static_cast<int>(linegap);
     return 0.0;
 }
 
-double CxParameterProfile_setwgap(int wgap)
+double CxParameterProfile_setwgap(double wgap)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->wgap = wgap;
+    g_current_parameter_profile->wgap = static_cast<int>(wgap);
     return 0.0;
 }
 
-double CxParameterProfile_sethgap(int hgap)
+double CxParameterProfile_sethgap(double hgap)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->hgap = hgap;
+    g_current_parameter_profile->hgap = static_cast<int>(hgap);
     return 0.0;
 }
 
-double CxParameterProfile_setfilterprofile(int filterprofile)
+double CxParameterProfile_setfilterprofile(double filterprofile)
 {
     if (!g_current_parameter_profile)
         return 0.0;
 
-    g_current_parameter_profile->filterprofile = filterprofile;
+    g_current_parameter_profile->filterprofile = static_cast<int>(filterprofile);
     return 0.0;
 }
 

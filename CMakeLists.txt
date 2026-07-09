@@ -91,6 +91,7 @@ set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxParameterProfileRegister.cpp
   cximage/CxScriptEvidenceChainRuntime.cpp
   cximage/CxScriptEvidenceChainRegister.cpp
+  cximage/CxScriptReviewGateRuntime.cpp
 )
 
 set(CXSCRIPT_LEGACY_STAGE25_SOURCES

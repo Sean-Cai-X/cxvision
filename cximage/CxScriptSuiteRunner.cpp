@@ -7,6 +7,7 @@
 #include "CxScriptBestCaseSelector.h"
 #include "CxParameterProfileRuntime.h"
 #include "CxScriptEvidenceChainRuntime.h"
+#include "CxScriptReviewGateRuntime.h"
 #include "ManualStateTestConsole.h"
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,17 @@ const CxScriptCatalogEntry* FindCatalogScriptById(
 
 namespace
 {
+    bool StopForHumanReviewIfNeeded(
+        const CxScriptSuiteRunOptions& options,
+        CxScriptSuiteCaseResult& caseResult,
+        const std::string& stage,
+        const std::string& suggestedAction);
+
+    bool WriteHumanReviewJson(
+        const std::filesystem::path& path,
+        const CxScriptHumanReview& review,
+        std::string& reason);
+
     std::string TrimJsonScalar(std::string value)
     {
         const size_t comment = value.find(',');
@@ -718,6 +730,7 @@ namespace
         CxScriptSuiteCaseResult& out)
     {
         out.case_id = suiteCase.case_id;
+        out.evidence_id = suiteCase.case_id;
         out.script_id = suiteCase.script_id;
         out.script_path = script.path;
         out.image_id = image.image_id;
@@ -725,6 +738,9 @@ namespace
         out.level = image.level;
         out.target_id = suiteCase.target_id;
         out.tool = script.tool;
+        out.parameter_profile_id = suiteCase.parameter_profile_id;
+        out.contract_id = script.contract_path;
+
         out.expected_result =
             !suiteCase.expected_result.empty()
                 ? suiteCase.expected_result
@@ -746,9 +762,17 @@ namespace
             suiteCase.case_id;
 
         std::filesystem::create_directories(caseDir);
+        out.case_dir = caseDir.string();
 
         WriteCaseTrace(caseDir, suiteCase, resolved);
         ExportRoiPreview(image.path, caseDir, suiteCase, resolved);
+        out.roi_preview_path = (caseDir / "roi_preview.png").string();
+
+        if (StopForHumanReviewIfNeeded(options, out, "roi", "accept_roi or reject_roi"))
+        {
+            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            return;
+        }
 
         CxScriptHeadlessOptions headless;
         headless.enabled = true;
@@ -838,9 +862,26 @@ namespace
                     out);
         }
 
+        if (StopForHumanReviewIfNeeded(options, out, "result", "accept_result or reject_overlay or derive_profile"))
+        {
+            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            return;
+        }
+
         EvaluateSuiteCaseContract(out);
 
+        if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
+        {
+            WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+            return;
+        }
+
         WriteEvidencePacket(caseDir, suiteCase, resolved, out);
+
+        if (StopForHumanReviewIfNeeded(options, out, "promotion", "accept_to_regression or derive_diagnostic_profile"))
+        {
+            return;
+        }
     }
 
     int CountExecuted(const std::vector<CxScriptSuiteCaseResult>& cases)
@@ -859,6 +900,136 @@ namespace
             if (c.contract_pass)
                 ++count;
         return count;
+    }
+
+    bool StopForHumanReviewIfNeeded(
+        const CxScriptSuiteRunOptions& options,
+        CxScriptSuiteCaseResult& caseResult,
+        const std::string& stage,
+        const std::string& suggestedAction)
+    {
+        if (!options.require_human_review)
+            return false;
+
+        if (!options.review_stage.empty() &&
+            options.review_stage != stage)
+            return false;
+
+        if (!options.resume_review_id.empty())
+        {
+            CxScriptHumanReview review;
+            std::string reason;
+            std::filesystem::path reviewPath =
+                std::filesystem::path(caseResult.case_dir) / "human_review.json";
+
+            if (LoadHumanReviewJson(reviewPath, review, reason))
+            {
+                if (review.review_id == options.resume_review_id &&
+                    (options.review_decision.empty() || review.decision == options.review_decision))
+                {
+                    return false;
+                }
+            }
+
+            if (!options.review_decision.empty())
+            {
+                CxScriptHumanReview manualReview;
+                manualReview.review_id = options.resume_review_id;
+                manualReview.decision = options.review_decision;
+                manualReview.reviewer = "command_line";
+                manualReview.note = "Review decision from command line";
+                manualReview.next_action = "continue";
+
+                std::string writeReason;
+                WriteHumanReviewJson(reviewPath, manualReview, writeReason);
+                return false;
+            }
+        }
+
+        CxScriptReviewRequest request;
+        request.review_id = caseResult.case_id + "_" + stage;
+        request.case_id = caseResult.case_id;
+        request.evidence_id = caseResult.evidence_id;
+        request.stage = stage;
+        request.image_id = caseResult.image_id;
+        request.target_id = caseResult.target_id;
+        request.script_id = caseResult.script_id;
+        request.parameter_profile_id = caseResult.parameter_profile_id;
+        request.contract_id = caseResult.contract_id;
+
+        request.roi_preview_path = caseResult.roi_preview_path;
+        request.tool_display_path = caseResult.tool_display_path;
+        request.result_summary_path = caseResult.summary_path;
+        request.evidence_packet_path = caseResult.evidence_packet_path;
+        request.contract_result_path = caseResult.contract_result_path;
+        request.suggested_action = suggestedAction;
+
+        if (stage == "roi")
+            request.reason = "ROI preview generated. Please confirm whether the green ROI covers the intended target.";
+        else if (stage == "result")
+            request.reason = "Tool display generated. Please confirm whether the result matches the expected output.";
+        else if (stage == "contract")
+            request.reason = "Contract evaluation completed. Please confirm whether the contract result is consistent with the visual evidence.";
+        else if (stage == "promotion")
+            request.reason = "Case execution completed. Please decide whether to promote this case to the formal regression suite.";
+        else
+            request.reason = "Review required at stage: " + stage;
+
+        std::string reason;
+        std::filesystem::path requestPath =
+            std::filesystem::path(caseResult.case_dir) / "review_request.json";
+        WriteReviewRequestJson(requestPath, request, reason);
+
+        std::cout << "[review-required]\n";
+        std::cout << "review_id=" << request.review_id << "\n";
+        std::cout << "stage=" << stage << "\n";
+        std::cout << "roi_preview=" << request.roi_preview_path << "\n";
+        std::cout << "tool_display=" << request.tool_display_path << "\n";
+        std::cout << "review_request=" << requestPath.string() << "\n";
+        std::cout << std::flush;
+
+        caseResult.stopped_for_review = true;
+        caseResult.review_stage = stage;
+        return true;
+    }
+
+    bool WriteHumanReviewJson(
+        const std::filesystem::path& path,
+        const CxScriptHumanReview& review,
+        std::string& reason)
+    {
+        try
+        {
+            std::ofstream file(path);
+            if (!file.is_open())
+            {
+                reason = "Cannot open human review file: " + path.string();
+                return false;
+            }
+
+            file << "{\n";
+            file << "  \"review_id\": \"" << review.review_id << "\",\n";
+            file << "  \"decision\": \"" << review.decision << "\",\n";
+            file << "  \"reviewer\": \"" << review.reviewer << "\",\n";
+            file << "  \"note\": \"" << review.note << "\",\n";
+            file << "  \"next_action\": \"" << review.next_action << "\"";
+
+            if (!review.suggested_profile_id.empty())
+            {
+                file << ",\n";
+                file << "  \"suggested_profile_id\": \"" << review.suggested_profile_id << "\"";
+            }
+
+            file << "\n";
+            file << "}\n";
+
+            return true;
+        }
+        catch (const std::exception& e)
+        {
+            reason = "Failed to write human review: " + std::string(e.what());
+            return false;
+        }
     }
 }
 
@@ -1019,6 +1190,23 @@ bool RunCxScriptSuite(
     result.contract_pass = CountContractPass(result.case_results);
     result.contract_fail = result.executed_cases - result.contract_pass;
     result.report_root = outRoot.string();
+
+    bool stoppedForReview = false;
+    for (const auto& cr : result.case_results)
+    {
+        if (cr.stopped_for_review)
+        {
+            stoppedForReview = true;
+            break;
+        }
+    }
+
+    if (stoppedForReview)
+    {
+        result.ok = false;
+        result.reason = "REVIEW_REQUIRED";
+        return false;
+    }
 
     result.ok = result.contract_fail == 0;
     result.reason = result.ok ? "suite passed" : "suite has contract failures";
