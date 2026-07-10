@@ -1287,6 +1287,95 @@ void ViewController::drawScriptAcceptancePanels()
         // Manual tools are not runtime result.
         drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
 
+        // Layer 3: Manual Gauge State Handles
+        {
+            const ManualGaugeState& gauge = m_manualTest.current_gauge;
+            auto drawGaugeHandleScreen = [&](float ix, float iy, float radius, uint32_t color) {
+                const ImVec2 screenPos = ImVec2(imagePos.x + ix * sx, imagePos.y + iy * sy);
+                drawList->AddCircleFilled(screenPos, radius * m_imageViewZoom, color);
+                drawList->AddCircle(screenPos, radius * m_imageViewZoom + 2.0f, 0xFFFFFFFF, 0, 4.0f);
+            };
+
+            if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+            {
+                if (gauge.has_circle_gauge)
+                {
+                    drawGaugeHandleScreen((float)gauge.circle_cx, (float)gauge.circle_cy, 6.0f, 0xFF0000FF);
+
+                    int effectiveRadius = gauge.radius;
+                    if (effectiveRadius <= 0)
+                        effectiveRadius = gauge.gap > 0 ? gauge.gap : 50;
+                    drawGaugeHandleScreen((float)gauge.circle_cx + (float)effectiveRadius, (float)gauge.circle_cy, 6.0f, 0xFF0000FF);
+
+                    if (gauge.inner_radius > 0)
+                        drawGaugeHandleScreen((float)gauge.circle_cx + (float)gauge.inner_radius, (float)gauge.circle_cy, 5.0f, 0xFF00FFFF);
+
+                    if (gauge.outer_radius > 0)
+                        drawGaugeHandleScreen((float)gauge.circle_cx + (float)gauge.outer_radius, (float)gauge.circle_cy, 5.0f, 0xFF00FFFF);
+                }
+            }
+            else
+            {
+                if (gauge.has_line_gauge)
+                {
+                    drawGaugeHandleScreen((float)gauge.line_x0, (float)gauge.line_y0, 6.0f, 0xFF0000FF);
+                    drawGaugeHandleScreen((float)gauge.line_x1, (float)gauge.line_y1, 6.0f, 0xFF0000FF);
+
+                    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
+                    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
+                    drawGaugeHandleScreen(center_x, center_y, 5.0f, 0xFFFF0000);
+
+                    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+                    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+                    const float len = std::sqrt(dx * dx + dy * dy);
+                    if (len > 1.0f)
+                    {
+                        const float nx = -dy / len;
+                        const float ny = dx / len;
+                        drawGaugeHandleScreen(center_x + nx * (float)gauge.tool_half_width, center_y + ny * (float)gauge.tool_half_width, 5.0f, 0xFF00FFFF);
+                        drawGaugeHandleScreen(center_x - nx * (float)gauge.tool_half_width, center_y - ny * (float)gauge.tool_half_width, 5.0f, 0xFF00FFFF);
+                    }
+                }
+            }
+        }
+
+        // Manual Gauge Handle Interaction
+        {
+            const bool mouseOnImage = canvasHovered &&
+                io.MousePos.x >= imagePos.x && io.MousePos.x < imageEnd.x &&
+                io.MousePos.y >= imagePos.y && io.MousePos.y < imageEnd.y;
+
+            if (mouseOnImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                const ImVec2 imagePoint = ScreenToImage(io.MousePos.x, io.MousePos.y);
+                m_manualTest.active_gauge_handle = HitTestGaugeHandle(
+                    m_manualTest.current_gauge, imagePoint.x, imagePoint.y, 10.0f);
+
+                if (m_manualTest.active_gauge_handle != GaugeHandleType::None)
+                {
+                    m_manualTest.gauge_drag_start_x = imagePoint.x;
+                    m_manualTest.gauge_drag_start_y = imagePoint.y;
+                }
+            }
+
+            if (m_manualTest.active_gauge_handle != GaugeHandleType::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+            {
+                const ImVec2 imageNow = ScreenToImage(io.MousePos.x, io.MousePos.y);
+                const float dx = imageNow.x - m_manualTest.gauge_drag_start_x;
+                const float dy = imageNow.y - m_manualTest.gauge_drag_start_y;
+
+                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.active_gauge_handle, dx, dy);
+
+                m_manualTest.gauge_drag_start_x = imageNow.x;
+                m_manualTest.gauge_drag_start_y = imageNow.y;
+            }
+
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                m_manualTest.active_gauge_handle = GaugeHandleType::None;
+            }
+        }
+
     if (m_showTestPoints)
     {
       const ImU32 color = IM_COL32(255, 64, 64, 255);

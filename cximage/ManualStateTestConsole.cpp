@@ -1532,6 +1532,326 @@ static void InjectManualGaugeInt(
         "manual_gauge_applied");
 }
 
+static float DistanceSquared(float x1, float y1, float x2, float y2)
+{
+    const float dx = x2 - x1;
+    const float dy = y2 - y1;
+    return dx * dx + dy * dy;
+}
+
+static GaugeHandleType HitTestGaugeHandleLine(
+    const ManualGaugeState& gauge,
+    float mouse_x,
+    float mouse_y,
+    float handle_radius = 10.0f)
+{
+    if (!gauge.has_line_gauge)
+        return GaugeHandleType::None;
+
+    const float r2 = handle_radius * handle_radius;
+
+    if (DistanceSquared((float)gauge.line_x0, (float)gauge.line_y0, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineP0;
+
+    if (DistanceSquared((float)gauge.line_x1, (float)gauge.line_y1, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineP1;
+
+    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
+    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
+    if (DistanceSquared(center_x, center_y, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineCenter;
+
+    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len > 1.0f)
+    {
+        const float nx = -dy / len;
+        const float ny = dx / len;
+
+        const float width_plus_x = center_x + nx * (float)gauge.tool_half_width;
+        const float width_plus_y = center_y + ny * (float)gauge.tool_half_width;
+        if (DistanceSquared(width_plus_x, width_plus_y, mouse_x, mouse_y) <= r2)
+            return GaugeHandleType::LineWidthPlus;
+
+        const float width_minus_x = center_x - nx * (float)gauge.tool_half_width;
+        const float width_minus_y = center_y - ny * (float)gauge.tool_half_width;
+        if (DistanceSquared(width_minus_x, width_minus_y, mouse_x, mouse_y) <= r2)
+            return GaugeHandleType::LineWidthMinus;
+    }
+
+    return GaugeHandleType::None;
+}
+
+static GaugeHandleType HitTestGaugeHandleCircle(
+    const ManualGaugeState& gauge,
+    float mouse_x,
+    float mouse_y,
+    float handle_radius = 10.0f)
+{
+    if (!gauge.has_circle_gauge)
+        return GaugeHandleType::None;
+
+    const float r2 = handle_radius * handle_radius;
+
+    if (DistanceSquared((float)gauge.circle_cx, (float)gauge.circle_cy, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::CircleCenter;
+
+    int effective_radius = gauge.radius;
+    if (effective_radius <= 0)
+        effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+
+    const float px = (float)gauge.circle_cx + (float)effective_radius;
+    const float py = (float)gauge.circle_cy;
+    if (DistanceSquared(px, py, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::CircleRadius;
+
+    if (gauge.inner_radius > 0)
+    {
+        const float ix = (float)gauge.circle_cx + (float)gauge.inner_radius;
+        const float iy = (float)gauge.circle_cy;
+        if (DistanceSquared(ix, iy, mouse_x, mouse_y) <= r2)
+            return GaugeHandleType::CircleInner;
+    }
+
+    if (gauge.outer_radius > 0)
+    {
+        const float ox = (float)gauge.circle_cx + (float)gauge.outer_radius;
+        const float oy = (float)gauge.circle_cy;
+        if (DistanceSquared(ox, oy, mouse_x, mouse_y) <= r2)
+            return GaugeHandleType::CircleOuter;
+    }
+
+    return GaugeHandleType::None;
+}
+
+GaugeHandleType HitTestGaugeHandle(
+    const ManualGaugeState& gauge,
+    float mouse_x,
+    float mouse_y,
+    float handle_radius)
+{
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+        return HitTestGaugeHandleCircle(gauge, mouse_x, mouse_y, handle_radius);
+
+    return HitTestGaugeHandleLine(gauge, mouse_x, mouse_y, handle_radius);
+}
+
+static void DragGaugeHandleLine(
+    ManualGaugeState& gauge,
+    GaugeHandleType handle,
+    float delta_x,
+    float delta_y)
+{
+    if (!gauge.has_line_gauge)
+        return;
+
+    switch (handle)
+    {
+    case GaugeHandleType::LineP0:
+        gauge.line_x0 = static_cast<int>(std::round((float)gauge.line_x0 + delta_x));
+        gauge.line_y0 = static_cast<int>(std::round((float)gauge.line_y0 + delta_y));
+        break;
+    case GaugeHandleType::LineP1:
+        gauge.line_x1 = static_cast<int>(std::round((float)gauge.line_x1 + delta_x));
+        gauge.line_y1 = static_cast<int>(std::round((float)gauge.line_y1 + delta_y));
+        break;
+    case GaugeHandleType::LineCenter:
+        gauge.line_x0 = static_cast<int>(std::round((float)gauge.line_x0 + delta_x));
+        gauge.line_y0 = static_cast<int>(std::round((float)gauge.line_y0 + delta_y));
+        gauge.line_x1 = static_cast<int>(std::round((float)gauge.line_x1 + delta_x));
+        gauge.line_y1 = static_cast<int>(std::round((float)gauge.line_y1 + delta_y));
+        break;
+    case GaugeHandleType::LineWidthPlus:
+    case GaugeHandleType::LineWidthMinus:
+    {
+        const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+        const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 1.0f)
+        {
+            const float nx = -dy / len;
+            const float ny = dx / len;
+            const float proj = delta_x * nx + delta_y * ny;
+            gauge.tool_half_width = std::max(1, gauge.tool_half_width + static_cast<int>(std::round(proj)));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+}
+
+static void DragGaugeHandleCircle(
+    ManualGaugeState& gauge,
+    GaugeHandleType handle,
+    float delta_x,
+    float delta_y)
+{
+    if (!gauge.has_circle_gauge)
+        return;
+
+    switch (handle)
+    {
+    case GaugeHandleType::CircleCenter:
+        gauge.circle_cx = static_cast<int>(std::round((float)gauge.circle_cx + delta_x));
+        gauge.circle_cy = static_cast<int>(std::round((float)gauge.circle_cy + delta_y));
+        gauge.circle_px = static_cast<int>(std::round((float)gauge.circle_px + delta_x));
+        gauge.circle_py = static_cast<int>(std::round((float)gauge.circle_py + delta_y));
+        break;
+    case GaugeHandleType::CircleRadius:
+    {
+        int effective_radius = gauge.radius;
+        if (effective_radius <= 0)
+            effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+
+        const float new_px = (float)gauge.circle_cx + (float)effective_radius + delta_x;
+        const float new_py = (float)gauge.circle_cy + delta_y;
+        const float dx = new_px - (float)gauge.circle_cx;
+        const float dy = new_py - (float)gauge.circle_cy;
+        const int new_radius = std::max(1, static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
+
+        gauge.radius = new_radius;
+        gauge.gap = new_radius;
+        gauge.circle_px = gauge.circle_cx + new_radius;
+        gauge.circle_py = gauge.circle_cy;
+        break;
+    }
+    case GaugeHandleType::CircleInner:
+    {
+        const float dx = (float)gauge.circle_cx + (float)gauge.inner_radius + delta_x - (float)gauge.circle_cx;
+        const float dy = (float)gauge.circle_cy + delta_y - (float)gauge.circle_cy;
+        gauge.inner_radius = std::max(1, std::min(gauge.outer_radius - 1,
+            static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)))));
+        break;
+    }
+    case GaugeHandleType::CircleOuter:
+    {
+        const float dx = (float)gauge.circle_cx + (float)gauge.outer_radius + delta_x - (float)gauge.circle_cx;
+        const float dy = (float)gauge.circle_cy + delta_y - (float)gauge.circle_cy;
+        gauge.outer_radius = std::max(gauge.inner_radius + 1,
+            static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
+        break;
+    }
+    default:
+        break;
+    }
+
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+}
+
+void DragGaugeHandle(
+    ManualGaugeState& gauge,
+    GaugeHandleType handle,
+    float delta_x,
+    float delta_y)
+{
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+        DragGaugeHandleCircle(gauge, handle, delta_x, delta_y);
+    else
+        DragGaugeHandleLine(gauge, handle, delta_x, delta_y);
+}
+
+static void DrawGaugeHandle(
+    ImDrawList* draw_list,
+    float x, float y,
+    float radius,
+    bool active,
+    bool hovered,
+    uint32_t color = 0xFF0000FF)
+{
+    const float r = active ? radius * 1.3f : hovered ? radius * 1.15f : radius;
+    draw_list->AddCircleFilled(ImVec2(x, y), r, color);
+    draw_list->AddCircle(ImVec2(x, y), r + 2.0f, 0xFFFFFFFF, 0, 4.0f);
+}
+
+static void DrawGaugeHandlesLine(
+    ImDrawList* draw_list,
+    const ManualGaugeState& gauge)
+{
+    if (!gauge.has_line_gauge)
+        return;
+
+    DrawGaugeHandle(draw_list, (float)gauge.line_x0, (float)gauge.line_y0,
+        6.0f, false, false, 0xFF0000FF);
+    DrawGaugeHandle(draw_list, (float)gauge.line_x1, (float)gauge.line_y1,
+        6.0f, false, false, 0xFF0000FF);
+
+    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
+    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
+    DrawGaugeHandle(draw_list, center_x, center_y,
+        5.0f, false, false, 0xFFFF0000);
+
+    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len > 1.0f)
+    {
+        const float nx = -dy / len;
+        const float ny = dx / len;
+
+        const float width_plus_x = center_x + nx * (float)gauge.tool_half_width;
+        const float width_plus_y = center_y + ny * (float)gauge.tool_half_width;
+        DrawGaugeHandle(draw_list, width_plus_x, width_plus_y,
+            5.0f, false, false, 0xFF00FFFF);
+
+        const float width_minus_x = center_x - nx * (float)gauge.tool_half_width;
+        const float width_minus_y = center_y - ny * (float)gauge.tool_half_width;
+        DrawGaugeHandle(draw_list, width_minus_x, width_minus_y,
+            5.0f, false, false, 0xFF00FFFF);
+    }
+}
+
+static void DrawGaugeHandlesCircle(
+    ImDrawList* draw_list,
+    const ManualGaugeState& gauge)
+{
+    if (!gauge.has_circle_gauge)
+        return;
+
+    DrawGaugeHandle(draw_list, (float)gauge.circle_cx, (float)gauge.circle_cy,
+        6.0f, false, false, 0xFF0000FF);
+
+    int effective_radius = gauge.radius;
+    if (effective_radius <= 0)
+        effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+
+    const float px = (float)gauge.circle_cx + (float)effective_radius;
+    const float py = (float)gauge.circle_cy;
+    DrawGaugeHandle(draw_list, px, py,
+        6.0f, false, false, 0xFF0000FF);
+
+    if (gauge.inner_radius > 0)
+    {
+        const float ix = (float)gauge.circle_cx + (float)gauge.inner_radius;
+        const float iy = (float)gauge.circle_cy;
+        DrawGaugeHandle(draw_list, ix, iy,
+            5.0f, false, false, 0xFF00FFFF);
+    }
+
+    if (gauge.outer_radius > 0)
+    {
+        const float ox = (float)gauge.circle_cx + (float)gauge.outer_radius;
+        const float oy = (float)gauge.circle_cy;
+        DrawGaugeHandle(draw_list, ox, oy,
+            5.0f, false, false, 0xFF00FFFF);
+    }
+}
+
+static void DrawGaugeHandles(
+    ImDrawList* draw_list,
+    const ManualGaugeState& gauge)
+{
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+        DrawGaugeHandlesCircle(draw_list, gauge);
+    else
+        DrawGaugeHandlesLine(draw_list, gauge);
+}
+
 static bool ApplyManualGaugeToGlobals(ManualTestContext& context)
 {
     ManualGaugeState& gauge = context.current_gauge;
@@ -6798,6 +7118,87 @@ static void DrawCxScriptWorkbenchOverview(ManualTestContext& context)
   }
 }
 
+static void DrawEvidenceCaseListPanel(ManualTestContext& context)
+{
+  if (!ImGui::CollapsingHeader("Evidence Case List", ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+
+  ImGui::TextWrapped("Evidence cases organized by case/image/target/tool/gauge_status/probe_status/contract_status/review_status");
+
+  if (context.evidence_items.empty())
+  {
+    ImGui::TextDisabled("No evidence cases loaded.");
+    ImGui::Text("Loading from catalog entries...");
+
+    for (const auto& entry : context.catalog_entries)
+    {
+      bool isVisible = entry.manual_visible && entry.frozen &&
+          (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
+      if (!isVisible) continue;
+
+      ManualEvidenceItem item;
+      item.case_id = entry.script_id;
+      item.tool = entry.tool;
+      item.script_id = entry.script_id;
+      item.gauge_status = "unannotated";
+      item.probe_status = "pending";
+      item.contract_status = "pending";
+      item.review_status = "unreviewed";
+      context.evidence_items.push_back(item);
+    }
+  }
+
+  if (!context.evidence_items.empty())
+  {
+    ImGui::BeginChild("evidence_case_list", ImVec2(-1, 200), true);
+
+    if (ImGui::BeginTable("evidence_case_table", 10,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
+    {
+      ImGui::TableSetupColumn("Case", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+      ImGui::TableSetupColumn("Tool", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+      ImGui::TableSetupColumn("Image", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableSetupColumn("Target", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableSetupColumn("Gauge", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+      ImGui::TableSetupColumn("Probe", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+      ImGui::TableSetupColumn("Contract", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+      ImGui::TableSetupColumn("Review", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+      ImGui::TableSetupColumn("Script", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableSetupColumn("Param", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+      ImGui::TableHeadersRow();
+
+      for (const auto& item : context.evidence_items)
+      {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(item.case_id.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(item.tool.c_str());
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(item.image_id.empty() ? "-" : item.image_id.c_str());
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextUnformatted(item.target_id.empty() ? "-" : item.target_id.c_str());
+        ImGui::TableSetColumnIndex(4);
+        ImGui::TextUnformatted(item.gauge_status.c_str());
+        ImGui::TableSetColumnIndex(5);
+        ImGui::TextUnformatted(item.probe_status.c_str());
+        ImGui::TableSetColumnIndex(6);
+        ImGui::TextUnformatted(item.contract_status.c_str());
+        ImGui::TableSetColumnIndex(7);
+        ImGui::TextUnformatted(item.review_status.c_str());
+        ImGui::TableSetColumnIndex(8);
+        ImGui::TextUnformatted(item.script_id.empty() ? "-" : item.script_id.c_str());
+        ImGui::TableSetColumnIndex(9);
+        ImGui::TextUnformatted(item.parameter_profile_id.empty() ? "-" : item.parameter_profile_id.c_str());
+      }
+
+      ImGui::EndTable();
+    }
+
+    ImGui::EndChild();
+  }
+}
+
 static void DrawCxScriptTemplateSummaryPanel(const ManualTestContext& context)
 {
   if (!ImGui::CollapsingHeader("cxparser script 基础模板 / 当前模板摘要", ImGuiTreeNodeFlags_DefaultOpen))
@@ -6964,8 +7365,9 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
   if (!ImGui::CollapsingHeader("关键参数 UI / Key Parameter Controls", ImGuiTreeNodeFlags_DefaultOpen))
     return;
 
+  ManualGaugeState& gauge = context.current_gauge;
   ManualParamRegressionState& ui = context.param_regression;
-  const bool gaugeAccepted = ManualGaugeAcceptedForParamRegression(context.current_gauge);
+  const bool gaugeAccepted = ManualGaugeAcceptedForParamRegression(gauge);
 
   ImGui::TextWrapped(
     "This panel follows the detailed sketch: edge mode, threshold-like sliders, measurement order, sampling count, catch method, quick measure/filter switches.");
@@ -7043,13 +7445,70 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
 
   ImGui::Separator();
   ImGui::Text("Mapped Gauge Params: threshold=%d method=%d linegap=%d gap=%d wgap=%d hgap=%d filterprofile=%d",
-              context.current_gauge.threshold,
-              context.current_gauge.method,
-              context.current_gauge.linegap,
-              context.current_gauge.gap,
-              context.current_gauge.wgap,
-              context.current_gauge.hgap,
-              context.current_gauge.filterprofile);
+              gauge.threshold,
+              gauge.method,
+              gauge.linegap,
+              gauge.gap,
+              gauge.wgap,
+              gauge.hgap,
+              gauge.filterprofile);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("--- Direct Gauge Parameter Controls ---");
+
+  if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+  {
+    ImGui::InputInt("method", &gauge.method);
+    ImGui::InputInt("threshold", &gauge.threshold);
+    ImGui::InputInt("gap", &gauge.gap);
+    ImGui::InputInt("linegap", &gauge.linegap);
+  }
+  else
+  {
+    ImGui::InputInt("method", &gauge.method);
+    ImGui::InputInt("threshold", &gauge.threshold);
+    ImGui::InputInt("linegap", &gauge.linegap);
+    ImGui::InputInt("wgap", &gauge.wgap);
+    ImGui::InputInt("hgap", &gauge.hgap);
+    ImGui::InputInt("tool_half_width", &gauge.tool_half_width);
+    ImGui::InputInt("filterprofile", &gauge.filterprofile);
+  }
+
+  ImGui::Separator();
+  if (ImGui::Button("Apply To GaugeState"))
+  {
+    SyncKeyParameterUiToGauge(context);
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+    context.debug_action = "Apply To GaugeState";
+    context.debug_status = "PENDING";
+    context.debug_reason = "key parameter UI synced to ManualGaugeState";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Apply To Globals"))
+  {
+    ApplyManualGaugeToGlobals(context);
+    context.debug_action = "Apply To Globals";
+    context.debug_status = "PENDING";
+    context.debug_reason = "ManualGaugeState injected into runtime globals";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Save As Candidate"))
+  {
+    SyncKeyParameterUiToGauge(context);
+    context.debug_action = "Save As Candidate";
+    context.debug_status = "PENDING";
+    context.debug_reason = "current parameters staged as candidate";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Reset To Baseline"))
+  {
+    ResetKeyParameterUiDefaults(context);
+    SyncKeyParameterUiToGauge(context);
+    context.debug_action = "Reset To Baseline";
+    context.debug_status = "PENDING";
+    context.debug_reason = "parameters reset to baseline";
+  }
 }
 
 static void DrawParamTuningScatterPanel(ManualTestContext& context)
@@ -7176,6 +7635,7 @@ void ViewController::drawManualStateTestConsole()
     static_cast<int>(m_annotationLayer.Elements().size());
 
   DrawCxScriptWorkbenchOverview(m_manualTest);
+  DrawEvidenceCaseListPanel(m_manualTest);
   DrawCxScriptTemplateSummaryPanel(m_manualTest);
   DrawKeyParameterSummaryPanel(m_manualTest);
   if (IsFindlineFindcircleContext(m_manualTest))

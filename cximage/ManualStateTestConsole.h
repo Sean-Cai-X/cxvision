@@ -12,6 +12,9 @@
 #include <iomanip>
 #include <array>
 #include <cstdint>
+#include <algorithm>
+#include <cmath>
+#include <imgui.h>
 struct ScriptLineView
 {
   int line_no = 0;
@@ -403,6 +406,30 @@ struct ResultRefView
 
 };
 
+enum class GaugeHandleType
+{
+    None,
+    LineP0,
+    LineP1,
+    LineCenter,
+    LineWidthPlus,
+    LineWidthMinus,
+    CircleCenter,
+    CircleRadius,
+    CircleInner,
+    CircleOuter
+};
+
+struct GaugeHandle
+{
+    GaugeHandleType type = GaugeHandleType::None;
+    float screen_x = 0.0f;
+    float screen_y = 0.0f;
+    float radius = 6.0f;
+    bool hovered = false;
+    bool active = false;
+};
+
 struct ManualGaugeState
 {
   std::string case_id;
@@ -432,6 +459,10 @@ struct ManualGaugeState
   int circle_px = 0;
   int circle_py = 0;
   int gap = 5;
+
+  int radius = 0;
+  int inner_radius = 0;
+  int outer_radius = 0;
 
   bool dirty = false;
   bool accepted = false;
@@ -468,6 +499,26 @@ struct ManualParamRegressionState
   std::string last_export_status;
   std::string last_export_reason;
   std::vector<std::string> exported_files;
+};
+struct ManualEvidenceItem
+{
+    std::string case_id;
+    std::string level;
+    std::string image_id;
+    std::string target_id;
+    std::string tool;
+
+    std::string script_id;
+    std::string parameter_profile_id;
+
+    std::string gauge_status;
+    std::string probe_status;
+    std::string contract_status;
+    std::string review_status;
+
+    std::string image_path;
+    std::string replay_package_path;
+    std::string gauge_annotation_path;
 };
 
 struct ManualTestContext
@@ -544,6 +595,12 @@ struct ManualTestContext
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
   ManualParamRegressionState param_regression;
+
+  GaugeHandleType active_gauge_handle = GaugeHandleType::None;
+  float gauge_drag_start_x = 0.0f;
+  float gauge_drag_start_y = 0.0f;
+
+  std::vector<ManualEvidenceItem> evidence_items;
 };
 
 struct ScriptSnippet
@@ -659,6 +716,45 @@ struct CxScriptHeadlessResult
     std::string current_result_reason;
 };
 
+
+
+struct ManualCatalogVisibleEntry
+{
+    std::string script_id;
+    std::string label;
+    std::string path;
+    std::string tool;
+    std::string expected_result;
+    std::string expected_policy_guard;
+    std::string contract_path;
+    std::string parameter_policy_id;
+    std::string parameter_role;
+};
+
+struct ManualCatalogHiddenEntry
+{
+    std::string script_id;
+    std::string label;
+    std::string path;
+    std::string tool;
+    std::string expected_result;
+    std::string hidden_reason;
+    std::string contract_path;
+};
+
+
+struct ManualCatalogUiState
+{
+    bool loaded = false;
+    std::string catalog_path;
+    std::string load_status;
+    std::string load_reason;
+
+    std::vector<ManualCatalogVisibleEntry> visible_scripts;
+    std::vector<ManualCatalogHiddenEntry> hidden_scripts;
+    std::vector<ManualCatalogHiddenEntry> advanced_scripts;
+};
+
 bool RunCxScriptHeadless(
     const CxScriptHeadlessOptions& options,
     CxScriptHeadlessResult& result);
@@ -687,41 +783,221 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     float scale,
     std::string& outReason);
 
-struct ManualCatalogVisibleEntry
+inline float ManualGaugeDistanceSquared(
+    float x1,
+    float y1,
+    float x2,
+    float y2)
 {
-    std::string script_id;
-    std::string label;
-    std::string path;
-    std::string tool;
-    std::string expected_result;
-    std::string expected_policy_guard;
-    std::string contract_path;
-    std::string parameter_policy_id;
-    std::string parameter_role;
-};
+    const float dx = x2 - x1;
+    const float dy = y2 - y1;
+    return dx * dx + dy * dy;
+}
 
-struct ManualCatalogHiddenEntry
+inline GaugeHandleType HitTestGaugeHandle(
+    const ManualGaugeState& gauge,
+    float mouse_x,
+    float mouse_y,
+    float handle_radius)
 {
-    std::string script_id;
-    std::string label;
-    std::string path;
-    std::string tool;
-    std::string expected_result;
-    std::string hidden_reason;
-    std::string contract_path;
-};
+    const float r2 = handle_radius * handle_radius;
 
-struct ManualCatalogUiState
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+    {
+        if (!gauge.has_circle_gauge)
+            return GaugeHandleType::None;
+
+        if (ManualGaugeDistanceSquared(
+                (float)gauge.circle_cx,
+                (float)gauge.circle_cy,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::CircleCenter;
+        }
+
+        int effective_radius = gauge.radius;
+        if (effective_radius <= 0)
+            effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+
+        if (ManualGaugeDistanceSquared(
+                (float)gauge.circle_cx + (float)effective_radius,
+                (float)gauge.circle_cy,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::CircleRadius;
+        }
+
+        if (gauge.inner_radius > 0 &&
+            ManualGaugeDistanceSquared(
+                (float)gauge.circle_cx + (float)gauge.inner_radius,
+                (float)gauge.circle_cy,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::CircleInner;
+        }
+
+        if (gauge.outer_radius > 0 &&
+            ManualGaugeDistanceSquared(
+                (float)gauge.circle_cx + (float)gauge.outer_radius,
+                (float)gauge.circle_cy,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::CircleOuter;
+        }
+
+        return GaugeHandleType::None;
+    }
+
+    if (!gauge.has_line_gauge)
+        return GaugeHandleType::None;
+
+    if (ManualGaugeDistanceSquared((float)gauge.line_x0, (float)gauge.line_y0, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineP0;
+
+    if (ManualGaugeDistanceSquared((float)gauge.line_x1, (float)gauge.line_y1, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineP1;
+
+    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
+    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
+    if (ManualGaugeDistanceSquared(center_x, center_y, mouse_x, mouse_y) <= r2)
+        return GaugeHandleType::LineCenter;
+
+    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len > 1.0f)
+    {
+        const float nx = -dy / len;
+        const float ny = dx / len;
+
+        if (ManualGaugeDistanceSquared(
+                center_x + nx * (float)gauge.tool_half_width,
+                center_y + ny * (float)gauge.tool_half_width,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::LineWidthPlus;
+        }
+
+        if (ManualGaugeDistanceSquared(
+                center_x - nx * (float)gauge.tool_half_width,
+                center_y - ny * (float)gauge.tool_half_width,
+                mouse_x,
+                mouse_y) <= r2)
+        {
+            return GaugeHandleType::LineWidthMinus;
+        }
+    }
+
+    return GaugeHandleType::None;
+}
+
+inline void DragGaugeHandle(
+    ManualGaugeState& gauge,
+    GaugeHandleType handle,
+    float delta_x,
+    float delta_y)
 {
-    bool loaded = false;
-    std::string catalog_path;
-    std::string load_status;
-    std::string load_reason;
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+    {
+        if (!gauge.has_circle_gauge)
+            return;
 
-    std::vector<ManualCatalogVisibleEntry> visible_scripts;
-    std::vector<ManualCatalogHiddenEntry> hidden_scripts;
-    std::vector<ManualCatalogHiddenEntry> advanced_scripts;
-};
+        switch (handle)
+        {
+        case GaugeHandleType::CircleCenter:
+            gauge.circle_cx = static_cast<int>(std::round((float)gauge.circle_cx + delta_x));
+            gauge.circle_cy = static_cast<int>(std::round((float)gauge.circle_cy + delta_y));
+            gauge.circle_px = static_cast<int>(std::round((float)gauge.circle_px + delta_x));
+            gauge.circle_py = static_cast<int>(std::round((float)gauge.circle_py + delta_y));
+            break;
+        case GaugeHandleType::CircleRadius:
+        {
+            int effective_radius = gauge.radius;
+            if (effective_radius <= 0)
+                effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+
+            const float new_px = (float)gauge.circle_cx + (float)effective_radius + delta_x;
+            const float new_py = (float)gauge.circle_cy + delta_y;
+            const float dx = new_px - (float)gauge.circle_cx;
+            const float dy = new_py - (float)gauge.circle_cy;
+            const int new_radius = std::max(1, static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
+
+            gauge.radius = new_radius;
+            gauge.gap = new_radius;
+            gauge.circle_px = gauge.circle_cx + new_radius;
+            gauge.circle_py = gauge.circle_cy;
+            break;
+        }
+        case GaugeHandleType::CircleInner:
+        {
+            const float dx = (float)gauge.circle_cx + (float)gauge.inner_radius + delta_x - (float)gauge.circle_cx;
+            const float dy = (float)gauge.circle_cy + delta_y - (float)gauge.circle_cy;
+            const int maxInner = std::max(1, gauge.outer_radius - 1);
+            gauge.inner_radius = std::max(1, std::min(maxInner,
+                static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)))));
+            break;
+        }
+        case GaugeHandleType::CircleOuter:
+        {
+            const float dx = (float)gauge.circle_cx + (float)gauge.outer_radius + delta_x - (float)gauge.circle_cx;
+            const float dy = (float)gauge.circle_cy + delta_y - (float)gauge.circle_cy;
+            gauge.outer_radius = std::max(gauge.inner_radius + 1,
+                static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    else
+    {
+        if (!gauge.has_line_gauge)
+            return;
+
+        switch (handle)
+        {
+        case GaugeHandleType::LineP0:
+            gauge.line_x0 = static_cast<int>(std::round((float)gauge.line_x0 + delta_x));
+            gauge.line_y0 = static_cast<int>(std::round((float)gauge.line_y0 + delta_y));
+            break;
+        case GaugeHandleType::LineP1:
+            gauge.line_x1 = static_cast<int>(std::round((float)gauge.line_x1 + delta_x));
+            gauge.line_y1 = static_cast<int>(std::round((float)gauge.line_y1 + delta_y));
+            break;
+        case GaugeHandleType::LineCenter:
+            gauge.line_x0 = static_cast<int>(std::round((float)gauge.line_x0 + delta_x));
+            gauge.line_y0 = static_cast<int>(std::round((float)gauge.line_y0 + delta_y));
+            gauge.line_x1 = static_cast<int>(std::round((float)gauge.line_x1 + delta_x));
+            gauge.line_y1 = static_cast<int>(std::round((float)gauge.line_y1 + delta_y));
+            break;
+        case GaugeHandleType::LineWidthPlus:
+        case GaugeHandleType::LineWidthMinus:
+        {
+            const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
+            const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len > 1.0f)
+            {
+                const float nx = -dy / len;
+                const float ny = dx / len;
+                const float proj = delta_x * nx + delta_y * ny;
+                gauge.tool_half_width = std::max(1, gauge.tool_half_width + static_cast<int>(std::round(proj)));
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+}
 
 static constexpr const char* kCxImageCatalogPath =
     "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
