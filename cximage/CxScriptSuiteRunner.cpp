@@ -16,6 +16,7 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <cctype>
 #include <functional>
 #include <iomanip>
 #include <opencv2/opencv.hpp>
@@ -186,6 +187,150 @@ namespace
             }
         }
         return out;
+    }
+
+    bool ExtractJsonIntLoose(
+        const std::string& text,
+        const std::string& key,
+        int& value)
+    {
+        const std::string pattern = "\"" + key + "\"";
+        size_t pos = text.find(pattern);
+        if (pos == std::string::npos)
+            return false;
+        pos = text.find(':', pos);
+        if (pos == std::string::npos)
+            return false;
+        ++pos;
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+            ++pos;
+        size_t end = pos;
+        if (end < text.size() && (text[end] == '-' || text[end] == '+'))
+            ++end;
+        while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
+            ++end;
+        if (end == pos)
+            return false;
+        try
+        {
+            value = std::stoi(text.substr(pos, end - pos));
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ExtractJsonStringLoose(
+        const std::string& text,
+        const std::string& key,
+        std::string& value)
+    {
+        const std::string pattern = "\"" + key + "\"";
+        size_t pos = text.find(pattern);
+        if (pos == std::string::npos)
+            return false;
+        pos = text.find(':', pos);
+        if (pos == std::string::npos)
+            return false;
+        pos = text.find('"', pos + 1);
+        if (pos == std::string::npos)
+            return false;
+        const size_t end = text.find('"', pos + 1);
+        if (end == std::string::npos)
+            return false;
+        value = text.substr(pos + 1, end - pos - 1);
+        return true;
+    }
+
+    bool ApplyManualGaugeAnnotationFile(
+        const std::filesystem::path& path,
+        CxScriptHeadlessOptions& headless,
+        CxScriptSuiteCaseResult& out,
+        std::string& reason)
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+        {
+            reason = "manual gauge annotation not found: " + path.string();
+            return false;
+        }
+        const std::string text(
+            (std::istreambuf_iterator<char>(file)),
+            std::istreambuf_iterator<char>());
+
+        std::string reviewStatus;
+        ExtractJsonStringLoose(text, "review_status", reviewStatus);
+        if (reviewStatus != "manual_accepted" &&
+            reviewStatus != "accepted" &&
+            reviewStatus != "promoted")
+        {
+            reason = "manual gauge annotation is not accepted: " + reviewStatus;
+            return false;
+        }
+
+        int v = 0;
+        bool any = false;
+        if (ExtractJsonIntLoose(text, "x0", v) || ExtractJsonIntLoose(text, "roi_x0", v))
+        {
+            headless.roi_x0 = v; out.roi_x0 = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "y0", v) || ExtractJsonIntLoose(text, "roi_y0", v))
+        {
+            headless.roi_y0 = v; out.roi_y0 = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "x1", v) || ExtractJsonIntLoose(text, "roi_x1", v))
+        {
+            headless.roi_x1 = v; out.roi_x1 = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "y1", v) || ExtractJsonIntLoose(text, "roi_y1", v))
+        {
+            headless.roi_y1 = v; out.roi_y1 = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "tool_half_width", v))
+            headless.tool_half_width = v;
+        if (ExtractJsonIntLoose(text, "wgap", v))
+            headless.wgap = v;
+        if (ExtractJsonIntLoose(text, "hgap", v))
+            headless.hgap = v;
+
+        if (ExtractJsonIntLoose(text, "cx", v) || ExtractJsonIntLoose(text, "circle_cx", v))
+        {
+            headless.circle_cx = v; out.circle_cx = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "cy", v) || ExtractJsonIntLoose(text, "circle_cy", v))
+        {
+            headless.circle_cy = v; out.circle_cy = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "px", v) || ExtractJsonIntLoose(text, "circle_px", v))
+        {
+            headless.circle_px = v; out.circle_px = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "py", v) || ExtractJsonIntLoose(text, "circle_py", v))
+        {
+            headless.circle_py = v; out.circle_py = v; any = true;
+        }
+        if (ExtractJsonIntLoose(text, "gap", v))
+            headless.gap = v;
+        if (ExtractJsonIntLoose(text, "linegap", v))
+            headless.linegap = v;
+        if (ExtractJsonIntLoose(text, "threshold", v))
+            headless.threshold = v;
+        if (ExtractJsonIntLoose(text, "method", v))
+            headless.method = v;
+        if (ExtractJsonIntLoose(text, "filterprofile", v))
+            headless.filterprofile = v;
+
+        reason = any
+            ? "Gauge Source: manual_accepted | Gauge Annotation: " + path.string()
+            : "manual gauge annotation has no supported gauge fields";
+        if (any)
+        {
+            out.gauge_source = "manual_accepted";
+            out.gauge_annotation_path = path.string();
+        }
+        return any;
     }
 
     bool JsonLineHasAnyKey(const std::string& line, const std::vector<std::string>& keys)
@@ -835,6 +980,8 @@ namespace
         file << "  \"avgdist\": " << r.avgdist << ",\n";
         file << "\n";
         file << "  \"policy_guard\": \"" << JsonEscape(r.policy_guard) << "\",\n";
+        file << "  \"gauge_source\": \"" << JsonEscape(r.gauge_source) << "\",\n";
+        file << "  \"gauge_annotation_path\": \"" << JsonEscape(r.gauge_annotation_path) << "\",\n";
         file << "  \"actual_policy_guard\": \"" << JsonEscape(r.actual_policy_guard) << "\",\n";
         file << "  \"result_status\": \"" << JsonEscape(r.result_status) << "\",\n";
         file << "  \"failure_stage\": \"" << JsonEscape(r.failure_stage) << "\",\n";
@@ -919,6 +1066,20 @@ namespace
             file << "    \"roi_y1\": 0,\n";
             file << "    \"tool_half_width\": 0\n";
         }
+        file << "  },\n";
+
+        file << "\n";
+        file << "  \"effective_gauge\": {\n";
+        file << "    \"source\": \"" << JsonEscape(result.gauge_source.empty() ? "suite_effective_globals" : result.gauge_source) << "\",\n";
+        file << "    \"annotation_path\": \"" << JsonEscape(result.gauge_annotation_path) << "\",\n";
+        file << "    \"roi_x0\": " << result.roi_x0 << ",\n";
+        file << "    \"roi_y0\": " << result.roi_y0 << ",\n";
+        file << "    \"roi_x1\": " << result.roi_x1 << ",\n";
+        file << "    \"roi_y1\": " << result.roi_y1 << ",\n";
+        file << "    \"circle_cx\": " << result.circle_cx << ",\n";
+        file << "    \"circle_cy\": " << result.circle_cy << ",\n";
+        file << "    \"circle_px\": " << result.circle_px << ",\n";
+        file << "    \"circle_py\": " << result.circle_py << "\n";
         file << "  },\n";
 
         file << "\n";
@@ -1277,6 +1438,65 @@ namespace
             if (resolved.profile)
             {
                 InjectParameterGlobals(headless, *resolved.profile);
+            }
+
+            if (options.use_manual_gauge)
+            {
+                const std::filesystem::path annotationPath =
+                    options.gauge_annotation_path.empty()
+                        ? (caseDir / "gauge_annotation.json")
+                        : std::filesystem::path(options.gauge_annotation_path);
+
+                std::string gaugeReason;
+                const bool gaugeOk = ApplyManualGaugeAnnotationFile(
+                    annotationPath,
+                    headless,
+                    out,
+                    gaugeReason);
+
+                AppendPhaseTrace(
+                    caseDir,
+                    "manual_gauge",
+                    gaugeOk ? "end" : "error",
+                    gaugeReason,
+                    0);
+                if (options.trace_run)
+                    trace.event(
+                        "manual_gauge",
+                        gaugeOk ? "end" : "error",
+                        gaugeReason);
+
+                {
+                    std::ofstream caseTrace(caseDir / "case_trace.txt", std::ios::app);
+                    if (caseTrace.is_open())
+                    {
+                        caseTrace << "\nManual Gauge:\n";
+                        caseTrace << "  enabled: true\n";
+                        caseTrace << "  status: " << (gaugeOk ? "loaded" : "error") << "\n";
+                        caseTrace << "  annotation: " << annotationPath.string() << "\n";
+                        caseTrace << "  reason: " << gaugeReason << "\n";
+                        caseTrace << "  line gauge: "
+                                  << out.roi_x0 << "," << out.roi_y0
+                                  << " -> " << out.roi_x1 << "," << out.roi_y1
+                                  << "\n";
+                        caseTrace << "  circle gauge: "
+                                  << out.circle_cx << "," << out.circle_cy
+                                  << " pxpy=" << out.circle_px << "," << out.circle_py
+                                  << "\n";
+                    }
+                }
+
+                if (!gaugeOk)
+                {
+                    out.headless_ok = false;
+                    out.contract_pass = false;
+                    out.failure_stage = "manual_gauge_not_available";
+                    out.conclusion = gaugeReason;
+                    WriteFinalCaseSummary(out, caseDir);
+                    if (options.trace_run)
+                        trace.close();
+                    return;
+                }
             }
 
             CxScriptHeadlessResult headlessResult;
@@ -1796,6 +2016,12 @@ bool RunCxScriptSuite(
 
     for (const auto& suiteCase : suite.cases)
     {
+        if (!options.only_case_id.empty() &&
+            suiteCase.case_id != options.only_case_id)
+        {
+            continue;
+        }
+
         ResolvedEvidenceCase resolved;
         std::string resolveReason;
 

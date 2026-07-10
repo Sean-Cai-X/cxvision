@@ -33,6 +33,10 @@ struct CxScriptSuiteRunOptions
 
     bool dry_run = false;
     bool preview_only = false;
+    bool use_manual_gauge = false;
+    bool probe_only = false;
+    std::string gauge_annotation_path;
+    std::string only_case_id;
 
     bool trace_run = false;
     bool dump_replay_package = true;
@@ -82,6 +86,8 @@ struct CxScriptSuiteCaseResult
     std::string contract_conclusion;
     std::string conclusion;
     std::string policy_guard;
+    std::string gauge_source;
+    std::string gauge_annotation_path;
 
     double circle_radius = 0.0;
     double avgdist = 0.0;

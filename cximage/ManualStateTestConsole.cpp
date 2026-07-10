@@ -1517,6 +1517,189 @@ static void UpsertGlobalVariableView(
 // å›¾åƒ global å˜é‡ï¼šglobal.matInputã€‚
 // æ³¨æ„ï¼šç”¨ä¸åŒå‡½æ•°åï¼Œé¿å…å’Œæ™®é€šå˜é‡å‡½æ•°é‡è½½å†²çªã€‚
 
+static void InjectManualGaugeInt(
+    ManualTestContext& context,
+    const std::string& name,
+    int value)
+{
+    context.runtime_int_vars[name] = value;
+    UpsertGlobalVariableView(
+        context,
+        "int",
+        name,
+        std::to_string(value),
+        0,
+        "manual_gauge_applied");
+}
+
+static bool ApplyManualGaugeToGlobals(ManualTestContext& context)
+{
+    ManualGaugeState& gauge = context.current_gauge;
+    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+    {
+        if (!gauge.has_circle_gauge)
+            return false;
+
+        InjectManualGaugeInt(context, "global.circle_cx", gauge.circle_cx);
+        InjectManualGaugeInt(context, "global.circle_cy", gauge.circle_cy);
+        InjectManualGaugeInt(context, "global.circle_px", gauge.circle_px);
+        InjectManualGaugeInt(context, "global.circle_py", gauge.circle_py);
+        InjectManualGaugeInt(context, "global.gap", gauge.gap);
+        InjectManualGaugeInt(context, "global.linegap", gauge.linegap);
+        InjectManualGaugeInt(context, "global.threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global.method", gauge.method);
+    }
+    else
+    {
+        if (!gauge.has_line_gauge)
+            return false;
+
+        InjectManualGaugeInt(context, "global.roi_x0", gauge.line_x0);
+        InjectManualGaugeInt(context, "global.roi_y0", gauge.line_y0);
+        InjectManualGaugeInt(context, "global.roi_x1", gauge.line_x1);
+        InjectManualGaugeInt(context, "global.roi_y1", gauge.line_y1);
+        InjectManualGaugeInt(context, "global.tool_half_width", gauge.tool_half_width);
+        InjectManualGaugeInt(context, "global.wgap", gauge.wgap);
+        InjectManualGaugeInt(context, "global.hgap", gauge.hgap);
+        InjectManualGaugeInt(context, "global.linegap", gauge.linegap);
+        InjectManualGaugeInt(context, "global.threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global.filterprofile", gauge.filterprofile);
+        InjectManualGaugeInt(context, "global.method", gauge.method);
+    }
+
+    UpsertGlobalVariableView(context, "string", "global.gauge_source",
+                             gauge.source, 0, "manual_gauge_applied");
+    UpsertGlobalVariableView(context, "string", "global.gauge_review_status",
+                             gauge.review_status, 0, "manual_gauge_applied");
+
+    gauge.dirty = false;
+    context.debug_action = "Apply Gauge To Globals";
+    context.debug_status = "PENDING";
+    context.debug_reason = "ManualGaugeState injected into runtime globals";
+    return true;
+}
+
+static fs::path ManualGaugeCaseDir(const ManualTestContext& context)
+{
+    fs::path dir = context.case_directory.empty()
+        ? fs::path("docs/notes/cxscript_case")
+        : fs::path(context.case_directory);
+    if (!context.current_gauge.case_id.empty())
+        dir /= context.current_gauge.case_id;
+    return dir;
+}
+
+static bool SaveManualGaugeAnnotation(
+    const ManualTestContext& context,
+    const fs::path& path,
+    std::string& reason)
+{
+    const ManualGaugeState& g = context.current_gauge;
+    fs::create_directories(path.parent_path());
+    std::ofstream file(path);
+    if (!file.is_open())
+    {
+        reason = "failed to open gauge_annotation.json";
+        return false;
+    }
+
+    file << "{\n";
+    file << "  \"case_id\": \"" << CxDebugJsonEscape(g.case_id) << "\",\n";
+    file << "  \"image_id\": \"" << CxDebugJsonEscape(g.image_id) << "\",\n";
+    file << "  \"target_id\": \"" << CxDebugJsonEscape(g.target_id) << "\",\n";
+    file << "  \"tool\": \"" << CxDebugJsonEscape(g.tool) << "\",\n";
+    file << "  \"source\": \"" << CxDebugJsonEscape(g.source) << "\",\n";
+    file << "  \"review_status\": \"" << CxDebugJsonEscape(g.review_status) << "\",\n";
+    if (g.has_circle_gauge)
+    {
+        file << "  \"circle_gauge\": {\n";
+        file << "    \"cx\": " << g.circle_cx << ",\n";
+        file << "    \"cy\": " << g.circle_cy << ",\n";
+        file << "    \"px\": " << g.circle_px << ",\n";
+        file << "    \"py\": " << g.circle_py << ",\n";
+        file << "    \"gap\": " << g.gap << ",\n";
+        file << "    \"linegap\": " << g.linegap << ",\n";
+        file << "    \"threshold\": " << g.threshold << ",\n";
+        file << "    \"method\": " << g.method << "\n";
+        file << "  },\n";
+    }
+    else
+    {
+        file << "  \"line_gauge\": {\n";
+        file << "    \"x0\": " << g.line_x0 << ",\n";
+        file << "    \"y0\": " << g.line_y0 << ",\n";
+        file << "    \"x1\": " << g.line_x1 << ",\n";
+        file << "    \"y1\": " << g.line_y1 << ",\n";
+        file << "    \"tool_half_width\": " << g.tool_half_width << ",\n";
+        file << "    \"wgap\": " << g.wgap << ",\n";
+        file << "    \"hgap\": " << g.hgap << ",\n";
+        file << "    \"linegap\": " << g.linegap << ",\n";
+        file << "    \"threshold\": " << g.threshold << ",\n";
+        file << "    \"filterprofile\": " << g.filterprofile << ",\n";
+        file << "    \"method\": " << g.method << "\n";
+        file << "  },\n";
+    }
+    file << "  \"review\": {\n";
+    file << "    \"stage\": \"gauge\",\n";
+    file << "    \"decision\": \"" << (g.accepted ? "accept_gauge" : "editing") << "\",\n";
+    file << "    \"note\": \"ManualGaugeState saved from ManualStateTestConsole.\"\n";
+    file << "  }\n";
+    file << "}\n";
+    reason.clear();
+    return true;
+}
+
+static bool ExportManualGaugeManifestCandidate(
+    const ManualTestContext& context,
+    const fs::path& path,
+    std::string& reason)
+{
+    const ManualGaugeState& g = context.current_gauge;
+    fs::create_directories(path.parent_path());
+    std::ofstream file(path);
+    if (!file.is_open())
+    {
+        reason = "failed to open manifest_candidate.json";
+        return false;
+    }
+
+    file << "{\n";
+    file << "  \"schema_version\": \"manual_gauge_manifest_candidate_v1\",\n";
+    file << "  \"warning\": \"Do not overwrite stage25_image_manifest.json automatically. Human Promote is required.\",\n";
+    file << "  \"case_id\": \"" << CxDebugJsonEscape(g.case_id) << "\",\n";
+    file << "  \"image_id\": \"" << CxDebugJsonEscape(g.image_id) << "\",\n";
+    file << "  \"target_id\": \"" << CxDebugJsonEscape(g.target_id) << "\",\n";
+    file << "  \"tool\": \"" << CxDebugJsonEscape(g.tool) << "\",\n";
+    file << "  \"review_status\": \"" << CxDebugJsonEscape(g.review_status) << "\",\n";
+    file << "  \"promote_allowed\": " << (g.accepted ? "true" : "false") << ",\n";
+    file << "  \"target_patch\": {\n";
+    if (g.has_circle_gauge)
+    {
+        file << "    \"circle_cx\": " << g.circle_cx << ",\n";
+        file << "    \"circle_cy\": " << g.circle_cy << ",\n";
+        file << "    \"circle_px\": " << g.circle_px << ",\n";
+        file << "    \"circle_py\": " << g.circle_py << ",\n";
+        file << "    \"gap\": " << g.gap << ",\n";
+    }
+    else
+    {
+        file << "    \"roi_x0\": " << g.line_x0 << ",\n";
+        file << "    \"roi_y0\": " << g.line_y0 << ",\n";
+        file << "    \"roi_x1\": " << g.line_x1 << ",\n";
+        file << "    \"roi_y1\": " << g.line_y1 << ",\n";
+        file << "    \"tool_half_width\": " << g.tool_half_width << ",\n";
+        file << "    \"wgap\": " << g.wgap << ",\n";
+        file << "    \"hgap\": " << g.hgap << ",\n";
+    }
+    file << "    \"linegap\": " << g.linegap << ",\n";
+    file << "    \"threshold\": " << g.threshold << ",\n";
+    file << "    \"method\": " << g.method << "\n";
+    file << "  }\n";
+    file << "}\n";
+    reason.clear();
+    return true;
+}
+
 static void ApplyCxParserExtDebugResultToManualConsole(
     ManualTestContext& context,
     const CxScriptSemanticBridgeResult& result)
@@ -6224,6 +6407,160 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.reason = reason.str();
       m_scriptResult.runtime_fillback_status = exported ? "gauge_frame_probe_exported" : "gauge_frame_probe_failed";
     }
+    ImGui::Separator();
+
+    ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
+    if (ImGui::CollapsingHeader("Manual Gauge State / Apply To Globals"))
+    {
+      ManualGaugeState& gauge = m_manualTest.current_gauge;
+      ImGui::TextWrapped(
+        "This reuses the existing ManualStateTestConsole gauge/script/replay chain. The current ManualGaugeState is the single source for Apply To Globals, probe, annotation, and manifest candidate.");
+
+      ImGui::Separator();
+      ImGui::Text("Phase 1 anchor cases only:");
+      ImGui::BulletText("L0_basic_findcircle_basic_dot_ok");
+      ImGui::BulletText("L1_line_high_contrast_001_plate_top_edge_ok");
+      ImGui::BulletText("L1_line_high_contrast_002_metal_part_lower_right_edge_ok");
+
+      ImGui::Separator();
+      InputTextString("Gauge case_id", gauge.case_id);
+      InputTextString("Gauge image_id", gauge.image_id);
+      InputTextString("Gauge target_id", gauge.target_id);
+      InputTextString("Gauge tool", gauge.tool);
+      InputTextString("Gauge source", gauge.source);
+      InputTextString("Gauge review_status", gauge.review_status);
+
+      if (ImGui::Button("Load Gauge From Current Globals"))
+      {
+        auto readInt = [&](const std::string& name, int& value) {
+          const auto it = m_manualTest.runtime_int_vars.find(name);
+          if (it != m_manualTest.runtime_int_vars.end())
+          {
+            value = it->second;
+            return true;
+          }
+          return false;
+        };
+
+        gauge.has_line_gauge =
+          readInt("global.roi_x0", gauge.line_x0) |
+          readInt("global.roi_y0", gauge.line_y0) |
+          readInt("global.roi_x1", gauge.line_x1) |
+          readInt("global.roi_y1", gauge.line_y1);
+        readInt("global.tool_half_width", gauge.tool_half_width);
+        readInt("global.wgap", gauge.wgap);
+        readInt("global.hgap", gauge.hgap);
+        readInt("global.linegap", gauge.linegap);
+        readInt("global.threshold", gauge.threshold);
+        readInt("global.filterprofile", gauge.filterprofile);
+        readInt("global.method", gauge.method);
+
+        gauge.has_circle_gauge =
+          readInt("global.circle_cx", gauge.circle_cx) |
+          readInt("global.circle_cy", gauge.circle_cy) |
+          readInt("global.circle_px", gauge.circle_px) |
+          readInt("global.circle_py", gauge.circle_py);
+        readInt("global.gap", gauge.gap);
+
+        gauge.source = "runtime_globals";
+        gauge.review_status = "editing";
+        gauge.accepted = false;
+        gauge.dirty = false;
+        m_manualTest.debug_action = "Load Gauge From Current Globals";
+        m_manualTest.debug_status = "PENDING";
+        m_manualTest.debug_reason = "ManualGaugeState loaded from runtime_int_vars";
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Accept Current Gauge"))
+      {
+        gauge.accepted = true;
+        gauge.review_status = "manual_accepted";
+        gauge.source = "manual";
+        gauge.dirty = false;
+      }
+
+      ImGui::Separator();
+      ImGui::Checkbox("Has Line Gauge", &gauge.has_line_gauge);
+      ImGui::InputInt("line_x0", &gauge.line_x0);
+      ImGui::InputInt("line_y0", &gauge.line_y0);
+      ImGui::InputInt("line_x1", &gauge.line_x1);
+      ImGui::InputInt("line_y1", &gauge.line_y1);
+      ImGui::InputInt("tool_half_width", &gauge.tool_half_width);
+      ImGui::InputInt("wgap", &gauge.wgap);
+      ImGui::InputInt("hgap", &gauge.hgap);
+      ImGui::InputInt("linegap", &gauge.linegap);
+      ImGui::InputInt("threshold", &gauge.threshold);
+      ImGui::InputInt("filterprofile", &gauge.filterprofile);
+      ImGui::InputInt("method", &gauge.method);
+
+      ImGui::Separator();
+      ImGui::Checkbox("Has Circle Gauge", &gauge.has_circle_gauge);
+      ImGui::InputInt("circle_cx", &gauge.circle_cx);
+      ImGui::InputInt("circle_cy", &gauge.circle_cy);
+      ImGui::InputInt("circle_px", &gauge.circle_px);
+      ImGui::InputInt("circle_py", &gauge.circle_py);
+      ImGui::InputInt("gap", &gauge.gap);
+
+      ImGui::Separator();
+      if (ImGui::Button("Apply Gauge To Globals"))
+      {
+        const bool ok = ApplyManualGaugeToGlobals(m_manualTest);
+        if (!ok)
+        {
+          m_manualTest.debug_action = "Apply Gauge To Globals";
+          m_manualTest.debug_status = "BLOCKED";
+          m_manualTest.debug_reason = "No active line/circle gauge in ManualGaugeState";
+        }
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Save Gauge Annotation"))
+      {
+        std::string reason;
+        const fs::path path = ManualGaugeCaseDir(m_manualTest) / "gauge_annotation.json";
+        const bool ok = SaveManualGaugeAnnotation(m_manualTest, path, reason);
+        m_manualTest.debug_action = "Save Gauge Annotation";
+        m_manualTest.debug_status = ok ? "PENDING" : "BLOCKED";
+        m_manualTest.debug_reason = ok ? ("saved: " + path.string()) : reason;
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Export Manifest Candidate"))
+      {
+        std::string reason;
+        const fs::path path = ManualGaugeCaseDir(m_manualTest) / "manifest_candidate.json";
+        const bool ok = ExportManualGaugeManifestCandidate(m_manualTest, path, reason);
+        m_manualTest.debug_action = "Export Manifest Candidate";
+        m_manualTest.debug_status = ok ? "PENDING" : "BLOCKED";
+        m_manualTest.debug_reason = ok ? ("saved: " + path.string()) : reason;
+      }
+
+      if (ImGui::Button("Run Probe With Accepted Gauge"))
+      {
+        if (!gauge.accepted)
+        {
+          m_manualTest.debug_action = "Run Probe With Accepted Gauge";
+          m_manualTest.debug_status = "BLOCKED";
+          m_manualTest.debug_reason = "Gauge must be accepted before probe";
+        }
+        else
+        {
+          ApplyManualGaugeToGlobals(m_manualTest);
+          m_manualTest.debug_action = "Run Probe With Accepted Gauge";
+          m_manualTest.debug_status = "PENDING";
+          m_manualTest.debug_reason = "Gauge globals applied; use existing Run/Frame Probe buttons for execution";
+        }
+      }
+
+      ImGui::Text("Gauge accepted: %s | dirty: %s",
+                  gauge.accepted ? "true" : "false",
+                  gauge.dirty ? "true" : "false");
+      ImGui::TextWrapped("Last action: %s | %s",
+                         m_manualTest.debug_action.c_str(),
+                         m_manualTest.debug_reason.c_str());
+    }
+
     ImGui::Separator();
     ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
     if (ImGui::CollapsingHeader("Evidence Replay"))

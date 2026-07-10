@@ -108,6 +108,7 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     cv::Mat original;
     cv::Mat resultOverlay;
     cv::Mat evidenceOverlay;
+    cv::Mat gaugePreview;
 
     if (!original_path.empty())
         original = cv::imread(original_path);
@@ -115,6 +116,10 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
         resultOverlay = cv::imread(result_overlay_path);
     if (!evidence_overlay_path.empty())
         evidenceOverlay = cv::imread(evidence_overlay_path);
+    const std::filesystem::path gaugePreviewPath =
+        output_path.parent_path() / "gauge_preview.png";
+    if (std::filesystem::exists(gaugePreviewPath))
+        gaugePreview = cv::imread(gaugePreviewPath.string());
 
     if (original.empty())
         return "";
@@ -148,6 +153,7 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
             2,
             cv::LINE_AA);
     }
+
     else
     {
         cv::putText(
@@ -174,6 +180,19 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
         }
     }
 
+    if (!result.gauge_source.empty())
+    {
+        cv::putText(
+            resultView,
+            "GaugeSource=" + result.gauge_source,
+            {20, 78},
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.65,
+            cv::Scalar(0, 255, 255),
+            2,
+            cv::LINE_AA);
+    }
+
     const int targetW = 480;
 
     auto resizeKeep = [](const cv::Mat& src, int width)
@@ -187,8 +206,13 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     cv::Mat a = resizeKeep(original, targetW);
     cv::Mat b = resizeKeep(resultView, targetW);
     cv::Mat c = resizeKeep(evidenceOverlay, targetW);
+    cv::Mat d;
+    if (!gaugePreview.empty())
+        d = resizeKeep(gaugePreview, targetW);
 
-    const int h = std::max({a.rows, b.rows, c.rows});
+    const int h = d.empty()
+        ? std::max({a.rows, b.rows, c.rows})
+        : std::max({a.rows, b.rows, c.rows, d.rows});
 
     auto padToHeight = [](const cv::Mat& src, int height)
     {
@@ -203,13 +227,24 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     a = padToHeight(a, h);
     b = padToHeight(b, h);
     c = padToHeight(c, h);
+    if (!d.empty())
+        d = padToHeight(d, h);
 
     cv::putText(a, "Original", {20, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0,255,0}, 2);
     cv::putText(b, "Result Overlay", {20, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0,255,0}, 2);
     cv::putText(c, "Evidence Overlay", {20, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0,255,0}, 2);
+    if (!d.empty())
+    {
+        cv::putText(d, "Gauge Preview", {20, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0,255,0}, 2);
+        cv::putText(d, "GaugeSource=gauge_preview/manual_annotation", {20, 65},
+                    cv::FONT_HERSHEY_SIMPLEX, 0.55, {0,255,255}, 2);
+    }
 
     cv::Mat row;
-    cv::hconcat(std::vector<cv::Mat>{a, b, c}, row);
+    if (d.empty())
+        cv::hconcat(std::vector<cv::Mat>{a, b, c}, row);
+    else
+        cv::hconcat(std::vector<cv::Mat>{a, b, c, d}, row);
 
     std::filesystem::create_directories(output_path.parent_path());
     cv::imwrite(output_path.string(), row);

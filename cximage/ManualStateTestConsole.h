@@ -402,6 +402,40 @@ struct ResultRefView
 
 };
 
+struct ManualGaugeState
+{
+  std::string case_id;
+  std::string image_id;
+  std::string target_id;
+  std::string tool = "Findline"; // Findline / Findcircle
+
+  std::string source = "manual"; // manifest / replay / ai_suggested / manual
+  std::string review_status = "editing"; // editing / accepted / rejected / promoted
+
+  bool has_line_gauge = false;
+  int line_x0 = 0;
+  int line_y0 = 0;
+  int line_x1 = 0;
+  int line_y1 = 0;
+  int tool_half_width = 20;
+  int wgap = 32;
+  int hgap = 8;
+  int linegap = 6;
+  int threshold = 20;
+  int filterprofile = 1;
+  int method = 2;
+
+  bool has_circle_gauge = false;
+  int circle_cx = 0;
+  int circle_cy = 0;
+  int circle_px = 0;
+  int circle_py = 0;
+  int gap = 5;
+
+  bool dirty = false;
+  bool accepted = false;
+};
+
 struct ManualTestContext
 {
   std::string script_file_path;
@@ -474,6 +508,7 @@ struct ManualTestContext
   bool show_result_overlay = false;
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
+  ManualGaugeState current_gauge;
 };
 
 struct ScriptSnippet

@@ -165,6 +165,23 @@ int main(int argc, char** argv)
         {
             suiteOptions.preview_only = true;
         }
+        else if (arg == "--use-manual-gauge")
+        {
+            suiteOptions.use_manual_gauge = true;
+        }
+        else if (arg == "--gauge-annotation" && i + 1 < argc)
+        {
+            suiteOptions.gauge_annotation_path = argv[++i];
+        }
+        else if (arg == "--probe-only")
+        {
+            suiteOptions.probe_only = true;
+            suiteOptions.run_contract = false;
+        }
+        else if (arg == "--only-case" && i + 1 < argc)
+        {
+            suiteOptions.only_case_id = argv[++i];
+        }
         else if (arg == "--case-timeout-sec" && i + 1 < argc)
         {
             suiteOptions.case_timeout_sec = std::stoi(argv[++i]);
