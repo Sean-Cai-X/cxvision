@@ -716,6 +716,78 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
   return result;
 }
 
+static bool SyncRuntimeObjectToManualGaugeState(
+    ManualTestContext& context,
+    const RuntimeObjectView& object)
+{
+    ManualGaugeState& gauge = context.current_gauge;
+
+    if (object.type == "Findline" && object.has_line_roi)
+    {
+        gauge.tool = "Findline";
+        gauge.source = "runtime_object";
+        gauge.review_status = "editing";
+
+        gauge.has_line_gauge = true;
+        gauge.has_circle_gauge = false;
+
+        gauge.line_x0 = static_cast<int>(std::round(object.line_x0));
+        gauge.line_y0 = static_cast<int>(std::round(object.line_y0));
+        gauge.line_x1 = static_cast<int>(std::round(object.line_x1));
+        gauge.line_y1 = static_cast<int>(std::round(object.line_y1));
+
+        int half_width = static_cast<int>(std::round(object.effective_tool_half_width));
+        if (half_width <= 0)
+            half_width = static_cast<int>(std::round(object.requested_tool_half_width));
+        if (half_width <= 0)
+            half_width = static_cast<int>(std::round(object.line_scan_half_width));
+        if (half_width <= 0)
+            half_width = 20;
+
+        gauge.tool_half_width = half_width;
+        gauge.wgap = object.line_tool_wgap;
+        gauge.hgap = object.line_tool_hgap;
+        gauge.linegap = object.linegap;
+
+        gauge.dirty = false;
+        gauge.accepted = false;
+        return true;
+    }
+
+    if (object.type == "Findcircle" && object.has_circle)
+    {
+        gauge.tool = "Findcircle";
+        gauge.source = "runtime_object";
+        gauge.review_status = "editing";
+
+        gauge.has_circle_gauge = true;
+        gauge.has_line_gauge = false;
+
+        gauge.circle_cx = static_cast<int>(std::round(object.circle_cx));
+        gauge.circle_cy = static_cast<int>(std::round(object.circle_cy));
+
+        int radius = static_cast<int>(std::round(object.circle_radius));
+        if (radius <= 0)
+            radius = 50;
+
+        gauge.radius = radius;
+        gauge.gap = radius;
+        gauge.circle_px = gauge.circle_cx + radius;
+        gauge.circle_py = gauge.circle_cy;
+
+        if (object.circle_inner > 0)
+            gauge.inner_radius = static_cast<int>(std::round(object.circle_inner));
+        if (object.circle_radius > 0)
+            gauge.outer_radius = static_cast<int>(std::round(object.circle_radius));
+
+        gauge.dirty = false;
+        gauge.accepted = false;
+        return true;
+    }
+
+    return false;
+}
+
 void ViewController::drawScriptAcceptancePanels()
 {
   ImGuiIO& panelIo = ImGui::GetIO();
@@ -1287,54 +1359,112 @@ void ViewController::drawScriptAcceptancePanels()
         // Manual tools are not runtime result.
         drawImageEvidenceOnCanvas(canvasHovered, canvasActive, drawList);
 
-        // Layer 3: Manual Gauge State Handles
+        // Sync Runtime Object to ManualGaugeState if not already set
+        if (!m_manualTest.current_gauge.has_line_gauge &&
+            !m_manualTest.current_gauge.has_circle_gauge &&
+            !m_manualTest.current_gauge.dirty)
         {
-            const ManualGaugeState& gauge = m_manualTest.current_gauge;
-            auto drawGaugeHandleScreen = [&](float ix, float iy, float radius, uint32_t color) {
-                const ImVec2 screenPos = ImVec2(imagePos.x + ix * sx, imagePos.y + iy * sy);
-                drawList->AddCircleFilled(screenPos, radius * m_imageViewZoom, color);
-                drawList->AddCircle(screenPos, radius * m_imageViewZoom + 2.0f, 0xFFFFFFFF, 0, 4.0f);
-            };
+            const std::string activeName = m_manualTest.current_result_ref.source_object;
 
-            if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+            if (!activeName.empty())
             {
-                if (gauge.has_circle_gauge)
+                for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
                 {
-                    drawGaugeHandleScreen((float)gauge.circle_cx, (float)gauge.circle_cy, 6.0f, 0xFF0000FF);
-
-                    int effectiveRadius = gauge.radius;
-                    if (effectiveRadius <= 0)
-                        effectiveRadius = gauge.gap > 0 ? gauge.gap : 50;
-                    drawGaugeHandleScreen((float)gauge.circle_cx + (float)effectiveRadius, (float)gauge.circle_cy, 6.0f, 0xFF0000FF);
-
-                    if (gauge.inner_radius > 0)
-                        drawGaugeHandleScreen((float)gauge.circle_cx + (float)gauge.inner_radius, (float)gauge.circle_cy, 5.0f, 0xFF00FFFF);
-
-                    if (gauge.outer_radius > 0)
-                        drawGaugeHandleScreen((float)gauge.circle_cx + (float)gauge.outer_radius, (float)gauge.circle_cy, 5.0f, 0xFF00FFFF);
+                    if (object.name == activeName &&
+                        object.visualizable &&
+                        !object.stale &&
+                        SyncRuntimeObjectToManualGaugeState(m_manualTest, object))
+                    {
+                        break;
+                    }
                 }
             }
             else
             {
-                if (gauge.has_line_gauge)
+                for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
                 {
-                    drawGaugeHandleScreen((float)gauge.line_x0, (float)gauge.line_y0, 6.0f, 0xFF0000FF);
-                    drawGaugeHandleScreen((float)gauge.line_x1, (float)gauge.line_y1, 6.0f, 0xFF0000FF);
+                    if (!object.visualizable || object.stale)
+                        continue;
 
-                    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
-                    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
-                    drawGaugeHandleScreen(center_x, center_y, 5.0f, 0xFFFF0000);
+                    if (SyncRuntimeObjectToManualGaugeState(m_manualTest, object))
+                        break;
+                }
+            }
+        }
 
-                    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
-                    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
-                    const float len = std::sqrt(dx * dx + dy * dy);
-                    if (len > 1.0f)
-                    {
-                        const float nx = -dy / len;
-                        const float ny = dx / len;
-                        drawGaugeHandleScreen(center_x + nx * (float)gauge.tool_half_width, center_y + ny * (float)gauge.tool_half_width, 5.0f, 0xFF00FFFF);
-                        drawGaugeHandleScreen(center_x - nx * (float)gauge.tool_half_width, center_y - ny * (float)gauge.tool_half_width, 5.0f, 0xFF00FFFF);
-                    }
+        // Layer 3: Manual Gauge State Handles (Topmost)
+        {
+            const ManualGaugeState& gauge = m_manualTest.current_gauge;
+
+            auto ToScreen = [&](float ix, float iy) -> ImVec2 {
+                return ImVec2(imagePos.x + ix * sx, imagePos.y + iy * sy);
+            };
+
+            auto DrawHandle = [&](float ix, float iy, const char* label, ImU32 fill) {
+                ImVec2 p = ToScreen(ix, iy);
+                float r = std::max(6.0f, 7.0f * m_imageViewZoom);
+
+                drawList->AddCircleFilled(p, r + 3.0f, IM_COL32(0, 0, 0, 220));
+                drawList->AddCircleFilled(p, r, fill);
+                drawList->AddCircle(p, r + 2.0f, IM_COL32(255, 255, 255, 255), 20, 2.5f);
+                drawList->AddText(ImVec2(p.x + 8.0f, p.y - 12.0f),
+                                  IM_COL32(255, 255, 255, 255),
+                                  label);
+            };
+
+            if (gauge.has_line_gauge)
+            {
+                LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
+                if (geom.valid)
+                {
+                    DrawHandle(geom.p0.x, geom.p0.y, "P0", IM_COL32(255, 64, 64, 255));
+                    DrawHandle(geom.p1.x, geom.p1.y, "P1", IM_COL32(255, 64, 64, 255));
+                    DrawHandle(geom.center.x, geom.center.y, "C", IM_COL32(64, 160, 255, 255));
+                    DrawHandle(geom.w_plus.x, geom.w_plus.y, "W+", IM_COL32(255, 180, 64, 255));
+                    DrawHandle(geom.w_minus.x, geom.w_minus.y, "W-", IM_COL32(255, 180, 64, 255));
+
+                    const ImVec2 s0 = ToScreen(geom.corner0.x, geom.corner0.y);
+                    const ImVec2 s1 = ToScreen(geom.corner1.x, geom.corner1.y);
+                    const ImVec2 s2 = ToScreen(geom.corner2.x, geom.corner2.y);
+                    const ImVec2 s3 = ToScreen(geom.corner3.x, geom.corner3.y);
+
+                    drawList->AddLine(s0, s1, IM_COL32(80, 255, 170, 200), 2.0f);
+                    drawList->AddLine(s1, s2, IM_COL32(80, 255, 170, 200), 2.0f);
+                    drawList->AddLine(s2, s3, IM_COL32(80, 255, 170, 200), 2.0f);
+                    drawList->AddLine(s3, s0, IM_COL32(80, 255, 170, 200), 2.0f);
+
+                    const ImVec2 sc0 = ToScreen(geom.p0.x, geom.p0.y);
+                    const ImVec2 sc1 = ToScreen(geom.p1.x, geom.p1.y);
+                    drawList->AddLine(sc0, sc1, IM_COL32(255, 220, 80, 255), 2.0f);
+                }
+            }
+
+            if (gauge.has_circle_gauge)
+            {
+                int radius = gauge.radius;
+                if (radius <= 0)
+                    radius = gauge.gap > 0 ? gauge.gap : 50;
+
+                DrawHandle((float)gauge.circle_cx, (float)gauge.circle_cy, "C", IM_COL32(255, 64, 64, 255));
+                DrawHandle((float)gauge.circle_cx + (float)radius,
+                           (float)gauge.circle_cy,
+                           "R",
+                           IM_COL32(255, 64, 64, 255));
+
+                if (gauge.inner_radius > 0)
+                {
+                    DrawHandle((float)gauge.circle_cx + (float)gauge.inner_radius,
+                               (float)gauge.circle_cy,
+                               "Rin",
+                               IM_COL32(255, 180, 64, 255));
+                }
+
+                if (gauge.outer_radius > 0)
+                {
+                    DrawHandle((float)gauge.circle_cx + (float)gauge.outer_radius,
+                               (float)gauge.circle_cy,
+                               "Rout",
+                               IM_COL32(255, 180, 64, 255));
                 }
             }
         }
@@ -1361,10 +1491,11 @@ void ViewController::drawScriptAcceptancePanels()
             if (m_manualTest.active_gauge_handle != GaugeHandleType::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
             {
                 const ImVec2 imageNow = ScreenToImage(io.MousePos.x, io.MousePos.y);
-                const float dx = imageNow.x - m_manualTest.gauge_drag_start_x;
-                const float dy = imageNow.y - m_manualTest.gauge_drag_start_y;
+                const ImVec2 delta(imageNow.x - m_manualTest.gauge_drag_start_x,
+                                   imageNow.y - m_manualTest.gauge_drag_start_y);
 
-                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.active_gauge_handle, dx, dy);
+                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.active_gauge_handle,
+                                imageNow, delta, io.KeyShift);
 
                 m_manualTest.gauge_drag_start_x = imageNow.x;
                 m_manualTest.gauge_drag_start_y = imageNow.y;
@@ -1465,7 +1596,7 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::End();
 
   ImGui::SetNextWindowPos(ImVec2(rightX, margin + runHeight + margin), layoutCondition);
-  ImGui::SetNextWindowSize(ImVec2(rightWidth, contentHeight - runHeight - margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(rightWidth, contentHeight * 0.25f), layoutCondition);
   ImGui::Begin("Result / Log", nullptr, panelFlags);
   ImGui::TextWrapped("Source: %s", emptyAsNone(m_scriptResult.source));
   ImGui::TextWrapped("Script: %s", emptyAsNone(m_scriptResult.script_path));
@@ -1481,6 +1612,167 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::Separator();
   ImGui::Text("Log:");
   for (const std::string& line : m_scriptResult.log_lines) ImGui::BulletText("%s", line.c_str());
+  ImGui::End();
+
+  ImGui::SetNextWindowPos(ImVec2(rightX, margin + runHeight + margin + contentHeight * 0.25f + margin), layoutCondition);
+  ImGui::SetNextWindowSize(ImVec2(rightWidth, contentHeight * 0.45f), layoutCondition);
+  ImGui::Begin("Gauge Workbench", nullptr, panelFlags);
+
+  ManualGaugeState& gauge = m_manualTest.current_gauge;
+
+  ImGui::Text("=== Current Evidence ===");
+  ImGui::Text("case_id: %s", emptyAsNone(gauge.case_id));
+  ImGui::Text("image_id: %s", emptyAsNone(gauge.image_id));
+  ImGui::Text("target_id: %s", emptyAsNone(gauge.target_id));
+  ImGui::Text("tool: %s", emptyAsNone(gauge.tool));
+  ImGui::Text("source: %s", emptyAsNone(gauge.source));
+  ImGui::Text("review_status: %s", emptyAsNone(gauge.review_status));
+  ImGui::Text("dirty: %s | accepted: %s", gauge.dirty ? "yes" : "no", gauge.accepted ? "yes" : "no");
+  ImGui::Separator();
+
+  ImGui::Text("=== Current Gauge ===");
+  if (gauge.has_line_gauge)
+  {
+    if (ImGui::InputInt("line_x0", &gauge.line_x0)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("line_y0", &gauge.line_y0)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("line_x1", &gauge.line_x1)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("line_y1", &gauge.line_y1)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("tool_half_width", &gauge.tool_half_width)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("wgap", &gauge.wgap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("hgap", &gauge.hgap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("linegap", &gauge.linegap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("threshold", &gauge.threshold)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("filterprofile", &gauge.filterprofile)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("method", &gauge.method)) { gauge.dirty = true; gauge.review_status = "editing"; }
+  }
+  else if (gauge.has_circle_gauge)
+  {
+    if (ImGui::InputInt("circle_cx", &gauge.circle_cx)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("circle_cy", &gauge.circle_cy)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("circle_px", &gauge.circle_px)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("circle_py", &gauge.circle_py)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("radius", &gauge.radius)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("inner_radius", &gauge.inner_radius)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("outer_radius", &gauge.outer_radius)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("gap", &gauge.gap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("linegap", &gauge.linegap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("threshold", &gauge.threshold)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("method", &gauge.method)) { gauge.dirty = true; gauge.review_status = "editing"; }
+  }
+  else
+  {
+    ImGui::TextDisabled("No gauge active. Run a script or select from catalog.");
+  }
+  ImGui::Separator();
+
+  ImGui::Text("=== Actions ===");
+  if (ImGui::Button("Apply Gauge To Globals"))
+  {
+    if (gauge.has_line_gauge)
+    {
+      m_manualTest.runtime_int_vars["roi_x0"] = gauge.line_x0;
+      m_manualTest.runtime_int_vars["roi_y0"] = gauge.line_y0;
+      m_manualTest.runtime_int_vars["roi_x1"] = gauge.line_x1;
+      m_manualTest.runtime_int_vars["roi_y1"] = gauge.line_y1;
+      m_manualTest.runtime_int_vars["tool_half_width"] = gauge.tool_half_width;
+      m_manualTest.runtime_int_vars["wgap"] = gauge.wgap;
+      m_manualTest.runtime_int_vars["hgap"] = gauge.hgap;
+      m_manualTest.runtime_int_vars["linegap"] = gauge.linegap;
+      m_manualTest.runtime_int_vars["threshold"] = gauge.threshold;
+      m_manualTest.runtime_int_vars["filterprofile"] = gauge.filterprofile;
+      m_manualTest.runtime_int_vars["method"] = gauge.method;
+    }
+    if (gauge.has_circle_gauge)
+    {
+      m_manualTest.runtime_int_vars["circle_cx"] = gauge.circle_cx;
+      m_manualTest.runtime_int_vars["circle_cy"] = gauge.circle_cy;
+      m_manualTest.runtime_int_vars["circle_px"] = gauge.circle_px;
+      m_manualTest.runtime_int_vars["circle_py"] = gauge.circle_py;
+      m_manualTest.runtime_int_vars["gap"] = gauge.gap;
+      m_manualTest.runtime_int_vars["linegap"] = gauge.linegap;
+      m_manualTest.runtime_int_vars["threshold"] = gauge.threshold;
+      m_manualTest.runtime_int_vars["method"] = gauge.method;
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Accept Manual Gauge"))
+  {
+    gauge.accepted = true;
+    gauge.dirty = false;
+    gauge.review_status = "manual_accepted";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Save Gauge Annotation"))
+  {
+    std::string caseId = gauge.case_id.empty() ? "unnamed" : gauge.case_id;
+    std::filesystem::path dir = "cxscript_runs/manual_gauge_workbench/" + caseId;
+    std::filesystem::create_directories(dir);
+    std::filesystem::path filePath = dir / "gauge_annotation.json";
+
+    std::ofstream ofs(filePath);
+    if (ofs.is_open())
+    {
+      ofs << "{\n";
+      ofs << "  \"case_id\": \"" << gauge.case_id << "\",\n";
+      ofs << "  \"image_id\": \"" << gauge.image_id << "\",\n";
+      ofs << "  \"target_id\": \"" << gauge.target_id << "\",\n";
+      ofs << "  \"tool\": \"" << gauge.tool << "\",\n";
+      ofs << "  \"source\": \"" << gauge.source << "\",\n";
+      ofs << "  \"review_status\": \"" << gauge.review_status << "\",\n";
+      ofs << "  \"line\": {\n";
+      ofs << "    \"x0\": " << gauge.line_x0 << ",\n";
+      ofs << "    \"y0\": " << gauge.line_y0 << ",\n";
+      ofs << "    \"x1\": " << gauge.line_x1 << ",\n";
+      ofs << "    \"y1\": " << gauge.line_y1 << ",\n";
+      ofs << "    \"tool_half_width\": " << gauge.tool_half_width << "\n";
+      ofs << "  },\n";
+      ofs << "  \"circle\": {\n";
+      ofs << "    \"cx\": " << gauge.circle_cx << ",\n";
+      ofs << "    \"cy\": " << gauge.circle_cy << ",\n";
+      ofs << "    \"px\": " << gauge.circle_px << ",\n";
+      ofs << "    \"py\": " << gauge.circle_py << ",\n";
+      ofs << "    \"radius\": " << gauge.radius << ",\n";
+      ofs << "    \"inner_radius\": " << gauge.inner_radius << ",\n";
+      ofs << "    \"outer_radius\": " << gauge.outer_radius << "\n";
+      ofs << "  },\n";
+      ofs << "  \"params\": {\n";
+      ofs << "    \"threshold\": " << gauge.threshold << ",\n";
+      ofs << "    \"gap\": " << gauge.gap << ",\n";
+      ofs << "    \"linegap\": " << gauge.linegap << ",\n";
+      ofs << "    \"wgap\": " << gauge.wgap << ",\n";
+      ofs << "    \"hgap\": " << gauge.hgap << ",\n";
+      ofs << "    \"filterprofile\": " << gauge.filterprofile << ",\n";
+      ofs << "    \"method\": " << gauge.method << "\n";
+      ofs << "  }\n";
+      ofs << "}\n";
+      ofs.close();
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Reset From Runtime"))
+  {
+    gauge.has_line_gauge = false;
+    gauge.has_circle_gauge = false;
+    gauge.dirty = false;
+    gauge.accepted = false;
+  }
+  ImGui::Separator();
+
+  ImGui::Text("=== Param Regression ===");
+  if (!gauge.accepted)
+  {
+    ImGui::TextDisabled("Parameter regression disabled: manual gauge not accepted.");
+  }
+  else
+  {
+    ImGui::Text("ready for candidate generation");
+  }
+  ImGui::Button("Generate Candidates (pending_binding)");
+  ImGui::SameLine();
+  ImGui::Button("Run Selected Probe (pending_binding)");
+  ImGui::SameLine();
+  ImGui::Button("Export Candidate (pending_binding)");
+
   ImGui::End();
 }
 void ViewController::initWindow (int theWidth, int theHeight, const char* theTitle)
@@ -2051,21 +2343,30 @@ void ViewController::mainloop()
          if (!m_myView.IsNull())
          {
 
-             if (ImGui::IsMouseDown(ImGuiMouseButton_Left)
-                 || ImGui::IsMouseDown(ImGuiMouseButton_Right)
-                 || ImGui::IsMouseDown(ImGuiMouseButton_Middle)
-                 || ImGui::GetIO().MouseWheel != 0
-                 || 1 == ifirstrun)
-             {
-                 ifirstrun = 0;
-
-                 FlushViewEvents(myContext, m_myView, true);
-                 m_myView->Redraw();
-             }
-
              ImGui_ImplOpenGL3_NewFrame();
              ImGui_ImplGlfw_NewFrame();
              ImGui::NewFrame();
+
+             ImGuiIO& io = ImGui::GetIO();
+             const bool imguiCapturesMouse =
+                 io.WantCaptureMouse ||
+                 ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) ||
+                 ImGui::IsAnyItemHovered() ||
+                 ImGui::IsAnyItemActive();
+
+             const bool canvasInteraction =
+                 !imguiCapturesMouse &&
+                 (ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+                  ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                  ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+                  io.MouseWheel != 0.0f);
+
+             if (canvasInteraction || ifirstrun == 1)
+             {
+                 ifirstrun = 0;
+                 FlushViewEvents(myContext, m_myView, true);
+                 m_myView->Redraw();
+             }
 
              if (m_showLegacyGpuWork)
              {
@@ -2414,8 +2715,11 @@ void ViewController::mainloop()
              drawScriptAcceptancePanels();
              const SemanticFlowAction flowAction = m_semanticFlowGraph.Draw();
              HandleSemanticFlowAction(flowAction);
+             drawEvidenceAlbumWindow();
+             drawAnnotationToolWindow();
+             drawKeyParameterControlsWindow();
+             drawParameterTuningAndConclusionWindow();
              drawManualStateTestConsole();
-             drawImageEvidencePanels();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
 

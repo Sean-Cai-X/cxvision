@@ -65,10 +65,15 @@ private:
                                 std::string& outName) const;
   void HandleSemanticFlowAction(const SemanticFlowAction& action);
   void drawScriptAcceptancePanels();
+  void EnsureCxScriptWorkbenchAssetsLoaded();
   void drawManualStateTestConsole();
   void initManualStateTestConsole();
   void initImageEvidenceLayer();
   void drawImageEvidencePanels();
+  void drawKeyParameterControlsWindow();
+  void drawParameterTuningAndConclusionWindow();
+  void drawEvidenceAlbumWindow();
+  void drawAnnotationToolWindow();
   void drawImageEvidenceOnCanvas(bool canvasHovered, bool canvasActive,
                                  ImDrawList* drawList);
   ImVec2 ImageToScreen(float ix, float iy) const;
