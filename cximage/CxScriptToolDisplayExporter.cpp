@@ -191,6 +191,18 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
             cv::Scalar(0, 255, 255),
             2,
             cv::LINE_AA);
+        if (!result.gauge_review_status.empty())
+        {
+            cv::putText(
+                resultView,
+                "ReviewStatus=" + result.gauge_review_status,
+                {20, 108},
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.65,
+                cv::Scalar(0, 255, 255),
+                2,
+                cv::LINE_AA);
+        }
     }
 
     const int targetW = 480;

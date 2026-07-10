@@ -1,0 +1,33 @@
+// Stage25 Findline Parameter Regression Probe
+// C/C++-style direct replay script. Values come from accepted gauge + candidate.
+
+Image m_image;
+Findline m_line;
+
+m_image.copyFromMat(global.matInput);
+
+int x0 = global.roi_x0;
+int y0 = global.roi_y0;
+int x1 = global.roi_x1;
+int y1 = global.roi_y1;
+
+int tool_half_width = global.tool_half_width;
+int wgap = global.candidate_wgap;
+int hgap = global.candidate_hgap;
+int linegap = global.candidate_linegap;
+int threshold = global.candidate_threshold;
+int method = global.candidate_method;
+int filterprofile = global.candidate_filterprofile;
+
+m_line.SetWHgap(wgap, hgap);
+m_line.setlinegap(linegap);
+m_line.setline(x0, y0, x1, y1, tool_half_width);
+m_line.setmethod(method);
+m_line.setthre(threshold);
+m_line.setfilterprofile(filterprofile);
+
+m_line.measure(&m_image);
+m_line.fitline();
+
+global.line_ref = m_line.get_result();
+global.current_status = "param_candidate_geometry_result_available";

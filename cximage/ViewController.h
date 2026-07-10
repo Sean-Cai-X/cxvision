@@ -164,7 +164,9 @@ private:
       None = 0,
       StartPoint,
       EndPoint,
-      Body
+      Body,
+      CenterY,
+      Width
   };
 
   RuntimeLineDragHandle m_runtimeLineDragHandle = RuntimeLineDragHandle::None;
@@ -365,6 +367,9 @@ private:
     bool m_annotationDragging = false;
     OverlayKind m_annotationDragKind = OverlayKind::Point;
     OverlayImagePoint m_annotationDragStart;
+    bool m_annotationHandleDragging = false;
+    int m_annotationHandleElement = -1;
+    int m_annotationHandleKind = 0; // 1 center-y, 2 line-start/radius, 3 line-end, 4 line-width
     int m_activePolylineElement = -1;
     bool m_attachToScriptMode = false;
     bool m_showSourcePreviewOverlay = false;

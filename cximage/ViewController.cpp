@@ -971,6 +971,72 @@ void ViewController::drawScriptAcceptancePanels()
                 drawList->AddLine(p1, p2, roiColor, 1.5f);
                 drawList->AddLine(p2, p3, roiColor, 1.5f);
                 drawList->AddLine(p3, p0, roiColor, 1.5f);
+
+                const ImVec2 center(
+                    (p0.x + p1.x + p2.x + p3.x) * 0.25f,
+                    (p0.y + p1.y + p2.y + p3.y) * 0.25f);
+                const ImVec2 m01((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+                const ImVec2 m12((p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f);
+                const ImVec2 m23((p2.x + p3.x) * 0.5f, (p2.y + p3.y) * 0.5f);
+                const ImVec2 m30((p3.x + p0.x) * 0.5f, (p3.y + p0.y) * 0.5f);
+                const ImU32 cornerHandleColor = IM_COL32(255, 255, 255, 70);
+                const ImU32 edgeHandleColor = IM_COL32(255, 160, 70, 70);
+                const ImU32 centerHandleColor = IM_COL32(70, 170, 255, 70);
+                const float cornerRadius = 5.0f;
+                const float edgeRadius = 5.5f;
+                drawList->AddCircleFilled(center, 6.5f, centerHandleColor);
+                drawList->AddCircle(center, 8.0f, IM_COL32(255, 255, 255, 255), 18, 1.5f);
+                drawList->AddText(ImVec2(center.x + 8.0f, center.y - 12.0f), centerHandleColor, "center");
+
+                const ImVec2 corners[] = {p0, p1, p2, p3};
+                for (const ImVec2& corner : corners)
+                {
+                    drawList->AddCircleFilled(corner, cornerRadius, cornerHandleColor);
+                    drawList->AddCircle(corner, cornerRadius + 1.5f, roiColor, 14, 1.2f);
+                }
+                const ImVec2 edges[] = {m01, m12, m23, m30};
+                for (const ImVec2& edge : edges)
+                {
+                    drawList->AddCircleFilled(edge, edgeRadius, edgeHandleColor);
+                    drawList->AddCircle(edge, edgeRadius + 1.5f, IM_COL32(255, 255, 255, 220), 14, 1.2f);
+                }
+                drawList->AddText(ImVec2(m12.x + 8.0f, m12.y - 12.0f), edgeHandleColor, "width");
+
+                const float handleRadius = 9.0f;
+                const ImVec2 mouse = ImGui::GetIO().MousePos;
+                auto HitTestCircle = [](const ImVec2& m, const ImVec2& c, float r) -> bool
+                {
+                    const float dx = m.x - c.x;
+                    const float dy = m.y - c.y;
+                    return dx * dx + dy * dy <= r * r;
+                };
+
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    if (HitTestCircle(mouse, center, handleRadius))
+                    {
+                        m_runtimeLineDragHandle = RuntimeLineDragHandle::CenterY;
+                        m_runtimeLineDragObject = object.name;
+                        m_runtimeLineDragStartMouseX = mouse.x;
+                        m_runtimeLineDragStartMouseY = mouse.y;
+                        m_runtimeLineDragStartX0 = object.line_x0;
+                        m_runtimeLineDragStartY0 = object.line_y0;
+                        m_runtimeLineDragStartX1 = object.line_x1;
+                        m_runtimeLineDragStartY1 = object.line_y1;
+                    }
+                    else if (HitTestCircle(mouse, m12, handleRadius) ||
+                             HitTestCircle(mouse, m30, handleRadius))
+                    {
+                        m_runtimeLineDragHandle = RuntimeLineDragHandle::Width;
+                        m_runtimeLineDragObject = object.name;
+                        m_runtimeLineDragStartMouseX = mouse.x;
+                        m_runtimeLineDragStartMouseY = mouse.y;
+                        m_runtimeLineDragStartX0 = object.line_x0;
+                        m_runtimeLineDragStartY0 = object.line_y0;
+                        m_runtimeLineDragStartX1 = object.line_x1;
+                        m_runtimeLineDragStartY1 = object.line_y1;
+                    }
+                }
             }
 
             const ImU32 seekPointColor = IM_COL32(80, 180, 255, 180);
@@ -1029,6 +1095,50 @@ void ViewController::drawScriptAcceptancePanels()
                     IM_COL32(80, 255, 170, 220),
                     "original measure");
             }
+
+            // Draw runtime gauge handles last so they are not hidden by seek points,
+            // measure points, or fit line overlays. High-contrast colors are used
+            // because production images often have dense white blobs.
+            if (object.has_line_scan_box)
+            {
+                const ImVec2 p0 = ImageToScreen(object.line_scan_box_xy[0], object.line_scan_box_xy[1]);
+                const ImVec2 p1 = ImageToScreen(object.line_scan_box_xy[2], object.line_scan_box_xy[3]);
+                const ImVec2 p2 = ImageToScreen(object.line_scan_box_xy[4], object.line_scan_box_xy[5]);
+                const ImVec2 p3 = ImageToScreen(object.line_scan_box_xy[6], object.line_scan_box_xy[7]);
+                const ImVec2 center(
+                    (p0.x + p1.x + p2.x + p3.x) * 0.25f,
+                    (p0.y + p1.y + p2.y + p3.y) * 0.25f);
+                const ImVec2 m01((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+                const ImVec2 m12((p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f);
+                const ImVec2 m23((p2.x + p3.x) * 0.5f, (p2.y + p3.y) * 0.5f);
+                const ImVec2 m30((p3.x + p0.x) * 0.5f, (p3.y + p0.y) * 0.5f);
+
+                auto drawVisibleHandle = [&](const ImVec2& point, ImU32 fill, float radius)
+                {
+                    drawList->AddCircleFilled(point, radius + 3.0f, IM_COL32(0, 0, 0, 230));
+                    drawList->AddCircleFilled(point, radius, fill);
+                    drawList->AddCircle(point, radius + 3.0f, IM_COL32(255, 255, 255, 255), 20, 1.2f);
+                };
+
+                const ImU32 centerColor = IM_COL32(40, 160, 255, 255);
+                const ImU32 cornerColor = IM_COL32(180, 80, 255, 255);
+                const ImU32 edgeColor = IM_COL32(255, 130, 30, 255);
+
+                drawVisibleHandle(center, centerColor, 7.5f);
+                drawList->AddText(ImVec2(center.x + 10.0f, center.y - 16.0f),
+                                  centerColor, "center");
+
+                const ImVec2 corners[] = {p0, p1, p2, p3};
+                for (const ImVec2& corner : corners)
+                    drawVisibleHandle(corner, cornerColor, 6.0f);
+
+                const ImVec2 edges[] = {m01, m12, m23, m30};
+                for (const ImVec2& edge : edges)
+                    drawVisibleHandle(edge, edgeColor, 6.5f);
+
+                drawList->AddText(ImVec2(m12.x + 10.0f, m12.y - 16.0f),
+                                  edgeColor, "width");
+            }
         }
 
         if (m_runtimeLineDragHandle != RuntimeLineDragHandle::None &&
@@ -1062,6 +1172,36 @@ void ViewController::drawScriptAcceptancePanels()
                     x1 += dx;
                     y1 += dy;
                 }
+                else if (m_runtimeLineDragHandle == RuntimeLineDragHandle::CenterY)
+                {
+                    y0 += dy;
+                    y1 += dy;
+                }
+
+                float halfWidth = 1.0f;
+                for (const RuntimeObjectView& runtimeObject : m_manualTest.runtime_objects)
+                {
+                    if (runtimeObject.name == m_runtimeLineDragObject)
+                    {
+                        halfWidth = std::max(1.0f, static_cast<float>(runtimeObject.line_scan_half_width));
+                        break;
+                    }
+                }
+
+                if (m_runtimeLineDragHandle == RuntimeLineDragHandle::Width)
+                {
+                    const float vx = m_runtimeLineDragStartX1 - m_runtimeLineDragStartX0;
+                    const float vy = m_runtimeLineDragStartY1 - m_runtimeLineDragStartY0;
+                    const float len = std::sqrt(vx * vx + vy * vy);
+                    if (len > 1.0f)
+                    {
+                        const float cx = (m_runtimeLineDragStartX0 + m_runtimeLineDragStartX1) * 0.5f;
+                        const float cy = (m_runtimeLineDragStartY0 + m_runtimeLineDragStartY1) * 0.5f;
+                        const float px = imageNow.x - cx;
+                        const float py = imageNow.y - cy;
+                        halfWidth = std::max(1.0f, std::fabs(px * (-vy / len) + py * (vx / len)));
+                    }
+                }
 
                 std::string reason;
                 UpdateRuntimeFindlineSetlineFromUi(
@@ -1071,7 +1211,7 @@ void ViewController::drawScriptAcceptancePanels()
                     y0,
                     x1,
                     y1,
-                    1.0f,
+                    halfWidth,
                     reason);
             }
             else

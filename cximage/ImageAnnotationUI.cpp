@@ -95,6 +95,55 @@ bool ParseNumericParameters(const std::string& text,
   return !values.empty();
 }
 
+bool HitTestScreenPoint(const ImVec2& mouse, const ImVec2& center, float radius)
+{
+  const float dx = mouse.x - center.x;
+  const float dy = mouse.y - center.y;
+  return dx * dx + dy * dy <= radius * radius;
+}
+
+void DrawHandle(ImDrawList* drawList, const ImVec2& p, ImU32 fill,
+                const char* label)
+{
+  drawList->AddCircleFilled(p, 6.0f, fill);
+  drawList->AddCircle(p, 7.5f, IM_COL32(255, 255, 255, 255), 16, 1.5f);
+  if (label != nullptr && label[0] != '\0')
+    drawList->AddText(ImVec2(p.x + 8.0f, p.y - 12.0f),
+                      IM_COL32(255, 255, 255, 230), label);
+}
+
+void UpdateManualGaugeFromElement(ManualTestContext& context,
+                                  const OverlayElement& element)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  if (element.kind == OverlayKind::Line && element.image_points.size() >= 2)
+  {
+    gauge.tool = "Findline";
+    gauge.has_line_gauge = true;
+    gauge.line_x0 = static_cast<int>(std::lround(element.image_points[0].x));
+    gauge.line_y0 = static_cast<int>(std::lround(element.image_points[0].y));
+    gauge.line_x1 = static_cast<int>(std::lround(element.image_points[1].x));
+    gauge.line_y1 = static_cast<int>(std::lround(element.image_points[1].y));
+    gauge.source = "annotation_handle";
+    gauge.review_status = "editing";
+    gauge.accepted = false;
+    gauge.dirty = true;
+  }
+  else if (element.kind == OverlayKind::Circle && !element.image_points.empty())
+  {
+    gauge.tool = "Findcircle";
+    gauge.has_circle_gauge = true;
+    gauge.circle_cx = static_cast<int>(std::lround(element.image_points[0].x));
+    gauge.circle_cy = static_cast<int>(std::lround(element.image_points[0].y));
+    gauge.circle_px = static_cast<int>(std::lround(element.image_points[0].x + element.radius));
+    gauge.circle_py = static_cast<int>(std::lround(element.image_points[0].y));
+    gauge.source = "annotation_handle";
+    gauge.review_status = "editing";
+    gauge.accepted = false;
+    gauge.dirty = true;
+  }
+}
+
 void InsertStatement(std::string& editor, const std::string& statement)
 {
   if (statement.empty()) return;
@@ -172,6 +221,7 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     m_scriptResult.result_ref = element.result_ref;
     m_scriptResult.issue_entry_ref = element.issue_entry_ref;
     element.generated_statement = GenerateElementStatement(element);
+    UpdateManualGaugeFromElement(m_manualTest, element);
     m_annotationStatus = "created " + element.ref;
   };
 
@@ -267,8 +317,11 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     }
   }
 
-  for (const OverlayElement& element : m_annotationLayer.Elements())
+  for (int elementIndex = 0;
+       elementIndex < static_cast<int>(m_annotationLayer.Elements().size());
+       ++elementIndex)
   {
+    OverlayElement& element = m_annotationLayer.Elements()[elementIndex];
     if (!element.visible || element.image_points.empty()) continue;
     const ImU32 color = element.selected ? IM_COL32(255, 220, 40, 255) :
                                           IM_COL32(255, 80, 180, 255);
@@ -324,6 +377,161 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     drawList->AddText(ImVec2(sourceLabel.x + 6.0f, sourceLabel.y + 6.0f),
                       color, element.source.empty() ? "manual_element" :
                                                     element.source.c_str());
+
+    const bool editableSelected = element.selected && element.editable &&
+      (tool == nullptr || m_imageToolMode == ImageToolMode::PointerPan);
+    if (editableSelected &&
+        (element.kind == OverlayKind::Line || element.kind == OverlayKind::Circle))
+    {
+      const ImVec2 mouse = ImGui::GetIO().MousePos;
+      const ImU32 centerColor = IM_COL32(80, 180, 255, 255);
+      const ImU32 boundaryColor = IM_COL32(255, 120, 80, 255);
+      const ImU32 widthColor = IM_COL32(120, 255, 160, 255);
+
+      if (element.kind == OverlayKind::Line && element.image_points.size() >= 2)
+      {
+        ImVec2 p0 = ImageToScreen(element.image_points[0].x,
+                                  element.image_points[0].y);
+        ImVec2 p1 = ImageToScreen(element.image_points[1].x,
+                                  element.image_points[1].y);
+        ImVec2 center((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+        const float dx = p1.x - p0.x;
+        const float dy = p1.y - p0.y;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        ImVec2 normal(0.0f, -1.0f);
+        if (len > 1.0f)
+          normal = ImVec2(-dy / len, dx / len);
+        ImVec2 widthHandle(center.x + normal.x * 28.0f,
+                           center.y + normal.y * 28.0f);
+
+        DrawHandle(drawList, center, centerColor, "center: move Y");
+        DrawHandle(drawList, p0, boundaryColor, "rotate/len A");
+        DrawHandle(drawList, p1, boundaryColor, "rotate/len B");
+        DrawHandle(drawList, widthHandle, widthColor, "width");
+        drawList->AddLine(center, widthHandle, widthColor, 1.5f);
+
+        if (!m_annotationHandleDragging &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          if (HitTestScreenPoint(mouse, center, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 1;
+          }
+          else if (HitTestScreenPoint(mouse, p0, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 2;
+          }
+          else if (HitTestScreenPoint(mouse, p1, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 3;
+          }
+          else if (HitTestScreenPoint(mouse, widthHandle, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 4;
+          }
+        }
+
+        if (m_annotationHandleDragging &&
+            m_annotationHandleElement == elementIndex &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+          const ImVec2 img = ScreenToImage(mouse.x, mouse.y);
+          if (m_annotationHandleKind == 1)
+          {
+            const float oldCenterY =
+              (element.image_points[0].y + element.image_points[1].y) * 0.5f;
+            const float deltaY = img.y - oldCenterY;
+            element.image_points[0].y += deltaY;
+            element.image_points[1].y += deltaY;
+          }
+          else if (m_annotationHandleKind == 2)
+          {
+            element.image_points[0].x = img.x;
+            element.image_points[0].y = img.y;
+          }
+          else if (m_annotationHandleKind == 3)
+          {
+            element.image_points[1].x = img.x;
+            element.image_points[1].y = img.y;
+          }
+          else if (m_annotationHandleKind == 4)
+          {
+            const ImVec2 centerImg(
+              (element.image_points[0].x + element.image_points[1].x) * 0.5f,
+              (element.image_points[0].y + element.image_points[1].y) * 0.5f);
+            const float ddx = img.x - centerImg.x;
+            const float ddy = img.y - centerImg.y;
+            m_manualTest.current_gauge.tool_half_width =
+              std::max(1, static_cast<int>(std::lround(std::sqrt(ddx * ddx + ddy * ddy))));
+          }
+          element.generated_statement = GenerateElementStatement(element);
+          UpdateManualGaugeFromElement(m_manualTest, element);
+        }
+      }
+      else if (element.kind == OverlayKind::Circle)
+      {
+        ImVec2 center = ImageToScreen(element.image_points[0].x,
+                                      element.image_points[0].y);
+        const float scaleX = m_annotationImageWidth / m_imageViewImage.cols;
+        const float scaleY = m_annotationImageHeight / m_imageViewImage.rows;
+        const float screenRadius = element.radius * (scaleX + scaleY) * 0.5f;
+        ImVec2 radiusHandle(center.x + screenRadius, center.y);
+        DrawHandle(drawList, center, centerColor, "center: move Y");
+        DrawHandle(drawList, radiusHandle, boundaryColor, "radius");
+        drawList->AddLine(center, radiusHandle, boundaryColor, 1.5f);
+
+        if (!m_annotationHandleDragging &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          if (HitTestScreenPoint(mouse, center, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 1;
+          }
+          else if (HitTestScreenPoint(mouse, radiusHandle, 10.0f))
+          {
+            m_annotationHandleDragging = true;
+            m_annotationHandleElement = elementIndex;
+            m_annotationHandleKind = 2;
+          }
+        }
+
+        if (m_annotationHandleDragging &&
+            m_annotationHandleElement == elementIndex &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+          const ImVec2 img = ScreenToImage(mouse.x, mouse.y);
+          if (m_annotationHandleKind == 1)
+            element.image_points[0].y = img.y;
+          else if (m_annotationHandleKind == 2)
+          {
+            const float ddx = img.x - element.image_points[0].x;
+            const float ddy = img.y - element.image_points[0].y;
+            element.radius = std::max(1.0f, std::sqrt(ddx * ddx + ddy * ddy));
+          }
+          element.generated_statement = GenerateElementStatement(element);
+          UpdateManualGaugeFromElement(m_manualTest, element);
+        }
+      }
+    }
+  }
+
+  if (m_annotationHandleDragging &&
+      ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+  {
+    m_annotationHandleDragging = false;
+    m_annotationHandleElement = -1;
+    m_annotationHandleKind = 0;
+    m_annotationStatus = "annotation handle updated ManualGaugeState";
   }
 
   for (const RuntimeObjectView& runtime : m_manualTest.runtime_objects)

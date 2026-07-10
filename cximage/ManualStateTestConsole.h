@@ -3,6 +3,7 @@
 
 #include "ParserDebugBridge.h"
 #include "CxScriptCatalogRuntime.h"
+#include "CxParamRegressionRuntime.h"
 
 #include <string>
 #include <vector>
@@ -436,6 +437,39 @@ struct ManualGaugeState
   bool accepted = false;
 };
 
+struct ManualParamRegressionState
+{
+  bool initialized = false;
+  std::string status = "disabled";
+  std::string reason = "Manual gauge must be accepted first.";
+  CxParamRegressionTask task;
+  CxParamRangeSet range_set;
+  std::vector<CxParamCandidate> candidates;
+  std::vector<CxParamEvalRecord> records;
+  std::vector<CxParamAccuracyStats> accuracy_stats;
+  int max_candidates = 12;
+  int max_case_seconds = 10;
+  int max_total_seconds = 60;
+  int selected_candidate_index = 0;
+  int edge_mode = 0; // 0 auto, 1 black-to-white, 2 white-to-black
+  int contrast_percent = 20;
+  int valid_length_percent = 50;
+  int interference_length_percent = 20;
+  int roughness = 8;
+  int burr_filter_percent = 0;
+  int measure_order = 3;
+  int black_index = 50;
+  int sample_points = 8;
+  int catch_method = 0;
+  bool enable_fast_measure = true;
+  bool enable_filter = true;
+  int tuning_tab = 0;
+  std::string output_dir;
+  std::string last_export_status;
+  std::string last_export_reason;
+  std::vector<std::string> exported_files;
+};
+
 struct ManualTestContext
 {
   std::string script_file_path;
@@ -509,6 +543,7 @@ struct ManualTestContext
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
+  ManualParamRegressionState param_regression;
 };
 
 struct ScriptSnippet

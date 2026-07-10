@@ -112,6 +112,9 @@ public:
   Image* QueryImage(const std::string& name) const;
   bool QueryDouble(const std::string& name, double& value) const;
   bool SetDouble(const std::string& name, double value);
+  bool SetGlobalInt(const std::string& name, int value);
+  bool SetGlobalDouble(const std::string& name, double value);
+  bool SetGlobalString(const std::string& name, const std::string& value);
   bool ApplyStatement(const std::string& statement);
   bool SetGlobalMatInput(const cv::Mat& image);
   void ClearGlobalInputs() { myGlobalMatInput.release(); }

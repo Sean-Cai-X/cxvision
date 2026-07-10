@@ -94,6 +94,43 @@ bool ParserDebugBridge::SetDouble(const std::string& name, double value)
   return ApplyStatement(name + "=" + std::to_string(value) + ";");
 }
 
+bool ParserDebugBridge::SetGlobalInt(const std::string& name, int value)
+{
+  const std::string fullName =
+    name.rfind("global.", 0) == 0 ? name : ("global." + name);
+  return ApplyStatement(fullName + "=" + std::to_string(value) + ";") ||
+         ApplyStatement(name + "=" + std::to_string(value) + ";");
+}
+
+bool ParserDebugBridge::SetGlobalDouble(const std::string& name, double value)
+{
+  const std::string fullName =
+    name.rfind("global.", 0) == 0 ? name : ("global." + name);
+  return ApplyStatement(fullName + "=" + std::to_string(value) + ";") ||
+         ApplyStatement(name + "=" + std::to_string(value) + ";");
+}
+
+bool ParserDebugBridge::SetGlobalString(
+  const std::string& name,
+  const std::string& value)
+{
+  auto escape = [](const std::string& text) {
+    std::string out;
+    for (char ch : text)
+    {
+      if (ch == '\\') out += "\\\\";
+      else if (ch == '"') out += "\\\"";
+      else out.push_back(ch);
+    }
+    return out;
+  };
+  const std::string fullName =
+    name.rfind("global.", 0) == 0 ? name : ("global." + name);
+  const std::string quoted = "\"" + escape(value) + "\"";
+  return ApplyStatement(fullName + "=" + quoted + ";") ||
+         ApplyStatement(name + "=" + quoted + ";");
+}
+
 bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 {
   return myRuntime != nullptr && !statement.empty() &&
@@ -233,7 +270,35 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
 std::vector<ParserDebugVariableSnapshot>
 ParserDebugBridge::SnapshotRuntimeVariables() const
 {
-  const char* names[] = {"doutputvalue", "current_status"};
+  const char* names[] = {
+    "doutputvalue",
+    "current_status",
+    "global.roi_x0",
+    "global.roi_y0",
+    "global.roi_x1",
+    "global.roi_y1",
+    "global.tool_half_width",
+    "global.wgap",
+    "global.hgap",
+    "global.linegap",
+    "global.threshold",
+    "global.filterprofile",
+    "global.method",
+    "global.circle_cx",
+    "global.circle_cy",
+    "global.circle_px",
+    "global.circle_py",
+    "global.gap",
+    "roi_x0",
+    "roi_y0",
+    "roi_x1",
+    "roi_y1",
+    "tool_half_width",
+    "circle_cx",
+    "circle_cy",
+    "circle_px",
+    "circle_py"
+  };
   std::vector<ParserDebugVariableSnapshot> snapshots;
   for (const char* name : names)
   {

@@ -1,0 +1,29 @@
+// Stage25 Findcircle Parameter Regression Probe
+// C/C++-style direct replay script. Values come from accepted gauge + candidate.
+
+Image m_image;
+Findcircle m_circle;
+
+m_image.copyFromMat(global.matInput);
+
+int cx = global.circle_cx;
+int cy = global.circle_cy;
+int px = global.circle_px;
+int py = global.circle_py;
+
+int method = global.candidate_method;
+int threshold = global.candidate_threshold;
+int gap = global.candidate_gap;
+int linegap = global.candidate_linegap;
+
+m_circle.Setgap(gap);
+m_circle.setlinegap(linegap);
+m_circle.setthre(threshold);
+m_circle.setmethod(method);
+m_circle.setcircle(cx, cy, px, py);
+
+m_circle.measure(&m_image);
+m_circle.fitcircle();
+
+global.circle_ref = m_circle.get_result();
+global.current_status = "param_candidate_geometry_result_available";

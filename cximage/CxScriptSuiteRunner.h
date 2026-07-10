@@ -87,6 +87,7 @@ struct CxScriptSuiteCaseResult
     std::string conclusion;
     std::string policy_guard;
     std::string gauge_source;
+    std::string gauge_review_status;
     std::string gauge_annotation_path;
 
     double circle_radius = 0.0;
@@ -114,6 +115,15 @@ struct CxScriptSuiteCaseResult
     int circle_cy = 0;
     int circle_px = 0;
     int circle_py = 0;
+
+    int effective_tool_half_width = 0;
+    int effective_wgap = 0;
+    int effective_hgap = 0;
+    int effective_gap = 0;
+    int effective_linegap = 0;
+    int effective_threshold = 0;
+    int effective_filterprofile = 0;
+    int effective_method = 0;
 
     double fit_line_x0 = 0.0;
     double fit_line_y0 = 0.0;

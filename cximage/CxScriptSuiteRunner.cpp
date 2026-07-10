@@ -328,6 +328,7 @@ namespace
         if (any)
         {
             out.gauge_source = "manual_accepted";
+            out.gauge_review_status = reviewStatus;
             out.gauge_annotation_path = path.string();
         }
         return any;
@@ -981,6 +982,7 @@ namespace
         file << "\n";
         file << "  \"policy_guard\": \"" << JsonEscape(r.policy_guard) << "\",\n";
         file << "  \"gauge_source\": \"" << JsonEscape(r.gauge_source) << "\",\n";
+        file << "  \"gauge_review_status\": \"" << JsonEscape(r.gauge_review_status) << "\",\n";
         file << "  \"gauge_annotation_path\": \"" << JsonEscape(r.gauge_annotation_path) << "\",\n";
         file << "  \"actual_policy_guard\": \"" << JsonEscape(r.actual_policy_guard) << "\",\n";
         file << "  \"result_status\": \"" << JsonEscape(r.result_status) << "\",\n";
@@ -1000,7 +1002,15 @@ namespace
         file << "  \"circle_cx\": " << r.circle_cx << ",\n";
         file << "  \"circle_cy\": " << r.circle_cy << ",\n";
         file << "  \"circle_px\": " << r.circle_px << ",\n";
-        file << "  \"circle_py\": " << r.circle_py << "\n";
+        file << "  \"circle_py\": " << r.circle_py << ",\n";
+        file << "  \"effective_tool_half_width\": " << r.effective_tool_half_width << ",\n";
+        file << "  \"effective_wgap\": " << r.effective_wgap << ",\n";
+        file << "  \"effective_hgap\": " << r.effective_hgap << ",\n";
+        file << "  \"effective_gap\": " << r.effective_gap << ",\n";
+        file << "  \"effective_linegap\": " << r.effective_linegap << ",\n";
+        file << "  \"effective_threshold\": " << r.effective_threshold << ",\n";
+        file << "  \"effective_filterprofile\": " << r.effective_filterprofile << ",\n";
+        file << "  \"effective_method\": " << r.effective_method << "\n";
         file << "}\n";
     }
 
@@ -1071,6 +1081,7 @@ namespace
         file << "\n";
         file << "  \"effective_gauge\": {\n";
         file << "    \"source\": \"" << JsonEscape(result.gauge_source.empty() ? "suite_effective_globals" : result.gauge_source) << "\",\n";
+        file << "    \"review_status\": \"" << JsonEscape(result.gauge_review_status) << "\",\n";
         file << "    \"annotation_path\": \"" << JsonEscape(result.gauge_annotation_path) << "\",\n";
         file << "    \"roi_x0\": " << result.roi_x0 << ",\n";
         file << "    \"roi_y0\": " << result.roi_y0 << ",\n";
@@ -1079,7 +1090,15 @@ namespace
         file << "    \"circle_cx\": " << result.circle_cx << ",\n";
         file << "    \"circle_cy\": " << result.circle_cy << ",\n";
         file << "    \"circle_px\": " << result.circle_px << ",\n";
-        file << "    \"circle_py\": " << result.circle_py << "\n";
+        file << "    \"circle_py\": " << result.circle_py << ",\n";
+        file << "    \"tool_half_width\": " << result.effective_tool_half_width << ",\n";
+        file << "    \"wgap\": " << result.effective_wgap << ",\n";
+        file << "    \"hgap\": " << result.effective_hgap << ",\n";
+        file << "    \"gap\": " << result.effective_gap << ",\n";
+        file << "    \"linegap\": " << result.effective_linegap << ",\n";
+        file << "    \"threshold\": " << result.effective_threshold << ",\n";
+        file << "    \"filterprofile\": " << result.effective_filterprofile << ",\n";
+        file << "    \"method\": " << result.effective_method << "\n";
         file << "  },\n";
 
         file << "\n";
@@ -1498,6 +1517,15 @@ namespace
                     return;
                 }
             }
+
+            out.effective_tool_half_width = headless.tool_half_width;
+            out.effective_wgap = headless.wgap;
+            out.effective_hgap = headless.hgap;
+            out.effective_gap = headless.gap;
+            out.effective_linegap = headless.linegap;
+            out.effective_threshold = headless.threshold;
+            out.effective_filterprofile = headless.filterprofile;
+            out.effective_method = headless.method;
 
             CxScriptHeadlessResult headlessResult;
             AppendPhaseTrace(caseDir, "headless_call", "begin", "", 0);

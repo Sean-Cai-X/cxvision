@@ -94,6 +94,8 @@ set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxScriptReviewGateRuntime.cpp
   cximage/CxScriptRunTraceRuntime.cpp
   cximage/CxAlgorithmTraceSink.cpp
+  cximage/CxParamRegressionRuntime.cpp
+  cximage/CxParamRegressionRegister.cpp
 )
 
 set(CXSCRIPT_LEGACY_STAGE25_SOURCES
