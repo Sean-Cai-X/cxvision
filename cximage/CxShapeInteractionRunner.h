@@ -18,6 +18,11 @@ struct CxShapeInteractionOptions
     bool render_frames = true;
     int drag_steps = 5;
     double tolerance = 8.0;
+
+    bool unified_log_enabled = false;
+    std::string unified_log_path;
+    std::string unified_log_status;
+    std::string unified_log_reason;
 };
 
 struct CxShapeInteractionCaseResultEx : CxShapeInteractionCaseResult
@@ -38,6 +43,13 @@ struct CxShapeInteractionCaseResultEx : CxShapeInteractionCaseResult
     std::string owner_type;
     std::string owner_binding;
     std::string operation;
+
+    int created_points_count = 0;
+    int created_handle_count = 0;
+    bool shape_visible = false;
+    bool shape_editable = false;
+    std::string shape_stable_ref;
+    std::string created_shape_kind;
 };
 
 struct CxShapeInteractionBatchResultEx : CxShapeInteractionBatchResult

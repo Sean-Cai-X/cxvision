@@ -394,8 +394,18 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 
         m_annotationDragEnd = {imagePoint.x, imagePoint.y};
 
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         {
+          const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
+          const double dy = m_annotationDragEnd.y - m_annotationDragStart.y;
+          const double length = std::sqrt(dx * dx + dy * dy);
+          if (length < 2.0)
+          {
+            m_annotationStatus = "draft_too_small";
+            m_annotationDragging = false;
+            return;
+          }
+
           const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
           if (toolSpec)
           {
@@ -437,6 +447,15 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 
         if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         {
+          const double width = std::abs(m_annotationDragEnd.x - m_annotationDragStart.x);
+          const double height = std::abs(m_annotationDragEnd.y - m_annotationDragStart.y);
+          if (width < 2.0 || height < 2.0)
+          {
+            m_annotationStatus = "draft_too_small";
+            m_annotationDragging = false;
+            return;
+          }
+
           const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
           if (toolSpec)
           {
@@ -476,8 +495,18 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
 
         m_annotationDragEnd = {imagePoint.x, imagePoint.y};
 
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         {
+          const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
+          const double dy = m_annotationDragEnd.y - m_annotationDragStart.y;
+          const double radius = std::sqrt(dx * dx + dy * dy);
+          if (radius < 2.0)
+          {
+            m_annotationStatus = "draft_too_small";
+            m_annotationDragging = false;
+            return;
+          }
+
           const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
           if (toolSpec)
           {
@@ -490,6 +519,56 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
             {
               m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
               m_annotationStatus = "created circle";
+            }
+          }
+          m_annotationDragging = false;
+        }
+      }
+      else if (tool->kind == OverlayKind::Ellipse && tool->action != "connect_refs")
+      {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_annotationDragging = false;
+          return;
+        }
+
+        if (!m_annotationDragging)
+        {
+          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+          {
+            m_annotationDragging = true;
+            m_annotationDragKind = OverlayKind::Ellipse;
+            m_annotationDragStart = {imagePoint.x, imagePoint.y};
+            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+          }
+          return;
+        }
+
+        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+
+        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+          const double rx = std::abs(m_annotationDragEnd.x - m_annotationDragStart.x);
+          const double ry = std::abs(m_annotationDragEnd.y - m_annotationDragStart.y);
+          if (rx < 2.0 || ry < 2.0)
+          {
+            m_annotationStatus = "draft_too_small";
+            m_annotationDragging = false;
+            return;
+          }
+
+          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+          if (toolSpec)
+          {
+            std::vector<CxShapePoint> pts = {
+                {m_annotationDragStart.x, m_annotationDragStart.y},
+                {m_annotationDragEnd.x, m_annotationDragEnd.y}
+            };
+            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+            if (shape)
+            {
+              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+              m_annotationStatus = "created ellipse";
             }
           }
           m_annotationDragging = false;
@@ -543,6 +622,14 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
       const float dy = end.y - start.y;
       drawList->AddCircle(start, std::sqrt(dx * dx + dy * dy),
                           previewColor, 48, 2.0f);
+    }
+    else if (m_annotationDragKind == OverlayKind::Ellipse)
+    {
+      const float cx = (start.x + end.x) * 0.5f;
+      const float cy = (start.y + end.y) * 0.5f;
+      const float rx = std::abs(end.x - start.x) * 0.5f;
+      const float ry = std::abs(end.y - start.y) * 0.5f;
+      drawList->AddEllipse(ImVec2(cx, cy), ImVec2(rx, ry), previewColor, 0.0f, 48, 2.0f);
     }
   }
 

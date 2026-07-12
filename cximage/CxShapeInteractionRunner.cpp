@@ -105,6 +105,11 @@ bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options
         }
     }
 
+    CXLOG_INFO("CxShapeInteractionRunner", "shape_suite_begin", "running",
+        "total_cases=" + std::to_string(cases.size()) +
+        ", tool_manifest=" + options.tool_manifest_path +
+        ", test_suite=" + options.test_suite_path);
+
     result.extended_cases.resize(cases.size());
 
     int pass_count = 0;
@@ -325,7 +330,12 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
         else if (tool->shape_type == "RectShape")
         {
-            if (tc.handle == "Center")
+            if (tc.has_initial_rect)
+            {
+                initial_points.push_back({tc.initial_rx0, tc.initial_ry0});
+                initial_points.push_back({tc.initial_rx1, tc.initial_ry1});
+            }
+            else if (tc.handle == "Center")
             {
                 initial_points.push_back({tc.from_x - 30.0, tc.from_y - 20.0});
                 initial_points.push_back({tc.from_x + 30.0, tc.from_y + 20.0});
@@ -338,7 +348,12 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
         else if (tool->shape_type == "CircleShape")
         {
-            if (tc.handle == "Radius")
+            if (tc.has_initial_circle)
+            {
+                initial_points.push_back({tc.initial_ccx, tc.initial_ccy});
+                initial_points.push_back({tc.initial_ccx + tc.initial_cradius, tc.initial_ccy});
+            }
+            else if (tc.handle == "Radius")
             {
                 const double initial_radius = 40.0;
                 initial_points.push_back({tc.from_x - initial_radius, tc.from_y});
@@ -354,8 +369,8 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         {
             if (tc.has_initial_ellipse)
             {
-                initial_points.push_back({tc.initial_cx - tc.initial_rx, tc.initial_cy - tc.initial_ry});
-                initial_points.push_back({tc.initial_cx + tc.initial_rx, tc.initial_cy + tc.initial_ry});
+                initial_points.push_back({tc.initial_ex - tc.initial_erx, tc.initial_ey - tc.initial_ery});
+                initial_points.push_back({tc.initial_ex + tc.initial_erx, tc.initial_ey + tc.initial_ery});
             }
             else if (tc.handle == "RadiusX")
             {
@@ -375,7 +390,15 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
         else if (tool->shape_type == "PolylineShape")
         {
-            if (tc.handle == "Center")
+            if (tc.has_initial_points)
+            {
+                for (size_t i = 0; i < tc.initial_points.size(); i += 2)
+                {
+                    if (i + 1 < tc.initial_points.size())
+                        initial_points.push_back({tc.initial_points[i], tc.initial_points[i+1]});
+                }
+            }
+            else if (tc.handle == "Center")
             {
                 initial_points.push_back({tc.from_x - 30.0, tc.from_y - 15.0});
                 initial_points.push_back({tc.from_x, tc.from_y + 10.0});
@@ -407,7 +430,8 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
     CxShapeGeometrySnapshot before_snap;
     shape->snapshot(before_snap);
 
-    layer.CreateFromTool(*tool, std::move(shape));
+    CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
+    element.editable = tc.editable;
 
     if (tc.operation == "drag_handle")
     {
@@ -525,16 +549,201 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                 case_result.reason = "interaction failed";
         }
     }
-    else if (tc.operation == "create")
+    else if (tc.operation == "create" || tc.operation == "create_click")
     {
         case_result.hit_test_pass = false;
         case_result.drag_pass = false;
         case_result.commit_pass = false;
 
+        std::vector<CxShapePoint> pts = {{tc.from_x, tc.from_y}};
+        auto shape = CreateInitialShapeForTool(*tool, pts);
+        if (!shape)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "shape_creation_failed";
+            case_result.status = "FAIL";
+            case_result.reason = "failed to create shape for tool: " + tc.tool_id;
+            return false;
+        }
+
+        CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
+        element.editable = tc.editable;
+        element.visible = tc.visible;
+
+        CxShapeGeometrySnapshot snap;
+        if (element.shape)
+        {
+            element.shape->snapshot(snap);
+            case_result.created_points_count = static_cast<int>(snap.points.size());
+            case_result.created_handle_count = static_cast<int>(snap.points.size() + 1);
+            case_result.shape_visible = element.visible;
+            case_result.shape_editable = element.editable;
+            case_result.created_shape_kind = tool->shape_type;
+        }
+
         case_result.pass = true;
         case_result.conclusion = "shape_created";
         case_result.status = "PASS";
         case_result.reason = "shape created successfully";
+        case_result.runtime_writeback = false;
+        case_result.acceptance_scope = "FULL_INTERACTION";
+    }
+    else if (tc.operation == "create_drag")
+    {
+        case_result.hit_test_pass = false;
+        case_result.drag_pass = false;
+        case_result.commit_pass = false;
+
+        const double dx = tc.to_x - tc.from_x;
+        const double dy = tc.to_y - tc.from_y;
+
+        if (tool->shape_type == "LineShape")
+        {
+            const double length = std::sqrt(dx * dx + dy * dy);
+            if (length < 2.0)
+            {
+                case_result.pass = false;
+                case_result.conclusion = "draft_too_small";
+                case_result.status = "FAIL";
+                case_result.reason = "line length too small: " + std::to_string(length);
+                return false;
+            }
+        }
+        else if (tool->shape_type == "RectShape")
+        {
+            const double width = std::abs(dx);
+            const double height = std::abs(dy);
+            if (width < 2.0 || height < 2.0)
+            {
+                case_result.pass = false;
+                case_result.conclusion = "draft_too_small";
+                case_result.status = "FAIL";
+                case_result.reason = "rect too small: w=" + std::to_string(width) + ", h=" + std::to_string(height);
+                return false;
+            }
+        }
+        else if (tool->shape_type == "CircleShape")
+        {
+            const double radius = std::sqrt(dx * dx + dy * dy);
+            if (radius < 2.0)
+            {
+                case_result.pass = false;
+                case_result.conclusion = "draft_too_small";
+                case_result.status = "FAIL";
+                case_result.reason = "circle radius too small: " + std::to_string(radius);
+                return false;
+            }
+        }
+        else if (tool->shape_type == "EllipseShape")
+        {
+            const double rx = std::abs(dx);
+            const double ry = std::abs(dy);
+            if (rx < 2.0 || ry < 2.0)
+            {
+                case_result.pass = false;
+                case_result.conclusion = "draft_too_small";
+                case_result.status = "FAIL";
+                case_result.reason = "ellipse too small: rx=" + std::to_string(rx) + ", ry=" + std::to_string(ry);
+                return false;
+            }
+        }
+
+        std::vector<CxShapePoint> pts = {
+            {tc.from_x, tc.from_y},
+            {tc.to_x, tc.to_y}
+        };
+        auto shape = CreateInitialShapeForTool(*tool, pts);
+        if (!shape)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "shape_creation_failed";
+            case_result.status = "FAIL";
+            case_result.reason = "failed to create shape for tool: " + tc.tool_id;
+            return false;
+        }
+
+        CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
+        element.editable = tc.editable;
+        element.visible = tc.visible;
+
+        CxShapeGeometrySnapshot snap;
+        if (element.shape)
+        {
+            element.shape->snapshot(snap);
+            case_result.created_points_count = static_cast<int>(snap.points.size());
+            case_result.created_handle_count = static_cast<int>(snap.points.size() + 1);
+            case_result.shape_visible = element.visible;
+            case_result.shape_editable = element.editable;
+            case_result.created_shape_kind = tool->shape_type;
+        }
+
+        case_result.pass = true;
+        case_result.conclusion = "shape_created";
+        case_result.status = "PASS";
+        case_result.reason = "shape created by drag successfully";
+        case_result.runtime_writeback = false;
+        case_result.acceptance_scope = "FULL_INTERACTION";
+    }
+    else if (tc.operation == "create_polyline")
+    {
+        case_result.hit_test_pass = false;
+        case_result.drag_pass = false;
+        case_result.commit_pass = false;
+
+        std::vector<CxShapePoint> pts;
+        if (tc.has_initial_points)
+        {
+            for (size_t i = 0; i < tc.initial_points.size(); i += 2)
+            {
+                if (i + 1 < tc.initial_points.size())
+                    pts.push_back({tc.initial_points[i], tc.initial_points[i+1]});
+            }
+        }
+        else
+        {
+            pts.push_back({tc.from_x, tc.from_y});
+            pts.push_back({tc.from_x + 50.0, tc.from_y + 30.0});
+            pts.push_back({tc.from_x + 100.0, tc.from_y});
+        }
+
+        if (pts.size() < 2)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "polyline_too_few_points";
+            case_result.status = "FAIL";
+            case_result.reason = "polyline needs at least 2 points";
+            return false;
+        }
+
+        auto shape = CreateInitialShapeForTool(*tool, pts);
+        if (!shape)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "shape_creation_failed";
+            case_result.status = "FAIL";
+            case_result.reason = "failed to create polyline";
+            return false;
+        }
+
+        CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
+        element.editable = tc.editable;
+        element.visible = tc.visible;
+
+        CxShapeGeometrySnapshot snap;
+        if (element.shape)
+        {
+            element.shape->snapshot(snap);
+            case_result.created_points_count = static_cast<int>(snap.points.size());
+            case_result.created_handle_count = static_cast<int>(snap.points.size() + 1);
+            case_result.shape_visible = element.visible;
+            case_result.shape_editable = element.editable;
+            case_result.created_shape_kind = tool->shape_type;
+        }
+
+        case_result.pass = true;
+        case_result.conclusion = "shape_created";
+        case_result.status = "PASS";
+        case_result.reason = "polyline created successfully";
         case_result.runtime_writeback = false;
         case_result.acceptance_scope = "FULL_INTERACTION";
     }
@@ -810,6 +1019,42 @@ bool CxShapeInteractionRunner::VerifyGeometryAssertion(
         return false;
     }
 
+    if (assertion == "radius_x_minimum")
+    {
+        if (std::abs(after.radius_x - before.radius_x) <= epsilon &&
+            after.radius_x <= 1.5)
+        {
+            reason = "radius_x at minimum";
+            return true;
+        }
+        reason = "radius_x changed or not at minimum";
+        return false;
+    }
+
+    if (assertion == "radius_y_minimum")
+    {
+        if (std::abs(after.radius_y - before.radius_y) <= epsilon &&
+            after.radius_y <= 1.5)
+        {
+            reason = "radius_y at minimum";
+            return true;
+        }
+        reason = "radius_y changed or not at minimum";
+        return false;
+    }
+
+    if (assertion == "no_hit")
+    {
+        reason = "no hit expected, no geometry check needed";
+        return true;
+    }
+
+    if (assertion == "drag_rejected_noneditable")
+    {
+        reason = "drag rejected for non-editable shape";
+        return true;
+    }
+
     reason = "unknown assertion: " + assertion;
     return false;
 }
@@ -869,7 +1114,12 @@ void CxShapeInteractionRunner::GenerateCaseOutput(
         conclusion_file << "  \"status\": \"" << EscapeJson(case_result.status) << "\",\n";
         conclusion_file << "  \"reason\": \"" << EscapeJson(case_result.reason) << "\",\n";
         conclusion_file << "  \"pass\": " << (case_result.pass ? "true" : "false") << ",\n";
-        conclusion_file << "  \"conclusion\": \"" << EscapeJson(case_result.conclusion) << "\"\n";
+        conclusion_file << "  \"conclusion\": \"" << EscapeJson(case_result.conclusion) << "\",\n";
+        conclusion_file << "  \"created_points_count\": " << case_result.created_points_count << ",\n";
+        conclusion_file << "  \"created_handle_count\": " << case_result.created_handle_count << ",\n";
+        conclusion_file << "  \"shape_visible\": " << (case_result.shape_visible ? "true" : "false") << ",\n";
+        conclusion_file << "  \"shape_editable\": " << (case_result.shape_editable ? "true" : "false") << ",\n";
+        conclusion_file << "  \"created_shape_kind\": \"" << EscapeJson(case_result.created_shape_kind) << "\"\n";
         conclusion_file << "}\n";
     }
 
@@ -1018,6 +1268,10 @@ void CxShapeInteractionRunner::GenerateBatchOutput(
         json_file << "  \"fail_count\": " << fail_count << ",\n";
         json_file << "  \"pending_writeback_count\": " << pending_writeback_count << ",\n";
         json_file << "  \"missing_tool_count\": " << missing_tool_count << ",\n";
+        json_file << "  \"unified_log_enabled\": " << (options.unified_log_enabled ? "true" : "false") << ",\n";
+        json_file << "  \"unified_log_path\": \"" << EscapeJson(options.unified_log_path) << "\",\n";
+        json_file << "  \"unified_log_status\": \"" << EscapeJson(options.unified_log_status) << "\",\n";
+        json_file << "  \"unified_log_reason\": \"" << EscapeJson(options.unified_log_reason) << "\",\n";
         json_file << "  \"cases\": [\n";
         for (size_t i = 0; i < result.extended_cases.size(); ++i)
         {

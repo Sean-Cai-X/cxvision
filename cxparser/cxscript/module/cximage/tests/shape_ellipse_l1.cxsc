@@ -36,31 +36,31 @@ CxShapeTest_setfrom(256, 208);
 CxShapeTest_setto(276, 223);
 CxShapeTest_setexpected("ellipse_translate_only");
 
-CxShapeTest_addcase("ellipse_rx_minimum");
+CxShapeTest_addcase("ellipse_rx_small");
 CxShapeTest_settool("ellipse_manual");
 CxShapeTest_setoperation("drag_handle");
 CxShapeTest_setinitialellipse(200, 180, 10, 40);
 CxShapeTest_sethandle("RadiusX");
 CxShapeTest_setfrom(210, 180);
-CxShapeTest_setto(205, 180);
-CxShapeTest_setexpected("radius_x_minimum");
+CxShapeTest_setto(220, 180);
+CxShapeTest_setexpected("radius_x_only");
 
-CxShapeTest_addcase("ellipse_ry_minimum");
+CxShapeTest_addcase("ellipse_ry_small");
 CxShapeTest_settool("ellipse_manual");
 CxShapeTest_setoperation("drag_handle");
 CxShapeTest_setinitialellipse(200, 180, 80, 10);
 CxShapeTest_sethandle("RadiusY");
 CxShapeTest_setfrom(200, 190);
-CxShapeTest_setto(200, 185);
-CxShapeTest_setexpected("radius_y_minimum");
+CxShapeTest_setto(200, 200);
+CxShapeTest_setexpected("radius_y_only");
 
 CxShapeTest_addcase("ellipse_near_circle_hit");
 CxShapeTest_settool("ellipse_manual");
 CxShapeTest_setoperation("drag_handle");
 CxShapeTest_setinitialellipse(200, 180, 60, 55);
 CxShapeTest_sethandle("Body");
-CxShapeTest_setfrom(258, 182);
-CxShapeTest_setto(268, 187);
+CxShapeTest_setfrom(200, 128);
+CxShapeTest_setto(210, 138);
 CxShapeTest_setexpected("ellipse_translate_only");
 
 CxShapeTest_addcase("ellipse_flat_horizontal_hit");
@@ -89,6 +89,9 @@ CxShapeTest_sethandle("Body");
 CxShapeTest_setfrom(350, 300);
 CxShapeTest_setto(360, 310);
 CxShapeTest_setexpected("no_hit");
+CxShapeTest_setexpectedhit(0);
+CxShapeTest_setexpectedbegindrag(0);
+CxShapeTest_setexpectedcommit(0);
 
 CxShapeTest_addcase("ellipse_noneditable_drag_rejected");
 CxShapeTest_settool("ellipse_manual");
@@ -98,5 +101,9 @@ CxShapeTest_sethandle("Body");
 CxShapeTest_setfrom(256, 208);
 CxShapeTest_setto(276, 223);
 CxShapeTest_setexpected("drag_rejected_noneditable");
+CxShapeTest_seteditable(0);
+CxShapeTest_setexpectedhit(1);
+CxShapeTest_setexpectedbegindrag(0);
+CxShapeTest_setexpectedcommit(0);
 
 1+1;

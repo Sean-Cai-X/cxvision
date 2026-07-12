@@ -95,16 +95,75 @@ static double CxShapeTest_setexpected(const char* expected)
     return 0.0;
 }
 
+static double CxShapeTest_setinitialpoints(const char* points_str)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current && points_str)
+    {
+        current->has_initial_points = true;
+        current->initial_points.clear();
+        
+        std::string str = points_str;
+        size_t pos = 0;
+        while (pos < str.size())
+        {
+            size_t end = str.find_first_of(", ", pos);
+            if (end == std::string::npos)
+                end = str.size();
+            
+            try
+            {
+                current->initial_points.push_back(std::stod(str.substr(pos, end - pos)));
+            }
+            catch (...)
+            {
+            }
+            
+            pos = end + 1;
+            while (pos < str.size() && (str[pos] == ',' || str[pos] == ' '))
+                pos++;
+        }
+    }
+    return 0.0;
+}
+
+static double CxShapeTest_setinitialrect(double x0, double y0, double x1, double y1)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+    {
+        current->has_initial_rect = true;
+        current->initial_rx0 = x0;
+        current->initial_ry0 = y0;
+        current->initial_rx1 = x1;
+        current->initial_ry1 = y1;
+    }
+    return 0.0;
+}
+
+static double CxShapeTest_setinitialcircle(double cx, double cy, double radius)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+    {
+        current->has_initial_circle = true;
+        current->initial_ccx = cx;
+        current->initial_ccy = cy;
+        current->initial_cradius = radius;
+    }
+    return 0.0;
+}
+
 static double CxShapeTest_setinitialellipse(double cx, double cy, double rx, double ry)
 {
     auto* current = CxShapeTestRuntime::Current();
     if (current)
     {
         current->has_initial_ellipse = true;
-        current->initial_cx = cx;
-        current->initial_cy = cy;
-        current->initial_rx = rx;
-        current->initial_ry = ry;
+        current->initial_ex = cx;
+        current->initial_ey = cy;
+        current->initial_erx = rx;
+        current->initial_ery = ry;
     }
     return 0.0;
 }
@@ -184,6 +243,9 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setpan", (mu::fun_type2)&CxShapeTest_setpan);
     parser.DefineFun("CxShapeTest_setvertex", (mu::fun_type1)&CxShapeTest_setvertex);
     parser.DefineFun("CxShapeTest_setexpected", (mu::strfun_type1)&CxShapeTest_setexpected);
+    parser.DefineFun("CxShapeTest_setinitialpoints", (mu::strfun_type1)&CxShapeTest_setinitialpoints);
+    parser.DefineFun("CxShapeTest_setinitialrect", (mu::fun_type4)&CxShapeTest_setinitialrect);
+    parser.DefineFun("CxShapeTest_setinitialcircle", (mu::fun_type3)&CxShapeTest_setinitialcircle);
     parser.DefineFun("CxShapeTest_setinitialellipse", (mu::fun_type4)&CxShapeTest_setinitialellipse);
     parser.DefineFun("CxShapeTest_seteditable", (mu::fun_type1)&CxShapeTest_seteditable);
     parser.DefineFun("CxShapeTest_setvisible", (mu::fun_type1)&CxShapeTest_setvisible);

@@ -22,11 +22,25 @@ struct CxShapeTestCase
     double pan_y = 0.0;
     int vertex_index = -1;
 
+    bool has_initial_points = false;
+    std::vector<double> initial_points;
+
+    bool has_initial_rect = false;
+    double initial_rx0 = 0.0;
+    double initial_ry0 = 0.0;
+    double initial_rx1 = 0.0;
+    double initial_ry1 = 0.0;
+
+    bool has_initial_circle = false;
+    double initial_ccx = 0.0;
+    double initial_ccy = 0.0;
+    double initial_cradius = 0.0;
+
     bool has_initial_ellipse = false;
-    double initial_cx = 0.0;
-    double initial_cy = 0.0;
-    double initial_rx = 0.0;
-    double initial_ry = 0.0;
+    double initial_ex = 0.0;
+    double initial_ey = 0.0;
+    double initial_erx = 0.0;
+    double initial_ery = 0.0;
 
     bool editable = true;
     bool visible = true;

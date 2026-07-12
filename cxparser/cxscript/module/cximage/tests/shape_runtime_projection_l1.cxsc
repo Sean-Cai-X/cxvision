@@ -1,0 +1,35 @@
+CxShapeTest_reset(0);
+
+CxShapeTest_addcase("findline_publish_roi_scan_points_fitline");
+CxShapeTest_settool("findline_gauge");
+CxShapeTest_setoperation("drag_handle");
+CxShapeTest_sethandle("Center");
+CxShapeTest_setfrom(175, 150);
+CxShapeTest_setto(195, 170);
+CxShapeTest_setexpected("translate_only");
+
+CxShapeTest_addcase("findcircle_publish_roi_scan_points_fitcircle");
+CxShapeTest_settool("findcircle_gauge");
+CxShapeTest_setoperation("drag_handle");
+CxShapeTest_sethandle("Center");
+CxShapeTest_setfrom(200, 180);
+CxShapeTest_setto(220, 200);
+CxShapeTest_setexpected("translate_only");
+
+CxShapeTest_addcase("findellipse_publish_roi_result");
+CxShapeTest_settool("findellipse_gauge");
+CxShapeTest_setoperation("drag_handle");
+CxShapeTest_sethandle("Center");
+CxShapeTest_setfrom(200, 180);
+CxShapeTest_setto(220, 200);
+CxShapeTest_setexpected("translate_only");
+
+CxShapeTest_addcase("findrect_publish_roi_result");
+CxShapeTest_settool("findrect_gauge");
+CxShapeTest_setoperation("drag_handle");
+CxShapeTest_sethandle("Center");
+CxShapeTest_setfrom(175, 150);
+CxShapeTest_setto(195, 170);
+CxShapeTest_setexpected("translate_only");
+
+1+1;

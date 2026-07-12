@@ -998,118 +998,14 @@ void ViewController::drawScriptAcceptancePanels()
             }
         }
 
-        // Layer 3: Manual Gauge State Handles (Topmost)
+        // Layer 3: Shape Elements from ImageAnnotationLayer
         {
-            const ManualGaugeState& gauge = m_manualTest.current_gauge;
+            std::vector<const CxShapeElement*> shapeElements;
+            m_annotationLayer.EnumerateVisibleShapes(shapeElements);
 
-            auto ToScreen = [&](float ix, float iy) -> ImVec2 {
-                return ImVec2(imagePos.x + ix * sx, imagePos.y + iy * sy);
-            };
-
-            auto DrawHandle = [&](float ix, float iy, const char* label, ImU32 fill) {
-                ImVec2 p = ToScreen(ix, iy);
-                float r = std::max(6.0f, 7.0f * m_imageViewZoom);
-
-                drawList->AddCircleFilled(p, r + 3.0f, IM_COL32(0, 0, 0, 220));
-                drawList->AddCircleFilled(p, r, fill);
-                drawList->AddCircle(p, r + 2.0f, IM_COL32(255, 255, 255, 255), 20, 2.5f);
-                drawList->AddText(ImVec2(p.x + 8.0f, p.y - 12.0f),
-                                  IM_COL32(255, 255, 255, 255),
-                                  label);
-            };
-
-            if (gauge.has_line_gauge)
+            for (const CxShapeElement* element : shapeElements)
             {
-                LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
-                if (geom.valid)
-                {
-                    DrawHandle(geom.p0.x, geom.p0.y, "P0", IM_COL32(255, 64, 64, 255));
-                    DrawHandle(geom.p1.x, geom.p1.y, "P1", IM_COL32(255, 64, 64, 255));
-                    DrawHandle(geom.center.x, geom.center.y, "C", IM_COL32(64, 160, 255, 255));
-                    DrawHandle(geom.w_plus.x, geom.w_plus.y, "W+", IM_COL32(255, 180, 64, 255));
-                    DrawHandle(geom.w_minus.x, geom.w_minus.y, "W-", IM_COL32(255, 180, 64, 255));
-
-                    const ImVec2 s0 = ToScreen(geom.corner0.x, geom.corner0.y);
-                    const ImVec2 s1 = ToScreen(geom.corner1.x, geom.corner1.y);
-                    const ImVec2 s2 = ToScreen(geom.corner2.x, geom.corner2.y);
-                    const ImVec2 s3 = ToScreen(geom.corner3.x, geom.corner3.y);
-
-                    drawList->AddLine(s0, s1, IM_COL32(80, 255, 170, 200), 2.0f);
-                    drawList->AddLine(s1, s2, IM_COL32(80, 255, 170, 200), 2.0f);
-                    drawList->AddLine(s2, s3, IM_COL32(80, 255, 170, 200), 2.0f);
-                    drawList->AddLine(s3, s0, IM_COL32(80, 255, 170, 200), 2.0f);
-
-                    const ImVec2 sc0 = ToScreen(geom.p0.x, geom.p0.y);
-                    const ImVec2 sc1 = ToScreen(geom.p1.x, geom.p1.y);
-                    drawList->AddLine(sc0, sc1, IM_COL32(255, 220, 80, 255), 2.0f);
-                }
-            }
-
-            if (gauge.has_circle_gauge)
-            {
-                int radius = gauge.radius;
-                if (radius <= 0)
-                    radius = gauge.gap > 0 ? gauge.gap : 50;
-
-                DrawHandle((float)gauge.circle_cx, (float)gauge.circle_cy, "C", IM_COL32(255, 64, 64, 255));
-                DrawHandle((float)gauge.circle_cx + (float)radius,
-                           (float)gauge.circle_cy,
-                           "R",
-                           IM_COL32(255, 64, 64, 255));
-
-                if (gauge.inner_radius > 0)
-                {
-                    DrawHandle((float)gauge.circle_cx + (float)gauge.inner_radius,
-                               (float)gauge.circle_cy,
-                               "Rin",
-                               IM_COL32(255, 180, 64, 255));
-                }
-
-                if (gauge.outer_radius > 0)
-                {
-                    DrawHandle((float)gauge.circle_cx + (float)gauge.outer_radius,
-                               (float)gauge.circle_cy,
-                               "Rout",
-                               IM_COL32(255, 180, 64, 255));
-                }
-            }
-        }
-
-        // Manual Gauge Handle Interaction
-        {
-            const bool mouseOnImage = canvasHovered &&
-                io.MousePos.x >= imagePos.x && io.MousePos.x < imageEnd.x &&
-                io.MousePos.y >= imagePos.y && io.MousePos.y < imageEnd.y;
-
-            if (mouseOnImage && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            {
-                const ImVec2 imagePoint = ScreenToImage(io.MousePos.x, io.MousePos.y);
-                m_manualTest.active_gauge_handle = HitTestGaugeHandle(
-                    m_manualTest.current_gauge, imagePoint.x, imagePoint.y, 10.0f);
-
-                if (m_manualTest.active_gauge_handle != GaugeHandleType::None)
-                {
-                    m_manualTest.gauge_drag_start_x = imagePoint.x;
-                    m_manualTest.gauge_drag_start_y = imagePoint.y;
-                }
-            }
-
-            if (m_manualTest.active_gauge_handle != GaugeHandleType::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-            {
-                const ImVec2 imageNow = ScreenToImage(io.MousePos.x, io.MousePos.y);
-                const ImVec2 delta(imageNow.x - m_manualTest.gauge_drag_start_x,
-                                   imageNow.y - m_manualTest.gauge_drag_start_y);
-
-                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.drag_start_gauge,
-                                m_manualTest.active_gauge_handle, imageNow, delta, io.KeyShift);
-
-                m_manualTest.gauge_drag_start_x = imageNow.x;
-                m_manualTest.gauge_drag_start_y = imageNow.y;
-            }
-
-            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-            {
-                m_manualTest.active_gauge_handle = GaugeHandleType::None;
+                DrawShapeElementOnImageView(*element, drawList);
             }
         }
 
@@ -3472,6 +3368,12 @@ bool ViewController::RunShapeInteractionSmoke(
         ? CxUnifiedLog::Instance().RunId()
         : GenerateLocalShapeRunId();
 
+    options.unified_log_enabled = CxUnifiedLog::Instance().IsInitialized();
+    options.unified_log_path = CxUnifiedLog::Instance().IsInitialized()
+        ? CxUnifiedLog::Instance().Path().string()
+        : "";
+    options.unified_log_status = options.unified_log_enabled ? "initialized" : "not_initialized";
+
     CXLOG_INFO(
         "ViewController",
         "shape_smoke_dispatch",
@@ -3551,5 +3453,166 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, 0);
             }
         }
+    }
+}
+
+void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList)
+{
+    if (!element.shape || !element.visible)
+        return;
+
+    const float sx = m_imageViewZoom;
+    const float sy = m_imageViewZoom;
+
+    auto ImageToScreen = [&](double x, double y) -> ImVec2 {
+        return ImVec2(m_annotationImagePosX + (float)x * sx, m_annotationImagePosY + (float)y * sy);
+    };
+
+    const ImU32 color = element.result_element 
+        ? IM_COL32(255, 180, 64, 255) 
+        : (element.editable ? IM_COL32(80, 255, 170, 200) : IM_COL32(160, 160, 200, 200));
+    const ImU32 selectedColor = IM_COL32(255, 64, 64, 255);
+    const float thickness = element.selected ? 3.0f : 2.0f;
+
+    switch (element.shape->kind())
+    {
+    case CxShapeKind::Line:
+    case CxShapeKind::LineGauge:
+    {
+        CxShapePoint p0, p1;
+        if (element.shape->exportLine(p0, p1))
+        {
+            drawList->AddLine(ImageToScreen(p0.x, p0.y), ImageToScreen(p1.x, p1.y), 
+                              element.selected ? selectedColor : color, thickness);
+
+            if (element.editable)
+            {
+                drawList->AddCircleFilled(ImageToScreen(p0.x, p0.y), 5.0f, IM_COL32(255, 64, 64, 255));
+                drawList->AddCircleFilled(ImageToScreen(p1.x, p1.y), 5.0f, IM_COL32(255, 64, 64, 255));
+                drawList->AddCircleFilled(ImageToScreen((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5), 
+                                          5.0f, IM_COL32(64, 160, 255, 255));
+            }
+        }
+        break;
+    }
+    case CxShapeKind::Rect:
+    {
+        std::vector<CxShapePoint> points;
+        bool closed;
+        element.shape->exportPolyline(points, closed);
+        if (points.size() >= 4)
+        {
+            for (size_t i = 0; i < 4; ++i)
+            {
+                const size_t j = (i + 1) % 4;
+                drawList->AddLine(ImageToScreen(points[i].x, points[i].y), 
+                                  ImageToScreen(points[j].x, points[j].y), 
+                                  element.selected ? selectedColor : color, thickness);
+            }
+
+            if (element.editable)
+            {
+                for (const auto& pt : points)
+                {
+                    drawList->AddCircleFilled(ImageToScreen(pt.x, pt.y), 5.0f, IM_COL32(255, 64, 64, 255));
+                }
+                const double cx = (points[0].x + points[2].x) * 0.5;
+                const double cy = (points[0].y + points[2].y) * 0.5;
+                drawList->AddCircleFilled(ImageToScreen(cx, cy), 5.0f, IM_COL32(64, 160, 255, 255));
+            }
+        }
+        break;
+    }
+    case CxShapeKind::Circle:
+    {
+        CxShapePoint center;
+        double radius, inner_radius;
+        if (element.shape->exportCircle(center, radius, inner_radius))
+        {
+            const ImVec2 c = ImageToScreen(center.x, center.y);
+            const float r = (float)radius * sx;
+            
+            drawList->AddCircle(c, r, element.selected ? selectedColor : color, 32, thickness);
+
+            if (inner_radius > 0)
+            {
+                const float ir = (float)inner_radius * sx;
+                drawList->AddCircle(c, ir, IM_COL32(255, 180, 64, 200), 32, thickness);
+            }
+
+            if (element.editable)
+            {
+                drawList->AddCircleFilled(c, 5.0f, IM_COL32(255, 64, 64, 255));
+                drawList->AddCircleFilled(ImageToScreen(center.x + radius, center.y), 
+                                          5.0f, IM_COL32(255, 64, 64, 255));
+            }
+        }
+        break;
+    }
+    case CxShapeKind::Ellipse:
+    {
+        CxShapePoint center;
+        double radius_x, radius_y, angle;
+        if (element.shape->exportEllipse(center, radius_x, radius_y, angle))
+        {
+            const ImVec2 c = ImageToScreen(center.x, center.y);
+            const float rx = (float)radius_x * sx;
+            const float ry = (float)radius_y * sy;
+            
+            drawList->AddEllipse(c, ImVec2(rx, ry), element.selected ? selectedColor : color, 0.0f, 64, thickness);
+
+            if (element.editable)
+            {
+                drawList->AddCircleFilled(c, 5.0f, IM_COL32(255, 64, 64, 255));
+                drawList->AddCircleFilled(ImageToScreen(center.x + radius_x, center.y), 
+                                          5.0f, IM_COL32(255, 64, 64, 255));
+                drawList->AddCircleFilled(ImageToScreen(center.x, center.y + radius_y), 
+                                          5.0f, IM_COL32(255, 64, 64, 255));
+            }
+        }
+        break;
+    }
+    case CxShapeKind::Polyline:
+    {
+        std::vector<CxShapePoint> points;
+        bool closed;
+        element.shape->exportPolyline(points, closed);
+        if (points.size() >= 2)
+        {
+            for (size_t i = 0; i < points.size() - 1; ++i)
+            {
+                drawList->AddLine(ImageToScreen(points[i].x, points[i].y), 
+                                  ImageToScreen(points[i+1].x, points[i+1].y), 
+                                  element.selected ? selectedColor : color, thickness);
+            }
+            if (closed && points.size() >= 3)
+            {
+                drawList->AddLine(ImageToScreen(points.back().x, points.back().y), 
+                                  ImageToScreen(points[0].x, points[0].y), 
+                                  element.selected ? selectedColor : color, thickness);
+            }
+
+            if (element.editable)
+            {
+                for (const auto& pt : points)
+                {
+                    drawList->AddCircleFilled(ImageToScreen(pt.x, pt.y), 5.0f, IM_COL32(255, 64, 64, 255));
+                }
+            }
+        }
+        break;
+    }
+    case CxShapeKind::Points:
+    {
+        std::vector<CxShapePoint> points;
+        element.shape->exportPoints(points);
+        for (const auto& pt : points)
+        {
+            const ImVec2 p = ImageToScreen(pt.x, pt.y);
+            drawList->AddCircleFilled(p, 4.0f, color);
+            drawList->AddCircle(p, 5.0f, IM_COL32(255, 255, 255, 255), 8, 1.5f);
+        }
+        break;
+    }
     }
 }

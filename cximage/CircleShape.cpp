@@ -73,17 +73,19 @@ void CircleShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x,
     {
     case CxShapeHandleRole::Center:
     case CxShapeHandleRole::Body:
-        m_cx = x;
-        m_cy = y;
+    {
+        const double dx = x - m_cx;
+        const double dy = y - m_cy;
+        m_cx += dx;
+        m_cy += dy;
         break;
+    }
     case CxShapeHandleRole::Radius:
     {
         const double dx = x - m_cx;
         const double dy = y - m_cy;
         const double r = std::max(1.0, std::sqrt(dx * dx + dy * dy));
         m_radius = r;
-        if (m_innerRadius >= m_radius)
-            m_innerRadius = std::max(0.0, m_radius - 1.0);
         break;
     }
     case CxShapeHandleRole::InnerRadius:

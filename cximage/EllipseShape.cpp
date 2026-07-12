@@ -139,9 +139,13 @@ void EllipseShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x
     {
     case CxShapeHandleRole::Center:
     case CxShapeHandleRole::Body:
-        m_cx = x;
-        m_cy = y;
+    {
+        const double dx = x - m_cx;
+        const double dy = y - m_cy;
+        m_cx += dx;
+        m_cy += dy;
         break;
+    }
     case CxShapeHandleRole::RadiusX:
     {
         const double rx = std::max(1.0, std::abs(x - m_cx));

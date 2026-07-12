@@ -384,35 +384,6 @@ void CxUnifiedLog::WriteLine(const std::string& line)
 
 bool CxUnifiedLog::WriteWithLock(const std::string& line)
 {
-    OVERLAPPED overlapped = {0};
-
-    const int max_retries = 20;
-    const DWORD retry_delay_ms = 5;
-    BOOL locked = FALSE;
-
-    for (int i = 0; i < max_retries; ++i)
-    {
-        locked = LockFileEx(
-            static_cast<HANDLE>(file_handle_),
-            LOCKFILE_EXCLUSIVE_LOCK,
-            0,
-            MAXDWORD,
-            MAXDWORD,
-            &overlapped);
-
-        if (locked)
-            break;
-
-        DWORD err = GetLastError();
-        if (err != ERROR_LOCK_VIOLATION && err != ERROR_SHARING_VIOLATION)
-            return false;
-
-        Sleep(retry_delay_ms);
-    }
-
-    if (!locked)
-        return false;
-
     std::string line_with_newline = line + "\n";
     DWORD bytes_written = 0;
     const BOOL write_ok = WriteFile(
@@ -423,17 +394,17 @@ bool CxUnifiedLog::WriteWithLock(const std::string& line)
         nullptr);
 
     const bool full_write = write_ok && bytes_written == line_with_newline.size();
+    if (!full_write)
+    {
+        char buf[128];
+        sprintf_s(buf, "WriteFile failed: write_ok=%d, bytes_written=%lu, expected=%zu, error=%lu",
+            write_ok, bytes_written, line_with_newline.size(), GetLastError());
+        RawFallbackWrite(buf);
+    }
 
     FlushFileBuffers(static_cast<HANDLE>(file_handle_));
 
-    const BOOL unlock_ok = UnlockFileEx(
-        static_cast<HANDLE>(file_handle_),
-        0,
-        MAXDWORD,
-        MAXDWORD,
-        &overlapped);
-
-    return full_write && unlock_ok;
+    return full_write;
 }
 
 CxScopedLogContext::CxScopedLogContext(const CxUnifiedLogContext& patch)

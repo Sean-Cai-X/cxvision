@@ -379,14 +379,35 @@ int main(int argc, char** argv)
 
     const std::string mode = DetectCxVisionRunMode(argc, argv);
 
-    if (logOptions.enabled)
+    ShapeInteractionTestOptions shapeOptions;
+    ParseShapeInteractionTestArgs(argc, argv, shapeOptions);
+
+    bool should_enable_unified_log = logOptions.enabled || shapeOptions.enabled;
+    if (!logOptions.path.empty() || shapeOptions.enabled)
     {
-        CxUnifiedLog::Instance().Initialize(
+        if (logOptions.path.empty())
+        {
+            logOptions.path = "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/_shared/cxvision_imgui_acceptance.jsonl";
+        }
+    }
+
+    if (should_enable_unified_log)
+    {
+        bool init_ok = CxUnifiedLog::Instance().Initialize(
             logOptions.path,
             mode,
             argc,
             argv,
             logReason);
+        if (!init_ok)
+        {
+            std::cerr << "[GuiMain] Unified log init failed: " << logReason << "\n";
+            std::cerr << "[GuiMain] Path: " << logOptions.path.string() << "\n";
+        }
+        else
+        {
+            std::cout << "[GuiMain] Unified log initialized: " << logOptions.path.string() << "\n";
+        }
     }
 
     InstallCxCrashLogHandlers();
