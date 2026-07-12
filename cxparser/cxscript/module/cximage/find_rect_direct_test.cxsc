@@ -1,0 +1,26 @@
+Image m_image;
+FindRect m_rect;
+
+m_image.copyFromMat(global.matInput);
+
+int x = global.roi_x;
+int y = global.roi_y;
+int width = global.roi_width;
+int height = global.roi_height;
+
+int threshold = global.threshold;
+int linegap = global.linegap;
+int method = global.method;
+int gauge = global.gauge;
+
+m_rect.setrect(x, y, width, height);
+m_rect.setthre(threshold);
+m_rect.setlinegap(linegap);
+m_rect.setmethod(method);
+m_rect.setgauge(gauge);
+
+m_rect.measure(&m_image);
+
+global.current_status = "PENDING";
+
+1+1;

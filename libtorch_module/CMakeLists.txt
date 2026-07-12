@@ -15,7 +15,7 @@ option(LIBTORCH_MODULE_BUILD_FULL "Build full validation target with OpenCV-depe
 option(LIBTORCH_MODULE_BUILD_CONTRACT "Build low-coupling contract smoke target" ON)
 option(LIBTORCH_MODULE_BUILD_MOBILEVIT "Build MobileViTv2 train/infer validation target" ON)
 option(LIBTORCH_MODULE_BUILD_SEGMENTATION "Build segmentation train/infer validation target" ON)
-option(LIBTORCH_MODULE_BUILD_DEMO "Build demo entry for staged validation runs" ON)
+option(LIBTORCH_MODULE_BUILD_DEMO "Build demo entry for staged validation runs" OFF)
 option(LIBTORCH_MODULE_BUILD_RUNTIME_DLL "Build runtime DLL for GUI integration" ON)
 option(LIBTORCH_MODULE_FULL_ENABLE_OPENCV_IMAGE "Enable OpenCV image-processing validation in full target" ON)
 option(LIBTORCH_MODULE_FULL_ENABLE_OPENCV_ANNOTATION "Enable OpenCV image+annotation validation in full target" ON)
@@ -102,6 +102,9 @@ function(configure_libtorch_module_target target_name)
     target_link_libraries(${target_name} PRIVATE
         ${LIBTORCH_MODULE_LIBRARIES}
     )
+    if(OpenCV_FOUND)
+        target_link_libraries(${target_name} PRIVATE ${OpenCV_LIBS})
+    endif()
 
     if(MSVC)
         set_property(TARGET ${target_name} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
@@ -109,7 +112,7 @@ function(configure_libtorch_module_target target_name)
             NOMINMAX
             _CRT_SECURE_NO_WARNINGS
         )
-        target_compile_options(${target_name} PRIVATE /EHsc)
+        target_compile_options(${target_name} PRIVATE /EHsc /bigobj)
         target_link_options(${target_name} PRIVATE
             "/INCLUDE:?warp_size@cuda@at@@YAHXZ"
             "/INCLUDE:?ignore_this_library_placeholder@@YAHXZ"

@@ -7,6 +7,8 @@
 #include "Findline.h"
 #include "../cxgeom/include/CxGeomElementBody.h"
 
+class ICxShapeSink;
+
 class FindRect : public Shape
 {
 public:
@@ -42,8 +44,17 @@ public:
 
     RectsShape& getresultrects();
     gp_Rectangle getresultrect(int inum) const;
-    int getresultobjsnum();
+    int getresultobjsnum() const;
     cxgeom::CxSurfaceElement makeresultelement(int inum, int entity_id) const;
+
+    bool hasresult() const
+    {
+        return m_lastresult.valid && m_resultrects.size() > 0;
+    }
+
+    void PublishDisplayShapes(
+        ICxShapeSink& sink,
+        const std::string& owner_ref) const;
 
     struct EdgeLearnResult
     {

@@ -1552,34 +1552,20 @@ static void DrawGaugeHandlesLine(
     if (!gauge.has_line_gauge)
         return;
 
-    DrawGaugeHandle(draw_list, (float)gauge.line_x0, (float)gauge.line_y0,
-        6.0f, false, false, 0xFF0000FF);
-    DrawGaugeHandle(draw_list, (float)gauge.line_x1, (float)gauge.line_y1,
-        6.0f, false, false, 0xFF0000FF);
+    LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
+    if (!geom.valid)
+        return;
 
-    const float center_x = ((float)gauge.line_x0 + (float)gauge.line_x1) * 0.5f;
-    const float center_y = ((float)gauge.line_y0 + (float)gauge.line_y1) * 0.5f;
-    DrawGaugeHandle(draw_list, center_x, center_y,
+    DrawGaugeHandle(draw_list, geom.p0.x, geom.p0.y,
+        6.0f, false, false, 0xFF0000FF);
+    DrawGaugeHandle(draw_list, geom.p1.x, geom.p1.y,
+        6.0f, false, false, 0xFF0000FF);
+    DrawGaugeHandle(draw_list, geom.center.x, geom.center.y,
         5.0f, false, false, 0xFFFF0000);
-
-    const float dx = (float)gauge.line_x1 - (float)gauge.line_x0;
-    const float dy = (float)gauge.line_y1 - (float)gauge.line_y0;
-    const float len = std::sqrt(dx * dx + dy * dy);
-    if (len > 1.0f)
-    {
-        const float nx = -dy / len;
-        const float ny = dx / len;
-
-        const float width_plus_x = center_x + nx * (float)gauge.tool_half_width;
-        const float width_plus_y = center_y + ny * (float)gauge.tool_half_width;
-        DrawGaugeHandle(draw_list, width_plus_x, width_plus_y,
-            5.0f, false, false, 0xFF00FFFF);
-
-        const float width_minus_x = center_x - nx * (float)gauge.tool_half_width;
-        const float width_minus_y = center_y - ny * (float)gauge.tool_half_width;
-        DrawGaugeHandle(draw_list, width_minus_x, width_minus_y,
-            5.0f, false, false, 0xFF00FFFF);
-    }
+    DrawGaugeHandle(draw_list, geom.w_plus.x, geom.w_plus.y,
+        5.0f, false, false, 0xFF00FFFF);
+    DrawGaugeHandle(draw_list, geom.w_minus.x, geom.w_minus.y,
+        5.0f, false, false, 0xFF00FFFF);
 }
 
 static void DrawGaugeHandlesCircle(
@@ -6746,12 +6732,14 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     doutputValue, m_manualTest.runtime_current_status, runtimeObjectCount,
     m_scriptResult.reason.empty() ? "runtime table refreshed" :
                                     m_scriptResult.reason);
+
+  SyncRuntimeObjectsToShapeElements();
 }
 
 
 static void DrawCxParserExtLineViewsPanel(const ManualTestContext& context)
 {
-  if (!ImGui::CollapsingHeader("CxParserExt Line Views"))
+  if (!ImGui::CollapsingHeader("CxParserExt Line Views##manual_console"))
     return;
 
   ImGui::Text("status: %s | ok: %s",
@@ -6776,7 +6764,7 @@ static void DrawCxParserExtLineViewsPanel(const ManualTestContext& context)
 
 static void DrawCxParserExtStatementViewsPanel(const ManualTestContext& context)
 {
-  if (!ImGui::CollapsingHeader("CxParserExt Statement Views"))
+  if (!ImGui::CollapsingHeader("CxParserExt Statement Views##manual_console"))
     return;
 
   for (const CxScriptStatementView& stmt : context.cxparser_ext_statement_views)
@@ -6805,7 +6793,7 @@ static void DrawCxParserExtStatementViewsPanel(const ManualTestContext& context)
 
 static void DrawCxParserExtObjectAssignmentsPanel(const ManualTestContext& context)
 {
-  if (!ImGui::CollapsingHeader("CxParserExt Object Assignments"))
+  if (!ImGui::CollapsingHeader("CxParserExt Object Assignments##manual_console"))
     return;
 
   for (const CxScriptObjectAssignmentView& item :
@@ -7232,7 +7220,6 @@ static void ResetKeyParameterUiDefaults(ManualTestContext& context)
 static void DrawKeyParameterControlPanel(ManualTestContext& context)
 {
   ManualGaugeState& gauge = context.current_gauge;
-  ManualParamRegressionState& ui = context.param_regression;
 
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
@@ -7242,6 +7229,7 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
   ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
   if (ImGui::CollapsingHeader("Geometry"))
   {
+      ImGui::PushID("geometry");
       if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
       {
           ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("cx", &gauge.circle_cx);
@@ -7261,11 +7249,14 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
           ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("x1", &gauge.line_x1);
           ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("y1", &gauge.line_y1);
       }
+      ImGui::PopID();
   }
 
   ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
   if (ImGui::CollapsingHeader("Edge Params"))
   {
+      ImGui::PushID("edge_params");
+
       ImGui::TextUnformatted("threshold");
       ImGui::SameLine(80.0f);
       ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##threshold", &gauge.threshold, 0, 255);
@@ -7311,6 +7302,7 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
           ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##fp_val", &gauge.filterprofile);
           gauge.filterprofile = std::max(0, std::min(10, gauge.filterprofile));
       }
+      ImGui::PopID();
   }
 
   ImGui::Separator();
@@ -7318,6 +7310,7 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
 
   const float btnWidth = (ImGui::GetContentRegionAvail().x - 30.0f) / 3.0f;
 
+  ImGui::PushID("actions");
   if (ImGui::Button("Apply To Gauge", ImVec2(btnWidth, 0)))
   {
     SyncKeyParameterUiToGauge(context);
@@ -7345,6 +7338,7 @@ static void DrawKeyParameterControlPanel(ManualTestContext& context)
     ResetKeyParameterUiDefaults(context);
     SyncKeyParameterUiToGauge(context);
   }
+  ImGui::PopID();
 }
 
 static void DrawParamTuningScatterPanel(ManualTestContext& context)
@@ -7483,22 +7477,63 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         manifestFile.close();
 
         m_manualTest.image_manifest_entries.clear();
-        size_t pos = 0;
-        while ((pos = jsonContent.find("image_id", pos)) != std::string::npos)
-        {
-            pos += 9;
-            size_t colon = jsonContent.find(":", pos);
-            if (colon == std::string::npos) break;
-            colon++;
-            size_t quote = jsonContent.find("\"", colon);
-            if (quote == std::string::npos) break;
-            quote++;
-            size_t endQuote = jsonContent.find("\"", quote);
-            if (endQuote == std::string::npos) break;
+        m_manualTest.image_manifest_items.clear();
 
-            std::string imageId = jsonContent.substr(quote, endQuote - quote);
-            m_manualTest.image_manifest_entries.push_back(imageId);
-            pos = endQuote;
+        size_t pos = 0;
+        while ((pos = jsonContent.find("{", pos)) != std::string::npos)
+        {
+            size_t objEnd = jsonContent.find("}", pos);
+            if (objEnd == std::string::npos) break;
+
+            std::string objStr = jsonContent.substr(pos, objEnd - pos + 1);
+
+            ManifestImageItem item;
+
+            size_t idPos = objStr.find("image_id");
+            if (idPos != std::string::npos)
+            {
+                idPos += 9;
+                size_t colon = objStr.find(":", idPos);
+                if (colon != std::string::npos)
+                {
+                    colon++;
+                    size_t quote = objStr.find("\"", colon);
+                    if (quote != std::string::npos)
+                    {
+                        quote++;
+                        size_t endQuote = objStr.find("\"", quote);
+                        if (endQuote != std::string::npos)
+                            item.image_id = objStr.substr(quote, endQuote - quote);
+                    }
+                }
+            }
+
+            size_t pathPos = objStr.find("image_path");
+            if (pathPos != std::string::npos)
+            {
+                pathPos += 11;
+                size_t colon = objStr.find(":", pathPos);
+                if (colon != std::string::npos)
+                {
+                    colon++;
+                    size_t quote = objStr.find("\"", colon);
+                    if (quote != std::string::npos)
+                    {
+                        quote++;
+                        size_t endQuote = objStr.find("\"", quote);
+                        if (endQuote != std::string::npos)
+                            item.image_path = objStr.substr(quote, endQuote - quote);
+                    }
+                }
+            }
+
+            if (!item.image_id.empty())
+            {
+                m_manualTest.image_manifest_entries.push_back(item.image_id);
+                m_manualTest.image_manifest_items.push_back(item);
+            }
+
+            pos = objEnd + 1;
         }
 
         m_manualTest.manifest_loaded = true;
@@ -7533,6 +7568,610 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     m_manualTest.workbench_assets_loaded = true;
 }
 
+void ViewController::EnsureEvidenceChainThumbnailsLoaded()
+{
+    if (m_manualTest.evidence_chain_thumbs.empty())
+    {
+        for (const auto& entry : m_manualTest.catalog_entries)
+        {
+            if (!entry.manual_visible || !entry.frozen)
+                continue;
+
+            EvidenceChainThumb thumb;
+            thumb.case_id = entry.script_id;
+            thumb.script_id = entry.script_id;
+            thumb.script_path = entry.path;
+            thumb.image_id = "";
+            thumb.image_path = "";
+            thumb.target_id = "";
+            thumb.tool = entry.tool;
+
+            thumb.parameter_summary = "threshold=20 method=2 linegap=6";
+            thumb.status = "pending";
+            thumb.reason = "";
+
+            thumb.texture_id = 0;
+            thumb.texture_w = 0;
+            thumb.texture_h = 0;
+            thumb.texture_loaded = false;
+
+            m_manualTest.evidence_chain_thumbs.push_back(thumb);
+        }
+    }
+
+    for (auto& thumb : m_manualTest.evidence_chain_thumbs)
+    {
+        if (thumb.texture_loaded || thumb.image_path.empty())
+            continue;
+
+        cv::Mat image = cv::imread(thumb.image_path);
+        if (image.empty())
+        {
+            thumb.texture_loaded = false;
+            continue;
+        }
+
+        cv::Mat small;
+        cv::resize(image, small, cv::Size(72, 72));
+
+        thumb.texture_id = CreateTextureFromMat0(small);
+        thumb.texture_w = small.cols;
+        thumb.texture_h = small.rows;
+        thumb.texture_loaded = true;
+    }
+}
+
+void ViewController::SelectEvidenceChainThumb(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_manualTest.evidence_chain_thumbs.size()))
+        return;
+
+    m_manualTest.selected_evidence_thumb = index;
+
+    const EvidenceChainThumb& thumb = m_manualTest.evidence_chain_thumbs[index];
+
+    m_manualTest.current_gauge.case_id = thumb.case_id;
+    m_manualTest.current_gauge.image_id = thumb.image_id;
+    m_manualTest.current_gauge.target_id = thumb.target_id;
+    m_manualTest.current_gauge.tool = thumb.tool;
+
+    for (const auto& entry : m_manualTest.catalog_entries)
+    {
+        if (entry.script_id == thumb.script_id)
+        {
+            std::string text;
+            if (ReadTextFile(ResolveWorkspaceFile(entry.path).generic_string(), text))
+                m_manualTest.editor_text = text;
+            m_manualTest.active_script_case_name = entry.label;
+            m_manualTest.active_script_case_path = entry.path;
+            m_manualTest.loaded_script_path = entry.path;
+            break;
+        }
+    }
+
+    ApplyManualGaugeToGlobals(m_manualTest);
+}
+
+void ViewController::DrawEvidenceChainThumbnailRail()
+{
+    DrawScriptEvidenceThumbnailRailByGroup();
+}
+
+void ViewController::RebuildScriptEvidenceGroups()
+{
+    m_manualTest.script_evidence_groups.clear();
+
+    std::map<std::string, int> groupByScript;
+
+    for (const auto& entry : m_manualTest.catalog_entries)
+    {
+        std::string scriptId = entry.script_id.empty() ? entry.label : entry.script_id;
+        if (scriptId.empty())
+            continue;
+
+        ScriptEvidenceGroup group;
+        group.script_id = scriptId;
+        group.script_path = entry.path;
+        group.label = entry.label;
+
+        groupByScript[group.script_id] =
+            static_cast<int>(m_manualTest.script_evidence_groups.size());
+
+        m_manualTest.script_evidence_groups.push_back(group);
+    }
+
+    for (const auto& item : m_manualTest.evidence_items)
+    {
+        std::string scriptId = item.script_id;
+        if (scriptId.empty())
+            continue;
+
+        auto it = groupByScript.find(scriptId);
+        if (it == groupByScript.end())
+            continue;
+
+        ScriptEvidenceThumb thumb;
+        thumb.case_id = item.case_id;
+        thumb.script_id = item.script_id;
+        thumb.image_id = item.image_id;
+        thumb.target_id = item.target_id;
+        thumb.tool = item.tool;
+        thumb.status = item.contract_status;
+        thumb.reason = "";
+
+        thumb.image_path = ResolveImagePathFromManifest(item.image_id);
+
+        thumb.parameter_summary = "";
+        if (!item.image_id.empty())
+            thumb.parameter_summary += "img=" + item.image_id;
+        if (!item.target_id.empty())
+            thumb.parameter_summary += " target=" + item.target_id;
+
+        m_manualTest.script_evidence_groups[it->second].thumbs.push_back(thumb);
+    }
+
+    m_manualTest.script_evidence_groups_dirty = false;
+}
+
+std::string ViewController::ResolveImagePathFromManifest(const std::string& imageId) const
+{
+    for (const auto& item : m_manualTest.image_manifest_items)
+    {
+        if (item.image_id == imageId)
+            return item.image_path;
+    }
+    return "";
+}
+
+void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb)
+{
+    if (thumb.texture_loaded || thumb.texture_failed)
+        return;
+
+    if (thumb.image_path.empty())
+    {
+        thumb.texture_failed = true;
+        thumb.reason = "image_path empty";
+        return;
+    }
+
+    cv::Mat img = cv::imread(thumb.image_path, cv::IMREAD_COLOR);
+    if (img.empty())
+    {
+        thumb.texture_failed = true;
+        thumb.reason = "image load failed";
+        return;
+    }
+
+    cv::Mat resized;
+    double scale = std::min(64.0 / img.cols, 64.0 / img.rows);
+    cv::resize(img, resized, cv::Size(), scale, scale, cv::INTER_AREA);
+
+    thumb.texture_id = CreateTextureFromMat0(resized);
+    thumb.texture_w = resized.cols;
+    thumb.texture_h = resized.rows;
+    thumb.texture_loaded = (thumb.texture_id != 0);
+    thumb.texture_failed = !thumb.texture_loaded;
+}
+
+void ViewController::SelectScriptEvidenceThumb(int groupIndex, int thumbIndex)
+{
+    if (groupIndex < 0 || groupIndex >= static_cast<int>(m_manualTest.script_evidence_groups.size()))
+        return;
+
+    auto& group = m_manualTest.script_evidence_groups[groupIndex];
+
+    if (thumbIndex < 0 || thumbIndex >= static_cast<int>(group.thumbs.size()))
+        return;
+
+    auto& thumb = group.thumbs[thumbIndex];
+
+    m_manualTest.selected_evidence_group = groupIndex;
+    m_manualTest.selected_evidence_thumb = thumbIndex;
+
+    for (const auto& entry : m_manualTest.catalog_entries)
+    {
+        if (entry.script_id == thumb.script_id)
+        {
+            std::string text;
+            if (ReadTextFile(ResolveWorkspaceFile(entry.path).generic_string(), text))
+                m_manualTest.editor_text = text;
+            m_manualTest.active_script_case_name = entry.label;
+            m_manualTest.active_script_case_path = entry.path;
+            m_manualTest.loaded_script_path = entry.path;
+            break;
+        }
+    }
+
+    if (!thumb.image_path.empty())
+    {
+        cv::Mat img = cv::imread(thumb.image_path, cv::IMREAD_COLOR);
+        if (!img.empty())
+        {
+            UpdateImageViewImage(img);
+            m_parserDebugBridge.SetGlobalMatInput(img);
+            m_manualTest.image_file_path = thumb.image_path;
+        }
+    }
+
+    m_manualTest.active_case_id = thumb.case_id;
+    m_manualTest.active_image_id = thumb.image_id;
+    m_manualTest.active_target_id = thumb.target_id;
+
+    m_manualTest.current_gauge.case_id = thumb.case_id;
+    m_manualTest.current_gauge.image_id = thumb.image_id;
+    m_manualTest.current_gauge.target_id = thumb.target_id;
+    m_manualTest.current_gauge.tool = thumb.tool;
+
+    ApplyManualGaugeToGlobals(m_manualTest);
+}
+
+void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
+{
+    if (m_manualTest.script_evidence_groups_dirty)
+        RebuildScriptEvidenceGroups();
+
+    ImGui::BeginChild("##script_evidence_thumb_rail",
+                      ImVec2(86.0f, 0.0f),
+                      true);
+
+    for (int g = 0; g < static_cast<int>(m_manualTest.script_evidence_groups.size()); ++g)
+    {
+        ScriptEvidenceGroup& group = m_manualTest.script_evidence_groups[g];
+
+        if (group.thumbs.empty())
+            continue;
+
+        ImGui::PushID(g);
+
+        ImGui::TextDisabled("%s", group.script_id.c_str());
+        ImGui::Separator();
+
+        for (int i = 0; i < static_cast<int>(group.thumbs.size()); ++i)
+        {
+            ScriptEvidenceThumb& thumb = group.thumbs[i];
+
+            ImGui::PushID(i);
+
+            EnsureScriptEvidenceThumbTexture(thumb);
+
+            const bool selected =
+                m_manualTest.selected_evidence_group == g &&
+                m_manualTest.selected_evidence_thumb == i;
+
+            if (selected)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.55f, 0.85f, 1.0f));
+
+            bool clicked = false;
+
+            if (thumb.texture_loaded)
+            {
+                ImTextureID texId = (ImTextureID)(uint64_t)thumb.texture_id;
+                clicked = ImGui::ImageButton("##thumb", texId, ImVec2(64, 64));
+            }
+            else
+            {
+                clicked = ImGui::Button("NO IMG##thumb", ImVec2(64, 64));
+            }
+
+            if (selected)
+                ImGui::PopStyleColor();
+
+            if (clicked)
+            {
+                SelectScriptEvidenceThumb(g, i);
+            }
+
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::BeginTooltip();
+                ImGui::Text("case: %s", thumb.case_id.c_str());
+                ImGui::Text("script: %s", thumb.script_id.c_str());
+                ImGui::Text("image: %s", thumb.image_id.c_str());
+                ImGui::Text("target: %s", thumb.target_id.c_str());
+                ImGui::Text("tool: %s", thumb.tool.c_str());
+                ImGui::TextWrapped("params: %s", thumb.parameter_summary.c_str());
+                ImGui::TextWrapped("path: %s", thumb.image_path.c_str());
+                if (thumb.texture_failed)
+                    ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "failed: %s", thumb.reason.c_str());
+                ImGui::EndTooltip();
+            }
+
+            ImGui::PopID();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        ImGui::PopID();
+    }
+
+    if (m_manualTest.script_evidence_groups.empty())
+    {
+        ImGui::TextDisabled("No evidence chain");
+    }
+
+    ImGui::EndChild();
+}
+
+void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
+{
+    ImGui::PushID("script_editor_block");
+
+    ImGui::Text("Script Editor");
+    if (InputTextMultilineString("##manual_script_editor",
+                                 context.editor_text,
+                                 ImVec2(-1.0f, 140.0f)))
+    {
+        context.editor_dirty = true;
+        if (context.editor_source.empty())
+            context.editor_source = "manual";
+    }
+    ImGui::Text("editor_dirty: %s", context.editor_dirty ? "true" : "false");
+    ImGui::Text("editor_source: %s", context.editor_source.c_str());
+    ImGui::TextWrapped("loaded_script_path: %s",
+                       context.loaded_script_path.empty() ? "(none)" :
+                       context.loaded_script_path.c_str());
+
+    ImGui::PopID();
+}
+
+void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
+{
+    ImGui::PushID("script_debug_compiler_block");
+
+    ImGui::Text("Script Debug Compiler");
+    ImGui::Text("run_state: %s", context.run_state.c_str());
+
+    const auto syncGeometryResult = [&]()
+    {
+        for (const ScriptVariableView& variable : context.global_variable_views)
+        {
+            if (variable.name != "global.circle_ref" ||
+                variable.value.rfind("runtime_object:", 0) != 0) continue;
+            m_scriptResult.result_ref = variable.value;
+            m_scriptResult.overlay_ref = variable.value;
+            return;
+        }
+        m_scriptResult.result_ref.clear();
+        m_scriptResult.overlay_ref.clear();
+    };
+
+    if (ImGui::Button("Compile##script_debug"))
+    {
+        ResetCxDebugRuntimeLog(context, "Compile");
+        AnalyzeScript(context);
+        ResetDebugRuntimeForReplay(context);
+
+        context.run_state = "compiled";
+        context.debug_action = "Compile";
+        context.debug_status = "PENDING";
+        context.debug_reason = "source compiled for debug replay; runtime not executed";
+
+        m_scriptResult = ScriptResult();
+        m_scriptResult.source = context.editor_source;
+        m_scriptResult.script_path = context.loaded_script_path;
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = "compiled for debug replay; no PASS without runtime result";
+        m_scriptResult.runtime_fillback_status = "debug_replay_ready";
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Run##script_debug"))
+    {
+        ResetCxDebugRuntimeLog(context, "Run");
+        AnalyzeScript(context);
+        ResetDebugRuntimeForReplay(context);
+
+        context.run_state = "runtime_run";
+        context.stop_requested = false;
+
+        int guard = 0;
+        const int maxSteps = static_cast<int>(context.line_views.size()) * 4 + 16;
+
+        while (!context.stop_requested &&
+            context.current_line < static_cast<int>(context.line_views.size()) &&
+            guard++ < maxSteps)
+        {
+            DebugStepOnceWithSnapshot(context);
+
+            if (context.run_state == "blocked")
+                break;
+        }
+        MarkDebugRunFinishedIfAtEnd(context);
+        m_scriptResult.status = context.debug_status;
+        m_scriptResult.reason = context.debug_reason;
+        m_scriptResult.runtime_fillback_status = "debug_run";
+        syncGeometryResult();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Step##script_debug"))
+    {
+        if (context.run_state == "idle" ||
+            context.run_state == "compiled" ||
+            context.run_state == "ready")
+        {
+            if (context.runtime_objects.empty() &&
+                context.runtime_int_vars.empty())
+            {
+                ResetDebugRuntimeForReplay(context);
+            }
+        }
+
+        DebugStepOnceWithSnapshot(context);
+
+        m_scriptResult.status = context.debug_status;
+        m_scriptResult.reason = context.debug_reason;
+        m_scriptResult.runtime_fillback_status = "debug_step";
+        syncGeometryResult();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Continue##script_debug"))
+    {
+        context.stop_requested = false;
+        context.run_state = "runtime_continue";
+
+        int guard = 0;
+        const int maxSteps = static_cast<int>(context.line_views.size()) * 4 + 16;
+
+        while (!context.stop_requested &&
+            context.current_line < static_cast<int>(context.line_views.size()) &&
+            guard++ < maxSteps)
+        {
+            DebugStepOnceWithSnapshot(context);
+
+            if (context.run_state == "blocked")
+                break;
+        }
+        MarkDebugRunFinishedIfAtEnd(context);
+        m_scriptResult.status = context.debug_status;
+        m_scriptResult.reason = context.debug_reason;
+        m_scriptResult.runtime_fillback_status = "debug_continue";
+        syncGeometryResult();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Stop##script_debug"))
+    {
+        context.stop_requested = true;
+        context.run_state = "stopped";
+        context.debug_status = "PENDING";
+        context.debug_reason = "debug run stopped by user";
+
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = context.debug_reason;
+        m_scriptResult.runtime_fillback_status = "stopped";
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##script_debug"))
+    {
+        AnalyzeScript(context);
+        ResetDebugRuntimeForReplay(context);
+
+        m_scriptResult = ScriptResult();
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = "debug runtime reset";
+        m_scriptResult.runtime_fillback_status = "reset";
+    }
+
+    if (ImGui::Button("Run File##script_debug"))
+        m_scriptResult = RunCxScript(context.script_file_path);
+
+    ImGui::SameLine();
+    if (ImGui::Button("Run Bound State##script_debug"))
+    {
+        ResetCxDebugRuntimeLog(context, "Run Bound State");
+        std::string boundScript;
+        const bool boundReady = !context.bound_state_script_path.empty() &&
+            ReadTextFile(ResolveWorkspaceFile(context.bound_state_script_path).generic_string(),
+                         boundScript);
+        if (boundReady)
+        {
+            context.editor_text = boundScript;
+            context.loaded_script_path = context.bound_state_script_path;
+            context.editor_source = "bound_state";
+            context.analyzed_text.clear();
+        }
+        if (!boundReady)
+        {
+            context.run_state = "blocked";
+            context.debug_status = "BLOCKED";
+            context.debug_reason = "bound N0 script unavailable";
+        }
+        else
+        {
+            AnalyzeScript(context);
+            ResetDebugRuntimeForReplay(context);
+            context.stop_requested = false;
+            int guard = 0;
+            const int maxSteps = static_cast<int>(context.line_views.size()) * 4 + 16;
+            while (!context.stop_requested &&
+                   context.current_line < static_cast<int>(context.line_views.size()) &&
+                   guard++ < maxSteps)
+            {
+                DebugStepOnceWithSnapshot(context);
+                if (context.run_state == "blocked") break;
+            }
+            MarkDebugRunFinishedIfAtEnd(context);
+        }
+        m_scriptResult.status = context.run_state == "blocked" ?
+            "BLOCKED" : "PENDING";
+        m_scriptResult.reason = context.debug_reason;
+        m_scriptResult.runtime_fillback_status = "bound_block_debug_steps";
+        syncGeometryResult();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Result##script_debug"))
+    {
+        m_scriptResult = ScriptResult();
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = "result cleared";
+        m_scriptResult.runtime_fillback_status = "not_started";
+        context.debug_action = "Clear Result";
+        context.debug_status = "PENDING";
+        context.debug_reason = m_scriptResult.reason;
+        context.debug_parser_output.clear();
+    }
+
+    if (ImGui::Button("Save Debug Log Snapshot##script_debug"))
+    {
+        RefreshSnapshotFromCurrentResultRef(context);
+        std::string savedPath;
+        std::string reason;
+        if (SaveCxDebugSnapshotText(context, savedPath, reason))
+        {
+            m_scriptResult.status = "PENDING";
+            m_scriptResult.reason = "debug snapshot saved: " + savedPath;
+            m_scriptResult.runtime_fillback_status = "debug_snapshot_saved";
+        }
+        else
+        {
+            m_scriptResult.status = "PENDING";
+            m_scriptResult.reason = reason;
+            m_scriptResult.runtime_fillback_status = "debug_snapshot_save_failed";
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Debug Log##script_debug"))
+    {
+        ResetCxDebugRuntimeLog(context, "manual clear debug log");
+
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = "debug runtime log cleared";
+        m_scriptResult.runtime_fillback_status = "debug_log_cleared";
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Run CxParserExt Debug##script_debug"))
+    {
+        const std::string scriptPath = !context.loaded_script_path.empty() ?
+            context.loaded_script_path : context.active_script_case_path;
+        CxScriptSemanticBridgeResult debugResult;
+        if (scriptPath.empty())
+        {
+            debugResult.ok = false;
+            debugResult.status = "missing_script_path";
+            debugResult.reason =
+                "CxParserExt debug in-process requires a script file path";
+        }
+        else
+        {
+            const fs::path resolvedScript = ResolveWorkspaceFile(scriptPath);
+            m_parserDebugBridge.RunCxParserExtDebugInProcess(
+                resolvedScript.generic_string(),
+                debugResult);
+        }
+        ApplyCxParserExtDebugResultToManualConsole(context, debugResult);
+    }
+
+    ImGui::PopID();
+}
+
 void ViewController::drawManualStateTestConsole()
 {
   if (!m_showManualStateTestConsole) return;
@@ -7552,6 +8191,12 @@ void ViewController::drawManualStateTestConsole()
   m_manualTest.source_preview_enabled = m_showSourcePreviewOverlay;
   m_manualTest.manual_elements_count =
     static_cast<int>(m_annotationLayer.Elements().size());
+
+  DrawScriptEditorBlock(m_manualTest);
+  ImGui::Separator();
+
+  DrawScriptDebugCompilerBlock(m_manualTest);
+  ImGui::Separator();
 
   if (ImGui::Button("Load Catalog"))
   {
@@ -7627,7 +8272,7 @@ void ViewController::drawManualStateTestConsole()
 
   ImGui::SameLine(); ImGui::Text("|"); ImGui::SameLine();
 
-  if (ImGui::Button("Run"))
+  if (ImGui::Button("Run##manual_control"))
   {
       m_manualTest.run_state = "running";
       m_scriptResult = ScriptResult();
@@ -7637,12 +8282,12 @@ void ViewController::drawManualStateTestConsole()
       m_scriptResult.reason = "executing current script";
   }
   ImGui::SameLine();
-  if (ImGui::Button("Step"))
+  if (ImGui::Button("Step##manual_control"))
   {
       m_manualTest.debug_action = "step";
   }
   ImGui::SameLine();
-  if (ImGui::Button("Reset"))
+  if (ImGui::Button("Reset##manual_control"))
   {
       m_scriptResult = ScriptResult();
       m_manualTest.run_state = "idle";
@@ -8992,23 +9637,6 @@ void ViewController::drawManualStateTestConsole()
     }
   }
 
-  ImGui::NextColumn();
-  ImGui::Text("Script Editor");
-  if (InputTextMultilineString("##manual_script_editor",
-                               m_manualTest.editor_text,
-                               ImVec2(-1.0f, 140.0f)))
-  {
-    m_manualTest.editor_dirty = true;
-    if (m_manualTest.editor_source.empty())
-      m_manualTest.editor_source = "manual";
-  }
-  ImGui::Text("editor_dirty: %s", m_manualTest.editor_dirty ? "true" : "false");
-  ImGui::Text("editor_source: %s", m_manualTest.editor_source.c_str());
-  ImGui::TextWrapped("loaded_script_path: %s",
-                     m_manualTest.loaded_script_path.empty() ? "(none)" :
-                     m_manualTest.loaded_script_path.c_str());
-  ImGui::Columns(1);
-
   AnalyzeScript(m_manualTest);
 
   if (m_manualTest.current_line >= static_cast<int>(m_manualTest.line_views.size()))
@@ -9084,261 +9712,10 @@ void ViewController::drawManualStateTestConsole()
   ImGui::TextWrapped("Status: runtime_executed = C++ call completed; geometry_result_available = geometry exists; PENDING = case not judged; PASS = judge/rule only; BLOCKED = cannot continue; PENDING_BINDING = statement recognized but result binding unavailable");
   }
 
-  ImGui::Separator();
-  ImGui::Text("Script Debug Compiler");
-  ImGui::Text("run_state: %s", m_manualTest.run_state.c_str());
-  const auto syncGeometryResult = [&]()
-  {
-    for (const ScriptVariableView& variable : m_manualTest.global_variable_views)
-    {
-      if (variable.name != "global.circle_ref" ||
-          variable.value.rfind("runtime_object:", 0) != 0) continue;
-      m_scriptResult.result_ref = variable.value;
-      m_scriptResult.overlay_ref = variable.value;
-      return;
-    }
-    m_scriptResult.result_ref.clear();
-    m_scriptResult.overlay_ref.clear();
-  };
-  if (ImGui::Button("Compile"))
-  {
-      ResetCxDebugRuntimeLog(m_manualTest, "Compile");
-      AnalyzeScript(m_manualTest);
-      ResetDebugRuntimeForReplay(m_manualTest);
 
-      m_manualTest.run_state = "compiled";
-      m_manualTest.debug_action = "Compile";
-      m_manualTest.debug_status = "PENDING";
-      m_manualTest.debug_reason = "source compiled for debug replay; runtime not executed";
-
-      m_scriptResult = ScriptResult();
-      m_scriptResult.source = m_manualTest.editor_source;
-      m_scriptResult.script_path = m_manualTest.loaded_script_path;
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = "compiled for debug replay; no PASS without runtime result";
-      m_scriptResult.runtime_fillback_status = "debug_replay_ready";
-  }
-
-  ImGui::SameLine();
-  if (ImGui::Button("Run"))
-  {
-      ResetCxDebugRuntimeLog(m_manualTest, "Run");
-      AnalyzeScript(m_manualTest);
-      ResetDebugRuntimeForReplay(m_manualTest);
-
-      m_manualTest.run_state = "runtime_run";
-      m_manualTest.stop_requested = false;
-
-      int guard = 0;
-      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
-
-      while (!m_manualTest.stop_requested &&
-          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
-          guard++ < maxSteps)
-      {
-          DebugStepOnceWithSnapshot(m_manualTest);
-
-          // é‡åˆ°çœŸå®ž runtime ç¼ºå¤±çš„ç®—æ³•è¡Œï¼Œå…ˆåœä¸‹æ¥è®©ç”¨æˆ·çœ‹ã€‚
-          if (m_manualTest.run_state == "blocked")
-              break;
-      }
-      MarkDebugRunFinishedIfAtEnd(m_manualTest);
-      m_scriptResult.status = m_manualTest.debug_status;
-      m_scriptResult.reason = m_manualTest.debug_reason;
-      m_scriptResult.runtime_fillback_status = "debug_run";
-      syncGeometryResult();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Step"))
-  {
-      if (m_manualTest.run_state == "idle" ||
-          m_manualTest.run_state == "compiled" ||
-          m_manualTest.run_state == "ready")
-      {
-          // å¦‚æžœè¿˜æ²¡åˆå§‹åŒ– runtimeï¼Œå°±åˆå§‹åŒ–ä¸€æ¬¡ã€‚
-          if (m_manualTest.runtime_objects.empty() &&
-              m_manualTest.runtime_int_vars.empty())
-          {
-              ResetDebugRuntimeForReplay(m_manualTest);
-          }
-      }
-
-      DebugStepOnceWithSnapshot(m_manualTest);
-
-      m_scriptResult.status = m_manualTest.debug_status;
-      m_scriptResult.reason = m_manualTest.debug_reason;
-      m_scriptResult.runtime_fillback_status = "debug_step";
-      syncGeometryResult();
-  }
-
-  ImGui::SameLine();
-  if (ImGui::Button("Continue"))
-  {
-      m_manualTest.stop_requested = false;
-      m_manualTest.run_state = "runtime_continue";
-
-      int guard = 0;
-      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
-
-      while (!m_manualTest.stop_requested &&
-          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
-          guard++ < maxSteps)
-      {
-          DebugStepOnceWithSnapshot(m_manualTest);
-
-          if (m_manualTest.run_state == "blocked")
-              break;
-      }
-      MarkDebugRunFinishedIfAtEnd(m_manualTest);
-      m_scriptResult.status = m_manualTest.debug_status;
-      m_scriptResult.reason = m_manualTest.debug_reason;
-      m_scriptResult.runtime_fillback_status = "debug_continue";
-      syncGeometryResult();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Stop"))
-  {
-      m_manualTest.stop_requested = true;
-      m_manualTest.run_state = "stopped";
-      m_manualTest.debug_status = "PENDING";
-      m_manualTest.debug_reason = "debug run stopped by user";
-
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = m_manualTest.debug_reason;
-      m_scriptResult.runtime_fillback_status = "stopped";
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Reset"))
-  {
-      AnalyzeScript(m_manualTest);
-      ResetDebugRuntimeForReplay(m_manualTest);
-
-      m_scriptResult = ScriptResult();
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = "debug runtime reset";
-      m_scriptResult.runtime_fillback_status = "reset";
-  }
-  if (ImGui::Button("Run File (runtime bridge)"))
-    m_scriptResult = RunCxScript(m_manualTest.script_file_path);
-  ImGui::SameLine();
-  if (ImGui::Button("Run Bound State (runtime bridge)"))
-  {
-      ResetCxDebugRuntimeLog(m_manualTest, "Run Bound State");
-    std::string boundScript;
-    const bool boundReady = !m_manualTest.bound_state_script_path.empty() &&
-      ReadTextFile(ResolveWorkspaceFile(m_manualTest.bound_state_script_path).generic_string(),
-                   boundScript);
-    if (boundReady)
-    {
-      m_manualTest.editor_text = boundScript;
-      m_manualTest.loaded_script_path = m_manualTest.bound_state_script_path;
-      m_manualTest.editor_source = "bound_state";
-      m_manualTest.analyzed_text.clear();
-    }
-    if (!boundReady)
-    {
-      m_manualTest.run_state = "blocked";
-      m_manualTest.debug_status = "BLOCKED";
-      m_manualTest.debug_reason = "bound N0 script unavailable";
-    }
-    else
-    {
-      AnalyzeScript(m_manualTest);
-      ResetDebugRuntimeForReplay(m_manualTest);
-      m_manualTest.stop_requested = false;
-      int guard = 0;
-      const int maxSteps = static_cast<int>(m_manualTest.line_views.size()) * 4 + 16;
-      while (!m_manualTest.stop_requested &&
-             m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
-             guard++ < maxSteps)
-      {
-        DebugStepOnceWithSnapshot(m_manualTest);
-        if (m_manualTest.run_state == "blocked") break;
-      }
-      MarkDebugRunFinishedIfAtEnd(m_manualTest);
-    }
-    m_scriptResult.status = m_manualTest.run_state == "blocked" ?
-      "BLOCKED" : "PENDING";
-    m_scriptResult.reason = m_manualTest.debug_reason;
-    m_scriptResult.runtime_fillback_status = "bound_block_debug_steps";
-    syncGeometryResult();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Clear Result"))
-  {
-    m_scriptResult = ScriptResult();
-    m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "result cleared";
-    m_scriptResult.runtime_fillback_status = "not_started";
-    m_manualTest.debug_action = "Clear Result";
-    m_manualTest.debug_status = "PENDING";
-    m_manualTest.debug_reason = m_scriptResult.reason;
-    m_manualTest.debug_parser_output.clear();
-  }
-
-  if (ImGui::Button("Save Debug Log Snapshot"))
-  {
-      RefreshSnapshotFromCurrentResultRef(m_manualTest);
-      std::string savedPath;
-      std::string reason;
-      if (SaveCxDebugSnapshotText(m_manualTest, savedPath, reason))
-      {
-          m_scriptResult.status = "PENDING";
-          m_scriptResult.reason = "debug snapshot saved: " + savedPath;
-          m_scriptResult.runtime_fillback_status = "debug_snapshot_saved";
-      }
-      else
-      {
-          m_scriptResult.status = "PENDING";
-          m_scriptResult.reason = reason;
-          m_scriptResult.runtime_fillback_status = "debug_snapshot_save_failed";
-      }
-  }
-
-  ImGui::SameLine();
-
-  if (ImGui::Button("Clear Debug Log"))
-  {
-      ResetCxDebugRuntimeLog(m_manualTest, "manual clear debug log");
-
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = "debug runtime log cleared";
-      m_scriptResult.runtime_fillback_status = "debug_log_cleared";
-  }
-
-
-  ImGui::SameLine();
-
-  if (ImGui::Button("Run CxParserExt Debug"))
-  {
-      const std::string scriptPath = !m_manualTest.loaded_script_path.empty() ?
-          m_manualTest.loaded_script_path : m_manualTest.active_script_case_path;
-      CxScriptSemanticBridgeResult debugResult;
-      if (scriptPath.empty())
-      {
-          debugResult.ok = false;
-          debugResult.status = "missing_script_path";
-          debugResult.reason =
-              "CxParserExt debug in-process requires a script file path";
-      }
-      else
-      {
-          const fs::path resolvedScript = ResolveWorkspaceFile(scriptPath);
-          m_parserDebugBridge.RunCxParserExtDebugInProcess(
-              resolvedScript.generic_string(),
-              debugResult);
-      }
-      ApplyCxParserExtDebugResultToManualConsole(m_manualTest, debugResult);
-      m_manualTest.debug_action = "Run CxParserExt Debug";
-      m_scriptResult.status = debugResult.ok ? "PENDING" : "FAIL";
-      m_scriptResult.reason = debugResult.ok ?
-          "cxparser_ext debug layer parsed script" : debugResult.reason;
-      m_scriptResult.runtime_fillback_status = debugResult.ok ?
-          "cxparser_ext_debug_ok" : "cxparser_ext_debug_failed";
-  }
   ImGui::Separator();
   ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
-  if (ImGui::CollapsingHeader("Last Debug Result"))
+  if (ImGui::CollapsingHeader("Last Debug Result##manual_console"))
   {
   ImGui::Text("action: %s | status: %s", m_manualTest.debug_action.c_str(),
               m_manualTest.debug_status.c_str());
@@ -10778,18 +11155,63 @@ void ViewController::drawAnnotationToolWindow()
 
   ImGui::Separator();
   ImGui::Text("Tool Palette");
+  ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Annotation UI v2 button palette");
 
-  const char* toolNames[] = { "Pointer / Pan", "Point", "Line", "Rect", "Circle", "Polyline", "Attach To Script" };
-  const ImageToolMode toolModes[] = { ImageToolMode::PointerPan, ImageToolMode::PointCreate, ImageToolMode::LineCreate, ImageToolMode::RectCreate, ImageToolMode::CircleCreate, ImageToolMode::PolylineCreate };
-
-  for (int i = 0; i < 6; ++i)
+  auto drawAnnotationToolButton = [this](const char* label, ImageToolMode mode)
   {
-    bool isActive = m_imageToolMode == toolModes[i];
-    if (ImGui::Selectable(toolNames[i], isActive))
+    ImGui::PushID(label);
+
+    const bool active = m_imageToolEnabled && m_imageToolMode == mode;
+
+    if (active)
     {
-      m_imageToolMode = toolModes[i];
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.50f, 0.85f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.40f, 0.75f, 1.0f));
     }
-  }
+
+    if (ImGui::Button(label, ImVec2(-1.0f, 26.0f)))
+    {
+      if (mode == ImageToolMode::PointerPan)
+      {
+        m_imageToolEnabled = false;
+        m_imageToolMode = ImageToolMode::PointerPan;
+        CancelAnnotationCreate();
+        m_annotationStatus = "Pointer / Pan active";
+      }
+      else if (active)
+      {
+        m_imageToolEnabled = false;
+        m_imageToolMode = ImageToolMode::PointerPan;
+        CancelAnnotationCreate();
+        m_annotationStatus = std::string(label) + " disabled";
+      }
+      else
+      {
+        m_imageToolEnabled = true;
+        m_imageToolMode = mode;
+        CancelAnnotationCreate();
+        m_annotationStatus = std::string(label) + " enabled";
+      }
+    }
+
+    if (active)
+      ImGui::PopStyleColor(3);
+
+    ImGui::PopID();
+  };
+
+  drawAnnotationToolButton("Pointer / Pan", ImageToolMode::PointerPan);
+  drawAnnotationToolButton("Point", ImageToolMode::PointCreate);
+  drawAnnotationToolButton("Line", ImageToolMode::LineCreate);
+  drawAnnotationToolButton("Rect", ImageToolMode::RectCreate);
+  drawAnnotationToolButton("Circle", ImageToolMode::CircleCreate);
+  drawAnnotationToolButton("Polyline", ImageToolMode::PolylineCreate);
+  drawAnnotationToolButton("Auto Boundary / EdgeSam", ImageToolMode::AutoBoundary);
+
+  ImGui::Separator();
+  ImGui::Text("Tool enabled: %s", m_imageToolEnabled ? "YES" : "NO");
+  ImGui::Text("Active tool: %s", ImageToolModeName(m_imageToolMode));
 
   ImGui::Separator();
   ImGui::Text("Element List");

@@ -8,12 +8,14 @@
 
 #include "Findline.h"
 #include "Findcircle.h"
+#include "FindRect.h"
 #include "Findellipse.h"
 #include "findobject.h"
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
 #include "CxScriptDirectBindings.h"
 #include "CircleRingGauge.h"
+#include "FindSegmentation.h"
 
 //#include "gridobject.h"
 //#include "imageroi.h"
@@ -346,9 +348,9 @@ namespace mu
             m_parser.DefineClassFun("PointsShape", apoints, "addpoint", &PointsShape::addpoint);
             m_parser.DefineClassFun("PointsShape", apoints, "clear", &PointsShape::clear);
             m_parser.DefineClassFun("PointsShape", apoints, "calibration", &PointsShape::calibration);
-            m_parser.DefineClassFun("PointsShape", apoints, "size", &PointsShape::size);
-            m_parser.DefineClassFun("PointsShape", apoints, "getx", &PointsShape::getx);
-            m_parser.DefineClassFun("PointsShape", apoints, "gety", &PointsShape::gety);
+            m_parser.DefineClassFun("PointsShape", apoints, "size", &PointsShape::script_size);
+            m_parser.DefineClassFun("PointsShape", apoints, "getx", &PointsShape::script_getx);
+            m_parser.DefineClassFun("PointsShape", apoints, "gety", &PointsShape::script_gety);
             m_parser.DefineClassFun("PointsShape", apoints, "crosspoint", &PointsShape::crosspoint);
             m_parser.DefineClassFun("PointsShape", apoints, "pointsABadd", &PointsShape::pointsABadd);
             m_parser.DefineClassFun("PointsShape", apoints, "gridpoints", &PointsShape::gridpoints);
@@ -479,6 +481,19 @@ namespace mu
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setlinegap", &Findellipse::setlinegap);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setmethod", &Findellipse::setmethod);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setthre", &Findellipse::setthre);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "measure", &Findellipse::measure);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "clear", &Findellipse::clear);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "setlinesample", &Findellipse::setlinesamplerate);
+
+            FindRect* pfindrect = nullptr;
+            m_parser.DefineClass("FindRect", pfindrect);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setrect", &FindRect::setrect);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setthre", &FindRect::setthre);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setlinegap", &FindRect::setlinegap);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setmethod", &FindRect::setmethod);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setgauge", &FindRect::setgauge);
+            m_parser.DefineClassFun("FindRect", pfindrect, "measure", &FindRect::measure);
+            m_parser.DefineClassFun("FindRect", pfindrect, "clear", &FindRect::clear);
 
             Findline* pfindline = nullptr;
             m_parser.DefineClass("Findline", pfindline);
@@ -547,6 +562,17 @@ namespace mu
             m_parser.DefineClassFun("Findobject", pfobj, "objectgrid", &FindObject::objectgrid);
             m_parser.DefineClassFun("Findobject", pfobj, "setobjectgrid", &FindObject::setobjectgrid);
             m_parser.DefineClassFun("Findobject", pfobj, "objectsort", &FindObject::objectsort);
+
+            // FindSegmentation registration disabled for crash debugging
+            // FindSegmentation* pfindsegmentation = nullptr;
+            // m_parser.DefineClass("FindSegmentation", pfindsegmentation);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setthreshold", &FindSegmentation::setthreshold);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpromptrect", &FindSegmentation::setpromptrect);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpoint", &FindSegmentation::setpoint);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode", &FindSegmentation::setmode);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "status_code", &FindSegmentation::status_code);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_contour_count", &FindSegmentation::get_contour_count);
+            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_primary_area", &FindSegmentation::get_primary_area);
             m_parser.DefineClassFun("Findobject", pfobj, "edge", &FindObject::Edge);
             m_parser.DefineClassFun("Findobject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);
             m_parser.DefineClassFun("Findobject", pfobj, "setrelmatch", &FindObject::setrelationrectfrom_matchresult);
@@ -1695,4 +1721,3 @@ namespace mu
         ListCreateClassFunDef(m_parser,pclassname,pclassfuncname);
     }
 }
-

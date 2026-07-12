@@ -285,6 +285,7 @@ namespace mu
         AddTest(&ParserTester::TestElseCondition);
         AddTest(&ParserTester::TestWhileCondition);
         AddTest(&ParserTester::TestAllCondition);
+        AddTest(&ParserTester::TestReturnCondition);
         break;
 
       case FullProfile:
@@ -306,6 +307,7 @@ namespace mu
         AddTest(&ParserTester::TestWhileCondition);
         AddTest(&ParserTester::TestAllCondition);
         AddTest(&ParserTester::TestClassVariadicBinding);
+        AddTest(&ParserTester::TestReturnCondition);
         break;
       }
       ParserTester::c_iCount = 0;
@@ -1912,6 +1914,101 @@ b=b+1;\
 		{
 			iStat += 1;
 			*m_stream <<" TestComment() catch error "<<"\r\n";
+		}
+
+		if (iStat==0)
+			*m_stream << "passed" << "\r\n";
+		else
+			*m_stream << "\n  failed with " << iStat << " errors" << "\r\n";
+
+		return iStat;
+	}
+
+	int ParserTester::TestReturnCondition()
+	{
+		ParserTester::c_iCount++;
+		int iStat = 0;
+		*m_stream << "testing return condition...";
+
+		Parser p;
+		double x = 0;
+		double returnValue = 0;
+		try
+		{
+			p.DefineVar("x", &x);
+			p.DefineVar("returnValue", &returnValue);
+
+			x = 0;
+			p.SetExpr("x=0; return; x=1;");
+			p.Eval();
+			if (x != 0) iStat++;
+
+			x = 0;
+			p.SetExpr("x=0; if (1) { return; } x=1;");
+			p.Eval();
+			if (x != 0) iStat++;
+
+			x = 0;
+			p.SetExpr("x=0; if (0) { return; } x=1;");
+			p.Eval();
+			if (x != 1) iStat++;
+
+			x = 0;
+			p.SetExpr("x=0; while (x < 3) { x=x+1; return; } x=9;");
+			p.Eval();
+			if (x != 1) iStat++;
+
+			x = 0;
+			p.SetExpr("return ;");
+			p.Eval();
+			if (x != 0) iStat++;
+
+			x = 0;
+			p.SetExpr("if (0) { return; } x=1;");
+			p.Eval();
+			if (x != 1) iStat++;
+
+			x = 0;
+			p.SetExpr("returnValue = 2; x=3;");
+			p.Eval();
+			if (x != 3) iStat++;
+
+			x = 0;
+			p.SetExpr("if (1) { if (1) { return; } } x=1;");
+			p.Eval();
+			if (x != 0) iStat++;
+
+			bool threw = false;
+			try
+			{
+				p.SetExpr("return 1;");
+				p.Eval();
+			}
+			catch (Parser::exception_type&)
+			{
+				threw = true;
+			}
+			if (!threw) iStat++;
+
+			p.SetExpr("x=2;");
+			p.Eval();
+			if (x != 2) iStat++;
+		}
+		catch (Parser::exception_type &e)
+		{
+			iStat += 1;
+			*m_stream << " Parser exception: " << e.GetMsg() << "\r\n";
+			*m_stream << " Token: " << e.GetToken() << "\r\n";
+		}
+		catch (std::exception &e)
+		{
+			iStat += 1;
+			*m_stream << " std::exception: " << e.what() << "\r\n";
+		}
+		catch (...)
+		{
+			iStat += 1;
+			*m_stream << " TestReturnCondition() catch error " << "\r\n";
 		}
 
 		if (iStat==0)

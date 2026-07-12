@@ -11,6 +11,7 @@
 #include "CxScriptRunTraceRuntime.h"
 #include "CxAlgorithmTraceSink.h"
 #include "ManualStateTestConsole.h"
+#include "CxUnifiedLog.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -28,7 +29,7 @@ public:
         : name_(name),
           begin_(std::chrono::steady_clock::now())
     {
-        std::cout << "[phase-begin] " << name_ << "\n" << std::flush;
+        CXLOG_INFO("CxScriptSuiteRunner", "phase_begin", "running", name_);
     }
 
     ~ScopedSuiteTimer()
@@ -37,8 +38,8 @@ public:
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             end - begin_).count();
 
-        std::cout << "[phase-end] " << name_
-                  << " elapsed_ms=" << ms << "\n" << std::flush;
+        CXLOG_INFO("CxScriptSuiteRunner", "phase_end", "finished", 
+                   name_ + " elapsed_ms=" + std::to_string(ms));
     }
 
     long long elapsed_ms() const
@@ -1329,6 +1330,18 @@ namespace
         out.parameter_profile_id = suiteCase.parameter_profile_id;
         out.contract_id = script.contract_path;
 
+        CxUnifiedLogContext logContext;
+        logContext.case_id = suiteCase.case_id;
+        logContext.image_id = suiteCase.image_id;
+        logContext.target_id = suiteCase.target_id;
+        logContext.script_id = suiteCase.script_id;
+        logContext.parameter_profile_id = suiteCase.parameter_profile_id;
+        logContext.tool = script.tool;
+        CxScopedLogContext scopedLogContext(logContext);
+
+        CXLOG_INFO("CxScriptSuiteRunner", "case_begin", "running", 
+                   "case_id=" + suiteCase.case_id);
+
         out.expected_result =
             !suiteCase.expected_result.empty()
                 ? suiteCase.expected_result
@@ -1815,8 +1828,11 @@ namespace
             trace.close();
         }
 
-        std::cout << "[SUITE] post-headless end case_id="
-                  << suiteCase.case_id << "\n" << std::flush;
+        CXLOG_INFO("CxScriptSuiteRunner", "case_end", 
+                   out.contract_pass ? "passed" : "failed", 
+                   "case_id=" + suiteCase.case_id + 
+                   " headless_ok=" + (out.headless_ok ? "true" : "false") + 
+                   " contract_pass=" + (out.contract_pass ? "true" : "false"));
     }
 
     int CountExecuted(const std::vector<CxScriptSuiteCaseResult>& cases)

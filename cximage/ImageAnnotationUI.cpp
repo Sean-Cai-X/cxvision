@@ -7,6 +7,11 @@
 #include <filesystem>
 #include <sstream>
 
+#include "CxAnnotationToolRuntime.h"
+#include "shapebase.h"
+#include "RectShape.h"
+#include "CircleShape.h"
+
 namespace
 {
 namespace fs = std::filesystem;
@@ -180,14 +185,66 @@ void ViewController::initImageEvidenceLayer()
   m_annotationLayer.LoadManifest(m_annotationManifestPath, m_annotationStatus);
 }
 
+bool ViewController::IsAnnotationCreateModeActive() const
+{
+    return m_imageToolEnabled &&
+           m_imageToolMode != ImageToolMode::PointerPan;
+}
+
+bool ViewController::IsMouseInsideImageCanvas(const ImVec2& p) const
+{
+    return p.x >= m_imageCanvasMin.x &&
+           p.x <= m_imageCanvasMax.x &&
+           p.y >= m_imageCanvasMin.y &&
+           p.y <= m_imageCanvasMax.y;
+}
+
+bool ViewController::HasActiveFindCircleGauge() const
+{
+    return m_manualTest.current_gauge.has_circle_gauge ||
+           m_manualTest.current_gauge.tool == "Findcircle";
+}
+
+bool ViewController::HasEditableFindCircleGauge() const
+{
+    return m_manualTest.current_gauge.has_circle_gauge &&
+           m_manualTest.current_gauge.circle_cx > 0 &&
+           m_manualTest.current_gauge.circle_cy > 0 &&
+           m_manualTest.current_gauge.radius > 0;
+}
+
+const char* ViewController::ImageToolModeName(ImageToolMode mode)
+{
+    switch (mode)
+    {
+    case ImageToolMode::PointerPan: return "Pointer / Pan";
+    case ImageToolMode::PointCreate: return "Point";
+    case ImageToolMode::LineCreate: return "Line";
+    case ImageToolMode::RectCreate: return "Rect";
+    case ImageToolMode::CircleCreate: return "Circle";
+    case ImageToolMode::PolylineCreate: return "Polyline";
+    case ImageToolMode::AutoBoundary: return "Auto Boundary";
+    case ImageToolMode::AttachToScript: return "Attach To Script";
+    default: return "Unknown";
+    }
+}
+
+void ViewController::CancelAnnotationCreate()
+{
+    m_annotationCreateActive = false;
+    m_annotationDragging = false;
+    m_activePolylineElement = -1;
+    m_activePolylinePoints.clear();
+}
+
 ImVec2 ViewController::ImageToScreen(float ix, float iy) const
 {
   if (m_imageViewImage.empty()) return ImVec2(m_annotationImagePosX,
                                                m_annotationImagePosY);
-  return ImVec2(m_annotationImagePosX +
-                  ix * m_annotationImageWidth / m_imageViewImage.cols,
-                m_annotationImagePosY +
-                  iy * m_annotationImageHeight / m_imageViewImage.rows);
+  float sx = m_annotationImageWidth / static_cast<float>(m_imageViewImage.cols);
+  float sy = m_annotationImageHeight / static_cast<float>(m_imageViewImage.rows);
+  return ImVec2(m_annotationImagePosX + ix * sx,
+                m_annotationImagePosY + iy * sy);
 }
 
 ImVec2 ViewController::ScreenToImage(float sx, float sy) const
@@ -201,15 +258,51 @@ ImVec2 ViewController::ScreenToImage(float sx, float sy) const
                   m_annotationImageHeight);
 }
 
+ImVec2 ViewController::ImageToScreenPoint(const OverlayImagePoint& p) const
+{
+  return ImageToScreen(p.x, p.y);
+}
+
+ImVec2 ViewController::ScreenToImagePoint(const ImVec2& p) const
+{
+  return ScreenToImage(p.x, p.y);
+}
+
 void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
                                                 bool canvasActive,
                                                 ImDrawList* drawList)
 {
   const AnnotationToolDefinition* tool = m_annotationLayer.ActiveTool();
   ImGuiIO& io = ImGui::GetIO();
-  const ImVec2 imagePoint = ScreenToImage(io.MousePos.x, io.MousePos.y);
-  const bool insideImage = imagePoint.x >= 0.0f && imagePoint.y >= 0.0f &&
-    imagePoint.x < m_imageViewImage.cols && imagePoint.y < m_imageViewImage.rows;
+
+  ImVec2 mouseScreen = io.MousePos;
+  bool mouseInImageCanvas = false;
+  ImVec2 imagePoint(-1.0f, -1.0f);
+  bool insideImage = false;
+
+  if (!m_imageViewImage.empty())
+  {
+    imagePoint = ScreenToImage(mouseScreen.x, mouseScreen.y);
+    insideImage = imagePoint.x >= 0.0f && imagePoint.y >= 0.0f &&
+      imagePoint.x < m_imageViewImage.cols && imagePoint.y < m_imageViewImage.rows;
+
+    mouseInImageCanvas =
+      mouseScreen.x >= m_annotationImagePosX &&
+      mouseScreen.x <= m_annotationImagePosX + m_annotationImageWidth &&
+      mouseScreen.y >= m_annotationImagePosY &&
+      mouseScreen.y <= m_annotationImagePosY + m_annotationImageHeight;
+
+    m_imageCanvasMin = ImVec2(m_annotationImagePosX, m_annotationImagePosY);
+    m_imageCanvasMax = ImVec2(
+        m_annotationImagePosX + m_annotationImageWidth,
+        m_annotationImagePosY + m_annotationImageHeight);
+  }
+
+  m_debugImageViewHovered = canvasHovered;
+  m_debugMouseInImage = insideImage;
+  m_debugMouseImageX = imagePoint.x;
+  m_debugMouseImageY = imagePoint.y;
+  m_debugAnnotationDragging = m_annotationDragging;
 
   auto finalizeElement = [this](OverlayElement& element)
   {
@@ -225,72 +318,207 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     m_annotationStatus = "created " + element.ref;
   };
 
-  if (tool != nullptr && canvasHovered && insideImage)
+  if (tool != nullptr)
   {
-    if (tool->kind == OverlayKind::Point && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    if (IsAnnotationCreateModeActive() && IsMouseInsideImageCanvas(mouseScreen) && insideImage)
     {
-      OverlayElement& element = m_annotationLayer.Create(
-        tool->kind, tool->role, tool->source, tool->module_hint);
-      element.image_points.push_back({imagePoint.x, imagePoint.y});
-      finalizeElement(element);
-    }
-    else if (tool->kind == OverlayKind::Polyline &&
-             ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-    {
-      if (m_activePolylineElement < 0 ||
-          m_activePolylineElement >= static_cast<int>(m_annotationLayer.Elements().size()))
+      m_blockOccMouseInputThisFrame = true;
+      m_blockImagePanThisFrame = true;
+
+      if (tool->kind == OverlayKind::Point && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
       {
-        OverlayElement& created = m_annotationLayer.Create(
-          tool->kind, tool->role, tool->source, tool->module_hint);
-        m_activePolylineElement = m_annotationLayer.SelectedIndex();
-        created.image_points.push_back({imagePoint.x, imagePoint.y});
-        finalizeElement(created);
-      }
-      else
-      {
-        OverlayElement& element = m_annotationLayer.Elements()[m_activePolylineElement];
-        element.image_points.push_back({imagePoint.x, imagePoint.y});
-        m_annotationLayer.Select(m_activePolylineElement);
-        finalizeElement(element);
-      }
-    }
-    else if ((tool->kind == OverlayKind::Line || tool->kind == OverlayKind::Rect ||
-              tool->kind == OverlayKind::Circle) && tool->action != "connect_refs")
-    {
-      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-      {
-        m_annotationDragging = true;
-        m_annotationDragKind = tool->kind;
-        m_annotationDragStart = {imagePoint.x, imagePoint.y};
-      }
-      if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-      {
-        OverlayElement& element = m_annotationLayer.Create(
-          tool->kind, tool->role, tool->source, tool->module_hint);
-        element.image_points.push_back(m_annotationDragStart);
-        if (tool->kind == OverlayKind::Circle)
+        const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+        if (toolSpec)
         {
-          const float dx = imagePoint.x - m_annotationDragStart.x;
-          const float dy = imagePoint.y - m_annotationDragStart.y;
-          element.radius = std::sqrt(dx * dx + dy * dy);
+          std::vector<CxShapePoint> pts = {{imagePoint.x, imagePoint.y}};
+          auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+          if (shape)
+          {
+            m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+            m_annotationStatus = "created point";
+          }
         }
-        else element.image_points.push_back({imagePoint.x, imagePoint.y});
-        m_annotationDragging = false;
+      }
+      else if (tool->kind == OverlayKind::Polyline)
+      {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_activePolylinePoints.clear();
+          return;
+        }
+
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+            ImGui::IsKeyPressed(ImGuiKey_Enter))
+        {
+          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+          if (toolSpec && !m_activePolylinePoints.empty())
+          {
+            auto shape = CreateInitialShapeForTool(*toolSpec, m_activePolylinePoints);
+            if (shape)
+            {
+              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+              m_annotationStatus = "created polyline";
+            }
+          }
+          m_activePolylinePoints.clear();
+          return;
+        }
+
+        if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          return;
+        }
+
+        m_activePolylinePoints.push_back({imagePoint.x, imagePoint.y});
+        m_annotationStatus = "polyline point added";
+      }
+      else if (tool->kind == OverlayKind::Line && tool->action != "connect_refs")
+      {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_annotationDragging = false;
+          return;
+        }
+
+        if (!m_annotationDragging)
+        {
+          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+          {
+            m_annotationDragging = true;
+            m_annotationDragKind = OverlayKind::Line;
+            m_annotationDragStart = {imagePoint.x, imagePoint.y};
+            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+          }
+          return;
+        }
+
+        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+          if (toolSpec)
+          {
+            std::vector<CxShapePoint> pts = {
+                {m_annotationDragStart.x, m_annotationDragStart.y},
+                {m_annotationDragEnd.x, m_annotationDragEnd.y}
+            };
+            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+            if (shape)
+            {
+              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+              m_annotationStatus = "created line";
+            }
+          }
+          m_annotationDragging = false;
+        }
+      }
+      else if (tool->kind == OverlayKind::Rect && tool->action != "connect_refs")
+      {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_annotationDragging = false;
+          return;
+        }
+
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          m_annotationDragging = true;
+          m_annotationDragKind = OverlayKind::Rect;
+          m_annotationDragStart = {imagePoint.x, imagePoint.y};
+          m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+          return;
+        }
+
+        if (m_annotationDragging)
+        {
+          m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+        }
+
+        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+          if (toolSpec)
+          {
+            std::vector<CxShapePoint> pts = {
+                {m_annotationDragStart.x, m_annotationDragStart.y},
+                {m_annotationDragEnd.x, m_annotationDragEnd.y}
+            };
+            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+            if (shape)
+            {
+              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+              m_annotationStatus = "created rect";
+            }
+          }
+          m_annotationDragging = false;
+        }
+      }
+      else if (tool->kind == OverlayKind::Circle && tool->action != "connect_refs")
+      {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_annotationDragging = false;
+          return;
+        }
+
+        if (!m_annotationDragging)
+        {
+          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+          {
+            m_annotationDragging = true;
+            m_annotationDragKind = OverlayKind::Circle;
+            m_annotationDragStart = {imagePoint.x, imagePoint.y};
+            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+          }
+          return;
+        }
+
+        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
+
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
+          if (toolSpec)
+          {
+            std::vector<CxShapePoint> pts = {
+                {m_annotationDragStart.x, m_annotationDragStart.y},
+                {m_annotationDragEnd.x, m_annotationDragEnd.y}
+            };
+            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+            if (shape)
+            {
+              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+              m_annotationStatus = "created circle";
+            }
+          }
+          m_annotationDragging = false;
+        }
+      }
+      else if (tool->kind == OverlayKind::Polyline && tool->action == "auto_segmentation")
+      {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+          OverlayElement& element = m_annotationLayer.Create(
+            OverlayKind::AutoBoundaryRequest, tool->role, tool->source, tool->module_hint);
+          element.image_points.push_back({imagePoint.x, imagePoint.y});
+          element.status = "pending_binding";
+          finalizeElement(element);
+        }
+      }
+      else if (tool->action == "connect_refs" &&
+               ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+               m_annotationLayer.Elements().size() >= 2)
+      {
+        const std::size_t count = m_annotationLayer.Elements().size();
+        const OverlayImagePoint first = ElementCenter(m_annotationLayer.Elements()[count - 2]);
+        const OverlayImagePoint second = ElementCenter(m_annotationLayer.Elements()[count - 1]);
+        OverlayElement& element = m_annotationLayer.Create(
+          OverlayKind::Line, tool->role, tool->source, tool->module_hint);
+        element.image_points.push_back(first);
+        element.image_points.push_back(second);
         finalizeElement(element);
       }
-    }
-    else if (tool->action == "connect_refs" &&
-             ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-             m_annotationLayer.Elements().size() >= 2)
-    {
-      const std::size_t count = m_annotationLayer.Elements().size();
-      const OverlayImagePoint first = ElementCenter(m_annotationLayer.Elements()[count - 2]);
-      const OverlayImagePoint second = ElementCenter(m_annotationLayer.Elements()[count - 1]);
-      OverlayElement& element = m_annotationLayer.Create(
-        OverlayKind::Line, tool->role, tool->source, tool->module_hint);
-      element.image_points.push_back(first);
-      element.image_points.push_back(second);
-      finalizeElement(element);
     }
   }
   if (!canvasActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -300,7 +528,8 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
   {
     const ImVec2 start = ImageToScreen(m_annotationDragStart.x,
                                        m_annotationDragStart.y);
-    const ImVec2 end = ImageToScreen(imagePoint.x, imagePoint.y);
+    const ImVec2 end = ImageToScreen(m_annotationDragEnd.x,
+                                     m_annotationDragEnd.y);
     const ImU32 previewColor = IM_COL32(80, 220, 255, 220);
     if (m_annotationDragKind == OverlayKind::Line)
       drawList->AddLine(start, end, previewColor, 2.0f);
@@ -352,14 +581,16 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
       else
         drawList->AddLine(first, second, color, thickness);
     }
-    else if (element.kind == OverlayKind::Circle)
+    else if (element.kind == OverlayKind::Circle && element.image_points.size() >= 2)
     {
       const ImVec2 center = ImageToScreen(element.image_points[0].x,
                                           element.image_points[0].y);
-      const float scaleX = m_annotationImageWidth / m_imageViewImage.cols;
-      const float scaleY = m_annotationImageHeight / m_imageViewImage.rows;
-      drawList->AddCircle(center, element.radius * (scaleX + scaleY) * 0.5f,
-                          color, 48, thickness);
+      const ImVec2 radiusPoint = ImageToScreen(element.image_points[1].x,
+                                               element.image_points[1].y);
+      const float dx = radiusPoint.x - center.x;
+      const float dy = radiusPoint.y - center.y;
+      const float radiusScreen = std::sqrt(dx * dx + dy * dy);
+      drawList->AddCircle(center, radiusScreen, color, 96, thickness);
     }
     else if (element.kind == OverlayKind::Polyline)
     {
@@ -370,6 +601,26 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
         const ImVec2 second = ImageToScreen(element.image_points[i].x,
                                             element.image_points[i].y);
         drawList->AddLine(first, second, color, thickness);
+      }
+    }
+    else if (element.kind == OverlayKind::AutoBoundaryRequest && !element.image_points.empty())
+    {
+      const ImVec2 p = ImageToScreen(element.image_points[0].x,
+                                     element.image_points[0].y);
+      drawList->AddCircleFilled(p, 6.0f, IM_COL32(255, 160, 40, 255));
+      drawList->AddCircle(p, 9.0f, IM_COL32(255, 255, 255, 255), 24, 2.0f);
+      drawList->AddText(ImVec2(p.x + 10.0f, p.y - 8.0f),
+                       IM_COL32(255, 220, 80, 255), "EdgeSam");
+    }
+    else if (element.kind == OverlayKind::BoundaryPolyline)
+    {
+      for (std::size_t i = 1; i < element.image_points.size(); ++i)
+      {
+        const ImVec2 first = ImageToScreen(element.image_points[i - 1].x,
+                                           element.image_points[i - 1].y);
+        const ImVec2 second = ImageToScreen(element.image_points[i].x,
+                                            element.image_points[i].y);
+        drawList->AddLine(first, second, IM_COL32(80, 255, 200, 255), thickness);
       }
     }
     const ImVec2 sourceLabel = ImageToScreen(element.image_points[0].x,
@@ -611,8 +862,7 @@ void ViewController::drawImageEvidencePanels()
   ImGui::SameLine();
   ImGui::TextWrapped("%s", m_annotationStatus.c_str());
   ImGui::TextDisabled(
-    "CxScript direct logic: AnnotationTool declaration -> field assignments -> "
-    "register_annotation_tool(object)");
+    "CxScript direct logic: CxAnnotationTool_* declarations -> CxAnnotationToolRuntime");
   ImGui::TextDisabled(
     "cximage=pending_binding  torch=pending_binding  "
     "mlpack=pending_binding  ensmallen=pending_binding");
@@ -620,67 +870,113 @@ void ViewController::drawImageEvidencePanels()
   ImGui::Separator();
   ImGui::Columns(2, "annotation_columns", true);
   ImGui::Text("Tool Palette");
-  auto selectTool = [this](OverlayKind kind)
+
+  auto drawAnnotationToolButton = [this](const char* label, ImageToolMode mode)
   {
-    for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
+    ImGui::PushID(label);
+
+    const bool active = m_imageToolEnabled && m_imageToolMode == mode;
+
+    if (active)
     {
-      const AnnotationToolDefinition& candidate = m_annotationLayer.Tools()[i];
-      if (candidate.kind == kind && candidate.action != "connect_refs")
-      {
-        m_annotationLayer.SetActiveToolIndex(i);
-        m_attachToScriptMode = false;
-        if (kind == OverlayKind::Point) m_imageToolMode = ImageToolMode::PointCreate;
-        else if (kind == OverlayKind::Line) m_imageToolMode = ImageToolMode::LineCreate;
-        else if (kind == OverlayKind::Rect) m_imageToolMode = ImageToolMode::RectCreate;
-        else if (kind == OverlayKind::Circle) m_imageToolMode = ImageToolMode::CircleCreate;
-        else m_imageToolMode = ImageToolMode::PolylineCreate;
-        if (kind != OverlayKind::Polyline) m_activePolylineElement = -1;
-        return;
-      }
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.85f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.95f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.45f, 0.75f, 1.0f));
     }
+
+    if (ImGui::Button(label, ImVec2(-1.0f, 28.0f)))
+    {
+        if (mode == ImageToolMode::PointerPan)
+        {
+            m_imageToolEnabled = false;
+            m_imageToolMode = ImageToolMode::PointerPan;
+            CancelAnnotationCreate();
+            m_annotationLayer.SetActiveToolIndex(-1);
+            m_annotationStatus = "annotation tool disabled";
+        }
+        else if (active)
+        {
+            m_imageToolEnabled = false;
+            m_imageToolMode = ImageToolMode::PointerPan;
+            CancelAnnotationCreate();
+            m_annotationLayer.SetActiveToolIndex(-1);
+            m_annotationStatus = "annotation tool disabled";
+        }
+        else
+        {
+            m_imageToolEnabled = true;
+            m_imageToolMode = mode;
+            CancelAnnotationCreate();
+            m_annotationStatus = std::string(label) + " enabled";
+
+            for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
+            {
+                const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
+                if (!tool.manual_visible) continue;
+                OverlayKind kind = OverlayKind::Point;
+                if (mode == ImageToolMode::PointCreate) kind = OverlayKind::Point;
+                else if (mode == ImageToolMode::LineCreate) kind = OverlayKind::Line;
+                else if (mode == ImageToolMode::RectCreate) kind = OverlayKind::Rect;
+                else if (mode == ImageToolMode::CircleCreate) kind = OverlayKind::Circle;
+                else if (mode == ImageToolMode::PolylineCreate) kind = OverlayKind::Polyline;
+                else if (mode == ImageToolMode::AutoBoundary) kind = OverlayKind::Polyline;
+
+                if (tool.kind == kind &&
+                    (mode == ImageToolMode::AutoBoundary ? tool.action == "auto_segmentation" : tool.action != "connect_refs"))
+                {
+                    m_annotationLayer.SetActiveToolIndex(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (active)
+        ImGui::PopStyleColor(3);
+
+    ImGui::PopID();
   };
-  const bool pointerMode = m_annotationLayer.ActiveToolIndex() < 0 &&
-                           !m_attachToScriptMode;
-  if (ImGui::Selectable("Pointer / Pan", pointerMode))
+
+  ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1),
+                      "Annotation Tool Palette V2 ACTIVE");
+  ImGui::TextUnformatted("Annotation Tools");
+  drawAnnotationToolButton("Pointer / Pan", ImageToolMode::PointerPan);
+  drawAnnotationToolButton("Point", ImageToolMode::PointCreate);
+  drawAnnotationToolButton("Line", ImageToolMode::LineCreate);
+  drawAnnotationToolButton("Rect", ImageToolMode::RectCreate);
+  drawAnnotationToolButton("Circle Annotation", ImageToolMode::CircleCreate);
+  drawAnnotationToolButton("Polyline", ImageToolMode::PolylineCreate);
+  drawAnnotationToolButton("Auto Boundary", ImageToolMode::AutoBoundary);
+
+  ImGui::Separator();
+
+  if (HasEditableFindCircleGauge())
   {
-    m_annotationLayer.SetActiveToolIndex(-1);
-    m_attachToScriptMode = false;
-    m_imageToolMode = ImageToolMode::PointerPan;
-    m_activePolylineElement = -1;
+    ImGui::TextUnformatted("FindCircle Gauge");
+    ImGui::TextDisabled("Move Circle Center");
+    ImGui::TextDisabled("Radius R");
+    ImGui::TextDisabled("Inner Rin");
+    ImGui::TextDisabled("Outer Rout");
   }
-  if (ImGui::Selectable("Point", m_annotationLayer.ActiveTool() != nullptr &&
-                        m_annotationLayer.ActiveTool()->kind == OverlayKind::Point))
-    selectTool(OverlayKind::Point);
-  if (ImGui::Selectable("Line", m_annotationLayer.ActiveTool() != nullptr &&
-                        m_annotationLayer.ActiveTool()->kind == OverlayKind::Line &&
-                        m_annotationLayer.ActiveTool()->action != "connect_refs"))
-    selectTool(OverlayKind::Line);
-  if (ImGui::Selectable("Rect", m_annotationLayer.ActiveTool() != nullptr &&
-                        m_annotationLayer.ActiveTool()->kind == OverlayKind::Rect))
-    selectTool(OverlayKind::Rect);
-  if (ImGui::Selectable("Circle", m_annotationLayer.ActiveTool() != nullptr &&
-                        m_annotationLayer.ActiveTool()->kind == OverlayKind::Circle))
-    selectTool(OverlayKind::Circle);
-  if (ImGui::Selectable("Polyline", m_annotationLayer.ActiveTool() != nullptr &&
-                        m_annotationLayer.ActiveTool()->kind == OverlayKind::Polyline))
-    selectTool(OverlayKind::Polyline);
-  if (ImGui::Selectable("Attach To Script", m_attachToScriptMode))
+  else
   {
-    m_annotationLayer.SetActiveToolIndex(-1);
-    m_attachToScriptMode = true;
-    m_imageToolMode = ImageToolMode::AttachToScript;
-    m_activePolylineElement = -1;
+    ImGui::TextDisabled("FindCircle Gauge: not available");
   }
+
+  ImGui::Separator();
+  ImGui::Text("Tool enabled: %s", m_imageToolEnabled ? "YES" : "NO");
+  ImGui::Text("Active tool: %s", ImageToolModeName(m_imageToolMode));
   ImGui::Separator();
   ImGui::TextDisabled("Manifest tool definitions");
   for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
   {
     const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
+    if (!tool.manual_visible) continue;
     ImGui::PushID(i);
     if (ImGui::Selectable(tool.name.c_str(), m_annotationLayer.ActiveToolIndex() == i))
     {
       m_annotationLayer.SetActiveToolIndex(i);
-      if (tool.kind != OverlayKind::Polyline) m_activePolylineElement = -1;
+      if (tool.kind != OverlayKind::Polyline) { m_activePolylineElement = -1; m_activePolylinePoints.clear(); }
     }
     ImGui::TextWrapped("%s | %s | %s", ImageAnnotationLayer::KindName(tool.kind),
                        tool.role.c_str(), tool.action.c_str());
@@ -688,123 +984,173 @@ void ViewController::drawImageEvidencePanels()
                        tool.module_hint.c_str());
     ImGui::PopID();
   }
-  if (ImGui::Button("Finish Polyline")) m_activePolylineElement = -1;
+  if (ImGui::Button("Finish Polyline")) { m_activePolylineElement = -1; m_activePolylinePoints.clear(); }
   if (ImGui::IsKeyPressed(ImGuiKey_Escape))
   {
-    m_activePolylineElement = -1;
-    m_annotationDragging = false;
+    m_imageToolEnabled = false;
+    m_imageToolMode = ImageToolMode::PointerPan;
+    CancelAnnotationCreate();
+    m_annotationLayer.SetActiveToolIndex(-1);
+    m_annotationStatus = "annotation tool disabled (ESC)";
   }
 
   ImGui::NextColumn();
-  ImGui::Text("Element List");
-  for (int i = 0; i < static_cast<int>(m_annotationLayer.Elements().size()); ++i)
+  ImGui::Text("Element List (ShapeElements)");
+  for (int i = 0; i < static_cast<int>(m_annotationLayer.ShapeElements().size()); ++i)
   {
-    OverlayElement& element = m_annotationLayer.Elements()[i];
-    ImGui::PushID(1000 + i);
+    CxShapeElement& element = m_annotationLayer.ShapeElements()[i];
+    ImGui::PushID(2000 + i);
     if (ImGui::Selectable(element.ref.c_str(), element.selected))
     {
-      m_annotationLayer.Select(i);
-      m_scriptResult.overlay_ref = "overlay:" + element.ref;
-      m_scriptResult.evidence_ref = element.evidence_ref;
-      m_scriptResult.result_ref = element.result_ref;
-      m_scriptResult.issue_entry_ref = element.issue_entry_ref;
+      m_annotationLayer.SelectShape(i);
+      m_scriptResult.overlay_ref = "shape:" + element.ref;
     }
     ImGui::SameLine();
     ImGui::Checkbox("visible", &element.visible);
-    ImGui::TextWrapped("%s | role=%s | source=%s | modules=%s",
-                       ImageAnnotationLayer::KindName(element.kind),
-                       element.role.c_str(), element.source.c_str(),
-                       element.module_hint.c_str());
+    char detailBuf[512] = "";
+    snprintf(detailBuf, sizeof(detailBuf),
+             "id=%d | tool=%s | role=%s | owner=%s:%s | editable=%d | result=%d | stale=%d",
+             element.id,
+             element.tool_id.c_str(),
+             element.semantic_role.c_str(),
+             element.owner_type.c_str(),
+             element.owner_ref.c_str(),
+             element.editable ? 1 : 0,
+             element.result_element ? 1 : 0,
+             element.stale ? 1 : 0);
+    ImGui::TextWrapped("%s", detailBuf);
     ImGui::PopID();
   }
+
+  ImGui::Separator();
+  static bool showLegacyOverlayElements = false;
+  if (ImGui::CollapsingHeader("Legacy Overlay Elements Debug", &showLegacyOverlayElements))
+  {
+    for (int i = 0; i < static_cast<int>(m_annotationLayer.Elements().size()); ++i)
+    {
+      OverlayElement& element = m_annotationLayer.Elements()[i];
+      ImGui::PushID(1000 + i);
+      if (ImGui::Selectable(element.ref.c_str(), element.selected))
+      {
+        m_annotationLayer.Select(i);
+        m_scriptResult.overlay_ref = "overlay:" + element.ref;
+        m_scriptResult.evidence_ref = element.evidence_ref;
+        m_scriptResult.result_ref = element.result_ref;
+        m_scriptResult.issue_entry_ref = element.issue_entry_ref;
+      }
+      ImGui::SameLine();
+      ImGui::Checkbox("visible", &element.visible);
+      const char* kindName = ImageAnnotationLayer::KindName(element.kind);
+      ImGui::TextWrapped("%s id=%d | status=%s | role=%s",
+                         kindName, element.id,
+                         element.status.c_str(), element.role.c_str());
+      ImGui::PopID();
+    }
+  }
+
   ImGui::Columns(1);
 
   ImGui::Separator();
   ImGui::Text("Element Inspector");
-  OverlayElement* selected = m_annotationLayer.Selected();
-  if (selected == nullptr)
+  CxShapeElement* selectedShape = m_annotationLayer.SelectedShape();
+  if (selectedShape != nullptr)
   {
-    ImGui::TextDisabled("No element selected");
+    ImGui::Text("ref: %s", selectedShape->ref.c_str());
+    ImGui::Text("tool_id: %s", selectedShape->tool_id.c_str());
+    ImGui::Text("semantic_role: %s", selectedShape->semantic_role.c_str());
+    ImGui::Text("owner_type: %s", selectedShape->owner_type.c_str());
+    ImGui::Text("owner_ref: %s", selectedShape->owner_ref.c_str());
+    ImGui::Text("editable: %s", selectedShape->editable ? "true" : "false");
+    ImGui::Text("result_element: %s", selectedShape->result_element ? "true" : "false");
+    ImGui::Text("stale: %s", selectedShape->stale ? "true" : "false");
   }
   else
   {
-    ImGui::Text("ref: %s", selected->ref.c_str());
-    ImGui::Text("kind: %s", ImageAnnotationLayer::KindName(selected->kind));
-    AnnotationInputText("role", selected->role);
-    ImGui::Text("source: %s", selected->source.c_str());
-    AnnotationInputText("module_hint", selected->module_hint);
-    AnnotationInputText("label", selected->label);
-    selected->generated_statement = GenerateElementStatement(*selected);
-    ImGui::TextWrapped("generated_statement: %s",
-                       selected->generated_statement.empty() ? "(none)" :
-                       selected->generated_statement.c_str());
-    ImGui::TextWrapped("evidence_ref: %s", selected->evidence_ref.c_str());
-    ImGui::TextWrapped("result_ref: %s", selected->result_ref.empty() ? "(none)" : selected->result_ref.c_str());
-    ImGui::TextWrapped("issue_entry_ref: %s", selected->issue_entry_ref.empty() ? "(none)" : selected->issue_entry_ref.c_str());
-    ImGui::Checkbox("visible##inspector", &selected->visible);
-    ImGui::SameLine();
-    ImGui::Checkbox("editable", &selected->editable);
-    if (selected->kind == OverlayKind::Circle && !selected->image_points.empty())
+    OverlayElement* selected = m_annotationLayer.Selected();
+    if (selected == nullptr)
     {
-      ImGui::Text("cx: %.3f", selected->image_points[0].x);
-      ImGui::Text("cy: %.3f", selected->image_points[0].y);
-      ImGui::Text("r: %.3f", selected->radius);
+      ImGui::TextDisabled("No element selected");
     }
-    else ImGui::Text("radius: %.3f", selected->radius);
-    for (std::size_t i = 0; i < selected->image_points.size(); ++i)
-      ImGui::BulletText("point[%d] image=(%.2f, %.2f)", static_cast<int>(i),
-                        selected->image_points[i].x,
-                        selected->image_points[i].y);
-    if (ImGui::Button("Copy Statement"))
-      ImGui::SetClipboardText(selected->generated_statement.c_str());
-    ImGui::SameLine();
-    if (ImGui::Button("Insert Statement To Editor"))
+    else
     {
-      InsertStatement(m_manualTest.editor_text, selected->generated_statement);
-      m_manualTest.editor_dirty = true;
-      m_manualTest.analyzed_text.clear();
-      m_annotationStatus = "statement inserted into Script Editor";
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Replace Current Line"))
-    {
-      ReplaceEditorLine(m_manualTest.editor_text, m_manualTest.current_line,
-                        selected->generated_statement);
-      m_manualTest.editor_dirty = true;
-      m_manualTest.analyzed_text.clear();
-      m_annotationStatus = "current script line replaced";
-    }
-    if (selected->kind == OverlayKind::Circle)
-    {
-      if (ImGui::Button("Apply To Script"))
+      ImGui::Text("ref: %s", selected->ref.c_str());
+      ImGui::Text("kind: %s", ImageAnnotationLayer::KindName(selected->kind));
+      AnnotationInputText("role", selected->role);
+      ImGui::Text("source: %s", selected->source.c_str());
+      AnnotationInputText("module_hint", selected->module_hint);
+      AnnotationInputText("label", selected->label);
+      selected->generated_statement = GenerateElementStatement(*selected);
+      ImGui::TextWrapped("generated_statement: %s",
+                         selected->generated_statement.empty() ? "(none)" :
+                         selected->generated_statement.c_str());
+      ImGui::TextWrapped("evidence_ref: %s", selected->evidence_ref.c_str());
+      ImGui::TextWrapped("result_ref: %s", selected->result_ref.empty() ? "(none)" : selected->result_ref.c_str());
+      ImGui::TextWrapped("issue_entry_ref: %s", selected->issue_entry_ref.empty() ? "(none)" : selected->issue_entry_ref.c_str());
+      ImGui::Checkbox("visible##inspector", &selected->visible);
+      ImGui::SameLine();
+      ImGui::Checkbox("editable", &selected->editable);
+      if (selected->kind == OverlayKind::Circle && !selected->image_points.empty())
       {
-        const bool replace = !m_manualTest.line_views.empty() &&
-          m_manualTest.current_line >= 0 &&
-          m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
-          m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)].method ==
-            "setcircle";
-        if (replace)
-          ReplaceEditorLine(m_manualTest.editor_text, m_manualTest.current_line,
-                            selected->generated_statement);
-        else InsertStatement(m_manualTest.editor_text, selected->generated_statement);
+        ImGui::Text("cx: %.3f", selected->image_points[0].x);
+        ImGui::Text("cy: %.3f", selected->image_points[0].y);
+        ImGui::Text("r: %.3f", selected->radius);
+      }
+      else ImGui::Text("radius: %.3f", selected->radius);
+      for (std::size_t i = 0; i < selected->image_points.size(); ++i)
+        ImGui::BulletText("point[%d] image=(%.2f, %.2f)", static_cast<int>(i),
+                          selected->image_points[i].x,
+                          selected->image_points[i].y);
+      if (ImGui::Button("Copy Statement"))
+        ImGui::SetClipboardText(selected->generated_statement.c_str());
+      ImGui::SameLine();
+      if (ImGui::Button("Insert Statement To Editor"))
+      {
+        InsertStatement(m_manualTest.editor_text, selected->generated_statement);
         m_manualTest.editor_dirty = true;
         m_manualTest.analyzed_text.clear();
-        m_annotationStatus = "manual_element applied to script only";
+        m_annotationStatus = "statement inserted into Script Editor";
       }
       ImGui::SameLine();
-      if (ImGui::Button("Apply To Parser"))
+      if (ImGui::Button("Replace Current Line"))
       {
-        if (!QueryParserObjectExists("Findcircle", "afindcircle0"))
-          m_parserDebugBridge.ApplyStatement("Findcircle afindcircle0;");
-        const bool applied = m_parserDebugBridge.ApplyStatement(
-          selected->generated_statement);
-        m_scriptResult.status = applied ? "PENDING" : "BLOCKED";
-        m_scriptResult.reason = applied ?
-          "manual_element applied to parser; runtime objects refreshed" :
-          "parser rejected manual circle statement";
-        RefreshRuntimeObjectTable("setcircle",
-          applied ? "runtime_executed" : "BLOCKED");
-        m_annotationStatus = m_scriptResult.reason;
+        ReplaceEditorLine(m_manualTest.editor_text, m_manualTest.current_line,
+                          selected->generated_statement);
+        m_manualTest.editor_dirty = true;
+        m_manualTest.analyzed_text.clear();
+        m_annotationStatus = "current script line replaced";
+      }
+      if (selected->kind == OverlayKind::Circle)
+      {
+        if (ImGui::Button("Apply To Script"))
+        {
+          const bool replace = !m_manualTest.line_views.empty() &&
+            m_manualTest.current_line >= 0 &&
+            m_manualTest.current_line < static_cast<int>(m_manualTest.line_views.size()) &&
+            m_manualTest.line_views[static_cast<std::size_t>(m_manualTest.current_line)].method ==
+              "setcircle";
+          if (replace)
+            ReplaceEditorLine(m_manualTest.editor_text, m_manualTest.current_line,
+                              selected->generated_statement);
+          else InsertStatement(m_manualTest.editor_text, selected->generated_statement);
+          m_manualTest.editor_dirty = true;
+          m_manualTest.analyzed_text.clear();
+          m_annotationStatus = "manual_element applied to script only";
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Apply To Parser"))
+        {
+          if (!QueryParserObjectExists("Findcircle", "afindcircle0"))
+            m_parserDebugBridge.ApplyStatement("Findcircle afindcircle0;");
+          const bool applied = m_parserDebugBridge.ApplyStatement(
+            selected->generated_statement);
+          m_scriptResult.status = applied ? "PENDING" : "BLOCKED";
+          m_scriptResult.reason = applied ?
+            "manual_element applied to parser; runtime objects refreshed" :
+            "parser rejected manual circle statement";
+          RefreshRuntimeObjectTable("setcircle",
+            applied ? "runtime_executed" : "BLOCKED");
+          m_annotationStatus = m_scriptResult.reason;
+        }
       }
     }
   }
@@ -812,9 +1158,13 @@ void ViewController::drawImageEvidencePanels()
   ImGui::Separator();
   AnnotationInputText("Session path", m_annotationSessionPath);
   if (ImGui::Button("Save Elements"))
-    m_annotationLayer.SaveElements(m_annotationSessionPath,
-                                   m_scriptResult.image_ref,
-                                   m_annotationStatus);
+  {
+      m_annotationStatus =
+          "saving elements count=" + std::to_string(m_annotationLayer.Elements().size());
+      m_annotationLayer.SaveElements(m_annotationSessionPath,
+                                     m_scriptResult.image_ref,
+                                     m_annotationStatus);
+  }
   ImGui::SameLine();
   if (ImGui::Button("Load Elements"))
   {

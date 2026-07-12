@@ -2,6 +2,9 @@
 #include "pch.h"
 
 #include "Findcircle.h"
+#include "CircleShape.h"
+#include "PolylineShape.h"
+#include "ImageAnnotationLayer.h"
 #include "../cxgeom/include/CxSetCircleBuild.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
@@ -1316,6 +1319,11 @@ PointsShape& Findcircle::getresultpoints()
 {
     return m_measurepoints;
 }
+
+const PointsShape& Findcircle::getresultpoints() const
+{
+    return m_measurepoints;
+}
  double distance(const gp_Pnt& a, const gp_Pnt& b)
 {
     const double dx = a.X() - b.X();
@@ -1537,6 +1545,19 @@ int Findcircle::getvalidpointcount()
 }
 
 bool Findcircle::hasfitresult()
+{
+    return m_measurepoints.size() >= 3 &&
+           m_dradius > 0.0 &&
+           std::isfinite(m_dresultcentx) &&
+           std::isfinite(m_dresultcenty) &&
+           std::isfinite(m_dradius) &&
+           std::isfinite(m_avgdist);
+}
+
+double Findcircle::getresultcentx() const { return m_dresultcentx; }
+double Findcircle::getresultcenty() const { return m_dresultcenty; }
+double Findcircle::getradius() const { return m_dradius; }
+bool Findcircle::hasfitresult() const
 {
     return m_measurepoints.size() >= 3 &&
            m_dradius > 0.0 &&
@@ -1916,5 +1937,102 @@ void Findcircle::BuildCircleMeasureGeometryCore(
             ++iadd;
             i += igapadd;
         }
+    }
+}
+
+void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+{
+    const int cx = getcirclecentx();
+    const int cy = getcirclecenty();
+    const int px = getcirclepax();
+    const int py = getcirclepay();
+
+    const double roi_radius = std::hypot(
+        static_cast<double>(px - cx),
+        static_cast<double>(py - cy));
+
+    auto roi_circle = std::make_unique<CircleShape>(
+        static_cast<double>(cx),
+        static_cast<double>(cy),
+        roi_radius);
+    sink.UpsertShape(
+        owner_ref + ".roi_circle",
+        "Findcircle",
+        owner_ref,
+        "setcircle",
+        "roi",
+        true,
+        false,
+        std::move(roi_circle));
+
+    const int linegap = m_iSelectPointGap;
+    const double outer_radius = roi_radius + static_cast<double>(linegap);
+    auto outer_scan = std::make_unique<CircleShape>(
+        static_cast<double>(cx),
+        static_cast<double>(cy),
+        outer_radius);
+    sink.UpsertShape(
+        owner_ref + ".outer_scan_circle",
+        "Findcircle",
+        owner_ref,
+        "",
+        "scan",
+        false,
+        false,
+        std::move(outer_scan));
+
+    const FindcircleMeasureGeometryDebug& debug = lastmeasuregeometrydebug();
+    if (debug.has_inner_gap && debug.inner_gap > 0)
+    {
+        const double inner_radius = std::max(1.0, roi_radius - static_cast<double>(debug.inner_gap));
+        auto inner_scan = std::make_unique<CircleShape>(
+            static_cast<double>(cx),
+            static_cast<double>(cy),
+            inner_radius);
+        sink.UpsertShape(
+            owner_ref + ".inner_scan_circle",
+            "Findcircle",
+            owner_ref,
+            "",
+            "scan",
+            false,
+            false,
+            std::move(inner_scan));
+    }
+
+    const PointsShape& measure_points = getresultpoints();
+    if (measure_points.size() > 0)
+    {
+        auto pts_shape = std::make_unique<PointsShape>();
+        for (int i = 0; i < measure_points.size(); ++i)
+        {
+            pts_shape->addpoint(measure_points.getx(i), measure_points.gety(i));
+        }
+        sink.UpsertShape(
+            owner_ref + ".measure_points",
+            "Findcircle",
+            owner_ref,
+            "",
+            "measure_points",
+            false,
+            true,
+            std::move(pts_shape));
+    }
+
+    if (hasfitresult())
+    {
+        auto fit_circle = std::make_unique<CircleShape>(
+            getresultcentx(),
+            getresultcenty(),
+            getradius());
+        sink.UpsertShape(
+            owner_ref + ".fit_circle",
+            "Findcircle",
+            owner_ref,
+            "",
+            "result",
+            false,
+            true,
+            std::move(fit_circle));
     }
 }

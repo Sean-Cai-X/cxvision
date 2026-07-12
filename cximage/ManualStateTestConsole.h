@@ -500,6 +500,27 @@ struct ManualParamRegressionState
   std::string last_export_reason;
   std::vector<std::string> exported_files;
 };
+
+struct EvidenceChainThumb
+{
+    std::string case_id;
+    std::string script_id;
+    std::string script_path;
+    std::string image_id;
+    std::string image_path;
+    std::string target_id;
+    std::string tool;
+
+    std::string parameter_summary;
+    std::string status;
+    std::string reason;
+
+    unsigned int texture_id = 0;
+    int texture_w = 0;
+    int texture_h = 0;
+    bool texture_loaded = false;
+};
+
 struct ManualEvidenceItem
 {
     std::string case_id;
@@ -519,6 +540,41 @@ struct ManualEvidenceItem
     std::string image_path;
     std::string replay_package_path;
     std::string gauge_annotation_path;
+};
+
+struct ManifestImageItem
+{
+    std::string image_id;
+    std::string image_path;
+    std::string level;
+    std::string status;
+};
+
+struct ScriptEvidenceThumb
+{
+    std::string case_id;
+    std::string script_id;
+    std::string script_path;
+    std::string image_id;
+    std::string image_path;
+    std::string target_id;
+    std::string tool;
+    std::string parameter_summary;
+    std::string status;
+    std::string reason;
+    unsigned int texture_id = 0;
+    int texture_w = 0;
+    int texture_h = 0;
+    bool texture_loaded = false;
+    bool texture_failed = false;
+};
+
+struct ScriptEvidenceGroup
+{
+    std::string script_id;
+    std::string script_path;
+    std::string label;
+    std::vector<ScriptEvidenceThumb> thumbs;
 };
 
 struct ManualTestContext
@@ -578,6 +634,10 @@ struct ManualTestContext
   std::string active_script_case_path;
   std::string active_script_case_purpose;
 
+  std::string active_case_id;
+  std::string active_image_id;
+  std::string active_target_id;
+
   std::string runtime_current_status = "PENDING";
   std::string runtime_current_node;
   std::string runtime_current_connect;
@@ -599,6 +659,7 @@ struct ManualTestContext
   GaugeHandleType active_gauge_handle = GaugeHandleType::None;
   float gauge_drag_start_x = 0.0f;
   float gauge_drag_start_y = 0.0f;
+  ManualGaugeState drag_start_gauge;
 
   std::vector<ManualEvidenceItem> evidence_items;
 
@@ -607,6 +668,14 @@ struct ManualTestContext
   bool manifest_loaded = false;
   std::string manifest_load_reason;
   std::vector<std::string> image_manifest_entries;
+  std::vector<ManifestImageItem> image_manifest_items;
+
+  std::vector<EvidenceChainThumb> evidence_chain_thumbs;
+  int selected_evidence_thumb = -1;
+
+  std::vector<ScriptEvidenceGroup> script_evidence_groups;
+  int selected_evidence_group = -1;
+  bool script_evidence_groups_dirty = true;
 };
 
 struct ScriptSnippet
@@ -821,6 +890,49 @@ struct LineGaugeGeometry
     bool valid = false;
 };
 
+struct CircleGaugeGeometry
+{
+    ImVec2 center;
+    float radius;
+    float innerRadius;
+    float outerRadius;
+
+    ImVec2 radiusHandle;
+    ImVec2 innerHandle;
+    ImVec2 outerHandle;
+};
+
+inline CircleGaugeGeometry BuildCircleGaugeGeometry(const ManualGaugeState& gauge)
+{
+    CircleGaugeGeometry geo;
+
+    geo.center = ImVec2((float)gauge.circle_cx, (float)gauge.circle_cy);
+
+    geo.radius = (float)std::max(1, gauge.radius);
+
+    if (gauge.inner_radius > 0)
+        geo.innerRadius = (float)gauge.inner_radius;
+    else
+        geo.innerRadius = std::max(1.0f, geo.radius - (float)std::max(1, gauge.gap));
+
+    if (gauge.outer_radius > 0)
+        geo.outerRadius = (float)gauge.outer_radius;
+    else
+        geo.outerRadius = geo.radius + (float)std::max(1, gauge.gap);
+
+    if (geo.innerRadius >= geo.radius)
+        geo.innerRadius = std::max(1.0f, geo.radius - 5.0f);
+
+    if (geo.outerRadius <= geo.radius)
+        geo.outerRadius = geo.radius + 5.0f;
+
+    geo.radiusHandle = ImVec2(geo.center.x + geo.radius, geo.center.y);
+    geo.innerHandle = ImVec2(geo.center.x + geo.innerRadius, geo.center.y);
+    geo.outerHandle = ImVec2(geo.center.x + geo.outerRadius, geo.center.y);
+
+    return geo;
+}
+
 inline LineGaugeGeometry BuildLineGaugeGeometry(const ManualGaugeState& gauge)
 {
     LineGaugeGeometry g;
@@ -946,12 +1058,28 @@ inline GaugeHandleType HitTestGaugeHandle(
     return GaugeHandleType::None;
 }
 
+inline int ClampCircleRadiusToImage(
+    int cx,
+    int cy,
+    int radius,
+    int imageW,
+    int imageH)
+{
+    const int maxR = std::min(
+        std::min(cx, imageW - 1 - cx),
+        std::min(cy, imageH - 1 - cy));
+    return std::clamp(radius, 1, maxR);
+}
+
 inline void DragGaugeHandle(
     ManualGaugeState& gauge,
+    const ManualGaugeState& drag_start_gauge,
     GaugeHandleType handle,
     const ImVec2& mouse_image_pos,
-    const ImVec2& mouse_delta_image,
-    bool shift_down)
+    const ImVec2& drag_start_mouse_image,
+    bool shift_down,
+    int imageW = 0,
+    int imageH = 0)
 {
     if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
     {
@@ -961,38 +1089,65 @@ inline void DragGaugeHandle(
         switch (handle)
         {
         case GaugeHandleType::CircleCenter:
-            gauge.circle_cx = static_cast<int>(std::round((float)gauge.circle_cx + mouse_delta_image.x));
-            gauge.circle_cy = static_cast<int>(std::round((float)gauge.circle_cy + mouse_delta_image.y));
-            gauge.circle_px = static_cast<int>(std::round((float)gauge.circle_px + mouse_delta_image.x));
-            gauge.circle_py = static_cast<int>(std::round((float)gauge.circle_py + mouse_delta_image.y));
+        {
+            const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
+            const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
+            gauge.circle_cx = drag_start_gauge.circle_cx + static_cast<int>(std::round(dx));
+            gauge.circle_cy = drag_start_gauge.circle_cy + static_cast<int>(std::round(dy));
+            gauge.circle_px = drag_start_gauge.circle_px + static_cast<int>(std::round(dx));
+            gauge.circle_py = drag_start_gauge.circle_py + static_cast<int>(std::round(dy));
             break;
+        }
         case GaugeHandleType::CircleRadius:
         {
-            float dx = mouse_image_pos.x - (float)gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)gauge.circle_cy;
+            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
             int r = std::max(1, static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
+
+            if (imageW > 0 && imageH > 0)
+                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
 
             gauge.radius = r;
             gauge.gap = r;
-            gauge.circle_px = static_cast<int>(std::round(mouse_image_pos.x));
-            gauge.circle_py = static_cast<int>(std::round(mouse_image_pos.y));
+            gauge.circle_px = drag_start_gauge.circle_cx + r;
+            gauge.circle_py = drag_start_gauge.circle_cy;
+
+            if (gauge.inner_radius >= gauge.radius)
+                gauge.inner_radius = std::max(1, gauge.radius - std::max(1, gauge.gap));
+
+            if (gauge.outer_radius <= gauge.radius)
+                gauge.outer_radius = gauge.radius + std::max(1, gauge.gap);
+
             break;
         }
         case GaugeHandleType::CircleInner:
         {
-            float dx = mouse_image_pos.x - (float)gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)gauge.circle_cy;
+            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
             int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
-            const int maxInner = std::max(1, gauge.outer_radius - 1);
-            gauge.inner_radius = std::max(1, std::min(maxInner, r));
+
+            if (imageW > 0 && imageH > 0)
+                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
+
+            r = std::min(r, drag_start_gauge.radius - 1);
+            r = std::min(r, drag_start_gauge.outer_radius - 1);
+
+            gauge.inner_radius = std::max(1, r);
             break;
         }
         case GaugeHandleType::CircleOuter:
         {
-            float dx = mouse_image_pos.x - (float)gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)gauge.circle_cy;
+            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
             int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
-            gauge.outer_radius = std::max(gauge.inner_radius + 1, r);
+
+            if (imageW > 0 && imageH > 0)
+                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
+
+            r = std::max(r, drag_start_gauge.radius + 1);
+            r = std::max(r, drag_start_gauge.inner_radius + 1);
+
+            gauge.outer_radius = r;
             break;
         }
         default:
@@ -1004,45 +1159,51 @@ inline void DragGaugeHandle(
         if (!gauge.has_line_gauge)
             return;
 
-        LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
-        if (!geom.valid)
-            return;
-
         switch (handle)
         {
         case GaugeHandleType::LineP0:
             gauge.line_x0 = static_cast<int>(std::round(mouse_image_pos.x));
             gauge.line_y0 = static_cast<int>(std::round(mouse_image_pos.y));
+            gauge.line_x1 = drag_start_gauge.line_x1;
+            gauge.line_y1 = drag_start_gauge.line_y1;
             break;
 
         case GaugeHandleType::LineP1:
+            gauge.line_x0 = drag_start_gauge.line_x0;
+            gauge.line_y0 = drag_start_gauge.line_y0;
             gauge.line_x1 = static_cast<int>(std::round(mouse_image_pos.x));
             gauge.line_y1 = static_cast<int>(std::round(mouse_image_pos.y));
             break;
 
         case GaugeHandleType::LineCenter:
-            if (shift_down)
-            {
-                gauge.line_x0 += static_cast<int>(std::round(mouse_delta_image.x));
-                gauge.line_x1 += static_cast<int>(std::round(mouse_delta_image.x));
-                gauge.line_y0 += static_cast<int>(std::round(mouse_delta_image.y));
-                gauge.line_y1 += static_cast<int>(std::round(mouse_delta_image.y));
-            }
-            else
-            {
-                gauge.line_y0 += static_cast<int>(std::round(mouse_delta_image.y));
-                gauge.line_y1 += static_cast<int>(std::round(mouse_delta_image.y));
-            }
+        {
+            const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
+            const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
+
+            gauge.line_x0 = drag_start_gauge.line_x0 + static_cast<int>(std::round(dx));
+            gauge.line_y0 = drag_start_gauge.line_y0 + static_cast<int>(std::round(dy));
+            gauge.line_x1 = drag_start_gauge.line_x1 + static_cast<int>(std::round(dx));
+            gauge.line_y1 = drag_start_gauge.line_y1 + static_cast<int>(std::round(dy));
             break;
+        }
 
         case GaugeHandleType::LineWidthPlus:
         case GaugeHandleType::LineWidthMinus:
         {
+            LineGaugeGeometry geom = BuildLineGaugeGeometry(drag_start_gauge);
+            if (!geom.valid)
+                return;
+
             const float fromCenterX = mouse_image_pos.x - geom.center.x;
             const float fromCenterY = mouse_image_pos.y - geom.center.y;
             const float signedDistance = fromCenterX * geom.normal.x + fromCenterY * geom.normal.y;
             const int newHalfWidth = std::max(1, static_cast<int>(std::round(std::abs(signedDistance))));
             gauge.tool_half_width = newHalfWidth;
+
+            gauge.line_x0 = drag_start_gauge.line_x0;
+            gauge.line_y0 = drag_start_gauge.line_y0;
+            gauge.line_x1 = drag_start_gauge.line_x1;
+            gauge.line_y1 = drag_start_gauge.line_y1;
             break;
         }
 

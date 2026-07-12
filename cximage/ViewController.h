@@ -19,6 +19,7 @@
 #include "Image.h"
 
 #include "Shape.h"
+#include "shapebase.h"
 #include "Findline.h"
 
 #include "FastMatch.h"
@@ -29,6 +30,7 @@
 #include "ManualStateTestConsole.h"
 #include "ImageAnnotationLayer.h"
 #include "SemanticFlowGraph.h"
+#include "CxShapeInteractionTest.h"
 
 //! OCCT view controller hosting interaction, image tools, and shape display.
 class ViewController : protected AIS_ViewController
@@ -66,6 +68,16 @@ private:
   void HandleSemanticFlowAction(const SemanticFlowAction& action);
   void drawScriptAcceptancePanels();
   void EnsureCxScriptWorkbenchAssetsLoaded();
+  void EnsureEvidenceChainThumbnailsLoaded();
+  void SelectEvidenceChainThumb(int index);
+  void DrawEvidenceChainThumbnailRail();
+  void RebuildScriptEvidenceGroups();
+  std::string ResolveImagePathFromManifest(const std::string& imageId) const;
+  void EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb);
+  void SelectScriptEvidenceThumb(int groupIndex, int thumbIndex);
+  void DrawScriptEvidenceThumbnailRailByGroup();
+  void DrawScriptEditorBlock(ManualTestContext& context);
+  void DrawScriptDebugCompilerBlock(ManualTestContext& context);
   void drawManualStateTestConsole();
   void initManualStateTestConsole();
   void initImageEvidenceLayer();
@@ -76,11 +88,16 @@ private:
   void drawAnnotationToolWindow();
   void drawImageEvidenceOnCanvas(bool canvasHovered, bool canvasActive,
                                  ImDrawList* drawList);
+  void DrawImguiBackgroundBackplate();
+  void ClearMainFramebuffer();
   ImVec2 ImageToScreen(float ix, float iy) const;
   ImVec2 ScreenToImage(float sx, float sy) const;
+  ImVec2 ImageToScreenPoint(const OverlayImagePoint& p) const;
+  ImVec2 ScreenToImagePoint(const ImVec2& p) const;
   ScriptResult RunCxScript(const std::string& theScriptPath);
   void RefreshRuntimeObjectTable(const std::string& lastMethod,
                                  const std::string& runtimeStatus);
+    void SyncRuntimeObjectsToShapeElements();
   bool QueryParserObjectExists(const std::string& type,
                                const std::string& name);
   Image* QueryParserImage(const std::string& name);
@@ -164,25 +181,6 @@ private:
 
 private:
 
-  enum class RuntimeLineDragHandle
-  {
-      None = 0,
-      StartPoint,
-      EndPoint,
-      Body,
-      CenterY,
-      Width
-  };
-
-  RuntimeLineDragHandle m_runtimeLineDragHandle = RuntimeLineDragHandle::None;
-  std::string m_runtimeLineDragObject;
-  float m_runtimeLineDragStartMouseX = 0.0f;
-  float m_runtimeLineDragStartMouseY = 0.0f;
-  float m_runtimeLineDragStartX0 = 0.0f;
-  float m_runtimeLineDragStartY0 = 0.0f;
-  float m_runtimeLineDragStartX1 = 0.0f;
-  float m_runtimeLineDragStartY1 = 0.0f;
-
   Handle(Window) myOcctWindow;
   Handle(V3d_CustomView) m_myView;
   Handle(AIS_InteractiveContext) myContext;
@@ -193,6 +191,43 @@ public:
     std::string focuEleUid;
     int st_Width;
     int st_Height;
+
+    bool IsAnnotationCreateModeActive() const;
+    bool IsMouseInsideImageCanvas(const ImVec2& p) const;
+    static const char* ImageToolModeName(ImageToolMode mode);
+    void CancelAnnotationCreate();
+    void HandleLineAnnotationInput(const ImVec2& mouseImage);
+    void CommitLineAnnotation();
+    void HandleRectAnnotationInput(const ImVec2& mouseImage);
+    void CommitRectAnnotation();
+    void HandleCircleAnnotationInput(const ImVec2& mouseImage);
+    void CommitCircleAnnotation();
+
+    void DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList);
+
+    bool RunShapeInteractionSmoke(
+        const std::string& manifest_path,
+        const std::string& suite_path,
+        const std::string& out_dir,
+        CxShapeInteractionBatchResult& result);
+
+    struct CxImageViewTransform
+    {
+        double canvas_x = 0.0;
+        double canvas_y = 0.0;
+        double image_x = 0.0;
+        double image_y = 0.0;
+        double zoom_x = 1.0;
+        double zoom_y = 1.0;
+
+        CxShapePoint ScreenToImage(double sx, double sy) const;
+        CxShapePoint ImageToScreen(double ix, double iy) const;
+    };
+
+    CxImageViewTransform GetImageViewTransform() const;
+
+    bool HasActiveFindCircleGauge() const;
+    bool HasEditableFindCircleGauge() const;
 
     std::map<std::string, Handle(AIS_InteractiveObject)> occ_Shapes;
     V3d_TypeOfOrientation viewPort;
@@ -234,6 +269,12 @@ protected:
 
     bool m_iattachline = false;
 
+    bool m_imguiMouseCaptureActive = false;
+    bool m_imguiDragActive = false;
+    bool m_imguiDragWasActive = false;
+    int m_forceRepaintFrames = 0;
+    double m_lastUiRepaintTime = 0.0;
+    bool m_debugDrawManualCircle = false;
 
     static bool opencvSW;
     static bool opencvblur;
@@ -372,16 +413,49 @@ private:
     bool m_annotationDragging = false;
     OverlayKind m_annotationDragKind = OverlayKind::Point;
     OverlayImagePoint m_annotationDragStart;
+    OverlayImagePoint m_annotationDragEnd;
+
+    struct AnnotationDraft
+    {
+        bool active = false;
+        OverlayKind kind = OverlayKind::Point;
+        std::vector<ImVec2> points;
+        void clear() { active = false; kind = OverlayKind::Point; points.clear(); }
+    };
+    AnnotationDraft m_annotationDraft;
+
     bool m_annotationHandleDragging = false;
     int m_annotationHandleElement = -1;
     int m_annotationHandleKind = 0; // 1 center-y, 2 line-start/radius, 3 line-end, 4 line-width
     int m_activePolylineElement = -1;
+    std::vector<CxShapePoint> m_activePolylinePoints;
     bool m_attachToScriptMode = false;
     bool m_showSourcePreviewOverlay = false;
     ImageToolMode m_imageToolMode = ImageToolMode::PointerPan;
+    bool m_imageToolEnabled = false;
+    bool m_annotationCreateActive = false;
+    bool m_blockOccMouseInputThisFrame = false;
+    bool m_blockImagePanThisFrame = false;
+    ImVec2 m_imageCanvasMin;
+    ImVec2 m_imageCanvasMax;
+    bool m_forceClearFramebuffer = true;
+    bool m_forceRedrawWhileDraggingUi = true;
+    bool m_enableImguiBackgroundBackplate = false;
+    bool m_enableAnnotationToolV2 = false;
+    bool m_enableFindSegmentationUi = false;
     std::string m_annotationManifestPath;
     std::string m_annotationSessionPath;
     std::string m_annotationStatus;
+    std::string m_annotationDebugHandler = "none";
+    std::string m_annotationDebugCommit = "none";
+    std::string m_annotationDebugReject = "none";
+    int m_annotationDebugCommitCount = 0;
+
+    bool m_debugImageViewHovered = false;
+    bool m_debugMouseInImage = false;
+    float m_debugMouseImageX = 0.0f;
+    float m_debugMouseImageY = 0.0f;
+    bool m_debugAnnotationDragging = false;
 };
 
 #endif // _ViewController_Header

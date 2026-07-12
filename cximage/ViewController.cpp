@@ -959,400 +959,6 @@ void ViewController::drawScriptAcceptancePanels()
             }
         };
 
-        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
-        {
-            if (object.type != "Findline")
-                continue;
-            if (!object.visualizable || object.stale)
-                continue;
-
-            const bool isActiveResultObject =
-                !m_manualTest.current_result_ref.source_object.empty() &&
-                object.name == m_manualTest.current_result_ref.source_object;
-
-            const ImU32 roiColor = isActiveResultObject
-                ? IM_COL32(80, 255, 170, 255)
-                : IM_COL32(80, 255, 170, 160);
-            const ImU32 pointColor = isActiveResultObject
-                ? IM_COL32(255, 80, 80, 255)
-                : IM_COL32(255, 80, 80, 160);
-            const ImU32 fitColor = isActiveResultObject
-                ? IM_COL32(255, 220, 80, 255)
-                : IM_COL32(255, 220, 80, 160);
-            const ImU32 pendingColor = IM_COL32(255, 220, 80, 180);
-
-            if (object.has_line_roi)
-            {
-                const ImVec2 c0 = ImageToScreen(object.line_x0, object.line_y0);
-                const ImVec2 c1 = ImageToScreen(object.line_x1, object.line_y1);
-                drawList->AddLine(c0, c1, roiColor, 2.0f);
-                drawList->AddCircleFilled(c0, 4.5f, roiColor);
-                drawList->AddCircleFilled(c1, 4.5f, roiColor);
-                drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 6.0f), roiColor, object.name.c_str());
-
-                if (object.runtime_state == "fitline_pending_binding" ||
-                    object.runtime_state == "fitline_pending_implementation")
-                {
-                    drawList->AddText(ImVec2(c0.x + 6.0f, c0.y - 14.0f), pendingColor, "fitline pending");
-                }
-
-                const float handleRadius = 7.0f;
-                const ImVec2 mouse = ImGui::GetIO().MousePos;
-
-                auto HitTestCircle = [](const ImVec2& m, const ImVec2& center, float r) -> bool
-                {
-                    const float dx = m.x - center.x;
-                    const float dy = m.y - center.y;
-                    return (dx * dx + dy * dy) <= r * r;
-                };
-
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                {
-                    if (HitTestCircle(mouse, c0, handleRadius))
-                    {
-                        m_runtimeLineDragHandle = RuntimeLineDragHandle::StartPoint;
-                        m_runtimeLineDragObject = object.name;
-                        m_runtimeLineDragStartMouseX = mouse.x;
-                        m_runtimeLineDragStartMouseY = mouse.y;
-                        m_runtimeLineDragStartX0 = object.line_x0;
-                        m_runtimeLineDragStartY0 = object.line_y0;
-                        m_runtimeLineDragStartX1 = object.line_x1;
-                        m_runtimeLineDragStartY1 = object.line_y1;
-                    }
-                    else if (HitTestCircle(mouse, c1, handleRadius))
-                    {
-                        m_runtimeLineDragHandle = RuntimeLineDragHandle::EndPoint;
-                        m_runtimeLineDragObject = object.name;
-                        m_runtimeLineDragStartMouseX = mouse.x;
-                        m_runtimeLineDragStartMouseY = mouse.y;
-                        m_runtimeLineDragStartX0 = object.line_x0;
-                        m_runtimeLineDragStartY0 = object.line_y0;
-                        m_runtimeLineDragStartX1 = object.line_x1;
-                        m_runtimeLineDragStartY1 = object.line_y1;
-                    }
-                }
-            }
-
-            if (object.has_line_scan_box)
-            {
-                const ImVec2 p0 = ImageToScreen(object.line_scan_box_xy[0], object.line_scan_box_xy[1]);
-                const ImVec2 p1 = ImageToScreen(object.line_scan_box_xy[2], object.line_scan_box_xy[3]);
-                const ImVec2 p2 = ImageToScreen(object.line_scan_box_xy[4], object.line_scan_box_xy[5]);
-                const ImVec2 p3 = ImageToScreen(object.line_scan_box_xy[6], object.line_scan_box_xy[7]);
-                drawList->AddLine(p0, p1, roiColor, 1.5f);
-                drawList->AddLine(p1, p2, roiColor, 1.5f);
-                drawList->AddLine(p2, p3, roiColor, 1.5f);
-                drawList->AddLine(p3, p0, roiColor, 1.5f);
-
-                const ImVec2 center(
-                    (p0.x + p1.x + p2.x + p3.x) * 0.25f,
-                    (p0.y + p1.y + p2.y + p3.y) * 0.25f);
-                const ImVec2 m01((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
-                const ImVec2 m12((p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f);
-                const ImVec2 m23((p2.x + p3.x) * 0.5f, (p2.y + p3.y) * 0.5f);
-                const ImVec2 m30((p3.x + p0.x) * 0.5f, (p3.y + p0.y) * 0.5f);
-                const ImU32 cornerHandleColor = IM_COL32(255, 255, 255, 70);
-                const ImU32 edgeHandleColor = IM_COL32(255, 160, 70, 70);
-                const ImU32 centerHandleColor = IM_COL32(70, 170, 255, 70);
-                const float cornerRadius = 5.0f;
-                const float edgeRadius = 5.5f;
-                drawList->AddCircleFilled(center, 6.5f, centerHandleColor);
-                drawList->AddCircle(center, 8.0f, IM_COL32(255, 255, 255, 255), 18, 1.5f);
-                drawList->AddText(ImVec2(center.x + 8.0f, center.y - 12.0f), centerHandleColor, "center");
-
-                const ImVec2 corners[] = {p0, p1, p2, p3};
-                for (const ImVec2& corner : corners)
-                {
-                    drawList->AddCircleFilled(corner, cornerRadius, cornerHandleColor);
-                    drawList->AddCircle(corner, cornerRadius + 1.5f, roiColor, 14, 1.2f);
-                }
-                const ImVec2 edges[] = {m01, m12, m23, m30};
-                for (const ImVec2& edge : edges)
-                {
-                    drawList->AddCircleFilled(edge, edgeRadius, edgeHandleColor);
-                    drawList->AddCircle(edge, edgeRadius + 1.5f, IM_COL32(255, 255, 255, 220), 14, 1.2f);
-                }
-                drawList->AddText(ImVec2(m12.x + 8.0f, m12.y - 12.0f), edgeHandleColor, "width");
-
-                const float handleRadius = 9.0f;
-                const ImVec2 mouse = ImGui::GetIO().MousePos;
-                auto HitTestCircle = [](const ImVec2& m, const ImVec2& c, float r) -> bool
-                {
-                    const float dx = m.x - c.x;
-                    const float dy = m.y - c.y;
-                    return dx * dx + dy * dy <= r * r;
-                };
-
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                {
-                    if (HitTestCircle(mouse, center, handleRadius))
-                    {
-                        m_runtimeLineDragHandle = RuntimeLineDragHandle::CenterY;
-                        m_runtimeLineDragObject = object.name;
-                        m_runtimeLineDragStartMouseX = mouse.x;
-                        m_runtimeLineDragStartMouseY = mouse.y;
-                        m_runtimeLineDragStartX0 = object.line_x0;
-                        m_runtimeLineDragStartY0 = object.line_y0;
-                        m_runtimeLineDragStartX1 = object.line_x1;
-                        m_runtimeLineDragStartY1 = object.line_y1;
-                    }
-                    else if (HitTestCircle(mouse, m12, handleRadius) ||
-                             HitTestCircle(mouse, m30, handleRadius))
-                    {
-                        m_runtimeLineDragHandle = RuntimeLineDragHandle::Width;
-                        m_runtimeLineDragObject = object.name;
-                        m_runtimeLineDragStartMouseX = mouse.x;
-                        m_runtimeLineDragStartMouseY = mouse.y;
-                        m_runtimeLineDragStartX0 = object.line_x0;
-                        m_runtimeLineDragStartY0 = object.line_y0;
-                        m_runtimeLineDragStartX1 = object.line_x1;
-                        m_runtimeLineDragStartY1 = object.line_y1;
-                    }
-                }
-            }
-
-            const ImU32 seekPointColor = IM_COL32(80, 180, 255, 180);
-
-            if (object.has_line_seek_points)
-            {
-                for (std::size_t i = 0;
-                     i + 1 < object.line_seek_points_xy.size();
-                     i += 2)
-                {
-                    const ImVec2 p = ImageToScreen(
-                        object.line_seek_points_xy[i],
-                        object.line_seek_points_xy[i + 1]);
-
-                    drawList->AddCircleFilled(p, 2.0f, seekPointColor);
-                }
-            }
-
-            if (object.has_line_measure_points)
-            {
-                for (std::size_t i = 0; i + 1 < object.line_measure_points_xy.size(); i += 2)
-                {
-                    drawList->AddCircleFilled(
-                        ImageToScreen(object.line_measure_points_xy[i], object.line_measure_points_xy[i + 1]),
-                        3.0f,
-                        pointColor);
-                }
-            }
-            else if (object.has_line_roi)
-            {
-                const ImVec2 c0 = ImageToScreen(object.line_x0, object.line_y0);
-                drawList->AddText(ImVec2(c0.x + 6.0f, c0.y + 22.0f), pendingColor, "measure points: 0");
-            }
-
-            if (object.has_fit_line)
-            {
-                const ImVec2 fit0 = ImageToScreen(object.fit_line_x0, object.fit_line_y0);
-                const ImVec2 fit1 = ImageToScreen(object.fit_line_x1, object.fit_line_y1);
-                drawList->AddLine(fit0, fit1, fitColor, 3.0f);
-                drawList->AddText(ImVec2(fit0.x + 6.0f, fit0.y - 14.0f), fitColor, "fit_line");
-            }
-
-            if (object.line_measure_fallback_used)
-            {
-                const ImVec2 p = ImageToScreen(object.line_x0, object.line_y0);
-                drawList->AddText(
-                    ImVec2(p.x + 6.0f, p.y + 40.0f),
-                    IM_COL32(255, 180, 80, 220),
-                    "fallback measure");
-            }
-            else if (object.line_measure_source == "original_measure_pipeline")
-            {
-                const ImVec2 p = ImageToScreen(object.line_x0, object.line_y0);
-                drawList->AddText(
-                    ImVec2(p.x + 6.0f, p.y + 40.0f),
-                    IM_COL32(80, 255, 170, 220),
-                    "original measure");
-            }
-
-            // Draw runtime gauge handles last so they are not hidden by seek points,
-            // measure points, or fit line overlays. High-contrast colors are used
-            // because production images often have dense white blobs.
-            if (object.has_line_scan_box)
-            {
-                const ImVec2 p0 = ImageToScreen(object.line_scan_box_xy[0], object.line_scan_box_xy[1]);
-                const ImVec2 p1 = ImageToScreen(object.line_scan_box_xy[2], object.line_scan_box_xy[3]);
-                const ImVec2 p2 = ImageToScreen(object.line_scan_box_xy[4], object.line_scan_box_xy[5]);
-                const ImVec2 p3 = ImageToScreen(object.line_scan_box_xy[6], object.line_scan_box_xy[7]);
-                const ImVec2 center(
-                    (p0.x + p1.x + p2.x + p3.x) * 0.25f,
-                    (p0.y + p1.y + p2.y + p3.y) * 0.25f);
-                const ImVec2 m01((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
-                const ImVec2 m12((p1.x + p2.x) * 0.5f, (p1.y + p2.y) * 0.5f);
-                const ImVec2 m23((p2.x + p3.x) * 0.5f, (p2.y + p3.y) * 0.5f);
-                const ImVec2 m30((p3.x + p0.x) * 0.5f, (p3.y + p0.y) * 0.5f);
-
-                auto drawVisibleHandle = [&](const ImVec2& point, ImU32 fill, float radius)
-                {
-                    drawList->AddCircleFilled(point, radius + 3.0f, IM_COL32(0, 0, 0, 230));
-                    drawList->AddCircleFilled(point, radius, fill);
-                    drawList->AddCircle(point, radius + 3.0f, IM_COL32(255, 255, 255, 255), 20, 1.2f);
-                };
-
-                const ImU32 centerColor = IM_COL32(40, 160, 255, 255);
-                const ImU32 cornerColor = IM_COL32(180, 80, 255, 255);
-                const ImU32 edgeColor = IM_COL32(255, 130, 30, 255);
-
-                drawVisibleHandle(center, centerColor, 7.5f);
-                drawList->AddText(ImVec2(center.x + 10.0f, center.y - 16.0f),
-                                  centerColor, "center");
-
-                const ImVec2 corners[] = {p0, p1, p2, p3};
-                for (const ImVec2& corner : corners)
-                    drawVisibleHandle(corner, cornerColor, 6.0f);
-
-                const ImVec2 edges[] = {m01, m12, m23, m30};
-                for (const ImVec2& edge : edges)
-                    drawVisibleHandle(edge, edgeColor, 6.5f);
-
-                drawList->AddText(ImVec2(m12.x + 10.0f, m12.y - 16.0f),
-                                  edgeColor, "width");
-            }
-        }
-
-        if (m_runtimeLineDragHandle != RuntimeLineDragHandle::None &&
-            !m_runtimeLineDragObject.empty())
-        {
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-            {
-                const ImVec2 mouseNow = ImGui::GetIO().MousePos;
-
-                const ImVec2 imageStart = ScreenToImage(
-                    m_runtimeLineDragStartMouseX,
-                    m_runtimeLineDragStartMouseY);
-
-                const ImVec2 imageNow = ScreenToImage(mouseNow.x, mouseNow.y);
-
-                const float dx = imageNow.x - imageStart.x;
-                const float dy = imageNow.y - imageStart.y;
-
-                float x0 = m_runtimeLineDragStartX0;
-                float y0 = m_runtimeLineDragStartY0;
-                float x1 = m_runtimeLineDragStartX1;
-                float y1 = m_runtimeLineDragStartY1;
-
-                if (m_runtimeLineDragHandle == RuntimeLineDragHandle::StartPoint)
-                {
-                    x0 += dx;
-                    y0 += dy;
-                }
-                else if (m_runtimeLineDragHandle == RuntimeLineDragHandle::EndPoint)
-                {
-                    x1 += dx;
-                    y1 += dy;
-                }
-                else if (m_runtimeLineDragHandle == RuntimeLineDragHandle::CenterY)
-                {
-                    y0 += dy;
-                    y1 += dy;
-                }
-
-                float halfWidth = 1.0f;
-                for (const RuntimeObjectView& runtimeObject : m_manualTest.runtime_objects)
-                {
-                    if (runtimeObject.name == m_runtimeLineDragObject)
-                    {
-                        halfWidth = std::max(1.0f, static_cast<float>(runtimeObject.line_scan_half_width));
-                        break;
-                    }
-                }
-
-                if (m_runtimeLineDragHandle == RuntimeLineDragHandle::Width)
-                {
-                    const float vx = m_runtimeLineDragStartX1 - m_runtimeLineDragStartX0;
-                    const float vy = m_runtimeLineDragStartY1 - m_runtimeLineDragStartY0;
-                    const float len = std::sqrt(vx * vx + vy * vy);
-                    if (len > 1.0f)
-                    {
-                        const float cx = (m_runtimeLineDragStartX0 + m_runtimeLineDragStartX1) * 0.5f;
-                        const float cy = (m_runtimeLineDragStartY0 + m_runtimeLineDragStartY1) * 0.5f;
-                        const float px = imageNow.x - cx;
-                        const float py = imageNow.y - cy;
-                        halfWidth = std::max(1.0f, std::fabs(px * (-vy / len) + py * (vx / len)));
-                    }
-                }
-
-                std::string reason;
-                UpdateRuntimeFindlineSetlineFromUi(
-                    m_manualTest,
-                    m_runtimeLineDragObject,
-                    x0,
-                    y0,
-                    x1,
-                    y1,
-                    halfWidth,
-                    reason);
-            }
-            else
-            {
-                m_runtimeLineDragHandle = RuntimeLineDragHandle::None;
-                m_runtimeLineDragObject.clear();
-            }
-        }
-
-        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
-        {
-            if (object.type != "Findcircle")
-                continue;
-            if (!object.visualizable || object.stale)
-                continue;
-
-            const bool isActiveResultObject =
-                !m_manualTest.current_result_ref.source_object.empty() &&
-                object.name == m_manualTest.current_result_ref.source_object;
-
-            const ImU32 roiColor = isActiveResultObject
-                ? IM_COL32(80, 255, 170, 255)
-                : IM_COL32(80, 255, 170, 160);
-            const ImU32 pointColor = isActiveResultObject
-                ? IM_COL32(255, 80, 80, 255)
-                : IM_COL32(255, 80, 80, 160);
-            const ImU32 fitColor = isActiveResultObject
-                ? IM_COL32(255, 220, 80, 255)
-                : IM_COL32(255, 220, 80, 160);
-            const ImU32 pendingColor = IM_COL32(255, 220, 80, 180);
-
-            if (object.has_circle_roi_outer_polyline)
-                DrawImagePolylineClosed(object.circle_roi_outer_xy, roiColor, 2.0f);
-            if (object.has_circle_roi_inner_polyline)
-                DrawImagePolylineClosed(object.circle_roi_inner_xy, roiColor, 1.5f);
-
-            if (object.has_circle)
-            {
-                const ImVec2 center = ImageToScreen(object.circle_cx, object.circle_cy);
-                drawList->AddCircleFilled(center, 3.5f, roiColor);
-                drawList->AddText(ImVec2(center.x + 6.0f, center.y + 6.0f), roiColor, object.name.c_str());
-            }
-
-            if (object.has_measure_points)
-            {
-                for (std::size_t i = 0; i + 1 < object.measure_points_xy.size(); i += 2)
-                {
-                    drawList->AddCircleFilled(
-                        ImageToScreen(object.measure_points_xy[i], object.measure_points_xy[i + 1]),
-                        2.5f,
-                        pointColor);
-                }
-            }
-            else if (object.has_circle)
-            {
-                const ImVec2 center = ImageToScreen(object.circle_cx, object.circle_cy);
-                drawList->AddText(ImVec2(center.x + 6.0f, center.y + 22.0f), pendingColor, "measure points: 0");
-            }
-
-            if (object.has_fit_circle_polyline)
-                DrawImagePolylineClosed(object.fit_circle_xy, fitColor, 3.0f);
-
-            if (object.has_fit_result)
-            {
-                const ImVec2 fitCenter = ImageToScreen(object.fit_cx, object.fit_cy);
-                drawList->AddCircleFilled(fitCenter, 3.0f, fitColor);
-                drawList->AddText(ImVec2(fitCenter.x + 6.0f, fitCenter.y - 14.0f), fitColor, "fit_circle");
-            }
-        }
 
         // Layer 2: Manual Element / Annotation Tool Layer.
 
@@ -1494,8 +1100,8 @@ void ViewController::drawScriptAcceptancePanels()
                 const ImVec2 delta(imageNow.x - m_manualTest.gauge_drag_start_x,
                                    imageNow.y - m_manualTest.gauge_drag_start_y);
 
-                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.active_gauge_handle,
-                                imageNow, delta, io.KeyShift);
+                DragGaugeHandle(m_manualTest.current_gauge, m_manualTest.drag_start_gauge,
+                                m_manualTest.active_gauge_handle, imageNow, delta, io.KeyShift);
 
                 m_manualTest.gauge_drag_start_x = imageNow.x;
                 m_manualTest.gauge_drag_start_y = imageNow.y;
@@ -3827,4 +3433,123 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
          }
      }
 
+}
+
+#include "CxShapeInteractionRunner.h"
+#include "CxUnifiedLog.h"
+#include "Findline.h"
+#include "Findcircle.h"
+#include "Findellipse.h"
+#include "FindRect.h"
+
+#include <sstream>
+#include <iomanip>
+#include <chrono>
+
+static std::string GenerateLocalShapeRunId()
+{
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    std::stringstream ss;
+    ss << "shape_local_" << std::setw(16) << std::setfill('0') << ms.count();
+    return ss.str();
+}
+
+bool ViewController::RunShapeInteractionSmoke(
+    const std::string& manifest_path,
+    const std::string& suite_path,
+    const std::string& out_dir,
+    CxShapeInteractionBatchResult& result)
+{
+    CxShapeInteractionRunner runner;
+    CxShapeInteractionOptions options;
+    options.tool_manifest_path = manifest_path;
+    options.test_suite_path = suite_path;
+    options.out_dir = out_dir;
+
+    options.run_id =
+        CxUnifiedLog::Instance().IsInitialized()
+        ? CxUnifiedLog::Instance().RunId()
+        : GenerateLocalShapeRunId();
+
+    CXLOG_INFO(
+        "ViewController",
+        "shape_smoke_dispatch",
+        "running",
+        "run_id=" + options.run_id +
+        ", suite=" + suite_path +
+        ", manifest=" + manifest_path +
+        ", out=" + out_dir);
+
+    CxShapeInteractionBatchResultEx ex_result;
+    const bool ok = runner.RunSuite(options, ex_result);
+
+    result.pass = ex_result.pass;
+    for (const auto& ex_case : ex_result.extended_cases)
+    {
+        CxShapeInteractionCaseResult cr;
+        cr.case_id = ex_case.case_id;
+        cr.tool_id = ex_case.tool_id;
+        cr.shape_kind = ex_case.shape_kind;
+        cr.pass = ex_case.pass;
+        cr.conclusion = ex_case.status;
+        cr.reason = ex_case.reason;
+        result.cases.push_back(cr);
+    }
+
+    return ok;
+}
+
+void ViewController::SyncRuntimeObjectsToShapeElements()
+{
+    std::vector<const CxShapeElement*> shapes;
+    m_annotationLayer.EnumerateVisibleShapes(shapes);
+
+    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+    {
+        if (object.type == "Findline")
+        {
+            Findline* tool = static_cast<Findline*>(
+                m_parserDebugBridge.QueryClassObject("Findline", object.name));
+            if (tool != nullptr)
+            {
+                m_annotationLayer.BeginRuntimeOwnerPublish("Findline", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findline", object.name, 0);
+            }
+        }
+        else if (object.type == "Findcircle")
+        {
+            Findcircle* tool = static_cast<Findcircle*>(
+                m_parserDebugBridge.QueryClassObject("Findcircle", object.name));
+            if (tool != nullptr)
+            {
+                m_annotationLayer.BeginRuntimeOwnerPublish("Findcircle", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findcircle", object.name, 0);
+            }
+        }
+        else if (object.type == "Findellipse")
+        {
+            Findellipse* tool = static_cast<Findellipse*>(
+                m_parserDebugBridge.QueryClassObject("Findellipse", object.name));
+            if (tool != nullptr)
+            {
+                m_annotationLayer.BeginRuntimeOwnerPublish("Findellipse", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findellipse", object.name, 0);
+            }
+        }
+        else if (object.type == "FindRect")
+        {
+            FindRect* tool = static_cast<FindRect*>(
+                m_parserDebugBridge.QueryClassObject("FindRect", object.name));
+            if (tool != nullptr)
+            {
+                m_annotationLayer.BeginRuntimeOwnerPublish("FindRect", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, 0);
+            }
+        }
+    }
 }

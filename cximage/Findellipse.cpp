@@ -4,6 +4,8 @@
 #include "occtinclude.h"
 #include "imagemanager.h"
 #include "findobject.h"
+#include "ImageAnnotationLayer.h"
+#include "EllipseShape.h"
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -127,6 +129,11 @@ void Findellipse::setselectedgenum(int iedgenum)
 void Findellipse::clear()
 {
     m_lines.clear();
+    m_has_display_roi = false;
+    m_roi_x0 = 0;
+    m_roi_y0 = 0;
+    m_roi_x1 = 0;
+    m_roi_y1 = 0;
 }
 void Findellipse::Setgap(int gap)
 {
@@ -154,6 +161,12 @@ void Findellipse::Setgap(int gap)
 void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 {
     Shape::setellipse(icentx, icenty, ipax, ipay);
+
+    m_roi_x0 = std::min(icentx, ipax);
+    m_roi_y0 = std::min(icenty, ipay);
+    m_roi_x1 = std::max(icentx, ipax);
+    m_roi_y1 = std::max(icenty, ipay);
+    m_has_display_roi = m_roi_x1 > m_roi_x0 && m_roi_y1 > m_roi_y0;
 
     for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
@@ -205,35 +218,13 @@ void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 }
 void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idis)
 {
-    /*
-    Shape::setellipse2(icentx, icenty, ipax, ipay,  idis);
-    for (std::size_t i = 0; i < m_lines.size(); ++i)
-    {
-        m_lines[i].clear();
-    }
-    int isize = getpath().ElementCount();
-    int isize2 = getpath2().ElementCount();
-    if (m_igap > 0)
-    {
-        double danglerate = m_igap * 1.0 / 360;
-        int igapadd = danglerate * isize;
-        int igapadd2 = danglerate * isize2;
-        LineShape aline1;
-        int iadd = 0;
-        int j = 0;
-        for (int i = 0; i < isize; )
-        {
-            gp_Pnt apoint = getpath().ElementAt(i);
-            gp_Pnt apoint2 = getpath2().ElementAt(j);
-            m_lines.push_back(aline1);
-            m_lines[iadd].setline(apoint2.X(), apoint2.Y(), apoint.X(), apoint.Y());
-            iadd = iadd + 1;
-            i = i + igapadd;
-            j = j + igapadd2;
-        }
-    }
-    */
     Shape::setellipse2(icentx, icenty, ipax, ipay, idis);
+
+    m_roi_x0 = std::min(icentx, ipax);
+    m_roi_y0 = std::min(icenty, ipay);
+    m_roi_x1 = std::max(icentx, ipax);
+    m_roi_y1 = std::max(icenty, ipay);
+    m_has_display_roi = m_roi_x1 > m_roi_x0 && m_roi_y1 > m_roi_y0;
     for (std::size_t i = 0; i < m_lines.size(); ++i)
     {
         m_lines[i].clear();
@@ -305,7 +296,12 @@ void Findellipse::Translate(const gp_Vec& translationVector)
     for (std::size_t i = 0; i < m_lines.size(); ++i)
     { 
         m_lines[i].Move(ix0, iy0);
-    } 
+    }
+
+    m_roi_x0 += ix0;
+    m_roi_y0 += iy0;
+    m_roi_x1 += ix0;
+    m_roi_y1 += iy0;
 }
 void Findellipse::drawpattern()
 { 
@@ -633,4 +629,73 @@ void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
         }
     }
 
+}
+
+bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
+{
+    out = {};
+
+    out.has_roi = m_has_display_roi;
+
+    if (m_has_display_roi)
+    {
+        out.center_x = static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5;
+        out.center_y = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
+        out.radius_x = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0)) * 0.5;
+        out.radius_y = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0)) * 0.5;
+    }
+
+    const PointsShape& points = const_cast<Findellipse*>(this)->getresultpoints();
+    out.has_measure_points = points.size() > 0;
+    out.measure_points_count = static_cast<int>(points.size());
+
+    return out.has_roi || out.has_measure_points;
+}
+
+void Findellipse::PublishDisplayShapes(
+    ICxShapeSink& sink,
+    const std::string& owner_ref) const
+{
+    FindellipseDisplaySnapshot snapshot;
+    if (!getdisplaysnapshot(snapshot))
+        return;
+
+    if (snapshot.has_roi)
+    {
+        auto roi = std::make_unique<EllipseShape>(
+            snapshot.center_x,
+            snapshot.center_y,
+            snapshot.radius_x,
+            snapshot.radius_y);
+
+        sink.UpsertShape(
+            owner_ref + ".roi_ellipse",
+            "Findellipse",
+            owner_ref,
+            "setellipse",
+            "roi",
+            true,
+            false,
+            std::move(roi));
+    }
+
+    const PointsShape& points = const_cast<Findellipse*>(this)->getresultpoints();
+    if (points.size() > 0)
+    {
+        auto resultPoints = std::make_unique<PointsShape>();
+        for (int i = 0; i < static_cast<int>(points.size()); ++i)
+        {
+            resultPoints->addpoint(points.getx(i), points.gety(i));
+        }
+
+        sink.UpsertShape(
+            owner_ref + ".measure_points",
+            "Findellipse",
+            owner_ref,
+            "",
+            "measure_points",
+            false,
+            true,
+            std::move(resultPoints));
+    }
 }

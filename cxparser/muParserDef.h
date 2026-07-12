@@ -89,36 +89,37 @@ enum ECmdCode
   cmIf			  = 23,
   cmElse		  = 24,
   cmWhile         = 25,
+  cmReturn        = 26,
 
-  cmVAR           = 26,
-  cmSTRVAR        = 27,
-  cmVAL           = 28,
+  cmVAR           = 27,
+  cmSTRVAR        = 28,
+  cmVAL           = 29,
 
-  cmFUNC          = 29,
-  cmFUNC_STR      = 30,
+  cmFUNC          = 30,
+  cmFUNC_STR      = 31,
 
-  cmSTRING        = 31,
-  cmOPRT_BIN      = 32,
-  cmOPRT_POSTFIX  = 33,
-  cmOPRT_INFIX    = 34,
-  cmEND           = 35,
+  cmSTRING        = 32,
+  cmOPRT_BIN      = 33,
+  cmOPRT_POSTFIX  = 34,
+  cmOPRT_INFIX    = 35,
+  cmEND           = 36,
 
-  cmClassObjDef   = 36,
-  cmVARLP		  = 37,
-  cmONEAREAEND    = 38,
-  cmClass		  = 39,
-  cmClassObj	  = 40,
-  cmClassFuc	  = 41,
-  cmClassFucNum	  = 42,
-  cmClassFucStr	  = 43,
+  cmClassObjDef   = 37,
+  cmVARLP		  = 38,
+  cmONEAREAEND    = 39,
+  cmClass		  = 40,
+  cmClassObj	  = 41,
+  cmClassFuc	  = 42,
+  cmClassFucNum	  = 43,
+  cmClassFucStr	  = 44,
 
-  cmClassFucVp	  = 44,
+  cmClassFucVp	  = 45,
 
-  cmStorageEnd	  = 45,
-  cmCallin		  = 46,
-  cmStringVar	  = 47,
-  cmStorageBegin  = 48,
-  cmUNKNOWN       = 49
+  cmStorageEnd	  = 46,
+  cmCallin		  = 47,
+  cmStringVar	  = 48,
+  cmStorageBegin  = 49,
+  cmUNKNOWN       = 50
 
 };
 

@@ -42,6 +42,7 @@ struct FindcircleMeasureGeometryDebug
     int center_y = 0;
     int pass_x = 0;
     int pass_y = 0;
+    bool has_inner_gap = false;
     int inner_gap = 0;
 
     int gap_degrees = 0;
@@ -74,11 +75,16 @@ struct FindcircleMeasureGeometryDebug
     int budget_max_samples = 2000000;
     int budget_max_elapsed_ms = 3000;
 };
+class ICxShapeSink;
+
 class Findcircle :public Shape
 {
 public:
     Findcircle();
     ~Findcircle();
+
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
+
     int gap() { return m_igap; }
     int thre();
 
@@ -130,6 +136,7 @@ public:
 
     void setshowlines(int ilines) { m_ishowlines = ilines; }
     PointsShape& getresultpoints();
+    const PointsShape& getresultpoints() const;
 
     void fitcircle();
 
@@ -155,6 +162,11 @@ public:
     int getvalidpointcount();
     bool hasfitresult();
     bool canfitresultmeasure();
+
+    double getresultcentx() const;
+    double getresultcenty() const;
+    double getradius() const;
+    bool hasfitresult() const;
 
     int getcirclecentx() const { return m_icentx; }
     int getcirclecenty() const { return m_icenty; }

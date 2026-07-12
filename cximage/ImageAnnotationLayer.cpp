@@ -1,5 +1,10 @@
 #include "ImageAnnotationLayer.h"
 
+#include "CxAnnotationToolRuntime.h"
+#include "CxAnnotationToolRegister.h"
+#include "muParser.h"
+#include "EllipseShape.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +14,81 @@
 namespace
 {
 namespace fs = std::filesystem;
+}
+
+std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
+    const CxAnnotationToolSpec& tool,
+    const std::vector<CxShapePoint>& points)
+{
+    if (tool.shape_type == "PointsShape")
+    {
+        auto shape = std::make_unique<PointsShape>();
+        if (!points.empty())
+            shape->addpoint(gp_Pnt(points[0].x, points[0].y, 0.0));
+        return shape;
+    }
+
+    if (tool.shape_type == "LineShape")
+    {
+        auto shape = std::make_unique<LineShape>();
+        if (points.size() >= 2)
+            shape->setline(static_cast<int>(points[0].x), static_cast<int>(points[0].y),
+                           static_cast<int>(points[1].x), static_cast<int>(points[1].y));
+        return shape;
+    }
+
+    if (tool.shape_type == "LineGaugeShape")
+    {
+        if (points.size() >= 2)
+            return std::make_unique<LineGaugeShape>(
+                points[0].x, points[0].y, points[1].x, points[1].y, 20.0);
+        return std::make_unique<LineGaugeShape>();
+    }
+
+    if (tool.shape_type == "RectShape")
+    {
+        auto shape = std::make_unique<RectShape>();
+        if (points.size() >= 2)
+            shape->setRect(points[0].x, points[0].y, points[1].x, points[1].y);
+        return shape;
+    }
+
+    if (tool.shape_type == "CircleShape")
+    {
+        if (points.size() >= 2)
+        {
+            const double dx = points[1].x - points[0].x;
+            const double dy = points[1].y - points[0].y;
+            return std::make_unique<CircleShape>(
+                points[0].x, points[0].y, std::sqrt(dx * dx + dy * dy));
+        }
+        return std::make_unique<CircleShape>();
+    }
+
+    if (tool.shape_type == "EllipseShape")
+    {
+        if (points.size() >= 2)
+        {
+            const double cx = (points[0].x + points[1].x) * 0.5;
+            const double cy = (points[0].y + points[1].y) * 0.5;
+            const double rx = std::abs(points[1].x - points[0].x) * 0.5;
+            const double ry = std::abs(points[1].y - points[0].y) * 0.5;
+            return std::make_unique<EllipseShape>(cx, cy, rx, ry);
+        }
+        return std::make_unique<EllipseShape>();
+    }
+
+    if (tool.shape_type == "PolylineShape")
+    {
+        auto shape = std::make_unique<PolylineShape>();
+        for (const auto& p : points)
+            shape->addPoint(p.x, p.y);
+        shape->close(false);
+        return shape;
+    }
+
+    return nullptr;
+}
 
 std::string Trim(const std::string& text)
 {
@@ -36,7 +116,6 @@ std::string UnquoteStatementValue(std::string value)
     value = value.substr(1, value.size() - 2);
   return value;
 }
-}
 
 const char* ImageAnnotationLayer::KindName(OverlayKind kind)
 {
@@ -46,7 +125,10 @@ const char* ImageAnnotationLayer::KindName(OverlayKind kind)
     case OverlayKind::Line: return "Line";
     case OverlayKind::Rect: return "Rect";
     case OverlayKind::Circle: return "Circle";
+    case OverlayKind::Ellipse: return "Ellipse";
     case OverlayKind::Polyline: return "Polyline";
+    case OverlayKind::AutoBoundaryRequest: return "AutoBoundary";
+    case OverlayKind::BoundaryPolyline: return "BoundaryPolyline";
   }
   return "Point";
 }
@@ -57,7 +139,10 @@ bool ImageAnnotationLayer::ParseKind(const std::string& text, OverlayKind& kind)
   else if (text == "Line") kind = OverlayKind::Line;
   else if (text == "Rect") kind = OverlayKind::Rect;
   else if (text == "Circle") kind = OverlayKind::Circle;
+  else if (text == "Ellipse") kind = OverlayKind::Ellipse;
   else if (text == "Polyline") kind = OverlayKind::Polyline;
+  else if (text == "AutoBoundary") kind = OverlayKind::AutoBoundaryRequest;
+  else if (text == "BoundaryPolyline") kind = OverlayKind::BoundaryPolyline;
   else return false;
   return true;
 }
@@ -65,65 +150,107 @@ bool ImageAnnotationLayer::ParseKind(const std::string& text, OverlayKind& kind)
 bool ImageAnnotationLayer::LoadManifest(const std::string& path,
                                         std::string& reason)
 {
+  myLoadStatus.clear();
+
   std::ifstream stream{fs::path(path)};
   if (!stream)
   {
     reason = "annotation tool CxScript not found";
     return false;
   }
-  myTools.clear();
-  AnnotationToolDefinition current;
-  std::string currentObject;
-  std::string line;
-  while (std::getline(stream, line))
+
+  std::stringstream buffer;
+  buffer << stream.rdbuf();
+  std::string script = buffer.str();
+
+  bool skipped_metadata = false;
+  bool skipped_register = false;
+
+  size_t pos = 0;
+  while (pos < script.size())
   {
-    line = Trim(line);
-    if (line.empty() || line[0] == '#' || line.rfind("//", 0) == 0) continue;
+    size_t line_end = script.find('\n', pos);
+    if (line_end == std::string::npos)
+      line_end = script.size();
 
-    const std::string declarationPrefix = "AnnotationTool ";
-    if (line.rfind(declarationPrefix, 0) == 0)
+    std::string line = script.substr(pos, line_end - pos);
+
+    if (line.find("script:") == 0 || line.find("method_status:") == 0)
     {
-      current = AnnotationToolDefinition();
-      currentObject = Trim(line.substr(declarationPrefix.size()));
-      if (!currentObject.empty() && currentObject.back() == ';')
-        currentObject.pop_back();
+      script.erase(pos, line_end - pos + (line_end < script.size() ? 1 : 0));
+      skipped_metadata = true;
       continue;
     }
 
-    const std::string registerPrefix = "register_annotation_tool(";
-    if (line.rfind(registerPrefix, 0) == 0)
+    if (line.find("register_function(") == 0)
     {
-      const std::size_t close = line.find(')', registerPrefix.size());
-      const std::string object = close == std::string::npos ? std::string() :
-        Trim(line.substr(registerPrefix.size(), close - registerPrefix.size()));
-      if (!currentObject.empty() && object == currentObject && !current.name.empty())
-        myTools.push_back(current);
-      current = AnnotationToolDefinition();
-      currentObject.clear();
+      script.erase(pos, line_end - pos + (line_end < script.size() ? 1 : 0));
+      skipped_register = true;
       continue;
     }
 
-    if (currentObject.empty()) continue;
-    const std::string assignmentPrefix = currentObject + ".";
-    if (line.rfind(assignmentPrefix, 0) != 0) continue;
-    const std::size_t equals = line.find('=', assignmentPrefix.size());
-    if (equals == std::string::npos) continue;
-    const std::string field = Trim(line.substr(
-      assignmentPrefix.size(), equals - assignmentPrefix.size()));
-    std::string value = UnquoteStatementValue(line.substr(equals + 1));
-    if (field == "name") current.name = value;
-    else if (field == "kind")
-    {
-      const std::string kindPrefix = "OverlayKind::";
-      if (value.rfind(kindPrefix, 0) == 0) value = value.substr(kindPrefix.size());
-      ParseKind(value, current.kind);
-    }
-    else if (field == "role") current.role = value;
-    else if (field == "source") current.source = value;
-    else if (field == "action") current.action = value;
-    else if (field == "module_hint") current.module_hint = value;
-    else if (field == "description") current.description = value;
+    pos = line_end + 1;
   }
+
+  if (skipped_metadata)
+  {
+    myLoadStatus = "legacy metadata line skipped; please remove script:/method_status:";
+  }
+  else if (skipped_register)
+  {
+    myLoadStatus = "legacy register_function skipped; registration should be in C++";
+  }
+  else
+  {
+    myLoadStatus = "loaded clean";
+  }
+
+  CxAnnotationToolRuntime::Reset();
+
+  mu::Parser parser;
+  parser.UsingClass(true);
+  RegisterCxAnnotationToolBindings(parser);
+
+  try
+  {
+    parser.SetExpr(script);
+    parser.Eval();
+  }
+  catch (const mu::Parser::exception_type& e)
+  {
+    reason = "CxScript parse error: " + std::string(e.GetMsg());
+    return false;
+  }
+
+  myTools.clear();
+    const auto& tools = CxAnnotationToolRuntime::Tools();
+    for (const auto& spec : tools)
+    {
+        AnnotationToolDefinition def;
+        def.name = spec.id;
+        def.label = spec.label;
+        def.shape_type = spec.shape_type;
+        def.role = spec.semantic_role;
+        def.action = spec.interaction;
+        def.source = spec.owner_tool.empty() ? "manual" : spec.owner_tool;
+        def.module_hint = spec.owner_tool;
+        def.description = spec.source_script;
+        def.owner_tool = spec.owner_tool;
+        def.owner_binding = spec.owner_binding;
+        def.manual_visible = spec.manual_visible;
+        def.editable = spec.editable;
+
+        if (spec.shape_type == "PointsShape") def.kind = OverlayKind::Point;
+        else if (spec.shape_type == "LineShape" || spec.shape_type == "LineGaugeShape") def.kind = OverlayKind::Line;
+        else if (spec.shape_type == "RectShape") def.kind = OverlayKind::Rect;
+        else if (spec.shape_type == "CircleShape") def.kind = OverlayKind::Circle;
+        else if (spec.shape_type == "EllipseShape") def.kind = OverlayKind::Ellipse;
+        else if (spec.shape_type == "PolylineShape") def.kind = OverlayKind::Polyline;
+        else def.kind = OverlayKind::Point;
+
+        myTools.push_back(def);
+    }
+
   reason = myTools.empty() ? "CxScript contains no registered annotation tools" :
                              "CxScript annotation tools loaded";
   return !myTools.empty();
@@ -135,6 +262,7 @@ std::string ImageAnnotationLayer::MakeRef(OverlayKind kind, int id) const
   if (kind == OverlayKind::Line) prefix = "line";
   else if (kind == OverlayKind::Rect) prefix = "roi_rect";
   else if (kind == OverlayKind::Circle) prefix = "circle";
+  else if (kind == OverlayKind::Ellipse) prefix = "ellipse";
   else if (kind == OverlayKind::Polyline) prefix = "polyline";
   std::ostringstream stream;
   stream << prefix << '_' << std::setw(3) << std::setfill('0') << id;
@@ -284,4 +412,719 @@ bool ImageAnnotationLayer::LoadElements(const std::string& path,
   Select(myElements.empty() ? -1 : static_cast<int>(myElements.size()) - 1);
   reason = "annotation elements loaded";
   return true;
+}
+
+OverlayElement* ImageAnnotationLayer::FindByStableRef(const std::string& ref)
+{
+  for (auto& e : myElements)
+  {
+    if (e.stable_ref == ref)
+      return &e;
+  }
+  return nullptr;
+}
+
+const OverlayElement* ImageAnnotationLayer::FindByStableRef(const std::string& ref) const
+{
+  for (const auto& e : myElements)
+  {
+    if (e.stable_ref == ref)
+      return &e;
+  }
+  return nullptr;
+}
+
+OverlayElement& ImageAnnotationLayer::UpsertByStableRef(const std::string& ref, OverlayKind kind)
+{
+  OverlayElement* existing = FindByStableRef(ref);
+  if (existing != nullptr)
+  {
+    existing->kind = kind;
+    existing->image_points.clear();
+    existing->radius = 0.0f;
+    existing->stale = false;
+    return *existing;
+  }
+  OverlayElement& created = Create(kind, "", "runtime", "cximage");
+  created.stable_ref = ref;
+  created.runtime_bound = true;
+  created.editable = false;
+  return created;
+}
+
+void ImageAnnotationLayer::RemoveByOwner(const std::string& owner_type, const std::string& owner_ref)
+{
+  auto it = myElements.begin();
+  while (it != myElements.end())
+  {
+    if (it->owner_type == owner_type && it->owner_ref == owner_ref)
+    {
+      it = myElements.erase(it);
+    }
+    else
+    {
+      ++it;
+    }
+  }
+  if (mySelectedIndex >= static_cast<int>(myElements.size()))
+  {
+    mySelectedIndex = myElements.empty() ? -1 : static_cast<int>(myElements.size()) - 1;
+  }
+}
+
+CxShapeElement& ImageAnnotationLayer::CreateFromTool(
+    const CxAnnotationToolSpec& tool,
+    std::unique_ptr<ShapeBase> shape)
+{
+    myShapeElements.emplace_back();
+    CxShapeElement& element = myShapeElements.back();
+    element.id = myNextId++;
+    element.ref = tool.id + "_" + std::to_string(element.id);
+    element.tool_id = tool.id;
+    element.owner_type = tool.owner_tool;
+    element.owner_binding = tool.owner_binding;
+    element.semantic_role = tool.semantic_role;
+    element.editable = tool.editable;
+    element.shape = std::move(shape);
+    return element;
+}
+
+CxShapeElement& ImageAnnotationLayer::UpsertShape(
+    const std::string& stable_ref,
+    std::unique_ptr<ShapeBase> shape)
+{
+    CxShapeElement* existing = FindShapeByStableRef(stable_ref);
+    if (existing != nullptr)
+    {
+        existing->shape = std::move(shape);
+        existing->stale = false;
+        return *existing;
+    }
+    myShapeElements.emplace_back();
+    CxShapeElement& element = myShapeElements.back();
+    element.id = myNextId++;
+    element.ref = stable_ref;
+    element.stable_ref = stable_ref;
+    element.shape = std::move(shape);
+    return element;
+}
+
+CxShapeElement* ImageAnnotationLayer::FindShapeByStableRef(const std::string& stable_ref)
+{
+    for (auto& e : myShapeElements)
+    {
+        if (e.stable_ref == stable_ref)
+            return &e;
+    }
+    return nullptr;
+}
+
+CxShapeHitResult ImageAnnotationLayer::HitTest(double image_x, double image_y, double tolerance)
+{
+    CxShapeHitResult result;
+    int max_priority = -1;
+    double min_distance = tolerance + 1.0;
+
+    for (int i = 0; i < static_cast<int>(myShapeElements.size()); ++i)
+    {
+        auto& element = myShapeElements[i];
+        if (!element.visible || !element.shape)
+            continue;
+
+        CxShapeHit hit = element.shape->hitTest(image_x, image_y, tolerance);
+        if (!hit.hit)
+            continue;
+
+        const int priority = HandlePriority(hit.role);
+        if (priority > max_priority ||
+            (priority == max_priority && hit.distance < min_distance))
+        {
+            max_priority = priority;
+            min_distance = hit.distance;
+            result.hit = true;
+            result.element_index = i;
+            result.shape_hit = hit;
+        }
+    }
+
+    return result;
+}
+
+bool ImageAnnotationLayer::BeginDrag(const CxShapeHitResult& hit, double image_x, double image_y)
+{
+    if (!hit.hit || hit.element_index < 0)
+        return false;
+
+    auto& element = myShapeElements[hit.element_index];
+    if (!element.editable || !element.shape)
+        return false;
+
+    myDraggingElement = hit.element_index;
+    myDraggingRole = hit.shape_hit.role;
+    myDraggingVertexIndex = hit.shape_hit.vertex_index;
+    myDragStartX = image_x;
+    myDragStartY = image_y;
+    myDragLastX = image_x;
+    myDragLastY = image_y;
+    myDragHasPosition = true;
+
+    for (auto& e : myShapeElements)
+        e.selected = false;
+    element.selected = true;
+
+    return true;
+}
+
+bool ImageAnnotationLayer::UpdateDrag(double image_x, double image_y)
+{
+    if (myDraggingElement < 0 || !myShapeElements[myDraggingElement].shape)
+        return false;
+
+    auto& element = myShapeElements[myDraggingElement];
+
+    if (myDraggingRole == CxShapeHandleRole::Body && myDragHasPosition)
+    {
+        const double dx = image_x - myDragLastX;
+        const double dy = image_y - myDragLastY;
+        element.shape->translateBy(dx, dy);
+    }
+    else
+    {
+        element.shape->dragHandle(myDraggingRole, myDraggingVertexIndex, image_x, image_y);
+    }
+
+    myDragLastX = image_x;
+    myDragLastY = image_y;
+    element.stale = true;
+
+    return true;
+}
+
+void ImageAnnotationLayer::MarkOwnerResultStale(const std::string& owner_type, const std::string& owner_ref)
+{
+    for (auto& e : myShapeElements)
+    {
+        if (e.owner_type == owner_type && e.owner_ref == owner_ref && e.result_element)
+            e.stale = true;
+    }
+}
+
+bool ImageAnnotationLayer::CommitEdit(std::string& reason)
+{
+    if (myDraggingElement < 0)
+    {
+        reason = "no active drag";
+        return false;
+    }
+
+    auto& element = myShapeElements[myDraggingElement];
+
+    if (element.owner_type == "Findline" && element.owner_binding == "setline")
+    {
+        reason = "Findline ROI edited; measure/fit result marked stale";
+        MarkOwnerResultStale(element.owner_type, element.owner_ref);
+    }
+    else if (element.owner_type == "Findcircle" && element.owner_binding == "setcircle")
+    {
+        reason = "Findcircle ROI radius edited; measure/fit result marked stale";
+        MarkOwnerResultStale(element.owner_type, element.owner_ref);
+    }
+    else
+    {
+        reason = "manual shape edited";
+    }
+
+    CancelDrag();
+    return true;
+}
+
+bool ImageAnnotationLayer::SimulateDragShape(
+    const std::string& stable_or_ref,
+    CxShapeHandleRole role,
+    int vertex_index,
+    double from_x,
+    double from_y,
+    double to_x,
+    double to_y,
+    std::string& reason)
+{
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(myShapeElements.size()); ++i)
+    {
+        if (myShapeElements[i].stable_ref == stable_or_ref ||
+            myShapeElements[i].ref == stable_or_ref)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (index < 0)
+    {
+        reason = "shape not found by ref: " + stable_or_ref;
+        return false;
+    }
+
+    CxShapeHitResult hit;
+    hit.hit = true;
+    hit.element_index = index;
+    hit.shape_hit.hit = true;
+    hit.shape_hit.role = role;
+    hit.shape_hit.vertex_index = vertex_index;
+    hit.shape_hit.distance = 0.0;
+
+    if (!BeginDrag(hit, from_x, from_y))
+    {
+        reason = "BeginDrag failed for ref: " + stable_or_ref;
+        return false;
+    }
+
+    UpdateDrag(to_x, to_y);
+    CommitEdit(reason);
+
+    return true;
+}
+
+void ImageAnnotationLayer::CancelDrag()
+{
+    myDraggingElement = -1;
+    myDraggingRole = CxShapeHandleRole::None;
+    myDraggingVertexIndex = -1;
+    myDragStartX = 0.0;
+    myDragStartY = 0.0;
+}
+
+void ImageAnnotationLayer::ClearShapeElements()
+{
+    myShapeElements.clear();
+    mySelectedShapeIndex = -1;
+    CancelDrag();
+}
+
+bool ImageAnnotationLayer::HasActiveDrag() const
+{
+    return myDraggingElement >= 0;
+}
+
+std::size_t ImageAnnotationLayer::ShapeElementCount() const
+{
+    return myShapeElements.size();
+}
+
+int ImageAnnotationLayer::HandlePriority(CxShapeHandleRole role)
+{
+    switch (role)
+    {
+    case CxShapeHandleRole::Vertex:
+    case CxShapeHandleRole::Corner0:
+    case CxShapeHandleRole::Corner1:
+    case CxShapeHandleRole::Corner2:
+    case CxShapeHandleRole::Corner3:
+    case CxShapeHandleRole::Start:
+    case CxShapeHandleRole::End:
+    case CxShapeHandleRole::Radius:
+    case CxShapeHandleRole::RadiusX:
+    case CxShapeHandleRole::RadiusY:
+    case CxShapeHandleRole::InnerRadius:
+    case CxShapeHandleRole::WidthPositive:
+    case CxShapeHandleRole::WidthNegative:
+        return 300;
+    case CxShapeHandleRole::Center:
+        return 250;
+    case CxShapeHandleRole::Body:
+        return 100;
+    case CxShapeHandleRole::None:
+    default:
+        return 0;
+    }
+}
+
+int ImageAnnotationLayer::MarkOwnerResultStaleAndCount(
+    const std::string& owner_type,
+    const std::string& owner_ref)
+{
+    int count = 0;
+    for (auto& e : myShapeElements)
+    {
+        if (e.result_element &&
+            e.owner_type == owner_type &&
+            e.owner_ref == owner_ref)
+        {
+            e.stale = true;
+            count++;
+        }
+    }
+    return count;
+}
+
+void ImageAnnotationLayer::RemoveRuntimeOwnersNotIn(
+    const std::unordered_set<std::string>& liveOwners)
+{
+    auto it = myShapeElements.begin();
+    while (it != myShapeElements.end())
+    {
+        if (it->runtime_bound)
+        {
+            const std::string owner_key = it->owner_type + ":" + it->owner_ref;
+            if (liveOwners.find(owner_key) == liveOwners.end())
+            {
+                it = myShapeElements.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+}
+
+bool ImageAnnotationLayer::CommitEdit(CxShapeCommitResult& result)
+{
+    if (myDraggingElement < 0)
+    {
+        result.reason = "no active drag";
+        return false;
+    }
+
+    CxShapeElement& element = myShapeElements[myDraggingElement];
+    result.owner_type = element.owner_type;
+    result.owner_ref = element.owner_ref;
+    result.owner_binding = element.owner_binding;
+    result.semantic_role = element.semantic_role;
+    result.result_marked_stale = false;
+    result.stale_result_count = 0;
+    result.runtime_writeback = false;
+
+    element.stale = false;
+
+    if (element.runtime_bound && element.editable && !element.owner_binding.empty())
+    {
+        element.runtime_edit_pending = true;
+    }
+
+    if (!element.owner_type.empty())
+    {
+        const int markedCount = MarkOwnerResultStaleAndCount(element.owner_type, element.owner_ref);
+        result.result_marked_stale = markedCount > 0;
+        result.stale_result_count = markedCount;
+        result.reason = "drag committed, " + std::to_string(markedCount) + " result elements marked stale (runtime writeback not implemented)";
+    }
+    else
+    {
+        result.reason = "drag committed";
+    }
+
+    result.committed = true;
+    CancelDrag();
+    return true;
+}
+
+bool ImageAnnotationLayer::SimulatePointerDrag(
+    double from_x,
+    double from_y,
+    double to_x,
+    double to_y,
+    int intermediate_steps,
+    double tolerance,
+    CxShapeInteractionTrace& trace)
+{
+    trace.pointer_events.clear();
+    trace.hits.clear();
+    trace.snapshots.clear();
+    trace.commit_reason.clear();
+    trace.commit_result = {};
+
+    trace.hit_test_called = true;
+    trace.hit = false;
+    trace.begin_drag_called = false;
+    trace.begin_drag_ok = false;
+    trace.update_drag_ok = false;
+    trace.commit_called = false;
+    trace.commit_ok = false;
+
+    CxShapeHitResult hit = HitTest(from_x, from_y, tolerance);
+    trace.hits.push_back(hit);
+    trace.hit = hit.hit;
+
+    if (!hit.hit)
+    {
+        trace.commit_reason = "hit test failed at start position";
+        return false;
+    }
+
+    trace.begin_drag_called = true;
+    if (!BeginDrag(hit, from_x, from_y))
+    {
+        trace.begin_drag_ok = false;
+        trace.commit_reason = "begin drag failed";
+        return false;
+    }
+    trace.begin_drag_ok = true;
+
+    if (myShapeElements.size() > static_cast<std::size_t>(hit.element_index) &&
+        myShapeElements[hit.element_index].shape)
+    {
+        CxShapeGeometrySnapshot snap;
+        myShapeElements[hit.element_index].shape->snapshot(snap);
+        trace.snapshots.push_back(snap);
+    }
+
+    trace.pointer_events.push_back({ CxPointerEvent::Type::LeftDown, from_x, from_y, 0 });
+
+    trace.update_drag_ok = true;
+    const int steps = std::max(1, intermediate_steps);
+    for (int i = 1; i <= steps; ++i)
+    {
+        const double t = static_cast<double>(i) / steps;
+        const double x = from_x + (to_x - from_x) * t;
+        const double y = from_y + (to_y - from_y) * t;
+
+        if (!UpdateDrag(x, y))
+        {
+            trace.update_drag_ok = false;
+            trace.commit_reason = "UpdateDrag failed at step " + std::to_string(i);
+            CancelDrag();
+            return false;
+        }
+        trace.pointer_events.push_back({ CxPointerEvent::Type::LeftDrag, x, y, static_cast<uint64_t>(i) });
+
+        if (myShapeElements.size() > static_cast<std::size_t>(hit.element_index) &&
+            myShapeElements[hit.element_index].shape)
+        {
+            CxShapeGeometrySnapshot snap;
+            myShapeElements[hit.element_index].shape->snapshot(snap);
+            trace.snapshots.push_back(snap);
+        }
+    }
+
+    trace.pointer_events.push_back({ CxPointerEvent::Type::LeftUp, to_x, to_y, static_cast<uint64_t>(steps + 1) });
+
+    trace.commit_called = true;
+    CxShapeCommitResult commit;
+    if (!CommitEdit(commit))
+    {
+        trace.commit_ok = false;
+        trace.commit_result = commit;
+        trace.commit_reason = commit.reason;
+        return false;
+    }
+    trace.commit_ok = true;
+
+    trace.commit_result = commit;
+    trace.commit_reason = commit.reason;
+
+    if (HasActiveDrag())
+    {
+        trace.commit_ok = false;
+        trace.commit_reason = "drag remained active after commit";
+        CancelDrag();
+        return false;
+    }
+
+    return true;
+}
+
+void ImageAnnotationLayer::RemoveShapeByOwner(const std::string& owner_type, const std::string& owner_ref)
+{
+    auto it = myShapeElements.begin();
+    while (it != myShapeElements.end())
+    {
+        if (it->owner_type == owner_type && it->owner_ref == owner_ref)
+        {
+            it = myShapeElements.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+void ImageAnnotationLayer::SelectShape(int index)
+{
+    mySelectedShapeIndex =
+        index >= 0 && index < static_cast<int>(myShapeElements.size())
+        ? index : -1;
+
+    for (int i = 0; i < static_cast<int>(myShapeElements.size()); ++i)
+        myShapeElements[i].selected = i == mySelectedShapeIndex;
+}
+
+CxShapeElement* ImageAnnotationLayer::SelectedShape()
+{
+    return mySelectedShapeIndex >= 0 && mySelectedShapeIndex < static_cast<int>(myShapeElements.size()) ?
+        &myShapeElements[mySelectedShapeIndex] : nullptr;
+}
+
+void ImageAnnotationLayer::EnumerateVisibleShapes(std::vector<const CxShapeElement*>& out) const
+{
+    out.clear();
+    for (const auto& e : myShapeElements)
+    {
+        if (e.visible && e.shape)
+            out.push_back(&e);
+    }
+}
+
+void ImageAnnotationLayer::UpsertShape(
+    const std::string& stable_ref,
+    const std::string& owner_type,
+    const std::string& owner_ref,
+    const std::string& owner_binding,
+    const std::string& semantic_role,
+    bool editable,
+    bool result_element,
+    std::unique_ptr<ShapeBase> shape)
+{
+    CxShapeElement* existing = FindShapeByStableRef(stable_ref);
+    if (existing != nullptr)
+    {
+        if (existing->runtime_edit_pending)
+        {
+            existing->runtime_publish_generation = myActiveRuntimePublishGeneration;
+            return;
+        }
+
+        existing->shape = std::move(shape);
+        existing->owner_type = owner_type;
+        existing->owner_ref = owner_ref;
+        existing->owner_binding = owner_binding;
+        existing->semantic_role = semantic_role;
+        existing->editable = editable;
+        existing->result_element = result_element;
+        existing->stale = false;
+        existing->runtime_bound = myActiveRuntimePublishGeneration != 0;
+        existing->runtime_publish_generation = myActiveRuntimePublishGeneration;
+        return;
+    }
+
+    myShapeElements.emplace_back();
+    CxShapeElement& element = myShapeElements.back();
+    element.id = myNextId++;
+    element.ref = stable_ref;
+    element.stable_ref = stable_ref;
+    element.owner_type = owner_type;
+    element.owner_ref = owner_ref;
+    element.owner_binding = owner_binding;
+    element.semantic_role = semantic_role;
+    element.editable = editable;
+    element.result_element = result_element;
+    element.runtime_bound = myActiveRuntimePublishGeneration != 0;
+    element.runtime_publish_generation = myActiveRuntimePublishGeneration;
+    element.shape = std::move(shape);
+}
+
+uint64_t ImageAnnotationLayer::BeginRuntimeOwnerPublish(
+    const std::string& owner_type,
+    const std::string& owner_ref)
+{
+    myActiveRuntimePublishGeneration = ++myRuntimePublishGeneration;
+    myActivePublishOwnerType = owner_type;
+    myActivePublishOwnerRef = owner_ref;
+    return myActiveRuntimePublishGeneration;
+}
+
+void ImageAnnotationLayer::EndRuntimeOwnerPublish(
+    const std::string& owner_type,
+    const std::string& owner_ref,
+    uint64_t generation)
+{
+    auto it = myShapeElements.begin();
+    while (it != myShapeElements.end())
+    {
+        const bool sameOwner =
+            it->runtime_bound &&
+            it->owner_type == owner_type &&
+            it->owner_ref == owner_ref;
+
+        const bool notPublishedThisRound =
+            it->runtime_publish_generation != generation;
+
+        if (sameOwner && notPublishedThisRound && !it->runtime_edit_pending)
+        {
+            it = myShapeElements.erase(it);
+            continue;
+        }
+
+        ++it;
+    }
+
+    myActivePublishOwnerType.clear();
+    myActivePublishOwnerRef.clear();
+    myActiveRuntimePublishGeneration = 0;
+}
+
+void ImageAnnotationLayer::ConfirmRuntimeWriteback(const std::string& stable_ref)
+{
+    CxShapeElement* element = FindShapeByStableRef(stable_ref);
+    if (element != nullptr)
+        element->runtime_edit_pending = false;
+}
+
+bool ImageAnnotationLayer::WriteShapeElementsJson(
+    const std::filesystem::path& path,
+    std::string& reason) const
+{
+    try
+    {
+        if (path.has_parent_path())
+            fs::create_directories(path.parent_path());
+
+        std::ofstream stream(path);
+        if (!stream)
+        {
+            reason = "failed to open file for writing";
+            return false;
+        }
+
+        stream << "{\n";
+        stream << "  \"shape_elements\": [\n";
+
+        for (size_t i = 0; i < myShapeElements.size(); ++i)
+        {
+            const auto& e = myShapeElements[i];
+            stream << "    {\n";
+            stream << "      \"stable_ref\": \"" << e.stable_ref << "\",\n";
+
+            std::string shape_kind = "Unknown";
+            if (e.shape)
+            {
+                switch (e.shape->kind())
+                {
+                case CxShapeKind::Points: shape_kind = "Points"; break;
+                case CxShapeKind::Line: shape_kind = "Line"; break;
+                case CxShapeKind::Rect: shape_kind = "Rect"; break;
+                case CxShapeKind::Circle: shape_kind = "Circle"; break;
+                case CxShapeKind::Ellipse: shape_kind = "Ellipse"; break;
+                case CxShapeKind::Polyline: shape_kind = "Polyline"; break;
+                case CxShapeKind::LineGauge: shape_kind = "LineGauge"; break;
+                }
+            }
+            stream << "      \"shape_kind\": \"" << shape_kind << "\",\n";
+            stream << "      \"owner_type\": \"" << e.owner_type << "\",\n";
+            stream << "      \"owner_ref\": \"" << e.owner_ref << "\",\n";
+            stream << "      \"owner_binding\": \"" << e.owner_binding << "\",\n";
+            stream << "      \"semantic_role\": \"" << e.semantic_role << "\",\n";
+            stream << "      \"editable\": " << (e.editable ? "true" : "false") << ",\n";
+            stream << "      \"result_element\": " << (e.result_element ? "true" : "false") << ",\n";
+            stream << "      \"runtime_bound\": " << (e.runtime_bound ? "true" : "false") << ",\n";
+            stream << "      \"runtime_edit_pending\": " << (e.runtime_edit_pending ? "true" : "false") << ",\n";
+            stream << "      \"stale\": " << (e.stale ? "true" : "false") << ",\n";
+            stream << "      \"visible\": " << (e.visible ? "true" : "false") << "\n";
+            stream << "    }";
+
+            if (i < myShapeElements.size() - 1)
+                stream << ",";
+            stream << "\n";
+        }
+
+        stream << "  ]\n";
+        stream << "}\n";
+
+        reason = "shape_elements.json written";
+        return true;
+    }
+    catch (const std::exception& ex)
+    {
+        reason = "WriteShapeElementsJson exception: " + std::string(ex.what());
+        return false;
+    }
 }

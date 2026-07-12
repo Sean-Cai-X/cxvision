@@ -62,6 +62,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/Findline.cpp
   cximage/Findcircle.cpp
   cximage/Findellipse.cpp
+  cximage/FindRect.cpp
   cximage/findobject.cpp
   cximage/FastMatch.cpp
   cximage/FastMatchPolicy.cpp
@@ -75,6 +76,21 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FormfitPrototype.cpp
   cximage/TorchRuntimeBridge.cpp
   cximage/TorchRuntimeResultAdapter.cpp
+  cximage/CxShapeInteractionRunner.cpp
+  cximage/CxShapeInteractionTest.cpp
+  cximage/CxShapeTestRegister.cpp
+  cximage/CxShapeTestRuntime.cpp
+  cximage/CxUnifiedLog.cpp
+  cximage/CxUnifiedLogStreamBuf.cpp
+  cximage/CxCrashLogHandler.cpp
+  cximage/CxUnifiedLogOptions.cpp
+  cximage/CxAnnotationToolRuntime.cpp
+  cximage/CxAnnotationToolRegister.cpp
+  cximage/LineGaugeShape.cpp
+  cximage/RectShape.cpp
+  cximage/CircleShape.cpp
+  cximage/EllipseShape.cpp
+  cximage/PolylineShape.cpp
 )
 
 set(CXSCRIPT_RUNTIME_SOURCES
@@ -127,6 +143,8 @@ set(CXGEOM_SOURCES
   cxgeom/src/CxCurveBuilder.cpp
   cxgeom/src/CxSetCircleBuild.cpp
   cxgeom/src/CxSetLineBuild.cpp
+  cxgeom/src/CxGeomElementBody.cpp
+  cxgeom/src/CxGeomAnnotationBody.cpp
 )
 
 set(CXPARSER_SOURCES
@@ -252,10 +270,24 @@ add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
 
 
 
-add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-          "$<TARGET_FILE:libtorch_module_runtime>"
-          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
-  COMMENT "Copy libtorch_module_runtime.dll for torch module acceptance"
-  DEPENDS libtorch_module_runtime
-)
+if(TARGET libtorch_module_runtime)
+  add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:libtorch_module_runtime>"
+            "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+    COMMENT "Copy libtorch_module_runtime.dll for torch module acceptance"
+  )
+else()
+  message(STATUS
+    "libtorch_module_runtime target is unavailable; runtime DLL copy is skipped")
+endif()
+
+
+
+option(CXVISION_BUILD_CXPARSER_RETURN_TESTS
+       "Build cxparser return keyword regression"
+       ON)
+
+if(CXVISION_BUILD_CXPARSER_RETURN_TESTS)
+  add_subdirectory(tests/cxparser_return)
+endif()

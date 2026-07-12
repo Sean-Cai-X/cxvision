@@ -1,4 +1,5 @@
 #include "CxScriptRunTraceRuntime.h"
+#include "CxUnifiedLog.h"
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -36,7 +37,7 @@ bool CxScriptRunTraceRuntime::open(const std::filesystem::path& caseDir,
     trace_jsonl_path_ = caseDir / "run_trace.jsonl";
     live_status_path_ = caseDir / "live_status.json";
 
-    jsonl_.open(trace_jsonl_path_);
+    jsonl_.open(trace_jsonl_path_, std::ios::out | std::ios::app);
     if (!jsonl_.is_open())
     {
         reason = "Cannot open run_trace.jsonl: " + trace_jsonl_path_.string();
@@ -47,7 +48,12 @@ bool CxScriptRunTraceRuntime::open(const std::filesystem::path& caseDir,
     case_id_ = caseId;
     begin_ = std::chrono::steady_clock::now();
 
-    std::cout << "[trace] case_dir=" << caseDir << "\n" << std::flush;
+    CxUnifiedLogContext logContext;
+    logContext.session_id = sessionId;
+    logContext.case_id = caseId;
+    CxScopedLogContext scopedContext(logContext);
+    CXLOG_INFO("CxScriptRunTraceRuntime", "open", "success", 
+               "case_dir=" + caseDir.string());
 
     return true;
 }
@@ -102,11 +108,16 @@ void CxScriptRunTraceRuntime::event(const std::string& phase,
     write_jsonl(e);
     write_live_status(e);
 
-    std::cout << "[trace] phase=" << phase
-              << " status=" << status
-              << " message=" << message
-              << " elapsed_ms=" << elapsed_ms
-              << "\n" << std::flush;
+    CxUnifiedLogContext logContext;
+    logContext.session_id = session_id_;
+    logContext.case_id = case_id_;
+    logContext.evidence_id = evidence_id_;
+    logContext.image_id = image_id_;
+    logContext.target_id = target_id_;
+    logContext.script_id = script_id_;
+    logContext.parameter_profile_id = parameter_profile_id_;
+    CxScopedLogContext scopedContext(logContext);
+    CXLOG_INFO("CxScriptRunTraceRuntime", phase.c_str(), status, message);
 }
 
 void CxScriptRunTraceRuntime::script_line(int lineNo,
@@ -225,6 +236,13 @@ void CxScriptRunTraceRuntime::close()
     {
         jsonl_.close();
     }
+
+    CxUnifiedLogContext logContext;
+    logContext.session_id = session_id_;
+    logContext.case_id = case_id_;
+    CxScopedLogContext scopedContext(logContext);
+    CXLOG_INFO("CxScriptRunTraceRuntime", "close", "completed", 
+               "case_id=" + case_id_);
 }
 
 void CxScriptRunTraceRuntime::write_jsonl(const CxScriptRunTraceEvent& e)

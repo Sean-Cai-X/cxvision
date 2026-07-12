@@ -243,6 +243,8 @@ struct FindlineMeasureInputDebug
     std::string cc_selected_foreground;
 };
 
+class ICxShapeSink;
+
 class Findline :public Shape
 {
 public:
@@ -255,6 +257,8 @@ public:
 
     Findline();
     ~Findline();
+
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
     int wgap() { return m_iwgap; }
     int hgap() { return m_ihgap; }
     int thre();
@@ -339,6 +343,8 @@ public:
     void setshowlines(int ilines) { m_ishowlines = ilines; }
     PointsShape& getresultpointsw();
     PointsShape& getresultpointsh();
+    const PointsShape& getresultpointsw() const;
+    const PointsShape& getresultpointsh() const;
     void Measure(Image& image);
     void MeasureBalanced(Image& image);
     void PyrImage(Image& image);

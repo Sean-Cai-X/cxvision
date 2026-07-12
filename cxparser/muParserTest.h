@@ -149,6 +149,7 @@ private:
 	int TestWhileCondition();
 	int TestAllCondition();
 	int TestClassVariadicBinding();
+	int TestReturnCondition();
 
     void Abort() const;
 

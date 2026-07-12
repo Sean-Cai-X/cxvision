@@ -1,0 +1,8 @@
+global.return_before = 1;
+global.return_after = 0;
+
+if (1) {
+    return;
+}
+
+global.return_after = 1;

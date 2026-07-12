@@ -321,6 +321,7 @@ void ParserBase::ReInit() const
   m_vStringBuf.clear();
   m_vByteCode.clear();
   m_pTokenReader->ReInit();
+  const_cast<ParserBase*>(this)->m_bstoprun = false;
 }
 
 void ParserBase::EndExpress()const
@@ -389,6 +390,7 @@ void ParserBase::SetExpr(const string_type &a_sExpr)
       ContainsControlFlowKeyword(a_sExpr, _T("if")) ||
       ContainsControlFlowKeyword(a_sExpr, _T("else")) ||
       ContainsControlFlowKeyword(a_sExpr, _T("while")) ||
+      ContainsControlFlowKeyword(a_sExpr, _T("return")) ||
       (a_sExpr.find(_T("{")) != string_type::npos) ||
       (a_sExpr.find(_T("}")) != string_type::npos);
   m_pTokenReader->SetFormula(sBuf);
@@ -1628,6 +1630,15 @@ value_type ParserBase::ParseString() const
 			break;
 		  case cmCallin:
 			  break;
+		  case cmReturn:
+			  #ifndef nodefCmdCode
+			  if (true == m_bcmd)
+			  {
+				  m_vByteCode.Finalize();
+			  }
+			  #endif
+			  const_cast<ParserBase*>(this)->m_bstoprun = true;
+			  return 0;
 		  case cmClassObjDef:
 			{
 				pclass= opt.m_pClass;
@@ -1669,6 +1680,11 @@ value_type ParserBase::ParseString() const
 			break;
 		}
 	  }
+
+if (m_bstoprun)
+		{
+			return 0;
+		}
 
 #ifndef nodefCmdCode
 if(true == m_bcmd)
@@ -2272,6 +2288,9 @@ value_type ParserBase::RunCollectionOpt() const
 				igotoindex = 1;
 			}
 			break;
+		case cmReturn:
+			const_cast<ParserBase*>(this)->m_bstoprun = true;
+			return 0;
 		case cmCallin:
 			break;
 		case cmClassObjDef:
@@ -2613,6 +2632,9 @@ inline value_type ParserBase::RunOptStack(TokeStack & optstack) const
 				igotoindex = 1;
 			}
 			break;
+		case cmReturn:
+			const_cast<ParserBase*>(this)->m_bstoprun = true;
+			return 0;
 		case cmCallin:
 			break;
 		case cmClassObjDef:

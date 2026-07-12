@@ -1,4 +1,4 @@
-﻿/*
+/*
   File: muParserBase.h
   Role: Core parser runtime and execution entry points.
 */
@@ -36,7 +36,7 @@ namespace mu
   - Prefer macro-gated branches for experimental parser work.
 */
 
-	static const char_type *c_DefaultOprt[28]=
+	static const char_type *c_DefaultOprt[29]=
 	{
 		"<=",
 		">=",
@@ -64,6 +64,7 @@ namespace mu
 		"if",
 		"else",
 		"while",
+		"return",
 		"for",
 		0
 	};

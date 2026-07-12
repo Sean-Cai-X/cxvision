@@ -1,0 +1,74 @@
+#ifndef CXIMAGE_CXSHAPE_INTERACTION_RUNNER_H
+#define CXIMAGE_CXSHAPE_INTERACTION_RUNNER_H
+
+#include <string>
+#include <vector>
+#include <memory>
+
+#include "CxShapeInteractionTest.h"
+#include "CxShapeTestRuntime.h"
+#include "ImageAnnotationLayer.h"
+
+struct CxShapeInteractionOptions
+{
+    std::string tool_manifest_path;
+    std::string test_suite_path;
+    std::string out_dir;
+    std::string run_id;
+    bool render_frames = true;
+    int drag_steps = 5;
+    double tolerance = 8.0;
+};
+
+struct CxShapeInteractionCaseResultEx : CxShapeInteractionCaseResult
+{
+    std::string expected_handle;
+    std::string actual_handle;
+    int expected_vertex = -1;
+    int actual_vertex = -1;
+    std::string geometry_assertion;
+    bool hit_test_pass = false;
+    bool drag_pass = false;
+    bool commit_pass = false;
+    bool render_pass = false;
+    bool runtime_writeback = false;
+    std::string acceptance_scope;
+    std::string status;
+    std::string shape_kind;
+    std::string owner_type;
+    std::string owner_binding;
+    std::string operation;
+};
+
+struct CxShapeInteractionBatchResultEx : CxShapeInteractionBatchResult
+{
+    std::vector<CxShapeInteractionCaseResultEx> extended_cases;
+};
+
+class CxShapeInteractionRunner
+{
+public:
+    bool RunSuite(const CxShapeInteractionOptions& options, CxShapeInteractionBatchResultEx& result);
+
+private:
+    bool LoadToolManifest(const std::string& path, std::string& reason);
+    bool LoadTestSuite(const std::string& path, std::string& reason);
+    bool RunTestCase(const CxShapeTestCase& tc, const CxShapeInteractionOptions& options, CxShapeInteractionCaseResultEx& case_result, CxShapeInteractionTrace& trace);
+    bool VerifyHitExpectation(const CxShapeTestCase& tc, const CxShapeHitResult& hit, std::string& reason);
+    bool VerifyGeometryAssertion(
+        const std::string& assertion,
+        const CxShapeGeometrySnapshot& before,
+        const CxShapeGeometrySnapshot& after,
+        std::string& reason);
+    void GenerateCaseOutput(
+        const CxShapeInteractionCaseResultEx& case_result,
+        const CxShapeInteractionTrace& trace,
+        const CxShapeInteractionOptions& options,
+        const std::string& out_dir);
+    void GenerateBatchOutput(
+        const CxShapeInteractionBatchResultEx& result,
+        const CxShapeInteractionOptions& options,
+        const std::string& out_dir);
+};
+
+#endif

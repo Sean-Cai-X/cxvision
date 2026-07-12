@@ -1,6 +1,9 @@
 #include "pch.h"
 
 #include "Findline.h"
+#include "LineGaugeShape.h"
+#include "PolylineShape.h"
+#include "ImageAnnotationLayer.h"
 #include "../cxgeom/include/CxSetLineBuild.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
@@ -2265,7 +2268,17 @@ PointsShape& Findline::getresultpointsw()
 {
     return m_measurepoints_w;
 }
+
+const PointsShape& Findline::getresultpointsw() const
+{
+    return m_measurepoints_w;
+}
 PointsShape& Findline::getresultpointsh()
+{
+    return m_measurepoints_h;
+}
+
+const PointsShape& Findline::getresultpointsh() const
 {
     return m_measurepoints_h;
 }
@@ -3305,4 +3318,105 @@ bool Findline::EnsureOriginalMeasureGeometryReady()
     }
 
     return ok;
+}
+
+void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+{
+    FindlineDisplaySnapshot snapshot;
+    if (!getdisplaysnapshot(snapshot))
+        return;
+
+    if (snapshot.has_line_roi)
+    {
+        auto gauge_shape = std::make_unique<LineGaugeShape>(
+            snapshot.x0, snapshot.y0,
+            snapshot.x1, snapshot.y1,
+            snapshot.scan_half_width);
+        sink.UpsertShape(
+            owner_ref + ".roi_axis",
+            "Findline",
+            owner_ref,
+            "setline",
+            "roi",
+            true,
+            false,
+            std::move(gauge_shape));
+    }
+
+    if (snapshot.has_scan_box)
+    {
+        auto box_shape = std::make_unique<PolylineShape>();
+        const auto& xy = snapshot.scan_box_xy;
+        box_shape->addPoint(xy[0], xy[1]);
+        box_shape->addPoint(xy[2], xy[3]);
+        box_shape->addPoint(xy[4], xy[5]);
+        box_shape->addPoint(xy[6], xy[7]);
+        box_shape->close(true);
+        sink.UpsertShape(
+            owner_ref + ".roi_box",
+            "Findline",
+            owner_ref,
+            "",
+            "scan_box",
+            false,
+            false,
+            std::move(box_shape));
+    }
+
+    const PointsShape& w_points = getresultpointsw();
+    if (w_points.size() > 0)
+    {
+        auto pts_shape = std::make_unique<PointsShape>();
+        for (int i = 0; i < w_points.size(); ++i)
+        {
+            pts_shape->addpoint(w_points.getx(i), w_points.gety(i));
+        }
+        sink.UpsertShape(
+            owner_ref + ".measure_points_w",
+            "Findline",
+            owner_ref,
+            "",
+            "measure_points",
+            false,
+            true,
+            std::move(pts_shape));
+    }
+
+    const PointsShape& h_points = getresultpointsh();
+    if (h_points.size() > 0)
+    {
+        auto pts_shape = std::make_unique<PointsShape>();
+        for (int i = 0; i < h_points.size(); ++i)
+        {
+            pts_shape->addpoint(h_points.getx(i), h_points.gety(i));
+        }
+        sink.UpsertShape(
+            owner_ref + ".measure_points_h",
+            "Findline",
+            owner_ref,
+            "",
+            "measure_points",
+            false,
+            true,
+            std::move(pts_shape));
+    }
+
+    if (hasfitresult())
+    {
+        auto fit_line = std::make_unique<LineShape>();
+        fit_line->setline(
+            static_cast<int>(std::lround(getresultx0())),
+            static_cast<int>(std::lround(getresulty0())),
+            static_cast<int>(std::lround(getresultx1())),
+            static_cast<int>(std::lround(getresulty1())));
+        sink.UpsertShape(
+            owner_ref + ".fit_line",
+            "Findline",
+            owner_ref,
+            "",
+            "result",
+            false,
+            true,
+            std::move(fit_line));
+    }
 }

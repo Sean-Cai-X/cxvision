@@ -16,8 +16,25 @@ extern "C" {
 
 struct CxScriptHeadlessOptions;
 struct CxScriptHeadlessResult;
+struct CxShapeInteractionBatchResult;
 
 bool ParseCxScriptHeadlessArgs(int argc, char** argv, CxScriptHeadlessOptions& options);
+
+struct ShapeInteractionTestOptions
+{
+    bool enabled = false;
+    std::string manifest_path;
+    std::string suite_path;
+    std::string out_dir;
+};
+
+bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOptions& options);
+
+bool RunShapeInteractionSmokeCli(
+    const std::string& manifest_path,
+    const std::string& suite_path,
+    const std::string& out_dir,
+    CxShapeInteractionBatchResult& result);
 #endif
 
 #endif

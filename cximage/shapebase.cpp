@@ -121,10 +121,92 @@ ShapeBase::ShapeBase():
     m_ishowlines(1)
 {
 }
-ShapeBase::~ShapeBase()
-{
+ShapeBase::~ShapeBase() = default;
 
+CxShapeHit ShapeBase::hitTest(double x, double y, double tolerance) const
+{
+    (void)x;
+    (void)y;
+    (void)tolerance;
+    return {};
 }
+
+void ShapeBase::enumerateHandles(std::vector<CxShapeHandle>& out) const
+{
+    (void)out;
+}
+
+void ShapeBase::dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y)
+{
+    (void)role;
+    (void)vertex_index;
+    (void)x;
+    (void)y;
+}
+
+void ShapeBase::translateBy(double dx, double dy)
+{
+    (void)dx;
+    (void)dy;
+}
+
+bool ShapeBase::snapshot(CxShapeGeometrySnapshot& out) const
+{
+    out.kind = kind();
+    out.points.clear();
+    exportPoints(out.points);
+    if (out.points.empty())
+    {
+        bool closed = false;
+        exportPolyline(out.points, closed);
+        out.closed = closed;
+    }
+    CxShapePoint center;
+    double radius = 0.0, inner_radius = 0.0;
+    if (exportCircle(center, radius, inner_radius))
+    {
+        out.center = center;
+        out.radius = radius;
+        out.inner_radius = inner_radius;
+    }
+    return true;
+}
+
+void ShapeBase::exportPolyline(std::vector<CxShapePoint>& out, bool& closed) const
+{
+    (void)out;
+    closed = false;
+}
+
+bool ShapeBase::exportCircle(CxShapePoint& center, double& radius, double& inner_radius) const
+{
+    (void)center;
+    (void)radius;
+    (void)inner_radius;
+    return false;
+}
+
+bool ShapeBase::exportLine(CxShapePoint& p0, CxShapePoint& p1) const
+{
+    (void)p0;
+    (void)p1;
+    return false;
+}
+
+bool ShapeBase::exportEllipse(CxShapePoint& center, double& radius_x, double& radius_y, double& angle) const
+{
+    (void)center;
+    (void)radius_x;
+    (void)radius_y;
+    (void)angle;
+    return false;
+}
+
+void ShapeBase::exportPoints(std::vector<CxShapePoint>& out) const
+{
+    (void)out;
+}
+
 int ShapeBase::show()
 {
     return m_ishow;
@@ -494,8 +576,144 @@ void LineShape::setshow(int bshow)
     m_path.PathShow(bshow);
 }
 void LineShape::setpenw(int iw)
+   
 {
    
+}
+
+bool LineShape::exportLine(CxShapePoint& p0, CxShapePoint& p1) const
+{
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    p0.x = start.X();
+    p0.y = start.Y();
+    p1.x = end.X();
+    p1.y = end.Y();
+    return true;
+}
+
+void LineShape::exportPoints(std::vector<CxShapePoint>& out) const
+{
+    out.clear();
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    out.push_back({ start.X(), start.Y() });
+    out.push_back({ end.X(), end.Y() });
+}
+
+CxShapeHit LineShape::hitTest(double x, double y, double tolerance) const
+{
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    const double x0 = start.X();
+    const double y0 = start.Y();
+    const double x1 = end.X();
+    const double y1 = end.Y();
+
+    const double len = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    if (len < 1.0)
+        return {};
+
+    const double t_sq = tolerance * tolerance;
+    double dist;
+
+    dist = (x - x0) * (x - x0) + (y - y0) * (y - y0);
+    if (dist <= t_sq)
+        return { true, CxShapeHandleRole::Start, -1, std::sqrt(dist) };
+
+    dist = (x - x1) * (x - x1) + (y - y1) * (y - y1);
+    if (dist <= t_sq)
+        return { true, CxShapeHandleRole::End, -1, std::sqrt(dist) };
+
+    const double cx = (x0 + x1) * 0.5;
+    const double cy = (y0 + y1) * 0.5;
+    dist = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+    if (dist <= t_sq)
+        return { true, CxShapeHandleRole::Center, -1, std::sqrt(dist) };
+
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double tdx = dx / len;
+    const double tdy = dy / len;
+    const double px = x - x0;
+    const double py = y - y0;
+    const double proj = px * tdx + py * tdy;
+    const double clamped_proj = std::max(0.0, std::min(len, proj));
+    const double near_x = x0 + tdx * clamped_proj;
+    const double near_y = y0 + tdy * clamped_proj;
+    const double body_dist = std::sqrt((x - near_x) * (x - near_x) + (y - near_y) * (y - near_y));
+
+    if (body_dist <= tolerance)
+        return { true, CxShapeHandleRole::Body, -1, body_dist };
+
+    return {};
+}
+
+void LineShape::enumerateHandles(std::vector<CxShapeHandle>& out) const
+{
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    const double x0 = start.X();
+    const double y0 = start.Y();
+    const double x1 = end.X();
+    const double y1 = end.Y();
+    const double cx = (x0 + x1) * 0.5;
+    const double cy = (y0 + y1) * 0.5;
+
+    out.push_back({ CxShapeHandleRole::Start, -1, { x0, y0 }, "P0" });
+    out.push_back({ CxShapeHandleRole::End, -1, { x1, y1 }, "P1" });
+    out.push_back({ CxShapeHandleRole::Center, -1, { cx, cy }, "C" });
+}
+
+void LineShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y)
+{
+    (void)vertex_index;
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    const double x0 = start.X();
+    const double y0 = start.Y();
+    const double x1 = end.X();
+    const double y1 = end.Y();
+
+    switch (role)
+    {
+    case CxShapeHandleRole::Start:
+        m_line.setLine(gp_Pnt(x, y, 0), end);
+        break;
+    case CxShapeHandleRole::End:
+        m_line.setLine(start, gp_Pnt(x, y, 0));
+        break;
+    case CxShapeHandleRole::Center:
+    case CxShapeHandleRole::Body:
+    {
+        const double cx_old = (x0 + x1) * 0.5;
+        const double cy_old = (y0 + y1) * 0.5;
+        const double dx = x - cx_old;
+        const double dy = y - cy_old;
+        m_line.setLine(gp_Pnt(x0 + dx, y0 + dy, 0), gp_Pnt(x1 + dx, y1 + dy, 0));
+        break;
+    }
+    default:
+        break;
+    }
+
+    gp_Path path;
+    path.AddPoint(m_line.StartPoint());
+    path.AddPoint(m_line.EndPoint());
+    m_path = path;
+}
+
+void LineShape::translateBy(double dx, double dy)
+{
+    gp_Pnt start = m_line.StartPoint();
+    gp_Pnt end = m_line.EndPoint();
+    m_line.setLine(gp_Pnt(start.X() + dx, start.Y() + dy, 0),
+                   gp_Pnt(end.X() + dx, end.Y() + dy, 0));
+
+    gp_Path path;
+    path.AddPoint(m_line.StartPoint());
+    path.AddPoint(m_line.EndPoint());
+    m_path = path;
 }
  
 void LineShape::drawshape(gp_Path&painter)
@@ -1155,11 +1373,17 @@ void PointsShape::copy(PointsShape &points)
     //    m_paths[i].CopyPath(points.);
     // m_paths.clear();
 }
-int PointsShape::size()
+int PointsShape::size() const
 {
     return m_path.ElementCount();
 }
-int PointsShape::ABsize()
+
+int PointsShape::script_size()
+{
+    return size();
+}
+
+int PointsShape::ABsize() const
 {
     return m_pathA.ElementCount();
 }
@@ -2656,7 +2880,7 @@ void PointsShape::calibration(double dx,double dy,double dangle)
     m_path.RotateAroundPoint(apoint, dangle); 
 
 }
-double PointsShape::getx(int inum)
+double PointsShape::getx(int inum) const
 {
     int icount = m_path.ElementCount();
     if(icount>inum&&inum>=0)
@@ -2668,7 +2892,13 @@ double PointsShape::getx(int inum)
         return -99999;
     }
 }
-double PointsShape::gety(int inum)
+
+double PointsShape::script_getx(int inum)
+{
+    return getx(inum);
+}
+
+double PointsShape::gety(int inum) const
 {
     int icount = m_path.ElementCount();
     if(icount>inum&&inum>=0)
@@ -2680,6 +2910,84 @@ double PointsShape::gety(int inum)
         return -99999;
     }
 
+}
+
+void PointsShape::exportPoints(std::vector<CxShapePoint>& out) const
+{
+    out.clear();
+    const int count = m_path.ElementCount();
+    for (int i = 0; i < count; ++i)
+    {
+        gp_Pnt p = m_path.ElementAt(i);
+        out.push_back({p.X(), p.Y()});
+    }
+}
+
+CxShapeHit PointsShape::hitTest(double x, double y, double tolerance) const
+{
+    const double t_sq = tolerance * tolerance;
+    const int count = m_path.ElementCount();
+    for (int i = 0; i < count; ++i)
+    {
+        gp_Pnt p = m_path.ElementAt(i);
+        const double dx = x - p.X();
+        const double dy = y - p.Y();
+        const double dist_sq = dx * dx + dy * dy;
+        if (dist_sq <= t_sq)
+            return { true, CxShapeHandleRole::Vertex, i, std::sqrt(dist_sq) };
+    }
+    return {};
+}
+
+void PointsShape::enumerateHandles(std::vector<CxShapeHandle>& out) const
+{
+    const int count = m_path.ElementCount();
+    for (int i = 0; i < count; ++i)
+    {
+        gp_Pnt p = m_path.ElementAt(i);
+        out.push_back({ CxShapeHandleRole::Vertex, i, { p.X(), p.Y() }, "V" + std::to_string(i) });
+    }
+}
+
+void PointsShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y)
+{
+    if (role != CxShapeHandleRole::Vertex)
+        return;
+
+    const int count = m_path.ElementCount();
+    if (vertex_index < 0 || vertex_index >= count)
+        return;
+
+    gp_Pnt p = m_path.ElementAt(vertex_index);
+    gp_Vec delta(x - p.X(), y - p.Y(), 0);
+
+    gp_Path new_path;
+    for (int i = 0; i < count; ++i)
+    {
+        gp_Pnt pt = m_path.ElementAt(i);
+        if (i == vertex_index)
+            new_path.AddPoint(gp_Pnt(x, y, 0));
+        else
+            new_path.AddPoint(pt);
+    }
+    m_path = new_path;
+}
+
+void PointsShape::translateBy(double dx, double dy)
+{
+    gp_Path new_path;
+    const int count = m_path.ElementCount();
+    for (int i = 0; i < count; ++i)
+    {
+        gp_Pnt p = m_path.ElementAt(i);
+        new_path.AddPoint(gp_Pnt(p.X() + dx, p.Y() + dy, 0));
+    }
+    m_path = new_path;
+}
+
+double PointsShape::script_gety(int inum)
+{
+    return gety(inum);
 }
 
 //圆条件

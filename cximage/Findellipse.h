@@ -4,6 +4,21 @@
 #include "Image.h"
 #include "shapebase.h"
 class FindObject;
+class ICxShapeSink;
+
+struct FindellipseDisplaySnapshot
+{
+    bool has_roi = false;
+
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double radius_x = 0.0;
+    double radius_y = 0.0;
+
+    bool has_measure_points = false;
+    int measure_points_count = 0;
+};
+
 class Findellipse :public Shape
 {
 public:
@@ -112,6 +127,19 @@ private:
 public:
     void easycluster(int igapx = 10, int igapy = 10, int iclusternum = 5);
     gp_Rectangle measurepointsboundingrect() { return m_measurepointsboundingRect; }
+
+    bool getdisplaysnapshot(FindellipseDisplaySnapshot& out) const;
+
+    void PublishDisplayShapes(
+        ICxShapeSink& sink,
+        const std::string& owner_ref) const;
+
+private:
+    bool m_has_display_roi = false;
+    int m_roi_x0 = 0;
+    int m_roi_y0 = 0;
+    int m_roi_x1 = 0;
+    int m_roi_y1 = 0;
 
 };
 

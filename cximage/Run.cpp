@@ -62,9 +62,8 @@ void RunClass::Run()
 
 #include <fstream>
 #include <iostream>
+#include "CxUnifiedLog.h"
 using namespace std;
-
-static ofstream log_alg("log_algtest.txt");
 
 #if 0
 ImageManager * RunClass::g_pmodule = nullptr;
@@ -88,7 +87,7 @@ double RunClass::fitcircle_(cv::Mat matInput, cv::Point2f& ptOut, double& radius
     Findcircle afindcircle0;
     Findcircle afindcircle1;
     m_occtimage.copyFromMat(matInput);
-    log_alg << "copy ok" <<endl;
+    CXLOG_INFO("Run", "image_copy", "ok", "copy ok");
     if (0 == m_isetcircle)
     { 
         afindcircle0.setcircle(850, 690, 0, 690);
@@ -157,7 +156,7 @@ double RunClass::fitcircle_(cv::Mat matInput, cv::Point2f& ptOut, double& radius
      
 
  
-    log_alg << "run ok" << endl;
+    CXLOG_INFO("Run", "algorithm_run", "ok", "run ok");
   
 	return 0;
 }
@@ -239,7 +238,7 @@ double RunClass::ProcessIdentifyCoordPattern(cv::Mat matInput, std::vector<cv::P
             m_Match.matchmore(&m_occtimage);
         }
 
-    log_alg << "run ok" << endl;
+    CXLOG_INFO("Run", "algorithm_run", "ok", "run ok");
     double dvalue1 = m_Match.getmaxresult();
     double dvaluex = m_Match.getresolvedresultcentx(-1);
     double dvaluey = m_Match.getresolvedresultcenty(-1);
@@ -280,7 +279,7 @@ double RunClass::ProcessIdentifyCoordMatch(cv::Mat matInput, std::vector<cv::Poi
         m_Match.rotatematchAB(&m_occtimage);
      }
 
-    log_alg << "run ok" << endl;
+    CXLOG_INFO("Run", "algorithm_run", "ok", "run ok");
     double dvalue1 = m_Match.getrotateresultscore();
     double dvaluex = m_Match.getrotateresultcentx(-1);
     double dvaluey = m_Match.getrotateresultcenty(-1);

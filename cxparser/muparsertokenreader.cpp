@@ -417,12 +417,18 @@ m_icurID = 0;
 		  eFunTok = (ECmdCode)cmIf;
 		  if (eFunTok==cmUNKNOWN)
 			  return false;
-		  if (szExpr[iEnd]!='(')
+		  int pos = iEnd;
+		  while (szExpr[pos] == ' ' || szExpr[pos] == '\t' ||
+				 szExpr[pos] == '\r' || szExpr[pos] == '\n')
+		  {
+			  ++pos;
+		  }
+		  if (szExpr[pos]!='(')
 			  return false;
 
 		  a_Tok.Set(eFunTok, strTok);
 
-		  m_iPos = (int)iEnd;
+		  m_iPos = pos;
 		  if (m_iSynFlags & noFUN)
 			  Error(ecUNEXPECTED_FUN, m_iPos-(int)a_Tok.GetAsString().length(), a_Tok.GetAsString());
 
@@ -435,12 +441,18 @@ m_icurID = 0;
 		  eFunTok = (ECmdCode)cmWhile;
 		  if (eFunTok==cmUNKNOWN)
 			  return false;
-		  if (szExpr[iEnd]!='(')
+		  int pos = iEnd;
+		  while (szExpr[pos] == ' ' || szExpr[pos] == '\t' ||
+				 szExpr[pos] == '\r' || szExpr[pos] == '\n')
+		  {
+			  ++pos;
+		  }
+		  if (szExpr[pos]!='(')
 			  return false;
 
 		  a_Tok.Set(eFunTok, strTok);
 
-		  m_iPos = (int)iEnd;
+		  m_iPos = pos;
 		  if (m_iSynFlags & noFUN)
 			  Error(ecUNEXPECTED_FUN, m_iPos-(int)a_Tok.GetAsString().length(), a_Tok.GetAsString());
 
@@ -454,17 +466,45 @@ m_icurID = 0;
 		  eFunTok = (ECmdCode)cmElse;
 		  if (eFunTok==cmUNKNOWN)
 			  return false;
-		  if (szExpr[iEnd]!='{')
+		  int pos = iEnd;
+		  while (szExpr[pos] == ' ' || szExpr[pos] == '\t' ||
+				 szExpr[pos] == '\r' || szExpr[pos] == '\n')
+		  {
+			  ++pos;
+		  }
+		  if (szExpr[pos]!='{')
 			  return false;
 
 		  a_Tok.Set(eFunTok, strTok);
 
-		  m_iPos = (int)iEnd;
+		  m_iPos = pos;
 		  if (m_iSynFlags & noFUN)
 			  Error(ecUNEXPECTED_FUN, m_iPos-(int)a_Tok.GetAsString().length(), a_Tok.GetAsString());
 
 		  m_iSynFlags = noANY ^ noLB;
 
+		  return true;
+	  }
+
+	  if(strTok==string_type(pOprt[cmReturn]))
+	  {
+		  eFunTok = (ECmdCode)cmReturn;
+		  if (eFunTok==cmUNKNOWN)
+			  return false;
+
+		  int pos = iEnd;
+		  while (szExpr[pos] == ' ' || szExpr[pos] == '\t' ||
+				 szExpr[pos] == '\r' || szExpr[pos] == '\n')
+		  {
+			  ++pos;
+		  }
+
+		  if (szExpr[pos] != ';')
+			  Error(ecUNEXPECTED_OPERATOR, pos, strTok);
+
+		  a_Tok.Set(eFunTok, strTok);
+		  m_iPos = pos;
+		  m_iSynFlags = noANY ^ noSEMIC;
 		  return true;
 	  }
 	  return false;
@@ -600,6 +640,30 @@ m_icurID = 0;
 					m_iSynFlags  =  noANY ^ ( noClassMemVar | noClassMemFuc );
 
 					break;
+				case cmReturn:
+				{
+					const int iReturnEnd = m_iPos + (int)len;
+					string_type strTok;
+					const int iNameEnd = ExtractToken(m_pParser->ValidNameChars(), strTok, m_iPos);
+					if (iNameEnd != iReturnEnd)
+						continue;
+
+					int iSemiPos = iReturnEnd;
+					while (szFormula[iSemiPos] == ' ' || szFormula[iSemiPos] == '\t' ||
+						   szFormula[iSemiPos] == '\r' || szFormula[iSemiPos] == '\n')
+					{
+						++iSemiPos;
+					}
+
+					if (szFormula[iSemiPos] != ';')
+						Error(ecUNEXPECTED_OPERATOR, iSemiPos, pOprtDef[i]);
+
+					m_iPos = iSemiPos;
+					m_iPreFlags = isANY;
+					m_iSynFlags = noANY ^ noSEMIC;
+					a_Tok.Set((ECmdCode)i, pOprtDef[i]);
+					return true;
+				}
 				default:
 				  Error(ecINTERNAL_ERROR);
 			}
@@ -633,34 +697,6 @@ m_icurID = 0;
 
       return true;
     }
-
-	string_type strTok;
-
-	int iEnd = ExtractToken(m_pParser->ValidNameChars(), strTok, m_iPos);
-	if (iEnd==m_iPos)
-		return false;
-
-    if(strTok==string_type("return"))
-	{
-		m_iSynFlags = 0;
-		a_Tok.Set(cmEND);
-	}
-	else
-		return false;
-
-	m_iPos = (int)iEnd;
-	if (m_iSynFlags & noFUN)
-		Error(ecUNEXPECTED_FUN, m_iPos-(int)a_Tok.GetAsString().length(), a_Tok.GetAsString());
-
-	m_iSynFlags = noBO | noBC | noVAL | noVAR | noCOMMA | noFUN | noOPT
-	| noPOSTOP | noINFIXOP | noEND | noSTR
-	| noASSIGN | noLB | noRB | noClassDef
-	| noClassObjDef | noClassMemOp | noClassPointOp | noClassMemVar
-	| noClassMemFuc | noClassObj  ;
-
-	m_iPreFlags = isEND;
-
-    return true;
 
     return false;
   }

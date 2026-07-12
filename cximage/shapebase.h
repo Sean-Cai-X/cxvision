@@ -61,6 +61,91 @@ enum HT_SHOW_SELECT
     fpoint.Transform(trsf);
 }
 
+enum class CxShapeKind {
+    Points,
+    Line,
+    Rect,
+    Circle,
+    Polyline,
+    Ellipse,
+    LineGauge
+};
+
+struct CxShapePoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+enum class CxShapeHandleRole {
+    None,
+    Body,
+    Center,
+    Start,
+    End,
+    WidthPositive,
+    WidthNegative,
+    Radius,
+    InnerRadius,
+    RadiusX,
+    RadiusY,
+    Corner0,
+    Corner1,
+    Corner2,
+    Corner3,
+    Vertex
+};
+
+inline const char* HandleName(CxShapeHandleRole role)
+{
+    switch (role)
+    {
+    case CxShapeHandleRole::Body: return "Body";
+    case CxShapeHandleRole::Center: return "Center";
+    case CxShapeHandleRole::Start: return "Start";
+    case CxShapeHandleRole::End: return "End";
+    case CxShapeHandleRole::WidthPositive: return "WidthPositive";
+    case CxShapeHandleRole::WidthNegative: return "WidthNegative";
+    case CxShapeHandleRole::Radius: return "Radius";
+    case CxShapeHandleRole::InnerRadius: return "InnerRadius";
+    case CxShapeHandleRole::RadiusX: return "RadiusX";
+    case CxShapeHandleRole::RadiusY: return "RadiusY";
+    case CxShapeHandleRole::Corner0: return "Corner0";
+    case CxShapeHandleRole::Corner1: return "Corner1";
+    case CxShapeHandleRole::Corner2: return "Corner2";
+    case CxShapeHandleRole::Corner3: return "Corner3";
+    case CxShapeHandleRole::Vertex: return "Vertex";
+    case CxShapeHandleRole::None:
+    default: return "None";
+    }
+}
+
+struct CxShapeHandle {
+    CxShapeHandleRole role = CxShapeHandleRole::None;
+    int vertex_index = -1;
+    CxShapePoint p;
+    std::string label;
+};
+
+struct CxShapeHit {
+    bool hit = false;
+    CxShapeHandleRole role = CxShapeHandleRole::None;
+    int vertex_index = -1;
+    double distance = 0.0;
+};
+
+struct CxShapeGeometrySnapshot {
+    CxShapeKind kind;
+    std::vector<CxShapePoint> points;
+    CxShapePoint center;
+    double radius = 0.0;
+    double inner_radius = 0.0;
+    double half_width = 0.0;
+    double radius_x = 0.0;
+    double radius_y = 0.0;
+    double angle = 0.0;
+    bool closed = false;
+};
+
 class ShapeBase
 {
     enum ShapeType { Line, Points,
@@ -84,7 +169,20 @@ public:
 
 public:
     ShapeBase();
-    ~ShapeBase();
+    virtual ~ShapeBase();
+
+    virtual CxShapeKind kind() const { return CxShapeKind::Points; }
+    virtual CxShapeHit hitTest(double x, double y, double tolerance) const;
+    virtual void enumerateHandles(std::vector<CxShapeHandle>& out) const;
+    virtual void dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y);
+    virtual void translateBy(double dx, double dy);
+    virtual bool snapshot(CxShapeGeometrySnapshot& out) const;
+
+    virtual void exportPolyline(std::vector<CxShapePoint>& out, bool& closed) const;
+    virtual bool exportCircle(CxShapePoint& center, double& radius, double& inner_radius) const;
+    virtual bool exportLine(CxShapePoint& p0, CxShapePoint& p1) const;
+    virtual bool exportEllipse(CxShapePoint& center, double& radius_x, double& radius_y, double& angle) const;
+    virtual void exportPoints(std::vector<CxShapePoint>& out) const;
     int show();
     void setshow(int ishow);
     void setShape(int ishape);
@@ -167,7 +265,15 @@ public:
     void copy(LineShape &aline);
     void clear();
     void setcolor(int ir, int ig, int ib);
-    void linearInterp(int subPixelDensity);
+    void linearInterp(int subPixelDensity);
+
+    CxShapeKind kind() const override { return CxShapeKind::Line; }
+    bool exportLine(CxShapePoint& p0, CxShapePoint& p1) const override;
+    void exportPoints(std::vector<CxShapePoint>& out) const override;
+    CxShapeHit hitTest(double x, double y, double tolerance) const override;
+    void enumerateHandles(std::vector<CxShapeHandle>& out) const override;
+    void dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y) override;
+    void translateBy(double dx, double dy) override;
 
     void drawshapex(gp_Path&painter,double dmovx,double dmovy,
         double dangle,double dzoomx,double dzoomy);
@@ -200,11 +306,14 @@ public:
     void setshow(int ishow);
     void clear();
     void copy(PointsShape& points);
-    int size();
-    int ABsize();
+    int size() const;
+    int script_size();
+    int ABsize() const;
     void calibration(double dx,double dy,double dangle);
-    double getx(int inum);
-    double gety(int inum);
+    double getx(int inum) const;
+    double gety(int inum) const;
+    double script_getx(int inum);
+    double script_gety(int inum);
 
     gp_Pnt getpointscent() const;
     void pointsABadd(void *pointsB);
@@ -303,6 +412,14 @@ public:
     virtual void Rotate(double dangle);
     virtual void Zoom(double dx0,double dy0);
 
+    void exportPoints(std::vector<CxShapePoint>& out) const override;
+
+    CxShapeKind kind() const override { return CxShapeKind::Points; }
+    CxShapeHit hitTest(double x, double y, double tolerance) const override;
+    void enumerateHandles(std::vector<CxShapeHandle>& out) const override;
+    void dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y) override;
+    void translateBy(double dx, double dy) override;
+
     void MoveAB(int ix, int iy);
     void RotateAB(double dangle);
     void ZoomAB(double dx0, double dy0);
@@ -384,7 +501,7 @@ public:
     void addrect(gp_Rectangle& arect);
     void addrect(gp_Rectangle& arect, std::string& astring);
     void clear();
-    int size() { return static_cast<int>(m_rects.size()); }
+    int size() const { return static_cast<int>(m_rects.size()); }
     gp_Rectangle getrect(int inum) const { if (m_rects.size() > inum)return m_rects[inum]; else return gp_Rectangle(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0)); }
     void setspecshow(int ishownum){ m_ispecshow = ishownum; }
     void setrect(int inum,int ix,int iy,int iw,int ih);

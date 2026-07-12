@@ -3,6 +3,19 @@
 
 #include <string>
 #include <vector>
+#include <memory>
+#include <unordered_set>
+
+#include "shapebase.h"
+#include "CxAnnotationToolRuntime.h"
+#include "LineGaugeShape.h"
+#include "RectShape.h"
+#include "CircleShape.h"
+#include "PolylineShape.h"
+
+std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
+    const CxAnnotationToolSpec& tool,
+    const std::vector<CxShapePoint>& points);
 
 struct OverlayImagePoint
 {
@@ -16,7 +29,10 @@ enum class OverlayKind
   Line,
   Rect,
   Circle,
-  Polyline
+  Ellipse,
+  Polyline,
+  AutoBoundaryRequest,
+  BoundaryPolyline
 };
 
 enum class ImageToolMode
@@ -27,22 +43,58 @@ enum class ImageToolMode
   RectCreate,
   CircleCreate,
   PolylineCreate,
+  AutoBoundary,
   AttachToScript
+};
+
+struct CxShapeElement
+{
+  int id = 0;
+  std::string ref;
+  std::string stable_ref;
+
+  std::string tool_id;
+  std::string owner_type;
+  std::string owner_ref;
+  std::string owner_binding;
+  std::string semantic_role;
+  std::string source_script;
+  std::string source_statement;
+
+  bool editable = true;
+  bool visible = true;
+  bool runtime_bound = false;
+  bool result_element = false;
+  bool stale = false;
+  bool selected = false;
+  bool runtime_edit_pending = false;
+
+  uint64_t runtime_publish_generation = 0;
+
+  std::unique_ptr<ShapeBase> shape;
 };
 
 struct OverlayElement
 {
   int id = 0;
   std::string ref;
+  std::string stable_ref;
   OverlayKind kind = OverlayKind::Point;
   std::string role;
+  std::string semantic_role;
   std::string source;
+  std::string owner_type;
+  std::string owner_ref;
+  std::string status = "created";
   std::string module_hint;
   std::vector<OverlayImagePoint> image_points;
   float radius = 0.0f;
   bool selected = false;
   bool visible = true;
   bool editable = true;
+  bool runtime_bound = false;
+  bool stale = false;
+  uint64_t source_version = 0;
   std::string label;
   std::string evidence_ref;
   std::string generated_statement;
@@ -53,15 +105,78 @@ struct OverlayElement
 struct AnnotationToolDefinition
 {
   std::string name;
-  OverlayKind kind = OverlayKind::Point;
+  std::string label;
+  std::string shape_type;
   std::string role;
   std::string source;
   std::string action;
   std::string module_hint;
   std::string description;
+  std::string owner_tool;
+  std::string owner_binding;
+  bool manual_visible = true;
+  bool editable = true;
+  OverlayKind kind = OverlayKind::Point;
 };
 
-class ImageAnnotationLayer
+class ICxShapeSink {
+public:
+    virtual ~ICxShapeSink() = default;
+
+    virtual void UpsertShape(
+        const std::string& stable_ref,
+        const std::string& owner_type,
+        const std::string& owner_ref,
+        const std::string& owner_binding,
+        const std::string& semantic_role,
+        bool editable,
+        bool result_element,
+        std::unique_ptr<ShapeBase> shape) = 0;
+};
+
+struct CxShapeHitResult {
+    bool hit = false;
+    int element_index = -1;
+    CxShapeHit shape_hit;
+};
+
+struct CxPointerEvent {
+    enum class Type { Move, LeftDown, LeftDrag, LeftUp };
+    Type type;
+    double image_x;
+    double image_y;
+    uint64_t frame_no;
+};
+
+struct CxShapeCommitResult {
+    bool committed = false;
+    std::string owner_type;
+    std::string owner_ref;
+    std::string owner_binding;
+    std::string semantic_role;
+    bool result_marked_stale = false;
+    int stale_result_count = 0;
+    bool runtime_writeback = false;
+    std::string reason;
+};
+
+struct CxShapeInteractionTrace {
+    std::vector<CxPointerEvent> pointer_events;
+    std::vector<CxShapeHitResult> hits;
+    std::vector<CxShapeGeometrySnapshot> snapshots;
+    std::string commit_reason;
+    CxShapeCommitResult commit_result;
+
+    bool hit_test_called = false;
+    bool hit = false;
+    bool begin_drag_called = false;
+    bool begin_drag_ok = false;
+    bool update_drag_ok = false;
+    bool commit_called = false;
+    bool commit_ok = false;
+};
+
+class ImageAnnotationLayer : public ICxShapeSink
 {
 public:
   bool LoadManifest(const std::string& path, std::string& reason);
@@ -70,9 +185,17 @@ public:
   bool LoadElements(const std::string& path, std::string& imageRef,
                     std::string& reason);
 
+    bool WriteShapeElementsJson(
+        const std::filesystem::path& path,
+        std::string& reason) const;
+
   OverlayElement& Create(OverlayKind kind, const std::string& role,
                          const std::string& source,
                          const std::string& moduleHint);
+  OverlayElement* FindByStableRef(const std::string& ref);
+  const OverlayElement* FindByStableRef(const std::string& ref) const;
+  OverlayElement& UpsertByStableRef(const std::string& ref, OverlayKind kind);
+  void RemoveByOwner(const std::string& owner_type, const std::string& owner_ref);
   void Clear();
   void Select(int index);
 
@@ -92,14 +215,113 @@ public:
   static const char* KindName(OverlayKind kind);
   static bool ParseKind(const std::string& text, OverlayKind& kind);
 
+  CxShapeElement& CreateFromTool(
+      const CxAnnotationToolSpec& tool,
+      std::unique_ptr<ShapeBase> shape);
+
+  CxShapeElement& UpsertShape(
+      const std::string& stable_ref,
+      std::unique_ptr<ShapeBase> shape);
+
+  CxShapeElement* FindShapeByStableRef(const std::string& stable_ref);
+
+  CxShapeHitResult HitTest(double image_x, double image_y, double tolerance);
+
+  bool BeginDrag(const CxShapeHitResult& hit, double image_x, double image_y);
+  bool UpdateDrag(double image_x, double image_y);
+  bool CommitEdit(std::string& reason);
+  void CancelDrag();
+
+  bool SimulateDragShape(
+      const std::string& stable_or_ref,
+      CxShapeHandleRole role,
+      int vertex_index,
+      double from_x,
+      double from_y,
+      double to_x,
+      double to_y,
+      std::string& reason);
+
+  bool SimulatePointerDrag(
+      double from_x,
+      double from_y,
+      double to_x,
+      double to_y,
+      int intermediate_steps,
+      double tolerance,
+      CxShapeInteractionTrace& trace);
+
+  void RemoveShapeByOwner(const std::string& owner_type, const std::string& owner_ref);
+  void MarkOwnerResultStale(const std::string& owner_type, const std::string& owner_ref);
+
+    void RemoveRuntimeOwnersNotIn(const std::unordered_set<std::string>& liveOwners);
+
+    void SelectShape(int index);
+    CxShapeElement* SelectedShape();
+    const CxShapeElement* SelectedShape() const;
+
+    void EnumerateVisibleShapes(std::vector<const CxShapeElement*>& out) const;
+
+    std::vector<CxShapeElement>& ShapeElements() { return myShapeElements; }
+    const std::vector<CxShapeElement>& ShapeElements() const { return myShapeElements; }
+
+    void ClearShapeElements();
+    bool HasActiveDrag() const;
+    std::size_t ShapeElementCount() const;
+
+    bool CommitEdit(CxShapeCommitResult& result);
+    int MarkOwnerResultStaleAndCount(const std::string& owner_type, const std::string& owner_ref);
+
+    static int HandlePriority(CxShapeHandleRole role);
+
+    uint64_t BeginRuntimeOwnerPublish(
+        const std::string& owner_type,
+        const std::string& owner_ref);
+
+    void EndRuntimeOwnerPublish(
+        const std::string& owner_type,
+        const std::string& owner_ref,
+        uint64_t generation);
+
+    void ConfirmRuntimeWriteback(const std::string& stable_ref);
+    void DiscardPendingRuntimeEdit(const std::string& stable_ref);
+
+    void UpsertShape(
+        const std::string& stable_ref,
+        const std::string& owner_type,
+        const std::string& owner_ref,
+        const std::string& owner_binding,
+        const std::string& semantic_role,
+        bool editable,
+        bool result_element,
+        std::unique_ptr<ShapeBase> shape) override;
+
 private:
   std::string MakeRef(OverlayKind kind, int id) const;
 
   std::vector<AnnotationToolDefinition> myTools;
   std::vector<OverlayElement> myElements;
+  std::vector<CxShapeElement> myShapeElements;
   int myNextId = 1;
   int mySelectedIndex = -1;
   int myActiveToolIndex = -1;
+  int mySelectedShapeIndex = -1;
+
+  int myDraggingElement = -1;
+  CxShapeHandleRole myDraggingRole = CxShapeHandleRole::None;
+  int myDraggingVertexIndex = -1;
+  double myDragStartX = 0.0;
+  double myDragStartY = 0.0;
+  double myDragLastX = 0.0;
+  double myDragLastY = 0.0;
+  bool myDragHasPosition = false;
+
+  uint64_t myRuntimePublishGeneration = 0;
+  uint64_t myActiveRuntimePublishGeneration = 0;
+  std::string myActivePublishOwnerType;
+  std::string myActivePublishOwnerRef;
+
+  std::string myLoadStatus;
 };
 
 #endif

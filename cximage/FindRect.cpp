@@ -4,6 +4,8 @@
 #include "CxCoreBoundary.h"
 #include "CxCoreGeometryAttach.h"
 #include "imagemanager.h"
+#include "ImageAnnotationLayer.h"
+#include "RectShape.h"
 
 #include <algorithm>
 #include <cmath>
@@ -632,7 +634,7 @@ gp_Rectangle FindRect::getresultrect(int inum) const
     return const_cast<RectsShape&>(rects).getrect(inum);
 }
 
-int FindRect::getresultobjsnum()
+int FindRect::getresultobjsnum() const
 {
     return m_resultrects.size();
 }
@@ -659,4 +661,59 @@ cxgeom::CxSurfaceElement FindRect::makeresultelement(int inum, int entity_id) co
         ? std::max(0.0, std::min(1.0, m_lastresult.score / 100.0))
         : 1.0;
     return cxcore::MakeSurfaceElementFromRect(rect_output, entity_id, "findrect", confidence);
+}
+
+void FindRect::PublishDisplayShapes(
+    ICxShapeSink& sink,
+    const std::string& owner_ref) const
+{
+    const gp_Rectangle roi = rect();
+    const bool hasValidRoi =
+        std::abs(roi.Width()) > 1.0 &&
+        std::abs(roi.Height()) > 1.0;
+
+    if (hasValidRoi)
+    {
+        const double x0 = roi.TopLeft().X();
+        const double y0 = roi.TopLeft().Y();
+        const double x1 = x0 + roi.Width();
+        const double y1 = y0 + roi.Height();
+
+        auto roiShape = std::make_unique<RectShape>(x0, y0, x1, y1);
+        sink.UpsertShape(
+            owner_ref + ".roi_rect",
+            "FindRect",
+            owner_ref,
+            "setrect",
+            "roi",
+            true,
+            false,
+            std::move(roiShape));
+    }
+
+    for (int i = 0; i < getresultobjsnum(); ++i)
+    {
+        const gp_Rectangle result = getresultrect(i);
+        if (std::abs(result.Width()) <= 1.0 ||
+            std::abs(result.Height()) <= 1.0)
+        {
+            continue;
+        }
+
+        const double rx0 = result.TopLeft().X();
+        const double ry0 = result.TopLeft().Y();
+        const double rx1 = rx0 + result.Width();
+        const double ry1 = ry0 + result.Height();
+
+        auto resultShape = std::make_unique<RectShape>(rx0, ry0, rx1, ry1);
+        sink.UpsertShape(
+            owner_ref + ".result_rect." + std::to_string(i),
+            "FindRect",
+            owner_ref,
+            "",
+            "result",
+            false,
+            true,
+            std::move(resultShape));
+    }
 }

@@ -1,7 +1,13 @@
 #include "Main.h"
+#include "ViewController.h"
 #include "ManualStateTestConsole.h"
 #include "CxScriptGeometryFrameProbe.h"
 #include "CxScriptSuiteRunner.h"
+#include "CxShapeInteractionTest.h"
+#include "CxUnifiedLog.h"
+#include "CxUnifiedLogOptions.h"
+#include "CxUnifiedLogStreamBuf.h"
+#include "CxCrashLogHandler.h"
 
 #if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
 #include "CxScriptStage25Runner.h"
@@ -9,8 +15,70 @@
 
 #include <iostream>
 
-int main(int argc, char** argv)
+bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOptions& options)
 {
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--shape-interaction-smoke")
+        {
+            options.enabled = true;
+        }
+        else if (arg == "--annotation-tool-manifest" && i + 1 < argc)
+        {
+            options.manifest_path = argv[++i];
+        }
+        else if (arg == "--shape-interaction-suite" && i + 1 < argc)
+        {
+            options.suite_path = argv[++i];
+        }
+        else if (arg == "--out" && i + 1 < argc)
+        {
+            options.out_dir = argv[++i];
+        }
+    }
+    return true;
+}
+
+bool RunShapeInteractionSmokeCli(
+    const std::string& manifest_path,
+    const std::string& suite_path,
+    const std::string& out_dir,
+    CxShapeInteractionBatchResult& result)
+{
+    ViewController viewer;
+    return viewer.RunShapeInteractionSmoke(manifest_path, suite_path, out_dir, result);
+}
+
+int RunCxVisionApplication(int argc, char** argv)
+{
+    ShapeInteractionTestOptions shapeOptions;
+    ParseShapeInteractionTestArgs(argc, argv, shapeOptions);
+    if (shapeOptions.enabled)
+    {
+        CxShapeInteractionBatchResult result;
+        const bool ok = RunShapeInteractionSmokeCli(
+            shapeOptions.manifest_path.empty() ? "cxparser/cxscript/module/cximage/tool_annotation_basic.cxsc" : shapeOptions.manifest_path,
+            shapeOptions.suite_path.empty() ? "cxparser/cxscript/module/cximage/tests/shape_interaction_acceptance.cxsc" : shapeOptions.suite_path,
+            shapeOptions.out_dir.empty() ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/shape_interaction_smoke" : shapeOptions.out_dir,
+            result);
+
+        std::cout << "shape_interaction_smoke_ok=" << (ok ? "true" : "false") << "\n";
+        std::cout << "total_cases=" << result.cases.size() << "\n";
+        std::cout << "pass_count=" << std::count_if(result.cases.begin(), result.cases.end(),
+                                                    [](const auto& c) { return c.pass; }) << "\n";
+        std::cout << "fail_count=" << std::count_if(result.cases.begin(), result.cases.end(),
+                                                    [](const auto& c) { return !c.pass; }) << "\n";
+
+        for (const auto& c : result.cases)
+        {
+            std::cout << "case=" << c.case_id << " pass=" << (c.pass ? "true" : "false")
+                      << " conclusion=" << c.conclusion << "\n";
+        }
+
+        return ok ? 0 : 1;
+    }
+
     CxScriptHeadlessOptions headlessOptions;
     GaugeFrameProbeOptions frameProbeOptions;
     if (ParseGaugeFrameProbeArgs(argc, argv, frameProbeOptions) &&
@@ -267,4 +335,98 @@ int main(int argc, char** argv)
 
     std::cout << "[MAIN] entering GUI mode\n" << std::flush;
     return glfw_occ_main();
+}
+
+int RunUnifiedLogSmoke(const CxUnifiedLogOptions& options)
+{
+    CXLOG_INFO("CxUnifiedLog", "smoke_begin", "running", "smoke_id=" + options.smoke_id);
+
+    std::atomic<int> event_count{0};
+
+    auto worker = [&](int id)
+    {
+        for (int i = 0; i < 100; ++i)
+        {
+            std::ostringstream oss;
+            oss << "worker_thread_" << id << " event " << i;
+            CXLOG_INFO("CxUnifiedLogSmoke", "worker_event", "ok", oss.str());
+            event_count++;
+        }
+    };
+
+    std::thread t1(worker, 0);
+    std::thread t2(worker, 1);
+
+    t1.join();
+    t2.join();
+
+    CXLOG_INFO("CxUnifiedLog", "smoke_end", "completed", "events=" + std::to_string(event_count.load()));
+
+    std::cout << "unified_log_smoke_ok=true\n";
+    std::cout << "written_events=" << event_count.load() + 2 << "\n";
+    std::cout << "run_id=" << CxUnifiedLog::Instance().RunId() << "\n";
+    std::cout << "log_path=" << CxUnifiedLog::Instance().Path().string() << "\n";
+
+    return 0;
+}
+
+int main(int argc, char** argv)
+{
+    CxUnifiedLogOptions logOptions;
+    std::string logReason;
+
+    ParseUnifiedLogArgs(argc, argv, logOptions, logReason);
+
+    const std::string mode = DetectCxVisionRunMode(argc, argv);
+
+    if (logOptions.enabled)
+    {
+        CxUnifiedLog::Instance().Initialize(
+            logOptions.path,
+            mode,
+            argc,
+            argv,
+            logReason);
+    }
+
+    InstallCxCrashLogHandlers();
+
+    if (logOptions.enabled && logOptions.capture_stdio)
+    {
+        InstallUnifiedStdStreamCapture();
+    }
+
+    if (logOptions.enabled)
+    {
+        CXLOG_INFO(
+            "GuiMain",
+            "run_start",
+            "started",
+            "mode=" + mode + ", args=" + RedactCommandLine(argc, argv));
+    }
+
+    int exitCode = 0;
+
+    if (logOptions.smoke_mode)
+    {
+        exitCode = RunUnifiedLogSmoke(logOptions);
+    }
+    else
+    {
+        exitCode = RunCxVisionApplication(argc, argv);
+    }
+
+    if (logOptions.enabled)
+    {
+        CxUnifiedLog::Instance().Shutdown(
+            exitCode,
+            exitCode == 0 ? "normal_exit" : "failed_exit");
+    }
+
+    if (logOptions.enabled && logOptions.capture_stdio)
+    {
+        RestoreUnifiedStdStreamCapture();
+    }
+
+    return exitCode;
 }
