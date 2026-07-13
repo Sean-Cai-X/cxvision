@@ -160,6 +160,29 @@ struct CxShapeCommitResult {
     std::string reason;
 };
 
+struct CxImagePointerFrame {
+    bool canvas_hovered = false;
+    bool inside_image = false;
+    bool left_clicked = false;
+    bool left_down = false;
+    bool left_released = false;
+    bool right_clicked = false;
+    bool escape_pressed = false;
+    bool enter_pressed = false;
+    double image_x = 0.0;
+    double image_y = 0.0;
+};
+
+struct CxImagePointerResult {
+    bool consumed = false;
+    std::string phase;
+    std::string status;
+    std::string reason;
+    std::string created_ref;
+    std::string selected_ref;
+    CxShapeCommitResult commit;
+};
+
 struct CxShapeInteractionTrace {
     std::vector<CxPointerEvent> pointer_events;
     std::vector<CxShapeHitResult> hits;

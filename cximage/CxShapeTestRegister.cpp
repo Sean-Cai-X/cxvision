@@ -230,6 +230,46 @@ static double CxShapeTest_setexpectedradiusy(double expected)
     return 0.0;
 }
 
+static double CxShapeTest_setpointersequence(const char* sequence)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+        current->pointer_sequence = sequence ? sequence : "";
+    return 0.0;
+}
+
+static double CxShapeTest_setexpectedshapedelta(double delta)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+        current->expected_shape_count_delta = static_cast<int>(delta);
+    return 0.0;
+}
+
+static double CxShapeTest_setexpectedcreatedkind(const char* kind)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+        current->expected_created_kind = kind ? kind : "";
+    return 0.0;
+}
+
+static double CxShapeTest_setexpectedphase(const char* phase)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+        current->expected_phase = phase ? phase : "";
+    return 0.0;
+}
+
+static double CxShapeTest_setexpectedstatus(const char* status)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+        current->expected_status = status ? status : "";
+    return 0.0;
+}
+
 void RegisterCxShapeTestBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxShapeTest_reset", (mu::fun_type1)&CxShapeTest_reset);
@@ -254,4 +294,9 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setexpectedcommit", (mu::fun_type1)&CxShapeTest_setexpectedcommit);
     parser.DefineFun("CxShapeTest_setexpectedradiusx", (mu::fun_type1)&CxShapeTest_setexpectedradiusx);
     parser.DefineFun("CxShapeTest_setexpectedradiusy", (mu::fun_type1)&CxShapeTest_setexpectedradiusy);
+    parser.DefineFun("CxShapeTest_setpointersequence", (mu::strfun_type1)&CxShapeTest_setpointersequence);
+    parser.DefineFun("CxShapeTest_setexpectedshapedelta", (mu::fun_type1)&CxShapeTest_setexpectedshapedelta);
+    parser.DefineFun("CxShapeTest_setexpectedcreatedkind", (mu::strfun_type1)&CxShapeTest_setexpectedcreatedkind);
+    parser.DefineFun("CxShapeTest_setexpectedphase", (mu::strfun_type1)&CxShapeTest_setexpectedphase);
+    parser.DefineFun("CxShapeTest_setexpectedstatus", (mu::strfun_type1)&CxShapeTest_setexpectedstatus);
 }

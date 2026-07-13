@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "CxAnnotationToolRuntime.h"
+#include "CxUnifiedLog.h"
 #include "shapebase.h"
 #include "RectShape.h"
 #include "CircleShape.h"
@@ -268,6 +269,452 @@ ImVec2 ViewController::ScreenToImagePoint(const ImVec2& p) const
   return ScreenToImage(p.x, p.y);
 }
 
+static double Distance2(double x0, double y0, double x1, double y1)
+{
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    return dx * dx + dy * dy;
+}
+
+bool ViewController::CommitDraftShapeFromTool(
+    const CxAnnotationToolSpec& tool,
+    CxImagePointerResult& out)
+{
+    const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
+    const double dy = m_annotationDragEnd.y - m_annotationDragStart.y;
+
+    if (tool.shape_type == "LineShape")
+    {
+        const double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist < 2.0)
+        {
+            out.status = "draft_too_small";
+            out.reason = "line length too small";
+            return false;
+        }
+    }
+    else if (tool.shape_type == "RectShape")
+    {
+        const double w = std::abs(dx);
+        const double h = std::abs(dy);
+        if (w < 2.0 || h < 2.0)
+        {
+            out.status = "draft_too_small";
+            out.reason = "rect width/height too small";
+            return false;
+        }
+    }
+    else if (tool.shape_type == "CircleShape")
+    {
+        const double r = std::sqrt(dx * dx + dy * dy);
+        if (r < 2.0)
+        {
+            out.status = "draft_too_small";
+            out.reason = "circle radius too small";
+            return false;
+        }
+    }
+    else if (tool.shape_type == "EllipseShape")
+    {
+        const double rx = std::abs(dx);
+        const double ry = std::abs(dy);
+        if (rx < 2.0 || ry < 2.0)
+        {
+            out.status = "draft_too_small";
+            out.reason = "ellipse radius too small";
+            return false;
+        }
+    }
+
+    std::vector<CxShapePoint> pts = {
+        {m_annotationDragStart.x, m_annotationDragStart.y},
+        {m_annotationDragEnd.x, m_annotationDragEnd.y}
+    };
+    auto shape = CreateInitialShapeForTool(tool, pts);
+    if (!shape)
+    {
+        out.status = "failed";
+        out.reason = "CreateInitialShapeForTool failed";
+        return false;
+    }
+
+    CxShapeElement& element = m_annotationLayer.CreateFromTool(tool, std::move(shape));
+    out.consumed = true;
+    out.phase = "create_shape";
+    out.status = "created";
+    out.created_ref = element.stable_ref;
+    out.reason = "shape created from annotation tool";
+    CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+    return true;
+}
+
+CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
+    const CxImagePointerFrame& frame)
+{
+    CxImagePointerResult out;
+
+    CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_begin", "running",
+        "x=" + std::to_string(frame.image_x) + ", y=" + std::to_string(frame.image_y));
+
+    if (!frame.canvas_hovered || !frame.inside_image)
+    {
+        out.phase = "pointer_reject";
+        out.status = "ignored";
+        out.reason = "outside image canvas";
+        CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_reject", "ignored", "reason=outside canvas");
+        return out;
+    }
+
+    if (frame.escape_pressed)
+    {
+        m_annotationDragging = false;
+        m_activePolylinePoints.clear();
+        m_annotationLayer.CancelDrag();
+        out.consumed = true;
+        out.phase = "cancel";
+        out.status = "cancelled";
+        return out;
+    }
+
+    if (m_annotationLayer.HasActiveDrag())
+    {
+        out.consumed = true;
+        out.phase = "drag_existing";
+
+        if (frame.left_down)
+        {
+            const bool ok = m_annotationLayer.UpdateDrag(frame.image_x, frame.image_y);
+            out.status = ok ? "dragging" : "failed";
+            out.reason = ok ? "drag updated" : "UpdateDrag failed";
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            CxShapeCommitResult commit;
+            const bool ok = m_annotationLayer.CommitEdit(commit);
+            out.commit = commit;
+            out.status = ok ? "committed" : "failed";
+            out.reason = commit.reason;
+            if (ok)
+                CXLOG_INFO("ImageAnnotationUI", "annotation_drag_commit", "committed", "reason=" + commit.reason);
+            return out;
+        }
+
+        return out;
+    }
+
+    const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
+    const bool hasActiveTool = activeTool != nullptr;
+    const bool inCreateMode = IsAnnotationCreateModeActive();
+
+    if (!inCreateMode)
+    {
+        if (frame.left_clicked)
+        {
+            CxShapeHitResult hit =
+                m_annotationLayer.HitTest(frame.image_x, frame.image_y, 8.0);
+
+            if (hit.hit)
+            {
+                m_annotationLayer.SelectShape(hit.element_index);
+                m_annotationLayer.BeginDrag(hit, frame.image_x, frame.image_y);
+
+                const CxShapeElement* selected = m_annotationLayer.SelectedShape();
+                out.consumed = true;
+                out.phase = "select_existing";
+                out.status = "selected";
+                out.selected_ref = selected ? selected->stable_ref : "";
+                out.reason = "shape selected and drag started";
+                CXLOG_INFO("ImageAnnotationUI", "annotation_drag_begin", "running", "ref=" + out.selected_ref);
+                return out;
+            }
+        }
+
+        out.phase = "pointer_pan";
+        out.status = "not_consumed";
+        return out;
+    }
+
+    OverlayKind currentKind = OverlayKind::Line;
+    std::string currentToolName = "scan_line";
+    
+    if (hasActiveTool)
+    {
+        currentKind = activeTool->kind;
+        currentToolName = activeTool->name;
+    }
+    else
+    {
+        switch (m_imageToolMode)
+        {
+        case ImageToolMode::PointCreate: currentKind = OverlayKind::Point; currentToolName = "point_pick"; break;
+        case ImageToolMode::LineCreate: currentKind = OverlayKind::Line; currentToolName = "scan_line"; break;
+        case ImageToolMode::RectCreate: currentKind = OverlayKind::Rect; currentToolName = "roi_rect"; break;
+        case ImageToolMode::CircleCreate: currentKind = OverlayKind::Circle; currentToolName = "roi_circle"; break;
+        case ImageToolMode::PolylineCreate: currentKind = OverlayKind::Polyline; currentToolName = "polyline"; break;
+        default: break;
+        }
+    }
+
+    if (currentKind == OverlayKind::Point)
+    {
+        if (frame.left_clicked)
+        {
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                std::vector<CxShapePoint> pts = {{frame.image_x, frame.image_y}};
+                auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+                if (shape)
+                {
+                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "created";
+                out.created_ref = element.stable_ref;
+                out.reason = "point created";
+                CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+                return out;
+                }
+            }
+            out.status = "failed";
+            out.reason = "CreateInitialShapeForTool failed";
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::Polyline)
+    {
+        if (frame.left_clicked)
+        {
+            m_activePolylinePoints.push_back({frame.image_x, frame.image_y});
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "point_added";
+            out.reason = "polyline point added";
+            return out;
+        }
+
+        if (frame.right_clicked || frame.enter_pressed)
+        {
+            if (m_activePolylinePoints.empty())
+            {
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "empty_polyline";
+                out.reason = "no points to create polyline";
+                return out;
+            }
+
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                auto shape = CreateInitialShapeForTool(*toolSpec, m_activePolylinePoints);
+                if (shape)
+                {
+                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "created";
+                out.created_ref = element.stable_ref;
+                out.reason = "polyline created";
+                CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+                m_activePolylinePoints.clear();
+                return out;
+                }
+            }
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "failed";
+            out.reason = "CreateInitialShapeForTool failed";
+            m_activePolylinePoints.clear();
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::Line)
+    {
+        if (!m_annotationDragging)
+        {
+            if (frame.left_clicked)
+            {
+                m_annotationDragging = true;
+                m_annotationDragKind = OverlayKind::Line;
+                m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
+                m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "draft_started";
+                out.reason = "line draft started";
+                return out;
+            }
+            return out;
+        }
+
+        if (frame.left_down)
+        {
+            m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "draft_updating";
+            out.reason = "line draft updating";
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                CommitDraftShapeFromTool(*toolSpec, out);
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "tool spec not found";
+            }
+            m_annotationDragging = false;
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::Rect)
+    {
+        if (!m_annotationDragging)
+        {
+            if (frame.left_clicked)
+            {
+                m_annotationDragging = true;
+                m_annotationDragKind = OverlayKind::Rect;
+                m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
+                m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "draft_started";
+                out.reason = "rect draft started";
+                return out;
+            }
+            return out;
+        }
+
+        if (frame.left_down)
+        {
+            m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "draft_updating";
+            out.reason = "rect draft updating";
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                CommitDraftShapeFromTool(*toolSpec, out);
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "tool spec not found";
+            }
+            m_annotationDragging = false;
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::Circle)
+    {
+        if (!m_annotationDragging)
+        {
+            if (frame.left_clicked)
+            {
+                m_annotationDragging = true;
+                m_annotationDragKind = OverlayKind::Circle;
+                m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
+                m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "draft_started";
+                out.reason = "circle draft started";
+                return out;
+            }
+            return out;
+        }
+
+        if (frame.left_down)
+        {
+            m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "draft_updating";
+            out.reason = "circle draft updating";
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                CommitDraftShapeFromTool(*toolSpec, out);
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "tool spec not found";
+            }
+            m_annotationDragging = false;
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::Ellipse)
+    {
+        if (!m_annotationDragging)
+        {
+            if (frame.left_clicked)
+            {
+                m_annotationDragging = true;
+                m_annotationDragKind = OverlayKind::Ellipse;
+                m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
+                m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "draft_started";
+                out.reason = "ellipse draft started";
+                return out;
+            }
+            return out;
+        }
+
+        if (frame.left_down)
+        {
+            m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "draft_updating";
+            out.reason = "ellipse draft updating";
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
+            if (toolSpec)
+            {
+                CommitDraftShapeFromTool(*toolSpec, out);
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "tool spec not found";
+            }
+            m_annotationDragging = false;
+            return out;
+        }
+    }
+
+    return out;
+}
+
 void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
                                                 bool canvasActive,
                                                 ImDrawList* drawList)
@@ -318,263 +765,32 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     m_annotationStatus = "created " + element.ref;
   };
 
+  CxImagePointerFrame pointerFrame;
+  pointerFrame.canvas_hovered = canvasHovered;
+  pointerFrame.inside_image = insideImage;
+  pointerFrame.left_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  pointerFrame.left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+  pointerFrame.left_released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+  pointerFrame.right_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+  pointerFrame.escape_pressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
+  pointerFrame.enter_pressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
+  pointerFrame.image_x = imagePoint.x;
+  pointerFrame.image_y = imagePoint.y;
+
+  CxImagePointerResult pointerResult = ProcessImageAnnotationPointerFrame(pointerFrame);
+
+  if (pointerResult.consumed)
+  {
+    m_blockOccMouseInputThisFrame = true;
+    m_blockImagePanThisFrame = true;
+    m_annotationStatus = pointerResult.status + ": " + pointerResult.reason;
+  }
+
   if (tool != nullptr)
   {
     if (IsAnnotationCreateModeActive() && IsMouseInsideImageCanvas(mouseScreen) && insideImage)
     {
-      m_blockOccMouseInputThisFrame = true;
-      m_blockImagePanThisFrame = true;
-
-      if (tool->kind == OverlayKind::Point && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-      {
-        const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-        if (toolSpec)
-        {
-          std::vector<CxShapePoint> pts = {{imagePoint.x, imagePoint.y}};
-          auto shape = CreateInitialShapeForTool(*toolSpec, pts);
-          if (shape)
-          {
-            m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-            m_annotationStatus = "created point";
-          }
-        }
-      }
-      else if (tool->kind == OverlayKind::Polyline)
-      {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-        {
-          m_activePolylinePoints.clear();
-          return;
-        }
-
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-            ImGui::IsKeyPressed(ImGuiKey_Enter))
-        {
-          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-          if (toolSpec && !m_activePolylinePoints.empty())
-          {
-            auto shape = CreateInitialShapeForTool(*toolSpec, m_activePolylinePoints);
-            if (shape)
-            {
-              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-              m_annotationStatus = "created polyline";
-            }
-          }
-          m_activePolylinePoints.clear();
-          return;
-        }
-
-        if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        {
-          return;
-        }
-
-        m_activePolylinePoints.push_back({imagePoint.x, imagePoint.y});
-        m_annotationStatus = "polyline point added";
-      }
-      else if (tool->kind == OverlayKind::Line && tool->action != "connect_refs")
-      {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-        {
-          m_annotationDragging = false;
-          return;
-        }
-
-        if (!m_annotationDragging)
-        {
-          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-          {
-            m_annotationDragging = true;
-            m_annotationDragKind = OverlayKind::Line;
-            m_annotationDragStart = {imagePoint.x, imagePoint.y};
-            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-          }
-          return;
-        }
-
-        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-
-        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-          const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
-          const double dy = m_annotationDragEnd.y - m_annotationDragStart.y;
-          const double length = std::sqrt(dx * dx + dy * dy);
-          if (length < 2.0)
-          {
-            m_annotationStatus = "draft_too_small";
-            m_annotationDragging = false;
-            return;
-          }
-
-          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-          if (toolSpec)
-          {
-            std::vector<CxShapePoint> pts = {
-                {m_annotationDragStart.x, m_annotationDragStart.y},
-                {m_annotationDragEnd.x, m_annotationDragEnd.y}
-            };
-            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
-            if (shape)
-            {
-              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-              m_annotationStatus = "created line";
-            }
-          }
-          m_annotationDragging = false;
-        }
-      }
-      else if (tool->kind == OverlayKind::Rect && tool->action != "connect_refs")
-      {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-        {
-          m_annotationDragging = false;
-          return;
-        }
-
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        {
-          m_annotationDragging = true;
-          m_annotationDragKind = OverlayKind::Rect;
-          m_annotationDragStart = {imagePoint.x, imagePoint.y};
-          m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-          return;
-        }
-
-        if (m_annotationDragging)
-        {
-          m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-        }
-
-        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-          const double width = std::abs(m_annotationDragEnd.x - m_annotationDragStart.x);
-          const double height = std::abs(m_annotationDragEnd.y - m_annotationDragStart.y);
-          if (width < 2.0 || height < 2.0)
-          {
-            m_annotationStatus = "draft_too_small";
-            m_annotationDragging = false;
-            return;
-          }
-
-          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-          if (toolSpec)
-          {
-            std::vector<CxShapePoint> pts = {
-                {m_annotationDragStart.x, m_annotationDragStart.y},
-                {m_annotationDragEnd.x, m_annotationDragEnd.y}
-            };
-            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
-            if (shape)
-            {
-              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-              m_annotationStatus = "created rect";
-            }
-          }
-          m_annotationDragging = false;
-        }
-      }
-      else if (tool->kind == OverlayKind::Circle && tool->action != "connect_refs")
-      {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-        {
-          m_annotationDragging = false;
-          return;
-        }
-
-        if (!m_annotationDragging)
-        {
-          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-          {
-            m_annotationDragging = true;
-            m_annotationDragKind = OverlayKind::Circle;
-            m_annotationDragStart = {imagePoint.x, imagePoint.y};
-            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-          }
-          return;
-        }
-
-        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-
-        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-          const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
-          const double dy = m_annotationDragEnd.y - m_annotationDragStart.y;
-          const double radius = std::sqrt(dx * dx + dy * dy);
-          if (radius < 2.0)
-          {
-            m_annotationStatus = "draft_too_small";
-            m_annotationDragging = false;
-            return;
-          }
-
-          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-          if (toolSpec)
-          {
-            std::vector<CxShapePoint> pts = {
-                {m_annotationDragStart.x, m_annotationDragStart.y},
-                {m_annotationDragEnd.x, m_annotationDragEnd.y}
-            };
-            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
-            if (shape)
-            {
-              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-              m_annotationStatus = "created circle";
-            }
-          }
-          m_annotationDragging = false;
-        }
-      }
-      else if (tool->kind == OverlayKind::Ellipse && tool->action != "connect_refs")
-      {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-        {
-          m_annotationDragging = false;
-          return;
-        }
-
-        if (!m_annotationDragging)
-        {
-          if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-          {
-            m_annotationDragging = true;
-            m_annotationDragKind = OverlayKind::Ellipse;
-            m_annotationDragStart = {imagePoint.x, imagePoint.y};
-            m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-          }
-          return;
-        }
-
-        m_annotationDragEnd = {imagePoint.x, imagePoint.y};
-
-        if (m_annotationDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-        {
-          const double rx = std::abs(m_annotationDragEnd.x - m_annotationDragStart.x);
-          const double ry = std::abs(m_annotationDragEnd.y - m_annotationDragStart.y);
-          if (rx < 2.0 || ry < 2.0)
-          {
-            m_annotationStatus = "draft_too_small";
-            m_annotationDragging = false;
-            return;
-          }
-
-          const auto* toolSpec = CxAnnotationToolRuntime::FindById(tool->name);
-          if (toolSpec)
-          {
-            std::vector<CxShapePoint> pts = {
-                {m_annotationDragStart.x, m_annotationDragStart.y},
-                {m_annotationDragEnd.x, m_annotationDragEnd.y}
-            };
-            auto shape = CreateInitialShapeForTool(*toolSpec, pts);
-            if (shape)
-            {
-              m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
-              m_annotationStatus = "created ellipse";
-            }
-          }
-          m_annotationDragging = false;
-        }
-      }
-      else if (tool->kind == OverlayKind::Polyline && tool->action == "auto_segmentation")
+      if (tool->kind == OverlayKind::Polyline && tool->action == "auto_segmentation")
       {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
@@ -600,6 +816,7 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
       }
     }
   }
+
   if (!canvasActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     m_annotationDragging = false;
 
@@ -1270,4 +1487,59 @@ void ViewController::drawImageEvidencePanels()
   }
 
   ImGui::End();
+}
+
+bool ViewController::TestLoadAnnotationToolManifest(const std::string& path, std::string& reason)
+{
+    m_annotationManifestPath = path;
+    return m_annotationLayer.LoadManifest(path, reason);
+}
+
+bool ViewController::TestSetActiveAnnotationTool(const std::string& tool_id, std::string& reason)
+{
+    for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
+    {
+        if (m_annotationLayer.Tools()[i].name == tool_id)
+        {
+            m_annotationLayer.SetActiveToolIndex(i);
+            return true;
+        }
+    }
+    reason = "tool not found: " + tool_id;
+    return false;
+}
+
+void ViewController::TestEnableAnnotationCreateMode()
+{
+    m_imageToolEnabled = true;
+    m_imageToolMode = ImageToolMode::LineCreate;
+}
+
+void ViewController::TestSetActiveToolKind(OverlayKind kind)
+{
+    switch (kind)
+    {
+    case OverlayKind::Point: m_imageToolMode = ImageToolMode::PointCreate; break;
+    case OverlayKind::Line: m_imageToolMode = ImageToolMode::LineCreate; break;
+    case OverlayKind::Rect: m_imageToolMode = ImageToolMode::RectCreate; break;
+    case OverlayKind::Circle: m_imageToolMode = ImageToolMode::CircleCreate; break;
+    case OverlayKind::Ellipse: m_imageToolMode = ImageToolMode::CircleCreate; break;
+    case OverlayKind::Polyline: m_imageToolMode = ImageToolMode::PolylineCreate; break;
+    default: m_imageToolMode = ImageToolMode::LineCreate; break;
+    }
+}
+
+void ViewController::TestSetToolModePointerPan()
+{
+    m_imageToolMode = ImageToolMode::PointerPan;
+}
+
+std::size_t ViewController::TestShapeElementCount() const
+{
+    return m_annotationLayer.ShapeElements().size();
+}
+
+bool ViewController::TestGetLastPointerResult(CxImagePointerResult& out) const
+{
+    return true;
 }

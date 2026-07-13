@@ -193,6 +193,12 @@ public:
     int st_Height;
 
     bool IsAnnotationCreateModeActive() const;
+    CxImagePointerResult ProcessImageAnnotationPointerFrame(
+        const CxImagePointerFrame& frame);
+    bool CommitDraftShapeFromTool(
+        const CxAnnotationToolSpec& tool,
+        CxImagePointerResult& out);
+
     bool IsMouseInsideImageCanvas(const ImVec2& p) const;
     static const char* ImageToolModeName(ImageToolMode mode);
     void CancelAnnotationCreate();
@@ -202,6 +208,14 @@ public:
     void CommitRectAnnotation();
     void HandleCircleAnnotationInput(const ImVec2& mouseImage);
     void CommitCircleAnnotation();
+
+    bool TestLoadAnnotationToolManifest(const std::string& path, std::string& reason);
+    bool TestSetActiveAnnotationTool(const std::string& tool_id, std::string& reason);
+    void TestEnableAnnotationCreateMode();
+    void TestSetActiveToolKind(OverlayKind kind);
+    void TestSetToolModePointerPan();
+    std::size_t TestShapeElementCount() const;
+    bool TestGetLastPointerResult(CxImagePointerResult& out) const;
 
     void DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList);
 

@@ -3456,6 +3456,52 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
     }
 }
 
+static const char* ShapeHandleLabel(CxShapeHandleRole role, int vertexIndex)
+{
+    switch (role)
+    {
+    case CxShapeHandleRole::Center: return "C";
+    case CxShapeHandleRole::Start: return "P0";
+    case CxShapeHandleRole::End: return "P1";
+    case CxShapeHandleRole::Corner0: return "K0";
+    case CxShapeHandleRole::Corner1: return "K1";
+    case CxShapeHandleRole::Corner2: return "K2";
+    case CxShapeHandleRole::Corner3: return "K3";
+    case CxShapeHandleRole::Radius: return "R";
+    case CxShapeHandleRole::InnerRadius: return "Rin";
+    case CxShapeHandleRole::WidthPositive: return "W+";
+    case CxShapeHandleRole::WidthNegative: return "W-";
+    case CxShapeHandleRole::RadiusX: return "Rx";
+    case CxShapeHandleRole::RadiusY: return "Ry";
+    case CxShapeHandleRole::Vertex:
+    {
+        static char buf[16];
+        sprintf_s(buf, "V%d", vertexIndex);
+        return buf;
+    }
+    case CxShapeHandleRole::Body: return "Body";
+    default: return "?";
+    }
+}
+
+static ImU32 ShapeHandleColor(CxShapeHandleRole role, const CxShapeElement& element)
+{
+    if (element.result_element)
+        return IM_COL32(255, 180, 64, 255);
+    if (element.editable)
+        return IM_COL32(80, 255, 170, 255);
+    return IM_COL32(160, 160, 200, 255);
+}
+
+static ImU32 ShapeElementStrokeColor(const CxShapeElement& element)
+{
+    if (element.result_element)
+        return IM_COL32(255, 180, 64, 255);
+    if (element.editable)
+        return IM_COL32(80, 255, 170, 200);
+    return IM_COL32(160, 160, 200, 200);
+}
+
 void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList)
 {
     if (!element.shape || !element.visible)
@@ -3468,9 +3514,7 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         return ImVec2(m_annotationImagePosX + (float)x * sx, m_annotationImagePosY + (float)y * sy);
     };
 
-    const ImU32 color = element.result_element 
-        ? IM_COL32(255, 180, 64, 255) 
-        : (element.editable ? IM_COL32(80, 255, 170, 200) : IM_COL32(160, 160, 200, 200));
+    const ImU32 color = ShapeElementStrokeColor(element);
     const ImU32 selectedColor = IM_COL32(255, 64, 64, 255);
     const float thickness = element.selected ? 3.0f : 2.0f;
 
@@ -3484,14 +3528,6 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         {
             drawList->AddLine(ImageToScreen(p0.x, p0.y), ImageToScreen(p1.x, p1.y), 
                               element.selected ? selectedColor : color, thickness);
-
-            if (element.editable)
-            {
-                drawList->AddCircleFilled(ImageToScreen(p0.x, p0.y), 5.0f, IM_COL32(255, 64, 64, 255));
-                drawList->AddCircleFilled(ImageToScreen(p1.x, p1.y), 5.0f, IM_COL32(255, 64, 64, 255));
-                drawList->AddCircleFilled(ImageToScreen((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5), 
-                                          5.0f, IM_COL32(64, 160, 255, 255));
-            }
         }
         break;
     }
@@ -3508,17 +3544,6 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
                 drawList->AddLine(ImageToScreen(points[i].x, points[i].y), 
                                   ImageToScreen(points[j].x, points[j].y), 
                                   element.selected ? selectedColor : color, thickness);
-            }
-
-            if (element.editable)
-            {
-                for (const auto& pt : points)
-                {
-                    drawList->AddCircleFilled(ImageToScreen(pt.x, pt.y), 5.0f, IM_COL32(255, 64, 64, 255));
-                }
-                const double cx = (points[0].x + points[2].x) * 0.5;
-                const double cy = (points[0].y + points[2].y) * 0.5;
-                drawList->AddCircleFilled(ImageToScreen(cx, cy), 5.0f, IM_COL32(64, 160, 255, 255));
             }
         }
         break;
@@ -3539,13 +3564,6 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
                 const float ir = (float)inner_radius * sx;
                 drawList->AddCircle(c, ir, IM_COL32(255, 180, 64, 200), 32, thickness);
             }
-
-            if (element.editable)
-            {
-                drawList->AddCircleFilled(c, 5.0f, IM_COL32(255, 64, 64, 255));
-                drawList->AddCircleFilled(ImageToScreen(center.x + radius, center.y), 
-                                          5.0f, IM_COL32(255, 64, 64, 255));
-            }
         }
         break;
     }
@@ -3560,15 +3578,6 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
             const float ry = (float)radius_y * sy;
             
             drawList->AddEllipse(c, ImVec2(rx, ry), element.selected ? selectedColor : color, 0.0f, 64, thickness);
-
-            if (element.editable)
-            {
-                drawList->AddCircleFilled(c, 5.0f, IM_COL32(255, 64, 64, 255));
-                drawList->AddCircleFilled(ImageToScreen(center.x + radius_x, center.y), 
-                                          5.0f, IM_COL32(255, 64, 64, 255));
-                drawList->AddCircleFilled(ImageToScreen(center.x, center.y + radius_y), 
-                                          5.0f, IM_COL32(255, 64, 64, 255));
-            }
         }
         break;
     }
@@ -3591,14 +3600,6 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
                                   ImageToScreen(points[0].x, points[0].y), 
                                   element.selected ? selectedColor : color, thickness);
             }
-
-            if (element.editable)
-            {
-                for (const auto& pt : points)
-                {
-                    drawList->AddCircleFilled(ImageToScreen(pt.x, pt.y), 5.0f, IM_COL32(255, 64, 64, 255));
-                }
-            }
         }
         break;
     }
@@ -3614,5 +3615,28 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         }
         break;
     }
+    }
+
+    if (element.editable)
+    {
+        std::vector<CxShapeHandle> handles;
+        element.shape->enumerateHandles(handles);
+
+        for (const CxShapeHandle& h : handles)
+        {
+            if (h.role == CxShapeHandleRole::Body)
+                continue;
+
+            ImVec2 p = ImageToScreen(h.p.x, h.p.y);
+            const char* label = h.label.empty() ? ShapeHandleLabel(h.role, h.vertex_index) : h.label.c_str();
+            ImU32 fill = ShapeHandleColor(h.role, element);
+
+            drawList->AddCircleFilled(p, 8.0f, IM_COL32(0, 0, 0, 220));
+            drawList->AddCircleFilled(p, 6.0f, fill);
+            drawList->AddCircle(p, 8.0f, IM_COL32(255, 255, 255, 255), 20, 1.5f);
+            drawList->AddText(ImVec2(p.x + 8.0f, p.y - 12.0f),
+                              IM_COL32(255, 255, 255, 255),
+                              label);
+        }
     }
 }

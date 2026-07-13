@@ -2,6 +2,7 @@
 #include "CxAnnotationToolRuntime.h"
 #include "CxAnnotationToolRegister.h"
 #include "CxShapeTestRegister.h"
+#include "ViewController.h"
 #include "muParser.h"
 #include "CxUnifiedLog.h"
 
@@ -746,6 +747,241 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         case_result.reason = "polyline created successfully";
         case_result.runtime_writeback = false;
         case_result.acceptance_scope = "FULL_INTERACTION";
+    }
+    else if (tc.operation == "gui_pointer_create" ||
+             tc.operation == "gui_pointer_drag_existing" ||
+             tc.operation == "gui_pointer_select_existing")
+    {
+        case_result.hit_test_pass = false;
+        case_result.drag_pass = false;
+        case_result.commit_pass = false;
+
+        ViewController viewer;
+        std::string reason;
+
+        if (tc.operation == "gui_pointer_drag_existing" || tc.operation == "gui_pointer_select_existing")
+        {
+            viewer.TestEnableAnnotationCreateMode();
+            if (tc.tool_id == "scan_line")
+            {
+                viewer.TestSetActiveToolKind(OverlayKind::Line);
+                CxImagePointerFrame frame_init;
+                frame_init.canvas_hovered = true;
+                frame_init.inside_image = true;
+                frame_init.left_clicked = true;
+                frame_init.left_down = true;
+                frame_init.image_x = tc.from_x - 40.0;
+                frame_init.image_y = tc.from_y - 20.0;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init);
+                CxImagePointerFrame frame_init2;
+                frame_init2.canvas_hovered = true;
+                frame_init2.inside_image = true;
+                frame_init2.left_released = true;
+                frame_init2.image_x = tc.from_x + 40.0;
+                frame_init2.image_y = tc.from_y + 20.0;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init2);
+            }
+            else if (tc.tool_id == "roi_circle")
+            {
+                viewer.TestSetActiveToolKind(OverlayKind::Circle);
+                CxImagePointerFrame frame_init;
+                frame_init.canvas_hovered = true;
+                frame_init.inside_image = true;
+                frame_init.left_clicked = true;
+                frame_init.left_down = true;
+                frame_init.image_x = tc.from_x;
+                frame_init.image_y = tc.from_y;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init);
+                CxImagePointerFrame frame_init2;
+                frame_init2.canvas_hovered = true;
+                frame_init2.inside_image = true;
+                frame_init2.left_released = true;
+                frame_init2.image_x = tc.from_x + 50.0;
+                frame_init2.image_y = tc.from_y;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init2);
+            }
+            viewer.TestSetToolModePointerPan();
+        }
+        else
+        {
+            viewer.TestEnableAnnotationCreateMode();
+
+            if (tc.tool_id == "point_pick")
+                viewer.TestSetActiveToolKind(OverlayKind::Point);
+            else if (tc.tool_id == "scan_line")
+                viewer.TestSetActiveToolKind(OverlayKind::Line);
+            else if (tc.tool_id == "roi_rect")
+                viewer.TestSetActiveToolKind(OverlayKind::Rect);
+            else if (tc.tool_id == "roi_circle")
+                viewer.TestSetActiveToolKind(OverlayKind::Circle);
+            else if (tc.tool_id == "roi_ellipse")
+                viewer.TestSetActiveToolKind(OverlayKind::Ellipse);
+            else if (tc.tool_id == "polyline")
+                viewer.TestSetActiveToolKind(OverlayKind::Polyline);
+            else if (tc.tool_id == "pointer")
+                viewer.TestSetToolModePointerPan();
+        }
+
+        const size_t initial_count = viewer.TestShapeElementCount();
+
+        if (tc.pointer_sequence == "click")
+        {
+            CxImagePointerFrame frame;
+            frame.canvas_hovered = true;
+            frame.inside_image = true;
+            frame.left_clicked = true;
+            frame.image_x = tc.from_x;
+            frame.image_y = tc.from_y;
+
+            CxImagePointerResult r = viewer.ProcessImageAnnotationPointerFrame(frame);
+            case_result.actual_handle = r.phase;
+            case_result.status = r.status;
+            case_result.reason = r.reason;
+
+            if (tc.expected_phase.empty() || r.phase == tc.expected_phase)
+            {
+                if (tc.expected_status.empty() || r.status == tc.expected_status)
+                {
+                    case_result.pass = true;
+                    case_result.conclusion = "pointer_operation_completed";
+                }
+                else
+                {
+                    case_result.pass = false;
+                    case_result.conclusion = "status_mismatch";
+                    case_result.reason = "expected status=" + tc.expected_status + ", actual=" + r.status;
+                }
+            }
+            else
+            {
+                case_result.pass = false;
+                case_result.conclusion = "phase_mismatch";
+                case_result.reason = "expected phase=" + tc.expected_phase + ", actual=" + r.phase;
+            }
+        }
+        else if (tc.pointer_sequence == "drag_release")
+        {
+            CxImagePointerFrame frame_down;
+            frame_down.canvas_hovered = true;
+            frame_down.inside_image = true;
+            frame_down.left_clicked = true;
+            frame_down.left_down = true;
+            frame_down.image_x = tc.from_x;
+            frame_down.image_y = tc.from_y;
+
+            viewer.ProcessImageAnnotationPointerFrame(frame_down);
+
+            CxImagePointerFrame frame_drag;
+            frame_drag.canvas_hovered = true;
+            frame_drag.inside_image = true;
+            frame_drag.left_down = true;
+            frame_drag.image_x = tc.to_x;
+            frame_drag.image_y = tc.to_y;
+
+            viewer.ProcessImageAnnotationPointerFrame(frame_drag);
+
+            CxImagePointerFrame frame_release;
+            frame_release.canvas_hovered = true;
+            frame_release.inside_image = true;
+            frame_release.left_released = true;
+            frame_release.image_x = tc.to_x;
+            frame_release.image_y = tc.to_y;
+
+            CxImagePointerResult r = viewer.ProcessImageAnnotationPointerFrame(frame_release);
+            case_result.actual_handle = r.phase;
+            case_result.status = r.status;
+            case_result.reason = r.reason;
+
+            if (tc.expected_phase.empty() || r.phase == tc.expected_phase)
+            {
+                if (tc.expected_status.empty() || r.status == tc.expected_status)
+                {
+                    case_result.pass = true;
+                    case_result.conclusion = "pointer_operation_completed";
+                }
+                else
+                {
+                    case_result.pass = false;
+                    case_result.conclusion = "status_mismatch";
+                    case_result.reason = "expected status=" + tc.expected_status + ", actual=" + r.status;
+                }
+            }
+            else
+            {
+                case_result.pass = false;
+                case_result.conclusion = "phase_mismatch";
+                case_result.reason = "expected phase=" + tc.expected_phase + ", actual=" + r.phase;
+            }
+        }
+        else if (tc.pointer_sequence == "polyline_finish")
+        {
+            CxImagePointerFrame frame1;
+            frame1.canvas_hovered = true;
+            frame1.inside_image = true;
+            frame1.left_clicked = true;
+            frame1.image_x = tc.from_x;
+            frame1.image_y = tc.from_y;
+            viewer.ProcessImageAnnotationPointerFrame(frame1);
+
+            CxImagePointerFrame frame2;
+            frame2.canvas_hovered = true;
+            frame2.inside_image = true;
+            frame2.left_clicked = true;
+            frame2.image_x = tc.to_x;
+            frame2.image_y = tc.to_y;
+            viewer.ProcessImageAnnotationPointerFrame(frame2);
+
+            CxImagePointerFrame frame_commit;
+            frame_commit.canvas_hovered = true;
+            frame_commit.inside_image = true;
+            frame_commit.right_clicked = true;
+            viewer.ProcessImageAnnotationPointerFrame(frame_commit);
+
+            CxImagePointerResult r;
+            viewer.TestGetLastPointerResult(r);
+            case_result.actual_handle = r.phase;
+            case_result.status = r.status;
+            case_result.reason = r.reason;
+
+            if (tc.expected_phase.empty() || r.phase == tc.expected_phase)
+            {
+                if (tc.expected_status.empty() || r.status == tc.expected_status)
+                {
+                    case_result.pass = true;
+                    case_result.conclusion = "pointer_operation_completed";
+                }
+                else
+                {
+                    case_result.pass = false;
+                    case_result.conclusion = "status_mismatch";
+                    case_result.reason = "expected status=" + tc.expected_status + ", actual=" + r.status;
+                }
+            }
+            else
+            {
+                case_result.pass = false;
+                case_result.conclusion = "phase_mismatch";
+                case_result.reason = "expected phase=" + tc.expected_phase + ", actual=" + r.phase;
+            }
+        }
+
+        const size_t final_count = viewer.TestShapeElementCount();
+        case_result.created_points_count = static_cast<int>(final_count - initial_count);
+
+        if (tc.expected_shape_count_delta != 0)
+        {
+            if (static_cast<int>(final_count - initial_count) != tc.expected_shape_count_delta)
+            {
+                case_result.pass = false;
+                case_result.conclusion = "shape_count_delta_mismatch";
+                case_result.reason = "expected delta=" + std::to_string(tc.expected_shape_count_delta) +
+                                     ", actual=" + std::to_string(final_count - initial_count);
+            }
+        }
+
+        case_result.created_shape_kind = tc.expected_created_kind;
+        case_result.runtime_writeback = false;
+        case_result.acceptance_scope = "GUI_POINTER";
     }
     else
     {

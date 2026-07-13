@@ -53,6 +53,12 @@ struct CxShapeTestCase
     bool has_expected_radius_y = false;
     double expected_radius_x = 0.0;
     double expected_radius_y = 0.0;
+
+    std::string pointer_sequence;
+    int expected_shape_count_delta = 0;
+    std::string expected_created_kind;
+    std::string expected_phase;
+    std::string expected_status;
 };
 
 class CxShapeTestRuntime
