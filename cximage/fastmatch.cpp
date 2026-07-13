@@ -5172,3 +5172,175 @@ void fastmatch::shapesetroi(void* pshape)
         return;
     Shape::shapesetroi(pshape);
 }
+
+void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+{
+    const gp_Rectangle learn_rect = rect();
+    const double learn_x = learn_rect.TopLeft().X();
+    const double learn_y = learn_rect.TopLeft().Y();
+    const double learn_w = learn_rect.Width();
+    const double learn_h = learn_rect.Height();
+
+    if (learn_w > 0 && learn_h > 0)
+    {
+        auto learn_roi_shape = std::make_unique<RectShape>();
+        learn_roi_shape->setRect(learn_x, learn_y, learn_x + learn_w, learn_y + learn_h);
+        sink.UpsertShape(
+            owner_ref + ".learn_roi",
+            "fastmatch",
+            owner_ref,
+            "learn_roi",
+            "learn_roi",
+            true,
+            false,
+            std::move(learn_roi_shape));
+    }
+
+    const gp_Rectangle search_rect = m_matchrect;
+    const double search_x = search_rect.TopLeft().X();
+    const double search_y = search_rect.TopLeft().Y();
+    const double search_w = search_rect.Width();
+    const double search_h = search_rect.Height();
+
+    if (search_w > 0 && search_h > 0)
+    {
+        auto search_roi_shape = std::make_unique<RectShape>();
+        search_roi_shape->setRect(search_x, search_y, search_x + search_w, search_y + search_h);
+        sink.UpsertShape(
+            owner_ref + ".search_roi",
+            "fastmatch",
+            owner_ref,
+            "search_roi",
+            "search_roi",
+            true,
+            false,
+            std::move(search_roi_shape));
+    }
+
+    const PointsShape& model_points = getmodel();
+    if (model_points.size() > 0)
+    {
+        auto model_shape = std::make_unique<PointsShape>();
+        for (int i = 0; i < model_points.size(); ++i)
+        {
+            model_shape->addpoint(model_points.getx(i), model_points.gety(i));
+        }
+        sink.UpsertShape(
+            owner_ref + ".model_points",
+            "fastmatch",
+            owner_ref,
+            "",
+            "model",
+            false,
+            false,
+            std::move(model_shape));
+    }
+
+    const int candidate_count = getresultcandidatecount();
+    if (candidate_count > 0)
+    {
+        auto candidates_shape = std::make_unique<PointsShape>();
+        for (int i = 0; i < candidate_count; ++i)
+        {
+            candidates_shape->addpoint(getresultcentx(i), getresultcenty(i));
+        }
+        sink.UpsertShape(
+            owner_ref + ".candidate_centers",
+            "fastmatch",
+            owner_ref,
+            "",
+            "measure_points",
+            false,
+            true,
+            std::move(candidates_shape));
+    }
+
+    const RectsShape& result_rects = *getresultrects();
+    if (result_rects.size() > 0)
+    {
+        for (int i = 0; i < result_rects.size(); ++i)
+        {
+            const gp_Rectangle r = result_rects.getrect(i);
+            auto result_shape = std::make_unique<RectShape>();
+            result_shape->setRect(r.TopLeft().X(), r.TopLeft().Y(),
+                                 r.BottomRight().X(), r.BottomRight().Y());
+            sink.UpsertShape(
+                owner_ref + ".result_boxes." + std::to_string(i),
+                "fastmatch",
+                owner_ref,
+                "result",
+                "result",
+                false,
+                true,
+                std::move(result_shape));
+        }
+    }
+
+    if (candidate_count > 0)
+    {
+        const int best_index = getresultbestindex();
+        if (best_index >= 0 && best_index < candidate_count)
+        {
+            auto best_shape = std::make_unique<PointsShape>();
+            best_shape->addpoint(getresultcentx(best_index), getresultcenty(best_index));
+            sink.UpsertShape(
+                owner_ref + ".best_center",
+                "fastmatch",
+                owner_ref,
+                "",
+                "best_result",
+                false,
+                true,
+                std::move(best_shape));
+        }
+    }
+}
+
+bool fastmatch::ApplyDisplayShapeEdit(const std::string& owner_binding, const std::string& semantic_role,
+                                      double x0, double y0, double x1, double y1, std::string& reason)
+{
+    if (owner_binding == "learn_roi")
+    {
+        const double w = std::abs(x1 - x0);
+        const double h = std::abs(y1 - y0);
+        const double x = std::min(x0, x1);
+        const double y = std::min(y0, y1);
+
+        if (w < 2.0 || h < 2.0)
+        {
+            reason = "learn ROI too small (min 2px)";
+            return false;
+        }
+
+        setrect(static_cast<int>(x), static_cast<int>(y),
+                static_cast<int>(w), static_cast<int>(h));
+        reason = "learn ROI updated";
+        return true;
+    }
+    else if (owner_binding == "search_roi")
+    {
+        const double w = std::abs(x1 - x0);
+        const double h = std::abs(y1 - y0);
+        const double x = std::min(x0, x1);
+        const double y = std::min(y0, y1);
+
+        if (w < 2.0 || h < 2.0)
+        {
+            reason = "search ROI too small (min 2px)";
+            return false;
+        }
+
+        setmatchrect(static_cast<int>(x), static_cast<int>(y),
+                     static_cast<int>(w), static_cast<int>(h));
+        reason = "search ROI updated";
+        return true;
+    }
+    else if (owner_binding == "result")
+    {
+        reason = "result elements are not editable";
+        return false;
+    }
+
+    reason = "unknown owner_binding: " + owner_binding;
+    return false;
+}

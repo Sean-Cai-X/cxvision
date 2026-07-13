@@ -1,0 +1,33 @@
+Image m_image;
+fastmatch m_match;
+
+m_image.copyFromMat(global.matInput);
+
+int learn_x = global.learn_roi_x;
+int learn_y = global.learn_roi_y;
+int learn_w = global.learn_roi_w;
+int learn_h = global.learn_roi_h;
+
+int search_x = global.search_roi_x;
+int search_y = global.search_roi_y;
+int search_w = global.search_roi_w;
+int search_h = global.search_roi_h;
+
+int threshold = global.threshold;
+int linegap = global.linegap;
+double min_score = global.min_score;
+int find_num = global.find_num;
+
+m_match.setrect(learn_x, learn_y, learn_w, learn_h);
+m_match.setthre(threshold);
+m_match.setlinegap(linegap);
+m_match.learn(&m_image);
+
+m_match.setmatchrect(search_x, search_y, search_w, search_h);
+m_match.setminscore(min_score);
+m_match.setfindnum(find_num);
+m_match.match(&m_image);
+
+global.match_count = m_match.getresultcandidatecount();
+global.best_score = m_match.getresultbestscore();
+global.current_status = "geometry_result_available";

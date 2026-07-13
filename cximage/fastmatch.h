@@ -10,6 +10,7 @@
 #include <opencv2/core/mat.hpp>
 
 class Grid;
+class ICxShapeSink;
 typedef vector<int> Cluster;
 using namespace std;
 
@@ -503,6 +504,10 @@ public:
     void getresultcentpoints(void* points);
     void getrotateresultrectpoints(std::vector<cv::Point2f>& points);
     void ZeroPOS();
+
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
+    bool ApplyDisplayShapeEdit(const std::string& owner_binding, const std::string& semantic_role,
+                               double x0, double y0, double x1, double y1, std::string& reason);
 };
 
 #endif //FASTMATCH_H

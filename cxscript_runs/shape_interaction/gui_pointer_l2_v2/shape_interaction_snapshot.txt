@@ -1,0 +1,17 @@
+Shape Interaction Test Snapshot
+================================
+
+Total: 10
+Pass: 9
+Fail: 1
+
+gui_create_point: created (point created)
+gui_create_line_drag_release: created (shape created from annotation tool)
+gui_create_rect_drag_release: created (shape created from annotation tool)
+gui_create_circle_drag_release: created (shape created from annotation tool)
+gui_create_ellipse_drag_release: created (shape created from annotation tool)
+gui_drag_existing_line_center: committed (drag committed)
+gui_drag_existing_circle_radius: committed (drag committed)
+gui_select_existing_shape: selected (shape selected and drag started)
+gui_pointer_pan_no_create: FAIL (tool not registered: )
+gui_create_too_small_rejected: draft_too_small (line length too small)

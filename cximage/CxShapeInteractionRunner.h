@@ -25,6 +25,18 @@ struct CxShapeInteractionOptions
     std::string unified_log_reason;
 };
 
+struct CxShapeInteractionPointerEvent {
+    std::string event;
+    double screen_x = 0.0;
+    double screen_y = 0.0;
+    double image_x = 0.0;
+    double image_y = 0.0;
+    bool canvas_hovered = false;
+    bool inside_image = false;
+    std::string phase;
+    std::string status;
+};
+
 struct CxShapeInteractionCaseResultEx : CxShapeInteractionCaseResult
 {
     std::string expected_handle;
@@ -50,6 +62,15 @@ struct CxShapeInteractionCaseResultEx : CxShapeInteractionCaseResult
     bool shape_editable = false;
     std::string shape_stable_ref;
     std::string created_shape_kind;
+    std::string created_ref;
+    std::string selected_ref;
+
+    int shape_count_before = 0;
+    int shape_count_after = 0;
+    int shape_count_delta = 0;
+
+    std::vector<CxShapeInteractionPointerEvent> pointer_events;
+    CxShapeCommitResult commit_result;
 };
 
 struct CxShapeInteractionBatchResultEx : CxShapeInteractionBatchResult

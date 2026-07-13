@@ -154,6 +154,8 @@ struct CxShapeCommitResult {
     std::string owner_ref;
     std::string owner_binding;
     std::string semantic_role;
+    std::string stable_ref;
+    bool editable = false;
     bool result_marked_stale = false;
     int stale_result_count = 0;
     bool runtime_writeback = false;
@@ -169,8 +171,19 @@ struct CxImagePointerFrame {
     bool right_clicked = false;
     bool escape_pressed = false;
     bool enter_pressed = false;
+    bool pointer_moved = false;
     double image_x = 0.0;
     double image_y = 0.0;
+
+    bool HasInteractionEvent() const
+    {
+        return left_clicked ||
+               left_released ||
+               right_clicked ||
+               escape_pressed ||
+               enter_pressed ||
+               (left_down && pointer_moved);
+    }
 };
 
 struct CxImagePointerResult {

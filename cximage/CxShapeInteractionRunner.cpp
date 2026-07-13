@@ -5,13 +5,20 @@
 #include "ViewController.h"
 #include "muParser.h"
 #include "CxUnifiedLog.h"
+#include "Findline.h"
+#include "Findcircle.h"
+#include "Findellipse.h"
+#include "FindRect.h"
 
 #include <fstream>
 #include <sstream>
 #include <filesystem>
 #include <unordered_set>
+#include <map>
 
 namespace fs = std::filesystem;
+
+static std::string EscapeJson(const std::string& s);
 
 bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options, CxShapeInteractionBatchResultEx& result)
 {
@@ -281,7 +288,7 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
     layer.ClearShapeElements();
 
     auto tool = CxAnnotationToolRuntime::FindById(tc.tool_id);
-    if (!tool)
+    if (!tool && tc.tool_id != "")
     {
         case_result.pass = false;
         case_result.conclusion = "tool_not_registered";
@@ -289,10 +296,18 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         case_result.reason = "tool not registered: " + tc.tool_id;
         return false;
     }
+    
+    if (tc.tool_id.empty())
+    {
+        CXLOG_INFO("CxShapeInteractionRunner", "shape_case_info", "info", "case=" + tc.case_id + ", tool_id_is_empty=true");
+    }
 
-    case_result.shape_kind = tool->shape_type;
-    case_result.owner_type = tool->owner_tool;
-    case_result.owner_binding = tool->owner_binding;
+    if (tool)
+    {
+        case_result.shape_kind = tool->shape_type;
+        case_result.owner_type = tool->owner_tool;
+        case_result.owner_binding = tool->owner_binding;
+    }
 
     std::vector<CxShapePoint> initial_points;
     if (tc.operation == "drag_handle")
@@ -495,7 +510,7 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                     case_result.conclusion = "interaction_passed";
                     case_result.reason = "hit=" + case_result.actual_handle + ", geometry verified";
 
-                    const bool runtimeBoundTool = !tool->owner_tool.empty() && !tool->owner_binding.empty();
+                    const bool runtimeBoundTool = tool && !tool->owner_tool.empty() && !tool->owner_binding.empty();
                     if (runtimeBoundTool)
                     {
                         case_result.status = "GEOMETRY_PASS_PENDING_WRITEBACK";
@@ -748,6 +763,193 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         case_result.runtime_writeback = false;
         case_result.acceptance_scope = "FULL_INTERACTION";
     }
+    else if (tc.operation == "runtime_publish")
+    {
+        case_result.hit_test_pass = false;
+        case_result.drag_pass = false;
+        case_result.commit_pass = false;
+
+        ImageAnnotationLayer layer;
+        layer.ClearShapeElements();
+
+        std::string owner_type;
+        std::string owner_ref;
+
+        if (tc.tool_id == "findline_gauge")
+        {
+            Findline findline;
+            findline.setline(static_cast<int>(tc.from_x - 30), static_cast<int>(tc.from_y - 15),
+                             static_cast<int>(tc.from_x + 30), static_cast<int>(tc.from_y + 15), 1);
+            findline.PublishDisplayShapes(layer, "test_findline_001");
+            owner_type = "Findline";
+            owner_ref = "test_findline_001";
+        }
+        else if (tc.tool_id == "findcircle_gauge")
+        {
+            Findcircle findcircle;
+            findcircle.setcircle(static_cast<int>(tc.from_x), static_cast<int>(tc.from_y), 0, 50);
+            findcircle.PublishDisplayShapes(layer, "test_findcircle_001");
+            owner_type = "Findcircle";
+            owner_ref = "test_findcircle_001";
+        }
+        else if (tc.tool_id == "findellipse_gauge")
+        {
+            Findellipse findellipse;
+            findellipse.setellipse(static_cast<int>(tc.from_x), static_cast<int>(tc.from_y),
+                                   static_cast<int>(tc.from_x + 40), static_cast<int>(tc.from_y + 25));
+            findellipse.PublishDisplayShapes(layer, "test_findellipse_001");
+            owner_type = "Findellipse";
+            owner_ref = "test_findellipse_001";
+        }
+        else if (tc.tool_id == "findrect_gauge")
+        {
+            FindRect findrect;
+            findrect.setrect(static_cast<int>(tc.from_x - 30), static_cast<int>(tc.from_y - 20),
+                             static_cast<int>(tc.from_x + 30), static_cast<int>(tc.from_y + 20));
+            findrect.PublishDisplayShapes(layer, "test_findrect_001");
+            owner_type = "FindRect";
+            owner_ref = "test_findrect_001";
+        }
+
+        const auto& elements = layer.ShapeElements();
+        case_result.created_points_count = static_cast<int>(elements.size());
+
+        struct RoleCounts {
+            int roi = 0;
+            int scan = 0;
+            int measure_points = 0;
+            int result = 0;
+            int editable_roi = 0;
+            int noneditable_result = 0;
+            int stale = 0;
+        };
+
+        RoleCounts counts;
+        for (const auto& elem : elements)
+        {
+            if (elem.semantic_role == "roi") counts.roi++;
+            if (elem.semantic_role == "scan") counts.scan++;
+            if (elem.semantic_role == "measure_points") counts.measure_points++;
+            if (elem.semantic_role == "result") counts.result++;
+            if (elem.semantic_role == "roi" && elem.editable) counts.editable_roi++;
+            if (elem.semantic_role == "result" && !elem.editable) counts.noneditable_result++;
+            if (elem.stale) counts.stale++;
+        }
+
+        std::string reason;
+        bool pass = true;
+
+        if (counts.roi == 0)
+        {
+            pass = false;
+            reason += "missing roi elements; ";
+        }
+        if (counts.scan == 0)
+        {
+            pass = false;
+            reason += "missing scan elements; ";
+        }
+        if (counts.measure_points == 0)
+        {
+            pass = false;
+            reason += "missing measure_points elements; ";
+        }
+        if (counts.result == 0)
+        {
+            pass = false;
+            reason += "missing result elements; ";
+        }
+        if (counts.editable_roi == 0)
+        {
+            pass = false;
+            reason += "no editable roi elements; ";
+        }
+        if (counts.noneditable_result == 0)
+        {
+            pass = false;
+            reason += "no non-editable result elements; ";
+        }
+
+        std::map<std::string, int> stable_ref_counts;
+        for (const auto& elem : elements)
+        {
+            stable_ref_counts[elem.stable_ref]++;
+        }
+        int duplicate_stable_ref_count = 0;
+        for (const auto& pair : stable_ref_counts)
+        {
+            if (pair.second > 1)
+                duplicate_stable_ref_count++;
+        }
+
+        const fs::path case_dir = fs::path(options.out_dir) / "cases" / case_result.case_id;
+        fs::create_directories(case_dir);
+
+        std::ofstream before_file(case_dir / "shape_elements_before.json");
+        if (before_file)
+        {
+            before_file << "{\"elements\": []}\n";
+        }
+
+        std::ofstream after_file(case_dir / "shape_elements_after.json");
+        if (after_file)
+        {
+            after_file << "{\n";
+            after_file << "  \"elements\": [\n";
+            for (size_t i = 0; i < elements.size(); ++i)
+            {
+                const auto& elem = elements[i];
+                after_file << "    {\n";
+                after_file << "      \"id\": " << elem.id << ",\n";
+                after_file << "      \"stable_ref\": \"" << EscapeJson(elem.stable_ref) << "\",\n";
+                after_file << "      \"tool_id\": \"" << EscapeJson(elem.tool_id) << "\",\n";
+                after_file << "      \"owner_type\": \"" << EscapeJson(elem.owner_type) << "\",\n";
+                after_file << "      \"owner_ref\": \"" << EscapeJson(elem.owner_ref) << "\",\n";
+                after_file << "      \"owner_binding\": \"" << EscapeJson(elem.owner_binding) << "\",\n";
+                after_file << "      \"semantic_role\": \"" << EscapeJson(elem.semantic_role) << "\",\n";
+                after_file << "      \"editable\": " << (elem.editable ? "true" : "false") << ",\n";
+                after_file << "      \"visible\": " << (elem.visible ? "true" : "false") << ",\n";
+                after_file << "      \"result_element\": " << (elem.result_element ? "true" : "false") << ",\n";
+                after_file << "      \"stale\": " << (elem.stale ? "true" : "false") << "\n";
+                after_file << "    }";
+                if (i < elements.size() - 1)
+                    after_file << ",";
+                after_file << "\n";
+            }
+            after_file << "  ]\n";
+            after_file << "}\n";
+        }
+
+        std::ofstream projection_file(case_dir / "projection_summary.json");
+        if (projection_file)
+        {
+            projection_file << "{\n";
+            projection_file << "  \"owner_type\": \"" << EscapeJson(owner_type) << "\",\n";
+            projection_file << "  \"owner_ref\": \"" << EscapeJson(owner_ref) << "\",\n";
+            projection_file << "  \"roles\": {\n";
+            projection_file << "    \"roi\": " << counts.roi << ",\n";
+            projection_file << "    \"scan\": " << counts.scan << ",\n";
+            projection_file << "    \"measure_points\": " << counts.measure_points << ",\n";
+            projection_file << "    \"result\": " << counts.result << "\n";
+            projection_file << "  },\n";
+            projection_file << "  \"editable_roi_count\": " << counts.editable_roi << ",\n";
+            projection_file << "  \"editable_result_count\": " << (counts.result - counts.noneditable_result) << ",\n";
+            projection_file << "  \"stale_result_count\": " << counts.stale << ",\n";
+            projection_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << "\n";
+            projection_file << "}\n";
+        }
+
+        case_result.pass = pass;
+        case_result.conclusion = pass ? "runtime_publish_verified" : "runtime_publish_incomplete";
+        case_result.status = pass ? "PASS" : "FAIL";
+        case_result.reason = pass ? "all required roles published" : reason;
+        case_result.runtime_writeback = false;
+        case_result.acceptance_scope = "RUNTIME_PROJECTION";
+        case_result.owner_type = owner_type;
+        case_result.shape_count_before = 0;
+        case_result.shape_count_after = static_cast<int>(elements.size());
+        case_result.shape_count_delta = static_cast<int>(elements.size());
+    }
     else if (tc.operation == "gui_pointer_create" ||
              tc.operation == "gui_pointer_drag_existing" ||
              tc.operation == "gui_pointer_select_existing")
@@ -773,6 +975,13 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                 frame_init.image_x = tc.from_x - 40.0;
                 frame_init.image_y = tc.from_y - 20.0;
                 viewer.ProcessImageAnnotationPointerFrame(frame_init);
+                CxImagePointerFrame frame_init_drag;
+                frame_init_drag.canvas_hovered = true;
+                frame_init_drag.inside_image = true;
+                frame_init_drag.left_down = true;
+                frame_init_drag.image_x = tc.from_x + 40.0;
+                frame_init_drag.image_y = tc.from_y + 20.0;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init_drag);
                 CxImagePointerFrame frame_init2;
                 frame_init2.canvas_hovered = true;
                 frame_init2.inside_image = true;
@@ -781,7 +990,7 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                 frame_init2.image_y = tc.from_y + 20.0;
                 viewer.ProcessImageAnnotationPointerFrame(frame_init2);
             }
-            else if (tc.tool_id == "roi_circle")
+            else if (tc.tool_id == "circle_roi")
             {
                 viewer.TestSetActiveToolKind(OverlayKind::Circle);
                 CxImagePointerFrame frame_init;
@@ -792,6 +1001,13 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                 frame_init.image_x = tc.from_x;
                 frame_init.image_y = tc.from_y;
                 viewer.ProcessImageAnnotationPointerFrame(frame_init);
+                CxImagePointerFrame frame_init_drag;
+                frame_init_drag.canvas_hovered = true;
+                frame_init_drag.inside_image = true;
+                frame_init_drag.left_down = true;
+                frame_init_drag.image_x = tc.from_x + 50.0;
+                frame_init_drag.image_y = tc.from_y;
+                viewer.ProcessImageAnnotationPointerFrame(frame_init_drag);
                 CxImagePointerFrame frame_init2;
                 frame_init2.canvas_hovered = true;
                 frame_init2.inside_image = true;
@@ -804,25 +1020,31 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
         else
         {
-            viewer.TestEnableAnnotationCreateMode();
-
-            if (tc.tool_id == "point_pick")
-                viewer.TestSetActiveToolKind(OverlayKind::Point);
-            else if (tc.tool_id == "scan_line")
-                viewer.TestSetActiveToolKind(OverlayKind::Line);
-            else if (tc.tool_id == "roi_rect")
-                viewer.TestSetActiveToolKind(OverlayKind::Rect);
-            else if (tc.tool_id == "roi_circle")
-                viewer.TestSetActiveToolKind(OverlayKind::Circle);
-            else if (tc.tool_id == "roi_ellipse")
-                viewer.TestSetActiveToolKind(OverlayKind::Ellipse);
-            else if (tc.tool_id == "polyline")
-                viewer.TestSetActiveToolKind(OverlayKind::Polyline);
-            else if (tc.tool_id == "pointer")
+            if (tc.tool_id.empty())
+            {
                 viewer.TestSetToolModePointerPan();
+            }
+            else
+            {
+                viewer.TestEnableAnnotationCreateMode();
+
+                if (tc.tool_id == "point_pick")
+                    viewer.TestSetActiveToolKind(OverlayKind::Point);
+                else if (tc.tool_id == "scan_line")
+                    viewer.TestSetActiveToolKind(OverlayKind::Line);
+                else if (tc.tool_id == "roi_rect")
+                    viewer.TestSetActiveToolKind(OverlayKind::Rect);
+                else if (tc.tool_id == "circle_roi")
+                    viewer.TestSetActiveToolKind(OverlayKind::Circle);
+                else if (tc.tool_id == "ellipse_manual")
+                    viewer.TestSetActiveToolKind(OverlayKind::Ellipse);
+                else if (tc.tool_id == "boundary_polyline")
+                    viewer.TestSetActiveToolKind(OverlayKind::Polyline);
+            }
         }
 
         const size_t initial_count = viewer.TestShapeElementCount();
+        case_result.shape_count_before = static_cast<int>(initial_count);
 
         if (tc.pointer_sequence == "click")
         {
@@ -837,6 +1059,16 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
             case_result.actual_handle = r.phase;
             case_result.status = r.status;
             case_result.reason = r.reason;
+
+            CxShapeInteractionPointerEvent evt;
+            evt.event = "left_down";
+            evt.image_x = tc.from_x;
+            evt.image_y = tc.from_y;
+            evt.canvas_hovered = true;
+            evt.inside_image = true;
+            evt.phase = r.phase;
+            evt.status = r.status;
+            case_result.pointer_events.push_back(evt);
 
             if (tc.expected_phase.empty() || r.phase == tc.expected_phase)
             {
@@ -869,16 +1101,37 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
             frame_down.image_x = tc.from_x;
             frame_down.image_y = tc.from_y;
 
-            viewer.ProcessImageAnnotationPointerFrame(frame_down);
+            CxImagePointerResult r_down = viewer.ProcessImageAnnotationPointerFrame(frame_down);
+
+            CxShapeInteractionPointerEvent evt_down;
+            evt_down.event = "left_down";
+            evt_down.image_x = tc.from_x;
+            evt_down.image_y = tc.from_y;
+            evt_down.canvas_hovered = true;
+            evt_down.inside_image = true;
+            evt_down.phase = r_down.phase;
+            evt_down.status = r_down.status;
+            case_result.pointer_events.push_back(evt_down);
 
             CxImagePointerFrame frame_drag;
             frame_drag.canvas_hovered = true;
             frame_drag.inside_image = true;
             frame_drag.left_down = true;
+            frame_drag.pointer_moved = true;
             frame_drag.image_x = tc.to_x;
             frame_drag.image_y = tc.to_y;
 
-            viewer.ProcessImageAnnotationPointerFrame(frame_drag);
+            CxImagePointerResult r_drag = viewer.ProcessImageAnnotationPointerFrame(frame_drag);
+
+            CxShapeInteractionPointerEvent evt_drag;
+            evt_drag.event = "left_drag";
+            evt_drag.image_x = tc.to_x;
+            evt_drag.image_y = tc.to_y;
+            evt_drag.canvas_hovered = true;
+            evt_drag.inside_image = true;
+            evt_drag.phase = r_drag.phase;
+            evt_drag.status = r_drag.status;
+            case_result.pointer_events.push_back(evt_drag);
 
             CxImagePointerFrame frame_release;
             frame_release.canvas_hovered = true;
@@ -891,6 +1144,16 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
             case_result.actual_handle = r.phase;
             case_result.status = r.status;
             case_result.reason = r.reason;
+
+            CxShapeInteractionPointerEvent evt_release;
+            evt_release.event = "left_released";
+            evt_release.image_x = tc.to_x;
+            evt_release.image_y = tc.to_y;
+            evt_release.canvas_hovered = true;
+            evt_release.inside_image = true;
+            evt_release.phase = r.phase;
+            evt_release.status = r.status;
+            case_result.pointer_events.push_back(evt_release);
 
             if (tc.expected_phase.empty() || r.phase == tc.expected_phase)
             {
@@ -966,20 +1229,33 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
 
         const size_t final_count = viewer.TestShapeElementCount();
-        case_result.created_points_count = static_cast<int>(final_count - initial_count);
+        case_result.shape_count_after = static_cast<int>(final_count);
+        const int actual_delta = static_cast<int>(final_count - initial_count);
+        case_result.shape_count_delta = actual_delta;
+        case_result.created_points_count = actual_delta;
 
-        if (tc.expected_shape_count_delta != 0)
+        if (actual_delta != tc.expected_shape_count_delta)
         {
-            if (static_cast<int>(final_count - initial_count) != tc.expected_shape_count_delta)
-            {
-                case_result.pass = false;
-                case_result.conclusion = "shape_count_delta_mismatch";
-                case_result.reason = "expected delta=" + std::to_string(tc.expected_shape_count_delta) +
-                                     ", actual=" + std::to_string(final_count - initial_count);
-            }
+            case_result.pass = false;
+            case_result.conclusion = "shape_count_delta_mismatch";
+            case_result.reason = "expected delta=" + std::to_string(tc.expected_shape_count_delta) +
+                                 ", actual=" + std::to_string(actual_delta);
         }
 
-        case_result.created_shape_kind = tc.expected_created_kind;
+        CxImagePointerResult r;
+        viewer.TestGetLastPointerResult(r);
+        case_result.created_ref = r.created_ref;
+        case_result.created_shape_kind = viewer.TestShapeKindByRef(r.created_ref);
+        case_result.commit_result = r.commit;
+
+        if (!tc.expected_created_kind.empty() && case_result.created_shape_kind != tc.expected_created_kind)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "created_shape_kind_mismatch";
+            case_result.reason = "expected created_kind=" + tc.expected_created_kind +
+                                 ", actual=" + case_result.created_shape_kind;
+        }
+
         case_result.runtime_writeback = false;
         case_result.acceptance_scope = "GUI_POINTER";
     }
@@ -1355,7 +1631,36 @@ void CxShapeInteractionRunner::GenerateCaseOutput(
         conclusion_file << "  \"created_handle_count\": " << case_result.created_handle_count << ",\n";
         conclusion_file << "  \"shape_visible\": " << (case_result.shape_visible ? "true" : "false") << ",\n";
         conclusion_file << "  \"shape_editable\": " << (case_result.shape_editable ? "true" : "false") << ",\n";
-        conclusion_file << "  \"created_shape_kind\": \"" << EscapeJson(case_result.created_shape_kind) << "\"\n";
+        conclusion_file << "  \"created_shape_kind\": \"" << EscapeJson(case_result.created_shape_kind) << "\",\n";
+        conclusion_file << "  \"created_ref\": \"" << EscapeJson(case_result.created_ref) << "\",\n";
+        conclusion_file << "  \"selected_ref\": \"" << EscapeJson(case_result.selected_ref) << "\",\n";
+        conclusion_file << "  \"shape_count_before\": " << case_result.shape_count_before << ",\n";
+        conclusion_file << "  \"shape_count_after\": " << case_result.shape_count_after << ",\n";
+        conclusion_file << "  \"shape_count_delta\": " << case_result.shape_count_delta << ",\n";
+        conclusion_file << "  \"pointer_events\": [\n";
+        for (size_t i = 0; i < case_result.pointer_events.size(); ++i)
+        {
+            const auto& evt = case_result.pointer_events[i];
+            conclusion_file << "    {\n";
+            conclusion_file << "      \"event\": \"" << EscapeJson(evt.event) << "\",\n";
+            conclusion_file << "      \"screen_x\": " << evt.screen_x << ",\n";
+            conclusion_file << "      \"screen_y\": " << evt.screen_y << ",\n";
+            conclusion_file << "      \"image_x\": " << evt.image_x << ",\n";
+            conclusion_file << "      \"image_y\": " << evt.image_y << ",\n";
+            conclusion_file << "      \"canvas_hovered\": " << (evt.canvas_hovered ? "true" : "false") << ",\n";
+            conclusion_file << "      \"inside_image\": " << (evt.inside_image ? "true" : "false") << ",\n";
+            conclusion_file << "      \"phase\": \"" << EscapeJson(evt.phase) << "\",\n";
+            conclusion_file << "      \"status\": \"" << EscapeJson(evt.status) << "\"\n";
+            conclusion_file << "    }";
+            if (i < case_result.pointer_events.size() - 1)
+                conclusion_file << ",";
+            conclusion_file << "\n";
+        }
+        conclusion_file << "  ],\n";
+        conclusion_file << "  \"commit_result\": {\n";
+        conclusion_file << "    \"committed\": " << (case_result.commit_result.committed ? "true" : "false") << ",\n";
+        conclusion_file << "    \"reason\": \"" << EscapeJson(case_result.commit_result.reason) << "\"\n";
+        conclusion_file << "  }\n";
         conclusion_file << "}\n";
     }
 

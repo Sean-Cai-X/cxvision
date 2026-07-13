@@ -3335,6 +3335,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 #include "CxUnifiedLog.h"
 #include "Findline.h"
 #include "Findcircle.h"
+#include "FastMatch.h"
 #include "Findellipse.h"
 #include "FindRect.h"
 
@@ -3451,6 +3452,17 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_annotationLayer.BeginRuntimeOwnerPublish("FindRect", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
                 m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, 0);
+            }
+        }
+        else if (object.type == "fastmatch")
+        {
+            fastmatch* tool = static_cast<fastmatch*>(
+                m_parserDebugBridge.QueryClassObject("fastmatch", object.name));
+            if (tool != nullptr)
+            {
+                m_annotationLayer.BeginRuntimeOwnerPublish("fastmatch", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("fastmatch", object.name, 0);
             }
         }
     }

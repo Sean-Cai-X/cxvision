@@ -1,0 +1,16 @@
+{
+  "case_id": "gui_create_ellipse_drag_release",
+  "events": [
+  ],
+  "hits": [
+  ],
+  "commit_reason": "",
+  "commit_result": {
+    "committed": false,
+    "owner_type": "",
+    "owner_ref": "",
+    "owner_binding": "",
+    "result_marked_stale": false,
+    "stale_result_count": 0
+  }
+}

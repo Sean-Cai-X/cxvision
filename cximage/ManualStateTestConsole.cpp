@@ -2055,33 +2055,12 @@ static CxParamCandidate CandidateFromManualGauge(
 
 static void AddMlpackRankPlaceholderCandidates(ManualParamRegressionState& state)
 {
-    CxParamCandidate c;
-    if (!state.candidates.empty())
-        c = state.candidates.front();
-    c.candidate_id = "mlpack_low_risk_threshold12";
-    c.source = "mlpack_rank";
-    c.threshold = 12;
-    c.predicted_quality = 0.72;
-    c.predicted_risk = 0.28;
-    c.predicted_failure_class = "low_risk_candidate";
-    c.selected_for_probe = true;
-    state.candidates.push_back(c);
+    (void)state;
 }
 
 static void AddEnsmallenOptPlaceholderCandidates(ManualParamRegressionState& state)
 {
-    CxParamCandidate c;
-    if (!state.candidates.empty())
-        c = state.candidates.front();
-    c.candidate_id = "ensmallen_bounded_threshold12_linegap10";
-    c.source = "ensmallen_opt";
-    c.threshold = 12;
-    c.linegap = 10;
-    c.predicted_quality = 0.68;
-    c.predicted_risk = 0.35;
-    c.predicted_failure_class = "bounded_search_candidate";
-    c.selected_for_probe = true;
-    state.candidates.push_back(c);
+    (void)state;
 }
 
 static void RefreshParamRegressionExportedFiles(ManualParamRegressionState& state)

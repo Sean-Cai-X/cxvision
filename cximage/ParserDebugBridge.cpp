@@ -4,6 +4,7 @@
 #include "Image.h"
 #include "CircleRingGauge.h"
 #include "FastMatchDiagnostic.h"
+#include "FastMatch.h"
 
 #if defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
 #include "cxscript_debug_embedded_runner.h"
@@ -65,6 +66,10 @@ void* ParserDebugBridge::QueryClassObject(const std::string& type,
   void* object = myRuntime->GetClassObj(type, name);
   if (object == nullptr && type == "Findcircle")
     object = myRuntime->GetClassObj("findcircle", name);
+  if (object == nullptr && type == "fastmatch")
+    object = myRuntime->GetClassObj("FastMatch", name);
+  if (object == nullptr && type == "fastmatch")
+    object = myRuntime->GetClassObj("CFastMatch", name);
   return object;
 }
 
@@ -181,7 +186,8 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
     {"Findcircle", "afindcircle0"},
     {"Findcircle", "afindcircle1"},
     {"CircleRingGauge", "ring_gauge"},
-    {"FastMatchDiagnostic", "fm"}
+    {"FastMatchDiagnostic", "fm"},
+    {"fastmatch", "m_match"}
   };
   std::vector<ParserDebugObjectSnapshot> snapshots;
   for (const auto& item : objects)
@@ -260,6 +266,33 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
         snapshot.value_summary = "FastMatchDiagnostic: allowed=" +
           std::string(fm->allowed() ? "true" : "false") +
           ", status_code=" + std::to_string(fm->status_code());
+      }
+    }
+    else if (snapshot.type == "fastmatch" && snapshot.exists_in_parser)
+    {
+      fastmatch* fm = static_cast<fastmatch*>(
+        QueryClassObject(snapshot.type, snapshot.name));
+      if (fm != nullptr)
+      {
+        snapshot.has_fastmatch = true;
+        const PointsShape& model = fm->getmodel();
+        snapshot.fastmatch_model_available = model.size() > 0;
+        snapshot.fastmatch_model_point_count = model.size();
+        snapshot.fastmatch_candidate_count = fm->getresultcandidatecount();
+        snapshot.fastmatch_best_index = fm->getresultbestindex();
+        snapshot.fastmatch_best_score = fm->getresultbestscore();
+        const int candidate_count = fm->getresultcandidatecount();
+        const int best_idx = fm->getresultbestindex();
+        if (best_idx >= 0 && best_idx < candidate_count)
+        {
+          snapshot.fastmatch_best_x = fm->getresultcentx(best_idx);
+          snapshot.fastmatch_best_y = fm->getresultcenty(best_idx);
+        }
+        const RectsShape& result_rects = *fm->getresultrects();
+        snapshot.fastmatch_has_result_box = result_rects.size() > 0;
+        snapshot.fastmatch_result_status = candidate_count > 0 ? "geometry_result_available" : "PENDING";
+        snapshot.value_summary = "fastmatch: candidates=" + std::to_string(candidate_count) +
+          ", best_score=" + std::to_string(fm->getresultbestscore());
       }
     }
     snapshots.push_back(snapshot);

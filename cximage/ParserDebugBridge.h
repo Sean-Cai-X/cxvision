@@ -45,6 +45,17 @@ struct ParserDebugObjectSnapshot
   std::string fastmatch_status;
   std::string fastmatch_reason;
   std::string fastmatch_result_ref;
+
+  bool has_fastmatch = false;
+  bool fastmatch_model_available = false;
+  int fastmatch_model_point_count = 0;
+  int fastmatch_candidate_count = 0;
+  int fastmatch_best_index = -1;
+  double fastmatch_best_score = 0.0;
+  double fastmatch_best_x = 0.0;
+  double fastmatch_best_y = 0.0;
+  bool fastmatch_has_result_box = false;
+  std::string fastmatch_result_status;
 };
 
 struct ParserDebugVariableSnapshot

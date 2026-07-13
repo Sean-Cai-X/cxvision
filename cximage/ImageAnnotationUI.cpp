@@ -238,6 +238,15 @@ void ViewController::CancelAnnotationCreate()
     m_activePolylinePoints.clear();
 }
 
+void ViewController::ClampImagePointToImageBounds(double& x, double& y) const
+{
+    if (!m_imageViewImage.empty())
+    {
+        x = std::max(0.0, std::min(x, static_cast<double>(m_imageViewImage.cols)));
+        y = std::max(0.0, std::min(y, static_cast<double>(m_imageViewImage.rows)));
+    }
+}
+
 ImVec2 ViewController::ImageToScreen(float ix, float iy) const
 {
   if (m_imageViewImage.empty()) return ImVec2(m_annotationImagePosX,
@@ -353,16 +362,11 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 {
     CxImagePointerResult out;
 
-    CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_begin", "running",
-        "x=" + std::to_string(frame.image_x) + ", y=" + std::to_string(frame.image_y));
-
-    if (!frame.canvas_hovered || !frame.inside_image)
+    if (frame.HasInteractionEvent())
     {
-        out.phase = "pointer_reject";
-        out.status = "ignored";
-        out.reason = "outside image canvas";
-        CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_reject", "ignored", "reason=outside canvas");
-        return out;
+        CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_begin", "running",
+            "x=" + std::to_string(frame.image_x) + ", y=" + std::to_string(frame.image_y) +
+            ", inside=" + std::string(frame.inside_image ? "true" : "false"));
     }
 
     if (frame.escape_pressed)
@@ -373,6 +377,8 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         out.consumed = true;
         out.phase = "cancel";
         out.status = "cancelled";
+        m_lastPointerResult = out;
+        CXLOG_INFO("ImageAnnotationUI", "annotation_cancel", "cancelled", "reason=escape");
         return out;
     }
 
@@ -383,9 +389,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_down)
         {
-            const bool ok = m_annotationLayer.UpdateDrag(frame.image_x, frame.image_y);
+            double clamped_x = frame.image_x;
+            double clamped_y = frame.image_y;
+            ClampImagePointToImageBounds(clamped_x, clamped_y);
+            const bool ok = m_annotationLayer.UpdateDrag(clamped_x, clamped_y);
             out.status = ok ? "dragging" : "failed";
             out.reason = ok ? "drag updated" : "UpdateDrag failed";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -396,11 +406,109 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.commit = commit;
             out.status = ok ? "committed" : "failed";
             out.reason = commit.reason;
+
+            if (ok && commit.owner_type == "fastmatch" && commit.editable && !commit.owner_binding.empty())
+            {
+                void* toolObj = m_parserDebugBridge.QueryClassObject("fastmatch", commit.owner_ref);
+                if (toolObj != nullptr)
+                {
+                    fastmatch* tool = static_cast<fastmatch*>(toolObj);
+                    auto* layer = &m_annotationLayer;
+                    const auto& elements = layer->ShapeElements();
+                    for (const auto& elem : elements)
+                    {
+                        if (elem.stable_ref == commit.stable_ref && elem.shape != nullptr && elem.shape->kind() == CxShapeKind::Rect)
+                        {
+                            auto* rectShape = dynamic_cast<RectShape*>(elem.shape.get());
+                            if (rectShape != nullptr)
+                            {
+                                const double x0 = rectShape->x0();
+                                const double y0 = rectShape->y0();
+                                const double x1 = rectShape->x1();
+                                const double y1 = rectShape->y1();
+                                std::string reason;
+                                if (tool->ApplyDisplayShapeEdit(commit.owner_binding, commit.semantic_role,
+                                                                x0, y0, x1, y1, reason))
+                                {
+                                    commit.runtime_writeback = true;
+                                    out.reason = reason;
+                                }
+                                else
+                                {
+                                    out.reason = "FastMatch edit rejected: " + reason;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
             if (ok)
-                CXLOG_INFO("ImageAnnotationUI", "annotation_drag_commit", "committed", "reason=" + commit.reason);
+                CXLOG_INFO("ImageAnnotationUI", "annotation_drag_commit", "committed", "reason=" + out.reason);
+            m_lastPointerResult = out;
             return out;
         }
 
+        m_lastPointerResult = out;
+        return out;
+    }
+
+    if (m_annotationDragging)
+    {
+        out.consumed = true;
+        out.phase = "create_shape";
+
+        if (frame.left_down)
+        {
+            double clamped_x = frame.image_x;
+            double clamped_y = frame.image_y;
+            ClampImagePointToImageBounds(clamped_x, clamped_y);
+            m_annotationDragEnd = {(float)clamped_x, (float)clamped_y};
+            out.status = "draft_updating";
+            out.reason = "draft updating";
+            m_lastPointerResult = out;
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
+            if (activeTool)
+            {
+                const auto* toolSpec = CxAnnotationToolRuntime::FindById(activeTool->name);
+                if (toolSpec)
+                {
+                    CommitDraftShapeFromTool(*toolSpec, out);
+                }
+                else
+                {
+                    out.status = "failed";
+                    out.reason = "tool spec not found";
+                }
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "no active tool";
+            }
+            m_annotationDragging = false;
+            m_lastPointerResult = out;
+            return out;
+        }
+
+        m_lastPointerResult = out;
+        return out;
+    }
+
+    if (!frame.canvas_hovered || !frame.inside_image)
+    {
+        out.phase = "pointer_reject";
+        out.status = "ignored";
+        out.reason = "outside image canvas";
+        m_lastPointerResult = out;
+        if (frame.HasInteractionEvent())
+            CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_reject", "ignored", "reason=outside canvas");
         return out;
     }
 
@@ -427,12 +535,14 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.selected_ref = selected ? selected->stable_ref : "";
                 out.reason = "shape selected and drag started";
                 CXLOG_INFO("ImageAnnotationUI", "annotation_drag_begin", "running", "ref=" + out.selected_ref);
+                m_lastPointerResult = out;
                 return out;
             }
         }
 
         out.phase = "pointer_pan";
         out.status = "not_consumed";
+        m_lastPointerResult = out;
         return out;
     }
 
@@ -451,8 +561,8 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         case ImageToolMode::PointCreate: currentKind = OverlayKind::Point; currentToolName = "point_pick"; break;
         case ImageToolMode::LineCreate: currentKind = OverlayKind::Line; currentToolName = "scan_line"; break;
         case ImageToolMode::RectCreate: currentKind = OverlayKind::Rect; currentToolName = "roi_rect"; break;
-        case ImageToolMode::CircleCreate: currentKind = OverlayKind::Circle; currentToolName = "roi_circle"; break;
-        case ImageToolMode::PolylineCreate: currentKind = OverlayKind::Polyline; currentToolName = "polyline"; break;
+        case ImageToolMode::CircleCreate: currentKind = OverlayKind::Circle; currentToolName = "circle_roi"; break;
+        case ImageToolMode::PolylineCreate: currentKind = OverlayKind::Polyline; currentToolName = "boundary_polyline"; break;
         default: break;
         }
     }
@@ -475,11 +585,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.created_ref = element.stable_ref;
                 out.reason = "point created";
                 CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+                m_lastPointerResult = out;
                 return out;
                 }
             }
             out.status = "failed";
             out.reason = "CreateInitialShapeForTool failed";
+            m_lastPointerResult = out;
             return out;
         }
     }
@@ -492,6 +604,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.phase = "create_shape";
             out.status = "point_added";
             out.reason = "polyline point added";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -503,6 +616,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.phase = "create_shape";
                 out.status = "empty_polyline";
                 out.reason = "no points to create polyline";
+                m_lastPointerResult = out;
                 return out;
             }
 
@@ -520,6 +634,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = "polyline created";
                 CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
                 m_activePolylinePoints.clear();
+                m_lastPointerResult = out;
                 return out;
                 }
             }
@@ -528,6 +643,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.status = "failed";
             out.reason = "CreateInitialShapeForTool failed";
             m_activePolylinePoints.clear();
+            m_lastPointerResult = out;
             return out;
         }
     }
@@ -545,8 +661,10 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.phase = "create_shape";
                 out.status = "draft_started";
                 out.reason = "line draft started";
+                m_lastPointerResult = out;
                 return out;
             }
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -557,6 +675,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.phase = "create_shape";
             out.status = "draft_updating";
             out.reason = "line draft updating";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -573,6 +692,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = "tool spec not found";
             }
             m_annotationDragging = false;
+            m_lastPointerResult = out;
             return out;
         }
     }
@@ -590,8 +710,10 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.phase = "create_shape";
                 out.status = "draft_started";
                 out.reason = "rect draft started";
+                m_lastPointerResult = out;
                 return out;
             }
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -602,6 +724,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.phase = "create_shape";
             out.status = "draft_updating";
             out.reason = "rect draft updating";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -618,6 +741,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = "tool spec not found";
             }
             m_annotationDragging = false;
+            m_lastPointerResult = out;
             return out;
         }
     }
@@ -635,8 +759,10 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.phase = "create_shape";
                 out.status = "draft_started";
                 out.reason = "circle draft started";
+                m_lastPointerResult = out;
                 return out;
             }
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -647,6 +773,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.phase = "create_shape";
             out.status = "draft_updating";
             out.reason = "circle draft updating";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -663,6 +790,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = "tool spec not found";
             }
             m_annotationDragging = false;
+            m_lastPointerResult = out;
             return out;
         }
     }
@@ -680,8 +808,10 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.phase = "create_shape";
                 out.status = "draft_started";
                 out.reason = "ellipse draft started";
+                m_lastPointerResult = out;
                 return out;
             }
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -692,6 +822,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.phase = "create_shape";
             out.status = "draft_updating";
             out.reason = "ellipse draft updating";
+            m_lastPointerResult = out;
             return out;
         }
 
@@ -708,10 +839,12 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = "tool spec not found";
             }
             m_annotationDragging = false;
+            m_lastPointerResult = out;
             return out;
         }
     }
 
+    m_lastPointerResult = out;
     return out;
 }
 
@@ -1541,5 +1674,29 @@ std::size_t ViewController::TestShapeElementCount() const
 
 bool ViewController::TestGetLastPointerResult(CxImagePointerResult& out) const
 {
+    out = m_lastPointerResult;
     return true;
+}
+
+std::string ViewController::TestShapeKindByRef(const std::string& ref) const
+{
+    const auto& elements = m_annotationLayer.ShapeElements();
+    for (const auto& elem : elements)
+    {
+        if (elem.stable_ref == ref && elem.shape)
+        {
+            switch (elem.shape->kind())
+            {
+            case CxShapeKind::Points: return "Points";
+            case CxShapeKind::Line: return "Line";
+            case CxShapeKind::Rect: return "Rect";
+            case CxShapeKind::Circle: return "Circle";
+            case CxShapeKind::Polyline: return "Polyline";
+            case CxShapeKind::Ellipse: return "Ellipse";
+            case CxShapeKind::LineGauge: return "LineGauge";
+            default: return "Unknown";
+            }
+        }
+    }
+    return "";
 }

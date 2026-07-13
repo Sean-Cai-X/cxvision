@@ -202,6 +202,7 @@ public:
     bool IsMouseInsideImageCanvas(const ImVec2& p) const;
     static const char* ImageToolModeName(ImageToolMode mode);
     void CancelAnnotationCreate();
+    void ClampImagePointToImageBounds(double& x, double& y) const;
     void HandleLineAnnotationInput(const ImVec2& mouseImage);
     void CommitLineAnnotation();
     void HandleRectAnnotationInput(const ImVec2& mouseImage);
@@ -216,6 +217,7 @@ public:
     void TestSetToolModePointerPan();
     std::size_t TestShapeElementCount() const;
     bool TestGetLastPointerResult(CxImagePointerResult& out) const;
+    std::string TestShapeKindByRef(const std::string& ref) const;
 
     void DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList);
 
@@ -470,6 +472,7 @@ private:
     float m_debugMouseImageX = 0.0f;
     float m_debugMouseImageY = 0.0f;
     bool m_debugAnnotationDragging = false;
+    CxImagePointerResult m_lastPointerResult;
 };
 
 #endif // _ViewController_Header

@@ -789,6 +789,8 @@ bool ImageAnnotationLayer::CommitEdit(CxShapeCommitResult& result)
     result.owner_ref = element.owner_ref;
     result.owner_binding = element.owner_binding;
     result.semantic_role = element.semantic_role;
+    result.stable_ref = element.stable_ref;
+    result.editable = element.editable;
     result.result_marked_stale = false;
     result.stale_result_count = 0;
     result.runtime_writeback = false;
@@ -800,16 +802,26 @@ bool ImageAnnotationLayer::CommitEdit(CxShapeCommitResult& result)
         element.runtime_edit_pending = true;
     }
 
+
+
     if (!element.owner_type.empty())
     {
         const int markedCount = MarkOwnerResultStaleAndCount(element.owner_type, element.owner_ref);
         result.result_marked_stale = markedCount > 0;
         result.stale_result_count = markedCount;
-        result.reason = "drag committed, " + std::to_string(markedCount) + " result elements marked stale (runtime writeback not implemented)";
+        if (!result.reason.empty())
+        {
+            result.reason += ", " + std::to_string(markedCount) + " result elements marked stale";
+        }
+        else
+        {
+            result.reason = "drag committed, " + std::to_string(markedCount) + " result elements marked stale";
+        }
     }
     else
     {
-        result.reason = "drag committed";
+        if (result.reason.empty())
+            result.reason = "drag committed";
     }
 
     result.committed = true;
