@@ -275,9 +275,9 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
       if (fm != nullptr)
       {
         snapshot.has_fastmatch = true;
-        const PointsShape& model = fm->getmodel();
-        snapshot.fastmatch_model_available = model.size() > 0;
-        snapshot.fastmatch_model_point_count = model.size();
+        const int model_point_count = fm->getmodelpointcount();
+        snapshot.fastmatch_model_available = model_point_count > 0;
+        snapshot.fastmatch_model_point_count = model_point_count;
         snapshot.fastmatch_candidate_count = fm->getresultcandidatecount();
         snapshot.fastmatch_best_index = fm->getresultbestindex();
         snapshot.fastmatch_best_score = fm->getresultbestscore();

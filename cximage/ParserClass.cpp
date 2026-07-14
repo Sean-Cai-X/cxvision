@@ -655,6 +655,9 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "getresultnum", &fastmatch::getresultnum);
             m_parser.DefineClassFun("Match", pfastmatch, "getresultcentx", &fastmatch::getresultcentx);
             m_parser.DefineClassFun("Match", pfastmatch, "getresultcenty", &fastmatch::getresultcenty);
+            m_parser.DefineClassFun("Match", pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
+            m_parser.DefineClassFun("Match", pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
+            m_parser.DefineClassFun("Match", pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
             m_parser.DefineClassFun("Match", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
             m_parser.DefineClassFun("Match", pfastmatch, "setspecshow", &fastmatch::setspecshow);
             m_parser.DefineClassFun("Match", pfastmatch, "setrelresultnum", &fastmatch::setrelationrectfromresultnum);

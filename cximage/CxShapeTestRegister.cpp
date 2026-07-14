@@ -168,6 +168,20 @@ static double CxShapeTest_setinitialellipse(double cx, double cy, double rx, dou
     return 0.0;
 }
 
+static double CxShapeTest_setinitialline(double x0, double y0, double x1, double y1)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+    {
+        current->has_initial_line = true;
+        current->initial_lx0 = x0;
+        current->initial_ly0 = y0;
+        current->initial_lx1 = x1;
+        current->initial_ly1 = y1;
+    }
+    return 0.0;
+}
+
 static double CxShapeTest_seteditable(double editable)
 {
     auto* current = CxShapeTestRuntime::Current();
@@ -270,6 +284,140 @@ static double CxShapeTest_setexpectedstatus(const char* status)
     return 0.0;
 }
 
+static std::string s_last_test_role;
+
+static double CxShapeTest_setrole(const char* role)
+{
+    s_last_test_role = role ? role : "";
+    return 0.0;
+}
+
+static double CxShapeTest_expectrole(double min_count)
+{
+    CxShapeTestRuntime::ExpectRole(s_last_test_role, static_cast<int>(min_count));
+    return 0.0;
+}
+
+static double CxShapeTest_expectrole_range(double min_count, double max_count)
+{
+    CxShapeTestRuntime::ExpectRole(s_last_test_role, static_cast<int>(min_count), static_cast<int>(max_count));
+    return 0.0;
+}
+
+static double CxShapeTest_expecteditable(double editable)
+{
+    CxShapeTestRuntime::ExpectEditable(s_last_test_role, static_cast<int>(editable));
+    return 0.0;
+}
+
+static double CxShapeTest_expecteditableelement(double result_element)
+{
+    CxShapeTestRuntime::ExpectResultElement(s_last_test_role, static_cast<int>(result_element));
+    return 0.0;
+}
+
+static double CxShapeTest_setownerbinding(const char* binding)
+{
+    CxShapeTestRuntime::SetOwnerBinding(binding ? binding : "");
+    return 0.0;
+}
+
+static double CxShapeTest_setexpectedhandle(const char* handle)
+{
+    CxShapeTestRuntime::SetExpectedHandle(handle ? handle : "");
+    return 0.0;
+}
+
+static double CxShapeTest_setdragdelta(double dx, double dy)
+{
+    CxShapeTestRuntime::SetDragDelta(static_cast<int>(dx), static_cast<int>(dy));
+    return 0.0;
+}
+
+static double CxShapeTest_setimage(const char* path)
+{
+    CxShapeTestRuntime::SetImage(path ? path : "");
+    return 0.0;
+}
+
+static double CxShapeTest_setthreshold(double value)
+{
+    CxShapeTestRuntime::SetThreshold(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setmethod(double value)
+{
+    CxShapeTestRuntime::SetMethod(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setgap(double value)
+{
+    CxShapeTestRuntime::SetGap(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setlinegap(double value)
+{
+    CxShapeTestRuntime::SetLineGap(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setwhgap(double w, double h)
+{
+    CxShapeTestRuntime::SetWHGap(static_cast<int>(w), static_cast<int>(h));
+    return 0.0;
+}
+
+static double CxShapeTest_settoolhalfwidth(double value)
+{
+    CxShapeTestRuntime::SetToolHalfWidth(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setfilterprofile(double value)
+{
+    CxShapeTestRuntime::SetFilterProfile(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectminvalidpoints(double value)
+{
+    CxShapeTestRuntime::ExpectMinValidPoints(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectfitline(double value)
+{
+    CxShapeTestRuntime::ExpectFitLine(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectfitcircle(double value)
+{
+    CxShapeTestRuntime::ExpectFitCircle(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectfitellipse(double value)
+{
+    CxShapeTestRuntime::ExpectFitEllipse(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectresultrect(double value)
+{
+    CxShapeTestRuntime::ExpectResultRect(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectmaxresidual(double value)
+{
+    CxShapeTestRuntime::ExpectMaxResidual(value);
+    return 0.0;
+}
+
 void RegisterCxShapeTestBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxShapeTest_reset", (mu::fun_type1)&CxShapeTest_reset);
@@ -287,6 +435,7 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setinitialrect", (mu::fun_type4)&CxShapeTest_setinitialrect);
     parser.DefineFun("CxShapeTest_setinitialcircle", (mu::fun_type3)&CxShapeTest_setinitialcircle);
     parser.DefineFun("CxShapeTest_setinitialellipse", (mu::fun_type4)&CxShapeTest_setinitialellipse);
+    parser.DefineFun("CxShapeTest_setinitialline", (mu::fun_type4)&CxShapeTest_setinitialline);
     parser.DefineFun("CxShapeTest_seteditable", (mu::fun_type1)&CxShapeTest_seteditable);
     parser.DefineFun("CxShapeTest_setvisible", (mu::fun_type1)&CxShapeTest_setvisible);
     parser.DefineFun("CxShapeTest_setexpectedhit", (mu::fun_type1)&CxShapeTest_setexpectedhit);
@@ -299,4 +448,26 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setexpectedcreatedkind", (mu::strfun_type1)&CxShapeTest_setexpectedcreatedkind);
     parser.DefineFun("CxShapeTest_setexpectedphase", (mu::strfun_type1)&CxShapeTest_setexpectedphase);
     parser.DefineFun("CxShapeTest_setexpectedstatus", (mu::strfun_type1)&CxShapeTest_setexpectedstatus);
+    parser.DefineFun("CxShapeTest_setrole", (mu::strfun_type1)&CxShapeTest_setrole);
+    parser.DefineFun("CxShapeTest_expectrole", (mu::fun_type1)&CxShapeTest_expectrole);
+    parser.DefineFun("CxShapeTest_expectrole_range", (mu::fun_type2)&CxShapeTest_expectrole_range);
+    parser.DefineFun("CxShapeTest_expecteditable", (mu::fun_type1)&CxShapeTest_expecteditable);
+    parser.DefineFun("CxShapeTest_expecteditableelement", (mu::fun_type1)&CxShapeTest_expecteditableelement);
+    parser.DefineFun("CxShapeTest_setownerbinding", (mu::strfun_type1)&CxShapeTest_setownerbinding);
+    parser.DefineFun("CxShapeTest_setexpectedhandle", (mu::strfun_type1)&CxShapeTest_setexpectedhandle);
+    parser.DefineFun("CxShapeTest_setdragdelta", (mu::fun_type2)&CxShapeTest_setdragdelta);
+    parser.DefineFun("CxShapeTest_setimage", (mu::strfun_type1)&CxShapeTest_setimage);
+    parser.DefineFun("CxShapeTest_setthreshold", (mu::fun_type1)&CxShapeTest_setthreshold);
+    parser.DefineFun("CxShapeTest_setmethod", (mu::fun_type1)&CxShapeTest_setmethod);
+    parser.DefineFun("CxShapeTest_setgap", (mu::fun_type1)&CxShapeTest_setgap);
+    parser.DefineFun("CxShapeTest_setlinegap", (mu::fun_type1)&CxShapeTest_setlinegap);
+    parser.DefineFun("CxShapeTest_setwhgap", (mu::fun_type2)&CxShapeTest_setwhgap);
+    parser.DefineFun("CxShapeTest_settoolhalfwidth", (mu::fun_type1)&CxShapeTest_settoolhalfwidth);
+    parser.DefineFun("CxShapeTest_setfilterprofile", (mu::fun_type1)&CxShapeTest_setfilterprofile);
+    parser.DefineFun("CxShapeTest_expectminvalidpoints", (mu::fun_type1)&CxShapeTest_expectminvalidpoints);
+    parser.DefineFun("CxShapeTest_expectfitline", (mu::fun_type1)&CxShapeTest_expectfitline);
+    parser.DefineFun("CxShapeTest_expectfitcircle", (mu::fun_type1)&CxShapeTest_expectfitcircle);
+    parser.DefineFun("CxShapeTest_expectfitellipse", (mu::fun_type1)&CxShapeTest_expectfitellipse);
+    parser.DefineFun("CxShapeTest_expectresultrect", (mu::fun_type1)&CxShapeTest_expectresultrect);
+    parser.DefineFun("CxShapeTest_expectmaxresidual", (mu::fun_type1)&CxShapeTest_expectmaxresidual);
 }

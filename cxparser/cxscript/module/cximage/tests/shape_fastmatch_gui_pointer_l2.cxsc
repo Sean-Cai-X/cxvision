@@ -1,3 +1,5 @@
+CxShapeTest_reset(0);
+
 CxShapeTest_addcase("fastmatch_select_learn_roi");
 CxShapeTest_settool("fastmatch");
 CxShapeTest_setoperation("gui_pointer_select_existing");

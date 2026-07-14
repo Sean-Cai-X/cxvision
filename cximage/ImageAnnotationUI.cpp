@@ -183,7 +183,24 @@ void ViewController::initImageEvidenceLayer()
   m_annotationSessionPath =
     (repositoryRoot / "cxparser" / "cxscript" / "annotations" /
      "session_001.cxann").generic_string();
-  m_annotationLayer.LoadManifest(m_annotationManifestPath, m_annotationStatus);
+
+    std::string init_reason;
+    if (!m_parserOwner.Initialize(init_reason))
+    {
+        m_annotationStatus = "parser initialize failed: " + init_reason;
+        return;
+    }
+
+    CxAnnotationToolManifestSnapshot snapshot;
+    if (!m_parserOwner.ParseAnnotationToolManifest(m_annotationManifestPath, snapshot, m_annotationStatus))
+    {
+        return;
+    }
+
+    if (!m_annotationLayer.ApplyToolManifestSnapshot(snapshot, m_annotationStatus))
+    {
+        return;
+    }
 }
 
 bool ViewController::IsAnnotationCreateModeActive() const
@@ -286,7 +303,7 @@ static double Distance2(double x0, double y0, double x1, double y1)
 }
 
 bool ViewController::CommitDraftShapeFromTool(
-    const CxAnnotationToolSpec& tool,
+    const AnnotationToolDefinition& tool,
     CxImagePointerResult& out)
 {
     const double dx = m_annotationDragEnd.x - m_annotationDragStart.x;
@@ -476,16 +493,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
             if (activeTool)
             {
-                const auto* toolSpec = CxAnnotationToolRuntime::FindById(activeTool->name);
-                if (toolSpec)
-                {
-                    CommitDraftShapeFromTool(*toolSpec, out);
-                }
-                else
-                {
-                    out.status = "failed";
-                    out.reason = "tool spec not found";
-                }
+                CommitDraftShapeFromTool(*activeTool, out);
             }
             else
             {
@@ -571,28 +579,41 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
     {
         if (frame.left_clicked)
         {
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            if (hasActiveTool)
             {
+                const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+                if (!tool)
+                {
+                    out.consumed = true;
+                    out.phase = "create_shape";
+                    out.status = "failed";
+                    out.reason = "active tool definition unavailable";
+                    m_lastPointerResult = out;
+                    return out;
+                }
+
                 std::vector<CxShapePoint> pts = {{frame.image_x, frame.image_y}};
-                auto shape = CreateInitialShapeForTool(*toolSpec, pts);
+                auto shape = CreateInitialShapeForTool(*tool, pts);
                 if (shape)
                 {
-                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*tool, std::move(shape));
+                    out.consumed = true;
+                    out.phase = "create_shape";
+                    out.status = "created";
+                    out.created_ref = element.stable_ref;
+                    out.reason = "point created";
+                    CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+                    m_lastPointerResult = out;
+                    return out;
+                }
+
                 out.consumed = true;
                 out.phase = "create_shape";
-                out.status = "created";
-                out.created_ref = element.stable_ref;
-                out.reason = "point created";
-                CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
+                out.status = "failed";
+                out.reason = "CreateInitialShapeForTool failed";
                 m_lastPointerResult = out;
                 return out;
-                }
             }
-            out.status = "failed";
-            out.reason = "CreateInitialShapeForTool failed";
-            m_lastPointerResult = out;
-            return out;
         }
     }
     else if (currentKind == OverlayKind::Polyline)
@@ -620,13 +641,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 return out;
             }
 
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            if (tool)
             {
-                auto shape = CreateInitialShapeForTool(*toolSpec, m_activePolylinePoints);
+                auto shape = CreateInitialShapeForTool(*tool, m_activePolylinePoints);
                 if (shape)
                 {
-                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*toolSpec, std::move(shape));
+                    CxShapeElement& element = m_annotationLayer.CreateFromTool(*tool, std::move(shape));
                 out.consumed = true;
                 out.phase = "create_shape";
                 out.status = "created";
@@ -641,7 +662,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             out.consumed = true;
             out.phase = "create_shape";
             out.status = "failed";
-            out.reason = "CreateInitialShapeForTool failed";
+            out.reason = "active tool definition unavailable";
             m_activePolylinePoints.clear();
             m_lastPointerResult = out;
             return out;
@@ -681,15 +702,19 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            CXLOG_INFO("ImageAnnotationUI", "annotation_line_release", "debug", 
+                       "currentToolName=" + currentToolName + 
+                       ", tool=" + (tool ? "found" : "null") +
+                       ", m_imageToolMode=" + std::to_string(static_cast<int>(m_imageToolMode)));
+            if (tool)
             {
-                CommitDraftShapeFromTool(*toolSpec, out);
+                CommitDraftShapeFromTool(*tool, out);
             }
             else
             {
                 out.status = "failed";
-                out.reason = "tool spec not found";
+                out.reason = "active tool definition unavailable";
             }
             m_annotationDragging = false;
             m_lastPointerResult = out;
@@ -730,15 +755,15 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            if (tool)
             {
-                CommitDraftShapeFromTool(*toolSpec, out);
+                CommitDraftShapeFromTool(*tool, out);
             }
             else
             {
                 out.status = "failed";
-                out.reason = "tool spec not found";
+                out.reason = "active tool definition unavailable";
             }
             m_annotationDragging = false;
             m_lastPointerResult = out;
@@ -779,15 +804,15 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            if (tool)
             {
-                CommitDraftShapeFromTool(*toolSpec, out);
+                CommitDraftShapeFromTool(*tool, out);
             }
             else
             {
                 out.status = "failed";
-                out.reason = "tool spec not found";
+                out.reason = "active tool definition unavailable";
             }
             m_annotationDragging = false;
             m_lastPointerResult = out;
@@ -828,15 +853,15 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const auto* toolSpec = CxAnnotationToolRuntime::FindById(currentToolName);
-            if (toolSpec)
+            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            if (tool)
             {
-                CommitDraftShapeFromTool(*toolSpec, out);
+                CommitDraftShapeFromTool(*tool, out);
             }
             else
             {
                 out.status = "failed";
-                out.reason = "tool spec not found";
+                out.reason = "active tool definition unavailable";
             }
             m_annotationDragging = false;
             m_lastPointerResult = out;
@@ -1295,7 +1320,22 @@ void ViewController::drawImageEvidencePanels()
   ImGui::Text("Annotation Tool Manifest");
   AnnotationInputText("Manifest path", m_annotationManifestPath);
   if (ImGui::Button("Load Tool Manifest"))
-    m_annotationLayer.LoadManifest(m_annotationManifestPath, m_annotationStatus);
+    {
+        std::string reason;
+        CxAnnotationToolManifestSnapshot snapshot;
+        if (!m_parserOwner.ParseAnnotationToolManifest(m_annotationManifestPath, snapshot, reason))
+        {
+            m_annotationStatus = "parse failed: " + reason;
+        }
+        else if (!m_annotationLayer.ApplyToolManifestSnapshot(snapshot, reason))
+        {
+            m_annotationStatus = "apply failed: " + reason;
+        }
+        else
+        {
+            m_annotationStatus = reason;
+        }
+    }
   ImGui::SameLine();
   ImGui::TextWrapped("%s", m_annotationStatus.c_str());
   ImGui::TextDisabled(
@@ -1625,7 +1665,26 @@ void ViewController::drawImageEvidencePanels()
 bool ViewController::TestLoadAnnotationToolManifest(const std::string& path, std::string& reason)
 {
     m_annotationManifestPath = path;
-    return m_annotationLayer.LoadManifest(path, reason);
+
+    std::string init_reason;
+    if (!m_parserOwner.Initialize(init_reason))
+    {
+        reason = "parser initialize failed: " + init_reason;
+        return false;
+    }
+
+    CxAnnotationToolManifestSnapshot snapshot;
+    if (!m_parserOwner.ParseAnnotationToolManifest(path, snapshot, reason))
+    {
+        return false;
+    }
+
+    return m_annotationLayer.ApplyToolManifestSnapshot(snapshot, reason);
+}
+
+bool ViewController::TestApplyAnnotationToolManifestSnapshot(const CxAnnotationToolManifestSnapshot& snapshot, std::string& reason)
+{
+    return m_annotationLayer.ApplyToolManifestSnapshot(snapshot, reason);
 }
 
 bool ViewController::TestSetActiveAnnotationTool(const std::string& tool_id, std::string& reason)
@@ -1687,13 +1746,13 @@ std::string ViewController::TestShapeKindByRef(const std::string& ref) const
         {
             switch (elem.shape->kind())
             {
-            case CxShapeKind::Points: return "Points";
-            case CxShapeKind::Line: return "Line";
-            case CxShapeKind::Rect: return "Rect";
-            case CxShapeKind::Circle: return "Circle";
-            case CxShapeKind::Polyline: return "Polyline";
-            case CxShapeKind::Ellipse: return "Ellipse";
-            case CxShapeKind::LineGauge: return "LineGauge";
+            case CxShapeKind::Points: return "PointsShape";
+            case CxShapeKind::Line: return "LineShape";
+            case CxShapeKind::Rect: return "RectShape";
+            case CxShapeKind::Circle: return "CircleShape";
+            case CxShapeKind::Polyline: return "PolylineShape";
+            case CxShapeKind::Ellipse: return "EllipseShape";
+            case CxShapeKind::LineGauge: return "LineGaugeShape";
             default: return "Unknown";
             }
         }

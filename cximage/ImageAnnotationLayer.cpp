@@ -17,7 +17,7 @@ namespace fs = std::filesystem;
 }
 
 std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
-    const CxAnnotationToolSpec& tool,
+    const AnnotationToolDefinition& tool,
     const std::vector<CxShapePoint>& points)
 {
     if (tool.shape_type == "PointsShape")
@@ -147,113 +147,78 @@ bool ImageAnnotationLayer::ParseKind(const std::string& text, OverlayKind& kind)
   return true;
 }
 
-bool ImageAnnotationLayer::LoadManifest(const std::string& path,
-                                        std::string& reason)
+bool ImageAnnotationLayer::ConvertToolSpec(
+    const CxAnnotationToolSpec& spec,
+    AnnotationToolDefinition& def,
+    std::string& reason) const
 {
-  myLoadStatus.clear();
+    def.name = spec.id;
+    def.label = spec.label;
+    def.shape_type = spec.shape_type;
+    def.role = spec.semantic_role;
+    def.action = spec.interaction;
+    def.source = spec.owner_tool.empty() ? "manual" : spec.owner_tool;
+    def.module_hint = spec.owner_tool;
+    def.description = spec.source_script;
+    def.owner_tool = spec.owner_tool;
+    def.owner_binding = spec.owner_binding;
+    def.manual_visible = spec.manual_visible;
+    def.editable = spec.editable;
 
-  std::ifstream stream{fs::path(path)};
-  if (!stream)
-  {
-    reason = "annotation tool CxScript not found";
-    return false;
-  }
-
-  std::stringstream buffer;
-  buffer << stream.rdbuf();
-  std::string script = buffer.str();
-
-  bool skipped_metadata = false;
-  bool skipped_register = false;
-
-  size_t pos = 0;
-  while (pos < script.size())
-  {
-    size_t line_end = script.find('\n', pos);
-    if (line_end == std::string::npos)
-      line_end = script.size();
-
-    std::string line = script.substr(pos, line_end - pos);
-
-    if (line.find("script:") == 0 || line.find("method_status:") == 0)
+    if (spec.shape_type == "PointsShape") def.kind = OverlayKind::Point;
+    else if (spec.shape_type == "LineShape" || spec.shape_type == "LineGaugeShape") def.kind = OverlayKind::Line;
+    else if (spec.shape_type == "RectShape") def.kind = OverlayKind::Rect;
+    else if (spec.shape_type == "CircleShape") def.kind = OverlayKind::Circle;
+    else if (spec.shape_type == "EllipseShape") def.kind = OverlayKind::Ellipse;
+    else if (spec.shape_type == "PolylineShape") def.kind = OverlayKind::Polyline;
+    else if (spec.shape_type == "BoundaryPolyline") def.kind = OverlayKind::BoundaryPolyline;
+    else if (spec.shape_type == "AutoBoundary") def.kind = OverlayKind::AutoBoundaryRequest;
+    else
     {
-      script.erase(pos, line_end - pos + (line_end < script.size() ? 1 : 0));
-      skipped_metadata = true;
-      continue;
+        reason = "unsupported annotation shape type: " + spec.shape_type;
+        return false;
     }
 
-    if (line.find("register_function(") == 0)
-    {
-      script.erase(pos, line_end - pos + (line_end < script.size() ? 1 : 0));
-      skipped_register = true;
-      continue;
-    }
+    return true;
+}
 
-    pos = line_end + 1;
-  }
+bool ImageAnnotationLayer::ApplyToolManifestSnapshot(
+    const CxAnnotationToolManifestSnapshot& snapshot,
+    std::string& reason)
+{
+    std::vector<AnnotationToolDefinition> nextTools;
 
-  if (skipped_metadata)
-  {
-    myLoadStatus = "legacy metadata line skipped; please remove script:/method_status:";
-  }
-  else if (skipped_register)
-  {
-    myLoadStatus = "legacy register_function skipped; registration should be in C++";
-  }
-  else
-  {
-    myLoadStatus = "loaded clean";
-  }
-
-  CxAnnotationToolRuntime::Reset();
-
-  mu::Parser parser;
-  parser.UsingClass(true);
-  RegisterCxAnnotationToolBindings(parser);
-
-  try
-  {
-    parser.SetExpr(script);
-    parser.Eval();
-  }
-  catch (const mu::Parser::exception_type& e)
-  {
-    reason = "CxScript parse error: " + std::string(e.GetMsg());
-    return false;
-  }
-
-  myTools.clear();
-    const auto& tools = CxAnnotationToolRuntime::Tools();
-    for (const auto& spec : tools)
+    for (const CxAnnotationToolSpec& spec : snapshot.tools)
     {
         AnnotationToolDefinition def;
-        def.name = spec.id;
-        def.label = spec.label;
-        def.shape_type = spec.shape_type;
-        def.role = spec.semantic_role;
-        def.action = spec.interaction;
-        def.source = spec.owner_tool.empty() ? "manual" : spec.owner_tool;
-        def.module_hint = spec.owner_tool;
-        def.description = spec.source_script;
-        def.owner_tool = spec.owner_tool;
-        def.owner_binding = spec.owner_binding;
-        def.manual_visible = spec.manual_visible;
-        def.editable = spec.editable;
 
-        if (spec.shape_type == "PointsShape") def.kind = OverlayKind::Point;
-        else if (spec.shape_type == "LineShape" || spec.shape_type == "LineGaugeShape") def.kind = OverlayKind::Line;
-        else if (spec.shape_type == "RectShape") def.kind = OverlayKind::Rect;
-        else if (spec.shape_type == "CircleShape") def.kind = OverlayKind::Circle;
-        else if (spec.shape_type == "EllipseShape") def.kind = OverlayKind::Ellipse;
-        else if (spec.shape_type == "PolylineShape") def.kind = OverlayKind::Polyline;
-        else def.kind = OverlayKind::Point;
+        if (!ConvertToolSpec(spec, def, reason))
+            return false;
 
-        myTools.push_back(def);
+        nextTools.push_back(def);
     }
 
-  reason = myTools.empty() ? "CxScript contains no registered annotation tools" :
-                             "CxScript annotation tools loaded";
-  return !myTools.empty();
+    if (nextTools.empty())
+    {
+        reason = "tool manifest snapshot is empty";
+        return false;
+    }
+
+    myTools.swap(nextTools);
+    myLoadStatus = "loaded from parser-owned snapshot";
+    reason = myLoadStatus;
+    return true;
+}
+
+const AnnotationToolDefinition* ImageAnnotationLayer::FindToolDefinition(const std::string& tool_id) const
+{
+    for (const AnnotationToolDefinition& tool : myTools)
+    {
+        if (tool.name == tool_id)
+            return &tool;
+    }
+
+    return nullptr;
 }
 
 std::string ImageAnnotationLayer::MakeRef(OverlayKind kind, int id) const
@@ -473,17 +438,17 @@ void ImageAnnotationLayer::RemoveByOwner(const std::string& owner_type, const st
 }
 
 CxShapeElement& ImageAnnotationLayer::CreateFromTool(
-    const CxAnnotationToolSpec& tool,
+    const AnnotationToolDefinition& tool,
     std::unique_ptr<ShapeBase> shape)
 {
     myShapeElements.emplace_back();
     CxShapeElement& element = myShapeElements.back();
     element.id = myNextId++;
-    element.ref = tool.id + "_" + std::to_string(element.id);
-    element.tool_id = tool.id;
+    element.ref = tool.name + "_" + std::to_string(element.id);
+    element.tool_id = tool.name;
     element.owner_type = tool.owner_tool;
     element.owner_binding = tool.owner_binding;
-    element.semantic_role = tool.semantic_role;
+    element.semantic_role = tool.role;
     element.editable = tool.editable;
     element.shape = std::move(shape);
     return element;

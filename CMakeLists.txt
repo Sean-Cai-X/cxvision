@@ -77,9 +77,23 @@ set(CXIMAGE_CORE_SOURCES
   cximage/TorchRuntimeBridge.cpp
   cximage/TorchRuntimeResultAdapter.cpp
   cximage/CxShapeInteractionRunner.cpp
+  cximage/CxRuntimeProjectionExecutor.cpp
   cximage/CxShapeInteractionTest.cpp
   cximage/CxShapeTestRegister.cpp
   cximage/CxShapeTestRuntime.cpp
+  cximage/CxParamProbeRunner.cpp
+  cximage/CxParserRuntimeOwner.cpp
+  cximage/ManualConsoleUtils.cpp
+  cximage/ManualConsoleRuntimeView.cpp
+  cximage/ManualConsoleCxScriptDebug.cpp
+  cximage/ManualConsoleFindcircleDebug.cpp
+  cximage/ManualConsoleFindlineDebug.cpp
+  cximage/ManualConsoleGauge.cpp
+  cximage/ManualConsoleParamRegressionPanel.cpp
+  cximage/ManualConsoleEvidenceChain.cpp
+  cximage/ManualConsoleScriptDebugPanel.cpp
+  cximage/CxScriptCasePackageWriter.cpp
+  cximage/CxScriptHeadlessRunner.cpp
   cximage/CxUnifiedLog.cpp
   cximage/CxUnifiedLogStreamBuf.cpp
   cximage/CxCrashLogHandler.cpp

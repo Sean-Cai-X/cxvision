@@ -11,6 +11,7 @@
 #include "CxScriptRunTraceRuntime.h"
 #include "CxAlgorithmTraceSink.h"
 #include "ManualStateTestConsole.h"
+#include "CxScriptHeadlessRuntime.h"
 #include "CxUnifiedLog.h"
 #include <filesystem>
 #include <fstream>

@@ -2,6 +2,7 @@
 
 #include "FastMatch.h"
 #include "imagemanager.h"
+#include "ImageAnnotationLayer.h"
 #include <algorithm>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
@@ -1473,7 +1474,7 @@ RectsShape& fastmatch::getmatchrects()
 {
     return m_matchrects;
 }
-gp_Rectangle fastmatch::getresultrect(int inum)
+gp_Rectangle fastmatch::getresultrect(int inum) const
 {
     if (inum < 0 || inum >= m_resultrects.size())
         return gp_Rectangle(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
@@ -1481,7 +1482,7 @@ gp_Rectangle fastmatch::getresultrect(int inum)
     return arect0;
 }
 
-gp_Rectangle fastmatch::getresolvedresultrect(int inum)
+gp_Rectangle fastmatch::getresolvedresultrect(int inum) const
 {
     gp_Rectangle arect0 = getresultrect(inum);
     gp_Pnt origin = rect().TopLeft();
@@ -3829,12 +3830,12 @@ int fastmatch::getresultcandidaterejectcount() const
     return m_resultcandidate_reject_count;
 }
 
-int fastmatch::getresultcandidatecount() const
+int fastmatch::getresultcandidatecount()
 {
     return static_cast<int>(std::min(m_resultnums.size(), m_resultpoints.size()));
 }
 
-int fastmatch::getresultbestindex() const
+int fastmatch::getresultbestindex()
 {
     const int candidate_count = getresultcandidatecount();
     if (candidate_count <= 0)
@@ -3844,7 +3845,7 @@ int fastmatch::getresultbestindex() const
     return candidate_count - 1;
 }
 
-double fastmatch::getresultbestscore() const
+double fastmatch::getresultbestscore()
 {
     const int best_index = getresultbestindex();
     if (best_index < 0)
@@ -5173,7 +5174,25 @@ void fastmatch::shapesetroi(void* pshape)
     Shape::shapesetroi(pshape);
 }
 
-void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+std::vector<cv::Point2f> fastmatch::getmodel() const
+{
+    std::vector<cv::Point2f> points;
+    const int count = m_modelpoints_sample1.size();
+    for (int i = 0; i < count; ++i)
+    {
+        points.push_back(cv::Point2f(
+            static_cast<float>(m_modelpoints_sample1.getx(i)),
+            static_cast<float>(m_modelpoints_sample1.gety(i))));
+    }
+    return points;
+}
+
+int fastmatch::getmodelpointcount()
+{
+    return m_modelpoints_sample1.size();
+}
+
+void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref)
 {
     const gp_Rectangle learn_rect = rect();
     const double learn_x = learn_rect.TopLeft().X();
@@ -5217,13 +5236,13 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
             std::move(search_roi_shape));
     }
 
-    const PointsShape& model_points = getmodel();
-    if (model_points.size() > 0)
+    const auto& model_points = getmodel();
+    if (!model_points.empty())
     {
         auto model_shape = std::make_unique<PointsShape>();
-        for (int i = 0; i < model_points.size(); ++i)
+        for (const auto& pt : model_points)
         {
-            model_shape->addpoint(model_points.getx(i), model_points.gety(i));
+            model_shape->addpoint(pt.x, pt.y);
         }
         sink.UpsertShape(
             owner_ref + ".model_points",
@@ -5242,7 +5261,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         auto candidates_shape = std::make_unique<PointsShape>();
         for (int i = 0; i < candidate_count; ++i)
         {
-            candidates_shape->addpoint(getresultcentx(i), getresultcenty(i));
+            candidates_shape->addpoint(getresolvedresultcentx(i), getresolvedresultcenty(i));
         }
         sink.UpsertShape(
             owner_ref + ".candidate_centers",
@@ -5255,12 +5274,12 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
             std::move(candidates_shape));
     }
 
-    const RectsShape& result_rects = *getresultrects();
-    if (result_rects.size() > 0)
+    const RectsShape* result_rects = getresultrects();
+    if (result_rects != nullptr && result_rects->size() > 0)
     {
-        for (int i = 0; i < result_rects.size(); ++i)
+        for (int i = 0; i < result_rects->size(); ++i)
         {
-            const gp_Rectangle r = result_rects.getrect(i);
+            const gp_Rectangle r = getresolvedresultrect(i);
             auto result_shape = std::make_unique<RectShape>();
             result_shape->setRect(r.TopLeft().X(), r.TopLeft().Y(),
                                  r.BottomRight().X(), r.BottomRight().Y());
@@ -5282,7 +5301,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         if (best_index >= 0 && best_index < candidate_count)
         {
             auto best_shape = std::make_unique<PointsShape>();
-            best_shape->addpoint(getresultcentx(best_index), getresultcenty(best_index));
+            best_shape->addpoint(getresolvedresultcentx(best_index), getresolvedresultcenty(best_index));
             sink.UpsertShape(
                 owner_ref + ".best_center",
                 "fastmatch",

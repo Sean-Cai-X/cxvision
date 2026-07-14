@@ -3,10 +3,10 @@
 ## Summary
 
 - Total Cases: 10
-- Pass: 9
-- Fail: 1
+- Pass: 1
+- Fail: 9
 - Pending Writeback: 0
-- Missing Tools: 1
+- Missing Tools: 0
 
 ## Case Details
 
@@ -17,86 +17,86 @@
 - Expected Handle: 
 - Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: point created
+- Reason: expected created_kind=PointsShape, actual=Points
 
 ### gui_create_line_drag_release
 
 - Tool: scan_line
-- Status: created
+- Status: failed
 - Expected Handle: 
 - Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: shape created from annotation tool
+- Reason: expected created_kind=LineShape, actual=
 
 ### gui_create_rect_drag_release
 
 - Tool: roi_rect
-- Status: created
+- Status: failed
 - Expected Handle: 
 - Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: shape created from annotation tool
+- Reason: expected created_kind=RectShape, actual=
 
 ### gui_create_circle_drag_release
 
 - Tool: circle_roi
-- Status: created
+- Status: failed
 - Expected Handle: 
 - Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: shape created from annotation tool
+- Reason: expected created_kind=CircleShape, actual=
 
 ### gui_create_ellipse_drag_release
 
 - Tool: ellipse_manual
-- Status: created
+- Status: failed
 - Expected Handle: 
 - Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: shape created from annotation tool
+- Reason: expected created_kind=EllipseShape, actual=
 
 ### gui_drag_existing_line_center
 
 - Tool: scan_line
-- Status: committed
+- Status: not_consumed
 - Expected Handle: 
-- Actual Handle: drag_existing
+- Actual Handle: pointer_pan
 - Geometry Assertion: 
-- Reason: drag committed
+- Reason: expected phase=drag_existing, actual=pointer_pan
 
 ### gui_drag_existing_circle_radius
 
 - Tool: circle_roi
-- Status: committed
+- Status: not_consumed
 - Expected Handle: 
-- Actual Handle: drag_existing
+- Actual Handle: pointer_pan
 - Geometry Assertion: 
-- Reason: drag committed
+- Reason: expected phase=drag_existing, actual=pointer_pan
 
 ### gui_select_existing_shape
 
 - Tool: scan_line
-- Status: selected
+- Status: not_consumed
 - Expected Handle: 
-- Actual Handle: select_existing
+- Actual Handle: pointer_pan
 - Geometry Assertion: 
-- Reason: shape selected and drag started
+- Reason: expected phase=select_existing, actual=pointer_pan
 
 ### gui_pointer_pan_no_create
 
 - Tool: 
-- Status: FAIL
+- Status: not_consumed
 - Expected Handle: 
-- Actual Handle: 
+- Actual Handle: pointer_pan
 - Geometry Assertion: 
-- Reason: tool not registered: 
+- Reason: 
 
 ### gui_create_too_small_rejected
 
 - Tool: scan_line
-- Status: draft_too_small
+- Status: failed
 - Expected Handle: 
-- Actual Handle: 
+- Actual Handle: create_shape
 - Geometry Assertion: 
-- Reason: line length too small
+- Reason: expected status=draft_too_small, actual=failed
 

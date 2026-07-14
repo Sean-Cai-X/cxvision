@@ -1,0 +1,6 @@
+#ifndef CXIMAGE_MANUAL_CONSOLE_EVIDENCE_CHAIN_H
+#define CXIMAGE_MANUAL_CONSOLE_EVIDENCE_CHAIN_H
+
+#include "ViewController.h"
+
+#endif

@@ -55,7 +55,8 @@ public:
 
     void ABtoShape(std::vector<cv::Point2f>& points);
 
-    std::vector<cv::Point2f> getmodel();
+    std::vector<cv::Point2f> getmodel() const;
+    int getmodelpointcount();
 
     int ABpatternsize();
     void loadrotatemodelfile(const char* pchar);
@@ -156,9 +157,9 @@ public:
     int getresultcandidateinsertcount() const;
     int getresultcandidatereplacecount() const;
     int getresultcandidaterejectcount() const;
-    int getresultcandidatecount() const;
-    int getresultbestindex() const;
-    double getresultbestscore() const;
+    int getresultcandidatecount();
+    int getresultbestindex();
+    double getresultbestscore();
     int getrawthresholdhitrecordcount() const;
     gp_Pnt getrawthresholdhitpoint(int inum) const;
     int getrawthresholdhitscore(int inum) const;
@@ -261,8 +262,8 @@ public:
     void modelmethod(int itype);
     RectsShape& getmatchrects();
     gp_Rectangle& getmatchrect();
-    gp_Rectangle getresultrect(int inum);
-    gp_Rectangle getresolvedresultrect(int inum);
+    gp_Rectangle getresultrect(int inum) const;
+    gp_Rectangle getresolvedresultrect(int inum) const;
     vector<PointsShape>& getmodels_l12();
     Grid* getgrid();
     void setgrid(int iw, int igrid);
@@ -472,6 +473,7 @@ private:
 
 public:
     RectsShape* getresultrects() { return &m_resultrects; }
+    const RectsShape* getresultrects() const { return &m_resultrects; }
 
     void setrelationrectfromresultnum(int inum);
     void setrelationrectfrom_matchresult(void* pmatch);
@@ -505,7 +507,7 @@ public:
     void getrotateresultrectpoints(std::vector<cv::Point2f>& points);
     void ZeroPOS();
 
-    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref);
     bool ApplyDisplayShapeEdit(const std::string& owner_binding, const std::string& semantic_role,
                                double x0, double y0, double x1, double y1, std::string& reason);
 };

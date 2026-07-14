@@ -3353,11 +3353,11 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
         box_shape->addPoint(xy[6], xy[7]);
         box_shape->close(true);
         sink.UpsertShape(
-            owner_ref + ".roi_box",
+            owner_ref + ".scan_box",
             "Findline",
             owner_ref,
             "",
-            "scan_box",
+            "scan",
             false,
             false,
             std::move(box_shape));

@@ -1,17 +1,7 @@
 #include "CxShapeInteractionRunner.h"
-#include "CxAnnotationToolRuntime.h"
-#include "CxAnnotationToolRegister.h"
-#include "CxShapeTestRegister.h"
 #include "ViewController.h"
-#include "muParser.h"
 #include "CxUnifiedLog.h"
-#include "Findline.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
-#include "FindRect.h"
 
-#include <fstream>
-#include <sstream>
 #include <filesystem>
 #include <unordered_set>
 #include <map>
@@ -20,10 +10,29 @@ namespace fs = std::filesystem;
 
 static std::string EscapeJson(const std::string& s);
 
-bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options, CxShapeInteractionBatchResultEx& result)
+bool CxShapeInteractionRunner::TryFindToolSpec(
+    const CxAnnotationToolManifestSnapshot& manifest,
+    const std::string& tool_id,
+    CxAnnotationToolSpec& output)
 {
-    std::string reason;
+    for (const CxAnnotationToolSpec& tool : manifest.tools)
+    {
+        if (tool.id == tool_id)
+        {
+            output = tool;
+            return true;
+        }
+    }
+    return false;
+}
 
+bool CxShapeInteractionRunner::RunSuite(
+    const CxAnnotationToolManifestSnapshot& manifest,
+    const CxShapeTestSuiteSnapshot& suite,
+    ICxRuntimeProjectionExecutor& projection_executor,
+    const CxShapeInteractionOptions& options,
+    CxShapeInteractionBatchResultEx& result)
+{
     if (options.run_id.empty())
     {
         result.pass = false;
@@ -53,22 +62,10 @@ bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options
         return false;
     }
 
-    if (!LoadToolManifest(options.tool_manifest_path, reason))
-    {
-        result.pass = false;
-        return false;
-    }
-
-    if (!LoadTestSuite(options.test_suite_path, reason))
-    {
-        result.pass = false;
-        return false;
-    }
-
     CXLOG_INFO("CxShapeInteractionRunner", "shape_suite_begin", "running", 
                "suite_path=" + options.test_suite_path + ", run_id=" + options.run_id);
 
-    const auto& cases = CxShapeTestRuntime::Cases();
+    const auto& cases = suite.cases;
 
     if (cases.empty())
     {
@@ -135,7 +132,7 @@ bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options
         CXLOG_INFO("CxShapeInteractionRunner", "shape_case_begin", "running",
             "operation=" + cases[i].operation + ", handle=" + cases[i].handle);
 
-        RunTestCase(cases[i], options, result.extended_cases[i], trace);
+        RunTestCase(cases[i], manifest, projection_executor, options, result.extended_cases[i], trace);
 
         const auto& caseResult = result.extended_cases[i];
         if (caseResult.pass)
@@ -184,71 +181,7 @@ bool CxShapeInteractionRunner::RunSuite(const CxShapeInteractionOptions& options
     return result.pass;
 }
 
-bool CxShapeInteractionRunner::LoadToolManifest(const std::string& path, std::string& reason)
-{
-    std::ifstream stream{fs::path(path)};
-    if (!stream)
-    {
-        reason = "tool manifest not found: " + path;
-        return false;
-    }
 
-    std::stringstream buffer;
-    buffer << stream.rdbuf();
-    std::string script = buffer.str();
-
-    CxAnnotationToolRuntime::Reset();
-
-    mu::Parser parser;
-    parser.UsingClass(true);
-    RegisterCxAnnotationToolBindings(parser);
-
-    try
-    {
-        parser.SetExpr(script);
-        parser.Eval();
-    }
-    catch (const mu::Parser::exception_type& e)
-    {
-        reason = "parse error: " + std::string(e.GetMsg());
-        return false;
-    }
-
-    return true;
-}
-
-bool CxShapeInteractionRunner::LoadTestSuite(const std::string& path, std::string& reason)
-{
-    std::ifstream stream{fs::path(path)};
-    if (!stream)
-    {
-        reason = "test suite not found: " + path;
-        return false;
-    }
-
-    std::stringstream buffer;
-    buffer << stream.rdbuf();
-    std::string script = buffer.str();
-
-    CxShapeTestRuntime::Reset();
-
-    mu::Parser parser;
-    parser.UsingClass(true);
-    RegisterCxShapeTestBindings(parser);
-
-    try
-    {
-        parser.SetExpr(script);
-        parser.Eval();
-    }
-    catch (const mu::Parser::exception_type& e)
-    {
-        reason = "parse error: " + std::string(e.GetMsg());
-        return false;
-    }
-
-    return true;
-}
 
 bool CxShapeInteractionRunner::VerifyHitExpectation(
     const CxShapeTestCase& tc,
@@ -275,7 +208,13 @@ bool CxShapeInteractionRunner::VerifyHitExpectation(
     return true;
 }
 
-bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxShapeInteractionOptions& options, CxShapeInteractionCaseResultEx& case_result, CxShapeInteractionTrace& trace)
+bool CxShapeInteractionRunner::RunTestCase(
+    const CxShapeTestCase& tc,
+    const CxAnnotationToolManifestSnapshot& manifest,
+    ICxRuntimeProjectionExecutor& projection_executor,
+    const CxShapeInteractionOptions& options,
+    CxShapeInteractionCaseResultEx& case_result,
+    CxShapeInteractionTrace& trace)
 {
     case_result.case_id = tc.case_id;
     case_result.tool_id = tc.tool_id;
@@ -287,26 +226,39 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
     ImageAnnotationLayer layer;
     layer.ClearShapeElements();
 
-    auto tool = CxAnnotationToolRuntime::FindById(tc.tool_id);
-    if (!tool && tc.tool_id != "")
+    std::string apply_reason;
+    if (!layer.ApplyToolManifestSnapshot(manifest, apply_reason))
     {
         case_result.pass = false;
-        case_result.conclusion = "tool_not_registered";
+        case_result.conclusion = "manifest_apply_failed";
         case_result.status = "FAIL";
-        case_result.reason = "tool not registered: " + tc.tool_id;
+        case_result.reason = "manifest apply failed: " + apply_reason;
         return false;
+    }
+
+    const bool requires_palette_tool = tc.operation != "runtime_publish";
+    const AnnotationToolDefinition* tool = nullptr;
+
+    if (requires_palette_tool && !tc.tool_id.empty())
+    {
+        tool = layer.FindToolDefinition(tc.tool_id);
+        if (!tool)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "tool_not_registered";
+            case_result.status = "FAIL";
+            case_result.reason = "tool not registered in manifest snapshot: " + tc.tool_id;
+            return false;
+        }
+
+        case_result.shape_kind = tool->shape_type;
+        case_result.owner_type = tool->owner_tool;
+        case_result.owner_binding = tool->owner_binding;
     }
     
     if (tc.tool_id.empty())
     {
         CXLOG_INFO("CxShapeInteractionRunner", "shape_case_info", "info", "case=" + tc.case_id + ", tool_id_is_empty=true");
-    }
-
-    if (tool)
-    {
-        case_result.shape_kind = tool->shape_type;
-        case_result.owner_type = tool->owner_tool;
-        case_result.owner_binding = tool->owner_binding;
     }
 
     std::vector<CxShapePoint> initial_points;
@@ -433,24 +385,33 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         }
     }
 
-    std::unique_ptr<ShapeBase> shape = CreateInitialShapeForTool(*tool, initial_points);
-    if (!shape)
-    {
-        case_result.pass = false;
-        case_result.conclusion = "shape_creation_failed";
-        case_result.status = "FAIL";
-        case_result.reason = "failed to create shape for tool: " + tc.tool_id;
-        return false;
-    }
-
-    CxShapeGeometrySnapshot before_snap;
-    shape->snapshot(before_snap);
-
-    CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
-    element.editable = tc.editable;
-
     if (tc.operation == "drag_handle")
     {
+        if (!tool)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "no_tool_for_drag_handle";
+            case_result.status = "FAIL";
+            case_result.reason = "drag_handle operation requires a tool";
+            return false;
+        }
+
+        std::unique_ptr<ShapeBase> shape = CreateInitialShapeForTool(*tool, initial_points);
+        if (!shape)
+        {
+            case_result.pass = false;
+            case_result.conclusion = "shape_creation_failed";
+            case_result.status = "FAIL";
+            case_result.reason = "failed to create shape for tool: " + tc.tool_id;
+            return false;
+        }
+
+        CxShapeGeometrySnapshot before_snap;
+        shape->snapshot(before_snap);
+
+        CxShapeElement& element = layer.CreateFromTool(*tool, std::move(shape));
+        element.editable = tc.editable;
+
         trace = {};
         const bool success = layer.SimulatePointerDrag(
             tc.from_x, tc.from_y,
@@ -510,7 +471,7 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
                     case_result.conclusion = "interaction_passed";
                     case_result.reason = "hit=" + case_result.actual_handle + ", geometry verified";
 
-                    const bool runtimeBoundTool = tool && !tool->owner_tool.empty() && !tool->owner_binding.empty();
+                    const bool runtimeBoundTool = !tool->owner_tool.empty() && !tool->owner_binding.empty();
                     if (runtimeBoundTool)
                     {
                         case_result.status = "GEOMETRY_PASS_PENDING_WRITEBACK";
@@ -763,7 +724,7 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         case_result.runtime_writeback = false;
         case_result.acceptance_scope = "FULL_INTERACTION";
     }
-    else if (tc.operation == "runtime_publish")
+    else if (tc.operation == "runtime_geometry_publish" || tc.operation == "runtime_result_publish")
     {
         case_result.hit_test_pass = false;
         case_result.drag_pass = false;
@@ -772,102 +733,213 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         ImageAnnotationLayer layer;
         layer.ClearShapeElements();
 
-        std::string owner_type;
-        std::string owner_ref;
+        std::string apply_reason;
+        if (!layer.ApplyToolManifestSnapshot(manifest, apply_reason))
+        {
+            case_result.status = "FAIL";
+            case_result.conclusion = "manifest_apply_failed";
+            case_result.reason = "failed to apply manifest snapshot: " + apply_reason;
+            return false;
+        }
 
-        if (tc.tool_id == "findline_gauge")
+        CxRuntimeProjectionRequest request;
+        request.case_id = tc.case_id;
+        request.tool_id = tc.tool_id;
+        request.owner_type = tc.tool_id;
+        request.owner_ref =
+            tc.owner_binding.empty()
+                ? "shape_result." + tc.case_id
+                : tc.owner_binding;
+        request.image_path = tc.image_path;
+
+        if (tc.has_initial_line)
         {
-            Findline findline;
-            findline.setline(static_cast<int>(tc.from_x - 30), static_cast<int>(tc.from_y - 15),
-                             static_cast<int>(tc.from_x + 30), static_cast<int>(tc.from_y + 15), 1);
-            findline.PublishDisplayShapes(layer, "test_findline_001");
-            owner_type = "Findline";
-            owner_ref = "test_findline_001";
+            request.roi_x0 = tc.initial_lx0;
+            request.roi_y0 = tc.initial_ly0;
+            request.roi_x1 = tc.initial_lx1;
+            request.roi_y1 = tc.initial_ly1;
         }
-        else if (tc.tool_id == "findcircle_gauge")
+        else if (tc.has_initial_rect)
         {
-            Findcircle findcircle;
-            findcircle.setcircle(static_cast<int>(tc.from_x), static_cast<int>(tc.from_y), 0, 50);
-            findcircle.PublishDisplayShapes(layer, "test_findcircle_001");
-            owner_type = "Findcircle";
-            owner_ref = "test_findcircle_001";
+            request.roi_x0 = tc.initial_rx0;
+            request.roi_y0 = tc.initial_ry0;
+            request.roi_x1 = tc.initial_rx1;
+            request.roi_y1 = tc.initial_ry1;
         }
-        else if (tc.tool_id == "findellipse_gauge")
+
+        if (tc.has_initial_circle)
         {
-            Findellipse findellipse;
-            findellipse.setellipse(static_cast<int>(tc.from_x), static_cast<int>(tc.from_y),
-                                   static_cast<int>(tc.from_x + 40), static_cast<int>(tc.from_y + 25));
-            findellipse.PublishDisplayShapes(layer, "test_findellipse_001");
-            owner_type = "Findellipse";
-            owner_ref = "test_findellipse_001";
+            request.circle_cx = tc.initial_ccx;
+            request.circle_cy = tc.initial_ccy;
+            request.circle_px = tc.initial_ccx + tc.initial_cradius;
+            request.circle_py = tc.initial_ccy;
         }
-        else if (tc.tool_id == "findrect_gauge")
+
+        if (tc.has_initial_ellipse)
         {
-            FindRect findrect;
-            findrect.setrect(static_cast<int>(tc.from_x - 30), static_cast<int>(tc.from_y - 20),
-                             static_cast<int>(tc.from_x + 30), static_cast<int>(tc.from_y + 20));
-            findrect.PublishDisplayShapes(layer, "test_findrect_001");
-            owner_type = "FindRect";
-            owner_ref = "test_findrect_001";
+            request.roi_x0 = tc.initial_ex - tc.initial_erx;
+            request.roi_y0 = tc.initial_ey - tc.initial_ery;
+            request.roi_x1 = tc.initial_ex + tc.initial_erx;
+            request.roi_y1 = tc.initial_ey + tc.initial_ery;
         }
+
+        request.tool_half_width = tc.tool_half_width;
+        request.wgap = tc.wgap;
+        request.hgap = tc.hgap;
+        request.gap = tc.gap;
+        request.linegap = tc.linegap;
+        request.threshold = tc.threshold;
+        request.method = tc.method;
+        request.filter_profile = tc.filter_profile;
+        request.require_algorithm_execution = (tc.operation == "runtime_result_publish");
+
+        CxRuntimeProjectionResult projection;
+        if (!projection_executor.Execute(request, layer, projection))
+        {
+            case_result.status = "FAIL";
+            case_result.conclusion = "projection_execution_failed";
+            case_result.reason = "projection execution failed: " + projection.reason;
+            case_result.owner_type = projection.owner_type;
+            case_result.owner_binding = projection.owner_ref;
+            return false;
+        }
+
+        std::string owner_type = projection.owner_type;
+        std::string owner_ref = projection.owner_ref;
 
         const auto& elements = layer.ShapeElements();
         case_result.created_points_count = static_cast<int>(elements.size());
 
-        struct RoleCounts {
-            int roi = 0;
-            int scan = 0;
-            int measure_points = 0;
-            int result = 0;
-            int editable_roi = 0;
-            int noneditable_result = 0;
-            int stale = 0;
-        };
+        std::map<std::string, int> role_counts;
+        std::map<std::string, int> editable_role_counts;
+        std::map<std::string, int> result_role_counts;
+        int stale_result_count = 0;
 
-        RoleCounts counts;
         for (const auto& elem : elements)
         {
-            if (elem.semantic_role == "roi") counts.roi++;
-            if (elem.semantic_role == "scan") counts.scan++;
-            if (elem.semantic_role == "measure_points") counts.measure_points++;
-            if (elem.semantic_role == "result") counts.result++;
-            if (elem.semantic_role == "roi" && elem.editable) counts.editable_roi++;
-            if (elem.semantic_role == "result" && !elem.editable) counts.noneditable_result++;
-            if (elem.stale) counts.stale++;
+            role_counts[elem.semantic_role]++;
+            if (elem.editable) editable_role_counts[elem.semantic_role]++;
+            if (elem.result_element) result_role_counts[elem.semantic_role]++;
+            if (elem.result_element && elem.stale) stale_result_count++;
         }
 
         std::string reason;
         bool pass = true;
 
-        if (counts.roi == 0)
+        if (!tc.role_expectations.empty())
         {
-            pass = false;
-            reason += "missing roi elements; ";
+            for (const auto& exp : tc.role_expectations)
+            {
+                const int actual = role_counts.count(exp.role) ? role_counts[exp.role] : 0;
+                if (actual < exp.min_count)
+                {
+                    pass = false;
+                    reason += "role '" + exp.role + "' has " + std::to_string(actual) +
+                              " elements, expected at least " + std::to_string(exp.min_count) + "; ";
+                }
+                if (exp.max_count >= 0 && actual > exp.max_count)
+                {
+                    pass = false;
+                    reason += "role '" + exp.role + "' has " + std::to_string(actual) +
+                              " elements, expected at most " + std::to_string(exp.max_count) + "; ";
+                }
+                if (exp.require_editable >= 0)
+                {
+                    const int editable_count = editable_role_counts.count(exp.role) ? editable_role_counts[exp.role] : 0;
+                    if (exp.require_editable == 1 && editable_count == 0)
+                    {
+                        pass = false;
+                        reason += "role '" + exp.role + "' is not editable; ";
+                    }
+                    if (exp.require_editable == 0 && editable_count > 0)
+                    {
+                        pass = false;
+                        reason += "role '" + exp.role + "' should not be editable; ";
+                    }
+                }
+                if (exp.require_result_element >= 0)
+                {
+                    const int result_count = result_role_counts.count(exp.role) ? result_role_counts[exp.role] : 0;
+                    if (exp.require_result_element == 1 && result_count == 0)
+                    {
+                        pass = false;
+                        reason += "role '" + exp.role + "' is not a result element; ";
+                    }
+                    if (exp.require_result_element == 0 && result_count > 0)
+                    {
+                        pass = false;
+                        reason += "role '" + exp.role + "' should not be a result element; ";
+                    }
+                }
+            }
         }
-        if (counts.scan == 0)
+        else
         {
             pass = false;
-            reason += "missing scan elements; ";
+            reason = "runtime projection case has no role expectations";
         }
-        if (counts.measure_points == 0)
+
+        if (tc.operation == "runtime_result_publish")
         {
-            pass = false;
-            reason += "missing measure_points elements; ";
-        }
-        if (counts.result == 0)
-        {
-            pass = false;
-            reason += "missing result elements; ";
-        }
-        if (counts.editable_roi == 0)
-        {
-            pass = false;
-            reason += "no editable roi elements; ";
-        }
-        if (counts.noneditable_result == 0)
-        {
-            pass = false;
-            reason += "no non-editable result elements; ";
+            if (!projection.executed)
+            {
+                pass = false;
+                reason += "algorithm was not executed; ";
+            }
+
+            if (!projection.publish_ok)
+            {
+                pass = false;
+                reason += "runtime shape publication failed; ";
+            }
+
+            if (tc.expected_min_valid_points >= 0 &&
+                projection.valid_points_count < tc.expected_min_valid_points)
+            {
+                pass = false;
+                reason += "valid point count below expectation (actual=" +
+                    std::to_string(projection.valid_points_count) +
+                    ", expected_min=" +
+                    std::to_string(tc.expected_min_valid_points) + "); ";
+            }
+
+            if (tc.expected_has_fit_line >= 0 &&
+                projection.has_fit_line != (tc.expected_has_fit_line == 1))
+            {
+                pass = false;
+                reason += "fit line expectation mismatch; ";
+            }
+
+            if (tc.expected_has_fit_circle >= 0 &&
+                projection.has_fit_circle != (tc.expected_has_fit_circle == 1))
+            {
+                pass = false;
+                reason += "fit circle expectation mismatch; ";
+            }
+
+            if (tc.expected_has_fit_ellipse >= 0 &&
+                projection.has_fit_ellipse != (tc.expected_has_fit_ellipse == 1))
+            {
+                pass = false;
+                reason += "fit ellipse expectation mismatch; ";
+            }
+
+            if (tc.expected_max_residual >= 0.0 &&
+                projection.fit_residual > tc.expected_max_residual)
+            {
+                pass = false;
+                reason += "fit residual exceeds expectation (actual=" +
+                    std::to_string(projection.fit_residual) +
+                    ", max=" +
+                    std::to_string(tc.expected_max_residual) + "); ";
+            }
+
+            if (!projection.failure_stage.empty())
+            {
+                pass = false;
+                reason += "failure_stage=" + projection.failure_stage +
+                    ", reason=" + projection.reason + "; ";
+            }
         }
 
         std::map<std::string, int> stable_ref_counts;
@@ -880,6 +952,36 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         {
             if (pair.second > 1)
                 duplicate_stable_ref_count++;
+        }
+
+        if (tc.operation == "runtime_result_publish")
+        {
+            if (duplicate_stable_ref_count > 0)
+            {
+                pass = false;
+                reason += "duplicate stable_ref detected; ";
+            }
+
+            if (stale_result_count > 0)
+            {
+                pass = false;
+                reason += "published result contains stale elements; ";
+            }
+
+            for (const auto& elem : elements)
+            {
+                if (elem.owner_ref != projection.owner_ref)
+                {
+                    pass = false;
+                    reason += "owner_ref mismatch: " + elem.stable_ref + "; ";
+                }
+
+                if (elem.owner_type != projection.owner_type)
+                {
+                    pass = false;
+                    reason += "owner_type mismatch: " + elem.stable_ref + "; ";
+                }
+            }
         }
 
         const fs::path case_dir = fs::path(options.out_dir) / "cases" / case_result.case_id;
@@ -927,14 +1029,14 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
             projection_file << "  \"owner_type\": \"" << EscapeJson(owner_type) << "\",\n";
             projection_file << "  \"owner_ref\": \"" << EscapeJson(owner_ref) << "\",\n";
             projection_file << "  \"roles\": {\n";
-            projection_file << "    \"roi\": " << counts.roi << ",\n";
-            projection_file << "    \"scan\": " << counts.scan << ",\n";
-            projection_file << "    \"measure_points\": " << counts.measure_points << ",\n";
-            projection_file << "    \"result\": " << counts.result << "\n";
+            projection_file << "    \"roi\": " << (role_counts.count("roi") ? role_counts["roi"] : 0) << ",\n";
+            projection_file << "    \"scan\": " << (role_counts.count("scan") ? role_counts["scan"] : 0) << ",\n";
+            projection_file << "    \"measure_points\": " << (role_counts.count("measure_points") ? role_counts["measure_points"] : 0) << ",\n";
+            projection_file << "    \"result\": " << (role_counts.count("result") ? role_counts["result"] : 0) << "\n";
             projection_file << "  },\n";
-            projection_file << "  \"editable_roi_count\": " << counts.editable_roi << ",\n";
-            projection_file << "  \"editable_result_count\": " << (counts.result - counts.noneditable_result) << ",\n";
-            projection_file << "  \"stale_result_count\": " << counts.stale << ",\n";
+            projection_file << "  \"editable_roi_count\": " << (editable_role_counts.count("roi") ? editable_role_counts["roi"] : 0) << ",\n";
+            projection_file << "  \"editable_result_count\": " << ((role_counts.count("result") ? role_counts["result"] : 0) - (result_role_counts.count("result") ? result_role_counts["result"] : 0)) << ",\n";
+            projection_file << "  \"stale_result_count\": " << stale_result_count << ",\n";
             projection_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << "\n";
             projection_file << "}\n";
         }
@@ -961,61 +1063,56 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
         ViewController viewer;
         std::string reason;
 
+        if (!viewer.TestApplyAnnotationToolManifestSnapshot(manifest, reason))
+        {
+            case_result.status = "FAIL";
+            case_result.conclusion = "manifest_apply_failed";
+            case_result.reason = "failed to apply manifest snapshot to viewer: " + reason;
+            return false;
+        }
+
+        viewer.TestEnableAnnotationCreateMode();
+
+        if (!tc.tool_id.empty())
+        {
+            if (!viewer.TestSetActiveAnnotationTool(tc.tool_id, reason))
+            {
+                case_result.status = "FAIL";
+                case_result.conclusion = "tool_not_found";
+                case_result.reason = "failed to set active tool: " + reason;
+                return false;
+            }
+        }
+
         if (tc.operation == "gui_pointer_drag_existing" || tc.operation == "gui_pointer_select_existing")
         {
             viewer.TestEnableAnnotationCreateMode();
-            if (tc.tool_id == "scan_line")
-            {
-                viewer.TestSetActiveToolKind(OverlayKind::Line);
-                CxImagePointerFrame frame_init;
-                frame_init.canvas_hovered = true;
-                frame_init.inside_image = true;
-                frame_init.left_clicked = true;
-                frame_init.left_down = true;
-                frame_init.image_x = tc.from_x - 40.0;
-                frame_init.image_y = tc.from_y - 20.0;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init);
-                CxImagePointerFrame frame_init_drag;
-                frame_init_drag.canvas_hovered = true;
-                frame_init_drag.inside_image = true;
-                frame_init_drag.left_down = true;
-                frame_init_drag.image_x = tc.from_x + 40.0;
-                frame_init_drag.image_y = tc.from_y + 20.0;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init_drag);
-                CxImagePointerFrame frame_init2;
-                frame_init2.canvas_hovered = true;
-                frame_init2.inside_image = true;
-                frame_init2.left_released = true;
-                frame_init2.image_x = tc.from_x + 40.0;
-                frame_init2.image_y = tc.from_y + 20.0;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init2);
-            }
-            else if (tc.tool_id == "circle_roi")
-            {
-                viewer.TestSetActiveToolKind(OverlayKind::Circle);
-                CxImagePointerFrame frame_init;
-                frame_init.canvas_hovered = true;
-                frame_init.inside_image = true;
-                frame_init.left_clicked = true;
-                frame_init.left_down = true;
-                frame_init.image_x = tc.from_x;
-                frame_init.image_y = tc.from_y;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init);
-                CxImagePointerFrame frame_init_drag;
-                frame_init_drag.canvas_hovered = true;
-                frame_init_drag.inside_image = true;
-                frame_init_drag.left_down = true;
-                frame_init_drag.image_x = tc.from_x + 50.0;
-                frame_init_drag.image_y = tc.from_y;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init_drag);
-                CxImagePointerFrame frame_init2;
-                frame_init2.canvas_hovered = true;
-                frame_init2.inside_image = true;
-                frame_init2.left_released = true;
-                frame_init2.image_x = tc.from_x + 50.0;
-                frame_init2.image_y = tc.from_y;
-                viewer.ProcessImageAnnotationPointerFrame(frame_init2);
-            }
+            CxImagePointerFrame frame_init;
+            frame_init.canvas_hovered = true;
+            frame_init.inside_image = true;
+            frame_init.left_clicked = true;
+            frame_init.left_down = true;
+            frame_init.image_x = tc.from_x - 40.0;
+            frame_init.image_y = tc.from_y - 20.0;
+            viewer.ProcessImageAnnotationPointerFrame(frame_init);
+            CxImagePointerFrame frame_init_drag;
+            frame_init_drag.canvas_hovered = true;
+            frame_init_drag.inside_image = true;
+            frame_init_drag.left_down = true;
+            frame_init_drag.image_x = tc.from_x + 40.0;
+            frame_init_drag.image_y = tc.from_y + 20.0;
+            viewer.ProcessImageAnnotationPointerFrame(frame_init_drag);
+            CxImagePointerFrame frame_init2;
+            frame_init2.canvas_hovered = true;
+            frame_init2.inside_image = true;
+            frame_init2.left_released = true;
+            frame_init2.image_x = tc.from_x + 40.0;
+            frame_init2.image_y = tc.from_y + 20.0;
+            viewer.ProcessImageAnnotationPointerFrame(frame_init2);
+
+            const size_t shape_count_after_create = viewer.TestShapeElementCount();
+            CXLOG_INFO("CxShapeInteractionRunner", "shape_case_info", "info", "case=" + tc.case_id + ", shapes_after_create=" + std::to_string(shape_count_after_create));
+
             viewer.TestSetToolModePointerPan();
         }
         else
@@ -1027,19 +1124,6 @@ bool CxShapeInteractionRunner::RunTestCase(const CxShapeTestCase& tc, const CxSh
             else
             {
                 viewer.TestEnableAnnotationCreateMode();
-
-                if (tc.tool_id == "point_pick")
-                    viewer.TestSetActiveToolKind(OverlayKind::Point);
-                else if (tc.tool_id == "scan_line")
-                    viewer.TestSetActiveToolKind(OverlayKind::Line);
-                else if (tc.tool_id == "roi_rect")
-                    viewer.TestSetActiveToolKind(OverlayKind::Rect);
-                else if (tc.tool_id == "circle_roi")
-                    viewer.TestSetActiveToolKind(OverlayKind::Circle);
-                else if (tc.tool_id == "ellipse_manual")
-                    viewer.TestSetActiveToolKind(OverlayKind::Ellipse);
-                else if (tc.tool_id == "boundary_polyline")
-                    viewer.TestSetActiveToolKind(OverlayKind::Polyline);
             }
         }
 

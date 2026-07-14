@@ -1,4 +1,4 @@
-#include "ManualStateTestConsole.h"
+﻿#include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include <glad/glad.h>
 
@@ -182,7 +182,6 @@ std::string formatNumber(double dvalue)
 
 ViewController::ViewController()
 {
-    m_parserDebugBridge.Bind(&m_imageparser);
     mouseDownPT.SetX(0);
     mouseDownPT.SetY(0);
 
@@ -1812,9 +1811,15 @@ gp_Path m_gpath;
 m_gpath.SetContext(myContext);
 m_gpath.SetView(m_myView);
 
-    m_imageparser.ParserInitialClassFunction(0);
-    m_imageparser.SetStream(&m_os);
-    m_imageparser.SetCreateCodeStream(&m_createcodeos);
+    std::string init_reason;
+    if (!m_parserOwner.Initialize(init_reason))
+    {
+        m_os << "parser initialization failed: " << init_reason << std::endl;
+    }
+    else
+    {
+        m_parserOwner.ConfigureStreams(&m_os, &m_createcodeos);
+    }
 
     initialparser();
 
@@ -1931,7 +1936,7 @@ void ViewController::mainloop()
                  auto start = std::chrono::high_resolution_clock::now();
 
                  if(0)
-                 m_imageparser.Compile(text);
+                 m_parserOwner.Compile(text);
 
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -1980,7 +1985,7 @@ void ViewController::mainloop()
 
                  auto start = std::chrono::high_resolution_clock::now();
 
-                 m_imageparser.Compile(text2);
+                 m_parserOwner.Compile(text2);
 
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -2023,7 +2028,7 @@ void ViewController::mainloop()
                  auto start = std::chrono::high_resolution_clock::now();
 
 
-                 m_imageparser.Compile(text3);
+                 m_parserOwner.Compile(text3);
 
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -2086,7 +2091,7 @@ void ViewController::mainloop()
                  clearos();
                  clearcreateos();
                  auto start = std::chrono::high_resolution_clock::now();
-                 m_imageparser.Compile(text4);
+                 m_parserOwner.Compile(text4);
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
                  m_iruntimes = elapsed_time.count();
@@ -2118,7 +2123,7 @@ void ViewController::mainloop()
 
                  auto start = std::chrono::high_resolution_clock::now();
 
-                 m_imageparser.Compile(text5);
+                 m_parserOwner.Compile(text5);
 
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -2149,7 +2154,7 @@ void ViewController::mainloop()
 
                  auto start = std::chrono::high_resolution_clock::now();
 
-                 m_imageparser.Compile(text6);
+                 m_parserOwner.Compile(text6);
 
                  auto end = std::chrono::high_resolution_clock::now();
                  std::chrono::duration<int, std::milli> elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -2229,14 +2234,14 @@ void ViewController::mainloop()
              {
                  m_imageshow = 0;
                  Image* pshowimage = nullptr;
-                 for (int i = 0; i < m_imageparser.GetClassObjSum("Image"); i++)
+                 for (int i = 0; i < m_parserOwner.ObjectCount("Image"); i++)
                  {
-                     Image* pimage = (Image*)m_imageparser.GetClassObj("Image", i);
+                     Image* pimage = (Image*)m_parserOwner.GetClassObj("Image", i);
                      if (pimage->getshow() == 1)
                          pshowimage = pimage;
                  }
 
-                 ImageManager* pmodule = (ImageManager*)m_imageparser.GetClassObj("Module", "amodule");
+                 ImageManager* pmodule = (ImageManager*)m_parserOwner.GetClassObj("Module", "amodule");
                  Image* pmoduleimage = nullptr;
                  int imoduleshow = 0;
                  if (nullptr != pmodule)
@@ -2256,10 +2261,10 @@ void ViewController::mainloop()
                     SetBackgroundInView(m_myView, pshowimage->getmat());
                  }
              }
-             m_shapex = (Shape*)m_imageparser.GetClassObj("Shape", "ashape0");
-             m_apoints = (PointsShape*)m_imageparser.GetClassObj("PointsShape", "apoints0");
-             m_bpoints = (PointsShape*)m_imageparser.GetClassObj("PointsShape", "apoints1");
-             m_afindline = (Findline*)m_imageparser.GetClassObj("Findline", "afindline");
+             m_shapex = (Shape*)m_parserOwner.GetClassObj("Shape", "ashape0");
+             m_apoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints0");
+             m_bpoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints1");
+             m_afindline = (Findline*)m_parserOwner.GetClassObj("Findline", "afindline");
              if (opencvSW)
                  Imgui_OpenCV_Window0(&opencvSW);
 
@@ -2907,17 +2912,17 @@ void ViewController::onMouseScroll(double theOffsetX, double theOffsetY)
 }
 void ViewController::SetParserValue(const string& codestr, double dvalue)
 {
-    if (!m_imageparser.IsObjectVar(codestr.c_str()))
+    if (!m_parserOwner.IsObjectVar(codestr.c_str()))
         return;
     string astr(codestr+"="+formatNumber(dvalue)+";");
-    m_imageparser.Compile(astr.c_str());
+    m_parserOwner.Compile(astr.c_str());
 }
 double ViewController::GetParserValue(const string& codestr)
 {
     double* pdouble = NULL;
-    if (!m_imageparser.IsObjectVar((const char*)codestr.c_str()))
+    if (!m_parserOwner.IsObjectVar((const char*)codestr.c_str()))
         return 0x00;
-    pdouble = (double*)m_imageparser.GetDoubleValue((const char*)codestr.c_str());
+    pdouble = (double*)m_parserOwner.GetDoubleValue((const char*)codestr.c_str());
     if (NULL == pdouble)
         return 0x00;
     double dvalue = 0;
@@ -2929,7 +2934,7 @@ double ViewController::GetParserValue(const string& codestr)
 string ViewController::initialparser()
 {
     string str;
-    bool bresult = m_imageparser.Compile("Module amodule;");
+    bool bresult = m_parserOwner.Compile("Module amodule;");
     if (!bresult)
     {
         str = str + "build Module fail!\r\n";
@@ -2942,7 +2947,7 @@ string ViewController::initialparser()
     clearos();
     string strfile = getlocationstring("./static.h");
     string strcode = loadfilestring(strfile);
-    bresult = m_imageparser.Compile(strcode.c_str());
+    bresult = m_parserOwner.Compile(strcode.c_str());
     if (!bresult)
     {
         str = str + "build " + strfile + " fail!\r\n";
@@ -2963,7 +2968,7 @@ string ViewController::initialparser()
 
         m_strcode = loadfilestring(filename);
 
-        bresult = m_imageparser.Compile(m_strcode.c_str());
+        bresult = m_parserOwner.Compile(m_strcode.c_str());
         if (!bresult)
         {
             str = str + "build " + getfilename + " fail!\r\n";
@@ -2975,9 +2980,9 @@ string ViewController::initialparser()
         }
         clearos();
     }
-    for (int i = 0; i < m_imageparser.GetClassObjSum("Image"); i++)
+    for (int i = 0; i < m_parserOwner.ObjectCount("Image"); i++)
     {
-        Image* pimage = (Image*)m_imageparser.GetClassObj("Image", i);
+        Image* pimage = (Image*)m_parserOwner.GetClassObj("Image", i);
         if (nullptr != pimage)
             *pimage = Image(2048,1536,CV_32FC3);
     }
@@ -3002,7 +3007,7 @@ void ViewController::clearcreateos()
 }
 void ViewController::clearparserobject()
 {
-    m_imageparser.ClearAll();
+    m_parserOwner.ClearAll();
 }
 void ViewController::resetparser()
 {
@@ -3011,91 +3016,91 @@ void ViewController::resetparser()
 }
 Shape* ViewController::indexAt(const gp_Pnt& pos)
 {
-    int isize = m_imageparser.GetClassObjSum("Shape");
+    int isize = m_parserOwner.ObjectCount("Shape");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("Shape", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("Shape", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("Findline");
+    isize = m_parserOwner.ObjectCount("Findline");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("Findline", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("Findline", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("findcircle");
+    isize = m_parserOwner.ObjectCount("findcircle");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("findcircle", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("findcircle", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("ASR");
+    isize = m_parserOwner.ObjectCount("ASR");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("ASR", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("ASR", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("findobject");
+    isize = m_parserOwner.ObjectCount("findobject");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("findobject", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("findobject", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("Imageroi");
+    isize = m_parserOwner.ObjectCount("Imageroi");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("Imageroi", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("Imageroi", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("imagecodeparser");
+    isize = m_parserOwner.ObjectCount("imagecodeparser");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("imagecodeparser", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("imagecodeparser", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("gridobject");
+    isize = m_parserOwner.ObjectCount("gridobject");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("gridobject", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("gridobject", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("fastmatch");
+    isize = m_parserOwner.ObjectCount("fastmatch");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("fastmatch", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("fastmatch", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_imageparser.GetClassObjSum("easyorc");
+    isize = m_parserOwner.ObjectCount("easyorc");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_imageparser.GetClassObj("easyorc", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("easyorc", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
@@ -3332,12 +3337,13 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 }
 
 #include "CxShapeInteractionRunner.h"
+#include "CxRuntimeProjectionExecutor.h"
 #include "CxUnifiedLog.h"
 #include "Findline.h"
 #include "Findcircle.h"
-#include "FastMatch.h"
 #include "Findellipse.h"
 #include "FindRect.h"
+#include "FastMatch.h"
 
 #include <sstream>
 #include <iomanip>
@@ -3358,6 +3364,14 @@ bool ViewController::RunShapeInteractionSmoke(
     const std::string& out_dir,
     CxShapeInteractionBatchResult& result)
 {
+    std::string init_reason;
+    if (!m_parserOwner.Initialize(init_reason))
+    {
+        result.pass = false;
+        CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parser initialize failed: " + init_reason);
+        return false;
+    }
+
     CxShapeInteractionRunner runner;
     CxShapeInteractionOptions options;
     options.tool_manifest_path = manifest_path;
@@ -3384,8 +3398,27 @@ bool ViewController::RunShapeInteractionSmoke(
         ", manifest=" + manifest_path +
         ", out=" + out_dir);
 
+    CxAnnotationToolManifestSnapshot manifest;
+    CxShapeTestSuiteSnapshot suite;
+    std::string reason;
+
+    if (!m_parserOwner.ParseAnnotationToolManifest(manifest_path, manifest, reason))
+    {
+        result.pass = false;
+        CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse annotation manifest failed: " + reason);
+        return false;
+    }
+
+    if (!m_parserOwner.ParseShapeInteractionSuite(suite_path, suite, reason))
+    {
+        result.pass = false;
+        CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse shape suite failed: " + reason);
+        return false;
+    }
+
+    CxRuntimeProjectionExecutor executor;
     CxShapeInteractionBatchResultEx ex_result;
-    const bool ok = runner.RunSuite(options, ex_result);
+    const bool ok = runner.RunSuite(manifest, suite, executor, options, ex_result);
 
     result.pass = ex_result.pass;
     for (const auto& ex_case : ex_result.extended_cases)

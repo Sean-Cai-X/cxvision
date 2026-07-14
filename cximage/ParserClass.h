@@ -10,16 +10,19 @@ namespace mu
 {
     class CxParserRuntime
     {
-     public:
-         CxParserRuntime();          // Class Constructor
-         ~CxParserRuntime() {};         // Class destructor
-          double CONST_TAN(int ix,int iy); 
-          void ParserInitialClassFunction(int iusing); 
-          void ParserElementShow(int ishow);
     public:
-        mu::Parser  m_parser;
+        CxParserRuntime();
+        ~CxParserRuntime() {};
 
-        mu::Parser *GetParser(){return &m_parser;}
+        CxParserRuntime(const CxParserRuntime&) = delete;
+        CxParserRuntime& operator=(const CxParserRuntime&) = delete;
+
+        double CONST_TAN(int ix, int iy);
+        void ParserInitialClassFunction(int iusing);
+        void ParserElementShow(int ishow);
+
+    public:
+        mu::Parser m_parser;
 
         value_type Eval();
 

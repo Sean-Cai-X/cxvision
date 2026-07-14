@@ -8,14 +8,11 @@
 
 #include "shapebase.h"
 #include "CxAnnotationToolRuntime.h"
+#include "CxParserSnapshotTypes.h"
 #include "LineGaugeShape.h"
 #include "RectShape.h"
 #include "CircleShape.h"
 #include "PolylineShape.h"
-
-std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
-    const CxAnnotationToolSpec& tool,
-    const std::vector<CxShapePoint>& points);
 
 struct OverlayImagePoint
 {
@@ -119,6 +116,10 @@ struct AnnotationToolDefinition
   OverlayKind kind = OverlayKind::Point;
 };
 
+std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
+    const AnnotationToolDefinition& tool,
+    const std::vector<CxShapePoint>& points);
+
 class ICxShapeSink {
 public:
     virtual ~ICxShapeSink() = default;
@@ -215,7 +216,14 @@ struct CxShapeInteractionTrace {
 class ImageAnnotationLayer : public ICxShapeSink
 {
 public:
-  bool LoadManifest(const std::string& path, std::string& reason);
+    bool ApplyToolManifestSnapshot(
+        const CxAnnotationToolManifestSnapshot& snapshot,
+        std::string& reason);
+
+    bool ConvertToolSpec(
+        const CxAnnotationToolSpec& spec,
+        AnnotationToolDefinition& def,
+        std::string& reason) const;
   bool SaveElements(const std::string& path, const std::string& imageRef,
                     std::string& reason) const;
   bool LoadElements(const std::string& path, std::string& imageRef,
@@ -237,6 +245,7 @@ public:
 
   std::vector<AnnotationToolDefinition>& Tools() { return myTools; }
   const std::vector<AnnotationToolDefinition>& Tools() const { return myTools; }
+  const AnnotationToolDefinition* FindToolDefinition(const std::string& tool_id) const;
   std::vector<OverlayElement>& Elements() { return myElements; }
   const std::vector<OverlayElement>& Elements() const { return myElements; }
 
@@ -252,7 +261,7 @@ public:
   static bool ParseKind(const std::string& text, OverlayKind& kind);
 
   CxShapeElement& CreateFromTool(
-      const CxAnnotationToolSpec& tool,
+      const AnnotationToolDefinition& tool,
       std::unique_ptr<ShapeBase> shape);
 
   CxShapeElement& UpsertShape(

@@ -8,6 +8,8 @@
 #include "CxShapeInteractionTest.h"
 #include "CxShapeTestRuntime.h"
 #include "ImageAnnotationLayer.h"
+#include "CxParserSnapshotTypes.h"
+#include "ICxRuntimeProjectionExecutor.h"
 
 struct CxShapeInteractionOptions
 {
@@ -81,12 +83,26 @@ struct CxShapeInteractionBatchResultEx : CxShapeInteractionBatchResult
 class CxShapeInteractionRunner
 {
 public:
-    bool RunSuite(const CxShapeInteractionOptions& options, CxShapeInteractionBatchResultEx& result);
+    bool RunSuite(
+        const CxAnnotationToolManifestSnapshot& manifest,
+        const CxShapeTestSuiteSnapshot& suite,
+        ICxRuntimeProjectionExecutor& projection_executor,
+        const CxShapeInteractionOptions& options,
+        CxShapeInteractionBatchResultEx& result);
 
 private:
-    bool LoadToolManifest(const std::string& path, std::string& reason);
-    bool LoadTestSuite(const std::string& path, std::string& reason);
-    bool RunTestCase(const CxShapeTestCase& tc, const CxShapeInteractionOptions& options, CxShapeInteractionCaseResultEx& case_result, CxShapeInteractionTrace& trace);
+    static bool TryFindToolSpec(
+        const CxAnnotationToolManifestSnapshot& manifest,
+        const std::string& tool_id,
+        CxAnnotationToolSpec& output);
+
+    bool RunTestCase(
+        const CxShapeTestCase& tc,
+        const CxAnnotationToolManifestSnapshot& manifest,
+        ICxRuntimeProjectionExecutor& projection_executor,
+        const CxShapeInteractionOptions& options,
+        CxShapeInteractionCaseResultEx& case_result,
+        CxShapeInteractionTrace& trace);
     bool VerifyHitExpectation(const CxShapeTestCase& tc, const CxShapeHitResult& hit, std::string& reason);
     bool VerifyGeometryAssertion(
         const std::string& assertion,

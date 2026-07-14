@@ -31,6 +31,7 @@
 #include "ImageAnnotationLayer.h"
 #include "SemanticFlowGraph.h"
 #include "CxShapeInteractionTest.h"
+#include "CxParserRuntimeOwner.h"
 
 //! OCCT view controller hosting interaction, image tools, and shape display.
 class ViewController : protected AIS_ViewController
@@ -78,6 +79,9 @@ private:
   void DrawScriptEvidenceThumbnailRailByGroup();
   void DrawScriptEditorBlock(ManualTestContext& context);
   void DrawScriptDebugCompilerBlock(ManualTestContext& context);
+  void DrawCxParserExtLineViewsPanel(ManualTestContext& context);
+  void DrawCxParserExtStatementViewsPanel(ManualTestContext& context);
+  void DrawCxParserExtObjectAssignmentsPanel(ManualTestContext& context);
   void drawManualStateTestConsole();
   void initManualStateTestConsole();
   void initImageEvidenceLayer();
@@ -196,7 +200,7 @@ public:
     CxImagePointerResult ProcessImageAnnotationPointerFrame(
         const CxImagePointerFrame& frame);
     bool CommitDraftShapeFromTool(
-        const CxAnnotationToolSpec& tool,
+        const AnnotationToolDefinition& tool,
         CxImagePointerResult& out);
 
     bool IsMouseInsideImageCanvas(const ImVec2& p) const;
@@ -211,6 +215,7 @@ public:
     void CommitCircleAnnotation();
 
     bool TestLoadAnnotationToolManifest(const std::string& path, std::string& reason);
+    bool TestApplyAnnotationToolManifestSnapshot(const CxAnnotationToolManifestSnapshot& snapshot, std::string& reason);
     bool TestSetActiveAnnotationTool(const std::string& tool_id, std::string& reason);
     void TestEnableAnnotationCreateMode();
     void TestSetActiveToolKind(OverlayKind kind);
@@ -363,7 +368,7 @@ private:
     Shape* indexAt(const gp_Pnt& pos);
     string uniqueName(const string& name);
 
-    mu::CxParserRuntime m_imageparser;
+    
     ParserDebugBridge m_parserDebugBridge;
 
     std::ostringstream m_os;
@@ -408,6 +413,7 @@ private:
     bool m_detachablePanels = false;
     bool m_showManualStateTestConsole = true;
     ManualTestContext m_manualTest;
+    CxParserRuntimeOwner m_parserOwner;
     ImageAnnotationLayer m_annotationLayer;
     std::vector<ScriptSnippet> m_manualSnippets;
     std::vector<ScriptSnippet> m_directTestModules;

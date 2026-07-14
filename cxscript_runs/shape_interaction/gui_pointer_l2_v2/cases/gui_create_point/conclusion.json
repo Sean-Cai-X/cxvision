@@ -1,5 +1,5 @@
 {
-  "run_id": "run-20260713-120023-p19664",
+  "run_id": "run-20260713-132027-p21800",
   "case_id": "gui_create_point",
   "tool_id": "point_pick",
   "operation": "gui_pointer_create",
@@ -16,12 +16,34 @@
   "runtime_writeback": false,
   "acceptance_scope": "GUI_POINTER",
   "status": "created",
-  "reason": "point created",
-  "pass": true,
-  "conclusion": "pointer_operation_completed",
+  "reason": "expected created_kind=PointsShape, actual=Points",
+  "pass": false,
+  "conclusion": "created_shape_kind_mismatch",
   "created_points_count": 1,
   "created_handle_count": 0,
   "shape_visible": false,
   "shape_editable": false,
-  "created_shape_kind": "PointsShape"
+  "created_shape_kind": "Points",
+  "created_ref": "",
+  "selected_ref": "",
+  "shape_count_before": 0,
+  "shape_count_after": 1,
+  "shape_count_delta": 1,
+  "pointer_events": [
+    {
+      "event": "left_down",
+      "screen_x": 0,
+      "screen_y": 0,
+      "image_x": 100,
+      "image_y": 100,
+      "canvas_hovered": true,
+      "inside_image": true,
+      "phase": "create_shape",
+      "status": "created"
+    }
+  ],
+  "commit_result": {
+    "committed": false,
+    "reason": ""
+  }
 }

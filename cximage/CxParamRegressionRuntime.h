@@ -48,7 +48,7 @@ struct CxParamRegressionTask
 struct CxParamCandidate
 {
     std::string candidate_id;
-    std::string source = "manual_seed"; // manual_seed / mlpack_rank / ensmallen_opt / grid
+    std::string source = "manual_seed";
     int method = 0;
     int threshold = 20;
     int gap = 5;
@@ -57,6 +57,9 @@ struct CxParamCandidate
     int hgap = 32;
     int filterprofile = 1;
     int samplerate = 1;
+    double min_score = 0.0;
+    int find_num = 1;
+    int compare_gap = 0;
     double predicted_quality = 0.0;
     double predicted_risk = 0.0;
     std::string predicted_failure_class = "unknown";

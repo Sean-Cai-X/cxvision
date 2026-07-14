@@ -23,9 +23,11 @@ bool ParseCxScriptHeadlessArgs(int argc, char** argv, CxScriptHeadlessOptions& o
 struct ShapeInteractionTestOptions
 {
     bool enabled = false;
+    bool parse_ok = true;
     std::string manifest_path;
     std::string suite_path;
     std::string out_dir;
+    std::string parse_reason;
 };
 
 bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOptions& options);

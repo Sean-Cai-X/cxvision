@@ -17,26 +17,74 @@
 
 bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOptions& options)
 {
+    options = {};
+
     for (int i = 1; i < argc; ++i)
     {
-        std::string arg = argv[i];
-        if (arg == "--shape-interaction-smoke")
+        const std::string arg = argv[i];
+
+        if (arg == "--shape-interaction-smoke" ||
+            arg == "--shape_interaction_smoke")
         {
             options.enabled = true;
+            continue;
         }
-        else if (arg == "--annotation-tool-manifest" && i + 1 < argc)
+
+        if (arg == "--annotation-tool-manifest" ||
+            arg == "--shape-interaction-manifest" ||
+            arg == "--shape_interaction_manifest")
         {
+            options.enabled = true;
+
+            if (i + 1 >= argc)
+            {
+                options.parse_ok = false;
+                options.parse_reason = arg + " requires a path";
+                return false;
+            }
+
             options.manifest_path = argv[++i];
+            continue;
         }
-        else if (arg == "--shape-interaction-suite" && i + 1 < argc)
+
+        if (arg == "--shape-interaction-suite" ||
+            arg == "--shape_interaction_suite")
         {
+            options.enabled = true;
+
+            if (i + 1 >= argc)
+            {
+                options.parse_ok = false;
+                options.parse_reason = arg + " requires a path";
+                return false;
+            }
+
             options.suite_path = argv[++i];
+            continue;
         }
-        else if (arg == "--out" && i + 1 < argc)
+
+        if (arg == "--out")
         {
+            if (i + 1 >= argc)
+            {
+                options.parse_ok = false;
+                options.parse_reason = "--out requires a path";
+                return false;
+            }
+
             options.out_dir = argv[++i];
+            continue;
+        }
+
+        if (arg.find("--shape-interaction") == 0 ||
+            arg.find("--shape_interaction") == 0)
+        {
+            options.parse_ok = false;
+            options.parse_reason = "unknown shape interaction option: " + arg;
+            return false;
         }
     }
+
     return true;
 }
 
@@ -53,15 +101,28 @@ bool RunShapeInteractionSmokeCli(
 int RunCxVisionApplication(int argc, char** argv)
 {
     ShapeInteractionTestOptions shapeOptions;
-    ParseShapeInteractionTestArgs(argc, argv, shapeOptions);
+
+    if (!ParseShapeInteractionTestArgs(argc, argv, shapeOptions))
+    {
+        std::cerr << "shape argument error: "
+                  << shapeOptions.parse_reason << "\n";
+        return 2;
+    }
+
     if (shapeOptions.enabled)
     {
+        const std::string manifest_path = shapeOptions.manifest_path.empty() 
+            ? "cxparser/cxscript/module/cximage/tool_annotation_basic.cxsc" 
+            : shapeOptions.manifest_path;
+        const std::string suite_path = shapeOptions.suite_path.empty() 
+            ? "cxparser/cxscript/module/cximage/tests/shape_interaction_acceptance.cxsc" 
+            : shapeOptions.suite_path;
+        const std::string out_dir = shapeOptions.out_dir.empty() 
+            ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/shape_interaction_smoke" 
+            : shapeOptions.out_dir;
+
         CxShapeInteractionBatchResult result;
-        const bool ok = RunShapeInteractionSmokeCli(
-            shapeOptions.manifest_path.empty() ? "cxparser/cxscript/module/cximage/tool_annotation_basic.cxsc" : shapeOptions.manifest_path,
-            shapeOptions.suite_path.empty() ? "cxparser/cxscript/module/cximage/tests/shape_interaction_acceptance.cxsc" : shapeOptions.suite_path,
-            shapeOptions.out_dir.empty() ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/shape_interaction_smoke" : shapeOptions.out_dir,
-            result);
+        const bool ok = RunShapeInteractionSmokeCli(manifest_path, suite_path, out_dir, result);
 
         std::cout << "shape_interaction_smoke_ok=" << (ok ? "true" : "false") << "\n";
         std::cout << "total_cases=" << result.cases.size() << "\n";
@@ -76,7 +137,12 @@ int RunCxVisionApplication(int argc, char** argv)
                       << " conclusion=" << c.conclusion << "\n";
         }
 
-        return ok ? 0 : 1;
+        int exit_code = ok ? 0 : 1;
+        if (result.cases.empty())
+        {
+            exit_code = 3;
+        }
+        return exit_code;
     }
 
     CxScriptHeadlessOptions headlessOptions;
