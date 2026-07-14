@@ -76,6 +76,21 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
             continue;
         }
 
+        if (arg == "--image-manifest")
+        {
+            options.enabled = true;
+
+            if (i + 1 >= argc)
+            {
+                options.parse_ok = false;
+                options.parse_reason = "--image-manifest requires a path";
+                return false;
+            }
+
+            options.image_manifest_path = argv[++i];
+            continue;
+        }
+
         if (arg == "--shape_suite" || arg == "--out_dir")
         {
             options.parse_ok = false;
@@ -100,11 +115,12 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
 bool RunShapeInteractionSmokeCli(
     const std::string& manifest_path,
     const std::string& suite_path,
+    const std::string& image_manifest_path,
     const std::string& out_dir,
     CxShapeInteractionBatchResult& result)
 {
     ViewController viewer;
-    return viewer.RunShapeInteractionSmoke(manifest_path, suite_path, out_dir, result);
+    return viewer.RunShapeInteractionSmoke(manifest_path, suite_path, image_manifest_path, out_dir, result);
 }
 
 int RunCxVisionApplication(int argc, char** argv)
@@ -126,12 +142,13 @@ int RunCxVisionApplication(int argc, char** argv)
         const std::string suite_path = shapeOptions.suite_path.empty() 
             ? "cxparser/cxscript/module/cximage/tests/shape_interaction_acceptance.cxsc" 
             : shapeOptions.suite_path;
+        const std::string image_manifest_path = shapeOptions.image_manifest_path;
         const std::string out_dir = shapeOptions.out_dir.empty() 
             ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/shape_interaction_smoke" 
             : shapeOptions.out_dir;
 
         CxShapeInteractionBatchResult result;
-        const bool ok = RunShapeInteractionSmokeCli(manifest_path, suite_path, out_dir, result);
+        const bool ok = RunShapeInteractionSmokeCli(manifest_path, suite_path, image_manifest_path, out_dir, result);
 
         std::cout << "shape_interaction_smoke_ok=" << (ok ? "true" : "false") << "\n";
         std::cout << "total_cases=" << result.cases.size() << "\n";

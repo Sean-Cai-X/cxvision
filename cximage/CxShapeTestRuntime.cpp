@@ -275,3 +275,24 @@ void CxShapeTestRuntime::ExpectResultBox(int value)
     if (s_current)
         s_current->expected_has_result_box = value;
 }
+
+void CxShapeTestRuntime::SetManifest(const std::string& path)
+{
+    if (s_current)
+        s_current->image_manifest_path = path;
+}
+
+void CxShapeTestRuntime::SetManifestTarget(const std::string& image_id, const std::string& target_id)
+{
+    if (s_current)
+    {
+        s_current->manifest_image_id = image_id;
+        s_current->manifest_target_id = target_id;
+    }
+}
+
+void CxShapeTestRuntime::SetManifestMatchCase(const std::string& case_id)
+{
+    if (s_current)
+        s_current->manifest_match_case_id = case_id;
+}

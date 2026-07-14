@@ -101,6 +101,93 @@ namespace
         }
     }
 
+    bool ParseJsonDouble(
+        const std::string& text,
+        size_t& pos,
+        double& out_value,
+        std::string& out_reason)
+    {
+        SkipWhitespace(text, pos);
+        const auto start = pos;
+
+        if (pos >= text.size())
+        {
+            out_reason = "unexpected end of input";
+            return false;
+        }
+
+        if (text[pos] == '-')
+            ++pos;
+
+        bool has_integer_part = false;
+        while (pos < text.size() && std::isdigit(text[pos]))
+        {
+            ++pos;
+            has_integer_part = true;
+        }
+
+        if (pos < text.size() && text[pos] == '.')
+        {
+            ++pos;
+            bool has_fractional_part = false;
+            while (pos < text.size() && std::isdigit(text[pos]))
+            {
+                ++pos;
+                has_fractional_part = true;
+            }
+            if (!has_integer_part && !has_fractional_part)
+            {
+                out_reason = "missing numeric value";
+                return false;
+            }
+        }
+
+        if (!has_integer_part)
+        {
+            out_reason = "missing numeric value";
+            return false;
+        }
+
+        if (pos < text.size())
+        {
+            if (text[pos] == 'e' || text[pos] == 'E')
+            {
+                ++pos;
+                if (pos < text.size() && (text[pos] == '+' || text[pos] == '-'))
+                    ++pos;
+                bool has_exponent = false;
+                while (pos < text.size() && std::isdigit(text[pos]))
+                {
+                    ++pos;
+                    has_exponent = true;
+                }
+                if (!has_exponent)
+                {
+                    out_reason = "missing exponent value";
+                    return false;
+                }
+            }
+        }
+
+        try
+        {
+            out_value = std::stod(text.substr(start, pos - start));
+        }
+        catch (...)
+        {
+            out_reason = "cannot parse numeric value";
+            return false;
+        }
+
+        if (std::isnan(out_value) || std::isinf(out_value))
+        {
+            out_reason = "NaN or Infinity not allowed";
+            return false;
+        }
+
+        return true;
+    }
+
     size_t FindArrayStart(const std::string& text, size_t pos, const std::string& arrayName)
     {
         const std::string pattern = "\"" + arrayName + "\"";
@@ -233,6 +320,27 @@ namespace
                 entry.width = ParseInt(text, pos);
             else if (key == "height")
                 entry.height = ParseInt(text, pos);
+            else if (key == "raw_not_cropped")
+            {
+                SkipWhitespace(text, pos);
+                entry.raw_not_cropped = (text[pos] == 't' || text[pos] == 'T');
+                while (pos < end && text[pos] != ',' && text[pos] != '}')
+                    ++pos;
+            }
+            else if (key == "raw_not_enhanced")
+            {
+                SkipWhitespace(text, pos);
+                entry.raw_not_enhanced = (text[pos] == 't' || text[pos] == 'T');
+                while (pos < end && text[pos] != ',' && text[pos] != '}')
+                    ++pos;
+            }
+            else if (key == "raw_not_rotated")
+            {
+                SkipWhitespace(text, pos);
+                entry.raw_not_rotated = (text[pos] == 't' || text[pos] == 'T');
+                while (pos < end && text[pos] != ',' && text[pos] != '}')
+                    ++pos;
+            }
             else if (key == "tool_targets")
             {
                 SkipWhitespace(text, pos);
@@ -264,82 +372,161 @@ namespace
                                         target.tool = ParseString(text, tp);
                                     else if (tkey == "roi_name")
                                         target.target_id = ParseString(text, tp);
-                                    else if (tkey == "x0")
-                                    {
-                                        target.has_line = true;
-                                        target.x0 = ParseInt(text, tp);
-                                    }
-                                    else if (tkey == "y0")
-                                        target.y0 = ParseInt(text, tp);
-                                    else if (tkey == "x1")
-                                        target.x1 = ParseInt(text, tp);
-                                    else if (tkey == "y1")
-                                        target.y1 = ParseInt(text, tp);
-                                    else if (tkey == "cx")
-                                    {
-                                        target.has_circle = true;
-                                        target.cx = ParseInt(text, tp);
-                                    }
-                                    else if (tkey == "cy")
-                                        target.cy = ParseInt(text, tp);
-                                    else if (tkey == "px")
-                                        target.px = ParseInt(text, tp);
-                                    else if (tkey == "py")
-                                        target.py = ParseInt(text, tp);
-                                    else if (tkey == "major_radius")
-                                    {
-                                        target.has_ellipse = true;
-                                        target.ellipse_major_radius = std::stod(ParseString(text, tp));
-                                    }
-                                    else if (tkey == "minor_radius")
-                                        target.ellipse_minor_radius = std::stod(ParseString(text, tp));
-                                    else if (tkey == "angle_deg")
-                                    {
-                                        target.has_ellipse = true;
-                                        target.has_rect = true;
-                                        target.ellipse_angle_deg = std::stod(ParseString(text, tp));
-                                        target.rect_angle_deg = target.ellipse_angle_deg;
-                                    }
-                                    else if (tkey == "width")
-                                    {
-                                        target.has_rect = true;
-                                        target.rect_width = std::stod(ParseString(text, tp));
-                                    }
-                                    else if (tkey == "height")
-                                    {
-                                        target.has_rect = true;
-                                        target.rect_height = std::stod(ParseString(text, tp));
-                                    }
-                                    else if (tkey == "wgap")
-                                        target.wgap = ParseInt(text, tp);
-                                    else if (tkey == "hgap")
-                                        target.hgap = ParseInt(text, tp);
-                                    else if (tkey == "gap")
-                                        target.gap = ParseInt(text, tp);
-                                    else if (tkey == "linegap")
-                                        target.linegap = ParseInt(text, tp);
-                                    else if (tkey == "tool_half_width")
-                                        target.tool_half_width = ParseInt(text, tp);
-                                    else if (tkey == "threshold")
-                                        target.threshold = ParseInt(text, tp);
-                                    else if (tkey == "method")
-                                        target.method = ParseInt(text, tp);
-                                    else if (tkey == "expected_edge")
-                                        target.expected_edge = ParseString(text, tp);
-                                    else if (tkey == "edge_polarity_hint")
-                                        target.edge_polarity_hint = ParseString(text, tp);
-                                    else if (tkey == "comment")
-                                        target.comment = ParseString(text, tp);
-                                    else
+                                    bool seen_x0 = false, seen_y0 = false, seen_x1 = false, seen_y1 = false;
+                                    bool seen_cx = false, seen_cy = false, seen_px = false, seen_py = false;
+                                    bool seen_major_radius = false, seen_minor_radius = false, seen_angle_deg = false;
+                                    bool seen_width = false, seen_height = false;
+
+                                    while (tp < targetEnd)
                                     {
                                         SkipWhitespace(text, tp);
-                                        if (tp < targetEnd && text[tp] == '"')
-                                            ParseString(text, tp);
+                                        if (tp >= targetEnd || text[tp] == '}')
+                                            break;
+
+                                        const std::string tkey = ParseString(text, tp);
+                                        if (tkey.empty())
+                                            break;
+
+                                        ExpectChar(text, tp, ':');
+
+                                        if (tkey == "tool")
+                                            target.tool = ParseString(text, tp);
+                                        else if (tkey == "roi_name")
+                                            target.target_id = ParseString(text, tp);
+                                        else if (tkey == "x0")
+                                        {
+                                            seen_x0 = true;
+                                            target.x0 = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "y0")
+                                        {
+                                            seen_y0 = true;
+                                            target.y0 = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "x1")
+                                        {
+                                            seen_x1 = true;
+                                            target.x1 = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "y1")
+                                        {
+                                            seen_y1 = true;
+                                            target.y1 = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "cx")
+                                        {
+                                            seen_cx = true;
+                                            target.cx = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "cy")
+                                        {
+                                            seen_cy = true;
+                                            target.cy = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "px")
+                                        {
+                                            seen_px = true;
+                                            target.px = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "py")
+                                        {
+                                            seen_py = true;
+                                            target.py = ParseInt(text, tp);
+                                        }
+                                        else if (tkey == "major_radius")
+                                        {
+                                            seen_major_radius = true;
+                                            std::string reason;
+                                            double val = 0.0;
+                                            if (ParseJsonDouble(text, tp, val, reason))
+                                                target.ellipse_major_radius = val;
+                                        }
+                                        else if (tkey == "minor_radius")
+                                        {
+                                            seen_minor_radius = true;
+                                            std::string reason;
+                                            double val = 0.0;
+                                            if (ParseJsonDouble(text, tp, val, reason))
+                                                target.ellipse_minor_radius = val;
+                                        }
+                                        else if (tkey == "angle_deg")
+                                        {
+                                            seen_angle_deg = true;
+                                            std::string reason;
+                                            double val = 0.0;
+                                            if (ParseJsonDouble(text, tp, val, reason))
+                                            {
+                                                target.ellipse_angle_deg = val;
+                                                target.rect_angle_deg = val;
+                                            }
+                                        }
+                                        else if (tkey == "width")
+                                        {
+                                            seen_width = true;
+                                            std::string reason;
+                                            double val = 0.0;
+                                            if (ParseJsonDouble(text, tp, val, reason))
+                                                target.rect_width = val;
+                                        }
+                                        else if (tkey == "height")
+                                        {
+                                            seen_height = true;
+                                            std::string reason;
+                                            double val = 0.0;
+                                            if (ParseJsonDouble(text, tp, val, reason))
+                                                target.rect_height = val;
+                                        }
+                                        else if (tkey == "wgap")
+                                            target.wgap = ParseInt(text, tp);
+                                        else if (tkey == "hgap")
+                                            target.hgap = ParseInt(text, tp);
+                                        else if (tkey == "gap")
+                                            target.gap = ParseInt(text, tp);
+                                        else if (tkey == "linegap")
+                                            target.linegap = ParseInt(text, tp);
+                                        else if (tkey == "tool_half_width")
+                                            target.tool_half_width = ParseInt(text, tp);
+                                        else if (tkey == "threshold")
+                                            target.threshold = ParseInt(text, tp);
+                                        else if (tkey == "method")
+                                            target.method = ParseInt(text, tp);
+                                        else if (tkey == "expected_edge")
+                                            target.expected_edge = ParseString(text, tp);
+                                        else if (tkey == "edge_polarity_hint")
+                                            target.edge_polarity_hint = ParseString(text, tp);
+                                        else if (tkey == "comment")
+                                            target.comment = ParseString(text, tp);
                                         else
                                         {
-                                            while (tp < targetEnd && text[tp] != ',' && text[tp] != '}')
-                                                ++tp;
+                                            SkipWhitespace(text, tp);
+                                            if (tp < targetEnd && text[tp] == '"')
+                                                ParseString(text, tp);
+                                            else
+                                            {
+                                                while (tp < targetEnd && text[tp] != ',' && text[tp] != '}')
+                                                    ++tp;
+                                            }
                                         }
+
+                                        if (!ExpectChar(text, tp, ','))
+                                            break;
+                                    }
+
+                                    if (target.tool == "Findline")
+                                    {
+                                        target.has_line = seen_x0 && seen_y0 && seen_x1 && seen_y1;
+                                    }
+                                    else if (target.tool == "Findcircle")
+                                    {
+                                        target.has_circle = seen_cx && seen_cy && seen_px && seen_py;
+                                    }
+                                    else if (target.tool == "Findellipse")
+                                    {
+                                        target.has_ellipse = seen_cx && seen_cy && seen_major_radius && seen_minor_radius && seen_angle_deg;
+                                    }
+                                    else if (target.tool == "FindRect")
+                                    {
+                                        target.has_rect = seen_cx && seen_cy && seen_width && seen_height && seen_angle_deg;
                                     }
 
                                     if (!ExpectChar(text, tp, ','))
@@ -371,10 +558,6 @@ namespace
             if (!ExpectChar(text, pos, ','))
                 break;
         }
-
-        entry.raw_not_cropped = true;
-        entry.raw_not_enhanced = true;
-        entry.raw_not_rotated = true;
 
         return true;
     }
@@ -734,7 +917,8 @@ bool LoadStage25ImageManifestJson(
             {
                 if (img.image_id == mc.test_image_id)
                 {
-                    mc.has_search_rect = true;
+                    mc.search_rect_defaulted = true;
+                    mc.search_rect_source = "runtime_default_full_image";
                     mc.search_rect.x = 0.0;
                     mc.search_rect.y = 0.0;
                     mc.search_rect.width = static_cast<double>(img.width);
@@ -773,6 +957,43 @@ namespace
         return x >= 0 && y >= 0 && x < w && y < h;
     }
 
+    void BuildRotatedRectCorners(
+        double cx, double cy, double width, double height, double angle_deg,
+        std::vector<std::pair<double, double>>& corners)
+    {
+        corners.clear();
+        const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+        const double cos_a = std::cos(angle_rad);
+        const double sin_a = std::sin(angle_rad);
+        const double hw = width / 2.0;
+        const double hh = height / 2.0;
+
+        const double dx[] = { -hw, hw, hw, -hw };
+        const double dy[] = { -hh, -hh, hh, hh };
+
+        for (int i = 0; i < 4; ++i)
+        {
+            double x = cx + dx[i] * cos_a - dy[i] * sin_a;
+            double y = cy + dx[i] * sin_a + dy[i] * cos_a;
+            corners.emplace_back(x, y);
+        }
+    }
+
+    bool IsPolygonIntersectingImage(
+        const std::vector<std::pair<double, double>>& points,
+        int image_width, int image_height)
+    {
+        for (const auto& p : points)
+        {
+            if (p.first >= 0 && p.first < image_width &&
+                p.second >= 0 && p.second < image_height)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void ValidateTargetRoi(
         const CxScriptImageManifestEntry& image,
         const CxScriptImageTargetRoi& target,
@@ -780,6 +1001,17 @@ namespace
     {
         if (target.tool == "Findline")
         {
+            if (!target.has_line)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findline ROI missing required fields");
+                return;
+            }
+
             if (target.x0 == target.x1 && target.y0 == target.y1)
             {
                 AddImageManifestIssue(
@@ -804,6 +1036,17 @@ namespace
 
         if (target.tool == "Findcircle")
         {
+            if (!target.has_circle)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findcircle ROI missing required fields");
+                return;
+            }
+
             if (!IsPointInsideImage(target.cx, target.cy, image.width, image.height) ||
                 !IsPointInsideImage(target.px, target.py, image.width, image.height))
             {
@@ -827,6 +1070,169 @@ namespace
                     "Findcircle radius is too small");
             }
         }
+
+        if (target.tool == "Findellipse")
+        {
+            if (!target.has_ellipse)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse ROI missing required fields");
+                return;
+            }
+
+            if (std::abs(target.cx) > 10000 || std::abs(target.cy) > 10000)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse center coordinates out of reasonable range");
+            }
+
+            if (target.ellipse_major_radius <= 1)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse major radius must be > 1");
+            }
+
+            if (target.ellipse_minor_radius <= 1)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse minor radius must be > 1");
+            }
+
+            if (std::abs(target.ellipse_angle_deg) > 180)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse angle out of valid range");
+            }
+
+            const double bounding_radius = std::max(target.ellipse_major_radius, target.ellipse_minor_radius);
+            const double min_x = target.cx - bounding_radius;
+            const double max_x = target.cx + bounding_radius;
+            const double min_y = target.cy - bounding_radius;
+            const double max_y = target.cy + bounding_radius;
+
+            if (max_x < 0 || min_x >= image.width ||
+                max_y < 0 || min_y >= image.height)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Findellipse ROI is completely outside image");
+            }
+        }
+
+        if (target.tool == "FindRect")
+        {
+            if (!target.has_rect)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect ROI missing required fields");
+                return;
+            }
+
+            if (target.rect_width <= 1)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect width must be > 1");
+            }
+
+            if (target.rect_height <= 1)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect height must be > 1");
+            }
+
+            if (std::abs(target.rect_angle_deg) > 180)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect angle out of valid range");
+            }
+
+            std::vector<std::pair<double, double>> corners;
+            BuildRotatedRectCorners(
+                target.cx, target.cy,
+                target.rect_width, target.rect_height,
+                target.rect_angle_deg,
+                corners);
+
+            if (corners.size() != 4)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect failed to build corners");
+                return;
+            }
+
+            double min_x = corners[0].first, max_x = corners[0].first;
+            double min_y = corners[0].second, max_y = corners[0].second;
+            for (const auto& p : corners)
+            {
+                min_x = std::min(min_x, p.first);
+                max_x = std::max(max_x, p.first);
+                min_y = std::min(min_y, p.second);
+                max_y = std::max(max_y, p.second);
+            }
+
+            if (max_x - min_x < 1 || max_y - min_y < 1)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect has degenerate bounding box");
+            }
+
+            if (!IsPolygonIntersectingImage(corners, image.width, image.height))
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindRect ROI is completely outside image");
+            }
+        }
     }
 }
 
@@ -835,8 +1241,32 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
 {
     CxScriptImageManifestValidationResult result;
 
+    std::set<std::string> image_ids;
     for (const auto& image : manifest.images)
     {
+        if (image.image_id.empty())
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                "",
+                "Image entry has empty image_id");
+        }
+        else if (image_ids.count(image.image_id) > 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                image.image_id,
+                "",
+                "Duplicate image_id detected");
+        }
+        else
+        {
+            image_ids.insert(image.image_id);
+        }
+
         if (!std::filesystem::exists(image.path))
         {
             AddImageManifestIssue(
@@ -872,39 +1302,189 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
                     std::to_string(img.cols) + "x" + std::to_string(img.rows) + ")");
         }
 
-        if (!image.raw_not_cropped)
-        {
-            AddImageManifestIssue(
-                result,
-                "error",
-                image.image_id,
-                "",
-                "raw_not_cropped must be true");
-        }
-
-        if (!image.raw_not_enhanced)
-        {
-            AddImageManifestIssue(
-                result,
-                "error",
-                image.image_id,
-                "",
-                "raw_not_enhanced must be true");
-        }
-
-        if (!image.raw_not_rotated)
-        {
-            AddImageManifestIssue(
-                result,
-                "error",
-                image.image_id,
-                "",
-                "raw_not_rotated must be true");
-        }
-
+        std::set<std::string> target_ids;
         for (const auto& target : image.targets)
         {
+            if (target.target_id.empty())
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    "",
+                    "Target entry has empty target_id");
+            }
+            else if (target_ids.count(target.target_id) > 0)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Duplicate target_id within image");
+            }
+            else
+            {
+                target_ids.insert(target.target_id);
+            }
+
+            if (target.tool.empty())
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Target has empty tool");
+            }
+            else if (target.tool != "Findline" &&
+                     target.tool != "Findcircle" &&
+                     target.tool != "Findellipse" &&
+                     target.tool != "FindRect")
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "Unknown tool: " + target.tool);
+            }
+
             ValidateTargetRoi(image, target, result);
+        }
+    }
+
+    std::set<std::string> match_case_ids;
+    for (const auto& mc : manifest.match_cases)
+    {
+        if (mc.case_id.empty())
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                "",
+                "Match case has empty case_id");
+        }
+        else if (match_case_ids.count(mc.case_id) > 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Duplicate match case_id detected");
+        }
+        else
+        {
+            match_case_ids.insert(mc.case_id);
+        }
+
+        if (mc.template_image_id.empty())
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Match case missing template_image_id");
+        }
+        else if (!FindImageById(manifest, mc.template_image_id))
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                mc.template_image_id,
+                mc.case_id,
+                "Template image_id not found in manifest");
+        }
+
+        if (mc.test_image_id.empty())
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Match case missing test_image_id");
+        }
+        else if (!FindImageById(manifest, mc.test_image_id))
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                mc.test_image_id,
+                mc.case_id,
+                "Test image_id not found in manifest");
+        }
+
+        if (mc.template_rect.width <= 0 || mc.template_rect.height <= 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Template rect has invalid dimensions");
+        }
+
+        if (!mc.has_search_rect)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Match case missing search_rect");
+        }
+        else if (mc.search_rect.width <= 0 || mc.search_rect.height <= 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Search rect has invalid dimensions");
+        }
+
+        if (mc.expected_rect.width <= 0 || mc.expected_rect.height <= 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "Expected rect has invalid dimensions");
+        }
+
+        if (mc.rotation_min_deg > mc.rotation_max_deg)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "rotation_min_deg > rotation_max_deg");
+        }
+
+        if (mc.scale_min > mc.scale_max)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "scale_min > scale_max");
+        }
+
+        if (mc.candidate_budget <= 0)
+        {
+            AddImageManifestIssue(
+                result,
+                "error",
+                "",
+                mc.case_id,
+                "candidate_budget must be > 0");
         }
     }
 
@@ -998,6 +1578,32 @@ bool WriteManifestDryRunReport(
         }
     }
 
+    CxScriptImageManifestValidationResult validation = ValidateStage25ImageManifest(manifest);
+
+    std::vector<std::string> unresolved_refs;
+    std::vector<std::string> invalid_rois;
+
+    for (const auto& issue : validation.issues)
+    {
+        if (issue.severity == "error")
+        {
+            if (issue.message.find("not found") != std::string::npos ||
+                issue.message.find("path does not exist") != std::string::npos)
+            {
+                unresolved_refs.push_back(issue.image_id + "/" + issue.target_id + ": " + issue.message);
+            }
+            else if (issue.message.find("ROI") != std::string::npos ||
+                     issue.message.find("radius") != std::string::npos ||
+                     issue.message.find("width") != std::string::npos ||
+                     issue.message.find("height") != std::string::npos)
+            {
+                invalid_rois.push_back(issue.image_id + "/" + issue.target_id + ": " + issue.message);
+            }
+        }
+    }
+
+    bool parse_ok = validation.issues.empty();
+
     std::filesystem::path resolved_path = out_path / "manifest_resolved_snapshot.json";
     std::ofstream resolved_file(resolved_path);
     if (!resolved_file.is_open())
@@ -1024,10 +1630,51 @@ bool WriteManifestDryRunReport(
     }
     resolved_file << "  },\n";
     resolved_file << "  \"match_case_count\": " << manifest.match_cases.size() << ",\n";
-    resolved_file << "  \"unresolved_image_refs\": [],\n";
-    resolved_file << "  \"invalid_rois\": [],\n";
-    resolved_file << "  \"parse_ok\": true\n";
+    resolved_file << "  \"unresolved_image_refs\": [\n";
+    for (size_t i = 0; i < unresolved_refs.size(); ++i)
+    {
+        resolved_file << "    \"" << unresolved_refs[i] << "\"";
+        if (i < unresolved_refs.size() - 1)
+            resolved_file << ",";
+        resolved_file << "\n";
+    }
+    resolved_file << "  ],\n";
+    resolved_file << "  \"invalid_rois\": [\n";
+    for (size_t i = 0; i < invalid_rois.size(); ++i)
+    {
+        resolved_file << "    \"" << invalid_rois[i] << "\"";
+        if (i < invalid_rois.size() - 1)
+            resolved_file << ",";
+        resolved_file << "\n";
+    }
+    resolved_file << "  ],\n";
+    resolved_file << "  \"parse_ok\": " << (parse_ok ? "true" : "false") << "\n";
     resolved_file << "}\n";
+
+    std::filesystem::path validation_path = out_path / "manifest_validation_report.json";
+    std::ofstream validation_file(validation_path);
+    if (!validation_file.is_open())
+        return false;
+
+    validation_file << "{\n";
+    validation_file << "  \"total_issues\": " << validation.issues.size() << ",\n";
+    validation_file << "  \"issues\": [\n";
+    for (size_t i = 0; i < validation.issues.size(); ++i)
+    {
+        const auto& issue = validation.issues[i];
+        validation_file << "    {\n";
+        validation_file << "      \"severity\": \"" << issue.severity << "\",\n";
+        validation_file << "      \"image_id\": \"" << issue.image_id << "\",\n";
+        validation_file << "      \"target_id\": \"" << issue.target_id << "\",\n";
+        validation_file << "      \"message\": \"" << issue.message << "\"\n";
+        validation_file << "    }";
+        if (i < validation.issues.size() - 1)
+            validation_file << ",";
+        validation_file << "\n";
+    }
+    validation_file << "  ],\n";
+    validation_file << "  \"validation_ok\": " << (parse_ok ? "true" : "false") << "\n";
+    validation_file << "}\n";
 
     return true;
 }

@@ -10,6 +10,7 @@
 #include "ImageAnnotationLayer.h"
 #include "CxParserSnapshotTypes.h"
 #include "ICxRuntimeProjectionExecutor.h"
+#include "CxScriptImageManifestRuntime.h"
 
 struct CxShapeInteractionOptions
 {
@@ -84,8 +85,9 @@ class CxShapeInteractionRunner
 {
 public:
     bool RunSuite(
-        const CxAnnotationToolManifestSnapshot& manifest,
+        const CxAnnotationToolManifestSnapshot& tool_manifest,
         const CxShapeTestSuiteSnapshot& suite,
+        const CxScriptImageManifestRuntime& image_manifest,
         ICxRuntimeProjectionExecutor& projection_executor,
         const CxShapeInteractionOptions& options,
         CxShapeInteractionBatchResultEx& result);
@@ -98,7 +100,8 @@ private:
 
     bool RunTestCase(
         const CxShapeTestCase& tc,
-        const CxAnnotationToolManifestSnapshot& manifest,
+        const CxAnnotationToolManifestSnapshot& tool_manifest,
+        const CxScriptImageManifestRuntime& image_manifest,
         ICxRuntimeProjectionExecutor& projection_executor,
         const CxShapeInteractionOptions& options,
         CxShapeInteractionCaseResultEx& case_result,

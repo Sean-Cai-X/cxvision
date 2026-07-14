@@ -124,6 +124,11 @@ struct CxShapeTestCase
     int expected_min_candidates = -1;
     double expected_min_best_score = -1.0;
     int expected_has_result_box = -1;
+
+    std::string image_manifest_path;
+    std::string manifest_image_id;
+    std::string manifest_target_id;
+    std::string manifest_match_case_id;
 };
 
 class CxShapeTestRuntime
@@ -170,6 +175,10 @@ public:
     static void ExpectMinCandidates(int value);
     static void ExpectMinBestScore(double value);
     static void ExpectResultBox(int value);
+
+    static void SetManifest(const std::string& path);
+    static void SetManifestTarget(const std::string& image_id, const std::string& target_id);
+    static void SetManifestMatchCase(const std::string& case_id);
 
 private:
     static std::vector<CxShapeTestCase> s_cases;

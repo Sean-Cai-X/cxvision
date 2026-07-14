@@ -18,6 +18,7 @@ public:
     void clear();
     void setshow(int ishow);
     virtual void setrect(int ix, int iy, int iw, int ih);
+    void setrotatedrect(double cx, double cy, double width, double height, double angle_deg);
     virtual void drawshape();
     void shapesetroi(void* pshape);
 
@@ -92,6 +93,13 @@ private:
 
     RectsShape m_resultrects;
     RectLearnResult m_lastresult;
+
+    bool m_has_rotated_rect = false;
+    double m_rotated_cx = 0.0;
+    double m_rotated_cy = 0.0;
+    double m_rotated_width = 0.0;
+    double m_rotated_height = 0.0;
+    double m_rotated_angle_deg = 0.0;
     Image* g_pbackimage;
     FindObject* g_pbackfindobject;
     int m_ithreshold;

@@ -397,6 +397,16 @@ void FindRect::setrect(int ix, int iy, int iw, int ih)
     Shape::setrect(ix, iy, iw, ih);
 }
 
+void FindRect::setrotatedrect(double cx, double cy, double width, double height, double angle_deg)
+{
+    m_has_rotated_rect = true;
+    m_rotated_cx = cx;
+    m_rotated_cy = cy;
+    m_rotated_width = width;
+    m_rotated_height = height;
+    m_rotated_angle_deg = angle_deg;
+}
+
 void FindRect::drawshape()
 {
     Shape::drawshape();
@@ -667,28 +677,66 @@ void FindRect::PublishDisplayShapes(
     ICxShapeSink& sink,
     const std::string& owner_ref) const
 {
-    const gp_Rectangle roi = rect();
-    const bool hasValidRoi =
-        std::abs(roi.Width()) > 1.0 &&
-        std::abs(roi.Height()) > 1.0;
-
-    if (hasValidRoi)
+    if (m_has_rotated_rect)
     {
-        const double x0 = roi.TopLeft().X();
-        const double y0 = roi.TopLeft().Y();
-        const double x1 = x0 + roi.Width();
-        const double y1 = y0 + roi.Height();
+        const double angle_rad = m_rotated_angle_deg * M_PI / 180.0;
+        const double hw = m_rotated_width / 2.0;
+        const double hh = m_rotated_height / 2.0;
 
-        auto roiShape = std::make_unique<RectShape>(x0, y0, x1, y1);
+        const double cos_a = cos(angle_rad);
+        const double sin_a = sin(angle_rad);
+
+        double x0 = m_rotated_cx - hw * cos_a + hh * sin_a;
+        double y0 = m_rotated_cy - hw * sin_a - hh * cos_a;
+        double x1 = m_rotated_cx + hw * cos_a + hh * sin_a;
+        double y1 = m_rotated_cy + hw * sin_a - hh * cos_a;
+        double x2 = m_rotated_cx + hw * cos_a - hh * sin_a;
+        double y2 = m_rotated_cy + hw * sin_a + hh * cos_a;
+        double x3 = m_rotated_cx - hw * cos_a - hh * sin_a;
+        double y3 = m_rotated_cy - hw * sin_a + hh * cos_a;
+
+        auto roiShape = std::make_unique<PolylineShape>();
+        roiShape->addPoint(x0, y0);
+        roiShape->addPoint(x1, y1);
+        roiShape->addPoint(x2, y2);
+        roiShape->addPoint(x3, y3);
+        roiShape->close(true);
+
         sink.UpsertShape(
-            owner_ref + ".roi_rect",
+            owner_ref + ".roi_rotated_rect",
             "FindRect",
             owner_ref,
-            "setrect",
+            "setrotatedrect",
             "roi",
             true,
             false,
             std::move(roiShape));
+    }
+    else
+    {
+        const gp_Rectangle roi = rect();
+        const bool hasValidRoi =
+            std::abs(roi.Width()) > 1.0 &&
+            std::abs(roi.Height()) > 1.0;
+
+        if (hasValidRoi)
+        {
+            const double x0 = roi.TopLeft().X();
+            const double y0 = roi.TopLeft().Y();
+            const double x1 = x0 + roi.Width();
+            const double y1 = y0 + roi.Height();
+
+            auto roiShape = std::make_unique<RectShape>(x0, y0, x1, y1);
+            sink.UpsertShape(
+                owner_ref + ".roi_rect",
+                "FindRect",
+                owner_ref,
+                "setrect",
+                "roi",
+                true,
+                false,
+                std::move(roiShape));
+        }
     }
 
     for (int i = 0; i < getresultobjsnum(); ++i)

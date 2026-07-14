@@ -546,6 +546,7 @@ m_iupgradexscale(5),
 m_iupgradeyscale(5),
 m_iupgradeanglescale(6),
 m_matchrect(gp_Pnt(0,0,0), gp_Pnt(0, 0, 0)),
+m_expected_rect(gp_Pnt(0,0,0), gp_Pnt(0, 0, 0)),
 m_irelationrect(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0))
 {
     setcolor(0, 0, 255);
@@ -1449,6 +1450,15 @@ void fastmatch::setmatchrect(int ix, int iy, int iw, int ih)
     }
     else
         m_matchrects.setrect(0,ix,iy,iw,ih);
+}
+
+void fastmatch::setexpectedrect(double x0, double y0, double x1, double y1)
+{
+    const double min_x = std::min(x0, x1);
+    const double min_y = std::min(y0, y1);
+    const double max_x = std::max(x0, x1);
+    const double max_y = std::max(y0, y1);
+    m_expected_rect = gp_Rectangle(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0));
 }
 
 void fastmatch::setmatchrectnum(int inum)
@@ -5206,7 +5216,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         learn_roi_shape->setRect(learn_x, learn_y, learn_x + learn_w, learn_y + learn_h);
         sink.UpsertShape(
             owner_ref + ".learn_roi",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "learn_roi",
             "learn_roi",
@@ -5227,13 +5237,32 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         search_roi_shape->setRect(search_x, search_y, search_x + search_w, search_y + search_h);
         sink.UpsertShape(
             owner_ref + ".search_roi",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "search_roi",
             "search_roi",
             true,
             false,
             std::move(search_roi_shape));
+    }
+
+    const double expected_w = m_expected_rect.Width();
+    const double expected_h = m_expected_rect.Height();
+    if (expected_w > 0 && expected_h > 0)
+    {
+        const double expected_x = m_expected_rect.TopLeft().X();
+        const double expected_y = m_expected_rect.TopLeft().Y();
+        auto expected_shape = std::make_unique<RectShape>();
+        expected_shape->setRect(expected_x, expected_y, expected_x + expected_w, expected_y + expected_h);
+        sink.UpsertShape(
+            owner_ref + ".expected_gt",
+            "FastMatch",
+            owner_ref,
+            "expected_gt",
+            "expected_gt",
+            false,
+            false,
+            std::move(expected_shape));
     }
 
     const auto& model_points = getmodel();

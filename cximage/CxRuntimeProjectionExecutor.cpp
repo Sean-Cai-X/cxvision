@@ -291,19 +291,35 @@ bool ExecuteFindRect(const CxRuntimeProjectionRequest& request,
     if (request.owner_ref.empty())
         return Fail(result, "request_validation", "owner_ref is empty");
 
-    const int x0 = static_cast<int>(std::min(request.roi_x0, request.roi_x1));
-    const int y0 = static_cast<int>(std::min(request.roi_y0, request.roi_y1));
-    const int x1 = static_cast<int>(std::max(request.roi_x0, request.roi_x1));
-    const int y1 = static_cast<int>(std::max(request.roi_y0, request.roi_y1));
-
-    const int width = x1 - x0;
-    const int height = y1 - y0;
-
-    if (width < 2 || height < 2)
-        return Fail(result, "request_validation", "FindRect width or height is too small");
-
     FindRect tool;
-    tool.setrect(x0, y0, width, height);
+
+    if (request.has_rotated_rect_roi)
+    {
+        if (request.rect_width < 2 || request.rect_height < 2)
+            return Fail(result, "request_validation", "FindRect rotated rect width or height is too small");
+
+        tool.setrotatedrect(
+            request.rect_cx,
+            request.rect_cy,
+            request.rect_width,
+            request.rect_height,
+            request.rect_angle_deg);
+    }
+    else
+    {
+        const int x0 = static_cast<int>(std::min(request.roi_x0, request.roi_x1));
+        const int y0 = static_cast<int>(std::min(request.roi_y0, request.roi_y1));
+        const int x1 = static_cast<int>(std::max(request.roi_x0, request.roi_x1));
+        const int y1 = static_cast<int>(std::max(request.roi_y0, request.roi_y1));
+
+        const int width = x1 - x0;
+        const int height = y1 - y0;
+
+        if (width < 2 || height < 2)
+            return Fail(result, "request_validation", "FindRect width or height is too small");
+
+        tool.setrect(x0, y0, width, height);
+    }
     tool.setlinegap(request.linegap);
     tool.setthre(request.threshold);
 
@@ -358,13 +374,10 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
 
     if (request.has_learn_roi)
     {
-        const int lx0 = static_cast<int>(std::min(request.learn_x0, request.learn_x1));
-        const int ly0 = static_cast<int>(std::min(request.learn_y0, request.learn_y1));
-        const int lx1 = static_cast<int>(std::max(request.learn_x0, request.learn_x1));
-        const int ly1 = static_cast<int>(std::max(request.learn_y0, request.learn_y1));
-
-        const int lwidth = lx1 - lx0;
-        const int lheight = ly1 - ly0;
+        const int lx0 = static_cast<int>(request.learn_roi.x);
+        const int ly0 = static_cast<int>(request.learn_roi.y);
+        const int lwidth = static_cast<int>(request.learn_roi.width);
+        const int lheight = static_cast<int>(request.learn_roi.height);
 
         if (lwidth < 2 || lheight < 2)
             return Fail(result, "request_validation", "FastMatch learn ROI width or height is too small");
@@ -374,18 +387,24 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
 
     if (request.has_search_roi)
     {
-        const int sx0 = static_cast<int>(std::min(request.search_x0, request.search_x1));
-        const int sy0 = static_cast<int>(std::min(request.search_y0, request.search_y1));
-        const int sx1 = static_cast<int>(std::max(request.search_x0, request.search_x1));
-        const int sy1 = static_cast<int>(std::max(request.search_y0, request.search_y1));
-
-        const int swidth = sx1 - sx0;
-        const int sheight = sy1 - sy0;
+        const int sx0 = static_cast<int>(request.search_roi.x);
+        const int sy0 = static_cast<int>(request.search_roi.y);
+        const int swidth = static_cast<int>(request.search_roi.width);
+        const int sheight = static_cast<int>(request.search_roi.height);
 
         if (swidth < 2 || sheight < 2)
             return Fail(result, "request_validation", "FastMatch search ROI width or height is too small");
 
         matcher.setmatchrect(sx0, sy0, swidth, sheight);
+    }
+
+    if (request.has_expected_rect)
+    {
+        matcher.setexpectedrect(
+            request.expected_rect.x,
+            request.expected_rect.y,
+            request.expected_rect.x + request.expected_rect.width,
+            request.expected_rect.y + request.expected_rect.height);
     }
 
     if (request.require_algorithm_execution)

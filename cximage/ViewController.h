@@ -227,8 +227,9 @@ public:
     void DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList);
 
     bool RunShapeInteractionSmoke(
-        const std::string& manifest_path,
+        const std::string& tool_manifest_path,
         const std::string& suite_path,
+        const std::string& image_manifest_path,
         const std::string& out_dir,
         CxShapeInteractionBatchResult& result);
 

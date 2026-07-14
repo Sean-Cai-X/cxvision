@@ -1,6 +1,7 @@
 #include "CxShapeInteractionRunner.h"
 #include "ViewController.h"
 #include "CxUnifiedLog.h"
+#include "CxManifestProjectionRequestResolver.h"
 
 #include <filesystem>
 #include <unordered_set>
@@ -11,11 +12,11 @@ namespace fs = std::filesystem;
 static std::string EscapeJson(const std::string& s);
 
 bool CxShapeInteractionRunner::TryFindToolSpec(
-    const CxAnnotationToolManifestSnapshot& manifest,
-    const std::string& tool_id,
-    CxAnnotationToolSpec& output)
+    const CxAnnotationToolManifestSnapshot& tool_manifest,
+        const std::string& tool_id,
+        CxAnnotationToolSpec& output)
 {
-    for (const CxAnnotationToolSpec& tool : manifest.tools)
+    for (const CxAnnotationToolSpec& tool : tool_manifest.tools)
     {
         if (tool.id == tool_id)
         {
@@ -27,8 +28,9 @@ bool CxShapeInteractionRunner::TryFindToolSpec(
 }
 
 bool CxShapeInteractionRunner::RunSuite(
-    const CxAnnotationToolManifestSnapshot& manifest,
+    const CxAnnotationToolManifestSnapshot& tool_manifest,
     const CxShapeTestSuiteSnapshot& suite,
+    const CxScriptImageManifestRuntime& image_manifest,
     ICxRuntimeProjectionExecutor& projection_executor,
     const CxShapeInteractionOptions& options,
     CxShapeInteractionBatchResultEx& result)
@@ -132,7 +134,7 @@ bool CxShapeInteractionRunner::RunSuite(
         CXLOG_INFO("CxShapeInteractionRunner", "shape_case_begin", "running",
             "operation=" + cases[i].operation + ", handle=" + cases[i].handle);
 
-        RunTestCase(cases[i], manifest, projection_executor, options, result.extended_cases[i], trace);
+        RunTestCase(cases[i], tool_manifest, image_manifest, projection_executor, options, result.extended_cases[i], trace);
 
         const auto& caseResult = result.extended_cases[i];
         if (caseResult.pass)
@@ -210,7 +212,8 @@ bool CxShapeInteractionRunner::VerifyHitExpectation(
 
 bool CxShapeInteractionRunner::RunTestCase(
     const CxShapeTestCase& tc,
-    const CxAnnotationToolManifestSnapshot& manifest,
+    const CxAnnotationToolManifestSnapshot& tool_manifest,
+    const CxScriptImageManifestRuntime& image_manifest,
     ICxRuntimeProjectionExecutor& projection_executor,
     const CxShapeInteractionOptions& options,
     CxShapeInteractionCaseResultEx& case_result,
@@ -227,7 +230,7 @@ bool CxShapeInteractionRunner::RunTestCase(
     layer.ClearShapeElements();
 
     std::string apply_reason;
-    if (!layer.ApplyToolManifestSnapshot(manifest, apply_reason))
+    if (!layer.ApplyToolManifestSnapshot(tool_manifest, apply_reason))
     {
         case_result.pass = false;
         case_result.conclusion = "manifest_apply_failed";
@@ -734,7 +737,7 @@ bool CxShapeInteractionRunner::RunTestCase(
         layer.ClearShapeElements();
 
         std::string apply_reason;
-        if (!layer.ApplyToolManifestSnapshot(manifest, apply_reason))
+        if (!layer.ApplyToolManifestSnapshot(tool_manifest, apply_reason))
         {
             case_result.status = "FAIL";
             case_result.conclusion = "manifest_apply_failed";
@@ -750,58 +753,77 @@ bool CxShapeInteractionRunner::RunTestCase(
             tc.owner_binding.empty()
                 ? "shape_result." + tc.case_id
                 : tc.owner_binding;
-        request.image_path = tc.image_path;
 
-        if (tc.has_initial_line)
-        {
-            request.roi_x0 = tc.initial_lx0;
-            request.roi_y0 = tc.initial_ly0;
-            request.roi_x1 = tc.initial_lx1;
-            request.roi_y1 = tc.initial_ly1;
-        }
-        else if (tc.has_initial_rect)
-        {
-            request.roi_x0 = tc.initial_rx0;
-            request.roi_y0 = tc.initial_ry0;
-            request.roi_x1 = tc.initial_rx1;
-            request.roi_y1 = tc.initial_ry1;
-        }
+        bool use_manifest_projection = !tc.image_manifest_path.empty() && 
+                                       (!tc.manifest_target_id.empty() || !tc.manifest_match_case_id.empty());
 
-        if (tc.has_initial_circle)
+        if (use_manifest_projection)
         {
-            request.circle_cx = tc.initial_ccx;
-            request.circle_cy = tc.initial_ccy;
-            request.circle_px = tc.initial_ccx + tc.initial_cradius;
-            request.circle_py = tc.initial_ccy;
+            std::string resolve_reason;
+            if (!ResolveManifestProjectionRequest(image_manifest, tc, request, resolve_reason))
+            {
+                case_result.pass = false;
+                case_result.status = "FAIL";
+                case_result.conclusion = "manifest_projection_resolve_failed";
+                case_result.reason = resolve_reason;
+                return false;
+            }
         }
-
-        if (tc.has_initial_ellipse)
+        else
         {
-            request.roi_x0 = tc.initial_ex - tc.initial_erx;
-            request.roi_y0 = tc.initial_ey - tc.initial_ery;
-            request.roi_x1 = tc.initial_ex + tc.initial_erx;
-            request.roi_y1 = tc.initial_ey + tc.initial_ery;
-        }
+            request.image_path = tc.image_path;
 
-        if (tc.has_initial_learn_rect)
-        {
-            request.has_learn_roi = true;
-            request.learn_x0 = tc.initial_learn_x0;
-            request.learn_y0 = tc.initial_learn_y0;
-            request.learn_x1 = tc.initial_learn_x1;
-            request.learn_y1 = tc.initial_learn_y1;
-        }
+            if (tc.has_initial_line)
+            {
+                request.roi_x0 = tc.initial_lx0;
+                request.roi_y0 = tc.initial_ly0;
+                request.roi_x1 = tc.initial_lx1;
+                request.roi_y1 = tc.initial_ly1;
+            }
+            else if (tc.has_initial_rect)
+            {
+                request.roi_x0 = tc.initial_rx0;
+                request.roi_y0 = tc.initial_ry0;
+                request.roi_x1 = tc.initial_rx1;
+                request.roi_y1 = tc.initial_ry1;
+            }
 
-        if (tc.has_initial_search_rect)
-        {
-            request.has_search_roi = true;
-            request.search_x0 = tc.initial_search_x0;
-            request.search_y0 = tc.initial_search_y0;
-            request.search_x1 = tc.initial_search_x1;
-            request.search_y1 = tc.initial_search_y1;
-        }
+            if (tc.has_initial_circle)
+            {
+                request.circle_cx = tc.initial_ccx;
+                request.circle_cy = tc.initial_ccy;
+                request.circle_px = tc.initial_ccx + tc.initial_cradius;
+                request.circle_py = tc.initial_ccy;
+            }
 
-        request.tool_half_width = tc.tool_half_width;
+            if (tc.has_initial_ellipse)
+            {
+                request.roi_x0 = tc.initial_ex - tc.initial_erx;
+                request.roi_y0 = tc.initial_ey - tc.initial_ery;
+                request.roi_x1 = tc.initial_ex + tc.initial_erx;
+                request.roi_y1 = tc.initial_ey + tc.initial_ery;
+            }
+
+            if (tc.has_initial_learn_rect)
+            {
+                request.has_learn_roi = true;
+                request.learn_roi.x = tc.initial_learn_x0;
+                request.learn_roi.y = tc.initial_learn_y0;
+                request.learn_roi.width = tc.initial_learn_x1 - tc.initial_learn_x0;
+                request.learn_roi.height = tc.initial_learn_y1 - tc.initial_learn_y0;
+            }
+
+            if (tc.has_initial_search_rect)
+            {
+                request.has_search_roi = true;
+                request.search_roi.x = tc.initial_search_x0;
+                request.search_roi.y = tc.initial_search_y0;
+                request.search_roi.width = tc.initial_search_x1 - tc.initial_search_x0;
+                request.search_roi.height = tc.initial_search_y1 - tc.initial_search_y0;
+            }
+
+            request.tool_half_width = tc.tool_half_width;
+        }
         request.wgap = tc.wgap;
         request.hgap = tc.hgap;
         request.gap = tc.gap;
@@ -829,23 +851,46 @@ bool CxShapeInteractionRunner::RunTestCase(
         std::string owner_ref = projection.owner_ref;
 
         const auto& elements = layer.ShapeElements();
-        case_result.created_points_count = static_cast<int>(elements.size());
 
         std::map<std::string, int> role_counts;
         std::map<std::string, int> editable_role_counts;
         std::map<std::string, int> result_role_counts;
         int stale_result_count = 0;
+        int result_element_count = 0;
+        std::unordered_set<std::string> stable_refs;
+        int duplicate_stable_ref_count = 0;
+        int owner_mismatch_count = 0;
+        bool pass = true;
 
         for (const auto& elem : elements)
         {
+            if (elem.owner_ref != owner_ref)
+                continue;
+
+            if (elem.owner_type != owner_type)
+                owner_mismatch_count++;
+
+            if (elem.stable_ref.empty())
+                pass = false;
+
+            if (stable_refs.count(elem.stable_ref) > 0)
+                duplicate_stable_ref_count++;
+            else
+                stable_refs.insert(elem.stable_ref);
+
             role_counts[elem.semantic_role]++;
             if (elem.editable) editable_role_counts[elem.semantic_role]++;
-            if (elem.result_element) result_role_counts[elem.semantic_role]++;
+            if (elem.result_element)
+            {
+                result_role_counts[elem.semantic_role]++;
+                result_element_count++;
+            }
             if (elem.result_element && elem.stale) stale_result_count++;
         }
 
+        case_result.created_points_count = static_cast<int>(stable_refs.size());
+
         std::string reason;
-        bool pass = true;
 
         if (!tc.role_expectations.empty())
         {
@@ -898,6 +943,40 @@ bool CxShapeInteractionRunner::RunTestCase(
         {
             pass = false;
             reason = "runtime projection case has no role expectations";
+        }
+
+        if (duplicate_stable_ref_count > 0)
+        {
+            pass = false;
+            reason += "duplicate stable_ref detected; ";
+        }
+
+        if (owner_mismatch_count > 0)
+        {
+            pass = false;
+            reason += "owner_type mismatch detected; ";
+        }
+
+        if (tc.operation == "runtime_geometry_publish")
+        {
+            if (projection.algorithm_ok)
+            {
+                pass = false;
+                reason += "geometry-only case should not have algorithm_ok=true; ";
+            }
+
+            if (result_element_count > 0)
+            {
+                pass = false;
+                reason += "geometry-only case should have result_element_count=0 (actual=" +
+                    std::to_string(result_element_count) + "); ";
+            }
+
+            if (stale_result_count > 0)
+            {
+                pass = false;
+                reason += "geometry-only case should have stale_result_count=0; ";
+            }
         }
 
         if (tc.operation == "runtime_result_publish")
@@ -1000,26 +1079,8 @@ bool CxShapeInteractionRunner::RunTestCase(
             }
         }
 
-        std::map<std::string, int> stable_ref_counts;
-        for (const auto& elem : elements)
-        {
-            stable_ref_counts[elem.stable_ref]++;
-        }
-        int duplicate_stable_ref_count = 0;
-        for (const auto& pair : stable_ref_counts)
-        {
-            if (pair.second > 1)
-                duplicate_stable_ref_count++;
-        }
-
         if (tc.operation == "runtime_result_publish")
         {
-            if (duplicate_stable_ref_count > 0)
-            {
-                pass = false;
-                reason += "duplicate stable_ref detected; ";
-            }
-
             if (stale_result_count > 0)
             {
                 pass = false;
@@ -1099,6 +1160,85 @@ bool CxShapeInteractionRunner::RunTestCase(
             projection_file << "}\n";
         }
 
+        std::ofstream request_file(case_dir / "projection_request.json");
+        if (request_file)
+        {
+            request_file << "{\n";
+            request_file << "  \"case_id\": \"" << EscapeJson(request.case_id) << "\",\n";
+            request_file << "  \"tool_id\": \"" << EscapeJson(request.tool_id) << "\",\n";
+            request_file << "  \"owner_type\": \"" << EscapeJson(request.owner_type) << "\",\n";
+            request_file << "  \"image_path\": \"" << EscapeJson(request.image_path) << "\",\n";
+            if (request.has_ellipse_roi)
+            {
+                request_file << "  \"has_ellipse_roi\": true,\n";
+                request_file << "  \"ellipse_cx\": " << request.ellipse_cx << ",\n";
+                request_file << "  \"ellipse_cy\": " << request.ellipse_cy << ",\n";
+                request_file << "  \"ellipse_rx\": " << request.ellipse_rx << ",\n";
+                request_file << "  \"ellipse_ry\": " << request.ellipse_ry << ",\n";
+                request_file << "  \"ellipse_angle_deg\": " << request.ellipse_angle_deg << ",\n";
+            }
+            if (request.has_rotated_rect_roi)
+            {
+                request_file << "  \"has_rotated_rect_roi\": true,\n";
+                request_file << "  \"rect_cx\": " << request.rect_cx << ",\n";
+                request_file << "  \"rect_cy\": " << request.rect_cy << ",\n";
+                request_file << "  \"rect_width\": " << request.rect_width << ",\n";
+                request_file << "  \"rect_height\": " << request.rect_height << ",\n";
+                request_file << "  \"rect_angle_deg\": " << request.rect_angle_deg << ",\n";
+            }
+            if (!request.template_image_path.empty())
+                request_file << "  \"template_image_path\": \"" << EscapeJson(request.template_image_path) << "\",\n";
+            if (!request.test_image_path.empty())
+                request_file << "  \"test_image_path\": \"" << EscapeJson(request.test_image_path) << "\",\n";
+            if (request.has_learn_roi)
+            {
+                request_file << "  \"has_learn_roi\": true,\n";
+                request_file << "  \"learn_roi\": {\n";
+                request_file << "    \"x\": " << request.learn_roi.x << ",\n";
+                request_file << "    \"y\": " << request.learn_roi.y << ",\n";
+                request_file << "    \"width\": " << request.learn_roi.width << ",\n";
+                request_file << "    \"height\": " << request.learn_roi.height << "\n";
+                request_file << "  },\n";
+            }
+            if (request.has_search_roi)
+            {
+                request_file << "  \"has_search_roi\": true,\n";
+                request_file << "  \"search_roi\": {\n";
+                request_file << "    \"x\": " << request.search_roi.x << ",\n";
+                request_file << "    \"y\": " << request.search_roi.y << ",\n";
+                request_file << "    \"width\": " << request.search_roi.width << ",\n";
+                request_file << "    \"height\": " << request.search_roi.height << "\n";
+                request_file << "  },\n";
+            }
+            if (request.has_expected_rect)
+            {
+                request_file << "  \"has_expected_rect\": true,\n";
+                request_file << "  \"expected_rect\": {\n";
+                request_file << "    \"x\": " << request.expected_rect.x << ",\n";
+                request_file << "    \"y\": " << request.expected_rect.y << ",\n";
+                request_file << "    \"width\": " << request.expected_rect.width << ",\n";
+                request_file << "    \"height\": " << request.expected_rect.height << "\n";
+                request_file << "  },\n";
+            }
+            request_file << "  \"threshold\": " << request.threshold << ",\n";
+            request_file << "  \"method\": " << request.method << "\n";
+            request_file << "}\n";
+        }
+
+        std::ofstream result_file(case_dir / "projection_result.json");
+        if (result_file)
+        {
+            result_file << "{\n";
+            result_file << "  \"pass\": " << (pass ? "true" : "false") << ",\n";
+            result_file << "  \"executed\": " << (projection.executed ? "true" : "false") << ",\n";
+            result_file << "  \"algorithm_ok\": " << (projection.algorithm_ok ? "true" : "false") << ",\n";
+            result_file << "  \"valid_points_count\": " << projection.valid_points_count << ",\n";
+            result_file << "  \"result_element_count\": " << result_element_count << ",\n";
+            result_file << "  \"stale_result_count\": " << stale_result_count << ",\n";
+            result_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << "\n";
+            result_file << "}\n";
+        }
+
         case_result.pass = pass;
         case_result.conclusion = pass ? "runtime_publish_verified" : "runtime_publish_incomplete";
         case_result.status = pass ? "PASS" : "FAIL";
@@ -1121,7 +1261,7 @@ bool CxShapeInteractionRunner::RunTestCase(
         ViewController viewer;
         std::string reason;
 
-        if (!viewer.TestApplyAnnotationToolManifestSnapshot(manifest, reason))
+        if (!viewer.TestApplyAnnotationToolManifestSnapshot(tool_manifest, reason))
         {
             case_result.status = "FAIL";
             case_result.conclusion = "manifest_apply_failed";

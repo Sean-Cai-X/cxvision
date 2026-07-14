@@ -145,6 +145,7 @@ public:
 
     void setmatchrectnum(int inum);
     void setmatchrect(int ix, int iy, int iw, int ih);
+    void setexpectedrect(double x0, double y0, double x1, double y1);
 
     void setmultimatchrect(int inum, int ix, int iy, int iw, int ih);
     void setmatchthre(int ithre);
@@ -355,6 +356,7 @@ private:
 
     RectsShape m_matchrects;
     gp_Rectangle m_matchrect;
+    gp_Rectangle m_expected_rect;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;

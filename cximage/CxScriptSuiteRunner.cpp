@@ -2039,11 +2039,14 @@ bool RunCxScriptSuite(
 
     if (!validation.ok)
     {
+        WriteManifestDryRunReport(imageManifest, outRoot.string());
         result.ok = false;
         result.reason = "image manifest validation failed";
         result.report_root = outRoot.string();
         return false;
     }
+
+    WriteManifestDryRunReport(imageManifest, outRoot.string());
 
     CxParameterProfileRuntime parameterProfiles;
     if (!options.parameter_profile_path.empty())

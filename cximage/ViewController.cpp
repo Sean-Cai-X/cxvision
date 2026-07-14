@@ -1,4 +1,4 @@
-﻿#include "ManualStateTestConsole.h"
+#include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include <glad/glad.h>
 
@@ -3359,8 +3359,9 @@ static std::string GenerateLocalShapeRunId()
 }
 
 bool ViewController::RunShapeInteractionSmoke(
-    const std::string& manifest_path,
+    const std::string& tool_manifest_path,
     const std::string& suite_path,
+    const std::string& image_manifest_path,
     const std::string& out_dir,
     CxShapeInteractionBatchResult& result)
 {
@@ -3374,7 +3375,7 @@ bool ViewController::RunShapeInteractionSmoke(
 
     CxShapeInteractionRunner runner;
     CxShapeInteractionOptions options;
-    options.tool_manifest_path = manifest_path;
+    options.tool_manifest_path = tool_manifest_path;
     options.test_suite_path = suite_path;
     options.out_dir = out_dir;
 
@@ -3395,20 +3396,22 @@ bool ViewController::RunShapeInteractionSmoke(
         "running",
         "run_id=" + options.run_id +
         ", suite=" + suite_path +
-        ", manifest=" + manifest_path +
+        ", manifest=" + tool_manifest_path +
+        ", image_manifest=" + image_manifest_path +
         ", out=" + out_dir);
 
     CxAnnotationToolManifestSnapshot manifest;
     CxShapeTestSuiteSnapshot suite;
+    CxScriptImageManifestRuntime image_manifest;
     std::string reason;
 
-    result.manifest_path = manifest_path;
+    result.manifest_path = tool_manifest_path;
     result.suite_path = suite_path;
 
-    bool manifest_exists = std::filesystem::exists(manifest_path);
+    bool manifest_exists = std::filesystem::exists(tool_manifest_path);
     bool suite_exists = std::filesystem::exists(suite_path);
 
-    if (!m_parserOwner.ParseAnnotationToolManifest(manifest_path, manifest, reason))
+    if (!m_parserOwner.ParseAnnotationToolManifest(tool_manifest_path, manifest, reason))
     {
         result.pass = false;
         result.failure_stage = "manifest_parse";
@@ -3416,7 +3419,7 @@ bool ViewController::RunShapeInteractionSmoke(
 
         CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse annotation manifest failed: " + reason);
 
-        WriteShapeSuiteLoadReport(out_dir, manifest_path, suite_path,
+        WriteShapeSuiteLoadReport(out_dir, tool_manifest_path, suite_path,
             manifest_exists, false, suite_exists, false, 0,
             result.failure_stage, result.reason);
 
@@ -3431,16 +3434,47 @@ bool ViewController::RunShapeInteractionSmoke(
 
         CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse shape suite failed: " + reason);
 
-        WriteShapeSuiteLoadReport(out_dir, manifest_path, suite_path,
+        WriteShapeSuiteLoadReport(out_dir, tool_manifest_path, suite_path,
             manifest_exists, true, suite_exists, false, 0,
             result.failure_stage, result.reason);
 
         return false;
     }
 
+    bool image_manifest_loaded = false;
+    if (!image_manifest_path.empty())
+    {
+        if (!LoadStage25ImageManifestJson(image_manifest_path, image_manifest, reason))
+        {
+            result.pass = false;
+            result.failure_stage = "image_manifest_load";
+            result.reason = reason;
+
+            CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "load image manifest failed: " + reason);
+
+            return false;
+        }
+
+        auto validation = ValidateStage25ImageManifest(image_manifest);
+        WriteManifestDryRunReport(image_manifest, out_dir);
+
+        if (!validation.ok)
+        {
+            result.pass = false;
+            result.failure_stage = "image_manifest_validation";
+            result.reason = "image manifest validation failed";
+
+            CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "image manifest validation failed");
+
+            return false;
+        }
+
+        image_manifest_loaded = true;
+    }
+
     CxRuntimeProjectionExecutor executor;
     CxShapeInteractionBatchResultEx ex_result;
-    const bool ok = runner.RunSuite(manifest, suite, executor, options, ex_result);
+    const bool ok = runner.RunSuite(manifest, suite, image_manifest, executor, options, ex_result);
 
     result.pass = ex_result.pass;
     for (const auto& ex_case : ex_result.extended_cases)

@@ -3,17 +3,10 @@
 
 #include <string>
 #include <opencv2/opencv.hpp>
-#include "ViewController.h"
 #include "CxScriptHeadlessRuntime.h"
 
-bool SaveCxScriptOverlayImage(
-    const ManualTestContext& context,
-    const cv::Mat& sourceImage,
-    const std::filesystem::path& outputPath,
-    std::string& outReason);
-
 bool SaveCxScriptHeadlessSummaryJson(
-    const ManualTestContext& context,
+    const CxScriptExecutionCapture& capture,
     const std::filesystem::path& outputPath,
     std::string& outReason);
 

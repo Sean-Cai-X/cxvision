@@ -26,6 +26,7 @@ struct ShapeInteractionTestOptions
     bool parse_ok = true;
     std::string manifest_path;
     std::string suite_path;
+    std::string image_manifest_path;
     std::string out_dir;
     std::string parse_reason;
 };
@@ -35,6 +36,7 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
 bool RunShapeInteractionSmokeCli(
     const std::string& manifest_path,
     const std::string& suite_path,
+    const std::string& image_manifest_path,
     const std::string& out_dir,
     CxShapeInteractionBatchResult& result);
 #endif

@@ -2,6 +2,54 @@
 #define CXIMAGE_CXSCRIPT_HEADLESS_RUNTIME_H
 
 #include <string>
+#include <vector>
+
+struct CxShapeElementSnapshot
+{
+    std::string shape_kind;
+    std::string role;
+    std::string stable_ref;
+    bool editable = false;
+    bool result_element = false;
+
+    std::vector<std::pair<double, double>> points;
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double radius_x = 0.0;
+    double radius_y = 0.0;
+    double angle_deg = 0.0;
+};
+
+struct CxScriptExecutionCapture
+{
+    bool script_compiled = false;
+    bool runtime_completed = false;
+
+    int elapsed_ms = 0;
+    int scan_line_count = 0;
+    int sample_count = 0;
+
+    int valid_points_count = 0;
+    bool has_fit_line = false;
+    bool has_fit_circle = false;
+
+    double circle_radius = 0.0;
+    double avgdist = 0.0;
+
+    bool budget_exceeded = false;
+
+    int rendered_roi_count = 0;
+    int rendered_scan_count = 0;
+    int rendered_measure_points_count = 0;
+    int rendered_result_count = 0;
+
+    int result_overlay_changed_pixels = 0;
+
+    std::string failure_stage;
+    std::string reason;
+
+    std::vector<CxShapeElementSnapshot> shapes;
+};
 
 struct CxScriptHeadlessOptions
 {
@@ -20,6 +68,10 @@ struct CxScriptHeadlessOptions
     bool save_overlay = true;
     int max_steps = 10000;
     int timeout_sec = 30;
+
+    int max_elapsed_ms = 5000;
+    int max_scan_lines = 4096;
+    int max_samples = 200000;
 
     std::string stage25_image_id;
     std::string stage25_level;

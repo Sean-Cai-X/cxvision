@@ -85,6 +85,8 @@ struct CxScriptFastMatchCase
     CxManifestRect template_rect;
 
     bool has_search_rect = false;
+    bool search_rect_defaulted = false;
+    std::string search_rect_source;
     CxManifestRect search_rect;
 
     CxManifestRect expected_rect;

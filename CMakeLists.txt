@@ -81,6 +81,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CxShapeInteractionTest.cpp
   cximage/CxShapeTestRegister.cpp
   cximage/CxShapeTestRuntime.cpp
+  cximage/CxManifestProjectionRequestResolver.cpp
   cximage/CxParamProbeRunner.cpp
   cximage/CxParserRuntimeOwner.cpp
   cximage/ManualConsoleUtils.cpp

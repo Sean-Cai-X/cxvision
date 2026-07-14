@@ -472,6 +472,31 @@ static double CxShapeTest_expectresultbox(double value)
     return 0.0;
 }
 
+static double CxShapeTest_setmanifest(const char* path)
+{
+    CxShapeTestRuntime::SetManifest(path);
+    return 0.0;
+}
+
+static double CxShapeTest_setmanifesttarget(const char* combined)
+{
+    std::string s(combined);
+    size_t comma_pos = s.find(',');
+    if (comma_pos != std::string::npos)
+    {
+        std::string image_id = s.substr(0, comma_pos);
+        std::string target_id = s.substr(comma_pos + 1);
+        CxShapeTestRuntime::SetManifestTarget(image_id, target_id);
+    }
+    return 0.0;
+}
+
+static double CxShapeTest_setmanifestmatchcase(const char* case_id)
+{
+    CxShapeTestRuntime::SetManifestMatchCase(case_id);
+    return 0.0;
+}
+
 void RegisterCxShapeTestBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxShapeTest_reset", (mu::fun_type1)&CxShapeTest_reset);
@@ -533,4 +558,7 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_expectmincandidates", (mu::fun_type1)&CxShapeTest_expectmincandidates);
     parser.DefineFun("CxShapeTest_expectminbestscore", (mu::fun_type1)&CxShapeTest_expectminbestscore);
     parser.DefineFun("CxShapeTest_expectresultbox", (mu::fun_type1)&CxShapeTest_expectresultbox);
+    parser.DefineFun("CxShapeTest_setmanifest", (mu::strfun_type1)&CxShapeTest_setmanifest);
+    parser.DefineFun("CxShapeTest_setmanifesttarget", (mu::strfun_type1)&CxShapeTest_setmanifesttarget);
+    parser.DefineFun("CxShapeTest_setmanifestmatchcase", (mu::strfun_type1)&CxShapeTest_setmanifestmatchcase);
 }

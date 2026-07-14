@@ -115,7 +115,7 @@ void CxScriptSuiteReportWriter::WriteImageManifestContractReport(
     file << "# Stage25 Image Manifest Contract Report\n\n";
     file << "- Manifest: " << manifest.manifest_path << "\n";
     file << "- Schema: " << manifest.schema_version << "\n";
-    file << "- Expected images: 13\n";
+    file << "- Images: " << manifest.total_images << "\n";
     file << "- L0: " << manifest.l0_count << "\n";
     file << "- L1: " << manifest.l1_count << "\n";
     file << "- L2: " << manifest.l2_count << "\n";

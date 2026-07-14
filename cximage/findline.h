@@ -5,6 +5,7 @@
 #include "shapebase.h"
 #include "findobject.h"
 #include "CxImageRuntimeOverlay.h"
+#include "CxAlgorithmBudget.h"
 #include <string>
 #include <map>
 #include <string>

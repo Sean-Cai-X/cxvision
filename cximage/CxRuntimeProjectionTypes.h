@@ -3,6 +3,25 @@
 
 #include <string>
 #include <map>
+#include <vector>
+#include "CxScriptImageManifestRuntime.h"
+
+struct CxShapeElementSnapshot
+{
+    std::string stable_ref;
+    std::string owner_type;
+    std::string owner_ref;
+    std::string semantic_role;
+    std::string shape_kind;
+    std::vector<double> points;
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double radius_x = 0.0;
+    double radius_y = 0.0;
+    double angle_deg = 0.0;
+    bool editable = false;
+    bool result_element = false;
+};
 
 struct CxRuntimeProjectionRequest
 {
@@ -23,18 +42,6 @@ struct CxRuntimeProjectionRequest
     double circle_px = 0.0;
     double circle_py = 0.0;
 
-    bool has_learn_roi = false;
-    double learn_x0 = 0.0;
-    double learn_y0 = 0.0;
-    double learn_x1 = 0.0;
-    double learn_y1 = 0.0;
-
-    bool has_search_roi = false;
-    double search_x0 = 0.0;
-    double search_y0 = 0.0;
-    double search_x1 = 0.0;
-    double search_y1 = 0.0;
-
     int tool_half_width = 1;
     int wgap = 2;
     int hgap = 2;
@@ -49,6 +56,32 @@ struct CxRuntimeProjectionRequest
     int compare_gap = 0;
 
     bool require_algorithm_execution = false;
+
+    bool has_ellipse_roi = false;
+    double ellipse_cx = 0.0;
+    double ellipse_cy = 0.0;
+    double ellipse_rx = 0.0;
+    double ellipse_ry = 0.0;
+    double ellipse_angle_deg = 0.0;
+
+    bool has_rotated_rect_roi = false;
+    double rect_cx = 0.0;
+    double rect_cy = 0.0;
+    double rect_width = 0.0;
+    double rect_height = 0.0;
+    double rect_angle_deg = 0.0;
+
+    std::string template_image_path;
+    std::string test_image_path;
+
+    bool has_learn_roi = false;
+    CxManifestRect learn_roi;
+
+    bool has_search_roi = false;
+    CxManifestRect search_roi;
+
+    bool has_expected_rect = false;
+    CxManifestRect expected_rect;
 };
 
 struct CxRuntimeProjectionResult
@@ -80,6 +113,8 @@ struct CxRuntimeProjectionResult
     bool has_best_result = false;
 
     std::map<std::string, int> role_counts;
+
+    std::vector<CxShapeElementSnapshot> published_shapes;
 };
 
 #endif
