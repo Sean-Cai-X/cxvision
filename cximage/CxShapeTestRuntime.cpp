@@ -209,3 +209,69 @@ void CxShapeTestRuntime::ExpectMaxResidual(double value)
     if (s_current)
         s_current->expected_max_residual = value;
 }
+
+void CxShapeTestRuntime::SetInitialLearnRect(double x0, double y0, double x1, double y1)
+{
+    if (s_current)
+    {
+        s_current->has_initial_learn_rect = true;
+        s_current->initial_learn_x0 = x0;
+        s_current->initial_learn_y0 = y0;
+        s_current->initial_learn_x1 = x1;
+        s_current->initial_learn_y1 = y1;
+    }
+}
+
+void CxShapeTestRuntime::SetInitialSearchRect(double x0, double y0, double x1, double y1)
+{
+    if (s_current)
+    {
+        s_current->has_initial_search_rect = true;
+        s_current->initial_search_x0 = x0;
+        s_current->initial_search_y0 = y0;
+        s_current->initial_search_x1 = x1;
+        s_current->initial_search_y1 = y1;
+    }
+}
+
+void CxShapeTestRuntime::SetMinScore(double value)
+{
+    if (s_current)
+        s_current->min_score = value;
+}
+
+void CxShapeTestRuntime::SetFindNum(int value)
+{
+    if (s_current)
+        s_current->find_num = value;
+}
+
+void CxShapeTestRuntime::SetCompareGap(int value)
+{
+    if (s_current)
+        s_current->compare_gap = value;
+}
+
+void CxShapeTestRuntime::ExpectMinModelPoints(int value)
+{
+    if (s_current)
+        s_current->expected_min_model_points = value;
+}
+
+void CxShapeTestRuntime::ExpectMinCandidates(int value)
+{
+    if (s_current)
+        s_current->expected_min_candidates = value;
+}
+
+void CxShapeTestRuntime::ExpectMinBestScore(double value)
+{
+    if (s_current)
+        s_current->expected_min_best_score = value;
+}
+
+void CxShapeTestRuntime::ExpectResultBox(int value)
+{
+    if (s_current)
+        s_current->expected_has_result_box = value;
+}

@@ -418,6 +418,60 @@ static double CxShapeTest_expectmaxresidual(double value)
     return 0.0;
 }
 
+static double CxShapeTest_setinitiallearnrect(double x0, double y0, double x1, double y1)
+{
+    CxShapeTestRuntime::SetInitialLearnRect(x0, y0, x1, y1);
+    return 0.0;
+}
+
+static double CxShapeTest_setinitialsearchrect(double x0, double y0, double x1, double y1)
+{
+    CxShapeTestRuntime::SetInitialSearchRect(x0, y0, x1, y1);
+    return 0.0;
+}
+
+static double CxShapeTest_setminscore(double value)
+{
+    CxShapeTestRuntime::SetMinScore(value);
+    return 0.0;
+}
+
+static double CxShapeTest_setfindnum(double value)
+{
+    CxShapeTestRuntime::SetFindNum(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_setcomparespace(double value)
+{
+    CxShapeTestRuntime::SetCompareGap(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectminmodelpoints(double value)
+{
+    CxShapeTestRuntime::ExpectMinModelPoints(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectmincandidates(double value)
+{
+    CxShapeTestRuntime::ExpectMinCandidates(static_cast<int>(value));
+    return 0.0;
+}
+
+static double CxShapeTest_expectminbestscore(double value)
+{
+    CxShapeTestRuntime::ExpectMinBestScore(value);
+    return 0.0;
+}
+
+static double CxShapeTest_expectresultbox(double value)
+{
+    CxShapeTestRuntime::ExpectResultBox(static_cast<int>(value));
+    return 0.0;
+}
+
 void RegisterCxShapeTestBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxShapeTest_reset", (mu::fun_type1)&CxShapeTest_reset);
@@ -470,4 +524,13 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_expectfitellipse", (mu::fun_type1)&CxShapeTest_expectfitellipse);
     parser.DefineFun("CxShapeTest_expectresultrect", (mu::fun_type1)&CxShapeTest_expectresultrect);
     parser.DefineFun("CxShapeTest_expectmaxresidual", (mu::fun_type1)&CxShapeTest_expectmaxresidual);
+    parser.DefineFun("CxShapeTest_setinitiallearnrect", (mu::fun_type4)&CxShapeTest_setinitiallearnrect);
+    parser.DefineFun("CxShapeTest_setinitialsearchrect", (mu::fun_type4)&CxShapeTest_setinitialsearchrect);
+    parser.DefineFun("CxShapeTest_setminscore", (mu::fun_type1)&CxShapeTest_setminscore);
+    parser.DefineFun("CxShapeTest_setfindnum", (mu::fun_type1)&CxShapeTest_setfindnum);
+    parser.DefineFun("CxShapeTest_setcomparespace", (mu::fun_type1)&CxShapeTest_setcomparespace);
+    parser.DefineFun("CxShapeTest_expectminmodelpoints", (mu::fun_type1)&CxShapeTest_expectminmodelpoints);
+    parser.DefineFun("CxShapeTest_expectmincandidates", (mu::fun_type1)&CxShapeTest_expectmincandidates);
+    parser.DefineFun("CxShapeTest_expectminbestscore", (mu::fun_type1)&CxShapeTest_expectminbestscore);
+    parser.DefineFun("CxShapeTest_expectresultbox", (mu::fun_type1)&CxShapeTest_expectresultbox);
 }

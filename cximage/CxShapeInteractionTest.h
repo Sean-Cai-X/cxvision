@@ -35,6 +35,10 @@ struct CxShapeInteractionBatchResult
 {
     bool pass = false;
     std::vector<CxShapeInteractionCaseResult> cases;
+    std::string failure_stage;
+    std::string reason;
+    std::string manifest_path;
+    std::string suite_path;
 };
 
 bool WriteShapeInteractionReportJson(
@@ -56,6 +60,18 @@ bool WriteShapeInteractionSnapshot(
     const CxShapeInteractionBatchResult& result,
     const std::string& path,
     std::string& reason);
+
+bool WriteShapeSuiteLoadReport(
+    const std::string& out_dir,
+    const std::string& manifest_path,
+    const std::string& suite_path,
+    bool manifest_exists,
+    bool manifest_parse_ok,
+    bool suite_exists,
+    bool suite_parse_ok,
+    int case_count,
+    const std::string& failure_stage,
+    const std::string& reason);
 
 bool AssertLineMoved(
     const ShapeBase& before,

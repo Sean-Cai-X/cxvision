@@ -184,7 +184,8 @@ bool ExecuteFindcircle(const CxRuntimeProjectionRequest& request,
         result.valid_points_count = tool.getvalidpointcount();
         result.has_fit_circle = tool.hasfitresult();
         result.circle_radius = tool.getradius();
-        result.avgdist = tool.getavgdist();
+        result.fit_residual = tool.getavgdist();
+        result.avgdist = result.fit_residual;
 
         result.algorithm_ok =
             result.valid_points_count >= 3 &&
@@ -350,19 +351,42 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
     if (request.owner_ref.empty())
         return Fail(result, "request_validation", "owner_ref is empty");
 
-    const int x0 = static_cast<int>(std::min(request.roi_x0, request.roi_x1));
-    const int y0 = static_cast<int>(std::min(request.roi_y0, request.roi_y1));
-    const int x1 = static_cast<int>(std::max(request.roi_x0, request.roi_x1));
-    const int y1 = static_cast<int>(std::max(request.roi_y0, request.roi_y1));
-
-    const int width = x1 - x0;
-    const int height = y1 - y0;
-
-    if (width < 2 || height < 2)
-        return Fail(result, "request_validation", "FastMatch ROI width or height is too small");
+    if (!request.has_learn_roi && !request.has_search_roi)
+        return Fail(result, "request_validation", "FastMatch requires at least one of learn_roi or search_roi");
 
     fastmatch matcher;
-    matcher.setrect(x0, y0, width, height);
+
+    if (request.has_learn_roi)
+    {
+        const int lx0 = static_cast<int>(std::min(request.learn_x0, request.learn_x1));
+        const int ly0 = static_cast<int>(std::min(request.learn_y0, request.learn_y1));
+        const int lx1 = static_cast<int>(std::max(request.learn_x0, request.learn_x1));
+        const int ly1 = static_cast<int>(std::max(request.learn_y0, request.learn_y1));
+
+        const int lwidth = lx1 - lx0;
+        const int lheight = ly1 - ly0;
+
+        if (lwidth < 2 || lheight < 2)
+            return Fail(result, "request_validation", "FastMatch learn ROI width or height is too small");
+
+        matcher.setrect(lx0, ly0, lwidth, lheight);
+    }
+
+    if (request.has_search_roi)
+    {
+        const int sx0 = static_cast<int>(std::min(request.search_x0, request.search_x1));
+        const int sy0 = static_cast<int>(std::min(request.search_y0, request.search_y1));
+        const int sx1 = static_cast<int>(std::max(request.search_x0, request.search_x1));
+        const int sy1 = static_cast<int>(std::max(request.search_y0, request.search_y1));
+
+        const int swidth = sx1 - sx0;
+        const int sheight = sy1 - sy0;
+
+        if (swidth < 2 || sheight < 2)
+            return Fail(result, "request_validation", "FastMatch search ROI width or height is too small");
+
+        matcher.setmatchrect(sx0, sy0, swidth, sheight);
+    }
 
     if (request.require_algorithm_execution)
     {
@@ -374,14 +398,17 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
         matcher.match(&image);
 
         result.valid_points_count = matcher.getmodelpointcount();
-        result.algorithm_ok = result.valid_points_count > 0;
+        result.model_point_count = matcher.getmodelpointcount();
+        result.candidate_count = matcher.getresultcandidatecount();
+        result.best_score = matcher.getresultbestscore();
+        result.algorithm_ok = result.model_point_count > 0;
         result.executed = true;
 
         if (!result.algorithm_ok)
         {
             result.failure_stage = "fastmatch_model";
             result.reason = "FastMatch model unavailable: model_points=" +
-                std::to_string(result.valid_points_count);
+                std::to_string(result.model_point_count);
         }
     }
 

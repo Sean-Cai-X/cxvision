@@ -707,3 +707,46 @@ bool WriteShapeInteractionSnapshot(const CxShapeInteractionBatchResult& result,
         return false;
     }
 }
+
+bool WriteShapeSuiteLoadReport(
+    const std::string& out_dir,
+    const std::string& manifest_path,
+    const std::string& suite_path,
+    bool manifest_exists,
+    bool manifest_parse_ok,
+    bool suite_exists,
+    bool suite_parse_ok,
+    int case_count,
+    const std::string& failure_stage,
+    const std::string& reason)
+{
+    try
+    {
+        fs::create_directories(out_dir);
+        const fs::path report_path = fs::path(out_dir) / "suite_load_report.json";
+        std::ofstream file(report_path);
+        if (!file)
+        {
+            return false;
+        }
+
+        file << "{\n";
+        file << "  \"working_directory\": \"" << fs::current_path().string() << "\",\n";
+        file << "  \"manifest_path\": \"" << manifest_path << "\",\n";
+        file << "  \"manifest_exists\": " << (manifest_exists ? "true" : "false") << ",\n";
+        file << "  \"manifest_parse_ok\": " << (manifest_parse_ok ? "true" : "false") << ",\n";
+        file << "  \"suite_path\": \"" << suite_path << "\",\n";
+        file << "  \"suite_exists\": " << (suite_exists ? "true" : "false") << ",\n";
+        file << "  \"suite_parse_ok\": " << (suite_parse_ok ? "true" : "false") << ",\n";
+        file << "  \"case_count\": " << case_count << ",\n";
+        file << "  \"failure_stage\": \"" << failure_stage << "\",\n";
+        file << "  \"reason\": \"" << reason << "\"\n";
+        file << "}\n";
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        return false;
+    }
+}

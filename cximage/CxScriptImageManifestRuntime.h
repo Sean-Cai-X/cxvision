@@ -10,15 +10,27 @@ struct CxScriptImageTargetRoi
     std::string orientation;
     std::string roi_type;
 
+    bool has_line = false;
     int x0 = 0;
     int y0 = 0;
     int x1 = 0;
     int y1 = 0;
 
+    bool has_circle = false;
     int cx = 0;
     int cy = 0;
     int px = 0;
     int py = 0;
+
+    bool has_ellipse = false;
+    double ellipse_major_radius = 0.0;
+    double ellipse_minor_radius = 0.0;
+    double ellipse_angle_deg = 0.0;
+
+    bool has_rect = false;
+    double rect_width = 0.0;
+    double rect_height = 0.0;
+    double rect_angle_deg = 0.0;
 
     int wgap = 32;
     int hgap = 8;
@@ -53,6 +65,42 @@ struct CxScriptImageManifestEntry
     std::vector<CxScriptImageTargetRoi> targets;
 };
 
+struct CxManifestRect
+{
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+struct CxScriptFastMatchCase
+{
+    std::string case_id;
+    std::string level;
+    std::string tool;
+
+    std::string template_image_id;
+    std::string test_image_id;
+
+    CxManifestRect template_rect;
+
+    bool has_search_rect = false;
+    CxManifestRect search_rect;
+
+    CxManifestRect expected_rect;
+
+    double rotation_min_deg = 0.0;
+    double rotation_max_deg = 0.0;
+    double scale_min = 1.0;
+    double scale_max = 1.0;
+
+    int candidate_budget = 0;
+
+    std::string expected_variation;
+    std::string review_focus;
+    std::string comment;
+};
+
 struct CxScriptImageManifestRuntime
 {
     std::string manifest_path;
@@ -68,6 +116,7 @@ struct CxScriptImageManifestRuntime
     int l3_count = 0;
 
     std::vector<CxScriptImageManifestEntry> images;
+    std::vector<CxScriptFastMatchCase> match_cases;
 };
 
 struct CxScriptImageManifestValidationIssue
@@ -100,3 +149,17 @@ const CxScriptImageTargetRoi* FindTargetRoiByImageAndTargetId(
     const CxScriptImageManifestRuntime& manifest,
     const std::string& image_id,
     const std::string& target_id);
+
+const CxScriptFastMatchCase* FindMatchCaseById(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& case_id);
+
+bool ParseDoubleRange(
+    const std::string& text,
+    double& out_min,
+    double& out_max,
+    std::string& reason);
+
+bool WriteManifestDryRunReport(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& output_dir);

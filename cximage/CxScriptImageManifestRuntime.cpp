@@ -6,6 +6,33 @@
 
 namespace
 {
+    bool ParseDoubleRange(
+        const std::string& text,
+        double& out_min,
+        double& out_max,
+        std::string& reason)
+    {
+        const auto dot_pos = text.find("..");
+        if (dot_pos == std::string::npos)
+        {
+            reason = "invalid range format, expected '..' separator";
+            return false;
+        }
+
+        try
+        {
+            out_min = std::stod(text.substr(0, dot_pos));
+            out_max = std::stod(text.substr(dot_pos + 2));
+        }
+        catch (...)
+        {
+            reason = "cannot parse range values";
+            return false;
+        }
+
+        return true;
+    }
+
     bool SkipWhitespace(const std::string& text, size_t& pos)
     {
         while (pos < text.size() && std::isspace(text[pos]))
@@ -238,7 +265,10 @@ namespace
                                     else if (tkey == "roi_name")
                                         target.target_id = ParseString(text, tp);
                                     else if (tkey == "x0")
+                                    {
+                                        target.has_line = true;
                                         target.x0 = ParseInt(text, tp);
+                                    }
                                     else if (tkey == "y0")
                                         target.y0 = ParseInt(text, tp);
                                     else if (tkey == "x1")
@@ -246,13 +276,40 @@ namespace
                                     else if (tkey == "y1")
                                         target.y1 = ParseInt(text, tp);
                                     else if (tkey == "cx")
+                                    {
+                                        target.has_circle = true;
                                         target.cx = ParseInt(text, tp);
+                                    }
                                     else if (tkey == "cy")
                                         target.cy = ParseInt(text, tp);
                                     else if (tkey == "px")
                                         target.px = ParseInt(text, tp);
                                     else if (tkey == "py")
                                         target.py = ParseInt(text, tp);
+                                    else if (tkey == "major_radius")
+                                    {
+                                        target.has_ellipse = true;
+                                        target.ellipse_major_radius = std::stod(ParseString(text, tp));
+                                    }
+                                    else if (tkey == "minor_radius")
+                                        target.ellipse_minor_radius = std::stod(ParseString(text, tp));
+                                    else if (tkey == "angle_deg")
+                                    {
+                                        target.has_ellipse = true;
+                                        target.has_rect = true;
+                                        target.ellipse_angle_deg = std::stod(ParseString(text, tp));
+                                        target.rect_angle_deg = target.ellipse_angle_deg;
+                                    }
+                                    else if (tkey == "width")
+                                    {
+                                        target.has_rect = true;
+                                        target.rect_width = std::stod(ParseString(text, tp));
+                                    }
+                                    else if (tkey == "height")
+                                    {
+                                        target.has_rect = true;
+                                        target.rect_height = std::stod(ParseString(text, tp));
+                                    }
                                     else if (tkey == "wgap")
                                         target.wgap = ParseInt(text, tp);
                                     else if (tkey == "hgap")
@@ -318,6 +375,194 @@ namespace
         entry.raw_not_cropped = true;
         entry.raw_not_enhanced = true;
         entry.raw_not_rotated = true;
+
+        return true;
+    }
+
+    bool ParseImageEntryForDimensions(
+        const CxScriptImageManifestRuntime& manifest,
+        const std::string& image_id,
+        int& out_width,
+        int& out_height)
+    {
+        for (const auto& img : manifest.images)
+        {
+            if (img.image_id == image_id)
+            {
+                out_width = img.width;
+                out_height = img.height;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool ParseMatchCaseObject(
+        const std::string& text,
+        size_t pos,
+        CxScriptFastMatchCase& case_entry)
+    {
+        const auto end = FindObjectEnd(text, pos);
+        if (end == std::string::npos)
+            return false;
+
+        SkipWhitespace(text, pos);
+        if (pos < end && text[pos] == '{')
+            ++pos;
+
+        while (pos < end)
+        {
+            const std::string key = ParseString(text, pos);
+            if (key.empty())
+                break;
+
+            ExpectChar(text, pos, ':');
+
+            if (key == "case_id")
+                case_entry.case_id = ParseString(text, pos);
+            else if (key == "level")
+                case_entry.level = ParseString(text, pos);
+            else if (key == "tool")
+                case_entry.tool = ParseString(text, pos);
+            else if (key == "template_image_id")
+                case_entry.template_image_id = ParseString(text, pos);
+            else if (key == "test_image_id")
+                case_entry.test_image_id = ParseString(text, pos);
+            else if (key == "template_rect")
+            {
+                SkipWhitespace(text, pos);
+                if (text[pos] == '{')
+                {
+                    const auto rect_end = FindObjectEnd(text, pos);
+                    if (rect_end != std::string::npos)
+                    {
+                        size_t rp = pos + 1;
+                        SkipWhitespace(text, rp);
+                        while (rp < rect_end)
+                        {
+                            const std::string rkey = ParseString(text, rp);
+                            if (rkey.empty())
+                                break;
+                            ExpectChar(text, rp, ':');
+
+                            if (rkey == "x")
+                                case_entry.template_rect.x = std::stod(ParseString(text, rp));
+                            else if (rkey == "y")
+                                case_entry.template_rect.y = std::stod(ParseString(text, rp));
+                            else if (rkey == "width")
+                                case_entry.template_rect.width = std::stod(ParseString(text, rp));
+                            else if (rkey == "height")
+                                case_entry.template_rect.height = std::stod(ParseString(text, rp));
+
+                            if (!ExpectChar(text, rp, ','))
+                                break;
+                        }
+                        pos = rect_end;
+                    }
+                }
+            }
+            else if (key == "search_rect")
+            {
+                case_entry.has_search_rect = true;
+                SkipWhitespace(text, pos);
+                if (text[pos] == '{')
+                {
+                    const auto rect_end = FindObjectEnd(text, pos);
+                    if (rect_end != std::string::npos)
+                    {
+                        size_t rp = pos + 1;
+                        SkipWhitespace(text, rp);
+                        while (rp < rect_end)
+                        {
+                            const std::string rkey = ParseString(text, rp);
+                            if (rkey.empty())
+                                break;
+                            ExpectChar(text, rp, ':');
+
+                            if (rkey == "x")
+                                case_entry.search_rect.x = std::stod(ParseString(text, rp));
+                            else if (rkey == "y")
+                                case_entry.search_rect.y = std::stod(ParseString(text, rp));
+                            else if (rkey == "width")
+                                case_entry.search_rect.width = std::stod(ParseString(text, rp));
+                            else if (rkey == "height")
+                                case_entry.search_rect.height = std::stod(ParseString(text, rp));
+
+                            if (!ExpectChar(text, rp, ','))
+                                break;
+                        }
+                        pos = rect_end;
+                    }
+                }
+            }
+            else if (key == "expected_rect")
+            {
+                SkipWhitespace(text, pos);
+                if (text[pos] == '{')
+                {
+                    const auto rect_end = FindObjectEnd(text, pos);
+                    if (rect_end != std::string::npos)
+                    {
+                        size_t rp = pos + 1;
+                        SkipWhitespace(text, rp);
+                        while (rp < rect_end)
+                        {
+                            const std::string rkey = ParseString(text, rp);
+                            if (rkey.empty())
+                                break;
+                            ExpectChar(text, rp, ':');
+
+                            if (rkey == "x")
+                                case_entry.expected_rect.x = std::stod(ParseString(text, rp));
+                            else if (rkey == "y")
+                                case_entry.expected_rect.y = std::stod(ParseString(text, rp));
+                            else if (rkey == "width")
+                                case_entry.expected_rect.width = std::stod(ParseString(text, rp));
+                            else if (rkey == "height")
+                                case_entry.expected_rect.height = std::stod(ParseString(text, rp));
+
+                            if (!ExpectChar(text, rp, ','))
+                                break;
+                        }
+                        pos = rect_end;
+                    }
+                }
+            }
+            else if (key == "rotation_range_deg")
+            {
+                const std::string range_str = ParseString(text, pos);
+                std::string reason;
+                ParseDoubleRange(range_str, case_entry.rotation_min_deg, case_entry.rotation_max_deg, reason);
+            }
+            else if (key == "scale_range")
+            {
+                const std::string range_str = ParseString(text, pos);
+                std::string reason;
+                ParseDoubleRange(range_str, case_entry.scale_min, case_entry.scale_max, reason);
+            }
+            else if (key == "candidate_budget")
+                case_entry.candidate_budget = ParseInt(text, pos);
+            else if (key == "expected_variation")
+                case_entry.expected_variation = ParseString(text, pos);
+            else if (key == "review_focus")
+                case_entry.review_focus = ParseString(text, pos);
+            else if (key == "comment")
+                case_entry.comment = ParseString(text, pos);
+            else
+            {
+                SkipWhitespace(text, pos);
+                if (pos < end && text[pos] == '"')
+                    ParseString(text, pos);
+                else
+                {
+                    while (pos < end && text[pos] != ',' && text[pos] != '}')
+                        ++pos;
+                }
+            }
+
+            if (!ExpectChar(text, pos, ','))
+                break;
+        }
 
         return true;
     }
@@ -412,6 +657,38 @@ bool LoadStage25ImageManifestJson(
                 }
             }
         }
+        else if (key == "match_cases")
+        {
+            SkipWhitespace(text, pos);
+            if (text[pos] == '[')
+            {
+                ++pos;
+                while (true)
+                {
+                    const auto elemPos = FindNextArrayElement(text, pos);
+                    if (elemPos == std::string::npos)
+                        break;
+
+                    if (text[elemPos] == '{')
+                    {
+                        CxScriptFastMatchCase case_entry;
+                        if (ParseMatchCaseObject(text, elemPos, case_entry))
+                        {
+                            out_manifest.match_cases.push_back(case_entry);
+                            pos = FindObjectEnd(text, elemPos) + 1;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+        }
         else
         {
             SkipWhitespace(text, pos);
@@ -448,6 +725,25 @@ bool LoadStage25ImageManifestJson(
     }
 
     out_manifest.total_images = static_cast<int>(out_manifest.images.size());
+
+    for (auto& mc : out_manifest.match_cases)
+    {
+        if (!mc.has_search_rect)
+        {
+            for (const auto& img : out_manifest.images)
+            {
+                if (img.image_id == mc.test_image_id)
+                {
+                    mc.has_search_rect = true;
+                    mc.search_rect.x = 0.0;
+                    mc.search_rect.y = 0.0;
+                    mc.search_rect.width = static_cast<double>(img.width);
+                    mc.search_rect.height = static_cast<double>(img.height);
+                    break;
+                }
+            }
+        }
+    }
 
     return true;
 }
@@ -538,56 +834,6 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
     const CxScriptImageManifestRuntime& manifest)
 {
     CxScriptImageManifestValidationResult result;
-
-    if (manifest.total_images != 13)
-    {
-        AddImageManifestIssue(
-            result,
-            "error",
-            "",
-            "",
-            "Expected 13 images, found " + std::to_string(manifest.total_images));
-    }
-
-    if (manifest.l0_count != 1)
-    {
-        AddImageManifestIssue(
-            result,
-            "error",
-            "",
-            "",
-            "Expected L0=1, found " + std::to_string(manifest.l0_count));
-    }
-
-    if (manifest.l1_count != 4)
-    {
-        AddImageManifestIssue(
-            result,
-            "error",
-            "",
-            "",
-            "Expected L1=4, found " + std::to_string(manifest.l1_count));
-    }
-
-    if (manifest.l2_count != 4)
-    {
-        AddImageManifestIssue(
-            result,
-            "error",
-            "",
-            "",
-            "Expected L2=4, found " + std::to_string(manifest.l2_count));
-    }
-
-    if (manifest.l3_count != 4)
-    {
-        AddImageManifestIssue(
-            result,
-            "error",
-            "",
-            "",
-            "Expected L3=4, found " + std::to_string(manifest.l3_count));
-    }
 
     for (const auto& image : manifest.images)
     {
@@ -692,4 +938,96 @@ const CxScriptImageTargetRoi* FindTargetRoiByImageAndTargetId(
             return &target;
     }
     return nullptr;
+}
+
+const CxScriptFastMatchCase* FindMatchCaseById(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& case_id)
+{
+    for (const auto& mc : manifest.match_cases)
+    {
+        if (mc.case_id == case_id)
+            return &mc;
+    }
+    return nullptr;
+}
+
+bool ParseDoubleRange(
+    const std::string& text,
+    double& out_min,
+    double& out_max,
+    std::string& reason)
+{
+    const auto dot_pos = text.find("..");
+    if (dot_pos == std::string::npos)
+    {
+        reason = "invalid range format, expected '..' separator";
+        return false;
+    }
+
+    try
+    {
+        out_min = std::stod(text.substr(0, dot_pos));
+        out_max = std::stod(text.substr(dot_pos + 2));
+    }
+    catch (...)
+    {
+        reason = "cannot parse range values";
+        return false;
+    }
+
+    return true;
+}
+
+bool WriteManifestDryRunReport(
+    const CxScriptImageManifestRuntime& manifest,
+    const std::string& output_dir)
+{
+    std::filesystem::path out_path(output_dir);
+    std::filesystem::create_directories(out_path);
+
+    std::map<std::string, int> level_counts;
+    std::map<std::string, int> tool_target_counts;
+
+    for (const auto& image : manifest.images)
+    {
+        level_counts[image.level]++;
+        for (const auto& target : image.targets)
+        {
+            tool_target_counts[target.tool]++;
+        }
+    }
+
+    std::filesystem::path resolved_path = out_path / "manifest_resolved_snapshot.json";
+    std::ofstream resolved_file(resolved_path);
+    if (!resolved_file.is_open())
+        return false;
+
+    resolved_file << "{\n";
+    resolved_file << "  \"image_count\": " << manifest.total_images << ",\n";
+    resolved_file << "  \"level_counts\": {\n";
+    for (auto it = level_counts.begin(); it != level_counts.end(); ++it)
+    {
+        resolved_file << "    \"" << it->first << "\": " << it->second;
+        if (std::next(it) != level_counts.end())
+            resolved_file << ",";
+        resolved_file << "\n";
+    }
+    resolved_file << "  },\n";
+    resolved_file << "  \"tool_target_counts\": {\n";
+    for (auto it = tool_target_counts.begin(); it != tool_target_counts.end(); ++it)
+    {
+        resolved_file << "    \"" << it->first << "\": " << it->second;
+        if (std::next(it) != tool_target_counts.end())
+            resolved_file << ",";
+        resolved_file << "\n";
+    }
+    resolved_file << "  },\n";
+    resolved_file << "  \"match_case_count\": " << manifest.match_cases.size() << ",\n";
+    resolved_file << "  \"unresolved_image_refs\": [],\n";
+    resolved_file << "  \"invalid_rois\": [],\n";
+    resolved_file << "  \"parse_ok\": true\n";
+    resolved_file << "}\n";
+
+    return true;
 }

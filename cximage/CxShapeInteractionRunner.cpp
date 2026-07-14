@@ -783,6 +783,24 @@ bool CxShapeInteractionRunner::RunTestCase(
             request.roi_y1 = tc.initial_ey + tc.initial_ery;
         }
 
+        if (tc.has_initial_learn_rect)
+        {
+            request.has_learn_roi = true;
+            request.learn_x0 = tc.initial_learn_x0;
+            request.learn_y0 = tc.initial_learn_y0;
+            request.learn_x1 = tc.initial_learn_x1;
+            request.learn_y1 = tc.initial_learn_y1;
+        }
+
+        if (tc.has_initial_search_rect)
+        {
+            request.has_search_roi = true;
+            request.search_x0 = tc.initial_search_x0;
+            request.search_y0 = tc.initial_search_y0;
+            request.search_x1 = tc.initial_search_x1;
+            request.search_y1 = tc.initial_search_y1;
+        }
+
         request.tool_half_width = tc.tool_half_width;
         request.wgap = tc.wgap;
         request.hgap = tc.hgap;
@@ -791,6 +809,9 @@ bool CxShapeInteractionRunner::RunTestCase(
         request.threshold = tc.threshold;
         request.method = tc.method;
         request.filter_profile = tc.filter_profile;
+        request.min_score = tc.min_score;
+        request.find_num = tc.find_num;
+        request.compare_gap = tc.compare_gap;
         request.require_algorithm_execution = (tc.operation == "runtime_result_publish");
 
         CxRuntimeProjectionResult projection;
@@ -932,6 +953,43 @@ bool CxShapeInteractionRunner::RunTestCase(
                     std::to_string(projection.fit_residual) +
                     ", max=" +
                     std::to_string(tc.expected_max_residual) + "); ";
+            }
+
+            if (tc.expected_min_model_points >= 0 &&
+                projection.model_point_count < tc.expected_min_model_points)
+            {
+                pass = false;
+                reason += "model point count below expectation (actual=" +
+                    std::to_string(projection.model_point_count) +
+                    ", expected_min=" +
+                    std::to_string(tc.expected_min_model_points) + "); ";
+            }
+
+            if (tc.expected_min_candidates >= 0 &&
+                projection.candidate_count < tc.expected_min_candidates)
+            {
+                pass = false;
+                reason += "candidate count below expectation (actual=" +
+                    std::to_string(projection.candidate_count) +
+                    ", expected_min=" +
+                    std::to_string(tc.expected_min_candidates) + "); ";
+            }
+
+            if (tc.expected_min_best_score >= 0.0 &&
+                projection.best_score < tc.expected_min_best_score)
+            {
+                pass = false;
+                reason += "best score below expectation (actual=" +
+                    std::to_string(projection.best_score) +
+                    ", expected_min=" +
+                    std::to_string(tc.expected_min_best_score) + "); ";
+            }
+
+            if (tc.expected_has_result_box >= 0 &&
+                projection.has_result_box != (tc.expected_has_result_box == 1))
+            {
+                pass = false;
+                reason += "result box expectation mismatch; ";
             }
 
             if (!projection.failure_stage.empty())

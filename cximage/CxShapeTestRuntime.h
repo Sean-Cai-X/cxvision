@@ -103,6 +103,27 @@ struct CxShapeTestCase
 
     double expected_min_radius = -1.0;
     double expected_max_residual = -1.0;
+
+    bool has_initial_learn_rect = false;
+    double initial_learn_x0 = 0.0;
+    double initial_learn_y0 = 0.0;
+    double initial_learn_x1 = 0.0;
+    double initial_learn_y1 = 0.0;
+
+    bool has_initial_search_rect = false;
+    double initial_search_x0 = 0.0;
+    double initial_search_y0 = 0.0;
+    double initial_search_x1 = 0.0;
+    double initial_search_y1 = 0.0;
+
+    double min_score = 0.0;
+    int find_num = 1;
+    int compare_gap = 0;
+
+    int expected_min_model_points = -1;
+    int expected_min_candidates = -1;
+    double expected_min_best_score = -1.0;
+    int expected_has_result_box = -1;
 };
 
 class CxShapeTestRuntime
@@ -137,6 +158,18 @@ public:
     static void ExpectFitEllipse(int value);
     static void ExpectResultRect(int value);
     static void ExpectMaxResidual(double value);
+
+    static void SetInitialLearnRect(double x0, double y0, double x1, double y1);
+    static void SetInitialSearchRect(double x0, double y0, double x1, double y1);
+
+    static void SetMinScore(double value);
+    static void SetFindNum(int value);
+    static void SetCompareGap(int value);
+
+    static void ExpectMinModelPoints(int value);
+    static void ExpectMinCandidates(int value);
+    static void ExpectMinBestScore(double value);
+    static void ExpectResultBox(int value);
 
 private:
     static std::vector<CxShapeTestCase> s_cases;

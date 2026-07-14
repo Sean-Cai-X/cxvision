@@ -81,14 +81,23 @@ struct CxScriptHeadlessOptions
 struct CxScriptHeadlessResult
 {
     bool ok = false;
+    bool launched = false;
+    bool executed = false;
+    bool runtime_ok = false;
+    bool timed_out = false;
+    bool assets_complete = false;
 
     int exit_code = 0;
 
+    std::string failure_stage;
     std::string reason;
 
     std::string snapshot_path;
     std::string overlay_path;
     std::string summary_path;
+    std::string result_overlay_path;
+    std::string evidence_overlay_path;
+    std::string tool_display_path;
     std::string runtime_log_path;
 
     std::string run_state;
@@ -98,6 +107,21 @@ struct CxScriptHeadlessResult
     std::string current_result_name;
     std::string current_result_status;
     std::string current_result_reason;
+
+    int points_count = 0;
+    int valid_points_count = 0;
+    bool has_fit_line = false;
+    bool has_fit_circle = false;
+
+    int model_point_count = 0;
+    int candidate_count = 0;
+    double best_score = 0.0;
+
+    double local_support = 0.0;
+    double local_mean_distance = 0.0;
+    double fit_offset = 0.0;
+    double circle_radius = 0.0;
+    double avgdist = 0.0;
 };
 
 bool RunCxScriptHeadless(

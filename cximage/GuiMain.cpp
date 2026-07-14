@@ -76,6 +76,15 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
             continue;
         }
 
+        if (arg == "--shape_suite" || arg == "--out_dir")
+        {
+            options.parse_ok = false;
+            options.parse_reason =
+                "unsupported option '" + arg +
+                "'; use --shape-interaction-suite and --out";
+            return false;
+        }
+
         if (arg.find("--shape-interaction") == 0 ||
             arg.find("--shape_interaction") == 0)
         {
@@ -130,6 +139,12 @@ int RunCxVisionApplication(int argc, char** argv)
                                                     [](const auto& c) { return c.pass; }) << "\n";
         std::cout << "fail_count=" << std::count_if(result.cases.begin(), result.cases.end(),
                                                     [](const auto& c) { return !c.pass; }) << "\n";
+
+        if (!result.failure_stage.empty())
+        {
+            std::cout << "failure_stage=" << result.failure_stage << "\n";
+            std::cout << "reason=" << result.reason << "\n";
+        }
 
         for (const auto& c : result.cases)
         {

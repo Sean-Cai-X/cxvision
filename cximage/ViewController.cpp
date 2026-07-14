@@ -3402,17 +3402,39 @@ bool ViewController::RunShapeInteractionSmoke(
     CxShapeTestSuiteSnapshot suite;
     std::string reason;
 
+    result.manifest_path = manifest_path;
+    result.suite_path = suite_path;
+
+    bool manifest_exists = std::filesystem::exists(manifest_path);
+    bool suite_exists = std::filesystem::exists(suite_path);
+
     if (!m_parserOwner.ParseAnnotationToolManifest(manifest_path, manifest, reason))
     {
         result.pass = false;
+        result.failure_stage = "manifest_parse";
+        result.reason = reason;
+
         CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse annotation manifest failed: " + reason);
+
+        WriteShapeSuiteLoadReport(out_dir, manifest_path, suite_path,
+            manifest_exists, false, suite_exists, false, 0,
+            result.failure_stage, result.reason);
+
         return false;
     }
 
     if (!m_parserOwner.ParseShapeInteractionSuite(suite_path, suite, reason))
     {
         result.pass = false;
+        result.failure_stage = "suite_parse";
+        result.reason = reason;
+
         CXLOG_ERROR("ViewController", "shape_smoke_dispatch", "failed", "parse shape suite failed: " + reason);
+
+        WriteShapeSuiteLoadReport(out_dir, manifest_path, suite_path,
+            manifest_exists, true, suite_exists, false, 0,
+            result.failure_stage, result.reason);
+
         return false;
     }
 
