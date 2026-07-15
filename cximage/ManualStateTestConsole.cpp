@@ -123,22 +123,48 @@ void ViewController::initManualStateTestConsole()
     m_manualTest.manifest_path = "cxparser/cxscript/module/cximage/image_manifest.cxsc";
 }
 
-void ViewController::LoadBoundStateToManualConsole(const std::string& nodeId, const std::string& scriptPath)
+bool ViewController::LoadBoundStateToManualConsole(
+    const std::string& nodeId,
+    const std::string& scriptPath,
+    std::string& reason)
 {
-    m_manualTest.active_script_case_name = nodeId; m_manualTest.active_script_case_path = scriptPath; if (!scriptPath.empty())
+    m_manualTest.active_script_case_name = nodeId;
+    m_manualTest.active_script_case_path = scriptPath;
+    if (scriptPath.empty())
     {
-        std::string text;
-        if (ReadTextFile(scriptPath, text))
-        {
-            m_manualTest.editor_text = text;
-            m_manualTest.loaded_script_path = scriptPath;
-            m_manualTest.script_file_path = scriptPath;
-            m_manualTest.editor_source = "catalog";
-            m_manualTest.editor_dirty = false;
-            m_manualTest.analyzed_text.clear();
-            m_manualTest.current_line = 0;
-        }
+        reason = "semantic node has no bound script path";
+        m_manualTest.debug_status = "script_load_failed";
+        m_manualTest.debug_reason = reason;
+        return false;
     }
+
+    const std::filesystem::path resolved = ResolveWorkspaceFile(scriptPath);
+    std::string text;
+    if (!ReadTextFile(resolved.string(), text))
+    {
+        reason = "cannot read bound catalog script: " + resolved.string();
+        m_manualTest.editor_text.clear();
+        m_manualTest.loaded_script_path.clear();
+        m_manualTest.script_file_path.clear();
+        m_manualTest.editor_dirty = false;
+        m_manualTest.analyzed_text.clear();
+        m_manualTest.debug_status = "script_load_failed";
+        m_manualTest.debug_reason = reason;
+        return false;
+    }
+
+    m_manualTest.editor_text = text;
+    m_manualTest.loaded_script_path = resolved.string();
+    m_manualTest.script_file_path = resolved.string();
+    m_manualTest.editor_source = "semantic_flow";
+    m_manualTest.editor_dirty = false;
+    m_manualTest.analyzed_text.clear();
+    m_manualTest.current_line = 0;
+    m_manualTest.run_state = "ready";
+    m_manualTest.debug_status = "script_loaded";
+    m_manualTest.debug_reason = "loaded exact bound script: " + scriptPath;
+    reason = m_manualTest.debug_reason;
+    return true;
 }
 
 void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,

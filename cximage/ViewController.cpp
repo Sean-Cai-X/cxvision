@@ -631,19 +631,33 @@ void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
 
   if (action.type == SemanticFlowActionType::LoadBoundScript)
   {
-    LoadBoundStateToManualConsole(action.node_id, action.script_path);
+    std::string reason;
+    const bool loaded = LoadBoundStateToManualConsole(
+      action.node_id, action.script_path, reason);
 
     m_scriptResult.source = "semantic_flow";
-    m_scriptResult.status = "PENDING";
+    m_scriptResult.status = loaded ? "PENDING" : "FAIL";
     m_scriptResult.script_path = action.script_path;
-    m_scriptResult.reason = "semantic node script loaded to Manual State Test Console";
-    m_scriptResult.runtime_fillback_status = "semantic_node_loaded";
+    m_scriptResult.reason = reason;
+    m_scriptResult.runtime_fillback_status = loaded
+      ? "semantic_node_loaded"
+      : "semantic_node_load_failed";
     return;
   }
 
   if (action.type == SemanticFlowActionType::RunBoundScript)
   {
-    LoadBoundStateToManualConsole(action.node_id, action.script_path);
+    std::string loadReason;
+    if (!LoadBoundStateToManualConsole(
+          action.node_id, action.script_path, loadReason))
+    {
+      m_scriptResult.source = "semantic_flow";
+      m_scriptResult.status = "FAIL";
+      m_scriptResult.script_path = action.script_path;
+      m_scriptResult.reason = loadReason;
+      m_scriptResult.runtime_fillback_status = "semantic_node_load_failed";
+      return;
+    }
 
     m_scriptResult = RunCxScript(action.script_path);
     RefreshRuntimeObjectTable("Flow Run",
@@ -1370,6 +1384,12 @@ void ViewController::UpdateImageViewImage(const cv::Mat& image)
         m_annotationStatus = "image size changed; annotation refs cleared";
     }
     image.copyTo(m_imageViewImage);
+    if (!m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage))
+    {
+        m_manualTest.debug_status = "image_bind_failed";
+        m_manualTest.debug_reason =
+            "Image View loaded, but global_matInput binding failed";
+    }
     if (m_imageViewTexture != 0)
     {
         glDeleteTextures(1, &m_imageViewTexture);
@@ -1777,6 +1797,7 @@ m_gpath.SetView(m_myView);
     else
     {
         m_parserOwner.ConfigureStreams(&m_os, &m_createcodeos);
+        m_parserDebugBridge.Bind(&m_parserOwner);
     }
 
     initialparser();

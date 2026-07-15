@@ -249,6 +249,23 @@ bool SemanticFlowGraph::BindScriptToNode(int node_index,
     return false;
   }
 
+  const fs::path resolved = fs::path(script_path).is_absolute()
+    ? fs::path(script_path)
+    : fs::path(m_repositoryRoot) / fs::path(script_path);
+  if (!fs::exists(resolved) || !fs::is_regular_file(resolved))
+  {
+    out_reason = "selected catalog script does not exist: " +
+      resolved.lexically_normal().generic_string();
+    m_lastLog = out_reason;
+    return false;
+  }
+  if (resolved.extension() != ".cxsc")
+  {
+    out_reason = "selected catalog entry is not a .cxsc script";
+    m_lastLog = out_reason;
+    return false;
+  }
+
   SemanticNode& node = m_flow.nodes[static_cast<std::size_t>(node_index)];
   node.script_path = script_path;
   node.status = "ready";
@@ -424,6 +441,7 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
       node->status = "running";
       action.type = SemanticFlowActionType::RunBoundScript;
       action.node_index = m_flow.selected_node_index;
+      action.node_id = node->id;
       action.script_path = node->script_path;
     }
   }

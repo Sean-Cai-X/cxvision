@@ -258,11 +258,45 @@ void CxParserRuntimeOwner::ClearAll()
         m_runtime->ClearAll();
 }
 
+void CxParserRuntimeOwner::StopRun()
+{
+    if (m_runtime)
+        m_runtime->StopRun();
+}
+
 bool CxParserRuntimeOwner::IsObjectVar(const char* sz)
 {
     if (!m_runtime)
         return false;
     return m_runtime->IsObjectVar(sz);
+}
+
+bool CxParserRuntimeOwner::DefineExternalDouble(
+    const std::string& name,
+    double* value,
+    std::string& reason)
+{
+    if (!m_initialized || !m_runtime)
+    {
+        reason = "parser owner is not initialized";
+        return false;
+    }
+    if (name.empty() || value == nullptr)
+    {
+        reason = "external numeric input is invalid";
+        return false;
+    }
+    try
+    {
+        m_runtime->m_parser.DefineVar(name, value);
+        reason.clear();
+        return true;
+    }
+    catch (...)
+    {
+        reason = "failed to bind external numeric input: " + name;
+        return false;
+    }
 }
 
 bool CxParserRuntimeOwner::ParseAnnotationToolManifest(

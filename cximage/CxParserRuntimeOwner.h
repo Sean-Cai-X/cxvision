@@ -78,7 +78,12 @@ public:
     void* GetClassObj(const std::string& strclass, const int& iobjnum);
     void* GetDoubleValue(const std::string& strname);
     void ClearAll();
+    void StopRun();
     bool IsObjectVar(const char* sz);
+    bool DefineExternalDouble(
+        const std::string& name,
+        double* value,
+        std::string& reason);
 
 private:
     bool ReadScript(

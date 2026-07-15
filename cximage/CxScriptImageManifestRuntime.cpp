@@ -287,6 +287,92 @@ namespace
         return std::string::npos;
     }
 
+    size_t FindArrayEnd(const std::string& text, size_t start)
+    {
+        int depth = 1;
+        bool inString = false;
+        bool escaped = false;
+
+        for (size_t i = start + 1; i < text.size(); ++i)
+        {
+            const char ch = text[i];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (ch == '\\')
+                {
+                    escaped = true;
+                }
+                else if (ch == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (ch == '[')
+                ++depth;
+            else if (ch == ']')
+            {
+                --depth;
+                if (depth == 0)
+                    return i;
+            }
+        }
+        return std::string::npos;
+    }
+
+    bool ParseManifestRectObject(
+        const std::string& text,
+        size_t pos,
+        CxManifestRect& out_rect)
+    {
+        SkipWhitespace(text, pos);
+        if (pos >= text.size() || text[pos] != '{')
+            return false;
+
+        const auto rect_end = FindObjectEnd(text, pos);
+        if (rect_end == std::string::npos)
+            return false;
+
+        size_t rp = pos + 1;
+        SkipWhitespace(text, rp);
+        while (rp < rect_end)
+        {
+            const std::string rkey = ParseString(text, rp);
+            if (rkey.empty())
+                break;
+            ExpectChar(text, rp, ':');
+
+            double value = 0.0;
+            std::string reason;
+            if (!ParseJsonDouble(text, rp, value, reason))
+                return false;
+
+            if (rkey == "x")
+                out_rect.x = value;
+            else if (rkey == "y")
+                out_rect.y = value;
+            else if (rkey == "width")
+                out_rect.width = value;
+            else if (rkey == "height")
+                out_rect.height = value;
+
+            if (!ExpectChar(text, rp, ','))
+                break;
+        }
+        return true;
+    }
+
     bool ParseImageObject(
         const std::string& text,
         size_t pos,
@@ -640,103 +726,34 @@ namespace
                 case_entry.test_image_id = ParseString(text, pos);
             else if (key == "template_rect")
             {
-                SkipWhitespace(text, pos);
-                if (text[pos] == '{')
-                {
-                    const auto rect_end = FindObjectEnd(text, pos);
-                    if (rect_end != std::string::npos)
-                    {
-                        size_t rp = pos + 1;
-                        SkipWhitespace(text, rp);
-                        while (rp < rect_end)
-                        {
-                            const std::string rkey = ParseString(text, rp);
-                            if (rkey.empty())
-                                break;
-                            ExpectChar(text, rp, ':');
-
-                            if (rkey == "x")
-                                case_entry.template_rect.x = std::stod(ParseString(text, rp));
-                            else if (rkey == "y")
-                                case_entry.template_rect.y = std::stod(ParseString(text, rp));
-                            else if (rkey == "width")
-                                case_entry.template_rect.width = std::stod(ParseString(text, rp));
-                            else if (rkey == "height")
-                                case_entry.template_rect.height = std::stod(ParseString(text, rp));
-
-                            if (!ExpectChar(text, rp, ','))
-                                break;
-                        }
-                        pos = rect_end;
-                    }
-                }
+                size_t rect_pos = pos;
+                SkipWhitespace(text, rect_pos);
+                const auto rect_end = FindObjectEnd(text, rect_pos);
+                if (!ParseManifestRectObject(text, rect_pos, case_entry.template_rect) ||
+                    rect_end == std::string::npos)
+                    return false;
+                pos = rect_end + 1;
             }
             else if (key == "search_rect")
             {
                 case_entry.has_search_rect = true;
-                SkipWhitespace(text, pos);
-                if (text[pos] == '{')
-                {
-                    const auto rect_end = FindObjectEnd(text, pos);
-                    if (rect_end != std::string::npos)
-                    {
-                        size_t rp = pos + 1;
-                        SkipWhitespace(text, rp);
-                        while (rp < rect_end)
-                        {
-                            const std::string rkey = ParseString(text, rp);
-                            if (rkey.empty())
-                                break;
-                            ExpectChar(text, rp, ':');
-
-                            if (rkey == "x")
-                                case_entry.search_rect.x = std::stod(ParseString(text, rp));
-                            else if (rkey == "y")
-                                case_entry.search_rect.y = std::stod(ParseString(text, rp));
-                            else if (rkey == "width")
-                                case_entry.search_rect.width = std::stod(ParseString(text, rp));
-                            else if (rkey == "height")
-                                case_entry.search_rect.height = std::stod(ParseString(text, rp));
-
-                            if (!ExpectChar(text, rp, ','))
-                                break;
-                        }
-                        pos = rect_end;
-                    }
-                }
+                size_t rect_pos = pos;
+                SkipWhitespace(text, rect_pos);
+                const auto rect_end = FindObjectEnd(text, rect_pos);
+                if (!ParseManifestRectObject(text, rect_pos, case_entry.search_rect) ||
+                    rect_end == std::string::npos)
+                    return false;
+                pos = rect_end + 1;
             }
             else if (key == "expected_rect")
             {
-                SkipWhitespace(text, pos);
-                if (text[pos] == '{')
-                {
-                    const auto rect_end = FindObjectEnd(text, pos);
-                    if (rect_end != std::string::npos)
-                    {
-                        size_t rp = pos + 1;
-                        SkipWhitespace(text, rp);
-                        while (rp < rect_end)
-                        {
-                            const std::string rkey = ParseString(text, rp);
-                            if (rkey.empty())
-                                break;
-                            ExpectChar(text, rp, ':');
-
-                            if (rkey == "x")
-                                case_entry.expected_rect.x = std::stod(ParseString(text, rp));
-                            else if (rkey == "y")
-                                case_entry.expected_rect.y = std::stod(ParseString(text, rp));
-                            else if (rkey == "width")
-                                case_entry.expected_rect.width = std::stod(ParseString(text, rp));
-                            else if (rkey == "height")
-                                case_entry.expected_rect.height = std::stod(ParseString(text, rp));
-
-                            if (!ExpectChar(text, rp, ','))
-                                break;
-                        }
-                        pos = rect_end;
-                    }
-                }
+                size_t rect_pos = pos;
+                SkipWhitespace(text, rect_pos);
+                const auto rect_end = FindObjectEnd(text, rect_pos);
+                if (!ParseManifestRectObject(text, rect_pos, case_entry.expected_rect) ||
+                    rect_end == std::string::npos)
+                    return false;
+                pos = rect_end + 1;
             }
             else if (key == "rotation_range_deg")
             {
@@ -838,6 +855,7 @@ bool LoadStage25ImageManifestJson(
             SkipWhitespace(text, pos);
             if (text[pos] == '[')
             {
+                const auto array_end = FindArrayEnd(text, pos);
                 ++pos;
                 while (true)
                 {
@@ -872,6 +890,8 @@ bool LoadStage25ImageManifestJson(
                         break;
                     }
                 }
+                if (array_end != std::string::npos)
+                    pos = array_end + 1;
             }
         }
         else if (key == "match_cases")
@@ -879,6 +899,7 @@ bool LoadStage25ImageManifestJson(
             SkipWhitespace(text, pos);
             if (text[pos] == '[')
             {
+                const auto array_end = FindArrayEnd(text, pos);
                 ++pos;
                 while (true)
                 {
@@ -904,6 +925,8 @@ bool LoadStage25ImageManifestJson(
                         break;
                     }
                 }
+                if (array_end != std::string::npos)
+                    pos = array_end + 1;
             }
         }
         else

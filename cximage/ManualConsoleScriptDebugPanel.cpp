@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ManualConsoleScriptDebugPanel.h"
 #include "ManualConsoleCxScriptDebug.h"
+#include "ManualConsoleUtils.h"
 #include "ManualStateTestConsole.h"
 
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
@@ -17,12 +18,14 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
   int source_index = 0;
   if (context.editor_source == "catalog") source_index = 1;
   else if (context.editor_source == "direct_file") source_index = 2;
+  else if (context.editor_source == "semantic_flow") source_index = 3;
   if (ImGui::Combo("##source", &source_index,
-                   "internal\0catalog\0direct_file\0"))
+                   "manual\0catalog\0direct_file\0semantic_flow\0"))
   {
     if (source_index == 0) context.editor_source = "manual";
     else if (source_index == 1) context.editor_source = "catalog";
     else if (source_index == 2) context.editor_source = "direct_file";
+    else if (source_index == 3) context.editor_source = "semantic_flow";
   }
   ImGui::PopItemWidth();
 
@@ -47,20 +50,17 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
   if (context.editor_dirty)
     ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "*");
 
+  if (!context.loaded_script_path.empty())
+    ImGui::TextWrapped("Loaded: %s", context.loaded_script_path.c_str());
+
   ImGui::EndChild();
 
   ImGui::BeginChild("script_editor_text", ImVec2(-1, -1), true);
-  ImGuiInputTextFlags flags = ImGuiInputTextFlags_AllowTabInput |
-                              ImGuiInputTextFlags_EnterReturnsTrue |
-                              ImGuiInputTextFlags_CtrlEnterForNewLine |
-                              ImGuiInputTextFlags_AutoSelectAll;
-  if (ImGui::InputTextMultiline("##script_text",
-                                 context.editor_text.data(),
-                                 context.editor_text.size() + 1,
-                                 ImVec2(-1, -1),
-                                 flags))
+  if (InputTextMultilineString(
+        "##script_text", context.editor_text, ImVec2(-1, -1)))
   {
     context.editor_dirty = true;
+    context.analyzed_text.clear();
   }
   ImGui::EndChild();
 
@@ -76,18 +76,64 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
   const float btnWidth = 90.0f;
 
+  ImGui::TextDisabled(
+    "Compile: source preflight/line analysis; Run: execute exact editor text via CxParserRuntime::Compile");
+
   if (ImGui::Button("Compile", ImVec2(btnWidth, 0)))
   {
-    AnalyzeScript(context);
     context.debug_action = "Compile";
-    context.debug_status = "PENDING";
-    context.debug_reason = "Script analyzed";
+    if (context.editor_text.empty())
+    {
+      context.debug_status = "compile_failed";
+      context.debug_reason = "Script Editor is empty";
+    }
+    else
+    {
+      AnalyzeScript(context);
+      context.debug_status = "source_analyzed";
+      context.debug_reason =
+        "CxScript source analyzed; Run executes the exact editor text";
+    }
   }
 
   ImGui::SameLine();
   if (ImGui::Button("Run", ImVec2(btnWidth, 0)))
   {
-    context.run_state = "running";
+    context.debug_action = "Run";
+    if (context.editor_text.empty())
+    {
+      context.run_state = "failed";
+      context.debug_status = "run_failed";
+      context.debug_reason = "Script Editor is empty";
+    }
+    else
+    {
+      AnalyzeScript(context);
+      for (const auto& input : context.runtime_int_vars)
+      {
+        if (input.first.rfind("global_", 0) == 0)
+          m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+      }
+
+      context.run_state = "running";
+      const bool ran = m_parserDebugBridge.RunScript(context.editor_text);
+      context.run_state = ran ? "runtime_finished" : "failed";
+      context.debug_status = ran ? "runtime_executed" : "run_failed";
+      context.debug_reason = ran
+        ? "exact Script Editor text executed through ParserDebugBridge"
+        : "ParserDebugBridge rejected the Script Editor text";
+
+      m_scriptResult.source = "manual_console_editor";
+      m_scriptResult.script_path = context.loaded_script_path;
+      m_scriptResult.status = ran ? "PENDING" : "BLOCKED";
+      m_scriptResult.reason = context.debug_reason;
+      m_scriptResult.runtime_fillback_status = ran
+        ? "runtime_objects_queried"
+        : "not_started";
+
+      RefreshRuntimeObjectTable(
+        "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
+    }
   }
 
   ImGui::SameLine();

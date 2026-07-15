@@ -1,12 +1,13 @@
 #ifndef CXIMAGE_PARSER_DEBUG_BRIDGE_H
 #define CXIMAGE_PARSER_DEBUG_BRIDGE_H
 
-#include "ParserClass.h"
+#include "CxParserRuntimeOwner.h"
 
 #include <opencv2/core/mat.hpp>
 
 #include <string>
 #include <vector>
+#include <map>
 
 class Image;
 
@@ -114,7 +115,7 @@ struct CxScriptSemanticBridgeResult
 class ParserDebugBridge
 {
 public:
-  void Bind(mu::CxParserRuntime* runtime) { myRuntime = runtime; }
+  void Bind(CxParserRuntimeOwner* owner) { myOwner = owner; }
   bool CompileScript(const std::string& scriptText);
   bool RunScript(const std::string& scriptText);
   bool RunPrefixToLine(const std::string& scriptText, int lineNo);
@@ -128,7 +129,7 @@ public:
   bool SetGlobalString(const std::string& name, const std::string& value);
   bool ApplyStatement(const std::string& statement);
   bool SetGlobalMatInput(const cv::Mat& image);
-  void ClearGlobalInputs() { myGlobalMatInput.release(); }
+  void ClearGlobalInputs();
   bool HasGlobalMatInput() const { return !myGlobalMatInput.empty(); }
   int GlobalMatInputWidth() const { return myGlobalMatInput.cols; }
   int GlobalMatInputHeight() const { return myGlobalMatInput.rows; }
@@ -146,8 +147,9 @@ private:
   std::string PrepareScript(const std::string& scriptText) const;
   bool RebindGlobalInputs();
 
-  mu::CxParserRuntime* myRuntime = nullptr;
+  CxParserRuntimeOwner* myOwner = nullptr;
   cv::Mat myGlobalMatInput;
+  std::map<std::string, double> myGlobalNumericInputs;
 };
 
 #endif

@@ -43,7 +43,8 @@ bool InputTextMultilineString(const char* label, std::string& value,
 
 bool ReadTextFile(const std::string& path, std::string& text)
 {
-    std::ifstream stream(fs::path(path), std::ios::binary);
+    const fs::path resolved = ResolveWorkspaceFile(path);
+    std::ifstream stream(resolved, std::ios::binary);
     if (!stream) return false;
     text.assign(std::istreambuf_iterator<char>(stream),
                 std::istreambuf_iterator<char>());

@@ -13,27 +13,37 @@
 #include <sstream>
 #include <utility>
 
+namespace
+{
+std::string CanonicalGlobalName(const std::string& name)
+{
+  if (name.rfind("global_", 0) == 0)
+    return name;
+  return "global_" + name;
+}
+}
+
 bool ParserDebugBridge::CompileScript(const std::string& scriptText)
 {
-  if (myRuntime == nullptr || scriptText.empty()) return false;
+  if (myOwner == nullptr || scriptText.empty()) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
   const std::string prepared = PrepareScript(scriptText);
-  return myRuntime->Compile(prepared.c_str());
+  return myOwner->Compile(prepared.c_str());
 }
 
 bool ParserDebugBridge::RunScript(const std::string& scriptText)
 {
-  if (myRuntime == nullptr || scriptText.empty()) return false;
+  if (myOwner == nullptr || scriptText.empty()) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
   const std::string prepared = PrepareScript(scriptText);
-  return myRuntime->Compile(prepared.c_str());
+  return myOwner->Compile(prepared.c_str());
 }
 
 bool ParserDebugBridge::RunPrefixToLine(const std::string& scriptText, int lineNo)
 {
-  if (myRuntime == nullptr || lineNo <= 0) return false;
+  if (myOwner == nullptr || lineNo <= 0) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
   std::istringstream input(scriptText);
@@ -56,20 +66,20 @@ bool ParserDebugBridge::RunPrefixToLine(const std::string& scriptText, int lineN
   }
   while (braceDepth-- > 0) prefixText += "}\n";
   prefixText = PrepareScript(prefixText);
-  return current > 0 && myRuntime->Compile(prefixText.c_str());
+  return current > 0 && myOwner->Compile(prefixText.c_str());
 }
 
 void* ParserDebugBridge::QueryClassObject(const std::string& type,
                                           const std::string& name) const
 {
-  if (myRuntime == nullptr) return nullptr;
-  void* object = myRuntime->GetClassObj(type, name);
+  if (myOwner == nullptr) return nullptr;
+  void* object = myOwner->GetClassObj(type, name);
   if (object == nullptr && type == "Findcircle")
-    object = myRuntime->GetClassObj("findcircle", name);
+    object = myOwner->GetClassObj("findcircle", name);
   if (object == nullptr && type == "fastmatch")
-    object = myRuntime->GetClassObj("FastMatch", name);
+    object = myOwner->GetClassObj("FastMatch", name);
   if (object == nullptr && type == "fastmatch")
-    object = myRuntime->GetClassObj("CFastMatch", name);
+    object = myOwner->GetClassObj("CFastMatch", name);
   return object;
 }
 
@@ -86,8 +96,8 @@ Image* ParserDebugBridge::QueryImage(const std::string& name) const
 
 bool ParserDebugBridge::QueryDouble(const std::string& name, double& value) const
 {
-  if (myRuntime == nullptr || !myRuntime->IsObjectVar(name.c_str())) return false;
-  double* runtimeValue = static_cast<double*>(myRuntime->GetDoubleValue(name));
+  if (myOwner == nullptr || !myOwner->IsObjectVar(name.c_str())) return false;
+  double* runtimeValue = static_cast<double*>(myOwner->GetDoubleValue(name));
   if (runtimeValue == nullptr) return false;
   value = *runtimeValue;
   return true;
@@ -95,24 +105,21 @@ bool ParserDebugBridge::QueryDouble(const std::string& name, double& value) cons
 
 bool ParserDebugBridge::SetDouble(const std::string& name, double value)
 {
-  if (myRuntime == nullptr || !myRuntime->IsObjectVar(name.c_str())) return false;
+  if (myOwner == nullptr || !myOwner->IsObjectVar(name.c_str())) return false;
   return ApplyStatement(name + "=" + std::to_string(value) + ";");
 }
 
 bool ParserDebugBridge::SetGlobalInt(const std::string& name, int value)
 {
-  const std::string fullName =
-    name.rfind("global.", 0) == 0 ? name : ("global." + name);
-  return ApplyStatement(fullName + "=" + std::to_string(value) + ";") ||
-         ApplyStatement(name + "=" + std::to_string(value) + ";");
+  myGlobalNumericInputs[CanonicalGlobalName(name)] =
+    static_cast<double>(value);
+  return true;
 }
 
 bool ParserDebugBridge::SetGlobalDouble(const std::string& name, double value)
 {
-  const std::string fullName =
-    name.rfind("global.", 0) == 0 ? name : ("global." + name);
-  return ApplyStatement(fullName + "=" + std::to_string(value) + ";") ||
-         ApplyStatement(name + "=" + std::to_string(value) + ";");
+  myGlobalNumericInputs[CanonicalGlobalName(name)] = value;
+  return true;
 }
 
 bool ParserDebugBridge::SetGlobalString(
@@ -129,17 +136,15 @@ bool ParserDebugBridge::SetGlobalString(
     }
     return out;
   };
-  const std::string fullName =
-    name.rfind("global.", 0) == 0 ? name : ("global." + name);
+  const std::string fullName = CanonicalGlobalName(name);
   const std::string quoted = "\"" + escape(value) + "\"";
-  return ApplyStatement(fullName + "=" + quoted + ";") ||
-         ApplyStatement(name + "=" + quoted + ";");
+  return ApplyStatement(fullName + "=" + quoted + ";");
 }
 
 bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 {
-  return myRuntime != nullptr && !statement.empty() &&
-         myRuntime->Compile(statement.c_str());
+  return myOwner != nullptr && !statement.empty() &&
+         myOwner->Compile(statement.c_str());
 }
 
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
@@ -160,10 +165,10 @@ bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
 {
   if (image.empty()) return false;
   myGlobalMatInput = image.clone();
-  if (myRuntime == nullptr) return false;
+  if (myOwner == nullptr) return false;
   if (QueryImage("global_matInput") == nullptr)
   {
-    if (!myRuntime->Compile("Image global_matInput;")) return false;
+    if (!myOwner->Compile("Image global_matInput;")) return false;
   }
   Image* runtimeImage = QueryImage("global_matInput");
   if (runtimeImage == nullptr) return false;
@@ -173,8 +178,26 @@ bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
 
 bool ParserDebugBridge::RebindGlobalInputs()
 {
-  if (myGlobalMatInput.empty()) return true;
+  if (myOwner == nullptr)
+    return false;
+
+  std::string reason;
+  for (auto& input : myGlobalNumericInputs)
+  {
+    if (!myOwner->DefineExternalDouble(
+          input.first, &input.second, reason))
+      return false;
+  }
+
+  if (myGlobalMatInput.empty())
+    return true;
   return SetGlobalMatInput(myGlobalMatInput);
+}
+
+void ParserDebugBridge::ClearGlobalInputs()
+{
+  myGlobalMatInput.release();
+  myGlobalNumericInputs.clear();
 }
 
 std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects(
@@ -415,10 +438,10 @@ bool ParserDebugBridge::RunCxParserExtDebugInProcess(
 }
 void ParserDebugBridge::Stop()
 {
-  if (myRuntime != nullptr) myRuntime->StopRun();
+  if (myOwner != nullptr) myOwner->StopRun();
 }
 
 void ParserDebugBridge::ResetRuntime()
 {
-  if (myRuntime != nullptr) myRuntime->ClearAll();
+  if (myOwner != nullptr) myOwner->ClearAll();
 }

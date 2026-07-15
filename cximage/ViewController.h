@@ -58,8 +58,10 @@ public:
   //! Run the application event loop.
   void run();
 
-  void LoadBoundStateToManualConsole(const std::string& nodeId,
-                                         const std::string& scriptPath);
+  bool LoadBoundStateToManualConsole(
+      const std::string& nodeId,
+      const std::string& scriptPath,
+      std::string& reason);
 
 private:
   void initImGui();
