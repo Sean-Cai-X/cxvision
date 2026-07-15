@@ -2973,6 +2973,32 @@ void* ParserBase::GetClassObj(const string_type &  strclass,int iobjnum)
 	}
 	return NULL;
 }
+mu::string_type ParserBase::GetClassObjName(const mu::string_type & strclass, int object_index) const
+{
+    mu::classbasemap_type classmap = GetClassMap();
+    classbase *pclass = nullptr;
+    if (!classmap.size())
+        return string_type();
+
+    mu::classbasemap_type::const_iterator item = classmap.begin();
+    for (; item != classmap.end(); ++item)
+    {
+        if (strclass == item->first)
+        {
+            pclass = const_cast<classbase*>(item->second);
+            break;
+        }
+    }
+
+    if (!pclass)
+        return string_type();
+
+    if (object_index < 0 || object_index >= pclass->size())
+        return string_type();
+
+    return pclass->getvar(object_index);
+}
+
 int ParserBase::GetClassObjSum(const string_type &  strclass)
 {
 	mu::classbasemap_type classmap = GetClassMap();
@@ -2980,7 +3006,7 @@ int ParserBase::GetClassObjSum(const string_type &  strclass)
 	if(!classmap.size())
 		return 0;
 
-	classbasemap_type::const_iterator item = classmap.begin();
+	mu::classbasemap_type::const_iterator item = classmap.begin();
 	for (; item!=classmap.end(); ++item)
 	{
 		if(strclass==item->first)

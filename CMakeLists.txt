@@ -96,6 +96,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CxScriptCasePackageWriter.cpp
   cximage/CxScriptHeadlessRunner.cpp
   cximage/CxScriptHeadlessBindings.cpp
+  cximage/CxScriptRuntimeCaptureSmoke.cpp
   cximage/CxUnifiedLog.cpp
   cximage/CxUnifiedLogStreamBuf.cpp
   cximage/CxCrashLogHandler.cpp
@@ -128,6 +129,8 @@ set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxAlgorithmTraceSink.cpp
   cximage/CxParamRegressionRuntime.cpp
   cximage/CxParamRegressionRegister.cpp
+  cximage/CxScriptRuntimeResultCapture.cpp
+  cximage/CxShapeOverlayRenderer.cpp
 )
 
 set(CXSCRIPT_LEGACY_STAGE25_SOURCES

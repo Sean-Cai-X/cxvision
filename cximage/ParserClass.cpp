@@ -417,6 +417,11 @@ namespace mu
             m_parser.DefineClassFun("Findcircle", pfindcircle, "fitmeasure", &Findcircle::FitResultMeasure);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "FitResultMeasure", &Findcircle::FitResultMeasure);
 
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxelapsedms", &Findcircle::setmaxelapsedms);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxscanlines", &Findcircle::setmaxscanlines);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxsamples", &Findcircle::setmaxsamples);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "get_result", &Findcircle::get_result_script);
+
             m_parser.DefineClassFun(
                 "Findcircle",
                 pfindcircle,
@@ -532,6 +537,12 @@ namespace mu
                 pfindline,
                 "setmeasurefallback",
                 static_cast<void (Findline::*)(int)>(&Findline::setmeasurefallback));
+
+            m_parser.DefineClassFun("Findline", pfindline, "setmaxelapsedms", &Findline::setmaxelapsedms);
+            m_parser.DefineClassFun("Findline", pfindline, "setmaxscanlines", &Findline::setmaxscanlines);
+            m_parser.DefineClassFun("Findline", pfindline, "setmaxsamples", &Findline::setmaxsamples);
+            m_parser.DefineClassFun("Findline", pfindline, "setfilterprofile", &Findline::setfilterprofile);
+            m_parser.DefineClassFun("Findline", pfindline, "get_result", &Findline::get_result_script);
 
            // m_parser.DefineClassFun("Findline", pfindline, "setlinesegment", &Findline::setlinesegment);
 
@@ -841,6 +852,13 @@ namespace mu
             }
         }
         return 0;
+    }
+
+    std::string CxParserRuntime::GetClassObjName(
+        const std::string& class_name,
+        int object_index) const
+    {
+        return m_parser.GetClassObjName(class_name, object_index);
     }
 
     void CxParserRuntime::SetExpr(const string & str)
@@ -1421,6 +1439,137 @@ namespace mu
             return 0;
         }
         return 1;
+    }
+
+    bool CxParserRuntime::CompileCollectedScript(const std::string& script, std::string& reason)
+    {
+        try
+        {
+            std::vector<std::string> statements;
+            std::string current;
+            int brace_depth = 0;
+            bool in_string = false;
+            bool escaped = false;
+            bool line_comment = false;
+            bool block_comment = false;
+
+            for (size_t i = 0; i < script.size(); ++i)
+            {
+                const char ch = script[i];
+                const char next = i + 1 < script.size() ? script[i + 1] : '\0';
+
+                if (line_comment)
+                {
+                    if (ch == '\n')
+                        line_comment = false;
+                    continue;
+                }
+                if (block_comment)
+                {
+                    if (ch == '*' && next == '/')
+                    {
+                        block_comment = false;
+                        ++i;
+                    }
+                    continue;
+                }
+                if (!in_string && ch == '/' && next == '/')
+                {
+                    line_comment = true;
+                    ++i;
+                    continue;
+                }
+                if (!in_string && ch == '/' && next == '*')
+                {
+                    block_comment = true;
+                    ++i;
+                    continue;
+                }
+
+                current.push_back(ch);
+                if (in_string)
+                {
+                    if (escaped)
+                        escaped = false;
+                    else if (ch == '\\')
+                        escaped = true;
+                    else if (ch == '"')
+                        in_string = false;
+                    continue;
+                }
+                if (ch == '"')
+                {
+                    in_string = true;
+                    continue;
+                }
+                if (ch == '{')
+                    ++brace_depth;
+                else if (ch == '}')
+                    --brace_depth;
+
+                if ((ch == ';' && brace_depth == 0) ||
+                    (ch == '}' && brace_depth == 0))
+                {
+                    statements.push_back(current);
+                    current.clear();
+                }
+            }
+            if (current.find_first_not_of(" \t\r\n") != std::string::npos)
+                statements.push_back(current);
+
+            if (statements.empty())
+            {
+                reason = "CompileCollectedScript produced no statements";
+                return false;
+            }
+
+            m_collectedScriptStatements = std::move(statements);
+            reason.clear();
+            return true;
+        }
+        catch (mu::Parser::exception_type& e)
+        {
+            reason = "CompileCollectedScript failed: " + e.GetMsg();
+            m_collectedScriptStatements.clear();
+            return false;
+        }
+        catch (...)
+        {
+            reason = "CompileCollectedScript crashed";
+            m_collectedScriptStatements.clear();
+            return false;
+        }
+    }
+
+    bool CxParserRuntime::RunCollectedScript(std::string& reason)
+    {
+        try
+        {
+            for (const auto& statement : m_collectedScriptStatements)
+            {
+                if (!Compile(statement.c_str()))
+                {
+                    reason = "RunCollectedScript failed near statement: " + statement;
+                    m_collectedScriptStatements.clear();
+                    return false;
+                }
+            }
+            m_collectedScriptStatements.clear();
+            reason.clear();
+            return true;
+        }
+        catch (mu::Parser::exception_type& e)
+        {
+            reason = "RunCollectedScript failed: " + e.GetMsg();
+            m_collectedScriptStatements.clear();
+            return false;
+        }
+        catch (...)
+        {
+            reason = "RunCollectedScript crashed";
+            m_collectedScriptStatements.clear();
+            return false;
+        }
     }
 
     void CxParserRuntime::ResetRun()

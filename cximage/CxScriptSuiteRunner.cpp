@@ -6,6 +6,7 @@
 #include "CxScriptToolDisplayExporter.h"
 #include "CxScriptBestCaseSelector.h"
 #include "CxParameterProfileRuntime.h"
+#include "CxParserRuntimeOwner.h"
 #include "CxScriptEvidenceChainRuntime.h"
 #include "CxScriptReviewGateRuntime.h"
 #include "CxScriptRunTraceRuntime.h"
@@ -417,6 +418,26 @@ namespace
                 try { out.valid_points_count = std::stoi(JsonLineValue(line)); }
                 catch (...) {}
             }
+            else if (JsonLineHasKey(line, "algorithm_executed"))
+            {
+                out.algorithm_executed = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "budget_exceeded"))
+            {
+                out.budget_exceeded = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "rendered_measure_points_count"))
+            {
+                try { out.rendered_measure_points_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "rendered_result_count"))
+            {
+                try { out.rendered_result_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "result_overlay_changed_pixels"))
+            {
+                try { out.result_overlay_changed_pixels = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
             else if (JsonLineHasAnyKey(line, {"points_count", "measure_points_count", "line_measure_points_count", "circle_measure_points_count"}))
             {
                 try { out.points_count = std::stoi(JsonLineValue(line)); }
@@ -645,13 +666,20 @@ namespace
         CxScriptHeadlessOptions& headless,
         const CxParameterProfile& profile)
     {
-        headless.method = profile.method;
-        headless.threshold = profile.threshold;
-        headless.gap = profile.gap;
-        headless.linegap = profile.linegap;
-        headless.wgap = profile.wgap;
-        headless.hgap = profile.hgap;
-        headless.filterprofile = profile.filterprofile;
+        if (profile.has_method)
+            headless.method = profile.method;
+        if (profile.has_threshold)
+            headless.threshold = profile.threshold;
+        if (profile.has_gap)
+            headless.gap = profile.gap;
+        if (profile.has_linegap)
+            headless.linegap = profile.linegap;
+        if (profile.has_wgap)
+            headless.wgap = profile.wgap;
+        if (profile.has_hgap)
+            headless.hgap = profile.hgap;
+        if (profile.has_filterprofile)
+            headless.filterprofile = profile.filterprofile;
     }
 
     void WriteCaseTrace(
@@ -871,26 +899,15 @@ namespace
         packetFile << "\n";
         packetFile << "  \"parameter\": {\n";
         packetFile << "    \"profile_id\": \"" << suite_case.parameter_profile_id << "\",\n";
-        if (resolved.profile)
-        {
-            packetFile << "    \"method\": " << resolved.profile->method << ",\n";
-            packetFile << "    \"threshold\": " << resolved.profile->threshold << ",\n";
-            packetFile << "    \"gap\": " << resolved.profile->gap << ",\n";
-            packetFile << "    \"linegap\": " << resolved.profile->linegap << ",\n";
-            packetFile << "    \"wgap\": " << resolved.profile->wgap << ",\n";
-            packetFile << "    \"hgap\": " << resolved.profile->hgap << ",\n";
-            packetFile << "    \"filterprofile\": " << resolved.profile->filterprofile << "\n";
-        }
-        else
-        {
-            packetFile << "    \"method\": 0,\n";
-            packetFile << "    \"threshold\": 0,\n";
-            packetFile << "    \"gap\": 0,\n";
-            packetFile << "    \"linegap\": 0,\n";
-            packetFile << "    \"wgap\": 0,\n";
-            packetFile << "    \"hgap\": 0,\n";
-            packetFile << "    \"filterprofile\": 0\n";
-        }
+        packetFile << "    \"method\": " << result.effective_method << ",\n";
+        packetFile << "    \"threshold\": " << result.effective_threshold << ",\n";
+        packetFile << "    \"gap\": " << result.effective_gap << ",\n";
+        packetFile << "    \"linegap\": " << result.effective_linegap << ",\n";
+        packetFile << "    \"wgap\": " << result.effective_wgap << ",\n";
+        packetFile << "    \"hgap\": " << result.effective_hgap << ",\n";
+        packetFile << "    \"tool_half_width\": " << result.effective_tool_half_width << ",\n";
+        packetFile << "    \"filterprofile\": " << result.effective_filterprofile << ",\n";
+        packetFile << "    \"source\": \"effective_merged_snapshot\"\n";
         packetFile << "  },\n";
         packetFile << "\n";
         packetFile << "  \"contract\": {\n";
@@ -1246,6 +1263,11 @@ namespace
         contractHeadless.contract_context_enabled = true;
         contractHeadless.contract_headless_ok = r.headless_ok ? 1 : 0;
         contractHeadless.contract_pass_initial = 0;
+        contractHeadless.contract_algorithm_executed = r.algorithm_executed ? 1 : 0;
+        contractHeadless.contract_budget_exceeded = r.budget_exceeded ? 1 : 0;
+        contractHeadless.contract_rendered_measure_points_count = r.rendered_measure_points_count;
+        contractHeadless.contract_rendered_result_count = r.rendered_result_count;
+        contractHeadless.contract_result_overlay_changed_pixels = r.result_overlay_changed_pixels;
         contractHeadless.points_count = r.points_count;
         contractHeadless.valid_points_count = r.valid_points_count;
         contractHeadless.has_fit_line = r.has_fit_line ? 1 : 0;
@@ -1442,6 +1464,14 @@ namespace
             headless.stage25_target_id = suiteCase.target_id;
             headless.stage25_tool = script.tool;
 
+            // Profile supplies the explicit algorithm baseline. Manifest target
+            // values are applied afterwards and therefore remain authoritative
+            // for per-image gauge/scan geometry.
+            if (resolved.profile)
+            {
+                InjectParameterGlobals(headless, *resolved.profile);
+            }
+
             if (resolved.target)
             {
                 headless.roi_x0 = resolved.target->x0;
@@ -1452,11 +1482,27 @@ namespace
                 headless.circle_cy = resolved.target->cy;
                 headless.circle_px = resolved.target->px;
                 headless.circle_py = resolved.target->py;
-                headless.wgap = resolved.target->wgap;
-                headless.hgap = resolved.target->hgap;
-                headless.gap = resolved.target->gap;
-                headless.linegap = resolved.target->linegap;
-                headless.tool_half_width = resolved.target->tool_half_width;
+                if (resolved.target->has_wgap)
+                    headless.wgap = resolved.target->wgap;
+                if (resolved.target->has_hgap)
+                    headless.hgap = resolved.target->hgap;
+                if (resolved.target->has_gap)
+                    headless.gap = resolved.target->gap;
+                if (resolved.target->has_linegap)
+                    headless.linegap = resolved.target->linegap;
+                if (resolved.target->has_tool_half_width)
+                    headless.tool_half_width = resolved.target->tool_half_width;
+                if (resolved.target->has_threshold)
+                    headless.threshold = resolved.target->threshold;
+
+                // Stage25 historically shared a Findline-oriented method=2
+                // default across every tool. Findcircle's verified direct
+                // execution branch is method=0. Preserve an explicit manifest
+                // value, otherwise select the baseline by target tool.
+                if (resolved.target->has_method)
+                    headless.method = resolved.target->method;
+                else if (resolved.target->tool == "Findcircle")
+                    headless.method = 0;
 
                 out.roi_x0 = resolved.target->x0;
                 out.roi_y0 = resolved.target->y0;
@@ -1466,11 +1512,6 @@ namespace
                 out.circle_cy = resolved.target->cy;
                 out.circle_px = resolved.target->px;
                 out.circle_py = resolved.target->py;
-            }
-
-            if (resolved.profile)
-            {
-                InjectParameterGlobals(headless, *resolved.profile);
             }
 
             if (options.use_manual_gauge)
@@ -1575,10 +1616,21 @@ namespace
             out.case_dir = caseDir.string();
             out.snapshot_path = headlessResult.snapshot_path;
             out.summary_path = headlessResult.summary_path;
-            out.result_overlay_path = headlessResult.overlay_path;
+            out.result_overlay_path = headlessResult.result_overlay_path;
+            out.evidence_overlay_path = headlessResult.evidence_overlay_path;
+            out.tool_display_path = headlessResult.tool_display_path;
 
             std::cout << "[SUITE] metrics begin summary=" << out.summary_path << "\n" << std::flush;
             LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
+            if (out.actual_policy_guard.empty())
+            {
+                if (out.tool == "Findline" && out.valid_points_count >= 2 && out.has_fit_line)
+                    out.actual_policy_guard = "MEASURE_AND_FIT_AVAILABLE";
+                else if (out.tool == "Findcircle" && out.valid_points_count >= 3 &&
+                         out.has_fit_circle && out.circle_radius > 0.0)
+                    out.actual_policy_guard = "CIRCLE_MEASURE_AND_FIT_AVAILABLE";
+                out.policy_guard = out.actual_policy_guard;
+            }
             std::cout << "[SUITE] metrics end headless_ok=" << (out.headless_ok ? "true" : "false")
                       << " valid_points_count=" << out.valid_points_count
                       << " has_fit_circle=" << (out.has_fit_circle ? "true" : "false")
@@ -1751,6 +1803,20 @@ namespace
                       << "\n" << std::flush;
         }
 
+        // The pre-contract display is useful for the optional result review
+        // gate, but its PASS/FAIL label is not final. Regenerate the same
+        // asset from the final contract facts before packaging evidence.
+        if (options.export_tool_display)
+        {
+            out.tool_display_path =
+                CxScriptToolDisplayExporter::ExportToolDisplay(
+                    image.path,
+                    out.result_overlay_path,
+                    out.evidence_overlay_path,
+                    caseDir / "tool_display.png",
+                    out);
+        }
+
         if (StopForHumanReviewIfNeeded(options, out, "contract", "accept_contract or reject_contract"))
         {
             WriteEvidencePacket(caseDir, suiteCase, resolved, out);
@@ -1812,16 +1878,6 @@ namespace
         AppendPhaseTrace(caseDir, "promotion", "end", "", 0);
         std::cout << "[SUITE] promotion end case_id="
                   << suiteCase.case_id << "\n" << std::flush;
-
-        if (out.contract_pass && out.headless_ok)
-        {
-            WriteHumanReview(
-                suiteCase.case_id,
-                "accept",
-                suiteCase.case_id + " baseline accepted. ROI, measure points, fit circle, and evidence summary are consistent.",
-                "promote_to_baseline",
-                caseDir);
-        }
 
         if (options.trace_run)
         {
@@ -1991,25 +2047,51 @@ bool RunCxScriptSuite(
 {
     result = CxScriptSuiteRunResult{};
 
-    CxScriptSuiteRuntime suite;
     std::string reason;
-
-    if (!LoadCxScriptSuiteFile(options.suite_path, suite, reason))
-    {
-        result.reason = reason;
-        return false;
-    }
-
+    CxScriptSuiteRuntime suite;
     CxScriptCatalogRuntime catalog;
-    const std::string catalogPath =
-        !options.catalog_path_override.empty()
+    CxParameterProfileRuntime parameterProfiles;
+    std::string catalogPath;
+
+    // Metadata documents share exactly one serial Parser owner. Copy their
+    // value snapshots, then destroy the owner before any algorithm case starts.
+    {
+        CxParserRuntimeOwner metadataOwner;
+        if (!metadataOwner.Initialize(reason))
+        {
+            result.reason = "metadata parser owner initialization failed: " + reason;
+            return false;
+        }
+
+        if (!metadataOwner.ParseScriptSuite(options.suite_path, suite, reason))
+        {
+            result.reason = reason;
+            return false;
+        }
+
+        catalogPath = !options.catalog_path_override.empty()
             ? options.catalog_path_override
             : suite.catalog_path;
+        if (!metadataOwner.ParseScriptCatalog(catalogPath, catalog, reason))
+        {
+            result.reason = reason;
+            return false;
+        }
 
-    if (!LoadCxScriptCatalogFile(catalogPath, catalog, reason))
-    {
-        result.reason = reason;
-        return false;
+        if (!options.parameter_profile_path.empty())
+        {
+            if (!metadataOwner.ParseParameterProfile(
+                    options.parameter_profile_path,
+                    parameterProfiles,
+                    reason))
+            {
+                result.reason = "parameter profile load failed: " + reason;
+                return false;
+            }
+            std::cout << "[DEBUG] Loaded "
+                      << parameterProfiles.profiles.size()
+                      << " parameter profiles\n";
+        }
     }
 
     CxScriptImageManifestRuntime imageManifest;
@@ -2047,20 +2129,6 @@ bool RunCxScriptSuite(
     }
 
     WriteManifestDryRunReport(imageManifest, outRoot.string());
-
-    CxParameterProfileRuntime parameterProfiles;
-    if (!options.parameter_profile_path.empty())
-    {
-        std::string loadReason;
-        if (LoadCxParameterProfileFile(options.parameter_profile_path, parameterProfiles, loadReason))
-        {
-            std::cout << "[DEBUG] Loaded " << parameterProfiles.profiles.size() << " parameter profiles\n";
-        }
-        else
-        {
-            std::cerr << "[WARN] Failed to load parameter profiles: " << loadReason << "\n";
-        }
-    }
 
     for (const auto& suiteCase : suite.cases)
     {
@@ -2293,8 +2361,39 @@ bool RunCxScriptSuite(
         return false;
     }
 
-    result.ok = result.contract_fail == 0;
-    result.reason = result.ok ? "suite passed" : "suite has contract failures";
+    if (options.dry_run)
+    {
+        bool allEvidenceResolved = result.total_cases > 0;
+        for (const auto& cr : result.case_results)
+        {
+            if (cr.failure_stage != "dry_run_completed")
+            {
+                allEvidenceResolved = false;
+                break;
+            }
+        }
+
+        result.ok = allEvidenceResolved;
+        result.reason = allEvidenceResolved
+            ? "suite dry-run passed"
+            : "suite dry-run has unresolved evidence";
+        std::cout << "[SUITE] RunCxScriptSuite returning ok="
+                  << (result.ok ? "true" : "false")
+                  << " reason=" << result.reason
+                  << "\n" << std::flush;
+        return result.ok;
+    }
+
+    result.ok = result.total_cases > 0 &&
+                result.executed_cases == result.total_cases &&
+                result.contract_pass == result.executed_cases &&
+                result.contract_fail == 0;
+    if (result.ok)
+        result.reason = "suite passed";
+    else if (result.executed_cases != result.total_cases)
+        result.reason = "suite has unexecuted cases";
+    else
+        result.reason = "suite has contract failures";
 
     std::cout << "[SUITE] RunCxScriptSuite returning ok="
               << (result.ok ? "true" : "false")

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <sstream>
 
 #include "CxParserSnapshotTypes.h"
 
@@ -15,8 +16,15 @@ namespace mu
 enum class CxParserDocumentKind
 {
     AnnotationToolManifest,
-    ShapeInteractionSuite
+    ShapeInteractionSuite,
+    ScriptSuite,
+    ScriptCatalog,
+    ParameterProfile
 };
+
+struct CxScriptSuiteRuntime;
+struct CxScriptCatalogRuntime;
+struct CxParameterProfileRuntime;
 
 class CxParserExecutionGuard;
 
@@ -45,6 +53,21 @@ public:
         CxShapeTestSuiteSnapshot& snapshot,
         std::string& reason);
 
+    bool ParseScriptSuite(
+        const std::string& path,
+        CxScriptSuiteRuntime& snapshot,
+        std::string& reason);
+
+    bool ParseScriptCatalog(
+        const std::string& path,
+        CxScriptCatalogRuntime& snapshot,
+        std::string& reason);
+
+    bool ParseParameterProfile(
+        const std::string& path,
+        CxParameterProfileRuntime& snapshot,
+        std::string& reason);
+
     bool IsExecuting() const;
 
     bool Compile(const std::string& source, std::string& reason);
@@ -68,12 +91,23 @@ private:
         const std::string& source_path,
         std::string& reason);
 
+    bool EnsureBindings(
+        CxParserDocumentKind kind,
+        std::string& reason);
+
     void EndExecution();
 
 private:
     std::unique_ptr<mu::CxParserRuntime> m_runtime;
+    std::ostringstream m_runtime_stream;
+    std::ostringstream m_code_stream;
     bool m_initialized = false;
     bool m_executing = false;
+    bool m_annotation_bindings_registered = false;
+    bool m_shape_bindings_registered = false;
+    bool m_suite_bindings_registered = false;
+    bool m_catalog_bindings_registered = false;
+    bool m_parameter_bindings_registered = false;
 };
 
 #endif

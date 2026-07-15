@@ -8,9 +8,9 @@
 #include "CxAlgorithmBudget.h"
 #include <string>
 #include <map>
-#include <string>
 #include <array>
 #include <cstdint>
+#include <chrono>
 
 
 class FindObject;
@@ -387,6 +387,19 @@ public:
     {
         return m_measure_fallback_mode;
     }
+
+    void setmaxelapsedms(int value);
+    void setmaxscanlines(int value);
+    void setmaxsamples(int value);
+
+    bool budgetexceeded() const;
+    int getelapsedms() const;
+    int getscanlinecount() const;
+    int getsamplecount() const;
+    const std::string& getfailurestage() const;
+
+    double get_result() { return m_has_fit_result ? 1.0 : 0.0; }
+    double get_result_script() { return get_result(); }
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
@@ -475,7 +488,7 @@ public:
     const FindlineMeasureProfileStats& lastmeasureprofilestats() const { return m_lastMeasureProfile; }
 private:
     void ClearMeasureState();
-    void BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats);
+    void BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats, const std::chrono::steady_clock::time_point& total_begin);
     void CollectAllEdgeBands(Image& image, FindlineMeasureProfileStats& stats);
     void BuildEdgeBandGraph(FindlineMeasureProfileStats& stats);
     void SolveBestEdgeChain(FindlineMeasureProfileStats& stats);
@@ -544,6 +557,9 @@ private:
     FitlineMode m_fitline_mode = FitlineMode::LeastSquares;
     std::string m_fitline_status = "not_executed";
     std::vector<double> m_fit_point_weights;
+
+    CxAlgorithmBudget m_budget;
+    CxAlgorithmBudgetState m_budget_state;
 };
 
 #endif //_findline_Header

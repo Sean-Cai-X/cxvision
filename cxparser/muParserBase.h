@@ -622,6 +622,7 @@ private:
 	void* GetClassObj(const string_type & strclass,const string_type & strobj);
     void* GetClassObj(const string_type &  strclass,int iobjnum);
 	int GetClassObjSum(const string_type &  strclass);
+    string_type GetClassObjName(const string_type & strclass, int object_index) const;
 
     bool m_bcmd;
 

@@ -3,22 +3,7 @@
 
 #include <string>
 #include <vector>
-
-struct CxShapeElementSnapshot
-{
-    std::string shape_kind;
-    std::string role;
-    std::string stable_ref;
-    bool editable = false;
-    bool result_element = false;
-
-    std::vector<std::pair<double, double>> points;
-    double center_x = 0.0;
-    double center_y = 0.0;
-    double radius_x = 0.0;
-    double radius_y = 0.0;
-    double angle_deg = 0.0;
-};
+#include "CxRuntimeProjectionTypes.h"
 
 struct CxScriptExecutionCapture
 {
@@ -47,8 +32,21 @@ struct CxScriptExecutionCapture
 
     std::string failure_stage;
     std::string reason;
+    bool contract_context = false;
+    bool contract_pass = false;
+    std::string contract_status;
+    std::string contract_conclusion;
 
     std::vector<CxShapeElementSnapshot> shapes;
+
+    bool smoke_pass = false;
+    std::string smoke_findline_object_name;
+    bool smoke_findline_roi = false;
+    bool smoke_findline_scan = false;
+    std::string smoke_findcircle_object_name;
+    std::string smoke_findcircle_roi_shape_kind;
+    double smoke_findcircle_roi_radius = 0.0;
+    double smoke_findcircle_outer_scan_radius = 0.0;
 };
 
 struct CxScriptHeadlessOptions
@@ -103,8 +101,14 @@ struct CxScriptHeadlessOptions
 
     bool contract_context_enabled = false;
     bool enable_evidence_analysis = true;
+    bool runtime_capture_smoke = false;
     int contract_headless_ok = 0;
     int contract_pass_initial = 0;
+    int contract_algorithm_executed = 0;
+    int contract_budget_exceeded = 0;
+    int contract_rendered_measure_points_count = 0;
+    int contract_rendered_result_count = 0;
+    int contract_result_overlay_changed_pixels = 0;
     int points_count = 0;
     int valid_points_count = 0;
     int has_fit_line = 0;

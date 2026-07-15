@@ -11,12 +11,19 @@ struct CxParameterProfile
     std::string description;
 
     int method = 0;
+    bool has_method = false;
     int threshold = 20;
+    bool has_threshold = false;
     int gap = 5;
+    bool has_gap = false;
     int linegap = 6;
+    bool has_linegap = false;
     int wgap = 32;
+    bool has_wgap = false;
     int hgap = 8;
+    bool has_hgap = false;
     int filterprofile = 0;
+    bool has_filterprofile = false;
 };
 
 struct CxParameterProfileRuntime

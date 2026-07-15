@@ -16,9 +16,13 @@ struct CxShapeElementSnapshot
     std::vector<double> points;
     double center_x = 0.0;
     double center_y = 0.0;
+    double radius = 0.0;
+    double inner_radius = 0.0;
+    double half_width = 0.0;
     double radius_x = 0.0;
     double radius_y = 0.0;
     double angle_deg = 0.0;
+    bool closed = false;
     bool editable = false;
     bool result_element = false;
 };

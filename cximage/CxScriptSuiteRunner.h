@@ -75,6 +75,11 @@ struct CxScriptSuiteCaseResult
     int valid_points_count = 0;
     bool has_fit_line = false;
     bool has_fit_circle = false;
+    bool algorithm_executed = false;
+    bool budget_exceeded = false;
+    int rendered_measure_points_count = 0;
+    int rendered_result_count = 0;
+    int result_overlay_changed_pixels = 0;
 
     double local_support = 0.0;
     double local_mean_distance = 0.0;

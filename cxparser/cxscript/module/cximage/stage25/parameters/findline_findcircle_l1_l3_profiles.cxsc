@@ -1,0 +1,15 @@
+CxParameterProfile_reset(0);
+
+CxParameterProfile_settool("Findline");
+CxParameterProfile_add("findline_l1_l3_verified_baseline");
+CxParameterProfile_setrole("STAGE25_FIXED_BASELINE");
+CxParameterProfile_setmethod(2);
+CxParameterProfile_setthreshold(20);
+CxParameterProfile_setdescription("Findline L1-L3 fixed algorithm baseline; per-image gauge geometry remains manifest-owned.");
+
+CxParameterProfile_settool("Findcircle");
+CxParameterProfile_add("findcircle_l1_l3_verified_baseline");
+CxParameterProfile_setrole("STAGE25_FIXED_BASELINE");
+CxParameterProfile_setmethod(0);
+CxParameterProfile_setthreshold(20);
+CxParameterProfile_setdescription("Findcircle L1-L3 fixed direct baseline; per-image gauge geometry remains manifest-owned.");

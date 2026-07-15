@@ -5,6 +5,7 @@
 #include "Image.h"
 #include "CxScriptRuntimeResultCapture.h"
 #include "CxShapeOverlayRenderer.h"
+#include "CxScriptRuntimeCaptureSmoke.h"
 
 #include <sstream>
 #include <fstream>
@@ -36,9 +37,64 @@ std::string ReplaceIdentifier(
     return result;
 }
 
-std::string PrepareCxScriptRuntimeSource(const std::string& source)
+std::string PrepareCxScriptRuntimeSource(const std::string& source, bool contract_context)
 {
-    std::string result = ReplaceIdentifier(source, "global.matInput", "global_matInput");
+    std::istringstream input(source);
+    std::ostringstream normalized;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (contract_context &&
+            (line.find("global.contract_status") != std::string::npos ||
+             line.find("global.contract_conclusion") != std::string::npos ||
+             line.find("global_contract_status") != std::string::npos ||
+             line.find("global_contract_conclusion") != std::string::npos))
+        {
+            continue;
+        }
+        const size_t first = line.find_first_not_of(" \t");
+        if (first != std::string::npos)
+        {
+            static const char* declaration_types[] = { "int ", "double ", "float " };
+            for (const char* type : declaration_types)
+            {
+                const size_t length = std::strlen(type);
+                if (line.compare(first, length, type) == 0)
+                {
+                    line.erase(first, length);
+                    break;
+                }
+            }
+        }
+        normalized << line << '\n';
+    }
+
+    std::string runtime_source = normalized.str();
+    for (size_t i = 0; i < runtime_source.size(); ++i)
+    {
+        if (runtime_source[i] != '&')
+            continue;
+
+        size_t previous = i;
+        while (previous > 0 && std::isspace(static_cast<unsigned char>(runtime_source[previous - 1])))
+            --previous;
+        size_t next = i + 1;
+        while (next < runtime_source.size() && std::isspace(static_cast<unsigned char>(runtime_source[next])))
+            ++next;
+
+        const bool argument_position =
+            previous > 0 && (runtime_source[previous - 1] == '(' || runtime_source[previous - 1] == ',');
+        const bool object_identifier =
+            next < runtime_source.size() &&
+            (std::isalpha(static_cast<unsigned char>(runtime_source[next])) || runtime_source[next] == '_');
+        if (argument_position && object_identifier)
+        {
+            runtime_source.erase(i, 1);
+            --i;
+        }
+    }
+
+    std::string result = ReplaceIdentifier(runtime_source, "global.matInput", "global_matInput");
     result = ReplaceIdentifier(result, "global.roi_x0", "global_roi_x0");
     result = ReplaceIdentifier(result, "global.roi_y0", "global_roi_y0");
     result = ReplaceIdentifier(result, "global.roi_x1", "global_roi_x1");
@@ -62,6 +118,22 @@ std::string PrepareCxScriptRuntimeSource(const std::string& source)
     result = ReplaceIdentifier(result, "global.max_elapsed_ms", "global_max_elapsed_ms");
     result = ReplaceIdentifier(result, "global.max_scan_lines", "global_max_scan_lines");
     result = ReplaceIdentifier(result, "global.max_samples", "global_max_samples");
+    result = ReplaceIdentifier(result, "global.line_ref", "global_line_ref");
+    result = ReplaceIdentifier(result, "global.circle_ref", "global_circle_ref");
+    result = ReplaceIdentifier(result, "global.current_status", "global_current_status");
+    result = ReplaceIdentifier(result, "global.contract_pass", "global_contract_pass");
+    result = ReplaceIdentifier(result, "global.headless_ok", "global_headless_ok");
+    result = ReplaceIdentifier(result, "global.algorithm_executed", "global_algorithm_executed");
+    result = ReplaceIdentifier(result, "global.budget_exceeded", "global_budget_exceeded");
+    result = ReplaceIdentifier(result, "global.valid_points_count", "global_valid_points_count");
+    result = ReplaceIdentifier(result, "global.has_fit_line", "global_has_fit_line");
+    result = ReplaceIdentifier(result, "global.has_fit_circle", "global_has_fit_circle");
+    result = ReplaceIdentifier(result, "global.rendered_measure_points_count", "global_rendered_measure_points_count");
+    result = ReplaceIdentifier(result, "global.rendered_result_count", "global_rendered_result_count");
+    result = ReplaceIdentifier(result, "global.result_overlay_changed_pixels", "global_result_overlay_changed_pixels");
+    result = ReplaceIdentifier(result, "global.policy_guard_match", "global_policy_guard_match");
+    result = ReplaceIdentifier(result, "global.circle_radius", "global_contract_circle_radius");
+    result = ReplaceIdentifier(result, "global.avgdist", "global_contract_avgdist");
     return result;
 }
 
@@ -88,59 +160,177 @@ std::string LoadCxScriptSource(const std::string& script_path, std::string& reas
     return script_source;
 }
 
+void DefineCxScriptLocalVariables(
+    mu::CxParserRuntime& runtime,
+    const std::string& source,
+    std::map<std::string, double>& storage)
+{
+    std::istringstream input(source);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        const size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos)
+            continue;
+
+        static const char* declaration_types[] = { "int ", "double ", "float " };
+        size_t name_begin = std::string::npos;
+        for (const char* type : declaration_types)
+        {
+            const size_t length = std::strlen(type);
+            if (line.compare(first, length, type) == 0)
+            {
+                name_begin = first + length;
+                break;
+            }
+        }
+        if (name_begin == std::string::npos)
+            continue;
+
+        size_t name_end = name_begin;
+        while (name_end < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[name_end])) || line[name_end] == '_'))
+        {
+            ++name_end;
+        }
+        if (name_end == name_begin)
+            continue;
+
+        const std::string name = line.substr(name_begin, name_end - name_begin);
+        auto inserted = storage.emplace(name, 0.0);
+        if (inserted.second)
+            runtime.m_parser.DefineVar(name, &inserted.first->second);
+    }
+}
+
+struct CxScriptInjectedGlobals
+{
+    double roi_x0 = 0.0;
+    double roi_y0 = 0.0;
+    double roi_x1 = 0.0;
+    double roi_y1 = 0.0;
+    double tool_half_width = 0.0;
+    double wgap = 0.0;
+    double hgap = 0.0;
+    double gap = 0.0;
+    double linegap = 0.0;
+    double threshold = 0.0;
+    double method = 0.0;
+    double filterprofile = 0.0;
+    double samplerate = 0.0;
+    double min_score = 0.0;
+    double find_num = 0.0;
+    double compare_gap = 0.0;
+    double circle_cx = 0.0;
+    double circle_cy = 0.0;
+    double circle_px = 0.0;
+    double circle_py = 0.0;
+    double max_elapsed_ms = 0.0;
+    double max_scan_lines = 0.0;
+    double max_samples = 0.0;
+    double line_ref = 0.0;
+    double circle_ref = 0.0;
+    double contract_pass = 0.0;
+    double headless_ok = 0.0;
+    double algorithm_executed = 0.0;
+    double budget_exceeded = 0.0;
+    double valid_points_count = 0.0;
+    double has_fit_line = 0.0;
+    double has_fit_circle = 0.0;
+    double rendered_measure_points_count = 0.0;
+    double rendered_result_count = 0.0;
+    double result_overlay_changed_pixels = 0.0;
+    double policy_guard_match = 0.0;
+    double contract_circle_radius = 0.0;
+    double contract_avgdist = 0.0;
+};
+
 bool InjectCxScriptGlobals(
     mu::CxParserRuntime& runtime,
     const CxScriptHeadlessOptions& options,
+    CxScriptInjectedGlobals& values,
     std::string& reason)
 {
-    double roi_x0_val = static_cast<double>(options.roi_x0);
-    double roi_y0_val = static_cast<double>(options.roi_y0);
-    double roi_x1_val = static_cast<double>(options.roi_x1);
-    double roi_y1_val = static_cast<double>(options.roi_y1);
-    double tool_half_width_val = static_cast<double>(options.tool_half_width);
-    double wgap_val = static_cast<double>(options.wgap);
-    double hgap_val = static_cast<double>(options.hgap);
-    double gap_val = static_cast<double>(options.gap);
-    double linegap_val = static_cast<double>(options.linegap);
-    double threshold_val = static_cast<double>(options.threshold);
-    double method_val = static_cast<double>(options.method);
-    double filterprofile_val = static_cast<double>(options.filterprofile);
-    double samplerate_val = static_cast<double>(options.samplerate);
-    double min_score_val = options.min_score;
-    double find_num_val = static_cast<double>(options.find_num);
-    double compare_gap_val = static_cast<double>(options.compare_gap);
-    double circle_cx_val = static_cast<double>(options.circle_cx);
-    double circle_cy_val = static_cast<double>(options.circle_cy);
-    double circle_px_val = static_cast<double>(options.circle_px);
-    double circle_py_val = static_cast<double>(options.circle_py);
+    values.roi_x0 = static_cast<double>(options.roi_x0);
+    values.roi_y0 = static_cast<double>(options.roi_y0);
+    values.roi_x1 = static_cast<double>(options.roi_x1);
+    values.roi_y1 = static_cast<double>(options.roi_y1);
+    values.tool_half_width = static_cast<double>(options.tool_half_width);
+    values.wgap = static_cast<double>(options.wgap);
+    values.hgap = static_cast<double>(options.hgap);
+    values.gap = static_cast<double>(options.gap);
+    values.linegap = static_cast<double>(options.linegap);
+    values.threshold = static_cast<double>(options.threshold);
+    values.method = static_cast<double>(options.method);
+    values.filterprofile = static_cast<double>(options.filterprofile);
+    values.samplerate = static_cast<double>(options.samplerate);
+    values.min_score = options.min_score;
+    values.find_num = static_cast<double>(options.find_num);
+    values.compare_gap = static_cast<double>(options.compare_gap);
+    values.circle_cx = static_cast<double>(options.circle_cx);
+    values.circle_cy = static_cast<double>(options.circle_cy);
+    values.circle_px = static_cast<double>(options.circle_px);
+    values.circle_py = static_cast<double>(options.circle_py);
+    values.max_elapsed_ms = static_cast<double>(options.max_elapsed_ms);
+    values.max_scan_lines = static_cast<double>(options.max_scan_lines);
+    values.max_samples = static_cast<double>(options.max_samples);
 
-    int max_elapsed_ms_val = options.max_elapsed_ms;
-    int max_scan_lines_val = options.max_scan_lines;
-    int max_samples_val = options.max_samples;
+    runtime.m_parser.DefineVar("global_roi_x0", &values.roi_x0);
+    runtime.m_parser.DefineVar("global_roi_y0", &values.roi_y0);
+    runtime.m_parser.DefineVar("global_roi_x1", &values.roi_x1);
+    runtime.m_parser.DefineVar("global_roi_y1", &values.roi_y1);
+    runtime.m_parser.DefineVar("global_tool_half_width", &values.tool_half_width);
+    runtime.m_parser.DefineVar("global_wgap", &values.wgap);
+    runtime.m_parser.DefineVar("global_hgap", &values.hgap);
+    runtime.m_parser.DefineVar("global_gap", &values.gap);
+    runtime.m_parser.DefineVar("global_linegap", &values.linegap);
+    runtime.m_parser.DefineVar("global_threshold", &values.threshold);
+    runtime.m_parser.DefineVar("global_method", &values.method);
+    runtime.m_parser.DefineVar("global_filterprofile", &values.filterprofile);
+    runtime.m_parser.DefineVar("global_samplerate", &values.samplerate);
+    runtime.m_parser.DefineVar("global_min_score", &values.min_score);
+    runtime.m_parser.DefineVar("global_find_num", &values.find_num);
+    runtime.m_parser.DefineVar("global_compare_gap", &values.compare_gap);
+    runtime.m_parser.DefineVar("global_circle_cx", &values.circle_cx);
+    runtime.m_parser.DefineVar("global_circle_cy", &values.circle_cy);
+    runtime.m_parser.DefineVar("global_circle_px", &values.circle_px);
+    runtime.m_parser.DefineVar("global_circle_py", &values.circle_py);
+    runtime.m_parser.DefineVar("global_max_elapsed_ms", &values.max_elapsed_ms);
+    runtime.m_parser.DefineVar("global_max_scan_lines", &values.max_scan_lines);
+    runtime.m_parser.DefineVar("global_max_samples", &values.max_samples);
+    runtime.m_parser.DefineVar("global_line_ref", &values.line_ref);
+    runtime.m_parser.DefineVar("global_circle_ref", &values.circle_ref);
 
-    runtime.m_parser.DefineVar("global_roi_x0", &roi_x0_val);
-    runtime.m_parser.DefineVar("global_roi_y0", &roi_y0_val);
-    runtime.m_parser.DefineVar("global_roi_x1", &roi_x1_val);
-    runtime.m_parser.DefineVar("global_roi_y1", &roi_y1_val);
-    runtime.m_parser.DefineVar("global_tool_half_width", &tool_half_width_val);
-    runtime.m_parser.DefineVar("global_wgap", &wgap_val);
-    runtime.m_parser.DefineVar("global_hgap", &hgap_val);
-    runtime.m_parser.DefineVar("global_gap", &gap_val);
-    runtime.m_parser.DefineVar("global_linegap", &linegap_val);
-    runtime.m_parser.DefineVar("global_threshold", &threshold_val);
-    runtime.m_parser.DefineVar("global_method", &method_val);
-    runtime.m_parser.DefineVar("global_filterprofile", &filterprofile_val);
-    runtime.m_parser.DefineVar("global_samplerate", &samplerate_val);
-    runtime.m_parser.DefineVar("global_min_score", &min_score_val);
-    runtime.m_parser.DefineVar("global_find_num", &find_num_val);
-    runtime.m_parser.DefineVar("global_compare_gap", &compare_gap_val);
-    runtime.m_parser.DefineVar("global_circle_cx", &circle_cx_val);
-    runtime.m_parser.DefineVar("global_circle_cy", &circle_cy_val);
-    runtime.m_parser.DefineVar("global_circle_px", &circle_px_val);
-    runtime.m_parser.DefineVar("global_circle_py", &circle_py_val);
-    runtime.m_parser.DefineVar("global_max_elapsed_ms", &max_elapsed_ms_val);
-    runtime.m_parser.DefineVar("global_max_scan_lines", &max_scan_lines_val);
-    runtime.m_parser.DefineVar("global_max_samples", &max_samples_val);
+    if (options.contract_context_enabled)
+    {
+        values.contract_pass = static_cast<double>(options.contract_pass_initial);
+        values.headless_ok = static_cast<double>(options.contract_headless_ok);
+        values.algorithm_executed = static_cast<double>(options.contract_algorithm_executed);
+        values.budget_exceeded = static_cast<double>(options.contract_budget_exceeded);
+        values.valid_points_count = static_cast<double>(options.valid_points_count);
+        values.has_fit_line = static_cast<double>(options.has_fit_line);
+        values.has_fit_circle = static_cast<double>(options.has_fit_circle);
+        values.rendered_measure_points_count = static_cast<double>(options.contract_rendered_measure_points_count);
+        values.rendered_result_count = static_cast<double>(options.contract_rendered_result_count);
+        values.result_overlay_changed_pixels = static_cast<double>(options.contract_result_overlay_changed_pixels);
+        values.policy_guard_match = static_cast<double>(options.policy_guard_match);
+        values.contract_circle_radius = options.circle_radius;
+        values.contract_avgdist = options.avgdist;
+
+        runtime.m_parser.DefineVar("global_contract_pass", &values.contract_pass);
+        runtime.m_parser.DefineVar("global_headless_ok", &values.headless_ok);
+        runtime.m_parser.DefineVar("global_algorithm_executed", &values.algorithm_executed);
+        runtime.m_parser.DefineVar("global_budget_exceeded", &values.budget_exceeded);
+        runtime.m_parser.DefineVar("global_valid_points_count", &values.valid_points_count);
+        runtime.m_parser.DefineVar("global_has_fit_line", &values.has_fit_line);
+        runtime.m_parser.DefineVar("global_has_fit_circle", &values.has_fit_circle);
+        runtime.m_parser.DefineVar("global_rendered_measure_points_count", &values.rendered_measure_points_count);
+        runtime.m_parser.DefineVar("global_rendered_result_count", &values.rendered_result_count);
+        runtime.m_parser.DefineVar("global_result_overlay_changed_pixels", &values.result_overlay_changed_pixels);
+        runtime.m_parser.DefineVar("global_policy_guard_match", &values.policy_guard_match);
+        runtime.m_parser.DefineVar("global_contract_circle_radius", &values.contract_circle_radius);
+        runtime.m_parser.DefineVar("global_contract_avgdist", &values.contract_avgdist);
+    }
 
     reason.clear();
     return true;
@@ -185,8 +375,10 @@ bool ExecuteCxScriptSequential(
     runtime.SetStream(&parser_output);
 
     runtime.ParserInitialClassFunction(0);
+    runtime.SetVarFactory();
 
-    if (!InjectCxScriptGlobals(runtime, options, reason))
+    CxScriptInjectedGlobals injected_globals;
+    if (!InjectCxScriptGlobals(runtime, options, injected_globals, reason))
         return false;
 
     if (!CreateCxScriptInputImage(runtime, source_image, reason))
@@ -198,22 +390,63 @@ bool ExecuteCxScriptSequential(
     if (script_source.empty())
         return false;
 
-    const std::string prepared =
-        PrepareCxScriptRuntimeSource(script_source);
+    std::map<std::string, double> script_locals;
+    DefineCxScriptLocalVariables(runtime, script_source, script_locals);
 
-    if (!runtime.Compile(prepared.c_str()))
+    const std::string prepared =
+        PrepareCxScriptRuntimeSource(script_source, options.contract_context_enabled);
+
+    if (!runtime.CompileCollectedScript(prepared, reason))
     {
-        capture.failure_stage = "script_execution";
-        reason = "CxParserRuntime::Compile failed";
+        const std::string parser_diagnostic = parser_output.str();
+        if (!parser_diagnostic.empty())
+            reason += " | parser: " + parser_diagnostic;
+        capture.failure_stage = "script_compile";
         return false;
     }
 
     capture.script_compiled = true;
 
-    if (!CaptureRuntimeToolResults(runtime, capture, reason))
+    if (!runtime.RunCollectedScript(reason))
     {
-        capture.failure_stage = "runtime_result_capture";
+        const std::string parser_diagnostic = parser_output.str();
+        if (!parser_diagnostic.empty())
+            reason += " | parser: " + parser_diagnostic;
+        capture.failure_stage = "script_execution";
         return false;
+    }
+
+    if (options.contract_context_enabled)
+    {
+        capture.contract_context = true;
+        capture.contract_pass = injected_globals.contract_pass != 0.0;
+        capture.contract_status = capture.contract_pass ? "contract_passed" : "contract_failed";
+        capture.contract_conclusion = capture.contract_pass
+            ? "CxScript contract conditions passed"
+            : "CxScript contract conditions failed";
+    }
+    else try
+    {
+        if (!CaptureRuntimeToolResults(runtime, capture, reason))
+        {
+            capture.failure_stage = "runtime_result_capture";
+            return false;
+        }
+    }
+    catch (...)
+    {
+        reason = "CaptureRuntimeToolResults crashed";
+        capture.failure_stage = "runtime_result_capture_crash";
+        return false;
+    }
+
+    if (options.runtime_capture_smoke)
+    {
+        if (!ValidateCxScriptRuntimeCaptureSmoke(runtime, capture, reason))
+        {
+            capture.failure_stage = "runtime_capture_smoke";
+            return false;
+        }
     }
 
     capture.runtime_completed = true;
@@ -254,7 +487,14 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
     file << "  \"failure_stage\": \"" << JsonEscape(capture.failure_stage) << "\",\n";
-    file << "  \"reason\": \"" << JsonEscape(capture.reason) << "\"\n";
+    file << "  \"reason\": \"" << JsonEscape(capture.reason) << "\""
+         << (capture.contract_context ? "," : "") << "\n";
+    if (capture.contract_context)
+    {
+        file << "  \"contract_pass\": " << (capture.contract_pass ? "true" : "false") << ",\n";
+        file << "  \"contract_status\": \"" << JsonEscape(capture.contract_status) << "\",\n";
+        file << "  \"contract_conclusion\": \"" << JsonEscape(capture.contract_conclusion) << "\"\n";
+    }
     file << "}\n";
 
     outReason.clear();
@@ -283,6 +523,8 @@ bool ParseCxScriptHeadlessArgs(
             options.max_steps = std::stoi(argv[++i]);
         else if (arg == "--timeout-sec" && i + 1 < argc)
             options.timeout_sec = std::stoi(argv[++i]);
+        else if (arg == "--runtime-capture-smoke")
+            options.runtime_capture_smoke = true;
     }
     return options.enabled && !options.image_path.empty() && !options.script_path.empty() && !options.output_dir.empty();
 }
@@ -375,11 +617,6 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         result.snapshot_path = snapshot_path.string();
     }
 
-    if (SaveCxScriptHeadlessSummaryJson(capture, summary_path, reason))
-    {
-        result.summary_path = summary_path.string();
-    }
-
     cv::Mat result_overlay;
     cv::Mat evidence_overlay;
     cv::Mat tool_display;
@@ -389,25 +626,32 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::RESULT, result_overlay, render_result))
     {
         std::filesystem::create_directories(result_overlay_path.parent_path());
-        cv::imwrite(result_overlay_path.string(), result_overlay);
-        result.result_overlay_path = result_overlay_path.string();
         capture.result_overlay_changed_pixels = render_result.changed_pixel_count;
         capture.rendered_measure_points_count = render_result.rendered_measure_points_count;
         capture.rendered_result_count = render_result.rendered_result_count;
+        if (cv::imwrite(result_overlay_path.string(), result_overlay))
+            result.result_overlay_path = result_overlay_path.string();
     }
 
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::EVIDENCE, evidence_overlay, render_result))
     {
         std::filesystem::create_directories(evidence_overlay_path.parent_path());
-        cv::imwrite(evidence_overlay_path.string(), evidence_overlay);
-        result.evidence_overlay_path = evidence_overlay_path.string();
+        if (cv::imwrite(evidence_overlay_path.string(), evidence_overlay))
+            result.evidence_overlay_path = evidence_overlay_path.string();
     }
 
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::TOOL_DISPLAY, tool_display, render_result))
     {
         std::filesystem::create_directories(tool_display_path.parent_path());
-        cv::imwrite(tool_display_path.string(), tool_display);
-        result.tool_display_path = tool_display_path.string();
+        if (cv::imwrite(tool_display_path.string(), tool_display))
+            result.tool_display_path = tool_display_path.string();
+    }
+
+    // Rendering facts are part of the contract input, so persist the summary
+    // only after all overlay passes have updated the capture.
+    if (SaveCxScriptHeadlessSummaryJson(capture, summary_path, reason))
+    {
+        result.summary_path = summary_path.string();
     }
 
     std::ofstream line_trace_file(line_trace_path);
@@ -451,18 +695,54 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file.close();
     }
 
+    if (options.runtime_capture_smoke)
+    {
+        std::filesystem::path smoke_path = output_dir / "runtime_capture_smoke.json";
+        std::ofstream smoke_file(smoke_path);
+        if (smoke_file.is_open())
+        {
+            smoke_file << "{\n";
+            smoke_file << "  \"pass\": " << (capture.smoke_pass ? "true" : "false") << ",\n";
+            smoke_file << "  \"execution_mode\": \"sequential\",\n";
+            smoke_file << "  \"algorithm_scope\": \"geometry_capture_only\",\n";
+            smoke_file << "  \"findline_object_name\": \"" << capture.smoke_findline_object_name << "\",\n";
+            smoke_file << "  \"findline_roi\": " << (capture.smoke_findline_roi ? "true" : "false") << ",\n";
+            smoke_file << "  \"findline_scan\": " << (capture.smoke_findline_scan ? "true" : "false") << ",\n";
+            smoke_file << "  \"findcircle_object_name\": \"" << capture.smoke_findcircle_object_name << "\",\n";
+            smoke_file << "  \"findcircle_roi_shape_kind\": \"" << capture.smoke_findcircle_roi_shape_kind << "\",\n";
+            smoke_file << "  \"findcircle_roi_radius\": " << capture.smoke_findcircle_roi_radius << ",\n";
+            smoke_file << "  \"findcircle_outer_scan_radius\": " << capture.smoke_findcircle_outer_scan_radius << ",\n";
+            smoke_file << "  \"reason\": \"" << capture.reason << "\"\n";
+            smoke_file << "}\n";
+            smoke_file.close();
+        }
+    }
+
     std::ofstream overlay_validation_file(overlay_validation_path);
     if (overlay_validation_file.is_open())
     {
+        const bool source_equals_result_overlay =
+            capture.result_overlay_changed_pixels == 0;
+        const bool fit_geometry_matches_overlay =
+            (!capture.has_fit_line && !capture.has_fit_circle) ||
+            capture.rendered_result_count > 0;
+        const bool point_geometry_matches_overlay =
+            capture.valid_points_count <= 0 ||
+            capture.rendered_measure_points_count > 0;
+        const bool summary_geometry_matches_overlay =
+            fit_geometry_matches_overlay && point_geometry_matches_overlay;
+
         overlay_validation_file << "{\n";
         overlay_validation_file << "  \"execution_mode\": \"sequential\",\n";
-        overlay_validation_file << "  \"source_equals_result_overlay\": false,\n";
+        overlay_validation_file << "  \"source_equals_result_overlay\": "
+                                << (source_equals_result_overlay ? "true" : "false") << ",\n";
         overlay_validation_file << "  \"changed_pixel_count\": " << capture.result_overlay_changed_pixels << ",\n";
         overlay_validation_file << "  \"rendered_roi_count\": " << capture.rendered_roi_count << ",\n";
         overlay_validation_file << "  \"rendered_scan_count\": " << capture.rendered_scan_count << ",\n";
         overlay_validation_file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
         overlay_validation_file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
-        overlay_validation_file << "  \"summary_geometry_matches_overlay\": true\n";
+        overlay_validation_file << "  \"summary_geometry_matches_overlay\": "
+                                << (summary_geometry_matches_overlay ? "true" : "false") << "\n";
         overlay_validation_file << "}\n";
         overlay_validation_file.close();
     }
@@ -487,11 +767,14 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     bool snapshot_ok = !result.snapshot_path.empty();
     bool summary_ok = !result.summary_path.empty();
-    bool evidence_ok = !result.evidence_overlay_path.empty() && capture.rendered_roi_count > 0;
+    bool evidence_ok = options.contract_context_enabled ||
+        (!result.evidence_overlay_path.empty() && capture.rendered_roi_count > 0);
     bool result_ok = !result.result_overlay_path.empty();
     bool tool_display_ok = !result.tool_display_path.empty();
 
-    result.assets_complete = snapshot_ok && summary_ok && evidence_ok && result_ok && tool_display_ok;
+    result.assets_complete = options.contract_context_enabled
+        ? (snapshot_ok && summary_ok)
+        : (snapshot_ok && summary_ok && evidence_ok && result_ok && tool_display_ok);
     result.ok = result.executed && result.runtime_ok && result.assets_complete;
     result.exit_code = result.ok ? 0 : 1;
 

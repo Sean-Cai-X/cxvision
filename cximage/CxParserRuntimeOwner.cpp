@@ -2,6 +2,12 @@
 #include "CxParserRuntimeOwner.h"
 #include "CxAnnotationToolRegister.h"
 #include "CxShapeTestRegister.h"
+#include "CxScriptSuiteRuntime.h"
+#include "CxScriptSuiteRegister.h"
+#include "CxScriptCatalogRuntime.h"
+#include "CxScriptCatalogRegister.h"
+#include "CxParameterProfileRuntime.h"
+#include "CxParameterProfileRegister.h"
 #include "ParserClass.h"
 #include <fstream>
 
@@ -38,10 +44,9 @@ bool CxParserRuntimeOwner::Initialize(std::string& reason)
     try
     {
         m_runtime = std::make_unique<mu::CxParserRuntime>();
+        m_runtime->SetStream(&m_runtime_stream);
+        m_runtime->SetCreateCodeStream(&m_code_stream);
         m_runtime->ParserInitialClassFunction(0);
-
-        RegisterCxAnnotationToolBindings(m_runtime->m_parser);
-        RegisterCxShapeTestBindings(m_runtime->m_parser);
 
         m_initialized = true;
         return true;
@@ -96,7 +101,73 @@ bool CxParserRuntimeOwner::BeginExecution(
         return false;
     }
 
+    if (!EnsureBindings(kind, reason))
+        return false;
+
     m_executing = true;
+    return true;
+}
+
+bool CxParserRuntimeOwner::EnsureBindings(
+    CxParserDocumentKind kind,
+    std::string& reason)
+{
+    try
+    {
+        switch (kind)
+        {
+        case CxParserDocumentKind::AnnotationToolManifest:
+            if (!m_annotation_bindings_registered)
+            {
+                RegisterCxAnnotationToolBindings(m_runtime->m_parser);
+                m_annotation_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::ShapeInteractionSuite:
+            if (!m_shape_bindings_registered)
+            {
+                RegisterCxShapeTestBindings(m_runtime->m_parser);
+                m_shape_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::ScriptSuite:
+            if (!m_suite_bindings_registered)
+            {
+                RegisterCxScriptSuiteBindings(m_runtime->m_parser);
+                m_suite_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::ScriptCatalog:
+            if (!m_catalog_bindings_registered)
+            {
+                RegisterCxScriptCatalogBindings(m_runtime->m_parser);
+                m_catalog_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::ParameterProfile:
+            if (!m_parameter_bindings_registered)
+            {
+                RegisterCxParameterProfileBindings(m_runtime->m_parser);
+                m_parameter_bindings_registered = true;
+            }
+            break;
+        }
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "binding registration failed: " + std::string(error.GetMsg());
+        return false;
+    }
+    catch (const std::exception& error)
+    {
+        reason = "binding registration failed: " + std::string(error.what());
+        return false;
+    }
+    catch (...)
+    {
+        reason = "binding registration failed: unknown exception";
+        return false;
+    }
     return true;
 }
 
@@ -217,8 +288,12 @@ bool CxParserRuntimeOwner::ParseAnnotationToolManifest(
 
     try
     {
-        m_runtime->m_parser.SetExpr(source);
-        m_runtime->m_parser.Eval();
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "annotation manifest Compile failed";
+            CxAnnotationToolRuntime::Reset();
+            return false;
+        }
 
         snapshot.source_path = path;
         snapshot.tools = CxAnnotationToolRuntime::Tools();
@@ -281,8 +356,12 @@ bool CxParserRuntimeOwner::ParseShapeInteractionSuite(
 
     try
     {
-        m_runtime->m_parser.SetExpr(source);
-        m_runtime->m_parser.Eval();
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "shape suite Compile failed";
+            CxShapeTestRuntime::Reset();
+            return false;
+        }
 
         snapshot.source_path = path;
         snapshot.cases = CxShapeTestRuntime::Cases();
@@ -319,5 +398,125 @@ bool CxParserRuntimeOwner::ParseShapeInteractionSuite(
         return false;
     }
 
+    return true;
+}
+
+bool CxParserRuntimeOwner::ParseScriptSuite(
+    const std::string& path,
+    CxScriptSuiteRuntime& snapshot,
+    std::string& reason)
+{
+    snapshot = {};
+    std::string source;
+    if (!ReadScript(path, source, reason) ||
+        !BeginExecution(CxParserDocumentKind::ScriptSuite, path, reason))
+        return false;
+
+    CxParserExecutionGuard guard(*this);
+    g_cxscript_suite = {};
+    g_current_suite_case = nullptr;
+
+    try
+    {
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "suite Compile failed";
+            return false;
+        }
+        snapshot = g_cxscript_suite;
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "suite parse error: " + std::string(error.GetMsg());
+        return false;
+    }
+
+    g_cxscript_suite = {};
+    g_current_suite_case = nullptr;
+    if (snapshot.cases.empty())
+    {
+        reason = "suite produced no cases";
+        return false;
+    }
+    return true;
+}
+
+bool CxParserRuntimeOwner::ParseScriptCatalog(
+    const std::string& path,
+    CxScriptCatalogRuntime& snapshot,
+    std::string& reason)
+{
+    snapshot = {};
+    std::string source;
+    if (!ReadScript(path, source, reason) ||
+        !BeginExecution(CxParserDocumentKind::ScriptCatalog, path, reason))
+        return false;
+
+    CxParserExecutionGuard guard(*this);
+    g_cxscript_catalog = {};
+    g_current_catalog_entry = nullptr;
+
+    try
+    {
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "catalog Compile failed";
+            return false;
+        }
+        snapshot = g_cxscript_catalog;
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "catalog parse error: " + std::string(error.GetMsg());
+        return false;
+    }
+
+    g_cxscript_catalog = {};
+    g_current_catalog_entry = nullptr;
+    if (snapshot.scripts.empty())
+    {
+        reason = "catalog produced no entries";
+        return false;
+    }
+    return true;
+}
+
+bool CxParserRuntimeOwner::ParseParameterProfile(
+    const std::string& path,
+    CxParameterProfileRuntime& snapshot,
+    std::string& reason)
+{
+    snapshot = {};
+    std::string source;
+    if (!ReadScript(path, source, reason) ||
+        !BeginExecution(CxParserDocumentKind::ParameterProfile, path, reason))
+        return false;
+
+    CxParserExecutionGuard guard(*this);
+    g_cxscript_parameter_profile = {};
+    g_current_parameter_profile = nullptr;
+
+    try
+    {
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "parameter profile Compile failed";
+            return false;
+        }
+        snapshot = g_cxscript_parameter_profile;
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "parameter profile parse error: " + std::string(error.GetMsg());
+        return false;
+    }
+
+    g_cxscript_parameter_profile = {};
+    g_current_parameter_profile = nullptr;
+    if (snapshot.profiles.empty())
+    {
+        reason = "parameter profile document produced no profiles";
+        return false;
+    }
     return true;
 }

@@ -2,6 +2,7 @@
 #define CXIMAGE_CXSCRIPT_HEADLESS_RUNNER_H
 
 #include <string>
+#include <filesystem>
 #include <opencv2/opencv.hpp>
 #include "CxScriptHeadlessRuntime.h"
 

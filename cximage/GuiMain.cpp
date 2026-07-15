@@ -78,8 +78,6 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
 
         if (arg == "--image-manifest")
         {
-            options.enabled = true;
-
             if (i + 1 >= argc)
             {
                 options.parse_ok = false;

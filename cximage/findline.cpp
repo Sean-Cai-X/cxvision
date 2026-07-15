@@ -1626,8 +1626,13 @@ void Findline::MeasureBalanced(Image& image)
     FindlineMeasureProfileStats stats;
     const std::chrono::steady_clock::time_point total_begin = std::chrono::steady_clock::now();
 
+    m_budget_state = CxAlgorithmBudgetState();
+
     ClearMeasureState();
-    BuildScanProfiles(image, stats);
+    BuildScanProfiles(image, stats, total_begin);
+
+    if (m_budget_state.exceeded)
+        return;
     CollectAllEdgeBands(image, stats);
     BuildEdgeBandGraph(stats);
     SolveBestEdgeChain(stats);
@@ -1708,7 +1713,7 @@ void Findline::ClearMeasureState()
     m_measurepoints_h.clear();
 }
 
-void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats)
+void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats, const std::chrono::steady_clock::time_point& total_begin)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     if (g_pbackimage == nullptr)
@@ -1731,10 +1736,52 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
 
     for (int i = 0; i < iwsize; ++i)
     {
+        m_budget_state.scan_line_count++;
+        m_budget_state.elapsed_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - total_begin).count());
+
+        if (m_budget_state.elapsed_ms >= m_budget.max_elapsed_ms)
+        {
+            m_budget_state.exceeded = true;
+            m_budget_state.exceeded_kind = "algorithm_budget_exceeded";
+            m_lastMeasureInputDebug.failure_stage = m_budget_state.exceeded_kind;
+            return;
+        }
+
+        if (m_budget_state.scan_line_count >= m_budget.max_scan_lines)
+        {
+            m_budget_state.exceeded = true;
+            m_budget_state.exceeded_kind = "scan_line_budget_exceeded";
+            m_lastMeasureInputDebug.failure_stage = m_budget_state.exceeded_kind;
+            return;
+        }
+
         m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
     }
     for (int i = 0; i < ihsize; ++i)
     {
+        m_budget_state.scan_line_count++;
+        m_budget_state.elapsed_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - total_begin).count());
+
+        if (m_budget_state.elapsed_ms >= m_budget.max_elapsed_ms)
+        {
+            m_budget_state.exceeded = true;
+            m_budget_state.exceeded_kind = "algorithm_budget_exceeded";
+            m_lastMeasureInputDebug.failure_stage = m_budget_state.exceeded_kind;
+            return;
+        }
+
+        if (m_budget_state.scan_line_count >= m_budget.max_scan_lines)
+        {
+            m_budget_state.exceeded = true;
+            m_budget_state.exceeded_kind = "scan_line_budget_exceeded";
+            m_lastMeasureInputDebug.failure_stage = m_budget_state.exceeded_kind;
+            return;
+        }
+
         m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
@@ -2863,6 +2910,46 @@ void Findline::exportmeasuredebugpoints(std::vector<float>& outXY) const
             outXY.push_back(static_cast<float>(band.y));
         }
     }
+}
+
+void Findline::setmaxelapsedms(int value)
+{
+    m_budget.max_elapsed_ms = value;
+}
+
+void Findline::setmaxscanlines(int value)
+{
+    m_budget.max_scan_lines = value;
+}
+
+void Findline::setmaxsamples(int value)
+{
+    m_budget.max_samples = value;
+}
+
+bool Findline::budgetexceeded() const
+{
+    return m_budget_state.exceeded;
+}
+
+int Findline::getelapsedms() const
+{
+    return m_budget_state.elapsed_ms;
+}
+
+int Findline::getscanlinecount() const
+{
+    return m_budget_state.scan_line_count;
+}
+
+int Findline::getsamplecount() const
+{
+    return m_budget_state.sample_count;
+}
+
+const std::string& Findline::getfailurestage() const
+{
+    return m_lastMeasureInputDebug.failure_stage;
 }
 
 namespace

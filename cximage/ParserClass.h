@@ -2,6 +2,7 @@
 #define PARSERCLASS_H
 #include "muParser.h"
 #include <string>
+#include <vector>
 
 using namespace std;
 #define WM_ZOOMWIN 100001
@@ -48,6 +49,10 @@ namespace mu
 
         int GetClassObjSum(const string &strclass);
 
+        std::string GetClassObjName(
+            const std::string& class_name,
+            int object_index) const;
+
         void* GetClass(const string &strclass);
     private:
         int g_testcal ;
@@ -74,6 +79,8 @@ namespace mu
         void ShowHelp();
         void Calc(const char *pszFormula);
         bool Compile(const char *a_szLine);
+        bool CompileCollectedScript(const std::string& script, std::string& reason);
+        bool RunCollectedScript(std::string& reason);
         void ClearAll();
         void StopRun();
         void SetRunOk();
@@ -115,6 +122,7 @@ namespace mu
     private:
         std::ostream *m_stream;
         std::ostream *m_createstream;
+        std::vector<std::string> m_collectedScriptStatements;
 //////////////////////////////////////////////////////////////////////////
     public:
         void CreateClassDef(const char *pclassname,

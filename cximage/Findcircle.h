@@ -3,6 +3,7 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
+#include "CxAlgorithmBudget.h"
 #include <cstdint>
 #include <string>
 class FindObject;
@@ -181,6 +182,19 @@ public:
     GeomAdaptor_Curve GetCurve(gp_Pnt center_p, Standard_Real radius);
 
     gp_Pnt FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint);
+
+    void setmaxelapsedms(int value);
+    void setmaxscanlines(int value);
+    void setmaxsamples(int value);
+
+    bool budgetexceeded() const;
+    int getelapsedms() const;
+    int getscanlinecount() const;
+    int getsamplecount() const;
+    const std::string& getfailurestage() const;
+
+    double get_result() const { return hasfitresult() ? 1.0 : 0.0; }
+    double get_result_script() { return get_result(); }
 private:
 
     double m_dresultcentx;
@@ -251,6 +265,9 @@ private:
 
     std::uint64_t m_measure_geometry_version = 0;
     std::uint64_t m_measure_geometry_built_version = 0;
+
+    CxAlgorithmBudget m_budget;
+    CxAlgorithmBudgetState m_budget_state;
 
     void MarkCircleMeasureGeometryDirty();
 

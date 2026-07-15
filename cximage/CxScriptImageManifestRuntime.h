@@ -33,12 +33,19 @@ struct CxScriptImageTargetRoi
     double rect_angle_deg = 0.0;
 
     int wgap = 32;
+    bool has_wgap = false;
     int hgap = 8;
+    bool has_hgap = false;
     int gap = 5;
+    bool has_gap = false;
     int linegap = 6;
+    bool has_linegap = false;
     int tool_half_width = 20;
+    bool has_tool_half_width = false;
     int threshold = 20;
+    bool has_threshold = false;
     int method = 2;
+    bool has_method = false;
 
     std::string expected_edge;
     std::string edge_polarity_hint;

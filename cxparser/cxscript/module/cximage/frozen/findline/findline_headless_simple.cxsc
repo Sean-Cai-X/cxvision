@@ -3,6 +3,10 @@ Findline m_line;
 
 m_image.copyFromMat(global.matInput);
 
+m_line.setmaxelapsedms(global.max_elapsed_ms);
+m_line.setmaxscanlines(global.max_scan_lines);
+m_line.setmaxsamples(global.max_samples);
+
 m_line.SetWHgap(global.wgap, global.hgap);
 m_line.setlinegap(global.linegap);
 m_line.setline(

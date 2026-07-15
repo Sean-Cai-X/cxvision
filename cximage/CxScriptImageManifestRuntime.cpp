@@ -372,6 +372,12 @@ namespace
                                         target.tool = ParseString(text, tp);
                                     else if (tkey == "roi_name")
                                         target.target_id = ParseString(text, tp);
+
+                                    // Advance past the separator following the
+                                    // first target field before parsing the
+                                    // remaining fields in the same object.
+                                    ExpectChar(text, tp, ',');
+
                                     bool seen_x0 = false, seen_y0 = false, seen_x1 = false, seen_y1 = false;
                                     bool seen_cx = false, seen_cy = false, seen_px = false, seen_py = false;
                                     bool seen_major_radius = false, seen_minor_radius = false, seen_angle_deg = false;
@@ -477,19 +483,40 @@ namespace
                                                 target.rect_height = val;
                                         }
                                         else if (tkey == "wgap")
+                                        {
                                             target.wgap = ParseInt(text, tp);
+                                            target.has_wgap = true;
+                                        }
                                         else if (tkey == "hgap")
+                                        {
                                             target.hgap = ParseInt(text, tp);
+                                            target.has_hgap = true;
+                                        }
                                         else if (tkey == "gap")
+                                        {
                                             target.gap = ParseInt(text, tp);
+                                            target.has_gap = true;
+                                        }
                                         else if (tkey == "linegap")
+                                        {
                                             target.linegap = ParseInt(text, tp);
+                                            target.has_linegap = true;
+                                        }
                                         else if (tkey == "tool_half_width")
+                                        {
                                             target.tool_half_width = ParseInt(text, tp);
+                                            target.has_tool_half_width = true;
+                                        }
                                         else if (tkey == "threshold")
+                                        {
                                             target.threshold = ParseInt(text, tp);
+                                            target.has_threshold = true;
+                                        }
                                         else if (tkey == "method")
+                                        {
                                             target.method = ParseInt(text, tp);
+                                            target.has_method = true;
+                                        }
                                         else if (tkey == "expected_edge")
                                             target.expected_edge = ParseString(text, tp);
                                         else if (tkey == "edge_polarity_hint")
@@ -772,7 +799,14 @@ bool LoadStage25ImageManifestJson(
 
     std::stringstream buffer;
     buffer << file.rdbuf();
-    const std::string text = buffer.str();
+    std::string text = buffer.str();
+    if (text.size() >= 3 &&
+        static_cast<unsigned char>(text[0]) == 0xEF &&
+        static_cast<unsigned char>(text[1]) == 0xBB &&
+        static_cast<unsigned char>(text[2]) == 0xBF)
+    {
+        text.erase(0, 3);
+    }
 
     out_manifest = CxScriptImageManifestRuntime{};
     out_manifest.manifest_path = manifest_path;

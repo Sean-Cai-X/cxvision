@@ -46,6 +46,7 @@ double CxParameterProfile_setmethod(double method)
         return 0.0;
 
     g_current_parameter_profile->method = static_cast<int>(method);
+    g_current_parameter_profile->has_method = true;
     return 0.0;
 }
 
@@ -55,6 +56,7 @@ double CxParameterProfile_setthreshold(double threshold)
         return 0.0;
 
     g_current_parameter_profile->threshold = static_cast<int>(threshold);
+    g_current_parameter_profile->has_threshold = true;
     return 0.0;
 }
 
@@ -64,6 +66,7 @@ double CxParameterProfile_setgap(double gap)
         return 0.0;
 
     g_current_parameter_profile->gap = static_cast<int>(gap);
+    g_current_parameter_profile->has_gap = true;
     return 0.0;
 }
 
@@ -73,6 +76,7 @@ double CxParameterProfile_setlinegap(double linegap)
         return 0.0;
 
     g_current_parameter_profile->linegap = static_cast<int>(linegap);
+    g_current_parameter_profile->has_linegap = true;
     return 0.0;
 }
 
@@ -82,6 +86,7 @@ double CxParameterProfile_setwgap(double wgap)
         return 0.0;
 
     g_current_parameter_profile->wgap = static_cast<int>(wgap);
+    g_current_parameter_profile->has_wgap = true;
     return 0.0;
 }
 
@@ -91,6 +96,7 @@ double CxParameterProfile_sethgap(double hgap)
         return 0.0;
 
     g_current_parameter_profile->hgap = static_cast<int>(hgap);
+    g_current_parameter_profile->has_hgap = true;
     return 0.0;
 }
 
@@ -100,6 +106,7 @@ double CxParameterProfile_setfilterprofile(double filterprofile)
         return 0.0;
 
     g_current_parameter_profile->filterprofile = static_cast<int>(filterprofile);
+    g_current_parameter_profile->has_filterprofile = true;
     return 0.0;
 }
 

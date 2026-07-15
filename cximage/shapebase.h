@@ -71,6 +71,29 @@ enum class CxShapeKind {
     LineGauge
 };
 
+inline const char* CxShapeKindName(CxShapeKind kind)
+{
+    switch (kind)
+    {
+    case CxShapeKind::Points:
+        return "PointsShape";
+    case CxShapeKind::Line:
+        return "LineShape";
+    case CxShapeKind::Rect:
+        return "RectShape";
+    case CxShapeKind::Circle:
+        return "CircleShape";
+    case CxShapeKind::Polyline:
+        return "PolylineShape";
+    case CxShapeKind::Ellipse:
+        return "EllipseShape";
+    case CxShapeKind::LineGauge:
+        return "LineGaugeShape";
+    default:
+        return "UnknownShape";
+    }
+}
+
 struct CxShapePoint {
     double x = 0.0;
     double y = 0.0;

@@ -705,17 +705,6 @@ void Findcircle::Measure(Image& image)
         return;
     }
 
-    if (g_pbackfindobject == nullptr)
-    {
-        m_lastMeasureGeometryDebug.failure_stage =
-            "circle_findobject_null";
-
-        m_lastMeasureGeometryDebug.detail =
-            "Findcircle Measure requires g_pbackfindobject prepared by debug/runtime environment.";
-
-        return;
-    }
-
     int ilineslen1 = 0;
     if (isize > 0)
         ilineslen1 = m_lines[0].getlinesize();
@@ -800,6 +789,8 @@ void Findcircle::Measure(Image& image)
     int icurlinenum = 0;
     int icurlineposition = 0;
 
+      m_budget_state = CxAlgorithmBudgetState();
+
       int ifixvalue = ComputeCircleScanTrim(isize);
       int iscanlines = isize - ifixvalue;
       iscanlines = std::max(iscanlines, ComputeCircleMinScanLines(isize));
@@ -809,15 +800,7 @@ void Findcircle::Measure(Image& image)
       const int right_margin = ComputeCircleEdgeMargin(ilineslen1, m_iSelectPointGap);
       const int max_edge_width = ComputeCircleMaxEdgeWidth(ilineslen1);
 
-      struct MeasureBudget {
-          int max_scan_lines = 2048;
-          int max_samples = 2000000;
-          int max_elapsed_ms = 3000;
-      };
-
-      MeasureBudget budget;
-
-      auto begin_time = std::chrono::steady_clock::now();
+      const auto begin_time = std::chrono::steady_clock::now();
       int scan_lines_processed = 0;
       int total_samples = 0;
       int valid_points_count = 0;
@@ -840,21 +823,31 @@ void Findcircle::Measure(Image& image)
           auto now = std::chrono::steady_clock::now();
           auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count();
 
-          if (scan_lines_processed > budget.max_scan_lines) {
-              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_scan_lines_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure scan lines exceeded budget: " + std::to_string(scan_lines_processed) + " > " + std::to_string(budget.max_scan_lines);
+          m_budget_state.elapsed_ms = static_cast<int>(elapsed_ms);
+          m_budget_state.scan_line_count = scan_lines_processed;
+          m_budget_state.sample_count = total_samples;
+
+          if (scan_lines_processed > m_budget.max_scan_lines) {
+              m_budget_state.exceeded = true;
+              m_budget_state.exceeded_kind = "scan_line_budget_exceeded";
+              m_lastMeasureGeometryDebug.failure_stage = "scan_line_budget_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure scan lines exceeded budget: " + std::to_string(scan_lines_processed) + " > " + std::to_string(m_budget.max_scan_lines);
               return true;
           }
 
-          if (total_samples > budget.max_samples) {
-              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_samples_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure samples exceeded budget: " + std::to_string(total_samples) + " > " + std::to_string(budget.max_samples);
+          if (total_samples > m_budget.max_samples) {
+              m_budget_state.exceeded = true;
+              m_budget_state.exceeded_kind = "sample_budget_exceeded";
+              m_lastMeasureGeometryDebug.failure_stage = "sample_budget_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure samples exceeded budget: " + std::to_string(total_samples) + " > " + std::to_string(m_budget.max_samples);
               return true;
           }
 
-          if (elapsed_ms > budget.max_elapsed_ms) {
-              m_lastMeasureGeometryDebug.failure_stage = "findcircle_budget_time_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure time exceeded budget: " + std::to_string(elapsed_ms) + "ms > " + std::to_string(budget.max_elapsed_ms) + "ms";
+          if (elapsed_ms > m_budget.max_elapsed_ms) {
+              m_budget_state.exceeded = true;
+              m_budget_state.exceeded_kind = "algorithm_budget_exceeded";
+              m_lastMeasureGeometryDebug.failure_stage = "algorithm_budget_exceeded";
+              m_lastMeasureGeometryDebug.detail = "Findcircle Measure time exceeded budget: " + std::to_string(elapsed_ms) + "ms > " + std::to_string(m_budget.max_elapsed_ms) + "ms";
               return true;
           }
 
@@ -1070,9 +1063,9 @@ void Findcircle::Measure(Image& image)
         static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - begin_time).count());
 
-    m_lastMeasureGeometryDebug.budget_max_scan_lines = budget.max_scan_lines;
-    m_lastMeasureGeometryDebug.budget_max_samples = budget.max_samples;
-    m_lastMeasureGeometryDebug.budget_max_elapsed_ms = budget.max_elapsed_ms;
+    m_lastMeasureGeometryDebug.budget_max_scan_lines = m_budget.max_scan_lines;
+    m_lastMeasureGeometryDebug.budget_max_samples = m_budget.max_samples;
+    m_lastMeasureGeometryDebug.budget_max_elapsed_ms = m_budget.max_elapsed_ms;
 
     CxAlgorithmTraceScope::Emit({
         "Findcircle",
@@ -1636,6 +1629,12 @@ void Findcircle::measure(void* pimage)
         return;
     }
 
+    // The Image argument is the authoritative image for this execution.
+    // Keep the same runtime-input semantics as Findline::measure(void*) so
+    // headless/manual/suite callers do not depend on ambient ImageManager
+    // state left by a previous UI session.
+    g_pbackimage = pgetimage;
+
     if (!EnsureCircleMeasureGeometryReady())
     {
         m_measurepoints.clear();
@@ -2035,4 +2034,44 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
             true,
             std::move(fit_circle));
     }
+}
+
+void Findcircle::setmaxelapsedms(int value)
+{
+    m_budget.max_elapsed_ms = value;
+}
+
+void Findcircle::setmaxscanlines(int value)
+{
+    m_budget.max_scan_lines = value;
+}
+
+void Findcircle::setmaxsamples(int value)
+{
+    m_budget.max_samples = value;
+}
+
+bool Findcircle::budgetexceeded() const
+{
+    return m_budget_state.exceeded;
+}
+
+int Findcircle::getelapsedms() const
+{
+    return m_budget_state.elapsed_ms;
+}
+
+int Findcircle::getscanlinecount() const
+{
+    return m_budget_state.scan_line_count;
+}
+
+int Findcircle::getsamplecount() const
+{
+    return m_budget_state.sample_count;
+}
+
+const std::string& Findcircle::getfailurestage() const
+{
+    return m_lastMeasureGeometryDebug.failure_stage;
 }
