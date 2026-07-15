@@ -1,4 +1,4 @@
-# CxVision Code Wiki v2.1
+# CxVision v2.1
 
 > **文档版本**: v2.1  
 > **对应分支**: codex/cxcore-integration  
