@@ -1,5 +1,7 @@
 #include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
+#include "ManualConsoleGauge.h"
+#include "LineGaugeShape.h"
 #include <glad/glad.h>
 
 #include "occtinclude.h"
@@ -765,19 +767,17 @@ static bool SyncRuntimeObjectToManualGaugeState(
         gauge.circle_cx = static_cast<int>(std::round(object.circle_cx));
         gauge.circle_cy = static_cast<int>(std::round(object.circle_cy));
 
-        int radius = static_cast<int>(std::round(object.circle_radius));
+        const int px = static_cast<int>(std::round(object.circle_inner));
+        const int py = static_cast<int>(std::round(object.circle_radius));
+        int radius = static_cast<int>(std::lround(std::hypot(
+            static_cast<double>(px - gauge.circle_cx),
+            static_cast<double>(py - gauge.circle_cy))));
         if (radius <= 0)
             radius = 50;
 
         gauge.radius = radius;
-        gauge.gap = radius;
-        gauge.circle_px = gauge.circle_cx + radius;
-        gauge.circle_py = gauge.circle_cy;
-
-        if (object.circle_inner > 0)
-            gauge.inner_radius = static_cast<int>(std::round(object.circle_inner));
-        if (object.circle_radius > 0)
-            gauge.outer_radius = static_cast<int>(std::round(object.circle_radius));
+        gauge.circle_px = px;
+        gauge.circle_py = py;
 
         gauge.dirty = false;
         gauge.accepted = false;
@@ -1169,84 +1169,42 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::Text("=== Actions ===");
   if (ImGui::Button("Apply Gauge To Globals"))
   {
-    if (gauge.has_line_gauge)
-    {
-      m_manualTest.runtime_int_vars["roi_x0"] = gauge.line_x0;
-      m_manualTest.runtime_int_vars["roi_y0"] = gauge.line_y0;
-      m_manualTest.runtime_int_vars["roi_x1"] = gauge.line_x1;
-      m_manualTest.runtime_int_vars["roi_y1"] = gauge.line_y1;
-      m_manualTest.runtime_int_vars["tool_half_width"] = gauge.tool_half_width;
-      m_manualTest.runtime_int_vars["wgap"] = gauge.wgap;
-      m_manualTest.runtime_int_vars["hgap"] = gauge.hgap;
-      m_manualTest.runtime_int_vars["linegap"] = gauge.linegap;
-      m_manualTest.runtime_int_vars["threshold"] = gauge.threshold;
-      m_manualTest.runtime_int_vars["filterprofile"] = gauge.filterprofile;
-      m_manualTest.runtime_int_vars["method"] = gauge.method;
-    }
-    if (gauge.has_circle_gauge)
-    {
-      m_manualTest.runtime_int_vars["circle_cx"] = gauge.circle_cx;
-      m_manualTest.runtime_int_vars["circle_cy"] = gauge.circle_cy;
-      m_manualTest.runtime_int_vars["circle_px"] = gauge.circle_px;
-      m_manualTest.runtime_int_vars["circle_py"] = gauge.circle_py;
-      m_manualTest.runtime_int_vars["gap"] = gauge.gap;
-      m_manualTest.runtime_int_vars["linegap"] = gauge.linegap;
-      m_manualTest.runtime_int_vars["threshold"] = gauge.threshold;
-      m_manualTest.runtime_int_vars["method"] = gauge.method;
-    }
+    ApplyManualGaugeToGlobals(m_manualTest);
   }
   ImGui::SameLine();
   if (ImGui::Button("Accept Manual Gauge"))
   {
-    gauge.accepted = true;
-    gauge.dirty = false;
-    gauge.review_status = "manual_accepted";
+    std::string reason;
+    if (ValidateManualGaugeGeometryForEditing(gauge, reason))
+    {
+      NormalizeManualGaugeGeometry(gauge);
+      gauge.accepted = true;
+      gauge.dirty = false;
+      gauge.review_status = "manual_accepted";
+      m_manualTest.debug_status = "gauge_accepted";
+      m_manualTest.debug_reason.clear();
+    }
+    else
+    {
+      gauge.accepted = false;
+      m_manualTest.debug_status = "gauge_accept_failed";
+      m_manualTest.debug_reason = reason;
+    }
   }
   ImGui::SameLine();
   if (ImGui::Button("Save Gauge Annotation"))
   {
-    std::string caseId = gauge.case_id.empty() ? "unnamed" : gauge.case_id;
-    std::filesystem::path dir = "cxscript_runs/manual_gauge_workbench/" + caseId;
-    std::filesystem::create_directories(dir);
-    std::filesystem::path filePath = dir / "gauge_annotation.json";
-
-    std::ofstream ofs(filePath);
-    if (ofs.is_open())
+    std::string path;
+    std::string reason;
+    if (SaveManualGaugeAnnotation(m_manualTest, "", "", path, reason))
     {
-      ofs << "{\n";
-      ofs << "  \"case_id\": \"" << gauge.case_id << "\",\n";
-      ofs << "  \"image_id\": \"" << gauge.image_id << "\",\n";
-      ofs << "  \"target_id\": \"" << gauge.target_id << "\",\n";
-      ofs << "  \"tool\": \"" << gauge.tool << "\",\n";
-      ofs << "  \"source\": \"" << gauge.source << "\",\n";
-      ofs << "  \"review_status\": \"" << gauge.review_status << "\",\n";
-      ofs << "  \"line\": {\n";
-      ofs << "    \"x0\": " << gauge.line_x0 << ",\n";
-      ofs << "    \"y0\": " << gauge.line_y0 << ",\n";
-      ofs << "    \"x1\": " << gauge.line_x1 << ",\n";
-      ofs << "    \"y1\": " << gauge.line_y1 << ",\n";
-      ofs << "    \"tool_half_width\": " << gauge.tool_half_width << "\n";
-      ofs << "  },\n";
-      ofs << "  \"circle\": {\n";
-      ofs << "    \"cx\": " << gauge.circle_cx << ",\n";
-      ofs << "    \"cy\": " << gauge.circle_cy << ",\n";
-      ofs << "    \"px\": " << gauge.circle_px << ",\n";
-      ofs << "    \"py\": " << gauge.circle_py << ",\n";
-      ofs << "    \"radius\": " << gauge.radius << ",\n";
-      ofs << "    \"inner_radius\": " << gauge.inner_radius << ",\n";
-      ofs << "    \"outer_radius\": " << gauge.outer_radius << "\n";
-      ofs << "  },\n";
-      ofs << "  \"params\": {\n";
-      ofs << "    \"threshold\": " << gauge.threshold << ",\n";
-      ofs << "    \"gap\": " << gauge.gap << ",\n";
-      ofs << "    \"linegap\": " << gauge.linegap << ",\n";
-      ofs << "    \"wgap\": " << gauge.wgap << ",\n";
-      ofs << "    \"hgap\": " << gauge.hgap << ",\n";
-      ofs << "    \"filterprofile\": " << gauge.filterprofile << ",\n";
-      ofs << "    \"method\": " << gauge.method << "\n";
-      ofs << "  }\n";
-      ofs << "}\n";
-      ofs.close();
+      m_manualTest.debug_status = "gauge_annotation_saved";
+      m_manualTest.debug_reason = path;
+    }
+    else
+    {
+      m_manualTest.debug_status = "gauge_annotation_save_failed";
+      m_manualTest.debug_reason = reason;
     }
   }
   ImGui::SameLine();
@@ -3494,9 +3452,6 @@ bool ViewController::RunShapeInteractionSmoke(
 
 void ViewController::SyncRuntimeObjectsToShapeElements()
 {
-    std::vector<const CxShapeElement*> shapes;
-    m_annotationLayer.EnumerateVisibleShapes(shapes);
-
     for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
         if (object.type == "Findline")
@@ -3505,9 +3460,10 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_parserDebugBridge.QueryClassObject("Findline", object.name));
             if (tool != nullptr)
             {
-                m_annotationLayer.BeginRuntimeOwnerPublish("Findline", object.name);
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("Findline", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findline", object.name, 0);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findline", object.name, generation);
             }
         }
         else if (object.type == "Findcircle")
@@ -3516,9 +3472,10 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_parserDebugBridge.QueryClassObject("Findcircle", object.name));
             if (tool != nullptr)
             {
-                m_annotationLayer.BeginRuntimeOwnerPublish("Findcircle", object.name);
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("Findcircle", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findcircle", object.name, 0);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findcircle", object.name, generation);
             }
         }
         else if (object.type == "Findellipse")
@@ -3527,9 +3484,10 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_parserDebugBridge.QueryClassObject("Findellipse", object.name));
             if (tool != nullptr)
             {
-                m_annotationLayer.BeginRuntimeOwnerPublish("Findellipse", object.name);
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("Findellipse", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findellipse", object.name, 0);
+                m_annotationLayer.EndRuntimeOwnerPublish("Findellipse", object.name, generation);
             }
         }
         else if (object.type == "FindRect")
@@ -3538,9 +3496,10 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_parserDebugBridge.QueryClassObject("FindRect", object.name));
             if (tool != nullptr)
             {
-                m_annotationLayer.BeginRuntimeOwnerPublish("FindRect", object.name);
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindRect", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, 0);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, generation);
             }
         }
         else if (object.type == "fastmatch")
@@ -3549,9 +3508,10 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_parserDebugBridge.QueryClassObject("fastmatch", object.name));
             if (tool != nullptr)
             {
-                m_annotationLayer.BeginRuntimeOwnerPublish("fastmatch", object.name);
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("fastmatch", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("fastmatch", object.name, 0);
+                m_annotationLayer.EndRuntimeOwnerPublish("fastmatch", object.name, generation);
             }
         }
     }
@@ -3589,7 +3549,7 @@ static ImU32 ShapeHandleColor(CxShapeHandleRole role, const CxShapeElement& elem
 {
     if (element.result_element)
         return IM_COL32(255, 180, 64, 255);
-    if (element.editable)
+    if (element.editable && element.selected)
         return IM_COL32(80, 255, 170, 255);
     return IM_COL32(160, 160, 200, 255);
 }
@@ -3627,8 +3587,41 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         CxShapePoint p0, p1;
         if (element.shape->exportLine(p0, p1))
         {
-            drawList->AddLine(ImageToScreen(p0.x, p0.y), ImageToScreen(p1.x, p1.y), 
+            drawList->AddLine(ImageToScreen(p0.x, p0.y), ImageToScreen(p1.x, p1.y),
                               element.selected ? selectedColor : color, thickness);
+
+            if (element.shape->kind() == CxShapeKind::LineGauge)
+            {
+                const auto* gauge =
+                    dynamic_cast<const LineGaugeShape*>(element.shape.get());
+                if (gauge != nullptr)
+                {
+                    const double dx = p1.x - p0.x;
+                    const double dy = p1.y - p0.y;
+                    const double length = std::hypot(dx, dy);
+                    if (length > 1.0)
+                    {
+                        const double nx = -dy / length;
+                        const double ny = dx / length;
+                        const double halfWidth = gauge->halfWidth();
+                        const CxShapePoint corners[4] = {
+                            {p0.x + nx * halfWidth, p0.y + ny * halfWidth},
+                            {p1.x + nx * halfWidth, p1.y + ny * halfWidth},
+                            {p1.x - nx * halfWidth, p1.y - ny * halfWidth},
+                            {p0.x - nx * halfWidth, p0.y - ny * halfWidth}
+                        };
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const int next = (i + 1) % 4;
+                            drawList->AddLine(
+                                ImageToScreen(corners[i].x, corners[i].y),
+                                ImageToScreen(corners[next].x, corners[next].y),
+                                element.selected ? selectedColor : color,
+                                thickness);
+                        }
+                    }
+                }
+            }
         }
         break;
     }

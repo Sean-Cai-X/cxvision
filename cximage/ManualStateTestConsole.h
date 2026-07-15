@@ -369,7 +369,7 @@ struct DebugStepSnapshot
 
 struct ResultRefView
 {
-    std::string name;             // global.circle_ref
+    std::string name;             // global_circle_ref
     std::string value;            // runtime_object:afindcircle0
     std::string source_object;    // afindcircle0
     std::string result_type;      // FindcircleResult
@@ -592,6 +592,7 @@ struct ManualTestContext
   std::string editor_source = "manual";
   std::string loaded_script_path;
   std::string case_directory = "docs/notes/cxscript_case";
+  std::string manual_gauge_output_root = "cxscript_runs/manual_gauge_workbench";
   std::string trace_status = "PENDING";
   std::string trace_reason = "not executed";
   std::string run_state = "idle";
@@ -615,7 +616,7 @@ struct ManualTestContext
   std::vector<CxScriptStatementView> cxparser_ext_statement_views;
   std::vector<CxScriptObjectAssignmentView> cxparser_ext_object_assignments;
   std::vector<ScriptVariableView> global_variable_views = {
-    {"Image", "global.matInput", "uninitialized", 0, "not_initialized",
+    {"Image", "global_matInput", "uninitialized", 0, "not_initialized",
      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg", false}
   };
   std::vector<ScriptVariableView> variable_views;

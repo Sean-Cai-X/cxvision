@@ -41,6 +41,17 @@ struct CxScriptToolResultCapture
     double circle_cy = 0.0;
     double circle_radius = 0.0;
 
+    bool object_prefilter_requested = false;
+    bool object_prefilter_applied = false;
+    int object_filter_borw = 0;
+    int object_filter_min = 0;
+    int object_filter_max = 0;
+    int fit_filter_input_count = 0;
+    int fit_filter_kept_count = 0;
+    int fit_filter_rejected_count = 0;
+    double fit_filter_sigma = 0.0;
+    double fit_filter_threshold = 0.0;
+
     std::string failure_stage;
     std::string reason;
 

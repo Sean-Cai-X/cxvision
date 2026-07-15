@@ -9,6 +9,9 @@ CxShapeTest_setrole("roi");
 CxShapeTest_expectrole(1);
 CxShapeTest_expecteditable(1);
 CxShapeTest_expecteditableelement(0);
+CxShapeTest_expectgeometrykind("EllipseShape");
+CxShapeTest_expectpointcount(3);
+CxShapeTest_expectmanifestgeometry(1);
 
 CxShapeTest_addcase("findellipse_l2_geometry");
 CxShapeTest_settool("findellipse_gauge");
@@ -19,6 +22,9 @@ CxShapeTest_setrole("roi");
 CxShapeTest_expectrole(1);
 CxShapeTest_expecteditable(1);
 CxShapeTest_expecteditableelement(0);
+CxShapeTest_expectgeometrykind("EllipseShape");
+CxShapeTest_expectpointcount(3);
+CxShapeTest_expectmanifestgeometry(1);
 
 CxShapeTest_addcase("findellipse_l3_geometry");
 CxShapeTest_settool("findellipse_gauge");
@@ -29,5 +35,8 @@ CxShapeTest_setrole("roi");
 CxShapeTest_expectrole(1);
 CxShapeTest_expecteditable(1);
 CxShapeTest_expecteditableelement(0);
+CxShapeTest_expectgeometrykind("EllipseShape");
+CxShapeTest_expectpointcount(3);
+CxShapeTest_expectmanifestgeometry(1);
 
 1+1;

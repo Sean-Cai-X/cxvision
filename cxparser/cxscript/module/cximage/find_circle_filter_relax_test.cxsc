@@ -1,7 +1,7 @@
 Image m_image;
 Findcircle m_circle;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
 int cx = 765;
 int cy = 471;
@@ -26,5 +26,5 @@ m_circle.setcircle(cx, cy, px, py);
 m_circle.measure(&m_image);
 m_circle.fitcircle();
 
-global.circle_ref = m_circle.get_result();
-global.current_status = "PENDING";
+global_circle_ref = m_circle.get_result();
+global_current_status = "PENDING";

@@ -8,7 +8,7 @@ EnsmallenBestParam m_best;
 EnsmallenMetric m_baseline_metric;
 EnsmallenMetric m_candidate_metric;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 m_circle.setcircle(850, 690, 0, 690);
 m_circle.setmethod(0);
 m_circle.setthre(20);
@@ -36,6 +36,6 @@ m_best = ensmallen.choose_best(m_candidate, m_candidate_metric);
 ensmallen.replay_best(m_best, &m_circle);
 ensmallen.compare_baseline(m_baseline_metric, m_candidate_metric);
 
-global.best_param_ref = m_best;
-global.evidence_ref = m_candidate_metric;
-global.current_status = "PENDING";
+global_best_param_ref = m_best;
+global_evidence_ref = m_candidate_metric;
+global_current_status = "PENDING";

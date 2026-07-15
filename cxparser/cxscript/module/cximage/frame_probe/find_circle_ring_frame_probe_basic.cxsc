@@ -3,7 +3,7 @@ Findcircle m_outer_circle;
 Findcircle m_inner_circle;
 CircleRingGauge m_ring_gauge;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
 int cx = 640;
 int cy = 480;
@@ -28,4 +28,4 @@ m_ring_gauge.settolerance(concentric_tolerance, thickness_tolerance);
 m_ring_gauge.setouter(&m_outer_circle);
 m_ring_gauge.setinner(&m_inner_circle);
 
-global.current_status = "FRAME_PROBE_ONLY";
+global_current_status = "FRAME_PROBE_ONLY";

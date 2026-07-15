@@ -17,26 +17,26 @@ bool ResolveManifestProjectionRequest(
         return false;
     }
 
-    const CxScriptImageManifestEntry* image_entry = nullptr;
-    for (const auto& entry : manifest.images)
-    {
-        if (entry.image_id == test_case.manifest_image_id)
-        {
-            image_entry = &entry;
-            break;
-        }
-    }
-
-    if (!image_entry)
-    {
-        out_reason = "image_id not found in manifest: " + test_case.manifest_image_id;
-        return false;
-    }
-
-    out_request.image_path = manifest.image_root + "/" + image_entry->path;
-
     if (!test_case.manifest_target_id.empty())
     {
+        const CxScriptImageManifestEntry* image_entry = nullptr;
+        for (const auto& entry : manifest.images)
+        {
+            if (entry.image_id == test_case.manifest_image_id)
+            {
+                image_entry = &entry;
+                break;
+            }
+        }
+
+        if (!image_entry)
+        {
+            out_reason = "image_id not found in manifest: " + test_case.manifest_image_id;
+            return false;
+        }
+
+        out_request.image_path = manifest.image_root + "/" + image_entry->path;
+
         bool target_found = false;
         for (const auto& target : image_entry->targets)
         {
@@ -132,6 +132,7 @@ bool ResolveManifestProjectionRequest(
 
                 out_request.template_image_path = manifest.image_root + "/" + template_image->path;
                 out_request.test_image_path = manifest.image_root + "/" + test_image->path;
+                out_request.image_path = out_request.test_image_path;
 
                 out_request.has_learn_roi = true;
                 out_request.learn_roi.x = match_case.template_rect.x;

@@ -131,6 +131,10 @@ public:
     void setgamarate(int igama);
     void setfindsetting(int ifindset);
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
+    void setfilter_script(int stack_filter_max, int stack_filter_min, int stack_filter_borw)
+    {
+        setfilter(stack_filter_borw, stack_filter_min, stack_filter_max);
+    }
     void setselectedgenum(int iedgenum);
     void getshape(void* pshape);
     void setcirclegap(int ivalue);
@@ -140,6 +144,13 @@ public:
     const PointsShape& getresultpoints() const;
 
     void fitcircle();
+    void fitcirclefiltered();
+
+    int getfitfilterinputcount() { return m_fitfilter_input_count; }
+    int getfitfilterkeptcount() { return m_fitfilter_kept_count; }
+    int getfitfilterrejectedcount() { return m_fitfilter_rejected_count; }
+    double getfitfiltersigma() { return m_fitfilter_sigma; }
+    double getfitfilterthreshold() { return m_fitfilter_threshold; }
 
     void Measure(Image& image);
     void MeasureBalanced(Image& image);
@@ -175,6 +186,10 @@ public:
     int getcirclepay() const { return m_ipay; }
     int getdebugprefilterused() const { return m_last_prefilter_used; }
     int getdebugcompactpathused() const { return m_last_compact_path_used; }
+    int getfindsetting() const { return m_ifindset; }
+    int getfilterborw() const { return m_ifilterborw; }
+    int getfiltermin() const { return static_cast<int>(m_ifiltermin); }
+    int getfiltermax() const { return static_cast<int>(m_ifiltermax); }
     const FindcircleMeasureGeometryDebug& lastmeasuregeometrydebug() const
     {
         return m_lastMeasureGeometryDebug;
@@ -256,6 +271,11 @@ private:
     gp_Rectangle m_measurepointsboundingRect;
     int m_last_prefilter_used;
     int m_last_compact_path_used;
+    int m_fitfilter_input_count = 0;
+    int m_fitfilter_kept_count = 0;
+    int m_fitfilter_rejected_count = 0;
+    double m_fitfilter_sigma = 0.0;
+    double m_fitfilter_threshold = 0.0;
 
     FindcircleMeasureGeometryRequest m_measure_geometry_request;
     FindcircleMeasureGeometryDebug m_lastMeasureGeometryDebug;

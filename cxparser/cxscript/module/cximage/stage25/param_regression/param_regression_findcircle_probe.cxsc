@@ -4,17 +4,17 @@
 Image m_image;
 Findcircle m_circle;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
-int cx = global.circle_cx;
-int cy = global.circle_cy;
-int px = global.circle_px;
-int py = global.circle_py;
+int cx = global_circle_cx;
+int cy = global_circle_cy;
+int px = global_circle_px;
+int py = global_circle_py;
 
-int method = global.candidate_method;
-int threshold = global.candidate_threshold;
-int gap = global.candidate_gap;
-int linegap = global.candidate_linegap;
+int method = global_candidate_method;
+int threshold = global_candidate_threshold;
+int gap = global_candidate_gap;
+int linegap = global_candidate_linegap;
 
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
@@ -25,5 +25,5 @@ m_circle.setcircle(cx, cy, px, py);
 m_circle.measure(&m_image);
 m_circle.fitcircle();
 
-global.circle_ref = m_circle.get_result();
-global.current_status = "param_candidate_geometry_result_available";
+global_circle_ref = m_circle.get_result();
+global_current_status = "param_candidate_geometry_result_available";

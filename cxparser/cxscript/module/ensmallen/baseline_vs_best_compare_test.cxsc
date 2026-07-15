@@ -10,9 +10,9 @@ m_tuning.setobjective("template_alignment_error");
 m_tuning.run();
 m_tuning.compare();
 
-global.param_ref = m_tuning.param_ref();
-global.objective_ref = m_tuning.objective_ref();
-global.best_ref = m_tuning.best_ref();
-global.compare_ref = m_tuning.compare_ref();
-global.summary_ref = m_tuning.summary_ref();
-global.current_status = "PENDING";
+global_param_ref = m_tuning.param_ref();
+global_objective_ref = m_tuning.objective_ref();
+global_best_ref = m_tuning.best_ref();
+global_compare_ref = m_tuning.compare_ref();
+global_summary_ref = m_tuning.summary_ref();
+global_current_status = "PENDING";

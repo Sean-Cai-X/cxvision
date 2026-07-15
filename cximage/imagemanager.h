@@ -31,6 +31,7 @@ public:
     static int m_imodulid;
     static void CurMode();
     static int GetCurMode();
+    static bool EnsureAlgorithmRuntimeResources(int image_width, int image_height);
 
     static Image* m_pBackImage;
     static Image* m_pBackObjectImage;

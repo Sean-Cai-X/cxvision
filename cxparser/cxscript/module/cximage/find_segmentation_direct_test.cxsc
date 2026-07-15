@@ -1,14 +1,14 @@
 Image m_image;
 FindSegmentation m_seg;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
-int x0 = global.roi_x0;
-int y0 = global.roi_y0;
-int x1 = global.roi_x1;
-int y1 = global.roi_y1;
-int px = global.seed_x;
-int py = global.seed_y;
+int x0 = global_roi_x0;
+int y0 = global_roi_y0;
+int x1 = global_roi_x1;
+int y1 = global_roi_y1;
+int px = global_seed_x;
+int py = global_seed_y;
 double threshold = 0.5;
 
 m_seg.setbackend("opencv_smoke");
@@ -22,4 +22,4 @@ m_seg.segment(&m_image);
 m_seg.extractboundary();
 m_seg.buildoverlay(&m_image);
 
-global.current_status = "PENDING";
+global_current_status = "PENDING";

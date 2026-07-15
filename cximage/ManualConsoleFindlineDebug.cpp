@@ -1396,7 +1396,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     line.timestamp = CurrentTimestamp();
 
     context.debug_status = "PENDING";
-    context.debug_reason = "get_result bound; global.current_status remains PENDING until judge/rule";
+    context.debug_reason = "get_result bound; global_current_status remains PENDING until judge/rule";
     context.runtime_current_status = "PENDING";
     context.run_state = "runtime_step";
 
@@ -1451,7 +1451,7 @@ bool TryExecuteImageCopyFromMat(ManualTestContext& context,
     {
         ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
         line.status = "BLOCKED";
-        line.reason = "global.matInput image path is empty";
+        line.reason = "global_matInput image path is empty";
         line.timestamp = CurrentTimestamp();
 
         context.run_state = "blocked";
@@ -1494,7 +1494,7 @@ bool TryExecuteImageCopyFromMat(ManualTestContext& context,
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_executed";
-    line.reason = "Image.copyFromMat executed from global.matInput";
+    line.reason = "Image.copyFromMat executed from global_matInput";
     line.timestamp = CurrentTimestamp();
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);

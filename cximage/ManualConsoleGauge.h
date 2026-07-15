@@ -6,40 +6,29 @@
 
 void InjectManualGaugeInt(ManualTestContext& context, const std::string& key, int value);
 
-void DrawGaugeHandle(
-    const ImVec2& canvas_pos,
-    float x,
-    float y,
-    float scale,
-    const ImVec4& color,
-    const char* label,
-    bool selected);
+bool ValidateManualGaugeGeometry(
+    const ManualGaugeState& gauge,
+    std::string& reason);
 
-void DrawGaugeHandlesLine(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName);
+bool ValidateManualGaugeGeometryForEditing(
+    const ManualGaugeState& gauge,
+    std::string& reason);
 
-void DrawGaugeHandlesCircle(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName);
+void NormalizeManualGaugeGeometry(ManualGaugeState& gauge);
 
-void DrawGaugeHandles(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName);
+bool ValidateParamRegressionPrerequisites(
+    const ManualTestContext& context,
+    std::string& reason);
 
 void ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName);
 void ApplyManualGaugeToGlobals(ManualTestContext& context);
 
 std::filesystem::path ManualGaugeCaseDir(const ManualTestContext& context);
+
+bool ResolveManualGaugeCaseDir(
+    const ManualTestContext& context,
+    std::filesystem::path& out,
+    std::string& reason);
 
 bool SaveManualGaugeAnnotation(
     ManualTestContext& context,

@@ -1,7 +1,7 @@
 Image m_occtimage;
 fastmatch m_match;
 
-m_occtimage.copyFromMat(global.matInput);
+m_occtimage.copyFromMat(global_matInput);
 
 int roi_x = 550;
 int roi_y = 500;
@@ -17,5 +17,5 @@ m_match.learn(&m_occtimage);
 m_match.setmatchrect(50, 50, 2200, 1900);
 m_match.match(&m_occtimage);
 
-global.match_ref = m_match.get_result();
-global.current_status = "PENDING";
+global_match_ref = m_match.get_result();
+global_current_status = "PENDING";

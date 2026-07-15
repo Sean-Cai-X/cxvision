@@ -51,6 +51,68 @@ void CountRoles(const ImageAnnotationLayer& layer, const std::string& owner_ref,
     }
 }
 
+void CapturePublishedShapes(const ImageAnnotationLayer& layer,
+                            const std::string& owner_ref,
+                            CxRuntimeProjectionResult& result)
+{
+    result.published_shapes.clear();
+    for (const auto& elem : layer.ShapeElements())
+    {
+        if (elem.owner_ref != owner_ref)
+            continue;
+
+        CxShapeElementSnapshot snap;
+        snap.stable_ref = elem.stable_ref;
+        snap.owner_type = elem.owner_type;
+        snap.owner_ref = elem.owner_ref;
+        snap.semantic_role = elem.semantic_role;
+        snap.editable = elem.editable;
+        snap.result_element = elem.result_element;
+
+        if (elem.shape)
+        {
+            CxShapeGeometrySnapshot geometry;
+            if (elem.shape->snapshot(geometry))
+            {
+                snap.shape_kind = CxShapeKindName(geometry.kind);
+                snap.center_x = geometry.center.x;
+                snap.center_y = geometry.center.y;
+                snap.radius = geometry.radius;
+                snap.inner_radius = geometry.inner_radius;
+                snap.half_width = geometry.half_width;
+                snap.radius_x = geometry.radius_x;
+                snap.radius_y = geometry.radius_y;
+                snap.angle_deg = geometry.angle;
+                snap.closed = geometry.closed;
+                for (const auto& point : geometry.points)
+                {
+                    snap.points.push_back(point.x);
+                    snap.points.push_back(point.y);
+                }
+
+                if (geometry.kind == CxShapeKind::Polyline && geometry.points.size() == 4)
+                {
+                    for (const auto& point : geometry.points)
+                    {
+                        snap.center_x += point.x;
+                        snap.center_y += point.y;
+                    }
+                    snap.center_x /= 4.0;
+                    snap.center_y /= 4.0;
+                    const double dx01 = geometry.points[1].x - geometry.points[0].x;
+                    const double dy01 = geometry.points[1].y - geometry.points[0].y;
+                    const double dx12 = geometry.points[2].x - geometry.points[1].x;
+                    const double dy12 = geometry.points[2].y - geometry.points[1].y;
+                    snap.radius_x = std::hypot(dx01, dy01) / 2.0;
+                    snap.radius_y = std::hypot(dx12, dy12) / 2.0;
+                    snap.angle_deg = std::atan2(dy01, dx01) * 180.0 / M_PI;
+                }
+            }
+        }
+        result.published_shapes.push_back(std::move(snap));
+    }
+}
+
 bool HasElementsForOwner(const ImageAnnotationLayer& layer, const std::string& owner_ref)
 {
     for (const auto& elem : layer.ShapeElements())
@@ -134,6 +196,7 @@ bool ExecuteFindline(const CxRuntimeProjectionRequest& request,
     tool.PublishDisplayShapes(layer, request.owner_ref);
     const size_t after = layer.ShapeElements().size();
 
+    CapturePublishedShapes(layer, request.owner_ref, result);
     CountRoles(layer, request.owner_ref, result);
 
     result.publish_ok =
@@ -212,6 +275,7 @@ bool ExecuteFindcircle(const CxRuntimeProjectionRequest& request,
     tool.PublishDisplayShapes(layer, request.owner_ref);
     const size_t after = layer.ShapeElements().size();
 
+    CapturePublishedShapes(layer, request.owner_ref, result);
     CountRoles(layer, request.owner_ref, result);
 
     result.publish_ok =
@@ -231,12 +295,23 @@ bool ExecuteFindellipse(const CxRuntimeProjectionRequest& request,
     if (request.owner_ref.empty())
         return Fail(result, "request_validation", "owner_ref is empty");
 
+    if (!request.has_ellipse_roi)
+        return Fail(result, "request_validation", "Findellipse requires has_ellipse_roi");
+
+    if (request.ellipse_rx <= 1.0 || request.ellipse_ry <= 1.0)
+        return Fail(result, "request_validation", "Findellipse radius is too small");
+
+    if (std::abs(request.ellipse_angle_deg) > 0.001)
+        return Fail(result,
+                    "unsupported_rotated_ellipse_roi",
+                    "Findellipse rotated ROI is not bound yet");
+
     Findellipse tool;
     tool.setellipse(
-        static_cast<int>(request.roi_x0),
-        static_cast<int>(request.roi_y0),
-        static_cast<int>(request.roi_x1),
-        static_cast<int>(request.roi_y1));
+        static_cast<int>(request.ellipse_cx - request.ellipse_rx),
+        static_cast<int>(request.ellipse_cy - request.ellipse_ry),
+        static_cast<int>(request.ellipse_cx + request.ellipse_rx),
+        static_cast<int>(request.ellipse_cy + request.ellipse_ry));
     tool.Setgap(request.gap);
     tool.setlinegap(request.linegap);
     tool.setthre(request.threshold);
@@ -272,6 +347,7 @@ bool ExecuteFindellipse(const CxRuntimeProjectionRequest& request,
     tool.PublishDisplayShapes(layer, request.owner_ref);
     const size_t after = layer.ShapeElements().size();
 
+    CapturePublishedShapes(layer, request.owner_ref, result);
     CountRoles(layer, request.owner_ref, result);
 
     result.publish_ok =
@@ -348,6 +424,7 @@ bool ExecuteFindRect(const CxRuntimeProjectionRequest& request,
     tool.PublishDisplayShapes(layer, request.owner_ref);
     const size_t after = layer.ShapeElements().size();
 
+    CapturePublishedShapes(layer, request.owner_ref, result);
     CountRoles(layer, request.owner_ref, result);
 
     result.publish_ok =
@@ -435,6 +512,7 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
     matcher.PublishDisplayShapes(layer, request.owner_ref);
     const size_t after = layer.ShapeElements().size();
 
+    CapturePublishedShapes(layer, request.owner_ref, result);
     CountRoles(layer, request.owner_ref, result);
 
     result.publish_ok =

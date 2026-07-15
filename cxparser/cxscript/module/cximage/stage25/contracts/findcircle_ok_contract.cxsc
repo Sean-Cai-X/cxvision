@@ -32,13 +32,13 @@ if (global_has_fit_circle == 0) {
     global_contract_conclusion = "Findcircle OK requires has_fit_circle == true";
 }
 
-if (global_contract_circle_radius <= 0) {
+if (global_circle_radius <= 0) {
     global_contract_pass = 0;
     global_contract_status = "findcircle_ok_failed";
     global_contract_conclusion = "Findcircle OK requires circle_radius > 0";
 }
 
-if (global_contract_avgdist > 8.0) {
+if (global_avgdist > 8.0) {
     global_contract_pass = 0;
     global_contract_status = "findcircle_high_residual";
     global_contract_conclusion = "Findcircle OK requires avgdist <= 8.0";

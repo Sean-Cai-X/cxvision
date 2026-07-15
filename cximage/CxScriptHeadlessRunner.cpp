@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CxScriptHeadlessRunner.h"
+#include "ImageManager.h"
 #include "ManualConsoleUtils.h"
 #include "ParserClass.h"
 #include "Image.h"
@@ -11,31 +12,9 @@
 #include <fstream>
 #include <algorithm>
 #include <chrono>
-
-std::string ReplaceIdentifier(
-    const std::string& source,
-    const std::string& old_id,
-    const std::string& new_id)
-{
-    std::string result = source;
-    size_t pos = 0;
-    while ((pos = result.find(old_id, pos)) != std::string::npos)
-    {
-        bool is_word_boundary_before = (pos == 0) || !isalnum(result[pos - 1]) && result[pos - 1] != '_';
-        bool is_word_boundary_after = (pos + old_id.size() == result.size()) || !isalnum(result[pos + old_id.size()]) && result[pos + old_id.size()] != '_';
-
-        if (is_word_boundary_before && is_word_boundary_after)
-        {
-            result.replace(pos, old_id.size(), new_id);
-            pos += new_id.size();
-        }
-        else
-        {
-            pos += old_id.size();
-        }
-    }
-    return result;
-}
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 std::string PrepareCxScriptRuntimeSource(const std::string& source, bool contract_context)
 {
@@ -45,9 +24,7 @@ std::string PrepareCxScriptRuntimeSource(const std::string& source, bool contrac
     while (std::getline(input, line))
     {
         if (contract_context &&
-            (line.find("global.contract_status") != std::string::npos ||
-             line.find("global.contract_conclusion") != std::string::npos ||
-             line.find("global_contract_status") != std::string::npos ||
+            (line.find("global_contract_status") != std::string::npos ||
              line.find("global_contract_conclusion") != std::string::npos))
         {
             continue;
@@ -94,47 +71,7 @@ std::string PrepareCxScriptRuntimeSource(const std::string& source, bool contrac
         }
     }
 
-    std::string result = ReplaceIdentifier(runtime_source, "global.matInput", "global_matInput");
-    result = ReplaceIdentifier(result, "global.roi_x0", "global_roi_x0");
-    result = ReplaceIdentifier(result, "global.roi_y0", "global_roi_y0");
-    result = ReplaceIdentifier(result, "global.roi_x1", "global_roi_x1");
-    result = ReplaceIdentifier(result, "global.roi_y1", "global_roi_y1");
-    result = ReplaceIdentifier(result, "global.tool_half_width", "global_tool_half_width");
-    result = ReplaceIdentifier(result, "global.wgap", "global_wgap");
-    result = ReplaceIdentifier(result, "global.hgap", "global_hgap");
-    result = ReplaceIdentifier(result, "global.gap", "global_gap");
-    result = ReplaceIdentifier(result, "global.linegap", "global_linegap");
-    result = ReplaceIdentifier(result, "global.threshold", "global_threshold");
-    result = ReplaceIdentifier(result, "global.method", "global_method");
-    result = ReplaceIdentifier(result, "global.filterprofile", "global_filterprofile");
-    result = ReplaceIdentifier(result, "global.samplerate", "global_samplerate");
-    result = ReplaceIdentifier(result, "global.min_score", "global_min_score");
-    result = ReplaceIdentifier(result, "global.find_num", "global_find_num");
-    result = ReplaceIdentifier(result, "global.compare_gap", "global_compare_gap");
-    result = ReplaceIdentifier(result, "global.circle_cx", "global_circle_cx");
-    result = ReplaceIdentifier(result, "global.circle_cy", "global_circle_cy");
-    result = ReplaceIdentifier(result, "global.circle_px", "global_circle_px");
-    result = ReplaceIdentifier(result, "global.circle_py", "global_circle_py");
-    result = ReplaceIdentifier(result, "global.max_elapsed_ms", "global_max_elapsed_ms");
-    result = ReplaceIdentifier(result, "global.max_scan_lines", "global_max_scan_lines");
-    result = ReplaceIdentifier(result, "global.max_samples", "global_max_samples");
-    result = ReplaceIdentifier(result, "global.line_ref", "global_line_ref");
-    result = ReplaceIdentifier(result, "global.circle_ref", "global_circle_ref");
-    result = ReplaceIdentifier(result, "global.current_status", "global_current_status");
-    result = ReplaceIdentifier(result, "global.contract_pass", "global_contract_pass");
-    result = ReplaceIdentifier(result, "global.headless_ok", "global_headless_ok");
-    result = ReplaceIdentifier(result, "global.algorithm_executed", "global_algorithm_executed");
-    result = ReplaceIdentifier(result, "global.budget_exceeded", "global_budget_exceeded");
-    result = ReplaceIdentifier(result, "global.valid_points_count", "global_valid_points_count");
-    result = ReplaceIdentifier(result, "global.has_fit_line", "global_has_fit_line");
-    result = ReplaceIdentifier(result, "global.has_fit_circle", "global_has_fit_circle");
-    result = ReplaceIdentifier(result, "global.rendered_measure_points_count", "global_rendered_measure_points_count");
-    result = ReplaceIdentifier(result, "global.rendered_result_count", "global_rendered_result_count");
-    result = ReplaceIdentifier(result, "global.result_overlay_changed_pixels", "global_result_overlay_changed_pixels");
-    result = ReplaceIdentifier(result, "global.policy_guard_match", "global_policy_guard_match");
-    result = ReplaceIdentifier(result, "global.circle_radius", "global_contract_circle_radius");
-    result = ReplaceIdentifier(result, "global.avgdist", "global_contract_avgdist");
-    return result;
+    return runtime_source;
 }
 
 std::string LoadCxScriptSource(const std::string& script_path, std::string& reason)
@@ -328,8 +265,8 @@ bool InjectCxScriptGlobals(
         runtime.m_parser.DefineVar("global_rendered_result_count", &values.rendered_result_count);
         runtime.m_parser.DefineVar("global_result_overlay_changed_pixels", &values.result_overlay_changed_pixels);
         runtime.m_parser.DefineVar("global_policy_guard_match", &values.policy_guard_match);
-        runtime.m_parser.DefineVar("global_contract_circle_radius", &values.contract_circle_radius);
-        runtime.m_parser.DefineVar("global_contract_avgdist", &values.contract_avgdist);
+        runtime.m_parser.DefineVar("global_circle_radius", &values.contract_circle_radius);
+        runtime.m_parser.DefineVar("global_avgdist", &values.contract_avgdist);
     }
 
     reason.clear();
@@ -368,6 +305,13 @@ bool ExecuteCxScriptSequential(
     std::string& reason)
 {
     const auto start_time = std::chrono::steady_clock::now();
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(source_image.cols, source_image.rows))
+    {
+        capture.failure_stage = "cximage_runtime_resources";
+        reason = "failed to initialize shared cximage algorithm runtime resources";
+        return false;
+    }
 
     mu::CxParserRuntime runtime;
 
@@ -462,8 +406,15 @@ bool SaveCxScriptHeadlessSummaryJson(
     const std::filesystem::path& outputPath,
     std::string& outReason)
 {
-    std::filesystem::create_directories(outputPath.parent_path());
-    std::ofstream file(outputPath);
+    std::error_code ec;
+    std::filesystem::create_directories(outputPath.parent_path(), ec);
+    if (ec)
+    {
+        outReason = "failed to create headless summary directory: " + ec.message();
+        return false;
+    }
+    const std::filesystem::path temporary = outputPath.string() + ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
     if (!file.is_open())
     {
         outReason = "failed to open headless summary json";
@@ -474,7 +425,10 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"execution_mode\": \"sequential\",\n";
     file << "  \"algorithm_executed\": " << (capture.runtime_completed ? "true" : "false") << ",\n";
     file << "  \"elapsed_ms\": " << capture.elapsed_ms << ",\n";
-    file << "  \"budget_ms\": 5000,\n";
+    file << "  \"budget_ms\": " << capture.budget_ms << ",\n";
+    file << "  \"max_steps\": " << capture.max_steps << ",\n";
+    file << "  \"max_scan_lines\": " << capture.max_scan_lines << ",\n";
+    file << "  \"max_samples\": " << capture.max_samples << ",\n";
     file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << ",\n";
     file << "  \"scan_line_count\": " << capture.scan_line_count << ",\n";
     file << "  \"sample_count\": " << capture.sample_count << ",\n";
@@ -483,6 +437,16 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"has_fit_circle\": " << (capture.has_fit_circle ? "true" : "false") << ",\n";
     file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
     file << "  \"avgdist\": " << capture.avgdist << ",\n";
+    file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
+    file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
+    file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
+    file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
+    file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
+    file << "  \"fit_filter_input_count\": " << capture.fit_filter_input_count << ",\n";
+    file << "  \"fit_filter_kept_count\": " << capture.fit_filter_kept_count << ",\n";
+    file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
+    file << "  \"fit_filter_sigma\": " << capture.fit_filter_sigma << ",\n";
+    file << "  \"fit_filter_threshold\": " << capture.fit_filter_threshold << ",\n";
     file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
     file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
@@ -496,6 +460,34 @@ bool SaveCxScriptHeadlessSummaryJson(
         file << "  \"contract_conclusion\": \"" << JsonEscape(capture.contract_conclusion) << "\"\n";
     }
     file << "}\n";
+
+    file.flush();
+    const bool write_ok = file.good();
+    file.close();
+    if (!write_ok)
+    {
+        std::filesystem::remove(temporary, ec);
+        outReason = "failed while writing headless summary json";
+        return false;
+    }
+#ifdef _WIN32
+    if (!MoveFileExW(
+            temporary.c_str(), outputPath.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        std::filesystem::remove(temporary, ec);
+        outReason = "failed to atomically replace headless summary json";
+        return false;
+    }
+#else
+    std::filesystem::rename(temporary, outputPath, ec);
+    if (ec)
+    {
+        std::filesystem::remove(temporary, ec);
+        outReason = "failed to atomically replace headless summary json";
+        return false;
+    }
+#endif
 
     outReason.clear();
     return true;
@@ -523,6 +515,52 @@ bool ParseCxScriptHeadlessArgs(
             options.max_steps = std::stoi(argv[++i]);
         else if (arg == "--timeout-sec" && i + 1 < argc)
             options.timeout_sec = std::stoi(argv[++i]);
+        else if (arg == "--roi-x0" && i + 1 < argc)
+            options.roi_x0 = std::stoi(argv[++i]);
+        else if (arg == "--roi-y0" && i + 1 < argc)
+            options.roi_y0 = std::stoi(argv[++i]);
+        else if (arg == "--roi-x1" && i + 1 < argc)
+            options.roi_x1 = std::stoi(argv[++i]);
+        else if (arg == "--roi-y1" && i + 1 < argc)
+            options.roi_y1 = std::stoi(argv[++i]);
+        else if (arg == "--circle-cx" && i + 1 < argc)
+            options.circle_cx = std::stoi(argv[++i]);
+        else if (arg == "--circle-cy" && i + 1 < argc)
+            options.circle_cy = std::stoi(argv[++i]);
+        else if (arg == "--circle-px" && i + 1 < argc)
+            options.circle_px = std::stoi(argv[++i]);
+        else if (arg == "--circle-py" && i + 1 < argc)
+            options.circle_py = std::stoi(argv[++i]);
+        else if (arg == "--tool-half-width" && i + 1 < argc)
+            options.tool_half_width = std::stoi(argv[++i]);
+        else if (arg == "--wgap" && i + 1 < argc)
+            options.wgap = std::stoi(argv[++i]);
+        else if (arg == "--hgap" && i + 1 < argc)
+            options.hgap = std::stoi(argv[++i]);
+        else if (arg == "--gap" && i + 1 < argc)
+            options.gap = std::stoi(argv[++i]);
+        else if (arg == "--linegap" && i + 1 < argc)
+            options.linegap = std::stoi(argv[++i]);
+        else if (arg == "--threshold" && i + 1 < argc)
+            options.threshold = std::stoi(argv[++i]);
+        else if (arg == "--method" && i + 1 < argc)
+            options.method = std::stoi(argv[++i]);
+        else if (arg == "--filterprofile" && i + 1 < argc)
+            options.filterprofile = std::stoi(argv[++i]);
+        else if (arg == "--samplerate" && i + 1 < argc)
+            options.samplerate = std::stoi(argv[++i]);
+        else if (arg == "--min-score" && i + 1 < argc)
+            options.min_score = std::stod(argv[++i]);
+        else if (arg == "--find-num" && i + 1 < argc)
+            options.find_num = std::stoi(argv[++i]);
+        else if (arg == "--compare-gap" && i + 1 < argc)
+            options.compare_gap = std::stoi(argv[++i]);
+        else if (arg == "--max-elapsed-ms" && i + 1 < argc)
+            options.max_elapsed_ms = std::stoi(argv[++i]);
+        else if (arg == "--max-scan-lines" && i + 1 < argc)
+            options.max_scan_lines = std::stoi(argv[++i]);
+        else if (arg == "--max-samples" && i + 1 < argc)
+            options.max_samples = std::stoi(argv[++i]);
         else if (arg == "--runtime-capture-smoke")
             options.runtime_capture_smoke = true;
     }
@@ -573,10 +611,19 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     result.launched = true;
 
     CxScriptExecutionCapture capture;
+    const int timeout_ms = std::max(1, options.timeout_sec) * 1000;
+    capture.budget_ms = options.max_elapsed_ms > 0
+        ? std::min(options.max_elapsed_ms, timeout_ms)
+        : timeout_ms;
+    capture.max_steps = options.max_steps;
+    capture.max_scan_lines = options.max_scan_lines;
+    capture.max_samples = options.max_samples;
     std::string reason;
 
+    CxScriptHeadlessOptions effective_options = options;
+    effective_options.max_elapsed_ms = capture.budget_ms;
     bool execution_ok = ExecuteCxScriptSequential(
-        options,
+        effective_options,
         source_image,
         capture,
         reason);
@@ -653,6 +700,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     {
         result.summary_path = summary_path.string();
     }
+    else
+    {
+        result.failure_stage = "summary_export";
+        result.reason = reason;
+    }
 
     std::ofstream line_trace_file(line_trace_path);
     if (line_trace_file.is_open())
@@ -690,6 +742,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"has_fit_circle\": " << (capture.has_fit_circle ? "true" : "false") << ",\n";
         object_state_file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
         object_state_file << "  \"avgdist\": " << capture.avgdist << ",\n";
+        object_state_file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
+        object_state_file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
+        object_state_file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
+        object_state_file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
+        object_state_file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
+        object_state_file << "  \"fit_filter_input_count\": " << capture.fit_filter_input_count << ",\n";
+        object_state_file << "  \"fit_filter_kept_count\": " << capture.fit_filter_kept_count << ",\n";
+        object_state_file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
+        object_state_file << "  \"fit_filter_sigma\": " << capture.fit_filter_sigma << ",\n";
+        object_state_file << "  \"fit_filter_threshold\": " << capture.fit_filter_threshold << ",\n";
         object_state_file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << "\n";
         object_state_file << "}\n";
         object_state_file.close();

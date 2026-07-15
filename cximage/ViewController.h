@@ -447,9 +447,6 @@ private:
     };
     AnnotationDraft m_annotationDraft;
 
-    bool m_annotationHandleDragging = false;
-    int m_annotationHandleElement = -1;
-    int m_annotationHandleKind = 0; // 1 center-y, 2 line-start/radius, 3 line-end, 4 line-width
     int m_activePolylineElement = -1;
     std::vector<CxShapePoint> m_activePolylinePoints;
     bool m_attachToScriptMode = false;
@@ -483,4 +480,3 @@ private:
 };
 
 #endif // _ViewController_Header
-

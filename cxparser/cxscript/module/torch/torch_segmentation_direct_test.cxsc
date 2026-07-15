@@ -4,9 +4,9 @@ TorchTensor m_tensor;
 TorchRawOutput m_raw;
 TorchMask m_mask;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
-string model_path = global.model_path;
+string model_path = global_model_path;
 int input_w = 512;
 int input_h = 512;
 float mean0 = 0.485;
@@ -24,6 +24,6 @@ m_raw = m_model.infer(m_tensor);
 m_mask = torch.decode_mask(m_raw, mask_threshold);
 cximage.overlay_mask(&m_image, m_mask);
 
-global.mask_ref = m_mask;
-global.overlay_ref = m_image.get_overlay();
-global.current_status = "PENDING";
+global_mask_ref = m_mask;
+global_overlay_ref = m_image.get_overlay();
+global_current_status = "PENDING";

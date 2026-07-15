@@ -6,10 +6,47 @@
 #include <filesystem>
 #include <unordered_set>
 #include <map>
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
 static std::string EscapeJson(const std::string& s);
+
+static std::string NormalizeComparablePath(const std::string& path)
+{
+    if (path.empty())
+        return {};
+    std::error_code ec;
+    fs::path normalized = fs::weakly_canonical(fs::absolute(fs::path(path), ec), ec);
+    if (ec)
+        normalized = fs::path(path).lexically_normal();
+    std::string value = normalized.generic_string();
+#ifdef _WIN32
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+#endif
+    return value;
+}
+
+static const CxShapeElementSnapshot* FindPublishedShapeByRole(
+    const CxRuntimeProjectionResult& projection,
+    const std::string& role)
+{
+    for (const auto& shape : projection.published_shapes)
+    {
+        if (shape.semantic_role == role)
+            return &shape;
+    }
+    return nullptr;
+}
+
+static double AngleDifferenceDegrees(double lhs, double rhs)
+{
+    double difference = std::fmod(std::abs(lhs - rhs), 180.0);
+    return std::min(difference, 180.0 - difference);
+}
 
 bool CxShapeInteractionRunner::TryFindToolSpec(
     const CxAnnotationToolManifestSnapshot& tool_manifest,
@@ -759,6 +796,16 @@ bool CxShapeInteractionRunner::RunTestCase(
 
         if (use_manifest_projection)
         {
+            if (NormalizeComparablePath(tc.image_manifest_path) !=
+                NormalizeComparablePath(image_manifest.manifest_path))
+            {
+                case_result.pass = false;
+                case_result.status = "FAIL";
+                case_result.conclusion = "manifest_path_mismatch";
+                case_result.reason = "suite manifest path differs from CLI manifest path";
+                return false;
+            }
+
             std::string resolve_reason;
             if (!ResolveManifestProjectionRequest(image_manifest, tc, request, resolve_reason))
             {
@@ -957,6 +1004,68 @@ bool CxShapeInteractionRunner::RunTestCase(
             reason += "owner_type mismatch detected; ";
         }
 
+        if (!tc.expected_geometry_kind.empty() ||
+            tc.expected_geometry_point_count >= 0 ||
+            tc.expect_geometry_from_manifest)
+        {
+            const CxShapeElementSnapshot* geometry =
+                FindPublishedShapeByRole(projection, "roi");
+            if (!geometry)
+            {
+                pass = false;
+                reason += "published roi geometry snapshot is missing; ";
+            }
+            else
+            {
+                if (!tc.expected_geometry_kind.empty() &&
+                    geometry->shape_kind != tc.expected_geometry_kind)
+                {
+                    pass = false;
+                    reason += "geometry kind mismatch (actual=" + geometry->shape_kind +
+                        ", expected=" + tc.expected_geometry_kind + "); ";
+                }
+
+                const int point_count = static_cast<int>(geometry->points.size() / 2);
+                if (tc.expected_geometry_point_count >= 0 &&
+                    point_count != tc.expected_geometry_point_count)
+                {
+                    pass = false;
+                    reason += "geometry point count mismatch (actual=" +
+                        std::to_string(point_count) + ", expected=" +
+                        std::to_string(tc.expected_geometry_point_count) + "); ";
+                }
+
+                if (tc.expect_geometry_from_manifest)
+                {
+                    const double tolerance = 1.1;
+                    if (request.has_ellipse_roi)
+                    {
+                        if (std::abs(geometry->center_x - request.ellipse_cx) > tolerance ||
+                            std::abs(geometry->center_y - request.ellipse_cy) > tolerance ||
+                            std::abs(geometry->radius_x - request.ellipse_rx) > tolerance ||
+                            std::abs(geometry->radius_y - request.ellipse_ry) > tolerance)
+                        {
+                            pass = false;
+                            reason += "ellipse geometry differs from manifest request; ";
+                        }
+                    }
+                    else if (request.has_rotated_rect_roi)
+                    {
+                        if (std::abs(geometry->center_x - request.rect_cx) > tolerance ||
+                            std::abs(geometry->center_y - request.rect_cy) > tolerance ||
+                            std::abs(geometry->radius_x * 2.0 - request.rect_width) > tolerance ||
+                            std::abs(geometry->radius_y * 2.0 - request.rect_height) > tolerance ||
+                            AngleDifferenceDegrees(geometry->angle_deg,
+                                                   request.rect_angle_deg) > 0.1)
+                        {
+                            pass = false;
+                            reason += "rotated rect geometry differs from manifest request; ";
+                        }
+                    }
+                }
+            }
+        }
+
         if (tc.operation == "runtime_geometry_publish")
         {
             if (projection.algorithm_ok)
@@ -1117,23 +1226,33 @@ bool CxShapeInteractionRunner::RunTestCase(
         {
             after_file << "{\n";
             after_file << "  \"elements\": [\n";
-            for (size_t i = 0; i < elements.size(); ++i)
+            for (size_t i = 0; i < projection.published_shapes.size(); ++i)
             {
-                const auto& elem = elements[i];
+                const auto& elem = projection.published_shapes[i];
                 after_file << "    {\n";
-                after_file << "      \"id\": " << elem.id << ",\n";
                 after_file << "      \"stable_ref\": \"" << EscapeJson(elem.stable_ref) << "\",\n";
-                after_file << "      \"tool_id\": \"" << EscapeJson(elem.tool_id) << "\",\n";
                 after_file << "      \"owner_type\": \"" << EscapeJson(elem.owner_type) << "\",\n";
                 after_file << "      \"owner_ref\": \"" << EscapeJson(elem.owner_ref) << "\",\n";
-                after_file << "      \"owner_binding\": \"" << EscapeJson(elem.owner_binding) << "\",\n";
                 after_file << "      \"semantic_role\": \"" << EscapeJson(elem.semantic_role) << "\",\n";
+                after_file << "      \"shape_kind\": \"" << EscapeJson(elem.shape_kind) << "\",\n";
+                after_file << "      \"points\": [";
+                for (size_t point_index = 0; point_index < elem.points.size(); ++point_index)
+                {
+                    if (point_index > 0) after_file << ", ";
+                    after_file << elem.points[point_index];
+                }
+                after_file << "],\n";
+                after_file << "      \"center_x\": " << elem.center_x << ",\n";
+                after_file << "      \"center_y\": " << elem.center_y << ",\n";
+                after_file << "      \"radius\": " << elem.radius << ",\n";
+                after_file << "      \"radius_x\": " << elem.radius_x << ",\n";
+                after_file << "      \"radius_y\": " << elem.radius_y << ",\n";
+                after_file << "      \"angle_deg\": " << elem.angle_deg << ",\n";
+                after_file << "      \"closed\": " << (elem.closed ? "true" : "false") << ",\n";
                 after_file << "      \"editable\": " << (elem.editable ? "true" : "false") << ",\n";
-                after_file << "      \"visible\": " << (elem.visible ? "true" : "false") << ",\n";
-                after_file << "      \"result_element\": " << (elem.result_element ? "true" : "false") << ",\n";
-                after_file << "      \"stale\": " << (elem.stale ? "true" : "false") << "\n";
+                after_file << "      \"result_element\": " << (elem.result_element ? "true" : "false") << "\n";
                 after_file << "    }";
-                if (i < elements.size() - 1)
+                if (i < projection.published_shapes.size() - 1)
                     after_file << ",";
                 after_file << "\n";
             }
@@ -1235,7 +1354,35 @@ bool CxShapeInteractionRunner::RunTestCase(
             result_file << "  \"valid_points_count\": " << projection.valid_points_count << ",\n";
             result_file << "  \"result_element_count\": " << result_element_count << ",\n";
             result_file << "  \"stale_result_count\": " << stale_result_count << ",\n";
-            result_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << "\n";
+            result_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << ",\n";
+            result_file << "  \"published_shapes\": [\n";
+            for (size_t i = 0; i < projection.published_shapes.size(); ++i)
+            {
+                const auto& shape = projection.published_shapes[i];
+                result_file << "    {\n";
+                result_file << "      \"stable_ref\": \"" << EscapeJson(shape.stable_ref) << "\",\n";
+                result_file << "      \"owner_type\": \"" << EscapeJson(shape.owner_type) << "\",\n";
+                result_file << "      \"owner_ref\": \"" << EscapeJson(shape.owner_ref) << "\",\n";
+                result_file << "      \"semantic_role\": \"" << EscapeJson(shape.semantic_role) << "\",\n";
+                result_file << "      \"shape_kind\": \"" << EscapeJson(shape.shape_kind) << "\",\n";
+                result_file << "      \"points\": [";
+                for (size_t point_index = 0; point_index < shape.points.size(); ++point_index)
+                {
+                    if (point_index > 0) result_file << ", ";
+                    result_file << shape.points[point_index];
+                }
+                result_file << "],\n";
+                result_file << "      \"center_x\": " << shape.center_x << ",\n";
+                result_file << "      \"center_y\": " << shape.center_y << ",\n";
+                result_file << "      \"radius\": " << shape.radius << ",\n";
+                result_file << "      \"radius_x\": " << shape.radius_x << ",\n";
+                result_file << "      \"radius_y\": " << shape.radius_y << ",\n";
+                result_file << "      \"angle_deg\": " << shape.angle_deg << ",\n";
+                result_file << "      \"editable\": " << (shape.editable ? "true" : "false") << ",\n";
+                result_file << "      \"result_element\": " << (shape.result_element ? "true" : "false") << "\n";
+                result_file << "    }" << (i + 1 < projection.published_shapes.size() ? "," : "") << "\n";
+            }
+            result_file << "  ]\n";
             result_file << "}\n";
         }
 

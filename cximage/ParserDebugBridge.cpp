@@ -145,7 +145,7 @@ bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
 {
   std::string prepared = scriptText;
-  const std::string source = "global.matInput";
+  const std::string source = "global_matInput";
   const std::string runtimeName = "global_matInput";
   std::size_t position = 0;
   while ((position = prepared.find(source, position)) != std::string::npos)
@@ -306,31 +306,22 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
   const char* names[] = {
     "doutputvalue",
     "current_status",
-    "global.roi_x0",
-    "global.roi_y0",
-    "global.roi_x1",
-    "global.roi_y1",
-    "global.tool_half_width",
-    "global.wgap",
-    "global.hgap",
-    "global.linegap",
-    "global.threshold",
-    "global.filterprofile",
-    "global.method",
-    "global.circle_cx",
-    "global.circle_cy",
-    "global.circle_px",
-    "global.circle_py",
-    "global.gap",
-    "roi_x0",
-    "roi_y0",
-    "roi_x1",
-    "roi_y1",
-    "tool_half_width",
-    "circle_cx",
-    "circle_cy",
-    "circle_px",
-    "circle_py"
+    "global_roi_x0",
+    "global_roi_y0",
+    "global_roi_x1",
+    "global_roi_y1",
+    "global_tool_half_width",
+    "global_wgap",
+    "global_hgap",
+    "global_linegap",
+    "global_threshold",
+    "global_filterprofile",
+    "global_method",
+    "global_circle_cx",
+    "global_circle_cy",
+    "global_circle_px",
+    "global_circle_py",
+    "global_gap"
   };
   std::vector<ParserDebugVariableSnapshot> snapshots;
   for (const char* name : names)

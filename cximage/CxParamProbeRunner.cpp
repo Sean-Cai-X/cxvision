@@ -59,43 +59,35 @@ bool RunSingleParamProbe(
     InjectCandidateGlobals(options, request.candidate);
 
     CxScriptHeadlessResult headless_result;
-    const bool launched = RunCxScriptHeadless(options, headless_result);
+    RunCxScriptHeadless(options, headless_result);
 
-    result.launched = launched;
-    result.executed = headless_result.ok;
+    result.launched = headless_result.launched;
+    result.executed = headless_result.executed;
+    result.runtime_ok = headless_result.runtime_ok;
+    result.assets_complete = headless_result.assets_complete;
+    result.timeout = headless_result.timed_out;
     result.exit_code = headless_result.exit_code;
     result.reason = headless_result.reason;
-    result.failure_stage = options.failure_stage;
+    result.failure_stage = headless_result.failure_stage;
 
-    if (!headless_result.snapshot_path.empty())
-    {
-        result.snapshot_path = headless_result.snapshot_path;
-    }
-    if (!headless_result.overlay_path.empty())
-    {
-        result.result_overlay_path = headless_result.overlay_path;
-    }
-    if (!options.result_overlay_path.empty())
-    {
-        result.result_overlay_path = options.result_overlay_path;
-    }
-    if (!options.evidence_overlay_path.empty())
-    {
-        result.evidence_overlay_path = options.evidence_overlay_path;
-    }
-    if (!options.tool_display_path.empty())
-    {
-        result.tool_display_path = options.tool_display_path;
-    }
-    if (!headless_result.summary_path.empty())
-    {
-        result.result_summary_path = headless_result.summary_path;
-    }
+    result.snapshot_path = headless_result.snapshot_path;
+    result.result_summary_path = headless_result.summary_path;
+    result.result_overlay_path = headless_result.result_overlay_path;
+    result.evidence_overlay_path = headless_result.evidence_overlay_path;
+    result.tool_display_path = headless_result.tool_display_path;
 
-    result.candidate_points = options.points_count;
-    result.fit_available = options.has_fit_line != 0 || options.has_fit_circle != 0;
-    result.support_score = options.local_support;
-    result.mean_distance = options.local_mean_distance;
+    result.candidate_points = headless_result.valid_points_count;
+    result.fit_available = headless_result.has_fit_line || headless_result.has_fit_circle;
+    result.mean_distance = headless_result.avgdist;
+    result.support_available = headless_result.support_available;
+    if (result.support_available)
+        result.support_score = headless_result.local_support;
 
-    return launched;
+    result.probe_ok =
+        result.launched &&
+        result.executed &&
+        result.runtime_ok &&
+        result.assets_complete &&
+        !result.timeout;
+    return result.probe_ok;
 }

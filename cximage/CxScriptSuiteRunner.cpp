@@ -1159,39 +1159,39 @@ namespace
         file << "  \"globals\": {\n";
         if (resolved.target)
         {
-            file << "    \"global.circle_cx\": " << resolved.target->cx << ",\n";
-            file << "    \"global.circle_cy\": " << resolved.target->cy << ",\n";
-            file << "    \"global.circle_px\": " << resolved.target->px << ",\n";
-            file << "    \"global.circle_py\": " << resolved.target->py << ",\n";
-            file << "    \"global.roi_x0\": " << resolved.target->x0 << ",\n";
-            file << "    \"global.roi_y0\": " << resolved.target->y0 << ",\n";
-            file << "    \"global.roi_x1\": " << resolved.target->x1 << ",\n";
-            file << "    \"global.roi_y1\": " << resolved.target->y1 << ",\n";
-            file << "    \"global.wgap\": " << resolved.target->wgap << ",\n";
-            file << "    \"global.hgap\": " << resolved.target->hgap << ",\n";
-            file << "    \"global.gap\": " << resolved.target->gap << ",\n";
-            file << "    \"global.linegap\": " << resolved.target->linegap << ",\n";
-            file << "    \"global.tool_half_width\": " << resolved.target->tool_half_width << ",\n";
+            file << "    \"global_circle_cx\": " << resolved.target->cx << ",\n";
+            file << "    \"global_circle_cy\": " << resolved.target->cy << ",\n";
+            file << "    \"global_circle_px\": " << resolved.target->px << ",\n";
+            file << "    \"global_circle_py\": " << resolved.target->py << ",\n";
+            file << "    \"global_roi_x0\": " << resolved.target->x0 << ",\n";
+            file << "    \"global_roi_y0\": " << resolved.target->y0 << ",\n";
+            file << "    \"global_roi_x1\": " << resolved.target->x1 << ",\n";
+            file << "    \"global_roi_y1\": " << resolved.target->y1 << ",\n";
+            file << "    \"global_wgap\": " << resolved.target->wgap << ",\n";
+            file << "    \"global_hgap\": " << resolved.target->hgap << ",\n";
+            file << "    \"global_gap\": " << resolved.target->gap << ",\n";
+            file << "    \"global_linegap\": " << resolved.target->linegap << ",\n";
+            file << "    \"global_tool_half_width\": " << resolved.target->tool_half_width << ",\n";
         }
         if (resolved.profile)
         {
-            file << "    \"global.method\": " << resolved.profile->method << ",\n";
-            file << "    \"global.threshold\": " << resolved.profile->threshold << ",\n";
-            file << "    \"global.gap\": " << resolved.profile->gap << ",\n";
-            file << "    \"global.linegap\": " << resolved.profile->linegap << ",\n";
-            file << "    \"global.wgap\": " << resolved.profile->wgap << ",\n";
-            file << "    \"global.hgap\": " << resolved.profile->hgap << ",\n";
-            file << "    \"global.filterprofile\": " << resolved.profile->filterprofile << "\n";
+            file << "    \"global_method\": " << resolved.profile->method << ",\n";
+            file << "    \"global_threshold\": " << resolved.profile->threshold << ",\n";
+            file << "    \"global_gap\": " << resolved.profile->gap << ",\n";
+            file << "    \"global_linegap\": " << resolved.profile->linegap << ",\n";
+            file << "    \"global_wgap\": " << resolved.profile->wgap << ",\n";
+            file << "    \"global_hgap\": " << resolved.profile->hgap << ",\n";
+            file << "    \"global_filterprofile\": " << resolved.profile->filterprofile << "\n";
         }
         else
         {
-            file << "    \"global.method\": 0,\n";
-            file << "    \"global.threshold\": 0,\n";
-            file << "    \"global.gap\": 0,\n";
-            file << "    \"global.linegap\": 0,\n";
-            file << "    \"global.wgap\": 0,\n";
-            file << "    \"global.hgap\": 0,\n";
-            file << "    \"global.filterprofile\": 0\n";
+            file << "    \"global_method\": 0,\n";
+            file << "    \"global_threshold\": 0,\n";
+            file << "    \"global_gap\": 0,\n";
+            file << "    \"global_linegap\": 0,\n";
+            file << "    \"global_wgap\": 0,\n";
+            file << "    \"global_hgap\": 0,\n";
+            file << "    \"global_filterprofile\": 0\n";
         }
         file << "  },\n";
 

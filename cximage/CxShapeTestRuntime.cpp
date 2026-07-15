@@ -296,3 +296,21 @@ void CxShapeTestRuntime::SetManifestMatchCase(const std::string& case_id)
     if (s_current)
         s_current->manifest_match_case_id = case_id;
 }
+
+void CxShapeTestRuntime::ExpectGeometryKind(const std::string& kind)
+{
+    if (s_current)
+        s_current->expected_geometry_kind = kind;
+}
+
+void CxShapeTestRuntime::ExpectGeometryPointCount(int count)
+{
+    if (s_current)
+        s_current->expected_geometry_point_count = count;
+}
+
+void CxShapeTestRuntime::ExpectManifestGeometry(bool enabled)
+{
+    if (s_current)
+        s_current->expect_geometry_from_manifest = enabled;
+}

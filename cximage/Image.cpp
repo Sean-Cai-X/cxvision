@@ -2740,20 +2740,20 @@ double calPointPointDist2(const cv::Point2f& P1, const cv::Point2f& P2)
     return dist;
 }
 // Randomly sample three unique indices for circle fitting.
-std::tuple<int, int, int> GetSample_(const int& index_size, const std::vector<std::tuple<int, int, int>>& sampled_indexes)
+std::tuple<int, int, int> GetSample_(const int& index_size,
+    const std::vector<std::tuple<int, int, int>>& sampled_indexes,
+    std::mt19937_64& generator)
 {
     assert(index_size > 2);
-    static std::random_device rd;
-    static std::mt19937_64 gen(rd());
-    static std::uniform_int_distribution<int> dist(0, index_size - 1);
+    std::uniform_int_distribution<int> dist(0, index_size - 1);
 
     bool has_sampled = false;
     while (true)
     {
         std::vector<int> index = {
-            dist(gen) % index_size,
-            dist(gen) % index_size,
-            dist(gen) % index_size,
+            dist(generator),
+            dist(generator),
+            dist(generator),
         };
         if (index[0] == index[1] || index[0] == index[2] || index[1] == index[2])
         {
@@ -2826,13 +2826,19 @@ void RansacCircleFit2(std::vector<cv::Point2f>& pts, const float inlier_threshol
     int max_inlier_num = 0;
     int sample_count = 0;
 
+    // A fixed local seed makes the same ordered measurement points produce
+    // the same inlier set in every process.  The previous random_device-backed
+    // static generator made Stage25 circle results change between identical
+    // serial runs and also retained state between calls in one process.
+    std::mt19937_64 generator(0x4358564953494F4EULL);
+
     double radius = 0.0f;
     cv::Point2f center;
     int nSampleTotal = 0;
     int nSampleValid = 0;
     while (sample_count < iterate_nums)
     {
-        auto [p1, p2, p3] = GetSample_(static_cast<int>(pts.size()), sampled_indexes);
+        auto [p1, p2, p3] = GetSample_(static_cast<int>(pts.size()), sampled_indexes, generator);
 
         nSampleTotal++;
 
@@ -2845,7 +2851,7 @@ void RansacCircleFit2(std::vector<cv::Point2f>& pts, const float inlier_threshol
         }
         else
         {
-            sampled_indexes.push_back({ p1, p2, p2 });
+            sampled_indexes.push_back({ p1, p2, p3 });
         }
 
         nSampleValid++;

@@ -497,6 +497,24 @@ static double CxShapeTest_setmanifestmatchcase(const char* case_id)
     return 0.0;
 }
 
+static double CxShapeTest_expectgeometrykind(const char* kind)
+{
+    CxShapeTestRuntime::ExpectGeometryKind(kind ? kind : "");
+    return 0.0;
+}
+
+static double CxShapeTest_expectpointcount(double count)
+{
+    CxShapeTestRuntime::ExpectGeometryPointCount(static_cast<int>(count));
+    return 0.0;
+}
+
+static double CxShapeTest_expectmanifestgeometry(double enabled)
+{
+    CxShapeTestRuntime::ExpectManifestGeometry(enabled != 0.0);
+    return 0.0;
+}
+
 void RegisterCxShapeTestBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxShapeTest_reset", (mu::fun_type1)&CxShapeTest_reset);
@@ -561,4 +579,7 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setmanifest", (mu::strfun_type1)&CxShapeTest_setmanifest);
     parser.DefineFun("CxShapeTest_setmanifesttarget", (mu::strfun_type1)&CxShapeTest_setmanifesttarget);
     parser.DefineFun("CxShapeTest_setmanifestmatchcase", (mu::strfun_type1)&CxShapeTest_setmanifestmatchcase);
+    parser.DefineFun("CxShapeTest_expectgeometrykind", (mu::strfun_type1)&CxShapeTest_expectgeometrykind);
+    parser.DefineFun("CxShapeTest_expectpointcount", (mu::fun_type1)&CxShapeTest_expectpointcount);
+    parser.DefineFun("CxShapeTest_expectmanifestgeometry", (mu::fun_type1)&CxShapeTest_expectmanifestgeometry);
 }

@@ -111,9 +111,12 @@ int ClampCircleEdgePosition(int position, int line_length, int margin)
 
 bool ShouldApplyCircleObjectPrefilter(int findset, int process_width, int line_count)
 {
-    if (findset & 0x01)
-        return true;
-    return process_width <= 24 || line_count <= 24;
+    (void)process_width;
+    (void)line_count;
+    // bit0 is the explicit FindObject prefilter switch. Compact-domain
+    // bypass is handled by the caller and must not be encoded here as an
+    // unreachable implicit enable path.
+    return (findset & 0x01) != 0;
 }
 
 void ApplyCircleObjectPrefilter(FindObject* find_object,
@@ -1449,6 +1452,112 @@ void Findcircle::fitcircle()
          elapsed_ms
      });
 }
+
+void Findcircle::fitcirclefiltered()
+{
+    m_fitfilter_input_count = m_measurepoints.size();
+    m_fitfilter_kept_count = 0;
+    m_fitfilter_rejected_count = 0;
+    m_fitfilter_sigma = 0.0;
+    m_fitfilter_threshold = 0.0;
+
+    const int point_count = m_measurepoints.size();
+    const int min_fit_points = ComputeCircleMinFitPoints(static_cast<int>(m_lines.size()));
+    if (point_count < std::max(5, min_fit_points))
+    {
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        return;
+    }
+
+    // The scan lines are stored in angular order.  Use a circular five-tap
+    // Gaussian neighbourhood only to obtain a stable initial circle; the
+    // final fit still uses the original, non-smoothed measurement points.
+    static constexpr double gaussian[5] = {
+        0.06136, 0.24477, 0.38774, 0.24477, 0.06136
+    };
+    std::vector<cv::Point2f> smoothed;
+    smoothed.reserve(static_cast<std::size_t>(point_count));
+    for (int i = 0; i < point_count; ++i)
+    {
+        double x = 0.0;
+        double y = 0.0;
+        for (int offset = -2; offset <= 2; ++offset)
+        {
+            const int neighbour = (i + offset + point_count) % point_count;
+            const double weight = gaussian[offset + 2];
+            x += weight * m_measurepoints.getx(neighbour);
+            y += weight * m_measurepoints.gety(neighbour);
+        }
+        smoothed.emplace_back(static_cast<float>(x), static_cast<float>(y));
+    }
+
+    auto initial_points = smoothed;
+    const auto [initial_center, initial_radius_value] = Image::CircleFit_(initial_points);
+    const double initial_radius = static_cast<double>(initial_radius_value);
+    if (!std::isfinite(initial_center.x) || !std::isfinite(initial_center.y) ||
+        !std::isfinite(initial_radius) || initial_radius <= 0.0)
+    {
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        return;
+    }
+
+    std::vector<double> signed_residuals;
+    signed_residuals.reserve(static_cast<std::size_t>(point_count));
+    double residual_mean = 0.0;
+    for (int i = 0; i < point_count; ++i)
+    {
+        const double dx = m_measurepoints.getx(i) - static_cast<double>(initial_center.x);
+        const double dy = m_measurepoints.gety(i) - static_cast<double>(initial_center.y);
+        const double residual = std::sqrt(dx * dx + dy * dy) - initial_radius;
+        signed_residuals.push_back(residual);
+        residual_mean += residual;
+    }
+    residual_mean /= static_cast<double>(point_count);
+
+    double variance = 0.0;
+    for (double residual : signed_residuals)
+    {
+        const double centered = residual - residual_mean;
+        variance += centered * centered;
+    }
+    variance /= static_cast<double>(point_count);
+    m_fitfilter_sigma = std::sqrt(std::max(0.0, variance));
+    m_fitfilter_threshold = 2.0 * m_fitfilter_sigma;
+
+    PointsShape filtered_points;
+    for (int i = 0; i < point_count; ++i)
+    {
+        if (std::abs(signed_residuals[static_cast<std::size_t>(i)] - residual_mean) <=
+            m_fitfilter_threshold)
+        {
+            gp_Pnt point;
+            point.SetX(m_measurepoints.getx(i));
+            point.SetY(m_measurepoints.gety(i));
+            filtered_points.addpoint(point);
+        }
+    }
+
+    m_fitfilter_kept_count = filtered_points.size();
+    m_fitfilter_rejected_count = point_count - m_fitfilter_kept_count;
+    if (m_fitfilter_kept_count < min_fit_points)
+    {
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        return;
+    }
+
+    m_measurepoints = filtered_points;
+    fitcircle();
+}
+
 void Findcircle::FitResultMeasure(void* pimage)
 {
     Image* pgetimage = static_cast<Image*>(pimage);

@@ -1,6 +1,6 @@
-global.return_before = 1;
-global.return_after = 0;
+global_return_before = 1;
+global_return_after = 0;
 
 return;
 
-global.return_after = 1;
+global_return_after = 1;

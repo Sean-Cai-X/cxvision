@@ -493,7 +493,7 @@ CxShapeHitResult ImageAnnotationLayer::HitTest(double image_x, double image_y, d
     for (int i = 0; i < static_cast<int>(myShapeElements.size()); ++i)
     {
         auto& element = myShapeElements[i];
-        if (!element.visible || !element.shape)
+        if (!element.visible || !element.editable || !element.shape)
             continue;
 
         CxShapeHit hit = element.shape->hitTest(image_x, image_y, tolerance);

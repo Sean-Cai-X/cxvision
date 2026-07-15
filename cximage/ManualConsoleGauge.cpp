@@ -6,6 +6,99 @@
 
 #include <sstream>
 #include <fstream>
+#include <cmath>
+#include <regex>
+
+namespace
+{
+std::string GaugeJsonEscape(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (char ch : value)
+    {
+        if (ch == '\\' || ch == '"')
+            out.push_back('\\');
+        if (ch == '\n')
+            out += "\\n";
+        else if (ch != '\r')
+            out.push_back(ch);
+    }
+    return out;
+}
+
+std::string SafePathComponent(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value)
+    {
+        if (std::isalnum(ch) || ch == '-' || ch == '_')
+            out.push_back(static_cast<char>(ch));
+        else
+            out.push_back('_');
+    }
+    while (out.find("..") != std::string::npos)
+        out.replace(out.find(".."), 2, "__");
+    return out;
+}
+
+bool ExtractJsonString(const std::string& source, const char* key, std::string& value)
+{
+    const std::regex pattern(std::string("\\\"") + key + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"");
+    std::smatch match;
+    if (!std::regex_search(source, match, pattern))
+        return false;
+    value = match[1].str();
+    return true;
+}
+
+bool ExtractJsonInt(const std::string& source, const char* key, int& value)
+{
+    const std::regex pattern(std::string("\\\"") + key + "\\\"\\s*:\\s*(-?[0-9]+)");
+    std::smatch match;
+    if (!std::regex_search(source, match, pattern))
+        return false;
+    value = std::stoi(match[1].str());
+    return true;
+}
+
+bool ExtractJsonBool(const std::string& source, const char* key, bool& value)
+{
+    const std::regex pattern(std::string("\\\"") + key + "\\\"\\s*:\\s*(true|false)");
+    std::smatch match;
+    if (!std::regex_search(source, match, pattern))
+        return false;
+    value = match[1].str() == "true";
+    return true;
+}
+
+bool AtomicReplaceFile(
+    const std::filesystem::path& temporary,
+    const std::filesystem::path& destination,
+    std::string& reason)
+{
+#ifdef _WIN32
+    if (!MoveFileExW(
+            temporary.c_str(),
+            destination.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        reason = "cannot atomically replace file: " + destination.string();
+        return false;
+    }
+#else
+    std::error_code ec;
+    std::filesystem::rename(temporary, destination, ec);
+    if (ec)
+    {
+        reason = "cannot atomically replace file: " + ec.message();
+        return false;
+    }
+#endif
+    return true;
+}
+}
 
 void InjectManualGaugeInt(ManualTestContext& context, const std::string& key, int value)
 {
@@ -19,84 +112,157 @@ void InjectManualGaugeInt(ManualTestContext& context, const std::string& key, in
         "manual_gauge_applied");
 }
 
-void DrawGaugeHandle(
-    const ImVec2& canvas_pos,
-    float x,
-    float y,
-    float scale,
-    const ImVec4& color,
-    const char* label,
-    bool selected)
+bool ValidateManualGaugeGeometryForEditing(
+    const ManualGaugeState& gauge,
+    std::string& reason)
 {
-    const float r = selected ? 8.0f * scale : 6.0f * scale;
-    float fx = canvas_pos.x + x * scale;
-    float fy = canvas_pos.y + y * scale;
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    draw_list->AddCircleFilled(ImVec2(fx, fy), r, IM_COL32(
-        static_cast<int>(color.x * 255),
-        static_cast<int>(color.y * 255),
-        static_cast<int>(color.z * 255),
-        static_cast<int>(color.w * 255)));
-    if (label)
-        draw_list->AddText(ImVec2(fx + r + 4, fy - 8), IM_COL32(255, 255, 255, 255), label);
+    if (gauge.tool == "Findline")
+    {
+        if (!gauge.has_line_gauge)
+            reason = "line gauge is unavailable";
+        else if (gauge.line_x0 == gauge.line_x1 && gauge.line_y0 == gauge.line_y1)
+            reason = "line gauge length is zero";
+        else if (gauge.tool_half_width <= 0)
+            reason = "tool_half_width must be positive";
+        else
+            reason.clear();
+        return reason.empty();
+    }
+    if (gauge.tool == "Findcircle")
+    {
+        if (!gauge.has_circle_gauge)
+            reason = "circle gauge is unavailable";
+        else if (gauge.circle_px == gauge.circle_cx && gauge.circle_py == gauge.circle_cy)
+            reason = "circle radius is zero";
+        else
+            reason.clear();
+        return reason.empty();
+    }
+    reason = "unsupported gauge tool";
+    return false;
 }
 
-void DrawGaugeHandlesLine(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName)
+bool ValidateManualGaugeGeometry(const ManualGaugeState& gauge, std::string& reason)
 {
-    (void)object;
-    (void)canvas_pos;
-    (void)scale;
-    (void)objectName;
-    (void)gaugeName;
+    if (!gauge.accepted)
+    {
+        reason = "gauge is not accepted";
+        return false;
+    }
+    if (gauge.review_status != "manual_accepted")
+    {
+        reason = "review_status is not manual_accepted";
+        return false;
+    }
+    if (gauge.dirty)
+    {
+        reason = "gauge was edited after acceptance";
+        return false;
+    }
+    return ValidateManualGaugeGeometryForEditing(gauge, reason);
 }
 
-void DrawGaugeHandlesCircle(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName)
+void NormalizeManualGaugeGeometry(ManualGaugeState& gauge)
 {
-    (void)object;
-    (void)canvas_pos;
-    (void)scale;
-    (void)objectName;
-    (void)gaugeName;
-}
-
-void DrawGaugeHandles(
-    const RuntimeObjectView& object,
-    const ImVec2& canvas_pos,
-    float scale,
-    const char* objectName,
-    const char* gaugeName)
-{
-    if (object.type == "Findline")
-        DrawGaugeHandlesLine(object, canvas_pos, scale, objectName, gaugeName);
-    else if (object.type == "Findcircle")
-        DrawGaugeHandlesCircle(object, canvas_pos, scale, objectName, gaugeName);
+    if (!gauge.has_circle_gauge)
+        return;
+    const double dx = static_cast<double>(gauge.circle_px - gauge.circle_cx);
+    const double dy = static_cast<double>(gauge.circle_py - gauge.circle_cy);
+    gauge.radius = static_cast<int>(std::lround(std::sqrt(dx * dx + dy * dy)));
 }
 
 void ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName)
 {
-    (void)context;
     (void)objectName;
+    ApplyManualGaugeToGlobals(context);
 }
 
 void ApplyManualGaugeToGlobals(ManualTestContext& context)
 {
-    (void)context;
+    ManualGaugeState& gauge = context.current_gauge;
+    std::string reason;
+    if (!ValidateManualGaugeGeometryForEditing(gauge, reason))
+    {
+        context.debug_status = "gauge_apply_failed";
+        context.debug_reason = reason;
+        return;
+    }
+    if (gauge.tool == "Findline")
+    {
+        InjectManualGaugeInt(context, "global_roi_x0", gauge.line_x0);
+        InjectManualGaugeInt(context, "global_roi_y0", gauge.line_y0);
+        InjectManualGaugeInt(context, "global_roi_x1", gauge.line_x1);
+        InjectManualGaugeInt(context, "global_roi_y1", gauge.line_y1);
+        InjectManualGaugeInt(context, "global_tool_half_width", gauge.tool_half_width);
+        InjectManualGaugeInt(context, "global_wgap", gauge.wgap);
+        InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
+        InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
+        InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
+        InjectManualGaugeInt(context, "global_method", gauge.method);
+    }
+    else
+    {
+        NormalizeManualGaugeGeometry(gauge);
+        InjectManualGaugeInt(context, "global_circle_cx", gauge.circle_cx);
+        InjectManualGaugeInt(context, "global_circle_cy", gauge.circle_cy);
+        InjectManualGaugeInt(context, "global_circle_px", gauge.circle_px);
+        InjectManualGaugeInt(context, "global_circle_py", gauge.circle_py);
+        InjectManualGaugeInt(context, "global_gap", gauge.gap);
+        InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
+        InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global_method", gauge.method);
+    }
+    gauge.review_status = "applied_to_globals";
+    gauge.accepted = false;
+    context.debug_status = "gauge_applied";
+    context.debug_reason.clear();
 }
 
 std::filesystem::path ManualGaugeCaseDir(const ManualTestContext& context)
 {
-    (void)context;
-    return std::filesystem::path();
+    std::filesystem::path out;
+    std::string reason;
+    if (!ResolveManualGaugeCaseDir(context, out, reason))
+        return {};
+    return out;
+}
+
+bool ResolveManualGaugeCaseDir(
+    const ManualTestContext& context,
+    std::filesystem::path& out,
+    std::string& reason)
+{
+    const std::string case_id = context.current_gauge.case_id.empty()
+        ? context.active_case_id
+        : context.current_gauge.case_id;
+    const std::string safe_case_id = SafePathComponent(case_id);
+    if (safe_case_id.empty())
+    {
+        reason = "case_id is empty";
+        return false;
+    }
+    if (context.manual_gauge_output_root.empty())
+    {
+        reason = "manual_gauge_output_root is empty";
+        return false;
+    }
+    std::error_code ec;
+    std::filesystem::path root = std::filesystem::absolute(context.manual_gauge_output_root, ec);
+    if (ec)
+    {
+        reason = "cannot resolve manual gauge output root: " + ec.message();
+        return false;
+    }
+    out = (root / safe_case_id).lexically_normal();
+    const std::filesystem::path relative = out.lexically_relative(root.lexically_normal());
+    if (relative.empty() || relative.native().find(L"..") == 0)
+    {
+        reason = "resolved case directory escapes output root";
+        return false;
+    }
+    reason.clear();
+    return true;
 }
 
 bool SaveManualGaugeAnnotation(
@@ -106,11 +272,79 @@ bool SaveManualGaugeAnnotation(
     std::string& outPath,
     std::string& outReason)
 {
-    (void)context;
     (void)objectName;
     (void)gaugeName;
-    (void)outPath;
-    (void)outReason;
+    ManualGaugeState& gauge = context.current_gauge;
+    NormalizeManualGaugeGeometry(gauge);
+    if (!ValidateManualGaugeGeometry(gauge, outReason))
+        return false;
+
+    std::filesystem::path dir;
+    if (!ResolveManualGaugeCaseDir(context, dir, outReason))
+        return false;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec)
+    {
+        outReason = "cannot create gauge case directory: " + ec.message();
+        return false;
+    }
+
+    const std::filesystem::path destination = dir / "gauge_annotation.json";
+    const std::filesystem::path temporary = destination.string() + ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+    {
+        outReason = "cannot open temporary gauge annotation";
+        return false;
+    }
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"case_id\": \"" << GaugeJsonEscape(gauge.case_id) << "\",\n"
+         << "  \"image_id\": \"" << GaugeJsonEscape(gauge.image_id) << "\",\n"
+         << "  \"target_id\": \"" << GaugeJsonEscape(gauge.target_id) << "\",\n"
+         << "  \"tool\": \"" << GaugeJsonEscape(gauge.tool) << "\",\n"
+         << "  \"source\": \"" << GaugeJsonEscape(gauge.source) << "\",\n"
+         << "  \"review_status\": \"" << GaugeJsonEscape(gauge.review_status) << "\",\n"
+         << "  \"accepted\": " << (gauge.accepted ? "true" : "false") << ",\n"
+         << "  \"has_line_gauge\": " << (gauge.has_line_gauge ? "true" : "false") << ",\n"
+         << "  \"line_x0\": " << gauge.line_x0 << ",\n"
+         << "  \"line_y0\": " << gauge.line_y0 << ",\n"
+         << "  \"line_x1\": " << gauge.line_x1 << ",\n"
+         << "  \"line_y1\": " << gauge.line_y1 << ",\n"
+         << "  \"tool_half_width\": " << gauge.tool_half_width << ",\n"
+         << "  \"has_circle_gauge\": " << (gauge.has_circle_gauge ? "true" : "false") << ",\n"
+         << "  \"circle_cx\": " << gauge.circle_cx << ",\n"
+         << "  \"circle_cy\": " << gauge.circle_cy << ",\n"
+         << "  \"circle_px\": " << gauge.circle_px << ",\n"
+         << "  \"circle_py\": " << gauge.circle_py << ",\n"
+         << "  \"radius\": " << gauge.radius << ",\n"
+         << "  \"inner_radius\": " << gauge.inner_radius << ",\n"
+         << "  \"outer_radius\": " << gauge.outer_radius << ",\n"
+         << "  \"wgap\": " << gauge.wgap << ",\n"
+         << "  \"hgap\": " << gauge.hgap << ",\n"
+         << "  \"gap\": " << gauge.gap << ",\n"
+         << "  \"linegap\": " << gauge.linegap << ",\n"
+         << "  \"threshold\": " << gauge.threshold << ",\n"
+         << "  \"filterprofile\": " << gauge.filterprofile << ",\n"
+         << "  \"method\": " << gauge.method << "\n"
+         << "}\n";
+    file.flush();
+    const bool write_ok = file.good();
+    file.close();
+    if (!write_ok)
+    {
+        outReason = "failed while writing gauge annotation";
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    if (!AtomicReplaceFile(temporary, destination, outReason))
+    {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    outPath = destination.string();
+    outReason.clear();
     return true;
 }
 
@@ -121,11 +355,66 @@ bool LoadManualGaugeAnnotation(
     std::string& outPath,
     std::string& outReason)
 {
-    (void)context;
     (void)objectName;
     (void)gaugeName;
-    (void)outPath;
-    (void)outReason;
+    std::filesystem::path dir;
+    if (!ResolveManualGaugeCaseDir(context, dir, outReason))
+        return false;
+    const std::filesystem::path source_path = dir / "gauge_annotation.json";
+    std::ifstream file(source_path, std::ios::binary);
+    if (!file.is_open())
+    {
+        outReason = "cannot open gauge annotation: " + source_path.string();
+        return false;
+    }
+    const std::string source{
+        std::istreambuf_iterator<char>(file),
+        std::istreambuf_iterator<char>()};
+    ManualGaugeState loaded;
+    int schema_version = 0;
+    if (!ExtractJsonInt(source, "schema_version", schema_version) || schema_version != 1 ||
+        !ExtractJsonString(source, "case_id", loaded.case_id) ||
+        !ExtractJsonString(source, "image_id", loaded.image_id) ||
+        !ExtractJsonString(source, "target_id", loaded.target_id) ||
+        !ExtractJsonString(source, "tool", loaded.tool) ||
+        !ExtractJsonString(source, "source", loaded.source) ||
+        !ExtractJsonString(source, "review_status", loaded.review_status) ||
+        !ExtractJsonBool(source, "accepted", loaded.accepted) ||
+        !ExtractJsonBool(source, "has_line_gauge", loaded.has_line_gauge) ||
+        !ExtractJsonBool(source, "has_circle_gauge", loaded.has_circle_gauge))
+    {
+        outReason = "gauge annotation schema is incomplete";
+        return false;
+    }
+    const char* integer_keys[] = {
+        "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
+        "circle_cx", "circle_cy", "circle_px", "circle_py", "radius",
+        "inner_radius", "outer_radius", "wgap", "hgap", "gap", "linegap",
+        "threshold", "filterprofile", "method"
+    };
+    int* integer_values[] = {
+        &loaded.line_x0, &loaded.line_y0, &loaded.line_x1, &loaded.line_y1,
+        &loaded.tool_half_width, &loaded.circle_cx, &loaded.circle_cy,
+        &loaded.circle_px, &loaded.circle_py, &loaded.radius,
+        &loaded.inner_radius, &loaded.outer_radius, &loaded.wgap, &loaded.hgap,
+        &loaded.gap, &loaded.linegap, &loaded.threshold, &loaded.filterprofile,
+        &loaded.method
+    };
+    for (std::size_t i = 0; i < std::size(integer_keys); ++i)
+    {
+        if (!ExtractJsonInt(source, integer_keys[i], *integer_values[i]))
+        {
+            outReason = std::string("missing gauge field: ") + integer_keys[i];
+            return false;
+        }
+    }
+    loaded.dirty = false;
+    NormalizeManualGaugeGeometry(loaded);
+    if (!ValidateManualGaugeGeometry(loaded, outReason))
+        return false;
+    context.current_gauge = loaded;
+    outPath = source_path.string();
+    outReason.clear();
     return true;
 }
 
@@ -136,16 +425,102 @@ bool ExportManualGaugeManifestCandidate(
     std::string& outPath,
     std::string& outReason)
 {
-    (void)context;
     (void)objectName;
     (void)gaugeName;
-    (void)outPath;
-    (void)outReason;
+    ManualGaugeState gauge = context.current_gauge;
+    NormalizeManualGaugeGeometry(gauge);
+    if (!ValidateManualGaugeGeometry(gauge, outReason))
+        return false;
+    std::filesystem::path dir;
+    if (!ResolveManualGaugeCaseDir(context, dir, outReason))
+        return false;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec)
+    {
+        outReason = "cannot create gauge case directory: " + ec.message();
+        return false;
+    }
+    const std::filesystem::path destination = dir / "gauge_manifest_candidate.cxsc";
+    const std::filesystem::path temporary = destination.string() + ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+    {
+        outReason = "cannot open temporary manifest candidate";
+        return false;
+    }
+    file << "// candidate only; pending manual review; do not promote automatically\n"
+         << "Stage25Manifest m;\n"
+         << "m.reset();\n"
+         << "m.setname(\"manual_gauge_candidate_" << GaugeJsonEscape(gauge.case_id) << "\");\n"
+         << "m.addimage(\"" << GaugeJsonEscape(gauge.image_id) << "\", \"manual_candidate\", \""
+         << GaugeJsonEscape(context.image_file_path) << "\");\n";
+    if (gauge.tool == "Findline")
+        file << "m.image_addfindlinetarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
+             << gauge.line_x0 << ", " << gauge.line_y0 << ", " << gauge.line_x1 << ", "
+             << gauge.line_y1 << ", " << gauge.wgap << ", " << gauge.hgap << ");\n";
+    else
+        file << "m.image_addfindcircletarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
+             << gauge.circle_cx << ", " << gauge.circle_cy << ", " << gauge.circle_px << ", "
+             << gauge.circle_py << ", " << gauge.gap << ", " << gauge.linegap << ");\n";
+    file.flush();
+    const bool write_ok = file.good();
+    file.close();
+    if (!write_ok)
+    {
+        outReason = "failed while writing manifest candidate";
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    if (!AtomicReplaceFile(temporary, destination, outReason))
+    {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    outPath = destination.string();
+    outReason.clear();
     return true;
 }
 
 bool ManualGaugeAcceptedForParamRegression(const ManualGaugeState& gauge)
 {
-    (void)gauge;
-    return false;
+    std::string reason;
+    return ValidateManualGaugeGeometry(gauge, reason);
+}
+
+bool ValidateParamRegressionPrerequisites(
+    const ManualTestContext& context,
+    std::string& reason)
+{
+    if (!ValidateManualGaugeGeometry(context.current_gauge, reason))
+        return false;
+    const ManualGaugeState& gauge = context.current_gauge;
+    if (gauge.case_id.empty() || gauge.image_id.empty() || gauge.target_id.empty())
+    {
+        reason = "case_id, image_id and target_id are required";
+        return false;
+    }
+    if (context.image_file_path.empty() || !std::filesystem::is_regular_file(context.image_file_path))
+    {
+        reason = "image_file_path is unavailable";
+        return false;
+    }
+    const std::string script_path = !context.loaded_script_path.empty()
+        ? context.loaded_script_path
+        : context.active_script_case_path;
+    if (script_path.empty() || !std::filesystem::is_regular_file(script_path))
+    {
+        reason = "script path is unavailable";
+        return false;
+    }
+    std::filesystem::path case_dir;
+    if (!ResolveManualGaugeCaseDir(context, case_dir, reason))
+        return false;
+    if (!std::filesystem::is_regular_file(case_dir / "gauge_annotation.json"))
+    {
+        reason = "gauge_annotation.json has not been saved";
+        return false;
+    }
+    reason.clear();
+    return true;
 }

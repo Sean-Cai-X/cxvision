@@ -61,6 +61,12 @@ bool CaptureFindlineResult(
     output.valid_points_count = tool.getvalidpointcount();
     output.has_fit_line = tool.hasfitresult();
     output.avgdist = tool.getavgdist();
+    const FindlineMeasureInputDebug& debug = tool.lastmeasureinputdebug();
+    output.object_prefilter_requested = (debug.objfilterset & 0x01) != 0;
+    output.object_prefilter_applied = debug.findobject_measure_called;
+    output.object_filter_borw = debug.effective_filter_borw;
+    output.object_filter_min = debug.effective_filter_min;
+    output.object_filter_max = debug.effective_filter_max;
     output.budget_exceeded = tool.budgetexceeded();
     output.failure_stage = output.has_fit_line
         ? std::string()
@@ -96,6 +102,16 @@ bool CaptureFindcircleResult(
     output.circle_cy = tool.getresultcenty();
     output.circle_radius = tool.getradius();
     output.avgdist = tool.getavgdist();
+    output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
+    output.object_prefilter_applied = tool.getdebugprefilterused() != 0;
+    output.object_filter_borw = tool.getfilterborw();
+    output.object_filter_min = tool.getfiltermin();
+    output.object_filter_max = tool.getfiltermax();
+    output.fit_filter_input_count = tool.getfitfilterinputcount();
+    output.fit_filter_kept_count = tool.getfitfilterkeptcount();
+    output.fit_filter_rejected_count = tool.getfitfilterrejectedcount();
+    output.fit_filter_sigma = tool.getfitfiltersigma();
+    output.fit_filter_threshold = tool.getfitfilterthreshold();
     output.budget_exceeded = tool.budgetexceeded();
     output.failure_stage = output.has_fit_circle
         ? std::string()
@@ -117,6 +133,16 @@ static void MergeToolCapture(
     capture.has_fit_circle = capture.has_fit_circle || tool.has_fit_circle;
     capture.budget_exceeded = capture.budget_exceeded || tool.budget_exceeded;
     capture.avgdist = tool.avgdist;
+    capture.object_prefilter_requested = tool.object_prefilter_requested;
+    capture.object_prefilter_applied = tool.object_prefilter_applied;
+    capture.object_filter_borw = tool.object_filter_borw;
+    capture.object_filter_min = tool.object_filter_min;
+    capture.object_filter_max = tool.object_filter_max;
+    capture.fit_filter_input_count = tool.fit_filter_input_count;
+    capture.fit_filter_kept_count = tool.fit_filter_kept_count;
+    capture.fit_filter_rejected_count = tool.fit_filter_rejected_count;
+    capture.fit_filter_sigma = tool.fit_filter_sigma;
+    capture.fit_filter_threshold = tool.fit_filter_threshold;
 
     if (capture.failure_stage.empty() && !tool.failure_stage.empty())
         capture.failure_stage = tool.failure_stage;

@@ -82,6 +82,38 @@ CxScriptCatalog_script_setmanualvisible(1);
 CxScriptCatalog_script_setregressionvisible(1);
 CxScriptCatalog_script_setadvancedvisible(0);
 
+CxScriptCatalog_addscript("findcircle_stage25_gaussian_chebyshev");
+CxScriptCatalog_script_setlabel("[Diagnostic] Findcircle - Gaussian + Chebyshev");
+CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/diagnostic/findcircle/findcircle_stage25_gaussian_chebyshev.cxsc");
+CxScriptCatalog_script_settool("Findcircle");
+CxScriptCatalog_script_setorientation("circle");
+CxScriptCatalog_script_setparameterpolicy("stage25_gaussian_chebyshev");
+CxScriptCatalog_script_setparameterrole("DIAGNOSTIC_CANDIDATE");
+CxScriptCatalog_script_setexpected("diagnostic");
+CxScriptCatalog_script_setexpectedstatus("geometry_result_available");
+CxScriptCatalog_script_setexpectedpolicyguard("CIRCLE_MEASURE_AND_FIT_AVAILABLE");
+CxScriptCatalog_script_setcontract("cxparser/cxscript/module/cximage/stage25/contracts/findcircle_ok_contract.cxsc");
+CxScriptCatalog_script_setfrozen(0);
+CxScriptCatalog_script_setmanualvisible(0);
+CxScriptCatalog_script_setregressionvisible(1);
+CxScriptCatalog_script_setadvancedvisible(1);
+
+CxScriptCatalog_addscript("findcircle_stage25_object_prefilter");
+CxScriptCatalog_script_setlabel("[Diagnostic] Findcircle - Object Prefilter Relax");
+CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/diagnostic/findcircle/findcircle_stage25_object_prefilter.cxsc");
+CxScriptCatalog_script_settool("Findcircle");
+CxScriptCatalog_script_setorientation("circle");
+CxScriptCatalog_script_setparameterpolicy("stage25_filter_relax_min1");
+CxScriptCatalog_script_setparameterrole("DIAGNOSTIC_CANDIDATE");
+CxScriptCatalog_script_setexpected("diagnostic");
+CxScriptCatalog_script_setexpectedstatus("geometry_result_available");
+CxScriptCatalog_script_setexpectedpolicyguard("CIRCLE_MEASURE_AND_FIT_AVAILABLE");
+CxScriptCatalog_script_setcontract("cxparser/cxscript/module/cximage/stage25/contracts/findcircle_ok_contract.cxsc");
+CxScriptCatalog_script_setfrozen(0);
+CxScriptCatalog_script_setmanualvisible(0);
+CxScriptCatalog_script_setregressionvisible(1);
+CxScriptCatalog_script_setadvancedvisible(1);
+
 CxScriptCatalog_addscript("findline_stage25_profile_ok");
 CxScriptCatalog_script_setlabel("[OK] Findline - Stage25 Profile Driven");
 CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/frozen/findline/findline_stage25_profile_ok.cxsc");

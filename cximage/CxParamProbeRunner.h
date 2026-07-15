@@ -21,6 +21,10 @@ struct CxParamProbeResult
 {
     bool launched = false;
     bool executed = false;
+    bool runtime_ok = false;
+    bool assets_complete = false;
+    bool probe_ok = false;
+    bool support_available = false;
     bool timeout = false;
     int exit_code = -1;
     std::string result_summary_path;

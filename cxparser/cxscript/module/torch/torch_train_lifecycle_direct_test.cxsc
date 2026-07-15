@@ -1,12 +1,12 @@
-global.torch_task = "torch.train.mobilevit.mainline";
-global.torch_device = "cpu";
-global.torch_input_image = "";
-global.torch_dataset_root = "";
+global_torch_task = "torch.train.mobilevit.mainline";
+global_torch_device = "cpu";
+global_torch_input_image = "";
+global_torch_dataset_root = "";
 
-global.current_status = "torch_train_start";
+global_current_status = "torch_train_start";
 
-if (global.torch_input_image != "") {
-    global.current_status = "torch_train_input_available";
+if (global_torch_input_image != "") {
+    global_current_status = "torch_train_input_available";
 }
 
-global.current_status = "torch_train_completed";
+global_current_status = "torch_train_completed";

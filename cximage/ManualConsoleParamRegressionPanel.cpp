@@ -103,12 +103,11 @@ bool InitializeParamRegressionFromGauge(
     std::string& reason)
 {
     ManualParamRegressionState& state = context.param_regression;
-    if (!ManualGaugeAcceptedForParamRegression(context.current_gauge))
+    if (!ValidateParamRegressionPrerequisites(context, reason))
     {
         state.initialized = false;
         state.status = "blocked";
-        state.reason = "Manual gauge must be accepted before parameter regression.";
-        reason = state.reason;
+        state.reason = reason;
         return false;
     }
 
@@ -301,7 +300,7 @@ void DrawCxScriptWorkbenchOverview(ManualTestContext& context)
     ImGui::TableSetColumnIndex(0);
     ImGui::Text("Image");
     ImGui::BulletText("image_file: %s", UiTextOrDash(context.image_file_path));
-    ImGui::BulletText("global.matInput: %s", context.global_variable_views.empty() ? "pending" : context.global_variable_views.front().status.c_str());
+    ImGui::BulletText("global_matInput: %s", context.global_variable_views.empty() ? "pending" : context.global_variable_views.front().status.c_str());
     ImGui::BulletText("annotation elements: %d", context.manual_elements_count);
     ImGui::BulletText("source preview: %s", context.source_preview_enabled ? "on" : "off");
     ImGui::BulletText("gauge annotation: %s",

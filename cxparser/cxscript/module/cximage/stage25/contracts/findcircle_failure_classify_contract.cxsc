@@ -1,23 +1,23 @@
-global.contract_pass = 0;
-global.contract_status = "findcircle_fail_unknown";
-global.contract_conclusion = "Findcircle failure classification not determined";
+global_contract_pass = 0;
+global_contract_status = "findcircle_fail_unknown";
+global_contract_conclusion = "Findcircle failure classification not determined";
 
-if (global.valid_points_count < 3) {
-    global.contract_status = "findcircle_fail_insufficient_points";
-    global.contract_conclusion = "Findcircle failed because valid points < 3.";
+if (global_valid_points_count < 3) {
+    global_contract_status = "findcircle_fail_insufficient_points";
+    global_contract_conclusion = "Findcircle failed because valid points < 3.";
 }
 
-if (global.has_fit_circle == 0) {
-    global.contract_status = "findcircle_fail_no_fit_circle";
-    global.contract_conclusion = "Findcircle failed because fit circle is unavailable.";
+if (global_has_fit_circle == 0) {
+    global_contract_status = "findcircle_fail_no_fit_circle";
+    global_contract_conclusion = "Findcircle failed because fit circle is unavailable.";
 }
 
-if (global.avgdist > 8.0) {
-    global.contract_status = "findcircle_fail_high_residual";
-    global.contract_conclusion = "Findcircle fit residual is too high.";
+if (global_avgdist > 8.0) {
+    global_contract_status = "findcircle_fail_high_residual";
+    global_contract_conclusion = "Findcircle fit residual is too high.";
 }
 
-if (global.circle_radius <= 0) {
-    global.contract_status = "findcircle_fail_invalid_radius";
-    global.contract_conclusion = "Findcircle radius is invalid or non-positive.";
+if (global_circle_radius <= 0) {
+    global_contract_status = "findcircle_fail_invalid_radius";
+    global_contract_conclusion = "Findcircle radius is invalid or non-positive.";
 }

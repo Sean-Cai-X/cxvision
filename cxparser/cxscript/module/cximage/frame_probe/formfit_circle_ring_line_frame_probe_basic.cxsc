@@ -5,7 +5,7 @@ Findline m_line_gauge;
 CircleRingGauge m_ring_gauge;
 FormfitGauge m_formfit_gauge;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
 int cx = 640;
 int cy = 480;
@@ -43,4 +43,4 @@ m_ring_gauge.setouter(&m_outer_circle);
 m_ring_gauge.setinner(&m_inner_circle);
 
 // G0/G1 only: FormfitGauge composition anchor, no measure/fit execution here.
-global.current_status = "FORMFIT_FRAME_PROBE_ONLY";
+global_current_status = "FORMFIT_FRAME_PROBE_ONLY";

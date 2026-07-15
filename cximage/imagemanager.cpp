@@ -184,6 +184,45 @@ int ImageManager::GetCurMode()
     return m_imodulid;
 }
 
+bool ImageManager::EnsureAlgorithmRuntimeResources(int image_width, int image_height)
+{
+    // The current cximage implementation has one concrete resource module.
+    // Initialize it once for serial Manual/Headless/Suite execution; do not
+    // call CurMode repeatedly because it increments the module id.
+    if (m_imodulid == 0)
+        m_imodulid = 1;
+    if (m_imodulid != 1)
+        return false;
+
+    const int required_width = std::max(BACKIMAGEWITH, image_width + 8);
+    const int required_height = std::max(BACKIMAGEHIGH, image_height + 8);
+
+    CreateBackImage(required_width, required_height);
+    CreateBackObjectImage(required_width, required_height);
+    CreateMapImage(required_width, required_height);
+
+    if (m_pBackImage != nullptr &&
+        (m_pBackImage->getWidth() < required_width || m_pBackImage->getHeight() < required_height))
+        *m_pBackImage = Image(required_width, required_height, CV_8UC3);
+    if (m_pBackObjectImage != nullptr &&
+        (m_pBackObjectImage->getWidth() < required_width || m_pBackObjectImage->getHeight() < required_height))
+        *m_pBackObjectImage = Image(required_width, required_height, CV_8UC3);
+    if (m_pMapImage != nullptr &&
+        (m_pMapImage->getWidth() < required_width || m_pMapImage->getHeight() < required_height))
+        *m_pMapImage = Image(required_width, required_height, CV_8UC4);
+
+    gp_Pnt* scan = GetListScan(1);
+    gp_Pnt* collect = GetListCollect(1);
+    FindObject* find_object = Getbackfindobject(1);
+
+    return m_pBackImage != nullptr &&
+        m_pBackObjectImage != nullptr &&
+        m_pMapImage != nullptr &&
+        scan != nullptr &&
+        collect != nullptr &&
+        find_object != nullptr;
+}
+
 Image* ImageManager::GetBackImage(int curmodul)
 {
     if(1==curmodul)

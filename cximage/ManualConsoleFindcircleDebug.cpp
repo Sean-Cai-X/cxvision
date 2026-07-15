@@ -921,10 +921,10 @@ bool TryHandleFindcircleGetResult(ManualTestContext& context,
         const std::string geometryRef = "runtime_object:" + call.object;
         object.last_runtime_status = "runtime_executed";
         object.runtime_state = "geometry_result_available";
-        UpsertGlobalVariableView(context, "geometry_ref", "global.circle_ref",
+        UpsertGlobalVariableView(context, "geometry_ref", "global_circle_ref",
             geometryRef, line.line_no, "geometry_result_available");
         line.status = "runtime_executed";
-        line.reason = "get_result bound global.circle_ref to " + geometryRef;
+        line.reason = "get_result bound global_circle_ref to " + geometryRef;
     }
     else
     {
@@ -932,7 +932,7 @@ bool TryHandleFindcircleGetResult(ManualTestContext& context,
         object.runtime_state = "pending_binding";
         object.display_summary =
             "get_result requires a valid fit result; no result fabricated";
-        UpsertGlobalVariableView(context, "geometry_ref", "global.circle_ref",
+        UpsertGlobalVariableView(context, "geometry_ref", "global_circle_ref",
             "uninitialized", line.line_no, "PENDING_BINDING");
         line.status = "PENDING_BINDING";
         line.reason = object.display_summary;

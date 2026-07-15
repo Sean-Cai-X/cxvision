@@ -87,7 +87,7 @@ std::string GetGlobalMatInputPath(const ManualTestContext& context)
 
     for (const ScriptVariableView& variable : context.global_variable_views)
     {
-        if (variable.name == "global.matInput")
+        if (variable.name == "global_matInput")
         {
             if (!variable.image_path.empty())
                 return variable.image_path;
@@ -227,10 +227,10 @@ void ResetDebugRuntimeForReplay(ManualTestContext& context)
 
     context.variable_views.clear();
     UpsertVariableView(context, "int", "m_isetcircle", "0", 0, "runtime_initialized");
-    UpsertVariableView(context, "string", "global.current_status", "PENDING", 0, "runtime_initialized");
+    UpsertVariableView(context, "string", "global_current_status", "PENDING", 0, "runtime_initialized");
     for (ScriptVariableView& variable : context.global_variable_views)
     {
-        if (variable.name == "global.matInput") continue;
+        if (variable.name == "global_matInput") continue;
         variable.value = "uninitialized";
         variable.status = "observed_source";
     }
@@ -352,7 +352,7 @@ void MarkDebugRunFinishedIfAtEnd(ManualTestContext& context)
         context.run_state = "runtime_finished";
         context.debug_status = "PENDING";
         context.debug_reason =
-            "script finished; global.current_status remains PENDING; judge/rule not executed";
+            "script finished; global_current_status remains PENDING; judge/rule not executed";
 
         AppendCxDebugEvent(
             context,
@@ -746,7 +746,7 @@ bool TryExecuteSimpleAssignment(ManualTestContext& context,
         return true;
     }
 
-    if (lhs == "global.current_status")
+    if (lhs == "global_current_status")
     {
         if (!rhs.empty() && rhs.front() == '"')
             rhs.erase(rhs.begin());
@@ -773,7 +773,7 @@ bool TryExecuteSimpleAssignment(ManualTestContext& context,
             "runtime_initialized");
 
         line.status = "runtime_executed";
-        line.reason = "global.current_status remains " + rhs + "; judge/rule not executed";
+        line.reason = "global_current_status remains " + rhs + "; judge/rule not executed";
         line.return_variable = lhs;
         line.timestamp = CurrentTimestamp();
 
@@ -879,16 +879,16 @@ bool TryExecuteCurrentStatusAssignment(ManualTestContext& context,
     const std::string& statement)
 {
     const std::string trimmed = TrimLine(statement);
-    if (trimmed.find("global.current_status") == std::string::npos ||
+    if (trimmed.find("global_current_status") == std::string::npos ||
         trimmed.find("PENDING") == std::string::npos)
         return false;
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
-    UpsertGlobalVariableView(context, "string", "global.current_status",
+    UpsertGlobalVariableView(context, "string", "global_current_status",
         "PENDING", line.line_no, "runtime_value");
     context.runtime_current_status = "PENDING";
     line.status = "runtime_executed";
-    line.reason = "global.current_status remains PENDING; judge/rule not executed";
+    line.reason = "global_current_status remains PENDING; judge/rule not executed";
     line.timestamp = CurrentTimestamp();
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
     context.run_state = "runtime_step";
@@ -1411,7 +1411,7 @@ void CaptureDebugStepSnapshot(ManualTestContext& context, int lineIndex)
     snapshot.reason = line.reason;
     snapshot.last_debug_result = context.debug_status + ": " + context.debug_reason;
     for (const ScriptVariableView& variable : context.global_variable_views)
-        if (variable.name == "global.circle_ref")
+        if (variable.name == "global_circle_ref")
             snapshot.current_result_ref = variable.value;
 
     RuntimeObjectView* object = line.object.empty() ? nullptr :

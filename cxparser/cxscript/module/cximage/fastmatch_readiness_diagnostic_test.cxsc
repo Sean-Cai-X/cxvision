@@ -14,5 +14,5 @@ fm.set_component_warning(1);
 
 fm.run();
 
-global.fastmatch_ref = fm.result_ref();
-global.current_status = "PENDING";
+global_fastmatch_ref = fm.result_ref();
+global_current_status = "PENDING";

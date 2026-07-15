@@ -129,6 +129,10 @@ struct CxShapeTestCase
     std::string manifest_image_id;
     std::string manifest_target_id;
     std::string manifest_match_case_id;
+
+    std::string expected_geometry_kind;
+    int expected_geometry_point_count = -1;
+    bool expect_geometry_from_manifest = false;
 };
 
 class CxShapeTestRuntime
@@ -179,6 +183,9 @@ public:
     static void SetManifest(const std::string& path);
     static void SetManifestTarget(const std::string& image_id, const std::string& target_id);
     static void SetManifestMatchCase(const std::string& case_id);
+    static void ExpectGeometryKind(const std::string& kind);
+    static void ExpectGeometryPointCount(int count);
+    static void ExpectManifestGeometry(bool enabled);
 
 private:
     static std::vector<CxShapeTestCase> s_cases;

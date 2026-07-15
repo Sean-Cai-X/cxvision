@@ -408,6 +408,12 @@ namespace mu
             m_parser.DefineClassFun("Findcircle", pfindcircle, "getshape", &Findcircle::getshape);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "setcirclegap", &Findcircle::setcirclegap);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "fitcircle", &Findcircle::fitcircle);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "fitcirclefiltered", &Findcircle::fitcirclefiltered);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterinputcount", &Findcircle::getfitfilterinputcount);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterkeptcount", &Findcircle::getfitfilterkeptcount);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterrejectedcount", &Findcircle::getfitfilterrejectedcount);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfiltersigma", &Findcircle::getfitfiltersigma);
+            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterthreshold", &Findcircle::getfitfilterthreshold);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "getavgdist", &Findcircle::getavgdist);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "getresultcentx", &Findcircle::getresultcentx);
             m_parser.DefineClassFun("Findcircle", pfindcircle, "getresultcenty", &Findcircle::getresultcenty);
@@ -439,6 +445,12 @@ namespace mu
                 pfindcircle,
                 "setfindsetting",
                 static_cast<void (Findcircle::*)(int)>(&Findcircle::setfindsetting));
+
+            m_parser.DefineClassFun(
+                "Findcircle",
+                pfindcircle,
+                "setfilter",
+                static_cast<void (Findcircle::*)(int, int, int)>(&Findcircle::setfilter_script));
 
             m_parser.DefineClassFun(
                 "Findcircle",

@@ -5,7 +5,7 @@ Findcircle inner_circle;
 
 CircleRingGauge ring_gauge;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
 int cx = 765;
 int cy = 471;
@@ -42,4 +42,4 @@ ring_gauge.setouter(&outer_circle);
 ring_gauge.setinner(&inner_circle);
 ring_gauge.build();
 
-global.current_status = "PENDING";
+global_current_status = "PENDING";

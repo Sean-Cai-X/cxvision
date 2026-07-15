@@ -11,6 +11,10 @@ struct CxScriptExecutionCapture
     bool runtime_completed = false;
 
     int elapsed_ms = 0;
+    int budget_ms = 0;
+    int max_steps = 0;
+    int max_scan_lines = 0;
+    int max_samples = 0;
     int scan_line_count = 0;
     int sample_count = 0;
 
@@ -20,6 +24,17 @@ struct CxScriptExecutionCapture
 
     double circle_radius = 0.0;
     double avgdist = 0.0;
+
+    bool object_prefilter_requested = false;
+    bool object_prefilter_applied = false;
+    int object_filter_borw = 0;
+    int object_filter_min = 0;
+    int object_filter_max = 0;
+    int fit_filter_input_count = 0;
+    int fit_filter_kept_count = 0;
+    int fit_filter_rejected_count = 0;
+    double fit_filter_sigma = 0.0;
+    double fit_filter_threshold = 0.0;
 
     bool budget_exceeded = false;
 
@@ -142,6 +157,7 @@ struct CxScriptHeadlessResult
     bool runtime_ok = false;
     bool timed_out = false;
     bool assets_complete = false;
+    bool support_available = false;
 
     int exit_code = 0;
 

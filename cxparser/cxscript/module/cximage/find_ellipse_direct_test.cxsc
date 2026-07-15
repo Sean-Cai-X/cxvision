@@ -1,17 +1,17 @@
 Image m_image;
 Findellipse m_ellipse;
 
-m_image.copyFromMat(global.matInput);
+m_image.copyFromMat(global_matInput);
 
-int x0 = global.ellipse_x0;
-int y0 = global.ellipse_y0;
-int x1 = global.ellipse_x1;
-int y1 = global.ellipse_y1;
+int x0 = global_ellipse_x0;
+int y0 = global_ellipse_y0;
+int x1 = global_ellipse_x1;
+int y1 = global_ellipse_y1;
 
-int gap = global.gap;
-int linegap = global.linegap;
-int threshold = global.threshold;
-int method = global.method;
+int gap = global_gap;
+int linegap = global_linegap;
+int threshold = global_threshold;
+int method = global_method;
 
 m_ellipse.setellipse(x0, y0, x1, y1);
 m_ellipse.setgap(gap);
@@ -21,6 +21,6 @@ m_ellipse.setmethod(method);
 
 m_ellipse.measure(&m_image);
 
-global.current_status = "PENDING";
+global_current_status = "PENDING";
 
 1+1;

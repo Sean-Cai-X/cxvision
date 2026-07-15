@@ -953,7 +953,7 @@ cxparser/cxscript/module/cximage/
 - `int` / `double`
 - 简单赋值
 - 已注册对象方法调用
-- `global.xxx` 输入输出
+- `global_xxx` 输入输出
 - 简单 `if (condition) { ... }`
 - `contract.reset / fail / pass / failed / setstatus / setconclusion`
 - `return;`（立即结束当前脚本执行）
