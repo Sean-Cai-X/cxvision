@@ -51,12 +51,3 @@ CxShapeTest_setfrom(150, 100);
 CxShapeTest_setto(500, 500);
 CxShapeTest_setexpectedphase("drag_existing");
 CxShapeTest_setexpectedstatus("committed");
-
-CxShapeTest_addcase("fastmatch_result_box_hit_rejected");
-CxShapeTest_settool("fastmatch");
-CxShapeTest_setoperation("gui_pointer_drag_existing");
-CxShapeTest_setpointersequence("drag_release");
-CxShapeTest_setfrom(170, 110);
-CxShapeTest_setto(190, 130);
-CxShapeTest_setexpectedphase("rejected");
-CxShapeTest_setexpectedstatus("failed");

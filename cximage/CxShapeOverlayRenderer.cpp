@@ -2,12 +2,28 @@
 #include "CxShapeOverlayRenderer.h"
 #include "CxScriptHeadlessRuntime.h"
 
+#include <algorithm>
+#include <cmath>
+
 void DrawRoiRectangle(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
 {
     if (shape.points.size() >= 4)
     {
-        cv::Point pt1(static_cast<int>(shape.points[0]), static_cast<int>(shape.points[1]));
-        cv::Point pt2(static_cast<int>(shape.points[2]), static_cast<int>(shape.points[3]));
+        double min_x = shape.points[0];
+        double max_x = shape.points[0];
+        double min_y = shape.points[1];
+        double max_y = shape.points[1];
+
+        for (size_t i = 0; i + 1 < shape.points.size(); i += 2)
+        {
+            min_x = std::min(min_x, shape.points[i]);
+            max_x = std::max(max_x, shape.points[i]);
+            min_y = std::min(min_y, shape.points[i + 1]);
+            max_y = std::max(max_y, shape.points[i + 1]);
+        }
+
+        cv::Point pt1(static_cast<int>(min_x), static_cast<int>(min_y));
+        cv::Point pt2(static_cast<int>(max_x), static_cast<int>(max_y));
         cv::rectangle(img, pt1, pt2, color, 2);
     }
 }
@@ -31,6 +47,15 @@ void DrawRoiCircle(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::
     cv::circle(img, center, radius, color, 2);
 }
 
+void DrawRoiEllipse(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
+{
+    cv::Point center(static_cast<int>(shape.center_x), static_cast<int>(shape.center_y));
+    cv::Size axes(
+        static_cast<int>(std::max(1.0, shape.radius_x)),
+        static_cast<int>(std::max(1.0, shape.radius_y)));
+    cv::ellipse(img, center, axes, shape.angle_deg, 0.0, 360.0, color, 2);
+}
+
 void DrawMeasurePoints(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
 {
     for (size_t i = 0; i + 1 < shape.points.size(); i += 2)
@@ -50,6 +75,44 @@ void DrawFitLine(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Sc
         cv::circle(img, pt1, 4, color, -1);
         cv::circle(img, pt2, 4, color, -1);
     }
+}
+
+void DrawLineGaugeFrame(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
+{
+    if (shape.points.size() < 4)
+        return;
+
+    const double x0 = shape.points[0];
+    const double y0 = shape.points[1];
+    const double x1 = shape.points[2];
+    const double y1 = shape.points[3];
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+    const double len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1.0)
+        return;
+
+    const double half_width = std::max(1.0, shape.half_width);
+    const double ndx = -dy / len;
+    const double ndy = dx / len;
+
+    std::vector<cv::Point> box;
+    box.emplace_back(static_cast<int>(std::lround(x0 + ndx * half_width)),
+                     static_cast<int>(std::lround(y0 + ndy * half_width)));
+    box.emplace_back(static_cast<int>(std::lround(x1 + ndx * half_width)),
+                     static_cast<int>(std::lround(y1 + ndy * half_width)));
+    box.emplace_back(static_cast<int>(std::lround(x1 - ndx * half_width)),
+                     static_cast<int>(std::lround(y1 - ndy * half_width)));
+    box.emplace_back(static_cast<int>(std::lround(x0 - ndx * half_width)),
+                     static_cast<int>(std::lround(y0 - ndy * half_width)));
+
+    cv::polylines(img, box, true, color, 2);
+    cv::line(
+        img,
+        cv::Point(static_cast<int>(std::lround(x0)), static_cast<int>(std::lround(y0))),
+        cv::Point(static_cast<int>(std::lround(x1)), static_cast<int>(std::lround(y1))),
+        color,
+        1);
 }
 
 void DrawFitCircle(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
@@ -105,12 +168,16 @@ bool RenderCxShapeOverlay(
         {
             if (shape.semantic_role == "roi" || shape.semantic_role == "scan" || shape.semantic_role == "measure_points")
                 should_render = true;
+            if (shape.semantic_role == "learn_roi" || shape.semantic_role == "search_roi")
+                should_render = true;
         }
         else if (layer == CxOverlayLayer::RESULT)
         {
             if (shape.semantic_role == "result" || shape.semantic_role == "measure_points")
                 should_render = true;
             if (shape.semantic_role == "roi" || shape.semantic_role == "scan")
+                should_render = true;
+            if (shape.semantic_role == "expected_gt")
                 should_render = true;
         }
         else if (layer == CxOverlayLayer::TOOL_DISPLAY)
@@ -128,16 +195,22 @@ bool RenderCxShapeOverlay(
             result.rendered_roi_count++;
             if (shape.shape_kind == "CircleShape")
                 DrawRoiCircle(output, shape, roi_color);
+            else if (shape.shape_kind == "EllipseShape")
+                DrawRoiEllipse(output, shape, roi_color);
             else if (shape.shape_kind == "PolylineShape")
                 DrawRoiPolyline(output, shape, roi_color);
             else if (shape.shape_kind == "RectShape")
                 DrawRoiRectangle(output, shape, roi_color);
+            else if (shape.shape_kind == "LineGaugeShape")
+                DrawLineGaugeFrame(output, shape, roi_color);
         }
         else if (shape.semantic_role == "scan")
         {
             result.rendered_scan_count++;
             if (shape.shape_kind == "CircleShape")
                 DrawRoiCircle(output, shape, scan_color);
+            else if (shape.shape_kind == "EllipseShape")
+                DrawRoiEllipse(output, shape, scan_color);
             else
                 DrawRoiPolyline(output, shape, scan_color);
         }
@@ -151,6 +224,8 @@ bool RenderCxShapeOverlay(
             result.rendered_result_count++;
             if (shape.shape_kind == "CircleShape")
                 DrawFitCircle(output, shape, result_color);
+            else if (shape.shape_kind == "EllipseShape")
+                DrawRoiEllipse(output, shape, result_color);
             else if (shape.shape_kind == "LineShape")
                 DrawFitLine(output, shape, result_color);
         }

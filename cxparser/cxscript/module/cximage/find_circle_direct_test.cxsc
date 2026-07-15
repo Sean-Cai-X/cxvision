@@ -3,14 +3,14 @@ Findcircle m_circle;
 
 m_image.copyFromMat(global_matInput);
 
-int cx = 765;
-int cy = 471;
-int px = 1200;
-int py = 471;
-int method = 0;
-int threshold = 20;
-int gap = 5;
-int linegap = 3;
+int cx = global_circle_cx;
+int cy = global_circle_cy;
+int px = global_circle_px;
+int py = global_circle_py;
+int method = global_method;
+int threshold = global_threshold;
+int gap = global_gap;
+int linegap = global_linegap;
 
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
@@ -20,6 +20,3 @@ m_circle.setmethod(method);
 m_circle.setcircle(cx, cy, px, py);
 m_circle.measure(&m_image);
 m_circle.fitcircle();
-
-global_circle_ref = m_circle.get_result();
-global_current_status = "PENDING";

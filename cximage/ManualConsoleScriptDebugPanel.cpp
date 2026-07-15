@@ -121,7 +121,8 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.debug_status = ran ? "runtime_executed" : "run_failed";
       context.debug_reason = ran
         ? "exact Script Editor text executed through ParserDebugBridge"
-        : "ParserDebugBridge rejected the Script Editor text";
+        : ("ParserDebugBridge rejected the Script Editor text: " +
+           m_parserDebugBridge.LastError());
 
       m_scriptResult.source = "manual_console_editor";
       m_scriptResult.script_path = context.loaded_script_path;

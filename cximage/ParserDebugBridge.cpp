@@ -1,6 +1,7 @@
 #include "ParserDebugBridge.h"
 
 #include "Findcircle.h"
+#include "findline.h"
 #include "Image.h"
 #include "CircleRingGauge.h"
 #include "FastMatchDiagnostic.h"
@@ -25,24 +26,27 @@ std::string CanonicalGlobalName(const std::string& name)
 
 bool ParserDebugBridge::CompileScript(const std::string& scriptText)
 {
+  myLastError.clear();
   if (myOwner == nullptr || scriptText.empty()) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
   const std::string prepared = PrepareScript(scriptText);
-  return myOwner->Compile(prepared.c_str());
+  return myOwner->ExecuteScript(prepared, myLastError);
 }
 
 bool ParserDebugBridge::RunScript(const std::string& scriptText)
 {
+  myLastError.clear();
   if (myOwner == nullptr || scriptText.empty()) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
   const std::string prepared = PrepareScript(scriptText);
-  return myOwner->Compile(prepared.c_str());
+  return myOwner->ExecuteScript(prepared, myLastError);
 }
 
 bool ParserDebugBridge::RunPrefixToLine(const std::string& scriptText, int lineNo)
 {
+  myLastError.clear();
   if (myOwner == nullptr || lineNo <= 0) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
@@ -66,7 +70,7 @@ bool ParserDebugBridge::RunPrefixToLine(const std::string& scriptText, int lineN
   }
   while (braceDepth-- > 0) prefixText += "}\n";
   prefixText = PrepareScript(prefixText);
-  return current > 0 && myOwner->Compile(prefixText.c_str());
+  return current > 0 && myOwner->ExecuteScript(prefixText, myLastError);
 }
 
 void* ParserDebugBridge::QueryClassObject(const std::string& type,
@@ -87,6 +91,22 @@ bool ParserDebugBridge::QueryObjectExists(const std::string& type,
                                           const std::string& name) const
 {
   return QueryClassObject(type, name) != nullptr;
+}
+
+std::vector<std::string> ParserDebugBridge::ListClassObjectNames(
+  const std::string& type) const
+{
+  std::vector<std::string> names;
+  if (myOwner == nullptr)
+    return names;
+  const int count = myOwner->ObjectCount(type);
+  for (int i = 0; i < count; ++i)
+  {
+    std::string name = myOwner->ObjectName(type, i);
+    if (!name.empty())
+      names.push_back(name);
+  }
+  return names;
 }
 
 Image* ParserDebugBridge::QueryImage(const std::string& name) const
@@ -179,19 +199,30 @@ bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
 bool ParserDebugBridge::RebindGlobalInputs()
 {
   if (myOwner == nullptr)
+  {
+    myLastError = "parser owner is not bound";
     return false;
+  }
 
   std::string reason;
   for (auto& input : myGlobalNumericInputs)
   {
     if (!myOwner->DefineExternalDouble(
           input.first, &input.second, reason))
+    {
+      myLastError = reason;
       return false;
+    }
   }
 
   if (myGlobalMatInput.empty())
     return true;
-  return SetGlobalMatInput(myGlobalMatInput);
+  if (!SetGlobalMatInput(myGlobalMatInput))
+  {
+    myLastError = "failed to bind global_matInput image";
+    return false;
+  }
+  return true;
 }
 
 void ParserDebugBridge::ClearGlobalInputs()

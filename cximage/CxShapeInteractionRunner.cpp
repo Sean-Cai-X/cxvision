@@ -2,6 +2,7 @@
 #include "ViewController.h"
 #include "CxUnifiedLog.h"
 #include "CxManifestProjectionRequestResolver.h"
+#include "CxShapeOverlayRenderer.h"
 
 #include <filesystem>
 #include <unordered_set>
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <opencv2/imgcodecs.hpp>
 
 namespace fs = std::filesystem;
 
@@ -1344,6 +1346,90 @@ bool CxShapeInteractionRunner::RunTestCase(
             request_file << "}\n";
         }
 
+        std::string result_overlay_path;
+        std::string evidence_overlay_path;
+        std::string tool_display_path;
+        int result_overlay_changed_pixels = 0;
+        int evidence_overlay_changed_pixels = 0;
+        int tool_display_changed_pixels = 0;
+        int result_overlay_rendered_elements = 0;
+        int evidence_overlay_rendered_elements = 0;
+        int tool_display_rendered_elements = 0;
+        std::string overlay_reason;
+
+        cv::Mat source_image;
+        if (!request.image_path.empty())
+            source_image = cv::imread(request.image_path, cv::IMREAD_COLOR);
+
+        if (!source_image.empty())
+        {
+            cv::Mat result_overlay;
+            cv::Mat evidence_overlay;
+            cv::Mat tool_display;
+            CxOverlayRenderResult render_result;
+
+            const fs::path result_path = case_dir / "result_overlay.png";
+            if (RenderCxShapeOverlay(source_image, projection.published_shapes, CxOverlayLayer::RESULT, result_overlay, render_result))
+            {
+                result_overlay_changed_pixels = render_result.changed_pixel_count;
+                result_overlay_rendered_elements = render_result.rendered_element_count;
+                if (cv::imwrite(result_path.string(), result_overlay))
+                    result_overlay_path = result_path.string();
+            }
+            else
+            {
+                overlay_reason += "result_overlay: " + render_result.reason + "; ";
+            }
+
+            const fs::path evidence_path = case_dir / "evidence_overlay.png";
+            if (RenderCxShapeOverlay(source_image, projection.published_shapes, CxOverlayLayer::EVIDENCE, evidence_overlay, render_result))
+            {
+                evidence_overlay_changed_pixels = render_result.changed_pixel_count;
+                evidence_overlay_rendered_elements = render_result.rendered_element_count;
+                if (cv::imwrite(evidence_path.string(), evidence_overlay))
+                    evidence_overlay_path = evidence_path.string();
+            }
+            else
+            {
+                overlay_reason += "evidence_overlay: " + render_result.reason + "; ";
+            }
+
+            const fs::path tool_display_out = case_dir / "tool_display.png";
+            if (RenderCxShapeOverlay(source_image, projection.published_shapes, CxOverlayLayer::TOOL_DISPLAY, tool_display, render_result))
+            {
+                tool_display_changed_pixels = render_result.changed_pixel_count;
+                tool_display_rendered_elements = render_result.rendered_element_count;
+                if (cv::imwrite(tool_display_out.string(), tool_display))
+                    tool_display_path = tool_display_out.string();
+            }
+            else
+            {
+                overlay_reason += "tool_display: " + render_result.reason + "; ";
+            }
+        }
+        else
+        {
+            overlay_reason = "source image unavailable for overlay: " + request.image_path;
+        }
+
+        std::ofstream overlay_file(case_dir / "overlay_validation.json");
+        if (overlay_file)
+        {
+            overlay_file << "{\n";
+            overlay_file << "  \"source_image_path\": \"" << EscapeJson(request.image_path) << "\",\n";
+            overlay_file << "  \"result_overlay_path\": \"" << EscapeJson(result_overlay_path) << "\",\n";
+            overlay_file << "  \"evidence_overlay_path\": \"" << EscapeJson(evidence_overlay_path) << "\",\n";
+            overlay_file << "  \"tool_display_path\": \"" << EscapeJson(tool_display_path) << "\",\n";
+            overlay_file << "  \"result_overlay_changed_pixels\": " << result_overlay_changed_pixels << ",\n";
+            overlay_file << "  \"evidence_overlay_changed_pixels\": " << evidence_overlay_changed_pixels << ",\n";
+            overlay_file << "  \"tool_display_changed_pixels\": " << tool_display_changed_pixels << ",\n";
+            overlay_file << "  \"result_overlay_rendered_elements\": " << result_overlay_rendered_elements << ",\n";
+            overlay_file << "  \"evidence_overlay_rendered_elements\": " << evidence_overlay_rendered_elements << ",\n";
+            overlay_file << "  \"tool_display_rendered_elements\": " << tool_display_rendered_elements << ",\n";
+            overlay_file << "  \"reason\": \"" << EscapeJson(overlay_reason) << "\"\n";
+            overlay_file << "}\n";
+        }
+
         std::ofstream result_file(case_dir / "projection_result.json");
         if (result_file)
         {
@@ -1355,6 +1441,12 @@ bool CxShapeInteractionRunner::RunTestCase(
             result_file << "  \"result_element_count\": " << result_element_count << ",\n";
             result_file << "  \"stale_result_count\": " << stale_result_count << ",\n";
             result_file << "  \"duplicate_stable_ref_count\": " << duplicate_stable_ref_count << ",\n";
+            result_file << "  \"result_overlay_path\": \"" << EscapeJson(result_overlay_path) << "\",\n";
+            result_file << "  \"evidence_overlay_path\": \"" << EscapeJson(evidence_overlay_path) << "\",\n";
+            result_file << "  \"tool_display_path\": \"" << EscapeJson(tool_display_path) << "\",\n";
+            result_file << "  \"result_overlay_changed_pixels\": " << result_overlay_changed_pixels << ",\n";
+            result_file << "  \"evidence_overlay_changed_pixels\": " << evidence_overlay_changed_pixels << ",\n";
+            result_file << "  \"tool_display_changed_pixels\": " << tool_display_changed_pixels << ",\n";
             result_file << "  \"published_shapes\": [\n";
             for (size_t i = 0; i < projection.published_shapes.size(); ++i)
             {
@@ -2099,26 +2191,49 @@ void CxShapeInteractionRunner::GenerateCaseOutput(
         trace_file << "{\n";
         trace_file << "  \"case_id\": \"" << EscapeJson(case_result.case_id) << "\",\n";
         trace_file << "  \"events\": [\n";
-        for (size_t i = 0; i < trace.pointer_events.size(); ++i)
+        if (!trace.pointer_events.empty())
         {
-            const auto& evt = trace.pointer_events[i];
-            std::string type_str;
-            switch (evt.type)
+            for (size_t i = 0; i < trace.pointer_events.size(); ++i)
             {
-            case CxPointerEvent::Type::Move: type_str = "Move"; break;
-            case CxPointerEvent::Type::LeftDown: type_str = "LeftDown"; break;
-            case CxPointerEvent::Type::LeftDrag: type_str = "LeftDrag"; break;
-            case CxPointerEvent::Type::LeftUp: type_str = "LeftUp"; break;
+                const auto& evt = trace.pointer_events[i];
+                std::string type_str;
+                switch (evt.type)
+                {
+                case CxPointerEvent::Type::Move: type_str = "Move"; break;
+                case CxPointerEvent::Type::LeftDown: type_str = "LeftDown"; break;
+                case CxPointerEvent::Type::LeftDrag: type_str = "LeftDrag"; break;
+                case CxPointerEvent::Type::LeftUp: type_str = "LeftUp"; break;
+                }
+                trace_file << "    {\n";
+                trace_file << "      \"step\": " << evt.frame_no << ",\n";
+                trace_file << "      \"type\": \"" << type_str << "\",\n";
+                trace_file << "      \"image_x\": " << evt.image_x << ",\n";
+                trace_file << "      \"image_y\": " << evt.image_y << "\n";
+                trace_file << "    }";
+                if (i < trace.pointer_events.size() - 1)
+                    trace_file << ",";
+                trace_file << "\n";
             }
-            trace_file << "    {\n";
-            trace_file << "      \"step\": " << evt.frame_no << ",\n";
-            trace_file << "      \"type\": \"" << type_str << "\",\n";
-            trace_file << "      \"image_x\": " << evt.image_x << ",\n";
-            trace_file << "      \"image_y\": " << evt.image_y << "\n";
-            trace_file << "    }";
-            if (i < trace.pointer_events.size() - 1)
-                trace_file << ",";
-            trace_file << "\n";
+        }
+        else
+        {
+            for (size_t i = 0; i < case_result.pointer_events.size(); ++i)
+            {
+                const auto& evt = case_result.pointer_events[i];
+                trace_file << "    {\n";
+                trace_file << "      \"step\": " << i << ",\n";
+                trace_file << "      \"type\": \"" << EscapeJson(evt.event) << "\",\n";
+                trace_file << "      \"screen_x\": " << evt.screen_x << ",\n";
+                trace_file << "      \"screen_y\": " << evt.screen_y << ",\n";
+                trace_file << "      \"image_x\": " << evt.image_x << ",\n";
+                trace_file << "      \"image_y\": " << evt.image_y << ",\n";
+                trace_file << "      \"phase\": \"" << EscapeJson(evt.phase) << "\",\n";
+                trace_file << "      \"status\": \"" << EscapeJson(evt.status) << "\"\n";
+                trace_file << "    }";
+                if (i < case_result.pointer_events.size() - 1)
+                    trace_file << ",";
+                trace_file << "\n";
+            }
         }
         trace_file << "  ],\n";
         trace_file << "  \"hits\": [\n";

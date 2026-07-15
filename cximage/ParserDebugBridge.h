@@ -121,6 +121,7 @@ public:
   bool RunPrefixToLine(const std::string& scriptText, int lineNo);
   bool QueryObjectExists(const std::string& type, const std::string& name) const;
   void* QueryClassObject(const std::string& type, const std::string& name) const;
+  std::vector<std::string> ListClassObjectNames(const std::string& type) const;
   Image* QueryImage(const std::string& name) const;
   bool QueryDouble(const std::string& name, double& value) const;
   bool SetDouble(const std::string& name, double value);
@@ -140,6 +141,7 @@ public:
   bool RunCxParserExtDebugInProcess(
     const std::string& scriptPath,
     CxScriptSemanticBridgeResult& outResult);
+  const std::string& LastError() const { return myLastError; }
   void Stop();
   void ResetRuntime();
 
@@ -150,6 +152,7 @@ private:
   CxParserRuntimeOwner* myOwner = nullptr;
   cv::Mat myGlobalMatInput;
   std::map<std::string, double> myGlobalNumericInputs;
+  std::string myLastError;
 };
 
 #endif

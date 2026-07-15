@@ -3,18 +3,18 @@ Findline m_line;
 
 m_image.copyFromMat(global_matInput);
 
-int x0 = 120;
-int y0 = 240;
-int x1 = 980;
-int y1 = 240;
+int x0 = global_roi_x0;
+int y0 = global_roi_y0;
+int x1 = global_roi_x1;
+int y1 = global_roi_y1;
 
-int method = 0;
-int threshold = 20;
-int linegap = 6;
+int method = global_method;
+int threshold = global_threshold;
+int linegap = global_linegap;
 int fitmode = 1;
-int wgap = 8;
-int hgap = 32;
-int tool_half_width = 32;
+int wgap = global_wgap;
+int hgap = global_hgap;
+int tool_half_width = global_tool_half_width;
 int measure_fallback = 0;
 
 m_line.setmeasurefallback(measure_fallback);
@@ -27,6 +27,3 @@ m_line.setlinegap(linegap);
 m_line.setfitmode(fitmode);
 m_line.measure(&m_image);
 m_line.fitline();
-
-global_line_ref = m_line.get_result();
-global_current_status = "PENDING";

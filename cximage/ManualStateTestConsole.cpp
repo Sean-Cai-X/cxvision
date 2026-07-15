@@ -95,6 +95,168 @@ static std::string CxDebugJsonEscape(const std::string& text)
     }
     return out;
 }
+
+static void CopyPointsToFloatXY(const PointsShape& points, std::vector<float>& out)
+{
+    out.clear();
+    for (int i = 0; i < points.size(); ++i)
+    {
+        const double x = points.getx(i);
+        const double y = points.gety(i);
+        if (!std::isfinite(x) || !std::isfinite(y))
+            continue;
+        out.push_back(static_cast<float>(x));
+        out.push_back(static_cast<float>(y));
+    }
+}
+
+static void FillRuntimeObjectFromFindcircle(
+    RuntimeObjectView& object,
+    const std::string& name,
+    Findcircle& circle)
+{
+    object = RuntimeObjectView{};
+    object.name = name;
+    object.type = "Findcircle";
+    object.exists_in_parser = true;
+    object.last_runtime_status = "runtime_executed";
+    object.runtime_state = "runtime_executed";
+    object.visualizable = true;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+
+    object.has_circle = true;
+    object.circle_cx = static_cast<float>(circle.getcirclecentx());
+    object.circle_cy = static_cast<float>(circle.getcirclecenty());
+    object.circle_inner = static_cast<float>(circle.getcirclepax());
+    object.circle_radius = static_cast<float>(circle.getcirclepay());
+
+    const PointsShape& points = circle.getresultpoints();
+    CopyPointsToFloatXY(points, object.measure_points_xy);
+    object.measure_points_count = points.size();
+    object.valid_points_count =
+        static_cast<int>(object.measure_points_xy.size() / 2);
+    object.has_measure_points = !object.measure_points_xy.empty();
+
+    object.has_fit_result = circle.hasfitresult();
+    if (object.has_fit_result)
+    {
+        object.fit_cx = static_cast<float>(circle.getresultcentx());
+        object.fit_cy = static_cast<float>(circle.getresultcenty());
+        object.fit_radius = static_cast<float>(circle.getradius());
+        object.fit_avgdist = static_cast<float>(circle.getavgdist());
+        object.runtime_state = "geometry_result_available";
+    }
+
+    object.display_summary = BuildFindcircleGeometrySummary(object);
+}
+
+static void FillRuntimeObjectFromFindline(
+    RuntimeObjectView& object,
+    const std::string& name,
+    Findline& line)
+{
+    object = RuntimeObjectView{};
+    object.name = name;
+    object.type = "Findline";
+    object.exists_in_parser = true;
+    object.last_runtime_status = "runtime_executed";
+    object.runtime_state = "runtime_executed";
+    object.visualizable = true;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+
+    FindlineDisplaySnapshot snapshot;
+    if (line.getdisplaysnapshot(snapshot))
+    {
+        object.has_line_roi = snapshot.has_line_roi;
+        object.line_x0 = snapshot.x0;
+        object.line_y0 = snapshot.y0;
+        object.line_x1 = snapshot.x1;
+        object.line_y1 = snapshot.y1;
+        object.line_scale = snapshot.scale;
+        object.line_tool_wgap = snapshot.wgap;
+        object.line_tool_hgap = snapshot.hgap;
+        object.linegap = snapshot.linegap;
+        object.has_line_scan_box = snapshot.has_scan_box;
+        object.line_scan_half_width = snapshot.scan_half_width;
+        object.line_scan_box_xy = snapshot.scan_box_xy;
+        object.line_display_source = snapshot.source;
+        object.effective_tool_half_width = snapshot.scan_half_width;
+        object.requested_tool_half_width = snapshot.scan_half_width;
+    }
+
+    const PointsShape& w_points = line.getresultpointsw();
+    const PointsShape& h_points = line.getresultpointsh();
+    object.line_pointsw_count = w_points.size();
+    object.line_pointsh_count = h_points.size();
+    CopyPointsToFloatXY(w_points, object.line_measure_points_xy);
+    std::vector<float> h_xy;
+    CopyPointsToFloatXY(h_points, h_xy);
+    object.line_measure_points_xy.insert(
+        object.line_measure_points_xy.end(), h_xy.begin(), h_xy.end());
+    object.line_measure_points_count =
+        static_cast<int>(object.line_measure_points_xy.size() / 2);
+    object.valid_line_points_count = line.getvalidpointcount();
+    object.valid_points_count = object.valid_line_points_count;
+    object.has_line_measure_points = !object.line_measure_points_xy.empty();
+
+    object.has_fit_line = line.hasfitresult();
+    if (object.has_fit_line)
+    {
+        object.fit_line_x0 = static_cast<float>(line.getresultx0());
+        object.fit_line_y0 = static_cast<float>(line.getresulty0());
+        object.fit_line_x1 = static_cast<float>(line.getresultx1());
+        object.fit_line_y1 = static_cast<float>(line.getresulty1());
+        object.line_avgdist = static_cast<float>(line.getavgdist());
+        object.runtime_state = "geometry_result_available";
+    }
+
+    object.display_summary = BuildFindlineGeometrySummary(object);
+}
+
+static void SeedDefaultManualGlobals(
+    ManualTestContext& context,
+    const std::string& scriptPath)
+{
+    auto set = [&](const char* name, int value) {
+        context.runtime_int_vars[name] = value;
+    };
+
+    set("global_threshold", 20);
+    set("global_method", 0);
+    set("global_linegap", 6);
+    set("global_wgap", 8);
+    set("global_hgap", 32);
+    set("global_tool_half_width", 32);
+
+    if (scriptPath.find("find_line_vertical") != std::string::npos)
+    {
+        set("global_roi_x0", 380);
+        set("global_roi_y0", 120);
+        set("global_roi_x1", 380);
+        set("global_roi_y1", 820);
+        set("global_wgap", 32);
+        set("global_hgap", 8);
+    }
+    else
+    {
+        set("global_roi_x0", 120);
+        set("global_roi_y0", 240);
+        set("global_roi_x1", 980);
+        set("global_roi_y1", 240);
+    }
+
+    if (scriptPath.find("find_circle") != std::string::npos)
+    {
+        set("global_circle_cx", 765);
+        set("global_circle_cy", 471);
+        set("global_circle_px", 1200);
+        set("global_circle_py", 471);
+        set("global_gap", 5);
+        set("global_linegap", 3);
+    }
+}
 }
 
 bool ViewController::QueryParserObjectExists(const std::string& type, const std::string& name)
@@ -160,6 +322,7 @@ bool ViewController::LoadBoundStateToManualConsole(
     m_manualTest.editor_dirty = false;
     m_manualTest.analyzed_text.clear();
     m_manualTest.current_line = 0;
+    SeedDefaultManualGlobals(m_manualTest, scriptPath);
     m_manualTest.run_state = "ready";
     m_manualTest.debug_status = "script_loaded";
     m_manualTest.debug_reason = "loaded exact bound script: " + scriptPath;
@@ -170,8 +333,37 @@ bool ViewController::LoadBoundStateToManualConsole(
 void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     const std::string& runtimeStatus)
 {
-    (void)lastMethod;
-    (void)runtimeStatus;
+    m_manualTest.runtime_objects.clear();
+
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("Findcircle"))
+    {
+        Findcircle* circle = static_cast<Findcircle*>(
+            m_parserDebugBridge.QueryClassObject("Findcircle", name));
+        if (circle == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        FillRuntimeObjectFromFindcircle(object, name, *circle);
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("Findline"))
+    {
+        Findline* line = static_cast<Findline*>(
+            m_parserDebugBridge.QueryClassObject("Findline", name));
+        if (line == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        FillRuntimeObjectFromFindline(object, name, *line);
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        m_manualTest.runtime_objects.push_back(object);
+    }
 
     for (RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
@@ -192,6 +384,8 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.image_overlay_summary += BuildOverlaySummary(m_manualTest, object) + "\n";
         }
     }
+
+    SyncRuntimeObjectsToShapeElements();
 }
 
 void ViewController::drawManualStateTestConsole()

@@ -215,6 +215,26 @@ bool CxParserRuntimeOwner::Compile(const char* source)
     }
 }
 
+bool CxParserRuntimeOwner::ExecuteScript(
+    const std::string& source,
+    std::string& reason)
+{
+    if (!m_initialized || !m_runtime)
+    {
+        reason = "parser owner is not initialized";
+        return false;
+    }
+
+    if (!m_runtime->CompileCollectedScript(source, reason))
+        return false;
+
+    if (!m_runtime->RunCollectedScript(reason))
+        return false;
+
+    reason.clear();
+    return true;
+}
+
 void CxParserRuntimeOwner::ConfigureStreams(std::ostream* runtime_stream, std::ostream* code_stream)
 {
     if (m_runtime)
@@ -229,6 +249,15 @@ int CxParserRuntimeOwner::ObjectCount(const std::string& type) const
     if (!m_runtime)
         return 0;
     return m_runtime->GetClassObjSum(type);
+}
+
+std::string CxParserRuntimeOwner::ObjectName(
+    const std::string& type,
+    int index) const
+{
+    if (!m_runtime)
+        return {};
+    return m_runtime->GetClassObjName(type, index);
 }
 
 void* CxParserRuntimeOwner::GetClassObj(const std::string& strclass, const std::string& strobj)

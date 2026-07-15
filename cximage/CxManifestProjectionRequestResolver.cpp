@@ -1,6 +1,28 @@
 #include "pch.h"
 #include "CxManifestProjectionRequestResolver.h"
 
+#include <filesystem>
+
+namespace
+{
+    std::string ResolveManifestImagePath(
+        const CxScriptImageManifestRuntime& manifest,
+        const std::string& image_path)
+    {
+        if (image_path.empty())
+            return {};
+
+        std::filesystem::path path(image_path);
+        if (path.is_absolute())
+            return path.string();
+
+        if (manifest.image_root.empty())
+            return path.string();
+
+        return (std::filesystem::path(manifest.image_root) / path).string();
+    }
+}
+
 bool ResolveManifestProjectionRequest(
     const CxScriptImageManifestRuntime& manifest,
     const CxShapeTestCase& test_case,
@@ -35,7 +57,7 @@ bool ResolveManifestProjectionRequest(
             return false;
         }
 
-        out_request.image_path = manifest.image_root + "/" + image_entry->path;
+        out_request.image_path = ResolveManifestImagePath(manifest, image_entry->path);
 
         bool target_found = false;
         for (const auto& target : image_entry->targets)
@@ -130,8 +152,8 @@ bool ResolveManifestProjectionRequest(
                     return false;
                 }
 
-                out_request.template_image_path = manifest.image_root + "/" + template_image->path;
-                out_request.test_image_path = manifest.image_root + "/" + test_image->path;
+                out_request.template_image_path = ResolveManifestImagePath(manifest, template_image->path);
+                out_request.test_image_path = ResolveManifestImagePath(manifest, test_image->path);
                 out_request.image_path = out_request.test_image_path;
 
                 out_request.has_learn_roi = true;
