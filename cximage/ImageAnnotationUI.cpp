@@ -9,9 +9,14 @@
 
 #include "CxAnnotationToolRuntime.h"
 #include "CxUnifiedLog.h"
+#include "Findcircle.h"
+#include "Findellipse.h"
+#include "FindRect.h"
+#include "findline.h"
 #include "shapebase.h"
 #include "RectShape.h"
 #include "CircleShape.h"
+#include "EllipseShape.h"
 #include "LineGaugeShape.h"
 
 namespace
@@ -190,6 +195,95 @@ void UpdateManualGaugeFromShapeElement(
   gauge.dirty = true;
 }
 
+bool ExportShapeElementToRuntimeGlobals(
+    ManualTestContext& context,
+    const CxShapeElement& element,
+    std::string& reason)
+{
+  if (!element.shape)
+  {
+    reason = "selected shape has no geometry";
+    return false;
+  }
+
+  auto setInt = [&context](const std::string& name, double value)
+  {
+    context.runtime_int_vars[name] = static_cast<int>(std::lround(value));
+  };
+
+  if (element.shape->kind() == CxShapeKind::Circle)
+  {
+    CxShapePoint center;
+    double radius = 0.0;
+    double inner_radius = 0.0;
+    if (!element.shape->exportCircle(center, radius, inner_radius) || radius <= 0.0)
+    {
+      reason = "selected circle cannot export center/radius";
+      return false;
+    }
+
+    setInt("global_circle_cx", center.x);
+    setInt("global_circle_cy", center.y);
+    setInt("global_circle_px", center.x + radius);
+    setInt("global_circle_py", center.y);
+    setInt("global_seed_x", center.x);
+    setInt("global_seed_y", center.y);
+    UpdateManualGaugeFromShapeElement(context, element);
+    reason = "circle exported to global_circle_* and global_seed_*";
+    return true;
+  }
+
+  CxShapePoint p0;
+  CxShapePoint p1;
+  if (element.shape->exportLine(p0, p1))
+  {
+    setInt("global_roi_x0", p0.x);
+    setInt("global_roi_y0", p0.y);
+    setInt("global_roi_x1", p1.x);
+    setInt("global_roi_y1", p1.y);
+    UpdateManualGaugeFromShapeElement(context, element);
+    reason = "line exported to global_roi_*";
+    return true;
+  }
+
+  std::vector<CxShapePoint> points;
+  bool closed = false;
+  element.shape->exportPolyline(points, closed);
+  if (points.empty())
+    element.shape->exportPoints(points);
+
+  if (points.empty())
+  {
+    reason = "selected shape has no exportable points";
+    return false;
+  }
+
+  double min_x = points[0].x;
+  double min_y = points[0].y;
+  double max_x = points[0].x;
+  double max_y = points[0].y;
+  for (const CxShapePoint& p : points)
+  {
+    min_x = std::min(min_x, p.x);
+    min_y = std::min(min_y, p.y);
+    max_x = std::max(max_x, p.x);
+    max_y = std::max(max_y, p.y);
+  }
+
+  setInt("global_roi_x0", min_x);
+  setInt("global_roi_y0", min_y);
+  setInt("global_roi_x1", max_x);
+  setInt("global_roi_y1", max_y);
+  setInt("global_seed_x", (min_x + max_x) * 0.5);
+  setInt("global_seed_y", (min_y + max_y) * 0.5);
+
+  if (points.size() == 1)
+    reason = "point exported to global_seed_* and degenerate global_roi_*";
+  else
+    reason = "shape bounds exported to global_roi_* and center to global_seed_*";
+  return true;
+}
+
 void InsertStatement(std::string& editor, const std::string& statement)
 {
   if (statement.empty()) return;
@@ -280,6 +374,7 @@ const char* ViewController::ImageToolModeName(ImageToolMode mode)
     case ImageToolMode::LineCreate: return "Line";
     case ImageToolMode::RectCreate: return "Rect";
     case ImageToolMode::CircleCreate: return "Circle";
+    case ImageToolMode::EllipseCreate: return "Ellipse";
     case ImageToolMode::PolylineCreate: return "Polyline";
     case ImageToolMode::AutoBoundary: return "Auto Boundary";
     case ImageToolMode::AttachToScript: return "Attach To Script";
@@ -342,6 +437,27 @@ static double Distance2(double x0, double y0, double x1, double y1)
     return dx * dx + dy * dy;
 }
 
+static ImageToolMode ToolModeFromAnnotationTool(const AnnotationToolDefinition& tool)
+{
+    if (tool.kind == OverlayKind::Point)
+        return ImageToolMode::PointCreate;
+    if (tool.kind == OverlayKind::Line)
+        return ImageToolMode::LineCreate;
+    if (tool.kind == OverlayKind::Rect)
+        return ImageToolMode::RectCreate;
+    if (tool.kind == OverlayKind::Circle)
+        return ImageToolMode::CircleCreate;
+    if (tool.kind == OverlayKind::Ellipse)
+        return ImageToolMode::EllipseCreate;
+    if (tool.kind == OverlayKind::Polyline ||
+        tool.kind == OverlayKind::BoundaryPolyline)
+        return ImageToolMode::PolylineCreate;
+    if (tool.kind == OverlayKind::AutoBoundaryRequest ||
+        tool.action == "auto_segmentation")
+        return ImageToolMode::AutoBoundary;
+    return ImageToolMode::PointerPan;
+}
+
 bool ViewController::CommitDraftShapeFromTool(
     const AnnotationToolDefinition& tool,
     CxImagePointerResult& out)
@@ -359,7 +475,7 @@ bool ViewController::CommitDraftShapeFromTool(
             return false;
         }
     }
-    else if (tool.shape_type == "RectShape")
+    else if (tool.shape_type == "RectShape" || tool.shape_type == "AutoBoundary")
     {
         const double w = std::abs(dx);
         const double h = std::abs(dy);
@@ -446,10 +562,12 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_down)
         {
-            double clamped_x = frame.image_x;
-            double clamped_y = frame.image_y;
-            ClampImagePointToImageBounds(clamped_x, clamped_y);
-            const bool ok = m_annotationLayer.UpdateDrag(clamped_x, clamped_y);
+            // Existing gauge/ROI handles must be allowed to move outside the
+            // image bounds.  Findcircle radius handles and wide Findline
+            // boxes often intentionally extend past the visible image while
+            // the center or fitted result remains meaningful.  New shape
+            // creation is still clamped in its draft path below.
+            const bool ok = m_annotationLayer.UpdateDrag(frame.image_x, frame.image_y);
             out.status = ok ? "dragging" : "failed";
             out.reason = ok ? "drag updated" : "UpdateDrag failed";
             m_lastPointerResult = out;
@@ -500,13 +618,184 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                     }
                 }
             }
+            else if (ok && commit.owner_type == "Findcircle" && commit.editable &&
+                     commit.owner_binding == "setcircle")
+            {
+                const CxShapeElement* edited =
+                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
+                Findcircle* tool = static_cast<Findcircle*>(
+                    m_parserDebugBridge.QueryClassObject("Findcircle", commit.owner_ref));
+                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
+                {
+                    CxShapePoint center;
+                    double radius = 0.0;
+                    double inner_radius = 0.0;
+                    if (edited->shape->exportCircle(center, radius, inner_radius) && radius > 0.0)
+                    {
+                        const int cx = static_cast<int>(std::lround(center.x));
+                        const int cy = static_cast<int>(std::lround(center.y));
+                        const int px = static_cast<int>(std::lround(center.x + radius));
+                        const int py = cy;
+                        tool->setcircle(cx, cy, px, py);
+                        m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                        commit.runtime_writeback = true;
+                        out.reason = "Findcircle ROI edit written back to setcircle";
+                    }
+                    else
+                    {
+                        out.reason = "Findcircle edit rejected: circle geometry export failed";
+                    }
+                }
+                else
+                {
+                    out.reason = "Findcircle edit rejected: runtime object or shape unavailable";
+                }
+            }
+            else if (ok && commit.owner_type == "Findline" && commit.editable &&
+                     commit.owner_binding == "setline")
+            {
+                const CxShapeElement* edited =
+                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
+                Findline* tool = static_cast<Findline*>(
+                    m_parserDebugBridge.QueryClassObject("Findline", commit.owner_ref));
+                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
+                {
+                    const LineGaugeShape* line =
+                        dynamic_cast<const LineGaugeShape*>(edited->shape.get());
+                    if (line != nullptr)
+                    {
+                        const int x0 = static_cast<int>(std::lround(line->x0()));
+                        const int y0 = static_cast<int>(std::lround(line->y0()));
+                        const int x1 = static_cast<int>(std::lround(line->x1()));
+                        const int y1 = static_cast<int>(std::lround(line->y1()));
+                        const int half_width = std::max(
+                            1, static_cast<int>(std::lround(line->halfWidth())));
+                        tool->setline(x0, y0, x1, y1, half_width);
+                        m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                        commit.runtime_writeback = true;
+                        out.reason = "Findline ROI edit written back to setline";
+                    }
+                    else
+                    {
+                        out.reason = "Findline edit rejected: line gauge geometry unavailable";
+                    }
+                }
+                else
+                {
+                    out.reason = "Findline edit rejected: runtime object or shape unavailable";
+                }
+            }
+            else if (ok && commit.owner_type == "Findellipse" && commit.editable &&
+                     commit.owner_binding == "setellipse")
+            {
+                const CxShapeElement* edited =
+                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
+                Findellipse* tool = static_cast<Findellipse*>(
+                    m_parserDebugBridge.QueryClassObject("Findellipse", commit.owner_ref));
+                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
+                {
+                    std::vector<CxShapePoint> points;
+                    edited->shape->exportPoints(points);
+                    if (points.size() >= 3)
+                    {
+                        const double cx = points[0].x;
+                        const double cy = points[0].y;
+                        const double rx = std::abs(points[1].x - cx);
+                        const double ry = std::abs(points[2].y - cy);
+                        if (rx >= 1.0 && ry >= 1.0)
+                        {
+                            tool->setellipse(
+                                static_cast<int>(std::lround(cx - rx)),
+                                static_cast<int>(std::lround(cy - ry)),
+                                static_cast<int>(std::lround(cx + rx)),
+                                static_cast<int>(std::lround(cy + ry)));
+                            m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                            commit.runtime_writeback = true;
+                            out.reason = "Findellipse ROI edit written back to setellipse";
+                        }
+                        else
+                        {
+                            out.reason = "Findellipse edit rejected: ellipse radius too small";
+                        }
+                    }
+                    else
+                    {
+                        out.reason = "Findellipse edit rejected: ellipse geometry unavailable";
+                    }
+                }
+                else
+                {
+                    out.reason = "Findellipse edit rejected: runtime object or shape unavailable";
+                }
+            }
+            else if (ok && commit.owner_type == "FindRect" && commit.editable &&
+                     (commit.owner_binding == "setrect" ||
+                      commit.owner_binding == "setrotatedrect"))
+            {
+                const CxShapeElement* edited =
+                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
+                FindRect* tool = static_cast<FindRect*>(
+                    m_parserDebugBridge.QueryClassObject("FindRect", commit.owner_ref));
+                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
+                {
+                    std::vector<CxShapePoint> points;
+                    bool closed = false;
+                    edited->shape->exportPolyline(points, closed);
+                    if (points.empty())
+                        edited->shape->exportPoints(points);
+
+                    if (!points.empty())
+                    {
+                        double min_x = points[0].x;
+                        double min_y = points[0].y;
+                        double max_x = points[0].x;
+                        double max_y = points[0].y;
+                        for (const CxShapePoint& p : points)
+                        {
+                            min_x = std::min(min_x, p.x);
+                            min_y = std::min(min_y, p.y);
+                            max_x = std::max(max_x, p.x);
+                            max_y = std::max(max_y, p.y);
+                        }
+                        const double w = max_x - min_x;
+                        const double h = max_y - min_y;
+                        if (w >= 2.0 && h >= 2.0)
+                        {
+                            tool->setrect(
+                                static_cast<int>(std::lround(min_x)),
+                                static_cast<int>(std::lround(min_y)),
+                                static_cast<int>(std::lround(w)),
+                                static_cast<int>(std::lround(h)));
+                            m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                            commit.runtime_writeback = true;
+                            out.reason = "FindRect ROI edit written back to setrect";
+                        }
+                        else
+                        {
+                            out.reason = "FindRect edit rejected: rect too small";
+                        }
+                    }
+                    else
+                    {
+                        out.reason = "FindRect edit rejected: rect geometry unavailable";
+                    }
+                }
+                else
+                {
+                    out.reason = "FindRect edit rejected: runtime object or shape unavailable";
+                }
+            }
 
             if (ok)
             {
                 const CxShapeElement* edited =
                     m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
                 if (edited != nullptr)
+                {
                     UpdateManualGaugeFromShapeElement(m_manualTest, *edited);
+                    std::string exportReason;
+                    ExportShapeElementToRuntimeGlobals(m_manualTest, *edited, exportReason);
+                }
             }
 
             if (ok)
@@ -612,26 +901,18 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         return out;
     }
 
-    OverlayKind currentKind = OverlayKind::Line;
-    std::string currentToolName = "scan_line";
-    
-    if (hasActiveTool)
+    if (!hasActiveTool)
     {
-        currentKind = activeTool->kind;
-        currentToolName = activeTool->name;
+        out.consumed = true;
+        out.phase = "create_shape";
+        out.status = "failed";
+        out.reason = "annotation tool enabled but ActiveTool is null";
+        m_lastPointerResult = out;
+        CXLOG_INFO("ImageAnnotationUI", "annotation_tool_missing", "failed", "reason=" + out.reason);
+        return out;
     }
-    else
-    {
-        switch (m_imageToolMode)
-        {
-        case ImageToolMode::PointCreate: currentKind = OverlayKind::Point; currentToolName = "point_pick"; break;
-        case ImageToolMode::LineCreate: currentKind = OverlayKind::Line; currentToolName = "scan_line"; break;
-        case ImageToolMode::RectCreate: currentKind = OverlayKind::Rect; currentToolName = "roi_rect"; break;
-        case ImageToolMode::CircleCreate: currentKind = OverlayKind::Circle; currentToolName = "circle_roi"; break;
-        case ImageToolMode::PolylineCreate: currentKind = OverlayKind::Polyline; currentToolName = "boundary_polyline"; break;
-        default: break;
-        }
-    }
+
+    OverlayKind currentKind = activeTool->kind;
 
     if (currentKind == OverlayKind::Point)
     {
@@ -639,7 +920,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         {
             if (hasActiveTool)
             {
-                const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+                const AnnotationToolDefinition* tool = activeTool;
                 if (!tool)
                 {
                     out.consumed = true;
@@ -699,7 +980,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 return out;
             }
 
-            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            const AnnotationToolDefinition* tool = activeTool;
             if (tool)
             {
                 auto shape = CreateInitialShapeForTool(*tool, m_activePolylinePoints);
@@ -760,10 +1041,10 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            const AnnotationToolDefinition* tool = activeTool;
             CXLOG_INFO("ImageAnnotationUI", "annotation_line_release", "debug", 
-                       "currentToolName=" + currentToolName + 
-                       ", tool=" + (tool ? "found" : "null") +
+                       "currentToolName=" + activeTool->name + 
+                       ", tool=active" +
                        ", m_imageToolMode=" + std::to_string(static_cast<int>(m_imageToolMode)));
             if (tool)
             {
@@ -813,7 +1094,56 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            const AnnotationToolDefinition* tool = activeTool;
+            if (tool)
+            {
+                CommitDraftShapeFromTool(*tool, out);
+            }
+            else
+            {
+                out.status = "failed";
+                out.reason = "active tool definition unavailable";
+            }
+            m_annotationDragging = false;
+            m_lastPointerResult = out;
+            return out;
+        }
+    }
+    else if (currentKind == OverlayKind::AutoBoundaryRequest)
+    {
+        if (!m_annotationDragging)
+        {
+            if (frame.left_clicked)
+            {
+                m_annotationDragging = true;
+                m_annotationDragKind = OverlayKind::AutoBoundaryRequest;
+                m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
+                m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+                out.consumed = true;
+                out.phase = "create_shape";
+                out.status = "draft_started";
+                out.reason = "auto boundary prompt draft started";
+                m_lastPointerResult = out;
+                return out;
+            }
+            m_lastPointerResult = out;
+            return out;
+        }
+
+        if (frame.left_down)
+        {
+            m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
+            out.consumed = true;
+            out.phase = "create_shape";
+            out.status = "draft_updating";
+            out.reason = "auto boundary prompt draft updating";
+            m_lastPointerResult = out;
+            return out;
+        }
+
+        if (frame.left_released)
+        {
+            const AnnotationToolDefinition* tool = activeTool;
             if (tool)
             {
                 CommitDraftShapeFromTool(*tool, out);
@@ -862,7 +1192,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            const AnnotationToolDefinition* tool = activeTool;
             if (tool)
             {
                 CommitDraftShapeFromTool(*tool, out);
@@ -911,7 +1241,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
-            const AnnotationToolDefinition* tool = m_annotationLayer.FindToolDefinition(currentToolName);
+            const AnnotationToolDefinition* tool = activeTool;
             if (tool)
             {
                 CommitDraftShapeFromTool(*tool, out);
@@ -935,7 +1265,6 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
                                                 bool canvasActive,
                                                 ImDrawList* drawList)
 {
-  const AnnotationToolDefinition* tool = m_annotationLayer.ActiveTool();
   ImGuiIO& io = ImGui::GetIO();
 
   ImVec2 mouseScreen = io.MousePos;
@@ -967,20 +1296,6 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
   m_debugMouseImageY = imagePoint.y;
   m_debugAnnotationDragging = m_annotationDragging;
 
-  auto finalizeElement = [this](OverlayElement& element)
-  {
-    element.source = "manual_element";
-    m_scriptResult.status = "PENDING";
-    m_scriptResult.reason = "manual_element created; parser runtime unchanged";
-    m_scriptResult.overlay_ref = "overlay:" + element.ref;
-    m_scriptResult.evidence_ref = element.evidence_ref;
-    m_scriptResult.result_ref = element.result_ref;
-    m_scriptResult.issue_entry_ref = element.issue_entry_ref;
-    element.generated_statement = GenerateElementStatement(element);
-    UpdateManualGaugeFromElement(m_manualTest, element);
-    m_annotationStatus = "created " + element.ref;
-  };
-
   CxImagePointerFrame pointerFrame;
   pointerFrame.canvas_hovered = canvasHovered;
   pointerFrame.inside_image = insideImage;
@@ -990,6 +1305,8 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
   pointerFrame.right_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
   pointerFrame.escape_pressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
   pointerFrame.enter_pressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
+  pointerFrame.pointer_moved =
+    io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
   pointerFrame.image_x = imagePoint.x;
   pointerFrame.image_y = imagePoint.y;
 
@@ -1000,37 +1317,6 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     m_blockOccMouseInputThisFrame = true;
     m_blockImagePanThisFrame = true;
     m_annotationStatus = pointerResult.status + ": " + pointerResult.reason;
-  }
-
-  if (tool != nullptr)
-  {
-    if (IsAnnotationCreateModeActive() && IsMouseInsideImageCanvas(mouseScreen) && insideImage)
-    {
-      if (tool->kind == OverlayKind::Polyline && tool->action == "auto_segmentation")
-      {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        {
-          OverlayElement& element = m_annotationLayer.Create(
-            OverlayKind::AutoBoundaryRequest, tool->role, tool->source, tool->module_hint);
-          element.image_points.push_back({imagePoint.x, imagePoint.y});
-          element.status = "pending_binding";
-          finalizeElement(element);
-        }
-      }
-      else if (tool->action == "connect_refs" &&
-               ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-               m_annotationLayer.Elements().size() >= 2)
-      {
-        const std::size_t count = m_annotationLayer.Elements().size();
-        const OverlayImagePoint first = ElementCenter(m_annotationLayer.Elements()[count - 2]);
-        const OverlayImagePoint second = ElementCenter(m_annotationLayer.Elements()[count - 1]);
-        OverlayElement& element = m_annotationLayer.Create(
-          OverlayKind::Line, tool->role, tool->source, tool->module_hint);
-        element.image_points.push_back(first);
-        element.image_points.push_back(second);
-        finalizeElement(element);
-      }
-    }
   }
 
   if (!canvasActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -1045,7 +1331,8 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     const ImU32 previewColor = IM_COL32(80, 220, 255, 220);
     if (m_annotationDragKind == OverlayKind::Line)
       drawList->AddLine(start, end, previewColor, 2.0f);
-    else if (m_annotationDragKind == OverlayKind::Rect)
+    else if (m_annotationDragKind == OverlayKind::Rect ||
+             m_annotationDragKind == OverlayKind::AutoBoundaryRequest)
       drawList->AddRect(ImVec2(std::min(start.x, end.x), std::min(start.y, end.y)),
                         ImVec2(std::max(start.x, end.x), std::max(start.y, end.y)),
                         previewColor, 0.0f, 0, 2.0f);
@@ -1238,11 +1525,13 @@ void ViewController::drawImageEvidencePanels()
   ImGui::Columns(2, "annotation_columns", true);
   ImGui::Text("Tool Palette");
 
-  auto drawAnnotationToolButton = [this](const char* label, ImageToolMode mode)
+  auto drawPointerPanButton = [this]()
   {
-    ImGui::PushID(label);
+    ImGui::PushID("Pointer / Pan");
 
-    const bool active = m_imageToolEnabled && m_imageToolMode == mode;
+    const bool active = !m_imageToolEnabled ||
+                        m_imageToolMode == ImageToolMode::PointerPan ||
+                        m_annotationLayer.ActiveToolIndex() < 0;
 
     if (active)
     {
@@ -1251,17 +1540,39 @@ void ViewController::drawImageEvidencePanels()
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.45f, 0.75f, 1.0f));
     }
 
-    if (ImGui::Button(label, ImVec2(-1.0f, 28.0f)))
+    if (ImGui::Button("Pointer / Pan", ImVec2(-1.0f, 28.0f)))
     {
-        if (mode == ImageToolMode::PointerPan)
-        {
-            m_imageToolEnabled = false;
-            m_imageToolMode = ImageToolMode::PointerPan;
-            CancelAnnotationCreate();
-            m_annotationLayer.SetActiveToolIndex(-1);
-            m_annotationStatus = "annotation tool disabled";
-        }
-        else if (active)
+        m_imageToolEnabled = false;
+        m_imageToolMode = ImageToolMode::PointerPan;
+        CancelAnnotationCreate();
+        m_annotationLayer.SetActiveToolIndex(-1);
+        m_annotationStatus = "annotation tool disabled";
+    }
+
+    if (active)
+        ImGui::PopStyleColor(3);
+
+    ImGui::PopID();
+  };
+
+  auto drawManifestToolButton = [this](int toolIndex, const AnnotationToolDefinition& tool)
+  {
+    ImGui::PushID(tool.name.c_str());
+
+    const bool active = m_imageToolEnabled &&
+                        m_annotationLayer.ActiveToolIndex() == toolIndex;
+
+    if (active)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.85f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.95f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.45f, 0.75f, 1.0f));
+    }
+
+    const std::string label = tool.label.empty() ? tool.name : tool.label;
+    if (ImGui::Button(label.c_str(), ImVec2(-1.0f, 28.0f)))
+    {
+        if (active)
         {
             m_imageToolEnabled = false;
             m_imageToolMode = ImageToolMode::PointerPan;
@@ -1272,29 +1583,14 @@ void ViewController::drawImageEvidencePanels()
         else
         {
             m_imageToolEnabled = true;
-            m_imageToolMode = mode;
+            m_imageToolMode = ToolModeFromAnnotationTool(tool);
             CancelAnnotationCreate();
-            m_annotationStatus = std::string(label) + " enabled";
-
-            for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
-            {
-                const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
-                if (!tool.manual_visible) continue;
-                OverlayKind kind = OverlayKind::Point;
-                if (mode == ImageToolMode::PointCreate) kind = OverlayKind::Point;
-                else if (mode == ImageToolMode::LineCreate) kind = OverlayKind::Line;
-                else if (mode == ImageToolMode::RectCreate) kind = OverlayKind::Rect;
-                else if (mode == ImageToolMode::CircleCreate) kind = OverlayKind::Circle;
-                else if (mode == ImageToolMode::PolylineCreate) kind = OverlayKind::Polyline;
-                else if (mode == ImageToolMode::AutoBoundary) kind = OverlayKind::Polyline;
-
-                if (tool.kind == kind &&
-                    (mode == ImageToolMode::AutoBoundary ? tool.action == "auto_segmentation" : tool.action != "connect_refs"))
-                {
-                    m_annotationLayer.SetActiveToolIndex(i);
-                    break;
-                }
-            }
+            m_annotationLayer.SetActiveToolIndex(toolIndex);
+            m_annotationStatus =
+                "enabled tool_id=" + tool.name +
+                " shape=" + tool.shape_type +
+                " role=" + tool.role +
+                " action=" + tool.action;
         }
     }
 
@@ -1306,14 +1602,14 @@ void ViewController::drawImageEvidencePanels()
 
   ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1),
                       "Annotation Tool Palette V2 ACTIVE");
-  ImGui::TextUnformatted("Annotation Tools");
-  drawAnnotationToolButton("Pointer / Pan", ImageToolMode::PointerPan);
-  drawAnnotationToolButton("Point", ImageToolMode::PointCreate);
-  drawAnnotationToolButton("Line", ImageToolMode::LineCreate);
-  drawAnnotationToolButton("Rect", ImageToolMode::RectCreate);
-  drawAnnotationToolButton("Circle Annotation", ImageToolMode::CircleCreate);
-  drawAnnotationToolButton("Polyline", ImageToolMode::PolylineCreate);
-  drawAnnotationToolButton("Auto Boundary", ImageToolMode::AutoBoundary);
+  ImGui::TextUnformatted("Annotation Tools (from cxscript manifest)");
+  drawPointerPanButton();
+  for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
+  {
+    const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
+    if (!tool.manual_visible) continue;
+    drawManifestToolButton(i, tool);
+  }
 
   ImGui::Separator();
 
@@ -1332,7 +1628,29 @@ void ViewController::drawImageEvidencePanels()
 
   ImGui::Separator();
   ImGui::Text("Tool enabled: %s", m_imageToolEnabled ? "YES" : "NO");
-  ImGui::Text("Active tool: %s", ImageToolModeName(m_imageToolMode));
+  ImGui::Text("Active mode: %s", ImageToolModeName(m_imageToolMode));
+  const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
+  if (activeTool != nullptr)
+  {
+    ImGui::TextWrapped(
+        "Active tool id: %s | shape=%s | role=%s | action=%s | index=%d",
+        activeTool->name.c_str(),
+        activeTool->shape_type.c_str(),
+        activeTool->role.c_str(),
+        activeTool->action.c_str(),
+        m_annotationLayer.ActiveToolIndex());
+  }
+  else
+  {
+    ImGui::TextDisabled("Active tool id: (none) | index=%d",
+                        m_annotationLayer.ActiveToolIndex());
+  }
+  ImGui::Text("ShapeElements: %d",
+              static_cast<int>(m_annotationLayer.ShapeElements().size()));
+  ImGui::TextWrapped("Last pointer: %s | %s | %s",
+                     m_lastPointerResult.phase.c_str(),
+                     m_lastPointerResult.status.c_str(),
+                     m_lastPointerResult.reason.c_str());
   ImGui::Separator();
   ImGui::TextDisabled("Manifest tool definitions");
   for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
@@ -1340,11 +1658,8 @@ void ViewController::drawImageEvidencePanels()
     const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
     if (!tool.manual_visible) continue;
     ImGui::PushID(i);
-    if (ImGui::Selectable(tool.name.c_str(), m_annotationLayer.ActiveToolIndex() == i))
-    {
-      m_annotationLayer.SetActiveToolIndex(i);
-      if (tool.kind != OverlayKind::Polyline) { m_activePolylineElement = -1; m_activePolylinePoints.clear(); }
-    }
+    const bool active = m_annotationLayer.ActiveToolIndex() == i;
+    ImGui::Text("%s%s", active ? "* " : "  ", tool.name.c_str());
     ImGui::TextWrapped("%s | %s | %s", ImageAnnotationLayer::KindName(tool.kind),
                        tool.role.c_str(), tool.action.c_str());
     ImGui::TextWrapped("source=%s modules=%s", tool.source.c_str(),
@@ -1430,6 +1745,22 @@ void ViewController::drawImageEvidencePanels()
     ImGui::Text("editable: %s", selectedShape->editable ? "true" : "false");
     ImGui::Text("result_element: %s", selectedShape->result_element ? "true" : "false");
     ImGui::Text("stale: %s", selectedShape->stale ? "true" : "false");
+    if (ImGui::Button("Bind Selected Shape To Globals"))
+    {
+      std::string reason;
+      if (ExportShapeElementToRuntimeGlobals(m_manualTest, *selectedShape, reason))
+      {
+        m_manualTest.debug_status = "shape_bound_to_globals";
+        m_manualTest.debug_reason = reason;
+        m_annotationStatus = reason;
+      }
+      else
+      {
+        m_manualTest.debug_status = "shape_bind_failed";
+        m_manualTest.debug_reason = reason;
+        m_annotationStatus = reason;
+      }
+    }
   }
   else
   {
@@ -1584,6 +1915,9 @@ bool ViewController::TestSetActiveAnnotationTool(const std::string& tool_id, std
         if (m_annotationLayer.Tools()[i].name == tool_id)
         {
             m_annotationLayer.SetActiveToolIndex(i);
+            m_imageToolEnabled = true;
+            m_imageToolMode = ToolModeFromAnnotationTool(m_annotationLayer.Tools()[i]);
+            CancelAnnotationCreate();
             return true;
         }
     }
@@ -1605,7 +1939,7 @@ void ViewController::TestSetActiveToolKind(OverlayKind kind)
     case OverlayKind::Line: m_imageToolMode = ImageToolMode::LineCreate; break;
     case OverlayKind::Rect: m_imageToolMode = ImageToolMode::RectCreate; break;
     case OverlayKind::Circle: m_imageToolMode = ImageToolMode::CircleCreate; break;
-    case OverlayKind::Ellipse: m_imageToolMode = ImageToolMode::CircleCreate; break;
+    case OverlayKind::Ellipse: m_imageToolMode = ImageToolMode::EllipseCreate; break;
     case OverlayKind::Polyline: m_imageToolMode = ImageToolMode::PolylineCreate; break;
     default: m_imageToolMode = ImageToolMode::LineCreate; break;
     }
@@ -1613,7 +1947,10 @@ void ViewController::TestSetActiveToolKind(OverlayKind kind)
 
 void ViewController::TestSetToolModePointerPan()
 {
+    m_imageToolEnabled = false;
     m_imageToolMode = ImageToolMode::PointerPan;
+    m_annotationLayer.SetActiveToolIndex(-1);
+    CancelAnnotationCreate();
 }
 
 std::size_t ViewController::TestShapeElementCount() const

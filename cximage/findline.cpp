@@ -2366,7 +2366,29 @@ void Findline::measure(void* pimage)
     }
 
     Image* image = static_cast<Image*>(pimage);
-    g_pbackimage = image;
+
+    // The input Image is read-only for this operation.  The legacy scan path
+    // writes each sampled profile into g_pbackimage and subsequently changes
+    // its ROI.  Aliasing the two images makes linecopyex() read and write the
+    // same cv::Mat while the destination ROI is being changed, which is unsafe
+    // in the Manual/CxScript path and can crash the process.
+    //
+    // Keep the established ImageManager BackImage as an independent scratch
+    // buffer.  A Findline constructed before the manager is initialized may
+    // have a null pointer, so resolve it lazily here.  Never substitute the
+    // caller's input image as the scratch buffer.
+    if (g_pbackimage == nullptr || g_pbackimage == image)
+        g_pbackimage = ImageManager::GetBackImage(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
+        m_lastMeasureInputDebug.detail =
+            "Findline.measure requires an independent ImageManager BackImage workspace.";
+        ClearMeasureState();
+        return;
+    }
 
     cv::Mat mat = image->getmat();
     m_lastMeasureInputDebug.image_mat_ready = !mat.empty();
@@ -2454,10 +2476,66 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail = "Findline display snapshot unavailable before measure";
     }
 
+    if (!m_lastMeasureInputDebug.has_line_roi)
+    {
+        ClearMeasureState();
+        return;
+    }
+
+    if (m_lastMeasureInputDebug.line_length <= 1.0e-6)
+    {
+        m_lastMeasureInputDebug.failure_stage = "line_roi_degenerate";
+        m_lastMeasureInputDebug.detail =
+            "Findline measure skipped because the ROI line length is zero.";
+        ClearMeasureState();
+        return;
+    }
+
+    if (!m_lastMeasureInputDebug.roi_intersects_image)
+    {
+        m_lastMeasureInputDebug.failure_stage = "line_roi_outside_image";
+        m_lastMeasureInputDebug.detail =
+            "Findline measure skipped because the scan box does not intersect the image.";
+        ClearMeasureState();
+        return;
+    }
+
+    // The original Measure pipeline builds scan lines and calls setroi() on a
+    // rectangular workspace.  It cannot safely crop a partially out-of-image
+    // rotated scan box.  Reject it before profile construction instead of
+    // allowing legacy code to calculate invalid scan geometry.
+    if (!m_lastMeasureInputDebug.roi_fully_inside_image)
+    {
+        m_lastMeasureInputDebug.failure_stage = "line_roi_partially_outside_image";
+        m_lastMeasureInputDebug.detail =
+            "Findline measure skipped because the complete scan box must be inside the image.";
+        ClearMeasureState();
+        return;
+    }
+
     ProbeDisplayRoiGrayStats(*image);
 
     if (!EnsureOriginalMeasureGeometryReady())
     {
+        ClearMeasureState();
+        return;
+    }
+
+    const int scanCount = ClampSizeToInt(m_lines_w.size()) +
+        ClampSizeToInt(m_lines_h.size());
+    int maxScanLength = 0;
+    for (LineShape& scan : m_lines_w)
+        maxScanLength = std::max(maxScanLength, scan.getlinesize());
+    for (LineShape& scan : m_lines_h)
+        maxScanLength = std::max(maxScanLength, scan.getlinesize());
+
+    if (scanCount <= 0 || maxScanLength <= 0 ||
+        scanCount > g_pbackimage->getHeight() ||
+        maxScanLength > g_pbackimage->getWidth())
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_capacity_exceeded";
+        m_lastMeasureInputDebug.detail =
+            "Findline measure skipped because scan geometry exceeds the BackImage workspace.";
         ClearMeasureState();
         return;
     }

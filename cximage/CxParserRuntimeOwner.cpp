@@ -9,7 +9,75 @@
 #include "CxParameterProfileRuntime.h"
 #include "CxParameterProfileRegister.h"
 #include "ParserClass.h"
+#include <cctype>
+#include <cstring>
 #include <fstream>
+
+namespace
+{
+const char* const kCxScriptNumericTypes[] = { "int ", "double ", "float " };
+
+bool FindNumericLocalDeclaration(
+    const std::string& line,
+    std::size_t& type_begin,
+    std::size_t& type_length,
+    std::string& name)
+{
+    type_begin = line.find_first_not_of(" \t");
+    if (type_begin == std::string::npos)
+        return false;
+
+    type_length = 0;
+    for (const char* type : kCxScriptNumericTypes)
+    {
+        const std::size_t length = std::strlen(type);
+        if (line.compare(type_begin, length, type) == 0)
+        {
+            type_length = length;
+            break;
+        }
+    }
+    if (type_length == 0)
+        return false;
+
+    const std::size_t name_begin = type_begin + type_length;
+    std::size_t name_end = name_begin;
+    while (name_end < line.size() &&
+           (std::isalnum(static_cast<unsigned char>(line[name_end])) ||
+            line[name_end] == '_'))
+    {
+        ++name_end;
+    }
+    if (name_end == name_begin)
+        return false;
+
+    name = line.substr(name_begin, name_end - name_begin);
+    return true;
+}
+
+std::string PrepareNumericLocals(
+    const std::string& source,
+    std::map<std::string, double>& storage)
+{
+    std::istringstream input(source);
+    std::ostringstream prepared;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        std::size_t type_begin = 0;
+        std::size_t type_length = 0;
+        std::string name;
+        if (FindNumericLocalDeclaration(
+                line, type_begin, type_length, name))
+        {
+            storage.emplace(name, 0.0);
+            line.erase(type_begin, type_length);
+        }
+        prepared << line << '\n';
+    }
+    return prepared.str();
+}
+}
 
 class CxParserExecutionGuard
 {
@@ -225,7 +293,30 @@ bool CxParserRuntimeOwner::ExecuteScript(
         return false;
     }
 
-    if (!m_runtime->CompileCollectedScript(source, reason))
+    if (!m_script_local_values.empty())
+    {
+        reason = "parser runtime must be cleared before executing another script";
+        return false;
+    }
+    struct ScriptLocalValueCleanup
+    {
+        std::map<std::string, double>& values;
+        ~ScriptLocalValueCleanup() { values.clear(); }
+    } cleanup{m_script_local_values};
+
+    const std::string prepared =
+        PrepareNumericLocals(source, m_script_local_values);
+    for (auto& local : m_script_local_values)
+    {
+        if (!DefineExternalDouble(local.first, &local.second, reason))
+        {
+            reason = "failed to bind CxScript local '" + local.first +
+                     "': " + reason;
+            return false;
+        }
+    }
+
+    if (!m_runtime->CompileCollectedScript(prepared, reason))
         return false;
 
     if (!m_runtime->RunCollectedScript(reason))
@@ -285,6 +376,7 @@ void CxParserRuntimeOwner::ClearAll()
 {
     if (m_runtime)
         m_runtime->ClearAll();
+    m_script_local_values.clear();
 }
 
 void CxParserRuntimeOwner::StopRun()

@@ -1,0 +1,22 @@
+Image m_image;
+Findellipse m_ellipse;
+
+m_image.copyFromMat(global_matInput);
+
+int x0 = global_roi_x0;
+int y0 = global_roi_y0;
+int x1 = global_roi_x1;
+int y1 = global_roi_y1;
+
+int gap = global_gap;
+int linegap = global_linegap;
+int threshold = global_threshold;
+int method = global_method;
+
+m_ellipse.setellipse(x0, y0, x1, y1);
+m_ellipse.setgap(gap);
+m_ellipse.setlinegap(linegap);
+m_ellipse.setthre(threshold);
+m_ellipse.setmethod(method);
+
+m_ellipse.measure(&m_image);

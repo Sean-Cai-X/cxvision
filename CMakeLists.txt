@@ -63,6 +63,9 @@ set(CXIMAGE_CORE_SOURCES
   cximage/Findcircle.cpp
   cximage/Findellipse.cpp
   cximage/FindRect.cpp
+  cximage/FindSegmentation.cpp
+  cximage/FindSegmentationOpenCvSmokeBackend.cpp
+  cximage/FindSegmentationEdgeSamBackend.cpp
   cximage/findobject.cpp
   cximage/FastMatch.cpp
   cximage/FastMatchPolicy.cpp

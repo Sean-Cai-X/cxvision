@@ -412,6 +412,7 @@ private:
     ScriptResult m_scriptResult;
     bool m_scriptRunRequested = false;
     bool m_showAllScripts = false;
+    int m_evidenceChainUiSection = 0;
     bool m_showLegacyGpuWork = false;
     bool m_detachablePanels = false;
     bool m_showManualStateTestConsole = true;

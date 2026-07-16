@@ -15,6 +15,8 @@
 
 using namespace std;
 static int iusingtestnum=0;
+static double g_last_fucn4_args[4] = {0.0, 0.0, 0.0, 0.0};
+static int g_last_fucn_i4_args[4] = {0, 0, 0, 0};
 
 /*
   Role: Exercise parser-visible class binding signatures inside regression
@@ -82,6 +84,10 @@ public :
 	}
 	void FUCN4(double adouble ,double bdouble,double cdouble,double ddouble )
 	{
+		g_last_fucn4_args[0] = adouble;
+		g_last_fucn4_args[1] = bdouble;
+		g_last_fucn4_args[2] = cdouble;
+		g_last_fucn4_args[3] = ddouble;
 		cout<<"usingclass FUCN4(PARM1="<<adouble<<",PARM2="<<bdouble<< ",PARM3="<<cdouble<<",PARM4="<<ddouble<<")"<<"\r\n";
 	}
 	void FUCN_I1(int aint)
@@ -98,6 +104,10 @@ public :
 	}
 	void FUCN_I4(int aint,int bint,int cint,int dint )
 	{
+		g_last_fucn_i4_args[0] = aint;
+		g_last_fucn_i4_args[1] = bint;
+		g_last_fucn_i4_args[2] = cint;
+		g_last_fucn_i4_args[3] = dint;
 		cout<<"usingclass FUCN_I4(PARM1="<<aint<<",PARM2="<<bint<<",PARM3="<<cint<<",PARM4="<<dint<<")"<<"\r\n";
 	}
 	void FUCN_I5(int aint,int bint,int cint,int dint,int eint )
@@ -1335,6 +1345,12 @@ namespace mu
 			p.Eval();
 
 			ListFormula(p);
+			if (g_last_fucn4_args[0] != 1.0 || g_last_fucn4_args[1] != 2.0 ||
+				g_last_fucn4_args[2] != 3.0 || g_last_fucn4_args[3] != 4.0)
+			{
+				*m_stream << " Class double 4-arg order failed" << "\r\n";
+				iStat++;
+			}
 
 			p.SetExpr("atestclass.FUCN_I1(1);");
 
@@ -1359,6 +1375,12 @@ namespace mu
 			p.Eval();
 
 			ListFormula(p);
+			if (g_last_fucn_i4_args[0] != 1 || g_last_fucn_i4_args[1] != 2 ||
+				g_last_fucn_i4_args[2] != 3 || g_last_fucn_i4_args[3] != 4)
+			{
+				*m_stream << " Class int 4-arg order failed" << "\r\n";
+				iStat++;
+			}
 
 			p.SetExpr("atestclass.FUCN_I5(1,2,3,4,5);");
 

@@ -40,6 +40,20 @@ bool ParserDebugBridge::RunScript(const std::string& scriptText)
   if (myOwner == nullptr || scriptText.empty()) return false;
   ResetRuntime();
   if (!RebindGlobalInputs()) return false;
+  if (scriptText.find("global_matInput") != std::string::npos)
+  {
+    Image* inputImage = QueryImage("global_matInput");
+    if (inputImage == nullptr)
+    {
+      myLastError = "global_matInput is required by script but is not bound";
+      return false;
+    }
+    if (inputImage->getmat().empty())
+    {
+      myLastError = "global_matInput image is empty";
+      return false;
+    }
+  }
   const std::string prepared = PrepareScript(scriptText);
   return myOwner->ExecuteScript(prepared, myLastError);
 }
@@ -170,6 +184,23 @@ bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
 {
   std::string prepared = scriptText;
+  // CxScript keeps a C/C++-like surface syntax, so users naturally write
+  // tool.measure(&m_image).  The current muParser class-object call path,
+  // however, passes object arguments by object token (m_image), not by C/C++
+  // address-of syntax.  Leaving the ampersand in place can route an invalid
+  // value into void* class methods such as Findline::measure(void*), which is
+  // exactly the kind of crash the Manual Console must prevent.
+  //
+  // Keep the editor text untouched, but normalize the runtime text submitted to
+  // the parser.  This is intentionally local to the debug bridge; it does not
+  // modify source .cxsc files or muParser itself.
+  std::size_t addressOf = 0;
+  while ((addressOf = prepared.find("(&", addressOf)) != std::string::npos)
+  {
+    prepared.erase(addressOf + 1, 1);
+    ++addressOf;
+  }
+
   const std::string source = "global_matInput";
   const std::string runtimeName = "global_matInput";
   std::size_t position = 0;

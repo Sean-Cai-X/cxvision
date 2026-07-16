@@ -391,7 +391,7 @@ namespace mu
                                 break;
                         case Param_double_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pdf4)(m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pdf4)(m_parm[0],m_parm[1],m_parm[2],m_parm[3]);
                                 break;
 
                         case Param_int_1:
@@ -416,7 +416,7 @@ namespace mu
                                 break;
                         case Param_int_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
+                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[0]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[3]));
                                 break;
                         case Param_int_5:
                                 if(m_parm.size()>=5)
@@ -488,7 +488,7 @@ namespace mu
                                 break;
                         case Param_double_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pdf4)(m_parm[3],m_parm[2],m_parm[1],m_parm[0]);
+                                        (m_pclass->*m_pdf4)(m_parm[0],m_parm[1],m_parm[2],m_parm[3]);
                                 break;
 
                         case Param_int_1:
@@ -505,7 +505,7 @@ namespace mu
                                 break;
                         case Param_int_4:
                                 if(m_parm.size()>=4)
-                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[3]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[0]));
+                                        (m_pclass->*m_pif4)(static_cast<int>(m_parm[0]),static_cast<int>(m_parm[1]),static_cast<int>(m_parm[2]),static_cast<int>(m_parm[3]));
                                 break;
                         case Param_int_5:
                                 if(m_parm.size()>=5)

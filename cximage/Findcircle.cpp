@@ -697,13 +697,14 @@ void Findcircle::Measure(Image& image)
         return;
     }
 
-    if (g_pbackimage == nullptr)
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
     {
         m_lastMeasureGeometryDebug.failure_stage =
-            "circle_backimage_null";
+            "circle_scan_workspace_unavailable";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle Measure requires g_pbackimage prepared by debug/runtime environment.";
+            "Findcircle Measure requires an independent ImageManager BackImage workspace.";
 
         return;
     }
@@ -727,6 +728,18 @@ void Findcircle::Measure(Image& image)
 
         m_lastMeasureGeometryDebug.detail =
             "Findcircle scan lines exist, but scan line length is zero.";
+
+        return;
+    }
+
+    if (isize + 5 > g_pbackimage->getHeight() ||
+        iprocessw + 3 > g_pbackimage->getWidth())
+    {
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_scan_workspace_capacity_exceeded";
+
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle Measure skipped because scan geometry exceeds the BackImage workspace.";
 
         return;
     }
@@ -1738,11 +1751,26 @@ void Findcircle::measure(void* pimage)
         return;
     }
 
-    // The Image argument is the authoritative image for this execution.
-    // Keep the same runtime-input semantics as Findline::measure(void*) so
-    // headless/manual/suite callers do not depend on ambient ImageManager
-    // state left by a previous UI session.
-    g_pbackimage = pgetimage;
+    ImageManager::EnsureAlgorithmRuntimeResources(
+        pgetimage->getWidth(),
+        pgetimage->getHeight());
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == pgetimage ||
+        g_pbackimage->getmat().empty())
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        m_lastMeasureGeometryDebug.failure_stage =
+            "circle_scan_workspace_unavailable";
+        m_lastMeasureGeometryDebug.detail =
+            "Findcircle.measure requires an independent ImageManager BackImage workspace.";
+        return;
+    }
 
     if (!EnsureCircleMeasureGeometryReady())
     {

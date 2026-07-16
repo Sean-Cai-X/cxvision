@@ -68,6 +68,15 @@ void RectShape::enumerateHandles(std::vector<CxShapeHandle>& out) const
     out.push_back({CxShapeHandleRole::Corner1, -1, m_points[1], "Corner1"});
     out.push_back({CxShapeHandleRole::Corner2, -1, m_points[2], "Corner2"});
     out.push_back({CxShapeHandleRole::Corner3, -1, m_points[3], "Corner3"});
+    out.push_back({
+        CxShapeHandleRole::Center,
+        -1,
+        {
+            (m_points[0].x + m_points[2].x) * 0.5,
+            (m_points[0].y + m_points[2].y) * 0.5
+        },
+        "C"
+    });
 }
 
 void RectShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y)

@@ -463,18 +463,27 @@ void Findellipse::Measure(Image& image)
         return;//error process
     m_measurepoints.clear();
     int isize = ClampSizeToInt(m_lines.size());
-    if (isize <= 0 || g_pbackimage == nullptr)
+    if (isize <= 0 || g_pbackimage == nullptr ||
+        g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
         return;
-    for (int i = 0; i < isize; i++)
-    {
-        m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
-    }
+
     int ilineslen1 = 0;
 
     if (isize > 0)
         ilineslen1 = m_lines[0].getlinesize();
 
     int iprocessw = ilineslen1;
+
+    if (iprocessw <= 0 ||
+        isize > g_pbackimage->getHeight() ||
+        iprocessw > g_pbackimage->getWidth())
+        return;
+
+    for (int i = 0; i < isize; i++)
+    {
+        m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
+    }
 
     g_pbackimage->setroi(0, 0, iprocessw, isize);
 

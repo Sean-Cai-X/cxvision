@@ -55,7 +55,15 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 
   ImGui::EndChild();
 
-  ImGui::BeginChild("script_editor_text", ImVec2(-1, -1), true);
+  // Keep the script editor as a bounded edit area.  Using (-1, -1) here makes
+  // the multiline editor consume all remaining parent space, so long scripts
+  // visually stretch the Manual State Test Console and push the compiler/result
+  // blocks away.  Long code should scroll inside this child instead.
+  const float editorHeight = ImGui::GetTextLineHeightWithSpacing() * 14.0f;
+  ImGui::BeginChild("script_editor_text",
+                    ImVec2(-1, editorHeight),
+                    true,
+                    ImGuiWindowFlags_HorizontalScrollbar);
   if (InputTextMultilineString(
         "##script_text", context.editor_text, ImVec2(-1, -1)))
   {
@@ -115,14 +123,22 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
           m_parserDebugBridge.SetGlobalInt(input.first, input.second);
       }
 
+      bool imageBound = true;
+      if (!m_imageViewImage.empty())
+        imageBound = m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage);
+      else if (!s_img0.empty())
+        imageBound = m_parserDebugBridge.SetGlobalMatInput(s_img0);
+
       context.run_state = "running";
-      const bool ran = m_parserDebugBridge.RunScript(context.editor_text);
+      const bool ran = imageBound && m_parserDebugBridge.RunScript(context.editor_text);
       context.run_state = ran ? "runtime_finished" : "failed";
       context.debug_status = ran ? "runtime_executed" : "run_failed";
       context.debug_reason = ran
         ? "exact Script Editor text executed through ParserDebugBridge"
-        : ("ParserDebugBridge rejected the Script Editor text: " +
-           m_parserDebugBridge.LastError());
+        : (imageBound
+          ? ("ParserDebugBridge rejected the Script Editor text: " +
+             m_parserDebugBridge.LastError())
+          : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput");
 
       m_scriptResult.source = "manual_console_editor";
       m_scriptResult.script_path = context.loaded_script_path;

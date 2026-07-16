@@ -386,22 +386,15 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
   SemanticNode* node = SelectedNode();
   if (node == nullptr)
   {
-    ImGui::TextDisabled("No node selected");
+    ImGui::TextDisabled("No node selected. Click a flow node first.");
     return;
   }
-  ImGui::Text("Node Detail");
-  ImGui::Text("id: %s", node->id.c_str());
-  ImGui::Text("stage: %s", node->stage.c_str());
-  ImGui::Text("module: %s", node->module.c_str());
-  ImGui::TextWrapped("title: %s", node->title.c_str());
-  ImGui::TextWrapped("script_path: %s", node->script_path.c_str());
-  ImGui::Text("status: %s", node->status.c_str());
-  ImGui::TextWrapped("status_from: %s", node->status_from.empty() ? "(none)" : node->status_from.c_str());
-  ImGui::TextWrapped("reason: %s", node->reason.empty() ? "(none)" : node->reason.c_str());
-  ImGui::TextWrapped("result_ref: %s", node->result_ref.empty() ? "(none)" : node->result_ref.c_str());
-  ImGui::TextWrapped("evidence_ref: %s", node->evidence_ref.empty() ? "(none)" : node->evidence_ref.c_str());
-  ImGui::TextWrapped("issue_entry_ref: %s", node->issue_entry_ref.empty() ? "(none)" : node->issue_entry_ref.c_str());
-  ImGui::Separator();
+
+  ImGui::Text("Selected: %s [%s]  status=%s",
+              node->id.c_str(),
+              node->stage.c_str(),
+              node->status.c_str());
+
   if (ImGui::Button("Bind Catalog Script To Node"))
   {
     action.type = SemanticFlowActionType::BindCatalogScriptToSelectedNode;
@@ -459,9 +452,6 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
     node->evidence_ref.clear();
     node->issue_entry_ref.clear();
   }
-  ImGui::TextWrapped("shared_bound_node_id: %s", m_sharedBoundNodeId.empty() ? "(none)" : m_sharedBoundNodeId.c_str());
-  ImGui::TextWrapped("shared_bound_script_path: %s", m_sharedBoundScriptPath.empty() ? "(none)" : m_sharedBoundScriptPath.c_str());
-  ImGui::TextWrapped("log: %s", m_lastLog.empty() ? "(none)" : m_lastLog.c_str());
 }
 
 SemanticFlowAction SemanticFlowGraph::Draw()
@@ -474,39 +464,61 @@ SemanticFlowAction SemanticFlowGraph::Draw()
     ImGui::End();
     return action;
   }
-  ImGui::TextWrapped("Flow File: %s", m_currentFlowPath.empty() ? "(none)" : m_currentFlowPath.c_str());
-  ImGui::TextWrapped("Current working dir: %s", m_currentWorkingDir.empty() ? "(unknown)" : m_currentWorkingDir.c_str());
-  ImGui::TextWrapped("Default demo path: %s", m_demoRelativePath.c_str());
-  ImGui::TextWrapped("Resolved demo path: %s", m_resolvedDemoPath.empty() ? "(none)" : m_resolvedDemoPath.c_str());
-  ImGui::Text("File exists: %s", m_demoFileExists ? "true" : "false");
-  ImGui::Text("Load status: %s", m_loadStatus.c_str());
-  ImGui::TextWrapped("Reason: %s", m_loadReason.c_str());
-  ImGui::Text("Node count: %d", static_cast<int>(m_flow.nodes.size()));
-  ImGui::Text("Edge count: %d", static_cast<int>(m_flow.edges.size()));
-  ImGui::Text("Runtime Debug Summary");
-  ImGui::Text("current_runtime_node: PENDING (runtime variable unavailable)");
-  ImGui::Text("current_runtime_connect: PENDING (runtime variable unavailable)");
-  ImGui::Text("doutputvalue: %s", m_runtimeDoutputValue.c_str());
-  ImGui::Text("current_status: %s", m_runtimeCurrentStatus.c_str());
-  ImGui::Text("runtime_object_count: %d", m_runtimeObjectCount);
-  ImGui::TextWrapped("last_runtime_reason: %s", m_lastRuntimeReason.c_str());
-  if (ImGui::Button("Load Demo Flow")) LoadDemoFlow();
-  ImGui::SameLine();
-  if (ImGui::Button("Reload Flow") && !m_resolvedDemoPath.empty()) LoadDemoFlow();
-  ImGui::SameLine();
-  if (ImGui::Button("Clear Flow")) ClearFlow();
-  ImGui::Text("flow: %s", m_flow.id.empty() ? "(none)" : m_flow.id.c_str());
-  ImGui::TextWrapped("description: %s", m_flow.description.empty() ? "(none)" : m_flow.description.c_str());
-  if (!m_flow.edges.empty())
-  {
-    ImGui::Text("Connections:");
-    for (const SemanticEdge& edge : m_flow.edges)
-      ImGui::BulletText("%s -> %s", edge.from.c_str(), edge.to.c_str());
-  }
-  ImGui::Separator();
+
   DrawGraphCanvas(action);
   ImGui::Separator();
   DrawNodeDetail(action);
+
+  if (ImGui::CollapsingHeader("Advanced Flow Debug"))
+  {
+    ImGui::TextWrapped("Flow File: %s", m_currentFlowPath.empty() ? "(none)" : m_currentFlowPath.c_str());
+    ImGui::TextWrapped("Current working dir: %s", m_currentWorkingDir.empty() ? "(unknown)" : m_currentWorkingDir.c_str());
+    ImGui::TextWrapped("Default demo path: %s", m_demoRelativePath.c_str());
+    ImGui::TextWrapped("Resolved demo path: %s", m_resolvedDemoPath.empty() ? "(none)" : m_resolvedDemoPath.c_str());
+    ImGui::Text("File exists: %s", m_demoFileExists ? "true" : "false");
+    ImGui::Text("Load status: %s", m_loadStatus.c_str());
+    ImGui::TextWrapped("Reason: %s", m_loadReason.c_str());
+    ImGui::Text("Node count: %d", static_cast<int>(m_flow.nodes.size()));
+    ImGui::Text("Edge count: %d", static_cast<int>(m_flow.edges.size()));
+    ImGui::Text("Runtime Debug Summary");
+    ImGui::Text("doutputvalue: %s", m_runtimeDoutputValue.c_str());
+    ImGui::Text("current_status: %s", m_runtimeCurrentStatus.c_str());
+    ImGui::Text("runtime_object_count: %d", m_runtimeObjectCount);
+    ImGui::TextWrapped("last_runtime_reason: %s", m_lastRuntimeReason.c_str());
+    if (ImGui::Button("Load Demo Flow")) LoadDemoFlow();
+    ImGui::SameLine();
+    if (ImGui::Button("Reload Flow") && !m_resolvedDemoPath.empty()) LoadDemoFlow();
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Flow")) ClearFlow();
+    ImGui::Text("flow: %s", m_flow.id.empty() ? "(none)" : m_flow.id.c_str());
+    ImGui::TextWrapped("description: %s", m_flow.description.empty() ? "(none)" : m_flow.description.c_str());
+    if (!m_flow.edges.empty())
+    {
+      ImGui::Text("Connections:");
+      for (const SemanticEdge& edge : m_flow.edges)
+        ImGui::BulletText("%s -> %s", edge.from.c_str(), edge.to.c_str());
+    }
+    ImGui::Separator();
+    SemanticNode* node = SelectedNode();
+    if (node != nullptr)
+    {
+      ImGui::Text("Node Detail");
+      ImGui::Text("id: %s", node->id.c_str());
+      ImGui::Text("stage: %s", node->stage.c_str());
+      ImGui::Text("module: %s", node->module.c_str());
+      ImGui::TextWrapped("title: %s", node->title.c_str());
+      ImGui::TextWrapped("script_path: %s", node->script_path.c_str());
+      ImGui::TextWrapped("status_from: %s", node->status_from.empty() ? "(none)" : node->status_from.c_str());
+      ImGui::TextWrapped("reason: %s", node->reason.empty() ? "(none)" : node->reason.c_str());
+      ImGui::TextWrapped("result_ref: %s", node->result_ref.empty() ? "(none)" : node->result_ref.c_str());
+      ImGui::TextWrapped("evidence_ref: %s", node->evidence_ref.empty() ? "(none)" : node->evidence_ref.c_str());
+      ImGui::TextWrapped("issue_entry_ref: %s", node->issue_entry_ref.empty() ? "(none)" : node->issue_entry_ref.c_str());
+    }
+    ImGui::TextWrapped("shared_bound_node_id: %s", m_sharedBoundNodeId.empty() ? "(none)" : m_sharedBoundNodeId.c_str());
+    ImGui::TextWrapped("shared_bound_script_path: %s", m_sharedBoundScriptPath.empty() ? "(none)" : m_sharedBoundScriptPath.c_str());
+    ImGui::TextWrapped("log: %s", m_lastLog.empty() ? "(none)" : m_lastLog.c_str());
+  }
+
   ImGui::End();
   return action;
 }

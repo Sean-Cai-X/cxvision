@@ -10,6 +10,10 @@ namespace mu
 
 class Findline;
 class Findcircle;
+class Findellipse;
+class FindRect;
+class FindSegmentation;
+class fastmatch;
 
 struct CxScriptToolResultCapture
 {
@@ -29,6 +33,8 @@ struct CxScriptToolResultCapture
     int valid_points_count = 0;
     bool has_fit_line = false;
     bool has_fit_circle = false;
+    bool has_fit_ellipse = false;
+    bool has_result_rect = false;
 
     double avgdist = 0.0;
 
@@ -41,6 +47,42 @@ struct CxScriptToolResultCapture
     double circle_cy = 0.0;
     double circle_radius = 0.0;
 
+    int result_rect_count = 0;
+
+    int model_point_count = 0;
+    int fastmatch_model_width = 0;
+    int fastmatch_model_height = 0;
+    int fastmatch_pattern_a_count = 0;
+    int fastmatch_pattern_b_count = 0;
+    double fastmatch_pattern_a_x = 0.0;
+    double fastmatch_pattern_a_y = 0.0;
+    double fastmatch_pattern_a_width = 0.0;
+    double fastmatch_pattern_a_height = 0.0;
+    double fastmatch_pattern_b_x = 0.0;
+    double fastmatch_pattern_b_y = 0.0;
+    double fastmatch_pattern_b_width = 0.0;
+    double fastmatch_pattern_b_height = 0.0;
+    int candidate_count = 0;
+    double best_score = 0.0;
+    bool has_result_box = false;
+    bool has_best_result = false;
+    int fastmatch_match_call_count = 0;
+    int fastmatch_match_ab_call_count = 0;
+    int fastmatch_match_sample_ab_call_count = 0;
+    int fastmatch_match_last_stage = 0;
+    int fastmatch_match_image_width = 0;
+    int fastmatch_match_image_height = 0;
+    int fastmatch_match_rect_x0 = 0;
+    int fastmatch_match_rect_y0 = 0;
+    int fastmatch_match_rect_x1 = 0;
+    int fastmatch_match_rect_y1 = 0;
+    int fastmatch_raw_probe_count = 0;
+    int fastmatch_raw_threshold_hit_count = 0;
+    int fastmatch_result_to_list_count = 0;
+    int fastmatch_candidate_insert_count = 0;
+    int fastmatch_candidate_replace_count = 0;
+    int fastmatch_candidate_reject_count = 0;
+
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
     int object_filter_borw = 0;
@@ -51,6 +93,18 @@ struct CxScriptToolResultCapture
     int fit_filter_rejected_count = 0;
     double fit_filter_sigma = 0.0;
     double fit_filter_threshold = 0.0;
+
+    bool findrect_seed_valid = false;
+    bool findrect_top_valid = false;
+    bool findrect_bottom_valid = false;
+    bool findrect_left_valid = false;
+    bool findrect_right_valid = false;
+    int findrect_top_points = 0;
+    int findrect_bottom_points = 0;
+    int findrect_left_points = 0;
+    int findrect_right_points = 0;
+    double findrect_coarse_score = 0.0;
+    double findrect_refine_score = 0.0;
 
     std::string failure_stage;
     std::string reason;
@@ -70,6 +124,26 @@ bool CaptureFindlineResult(
 
 bool CaptureFindcircleResult(
     class Findcircle& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureFindellipseResult(
+    class Findellipse& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureFindRectResult(
+    class FindRect& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureFastMatchResult(
+    class fastmatch& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureFindSegmentationResult(
+    class FindSegmentation& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 

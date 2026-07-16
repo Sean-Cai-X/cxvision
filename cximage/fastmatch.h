@@ -55,8 +55,20 @@ public:
 
     void ABtoShape(std::vector<cv::Point2f>& points);
 
-    std::vector<cv::Point2f> getmodel() const;
+    std::vector<cv::Point2f> getmodel();
     int getmodelpointcount();
+    int getmodelwidth() const { return m_imodelwith; }
+    int getmodelheight() const { return m_imodelheigh; }
+    int getpatternapointcount() const;
+    int getpatternbpointcount() const;
+    double getpatternax() const;
+    double getpatternay() const;
+    double getpatternawidth() const;
+    double getpatternaheight() const;
+    double getpatternbx() const;
+    double getpatternby() const;
+    double getpatternbwidth() const;
+    double getpatternbheight() const;
 
     int ABpatternsize();
     void loadrotatemodelfile(const char* pchar);
@@ -145,6 +157,8 @@ public:
 
     void setmatchrectnum(int inum);
     void setmatchrect(int ix, int iy, int iw, int ih);
+    void setrectxywh(int ih, int iw, int iy, int ix);
+    void setmatchrectxywh(int ih, int iw, int iy, int ix);
     void setexpectedrect(double x0, double y0, double x1, double y1);
 
     void setmultimatchrect(int inum, int ix, int iy, int iw, int ih);
@@ -154,6 +168,16 @@ public:
     void clearmatchmask();
     int getrawmatchprobecount() const;
     int getrawmatchthresholdhitcount() const;
+    int getmatchcallcount() const;
+    int getmatchabcallcount() const;
+    int getmatchsampleabcallcount() const;
+    int getmatchlaststage() const;
+    int getmatchimagewidth() const;
+    int getmatchimageheight() const;
+    int getmatchrectx0() const;
+    int getmatchrecty0() const;
+    int getmatchrectx1() const;
+    int getmatchrecty1() const;
     int getresulttolistcallcount() const;
     int getresultcandidateinsertcount() const;
     int getresultcandidatereplacecount() const;
@@ -404,6 +428,16 @@ private:
     gp_Pnt m_imaxpointkey;
     int m_rawmatch_probe_count;
     int m_rawmatch_threshold_hit_count;
+    int m_match_call_count = 0;
+    int m_matchab_call_count = 0;
+    int m_matchsampleab_call_count = 0;
+    int m_match_last_stage = 0;
+    int m_match_debug_image_width = 0;
+    int m_match_debug_image_height = 0;
+    int m_match_debug_rect_x0 = 0;
+    int m_match_debug_rect_y0 = 0;
+    int m_match_debug_rect_x1 = 0;
+    int m_match_debug_rect_y1 = 0;
     int m_resulttolist_call_count;
     int m_resultcandidate_insert_count;
     int m_resultcandidate_replace_count;

@@ -506,9 +506,16 @@ namespace mu
             m_parser.DefineClass("FindRect", pfindrect);
             m_parser.DefineClassFun("FindRect", pfindrect, "setrect", &FindRect::setrect);
             m_parser.DefineClassFun("FindRect", pfindrect, "setthre", &FindRect::setthre);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setcompgap", &FindRect::setcomparegap);
             m_parser.DefineClassFun("FindRect", pfindrect, "setlinegap", &FindRect::setlinegap);
             m_parser.DefineClassFun("FindRect", pfindrect, "setmethod", &FindRect::setmethod);
             m_parser.DefineClassFun("FindRect", pfindrect, "setgauge", &FindRect::setgauge);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setfindsetting", &FindRect::setfindsetting);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setfilter", &FindRect::setfilter);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setminmaxarea", &FindRect::setminmaxarea);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setminmaxwh", &FindRect::setminmaxwh);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setpolygonepsilon", &FindRect::setpolygonepsilon);
+            m_parser.DefineClassFun("FindRect", pfindrect, "setfillratio", &FindRect::setfillratio);
             m_parser.DefineClassFun("FindRect", pfindrect, "measure", &FindRect::measure);
             m_parser.DefineClassFun("FindRect", pfindrect, "clear", &FindRect::clear);
 
@@ -586,16 +593,18 @@ namespace mu
             m_parser.DefineClassFun("Findobject", pfobj, "setobjectgrid", &FindObject::setobjectgrid);
             m_parser.DefineClassFun("Findobject", pfobj, "objectsort", &FindObject::objectsort);
 
-            // FindSegmentation registration disabled for crash debugging
-            // FindSegmentation* pfindsegmentation = nullptr;
-            // m_parser.DefineClass("FindSegmentation", pfindsegmentation);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setthreshold", &FindSegmentation::setthreshold);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpromptrect", &FindSegmentation::setpromptrect);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpoint", &FindSegmentation::setpoint);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode", &FindSegmentation::setmode);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "status_code", &FindSegmentation::status_code);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_contour_count", &FindSegmentation::get_contour_count);
-            // m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_primary_area", &FindSegmentation::get_primary_area);
+            FindSegmentation* pfindsegmentation = nullptr;
+            m_parser.DefineClass("FindSegmentation", pfindsegmentation);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setthreshold", &FindSegmentation::setthreshold);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpromptrect", &FindSegmentation::setpromptrect);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpoint", &FindSegmentation::setpoint);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode", &FindSegmentation::setmode);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "segment", &FindSegmentation::segment);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "extractboundary", &FindSegmentation::extractboundary);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "buildoverlay", &FindSegmentation::buildoverlay);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "status_code", &FindSegmentation::status_code);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_contour_count", &FindSegmentation::get_contour_count);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_primary_area", &FindSegmentation::get_primary_area);
             m_parser.DefineClassFun("Findobject", pfobj, "edge", &FindObject::Edge);
             m_parser.DefineClassFun("Findobject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);
             m_parser.DefineClassFun("Findobject", pfobj, "setrelmatch", &FindObject::setrelationrectfrom_matchresult);
@@ -618,6 +627,7 @@ namespace mu
             m_parser.DefineClass("Match", pfastmatch);
             m_parser.DefineClass("fastmatch", pfastmatch);
             m_parser.DefineClassFun("Match", pfastmatch, "setrect", &fastmatch::setrect);
+            m_parser.DefineClassFun("Match", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
             m_parser.DefineClassFun("Match", pfastmatch, "Show", &fastmatch::setshow);
             m_parser.DefineClassFun("Match", pfastmatch, "learn", &fastmatch::learn);
             m_parser.DefineClassFun("Match", pfastmatch, "setcompgap", &fastmatch::setcomparegap);
@@ -637,6 +647,7 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "match", &fastmatch::match);
             m_parser.DefineClassFun("Match", pfastmatch, "matchmore", &fastmatch::matchmore);
             m_parser.DefineClassFun("Match", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
+            m_parser.DefineClassFun("Match", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
             m_parser.DefineClassFun("Match", pfastmatch, "setminscore", &fastmatch::setminscore);
             m_parser.DefineClassFun("Match", pfastmatch, "matchstepgap", &fastmatch::matchstepgap);
             m_parser.DefineClassFun("Match", pfastmatch, "patternrootgrid", &fastmatch::patternrootgrid);
@@ -705,10 +716,12 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "getresultcentpoints", &fastmatch::getresultcentpoints);
             m_parser.DefineClassFun("Match", pfastmatch, "getshape", &fastmatch::getshape);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "setrect", &fastmatch::setrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "setthre", &fastmatch::setthre);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "setlinegap", &fastmatch::setlinegap);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "learn", &fastmatch::learn);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "match", &fastmatch::match);
             m_parser.DefineClassFun("fastmatch", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
 
@@ -1439,10 +1452,17 @@ namespace mu
         }
         catch(mu::Parser::exception_type &e)
         {
+            const string message = e.GetMsg();
+            if (message.find("stack is empty") != string::npos)
+            {
+                *m_stream << "Result:<void>\r\n";
+                *m_stream << "================Build: 1 OK , 0 Fail ============" << "\r\n";
+                return 1;
+            }
 
             *m_stream  << "\nError: ";
             //*m_stream  << "------\r\n";
-            *m_stream  << " Message:  " << e.GetMsg() << "\r\n";
+            *m_stream  << " Message:  " << message << "\r\n";
             //*m_stream  << " Formula:  " << e.GetExpr() << "\r\n";
             *m_stream  << " Token: " << e.GetToken() ;// << "\r\n";
             *m_stream  << " Position: " << (int)e.GetPos() << "\r\n";

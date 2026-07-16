@@ -237,21 +237,10 @@ inline void RegisterPendingDirectCxScriptBindings(mu::Parser& parser)
   EnsmallenMetricBinding* metric = nullptr; parser.DefineClass("EnsmallenMetric", metric);
   EnsmallenHistoryBinding* history = nullptr; parser.DefineClass("EnsmallenHistory", history);
 
-  FindSegmentationBinding* find_segmentation = nullptr;
-  parser.DefineClass("FindSegmentation", find_segmentation);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setbackend", &FindSegmentationBinding::setbackend);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setmodel", &FindSegmentationBinding::setmodel);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setdevice", &FindSegmentationBinding::setdevice);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setthreshold", &FindSegmentationBinding::setthreshold);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setpromptrect", &FindSegmentationBinding::setpromptrect);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setpoint", &FindSegmentationBinding::setpoint);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "setmode", &FindSegmentationBinding::setmode);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "segment", &FindSegmentationBinding::segment);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "extractboundary", &FindSegmentationBinding::extractboundary);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "buildoverlay", &FindSegmentationBinding::buildoverlay);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "status_code", &FindSegmentationBinding::status_code);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "get_contour_count", &FindSegmentationBinding::get_contour_count);
-  parser.DefineClassFun("FindSegmentation", find_segmentation, "get_primary_area", &FindSegmentationBinding::get_primary_area);
+  // FindSegmentation pending binding is intentionally not registered here.
+  // The real cximage FindSegmentation backend and AutoBoundary ShapeElement
+  // tool are available, but parser binding must be enabled in a separate
+  // reviewed step so it cannot break the shared Parser initialization path.
 }
 
 #endif

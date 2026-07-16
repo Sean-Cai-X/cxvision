@@ -1,6 +1,13 @@
 #include "FindSegmentation.h"
 #include "FindSegmentationEdgeSamBackend.h"
 #include "FindSegmentationOpenCvSmokeBackend.h"
+#include "ImageAnnotationLayer.h"
+#include "PolylineShape.h"
+#include "RectShape.h"
+#include "CircleShape.h"
+
+#include <iostream>
+#include <memory>
 
 FindSegmentation::FindSegmentation()
 {
@@ -169,4 +176,83 @@ int FindSegmentation::get_contour_count()
 double FindSegmentation::get_primary_area()
 {
     return m_result.primary_area;
+}
+
+void FindSegmentation::PublishDisplayShapes(
+    ICxShapeSink& sink,
+    const std::string& owner_ref) const
+{
+    if (m_has_rect)
+    {
+        auto rect = std::make_unique<RectShape>();
+        rect->setRect(m_x0, m_y0, m_x1, m_y1);
+        sink.UpsertShape(
+            owner_ref + ".prompt_rect",
+            "FindSegmentation",
+            owner_ref,
+            "setpromptrect",
+            "roi",
+            true,
+            false,
+            std::move(rect));
+    }
+
+    if (m_has_point)
+    {
+        auto point = std::make_unique<PointsShape>();
+        point->addpoint(gp_Pnt(m_px, m_py, 0.0));
+        sink.UpsertShape(
+            owner_ref + ".prompt_point",
+            "FindSegmentation",
+            owner_ref,
+            "setpoint",
+            "prompt_point",
+            true,
+            false,
+            std::move(point));
+    }
+
+    if (m_result.contours.empty())
+        return;
+
+    const FindSegmentationContour* best = nullptr;
+    for (const FindSegmentationContour& contour : m_result.contours)
+    {
+        if (best == nullptr || contour.area > best->area)
+            best = &contour;
+    }
+
+    if (best == nullptr || best->points.empty())
+        return;
+
+    auto polyline = std::make_unique<PolylineShape>();
+    for (const cv::Point& p : best->points)
+        polyline->addPoint(p.x, p.y);
+    polyline->close(true);
+    sink.UpsertShape(
+        owner_ref + ".boundary_polyline",
+        "FindSegmentation",
+        owner_ref,
+        "boundary",
+        "boundary",
+        true,
+        true,
+        std::move(polyline));
+
+    cv::Rect bbox = cv::boundingRect(best->points);
+    auto rect = std::make_unique<RectShape>();
+    rect->setRect(
+        bbox.x,
+        bbox.y,
+        bbox.x + bbox.width,
+        bbox.y + bbox.height);
+    sink.UpsertShape(
+        owner_ref + ".boundary_bbox",
+        "FindSegmentation",
+        owner_ref,
+        "boundary_bbox",
+        "boundary_bbox",
+        true,
+        true,
+        std::move(rect));
 }

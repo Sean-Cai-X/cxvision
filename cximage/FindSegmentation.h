@@ -6,6 +6,8 @@
 
 #include <string>
 
+class ICxShapeSink;
+
 class FindSegmentation
 {
 public:
@@ -32,6 +34,7 @@ public:
     int status_code();
     int get_contour_count();
     double get_primary_area();
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
 
 public:
     std::string m_status;

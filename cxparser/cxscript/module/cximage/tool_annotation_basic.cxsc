@@ -8,6 +8,16 @@ CxAnnotationTool_setinteraction("click_to_create");
 CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
+CxAnnotationTool_add("auto_boundary_edgesam");
+CxAnnotationTool_setlabel("Auto Boundary / EdgeSam");
+CxAnnotationTool_setshape("AutoBoundary");
+CxAnnotationTool_setrole("auto_boundary_request");
+CxAnnotationTool_setinteraction("auto_segmentation");
+CxAnnotationTool_setownertool("FindSegmentation");
+CxAnnotationTool_setownerbinding("setpromptrect");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
 CxAnnotationTool_add("roi_rect");
 CxAnnotationTool_setlabel("Rect");
 CxAnnotationTool_setshape("RectShape");

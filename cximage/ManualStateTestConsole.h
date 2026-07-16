@@ -76,6 +76,12 @@ struct RuntimeObjectView
     bool has_circle = false;
     float circle_cx = 0.0f;
     float circle_cy = 0.0f;
+    // The third and fourth setcircle() arguments are a boundary point,
+    // not an inner radius / radius pair.  Keep explicit coordinates for
+    // ManualGaugeState synchronization; the legacy fields below remain for
+    // existing diagnostic/report code.
+    float circle_px = 0.0f;
+    float circle_py = 0.0f;
     float circle_inner = 0.0f;
     float circle_radius = 0.0f;
 

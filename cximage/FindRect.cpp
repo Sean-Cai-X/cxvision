@@ -384,6 +384,18 @@ void FindRect::clear()
 {
     m_resultrects.clear();
     m_lastresult = RectLearnResult();
+    m_last_failure_stage.clear();
+    m_debug_seed_valid = false;
+    m_debug_top_valid = false;
+    m_debug_bottom_valid = false;
+    m_debug_left_valid = false;
+    m_debug_right_valid = false;
+    m_debug_top_points = 0;
+    m_debug_bottom_points = 0;
+    m_debug_left_points = 0;
+    m_debug_right_points = 0;
+    m_debug_coarse_score = 0.0;
+    m_debug_refine_score = 0.0;
 }
 
 void FindRect::setshow(int ishow)
@@ -525,30 +537,60 @@ void FindRect::Measure(Image& image)
 {
     m_resultrects.clear();
     m_lastresult = RectLearnResult();
+    m_last_failure_stage.clear();
+    m_debug_seed_valid = false;
+    m_debug_top_valid = false;
+    m_debug_bottom_valid = false;
+    m_debug_left_valid = false;
+    m_debug_right_valid = false;
+    m_debug_top_points = 0;
+    m_debug_bottom_points = 0;
+    m_debug_left_points = 0;
+    m_debug_right_points = 0;
+    m_debug_coarse_score = 0.0;
+    m_debug_refine_score = 0.0;
     const gp_Rectangle roi_rect = rect();
     const int roi_x = std::max(0, static_cast<int>(roi_rect.TopLeft().X()));
     const int roi_y = std::max(0, static_cast<int>(roi_rect.TopLeft().Y()));
     const int roi_w = std::max(0, static_cast<int>(std::round(std::fabs(roi_rect.Width()))));
     const int roi_h = std::max(0, static_cast<int>(std::round(std::fabs(roi_rect.Height()))));
     if (roi_w <= 0 || roi_h <= 0)
+    {
+        m_last_failure_stage = "roi_empty";
         return;
+    }
     if (roi_x > image.getWidth() || roi_y > image.getHeight() || roi_w > image.getWidth() - roi_x || roi_h > image.getHeight() - roi_y)
+    {
+        m_last_failure_stage = "roi_out_of_image";
         return;
+    }
 
     RectLearnResult coarse_result;
     if (!LearnRectOnce(image, roi_rect, coarse_result))
+    {
+        if (m_last_failure_stage.empty())
+            m_last_failure_stage = "coarse_rect";
         return;
+    }
+    m_debug_coarse_score = coarse_result.score;
 
     RectLearnResult refined_result;
     if (RefineRectOnce(image, coarse_result.rect, refined_result) && refined_result.score >= coarse_result.score)
+    {
         coarse_result = refined_result;
+        m_debug_refine_score = refined_result.score;
+    }
 
     const double area = NonNegativeOr(std::fabs(coarse_result.rect.Width() * coarse_result.rect.Height()));
     if (area < m_iminarea || area > m_imaxarea)
+    {
+        m_last_failure_stage = "area_reject";
         return;
+    }
 
     m_resultrects.addrect(coarse_result.rect);
     m_lastresult = coarse_result;
+    m_last_failure_stage.clear();
 }
 
 bool FindRect::LearnRectOnce(Image& image, const gp_Rectangle& working_rect, RectLearnResult& result)
@@ -556,12 +598,16 @@ bool FindRect::LearnRectOnce(Image& image, const gp_Rectangle& working_rect, Rec
     result = RectLearnResult();
     const gp_Rectangle seed_rect = NormalizeRectangle(EstimateSeedRect(image, working_rect, m_ithreshold));
     result.seed_rect = seed_rect;
+    m_debug_seed_valid = HasPositiveArea(seed_rect);
     const int working_x = std::max(0, static_cast<int>(std::round(seed_rect.TopLeft().X())));
     const int working_y = std::max(0, static_cast<int>(std::round(seed_rect.TopLeft().Y())));
     const int working_w = std::max(0, static_cast<int>(std::round(std::fabs(seed_rect.Width()))));
     const int working_h = std::max(0, static_cast<int>(std::round(std::fabs(seed_rect.Height()))));
     if (working_w <= 0 || working_h <= 0)
+    {
+        m_last_failure_stage = "seed_empty";
         return false;
+    }
 
     result.gauge = SelectGauge(seed_rect, m_igauge);
     const int horizontal_h = std::max(result.gauge, std::min(working_h, result.gauge * 2));
@@ -581,42 +627,91 @@ bool FindRect::LearnRectOnce(Image& image, const gp_Rectangle& working_rect, Rec
                         m_ifindset, m_ifilterborw, static_cast<int>(m_ifiltermin), static_cast<int>(m_ifiltermax), result.gauge);
 
     if (!MeasureEdgeFinder(m_topfinder, image, result.top))
+    {
+        m_debug_top_valid = false;
+        m_debug_top_points = result.top.line.point_count;
+        m_last_failure_stage = "top_edge";
         return false;
+    }
+    m_debug_top_valid = result.top.valid;
+    m_debug_top_points = result.top.line.point_count;
     if (!MeasureEdgeFinder(m_bottomfinder, image, result.bottom))
+    {
+        m_debug_bottom_valid = false;
+        m_debug_bottom_points = result.bottom.line.point_count;
+        m_last_failure_stage = "bottom_edge";
         return false;
+    }
+    m_debug_bottom_valid = result.bottom.valid;
+    m_debug_bottom_points = result.bottom.line.point_count;
     if (!MeasureEdgeFinder(m_leftfinder, image, result.left))
+    {
+        m_debug_left_valid = false;
+        m_debug_left_points = result.left.line.point_count;
+        m_last_failure_stage = "left_edge";
         return false;
+    }
+    m_debug_left_valid = result.left.valid;
+    m_debug_left_points = result.left.line.point_count;
     if (!MeasureEdgeFinder(m_rightfinder, image, result.right))
+    {
+        m_debug_right_valid = false;
+        m_debug_right_points = result.right.line.point_count;
+        m_last_failure_stage = "right_edge";
         return false;
+    }
+    m_debug_right_valid = result.right.valid;
+    m_debug_right_points = result.right.line.point_count;
 
     gp_Pnt top_left;
     gp_Pnt top_right;
     gp_Pnt bottom_left;
     gp_Pnt bottom_right;
     if (!IntersectLines(ToFittedLine(result.top.line), ToFittedLine(result.left.line), top_left))
+    {
+        m_last_failure_stage = "intersect_top_left";
         return false;
+    }
     if (!IntersectLines(ToFittedLine(result.top.line), ToFittedLine(result.right.line), top_right))
+    {
+        m_last_failure_stage = "intersect_top_right";
         return false;
+    }
     if (!IntersectLines(ToFittedLine(result.bottom.line), ToFittedLine(result.left.line), bottom_left))
+    {
+        m_last_failure_stage = "intersect_bottom_left";
         return false;
+    }
     if (!IntersectLines(ToFittedLine(result.bottom.line), ToFittedLine(result.right.line), bottom_right))
+    {
+        m_last_failure_stage = "intersect_bottom_right";
         return false;
+    }
 
     const double min_x = std::min(std::min(top_left.X(), top_right.X()), std::min(bottom_left.X(), bottom_right.X()));
     const double max_x = std::max(std::max(top_left.X(), top_right.X()), std::max(bottom_left.X(), bottom_right.X()));
     const double min_y = std::min(std::min(top_left.Y(), top_right.Y()), std::min(bottom_left.Y(), bottom_right.Y()));
     const double max_y = std::max(std::max(top_left.Y(), top_right.Y()), std::max(bottom_left.Y(), bottom_right.Y()));
     if ((max_x - min_x) < m_iminobjw || (max_x - min_x) > m_imaxobjw)
+    {
+        m_last_failure_stage = "width_reject";
         return false;
+    }
     if ((max_y - min_y) < m_iminobjh || (max_y - min_y) > m_imaxobjh)
+    {
+        m_last_failure_stage = "height_reject";
         return false;
+    }
 
     result.valid = true;
     const gp_Rectangle learned_rect(gp_Pnt(min_x, min_y, 0), gp_Pnt(max_x, max_y, 0));
     result.rect = MergeRectWithSeed(learned_rect, seed_rect);
     result.score = ComputeRectScore(result);
     if (!std::isfinite(result.score))
+    {
+        m_last_failure_stage = "score_invalid";
         return false;
+    }
     return true;
 }
 

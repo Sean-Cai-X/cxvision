@@ -47,6 +47,18 @@ public:
     gp_Rectangle getresultrect(int inum) const;
     int getresultobjsnum() const;
     cxgeom::CxSurfaceElement makeresultelement(int inum, int entity_id) const;
+    const char* getfailurestage() const { return m_last_failure_stage.c_str(); }
+    int getdebugseedvalid() const { return m_debug_seed_valid ? 1 : 0; }
+    int getdebugtopvalid() const { return m_debug_top_valid ? 1 : 0; }
+    int getdebugbottomvalid() const { return m_debug_bottom_valid ? 1 : 0; }
+    int getdebugleftvalid() const { return m_debug_left_valid ? 1 : 0; }
+    int getdebugrightvalid() const { return m_debug_right_valid ? 1 : 0; }
+    int getdebugtoppoints() const { return m_debug_top_points; }
+    int getdebugbottompoints() const { return m_debug_bottom_points; }
+    int getdebugleftpoints() const { return m_debug_left_points; }
+    int getdebugrightpoints() const { return m_debug_right_points; }
+    double getdebugcoarsescore() const { return m_debug_coarse_score; }
+    double getdebugrefinescore() const { return m_debug_refine_score; }
 
     bool hasresult() const
     {
@@ -93,6 +105,18 @@ private:
 
     RectsShape m_resultrects;
     RectLearnResult m_lastresult;
+    std::string m_last_failure_stage;
+    bool m_debug_seed_valid = false;
+    bool m_debug_top_valid = false;
+    bool m_debug_bottom_valid = false;
+    bool m_debug_left_valid = false;
+    bool m_debug_right_valid = false;
+    int m_debug_top_points = 0;
+    int m_debug_bottom_points = 0;
+    int m_debug_left_points = 0;
+    int m_debug_right_points = 0;
+    double m_debug_coarse_score = 0.0;
+    double m_debug_refine_score = 0.0;
 
     bool m_has_rotated_rect = false;
     double m_rotated_cx = 0.0;

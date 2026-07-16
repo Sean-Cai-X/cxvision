@@ -39,6 +39,7 @@ enum class ImageToolMode
   LineCreate,
   RectCreate,
   CircleCreate,
+  EllipseCreate,
   PolylineCreate,
   AutoBoundary,
   AttachToScript

@@ -53,6 +53,17 @@ std::unique_ptr<ShapeBase> CreateInitialShapeForTool(
         return shape;
     }
 
+    if (tool.shape_type == "AutoBoundary")
+    {
+        auto shape = std::make_unique<RectShape>();
+        if (points.size() >= 2)
+            shape->setRect(points[0].x, points[0].y, points[1].x, points[1].y);
+        else if (!points.empty())
+            shape->setRect(points[0].x - 40.0, points[0].y - 40.0,
+                           points[0].x + 40.0, points[0].y + 40.0);
+        return shape;
+    }
+
     if (tool.shape_type == "CircleShape")
     {
         if (points.size() >= 2)
@@ -445,6 +456,7 @@ CxShapeElement& ImageAnnotationLayer::CreateFromTool(
     CxShapeElement& element = myShapeElements.back();
     element.id = myNextId++;
     element.ref = tool.name + "_" + std::to_string(element.id);
+    element.stable_ref = element.ref;
     element.tool_id = tool.name;
     element.owner_type = tool.owner_tool;
     element.owner_binding = tool.owner_binding;
@@ -493,14 +505,14 @@ CxShapeHitResult ImageAnnotationLayer::HitTest(double image_x, double image_y, d
     for (int i = 0; i < static_cast<int>(myShapeElements.size()); ++i)
     {
         auto& element = myShapeElements[i];
-        if (!element.visible || !element.editable || !element.shape)
+        if (!element.visible || !element.shape)
             continue;
 
         CxShapeHit hit = element.shape->hitTest(image_x, image_y, tolerance);
         if (!hit.hit)
             continue;
 
-        const int priority = HandlePriority(hit.role);
+        const int priority = HandlePriority(hit.role) + (element.editable ? 1000 : 0);
         if (priority > max_priority ||
             (priority == max_priority && hit.distance < min_distance))
         {

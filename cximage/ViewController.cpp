@@ -1,6 +1,7 @@
 #include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include "ManualConsoleGauge.h"
+#include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
 #include <glad/glad.h>
 
@@ -550,7 +551,12 @@ void ViewController::initScriptCatalog()
       item.path = fs::relative(entry.path(), root).generic_string();
       item.type = scanRoot.first;
       item.status = "ready";
-      item.description = item.name.find("direct_test") != std::string::npos
+      const bool isDirectLike =
+        item.name.find("direct_test") != std::string::npos ||
+        item.name.find("_direct") != std::string::npos ||
+        item.name.find("_smoke") != std::string::npos ||
+        item.path.find("/headless/") != std::string::npos;
+      item.description = isDirectLike
         ? "C/C++ statement-level direct CxScript case."
         : "CxScript " + item.type + " case.";
       m_scriptCatalog.push_back(item);
@@ -560,7 +566,7 @@ void ViewController::initScriptCatalog()
     [](const ScriptCatalogEntry& left, const ScriptCatalogEntry& right) { return left.path < right.path; });
   for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
   {
-    if (m_scriptCatalog[i].path == "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc")
+    if (m_scriptCatalog[i].path == "cxparser/cxscript/module/cximage/headless/fastmatch_l1_direct.cxsc")
     {
       m_selectedScript = static_cast<int>(i);
       break;
@@ -719,11 +725,26 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
       return result;
     }
   }
-  const bool ran = m_parserDebugBridge.RunScript(scriptText);
+  // Semantic Flow and Manual Console must execute with the same external
+  // input snapshot.  The editor Run button already performs this binding;
+  // bind it here as well for "Run Bound Script".
+  for (const auto& input : m_manualTest.runtime_int_vars)
+  {
+    if (input.first.rfind("global_", 0) == 0)
+      m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+  }
+  bool imageBound = true;
+  if (!m_imageViewImage.empty())
+    imageBound = m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage);
+  else if (!s_img0.empty())
+    imageBound = m_parserDebugBridge.SetGlobalMatInput(s_img0);
+
+  const bool ran = imageBound && m_parserDebugBridge.RunScript(scriptText);
   result.status = ran ? "PENDING" : "BLOCKED";
   result.reason = ran ?
     "parser runtime executed; runtime objects require query; no PASS inferred" :
-    "parser runtime rejected script";
+    (imageBound ? "parser runtime rejected script" :
+                  "no Image View/default image available for global_matInput");
   result.runtime_fillback_status = ran ? "runtime_objects_queried" : "not_started";
   result.log_lines.push_back(ran ?
     "Script executed through ParserDebugBridge." :
@@ -781,8 +802,8 @@ static bool SyncRuntimeObjectToManualGaugeState(
         gauge.circle_cx = static_cast<int>(std::round(object.circle_cx));
         gauge.circle_cy = static_cast<int>(std::round(object.circle_cy));
 
-        const int px = static_cast<int>(std::round(object.circle_inner));
-        const int py = static_cast<int>(std::round(object.circle_radius));
+        const int px = static_cast<int>(std::round(object.circle_px));
+        const int py = static_cast<int>(std::round(object.circle_py));
         int radius = static_cast<int>(std::lround(std::hypot(
             static_cast<double>(px - gauge.circle_cx),
             static_cast<double>(py - gauge.circle_cy))));
@@ -819,24 +840,138 @@ void ViewController::drawScriptAcceptancePanels()
 
   ImGui::SetNextWindowPos(ImVec2(margin, margin), layoutCondition);
   ImGui::SetNextWindowSize(ImVec2(leftWidth, catalogHeight), layoutCondition);
-  ImGui::Begin("Script Catalog", nullptr, panelFlags);
-  ImGui::Text("Runtime roots: cxparser/cxscript/module + integration");
-  ImGui::TextDisabled("rag_script_cases: semantic_reference_only");
-  ImGui::Checkbox("Show all catalog scripts", &m_showAllScripts);
+  ImGui::Begin("Evidence Chain UI", nullptr, panelFlags);
+  ImGui::TextUnformatted("证据链 UI");
+  ImGui::TextDisabled("(图像集 / case / evidence / review)");
   ImGui::Separator();
-  for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
+
+  const char* sectionLabels[] = {
+    "Image Set",
+    "Case",
+    "Evidence",
+    "Review"
+  };
+  const char* sectionHints[] = {
+    "图像集",
+    "case",
+    "evidence",
+    "review"
+  };
+  const char* sectionIcons[] = {
+    "[IMG]",
+    "[DOC]",
+    "[OK]",
+    "[USR]"
+  };
+  const float buttonWidth = std::max(54.0f, (ImGui::GetContentRegionAvail().x - 18.0f) / 4.0f);
+  for (int i = 0; i < 4; ++i)
   {
-    const ScriptCatalogEntry& item = m_scriptCatalog[i];
-    if (!m_showAllScripts && item.name.find("direct_test") == std::string::npos) continue;
-    ImGui::PushID(static_cast<int>(i));
-    if (ImGui::Selectable(item.name.c_str(), m_selectedScript == static_cast<int>(i))) m_selectedScript = static_cast<int>(i);
-    ImGui::TextWrapped("path: %s", item.path.c_str());
-    ImGui::Text("type: %s | status: %s", item.type.c_str(), item.status.c_str());
-    ImGui::TextWrapped("description: %s", item.description.c_str());
-    ImGui::Separator();
+    if (i > 0) ImGui::SameLine();
+    ImGui::PushID(i);
+    if (m_evidenceChainUiSection == i)
+      ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 130, 190, 255));
+    if (ImGui::Button((std::string(sectionIcons[i]) + "\n" + sectionLabels[i]).c_str(),
+                      ImVec2(buttonWidth, 48.0f)))
+    {
+      m_evidenceChainUiSection = i;
+      if (i == 2)
+      {
+        RebuildScriptEvidenceGroups();
+        EnsureEvidenceChainThumbnailsLoaded();
+      }
+    }
+    if (m_evidenceChainUiSection == i)
+      ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", sectionHints[i]);
     ImGui::PopID();
   }
-  if (m_scriptCatalog.empty()) ImGui::TextDisabled("No runnable scripts found.");
+
+  ImGui::Separator();
+  if (m_evidenceChainUiSection == 0)
+  {
+    ImGui::TextUnformatted("Image Set / 图像集");
+    ImGui::Text("manifest: %s", m_manualTest.manifest_loaded ? "loaded" : "not loaded");
+    ImGui::TextWrapped("%s", m_manualTest.manifest_path.empty() ? "(no manifest path)" : m_manualTest.manifest_path.c_str());
+    if (!m_manualTest.image_manifest_items.empty())
+    {
+      ImGui::BeginChild("evidence_image_set_list", ImVec2(-1, 0), true);
+      for (std::size_t i = 0; i < m_manualTest.image_manifest_items.size(); ++i)
+      {
+        const ManifestImageItem& item = m_manualTest.image_manifest_items[i];
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::Selectable(item.image_id.c_str(), m_manualTest.active_image_id == item.image_id))
+        {
+          m_manualTest.active_image_id = item.image_id;
+          m_manualTest.image_file_path = item.image_path;
+        }
+        ImGui::TextDisabled("%s | %s", item.level.c_str(), item.status.c_str());
+        ImGui::PopID();
+      }
+      ImGui::EndChild();
+    }
+    else
+    {
+      ImGui::TextDisabled("No image manifest entries loaded.");
+    }
+  }
+  else if (m_evidenceChainUiSection == 1)
+  {
+    ImGui::TextUnformatted("Case / 用例");
+    DrawEvidenceCaseListPanel(m_manualTest);
+  }
+  else if (m_evidenceChainUiSection == 2)
+  {
+    ImGui::TextUnformatted("Evidence / 脚本 + 参数 + 图片");
+    EnsureCxScriptWorkbenchAssetsLoaded();
+    DrawScriptEvidenceThumbnailRailByGroup();
+    ImGui::Separator();
+    ImGui::Checkbox("Show all catalog scripts", &m_showAllScripts);
+    if (ImGui::CollapsingHeader("CxScript Templates", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
+      {
+        const ScriptCatalogEntry& item = m_scriptCatalog[i];
+        const bool isDirectLike =
+          item.name.find("direct_test") != std::string::npos ||
+          item.name.find("_direct") != std::string::npos ||
+          item.name.find("_smoke") != std::string::npos ||
+          item.path.find("/headless/") != std::string::npos;
+        if (!m_showAllScripts && !isDirectLike) continue;
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::Selectable(item.name.c_str(), m_selectedScript == static_cast<int>(i)))
+        {
+          m_selectedScript = static_cast<int>(i);
+          m_manualTest.loaded_script_path = item.path;
+        }
+        ImGui::TextWrapped("path: %s", item.path.c_str());
+        ImGui::Text("type: %s | status: %s", item.type.c_str(), item.status.c_str());
+        ImGui::TextWrapped("description: %s", item.description.c_str());
+        ImGui::Separator();
+        ImGui::PopID();
+      }
+      if (m_scriptCatalog.empty()) ImGui::TextDisabled("No runnable scripts found.");
+    }
+  }
+  else
+  {
+    ImGui::TextUnformatted("Review / 人工复核");
+    ImGui::Text("active_case: %s", m_manualTest.active_case_id.empty() ? "(none)" : m_manualTest.active_case_id.c_str());
+    ImGui::Text("active_image: %s", m_manualTest.active_image_id.empty() ? "(none)" : m_manualTest.active_image_id.c_str());
+    ImGui::Text("active_target: %s", m_manualTest.active_target_id.empty() ? "(none)" : m_manualTest.active_target_id.c_str());
+    ImGui::Text("gauge_review: %s", m_manualTest.current_gauge.review_status.c_str());
+    if (ImGui::Button("Mark Review Accepted"))
+    {
+      m_manualTest.current_gauge.review_status = "manual_accepted";
+      m_manualTest.current_gauge.accepted = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Mark Review Rejected"))
+    {
+      m_manualTest.current_gauge.review_status = "manual_rejected";
+      m_manualTest.current_gauge.accepted = false;
+    }
+  }
   ImGui::End();
 
   ImGui::SetNextWindowPos(ImVec2(margin, margin + catalogHeight + margin), layoutCondition);
@@ -1088,6 +1223,8 @@ void ViewController::drawScriptAcceptancePanels()
   {
     m_scriptRunRequested = true;
     m_scriptResult = RunCxScript(m_scriptCatalog[m_selectedScript].path);
+    RefreshRuntimeObjectTable("Run Selected Script",
+      m_scriptResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
     m_scriptRunRequested = false;
   }
   ImGui::SameLine();
@@ -3322,6 +3459,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 #include "Findcircle.h"
 #include "Findellipse.h"
 #include "FindRect.h"
+#include "FindSegmentation.h"
 #include "FastMatch.h"
 
 #include <sstream>
@@ -3533,6 +3671,18 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                     m_annotationLayer.BeginRuntimeOwnerPublish("fastmatch", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
                 m_annotationLayer.EndRuntimeOwnerPublish("fastmatch", object.name, generation);
+            }
+        }
+        else if (object.type == "FindSegmentation")
+        {
+            FindSegmentation* tool = static_cast<FindSegmentation*>(
+                m_parserDebugBridge.QueryClassObject("FindSegmentation", object.name));
+            if (tool != nullptr)
+            {
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindSegmentation", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindSegmentation", object.name, generation);
             }
         }
     }

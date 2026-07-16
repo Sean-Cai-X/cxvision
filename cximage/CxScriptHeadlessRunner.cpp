@@ -165,6 +165,13 @@ struct CxScriptInjectedGlobals
     double max_elapsed_ms = 0.0;
     double max_scan_lines = 0.0;
     double max_samples = 0.0;
+    double strategy_id = 0.0;
+    double selected_method = 0.0;
+    double selected_threshold = 0.0;
+    double selected_wgap = 0.0;
+    double selected_hgap = 0.0;
+    double selected_linegap = 0.0;
+    double selected_filterprofile = 0.0;
     double line_ref = 0.0;
     double circle_ref = 0.0;
     double contract_pass = 0.0;
@@ -211,6 +218,13 @@ bool InjectCxScriptGlobals(
     values.max_elapsed_ms = static_cast<double>(options.max_elapsed_ms);
     values.max_scan_lines = static_cast<double>(options.max_scan_lines);
     values.max_samples = static_cast<double>(options.max_samples);
+    values.strategy_id = static_cast<double>(options.strategy_id);
+    values.selected_method = static_cast<double>(options.method);
+    values.selected_threshold = static_cast<double>(options.threshold);
+    values.selected_wgap = static_cast<double>(options.wgap);
+    values.selected_hgap = static_cast<double>(options.hgap);
+    values.selected_linegap = static_cast<double>(options.linegap);
+    values.selected_filterprofile = static_cast<double>(options.filterprofile);
 
     runtime.m_parser.DefineVar("global_roi_x0", &values.roi_x0);
     runtime.m_parser.DefineVar("global_roi_y0", &values.roi_y0);
@@ -235,6 +249,13 @@ bool InjectCxScriptGlobals(
     runtime.m_parser.DefineVar("global_max_elapsed_ms", &values.max_elapsed_ms);
     runtime.m_parser.DefineVar("global_max_scan_lines", &values.max_scan_lines);
     runtime.m_parser.DefineVar("global_max_samples", &values.max_samples);
+    runtime.m_parser.DefineVar("global_strategy_id", &values.strategy_id);
+    runtime.m_parser.DefineVar("global_selected_method", &values.selected_method);
+    runtime.m_parser.DefineVar("global_selected_threshold", &values.selected_threshold);
+    runtime.m_parser.DefineVar("global_selected_wgap", &values.selected_wgap);
+    runtime.m_parser.DefineVar("global_selected_hgap", &values.selected_hgap);
+    runtime.m_parser.DefineVar("global_selected_linegap", &values.selected_linegap);
+    runtime.m_parser.DefineVar("global_selected_filterprofile", &values.selected_filterprofile);
     runtime.m_parser.DefineVar("global_line_ref", &values.line_ref);
     runtime.m_parser.DefineVar("global_circle_ref", &values.circle_ref);
 
@@ -276,20 +297,22 @@ bool InjectCxScriptGlobals(
 bool CreateCxScriptInputImage(
     mu::CxParserRuntime& runtime,
     const cv::Mat& source_image,
+    const std::string& object_name,
     std::string& reason)
 {
-    if (!runtime.Compile("Image global_matInput;"))
+    const std::string declaration = "Image " + object_name + ";";
+    if (!runtime.Compile(declaration.c_str()))
     {
-        reason = "cannot create Image global_matInput";
+        reason = "cannot create Image " + object_name;
         return false;
     }
 
     Image* inputObject = static_cast<Image*>(
-        runtime.GetClassObj("Image", "global_matInput"));
+        runtime.GetClassObj("Image", object_name));
 
     if (inputObject == nullptr)
     {
-        reason = "Image global_matInput is unavailable";
+        reason = "Image " + object_name + " is unavailable";
         return false;
     }
 
@@ -325,8 +348,22 @@ bool ExecuteCxScriptSequential(
     if (!InjectCxScriptGlobals(runtime, options, injected_globals, reason))
         return false;
 
-    if (!CreateCxScriptInputImage(runtime, source_image, reason))
+    if (!CreateCxScriptInputImage(runtime, source_image, "global_matInput", reason))
         return false;
+
+    if (!options.template_image_path.empty())
+    {
+        cv::Mat template_image = cv::imread(options.template_image_path, cv::IMREAD_COLOR);
+        if (template_image.empty())
+        {
+            reason = "cannot read template image: " + options.template_image_path;
+            capture.failure_stage = "template_image";
+            return false;
+        }
+
+        if (!CreateCxScriptInputImage(runtime, template_image, "global_templateInput", reason))
+            return false;
+    }
 
     const std::string script_source =
         LoadCxScriptSource(options.script_path, reason);
@@ -359,6 +396,14 @@ bool ExecuteCxScriptSequential(
         capture.failure_stage = "script_execution";
         return false;
     }
+
+    capture.strategy_id = static_cast<int>(injected_globals.strategy_id);
+    capture.selected_method = static_cast<int>(injected_globals.selected_method);
+    capture.selected_threshold = static_cast<int>(injected_globals.selected_threshold);
+    capture.selected_wgap = static_cast<int>(injected_globals.selected_wgap);
+    capture.selected_hgap = static_cast<int>(injected_globals.selected_hgap);
+    capture.selected_linegap = static_cast<int>(injected_globals.selected_linegap);
+    capture.selected_filterprofile = static_cast<int>(injected_globals.selected_filterprofile);
 
     if (options.contract_context_enabled)
     {
@@ -429,14 +474,57 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"max_steps\": " << capture.max_steps << ",\n";
     file << "  \"max_scan_lines\": " << capture.max_scan_lines << ",\n";
     file << "  \"max_samples\": " << capture.max_samples << ",\n";
+    file << "  \"strategy_id\": " << capture.strategy_id << ",\n";
+    file << "  \"selected_method\": " << capture.selected_method << ",\n";
+    file << "  \"selected_threshold\": " << capture.selected_threshold << ",\n";
+    file << "  \"selected_wgap\": " << capture.selected_wgap << ",\n";
+    file << "  \"selected_hgap\": " << capture.selected_hgap << ",\n";
+    file << "  \"selected_linegap\": " << capture.selected_linegap << ",\n";
+    file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << ",\n";
     file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << ",\n";
     file << "  \"scan_line_count\": " << capture.scan_line_count << ",\n";
     file << "  \"sample_count\": " << capture.sample_count << ",\n";
     file << "  \"valid_points_count\": " << capture.valid_points_count << ",\n";
     file << "  \"has_fit_line\": " << (capture.has_fit_line ? "true" : "false") << ",\n";
     file << "  \"has_fit_circle\": " << (capture.has_fit_circle ? "true" : "false") << ",\n";
+    file << "  \"has_fit_ellipse\": " << (capture.has_fit_ellipse ? "true" : "false") << ",\n";
+    file << "  \"has_result_rect\": " << (capture.has_result_rect ? "true" : "false") << ",\n";
     file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
     file << "  \"avgdist\": " << capture.avgdist << ",\n";
+    file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
+    file << "  \"model_point_count\": " << capture.model_point_count << ",\n";
+    file << "  \"fastmatch_model_width\": " << capture.fastmatch_model_width << ",\n";
+    file << "  \"fastmatch_model_height\": " << capture.fastmatch_model_height << ",\n";
+    file << "  \"fastmatch_pattern_a_count\": " << capture.fastmatch_pattern_a_count << ",\n";
+    file << "  \"fastmatch_pattern_b_count\": " << capture.fastmatch_pattern_b_count << ",\n";
+    file << "  \"fastmatch_pattern_a_x\": " << capture.fastmatch_pattern_a_x << ",\n";
+    file << "  \"fastmatch_pattern_a_y\": " << capture.fastmatch_pattern_a_y << ",\n";
+    file << "  \"fastmatch_pattern_a_width\": " << capture.fastmatch_pattern_a_width << ",\n";
+    file << "  \"fastmatch_pattern_a_height\": " << capture.fastmatch_pattern_a_height << ",\n";
+    file << "  \"fastmatch_pattern_b_x\": " << capture.fastmatch_pattern_b_x << ",\n";
+    file << "  \"fastmatch_pattern_b_y\": " << capture.fastmatch_pattern_b_y << ",\n";
+    file << "  \"fastmatch_pattern_b_width\": " << capture.fastmatch_pattern_b_width << ",\n";
+    file << "  \"fastmatch_pattern_b_height\": " << capture.fastmatch_pattern_b_height << ",\n";
+    file << "  \"candidate_count\": " << capture.candidate_count << ",\n";
+    file << "  \"best_score\": " << capture.best_score << ",\n";
+    file << "  \"has_result_box\": " << (capture.has_result_box ? "true" : "false") << ",\n";
+    file << "  \"has_best_result\": " << (capture.has_best_result ? "true" : "false") << ",\n";
+    file << "  \"fastmatch_match_call_count\": " << capture.fastmatch_match_call_count << ",\n";
+    file << "  \"fastmatch_match_ab_call_count\": " << capture.fastmatch_match_ab_call_count << ",\n";
+    file << "  \"fastmatch_match_sample_ab_call_count\": " << capture.fastmatch_match_sample_ab_call_count << ",\n";
+    file << "  \"fastmatch_match_last_stage\": " << capture.fastmatch_match_last_stage << ",\n";
+    file << "  \"fastmatch_match_image_width\": " << capture.fastmatch_match_image_width << ",\n";
+    file << "  \"fastmatch_match_image_height\": " << capture.fastmatch_match_image_height << ",\n";
+    file << "  \"fastmatch_match_rect_x0\": " << capture.fastmatch_match_rect_x0 << ",\n";
+    file << "  \"fastmatch_match_rect_y0\": " << capture.fastmatch_match_rect_y0 << ",\n";
+    file << "  \"fastmatch_match_rect_x1\": " << capture.fastmatch_match_rect_x1 << ",\n";
+    file << "  \"fastmatch_match_rect_y1\": " << capture.fastmatch_match_rect_y1 << ",\n";
+    file << "  \"fastmatch_raw_probe_count\": " << capture.fastmatch_raw_probe_count << ",\n";
+    file << "  \"fastmatch_raw_threshold_hit_count\": " << capture.fastmatch_raw_threshold_hit_count << ",\n";
+    file << "  \"fastmatch_result_to_list_count\": " << capture.fastmatch_result_to_list_count << ",\n";
+    file << "  \"fastmatch_candidate_insert_count\": " << capture.fastmatch_candidate_insert_count << ",\n";
+    file << "  \"fastmatch_candidate_replace_count\": " << capture.fastmatch_candidate_replace_count << ",\n";
+    file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
     file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
     file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
     file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
@@ -447,6 +535,17 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
     file << "  \"fit_filter_sigma\": " << capture.fit_filter_sigma << ",\n";
     file << "  \"fit_filter_threshold\": " << capture.fit_filter_threshold << ",\n";
+    file << "  \"findrect_seed_valid\": " << (capture.findrect_seed_valid ? "true" : "false") << ",\n";
+    file << "  \"findrect_top_valid\": " << (capture.findrect_top_valid ? "true" : "false") << ",\n";
+    file << "  \"findrect_bottom_valid\": " << (capture.findrect_bottom_valid ? "true" : "false") << ",\n";
+    file << "  \"findrect_left_valid\": " << (capture.findrect_left_valid ? "true" : "false") << ",\n";
+    file << "  \"findrect_right_valid\": " << (capture.findrect_right_valid ? "true" : "false") << ",\n";
+    file << "  \"findrect_top_points\": " << capture.findrect_top_points << ",\n";
+    file << "  \"findrect_bottom_points\": " << capture.findrect_bottom_points << ",\n";
+    file << "  \"findrect_left_points\": " << capture.findrect_left_points << ",\n";
+    file << "  \"findrect_right_points\": " << capture.findrect_right_points << ",\n";
+    file << "  \"findrect_coarse_score\": " << capture.findrect_coarse_score << ",\n";
+    file << "  \"findrect_refine_score\": " << capture.findrect_refine_score << ",\n";
     file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
     file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
@@ -505,6 +604,8 @@ bool ParseCxScriptHeadlessArgs(
             options.enabled = true;
         else if (arg == "--image" && i + 1 < argc)
             options.image_path = argv[++i];
+        else if (arg == "--template-image" && i + 1 < argc)
+            options.template_image_path = argv[++i];
         else if (arg == "--script" && i + 1 < argc)
             options.script_path = argv[++i];
         else if (arg == "--case-name" && i + 1 < argc)
@@ -555,6 +656,8 @@ bool ParseCxScriptHeadlessArgs(
             options.find_num = std::stoi(argv[++i]);
         else if (arg == "--compare-gap" && i + 1 < argc)
             options.compare_gap = std::stoi(argv[++i]);
+        else if (arg == "--strategy-id" && i + 1 < argc)
+            options.strategy_id = std::stoi(argv[++i]);
         else if (arg == "--max-elapsed-ms" && i + 1 < argc)
             options.max_elapsed_ms = std::stoi(argv[++i]);
         else if (arg == "--max-scan-lines" && i + 1 < argc)
@@ -610,6 +713,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     result.launched = true;
 
+    if (!options.template_image_path.empty())
+    {
+        std::filesystem::path template_path(options.template_image_path);
+        if (!std::filesystem::exists(template_path))
+        {
+            result.reason = "template image not found: " + template_path.string();
+            result.failure_stage = "template_image";
+            return false;
+        }
+    }
+
     CxScriptExecutionCapture capture;
     const int timeout_ms = std::max(1, options.timeout_sec) * 1000;
     capture.budget_ms = options.max_elapsed_ms > 0
@@ -654,6 +768,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     {
         snapshot_file << "case_id: " << options.case_name << "\n";
         snapshot_file << "image: " << options.image_path << "\n";
+        if (!options.template_image_path.empty())
+            snapshot_file << "template_image: " << options.template_image_path << "\n";
         snapshot_file << "script: " << options.script_path << "\n";
         snapshot_file << "status: executed\n";
         snapshot_file << "timeout: false\n";
@@ -724,11 +840,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         variable_snapshot_file << "  \"roi_y0\": " << options.roi_y0 << ",\n";
         variable_snapshot_file << "  \"roi_x1\": " << options.roi_x1 << ",\n";
         variable_snapshot_file << "  \"roi_y1\": " << options.roi_y1 << ",\n";
+        variable_snapshot_file << "  \"strategy_id\": " << capture.strategy_id << ",\n";
         variable_snapshot_file << "  \"threshold\": " << options.threshold << ",\n";
         variable_snapshot_file << "  \"method\": " << options.method << ",\n";
         variable_snapshot_file << "  \"wgap\": " << options.wgap << ",\n";
         variable_snapshot_file << "  \"hgap\": " << options.hgap << ",\n";
-        variable_snapshot_file << "  \"linegap\": " << options.linegap << "\n";
+        variable_snapshot_file << "  \"linegap\": " << options.linegap << ",\n";
+        variable_snapshot_file << "  \"selected_threshold\": " << capture.selected_threshold << ",\n";
+        variable_snapshot_file << "  \"selected_method\": " << capture.selected_method << ",\n";
+        variable_snapshot_file << "  \"selected_wgap\": " << capture.selected_wgap << ",\n";
+        variable_snapshot_file << "  \"selected_hgap\": " << capture.selected_hgap << ",\n";
+        variable_snapshot_file << "  \"selected_linegap\": " << capture.selected_linegap << ",\n";
+        variable_snapshot_file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << "\n";
         variable_snapshot_file << "}\n";
         variable_snapshot_file.close();
     }
@@ -740,8 +863,44 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"valid_points_count\": " << capture.valid_points_count << ",\n";
         object_state_file << "  \"has_fit_line\": " << (capture.has_fit_line ? "true" : "false") << ",\n";
         object_state_file << "  \"has_fit_circle\": " << (capture.has_fit_circle ? "true" : "false") << ",\n";
+        object_state_file << "  \"has_fit_ellipse\": " << (capture.has_fit_ellipse ? "true" : "false") << ",\n";
+        object_state_file << "  \"has_result_rect\": " << (capture.has_result_rect ? "true" : "false") << ",\n";
         object_state_file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
         object_state_file << "  \"avgdist\": " << capture.avgdist << ",\n";
+        object_state_file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
+        object_state_file << "  \"model_point_count\": " << capture.model_point_count << ",\n";
+        object_state_file << "  \"fastmatch_model_width\": " << capture.fastmatch_model_width << ",\n";
+        object_state_file << "  \"fastmatch_model_height\": " << capture.fastmatch_model_height << ",\n";
+        object_state_file << "  \"fastmatch_pattern_a_count\": " << capture.fastmatch_pattern_a_count << ",\n";
+        object_state_file << "  \"fastmatch_pattern_b_count\": " << capture.fastmatch_pattern_b_count << ",\n";
+        object_state_file << "  \"fastmatch_pattern_a_x\": " << capture.fastmatch_pattern_a_x << ",\n";
+        object_state_file << "  \"fastmatch_pattern_a_y\": " << capture.fastmatch_pattern_a_y << ",\n";
+        object_state_file << "  \"fastmatch_pattern_a_width\": " << capture.fastmatch_pattern_a_width << ",\n";
+        object_state_file << "  \"fastmatch_pattern_a_height\": " << capture.fastmatch_pattern_a_height << ",\n";
+        object_state_file << "  \"fastmatch_pattern_b_x\": " << capture.fastmatch_pattern_b_x << ",\n";
+        object_state_file << "  \"fastmatch_pattern_b_y\": " << capture.fastmatch_pattern_b_y << ",\n";
+        object_state_file << "  \"fastmatch_pattern_b_width\": " << capture.fastmatch_pattern_b_width << ",\n";
+        object_state_file << "  \"fastmatch_pattern_b_height\": " << capture.fastmatch_pattern_b_height << ",\n";
+        object_state_file << "  \"candidate_count\": " << capture.candidate_count << ",\n";
+        object_state_file << "  \"best_score\": " << capture.best_score << ",\n";
+        object_state_file << "  \"has_result_box\": " << (capture.has_result_box ? "true" : "false") << ",\n";
+        object_state_file << "  \"has_best_result\": " << (capture.has_best_result ? "true" : "false") << ",\n";
+        object_state_file << "  \"fastmatch_match_call_count\": " << capture.fastmatch_match_call_count << ",\n";
+        object_state_file << "  \"fastmatch_match_ab_call_count\": " << capture.fastmatch_match_ab_call_count << ",\n";
+        object_state_file << "  \"fastmatch_match_sample_ab_call_count\": " << capture.fastmatch_match_sample_ab_call_count << ",\n";
+        object_state_file << "  \"fastmatch_match_last_stage\": " << capture.fastmatch_match_last_stage << ",\n";
+        object_state_file << "  \"fastmatch_match_image_width\": " << capture.fastmatch_match_image_width << ",\n";
+        object_state_file << "  \"fastmatch_match_image_height\": " << capture.fastmatch_match_image_height << ",\n";
+        object_state_file << "  \"fastmatch_match_rect_x0\": " << capture.fastmatch_match_rect_x0 << ",\n";
+        object_state_file << "  \"fastmatch_match_rect_y0\": " << capture.fastmatch_match_rect_y0 << ",\n";
+        object_state_file << "  \"fastmatch_match_rect_x1\": " << capture.fastmatch_match_rect_x1 << ",\n";
+        object_state_file << "  \"fastmatch_match_rect_y1\": " << capture.fastmatch_match_rect_y1 << ",\n";
+        object_state_file << "  \"fastmatch_raw_probe_count\": " << capture.fastmatch_raw_probe_count << ",\n";
+        object_state_file << "  \"fastmatch_raw_threshold_hit_count\": " << capture.fastmatch_raw_threshold_hit_count << ",\n";
+        object_state_file << "  \"fastmatch_result_to_list_count\": " << capture.fastmatch_result_to_list_count << ",\n";
+        object_state_file << "  \"fastmatch_candidate_insert_count\": " << capture.fastmatch_candidate_insert_count << ",\n";
+        object_state_file << "  \"fastmatch_candidate_replace_count\": " << capture.fastmatch_candidate_replace_count << ",\n";
+        object_state_file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
         object_state_file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
         object_state_file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
         object_state_file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
@@ -752,6 +911,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
         object_state_file << "  \"fit_filter_sigma\": " << capture.fit_filter_sigma << ",\n";
         object_state_file << "  \"fit_filter_threshold\": " << capture.fit_filter_threshold << ",\n";
+        object_state_file << "  \"findrect_seed_valid\": " << (capture.findrect_seed_valid ? "true" : "false") << ",\n";
+        object_state_file << "  \"findrect_top_valid\": " << (capture.findrect_top_valid ? "true" : "false") << ",\n";
+        object_state_file << "  \"findrect_bottom_valid\": " << (capture.findrect_bottom_valid ? "true" : "false") << ",\n";
+        object_state_file << "  \"findrect_left_valid\": " << (capture.findrect_left_valid ? "true" : "false") << ",\n";
+        object_state_file << "  \"findrect_right_valid\": " << (capture.findrect_right_valid ? "true" : "false") << ",\n";
+        object_state_file << "  \"findrect_top_points\": " << capture.findrect_top_points << ",\n";
+        object_state_file << "  \"findrect_bottom_points\": " << capture.findrect_bottom_points << ",\n";
+        object_state_file << "  \"findrect_left_points\": " << capture.findrect_left_points << ",\n";
+        object_state_file << "  \"findrect_right_points\": " << capture.findrect_right_points << ",\n";
+        object_state_file << "  \"findrect_coarse_score\": " << capture.findrect_coarse_score << ",\n";
+        object_state_file << "  \"findrect_refine_score\": " << capture.findrect_refine_score << ",\n";
         object_state_file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << "\n";
         object_state_file << "}\n";
         object_state_file.close();
@@ -822,6 +992,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "valid_points_count: " << capture.valid_points_count << "\n";
         log_file << "has_fit_line: " << (capture.has_fit_line ? "true" : "false") << "\n";
         log_file << "has_fit_circle: " << (capture.has_fit_circle ? "true" : "false") << "\n";
+        log_file << "has_fit_ellipse: " << (capture.has_fit_ellipse ? "true" : "false") << "\n";
+        log_file << "has_result_rect: " << (capture.has_result_rect ? "true" : "false") << "\n";
+        log_file << "model_point_count: " << capture.model_point_count << "\n";
+        log_file << "candidate_count: " << capture.candidate_count << "\n";
+        log_file << "best_score: " << capture.best_score << "\n";
         log_file << "case_end\n";
         log_file << "run_end\n";
         log_file.close();
@@ -843,6 +1018,13 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     result.valid_points_count = capture.valid_points_count;
     result.has_fit_line = capture.has_fit_line;
     result.has_fit_circle = capture.has_fit_circle;
+    result.has_fit_ellipse = capture.has_fit_ellipse;
+    result.has_result_rect = capture.has_result_rect;
+    result.model_point_count = capture.model_point_count;
+    result.candidate_count = capture.candidate_count;
+    result.best_score = capture.best_score;
+    result.has_result_box = capture.has_result_box;
+    result.has_best_result = capture.has_best_result;
     result.circle_radius = capture.circle_radius;
     result.avgdist = capture.avgdist;
 

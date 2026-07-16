@@ -438,7 +438,7 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
                       ImageAnnotationLayer& layer,
                       CxRuntimeProjectionResult& result)
 {
-    result.owner_type = "FastMatch";
+    result.owner_type = "fastmatch";
     result.owner_ref = request.owner_ref;
 
     if (request.owner_ref.empty())

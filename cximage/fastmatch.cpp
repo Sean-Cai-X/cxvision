@@ -1452,6 +1452,16 @@ void fastmatch::setmatchrect(int ix, int iy, int iw, int ih)
         m_matchrects.setrect(0,ix,iy,iw,ih);
 }
 
+void fastmatch::setrectxywh(int ih, int iw, int iy, int ix)
+{
+    setrect(ix, iy, iw, ih);
+}
+
+void fastmatch::setmatchrectxywh(int ih, int iw, int iy, int ix)
+{
+    setmatchrect(ix, iy, iw, ih);
+}
+
 void fastmatch::setexpectedrect(double x0, double y0, double x1, double y1)
 {
     const double min_x = std::min(x0, x1);
@@ -1960,6 +1970,8 @@ void fastmatch::MatchAB(Image& image)
 {
     m_matchimage = &image;
     resultclear();
+    ++m_matchab_call_count;
+    m_match_last_stage = 20;
     gp_Path& pathA = Findline::getpatternpathA();
     gp_Path& pathB = Findline::getpatternpathB();
 
@@ -1980,8 +1992,13 @@ void fastmatch::match(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
+    {
+        m_match_last_stage = 10;
         return;
+    }
 
+    ++m_match_call_count;
+    m_match_last_stage = 11;
     MatchAB(*pgetimage);
 }
  
@@ -3498,6 +3515,8 @@ void fastmatch::MatchSample(Image& image, gp_Path& path)
 
 void fastmatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
 {
+    ++m_matchsampleab_call_count;
+    m_match_last_stage = 30;
     int ithre = m_imatchthre;
     int icurmodule = ImageManager::GetCurMode();
     Image* pimage = ImageManager::GetTransferImage(icurmodule);
@@ -3506,10 +3525,19 @@ void fastmatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
     int iy0 = static_cast<int>(m_matchrect.TopLeft().Y());
     int ix1 = static_cast<int>(m_matchrect.BottomRight().X());
     int iy1 = static_cast<int>(m_matchrect.BottomRight().Y());
+    m_match_debug_image_width = image.getWidth();
+    m_match_debug_image_height = image.getHeight();
+    m_match_debug_rect_x0 = ix0;
+    m_match_debug_rect_y0 = iy0;
+    m_match_debug_rect_x1 = ix1;
+    m_match_debug_rect_y1 = iy1;
     ZeroPOS();
     if (image.getWidth() <= ix1
         || image.getHeight() <= iy1)
+    {
+        m_match_last_stage = 31;
         return;//error process
+    }
     m_iminfindnum = -1;
     const int icount1 = static_cast<int>(pathA.ElementCount());
     const int icount2 = static_cast<int>(pathB.ElementCount());
@@ -3818,6 +3846,56 @@ int fastmatch::getrawmatchprobecount() const
 int fastmatch::getrawmatchthresholdhitcount() const
 {
     return m_rawmatch_threshold_hit_count;
+}
+
+int fastmatch::getmatchcallcount() const
+{
+    return m_match_call_count;
+}
+
+int fastmatch::getmatchabcallcount() const
+{
+    return m_matchab_call_count;
+}
+
+int fastmatch::getmatchsampleabcallcount() const
+{
+    return m_matchsampleab_call_count;
+}
+
+int fastmatch::getmatchlaststage() const
+{
+    return m_match_last_stage;
+}
+
+int fastmatch::getmatchimagewidth() const
+{
+    return m_match_debug_image_width;
+}
+
+int fastmatch::getmatchimageheight() const
+{
+    return m_match_debug_image_height;
+}
+
+int fastmatch::getmatchrectx0() const
+{
+    return m_match_debug_rect_x0;
+}
+
+int fastmatch::getmatchrecty0() const
+{
+    return m_match_debug_rect_y0;
+}
+
+int fastmatch::getmatchrectx1() const
+{
+    return m_match_debug_rect_x1;
+}
+
+int fastmatch::getmatchrecty1() const
+{
+    return m_match_debug_rect_y1;
 }
 
 int fastmatch::getresulttolistcallcount() const
@@ -5184,7 +5262,7 @@ void fastmatch::shapesetroi(void* pshape)
     Shape::shapesetroi(pshape);
 }
 
-std::vector<cv::Point2f> fastmatch::getmodel() const
+std::vector<cv::Point2f> fastmatch::getmodel()
 {
     std::vector<cv::Point2f> points;
     const int count = m_modelpoints_sample1.size();
@@ -5194,12 +5272,67 @@ std::vector<cv::Point2f> fastmatch::getmodel() const
             static_cast<float>(m_modelpoints_sample1.getx(i)),
             static_cast<float>(m_modelpoints_sample1.gety(i))));
     }
+    if (points.empty())
+        ABtoShape(points);
     return points;
 }
 
 int fastmatch::getmodelpointcount()
 {
-    return m_modelpoints_sample1.size();
+    const int sample_count = m_modelpoints_sample1.size();
+    if (sample_count > 0)
+        return sample_count;
+    return ABpatternsize();
+}
+
+int fastmatch::getpatternapointcount() const
+{
+    return static_cast<int>(const_cast<fastmatch*>(this)->Findline::getpatternpathA().ElementCount());
+}
+
+int fastmatch::getpatternbpointcount() const
+{
+    return static_cast<int>(const_cast<fastmatch*>(this)->Findline::getpatternpathB().ElementCount());
+}
+
+double fastmatch::getpatternax() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathA().boundingRect().TopLeft().X();
+}
+
+double fastmatch::getpatternay() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathA().boundingRect().TopLeft().Y();
+}
+
+double fastmatch::getpatternawidth() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathA().boundingRect().Width();
+}
+
+double fastmatch::getpatternaheight() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathA().boundingRect().Height();
+}
+
+double fastmatch::getpatternbx() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathB().boundingRect().TopLeft().X();
+}
+
+double fastmatch::getpatternby() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathB().boundingRect().TopLeft().Y();
+}
+
+double fastmatch::getpatternbwidth() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathB().boundingRect().Width();
+}
+
+double fastmatch::getpatternbheight() const
+{
+    return const_cast<fastmatch*>(this)->Findline::getpatternpathB().boundingRect().Height();
 }
 
 void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref)
@@ -5216,7 +5349,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         learn_roi_shape->setRect(learn_x, learn_y, learn_x + learn_w, learn_y + learn_h);
         sink.UpsertShape(
             owner_ref + ".learn_roi",
-            "FastMatch",
+            "fastmatch",
             owner_ref,
             "learn_roi",
             "learn_roi",
@@ -5237,7 +5370,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         search_roi_shape->setRect(search_x, search_y, search_x + search_w, search_y + search_h);
         sink.UpsertShape(
             owner_ref + ".search_roi",
-            "FastMatch",
+            "fastmatch",
             owner_ref,
             "search_roi",
             "search_roi",
@@ -5256,7 +5389,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         expected_shape->setRect(expected_x, expected_y, expected_x + expected_w, expected_y + expected_h);
         sink.UpsertShape(
             owner_ref + ".expected_gt",
-            "FastMatch",
+            "fastmatch",
             owner_ref,
             "expected_gt",
             "expected_gt",

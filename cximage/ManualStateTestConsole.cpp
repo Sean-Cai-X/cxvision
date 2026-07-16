@@ -1,7 +1,8 @@
-﻿#include "ViewController.h"
+#include "ViewController.h"
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
+#include "FindSegmentation.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
@@ -128,8 +129,12 @@ static void FillRuntimeObjectFromFindcircle(
     object.has_circle = true;
     object.circle_cx = static_cast<float>(circle.getcirclecentx());
     object.circle_cy = static_cast<float>(circle.getcirclecenty());
-    object.circle_inner = static_cast<float>(circle.getcirclepax());
-    object.circle_radius = static_cast<float>(circle.getcirclepay());
+    object.circle_px = static_cast<float>(circle.getcirclepax());
+    object.circle_py = static_cast<float>(circle.getcirclepay());
+    // Preserve the legacy snapshot fields until the diagnostic JSON schema is
+    // migrated.  New GUI synchronization must use circle_px/circle_py.
+    object.circle_inner = object.circle_px;
+    object.circle_radius = object.circle_py;
 
     const PointsShape& points = circle.getresultpoints();
     CopyPointsToFloatXY(points, object.measure_points_xy);
@@ -230,7 +235,17 @@ static void SeedDefaultManualGlobals(
     set("global_hgap", 32);
     set("global_tool_half_width", 32);
 
-    if (scriptPath.find("find_line_vertical") != std::string::npos)
+    const bool isCircleScript =
+        scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos;
+    const bool isLineScript =
+        scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos;
+    const bool isVerticalLineScript =
+        scriptPath.find("find_line_vertical") != std::string::npos ||
+        scriptPath.find("findline_vertical") != std::string::npos;
+
+    if (isVerticalLineScript)
     {
         set("global_roi_x0", 380);
         set("global_roi_y0", 120);
@@ -247,7 +262,7 @@ static void SeedDefaultManualGlobals(
         set("global_roi_y1", 240);
     }
 
-    if (scriptPath.find("find_circle") != std::string::npos)
+    if (isCircleScript)
     {
         set("global_circle_cx", 765);
         set("global_circle_cy", 471);
@@ -256,6 +271,46 @@ static void SeedDefaultManualGlobals(
         set("global_gap", 5);
         set("global_linegap", 3);
     }
+
+    // The Script Editor and Gauge Workbench must start from the same value
+    // snapshot.  Previously only runtime_int_vars were seeded, leaving the
+    // visible/editable gauge at its zero-initialized geometry.
+    ManualGaugeState gauge;
+    gauge.source = "script_default";
+    gauge.review_status = "editing";
+    gauge.threshold = context.runtime_int_vars["global_threshold"];
+    gauge.method = context.runtime_int_vars["global_method"];
+    gauge.linegap = context.runtime_int_vars["global_linegap"];
+
+    if (isCircleScript)
+    {
+        gauge.tool = "Findcircle";
+        gauge.has_circle_gauge = true;
+        gauge.circle_cx = context.runtime_int_vars["global_circle_cx"];
+        gauge.circle_cy = context.runtime_int_vars["global_circle_cy"];
+        gauge.circle_px = context.runtime_int_vars["global_circle_px"];
+        gauge.circle_py = context.runtime_int_vars["global_circle_py"];
+        gauge.gap = context.runtime_int_vars["global_gap"];
+        gauge.radius = static_cast<int>(std::lround(std::hypot(
+            static_cast<double>(gauge.circle_px - gauge.circle_cx),
+            static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+    }
+    else if (isLineScript)
+    {
+        gauge.tool = "Findline";
+        gauge.has_line_gauge = true;
+        gauge.line_x0 = context.runtime_int_vars["global_roi_x0"];
+        gauge.line_y0 = context.runtime_int_vars["global_roi_y0"];
+        gauge.line_x1 = context.runtime_int_vars["global_roi_x1"];
+        gauge.line_y1 = context.runtime_int_vars["global_roi_y1"];
+        gauge.tool_half_width =
+            context.runtime_int_vars["global_tool_half_width"];
+        gauge.wgap = context.runtime_int_vars["global_wgap"];
+        gauge.hgap = context.runtime_int_vars["global_hgap"];
+    }
+
+    if (gauge.has_circle_gauge || gauge.has_line_gauge)
+        context.current_gauge = gauge;
 }
 }
 
@@ -365,6 +420,35 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("FindSegmentation"))
+    {
+        FindSegmentation* seg = static_cast<FindSegmentation*>(
+            m_parserDebugBridge.QueryClassObject("FindSegmentation", name));
+        if (seg == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "FindSegmentation";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = seg->m_status;
+        object.stale = false;
+        object.visualizable = seg->get_contour_count() > 0;
+        object.visual_source = object.visualizable ? "segmentation_boundary" : "segmentation_prompt";
+        object.has_measure_points = seg->get_contour_count() > 0;
+        object.measure_points_count = seg->get_contour_count();
+        object.valid_points_count = seg->get_contour_count();
+        object.display_summary =
+            "FindSegmentation " + name +
+            " status=" + seg->m_status +
+            " contours=" + std::to_string(seg->get_contour_count()) +
+            " area=" + std::to_string(seg->get_primary_area());
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
     for (RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
         if (object.stale)
@@ -386,12 +470,53 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     }
 
     SyncRuntimeObjectsToShapeElements();
+
+    m_manualTest.current_result_ref = ResultRefView();
+    m_scriptResult.result_ref.clear();
+    m_scriptResult.overlay_ref.clear();
+    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+    {
+        if (!object.visualizable || object.stale)
+            continue;
+
+        m_manualTest.current_result_ref.source_object = object.name;
+        m_manualTest.current_result_ref.value = "runtime_object:" + object.name;
+        m_manualTest.current_result_ref.status = "runtime_object_available";
+
+        if (object.type == "Findcircle")
+        {
+            m_manualTest.current_result_ref.name = "global_circle_ref";
+            m_manualTest.current_result_ref.result_type = "FindcircleResult";
+            m_manualTest.current_result_ref.fit_cx = object.fit_cx;
+            m_manualTest.current_result_ref.fit_cy = object.fit_cy;
+            m_manualTest.current_result_ref.fit_radius = object.fit_radius;
+            m_manualTest.current_result_ref.avgdist = object.fit_avgdist;
+            m_manualTest.current_result_ref.points_count = object.measure_points_count;
+            m_manualTest.current_result_ref.valid_points_count = object.valid_points_count;
+        }
+        else if (object.type == "Findline")
+        {
+            m_manualTest.current_result_ref.name = "global_line_ref";
+            m_manualTest.current_result_ref.result_type = "FindlineResult";
+            m_manualTest.current_result_ref.line_x0 = object.fit_line_x0;
+            m_manualTest.current_result_ref.line_y0 = object.fit_line_y0;
+            m_manualTest.current_result_ref.line_x1 = object.fit_line_x1;
+            m_manualTest.current_result_ref.line_y1 = object.fit_line_y1;
+            m_manualTest.current_result_ref.line_avgdist = object.line_avgdist;
+            m_manualTest.current_result_ref.line_points_count = object.line_measure_points_count;
+            m_manualTest.current_result_ref.valid_line_points_count = object.valid_points_count;
+        }
+
+        m_scriptResult.result_ref = m_manualTest.current_result_ref.value;
+        m_scriptResult.overlay_ref = "shape_owner:" + object.type + ":" + object.name;
+        break;
+    }
 }
 
 void ViewController::drawManualStateTestConsole()
 {
     ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(820, 980), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(520, 380), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Manual State Test Console", nullptr, ImGuiWindowFlags_NoCollapse))
     {
         ImGui::End();
@@ -492,17 +617,53 @@ void ViewController::drawAnnotationToolWindow()
     InputTextString("##manifest_path", m_annotationManifestPath);
     if (ImGui::Button("Load Tool Manifest"))
     {
-        m_annotationStatus = "manifest loading...";
+        std::string reason;
+        CxAnnotationToolManifestSnapshot snapshot;
+        if (!m_parserOwner.ParseAnnotationToolManifest(m_annotationManifestPath, snapshot, reason))
+        {
+            m_annotationStatus = "parse failed: " + reason;
+        }
+        else if (!m_annotationLayer.ApplyToolManifestSnapshot(snapshot, reason))
+        {
+            m_annotationStatus = "apply failed: " + reason;
+        }
+        else
+        {
+            m_annotationStatus = reason;
+        }
     }
 
     ImGui::Separator();
     ImGui::Text("Tool Palette");
-    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Annotation UI v2 button palette");
+    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Annotation UI v2 manifest button palette");
 
-    auto drawAnnotationToolButton = [this](const char* label, ImageToolMode mode)
+    auto toolModeFromDefinition = [](const AnnotationToolDefinition& tool)
     {
-        ImGui::PushID(label);
-        const bool active = m_imageToolEnabled && m_imageToolMode == mode;
+        if (tool.kind == OverlayKind::Point)
+            return ImageToolMode::PointCreate;
+        if (tool.kind == OverlayKind::Line)
+            return ImageToolMode::LineCreate;
+        if (tool.kind == OverlayKind::Rect)
+            return ImageToolMode::RectCreate;
+        if (tool.kind == OverlayKind::Circle)
+            return ImageToolMode::CircleCreate;
+        if (tool.kind == OverlayKind::Ellipse)
+            return ImageToolMode::EllipseCreate;
+        if (tool.kind == OverlayKind::Polyline ||
+            tool.kind == OverlayKind::BoundaryPolyline)
+            return ImageToolMode::PolylineCreate;
+        if (tool.kind == OverlayKind::AutoBoundaryRequest ||
+            tool.action == "auto_segmentation")
+            return ImageToolMode::AutoBoundary;
+        return ImageToolMode::PointerPan;
+    };
+
+    auto drawPointerPanButton = [this]()
+    {
+        ImGui::PushID("Pointer / Pan");
+        const bool active = !m_imageToolEnabled ||
+                            m_imageToolMode == ImageToolMode::PointerPan ||
+                            m_annotationLayer.ActiveToolIndex() < 0;
         if (active)
         {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.50f, 0.85f, 1.0f));
@@ -510,28 +671,53 @@ void ViewController::drawAnnotationToolWindow()
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.40f, 0.75f, 1.0f));
         }
 
-        if (ImGui::Button(label, ImVec2(-1.0f, 26.0f)))
+        if (ImGui::Button("Pointer / Pan", ImVec2(-1.0f, 26.0f)))
         {
-            if (mode == ImageToolMode::PointerPan)
+            m_imageToolEnabled = false;
+            m_imageToolMode = ImageToolMode::PointerPan;
+            CancelAnnotationCreate();
+            m_annotationLayer.SetActiveToolIndex(-1);
+            m_annotationStatus = "Pointer / Pan active";
+        }
+
+        if (active) ImGui::PopStyleColor(3);
+        ImGui::PopID();
+    };
+
+    auto drawManifestToolButton = [this, &toolModeFromDefinition](int toolIndex, const AnnotationToolDefinition& tool)
+    {
+        ImGui::PushID(tool.name.c_str());
+        const bool active = m_imageToolEnabled &&
+                            m_annotationLayer.ActiveToolIndex() == toolIndex;
+        if (active)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.50f, 0.85f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.40f, 0.75f, 1.0f));
+        }
+
+        const std::string label = tool.label.empty() ? tool.name : tool.label;
+        if (ImGui::Button(label.c_str(), ImVec2(-1.0f, 26.0f)))
+        {
+            if (active)
             {
                 m_imageToolEnabled = false;
                 m_imageToolMode = ImageToolMode::PointerPan;
                 CancelAnnotationCreate();
-                m_annotationStatus = "Pointer / Pan active";
-            }
-            else if (active)
-            {
-                m_imageToolEnabled = false;
-                m_imageToolMode = ImageToolMode::PointerPan;
-                CancelAnnotationCreate();
-                m_annotationStatus = std::string(label) + " disabled";
+                m_annotationLayer.SetActiveToolIndex(-1);
+                m_annotationStatus = label + " disabled";
             }
             else
             {
                 m_imageToolEnabled = true;
-                m_imageToolMode = mode;
+                m_imageToolMode = toolModeFromDefinition(tool);
                 CancelAnnotationCreate();
-                m_annotationStatus = std::string(label) + " enabled";
+                m_annotationLayer.SetActiveToolIndex(toolIndex);
+                m_annotationStatus =
+                    "enabled tool_id=" + tool.name +
+                    " shape=" + tool.shape_type +
+                    " role=" + tool.role +
+                    " action=" + tool.action;
             }
         }
 
@@ -539,36 +725,53 @@ void ViewController::drawAnnotationToolWindow()
         ImGui::PopID();
     };
 
-    drawAnnotationToolButton("Pointer / Pan", ImageToolMode::PointerPan);
-    drawAnnotationToolButton("Point", ImageToolMode::PointCreate);
-    drawAnnotationToolButton("Line", ImageToolMode::LineCreate);
-    drawAnnotationToolButton("Rect", ImageToolMode::RectCreate);
-    drawAnnotationToolButton("Circle", ImageToolMode::CircleCreate);
-    drawAnnotationToolButton("Polyline", ImageToolMode::PolylineCreate);
-    drawAnnotationToolButton("Auto Boundary / EdgeSam", ImageToolMode::AutoBoundary);
+    drawPointerPanButton();
+    for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
+    {
+        const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
+        if (!tool.manual_visible) continue;
+        drawManifestToolButton(i, tool);
+    }
 
     ImGui::Separator();
     ImGui::Text("Tool enabled: %s", m_imageToolEnabled ? "YES" : "NO");
-    ImGui::Text("Active tool: %s", ImageToolModeName(m_imageToolMode));
+    ImGui::Text("Active mode: %s", ImageToolModeName(m_imageToolMode));
+    const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
+    if (activeTool != nullptr)
+    {
+        ImGui::TextWrapped("Active tool id: %s | shape=%s | role=%s | action=%s",
+                           activeTool->name.c_str(),
+                           activeTool->shape_type.c_str(),
+                           activeTool->role.c_str(),
+                           activeTool->action.c_str());
+    }
+    else
+    {
+        ImGui::TextDisabled("Active tool id: (none)");
+    }
+    ImGui::Text("ShapeElements: %d",
+                static_cast<int>(m_annotationLayer.ShapeElements().size()));
+    ImGui::TextWrapped("Last pointer: %s | %s | %s",
+                       m_lastPointerResult.phase.c_str(),
+                       m_lastPointerResult.status.c_str(),
+                       m_lastPointerResult.reason.c_str());
 
     ImGui::Separator();
-    ImGui::Text("Element List");
+    ImGui::Text("Element List (ShapeElements)");
     ImGui::BeginChild("annotation_elements", ImVec2(-1, 150), true);
     int elemIndex = 0;
-    for (const auto& elem : m_annotationLayer.Elements())
+    for (const auto& elem : m_annotationLayer.ShapeElements())
     {
         ImGui::PushID(elemIndex++);
-        const char* kindStr = "unknown";
-        if (elem.kind == OverlayKind::Point) kindStr = "Point";
-        else if (elem.kind == OverlayKind::Line) kindStr = "Line";
-        else if (elem.kind == OverlayKind::Rect) kindStr = "Rect";
-        else if (elem.kind == OverlayKind::Circle) kindStr = "Circle";
-        else if (elem.kind == OverlayKind::Polyline) kindStr = "Polyline";
-        ImGui::Text("%s | id=%d", kindStr, elem.id);
+        ImGui::Text("%s | id=%d | tool=%s | role=%s",
+                    elem.stable_ref.c_str(),
+                    elem.id,
+                    elem.tool_id.c_str(),
+                    elem.semantic_role.c_str());
         ImGui::PopID();
     }
-    if (m_annotationLayer.Elements().empty())
-        ImGui::TextDisabled("No annotation elements");
+    if (m_annotationLayer.ShapeElements().empty())
+        ImGui::TextDisabled("No shape elements");
     ImGui::EndChild();
 
     ImGui::Separator();

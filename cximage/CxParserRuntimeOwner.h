@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <sstream>
+#include <map>
 
 #include "CxParserSnapshotTypes.h"
 
@@ -115,6 +116,9 @@ private:
     bool m_suite_bindings_registered = false;
     bool m_catalog_bindings_registered = false;
     bool m_parameter_bindings_registered = false;
+    // Numeric locals declared by the currently executing CxScript. Their
+    // addresses must remain stable until RunCollectedScript() completes.
+    std::map<std::string, double> m_script_local_values;
 };
 
 #endif
