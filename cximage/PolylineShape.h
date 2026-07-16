@@ -27,6 +27,8 @@ public:
     void translateBy(double dx, double dy) override;
 
     void exportPolyline(std::vector<CxShapePoint>& out, bool& closed) const override;
+    void exportPoints(std::vector<CxShapePoint>& out) const override;
+    bool snapshot(CxShapeGeometrySnapshot& out) const override;
 
     void drawshape(gp_Path& painter) override;
 

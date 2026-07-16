@@ -120,7 +120,21 @@ void PolylineShape::enumerateHandles(std::vector<CxShapeHandle>& out) const
     const int n = static_cast<int>(m_points.size());
     for (int i = 0; i < n; ++i)
     {
-        out.push_back({ CxShapeHandleRole::Vertex, i, m_points[i], "" });
+        out.push_back({ CxShapeHandleRole::Vertex, i, m_points[i], "P" + std::to_string(i) });
+    }
+
+    if (n > 0)
+    {
+        double cx = 0.0;
+        double cy = 0.0;
+        for (const auto& p : m_points)
+        {
+            cx += p.x;
+            cy += p.y;
+        }
+        cx /= n;
+        cy /= n;
+        out.push_back({ CxShapeHandleRole::Center, -1, { cx, cy }, "C" });
     }
 }
 
@@ -201,4 +215,30 @@ void PolylineShape::exportPolyline(std::vector<CxShapePoint>& out, bool& closed)
 {
     out = m_points;
     closed = m_closed;
+}
+
+void PolylineShape::exportPoints(std::vector<CxShapePoint>& out) const
+{
+    out = m_points;
+}
+
+bool PolylineShape::snapshot(CxShapeGeometrySnapshot& out) const
+{
+    out = CxShapeGeometrySnapshot{};
+    out.kind = CxShapeKind::Polyline;
+    out.points = m_points;
+    out.closed = m_closed;
+
+    if (!m_points.empty())
+    {
+        for (const auto& p : m_points)
+        {
+            out.center.x += p.x;
+            out.center.y += p.y;
+        }
+        out.center.x /= static_cast<double>(m_points.size());
+        out.center.y /= static_cast<double>(m_points.size());
+    }
+
+    return !m_points.empty();
 }

@@ -18,6 +18,7 @@
 #include "CircleShape.h"
 #include "EllipseShape.h"
 #include "LineGaugeShape.h"
+#include "PolylineShape.h"
 
 namespace
 {
@@ -970,12 +971,15 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.right_clicked || frame.enter_pressed)
         {
-            if (m_activePolylinePoints.empty())
+            const int required_points = frame.right_clicked ? 3 : 2;
+            if (static_cast<int>(m_activePolylinePoints.size()) < required_points)
             {
                 out.consumed = true;
                 out.phase = "create_shape";
-                out.status = "empty_polyline";
-                out.reason = "no points to create polyline";
+                out.status = "polyline_too_small";
+                out.reason = frame.right_clicked
+                    ? "closed polyline requires at least three points"
+                    : "polyline requires at least two points";
                 m_lastPointerResult = out;
                 return out;
             }
@@ -986,12 +990,21 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 auto shape = CreateInitialShapeForTool(*tool, m_activePolylinePoints);
                 if (shape)
                 {
+                    if (shape->kind() == CxShapeKind::Polyline)
+                    {
+                        PolylineShape* polyline =
+                            dynamic_cast<PolylineShape*>(shape.get());
+                        if (polyline != nullptr)
+                            polyline->close(frame.right_clicked);
+                    }
                     CxShapeElement& element = m_annotationLayer.CreateFromTool(*tool, std::move(shape));
                 out.consumed = true;
                 out.phase = "create_shape";
                 out.status = "created";
                 out.created_ref = element.stable_ref;
-                out.reason = "polyline created";
+                out.reason = frame.right_clicked
+                    ? "polyline closed by right click"
+                    : "polyline created";
                 CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
                 m_activePolylinePoints.clear();
                 m_lastPointerResult = out;
@@ -1353,6 +1366,41 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     }
   }
 
+  if (!m_annotationDragging && IsAnnotationCreateModeActive() &&
+      !m_activePolylinePoints.empty())
+  {
+    const ImU32 previewColor = IM_COL32(80, 220, 255, 220);
+    for (std::size_t i = 1; i < m_activePolylinePoints.size(); ++i)
+    {
+      const ImVec2 first = ImageToScreen(
+          static_cast<float>(m_activePolylinePoints[i - 1].x),
+          static_cast<float>(m_activePolylinePoints[i - 1].y));
+      const ImVec2 second = ImageToScreen(
+          static_cast<float>(m_activePolylinePoints[i].x),
+          static_cast<float>(m_activePolylinePoints[i].y));
+      drawList->AddLine(first, second, previewColor, 2.0f);
+    }
+
+    for (const CxShapePoint& p : m_activePolylinePoints)
+    {
+      const ImVec2 screen = ImageToScreen(
+          static_cast<float>(p.x),
+          static_cast<float>(p.y));
+      drawList->AddCircleFilled(screen, 4.0f, previewColor);
+      drawList->AddCircle(screen, 6.0f, IM_COL32(255, 255, 255, 220), 16, 1.0f);
+    }
+
+    if (insideImage)
+    {
+      const CxShapePoint& last = m_activePolylinePoints.back();
+      const ImVec2 first = ImageToScreen(
+          static_cast<float>(last.x),
+          static_cast<float>(last.y));
+      const ImVec2 second = ImageToScreen(imagePoint.x, imagePoint.y);
+      drawList->AddLine(first, second, IM_COL32(80, 220, 255, 120), 1.0f);
+    }
+  }
+
   for (int elementIndex = 0;
        elementIndex < static_cast<int>(m_annotationLayer.Elements().size());
        ++elementIndex)
@@ -1666,7 +1714,7 @@ void ViewController::drawImageEvidencePanels()
                        tool.module_hint.c_str());
     ImGui::PopID();
   }
-  if (ImGui::Button("Finish Polyline")) { m_activePolylineElement = -1; m_activePolylinePoints.clear(); }
+  if (ImGui::Button("Cancel Polyline Draft")) { m_activePolylineElement = -1; m_activePolylinePoints.clear(); }
   if (ImGui::IsKeyPressed(ImGuiKey_Escape))
   {
     m_imageToolEnabled = false;

@@ -549,6 +549,29 @@ void FindRect::Measure(Image& image)
     m_debug_right_points = 0;
     m_debug_coarse_score = 0.0;
     m_debug_refine_score = 0.0;
+
+    if (image.getmat().empty())
+    {
+        m_last_failure_stage = "image_empty";
+        return;
+    }
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
+    {
+        m_last_failure_stage = "algorithm_runtime_resources_unavailable";
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_last_failure_stage = "rect_scan_workspace_unavailable";
+        return;
+    }
+
     const gp_Rectangle roi_rect = rect();
     const int roi_x = std::max(0, static_cast<int>(roi_rect.TopLeft().X()));
     const int roi_y = std::max(0, static_cast<int>(roi_rect.TopLeft().Y()));
