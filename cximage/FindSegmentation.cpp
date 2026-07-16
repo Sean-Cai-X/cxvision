@@ -45,6 +45,11 @@ void FindSegmentation::setpromptrect(int x0, int y0, int x1, int y1)
     m_has_rect = true;
 }
 
+void FindSegmentation::setpromptrectxyxy(int y1, int x1, int y0, int x0)
+{
+    setpromptrect(x0, y0, x1, y1);
+}
+
 void FindSegmentation::setpoint(int x, int y)
 {
     m_px = x;
@@ -106,7 +111,7 @@ void FindSegmentation::segment(void* image)
 
     std::string reason;
 
-    if (m_backend == "edgesam")
+    if (m_backend == "edgesam" || m_backend == "libtorch_segmentation")
     {
         FindSegmentationEdgeSamBackend backend;
         backend.Run(input, m_result, reason);
@@ -120,10 +125,10 @@ void FindSegmentation::segment(void* image)
     m_status = m_result.status;
     m_reason = m_result.reason;
 
-    m_result_ref = "segmentation:" + m_backend;
-    m_mask_ref = "mask:" + m_backend;
-    m_contour_ref = "contour:" + m_backend;
-    m_overlay_ref = "overlay:" + m_backend;
+    m_result_ref = m_result.result_ref.empty() ? "segmentation:" + m_backend : m_result.result_ref;
+    m_mask_ref = m_result.mask_ref.empty() ? "mask:" + m_backend : m_result.mask_ref;
+    m_contour_ref = m_result.contour_ref.empty() ? "contour:" + m_backend : m_result.contour_ref;
+    m_overlay_ref = m_result.overlay_ref.empty() ? "overlay:" + m_backend : m_result.overlay_ref;
 
     std::cout << "[FindSegmentation] segment end status=" << m_status << "\n" << std::flush;
 }

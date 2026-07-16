@@ -106,6 +106,14 @@ struct CxScriptToolResultCapture
     double findrect_coarse_score = 0.0;
     double findrect_refine_score = 0.0;
 
+    int segmentation_status_code = 0;
+    int segmentation_contour_count = 0;
+    double segmentation_primary_area = 0.0;
+    std::string segmentation_result_ref;
+    std::string segmentation_mask_ref;
+    std::string segmentation_contour_ref;
+    std::string segmentation_overlay_ref;
+
     std::string failure_stage;
     std::string reason;
 

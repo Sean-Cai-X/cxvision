@@ -19,6 +19,7 @@ public:
 
     void setthreshold(double threshold);
     void setpromptrect(int x0, int y0, int x1, int y1);
+    void setpromptrectxyxy(int y1, int x1, int y0, int x0);
     void setpoint(int x, int y);
     void setmode(int mode);
 

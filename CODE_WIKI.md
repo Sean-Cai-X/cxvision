@@ -1,9 +1,9 @@
-# CxVision Code Wiki v2.1
+# CxVision Code Wiki v2.2
 
-> **文档版本**: v2.1  
+> **文档版本**: v2.2  
 > **对应分支**: codex/cxcore-integration  
-> **核验日期**: 2026-07-15  
-> **文档标题**: Implementation-Verified Unified Flow Architecture
+> **核验日期**: 2026-07-16  
+> **文档标题**: Standardized Execution Chain and Integration Baseline
 
 ## 目录
 
@@ -13,26 +13,28 @@
 3. [三条标准执行链](#3-三条标准执行链)
 4. [Application / UI](#4-application--ui)
 5. [Workbench State](#5-workbench-state)
-6. [Manual Console Controllers](#6-manual-console-controllers)
-7. [Unified Execution / Orchestration](#7-unified-execution--orchestration)
-8. [cxparser / cxparser_ext Runtime](#8-cxparser--cxparser_ext-runtime)
-9. [CxScript Asset System](#9-cxscript-asset-system)
-10. [Vision Tool Runtime](#10-vision-tool-runtime)
-11. [Model & Optimization Capability](#11-model--optimization-capability)
-    - 11.1 [torch 主模型](#111-torch-主模型)
-    - 11.2 [mlpack 基础模型](#112-mlpack-基础模型)
-    - 11.3 [ensmallen 优化层](#113-ensmallen-优化层)
-    - 11.4 [参数搜索策略](#114-参数搜索策略)
-12. [Canonical Result / Projection / Display](#12-canonical-result--projection--display)
-13. [Evidence / Review / Artifact](#13-evidence--review--artifact)
-14. [Parameter Regression](#14-parameter-regression)
-15. [Observability / Reliability](#15-observability--reliability)
-16. [OpenCV / OCCT / cxgeom / cxcloud](#16-opencv--occt--cxgeom--cxcloud)
-17. [Build / Runtime](#17-build--runtime)
-18. [Test Taxonomy / Acceptance](#18-test-taxonomy--acceptance)
-19. [Current Status Matrix](#19-current-status-matrix)
-20. [Roadmap](#20-roadmap)
-21. [Architecture Rules](#21-architecture-rules)
+6. [Interaction / Annotation](#6-interaction--annotation)
+7. [Manual Console Controllers](#7-manual-console-controllers)
+8. [Unified Execution / Orchestration](#8-unified-execution--orchestration)
+9. [cxparser / cxparser_ext Runtime](#9-cxparser--cxparser_ext-runtime)
+10. [CxScript Asset System](#10-cxscript-asset-system)
+11. [Vision Tool Runtime](#11-vision-tool-runtime)
+12. [Model & Optimization Capability](#12-model--optimization-capability)
+    - 12.1 [torch 主模型](#121-torch-主模型)
+    - 12.2 [mlpack 基础模型](#122-mlpack-基础模型)
+    - 12.3 [ensmallen 优化层](#123-ensmallen-优化层)
+    - 12.4 [参数搜索策略](#124-参数搜索策略)
+13. [Canonical Result / Projection / Display](#13-canonical-result--projection--display)
+14. [Evidence / Review / Artifact](#14-evidence--review--artifact)
+15. [Parameter Regression](#15-parameter-regression)
+16. [Fixed Baseline and Regression Policy](#16-fixed-baseline-and-regression-policy)
+17. [Observability / Reliability](#17-observability--reliability)
+18. [OpenCV / OCCT / cxgeom / cxcloud](#18-opencv--occt--cxgeom--cxcloud)
+19. [Build / Runtime](#19-build--runtime)
+20. [Test Taxonomy / Acceptance](#20-test-taxonomy--acceptance)
+21. [Current Status Matrix](#21-current-status-matrix)
+22. [Roadmap](#22-roadmap)
+23. [Architecture Rules](#23-architecture-rules)
 
 ## Appendix A. Core File Index
 ## Appendix B. CxScript Asset Index
@@ -99,7 +101,7 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
 
 ## 2. 完整系统架构
 
-### 2.1 十层架构
+### 2.1 十一层架构
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -110,21 +112,33 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
 └────────────────────────┬─────────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────┐
-│ 2. Workbench State & Controllers                             │
+│ 2. Workbench State                                           │
 │ ManualTestContext / ManualGaugeState                         │
 │ ManualParamRegressionState / RuntimeObjectView               │
-│ ManualConsoleGauge / Evidence / Param / Debug                │
 └────────────────────────┬─────────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────┐
-│ 3. Unified Execution & Orchestration                         │
+│ 3. Interaction / Annotation                                  │
+│ ImageAnnotationLayer / CxAnnotationToolRuntime               │
+│ Shape Elements / HitTest / Drag / CommitEdit                 │
+│ Runtime Projection / Runtime Writeback                       │
+└────────────────────────┬─────────────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────────────┐
+│ 4. Manual Console Controllers                                │
+│ ManualConsoleGauge / Evidence / Param / Debug                │
+│ ManualConsoleFindlineDebug / FindcircleDebug / RuntimeView   │
+└────────────────────────┬─────────────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────────────┐
+│ 5. Unified Execution & Orchestration                         │
 │ ParserDebugBridge / CxParserRuntimeOwner                     │
 │ CxScriptHeadlessRunner / CxScriptSuiteRunner                 │
 │ CxParamProbeRunner / RuntimeResultCapture                    │
 └────────────────────────┬─────────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────┐
-│ 4. CxScript Runtime & Asset System                           │
+│ 6. CxScript Runtime & Asset System                           │
 │ cxparser / cxparser_ext                                      │
 │ Catalog / Frozen / Diagnostic / Manifest / Suite             │
 │ Contract / Parameter Profile / Param Regression              │
@@ -133,16 +147,17 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
        ┌─────────────────┴─────────────────┐
        ▼                                   ▼
 ┌──────────────────────────────┐ ┌──────────────────────────────┐
-│ 5. Vision Tool Runtime       │ │ 6. Model & Capability Layer  │
+│ 7. Vision Tool Runtime       │ │ 8. Model & Optimization      │
 │ Findline / Findcircle        │ │ torch 主模型                 │
 │ Findellipse / FindRect       │ │ mlpack 基础模型              │
 │ FindObject / FastMatch       │ │ ensmallen 优化层             │
-│ CircleRing / Formfit         │ │ 参数搜索策略                 │
+│ FindSegmentation             │ │ 参数搜索策略                 │
+│ CircleRing / Formfit         │ │                              │
 └──────────────┬───────────────┘ └──────────────┬───────────────┘
                └───────────────┬────────────────┘
                                ▼
 ┌──────────────────────────────────────────────────────┐
-│ 7. Canonical Result & Projection                        │
+│ 9. Canonical Result & Projection                        │
 │ Runtime Capture / Tool Result / Metrics                 │
 │ Shape Overlay / Result Projector / ToolDisplay         │
 └────────────────────────┬─────────────────────────────┘
@@ -150,14 +165,14 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
         ┌────────────────┴────────────────┐
         ▼                                 ▼
 ┌──────────────────────────────┐ ┌──────────────────────────────┐
-│ 8. Evidence / Review         │ │ 9. Parameter Regression      │
+│ 10. Evidence / Review        │ │ 11. Parameter Regression     │
 │ Snapshot / Summary / Trace   │ │ Range / Candidate / Probe    │
 │ Overlay / Replay / Contract  │ │ HitDistribution / Accuracy   │
 │ Human Review / Promotion     │ │ mlpack Rank / ensmallen Opt  │
 └──────────────────────────────┘ └──────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────┐
-│ 10. Foundation & Observability                               │
+│ 12. Foundation & Observability                              │
 │ OpenCV / OCCT / cxgeom / cxcloud                            │
 │ UnifiedLog / CrashLog / Run Context                         │
 └──────────────────────────────────────────────────────────────┘
@@ -183,11 +198,20 @@ cxvision_repo/
 │   ├── ParserDebugBridge.h/cpp                  # 脚本调试桥接
 │   ├── CxParserRuntimeOwner.h/cpp               # 解析器运行时所有权
 │   ├── CxScriptHeadlessRunner.h/cpp             # 通用 Headless 运行器
+│   ├── CxScriptHeadlessBindings.h/cpp           # Headless 绑定注册
 │   ├── CxScriptSuiteRunner.h/cpp                # Suite 运行器
 │   ├── CxParamProbeRunner.h/cpp                 # 参数探测运行器
 │   ├── CxScriptCasePackageWriter.h/cpp          # Case 包写入器
+│   ├── CxScriptRuntimeCaptureSmoke.h/cpp        # Runtime Capture Smoke
+│   ├── CxRuntimeProjectionExecutor.h/cpp        # Runtime 投影执行器
+│   ├── CxShapeInteractionRunner.h/cpp           # Shape 交互测试运行器
+│   ├── CxShapeInteractionTest.h/cpp             # Shape 交互测试基类
+│   ├── CxManifestProjectionRequestResolver.h/cpp  # Manifest 投影解析器
 │   ├── ImageAnnotationLayer.h/cpp               # 图像注释层
 │   ├── CxAnnotationToolRuntime.h/cpp            # 注释工具运行时
+│   ├── FindSegmentation.h/cpp                   # 分割检测算法
+│   ├── FindSegmentationOpenCvSmokeBackend.h/cpp # OpenCV 分割后端
+│   ├── FindSegmentationEdgeSamBackend.h/cpp     # EdgeSam 分割后端
 │   ├── TorchRuntimeBridge.h/cpp                 # Torch 运行时桥接
 │   ├── TorchRuntimeResultAdapter.h/cpp          # Torch 结果适配器
 │   ├── CxUnifiedLog.h/cpp                       # 统一日志
@@ -420,9 +444,93 @@ Accepted Gauge
 
 ---
 
-## 6. Manual Console Controllers
+## 6. Interaction / Annotation
 
-### 6.1 ManualConsoleGauge
+### 6.1 ImageAnnotationLayer
+
+#### 定位
+图像注释层，管理 ShapeElements 和 OverlayElements，提供统一的 HitTest、Drag、CommitEdit 接口，以及 Runtime Projection 和 Runtime Writeback。
+
+#### 核心文件
+- [ImageAnnotationLayer.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/ImageAnnotationLayer.h)
+- [ImageAnnotationLayer.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/ImageAnnotationLayer.cpp)
+
+#### 数据结构
+- `CxShapeElement`：形状元素（含 stable_ref、owner、semantic_role）
+- `OverlayElement`：覆盖层元素
+- `CxShapeHitResult`：命中测试结果
+- `CxShapeCommitResult`：提交结果
+
+#### 交互流程
+1. HitTest → BeginDrag → UpdateDrag → CommitEdit / CancelDrag
+2. Runtime Object Publish → RefreshRuntimeObjectTable → SyncRuntimeObjectsToShapeElements
+3. Annotation Tool Create → Draft → Commit → UpsertShape
+
+#### 状态
+- **[Implemented]**：ShapeElements 管理、HitTest、Drag、CommitEdit、Runtime 投影
+- **[Partial]**：Commit → Runtime Object 即时写回
+
+### 6.2 CxAnnotationToolRuntime
+
+#### 定位
+注释工具运行时，管理 Point/Line/Rect/Circle/Ellipse/Polyline 工具的输入处理和状态。
+
+#### 核心文件
+- [CxAnnotationToolRuntime.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxAnnotationToolRuntime.h)
+- [CxAnnotationToolRuntime.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxAnnotationToolRuntime.cpp)
+
+#### 状态
+- **[Implemented]**：Point/Line/Rect/Circle/Ellipse/Polyline 创建、最小尺寸保护、ESC 取消
+
+### 6.3 Shape Elements
+
+#### LineGaugeShape
+直线 Gauge 形状，支持 P0/P1/Center/Width 四个拖动控制点。
+
+#### CircleGaugeShape
+圆形 Gauge 形状，支持 Center 和 Radius 控制点。
+
+#### RectShape
+矩形形状，支持 Corner 和 Center 控制点。
+
+#### EllipseShape
+椭圆形状，支持 Center、Rx、Ry 和 Angle 控制点。
+
+#### PolylineShape
+折线形状，支持顶点拖动和新增。
+
+#### 状态
+- **[Implemented]**：Shape 拖动、stale 标记
+- **[Verification Pending]**：重新运行后 Overlay 一致性
+
+### 6.4 Runtime Projection
+
+#### 定位
+将 Runtime 对象的几何信息投影到 ShapeElements，实现脚本执行结果的可视化。
+
+#### 核心文件
+- [CxRuntimeProjectionExecutor.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxRuntimeProjectionExecutor.h)
+- [CxRuntimeProjectionExecutor.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxRuntimeProjectionExecutor.cpp)
+
+#### 状态
+- **[Implemented]**：基础 Runtime 对象投影
+
+### 6.5 Runtime Writeback
+
+#### 定位
+将用户编辑的 Shape 几何写回 Runtime 对象和参数，实现交互闭环。
+
+#### 状态
+- **[Partial]**：Shape Commit → ManualGaugeState 同步
+- **[Partial]**：ManualGaugeState → Globals 同步
+- **[Partial]**：Globals → Runtime Tool Object 同步
+- **[Verification Pending]**：Result Overlay 一致性
+
+---
+
+## 7. Manual Console Controllers
+
+### 7.1 ManualConsoleGauge
 
 #### 定位
 Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参数注入和持久化。
@@ -444,7 +552,7 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 - **[Implemented]**：Gauge → Globals 注入、保存/加载、manifest candidate、accepted gate
 - **[Implemented / Verification Pending]**：控制点实际显示、鼠标拖动、缩放坐标转换、运行后显示一致性
 
-### 6.2 ManualConsoleParamRegressionPanel
+### 7.2 ManualConsoleParamRegressionPanel
 
 #### 定位
 参数回归面板控制器，提供参数范围、候选表、Probe Runner 和评估报告的 UI 集成。
@@ -470,7 +578,7 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 - **[Partial]**：UI 候选批量 Probe 循环
 - **[Placeholder]**：真实 Hit Distribution、mlpack Rank、ensmallen Optimize
 
-### 6.3 ManualConsoleEvidenceChain
+### 7.3 ManualConsoleEvidenceChain
 
 #### 定位
 证据链控制器，管理证据链的加载、浏览和操作。
@@ -482,7 +590,7 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 #### 状态
 - **[Implemented]**：基础证据链加载和查询
 
-### 6.4 ManualConsoleScriptDebugPanel
+### 7.4 ManualConsoleScriptDebugPanel
 
 #### 定位
 脚本调试面板，提供脚本编译、执行和调试功能。
@@ -490,7 +598,7 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 #### 状态
 - **[Implemented]**：基础脚本调试功能
 
-### 6.5 ManualConsoleFindlineDebug
+### 7.5 ManualConsoleFindlineDebug
 
 #### 定位
 Findline 专用调试面板。
@@ -498,7 +606,7 @@ Findline 专用调试面板。
 #### 状态
 - **[Implemented]**：基础调试功能
 
-### 6.6 ManualConsoleFindcircleDebug
+### 7.6 ManualConsoleFindcircleDebug
 
 #### 定位
 Findcircle 专用调试面板。
@@ -506,7 +614,7 @@ Findcircle 专用调试面板。
 #### 状态
 - **[Implemented]**：基础调试功能
 
-### 6.7 ManualConsoleRuntimeView
+### 7.7 ManualConsoleRuntimeView
 
 #### 定位
 运行时视图，展示脚本执行后的对象和变量状态。
@@ -517,7 +625,7 @@ Findcircle 专用调试面板。
 #### 状态
 - **[Implemented]**：基础运行时对象展示
 
-### 6.8 ManualConsoleCxScriptDebug
+### 7.8 ManualConsoleCxScriptDebug
 
 #### 定位
 CxScript 专用调试面板。
@@ -527,9 +635,9 @@ CxScript 专用调试面板。
 
 ---
 
-## 7. Unified Execution / Orchestration
+## 8. Unified Execution / Orchestration
 
-### 7.1 ParserDebugBridge
+### 8.1 ParserDebugBridge
 
 #### 定位
 脚本调试桥接器，负责 CxScript 的编译、执行、调试和全局输入注入。
@@ -547,7 +655,7 @@ CxScript 专用调试面板。
 #### 状态
 - **[Implemented]**：脚本编译/执行、全局输入注入、分步执行、运行时快照
 
-### 7.2 CxParserRuntimeOwner
+### 8.2 CxParserRuntimeOwner
 
 #### 定位
 解析器运行时所有权管理，确保运行时对象的生命周期正确管理。
@@ -558,7 +666,7 @@ CxScript 专用调试面板。
 #### 状态
 - **[Implemented]**：运行时所有权管理
 
-### 7.3 CxScriptHeadlessRunner
+### 8.3 CxScriptHeadlessRunner
 
 #### 定位
 通用 Headless 运行器，不是返回空 `true` 的 Scaffold，执行结束后检查完整的 Artifact。
@@ -582,7 +690,67 @@ CxScript 专用调试面板。
 #### 待固化问题
 与 `ParserDebugBridge`、`CxScriptSuiteRunner` 是否共享完全一致的 global 注入、对象生命周期、算法调用顺序和结果抓取语义。
 
-### 7.4 CxScriptSuiteRunner
+### 8.4 CxScriptHeadlessBindings
+
+#### 定位
+Headless 绑定注册，为 Headless Runner 提供统一的类型和方法绑定。
+
+#### 核心文件
+- [CxScriptHeadlessBindings.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxScriptHeadlessBindings.h)
+- [CxScriptHeadlessBindings.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxScriptHeadlessBindings.cpp)
+
+#### 状态
+- **[Implemented]**：基础绑定注册
+
+### 8.5 CxScriptRuntimeCaptureSmoke
+
+#### 定位
+Runtime Capture Smoke 测试，验证 Parser 执行后对象和几何 Shape 的捕获能力。
+
+#### 核心文件
+- [CxScriptRuntimeCaptureSmoke.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxScriptRuntimeCaptureSmoke.h)
+- [CxScriptRuntimeCaptureSmoke.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxScriptRuntimeCaptureSmoke.cpp)
+
+#### 状态
+- **[Implemented]**：基础 Smoke 捕获验证
+
+### 8.6 CxShapeInteractionRunner
+
+#### 定位
+Shape 交互测试运行器，执行 Shape 几何测试和交互测试套件。
+
+#### 核心文件
+- [CxShapeInteractionRunner.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxShapeInteractionRunner.h)
+- [CxShapeInteractionRunner.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxShapeInteractionRunner.cpp)
+
+#### 状态
+- **[Implemented]**：基础交互测试执行
+
+### 8.7 CxShapeInteractionTest
+
+#### 定位
+Shape 交互测试基类，提供统一的测试断言和验证框架。
+
+#### 核心文件
+- [CxShapeInteractionTest.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxShapeInteractionTest.h)
+- [CxShapeInteractionTest.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxShapeInteractionTest.cpp)
+
+#### 状态
+- **[Implemented]**：基础测试框架
+
+### 8.8 CxManifestProjectionRequestResolver
+
+#### 定位
+Manifest 投影请求解析器，将 manifest 中的目标和测试用例解析为投影请求。
+
+#### 核心文件
+- [CxManifestProjectionRequestResolver.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxManifestProjectionRequestResolver.h)
+- [CxManifestProjectionRequestResolver.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/CxManifestProjectionRequestResolver.cpp)
+
+#### 状态
+- **[Implemented]**：基础投影请求解析
+
+### 8.9 CxScriptSuiteRunner
 
 #### 定位
 Suite 运行器，支持完整的 5 步测试流程。
@@ -601,7 +769,7 @@ Suite 运行器，支持完整的 5 步测试流程。
 #### 状态
 - **[Implemented]**：Dry-run、Headless、Contract、基础报告
 
-### 7.5 CxParamProbeRunner
+### 8.10 CxParamProbeRunner
 
 #### 定位
 参数探测运行器，正确承接 Headless 结果并以 `probe_ok` 为准。
@@ -627,7 +795,7 @@ Suite 运行器，支持完整的 5 步测试流程。
 - **[Implemented]**：Adapter 已实现
 - **[Integration Pending]**：Parameter Regression Panel 尚未完全连成自动循环
 
-### 7.6 CxScriptCasePackageWriter
+### 8.11 CxScriptCasePackageWriter
 
 #### 定位
 Case 包写入器，生成标准测试资产。
@@ -640,9 +808,9 @@ Case 包写入器，生成标准测试资产。
 
 ---
 
-## 8. cxparser / cxparser_ext Runtime
+## 9. cxparser / cxparser_ext Runtime
 
-### 8.1 cxparser_ext
+### 9.1 cxparser_ext
 
 #### 定位
 构建在 cxparser 核心之上的扩展层，提供完整的脚本执行流水线、类型绑定构建、流程路由、验证引擎、结果交付等企业级功能。
@@ -660,7 +828,7 @@ PrepareTask → MergeBindingSpec → MergeEvidence → Run → Validate → Deli
 #### 状态
 - **[Implemented]**：基础流水线、绑定构建、验证引擎
 
-### 8.2 cxparser
+### 9.2 cxparser
 
 #### 定位
 基于 muParser 扩展的脚本解析核心引擎，提供表达式求值、变量绑定、类方法调用、字节码执行等能力。
@@ -676,9 +844,9 @@ PrepareTask → MergeBindingSpec → MergeEvidence → Run → Validate → Deli
 
 ---
 
-## 9. CxScript Asset System
+## 10. CxScript Asset System
 
-### 9.1 Asset 目录结构
+### 10.1 Asset 目录结构
 
 ```
 cxparser/cxscript/module/
@@ -703,7 +871,7 @@ cxparser/cxscript/module/
     └── ...
 ```
 
-### 9.2 Asset 类型定义
+### 10.2 Asset 类型定义
 
 | 类型 | 说明 | 状态 |
 |------|------|------|
@@ -718,9 +886,9 @@ cxparser/cxscript/module/
 
 ---
 
-## 10. Vision Tool Runtime
+## 11. Vision Tool Runtime
 
-### 10.1 Findline
+### 11.1 Findline
 
 #### 定位
 直线检测算法，支持亚像素级边缘细化和多种参数配置。
@@ -741,7 +909,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础直线检测、拟合、参数配置
 
-### 10.2 Findcircle
+### 11.2 Findcircle
 
 #### 定位
 圆检测算法，支持环形区域扫描和拟合。
@@ -753,7 +921,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础圆检测、拟合、超时保护
 
-### 10.3 Findellipse
+### 11.3 Findellipse
 
 #### 定位
 椭圆检测算法。
@@ -761,7 +929,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础椭圆检测
 
-### 10.4 FindRect
+### 11.4 FindRect
 
 #### 定位
 矩形检测算法。
@@ -769,7 +937,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础矩形检测
 
-### 10.5 FindObject
+### 11.5 FindObject
 
 #### 定位
 对象检测算法。
@@ -777,7 +945,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础对象检测
 
-### 10.6 FastMatch
+### 11.6 FastMatch
 
 #### 定位
 快速模板匹配算法。
@@ -788,7 +956,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础模板匹配
 
-### 10.7 CircleRingGauge
+### 11.7 CircleRingGauge
 
 #### 定位
 圆环规，验证同心圆、厚度和位置。
@@ -796,7 +964,7 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础圆环测量和判断
 
-### 10.8 FormfitGauge
+### 11.8 FormfitGauge
 
 #### 定位
 形位公差规，支持多种拟合方法。
@@ -804,11 +972,32 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础形位公差测量
 
+### 11.9 FindSegmentation
+
+#### 定位
+分割检测算法，支持多种后端实现。
+
+#### 核心文件
+- [FindSegmentation.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentation.h)
+- [FindSegmentation.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentation.cpp)
+- [FindSegmentationOpenCvSmokeBackend.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentationOpenCvSmokeBackend.h)
+- [FindSegmentationOpenCvSmokeBackend.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentationOpenCvSmokeBackend.cpp)
+- [FindSegmentationEdgeSamBackend.h](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentationEdgeSamBackend.h)
+- [FindSegmentationEdgeSamBackend.cpp](file:///d:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FindSegmentationEdgeSamBackend.cpp)
+
+#### 后端实现
+- **OpenCV Smoke Backend**：基于 OpenCV 的基础分割实现
+- **EdgeSam Backend**：基于 EdgeSam 的边缘分割实现
+
+#### 状态
+- **[Implemented]**：基础分割框架和后端接口
+- **[Verification Pending]**：完整分割效果验证
+
 ---
 
-## 11. Model & Optimization Capability
+## 12. Model & Optimization Capability
 
-### 11.1 torch 主模型
+### 12.1 torch 主模型
 
 #### 定位
 PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
@@ -836,7 +1025,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 - **[Implemented/Partial]**：动态 Runtime Bridge、C API Task 调用、结果适配、独立 libtorch_module 构建
 - **[Partial]**：统一进入公共 ExecutionResult、统一 EvidencePackage、CxScript → Torch → UI 的正式回归验证
 
-### 11.2 mlpack 基础模型
+### 12.2 mlpack 基础模型
 
 #### 定位
 基于 mlpack 的机器学习模型脚本语义层。
@@ -851,7 +1040,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 - **[Runtime Verification Pending]**：根目录 CMake 中无原生构建项
 - **[Placeholder]**：Parameter Regression 的 mlpack Rank
 
-### 11.3 ensmallen 优化层
+### 12.3 ensmallen 优化层
 
 #### 定位
 基于 ensmallen 的参数优化脚本语义层。
@@ -868,7 +1057,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 - **[Runtime Verification Pending]**：根目录 CMake 中无原生构建项
 - **[Placeholder]**：Parameter Regression 的 ensmallen Suggest
 
-### 11.4 参数搜索策略
+### 12.4 参数搜索策略
 
 | 策略 | 状态 | 说明 |
 |------|------|------|
@@ -879,9 +1068,9 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 
 ---
 
-## 12. Canonical Result / Projection / Display
+## 13. Canonical Result / Projection / Display
 
-### 12.1 RuntimeResultCapture
+### 13.1 RuntimeResultCapture
 
 #### 定位
 运行时结果捕获，统一收集脚本执行后的所有结果数据。
@@ -889,7 +1078,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础结果捕获
 
-### 12.2 ToolResult
+### 13.2 ToolResult
 
 #### 定位
 工具执行结果，包含测量点、拟合结果和统计指标。
@@ -897,7 +1086,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础工具结果
 
-### 12.3 ShapeOverlay
+### 13.3 ShapeOverlay
 
 #### 定位
 形状覆盖层，在图像上渲染检测到的几何形状。
@@ -905,7 +1094,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础形状渲染
 
-### 12.4 ResultProjector
+### 13.4 ResultProjector
 
 #### 定位
 结果投影器，将工具结果投影到 UI 和证据链。
@@ -913,7 +1102,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础投影
 
-### 12.5 ToolDisplay
+### 13.5 ToolDisplay
 
 #### 定位
 工具显示导出，生成工具执行的可视化输出。
@@ -926,9 +1115,9 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 
 ---
 
-## 13. Evidence / Review / Artifact
+## 14. Evidence / Review / Artifact
 
-### 13.1 EvidenceChain
+### 14.1 EvidenceChain
 
 #### 定位
 证据链管理，关联 Case、Image、Target、Script、Parameter Profile、Contract。
@@ -939,7 +1128,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础证据链加载和查询
 
-### 13.2 Snapshot
+### 14.2 Snapshot
 
 #### 定位
 执行快照，记录脚本执行时的完整状态。
@@ -947,7 +1136,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础快照生成
 
-### 13.3 Summary
+### 14.3 Summary
 
 #### 定位
 结果摘要，生成结构化的执行结果摘要。
@@ -955,7 +1144,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础摘要生成
 
-### 13.4 Trace
+### 14.4 Trace
 
 #### 定位
 运行轨迹，记录执行过程中的关键事件。
@@ -966,7 +1155,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础轨迹记录
 
-### 13.5 Overlay
+### 14.5 Overlay
 
 #### 定位
 覆盖层图像，包含结果叠加和证据叠加。
@@ -974,7 +1163,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础覆盖层生成
 
-### 13.6 Replay
+### 14.6 Replay
 
 #### 定位
 回放包，支持完整的执行过程重现。
@@ -982,7 +1171,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础回放包生成
 
-### 13.7 Contract
+### 14.7 Contract
 
 #### 定位
 契约定义，包含预期结果、最小点数、失败阶段等判断规则。
@@ -990,7 +1179,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础契约判断
 
-### 13.8 Review Gate
+### 14.8 Review Gate
 
 #### 定位
 审核门，管理审核阶段和决策。
@@ -1005,7 +1194,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 #### 状态
 - **[Implemented]**：基础审核状态定义和 JSON 序列化
 
-### 13.9 Human Review
+### 14.9 Human Review
 
 #### 定位
 人工审核记录和决策。

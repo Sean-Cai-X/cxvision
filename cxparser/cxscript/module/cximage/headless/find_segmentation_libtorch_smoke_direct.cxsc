@@ -1,0 +1,21 @@
+Image m_image;
+FindSegmentation m_seg;
+
+m_image.copyFromMat(global_matInput);
+
+int x0 = global_roi_x0;
+int y0 = global_roi_y0;
+int x1 = global_roi_x1;
+int y1 = global_roi_y1;
+double threshold = 0.5;
+
+m_seg.setbackend("libtorch_segmentation");
+m_seg.setdevice("cpu");
+m_seg.setmodel("");
+m_seg.setthreshold(threshold);
+m_seg.setpromptrect(x0, y0, x1, y1);
+m_seg.setmode(2);
+
+m_seg.segment(&m_image);
+m_seg.extractboundary();
+m_seg.buildoverlay(&m_image);

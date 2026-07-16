@@ -264,11 +264,19 @@ bool CaptureFindSegmentationResult(
     output.name = object_name;
     output.owner_ref = object_name;
 
-    output.valid_points_count = tool.get_contour_count();
-    output.has_result_rect = tool.get_contour_count() > 0;
-    output.result_rect_count = tool.get_contour_count();
-    output.avgdist = tool.get_primary_area();
-    output.failure_stage = tool.get_contour_count() > 0 ? std::string() : "boundary_contours";
+    output.segmentation_status_code = tool.status_code();
+    output.segmentation_contour_count = tool.get_contour_count();
+    output.segmentation_primary_area = tool.get_primary_area();
+    output.segmentation_result_ref = tool.get_result();
+    output.segmentation_mask_ref = tool.get_mask_ref();
+    output.segmentation_contour_ref = tool.get_contour_ref();
+    output.segmentation_overlay_ref = tool.get_overlay_ref();
+
+    output.valid_points_count = output.segmentation_contour_count;
+    output.has_result_rect = output.segmentation_contour_count > 0;
+    output.result_rect_count = output.segmentation_contour_count;
+    output.avgdist = output.segmentation_primary_area;
+    output.failure_stage = output.segmentation_contour_count > 0 ? std::string() : "boundary_contours";
     if (!output.failure_stage.empty())
         output.reason = tool.m_reason.empty() ? "FindSegmentation boundary unavailable" : tool.m_reason;
 
@@ -351,6 +359,19 @@ static void MergeToolCapture(
         capture.findrect_coarse_score = tool.findrect_coarse_score;
     if (tool.findrect_refine_score != 0.0)
         capture.findrect_refine_score = tool.findrect_refine_score;
+    if (tool.segmentation_status_code != 0)
+        capture.segmentation_status_code = tool.segmentation_status_code;
+    capture.segmentation_contour_count += tool.segmentation_contour_count;
+    if (tool.segmentation_primary_area != 0.0)
+        capture.segmentation_primary_area = tool.segmentation_primary_area;
+    if (!tool.segmentation_result_ref.empty())
+        capture.segmentation_result_ref = tool.segmentation_result_ref;
+    if (!tool.segmentation_mask_ref.empty())
+        capture.segmentation_mask_ref = tool.segmentation_mask_ref;
+    if (!tool.segmentation_contour_ref.empty())
+        capture.segmentation_contour_ref = tool.segmentation_contour_ref;
+    if (!tool.segmentation_overlay_ref.empty())
+        capture.segmentation_overlay_ref = tool.segmentation_overlay_ref;
 
     if (capture.failure_stage.empty() && !tool.failure_stage.empty())
         capture.failure_stage = tool.failure_stage;

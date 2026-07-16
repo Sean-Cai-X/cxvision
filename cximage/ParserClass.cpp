@@ -595,8 +595,12 @@ namespace mu
 
             FindSegmentation* pfindsegmentation = nullptr;
             m_parser.DefineClass("FindSegmentation", pfindsegmentation);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setbackend", &FindSegmentation::setbackend);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmodel", &FindSegmentation::setmodel);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setdevice", &FindSegmentation::setdevice);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setthreshold", &FindSegmentation::setthreshold);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpromptrect", &FindSegmentation::setpromptrect);
+            m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpromptrectxyxy", &FindSegmentation::setpromptrectxyxy);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpoint", &FindSegmentation::setpoint);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode", &FindSegmentation::setmode);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "segment", &FindSegmentation::segment);

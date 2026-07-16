@@ -546,6 +546,13 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"findrect_right_points\": " << capture.findrect_right_points << ",\n";
     file << "  \"findrect_coarse_score\": " << capture.findrect_coarse_score << ",\n";
     file << "  \"findrect_refine_score\": " << capture.findrect_refine_score << ",\n";
+    file << "  \"segmentation_status_code\": " << capture.segmentation_status_code << ",\n";
+    file << "  \"segmentation_contour_count\": " << capture.segmentation_contour_count << ",\n";
+    file << "  \"segmentation_primary_area\": " << capture.segmentation_primary_area << ",\n";
+    file << "  \"segmentation_result_ref\": \"" << JsonEscape(capture.segmentation_result_ref) << "\",\n";
+    file << "  \"segmentation_mask_ref\": \"" << JsonEscape(capture.segmentation_mask_ref) << "\",\n";
+    file << "  \"segmentation_contour_ref\": \"" << JsonEscape(capture.segmentation_contour_ref) << "\",\n";
+    file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
     file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
     file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
@@ -922,6 +929,13 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"findrect_right_points\": " << capture.findrect_right_points << ",\n";
         object_state_file << "  \"findrect_coarse_score\": " << capture.findrect_coarse_score << ",\n";
         object_state_file << "  \"findrect_refine_score\": " << capture.findrect_refine_score << ",\n";
+        object_state_file << "  \"segmentation_status_code\": " << capture.segmentation_status_code << ",\n";
+        object_state_file << "  \"segmentation_contour_count\": " << capture.segmentation_contour_count << ",\n";
+        object_state_file << "  \"segmentation_primary_area\": " << capture.segmentation_primary_area << ",\n";
+        object_state_file << "  \"segmentation_result_ref\": \"" << JsonEscape(capture.segmentation_result_ref) << "\",\n";
+        object_state_file << "  \"segmentation_mask_ref\": \"" << JsonEscape(capture.segmentation_mask_ref) << "\",\n";
+        object_state_file << "  \"segmentation_contour_ref\": \"" << JsonEscape(capture.segmentation_contour_ref) << "\",\n";
+        object_state_file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
         object_state_file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << "\n";
         object_state_file << "}\n";
         object_state_file.close();
