@@ -16,6 +16,11 @@ bool ParseCxScriptHeadlessArgs(
     char** argv,
     CxScriptHeadlessOptions& options);
 
+bool RunCxScriptHeadlessCapture(
+    const CxScriptHeadlessOptions& options,
+    CxScriptExecutionCapture& capture,
+    std::string& reason);
+
 bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadlessResult& result);
 
 int RunCxScriptHeadless(int argc, char* argv[]);

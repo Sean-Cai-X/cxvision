@@ -1,127 +1,25 @@
 #include "CxRuntimeProjectionExecutor.h"
-#include "Findline.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
-#include "FindRect.h"
-#include "FastMatch.h"
-#include "Image.h"
-#include "shapebase.h"
+#include "CxScriptHeadlessRunner.h"
+
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <string>
 
 namespace fs = std::filesystem;
 
 namespace {
 
-bool LoadProjectionImage(const std::string& path, Image& image, CxRuntimeProjectionResult& result)
-{
-    if (path.empty())
-    {
-        result.failure_stage = "image_load";
-        result.reason = "image path is empty";
-        return false;
-    }
-
-    if (!fs::exists(path))
-    {
-        result.failure_stage = "image_load";
-        result.reason = "image not found: " + path;
-        return false;
-    }
-
-    image.load(path.c_str());
-
-    if (image.getWidth() == 0 || image.getHeight() == 0)
-    {
-        result.failure_stage = "image_decode";
-        result.reason = "image exists but decode failed: " + path;
-        return false;
-    }
-
-    return true;
-}
-
-void CountRoles(const ImageAnnotationLayer& layer, const std::string& owner_ref, CxRuntimeProjectionResult& result)
-{
-    result.role_counts.clear();
-    for (const auto& elem : layer.ShapeElements())
-    {
-        if (elem.owner_ref != owner_ref)
-            continue;
-        result.role_counts[elem.semantic_role]++;
-    }
-}
-
-void CapturePublishedShapes(const ImageAnnotationLayer& layer,
-                            const std::string& owner_ref,
-                            CxRuntimeProjectionResult& result)
-{
-    result.published_shapes.clear();
-    for (const auto& elem : layer.ShapeElements())
-    {
-        if (elem.owner_ref != owner_ref)
-            continue;
-
-        CxShapeElementSnapshot snap;
-        snap.stable_ref = elem.stable_ref;
-        snap.owner_type = elem.owner_type;
-        snap.owner_ref = elem.owner_ref;
-        snap.semantic_role = elem.semantic_role;
-        snap.editable = elem.editable;
-        snap.result_element = elem.result_element;
-
-        if (elem.shape)
-        {
-            CxShapeGeometrySnapshot geometry;
-            if (elem.shape->snapshot(geometry))
-            {
-                snap.shape_kind = CxShapeKindName(geometry.kind);
-                snap.center_x = geometry.center.x;
-                snap.center_y = geometry.center.y;
-                snap.radius = geometry.radius;
-                snap.inner_radius = geometry.inner_radius;
-                snap.half_width = geometry.half_width;
-                snap.radius_x = geometry.radius_x;
-                snap.radius_y = geometry.radius_y;
-                snap.angle_deg = geometry.angle;
-                snap.closed = geometry.closed;
-                for (const auto& point : geometry.points)
-                {
-                    snap.points.push_back(point.x);
-                    snap.points.push_back(point.y);
-                }
-
-                if (geometry.kind == CxShapeKind::Polyline && geometry.points.size() == 4)
-                {
-                    for (const auto& point : geometry.points)
-                    {
-                        snap.center_x += point.x;
-                        snap.center_y += point.y;
-                    }
-                    snap.center_x /= 4.0;
-                    snap.center_y /= 4.0;
-                    const double dx01 = geometry.points[1].x - geometry.points[0].x;
-                    const double dy01 = geometry.points[1].y - geometry.points[0].y;
-                    const double dx12 = geometry.points[2].x - geometry.points[1].x;
-                    const double dy12 = geometry.points[2].y - geometry.points[1].y;
-                    snap.radius_x = std::hypot(dx01, dy01) / 2.0;
-                    snap.radius_y = std::hypot(dx12, dy12) / 2.0;
-                    snap.angle_deg = std::atan2(dy01, dx01) * 180.0 / M_PI;
-                }
-            }
-        }
-        result.published_shapes.push_back(std::move(snap));
-    }
-}
-
-bool HasElementsForOwner(const ImageAnnotationLayer& layer, const std::string& owner_ref)
-{
-    for (const auto& elem : layer.ShapeElements())
-    {
-        if (elem.owner_ref == owner_ref)
-            return true;
-    }
-    return false;
-}
+static const char* kFindlineProjectionScript =
+    "cxparser/cxscript/module/cximage/headless/projection/findline_projection.cxsc";
+static const char* kFindcircleProjectionScript =
+    "cxparser/cxscript/module/cximage/headless/projection/findcircle_projection.cxsc";
+static const char* kFindellipseProjectionScript =
+    "cxparser/cxscript/module/cximage/headless/projection/findellipse_projection.cxsc";
+static const char* kFindRectProjectionScript =
+    "cxparser/cxscript/module/cximage/headless/projection/findrect_projection.cxsc";
+static const char* kFastMatchProjectionScript =
+    "cxparser/cxscript/module/cximage/headless/projection/fastmatch_projection.cxsc";
 
 bool Fail(CxRuntimeProjectionResult& result, const std::string& stage, const std::string& reason)
 {
@@ -130,395 +28,290 @@ bool Fail(CxRuntimeProjectionResult& result, const std::string& stage, const std
     return false;
 }
 
-bool ExecuteFindline(const CxRuntimeProjectionRequest& request,
-                     ImageAnnotationLayer& layer,
-                     CxRuntimeProjectionResult& result)
+std::string OwnerTypeForTool(const std::string& tool_id)
 {
-    result.owner_type = "Findline";
-    result.owner_ref = request.owner_ref;
+    if (tool_id == "findline_gauge") return "Findline";
+    if (tool_id == "findcircle_gauge") return "Findcircle";
+    if (tool_id == "findellipse_gauge") return "Findellipse";
+    if (tool_id == "findrect_gauge") return "FindRect";
+    if (tool_id == "fastmatch") return "fastmatch";
+    return tool_id;
+}
 
+const char* ProjectionScriptForTool(const std::string& tool_id)
+{
+    if (tool_id == "findline_gauge") return kFindlineProjectionScript;
+    if (tool_id == "findcircle_gauge") return kFindcircleProjectionScript;
+    if (tool_id == "findellipse_gauge") return kFindellipseProjectionScript;
+    if (tool_id == "findrect_gauge") return kFindRectProjectionScript;
+    if (tool_id == "fastmatch") return kFastMatchProjectionScript;
+    return nullptr;
+}
+
+void CountRolesFromSnapshots(CxRuntimeProjectionResult& result)
+{
+    result.role_counts.clear();
+    for (const auto& shape : result.published_shapes)
+        result.role_counts[shape.semantic_role]++;
+}
+
+void NormalizePublishedShapeOwners(CxRuntimeProjectionResult& result)
+{
+    for (auto& shape : result.published_shapes)
+    {
+        shape.owner_type = result.owner_type;
+        shape.owner_ref = result.owner_ref;
+    }
+}
+
+bool ValidateProjectionRequest(const CxRuntimeProjectionRequest& request,
+                               CxRuntimeProjectionResult& result)
+{
     if (request.owner_ref.empty())
         return Fail(result, "request_validation", "owner_ref is empty");
 
-    if (request.roi_x0 == request.roi_x1 && request.roi_y0 == request.roi_y1)
-        return Fail(result, "request_validation", "Findline axis length is zero");
-
-    Findline tool;
-    tool.SetWHgap(request.wgap, request.hgap);
-    tool.setlinegap(request.linegap);
-    tool.setline(
-        static_cast<int>(request.roi_x0),
-        static_cast<int>(request.roi_y0),
-        static_cast<int>(request.roi_x1),
-        static_cast<int>(request.roi_y1),
-        request.tool_half_width);
-    tool.setmethod(request.method);
-    tool.setthre(request.threshold);
-
-    if (request.filter_profile > 0)
-        tool.setfilterprofile(request.filter_profile);
-
-    if (request.require_algorithm_execution)
+    if (request.tool_id == "findline_gauge")
     {
-        Image image;
-        if (!LoadProjectionImage(request.image_path, image, result))
-            return false;
-
-        tool.measure(&image);
-        result.executed = true;
-
-        tool.fitline();
-
-        result.valid_points_count = tool.getvalidpointcount();
-        result.has_fit_line = tool.hasfitresult();
-        result.fit_residual = tool.getavgdist();
-
-        result.algorithm_ok =
-            result.valid_points_count >= 2 &&
-            result.has_fit_line;
-
-        if (!result.algorithm_ok)
+        if (request.roi_x0 == request.roi_x1 && request.roi_y0 == request.roi_y1)
+            return Fail(result, "request_validation", "Findline axis length is zero");
+    }
+    else if (request.tool_id == "findcircle_gauge")
+    {
+        const double dx = request.circle_px - request.circle_cx;
+        const double dy = request.circle_py - request.circle_cy;
+        if (std::hypot(dx, dy) < 2.0)
+            return Fail(result, "request_validation", "Findcircle radius is too small");
+    }
+    else if (request.tool_id == "findellipse_gauge")
+    {
+        if (!request.has_ellipse_roi)
+            return Fail(result, "request_validation", "Findellipse requires has_ellipse_roi");
+        if (request.ellipse_rx <= 1.0 || request.ellipse_ry <= 1.0)
+            return Fail(result, "request_validation", "Findellipse radius is too small");
+        if (std::abs(request.ellipse_angle_deg) > 0.001)
+            return Fail(result,
+                        "unsupported_rotated_ellipse_roi",
+                        "Findellipse rotated ROI is not bound yet");
+    }
+    else if (request.tool_id == "findrect_gauge")
+    {
+        if (request.has_rotated_rect_roi)
         {
-            result.failure_stage =
-                result.valid_points_count < 2
-                    ? "measure_points"
-                    : "fitline";
-
-            result.reason =
-                "Findline result unavailable: valid_points=" +
-                std::to_string(result.valid_points_count) +
-                ", has_fit_line=" +
-                std::string(result.has_fit_line ? "true" : "false");
+            if (request.rect_width < 2 || request.rect_height < 2)
+                return Fail(result, "request_validation", "FindRect rotated rect width or height is too small");
+        }
+        else
+        {
+            const int width = static_cast<int>(std::abs(request.roi_x1 - request.roi_x0));
+            const int height = static_cast<int>(std::abs(request.roi_y1 - request.roi_y0));
+            if (width < 2 || height < 2)
+                return Fail(result, "request_validation", "FindRect width or height is too small");
         }
     }
-
-    const size_t before = layer.ShapeElements().size();
-    tool.PublishDisplayShapes(layer, request.owner_ref);
-    const size_t after = layer.ShapeElements().size();
-
-    CapturePublishedShapes(layer, request.owner_ref, result);
-    CountRoles(layer, request.owner_ref, result);
-
-    result.publish_ok =
-        after > before ||
-        HasElementsForOwner(layer, request.owner_ref);
+    else if (request.tool_id == "fastmatch")
+    {
+        if (!request.has_learn_roi && !request.has_search_roi)
+            return Fail(result, "request_validation", "FastMatch requires at least one of learn_roi or search_roi");
+        if (request.has_learn_roi &&
+            (request.learn_roi.width < 2 || request.learn_roi.height < 2))
+        {
+            return Fail(result, "request_validation", "FastMatch learn ROI width or height is too small");
+        }
+        if (request.has_search_roi &&
+            (request.search_roi.width < 2 || request.search_roi.height < 2))
+        {
+            return Fail(result, "request_validation", "FastMatch search ROI width or height is too small");
+        }
+    }
 
     return true;
 }
 
-bool ExecuteFindcircle(const CxRuntimeProjectionRequest& request,
-                       ImageAnnotationLayer& layer,
-                       CxRuntimeProjectionResult& result)
+CxScriptHeadlessOptions BuildHeadlessOptions(const CxRuntimeProjectionRequest& request)
 {
-    result.owner_type = "Findcircle";
-    result.owner_ref = request.owner_ref;
+    CxScriptHeadlessOptions options;
+    options.enabled = true;
+    options.image_path = request.test_image_path.empty()
+        ? request.image_path
+        : request.test_image_path;
+    options.template_image_path = request.template_image_path;
+    options.script_path = ProjectionScriptForTool(request.tool_id);
+    options.case_name = request.case_id;
+    options.output_dir = ".";
+    options.timeout_sec = 10;
+    options.max_elapsed_ms = 5000;
+    options.max_scan_lines = 4096;
+    options.max_samples = 200000;
 
-    if (request.owner_ref.empty())
-        return Fail(result, "request_validation", "owner_ref is empty");
+    options.roi_x0 = static_cast<int>(request.roi_x0);
+    options.roi_y0 = static_cast<int>(request.roi_y0);
+    options.roi_x1 = static_cast<int>(request.roi_x1);
+    options.roi_y1 = static_cast<int>(request.roi_y1);
 
-    const double dx = request.circle_px - request.circle_cx;
-    const double dy = request.circle_py - request.circle_cy;
+    options.circle_cx = static_cast<int>(request.circle_cx);
+    options.circle_cy = static_cast<int>(request.circle_cy);
+    options.circle_px = static_cast<int>(request.circle_px);
+    options.circle_py = static_cast<int>(request.circle_py);
 
-    if (std::hypot(dx, dy) < 2.0)
-        return Fail(result, "request_validation", "Findcircle radius is too small");
-
-    Findcircle tool;
-    tool.setcircle(
-        static_cast<int>(request.circle_cx),
-        static_cast<int>(request.circle_cy),
-        static_cast<int>(request.circle_px),
-        static_cast<int>(request.circle_py));
-    tool.Setgap(request.gap);
-    tool.setlinegap(request.linegap);
-    tool.setthre(request.threshold);
-    tool.setmethod(request.method);
-
-    if (request.require_algorithm_execution)
+    if (request.has_ellipse_roi)
     {
-        Image image;
-        if (!LoadProjectionImage(request.image_path, image, result))
-            return false;
-
-        tool.measure(&image);
-        result.executed = true;
-
-        tool.fitcircle();
-
-        result.valid_points_count = tool.getvalidpointcount();
-        result.has_fit_circle = tool.hasfitresult();
-        result.circle_radius = tool.getradius();
-        result.fit_residual = tool.getavgdist();
-        result.avgdist = result.fit_residual;
-
-        result.algorithm_ok =
-            result.valid_points_count >= 3 &&
-            result.has_fit_circle &&
-            result.circle_radius > 0.0;
-
-        if (!result.algorithm_ok)
-        {
-            result.failure_stage =
-                result.valid_points_count < 3
-                    ? "measure_points"
-                    : "fitcircle";
-
-            result.reason =
-                "Findcircle result unavailable: valid_points=" +
-                std::to_string(result.valid_points_count) +
-                ", has_fit_circle=" +
-                std::string(result.has_fit_circle ? "true" : "false") +
-                ", radius=" + std::to_string(result.circle_radius);
-        }
+        options.roi_x0 = static_cast<int>(request.ellipse_cx - request.ellipse_rx);
+        options.roi_y0 = static_cast<int>(request.ellipse_cy - request.ellipse_ry);
+        options.roi_x1 = static_cast<int>(request.ellipse_cx + request.ellipse_rx);
+        options.roi_y1 = static_cast<int>(request.ellipse_cy + request.ellipse_ry);
     }
-
-    const size_t before = layer.ShapeElements().size();
-    tool.PublishDisplayShapes(layer, request.owner_ref);
-    const size_t after = layer.ShapeElements().size();
-
-    CapturePublishedShapes(layer, request.owner_ref, result);
-    CountRoles(layer, request.owner_ref, result);
-
-    result.publish_ok =
-        after > before ||
-        HasElementsForOwner(layer, request.owner_ref);
-
-    return true;
-}
-
-bool ExecuteFindellipse(const CxRuntimeProjectionRequest& request,
-                        ImageAnnotationLayer& layer,
-                        CxRuntimeProjectionResult& result)
-{
-    result.owner_type = "Findellipse";
-    result.owner_ref = request.owner_ref;
-
-    if (request.owner_ref.empty())
-        return Fail(result, "request_validation", "owner_ref is empty");
-
-    if (!request.has_ellipse_roi)
-        return Fail(result, "request_validation", "Findellipse requires has_ellipse_roi");
-
-    if (request.ellipse_rx <= 1.0 || request.ellipse_ry <= 1.0)
-        return Fail(result, "request_validation", "Findellipse radius is too small");
-
-    if (std::abs(request.ellipse_angle_deg) > 0.001)
-        return Fail(result,
-                    "unsupported_rotated_ellipse_roi",
-                    "Findellipse rotated ROI is not bound yet");
-
-    Findellipse tool;
-    tool.setellipse(
-        static_cast<int>(request.ellipse_cx - request.ellipse_rx),
-        static_cast<int>(request.ellipse_cy - request.ellipse_ry),
-        static_cast<int>(request.ellipse_cx + request.ellipse_rx),
-        static_cast<int>(request.ellipse_cy + request.ellipse_ry));
-    tool.Setgap(request.gap);
-    tool.setlinegap(request.linegap);
-    tool.setthre(request.threshold);
-    tool.setmethod(request.method);
-
-    if (request.require_algorithm_execution)
-    {
-        Image image;
-        if (!LoadProjectionImage(request.image_path, image, result))
-            return false;
-
-        tool.measure(&image);
-        result.executed = true;
-
-        FindellipseDisplaySnapshot snapshot;
-        if (!tool.getdisplaysnapshot(snapshot))
-        {
-            result.failure_stage = "display_snapshot";
-            result.reason = "Findellipse display snapshot unavailable";
-            return false;
-        }
-
-        result.valid_points_count = snapshot.measure_points_count;
-        result.has_fit_ellipse = false;
-        result.algorithm_ok = false;
-        result.failure_stage = "fitellipse_binding";
-        result.reason =
-            "Findellipse measure points are available, "
-            "but fitted ellipse result is not bound";
-    }
-
-    const size_t before = layer.ShapeElements().size();
-    tool.PublishDisplayShapes(layer, request.owner_ref);
-    const size_t after = layer.ShapeElements().size();
-
-    CapturePublishedShapes(layer, request.owner_ref, result);
-    CountRoles(layer, request.owner_ref, result);
-
-    result.publish_ok =
-        after > before ||
-        HasElementsForOwner(layer, request.owner_ref);
-
-    return true;
-}
-
-bool ExecuteFindRect(const CxRuntimeProjectionRequest& request,
-                     ImageAnnotationLayer& layer,
-                     CxRuntimeProjectionResult& result)
-{
-    result.owner_type = "FindRect";
-    result.owner_ref = request.owner_ref;
-
-    if (request.owner_ref.empty())
-        return Fail(result, "request_validation", "owner_ref is empty");
-
-    FindRect tool;
 
     if (request.has_rotated_rect_roi)
     {
-        if (request.rect_width < 2 || request.rect_height < 2)
-            return Fail(result, "request_validation", "FindRect rotated rect width or height is too small");
-
-        tool.setrotatedrect(
-            request.rect_cx,
-            request.rect_cy,
-            request.rect_width,
-            request.rect_height,
-            request.rect_angle_deg);
-    }
-    else
-    {
-        const int x0 = static_cast<int>(std::min(request.roi_x0, request.roi_x1));
-        const int y0 = static_cast<int>(std::min(request.roi_y0, request.roi_y1));
-        const int x1 = static_cast<int>(std::max(request.roi_x0, request.roi_x1));
-        const int y1 = static_cast<int>(std::max(request.roi_y0, request.roi_y1));
-
-        const int width = x1 - x0;
-        const int height = y1 - y0;
-
-        if (width < 2 || height < 2)
-            return Fail(result, "request_validation", "FindRect width or height is too small");
-
-        tool.setrect(x0, y0, width, height);
-    }
-    tool.setlinegap(request.linegap);
-    tool.setthre(request.threshold);
-
-    if (request.require_algorithm_execution)
-    {
-        Image image;
-        if (!LoadProjectionImage(request.image_path, image, result))
-            return false;
-
-        tool.measure(&image);
-        result.executed = true;
-
-        result.valid_points_count = tool.getresultobjsnum();
-        result.has_result_rect = tool.hasresult();
-        result.algorithm_ok = tool.hasresult();
-
-        if (!result.algorithm_ok)
-        {
-            result.failure_stage = "findrect_result";
-            result.reason = "FindRect result unavailable: has_result=" +
-                std::string(result.has_result_rect ? "true" : "false");
-        }
+        options.roi_x0 = static_cast<int>(request.rect_cx - request.rect_width * 0.5);
+        options.roi_y0 = static_cast<int>(request.rect_cy - request.rect_height * 0.5);
+        options.roi_x1 = static_cast<int>(request.rect_cx + request.rect_width * 0.5);
+        options.roi_y1 = static_cast<int>(request.rect_cy + request.rect_height * 0.5);
     }
 
-    const size_t before = layer.ShapeElements().size();
-    tool.PublishDisplayShapes(layer, request.owner_ref);
-    const size_t after = layer.ShapeElements().size();
-
-    CapturePublishedShapes(layer, request.owner_ref, result);
-    CountRoles(layer, request.owner_ref, result);
-
-    result.publish_ok =
-        after > before ||
-        HasElementsForOwner(layer, request.owner_ref);
-
-    return true;
-}
-
-bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
-                      ImageAnnotationLayer& layer,
-                      CxRuntimeProjectionResult& result)
-{
-    result.owner_type = "fastmatch";
-    result.owner_ref = request.owner_ref;
-
-    if (request.owner_ref.empty())
-        return Fail(result, "request_validation", "owner_ref is empty");
-
-    if (!request.has_learn_roi && !request.has_search_roi)
-        return Fail(result, "request_validation", "FastMatch requires at least one of learn_roi or search_roi");
-
-    fastmatch matcher;
+    options.tool_half_width = request.tool_half_width;
+    options.wgap = request.wgap;
+    options.hgap = request.hgap;
+    options.gap = request.gap;
+    options.linegap = request.linegap;
+    options.threshold = request.threshold;
+    options.method = request.method;
+    options.filterprofile = request.filter_profile;
+    options.min_score = request.min_score;
+    options.find_num = request.find_num;
+    options.compare_gap = request.compare_gap;
+    options.algorithm_executed = request.require_algorithm_execution ? 1 : 0;
 
     if (request.has_learn_roi)
     {
-        const int lx0 = static_cast<int>(request.learn_roi.x);
-        const int ly0 = static_cast<int>(request.learn_roi.y);
-        const int lwidth = static_cast<int>(request.learn_roi.width);
-        const int lheight = static_cast<int>(request.learn_roi.height);
-
-        if (lwidth < 2 || lheight < 2)
-            return Fail(result, "request_validation", "FastMatch learn ROI width or height is too small");
-
-        matcher.setrect(lx0, ly0, lwidth, lheight);
+        options.learn_roi_x = static_cast<int>(request.learn_roi.x);
+        options.learn_roi_y = static_cast<int>(request.learn_roi.y);
+        options.learn_roi_w = static_cast<int>(request.learn_roi.width);
+        options.learn_roi_h = static_cast<int>(request.learn_roi.height);
+        if (options.roi_x1 == options.roi_x0 && options.roi_y1 == options.roi_y0)
+        {
+            options.roi_x0 = options.learn_roi_x;
+            options.roi_y0 = options.learn_roi_y;
+            options.roi_x1 = options.learn_roi_x + options.learn_roi_w;
+            options.roi_y1 = options.learn_roi_y + options.learn_roi_h;
+        }
     }
 
     if (request.has_search_roi)
     {
-        const int sx0 = static_cast<int>(request.search_roi.x);
-        const int sy0 = static_cast<int>(request.search_roi.y);
-        const int swidth = static_cast<int>(request.search_roi.width);
-        const int sheight = static_cast<int>(request.search_roi.height);
-
-        if (swidth < 2 || sheight < 2)
-            return Fail(result, "request_validation", "FastMatch search ROI width or height is too small");
-
-        matcher.setmatchrect(sx0, sy0, swidth, sheight);
+        options.search_roi_x = static_cast<int>(request.search_roi.x);
+        options.search_roi_y = static_cast<int>(request.search_roi.y);
+        options.search_roi_w = static_cast<int>(request.search_roi.width);
+        options.search_roi_h = static_cast<int>(request.search_roi.height);
     }
 
     if (request.has_expected_rect)
     {
-        matcher.setexpectedrect(
-            request.expected_rect.x,
-            request.expected_rect.y,
-            request.expected_rect.x + request.expected_rect.width,
-            request.expected_rect.y + request.expected_rect.height);
+        options.expected_rect_x = static_cast<int>(request.expected_rect.x);
+        options.expected_rect_y = static_cast<int>(request.expected_rect.y);
+        options.expected_rect_w = static_cast<int>(request.expected_rect.width);
+        options.expected_rect_h = static_cast<int>(request.expected_rect.height);
     }
 
-    if (request.require_algorithm_execution)
+    return options;
+}
+
+void PopulateProjectionMetrics(const CxRuntimeProjectionRequest& request,
+                               const CxScriptExecutionCapture& capture,
+                               CxRuntimeProjectionResult& result)
+{
+    result.executed = request.require_algorithm_execution;
+    result.valid_points_count = capture.valid_points_count;
+    result.has_fit_line = capture.has_fit_line;
+    result.has_fit_circle = capture.has_fit_circle;
+    result.has_fit_ellipse = capture.has_fit_ellipse;
+    result.has_result_rect = capture.has_result_rect;
+    result.fit_residual = capture.avgdist;
+    result.circle_radius = capture.circle_radius;
+    result.avgdist = capture.avgdist;
+    result.model_point_count = capture.model_point_count;
+    result.candidate_count = capture.candidate_count;
+    result.best_score = capture.best_score;
+    result.has_result_box = capture.has_result_box;
+    result.has_best_result = capture.has_best_result;
+    result.published_shapes = capture.shapes;
+
+    NormalizePublishedShapeOwners(result);
+    CountRolesFromSnapshots(result);
+
+    result.publish_ok = !result.published_shapes.empty();
+
+    if (!request.require_algorithm_execution)
     {
-        Image image;
-        if (!LoadProjectionImage(request.image_path, image, result))
-            return false;
-
-        matcher.learn(&image);
-        matcher.match(&image);
-
-        result.valid_points_count = matcher.getmodelpointcount();
-        result.model_point_count = matcher.getmodelpointcount();
-        result.candidate_count = matcher.getresultcandidatecount();
-        result.best_score = matcher.getresultbestscore();
-        result.algorithm_ok = result.model_point_count > 0;
-        result.executed = true;
-
-        if (!result.algorithm_ok)
-        {
-            result.failure_stage = "fastmatch_model";
-            result.reason = "FastMatch model unavailable: model_points=" +
-                std::to_string(result.model_point_count);
-        }
+        result.algorithm_ok = false;
+        return;
     }
 
-    const size_t before = layer.ShapeElements().size();
-    matcher.PublishDisplayShapes(layer, request.owner_ref);
-    const size_t after = layer.ShapeElements().size();
+    if (request.tool_id == "findline_gauge")
+    {
+        result.algorithm_ok =
+            result.valid_points_count >= 2 &&
+            result.has_fit_line;
+    }
+    else if (request.tool_id == "findcircle_gauge")
+    {
+        result.algorithm_ok =
+            result.valid_points_count >= 3 &&
+            result.has_fit_circle &&
+            result.circle_radius > 0.0;
+    }
+    else if (request.tool_id == "findellipse_gauge")
+    {
+        result.algorithm_ok = result.has_fit_ellipse;
+    }
+    else if (request.tool_id == "findrect_gauge")
+    {
+        result.algorithm_ok = result.has_result_rect;
+    }
+    else if (request.tool_id == "fastmatch")
+    {
+        result.algorithm_ok = result.model_point_count > 0;
+    }
 
-    CapturePublishedShapes(layer, request.owner_ref, result);
-    CountRoles(layer, request.owner_ref, result);
+    if (!result.algorithm_ok)
+    {
+        result.failure_stage = capture.failure_stage.empty()
+            ? "algorithm_result"
+            : capture.failure_stage;
+        result.reason = capture.reason.empty()
+            ? "projection cxscript executed but result did not satisfy tool contract"
+            : capture.reason;
+    }
+}
 
-    result.publish_ok =
-        after > before ||
-        HasElementsForOwner(layer, request.owner_ref);
+bool ExecuteViaCxScript(const CxRuntimeProjectionRequest& request,
+                        ImageAnnotationLayer&,
+                        CxRuntimeProjectionResult& result)
+{
+    result.owner_type = OwnerTypeForTool(request.tool_id);
+    result.owner_ref = request.owner_ref;
 
+    const char* script_path = ProjectionScriptForTool(request.tool_id);
+    if (script_path == nullptr)
+        return Fail(result, "tool_not_found", "no projection script registered for tool: " + request.tool_id);
+
+    if (!ValidateProjectionRequest(request, result))
+        return false;
+
+    CxScriptHeadlessOptions options = BuildHeadlessOptions(request);
+
+    CxScriptExecutionCapture capture;
+    std::string reason;
+    if (!RunCxScriptHeadlessCapture(options, capture, reason))
+    {
+        result.failure_stage = capture.failure_stage.empty()
+            ? "headless_projection"
+            : capture.failure_stage;
+        result.reason = reason;
+        return false;
+    }
+
+    PopulateProjectionMetrics(request, capture, result);
     return true;
 }
 
@@ -526,11 +319,11 @@ bool ExecuteFastMatch(const CxRuntimeProjectionRequest& request,
 
 CxRuntimeProjectionExecutor::CxRuntimeProjectionExecutor()
 {
-    Register("findline_gauge", ExecuteFindline);
-    Register("findcircle_gauge", ExecuteFindcircle);
-    Register("findellipse_gauge", ExecuteFindellipse);
-    Register("findrect_gauge", ExecuteFindRect);
-    Register("fastmatch", ExecuteFastMatch);
+    Register("findline_gauge", ExecuteViaCxScript);
+    Register("findcircle_gauge", ExecuteViaCxScript);
+    Register("findellipse_gauge", ExecuteViaCxScript);
+    Register("findrect_gauge", ExecuteViaCxScript);
+    Register("fastmatch", ExecuteViaCxScript);
 }
 
 void CxRuntimeProjectionExecutor::Register(const std::string& tool_id, const ProjectionHandler& handler)

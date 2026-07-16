@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include "CxRuntimeProjectionTypes.h"
 
 struct CxScriptExecutionCapture
@@ -116,6 +117,7 @@ struct CxScriptExecutionCapture
     bool contract_pass = false;
     std::string contract_status;
     std::string contract_conclusion;
+    std::map<std::string, double> runtime_globals;
 
     std::vector<CxShapeElementSnapshot> shapes;
 
@@ -180,6 +182,20 @@ struct CxScriptHeadlessOptions
     int find_num = 1;
     int compare_gap = 0;
     int strategy_id = 0;
+    int algorithm_executed = 0;
+
+    int learn_roi_x = 0;
+    int learn_roi_y = 0;
+    int learn_roi_w = 0;
+    int learn_roi_h = 0;
+    int search_roi_x = 0;
+    int search_roi_y = 0;
+    int search_roi_w = 0;
+    int search_roi_h = 0;
+    int expected_rect_x = 0;
+    int expected_rect_y = 0;
+    int expected_rect_w = 0;
+    int expected_rect_h = 0;
 
     bool contract_context_enabled = false;
     bool enable_evidence_analysis = true;

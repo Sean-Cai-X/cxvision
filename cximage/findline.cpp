@@ -1025,7 +1025,7 @@ int Findline::effectivefilterborw() const
 void Findline::MeasureT(void *pimage)
 {
     Image* image = (Image*)pimage;
-    if (image == nullptr || g_pbackimage == nullptr)
+    if (image == nullptr || image->getmat().empty() || g_pbackimage == nullptr || g_pbackimage == image)
         return;
 
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
@@ -1034,14 +1034,9 @@ void Findline::MeasureT(void *pimage)
     m_measurepoints_h.clear();
     int iwsize = ClampSizeToInt(m_lines_w.size());
     int ihsize = ClampSizeToInt(m_lines_h.size());
-    for (int i = 0; i < iwsize; i++)
-    {
-        m_lines_w[i].linecopyex(*image, *g_pbackimage, 0, i);
-    }
-    for (int i = 0; i < ihsize; i++)
-    {
-        m_lines_h[i].linecopyex(*image, *g_pbackimage, 0, i + iwsize);
-    }
+    if (iwsize <= 0 && ihsize <= 0)
+        return;
+
     int ilineslen1 = 0;
     int ilineslen2 = 0;
 
@@ -1051,6 +1046,21 @@ void Findline::MeasureT(void *pimage)
         ilineslen2 = m_lines_h[0].getlinesize();
 
     int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
+    if (iprocessw <= 0)
+        return;
+
+    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+        iprocessw > g_pbackimage->getWidth())
+        return;
+
+    for (int i = 0; i < iwsize; i++)
+    {
+        m_lines_w[i].linecopyex(*image, *g_pbackimage, 0, i);
+    }
+    for (int i = 0; i < ihsize; i++)
+    {
+        m_lines_h[i].linecopyex(*image, *g_pbackimage, 0, i + iwsize);
+    }
 
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
 
@@ -1083,8 +1093,53 @@ void Findline::Measure(Image& image)
     m_lastMeasureInputDebug.binary_roi_height = 0;
     m_lastMeasureInputDebug.result_empty_reason.clear();
 
-    if (g_pbackimage == nullptr)
+    if (image.getmat().empty())
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_empty_image";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "image_mat_empty";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline Measure received an empty input image.";
+
         return;
+    }
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            image.getWidth(),
+            image.getHeight()))
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_no_workspace";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "scan_workspace_unavailable";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline Measure failed to initialize ImageManager work buffers.";
+
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_no_workspace";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "scan_workspace_unavailable";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline Measure requires an independent ImageManager BackImage workspace.";
+
+        return;
+    }
 
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
@@ -1132,14 +1187,6 @@ void Findline::Measure(Image& image)
         return;
     }
 
-    for (int i = 0; i < iwsize; i++)
-    {
-        m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
-    }
-    for (int i = 0; i < ihsize; i++)
-    {
-        m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
-    }
     int ilineslen1 = 0;
     int ilineslen2 = 0;
 
@@ -1166,6 +1213,30 @@ void Findline::Measure(Image& image)
             "Findline original Measure scan lines exist but process width is zero.";
 
         return;
+    }
+
+    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+        iprocessw > g_pbackimage->getWidth())
+    {
+        m_lastMeasureInputDebug.measure_source =
+            "original_measure_pipeline_workspace_capacity";
+
+        m_lastMeasureInputDebug.failure_stage =
+            "scan_workspace_capacity_exceeded";
+
+        m_lastMeasureInputDebug.detail =
+            "Findline Measure skipped because scan geometry exceeds the BackImage workspace.";
+
+        return;
+    }
+
+    for (int i = 0; i < iwsize; i++)
+    {
+        m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
+    }
+    for (int i = 0; i < ihsize; i++)
+    {
+        m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
@@ -1734,6 +1805,36 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
     const int iwsize = ClampSizeToInt(m_lines_w.size());
     const int ihsize = ClampSizeToInt(m_lines_h.size());
 
+    if (iwsize <= 0 && ihsize <= 0)
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_lines_empty";
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    int ilineslen1 = 0;
+    int ilineslen2 = 0;
+    if (iwsize > 0)
+        ilineslen1 = m_lines_w[0].getlinesize();
+    if (ihsize > 0)
+        ilineslen2 = m_lines_h[0].getlinesize();
+
+    const int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
+    if (iprocessw <= 0)
+    {
+        m_lastMeasureInputDebug.failure_stage = "process_width_zero";
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+        iprocessw > g_pbackimage->getWidth())
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_capacity_exceeded";
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
     for (int i = 0; i < iwsize; ++i)
     {
         m_budget_state.scan_line_count++;
@@ -1785,14 +1886,6 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
         m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
-    int ilineslen1 = 0;
-    int ilineslen2 = 0;
-    if (iwsize > 0)
-        ilineslen1 = m_lines_w[0].getlinesize();
-    if (ihsize > 0)
-        ilineslen2 = m_lines_h[0].getlinesize();
-
-    const int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
@@ -2366,30 +2459,6 @@ void Findline::measure(void* pimage)
     }
 
     Image* image = static_cast<Image*>(pimage);
-
-    // The input Image is read-only for this operation.  The legacy scan path
-    // writes each sampled profile into g_pbackimage and subsequently changes
-    // its ROI.  Aliasing the two images makes linecopyex() read and write the
-    // same cv::Mat while the destination ROI is being changed, which is unsafe
-    // in the Manual/CxScript path and can crash the process.
-    //
-    // Keep the established ImageManager BackImage as an independent scratch
-    // buffer.  A Findline constructed before the manager is initialized may
-    // have a null pointer, so resolve it lazily here.  Never substitute the
-    // caller's input image as the scratch buffer.
-    if (g_pbackimage == nullptr || g_pbackimage == image)
-        g_pbackimage = ImageManager::GetBackImage(1);
-
-    if (g_pbackimage == nullptr || g_pbackimage == image ||
-        g_pbackimage->getmat().empty())
-    {
-        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
-        m_lastMeasureInputDebug.detail =
-            "Findline.measure requires an independent ImageManager BackImage workspace.";
-        ClearMeasureState();
-        return;
-    }
-
     cv::Mat mat = image->getmat();
     m_lastMeasureInputDebug.image_mat_ready = !mat.empty();
 
@@ -2406,6 +2475,31 @@ void Findline::measure(void* pimage)
     m_lastMeasureInputDebug.image_channels = mat.channels();
     m_lastMeasureInputDebug.image_type = mat.type();
     m_lastMeasureInputDebug.image_source = "Findline.measure(void*) parameter";
+
+    // The input Image is read-only for this operation.  The legacy scan path
+    // writes each sampled profile into g_pbackimage and subsequently changes
+    // its ROI.  Aliasing the two images makes linecopyex() read and write the
+    // same cv::Mat while the destination ROI is being changed.
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(mat.cols, mat.rows))
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
+        m_lastMeasureInputDebug.detail =
+            "Findline.measure failed to initialize ImageManager work buffers.";
+        ClearMeasureState();
+        return;
+    }
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
+        m_lastMeasureInputDebug.detail =
+            "Findline.measure requires an independent ImageManager BackImage workspace.";
+        ClearMeasureState();
+        return;
+    }
 
     FindlineDisplaySnapshot displaySnapshot;
     if (getdisplaysnapshot(displaySnapshot))

@@ -1006,6 +1006,12 @@ void AddObservedGlobalVariables(ManualTestContext& context, const std::string& s
 void AnalyzeScript(ManualTestContext& context)
 {
     if (context.analyzed_text == context.editor_text) return;
+    const int previousCurrentLine = context.current_line;
+    const bool preserveRuntimeCursor =
+        !context.line_views.empty() &&
+        (context.run_state == "runtime_step" ||
+         context.run_state == "running");
+
     context.analyzed_text = context.editor_text;
     context.line_views.clear();
     context.cxparser_ext_line_views.clear();
@@ -1102,6 +1108,16 @@ void AnalyzeScript(ManualTestContext& context)
     }
     context.trace_status = "PENDING";
     context.trace_reason = "source analyzed; runtime line callbacks unavailable";
+
+    if (preserveRuntimeCursor)
+    {
+        if (previousCurrentLine < 0)
+            context.current_line = 0;
+        else if (previousCurrentLine > static_cast<int>(context.line_views.size()))
+            context.current_line = static_cast<int>(context.line_views.size());
+        else
+            context.current_line = previousCurrentLine;
+    }
 }
 
 void DebugScriptLineEnd(ManualTestContext& context, int lineIndex, const std::string& status)

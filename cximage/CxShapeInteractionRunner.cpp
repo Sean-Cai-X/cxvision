@@ -899,8 +899,6 @@ bool CxShapeInteractionRunner::RunTestCase(
         std::string owner_type = projection.owner_type;
         std::string owner_ref = projection.owner_ref;
 
-        const auto& elements = layer.ShapeElements();
-
         std::map<std::string, int> role_counts;
         std::map<std::string, int> editable_role_counts;
         std::map<std::string, int> result_role_counts;
@@ -911,7 +909,7 @@ bool CxShapeInteractionRunner::RunTestCase(
         int owner_mismatch_count = 0;
         bool pass = true;
 
-        for (const auto& elem : elements)
+        for (const auto& elem : projection.published_shapes)
         {
             if (elem.owner_ref != owner_ref)
                 continue;
@@ -934,7 +932,6 @@ bool CxShapeInteractionRunner::RunTestCase(
                 result_role_counts[elem.semantic_role]++;
                 result_element_count++;
             }
-            if (elem.result_element && elem.stale) stale_result_count++;
         }
 
         case_result.created_points_count = static_cast<int>(stable_refs.size());
@@ -1198,7 +1195,7 @@ bool CxShapeInteractionRunner::RunTestCase(
                 reason += "published result contains stale elements; ";
             }
 
-            for (const auto& elem : elements)
+            for (const auto& elem : projection.published_shapes)
             {
                 if (elem.owner_ref != projection.owner_ref)
                 {
@@ -1486,8 +1483,8 @@ bool CxShapeInteractionRunner::RunTestCase(
         case_result.acceptance_scope = "RUNTIME_PROJECTION";
         case_result.owner_type = owner_type;
         case_result.shape_count_before = 0;
-        case_result.shape_count_after = static_cast<int>(elements.size());
-        case_result.shape_count_delta = static_cast<int>(elements.size());
+        case_result.shape_count_after = static_cast<int>(projection.published_shapes.size());
+        case_result.shape_count_delta = static_cast<int>(projection.published_shapes.size());
     }
     else if (tc.operation == "gui_pointer_create" ||
              tc.operation == "gui_pointer_drag_existing" ||

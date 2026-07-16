@@ -12,9 +12,17 @@
 #include <fstream>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstring>
+#include <iterator>
+#include <map>
+#include <vector>
 #ifdef _WIN32
 #include <Windows.h>
 #endif
+
+static const char* kHeadlessGlobalInitScript =
+    "cxparser/cxscript/module/cximage/headless/headless_globals.cxsc";
 
 std::string PrepareCxScriptRuntimeSource(const std::string& source, bool contract_context)
 {
@@ -140,179 +148,236 @@ void DefineCxScriptLocalVariables(
     }
 }
 
-struct CxScriptInjectedGlobals
+using CxScriptGlobalStorage = std::map<std::string, double>;
+
+std::vector<std::string> ExtractCxScriptGlobalDeclarations(const std::string& source)
 {
-    double roi_x0 = 0.0;
-    double roi_y0 = 0.0;
-    double roi_x1 = 0.0;
-    double roi_y1 = 0.0;
-    double tool_half_width = 0.0;
-    double wgap = 0.0;
-    double hgap = 0.0;
-    double gap = 0.0;
-    double linegap = 0.0;
-    double threshold = 0.0;
-    double method = 0.0;
-    double filterprofile = 0.0;
-    double samplerate = 0.0;
-    double min_score = 0.0;
-    double find_num = 0.0;
-    double compare_gap = 0.0;
-    double circle_cx = 0.0;
-    double circle_cy = 0.0;
-    double circle_px = 0.0;
-    double circle_py = 0.0;
-    double max_elapsed_ms = 0.0;
-    double max_scan_lines = 0.0;
-    double max_samples = 0.0;
-    double strategy_id = 0.0;
-    double selected_method = 0.0;
-    double selected_threshold = 0.0;
-    double selected_wgap = 0.0;
-    double selected_hgap = 0.0;
-    double selected_linegap = 0.0;
-    double selected_filterprofile = 0.0;
-    double line_ref = 0.0;
-    double circle_ref = 0.0;
-    double contract_pass = 0.0;
-    double headless_ok = 0.0;
-    double algorithm_executed = 0.0;
-    double budget_exceeded = 0.0;
-    double valid_points_count = 0.0;
-    double has_fit_line = 0.0;
-    double has_fit_circle = 0.0;
-    double rendered_measure_points_count = 0.0;
-    double rendered_result_count = 0.0;
-    double result_overlay_changed_pixels = 0.0;
-    double policy_guard_match = 0.0;
-    double contract_circle_radius = 0.0;
-    double contract_avgdist = 0.0;
-};
+    std::vector<std::string> names;
+    std::istringstream input(source);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        const size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos)
+            continue;
+
+        static const char* declaration_types[] = { "int ", "double ", "float " };
+        bool declaration = false;
+        for (const char* type : declaration_types)
+        {
+            const size_t length = std::strlen(type);
+            if (line.compare(first, length, type) == 0)
+            {
+                declaration = true;
+                break;
+            }
+        }
+        if (!declaration)
+            continue;
+
+        size_t name_begin = line.find("global_", first);
+        if (name_begin == std::string::npos)
+            continue;
+
+        size_t name_end = name_begin;
+        while (name_end < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[name_end])) || line[name_end] == '_'))
+        {
+            ++name_end;
+        }
+        if (name_end > name_begin)
+            names.emplace_back(line.substr(name_begin, name_end - name_begin));
+    }
+    return names;
+}
+
+std::string BuildCxScriptGlobalInitRuntimeSource(const std::string& source)
+{
+    std::ostringstream runtime_source;
+    std::istringstream input(source);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        const size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos)
+            continue;
+
+        static const char* declaration_types[] = { "int ", "double ", "float " };
+        bool declaration = false;
+        for (const char* type : declaration_types)
+        {
+            const size_t length = std::strlen(type);
+            if (line.compare(first, length, type) == 0)
+            {
+                declaration = true;
+                break;
+            }
+        }
+        if (!declaration)
+            runtime_source << line << '\n';
+    }
+
+    std::string prepared = runtime_source.str();
+    if (prepared.find_first_not_of(" \t\r\n") == std::string::npos)
+        prepared = "global_strategy_id = global_strategy_id;\n";
+    return PrepareCxScriptRuntimeSource(prepared, false);
+}
+
+bool SetCxScriptGlobalValue(
+    CxScriptGlobalStorage& storage,
+    const std::string& name,
+    double value,
+    std::string& reason)
+{
+    auto found = storage.find(name);
+    if (found == storage.end())
+    {
+        reason = "headless global init missing declaration: " + name;
+        return false;
+    }
+    found->second = value;
+    return true;
+}
+
+double GetCxScriptGlobalValue(
+    const CxScriptGlobalStorage& storage,
+    const std::string& name,
+    double fallback = 0.0)
+{
+    auto found = storage.find(name);
+    return found == storage.end() ? fallback : found->second;
+}
 
 bool InjectCxScriptGlobals(
     mu::CxParserRuntime& runtime,
     const CxScriptHeadlessOptions& options,
-    CxScriptInjectedGlobals& values,
+    CxScriptGlobalStorage& values,
     std::string& reason)
 {
-    values.roi_x0 = static_cast<double>(options.roi_x0);
-    values.roi_y0 = static_cast<double>(options.roi_y0);
-    values.roi_x1 = static_cast<double>(options.roi_x1);
-    values.roi_y1 = static_cast<double>(options.roi_y1);
-    values.tool_half_width = static_cast<double>(options.tool_half_width);
-    values.wgap = static_cast<double>(options.wgap);
-    values.hgap = static_cast<double>(options.hgap);
-    values.gap = static_cast<double>(options.gap);
-    values.linegap = static_cast<double>(options.linegap);
-    values.threshold = static_cast<double>(options.threshold);
-    values.method = static_cast<double>(options.method);
-    values.filterprofile = static_cast<double>(options.filterprofile);
-    values.samplerate = static_cast<double>(options.samplerate);
-    values.min_score = options.min_score;
-    values.find_num = static_cast<double>(options.find_num);
-    values.compare_gap = static_cast<double>(options.compare_gap);
-    values.circle_cx = static_cast<double>(options.circle_cx);
-    values.circle_cy = static_cast<double>(options.circle_cy);
-    values.circle_px = static_cast<double>(options.circle_px);
-    values.circle_py = static_cast<double>(options.circle_py);
-    values.max_elapsed_ms = static_cast<double>(options.max_elapsed_ms);
-    values.max_scan_lines = static_cast<double>(options.max_scan_lines);
-    values.max_samples = static_cast<double>(options.max_samples);
-    values.strategy_id = static_cast<double>(options.strategy_id);
-    values.selected_method = static_cast<double>(options.method);
-    values.selected_threshold = static_cast<double>(options.threshold);
-    values.selected_wgap = static_cast<double>(options.wgap);
-    values.selected_hgap = static_cast<double>(options.hgap);
-    values.selected_linegap = static_cast<double>(options.linegap);
-    values.selected_filterprofile = static_cast<double>(options.filterprofile);
+    const std::string global_init_source =
+        LoadCxScriptSource(kHeadlessGlobalInitScript, reason);
+    if (global_init_source.empty())
+        return false;
 
-    runtime.m_parser.DefineVar("global_roi_x0", &values.roi_x0);
-    runtime.m_parser.DefineVar("global_roi_y0", &values.roi_y0);
-    runtime.m_parser.DefineVar("global_roi_x1", &values.roi_x1);
-    runtime.m_parser.DefineVar("global_roi_y1", &values.roi_y1);
-    runtime.m_parser.DefineVar("global_tool_half_width", &values.tool_half_width);
-    runtime.m_parser.DefineVar("global_wgap", &values.wgap);
-    runtime.m_parser.DefineVar("global_hgap", &values.hgap);
-    runtime.m_parser.DefineVar("global_gap", &values.gap);
-    runtime.m_parser.DefineVar("global_linegap", &values.linegap);
-    runtime.m_parser.DefineVar("global_threshold", &values.threshold);
-    runtime.m_parser.DefineVar("global_method", &values.method);
-    runtime.m_parser.DefineVar("global_filterprofile", &values.filterprofile);
-    runtime.m_parser.DefineVar("global_samplerate", &values.samplerate);
-    runtime.m_parser.DefineVar("global_min_score", &values.min_score);
-    runtime.m_parser.DefineVar("global_find_num", &values.find_num);
-    runtime.m_parser.DefineVar("global_compare_gap", &values.compare_gap);
-    runtime.m_parser.DefineVar("global_circle_cx", &values.circle_cx);
-    runtime.m_parser.DefineVar("global_circle_cy", &values.circle_cy);
-    runtime.m_parser.DefineVar("global_circle_px", &values.circle_px);
-    runtime.m_parser.DefineVar("global_circle_py", &values.circle_py);
-    runtime.m_parser.DefineVar("global_max_elapsed_ms", &values.max_elapsed_ms);
-    runtime.m_parser.DefineVar("global_max_scan_lines", &values.max_scan_lines);
-    runtime.m_parser.DefineVar("global_max_samples", &values.max_samples);
-    runtime.m_parser.DefineVar("global_strategy_id", &values.strategy_id);
-    runtime.m_parser.DefineVar("global_selected_method", &values.selected_method);
-    runtime.m_parser.DefineVar("global_selected_threshold", &values.selected_threshold);
-    runtime.m_parser.DefineVar("global_selected_wgap", &values.selected_wgap);
-    runtime.m_parser.DefineVar("global_selected_hgap", &values.selected_hgap);
-    runtime.m_parser.DefineVar("global_selected_linegap", &values.selected_linegap);
-    runtime.m_parser.DefineVar("global_selected_filterprofile", &values.selected_filterprofile);
-    runtime.m_parser.DefineVar("global_line_ref", &values.line_ref);
-    runtime.m_parser.DefineVar("global_circle_ref", &values.circle_ref);
+    const std::vector<std::string> global_names =
+        ExtractCxScriptGlobalDeclarations(global_init_source);
+    if (global_names.empty())
+    {
+        reason = "headless global init has no global_ declarations: " +
+            std::string(kHeadlessGlobalInitScript);
+        return false;
+    }
+
+    for (const std::string& name : global_names)
+    {
+        auto inserted = values.emplace(name, 0.0);
+        if (inserted.second)
+            runtime.m_parser.DefineVar(name, &inserted.first->second);
+    }
+
+    const std::string prepared_global_init =
+        BuildCxScriptGlobalInitRuntimeSource(global_init_source);
+    if (!runtime.Compile(prepared_global_init.c_str()))
+    {
+        reason = "cannot compile headless global init script: " +
+            std::string(kHeadlessGlobalInitScript);
+        return false;
+    }
+
+    const std::map<std::string, double> option_globals = {
+        { "global_roi_x0", static_cast<double>(options.roi_x0) },
+        { "global_roi_y0", static_cast<double>(options.roi_y0) },
+        { "global_roi_x1", static_cast<double>(options.roi_x1) },
+        { "global_roi_y1", static_cast<double>(options.roi_y1) },
+        { "global_tool_half_width", static_cast<double>(options.tool_half_width) },
+        { "global_wgap", static_cast<double>(options.wgap) },
+        { "global_hgap", static_cast<double>(options.hgap) },
+        { "global_gap", static_cast<double>(options.gap) },
+        { "global_linegap", static_cast<double>(options.linegap) },
+        { "global_threshold", static_cast<double>(options.threshold) },
+        { "global_method", static_cast<double>(options.method) },
+        { "global_filterprofile", static_cast<double>(options.filterprofile) },
+        { "global_samplerate", static_cast<double>(options.samplerate) },
+        { "global_min_score", options.min_score },
+        { "global_find_num", static_cast<double>(options.find_num) },
+        { "global_compare_gap", static_cast<double>(options.compare_gap) },
+        { "global_learn_roi_x", static_cast<double>(options.learn_roi_x) },
+        { "global_learn_roi_y", static_cast<double>(options.learn_roi_y) },
+        { "global_learn_roi_w", static_cast<double>(options.learn_roi_w) },
+        { "global_learn_roi_h", static_cast<double>(options.learn_roi_h) },
+        { "global_search_roi_x", static_cast<double>(options.search_roi_x) },
+        { "global_search_roi_y", static_cast<double>(options.search_roi_y) },
+        { "global_search_roi_w", static_cast<double>(options.search_roi_w) },
+        { "global_search_roi_h", static_cast<double>(options.search_roi_h) },
+        { "global_expected_rect_x", static_cast<double>(options.expected_rect_x) },
+        { "global_expected_rect_y", static_cast<double>(options.expected_rect_y) },
+        { "global_expected_rect_w", static_cast<double>(options.expected_rect_w) },
+        { "global_expected_rect_h", static_cast<double>(options.expected_rect_h) },
+        { "global_circle_cx", static_cast<double>(options.circle_cx) },
+        { "global_circle_cy", static_cast<double>(options.circle_cy) },
+        { "global_circle_px", static_cast<double>(options.circle_px) },
+        { "global_circle_py", static_cast<double>(options.circle_py) },
+        { "global_max_elapsed_ms", static_cast<double>(options.max_elapsed_ms) },
+        { "global_max_scan_lines", static_cast<double>(options.max_scan_lines) },
+        { "global_max_samples", static_cast<double>(options.max_samples) },
+        { "global_strategy_id", static_cast<double>(options.strategy_id) },
+        { "global_algorithm_executed", static_cast<double>(options.algorithm_executed) },
+        { "global_selected_method", static_cast<double>(options.method) },
+        { "global_selected_threshold", static_cast<double>(options.threshold) },
+        { "global_selected_wgap", static_cast<double>(options.wgap) },
+        { "global_selected_hgap", static_cast<double>(options.hgap) },
+        { "global_selected_linegap", static_cast<double>(options.linegap) },
+        { "global_selected_filterprofile", static_cast<double>(options.filterprofile) },
+    };
+
+    for (const auto& item : option_globals)
+    {
+        if (!SetCxScriptGlobalValue(values, item.first, item.second, reason))
+            return false;
+    }
 
     if (options.contract_context_enabled)
     {
-        values.contract_pass = static_cast<double>(options.contract_pass_initial);
-        values.headless_ok = static_cast<double>(options.contract_headless_ok);
-        values.algorithm_executed = static_cast<double>(options.contract_algorithm_executed);
-        values.budget_exceeded = static_cast<double>(options.contract_budget_exceeded);
-        values.valid_points_count = static_cast<double>(options.valid_points_count);
-        values.has_fit_line = static_cast<double>(options.has_fit_line);
-        values.has_fit_circle = static_cast<double>(options.has_fit_circle);
-        values.rendered_measure_points_count = static_cast<double>(options.contract_rendered_measure_points_count);
-        values.rendered_result_count = static_cast<double>(options.contract_rendered_result_count);
-        values.result_overlay_changed_pixels = static_cast<double>(options.contract_result_overlay_changed_pixels);
-        values.policy_guard_match = static_cast<double>(options.policy_guard_match);
-        values.contract_circle_radius = options.circle_radius;
-        values.contract_avgdist = options.avgdist;
+        const std::map<std::string, double> contract_globals = {
+            { "global_contract_pass", static_cast<double>(options.contract_pass_initial) },
+            { "global_headless_ok", static_cast<double>(options.contract_headless_ok) },
+            { "global_algorithm_executed", static_cast<double>(options.contract_algorithm_executed) },
+            { "global_budget_exceeded", static_cast<double>(options.contract_budget_exceeded) },
+            { "global_valid_points_count", static_cast<double>(options.valid_points_count) },
+            { "global_has_fit_line", static_cast<double>(options.has_fit_line) },
+            { "global_has_fit_circle", static_cast<double>(options.has_fit_circle) },
+            { "global_rendered_measure_points_count", static_cast<double>(options.contract_rendered_measure_points_count) },
+            { "global_rendered_result_count", static_cast<double>(options.contract_rendered_result_count) },
+            { "global_result_overlay_changed_pixels", static_cast<double>(options.contract_result_overlay_changed_pixels) },
+            { "global_policy_guard_match", static_cast<double>(options.policy_guard_match) },
+            { "global_circle_radius", options.circle_radius },
+            { "global_avgdist", options.avgdist },
+        };
 
-        runtime.m_parser.DefineVar("global_contract_pass", &values.contract_pass);
-        runtime.m_parser.DefineVar("global_headless_ok", &values.headless_ok);
-        runtime.m_parser.DefineVar("global_algorithm_executed", &values.algorithm_executed);
-        runtime.m_parser.DefineVar("global_budget_exceeded", &values.budget_exceeded);
-        runtime.m_parser.DefineVar("global_valid_points_count", &values.valid_points_count);
-        runtime.m_parser.DefineVar("global_has_fit_line", &values.has_fit_line);
-        runtime.m_parser.DefineVar("global_has_fit_circle", &values.has_fit_circle);
-        runtime.m_parser.DefineVar("global_rendered_measure_points_count", &values.rendered_measure_points_count);
-        runtime.m_parser.DefineVar("global_rendered_result_count", &values.rendered_result_count);
-        runtime.m_parser.DefineVar("global_result_overlay_changed_pixels", &values.result_overlay_changed_pixels);
-        runtime.m_parser.DefineVar("global_policy_guard_match", &values.policy_guard_match);
-        runtime.m_parser.DefineVar("global_circle_radius", &values.contract_circle_radius);
-        runtime.m_parser.DefineVar("global_avgdist", &values.contract_avgdist);
+        for (const auto& item : contract_globals)
+        {
+            if (!SetCxScriptGlobalValue(values, item.first, item.second, reason))
+                return false;
+        }
     }
 
     reason.clear();
     return true;
 }
 
-bool CreateCxScriptInputImage(
+bool InjectCxScriptInputImage(
     mu::CxParserRuntime& runtime,
     const cv::Mat& source_image,
     const std::string& object_name,
     std::string& reason)
 {
-    const std::string declaration = "Image " + object_name + ";";
-    if (!runtime.Compile(declaration.c_str()))
-    {
-        reason = "cannot create Image " + object_name;
-        return false;
-    }
-
     Image* inputObject = static_cast<Image*>(
         runtime.GetClassObj("Image", object_name));
 
     if (inputObject == nullptr)
     {
-        reason = "Image " + object_name + " is unavailable";
+        reason = "Image " + object_name +
+            " is unavailable; declare it in " + std::string(kHeadlessGlobalInitScript);
         return false;
     }
 
@@ -344,11 +409,11 @@ bool ExecuteCxScriptSequential(
     runtime.ParserInitialClassFunction(0);
     runtime.SetVarFactory();
 
-    CxScriptInjectedGlobals injected_globals;
-    if (!InjectCxScriptGlobals(runtime, options, injected_globals, reason))
+    CxScriptGlobalStorage global_values;
+    if (!InjectCxScriptGlobals(runtime, options, global_values, reason))
         return false;
 
-    if (!CreateCxScriptInputImage(runtime, source_image, "global_matInput", reason))
+    if (!InjectCxScriptInputImage(runtime, source_image, "global_matInput", reason))
         return false;
 
     if (!options.template_image_path.empty())
@@ -361,7 +426,7 @@ bool ExecuteCxScriptSequential(
             return false;
         }
 
-        if (!CreateCxScriptInputImage(runtime, template_image, "global_templateInput", reason))
+        if (!InjectCxScriptInputImage(runtime, template_image, "global_templateInput", reason))
             return false;
     }
 
@@ -397,18 +462,18 @@ bool ExecuteCxScriptSequential(
         return false;
     }
 
-    capture.strategy_id = static_cast<int>(injected_globals.strategy_id);
-    capture.selected_method = static_cast<int>(injected_globals.selected_method);
-    capture.selected_threshold = static_cast<int>(injected_globals.selected_threshold);
-    capture.selected_wgap = static_cast<int>(injected_globals.selected_wgap);
-    capture.selected_hgap = static_cast<int>(injected_globals.selected_hgap);
-    capture.selected_linegap = static_cast<int>(injected_globals.selected_linegap);
-    capture.selected_filterprofile = static_cast<int>(injected_globals.selected_filterprofile);
+    capture.strategy_id = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_strategy_id"));
+    capture.selected_method = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_method"));
+    capture.selected_threshold = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_threshold"));
+    capture.selected_wgap = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_wgap"));
+    capture.selected_hgap = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_hgap"));
+    capture.selected_linegap = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_linegap"));
+    capture.selected_filterprofile = static_cast<int>(GetCxScriptGlobalValue(global_values, "global_selected_filterprofile"));
 
     if (options.contract_context_enabled)
     {
         capture.contract_context = true;
-        capture.contract_pass = injected_globals.contract_pass != 0.0;
+        capture.contract_pass = GetCxScriptGlobalValue(global_values, "global_contract_pass") != 0.0;
         capture.contract_status = capture.contract_pass ? "contract_passed" : "contract_failed";
         capture.contract_conclusion = capture.contract_pass
             ? "CxScript contract conditions passed"
@@ -428,6 +493,8 @@ bool ExecuteCxScriptSequential(
         capture.failure_stage = "runtime_result_capture_crash";
         return false;
     }
+
+    capture.runtime_globals = global_values;
 
     if (options.runtime_capture_smoke)
     {
@@ -556,6 +623,14 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
     file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
+    file << "  \"runtime_globals\": {\n";
+    for (auto it = capture.runtime_globals.begin(); it != capture.runtime_globals.end(); ++it)
+    {
+        const auto next = std::next(it);
+        file << "    \"" << JsonEscape(it->first) << "\": " << it->second
+             << (next == capture.runtime_globals.end() ? "" : ",") << "\n";
+    }
+    file << "  },\n";
     file << "  \"failure_stage\": \"" << JsonEscape(capture.failure_stage) << "\",\n";
     file << "  \"reason\": \"" << JsonEscape(capture.reason) << "\""
          << (capture.contract_context ? "," : "") << "\n";
@@ -1043,6 +1118,70 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     result.avgdist = capture.avgdist;
 
     return result.ok;
+}
+
+bool RunCxScriptHeadlessCapture(
+    const CxScriptHeadlessOptions& options,
+    CxScriptExecutionCapture& capture,
+    std::string& reason)
+{
+    capture = CxScriptExecutionCapture{};
+
+    std::filesystem::path script_path(options.script_path);
+    if (!std::filesystem::exists(script_path))
+    {
+        reason = "script not found: " + script_path.string();
+        capture.failure_stage = "script";
+        return false;
+    }
+
+    std::filesystem::path image_path(options.image_path);
+    if (!std::filesystem::exists(image_path))
+    {
+        reason = "image not found: " + image_path.string();
+        capture.failure_stage = "image";
+        return false;
+    }
+
+    cv::Mat source_image = cv::imread(image_path.string(), cv::IMREAD_COLOR);
+    if (source_image.empty())
+    {
+        reason = "cannot read image: " + image_path.string();
+        capture.failure_stage = "image";
+        return false;
+    }
+
+    if (!options.template_image_path.empty())
+    {
+        std::filesystem::path template_path(options.template_image_path);
+        if (!std::filesystem::exists(template_path))
+        {
+            reason = "template image not found: " + template_path.string();
+            capture.failure_stage = "template_image";
+            return false;
+        }
+    }
+
+    const int timeout_ms = std::max(1, options.timeout_sec) * 1000;
+    capture.budget_ms = options.max_elapsed_ms > 0
+        ? std::min(options.max_elapsed_ms, timeout_ms)
+        : timeout_ms;
+    capture.max_steps = options.max_steps;
+    capture.max_scan_lines = options.max_scan_lines;
+    capture.max_samples = options.max_samples;
+
+    CxScriptHeadlessOptions effective_options = options;
+    effective_options.max_elapsed_ms = capture.budget_ms;
+    const bool execution_ok = ExecuteCxScriptSequential(
+        effective_options,
+        source_image,
+        capture,
+        reason);
+
+    if (!execution_ok && capture.failure_stage.empty())
+        capture.failure_stage = "script_execution";
+
+    return execution_ok;
 }
 
 int RunCxScriptHeadless(int argc, char* argv[])

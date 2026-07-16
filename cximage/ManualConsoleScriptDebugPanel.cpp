@@ -163,6 +163,50 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   if (ImGui::Button("Continue", ImVec2(btnWidth, 0)))
   {
     context.run_state = "running";
+    AnalyzeScript(context);
+    const int maxContinueSteps = 512;
+    int executedSteps = 0;
+    while (context.run_state == "running" ||
+           context.run_state == "runtime_step")
+    {
+      if (context.current_line >= static_cast<int>(context.line_views.size()))
+      {
+        context.run_state = "runtime_finished";
+        context.debug_status = "PENDING";
+        context.debug_reason =
+          "script finished; global_current_status remains PENDING; judge/rule not executed";
+        break;
+      }
+
+      const int beforeLine = context.current_line;
+      DebugStepOnceWithSnapshot(context);
+      ++executedSteps;
+
+      if (context.run_state == "blocked" ||
+          context.run_state == "failed" ||
+          context.run_state == "runtime_finished")
+      {
+        break;
+      }
+
+      if (executedSteps >= maxContinueSteps)
+      {
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason =
+          "Continue stopped by step budget; possible debug cursor stall";
+        break;
+      }
+
+      if (context.current_line == beforeLine)
+      {
+        context.run_state = "blocked";
+        context.debug_status = "BLOCKED";
+        context.debug_reason =
+          "Continue stopped because debug cursor did not advance";
+        break;
+      }
+    }
   }
 
   ImGui::SameLine();
