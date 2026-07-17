@@ -273,6 +273,10 @@ public:
     {
         setlinesegment(ix0, iy0, ix1, iy1, iscale);
     }
+    void setline_script(int iscale, int iy1, int ix1, int iy0, int ix0)
+    {
+        setline(ix0, iy0, ix1, iy1, iscale);
+    }
     virtual void setrect(int ix, int iy, int iw, int ih);
     virtual void drawshape();
     void drawshapex( double dmovx, double dmovy,

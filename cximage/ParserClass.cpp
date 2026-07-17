@@ -522,7 +522,7 @@ namespace mu
             Findline* pfindline = nullptr;
             m_parser.DefineClass("Findline", pfindline);
             m_parser.DefineClassFun("Findline", pfindline, "setrect", &Findline::setrect);
-            m_parser.DefineClassFun("Findline", pfindline, "setline", &Findline::setline);
+            m_parser.DefineClassFun("Findline", pfindline, "setline", &Findline::setline_script);
             m_parser.DefineClassFun("Findline", pfindline, "fitline", &Findline::FitLine);
             m_parser.DefineClassFun("Findline", pfindline, "setfitmode", &Findline::setfitmode);
             m_parser.DefineClassFun(

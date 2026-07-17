@@ -43,6 +43,8 @@ bool FindSegmentationEdgeSamBackend::Run(
         output.backend_status = "runtime_load_failed";
         output.status = "runtime_load_failed";
         output.reason = "failed to load torch runtime dll: " + runtime_dll;
+        if (!bridge.LastErrorMessage().empty())
+            output.reason += "; " + bridge.LastErrorMessage();
         reason = output.reason;
         return false;
     }

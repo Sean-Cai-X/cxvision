@@ -150,6 +150,13 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
       RefreshRuntimeObjectTable(
         "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
+
+      std::string snapshotPath;
+      std::string snapshotReason;
+      if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
+      {
+        context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
+      }
     }
   }
 
@@ -157,6 +164,13 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   if (ImGui::Button("Step", ImVec2(btnWidth, 0)))
   {
     DebugStepOnceWithSnapshot(context);
+    SyncRuntimeObjectsToShapeElements();
+    std::string snapshotPath;
+    std::string snapshotReason;
+    if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
+    {
+      context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
+    }
   }
 
   ImGui::SameLine();
@@ -206,6 +220,14 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
           "Continue stopped because debug cursor did not advance";
         break;
       }
+    }
+
+    SyncRuntimeObjectsToShapeElements();
+    std::string snapshotPath;
+    std::string snapshotReason;
+    if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
+    {
+      context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
     }
   }
 

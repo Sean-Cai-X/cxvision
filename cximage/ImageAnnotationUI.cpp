@@ -18,6 +18,7 @@
 #include "CircleShape.h"
 #include "EllipseShape.h"
 #include "LineGaugeShape.h"
+#include "ManualConsoleCxScriptDebug.h"
 #include "PolylineShape.h"
 
 namespace
@@ -536,7 +537,16 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 {
     CxImagePointerResult out;
 
-    if (frame.HasInteractionEvent())
+    const bool hasActiveAnnotationState =
+        m_annotationLayer.HasActiveDrag() || m_annotationDragging;
+    const bool pointerInsideActiveCanvas =
+        frame.canvas_hovered && frame.inside_image;
+    const bool logPointerBegin =
+        (pointerInsideActiveCanvas && frame.HasInteractionEvent()) ||
+        (hasActiveAnnotationState &&
+         (frame.HasInteractionEvent() || frame.HasDragMoveEvent()));
+
+    if (logPointerBegin)
     {
         CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_begin", "running",
             "x=" + std::to_string(frame.image_x) + ", y=" + std::to_string(frame.image_y) +
@@ -800,7 +810,16 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
             }
 
             if (ok)
+            {
                 CXLOG_INFO("ImageAnnotationUI", "annotation_drag_commit", "committed", "reason=" + out.reason);
+                std::string snapshotPath;
+                std::string snapshotReason;
+                if (!SaveCxDebugSnapshotText(m_manualTest, snapshotPath, snapshotReason))
+                {
+                    m_manualTest.debug_reason +=
+                        " | debug snapshot save failed: " + snapshotReason;
+                }
+            }
             m_lastPointerResult = out;
             return out;
         }
@@ -852,9 +871,22 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         out.phase = "pointer_reject";
         out.status = "ignored";
         out.reason = "outside image canvas";
+        if (frame.left_released && hasActiveAnnotationState)
+        {
+            m_annotationDragging = false;
+            m_annotationLayer.CancelDrag();
+            out.status = "cancelled";
+            out.reason = "outside image canvas release; annotation state cleared";
+        }
         m_lastPointerResult = out;
-        if (frame.HasInteractionEvent())
-            CXLOG_INFO("ImageAnnotationUI", "annotation_pointer_reject", "ignored", "reason=outside canvas");
+        if (hasActiveAnnotationState && frame.HasInteractionEvent())
+        {
+            CXLOG_INFO(
+                "ImageAnnotationUI",
+                "annotation_pointer_reject",
+                out.status,
+                "reason=" + out.reason);
+        }
         return out;
     }
 

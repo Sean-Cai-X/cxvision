@@ -183,8 +183,12 @@ struct CxImagePointerFrame {
                left_released ||
                right_clicked ||
                escape_pressed ||
-               enter_pressed ||
-               (left_down && pointer_moved);
+               enter_pressed;
+    }
+
+    bool HasDragMoveEvent() const
+    {
+        return left_down && pointer_moved;
     }
 };
 

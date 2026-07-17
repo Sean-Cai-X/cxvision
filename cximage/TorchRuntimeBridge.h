@@ -13,6 +13,7 @@ class TorchRuntimeBridge
 public:
     bool Load(const std::string& dll_path);
     void Unload();
+    const std::string& LastErrorMessage() const;
 
     bool Create(const TorchRuntimeGuiConfig& config);
     TorchRuntimeGuiResult RunTask(const TorchRuntimeGuiRequest& request);
@@ -39,4 +40,5 @@ private:
     RunTaskFn run_task_ = nullptr;
     FreeResultFn free_result_ = nullptr;
     VersionFn version_ = nullptr;
+    std::string last_error_message_;
 };

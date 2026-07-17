@@ -1,14 +1,181 @@
 #include "TorchRuntimeBridge.h"
 #include "libtorch_module_runtime_c_api.h"
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+#ifdef _WIN32
+std::string FormatWin32Error(DWORD code)
+{
+    if (code == 0) {
+        return {};
+    }
+
+    LPSTR buffer = nullptr;
+    const DWORD size = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        code,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&buffer),
+        0,
+        nullptr);
+
+    std::string message;
+    if (size > 0 && buffer) {
+        message.assign(buffer, size);
+        while (!message.empty() && (message.back() == '\r' || message.back() == '\n' || message.back() == ' ')) {
+            message.pop_back();
+        }
+    }
+    if (buffer) {
+        LocalFree(buffer);
+    }
+    return message;
+}
+
+std::string GetEnvironmentValue(const char* name)
+{
+    const DWORD required = GetEnvironmentVariableA(name, nullptr, 0);
+    if (required == 0) {
+        return {};
+    }
+    std::string value(required, '\0');
+    const DWORD written = GetEnvironmentVariableA(name, value.data(), required);
+    if (written == 0) {
+        return {};
+    }
+    value.resize(written);
+    return value;
+}
+
+void AddExistingDirectory(std::vector<std::string>& dirs, const std::filesystem::path& dir)
+{
+    std::error_code ec;
+    if (!dir.empty() && std::filesystem::exists(dir, ec) && std::filesystem::is_directory(dir, ec)) {
+        dirs.push_back(dir.string());
+    }
+}
+
+void AddRuntimeDllDirectories(const std::vector<std::string>& dirs)
+{
+    using SetDefaultDllDirectoriesFn = BOOL (WINAPI *)(DWORD);
+    using AddDllDirectoryFn = DLL_DIRECTORY_COOKIE (WINAPI *)(PCWSTR);
+
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+    if (!kernel32) {
+        return;
+    }
+
+    auto set_default_dirs = reinterpret_cast<SetDefaultDllDirectoriesFn>(
+        GetProcAddress(kernel32, "SetDefaultDllDirectories"));
+    auto add_dll_directory = reinterpret_cast<AddDllDirectoryFn>(
+        GetProcAddress(kernel32, "AddDllDirectory"));
+
+    if (!set_default_dirs || !add_dll_directory) {
+        return;
+    }
+
+    set_default_dirs(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+
+    for (const std::string& dir : dirs) {
+        if (dir.empty()) {
+            continue;
+        }
+        const int required = MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, nullptr, 0);
+        if (required <= 0) {
+            continue;
+        }
+        std::wstring wide(static_cast<size_t>(required), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, wide.data(), required);
+        if (!wide.empty() && wide.back() == L'\0') {
+            wide.pop_back();
+        }
+        add_dll_directory(wide.c_str());
+    }
+}
+
+void PrependRuntimeDllSearchPath(const std::string& dll_path)
+{
+    std::vector<std::string> dirs;
+
+    const std::string libtorch_root = GetEnvironmentValue("LIBTORCH_ROOT");
+    const std::string cxvision_libtorch_bin = GetEnvironmentValue("CXVISION_LIBTORCH_BIN");
+    const std::string cxvision_opencv_bin = GetEnvironmentValue("CXVISION_OPENCV_BIN");
+    const std::string cuda_path = GetEnvironmentValue("CUDA_PATH");
+
+    AddExistingDirectory(dirs, cxvision_libtorch_bin);
+    if (!libtorch_root.empty()) {
+        AddExistingDirectory(dirs, std::filesystem::path(libtorch_root) / "lib");
+        AddExistingDirectory(dirs, std::filesystem::path(libtorch_root) / "bin");
+    }
+
+    AddExistingDirectory(dirs, "D:/libtorch/lib");
+    AddExistingDirectory(dirs, "D:/libtorch/bin");
+
+    AddExistingDirectory(dirs, cxvision_opencv_bin);
+    AddExistingDirectory(dirs, "D:/opencv4.9/opencv/build/x64/vc16/bin");
+    AddExistingDirectory(dirs, "D:/opencv/build/x64/vc16/bin");
+
+    if (!cuda_path.empty()) {
+        AddExistingDirectory(dirs, std::filesystem::path(cuda_path) / "bin");
+    }
+
+    if (dirs.empty()) {
+        return;
+    }
+
+    AddRuntimeDllDirectories(dirs);
+
+    std::string old_path = GetEnvironmentValue("PATH");
+    std::ostringstream next_path;
+    bool first = true;
+    for (const std::string& dir : dirs) {
+        if (!first) {
+            next_path << ';';
+        }
+        next_path << dir;
+        first = false;
+    }
+    if (!old_path.empty()) {
+        next_path << ';' << old_path;
+    }
+    SetEnvironmentVariableA("PATH", next_path.str().c_str());
+}
+#endif
+
+} // namespace
 
 bool TorchRuntimeBridge::Load(const std::string& dll_path)
 {
     Unload();
+    last_error_message_.clear();
 
 #ifdef _WIN32
-    dll_ = LoadLibraryA(dll_path.c_str());
+    PrependRuntimeDllSearchPath(dll_path);
+
+    SetLastError(0);
+    dll_ = LoadLibraryExA(
+        dll_path.c_str(),
+        nullptr,
+        LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!dll_) {
+        const DWORD error_code = GetLastError();
+        std::ostringstream oss;
+        oss << "LoadLibraryExA failed for '" << dll_path << "'";
+        if (error_code != 0) {
+            oss << " error=" << error_code;
+            const std::string formatted = FormatWin32Error(error_code);
+            if (!formatted.empty()) {
+                oss << " (" << formatted << ")";
+            }
+        }
+        last_error_message_ = oss.str();
         return false;
     }
 
@@ -19,12 +186,21 @@ bool TorchRuntimeBridge::Load(const std::string& dll_path)
     version_ = reinterpret_cast<VersionFn>(GetProcAddress(dll_, "torch_runtime_version"));
 
     if (!create_ || !destroy_ || !run_task_ || !free_result_) {
+        std::ostringstream oss;
+        oss << "torch runtime exports missing:";
+        if (!create_) oss << " torch_runtime_create";
+        if (!destroy_) oss << " torch_runtime_destroy";
+        if (!run_task_) oss << " torch_runtime_run_task";
+        if (!free_result_) oss << " torch_runtime_free_result";
+        last_error_message_ = oss.str();
         Unload();
         return false;
     }
 #else
     dll_ = dlopen(dll_path.c_str(), RTLD_LAZY);
     if (!dll_) {
+        const char* message = dlerror();
+        last_error_message_ = message ? message : "dlopen failed";
         return false;
     }
 
@@ -35,6 +211,7 @@ bool TorchRuntimeBridge::Load(const std::string& dll_path)
     version_ = reinterpret_cast<VersionFn>(dlsym(dll_, "torch_runtime_version"));
 
     if (!create_ || !destroy_ || !run_task_ || !free_result_) {
+        last_error_message_ = "torch runtime exports missing";
         Unload();
         return false;
     }
@@ -160,4 +337,9 @@ void TorchRuntimeBridge::Destroy()
 bool TorchRuntimeBridge::IsLoaded() const
 {
     return dll_ != nullptr && create_ != nullptr && destroy_ != nullptr && run_task_ != nullptr && free_result_ != nullptr;
+}
+
+const std::string& TorchRuntimeBridge::LastErrorMessage() const
+{
+    return last_error_message_;
 }

@@ -32,10 +32,40 @@ option(LIBTORCH_MODULE_FULL_ENABLE_TWOSTAGE_TRAIN "Enable two-stage train smoke 
 option(LIBTORCH_MODULE_FULL_ENABLE_OCC_STAGE "Enable OCC stage in full target" OFF)
 
 set(_libtorch_module_nvtoolsext_shim "${CMAKE_CURRENT_SOURCE_DIR}/third_party_shims/NvToolsExt")
-if(NOT TARGET CUDA::nvToolsExt AND EXISTS "${_libtorch_module_nvtoolsext_shim}/include")
-    add_library(CUDA::nvToolsExt INTERFACE IMPORTED)
-    set_target_properties(CUDA::nvToolsExt PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${_libtorch_module_nvtoolsext_shim}/include")
+if(NOT EXISTS "${_libtorch_module_nvtoolsext_shim}/include/nvToolsExt.h")
+    set(_libtorch_module_nvtoolsext_shim "D:/Codex-WorkDir/Sean_WorkDir/libtorch_module/third_party_shims/NvToolsExt")
+endif()
+set(CUDA_nvToolsExt_LIBRARY
+    "${_libtorch_module_nvtoolsext_shim}/lib/x64/nvToolsExt64_1.lib"
+    CACHE FILEPATH
+    "Shim nvToolsExt library for libtorch module builds")
+set(CUDAToolkit_nvToolsExt_INCLUDE_DIR
+    "${_libtorch_module_nvtoolsext_shim}/include"
+    CACHE PATH
+    "Shim nvToolsExt include directory for libtorch module builds")
+set(NVTOOLEXT_HOME
+    "${_libtorch_module_nvtoolsext_shim}"
+    CACHE PATH
+    "Shim nvToolsExt root for TorchConfig")
+set(_libtorch_module_nvtoolsext_stub_source
+    "${_libtorch_module_nvtoolsext_shim}/lib/x64/nvtoolsext_stub.c")
+set(_libtorch_module_libtorch_nvtoolsext_dll
+    "D:/libtorch/lib/nvToolsExt64_1.dll")
+
+if(NOT TARGET CUDA::nvToolsExt)
+    if(EXISTS "${CUDA_nvToolsExt_LIBRARY}")
+        add_library(CUDA::nvToolsExt UNKNOWN IMPORTED GLOBAL)
+        set_target_properties(CUDA::nvToolsExt PROPERTIES
+            IMPORTED_LOCATION "${CUDA_nvToolsExt_LIBRARY}")
+    elseif(EXISTS "${_libtorch_module_libtorch_nvtoolsext_dll}")
+        add_library(CUDA::nvToolsExt INTERFACE IMPORTED GLOBAL)
+    elseif(EXISTS "${_libtorch_module_nvtoolsext_stub_source}")
+        add_library(cxvision_nvtoolsext_stub STATIC
+            "${_libtorch_module_nvtoolsext_stub_source}")
+        set_target_properties(cxvision_nvtoolsext_stub PROPERTIES
+            OUTPUT_NAME "nvToolsExt64_1")
+        add_library(CUDA::nvToolsExt ALIAS cxvision_nvtoolsext_stub)
+    endif()
 endif()
 
 set(OpenCV_DIR "D:/opencv4.9/opencv/build" CACHE PATH "OpenCV build directory")
@@ -45,6 +75,8 @@ find_package(CUDAToolkit REQUIRED)
 set(LIBTORCH_ROOT "D:/libtorch" CACHE PATH "LibTorch root")
 set(GPUSDK_ROOT "D:/GPUSDK" CACHE PATH "GPU SDK root")
 set(TORCH_INSTALL_PREFIX "${LIBTORCH_ROOT}")
+set(Torch_DIR "${LIBTORCH_ROOT}/share/cmake/Torch" CACHE PATH "Torch CMake package directory")
+find_package(Torch REQUIRED)
 
 set(LIBTORCH_INCLUDE_DIRS
     "${LIBTORCH_ROOT}/include"
@@ -53,13 +85,7 @@ set(LIBTORCH_INCLUDE_DIRS
 set(LIBTORCH_LIBRARY_DIR "${LIBTORCH_ROOT}/lib")
 set(GPUSDK_LIBRARY_DIR "${GPUSDK_ROOT}/lib/x64")
 set(LIBTORCH_MODULE_LIBRARIES
-    c10_cuda.lib
-    torch_cuda.lib
-    torch.lib
-    torch_cpu.lib
-    c10.lib
-    caffe2_nvrtc.lib
-    CUDA::cudart
+    ${TORCH_LIBRARIES}
 )
 
 foreach(_full_option IN ITEMS

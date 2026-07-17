@@ -31,6 +31,10 @@ option(CXVISION_ENABLE_LEGACY_STAGE25_CPP
        "Build deprecated C++ Stage25 manifest/runner implementation"
        OFF)
 
+option(CXVISION_COPY_RUNTIME_DLLS
+       "Copy OCCT/OpenCV/LibTorch runtime DLLs next to cxvision_imgui_acceptance after build"
+       OFF)
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -276,32 +280,45 @@ set_target_properties(cxvision_imgui_acceptance PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
 )
 
-add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_directory
-          "${OCCT_ROOT}/win64/vc14/bin"
-          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
-  COMMENT "Copy matching OpenCASCADE runtime DLLs"
-)
+if(CXVISION_COPY_RUNTIME_DLLS)
+  add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${OCCT_ROOT}/win64/vc14/bin"
+            "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+    COMMENT "Copy matching OpenCASCADE runtime DLLs"
+  )
 
-add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-          "${OpenCV_DIR}/x64/vc16/bin/opencv_world490.dll"
-          "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
-  COMMENT "Copy OpenCV runtime DLL"
-)
-
-
-
-if(TARGET libtorch_module_runtime)
   add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "$<TARGET_FILE:libtorch_module_runtime>"
+            "${OpenCV_DIR}/x64/vc16/bin/opencv_world490.dll"
             "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
-    COMMENT "Copy libtorch_module_runtime.dll for torch module acceptance"
+    COMMENT "Copy OpenCV runtime DLL"
   )
+
+  if(TARGET libtorch_module_runtime)
+    add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+              "$<TARGET_FILE:libtorch_module_runtime>"
+              "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+      COMMENT "Copy libtorch_module_runtime.dll for torch module acceptance"
+    )
+
+    file(GLOB CXVISION_LIBTORCH_RUNTIME_DLLS
+         "${LIBTORCH_ROOT}/lib/*.dll")
+    foreach(_cxvision_libtorch_runtime_dll IN LISTS CXVISION_LIBTORCH_RUNTIME_DLLS)
+      add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_cxvision_libtorch_runtime_dll}"
+                "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+        COMMENT "Copy LibTorch runtime DLL ${_cxvision_libtorch_runtime_dll}"
+      )
+    endforeach()
+  else()
+    message(STATUS
+      "libtorch_module_runtime target is unavailable; runtime DLL copy is skipped")
+  endif()
 else()
-  message(STATUS
-    "libtorch_module_runtime target is unavailable; runtime DLL copy is skipped")
+  message(STATUS "Runtime DLL post-build copy is disabled (CXVISION_COPY_RUNTIME_DLLS=OFF)")
 endif()
 
 
