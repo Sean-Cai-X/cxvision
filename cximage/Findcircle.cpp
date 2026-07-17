@@ -10,6 +10,7 @@
 #include "imagemanager.h"
 #include "findobject.h"
 #include "CxAlgorithmTraceSink.h"
+#include "CxUnifiedLog.h"
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -27,6 +28,39 @@
 
 namespace {
 constexpr int kEdgeDetectMinNum = 10;
+
+void LogFindcircleMeasureProbe(
+    const char* phase,
+    const char* status,
+    const std::string& message)
+{
+    CXLOG_INFO("Findcircle", phase, status, message);
+    CxUnifiedLog::Instance().Flush();
+}
+
+std::string FindcircleMeasureMessage(
+    const char* detail,
+    int image_w,
+    int image_h,
+    int image_channels,
+    int cx,
+    int cy,
+    int px,
+    int py,
+    int line_count,
+    int line_length,
+    int back_w,
+    int back_h)
+{
+    return std::string("detail=") + detail +
+        ", image=" + std::to_string(image_w) + "x" + std::to_string(image_h) +
+        "x" + std::to_string(image_channels) +
+        ", circle=(" + std::to_string(cx) + "," + std::to_string(cy) +
+        ")->(" + std::to_string(px) + "," + std::to_string(py) + ")" +
+        ", scan_line_count=" + std::to_string(line_count) +
+        ", scan_line_length=" + std::to_string(line_length) +
+        ", back=" + std::to_string(back_w) + "x" + std::to_string(back_h);
+}
 
 int ClampSizeToInt(std::size_t value)
 {
@@ -631,6 +665,23 @@ void Findcircle::MeasureT(void *pimage)
 }
 void Findcircle::Measure(Image& image)
 {
+    LogFindcircleMeasureProbe(
+        "measure_image_enter",
+        "running",
+        FindcircleMeasureMessage(
+            "Findcircle::Measure(Image&) enter",
+            image.getmat().empty() ? 0 : image.getmat().cols,
+            image.getmat().empty() ? 0 : image.getmat().rows,
+            image.getmat().empty() ? 0 : image.getmat().channels(),
+            m_icentx,
+            m_icenty,
+            m_ipax,
+            m_ipay,
+            ClampSizeToInt(m_lines.size()),
+            m_lines.empty() ? 0 : m_lines[0].getlinesize(),
+            g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+            g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
+
     m_measurepoints.clear();
     m_dresultcentx = 0.0;
     m_dresultcenty = 0.0;
@@ -661,6 +712,10 @@ void Findcircle::Measure(Image& image)
 
     if (image.getmat().empty())
     {
+        LogFindcircleMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            "failure_stage=image_mat_empty");
         return;
     }
 
@@ -673,12 +728,44 @@ void Findcircle::Measure(Image& image)
 
     if (left < 0.0 || top < 0.0)
     {
+        LogFindcircleMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            FindcircleMeasureMessage(
+                "failure_stage=circle_roi_negative",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                m_icentx,
+                m_icenty,
+                m_ipax,
+                m_ipay,
+                ClampSizeToInt(m_lines.size()),
+                m_lines.empty() ? 0 : m_lines[0].getlinesize(),
+                g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+                g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
         return;
     }
 
     if (right >= static_cast<double>(image.getWidth()) ||
         bottom >= static_cast<double>(image.getHeight()))
     {
+        LogFindcircleMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            FindcircleMeasureMessage(
+                "failure_stage=circle_roi_outside_image",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                m_icentx,
+                m_icenty,
+                m_ipax,
+                m_ipay,
+                ClampSizeToInt(m_lines.size()),
+                m_lines.empty() ? 0 : m_lines[0].getlinesize(),
+                g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+                g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
         return;
     }
 
@@ -694,6 +781,10 @@ void Findcircle::Measure(Image& image)
         m_lastMeasureGeometryDebug.detail =
             "Findcircle Measure has zero scan lines; check setcircle/setcircle2, Setgap and geometry cache.";
 
+        LogFindcircleMeasureProbe(
+            "measure_geometry_fail",
+            "failed",
+            "failure_stage=circle_scan_lines_empty");
         return;
     }
 
@@ -706,6 +797,22 @@ void Findcircle::Measure(Image& image)
         m_lastMeasureGeometryDebug.detail =
             "Findcircle Measure requires an independent ImageManager BackImage workspace.";
 
+        LogFindcircleMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            FindcircleMeasureMessage(
+                "failure_stage=circle_scan_workspace_unavailable",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                m_icentx,
+                m_icenty,
+                m_ipax,
+                m_ipay,
+                isize,
+                m_lines.empty() ? 0 : m_lines[0].getlinesize(),
+                g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+                g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
         return;
     }
 
@@ -718,6 +825,23 @@ void Findcircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.scan_line_length =
         ilineslen1;
 
+    LogFindcircleMeasureProbe(
+        "measure_before_capacity_check",
+        "running",
+        FindcircleMeasureMessage(
+            "before workspace capacity check",
+            image.getWidth(),
+            image.getHeight(),
+            image.getmat().channels(),
+            m_icentx,
+            m_icenty,
+            m_ipax,
+            m_ipay,
+            isize,
+            iprocessw,
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
+
     m_lastMeasureGeometryDebug.process_width =
         iprocessw;
 
@@ -729,6 +853,10 @@ void Findcircle::Measure(Image& image)
         m_lastMeasureGeometryDebug.detail =
             "Findcircle scan lines exist, but scan line length is zero.";
 
+        LogFindcircleMeasureProbe(
+            "measure_geometry_fail",
+            "failed",
+            "failure_stage=circle_process_width_zero");
         return;
     }
 
@@ -741,10 +869,31 @@ void Findcircle::Measure(Image& image)
         m_lastMeasureGeometryDebug.detail =
             "Findcircle Measure skipped because scan geometry exceeds the BackImage workspace.";
 
+        LogFindcircleMeasureProbe(
+            "measure_capacity_fail",
+            "failed",
+            FindcircleMeasureMessage(
+                "failure_stage=circle_scan_workspace_capacity_exceeded",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                m_icentx,
+                m_icenty,
+                m_ipax,
+                m_ipay,
+                isize,
+                iprocessw,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
 
     const int stage_limit = ReadCircleMeasureStageLimit();
+
+    LogFindcircleMeasureProbe(
+        "measure_stage_limit",
+        "running",
+        "stage_limit=" + std::to_string(stage_limit));
 
     if (stage_limit == 1)
         return;
@@ -752,21 +901,61 @@ void Findcircle::Measure(Image& image)
     if (stage_limit == 2)
         return;
 
+    LogFindcircleMeasureProbe(
+        "measure_before_linecopyex",
+        "running",
+        FindcircleMeasureMessage(
+            "before linecopyex",
+            image.getWidth(),
+            image.getHeight(),
+            image.getmat().channels(),
+            m_icentx,
+            m_icenty,
+            m_ipax,
+            m_ipay,
+            isize,
+            iprocessw,
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
+    LogFindcircleMeasureProbe(
+        "measure_after_linecopyex",
+        "running",
+        "linecopyex complete");
     if (stage_limit == 3)
         return;
 
+      LogFindcircleMeasureProbe(
+          "measure_before_backimage_roi",
+          "running",
+          "setroi=(0,0," + std::to_string(iprocessw + 3) + "," +
+              std::to_string(isize + 5) + ")");
       g_pbackimage->setroi(0, 0, iprocessw+3, isize+5);
+      LogFindcircleMeasureProbe(
+          "measure_before_blur_threshold",
+          "running",
+          "threshold=" + std::to_string(m_iThreshold) +
+              ", gamma=" + std::to_string(m_igamarate) +
+              ", linegap=" + std::to_string(m_iSelectPointGap) +
+              ", method=" + std::to_string(m_iMethod));
       g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+      LogFindcircleMeasureProbe(
+          "measure_after_blur_threshold",
+          "running",
+          "blur/threshold complete");
       if (stage_limit == 4)
           return;
 
       const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
       if (!compact_domain && g_pbackfindobject != nullptr && ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize))
       {
+          LogFindcircleMeasureProbe(
+              "measure_before_object_prefilter",
+              "running",
+              "ifindset=" + std::to_string(m_ifindset));
           m_last_prefilter_used = 1;
           const int filter_min = compact_domain
               ? std::min(static_cast<int>(m_ifiltermin), std::max(4, iprocessw / 2))
@@ -778,6 +967,10 @@ void Findcircle::Measure(Image& image)
               m_ifilterborw,
               filter_min,
               static_cast<int>(m_ifiltermax));
+          LogFindcircleMeasureProbe(
+              "measure_after_object_prefilter",
+              "running",
+              "object prefilter complete");
       }
 
       if (compact_domain && ShouldBypassCircleMeasurePoints())
@@ -796,6 +989,23 @@ void Findcircle::Measure(Image& image)
       }
       if (stage_limit == 5)
           return;
+
+      LogFindcircleMeasureProbe(
+          "measure_before_sampling_loop",
+          "running",
+          FindcircleMeasureMessage(
+              "before sampling loop",
+              image.getWidth(),
+              image.getHeight(),
+              image.getmat().channels(),
+              m_icentx,
+              m_icenty,
+              m_ipax,
+              m_ipay,
+              isize,
+              iprocessw,
+              g_pbackimage->getWidth(),
+              g_pbackimage->getHeight()));
 
       int irecordpoint[100];
       int irecordnum = 0;
@@ -1093,6 +1303,13 @@ void Findcircle::Measure(Image& image)
         static_cast<int>(m_measurepoints.size()),
         m_lastMeasureGeometryDebug.elapsed_ms
     });
+    LogFindcircleMeasureProbe(
+        "measure_image_exit",
+        "finished",
+        "scan_lines_processed=" + std::to_string(scan_lines_processed) +
+            ", total_samples=" + std::to_string(total_samples) +
+            ", measure_points=" + std::to_string(m_measurepoints.size()) +
+            ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
 
 void Findcircle::MeasureBalanced(Image& image)
@@ -1729,6 +1946,11 @@ gp_Pnt Findcircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt exte
 }
 void Findcircle::measure(void* pimage)
 {
+    LogFindcircleMeasureProbe(
+        "measure_void_enter",
+        "running",
+        std::string("pimage_null=") + (pimage == nullptr ? "true" : "false"));
+
     Image* pgetimage = static_cast<Image*>(pimage);
 
     if (pgetimage == nullptr)
@@ -1738,6 +1960,10 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
+        LogFindcircleMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=image_pointer_null");
         return;
     }
 
@@ -1748,12 +1974,28 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
+        LogFindcircleMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=image_mat_empty");
         return;
     }
 
-    ImageManager::EnsureAlgorithmRuntimeResources(
-        pgetimage->getWidth(),
-        pgetimage->getHeight());
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            pgetimage->getWidth(),
+            pgetimage->getHeight()))
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        LogFindcircleMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=circle_scan_workspace_unavailable, reason=EnsureAlgorithmRuntimeResources failed");
+        return;
+    }
     g_pbackimage = ImageManager::GetBackImage(1);
     g_pbackfindobject = ImageManager::Getbackfindobject(1);
 
@@ -1769,6 +2011,13 @@ void Findcircle::measure(void* pimage)
             "circle_scan_workspace_unavailable";
         m_lastMeasureGeometryDebug.detail =
             "Findcircle.measure requires an independent ImageManager BackImage workspace.";
+        LogFindcircleMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=circle_scan_workspace_unavailable, backimage_null=" +
+                std::string(g_pbackimage == nullptr ? "true" : "false") +
+                ", backimage_alias_input=" +
+                std::string(g_pbackimage == pgetimage ? "true" : "false"));
         return;
     }
 
@@ -1779,10 +2028,35 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
+        LogFindcircleMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=circle_measure_geometry_not_ready");
         return;
     }
 
+    LogFindcircleMeasureProbe(
+        "measure_void_before_measure_image",
+        "running",
+        FindcircleMeasureMessage(
+            "before Measure(Image&)",
+            pgetimage->getWidth(),
+            pgetimage->getHeight(),
+            pgetimage->getmat().channels(),
+            m_icentx,
+            m_icenty,
+            m_ipax,
+            m_ipay,
+            ClampSizeToInt(m_lines.size()),
+            m_lines.empty() ? 0 : m_lines[0].getlinesize(),
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
     Measure(*pgetimage);
+    LogFindcircleMeasureProbe(
+        "measure_void_after_measure_image",
+        "finished",
+        "measure_points=" + std::to_string(m_measurepoints.size()) +
+            ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
 void Findcircle::automeasure(void* pimage)
 {

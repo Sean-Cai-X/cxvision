@@ -5,6 +5,25 @@
 #include <windows.h>
 #include <sstream>
 #include <iostream>
+#include <mutex>
+
+namespace
+{
+std::mutex g_cxCrashBreadcrumbMutex;
+std::string g_cxCrashBreadcrumb;
+
+std::string GetCxCrashBreadcrumb()
+{
+    std::lock_guard<std::mutex> lock(g_cxCrashBreadcrumbMutex);
+    return g_cxCrashBreadcrumb;
+}
+}
+
+void SetCxCrashBreadcrumb(const std::string& breadcrumb)
+{
+    std::lock_guard<std::mutex> lock(g_cxCrashBreadcrumbMutex);
+    g_cxCrashBreadcrumb = breadcrumb;
+}
 
 static LONG WINAPI CxUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
 {
@@ -15,6 +34,9 @@ static LONG WINAPI CxUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
     std::ostringstream oss;
     oss << "exception_code=" << std::hex << exceptionInfo->ExceptionRecord->ExceptionCode
         << ", exception_address=" << exceptionInfo->ExceptionRecord->ExceptionAddress;
+    const std::string breadcrumb = GetCxCrashBreadcrumb();
+    if (!breadcrumb.empty())
+        oss << ", breadcrumb=" << breadcrumb;
 
     WriteCrashLog("unhandled_exception", oss.str(), run_id, GetCurrentThreadId());
 

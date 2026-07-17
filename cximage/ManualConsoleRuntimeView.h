@@ -26,12 +26,17 @@ std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& object);
 
 std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object);
 
+std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object);
+
 std::string BuildGeometrySummary(const RuntimeObjectView& object);
 
 std::string BuildFindcircleOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object);
 
 std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
+    const RuntimeObjectView& object);
+
+std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object);
 
 std::string BuildOverlaySummary(const ManualTestContext& context,

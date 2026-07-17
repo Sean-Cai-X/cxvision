@@ -202,10 +202,39 @@ std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
     return ss.str();
 }
 
+std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "segmentation: object=" << object.name
+       << " | backend=" << object.segmentation_backend
+       << " | backend_status=" << object.segmentation_backend_status
+       << " | status_code=" << object.segmentation_status_code
+       << " | runtime_state=" << object.runtime_state
+       << " | device=" << object.segmentation_device
+       << " | contour_count=" << object.segmentation_contour_count
+       << " | primary_area=" << object.segmentation_primary_area
+       << " | result_ref=" << object.segmentation_result_ref
+       << " | mask_ref=" << object.segmentation_mask_ref
+       << " | contour_ref=" << object.segmentation_contour_ref
+       << " | overlay_ref=" << object.segmentation_overlay_ref
+       << " | libtorch_contract="
+       << (object.segmentation_has_libtorch_contract ? "true" : "false")
+       << " | real_mask_attach="
+       << (object.segmentation_real_mask_attach_ready ? "true" : "false");
+
+    if (!object.segmentation_reason.empty())
+        ss << " | reason=" << object.segmentation_reason;
+
+    return ss.str();
+}
+
 std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
     if (object.type == "Findline")
         return BuildFindlineGeometrySummary(object);
+    if (object.type == "FindSegmentation")
+        return BuildFindSegmentationGeometrySummary(object);
 
     return BuildFindcircleGeometrySummary(object);
 }
@@ -249,11 +278,34 @@ std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
     return ss.str();
 }
 
+std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context,
+    const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "image overlay:"
+       << " prompt_roi=true"
+       << " | boundary_polyline="
+       << (object.segmentation_contour_count > 0 ? "true" : "false")
+       << " | boundary_bbox="
+       << (object.segmentation_contour_count > 0 ? "true" : "false")
+       << " | editable_roi=true"
+       << " | editable_result=false"
+       << " | stale=" << (object.stale ? "true" : "false")
+       << " | source_preview_enabled="
+       << (context.source_preview_enabled ? "true" : "false")
+       << " | manual_elements_count=" << context.manual_elements_count;
+
+    return ss.str();
+}
+
 std::string BuildOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     if (object.type == "Findline")
         return BuildFindlineOverlaySummary(context, object);
+    if (object.type == "FindSegmentation")
+        return BuildFindSegmentationOverlaySummary(context, object);
 
     return BuildFindcircleOverlaySummary(context, object);
 }

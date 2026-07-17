@@ -35,6 +35,10 @@ public:
     int status_code();
     int get_contour_count();
     double get_primary_area();
+    const std::string& backend() const;
+    const std::string& model_path() const;
+    const std::string& device() const;
+    const FindSegmentationResult& result() const;
     void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
 
 public:

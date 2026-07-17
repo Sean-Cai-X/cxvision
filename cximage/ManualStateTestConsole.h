@@ -169,6 +169,24 @@ struct RuntimeObjectView
     std::string ring_reason;
     std::string ring_result_ref;
 
+    // FindSegmentation runtime / torch bridge visibility.
+    std::string segmentation_backend;
+    std::string segmentation_backend_status;
+    std::string segmentation_device;
+    std::string segmentation_model_path;
+    std::string segmentation_result_ref;
+    std::string segmentation_mask_ref;
+    std::string segmentation_contour_ref;
+    std::string segmentation_overlay_ref;
+    std::string segmentation_reason;
+    int segmentation_status_code = 0;
+    int segmentation_contour_count = 0;
+    double segmentation_primary_area = 0.0;
+    bool segmentation_has_prompt_rect = false;
+    bool segmentation_has_boundary = false;
+    bool segmentation_has_libtorch_contract = false;
+    bool segmentation_real_mask_attach_ready = false;
+
     // Findline fit result.
     bool has_fit_line = false;
     float fit_line_x0 = 0.0f;

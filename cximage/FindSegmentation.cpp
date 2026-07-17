@@ -183,6 +183,26 @@ double FindSegmentation::get_primary_area()
     return m_result.primary_area;
 }
 
+const std::string& FindSegmentation::backend() const
+{
+    return m_backend;
+}
+
+const std::string& FindSegmentation::model_path() const
+{
+    return m_model_path;
+}
+
+const std::string& FindSegmentation::device() const
+{
+    return m_device;
+}
+
+const FindSegmentationResult& FindSegmentation::result() const
+{
+    return m_result;
+}
+
 void FindSegmentation::PublishDisplayShapes(
     ICxShapeSink& sink,
     const std::string& owner_ref) const

@@ -5,6 +5,8 @@
 
 void InstallCxCrashLogHandlers();
 
+void SetCxCrashBreadcrumb(const std::string& breadcrumb);
+
 void WriteCrashLog(
     const std::string& event,
     const std::string& message,

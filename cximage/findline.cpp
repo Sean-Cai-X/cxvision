@@ -4,6 +4,7 @@
 #include "LineGaugeShape.h"
 #include "PolylineShape.h"
 #include "ImageAnnotationLayer.h"
+#include "CxUnifiedLog.h"
 #include "../cxgeom/include/CxSetLineBuild.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
@@ -30,6 +31,43 @@
 
 namespace
 {
+void LogFindlineMeasureProbe(
+    const char* phase,
+    const char* status,
+    const std::string& message)
+{
+    CXLOG_INFO("Findline", phase, status, message);
+    CxUnifiedLog::Instance().Flush();
+}
+
+std::string FindlineMeasureMessage(
+    const char* detail,
+    int image_w,
+    int image_h,
+    int image_channels,
+    int roi_x0,
+    int roi_y0,
+    int roi_x1,
+    int roi_y1,
+    int half_width,
+    int scan_w,
+    int scan_h,
+    int process_w,
+    int back_w,
+    int back_h)
+{
+    return std::string("detail=") + detail +
+        ", image=" + std::to_string(image_w) + "x" + std::to_string(image_h) +
+        "x" + std::to_string(image_channels) +
+        ", roi=(" + std::to_string(roi_x0) + "," + std::to_string(roi_y0) +
+        ")->(" + std::to_string(roi_x1) + "," + std::to_string(roi_y1) + ")" +
+        ", half_width=" + std::to_string(half_width) +
+        ", scan_w_count=" + std::to_string(scan_w) +
+        ", scan_h_count=" + std::to_string(scan_h) +
+        ", process_w=" + std::to_string(process_w) +
+        ", back=" + std::to_string(back_w) + "x" + std::to_string(back_h);
+}
+
 int ClampSizeToInt(std::size_t value)
 {
     const std::size_t max_value = static_cast<std::size_t>(std::numeric_limits<int>::max());
@@ -1072,6 +1110,25 @@ void Findline::Measure(Image& image)
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
 
+    LogFindlineMeasureProbe(
+        "measure_image_enter",
+        "running",
+        FindlineMeasureMessage(
+            "Findline::Measure(Image&) enter",
+            image.getmat().empty() ? 0 : image.getmat().cols,
+            image.getmat().empty() ? 0 : image.getmat().rows,
+            image.getmat().empty() ? 0 : image.getmat().channels(),
+            RoundToInt(rect().TopLeft().X()),
+            RoundToInt(rect().TopLeft().Y()),
+            RoundToInt(rect().TopLeft().X() + rect().Width()),
+            RoundToInt(rect().TopLeft().Y() + rect().Height()),
+            static_cast<int>(m_measure_geometry_request.measure_half_width),
+            0,
+            0,
+            0,
+            g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+            g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
+
     m_lastMeasureInputDebug.backimage_ready =
         g_pbackimage != nullptr;
 
@@ -1104,6 +1161,10 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.detail =
             "Findline Measure received an empty input image.";
 
+        LogFindlineMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            "failure_stage=image_mat_empty");
         return;
     }
 
@@ -1120,6 +1181,10 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.detail =
             "Findline Measure failed to initialize ImageManager work buffers.";
 
+        LogFindlineMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            "failure_stage=scan_workspace_unavailable, reason=EnsureAlgorithmRuntimeResources failed");
         return;
     }
 
@@ -1138,14 +1203,58 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.detail =
             "Findline Measure requires an independent ImageManager BackImage workspace.";
 
+        LogFindlineMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=scan_workspace_unavailable",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                RoundToInt(rect().TopLeft().X()),
+                RoundToInt(rect().TopLeft().Y()),
+                RoundToInt(rect().TopLeft().X() + rect().Width()),
+                RoundToInt(rect().TopLeft().Y() + rect().Height()),
+                static_cast<int>(m_measure_geometry_request.measure_half_width),
+                0,
+                0,
+                0,
+                g_pbackimage != nullptr ? g_pbackimage->getWidth() : 0,
+                g_pbackimage != nullptr ? g_pbackimage->getHeight() : 0));
         return;
     }
 
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
+    {
+        LogFindlineMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=roi_outside_image",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                RoundToInt(rect().TopLeft().X()),
+                RoundToInt(rect().TopLeft().Y()),
+                RoundToInt(rect().TopLeft().X() + rect().Width()),
+                RoundToInt(rect().TopLeft().Y() + rect().Height()),
+                static_cast<int>(m_measure_geometry_request.measure_half_width),
+                0,
+                0,
+                0,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;//error process
+    }
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
+    {
+        LogFindlineMeasureProbe(
+            "measure_image_fail",
+            "failed",
+            "failure_stage=roi_negative");
         return;//error process
+    }
 
     int iwsize = ClampSizeToInt(m_lines_w.size());
     int ihsize = ClampSizeToInt(m_lines_h.size());
@@ -1184,6 +1293,24 @@ void Findline::Measure(Image& image)
             "Findline original Measure has zero m_lines_w/m_lines_h. "
             "Use native width script or make request-cache build ready before measure.";
 
+        LogFindlineMeasureProbe(
+            "measure_geometry_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=original_scan_lines_empty",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                RoundToInt(rect().TopLeft().X()),
+                RoundToInt(rect().TopLeft().Y()),
+                RoundToInt(rect().TopLeft().X() + rect().Width()),
+                RoundToInt(rect().TopLeft().Y() + rect().Height()),
+                static_cast<int>(m_measure_geometry_request.measure_half_width),
+                iwsize,
+                ihsize,
+                0,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
 
@@ -1212,8 +1339,45 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.detail =
             "Findline original Measure scan lines exist but process width is zero.";
 
+        LogFindlineMeasureProbe(
+            "measure_geometry_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=original_process_width_zero",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                RoundToInt(rect().TopLeft().X()),
+                RoundToInt(rect().TopLeft().Y()),
+                RoundToInt(rect().TopLeft().X() + rect().Width()),
+                RoundToInt(rect().TopLeft().Y() + rect().Height()),
+                static_cast<int>(m_measure_geometry_request.measure_half_width),
+                iwsize,
+                ihsize,
+                iprocessw,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
+
+    LogFindlineMeasureProbe(
+        "measure_before_capacity_check",
+        "running",
+        FindlineMeasureMessage(
+            "before workspace capacity check",
+            image.getWidth(),
+            image.getHeight(),
+            image.getmat().channels(),
+            RoundToInt(rect().TopLeft().X()),
+            RoundToInt(rect().TopLeft().Y()),
+            RoundToInt(rect().TopLeft().X() + rect().Width()),
+            RoundToInt(rect().TopLeft().Y() + rect().Height()),
+            static_cast<int>(m_measure_geometry_request.measure_half_width),
+            iwsize,
+            ihsize,
+            iprocessw,
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
 
     if (iwsize + ihsize > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
@@ -1227,8 +1391,45 @@ void Findline::Measure(Image& image)
         m_lastMeasureInputDebug.detail =
             "Findline Measure skipped because scan geometry exceeds the BackImage workspace.";
 
+        LogFindlineMeasureProbe(
+            "measure_capacity_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=scan_workspace_capacity_exceeded",
+                image.getWidth(),
+                image.getHeight(),
+                image.getmat().channels(),
+                RoundToInt(rect().TopLeft().X()),
+                RoundToInt(rect().TopLeft().Y()),
+                RoundToInt(rect().TopLeft().X() + rect().Width()),
+                RoundToInt(rect().TopLeft().Y() + rect().Height()),
+                static_cast<int>(m_measure_geometry_request.measure_half_width),
+                iwsize,
+                ihsize,
+                iprocessw,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
+
+    LogFindlineMeasureProbe(
+        "measure_before_linecopyex",
+        "running",
+        FindlineMeasureMessage(
+            "before linecopyex",
+            image.getWidth(),
+            image.getHeight(),
+            image.getmat().channels(),
+            RoundToInt(rect().TopLeft().X()),
+            RoundToInt(rect().TopLeft().Y()),
+            RoundToInt(rect().TopLeft().X() + rect().Width()),
+            RoundToInt(rect().TopLeft().Y() + rect().Height()),
+            static_cast<int>(m_measure_geometry_request.measure_half_width),
+            iwsize,
+            ihsize,
+            iprocessw,
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
 
     for (int i = 0; i < iwsize; i++)
     {
@@ -1239,9 +1440,30 @@ void Findline::Measure(Image& image)
         m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
+    LogFindlineMeasureProbe(
+        "measure_after_linecopyex",
+        "running",
+        "linecopyex complete");
+
+    LogFindlineMeasureProbe(
+        "measure_before_backimage_roi",
+        "running",
+        "setroi=(0,0," + std::to_string(iprocessw) + "," +
+            std::to_string(iwsize + ihsize) + ")");
     g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
 
+    LogFindlineMeasureProbe(
+        "measure_before_blur_threshold",
+        "running",
+        "threshold=" + std::to_string(m_iThreshold) +
+            ", gamma=" + std::to_string(m_igamarate) +
+            ", linegap=" + std::to_string(m_iSelectPointGap) +
+            ", method=" + std::to_string(m_iMethod));
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+    LogFindlineMeasureProbe(
+        "measure_after_blur_threshold",
+        "running",
+        "blur/threshold complete");
 
     m_lastMeasureInputDebug.binary_roi_width = iprocessw;
     m_lastMeasureInputDebug.binary_roi_height = iwsize + ihsize;
@@ -2424,6 +2646,11 @@ const PointsShape& Findline::getresultpointsh() const
 }
 void Findline::measure(void* pimage)
 {
+    LogFindlineMeasureProbe(
+        "measure_void_enter",
+        "running",
+        std::string("pimage_null=") + (pimage == nullptr ? "true" : "false"));
+
     m_lastMeasureInputDebug = FindlineMeasureInputDebug();
     m_lastMeasureInputDebug.image_ptr_valid = (pimage != nullptr);
     m_lastMeasureInputDebug.method = m_iMethod;
@@ -2455,6 +2682,10 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.failure_stage = "image_pointer_null";
         m_lastMeasureInputDebug.detail = "Findline.measure received null image pointer";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=image_pointer_null");
         return;
     }
 
@@ -2467,6 +2698,10 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.failure_stage = "image_mat_empty";
         m_lastMeasureInputDebug.detail = "Image.getmat() is empty in Findline.measure";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=image_mat_empty");
         return;
     }
 
@@ -2486,6 +2721,10 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline.measure failed to initialize ImageManager work buffers.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=scan_workspace_unavailable, reason=EnsureAlgorithmRuntimeResources failed");
         return;
     }
     g_pbackimage = ImageManager::GetBackImage(1);
@@ -2498,6 +2737,13 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline.measure requires an independent ImageManager BackImage workspace.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=scan_workspace_unavailable, backimage_null=" +
+                std::string(g_pbackimage == nullptr ? "true" : "false") +
+                ", backimage_alias_input=" +
+                std::string(g_pbackimage == image ? "true" : "false"));
         return;
     }
 
@@ -2573,6 +2819,10 @@ void Findline::measure(void* pimage)
     if (!m_lastMeasureInputDebug.has_line_roi)
     {
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=line_roi_not_initialized");
         return;
     }
 
@@ -2582,6 +2832,10 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline measure skipped because the ROI line length is zero.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=line_roi_degenerate");
         return;
     }
 
@@ -2591,6 +2845,24 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline measure skipped because the scan box does not intersect the image.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=line_roi_outside_image",
+                mat.cols,
+                mat.rows,
+                mat.channels(),
+                RoundToInt(m_lastMeasureInputDebug.roi_x0),
+                RoundToInt(m_lastMeasureInputDebug.roi_y0),
+                RoundToInt(m_lastMeasureInputDebug.roi_x1),
+                RoundToInt(m_lastMeasureInputDebug.roi_y1),
+                static_cast<int>(m_lastMeasureInputDebug.roi_scan_half_width),
+                ClampSizeToInt(m_lines_w.size()),
+                ClampSizeToInt(m_lines_h.size()),
+                0,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
 
@@ -2604,6 +2876,24 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline measure skipped because the complete scan box must be inside the image.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=line_roi_partially_outside_image",
+                mat.cols,
+                mat.rows,
+                mat.channels(),
+                RoundToInt(m_lastMeasureInputDebug.roi_x0),
+                RoundToInt(m_lastMeasureInputDebug.roi_y0),
+                RoundToInt(m_lastMeasureInputDebug.roi_x1),
+                RoundToInt(m_lastMeasureInputDebug.roi_y1),
+                static_cast<int>(m_lastMeasureInputDebug.roi_scan_half_width),
+                ClampSizeToInt(m_lines_w.size()),
+                ClampSizeToInt(m_lines_h.size()),
+                0,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
 
@@ -2612,6 +2902,10 @@ void Findline::measure(void* pimage)
     if (!EnsureOriginalMeasureGeometryReady())
     {
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            "failure_stage=original_measure_geometry_not_ready");
         return;
     }
 
@@ -2631,10 +2925,52 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.detail =
             "Findline measure skipped because scan geometry exceeds the BackImage workspace.";
         ClearMeasureState();
+        LogFindlineMeasureProbe(
+            "measure_void_fail",
+            "failed",
+            FindlineMeasureMessage(
+                "failure_stage=scan_workspace_capacity_exceeded_pre_measure",
+                mat.cols,
+                mat.rows,
+                mat.channels(),
+                RoundToInt(m_lastMeasureInputDebug.roi_x0),
+                RoundToInt(m_lastMeasureInputDebug.roi_y0),
+                RoundToInt(m_lastMeasureInputDebug.roi_x1),
+                RoundToInt(m_lastMeasureInputDebug.roi_y1),
+                static_cast<int>(m_lastMeasureInputDebug.roi_scan_half_width),
+                ClampSizeToInt(m_lines_w.size()),
+                ClampSizeToInt(m_lines_h.size()),
+                maxScanLength,
+                g_pbackimage->getWidth(),
+                g_pbackimage->getHeight()));
         return;
     }
 
+    LogFindlineMeasureProbe(
+        "measure_void_before_measure_image",
+        "running",
+        FindlineMeasureMessage(
+            "before Measure(Image&)",
+            mat.cols,
+            mat.rows,
+            mat.channels(),
+            RoundToInt(m_lastMeasureInputDebug.roi_x0),
+            RoundToInt(m_lastMeasureInputDebug.roi_y0),
+            RoundToInt(m_lastMeasureInputDebug.roi_x1),
+            RoundToInt(m_lastMeasureInputDebug.roi_y1),
+            static_cast<int>(m_lastMeasureInputDebug.roi_scan_half_width),
+            ClampSizeToInt(m_lines_w.size()),
+            ClampSizeToInt(m_lines_h.size()),
+            maxScanLength,
+            g_pbackimage->getWidth(),
+            g_pbackimage->getHeight()));
     Measure(*image);
+    LogFindlineMeasureProbe(
+        "measure_void_after_measure_image",
+        "finished",
+        "points_w=" + std::to_string(m_measurepoints_w.size()) +
+            ", points_h=" + std::to_string(m_measurepoints_h.size()) +
+            ", failure_stage=" + m_lastMeasureInputDebug.failure_stage);
 
     const int originalPointCount =
         ClampSizeToInt(m_measurepoints_w.size()) +

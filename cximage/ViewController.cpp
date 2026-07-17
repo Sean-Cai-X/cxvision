@@ -3,6 +3,7 @@
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
+#include "CxCrashLogHandler.h"
 #include <glad/glad.h>
 
 #include "occtinclude.h"
@@ -2335,17 +2336,26 @@ void ViewController::mainloop()
              ImGui::End();
              }
 
+             SetCxCrashBreadcrumb("mainloop:drawScriptAcceptancePanels");
              drawScriptAcceptancePanels();
+             SetCxCrashBreadcrumb("mainloop:SemanticFlowGraph.Draw");
              const SemanticFlowAction flowAction = m_semanticFlowGraph.Draw();
+             SetCxCrashBreadcrumb("mainloop:HandleSemanticFlowAction");
              HandleSemanticFlowAction(flowAction);
+             SetCxCrashBreadcrumb("mainloop:drawEvidenceAlbumWindow");
              drawEvidenceAlbumWindow();
+             SetCxCrashBreadcrumb("mainloop:drawAnnotationToolWindow");
              drawAnnotationToolWindow();
+             SetCxCrashBreadcrumb("mainloop:drawKeyParameterControlsWindow");
              drawKeyParameterControlsWindow();
+             SetCxCrashBreadcrumb("mainloop:drawParameterTuningAndConclusionWindow");
              drawParameterTuningAndConclusionWindow();
+             SetCxCrashBreadcrumb("mainloop:drawManualStateTestConsole");
              drawManualStateTestConsole();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
 
+             SetCxCrashBreadcrumb("mainloop:image_show_update");
              if (1 == m_imageshow)
              {
                  m_imageshow = 0;
@@ -2377,6 +2387,7 @@ void ViewController::mainloop()
                     SetBackgroundInView(m_myView, pshowimage->getmat());
                  }
              }
+             SetCxCrashBreadcrumb("mainloop:runtime_object_shortcuts");
              m_shapex = (Shape*)m_parserOwner.GetClassObj("Shape", "ashape0");
              m_apoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints0");
              m_bpoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints1");
@@ -2384,10 +2395,14 @@ void ViewController::mainloop()
              if (opencvSW)
                  Imgui_OpenCV_Window0(&opencvSW);
 
+             SetCxCrashBreadcrumb("mainloop:ImGui::Render");
              ImGui::Render();
+             SetCxCrashBreadcrumb("mainloop:RenderDrawData");
              ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
+             SetCxCrashBreadcrumb("mainloop:glfwSwapBuffers");
              glfwSwapBuffers(myOcctWindow->getGlfwWindow());
+             SetCxCrashBreadcrumb("mainloop:frame_complete");
          }
      }
 }

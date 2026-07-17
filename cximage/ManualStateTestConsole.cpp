@@ -435,9 +435,28 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
         object.runtime_state = seg->m_status;
+        object.segmentation_backend = seg->backend();
+        object.segmentation_backend_status = seg->result().backend_status;
+        object.segmentation_device = seg->device();
+        object.segmentation_model_path = seg->model_path();
+        object.segmentation_status_code = seg->status_code();
+        object.segmentation_contour_count = seg->get_contour_count();
+        object.segmentation_primary_area = seg->get_primary_area();
+        object.segmentation_result_ref = seg->get_result();
+        object.segmentation_mask_ref = seg->get_mask_ref();
+        object.segmentation_contour_ref = seg->get_contour_ref();
+        object.segmentation_overlay_ref = seg->get_overlay_ref();
+        object.segmentation_reason = seg->m_reason;
+        object.segmentation_has_prompt_rect = true;
+        object.segmentation_has_boundary = object.segmentation_contour_count > 0;
+        object.segmentation_has_libtorch_contract =
+            object.segmentation_backend_status == "libtorch_contract_ready";
+        object.segmentation_real_mask_attach_ready =
+            object.segmentation_has_libtorch_contract &&
+            object.segmentation_contour_count > 0;
         object.stale = false;
-        object.visualizable = seg->get_contour_count() > 0;
-        object.visual_source = object.visualizable ? "segmentation_boundary" : "segmentation_prompt";
+        object.visualizable = true;
+        object.visual_source = object.segmentation_has_boundary ? "segmentation_boundary" : "segmentation_prompt";
         object.has_measure_points = seg->get_contour_count() > 0;
         object.measure_points_count = seg->get_contour_count();
         object.valid_points_count = seg->get_contour_count();
@@ -505,6 +524,19 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.line_avgdist = object.line_avgdist;
             m_manualTest.current_result_ref.line_points_count = object.line_measure_points_count;
             m_manualTest.current_result_ref.valid_line_points_count = object.valid_points_count;
+        }
+        else if (object.type == "FindSegmentation")
+        {
+            m_manualTest.current_result_ref.name = "global_segmentation_ref";
+            m_manualTest.current_result_ref.result_type = "FindSegmentationResult";
+            m_manualTest.current_result_ref.value = object.segmentation_result_ref.empty()
+                ? ("runtime_object:" + object.name)
+                : object.segmentation_result_ref;
+            m_manualTest.current_result_ref.status = object.segmentation_backend_status.empty()
+                ? object.runtime_state
+                : object.segmentation_backend_status;
+            m_manualTest.current_result_ref.points_count = object.segmentation_contour_count;
+            m_manualTest.current_result_ref.valid_points_count = object.segmentation_contour_count;
         }
 
         m_scriptResult.result_ref = m_manualTest.current_result_ref.value;
