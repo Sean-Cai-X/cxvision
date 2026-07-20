@@ -499,6 +499,15 @@ namespace mu
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setmethod", &Findellipse::setmethod);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setthre", &Findellipse::setthre);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "measure", &Findellipse::measure);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "fitellipse", &Findellipse::fitellipse);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultcentx", &Findellipse::getresultcentx);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultcenty", &Findellipse::getresultcenty);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultradiusx", &Findellipse::getresultradiusx);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultradiusy", &Findellipse::getresultradiusy);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultangle", &Findellipse::getresultangle);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "getavgdist", &Findellipse::getavgdist);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "hasfitresult", &Findellipse::hasfitresult);
+            m_parser.DefineClassFun("Findellipse", pfindellipse, "get_result", &Findellipse::get_result);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "clear", &Findellipse::clear);
             m_parser.DefineClassFun("Findellipse", pfindellipse, "setlinesample", &Findellipse::setlinesamplerate);
 

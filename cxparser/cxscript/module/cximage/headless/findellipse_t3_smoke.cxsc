@@ -20,3 +20,4 @@ m_ellipse.setthre(threshold);
 m_ellipse.setmethod(method);
 
 m_ellipse.measure(&m_image);
+m_ellipse.fitellipse();

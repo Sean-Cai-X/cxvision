@@ -18,6 +18,7 @@
 #include "CircleShape.h"
 #include "EllipseShape.h"
 #include "LineGaugeShape.h"
+#include "ManualConsoleGauge.h"
 #include "ManualConsoleCxScriptDebug.h"
 #include "PolylineShape.h"
 
@@ -159,6 +160,7 @@ void UpdateManualGaugeFromShapeElement(
     gauge.tool = "Findline";
     gauge.has_line_gauge = true;
     gauge.has_circle_gauge = false;
+    gauge.has_ellipse_gauge = false;
     gauge.line_x0 = static_cast<int>(std::lround(line->x0()));
     gauge.line_y0 = static_cast<int>(std::lround(line->y0()));
     gauge.line_x1 = static_cast<int>(std::lround(line->x1()));
@@ -178,6 +180,7 @@ void UpdateManualGaugeFromShapeElement(
     gauge.tool = "Findcircle";
     gauge.has_circle_gauge = true;
     gauge.has_line_gauge = false;
+    gauge.has_ellipse_gauge = false;
     gauge.circle_cx = static_cast<int>(std::lround(center.x));
     gauge.circle_cy = static_cast<int>(std::lround(center.y));
     gauge.radius = std::max(1, static_cast<int>(std::lround(radius)));
@@ -185,6 +188,24 @@ void UpdateManualGaugeFromShapeElement(
     gauge.circle_py = gauge.circle_cy;
     gauge.inner_radius = std::max(
         0, static_cast<int>(std::lround(inner_radius)));
+  }
+  else if (element.owner_type == "Findellipse" &&
+           element.shape->kind() == CxShapeKind::Ellipse)
+  {
+    CxShapeGeometrySnapshot geometry;
+    if (!element.shape->snapshot(geometry))
+      return;
+    if (geometry.radius_x <= 0.0 || geometry.radius_y <= 0.0)
+      return;
+
+    gauge.tool = "Findellipse";
+    gauge.has_ellipse_gauge = true;
+    gauge.has_line_gauge = false;
+    gauge.has_circle_gauge = false;
+    gauge.ellipse_x0 = static_cast<int>(std::lround(geometry.center.x - geometry.radius_x));
+    gauge.ellipse_y0 = static_cast<int>(std::lround(geometry.center.y - geometry.radius_y));
+    gauge.ellipse_x1 = static_cast<int>(std::lround(geometry.center.x + geometry.radius_x));
+    gauge.ellipse_y1 = static_cast<int>(std::lround(geometry.center.y + geometry.radius_y));
   }
   else
   {
@@ -232,6 +253,29 @@ bool ExportShapeElementToRuntimeGlobals(
     setInt("global_seed_y", center.y);
     UpdateManualGaugeFromShapeElement(context, element);
     reason = "circle exported to global_circle_* and global_seed_*";
+    return true;
+  }
+
+  if (element.shape->kind() == CxShapeKind::Ellipse)
+  {
+    CxShapeGeometrySnapshot geometry;
+    if (!element.shape->snapshot(geometry) ||
+        geometry.radius_x <= 0.0 ||
+        geometry.radius_y <= 0.0)
+    {
+      reason = "selected ellipse cannot export center/radius";
+      return false;
+    }
+
+    setInt("global_ellipse_x0", geometry.center.x - geometry.radius_x);
+    setInt("global_ellipse_y0", geometry.center.y - geometry.radius_y);
+    setInt("global_ellipse_x1", geometry.center.x + geometry.radius_x);
+    setInt("global_ellipse_y1", geometry.center.y + geometry.radius_y);
+    setInt("global_seed_x", geometry.center.x);
+    setInt("global_seed_y", geometry.center.y);
+    UpdateManualGaugeFromShapeElement(context, element);
+    ApplyManualGaugeToGlobals(context);
+    reason = "ellipse exported to global_ellipse_* and global_seed_*";
     return true;
   }
 

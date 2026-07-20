@@ -14,6 +14,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -53,6 +54,44 @@ int ComputeEllipseLineStep(int gap_degrees, int point_count)
     const double angle_rate = gap_degrees / 360.0;
     const int step = RoundToInt(angle_rate * static_cast<double>(point_count));
     return step > 0 ? step : 1;
+}
+
+bool HasSufficientEllipseAngularCoverage(
+    const std::vector<cv::Point2f>& points,
+    double center_x,
+    double center_y,
+    double radius_x,
+    double radius_y)
+{
+    if (points.size() < 5 || radius_x <= 1.0 || radius_y <= 1.0)
+        return false;
+
+    constexpr int kBins = 16;
+    std::array<bool, kBins> occupied{};
+    int occupied_count = 0;
+
+    for (const cv::Point2f& point : points)
+    {
+        const double nx = (static_cast<double>(point.x) - center_x) / radius_x;
+        const double ny = (static_cast<double>(point.y) - center_y) / radius_y;
+        double angle = std::atan2(ny, nx);
+        if (angle < 0.0)
+            angle += 2.0 * CV_PI;
+
+        int bin = static_cast<int>(std::floor(angle / (2.0 * CV_PI) * kBins));
+        if (bin < 0)
+            bin = 0;
+        if (bin >= kBins)
+            bin = kBins - 1;
+
+        if (!occupied[bin])
+        {
+            occupied[bin] = true;
+            ++occupied_count;
+        }
+    }
+
+    return occupied_count >= 4;
 }
 }
  
@@ -129,11 +168,20 @@ void Findellipse::setselectedgenum(int iedgenum)
 void Findellipse::clear()
 {
     m_lines.clear();
+    m_measurepoints.clear();
+    m_measurepoints_.clear();
     m_has_display_roi = false;
     m_roi_x0 = 0;
     m_roi_y0 = 0;
     m_roi_x1 = 0;
     m_roi_y1 = 0;
+    m_has_fit_result = false;
+    m_fit_center_x = 0.0;
+    m_fit_center_y = 0.0;
+    m_fit_radius_x = 0.0;
+    m_fit_radius_y = 0.0;
+    m_fit_angle_deg = 0.0;
+    m_fit_avgdist = 0.0;
 }
 void Findellipse::Setgap(int gap)
 {
@@ -161,6 +209,8 @@ void Findellipse::Setgap(int gap)
 void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 {
     Shape::setellipse(icentx, icenty, ipax, ipay);
+    m_has_fit_result = false;
+    m_fit_avgdist = 0.0;
 
     m_roi_x0 = std::min(icentx, ipax);
     m_roi_y0 = std::min(icenty, ipay);
@@ -219,6 +269,8 @@ void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idis)
 {
     Shape::setellipse2(icentx, icenty, ipax, ipay, idis);
+    m_has_fit_result = false;
+    m_fit_avgdist = 0.0;
 
     m_roi_x0 = std::min(icentx, ipax);
     m_roi_y0 = std::min(icenty, ipay);
@@ -456,17 +508,62 @@ void Findellipse::MeasureT(void *pimage)
 }
 void Findellipse::Measure(Image& image)
 {
+    m_has_fit_result = false;
+    m_fit_avgdist = 0.0;
+    m_measure_failure_stage.clear();
+    m_measure_failure_reason.clear();
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            image.getWidth(),
+            image.getHeight()))
+    {
+        m_measure_failure_stage = "runtime_resources";
+        m_measure_failure_reason =
+            "Findellipse failed to initialize ImageManager algorithm runtime resources.";
+        return;
+    }
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
+    {
+        m_measure_failure_stage = "roi_outside_image";
+        m_measure_failure_reason = "Findellipse ROI rectangle is outside input image.";
         return;//error process
+    }
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
+    {
+        m_measure_failure_stage = "roi_negative";
+        m_measure_failure_reason = "Findellipse ROI rectangle has negative origin.";
         return;//error process
+    }
     m_measurepoints.clear();
     int isize = ClampSizeToInt(m_lines.size());
-    if (isize <= 0 || g_pbackimage == nullptr ||
-        g_pbackimage == &image ||
-        g_pbackimage->getmat().empty())
+    if (isize <= 0)
+    {
+        m_measure_failure_stage = "scan_lines_empty";
+        m_measure_failure_reason = "Findellipse has no scan lines; check setellipse/setgap order.";
         return;
+    }
+    if (g_pbackimage == nullptr)
+    {
+        m_measure_failure_stage = "backimage_null";
+        m_measure_failure_reason = "Findellipse back image is null.";
+        return;
+    }
+    if (g_pbackimage == &image)
+    {
+        m_measure_failure_stage = "backimage_alias_input";
+        m_measure_failure_reason = "Findellipse back image aliases the input image.";
+        return;
+    }
+    if (g_pbackimage->getmat().empty())
+    {
+        m_measure_failure_stage = "backimage_empty";
+        m_measure_failure_reason = "Findellipse back image Mat is empty.";
+        return;
+    }
 
     int ilineslen1 = 0;
 
@@ -478,7 +575,11 @@ void Findellipse::Measure(Image& image)
     if (iprocessw <= 0 ||
         isize > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
+    {
+        m_measure_failure_stage = "scan_buffer_too_small";
+        m_measure_failure_reason = "Findellipse scan buffer is smaller than generated scan geometry.";
         return;
+    }
 
     for (int i = 0; i < isize; i++)
     {
@@ -509,6 +610,8 @@ void Findellipse::Measure(Image& image)
     cv::Vec3b icolor = 0;
     for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++)
     {
+        std::vector<int> candidate_positions;
+        candidate_positions.reserve(8);
         irecordpoint.clear();
         icurlinenum = 0;
         bcollectBegin = false;
@@ -536,10 +639,16 @@ void Findellipse::Measure(Image& image)
                         if (icurlineposition<(ilineslen1 - m_iSelectPointGap - 3)
                             && icurlineposition>m_iSelectPointGap + 3)
                         {
-                            gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
-                            m_measurepoints.addpoint(apoint);
-                            if (icurlinenum == m_iselectedgenum)
+                            if (m_iselectedgenum == 0)
+                            {
+                                candidate_positions.push_back(icurlineposition);
+                            }
+                            else
+                            {
+                                gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
+                                m_measurepoints.addpoint(apoint);
                                 break;
+                            }
                         }
                     }
                 }
@@ -559,24 +668,189 @@ void Findellipse::Measure(Image& image)
                 if (icurlineposition<(ilineslen1 - m_iSelectPointGap - 3)
                     && icurlineposition>m_iSelectPointGap + 3)
                 {
-                    gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
-                    m_measurepoints.addpoint(apoint);
-                    if (icurlinenum == m_iselectedgenum)
+                    if (m_iselectedgenum == 0)
+                    {
+                        candidate_positions.push_back(icurlineposition);
+                    }
+                    else
+                    {
+                        gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
+                        m_measurepoints.addpoint(apoint);
                         break;
+                    }
                 }
             }
             irecordpoint.clear();
             bcollectBegin = false;
         }
 
+        if (m_iselectedgenum == 0 && !candidate_positions.empty())
+        {
+            const int boundary_position = *std::max_element(
+                candidate_positions.begin(),
+                candidate_positions.end());
+            gp_Pnt apoint = m_lines[inumy].getlinepoint(boundary_position);
+            m_measurepoints.addpoint(apoint);
+        }
+
     }
 
+    if (m_measurepoints.size() <= 0)
+    {
+        m_measure_failure_stage = "threshold_no_edge";
+        m_measure_failure_reason =
+            "Findellipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
+    }
     
 }
 
 PointsShape& Findellipse::getresultpoints()
 {
     return m_measurepoints;
+}
+
+void Findellipse::fitellipse()
+{
+    m_has_fit_result = false;
+    m_fit_center_x = 0.0;
+    m_fit_center_y = 0.0;
+    m_fit_radius_x = 0.0;
+    m_fit_radius_y = 0.0;
+    m_fit_angle_deg = 0.0;
+    m_fit_avgdist = 0.0;
+
+    const int count = ClampSizeToInt(m_measurepoints.size());
+    if (count < 5)
+        return;
+
+    std::vector<cv::Point2f> points;
+    points.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+    {
+        const double x = m_measurepoints.getx(i);
+        const double y = m_measurepoints.gety(i);
+        if (std::isfinite(x) && std::isfinite(y))
+            points.emplace_back(static_cast<float>(x), static_cast<float>(y));
+    }
+    if (points.size() < 5)
+        return;
+
+    const double roi_center_x = static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5;
+    const double roi_center_y = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
+    const double roi_radius_x = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0)) * 0.5;
+    const double roi_radius_y = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0)) * 0.5;
+    if (!HasSufficientEllipseAngularCoverage(
+            points,
+            roi_center_x,
+            roi_center_y,
+            roi_radius_x,
+            roi_radius_y))
+    {
+        m_measure_failure_stage = "insufficient_boundary_coverage";
+        m_measure_failure_reason =
+            "Findellipse rejected edge set because accepted points do not cover enough of the Gauge ellipse.";
+        return;
+    }
+
+    cv::RotatedRect fitted;
+    try
+    {
+        fitted = cv::fitEllipse(points);
+    }
+    catch (const cv::Exception&)
+    {
+        return;
+    }
+
+    const double rx = std::abs(static_cast<double>(fitted.size.width)) * 0.5;
+    const double ry = std::abs(static_cast<double>(fitted.size.height)) * 0.5;
+    if (rx <= 0.0 || ry <= 0.0 ||
+        !std::isfinite(rx) || !std::isfinite(ry) ||
+        !std::isfinite(static_cast<double>(fitted.center.x)) ||
+        !std::isfinite(static_cast<double>(fitted.center.y)))
+    {
+        return;
+    }
+
+    const double min_radius_ratio = std::min(
+        rx / std::max(roi_radius_x, 1.0),
+        ry / std::max(roi_radius_y, 1.0));
+    const double max_radius_ratio = std::max(
+        rx / std::max(roi_radius_x, 1.0),
+        ry / std::max(roi_radius_y, 1.0));
+    if (min_radius_ratio < 0.45 || max_radius_ratio > 3.0)
+    {
+        m_measurepoints.clear();
+        m_measure_failure_stage = "fit_too_small_for_gauge";
+        m_measure_failure_reason =
+            "Findellipse rejected local edge cluster because fitted ellipse is too small compared with the Gauge.";
+        return;
+    }
+
+    m_fit_center_x = fitted.center.x;
+    m_fit_center_y = fitted.center.y;
+    m_fit_radius_x = rx;
+    m_fit_radius_y = ry;
+    m_fit_angle_deg = fitted.angle;
+
+    const double angle = m_fit_angle_deg * CV_PI / 180.0;
+    const double ca = std::cos(angle);
+    const double sa = std::sin(angle);
+    const double scale = (rx + ry) * 0.5;
+    double sum = 0.0;
+    int used = 0;
+    for (const cv::Point2f& point : points)
+    {
+        const double dx = static_cast<double>(point.x) - m_fit_center_x;
+        const double dy = static_cast<double>(point.y) - m_fit_center_y;
+        const double local_x = ca * dx + sa * dy;
+        const double local_y = -sa * dx + ca * dy;
+        const double norm = std::sqrt(
+            (local_x * local_x) / (rx * rx) +
+            (local_y * local_y) / (ry * ry));
+        if (std::isfinite(norm))
+        {
+            sum += std::abs(norm - 1.0) * scale;
+            ++used;
+        }
+    }
+    m_fit_avgdist = used > 0 ? sum / static_cast<double>(used) : 0.0;
+    m_has_fit_result = true;
+}
+
+double Findellipse::getresultcentx()
+{
+    return m_fit_center_x;
+}
+
+double Findellipse::getresultcenty()
+{
+    return m_fit_center_y;
+}
+
+double Findellipse::getresultradiusx()
+{
+    return m_fit_radius_x;
+}
+
+double Findellipse::getresultradiusy()
+{
+    return m_fit_radius_y;
+}
+
+double Findellipse::getresultangle()
+{
+    return m_fit_angle_deg;
+}
+
+double Findellipse::getavgdist()
+{
+    return m_fit_avgdist;
+}
+
+double Findellipse::hasfitresult()
+{
+    return m_has_fit_result ? 1.0 : 0.0;
 }
 
 
@@ -657,8 +931,26 @@ bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
     const PointsShape& points = const_cast<Findellipse*>(this)->getresultpoints();
     out.has_measure_points = points.size() > 0;
     out.measure_points_count = static_cast<int>(points.size());
+    out.has_fit_ellipse = m_has_fit_result;
+    out.fit_center_x = m_fit_center_x;
+    out.fit_center_y = m_fit_center_y;
+    out.fit_radius_x = m_fit_radius_x;
+    out.fit_radius_y = m_fit_radius_y;
+    out.fit_angle_deg = m_fit_angle_deg;
+    out.fit_avgdist = m_fit_avgdist;
 
-    return out.has_roi || out.has_measure_points;
+    out.gap = m_igap;
+    out.linegap = m_iSelectPointGap;
+    out.threshold = m_iThreshold;
+    out.method = m_iMethod;
+    out.scan_line_count = static_cast<int>(m_lines.size());
+    out.scan_line_length = m_lines.empty()
+        ? 0
+        : const_cast<LineShape&>(m_lines[0]).getlinesize();
+    out.measure_failure_stage = m_measure_failure_stage;
+    out.measure_failure_reason = m_measure_failure_reason;
+
+    return out.has_roi || out.has_measure_points || out.has_fit_ellipse;
 }
 
 void Findellipse::PublishDisplayShapes(
@@ -706,5 +998,24 @@ void Findellipse::PublishDisplayShapes(
             false,
             true,
             std::move(resultPoints));
+    }
+
+    if (snapshot.has_fit_ellipse)
+    {
+        auto fitEllipse = std::make_unique<EllipseShape>(
+            snapshot.fit_center_x,
+            snapshot.fit_center_y,
+            snapshot.fit_radius_x,
+            snapshot.fit_radius_y);
+
+        sink.UpsertShape(
+            owner_ref + ".fit_ellipse",
+            "Findellipse",
+            owner_ref,
+            "",
+            "result",
+            false,
+            true,
+            std::move(fitEllipse));
     }
 }

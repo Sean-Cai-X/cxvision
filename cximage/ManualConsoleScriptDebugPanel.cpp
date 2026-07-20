@@ -1,11 +1,14 @@
 #include "pch.h"
 #include "ManualConsoleScriptDebugPanel.h"
 #include "ManualConsoleCxScriptDebug.h"
+#include "ManualConsoleGauge.h"
 #include "ManualConsoleUtils.h"
 #include "ManualStateTestConsole.h"
+#include "CxCrashLogHandler.h"
 
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 {
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:ScriptEditor:begin");
   if (!ImGui::CollapsingHeader("Script Editor", ImGuiTreeNodeFlags_DefaultOpen))
     return;
 
@@ -73,10 +76,12 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
   ImGui::EndChild();
 
   ImGui::PopID();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:ScriptEditor:end");
 }
 
 void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 {
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:begin");
   if (!ImGui::CollapsingHeader("Debug Compiler", ImGuiTreeNodeFlags_DefaultOpen))
     return;
 
@@ -117,6 +122,12 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     else
     {
       AnalyzeScript(context);
+      if (context.current_gauge.has_line_gauge ||
+          context.current_gauge.has_circle_gauge ||
+          context.current_gauge.has_ellipse_gauge)
+      {
+        ApplyManualGaugeToGlobals(context);
+      }
       for (const auto& input : context.runtime_int_vars)
       {
         if (input.first.rfind("global_", 0) == 0)
@@ -252,6 +263,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     ImGui::TextWrapped("Reason: %s", context.debug_reason.c_str());
 
   ImGui::PopID();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:end");
 }
 
 void ViewController::DrawCxParserExtLineViewsPanel(ManualTestContext& context)

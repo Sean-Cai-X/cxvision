@@ -317,6 +317,10 @@ bool InjectCxScriptGlobals(
         { "global_circle_cy", static_cast<double>(options.circle_cy) },
         { "global_circle_px", static_cast<double>(options.circle_px) },
         { "global_circle_py", static_cast<double>(options.circle_py) },
+        { "global_ellipse_x0", static_cast<double>(options.ellipse_x0) },
+        { "global_ellipse_y0", static_cast<double>(options.ellipse_y0) },
+        { "global_ellipse_x1", static_cast<double>(options.ellipse_x1) },
+        { "global_ellipse_y1", static_cast<double>(options.ellipse_y1) },
         { "global_max_elapsed_ms", static_cast<double>(options.max_elapsed_ms) },
         { "global_max_scan_lines", static_cast<double>(options.max_scan_lines) },
         { "global_max_samples", static_cast<double>(options.max_samples) },
@@ -557,6 +561,11 @@ bool SaveCxScriptHeadlessSummaryJson(
     file << "  \"has_fit_ellipse\": " << (capture.has_fit_ellipse ? "true" : "false") << ",\n";
     file << "  \"has_result_rect\": " << (capture.has_result_rect ? "true" : "false") << ",\n";
     file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
+    file << "  \"ellipse_cx\": " << capture.ellipse_cx << ",\n";
+    file << "  \"ellipse_cy\": " << capture.ellipse_cy << ",\n";
+    file << "  \"ellipse_radius_x\": " << capture.ellipse_radius_x << ",\n";
+    file << "  \"ellipse_radius_y\": " << capture.ellipse_radius_y << ",\n";
+    file << "  \"ellipse_angle_deg\": " << capture.ellipse_angle_deg << ",\n";
     file << "  \"avgdist\": " << capture.avgdist << ",\n";
     file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
     file << "  \"model_point_count\": " << capture.model_point_count << ",\n";
@@ -714,6 +723,14 @@ bool ParseCxScriptHeadlessArgs(
             options.circle_px = std::stoi(argv[++i]);
         else if (arg == "--circle-py" && i + 1 < argc)
             options.circle_py = std::stoi(argv[++i]);
+        else if (arg == "--ellipse-x0" && i + 1 < argc)
+            options.ellipse_x0 = std::stoi(argv[++i]);
+        else if (arg == "--ellipse-y0" && i + 1 < argc)
+            options.ellipse_y0 = std::stoi(argv[++i]);
+        else if (arg == "--ellipse-x1" && i + 1 < argc)
+            options.ellipse_x1 = std::stoi(argv[++i]);
+        else if (arg == "--ellipse-y1" && i + 1 < argc)
+            options.ellipse_y1 = std::stoi(argv[++i]);
         else if (arg == "--tool-half-width" && i + 1 < argc)
             options.tool_half_width = std::stoi(argv[++i]);
         else if (arg == "--wgap" && i + 1 < argc)
@@ -948,6 +965,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"has_fit_ellipse\": " << (capture.has_fit_ellipse ? "true" : "false") << ",\n";
         object_state_file << "  \"has_result_rect\": " << (capture.has_result_rect ? "true" : "false") << ",\n";
         object_state_file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
+        object_state_file << "  \"ellipse_cx\": " << capture.ellipse_cx << ",\n";
+        object_state_file << "  \"ellipse_cy\": " << capture.ellipse_cy << ",\n";
+        object_state_file << "  \"ellipse_radius_x\": " << capture.ellipse_radius_x << ",\n";
+        object_state_file << "  \"ellipse_radius_y\": " << capture.ellipse_radius_y << ",\n";
+        object_state_file << "  \"ellipse_angle_deg\": " << capture.ellipse_angle_deg << ",\n";
         object_state_file << "  \"avgdist\": " << capture.avgdist << ",\n";
         object_state_file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
         object_state_file << "  \"model_point_count\": " << capture.model_point_count << ",\n";

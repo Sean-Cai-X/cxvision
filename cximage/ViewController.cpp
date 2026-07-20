@@ -729,6 +729,12 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
   // Semantic Flow and Manual Console must execute with the same external
   // input snapshot.  The editor Run button already performs this binding;
   // bind it here as well for "Run Bound Script".
+  if (m_manualTest.current_gauge.has_line_gauge ||
+      m_manualTest.current_gauge.has_circle_gauge ||
+      m_manualTest.current_gauge.has_ellipse_gauge)
+  {
+    ApplyManualGaugeToGlobals(m_manualTest);
+  }
   for (const auto& input : m_manualTest.runtime_int_vars)
   {
     if (input.first.rfind("global_", 0) == 0)
@@ -1312,6 +1318,18 @@ void ViewController::drawScriptAcceptancePanels()
     if (ImGui::InputInt("threshold", &gauge.threshold)) { gauge.dirty = true; gauge.review_status = "editing"; }
     if (ImGui::InputInt("method", &gauge.method)) { gauge.dirty = true; gauge.review_status = "editing"; }
   }
+  else if (gauge.has_ellipse_gauge)
+  {
+    if (ImGui::InputInt("ellipse_x0", &gauge.ellipse_x0)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("ellipse_y0", &gauge.ellipse_y0)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("ellipse_x1", &gauge.ellipse_x1)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("ellipse_y1", &gauge.ellipse_y1)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("gap", &gauge.gap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("linegap", &gauge.linegap)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("threshold", &gauge.threshold)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("method", &gauge.method)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    ImGui::TextDisabled("fitellipse: pending_binding; current runtime exposes ROI and measure points only.");
+  }
   else
   {
     ImGui::TextDisabled("No gauge active. Run a script or select from catalog.");
@@ -1364,6 +1382,7 @@ void ViewController::drawScriptAcceptancePanels()
   {
     gauge.has_line_gauge = false;
     gauge.has_circle_gauge = false;
+    gauge.has_ellipse_gauge = false;
     gauge.dirty = false;
     gauge.accepted = false;
   }

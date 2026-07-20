@@ -166,6 +166,9 @@ std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | edgebands=" << object.line_edgeband_count
        << " | chain=" << object.line_chain_length
        << " | measure_failure_stage=" << object.line_measure_failure_stage
+       << " | measure_detail=" << object.line_measure_failure_hint
+       << " | result_status=" << object.line_result_status
+       << " | result_reason=" << object.line_result_reason
        << " | image_ready=" << (object.line_measure_image_ready ? "true" : "false")
        << " | image_size=" << object.line_measure_image_width
        << "x" << object.line_measure_image_height
@@ -197,7 +200,34 @@ std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
        << " | scan_h=" << object.line_original_scan_h_count
        << " | scan_w_len=" << object.line_original_scan_w_length
        << " | scan_h_len=" << object.line_original_scan_h_length
-       << " | process_w=" << object.line_original_process_width;
+       << " | process_w=" << object.line_original_process_width
+       << " | backimage_ready="
+       << (object.line_measure_backimage_ready ? "true" : "false")
+       << " | findobject_ready="
+       << (object.line_measure_findobject_ready ? "true" : "false")
+       << " | findobject_called="
+       << (object.line_measure_findobject_called ? "true" : "false")
+       << " | binary_foreground="
+       << object.line_measure_binary_foreground_pixels
+       << " | filter_profile=" << object.line_measure_filter_profile
+       << " | effective_filter_borw="
+       << object.line_measure_effective_filter_borw
+       << " | effective_filter_min="
+       << object.line_measure_effective_filter_min
+       << " | effective_filter_max="
+       << object.line_measure_effective_filter_max
+       << " | component_total="
+       << object.line_findobject_component_total
+       << " | component_accepted="
+       << object.line_findobject_component_accepted
+       << " | component_rejected_min="
+       << object.line_findobject_component_rejected_by_min
+       << " | component_rejected_max="
+       << object.line_findobject_component_rejected_by_max
+       << " | component_rejected_borw="
+       << object.line_findobject_component_rejected_by_borw
+       << " | result_empty_reason="
+       << object.line_measure_result_empty_reason;
 
     return ss.str();
 }
@@ -229,10 +259,52 @@ std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object
     return ss.str();
 }
 
+std::string BuildFindellipseGeometrySummary(const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "geometry: object=" << object.name;
+
+    if (object.has_ellipse_roi)
+    {
+        ss << " | roi_ellipse=(cx=" << object.ellipse_cx
+           << ", cy=" << object.ellipse_cy
+           << ", rx=" << object.ellipse_rx
+           << ", ry=" << object.ellipse_ry << ")";
+    }
+    else
+    {
+        ss << " | roi_ellipse=(none)";
+    }
+
+    ss << " | measure_points_count=" << object.measure_points_count
+       << " | valid_points_count=" << object.valid_points_count
+       << " | fit_ellipse="
+       << (object.has_fit_ellipse ? "true" : "false");
+
+    if (object.has_fit_ellipse)
+    {
+        ss << " | fit_ellipse_result=(cx=" << object.fit_ellipse_cx
+           << ", cy=" << object.fit_ellipse_cy
+           << ", rx=" << object.fit_ellipse_rx
+           << ", ry=" << object.fit_ellipse_ry
+           << ", angle=" << object.fit_ellipse_angle_deg << ")"
+           << " | avgdist=" << object.fit_ellipse_avgdist;
+    }
+
+    ss
+       << " | result_status=" << object.ellipse_result_status
+       << " | result_reason=" << object.ellipse_result_reason;
+
+    return ss.str();
+}
+
 std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
     if (object.type == "Findline")
         return BuildFindlineGeometrySummary(object);
+    if (object.type == "Findellipse")
+        return BuildFindellipseGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
 
@@ -299,11 +371,31 @@ std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context
     return ss.str();
 }
 
+std::string BuildFindellipseOverlaySummary(const ManualTestContext& context,
+    const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "image overlay:"
+       << " green_roi_ellipse=" << (object.has_ellipse_roi ? "true" : "false")
+       << " | red_measure_points=" << object.valid_points_count
+       << " | yellow_fit_ellipse=" << (object.has_fit_ellipse ? "true" : "false")
+       << " | fitellipse_pending="
+       << (object.has_fit_ellipse ? "false" : "true")
+       << " | source_preview_enabled="
+       << (context.source_preview_enabled ? "true" : "false")
+       << " | manual_elements_count=" << context.manual_elements_count;
+
+    return ss.str();
+}
+
 std::string BuildOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     if (object.type == "Findline")
         return BuildFindlineOverlaySummary(context, object);
+    if (object.type == "Findellipse")
+        return BuildFindellipseOverlaySummary(context, object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationOverlaySummary(context, object);
 

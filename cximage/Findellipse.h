@@ -3,6 +3,7 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
+#include <string>
 class FindObject;
 class ICxShapeSink;
 
@@ -17,6 +18,23 @@ struct FindellipseDisplaySnapshot
 
     bool has_measure_points = false;
     int measure_points_count = 0;
+
+    bool has_fit_ellipse = false;
+    double fit_center_x = 0.0;
+    double fit_center_y = 0.0;
+    double fit_radius_x = 0.0;
+    double fit_radius_y = 0.0;
+    double fit_angle_deg = 0.0;
+    double fit_avgdist = 0.0;
+
+    int gap = 0;
+    int linegap = 0;
+    int threshold = 0;
+    int method = 0;
+    int scan_line_count = 0;
+    int scan_line_length = 0;
+    std::string measure_failure_stage;
+    std::string measure_failure_reason;
 };
 
 class Findellipse :public Shape
@@ -72,6 +90,15 @@ public:
     void setshowlines(int ilines) { m_ishowlines = ilines; }
     PointsShape& getresultpoints();
     void Measure(Image& image);
+    void fitellipse();
+    double getresultcentx();
+    double getresultcenty();
+    double getresultradiusx();
+    double getresultradiusy();
+    double getresultangle();
+    double getavgdist();
+    double hasfitresult();
+    double get_result() { return hasfitresult(); }
 
     void shapesetroi(void* pshape);
     void MeasureT(void* pimage);
@@ -140,6 +167,16 @@ private:
     int m_roi_y0 = 0;
     int m_roi_x1 = 0;
     int m_roi_y1 = 0;
+
+    bool m_has_fit_result = false;
+    double m_fit_center_x = 0.0;
+    double m_fit_center_y = 0.0;
+    double m_fit_radius_x = 0.0;
+    double m_fit_radius_y = 0.0;
+    double m_fit_angle_deg = 0.0;
+    double m_fit_avgdist = 0.0;
+    std::string m_measure_failure_stage;
+    std::string m_measure_failure_reason;
 
 };
 

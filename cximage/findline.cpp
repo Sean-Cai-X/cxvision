@@ -1619,7 +1619,19 @@ void Findline::Measure(Image& image)
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
 
+        LogFindlineMeasureProbe(
+            "measure_before_findobject_measure",
+            "running",
+            "findobject_roi=(0,0," + std::to_string(iprocessw) + "," +
+                std::to_string(iwsize + ihsize) + "), borw=" +
+                std::to_string(m_effective_filter_borw) + ", min=" +
+                std::to_string(m_effective_filter_min) + ", max=" +
+                std::to_string(m_effective_filter_max));
         g_pbackfindobject->Measure(*g_pbackimage);
+        LogFindlineMeasureProbe(
+            "measure_after_findobject_measure",
+            "running",
+            "findobject_results=" + std::to_string(g_pbackfindobject->getresultobjsnum()));
         //mask
     }
     else

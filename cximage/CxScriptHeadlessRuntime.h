@@ -34,6 +34,11 @@ struct CxScriptExecutionCapture
     bool has_result_rect = false;
 
     double circle_radius = 0.0;
+    double ellipse_cx = 0.0;
+    double ellipse_cy = 0.0;
+    double ellipse_radius_x = 0.0;
+    double ellipse_radius_y = 0.0;
+    double ellipse_angle_deg = 0.0;
     double avgdist = 0.0;
 
     int result_rect_count = 0;
@@ -168,6 +173,11 @@ struct CxScriptHeadlessOptions
     int circle_cy = 0;
     int circle_px = 0;
     int circle_py = 0;
+
+    int ellipse_x0 = 0;
+    int ellipse_y0 = 0;
+    int ellipse_x1 = 0;
+    int ellipse_y1 = 0;
 
     int tool_half_width = 20;
     int wgap = 32;

@@ -20,7 +20,6 @@ m_ellipse.setthre(threshold);
 m_ellipse.setmethod(method);
 
 m_ellipse.measure(&m_image);
-
-global_current_status = "PENDING";
+m_ellipse.fitellipse();
 
 1+1;

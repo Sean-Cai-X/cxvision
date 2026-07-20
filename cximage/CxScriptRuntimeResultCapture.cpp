@@ -142,13 +142,28 @@ bool CaptureFindellipseResult(
     FindellipseDisplaySnapshot snapshot;
     const bool has_snapshot = tool.getdisplaysnapshot(snapshot);
     output.valid_points_count = snapshot.measure_points_count;
-    output.has_fit_ellipse = false;
-    output.failure_stage = snapshot.measure_points_count > 0
+    output.has_fit_ellipse = tool.hasfitresult() != 0.0;
+    output.ellipse_cx = tool.getresultcentx();
+    output.ellipse_cy = tool.getresultcenty();
+    output.ellipse_radius_x = tool.getresultradiusx();
+    output.ellipse_radius_y = tool.getresultradiusy();
+    output.ellipse_angle_deg = tool.getresultangle();
+    output.avgdist = tool.getavgdist();
+    output.failure_stage = output.has_fit_ellipse
         ? std::string()
-        : "measure_points";
+        : (snapshot.measure_points_count > 0 ? "fitellipse" : "measure_points");
+
+    if (!snapshot.measure_failure_stage.empty())
+        output.failure_stage = snapshot.measure_failure_stage;
 
     if (!has_snapshot)
         output.reason = "Findellipse display snapshot is empty";
+    else if (!snapshot.measure_failure_stage.empty())
+        output.reason = snapshot.measure_failure_reason;
+    else if (!output.has_fit_ellipse && snapshot.measure_points_count > 0)
+        output.reason = "Findellipse produced measure points, but fitellipse result is unavailable.";
+    else if (!output.has_fit_ellipse)
+        output.reason = "Findellipse produced zero measure points.";
 
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
@@ -298,6 +313,14 @@ static void MergeToolCapture(
     capture.has_result_rect = capture.has_result_rect || tool.has_result_rect;
     capture.budget_exceeded = capture.budget_exceeded || tool.budget_exceeded;
     capture.avgdist = tool.avgdist;
+    if (tool.has_fit_ellipse)
+    {
+        capture.ellipse_cx = tool.ellipse_cx;
+        capture.ellipse_cy = tool.ellipse_cy;
+        capture.ellipse_radius_x = tool.ellipse_radius_x;
+        capture.ellipse_radius_y = tool.ellipse_radius_y;
+        capture.ellipse_angle_deg = tool.ellipse_angle_deg;
+    }
     capture.result_rect_count += tool.result_rect_count;
     capture.model_point_count += tool.model_point_count;
     if (tool.fastmatch_model_width > 0)

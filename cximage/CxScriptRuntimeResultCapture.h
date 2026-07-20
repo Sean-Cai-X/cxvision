@@ -47,6 +47,12 @@ struct CxScriptToolResultCapture
     double circle_cy = 0.0;
     double circle_radius = 0.0;
 
+    double ellipse_cx = 0.0;
+    double ellipse_cy = 0.0;
+    double ellipse_radius_x = 0.0;
+    double ellipse_radius_y = 0.0;
+    double ellipse_angle_deg = 0.0;
+
     int result_rect_count = 0;
 
     int model_point_count = 0;

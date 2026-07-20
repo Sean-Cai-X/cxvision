@@ -472,6 +472,8 @@ void FindObject::setsearchtype(int itype)
 void FindObject::Measure(Image& image)
 {
     m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
@@ -479,6 +481,15 @@ void FindObject::Measure(Image& image)
     int ih = rect().Height();
     int ix = rect().TopLeft().X();
     int iy = rect().TopLeft().Y();
+    if (iw <= 0 || ih <= 0 || ix < 0 || iy < 0)
+        return;
+    if (g_pmapimage == nullptr ||
+        m_objlistscanorA == nullptr ||
+        m_objlistcollectorA == nullptr)
+        return;
+    if (g_pmapimage->getWidth() < ix + iw ||
+        g_pmapimage->getHeight() < iy + ih)
+        return;
     int ix1 = ix + iw;
     int iy1 = iy + ih;
 
@@ -556,6 +567,7 @@ void FindObject::Measure(Image& image)
     m_scanid.clear();
     m_vborw.clear();
     m_vrow.clear();
+    m_vobjnum.clear();
     m_rectresults.clear();
     m_keypoint.clear();
     m_fitwh.clear();;
@@ -567,6 +579,8 @@ void FindObject::Measure(Image& image)
     for (int icurSeekNum = 0; icurSeekNum < nsearchseeksize;)//searchseek.size();)
     {
     FORBEGIN: 
+        if (icurSeekNum < 0 || icurSeekNum >= nsearchseeksize)
+            break;
         mapservice = MAP_service(m_objlistcollectorA[icurSeekNum].X(), m_objlistcollectorA[icurSeekNum].Y());
 
         if (mapservice > 0)
@@ -578,8 +592,19 @@ void FindObject::Measure(Image& image)
             else
                 goto FORBEGIN;
         }
+        iminx = 9999;
+        iminy = 9999;
+        imaxx = 0;
+        imaxy = 0;
+
         CLEAR_SCANOR();
         PUSH_SCANOR(m_objlistcollectorA[icurSeekNum].X(), m_objlistcollectorA[icurSeekNum].Y());
+        if (nscansize <= 0)
+            break;
+        iminx = static_cast<int>(m_objlistcollectorA[icurSeekNum].X());
+        iminy = static_cast<int>(m_objlistcollectorA[icurSeekNum].Y());
+        imaxx = iminx;
+        imaxy = iminy;
         SetMAP_service(m_objlistcollectorA[icurSeekNum].X(), m_objlistcollectorA[icurSeekNum].Y(), nScanerID);
         int itestx0 = MAP_service(m_objlistcollectorA[icurSeekNum].X(), m_objlistcollectorA[icurSeekNum].Y());
         icurScanerNUM = 0;

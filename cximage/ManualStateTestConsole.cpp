@@ -2,6 +2,7 @@
 #include "Image.h"
 #include "Findcircle.h"
 #include "findline.h"
+#include "Findellipse.h"
 #include "FindSegmentation.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
@@ -17,6 +18,7 @@
 #include "ManualConsoleCxScriptDebug.h"
 #include "ManualConsoleFindcircleDebug.h"
 #include "ManualConsoleFindlineDebug.h"
+#include "CxCrashLogHandler.h"
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "ManualConsoleEvidenceChain.h"
@@ -206,6 +208,103 @@ static void FillRuntimeObjectFromFindline(
     object.valid_points_count = object.valid_line_points_count;
     object.has_line_measure_points = !object.line_measure_points_xy.empty();
 
+    const FindlineMeasureInputDebug& inputDebug = line.lastmeasureinputdebug();
+    const FindlineMeasureProfileStats& profileStats = line.lastmeasureprofilestats();
+    object.line_measure_image_ready = inputDebug.image_mat_ready;
+    object.line_measure_image_width = inputDebug.image_width;
+    object.line_measure_image_height = inputDebug.image_height;
+    object.line_measure_image_channels = inputDebug.image_channels;
+    object.line_measure_image_type = inputDebug.image_type;
+    object.line_measure_roi_intersects_image = inputDebug.roi_intersects_image;
+    object.line_measure_roi_fully_inside_image = inputDebug.roi_fully_inside_image;
+    object.line_measure_method = inputDebug.method;
+    object.line_measure_threshold = inputDebug.threshold;
+    object.line_measure_linegap = inputDebug.linegap;
+    object.line_measure_wgap = inputDebug.wgap;
+    object.line_measure_hgap = inputDebug.hgap;
+    object.line_measure_profile_count = inputDebug.profile_count;
+    object.line_measure_sampled_pixel_count = inputDebug.sampled_pixel_count;
+    object.line_measure_gray_min = inputDebug.gray_min;
+    object.line_measure_gray_max = inputDebug.gray_max;
+    object.line_measure_gray_mean = inputDebug.gray_mean;
+    object.line_measure_max_gradient = inputDebug.max_gradient;
+    object.line_measure_image_source = inputDebug.image_source;
+    object.line_measure_input_failure_stage = inputDebug.failure_stage;
+    object.line_measure_input_detail = inputDebug.detail;
+    object.line_measure_failure_stage = inputDebug.failure_stage;
+    object.line_measure_failure_hint = inputDebug.detail;
+    object.line_measure_source = inputDebug.measure_source;
+    object.line_measure_fallback_allowed = inputDebug.fallback_allowed;
+    object.line_measure_fallback_used = inputDebug.fallback_used;
+    object.line_measure_original_failure_stage = inputDebug.original_failure_stage;
+    object.line_measure_original_detail = inputDebug.original_detail;
+    object.line_measure_original_point_count = inputDebug.original_point_count;
+    object.line_measure_original_edgeband_count = inputDebug.original_edgeband_count;
+    object.line_measure_original_chain_length = inputDebug.original_chain_length;
+    object.line_measure_geometry_request_valid =
+        inputDebug.measure_geometry_request_valid;
+    object.line_measure_geometry_dirty = inputDebug.measure_geometry_dirty;
+    object.line_measure_geometry_ready = inputDebug.measure_geometry_ready;
+    object.line_measure_geometry_version = inputDebug.measure_geometry_version;
+    object.line_measure_geometry_built_version =
+        inputDebug.measure_geometry_built_version;
+    object.line_measure_geometry_half_width =
+        inputDebug.measure_geometry_half_width;
+    object.line_original_scan_w_count = inputDebug.original_scan_w_count;
+    object.line_original_scan_h_count = inputDebug.original_scan_h_count;
+    object.line_original_scan_w_length = inputDebug.original_scan_w_length;
+    object.line_original_scan_h_length = inputDebug.original_scan_h_length;
+    object.line_original_process_width = inputDebug.original_process_width;
+    object.line_measure_backimage_ready = inputDebug.backimage_ready;
+    object.line_measure_findobject_ready = inputDebug.findobject_ready;
+    object.line_measure_objfilterset = inputDebug.objfilterset;
+    object.line_measure_filter_borw = inputDebug.filter_borw;
+    object.line_measure_filter_min = inputDebug.filter_min;
+    object.line_measure_filter_max = inputDebug.filter_max;
+    object.line_measure_filter_profile = inputDebug.filter_profile;
+    object.line_measure_filter_explicit = inputDebug.filter_explicit;
+    object.line_measure_effective_filter_borw =
+        inputDebug.effective_filter_borw;
+    object.line_measure_effective_filter_min =
+        inputDebug.effective_filter_min;
+    object.line_measure_effective_filter_max =
+        inputDebug.effective_filter_max;
+    object.line_measure_findobject_called =
+        inputDebug.findobject_measure_called;
+    object.line_measure_findobject_skipped =
+        inputDebug.findobject_measure_skipped;
+    object.line_measure_binary_foreground_pixels =
+        inputDebug.binary_foreground_pixels;
+    object.line_measure_binary_roi_width = inputDebug.binary_roi_width;
+    object.line_measure_binary_roi_height = inputDebug.binary_roi_height;
+    object.line_measure_result_empty_reason =
+        inputDebug.result_empty_reason;
+    object.line_findobject_component_total =
+        inputDebug.findobject_component_total;
+    object.line_findobject_component_accepted =
+        inputDebug.findobject_component_accepted;
+    object.line_findobject_component_rejected_by_min =
+        inputDebug.findobject_component_rejected_by_min;
+    object.line_findobject_component_rejected_by_max =
+        inputDebug.findobject_component_rejected_by_max;
+    object.line_findobject_component_rejected_by_borw =
+        inputDebug.findobject_component_rejected_by_borw;
+    object.line_findobject_area_min_observed =
+        inputDebug.findobject_area_min_observed;
+    object.line_findobject_area_max_observed =
+        inputDebug.findobject_area_max_observed;
+    object.line_findobject_area_mean_observed =
+        inputDebug.findobject_area_mean_observed;
+    object.line_findobject_area_median =
+        inputDebug.findobject_area_median_observed;
+    object.line_findobject_area_p90 =
+        inputDebug.findobject_area_p90_observed;
+    object.line_profile_point_count = profileStats.point_count;
+    object.line_edgeband_count = profileStats.edgeband_count;
+    object.line_chain_length = profileStats.chain_length;
+    object.line_fit_status = line.getfitstatus();
+    object.line_fit_mode = std::to_string(line.getfitmodevalue());
+
     object.has_fit_line = line.hasfitresult();
     if (object.has_fit_line)
     {
@@ -216,8 +315,158 @@ static void FillRuntimeObjectFromFindline(
         object.line_avgdist = static_cast<float>(line.getavgdist());
         object.runtime_state = "geometry_result_available";
     }
+    else if (object.valid_line_points_count <= 0)
+    {
+        object.runtime_state = "runtime_result_unavailable";
+        object.line_result_status = "no_measure_points";
+        object.line_result_reason = object.line_measure_failure_stage.empty()
+            ? "Findline produced zero valid points."
+            : object.line_measure_failure_stage + ": " +
+              object.line_measure_failure_hint;
+    }
+    else
+    {
+        object.runtime_state = "fitline_unavailable";
+        object.line_result_status = line.getfitstatus();
+        object.line_result_reason =
+            "Findline produced measure points, but no fitted line is available.";
+    }
 
     object.display_summary = BuildFindlineGeometrySummary(object);
+}
+
+static void FillRuntimeObjectFromFindellipse(
+    RuntimeObjectView& object,
+    const std::string& name,
+    Findellipse& ellipse)
+{
+    object = RuntimeObjectView{};
+    object.name = name;
+    object.type = "Findellipse";
+    object.exists_in_parser = true;
+    object.last_runtime_status = "runtime_executed";
+    object.runtime_state = "runtime_executed";
+    object.visualizable = true;
+    object.visual_source = "runtime_object";
+    object.stale = false;
+
+    FindellipseDisplaySnapshot snapshot;
+    if (ellipse.getdisplaysnapshot(snapshot))
+    {
+        object.has_ellipse_roi = snapshot.has_roi;
+        object.ellipse_cx = static_cast<float>(snapshot.center_x);
+        object.ellipse_cy = static_cast<float>(snapshot.center_y);
+        object.ellipse_rx = static_cast<float>(snapshot.radius_x);
+        object.ellipse_ry = static_cast<float>(snapshot.radius_y);
+        object.measure_points_count = snapshot.measure_points_count;
+        object.valid_points_count = snapshot.measure_points_count;
+        object.has_measure_points = snapshot.has_measure_points;
+        if (!snapshot.measure_failure_stage.empty())
+        {
+            object.ellipse_result_status = snapshot.measure_failure_stage;
+            object.ellipse_result_reason =
+                snapshot.measure_failure_reason +
+                " params: gap=" + std::to_string(snapshot.gap) +
+                ", linegap=" + std::to_string(snapshot.linegap) +
+                ", threshold=" + std::to_string(snapshot.threshold) +
+                ", method=" + std::to_string(snapshot.method) +
+                ", scan_lines=" + std::to_string(snapshot.scan_line_count) +
+                ", scan_len=" + std::to_string(snapshot.scan_line_length);
+        }
+    }
+
+    const PointsShape& points = ellipse.getresultpoints();
+    CopyPointsToFloatXY(points, object.measure_points_xy);
+    object.measure_points_count =
+        static_cast<int>(object.measure_points_xy.size() / 2);
+    object.valid_points_count = object.measure_points_count;
+    object.has_measure_points = !object.measure_points_xy.empty();
+
+    object.has_fit_ellipse = ellipse.hasfitresult() != 0.0;
+    if (object.has_fit_ellipse)
+    {
+        object.fit_ellipse_cx = static_cast<float>(ellipse.getresultcentx());
+        object.fit_ellipse_cy = static_cast<float>(ellipse.getresultcenty());
+        object.fit_ellipse_rx = static_cast<float>(ellipse.getresultradiusx());
+        object.fit_ellipse_ry = static_cast<float>(ellipse.getresultradiusy());
+        object.fit_ellipse_angle_deg = static_cast<float>(ellipse.getresultangle());
+        object.fit_ellipse_avgdist = static_cast<float>(ellipse.getavgdist());
+        object.runtime_state = "geometry_result_available";
+        object.ellipse_result_status = "fitellipse_available";
+        object.ellipse_result_reason.clear();
+    }
+    else
+    {
+        object.runtime_state = object.has_measure_points
+            ? "fitellipse_unavailable"
+            : "runtime_result_unavailable";
+        if (object.ellipse_result_status.empty())
+        {
+            object.ellipse_result_status = object.has_measure_points
+                ? "fitellipse_unavailable"
+                : "no_measure_points";
+        }
+        if (object.ellipse_result_reason.empty())
+        {
+            object.ellipse_result_reason = object.has_measure_points
+                ? "Findellipse produced measure points, but fitellipse result is unavailable."
+                : "Findellipse produced zero measure points.";
+        }
+    }
+
+    object.display_summary = BuildGeometrySummary(object);
+}
+
+static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
+{
+    if (object.type == "Findline")
+    {
+        if (object.has_fit_line)
+        {
+            return "Findline " + object.name +
+                " result available: valid_points=" +
+                std::to_string(object.valid_line_points_count) +
+                ", avgdist=" + std::to_string(object.line_avgdist);
+        }
+
+        std::string reason = "Findline " + object.name +
+            " has no fitted conclusion";
+        reason += ", valid_points=" +
+            std::to_string(object.valid_line_points_count);
+        if (!object.line_measure_failure_stage.empty())
+            reason += ", failure_stage=" + object.line_measure_failure_stage;
+        if (!object.line_measure_failure_hint.empty())
+            reason += ", detail=" + object.line_measure_failure_hint;
+        if (!object.line_result_reason.empty())
+            reason += ", result_reason=" + object.line_result_reason;
+        return reason;
+    }
+
+    if (object.type == "Findcircle")
+    {
+        if (object.has_fit_result)
+            return "Findcircle " + object.name +
+                " result available: valid_points=" +
+                std::to_string(object.valid_points_count) +
+                ", radius=" + std::to_string(object.fit_radius) +
+                ", avgdist=" + std::to_string(object.fit_avgdist);
+
+        return "Findcircle " + object.name +
+            " has no fitted conclusion, valid_points=" +
+            std::to_string(object.valid_points_count);
+    }
+
+    if (object.type == "Findellipse")
+    {
+        return "Findellipse " + object.name +
+            " roi=" + (object.has_ellipse_roi ? "available" : "missing") +
+            ", measure_points=" + std::to_string(object.valid_points_count) +
+            ", fit_status=" + object.ellipse_result_status +
+            ", reason=" + object.ellipse_result_reason;
+    }
+
+    return object.type + " " + object.name +
+        " state=" + object.runtime_state;
 }
 
 static void SeedDefaultManualGlobals(
@@ -231,8 +480,8 @@ static void SeedDefaultManualGlobals(
     set("global_threshold", 20);
     set("global_method", 0);
     set("global_linegap", 6);
-    set("global_wgap", 8);
-    set("global_hgap", 32);
+    set("global_wgap", 32);
+    set("global_hgap", 8);
     set("global_tool_half_width", 32);
 
     const bool isCircleScript =
@@ -241,6 +490,9 @@ static void SeedDefaultManualGlobals(
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
         scriptPath.find("findline") != std::string::npos;
+    const bool isEllipseScript =
+        scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos;
     const bool isVerticalLineScript =
         scriptPath.find("find_line_vertical") != std::string::npos ||
         scriptPath.find("findline_vertical") != std::string::npos;
@@ -271,6 +523,26 @@ static void SeedDefaultManualGlobals(
         set("global_gap", 5);
         set("global_linegap", 3);
     }
+    else if (isEllipseScript)
+    {
+        set("global_ellipse_x0", 600);
+        set("global_ellipse_y0", 360);
+        set("global_ellipse_x1", 930);
+        set("global_ellipse_y1", 580);
+        set("global_gap", 5);
+        set("global_linegap", 3);
+        set("global_threshold", 8);
+        set("global_method", 1);
+    }
+    else if (isLineScript)
+    {
+        // Stage 2.5 baseline for the current dot-grid test image.  The GUI
+        // default must match the verified Run/Headless call sequence; method=0
+        // and SetWHgap(8,32) reproduce the "no output points" path.
+        set("global_method", 2);
+        set("global_wgap", 32);
+        set("global_hgap", 8);
+    }
 
     // The Script Editor and Gauge Workbench must start from the same value
     // snapshot.  Previously only runtime_int_vars were seeded, leaving the
@@ -295,6 +567,16 @@ static void SeedDefaultManualGlobals(
             static_cast<double>(gauge.circle_px - gauge.circle_cx),
             static_cast<double>(gauge.circle_py - gauge.circle_cy))));
     }
+    else if (isEllipseScript)
+    {
+        gauge.tool = "Findellipse";
+        gauge.has_ellipse_gauge = true;
+        gauge.ellipse_x0 = context.runtime_int_vars["global_ellipse_x0"];
+        gauge.ellipse_y0 = context.runtime_int_vars["global_ellipse_y0"];
+        gauge.ellipse_x1 = context.runtime_int_vars["global_ellipse_x1"];
+        gauge.ellipse_y1 = context.runtime_int_vars["global_ellipse_y1"];
+        gauge.gap = context.runtime_int_vars["global_gap"];
+    }
     else if (isLineScript)
     {
         gauge.tool = "Findline";
@@ -309,7 +591,8 @@ static void SeedDefaultManualGlobals(
         gauge.hgap = context.runtime_int_vars["global_hgap"];
     }
 
-    if (gauge.has_circle_gauge || gauge.has_line_gauge)
+    if (gauge.has_circle_gauge || gauge.has_line_gauge ||
+        gauge.has_ellipse_gauge)
         context.current_gauge = gauge;
 }
 }
@@ -388,16 +671,20 @@ bool ViewController::LoadBoundStateToManualConsole(
 void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     const std::string& runtimeStatus)
 {
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:begin");
     m_manualTest.runtime_objects.clear();
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("Findcircle"))
     {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:query:" + name);
         Findcircle* circle = static_cast<Findcircle*>(
             m_parserDebugBridge.QueryClassObject("Findcircle", name));
         if (circle == nullptr)
             continue;
 
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:fill:" + name);
         RuntimeObjectView object;
         FillRuntimeObjectFromFindcircle(object, name, *circle);
         object.last_method = lastMethod;
@@ -405,14 +692,17 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("Findline"))
     {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:query:" + name);
         Findline* line = static_cast<Findline*>(
             m_parserDebugBridge.QueryClassObject("Findline", name));
         if (line == nullptr)
             continue;
 
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:fill:" + name);
         RuntimeObjectView object;
         FillRuntimeObjectFromFindline(object, name, *line);
         object.last_method = lastMethod;
@@ -420,9 +710,29 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("Findellipse"))
+    {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:query:" + name);
+        Findellipse* ellipse = static_cast<Findellipse*>(
+            m_parserDebugBridge.QueryClassObject("Findellipse", name));
+        if (ellipse == nullptr)
+            continue;
+
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:fill:" + name);
+        RuntimeObjectView object;
+        FillRuntimeObjectFromFindellipse(object, name, *ellipse);
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindSegmentation:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindSegmentation"))
     {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindSegmentation:query:" + name);
         FindSegmentation* seg = static_cast<FindSegmentation*>(
             m_parserDebugBridge.QueryClassObject("FindSegmentation", name));
         if (seg == nullptr)
@@ -468,6 +778,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:summary");
     for (RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
         if (object.stale)
@@ -488,8 +799,10 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         }
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:shape_sync");
     SyncRuntimeObjectsToShapeElements();
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:result_ref");
     m_manualTest.current_result_ref = ResultRefView();
     m_scriptResult.result_ref.clear();
     m_scriptResult.overlay_ref.clear();
@@ -525,6 +838,21 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.line_points_count = object.line_measure_points_count;
             m_manualTest.current_result_ref.valid_line_points_count = object.valid_points_count;
         }
+        else if (object.type == "Findellipse")
+        {
+            m_manualTest.current_result_ref.name = "global_ellipse_ref";
+            m_manualTest.current_result_ref.result_type = "FindellipseResult";
+            m_manualTest.current_result_ref.status = object.ellipse_result_status.empty()
+                ? (object.has_fit_ellipse ? "fitellipse_available" : "no_measure_points")
+                : object.ellipse_result_status;
+            m_manualTest.current_result_ref.fit_cx = object.fit_ellipse_cx;
+            m_manualTest.current_result_ref.fit_cy = object.fit_ellipse_cy;
+            m_manualTest.current_result_ref.fit_radius = object.fit_ellipse_rx;
+            m_manualTest.current_result_ref.avgdist = object.fit_ellipse_avgdist;
+            m_manualTest.current_result_ref.points_count = object.measure_points_count;
+            m_manualTest.current_result_ref.valid_points_count = object.valid_points_count;
+            m_manualTest.current_result_ref.reason = object.ellipse_result_reason;
+        }
         else if (object.type == "FindSegmentation")
         {
             m_manualTest.current_result_ref.name = "global_segmentation_ref";
@@ -543,6 +871,90 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_scriptResult.overlay_ref = "shape_owner:" + object.type + ":" + object.name;
         break;
     }
+
+    if (runtimeStatus == "runtime_executed")
+    {
+        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        {
+            if (object.stale)
+                continue;
+
+            if (object.type == "Findline" && !object.has_fit_line)
+            {
+                m_manualTest.debug_status = "runtime_executed_without_result";
+                m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
+                m_scriptResult.status = "PENDING_REVIEW";
+                m_scriptResult.reason = m_manualTest.debug_reason;
+                if (m_manualTest.current_result_ref.source_object.empty())
+                {
+                    m_manualTest.current_result_ref.source_object = object.name;
+                    m_manualTest.current_result_ref.name = "global_line_ref";
+                    m_manualTest.current_result_ref.result_type = "FindlineResult";
+                    m_manualTest.current_result_ref.value =
+                        "runtime_object:" + object.name;
+                    m_manualTest.current_result_ref.status =
+                        "runtime_result_unavailable";
+                    m_manualTest.current_result_ref.line_points_count =
+                        object.line_measure_points_count;
+                    m_manualTest.current_result_ref.valid_line_points_count =
+                        object.valid_points_count;
+                }
+                break;
+            }
+
+            if (object.type == "Findcircle" && !object.has_fit_result)
+            {
+                m_manualTest.debug_status = "runtime_executed_without_result";
+                m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
+                m_scriptResult.status = "PENDING_REVIEW";
+                m_scriptResult.reason = m_manualTest.debug_reason;
+                if (m_manualTest.current_result_ref.source_object.empty())
+                {
+                    m_manualTest.current_result_ref.source_object = object.name;
+                    m_manualTest.current_result_ref.name = "global_circle_ref";
+                    m_manualTest.current_result_ref.result_type =
+                        "FindcircleResult";
+                    m_manualTest.current_result_ref.value =
+                        "runtime_object:" + object.name;
+                    m_manualTest.current_result_ref.status =
+                        "runtime_result_unavailable";
+                    m_manualTest.current_result_ref.points_count =
+                        object.measure_points_count;
+                    m_manualTest.current_result_ref.valid_points_count =
+                        object.valid_points_count;
+                }
+                break;
+            }
+
+            if (object.type == "Findellipse" && !object.has_fit_ellipse)
+            {
+                m_manualTest.debug_status = "runtime_executed_without_fitellipse";
+                m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
+                m_scriptResult.status = "PENDING_REVIEW";
+                m_scriptResult.reason = m_manualTest.debug_reason;
+                if (m_manualTest.current_result_ref.source_object.empty())
+                {
+                    m_manualTest.current_result_ref.source_object = object.name;
+                    m_manualTest.current_result_ref.name = "global_ellipse_ref";
+                    m_manualTest.current_result_ref.result_type =
+                        "FindellipseResult";
+                    m_manualTest.current_result_ref.value =
+                        "runtime_object:" + object.name;
+                    m_manualTest.current_result_ref.status =
+                        object.ellipse_result_status;
+                    m_manualTest.current_result_ref.points_count =
+                        object.measure_points_count;
+                    m_manualTest.current_result_ref.valid_points_count =
+                        object.valid_points_count;
+                    m_manualTest.current_result_ref.reason =
+                        object.ellipse_result_reason;
+                }
+                break;
+            }
+        }
+    }
+
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:end");
 }
 
 void ViewController::drawManualStateTestConsole()

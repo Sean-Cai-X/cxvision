@@ -1,0 +1,47 @@
+CxScript Debug Snapshot
+=======================
+time: 2026-07-20T13:13:38
+flow_block: cximage_find_circle_explore.N0
+script_path: 
+run_state: idle
+runtime_current_status: PENDING
+debug_status: PENDING
+debug_reason: not started
+cxparser_ext_debug_ok: false
+cxparser_ext_debug_status: 
+cxparser_ext_debug_reason: 
+current_line_index: 0
+execution_cursor: END
+last_executed_line_no: 0
+
+CxParserExt Debug Layer
+------------------------
+line_views: 0
+statement_views: 0
+object_assignments: 0
+
+Current Result Ref
+------------------
+name: 
+value: 
+source_object: 
+result_type: 
+status: uninitialized
+reason: 
+fit: (0, 0, r=0)
+avgdist: 0
+points_count: 0
+valid_points_count: 0
+
+Geometry Summary
+----------------
+
+
+Image Overlay Summary
+---------------------
+
+
+Runtime Objects
+---------------
+Line Trace
+----------

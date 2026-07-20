@@ -72,6 +72,23 @@ struct RuntimeObjectView
     std::string visual_source = "stale_runtime";
     bool stale = true;
 
+    // Findellipse ROI / measure status.  Current Findellipse runtime exposes
+    // ROI and measurement points; fitted ellipse result is a later binding.
+    bool has_ellipse_roi = false;
+    float ellipse_cx = 0.0f;
+    float ellipse_cy = 0.0f;
+    float ellipse_rx = 0.0f;
+    float ellipse_ry = 0.0f;
+    bool has_fit_ellipse = false;
+    float fit_ellipse_cx = 0.0f;
+    float fit_ellipse_cy = 0.0f;
+    float fit_ellipse_rx = 0.0f;
+    float fit_ellipse_ry = 0.0f;
+    float fit_ellipse_angle_deg = 0.0f;
+    float fit_ellipse_avgdist = 0.0f;
+    std::string ellipse_result_status;
+    std::string ellipse_result_reason;
+
     // setcircle(...) 参数圆
     bool has_circle = false;
     float circle_cx = 0.0f;
@@ -484,6 +501,12 @@ struct ManualGaugeState
   int circle_px = 0;
   int circle_py = 0;
   int gap = 5;
+
+  bool has_ellipse_gauge = false;
+  int ellipse_x0 = 0;
+  int ellipse_y0 = 0;
+  int ellipse_x1 = 0;
+  int ellipse_y1 = 0;
 
   int radius = 0;
   int inner_radius = 0;

@@ -241,6 +241,10 @@ public:
 
     void  PUSH_SCANOR(int ix,int iy)
     {   
+        if (m_objlistscanorA == nullptr)
+            return;
+        if (ncurscan + 1 >= OBJSCANNNUM)
+            return;
         ncurscan++; 
         m_objlistscanorA[ncurscan].SetX(ix);
         m_objlistscanorA[ncurscan].SetY(iy);
@@ -253,6 +257,10 @@ public:
     }
     void PUSH_SEARCHSEEK(int ix,int iy)
     {
+        if (m_objlistcollectorA == nullptr)
+            return;
+        if (ncursearchseek + 1 >= OBJCOLLECTIONNUM)
+            return;
         ncursearchseek++; 
         m_objlistcollectorA[ncursearchseek].SetX(ix);
         m_objlistcollectorA[ncursearchseek].SetY(iy);
@@ -265,6 +273,8 @@ public:
     }
     void MAPCLEAR() 
     {
+        if (g_pmapimage == nullptr)
+            return;
         g_pmapimage->setroi(
             static_cast<int>(rect().TopLeft().X()),
             static_cast<int>(rect().TopLeft().Y()),
@@ -273,6 +283,13 @@ public:
         g_pmapimage->colorizeROI(0,0,0);
     }
     cv::Vec4b MAP(int ix, int iy) {
+        if (g_pmapimage == nullptr ||
+            ix < 0 || iy < 0 ||
+            ix >= g_pmapimage->getWidth() ||
+            iy >= g_pmapimage->getHeight())
+        {
+            return cv::Vec4b(0, 0, 0, 0);
+        }
         return g_pmapimage->pixelvalue(ix, iy);
     }
 
@@ -291,6 +308,13 @@ public:
 
     void SetMAP(int ix, int iy, cv::Vec4b ivalue)
     {
+        if (g_pmapimage == nullptr ||
+            ix < 0 || iy < 0 ||
+            ix >= g_pmapimage->getWidth() ||
+            iy >= g_pmapimage->getHeight())
+        {
+            return;
+        }
         g_pmapimage->setpixelvalue(ix, iy, ivalue);
     }
     void SetMAP_pixel(int ix, int iy, int  ivalue)
