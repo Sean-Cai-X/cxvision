@@ -361,6 +361,25 @@ static void FillRuntimeObjectFromFindellipse(
         object.measure_points_count = snapshot.measure_points_count;
         object.valid_points_count = snapshot.measure_points_count;
         object.has_measure_points = snapshot.has_measure_points;
+
+        object.ellipse_scan_line_count = snapshot.scan_line_count;
+        object.ellipse_scan_line_length = snapshot.scan_line_length;
+        object.ellipse_scan_lines_cross_outside_ellipse_count = snapshot.scan_lines_cross_outside_ellipse_count;
+        object.ellipse_accepted_points_outside_ellipse_count = snapshot.accepted_points_outside_ellipse_count;
+        object.ellipse_accepted_point_norm_min = snapshot.accepted_point_norm_min;
+        object.ellipse_accepted_point_norm_avg = snapshot.accepted_point_norm_avg;
+        object.ellipse_accepted_point_norm_max = snapshot.accepted_point_norm_max;
+        object.ellipse_rejected_boundary_band_candidate_count =
+            snapshot.rejected_boundary_band_candidate_count;
+        object.ellipse_rejected_boundary_band_norm_min =
+            snapshot.rejected_boundary_band_norm_min;
+        object.ellipse_rejected_boundary_band_norm_avg =
+            snapshot.rejected_boundary_band_norm_avg;
+        object.ellipse_rejected_boundary_band_norm_max =
+            snapshot.rejected_boundary_band_norm_max;
+        object.ellipse_scan_geometry_policy = snapshot.scan_geometry_policy;
+        object.ellipse_candidate_policy = snapshot.candidate_policy;
+
         if (!snapshot.measure_failure_stage.empty())
         {
             object.ellipse_result_status = snapshot.measure_failure_stage;
@@ -371,7 +390,17 @@ static void FillRuntimeObjectFromFindellipse(
                 ", threshold=" + std::to_string(snapshot.threshold) +
                 ", method=" + std::to_string(snapshot.method) +
                 ", scan_lines=" + std::to_string(snapshot.scan_line_count) +
-                ", scan_len=" + std::to_string(snapshot.scan_line_length);
+                ", scan_len=" + std::to_string(snapshot.scan_line_length) +
+                ", accepted_outside=" + std::to_string(snapshot.accepted_points_outside_ellipse_count) +
+                ", accepted_norm=" + std::to_string(snapshot.accepted_point_norm_min) + "/" +
+                std::to_string(snapshot.accepted_point_norm_avg) + "/" +
+                std::to_string(snapshot.accepted_point_norm_max) +
+                ", rejected_boundary_band=" +
+                std::to_string(snapshot.rejected_boundary_band_candidate_count) +
+                ", rejected_norm=" +
+                std::to_string(snapshot.rejected_boundary_band_norm_min) + "/" +
+                std::to_string(snapshot.rejected_boundary_band_norm_avg) + "/" +
+                std::to_string(snapshot.rejected_boundary_band_norm_max);
         }
     }
 
@@ -462,14 +491,29 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
             " roi=" + (object.has_ellipse_roi ? "available" : "missing") +
             ", measure_points=" + std::to_string(object.valid_points_count) +
             ", fit_status=" + object.ellipse_result_status +
-            ", reason=" + object.ellipse_result_reason;
+            ", reason=" + object.ellipse_result_reason +
+            ", scan_lines=" + std::to_string(object.ellipse_scan_line_count) +
+            ", scan_len=" + std::to_string(object.ellipse_scan_line_length) +
+            ", accepted_outside=" + std::to_string(object.ellipse_accepted_points_outside_ellipse_count) +
+            ", accepted_norm=" + std::to_string(object.ellipse_accepted_point_norm_min) + "/" +
+            std::to_string(object.ellipse_accepted_point_norm_avg) + "/" +
+            std::to_string(object.ellipse_accepted_point_norm_max) +
+            ", rejected_boundary_band=" +
+            std::to_string(object.ellipse_rejected_boundary_band_candidate_count) +
+            ", rejected_norm=" + std::to_string(object.ellipse_rejected_boundary_band_norm_min) + "/" +
+            std::to_string(object.ellipse_rejected_boundary_band_norm_avg) + "/" +
+            std::to_string(object.ellipse_rejected_boundary_band_norm_max) +
+            ", scan_policy=" + object.ellipse_scan_geometry_policy +
+            ", candidate_policy=" + object.ellipse_candidate_policy;
     }
 
     return object.type + " " + object.name +
         " state=" + object.runtime_state;
 }
 
-static void SeedDefaultManualGlobals(
+} // namespace
+
+void SeedDefaultManualGlobals(
     ManualTestContext& context,
     const std::string& scriptPath)
 {
@@ -594,7 +638,6 @@ static void SeedDefaultManualGlobals(
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
         gauge.has_ellipse_gauge)
         context.current_gauge = gauge;
-}
 }
 
 bool ViewController::QueryParserObjectExists(const std::string& type, const std::string& name)
@@ -799,8 +842,8 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         }
     }
 
-    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:shape_sync");
-    SyncRuntimeObjectsToShapeElements();
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:shape_sync_request");
+    RequestRuntimeShapeSync("RefreshRuntimeObjectTable");
 
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:result_ref");
     m_manualTest.current_result_ref = ResultRefView();

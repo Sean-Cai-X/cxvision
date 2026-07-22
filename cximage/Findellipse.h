@@ -35,6 +35,32 @@ struct FindellipseDisplaySnapshot
     int scan_line_length = 0;
     std::string measure_failure_stage;
     std::string measure_failure_reason;
+
+    int scan_candidate_lines = 0;
+    int scan_total_candidates = 0;
+    int scan_accepted_points_before_gate = 0;
+    double accepted_min_boundary_ratio = 0.0;
+    double accepted_max_boundary_ratio = 0.0;
+    double accepted_avg_boundary_ratio = 0.0;
+    std::string candidate_policy;
+
+    int scan_lines_outside_roi_count = 0;
+    int scan_lines_cross_outside_ellipse_count = 0;
+    double scan_endpoint_norm_min = 0.0;
+    double scan_endpoint_norm_avg = 0.0;
+    double scan_endpoint_norm_max = 0.0;
+
+    int accepted_points_outside_ellipse_count = 0;
+    double accepted_point_norm_min = 0.0;
+    double accepted_point_norm_avg = 0.0;
+    double accepted_point_norm_max = 0.0;
+
+    int rejected_boundary_band_candidate_count = 0;
+    double rejected_boundary_band_norm_min = 0.0;
+    double rejected_boundary_band_norm_avg = 0.0;
+    double rejected_boundary_band_norm_max = 0.0;
+
+    std::string scan_geometry_policy;
 };
 
 class Findellipse :public Shape
@@ -177,6 +203,31 @@ private:
     double m_fit_avgdist = 0.0;
     std::string m_measure_failure_stage;
     std::string m_measure_failure_reason;
+
+    int m_scan_candidate_lines = 0;
+    int m_scan_total_candidates = 0;
+    int m_scan_accepted_points_before_gate = 0;
+    double m_accepted_boundary_ratio_sum = 0.0;
+    double m_accepted_boundary_ratio_min = 999.0;
+    double m_accepted_boundary_ratio_max = -999.0;
+    std::string m_candidate_policy;
+
+    int m_scan_lines_outside_roi_count = 0;
+    int m_scan_lines_cross_outside_ellipse_count = 0;
+    double m_scan_endpoint_norm_min = 999.0;
+    double m_scan_endpoint_norm_max = -999.0;
+
+    int m_accepted_points_outside_ellipse_count = 0;
+    double m_accepted_point_norm_sum = 0.0;
+    double m_accepted_point_norm_count = 0;
+    double m_accepted_point_norm_min = 999.0;
+    double m_accepted_point_norm_max = -999.0;
+
+    int m_rejected_boundary_band_candidate_count = 0;
+    double m_rejected_boundary_band_norm_sum = 0.0;
+    double m_rejected_boundary_band_norm_min = 999.0;
+    double m_rejected_boundary_band_norm_max = -999.0;
+    std::string m_scan_geometry_policy;
 
 };
 

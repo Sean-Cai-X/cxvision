@@ -39,6 +39,28 @@ struct CxScriptExecutionCapture
     double ellipse_radius_x = 0.0;
     double ellipse_radius_y = 0.0;
     double ellipse_angle_deg = 0.0;
+    int ellipse_scan_candidate_lines = 0;
+    int ellipse_scan_total_candidates = 0;
+    int ellipse_scan_accepted_points_before_gate = 0;
+    double ellipse_accepted_min_boundary_ratio = 0.0;
+    double ellipse_accepted_max_boundary_ratio = 0.0;
+    double ellipse_accepted_avg_boundary_ratio = 0.0;
+    std::string ellipse_candidate_policy;
+
+    int ellipse_scan_lines_cross_outside_ellipse_count = 0;
+    double ellipse_scan_endpoint_norm_min = 0.0;
+    double ellipse_scan_endpoint_norm_avg = 0.0;
+    double ellipse_scan_endpoint_norm_max = 0.0;
+    int ellipse_accepted_points_outside_ellipse_count = 0;
+    double ellipse_accepted_point_norm_min = 0.0;
+    double ellipse_accepted_point_norm_avg = 0.0;
+    double ellipse_accepted_point_norm_max = 0.0;
+    int ellipse_rejected_boundary_band_candidate_count = 0;
+    double ellipse_rejected_boundary_band_norm_min = 0.0;
+    double ellipse_rejected_boundary_band_norm_avg = 0.0;
+    double ellipse_rejected_boundary_band_norm_max = 0.0;
+    std::string ellipse_scan_geometry_policy;
+
     double avgdist = 0.0;
 
     int result_rect_count = 0;
@@ -136,33 +158,45 @@ struct CxScriptExecutionCapture
     double smoke_findcircle_outer_scan_radius = 0.0;
 };
 
+struct CxScriptResultPackage
+{
+    std::map<std::string, double> runtime_globals_before;
+    std::map<std::string, double> runtime_globals_after;
+
+    std::vector<CxShapeElementSnapshot> shapes;
+
+    std::map<std::string, double> metrics;
+    std::map<std::string, std::string> facts;
+
+    std::string tool;
+    std::string object_name;
+    std::string status;
+    std::string failure_stage;
+    std::string reason;
+};
+
 struct CxScriptHeadlessOptions
 {
     bool enabled = false;
 
+    std::string case_id;
+    std::string script_path;
     std::string image_path;
     std::string template_image_path;
-    std::string script_path;
     std::string output_dir;
 
-    std::string case_name;
-    std::string snapshot_path;
-    std::string overlay_path;
-    std::string summary_path;
-    std::string runtime_log_path;
+    std::string globals_path;
+    std::string manifest_path;
+    std::string image_id;
+    std::string target_id;
 
-    bool save_overlay = true;
-    int max_steps = 10000;
     int timeout_sec = 30;
+    int max_steps = 10000;
 
-    int max_elapsed_ms = 5000;
-    int max_scan_lines = 4096;
-    int max_samples = 200000;
+    bool contract_context_enabled = false;
+    bool runtime_capture_smoke = false;
 
-    std::string stage25_image_id;
-    std::string stage25_level;
-    std::string stage25_target_id;
-    std::string stage25_tool;
+    std::map<std::string, double> cli_global_overrides;
 
     int roi_x0 = 0;
     int roi_y0 = 0;
@@ -207,9 +241,11 @@ struct CxScriptHeadlessOptions
     int expected_rect_w = 0;
     int expected_rect_h = 0;
 
-    bool contract_context_enabled = false;
     bool enable_evidence_analysis = true;
-    bool runtime_capture_smoke = false;
+    int max_elapsed_ms = 5000;
+    int max_scan_lines = 4096;
+    int max_samples = 200000;
+
     int contract_headless_ok = 0;
     int contract_pass_initial = 0;
     int contract_algorithm_executed = 0;
@@ -241,30 +277,45 @@ struct CxScriptHeadlessOptions
     double double_wgap = 0.0;
     double double_hgap = 0.0;
     double double_strategy_id = 0.0;
+
+    std::string case_name;
+    std::string snapshot_path;
+    std::string overlay_path;
+    std::string summary_path;
+    std::string runtime_log_path;
+    bool save_overlay = true;
+
+    std::string stage25_image_id;
+    std::string stage25_level;
+    std::string stage25_target_id;
+    std::string stage25_tool;
 };
 
 struct CxScriptHeadlessResult
 {
-    bool ok = false;
     bool launched = false;
     bool executed = false;
     bool runtime_ok = false;
-    bool timed_out = false;
     bool assets_complete = false;
-    bool support_available = false;
 
     int exit_code = 0;
 
     std::string failure_stage;
     std::string reason;
 
+    std::string output_dir;
     std::string snapshot_path;
-    std::string overlay_path;
     std::string summary_path;
     std::string result_overlay_path;
     std::string evidence_overlay_path;
     std::string tool_display_path;
     std::string runtime_log_path;
+
+    bool ok = false;
+    bool timed_out = false;
+    bool support_available = false;
+
+    std::string overlay_path;
 
     std::string run_state;
     std::string debug_status;

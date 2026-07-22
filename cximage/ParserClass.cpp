@@ -16,6 +16,8 @@
 #include "CxScriptDirectBindings.h"
 #include "CircleRingGauge.h"
 #include "FindSegmentation.h"
+#include "CxCrashLogHandler.h"
+#include "CxUnifiedLog.h"
 
 //#include "gridobject.h"
 //#include "imageroi.h"
@@ -1592,12 +1594,34 @@ namespace mu
         {
             for (const auto& statement : m_collectedScriptStatements)
             {
+                std::string statement_preview = statement;
+                constexpr std::size_t kMaxStatementPreview = 240;
+                if (statement_preview.size() > kMaxStatementPreview)
+                    statement_preview.resize(kMaxStatementPreview);
+                SetCxCrashBreadcrumb(
+                    "CxParserRuntime::RunCollectedScript:statement:" +
+                    statement_preview);
+                CXLOG_INFO(
+                    "CxParserRuntime",
+                    "cxscript_statement_begin",
+                    "running",
+                    statement_preview);
                 if (!Compile(statement.c_str()))
                 {
                     reason = "RunCollectedScript failed near statement: " + statement;
+                    CXLOG_ERROR(
+                        "CxParserRuntime",
+                        "cxscript_statement_end",
+                        "failed",
+                        statement_preview);
                     m_collectedScriptStatements.clear();
                     return false;
                 }
+                CXLOG_INFO(
+                    "CxParserRuntime",
+                    "cxscript_statement_end",
+                    "finished",
+                    statement_preview);
             }
             m_collectedScriptStatements.clear();
             reason.clear();

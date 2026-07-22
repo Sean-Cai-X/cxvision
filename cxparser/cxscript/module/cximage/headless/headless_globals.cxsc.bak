@@ -52,6 +52,7 @@ int global_line_ref;
 int global_circle_ref;
 int global_contract_pass;
 int global_headless_ok;
+int global_algorithm_executed;
 int global_budget_exceeded;
 int global_valid_points_count;
 int global_has_fit_line;

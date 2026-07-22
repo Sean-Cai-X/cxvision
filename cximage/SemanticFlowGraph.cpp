@@ -293,6 +293,69 @@ bool SemanticFlowGraph::BindScriptToNode(int node_index,
   return true;
 }
 
+bool SemanticFlowGraph::BindEvidenceToNode(
+    int node_index,
+    const SemanticEvidenceBinding& binding,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (node_index < 0 ||
+        node_index >= static_cast<int>(m_flow.nodes.size()))
+    {
+        reason = "invalid semantic node index";
+        return false;
+    }
+
+    if (!binding.valid)
+    {
+        reason = "invalid evidence binding";
+        return false;
+    }
+
+    if (binding.script_path.empty())
+    {
+        reason = "evidence binding has empty script_path";
+        return false;
+    }
+
+    SemanticNode& node = m_flow.nodes[static_cast<std::size_t>(node_index)];
+
+    node.evidence_binding = binding;
+
+    node.script_path = binding.script_path;
+
+    if (!binding.script_id.empty())
+        node.title = binding.script_id;
+
+    if (!binding.tool.empty())
+        node.module = binding.tool;
+    else
+        node.module = "cximage";
+
+    node.status = "ready";
+    node.reason =
+        "bound from evidence: image=" + binding.image_id +
+        " target=" + binding.target_id +
+        " param=" + binding.parameter_summary;
+
+    m_lastLog = node.reason;
+    reason = node.reason;
+    return true;
+}
+
+const SemanticEvidenceBinding* SemanticFlowGraph::SelectedNodeEvidenceBinding() const
+{
+    const SemanticNode* node = SelectedNode();
+    if (node == nullptr)
+        return nullptr;
+
+    if (!node->evidence_binding.valid)
+        return nullptr;
+
+    return &node->evidence_binding;
+}
+
 void SemanticFlowGraph::DrawGraphCanvas(SemanticFlowAction& action)
 {
   const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
@@ -365,6 +428,12 @@ void SemanticFlowGraph::DrawGraphCanvas(SemanticFlowAction& action)
         action.node_index = static_cast<int>(i);
         action.node_id = node.id;
         action.script_path = node.script_path;
+
+        if (node.evidence_binding.valid)
+        {
+            action.has_evidence_binding = true;
+            action.evidence_binding = node.evidence_binding;
+        }
       }
     }
     ImGui::PopID();
@@ -374,8 +443,17 @@ void SemanticFlowGraph::DrawGraphCanvas(SemanticFlowAction& action)
                                                                     : IM_COL32(205, 205, 205, 255),
                   5.0f, 0, m_flow.selected_node_index == static_cast<int>(i) ? 3.0f : 1.0f);
     draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 7.0f), IM_COL32_WHITE, (node.id + " [" + node.stage + "]").c_str());
-    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 29.0f), IM_COL32_WHITE, node.module.c_str());
-    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 50.0f), IM_COL32_WHITE, node.title.c_str());
+
+    std::string module = node.module;
+    if (node.evidence_binding.valid && !node.evidence_binding.tool.empty())
+        module = node.evidence_binding.tool;
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 29.0f), IM_COL32_WHITE, module.c_str());
+
+    std::string title = node.title;
+    if (node.evidence_binding.valid && !node.evidence_binding.script_id.empty())
+        title = node.evidence_binding.script_id;
+    draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 50.0f), IM_COL32_WHITE, title.c_str());
+
     draw->AddText(ImVec2(pos.x + 8.0f, pos.y + 72.0f), IM_COL32_WHITE, node.status.c_str());
   }
   ImGui::SetCursorScreenPos(ImVec2(canvasPos.x, canvasPos.y + canvasSize.y));
@@ -395,13 +473,14 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
               node->stage.c_str(),
               node->status.c_str());
 
-  if (ImGui::Button("Bind Catalog Script To Node"))
+  if (ImGui::Button("Bind Selected Evidence To Node"))
   {
     action.type = SemanticFlowActionType::BindCatalogScriptToSelectedNode;
     action.node_index = m_flow.selected_node_index;
     action.node_id = node->id;
-    m_lastLog = "bind catalog script requested";
+    m_lastLog = "bind selected evidence requested";
   }
+  ImGui::TextDisabled("Uses selected Evidence row; falls back to legacy catalog if none selected.");
   ImGui::SameLine();
   if (ImGui::Button("Load Node To Manual Console"))
   {
@@ -418,6 +497,12 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
       action.node_index = m_flow.selected_node_index;
       action.node_id = node->id;
       action.script_path = node->script_path;
+
+      if (node->evidence_binding.valid)
+      {
+          action.has_evidence_binding = true;
+          action.evidence_binding = node->evidence_binding;
+      }
     }
   }
   ImGui::SameLine();
@@ -436,6 +521,12 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
       action.node_index = m_flow.selected_node_index;
       action.node_id = node->id;
       action.script_path = node->script_path;
+
+      if (node->evidence_binding.valid)
+      {
+          action.has_evidence_binding = true;
+          action.evidence_binding = node->evidence_binding;
+      }
     }
   }
   ImGui::TextDisabled("PASS requires parser runtime result");
@@ -452,6 +543,46 @@ void SemanticFlowGraph::DrawNodeDetail(SemanticFlowAction& action)
     node->evidence_ref.clear();
     node->issue_entry_ref.clear();
   }
+
+    if (node->evidence_binding.valid)
+    {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Bound Evidence:");
+        ImGui::Text("source: %s",
+                    node->evidence_binding.source.empty()
+                        ? "-"
+                        : node->evidence_binding.source.c_str());
+        ImGui::Text("case: %s",
+                    node->evidence_binding.case_id.empty()
+                        ? "-"
+                        : node->evidence_binding.case_id.c_str());
+        ImGui::Text("script: %s",
+                    node->evidence_binding.script_id.empty()
+                        ? "-"
+                        : node->evidence_binding.script_id.c_str());
+        ImGui::Text("image: %s",
+                    node->evidence_binding.image_id.empty()
+                        ? "-"
+                        : node->evidence_binding.image_id.c_str());
+        ImGui::Text("target: %s",
+                    node->evidence_binding.target_id.empty()
+                        ? "-"
+                        : node->evidence_binding.target_id.c_str());
+        ImGui::Text("tool: %s",
+                    node->evidence_binding.tool.empty()
+                        ? "-"
+                        : node->evidence_binding.tool.c_str());
+        ImGui::TextWrapped("param: %s",
+                    node->evidence_binding.parameter_summary.empty()
+                        ? "-"
+                        : node->evidence_binding.parameter_summary.c_str());
+        ImGui::TextDisabled("Load/Run will restore evidence script, image, target and params.");
+    }
+    else
+    {
+        ImGui::Separator();
+        ImGui::TextDisabled("Bound Evidence: none");
+    }
 }
 
 SemanticFlowAction SemanticFlowGraph::Draw()

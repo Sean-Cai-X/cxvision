@@ -89,6 +89,20 @@ struct RuntimeObjectView
     std::string ellipse_result_status;
     std::string ellipse_result_reason;
 
+    int ellipse_scan_line_count = 0;
+    int ellipse_scan_line_length = 0;
+    int ellipse_scan_lines_cross_outside_ellipse_count = 0;
+    int ellipse_accepted_points_outside_ellipse_count = 0;
+    double ellipse_accepted_point_norm_min = 0.0;
+    double ellipse_accepted_point_norm_avg = 0.0;
+    double ellipse_accepted_point_norm_max = 0.0;
+    int ellipse_rejected_boundary_band_candidate_count = 0;
+    double ellipse_rejected_boundary_band_norm_min = 0.0;
+    double ellipse_rejected_boundary_band_norm_avg = 0.0;
+    double ellipse_rejected_boundary_band_norm_max = 0.0;
+    std::string ellipse_scan_geometry_policy;
+    std::string ellipse_candidate_policy;
+
     // setcircle(...) 参数圆
     bool has_circle = false;
     float circle_cx = 0.0f;
@@ -625,6 +639,41 @@ struct ScriptEvidenceGroup
     std::vector<ScriptEvidenceThumb> thumbs;
 };
 
+struct CxEvidenceSelectionSnapshot
+{
+    bool valid = false;
+
+    int group_index = -1;
+    int thumb_index = -1;
+
+    std::string case_id;
+
+    std::string script_id;
+    std::string script_path;
+
+    std::string image_id;
+    std::string image_path;
+
+    std::string target_id;
+    std::string tool;
+
+    std::string parameter_profile_id;
+    std::string parameter_summary;
+
+    std::string status;
+    std::string reason;
+
+    std::string source;
+};
+
+struct ScriptEvidenceRowRef
+{
+    int group_index = -1;
+    int thumb_index = -1;
+    bool is_group_header = false;
+    std::string label;
+};
+
 struct ManualTestContext
 {
   std::string script_file_path;
@@ -725,7 +774,19 @@ struct ManualTestContext
   std::vector<ScriptEvidenceGroup> script_evidence_groups;
   int selected_evidence_group = -1;
   bool script_evidence_groups_dirty = true;
+
+  std::vector<ScriptEvidenceRowRef> script_evidence_row_refs;
+  bool script_evidence_row_refs_dirty = true;
+
+  int script_evidence_thumb_load_budget_per_frame = 2;
+  int script_evidence_thumb_load_count_this_frame = 0;
+
+  CxEvidenceSelectionSnapshot current_evidence_selection;
 };
+
+void SeedDefaultManualGlobals(
+    ManualTestContext& context,
+    const std::string& scriptPath);
 
 struct ScriptSnippet
 {

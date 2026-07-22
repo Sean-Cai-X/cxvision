@@ -21,6 +21,23 @@
  
 namespace
 {
+double EllipseNorm(
+    double x,
+    double y,
+    double cx,
+    double cy,
+    double rx,
+    double ry)
+{
+    if (rx <= 1.0 || ry <= 1.0)
+        return 999.0;
+
+    const double nx = (x - cx) / rx;
+    const double ny = (y - cy) / ry;
+
+    return std::sqrt(nx * nx + ny * ny);
+}
+
 int ClampSizeToInt(std::size_t value)
 {
     const std::size_t max_value = static_cast<std::size_t>(std::numeric_limits<int>::max());
@@ -182,6 +199,13 @@ void Findellipse::clear()
     m_fit_radius_y = 0.0;
     m_fit_angle_deg = 0.0;
     m_fit_avgdist = 0.0;
+    m_scan_candidate_lines = 0;
+    m_scan_total_candidates = 0;
+    m_scan_accepted_points_before_gate = 0;
+    m_accepted_boundary_ratio_sum = 0.0;
+    m_accepted_boundary_ratio_min = 999.0;
+    m_accepted_boundary_ratio_max = -999.0;
+    m_candidate_policy.clear();
 }
 void Findellipse::Setgap(int gap)
 {
@@ -193,16 +217,67 @@ void Findellipse::Setgap(int gap)
     m_lines.clear();
 
     const int isize = ClampSizeToInt(getpath().ElementCount());
-    if (m_igap > 0 && isize > 0)
+    if (m_igap > 0 && isize > 0 && m_has_display_roi)
     {
         LineShape aline1;
         const int igapadd = ComputeEllipseLineStep(m_igap, isize);
+        const double cx = static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5;
+        const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
+        const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
+        const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
+        const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
+        const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+        const double outer_ratio = 1.05;
+
         for (int i = 0; i < isize; i += igapadd)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
-            m_lines.push_back(aline1);
-            m_lines[m_lines.size() - 1].setline(RoundToInt(getcent().X()), RoundToInt(getcent().Y()), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            const double dx = apoint.X() - cx;
+            const double dy = apoint.Y() - cy;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+
+            if (dist > 1.0)
+            {
+                const double nx = dx / dist;
+                const double ny = dy / dist;
+                const double boundary_dist = rx * ry / std::sqrt(
+                    ry * ry * nx * nx + rx * rx * ny * ny);
+                const double clamped_dist = std::min(
+                    boundary_dist * outer_ratio,
+                    dist);
+                const int end_x = RoundToInt(cx + nx * clamped_dist);
+                const int end_y = RoundToInt(cy + ny * clamped_dist);
+                m_lines.push_back(aline1);
+                m_lines[m_lines.size() - 1].setline(RoundToInt(cx), RoundToInt(cy), end_x, end_y);
+            }
+            else
+            {
+                m_lines.push_back(aline1);
+                m_lines[m_lines.size() - 1].setline(RoundToInt(cx), RoundToInt(cy), RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            }
             m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
+        }
+
+        m_scan_lines_outside_roi_count = 0;
+        m_scan_lines_cross_outside_ellipse_count = 0;
+        m_scan_endpoint_norm_min = 999.0;
+        m_scan_endpoint_norm_max = -999.0;
+
+        for (auto& line : m_lines)
+        {
+            const int line_size = line.getlinesize();
+            if (line_size < 2)
+                continue;
+
+            const double n_start = EllipseNorm(cx, cy, cx, cy, rx, ry);
+            gp_Pnt p_end = line.getlinepoint(line_size - 1);
+            const double n_end = EllipseNorm(p_end.X(), p_end.Y(), cx, cy, rx, ry);
+
+            m_scan_endpoint_norm_min = std::min(m_scan_endpoint_norm_min, std::min(n_start, n_end));
+            m_scan_endpoint_norm_max = std::max(m_scan_endpoint_norm_max, std::max(n_start, n_end));
+
+            if (n_end > 1.05)
+                m_scan_lines_cross_outside_ellipse_count++;
         }
     }
 }
@@ -230,12 +305,72 @@ void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
         const int igapadd = ComputeEllipseLineStep(m_igap, isize);
         int icx0 = (icentx + ipax) / 2;
         int icy0 = (icenty + ipay) / 2;
+        const double width0 = std::abs(static_cast<double>(ipax - icentx));
+        const double height0 = std::abs(static_cast<double>(ipay - icenty));
+        const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
+        const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+        const double outer_ratio = 1.05;
+
         for (int i = 0; i < isize; i += igapadd)
         {
             gp_Pnt apoint = getpath().ElementAt(i);
-            m_lines.push_back(aline1);
-            m_lines[m_lines.size() - 1].setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            const double dx = apoint.X() - icx0;
+            const double dy = apoint.Y() - icy0;
+            const double dist = std::sqrt(dx * dx + dy * dy);
+
+            if (dist > 1.0)
+            {
+                const double nx = dx / dist;
+                const double ny = dy / dist;
+                const double boundary_dist = rx * ry / std::sqrt(
+                    ry * ry * nx * nx + rx * rx * ny * ny);
+                const double clamped_dist = std::min(
+                    boundary_dist * outer_ratio,
+                    dist);
+                const int end_x = RoundToInt(icx0 + nx * clamped_dist);
+                const int end_y = RoundToInt(icy0 + ny * clamped_dist);
+                m_lines.push_back(aline1);
+                m_lines[m_lines.size() - 1].setline(icx0, icy0, end_x, end_y);
+            }
+            else
+            {
+                m_lines.push_back(aline1);
+                m_lines[m_lines.size() - 1].setline(icx0, icy0, RoundToInt(apoint.X()), RoundToInt(apoint.Y()));
+            }
             m_lines[m_lines.size() - 1].setPercent(m_dsamplerate);
+        }
+    }
+
+    m_scan_geometry_policy = "ellipse_boundary_clamped_1_05";
+    m_scan_lines_outside_roi_count = 0;
+    m_scan_lines_cross_outside_ellipse_count = 0;
+    m_scan_endpoint_norm_min = 999.0;
+    m_scan_endpoint_norm_max = -999.0;
+
+    if (m_has_display_roi)
+    {
+        const double cx = static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5;
+        const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
+        const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
+        const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
+        const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
+        const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+
+        for (auto& line : m_lines)
+        {
+            const int line_size = line.getlinesize();
+            if (line_size < 2)
+                continue;
+
+            const double n_start = EllipseNorm(cx, cy, cx, cy, rx, ry);
+            gp_Pnt p_end = line.getlinepoint(line_size - 1);
+            const double n_end = EllipseNorm(p_end.X(), p_end.Y(), cx, cy, rx, ry);
+
+            m_scan_endpoint_norm_min = std::min(m_scan_endpoint_norm_min, std::min(n_start, n_end));
+            m_scan_endpoint_norm_max = std::max(m_scan_endpoint_norm_max, std::max(n_start, n_end));
+
+            if (n_end > 1.05)
+                m_scan_lines_cross_outside_ellipse_count++;
         }
     }
     /*
@@ -302,6 +437,41 @@ void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idi
                 m_lines.push_back(scan_line);
             }
             aline1.clear();
+        }
+    }
+
+    m_scan_geometry_policy = "setellipse2_intersection_boundary";
+    m_scan_lines_outside_roi_count = 0;
+    m_scan_lines_cross_outside_ellipse_count = 0;
+    m_scan_endpoint_norm_min = 999.0;
+    m_scan_endpoint_norm_max = -999.0;
+
+    if (m_has_display_roi)
+    {
+        const double cx = static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5;
+        const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
+        const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
+        const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
+        const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
+        const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+
+        for (auto& line : m_lines)
+        {
+            const int line_size = line.getlinesize();
+            if (line_size < 2)
+                continue;
+
+            gp_Pnt p0 = line.getlinepoint(0);
+            gp_Pnt p1 = line.getlinepoint(line_size - 1);
+
+            const double n0 = EllipseNorm(p0.X(), p0.Y(), cx, cy, rx, ry);
+            const double n1 = EllipseNorm(p1.X(), p1.Y(), cx, cy, rx, ry);
+
+            m_scan_endpoint_norm_min = std::min(m_scan_endpoint_norm_min, std::min(n0, n1));
+            m_scan_endpoint_norm_max = std::max(m_scan_endpoint_norm_max, std::max(n0, n1));
+
+            if (n0 > 1.05 || n1 > 1.05)
+                m_scan_lines_cross_outside_ellipse_count++;
         }
     }
      
@@ -513,6 +683,24 @@ void Findellipse::Measure(Image& image)
     m_measure_failure_stage.clear();
     m_measure_failure_reason.clear();
 
+    m_scan_candidate_lines = 0;
+    m_scan_total_candidates = 0;
+    m_scan_accepted_points_before_gate = 0;
+    m_accepted_boundary_ratio_sum = 0.0;
+    m_accepted_boundary_ratio_min = 999.0;
+    m_accepted_boundary_ratio_max = -999.0;
+    m_candidate_policy = "ellipse_boundary_band_nearest_norm_loose_fallback";
+
+    m_accepted_points_outside_ellipse_count = 0;
+    m_accepted_point_norm_sum = 0.0;
+    m_accepted_point_norm_count = 0;
+    m_accepted_point_norm_min = 999.0;
+    m_accepted_point_norm_max = -999.0;
+    m_rejected_boundary_band_candidate_count = 0;
+    m_rejected_boundary_band_norm_sum = 0.0;
+    m_rejected_boundary_band_norm_min = 999.0;
+    m_rejected_boundary_band_norm_max = -999.0;
+
     if (!ImageManager::EnsureAlgorithmRuntimeResources(
             image.getWidth(),
             image.getHeight()))
@@ -540,6 +728,19 @@ void Findellipse::Measure(Image& image)
     }
     m_measurepoints.clear();
     int isize = ClampSizeToInt(m_lines.size());
+
+    const double ellipse_cx = m_has_display_roi
+        ? static_cast<double>(m_roi_x0 + m_roi_x1) * 0.5
+        : 0.0;
+    const double ellipse_cy = m_has_display_roi
+        ? static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5
+        : 0.0;
+    const double ellipse_rx = m_has_display_roi
+        ? std::abs(static_cast<double>(m_roi_x1 - m_roi_x0)) * 0.5
+        : 1.0;
+    const double ellipse_ry = m_has_display_roi
+        ? std::abs(static_cast<double>(m_roi_y1 - m_roi_y0)) * 0.5
+        : 1.0;
     if (isize <= 0)
     {
         m_measure_failure_stage = "scan_lines_empty";
@@ -646,6 +847,16 @@ void Findellipse::Measure(Image& image)
                             else
                             {
                                 gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
+                                const double norm = EllipseNorm(
+                                    apoint.X(), apoint.Y(),
+                                    ellipse_cx, ellipse_cy,
+                                    ellipse_rx, ellipse_ry);
+                                m_accepted_point_norm_sum += norm;
+                                m_accepted_point_norm_count++;
+                                m_accepted_point_norm_min = std::min(m_accepted_point_norm_min, norm);
+                                m_accepted_point_norm_max = std::max(m_accepted_point_norm_max, norm);
+                                if (norm > 1.05)
+                                    m_accepted_points_outside_ellipse_count++;
                                 m_measurepoints.addpoint(apoint);
                                 break;
                             }
@@ -675,6 +886,16 @@ void Findellipse::Measure(Image& image)
                     else
                     {
                         gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
+                        const double norm = EllipseNorm(
+                            apoint.X(), apoint.Y(),
+                            ellipse_cx, ellipse_cy,
+                            ellipse_rx, ellipse_ry);
+                        m_accepted_point_norm_sum += norm;
+                        m_accepted_point_norm_count++;
+                        m_accepted_point_norm_min = std::min(m_accepted_point_norm_min, norm);
+                        m_accepted_point_norm_max = std::max(m_accepted_point_norm_max, norm);
+                        if (norm > 1.05)
+                            m_accepted_points_outside_ellipse_count++;
                         m_measurepoints.addpoint(apoint);
                         break;
                     }
@@ -686,20 +907,120 @@ void Findellipse::Measure(Image& image)
 
         if (m_iselectedgenum == 0 && !candidate_positions.empty())
         {
-            const int boundary_position = *std::max_element(
-                candidate_positions.begin(),
-                candidate_positions.end());
+            m_scan_candidate_lines++;
+            m_scan_total_candidates += static_cast<int>(candidate_positions.size());
+
+            constexpr double kBoundaryBandMin = 0.65;
+            constexpr double kBoundaryBandLooseMin = 0.45;
+            constexpr double kBoundaryBandMax = 1.08;
+            int strict_boundary_position = -1;
+            double strict_best_score = 999.0;
+            double strict_best_norm = 0.0;
+            int loose_boundary_position = -1;
+            double loose_best_score = 999.0;
+            double loose_best_norm = 0.0;
+            for (const int candidate_position : candidate_positions)
+            {
+                if (candidate_position < 0 || candidate_position >= ilineslen1)
+                    continue;
+
+                gp_Pnt candidate_point = m_lines[inumy].getlinepoint(candidate_position);
+                const double candidate_norm = EllipseNorm(
+                    candidate_point.X(), candidate_point.Y(),
+                    ellipse_cx, ellipse_cy,
+                    ellipse_rx, ellipse_ry);
+
+                if (!std::isfinite(candidate_norm) ||
+                    candidate_norm < kBoundaryBandLooseMin ||
+                    candidate_norm > kBoundaryBandMax)
+                {
+                    if (std::isfinite(candidate_norm))
+                    {
+                        ++m_rejected_boundary_band_candidate_count;
+                        m_rejected_boundary_band_norm_sum += candidate_norm;
+                        m_rejected_boundary_band_norm_min =
+                            std::min(m_rejected_boundary_band_norm_min, candidate_norm);
+                        m_rejected_boundary_band_norm_max =
+                            std::max(m_rejected_boundary_band_norm_max, candidate_norm);
+                    }
+                    continue;
+                }
+
+                const double score = std::abs(candidate_norm - 1.0);
+                if (candidate_norm >= kBoundaryBandMin)
+                {
+                    if (score < strict_best_score)
+                    {
+                        strict_best_score = score;
+                        strict_best_norm = candidate_norm;
+                        strict_boundary_position = candidate_position;
+                    }
+                }
+                else if (score < loose_best_score)
+                {
+                    loose_best_score = score;
+                    loose_best_norm = candidate_norm;
+                    loose_boundary_position = candidate_position;
+                }
+            }
+
+            const int boundary_position =
+                strict_boundary_position >= 0 ? strict_boundary_position : loose_boundary_position;
+            const double best_norm =
+                strict_boundary_position >= 0 ? strict_best_norm : loose_best_norm;
+
+            if (boundary_position < 0)
+                continue;
+
             gp_Pnt apoint = m_lines[inumy].getlinepoint(boundary_position);
+
+            const double norm = EllipseNorm(
+                apoint.X(), apoint.Y(),
+                ellipse_cx, ellipse_cy,
+                ellipse_rx, ellipse_ry);
+            m_accepted_point_norm_sum += norm;
+            m_accepted_point_norm_count++;
+            m_accepted_point_norm_min = std::min(m_accepted_point_norm_min, norm);
+            m_accepted_point_norm_max = std::max(m_accepted_point_norm_max, norm);
+            if (norm > 1.05)
+                m_accepted_points_outside_ellipse_count++;
+
             m_measurepoints.addpoint(apoint);
+
+            double boundary_ratio = best_norm;
+            m_scan_accepted_points_before_gate++;
+            m_accepted_boundary_ratio_sum += boundary_ratio;
+            if (boundary_ratio < m_accepted_boundary_ratio_min)
+                m_accepted_boundary_ratio_min = boundary_ratio;
+            if (boundary_ratio > m_accepted_boundary_ratio_max)
+                m_accepted_boundary_ratio_max = boundary_ratio;
         }
 
     }
 
     if (m_measurepoints.size() <= 0)
     {
-        m_measure_failure_stage = "threshold_no_edge";
-        m_measure_failure_reason =
-            "Findellipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
+        if (m_scan_total_candidates > 0 && m_scan_accepted_points_before_gate <= 0)
+        {
+            m_measure_failure_stage = "no_boundary_band_candidate";
+            m_measure_failure_reason =
+                "Findellipse found edge runs, but none are near the Gauge ellipse boundary band.";
+            if (m_rejected_boundary_band_candidate_count > 0)
+            {
+                m_measure_failure_reason += " rejected_norm=" +
+                    std::to_string(m_rejected_boundary_band_norm_min) + "/" +
+                    std::to_string(
+                        m_rejected_boundary_band_norm_sum /
+                        static_cast<double>(m_rejected_boundary_band_candidate_count)) + "/" +
+                    std::to_string(m_rejected_boundary_band_norm_max);
+            }
+        }
+        else
+        {
+            m_measure_failure_stage = "threshold_no_edge";
+            m_measure_failure_reason =
+                "Findellipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
+        }
     }
     
 }
@@ -780,7 +1101,6 @@ void Findellipse::fitellipse()
         ry / std::max(roi_radius_y, 1.0));
     if (min_radius_ratio < 0.45 || max_radius_ratio > 3.0)
     {
-        m_measurepoints.clear();
         m_measure_failure_stage = "fit_too_small_for_gauge";
         m_measure_failure_reason =
             "Findellipse rejected local edge cluster because fitted ellipse is too small compared with the Gauge.";
@@ -949,6 +1269,57 @@ bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
         : const_cast<LineShape&>(m_lines[0]).getlinesize();
     out.measure_failure_stage = m_measure_failure_stage;
     out.measure_failure_reason = m_measure_failure_reason;
+
+    out.scan_candidate_lines = m_scan_candidate_lines;
+    out.scan_total_candidates = m_scan_total_candidates;
+    out.scan_accepted_points_before_gate = m_scan_accepted_points_before_gate;
+    out.accepted_min_boundary_ratio = m_scan_accepted_points_before_gate > 0
+        ? m_accepted_boundary_ratio_min
+        : 0.0;
+    out.accepted_max_boundary_ratio = m_scan_accepted_points_before_gate > 0
+        ? m_accepted_boundary_ratio_max
+        : 0.0;
+    out.accepted_avg_boundary_ratio = m_scan_accepted_points_before_gate > 0
+        ? m_accepted_boundary_ratio_sum / static_cast<double>(m_scan_accepted_points_before_gate)
+        : 0.0;
+    out.candidate_policy = m_candidate_policy;
+
+    out.scan_lines_outside_roi_count = m_scan_lines_outside_roi_count;
+    out.scan_lines_cross_outside_ellipse_count = m_scan_lines_cross_outside_ellipse_count;
+    out.scan_endpoint_norm_min = m_scan_lines_cross_outside_ellipse_count >= 0
+        ? m_scan_endpoint_norm_min
+        : 0.0;
+    out.scan_endpoint_norm_max = m_scan_lines_cross_outside_ellipse_count >= 0
+        ? m_scan_endpoint_norm_max
+        : 0.0;
+    out.scan_endpoint_norm_avg = m_lines.empty()
+        ? 0.0
+        : (m_scan_endpoint_norm_min + m_scan_endpoint_norm_max) * 0.5;
+
+    out.accepted_points_outside_ellipse_count = m_accepted_points_outside_ellipse_count;
+    out.accepted_point_norm_min = m_accepted_point_norm_count > 0
+        ? m_accepted_point_norm_min
+        : 0.0;
+    out.accepted_point_norm_max = m_accepted_point_norm_count > 0
+        ? m_accepted_point_norm_max
+        : 0.0;
+    out.accepted_point_norm_avg = m_accepted_point_norm_count > 0
+        ? m_accepted_point_norm_sum / m_accepted_point_norm_count
+        : 0.0;
+
+    out.rejected_boundary_band_candidate_count = m_rejected_boundary_band_candidate_count;
+    out.rejected_boundary_band_norm_min = m_rejected_boundary_band_candidate_count > 0
+        ? m_rejected_boundary_band_norm_min
+        : 0.0;
+    out.rejected_boundary_band_norm_max = m_rejected_boundary_band_candidate_count > 0
+        ? m_rejected_boundary_band_norm_max
+        : 0.0;
+    out.rejected_boundary_band_norm_avg = m_rejected_boundary_band_candidate_count > 0
+        ? m_rejected_boundary_band_norm_sum /
+            static_cast<double>(m_rejected_boundary_band_candidate_count)
+        : 0.0;
+
+    out.scan_geometry_policy = m_scan_geometry_policy;
 
     return out.has_roi || out.has_measure_points || out.has_fit_ellipse;
 }

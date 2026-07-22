@@ -1,6 +1,6 @@
 CxScript Debug Snapshot
 =======================
-time: 2026-07-20T13:13:38
+time: 2026-07-21T10:37:17
 flow_block: cximage_find_circle_explore.N0
 script_path: 
 run_state: idle

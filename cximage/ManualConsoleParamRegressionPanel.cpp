@@ -389,6 +389,8 @@ void DrawEvidenceCaseListPanel(ManualTestContext& context)
       item.review_status = "unreviewed";
       context.evidence_items.push_back(item);
     }
+    context.script_evidence_groups_dirty = true;
+    context.workbench_assets_loaded = false;
   }
 
   if (!context.evidence_items.empty())

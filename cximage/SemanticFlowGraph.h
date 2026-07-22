@@ -25,6 +25,13 @@ public:
                          const std::string& issue_entry_ref,
                          const std::string& reason);
 
+    bool BindEvidenceToNode(
+        int node_index,
+        const SemanticEvidenceBinding& binding,
+        std::string& reason);
+
+    const SemanticEvidenceBinding* SelectedNodeEvidenceBinding() const;
+
 private:
   bool LoadFlowFile(const std::string& path);
   void LoadDemoFlow();

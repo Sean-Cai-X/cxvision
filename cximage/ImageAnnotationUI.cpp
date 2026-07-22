@@ -631,13 +631,40 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
         if (frame.left_released)
         {
+            CXLOG_INFO("ImageAnnotationUI", "annotation_drag_release", "running",
+                "phase=before_commit");
             CxShapeCommitResult commit;
             const bool ok = m_annotationLayer.CommitEdit(commit);
             out.commit = commit;
             out.status = ok ? "committed" : "failed";
             out.reason = commit.reason;
+            CXLOG_INFO("ImageAnnotationUI", "annotation_drag_release", ok ? "committed" : "failed",
+                "phase=after_commit, owner=" + commit.owner_type +
+                ", binding=" + commit.owner_binding +
+                ", ref=" + commit.stable_ref +
+                ", reason=" + commit.reason);
 
-            if (ok && commit.owner_type == "fastmatch" && commit.editable && !commit.owner_binding.empty())
+            const bool deferRuntimeToolWriteback =
+                ok && commit.editable && !commit.owner_binding.empty() &&
+                (commit.owner_type == "Findline" ||
+                 commit.owner_type == "Findcircle" ||
+                 commit.owner_type == "Findellipse" ||
+                 commit.owner_type == "FindRect");
+
+            if (deferRuntimeToolWriteback)
+            {
+                // A GUI drag frame must not mutate Parser-owned tool objects.
+                // The stable path is:
+                //   Shape edit -> ManualGauge/global_* export -> next Run applies
+                //   setline/setcircle/setellipse/setrect from cxscript.
+                // This keeps refresh/runtime projection as a separate message
+                // and avoids stale Parser object pointers during repaint.
+                m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                commit.runtime_writeback = false;
+                out.reason = commit.owner_type +
+                    " ROI edit accepted; exported to globals; runtime object update deferred until next Run";
+            }
+            else if (ok && commit.owner_type == "fastmatch" && commit.editable && !commit.owner_binding.empty())
             {
                 void* toolObj = m_parserDebugBridge.QueryClassObject("fastmatch", commit.owner_ref);
                 if (toolObj != nullptr)
@@ -673,196 +700,25 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                     }
                 }
             }
-            else if (ok && commit.owner_type == "Findcircle" && commit.editable &&
-                     commit.owner_binding == "setcircle")
-            {
-                const CxShapeElement* edited =
-                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
-                Findcircle* tool = static_cast<Findcircle*>(
-                    m_parserDebugBridge.QueryClassObject("Findcircle", commit.owner_ref));
-                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
-                {
-                    CxShapePoint center;
-                    double radius = 0.0;
-                    double inner_radius = 0.0;
-                    if (edited->shape->exportCircle(center, radius, inner_radius) && radius > 0.0)
-                    {
-                        const int cx = static_cast<int>(std::lround(center.x));
-                        const int cy = static_cast<int>(std::lround(center.y));
-                        const int px = static_cast<int>(std::lround(center.x + radius));
-                        const int py = cy;
-                        tool->setcircle(cx, cy, px, py);
-                        m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
-                        commit.runtime_writeback = true;
-                        out.reason = "Findcircle ROI edit written back to setcircle";
-                    }
-                    else
-                    {
-                        out.reason = "Findcircle edit rejected: circle geometry export failed";
-                    }
-                }
-                else
-                {
-                    out.reason = "Findcircle edit rejected: runtime object or shape unavailable";
-                }
-            }
-            else if (ok && commit.owner_type == "Findline" && commit.editable &&
-                     commit.owner_binding == "setline")
-            {
-                const CxShapeElement* edited =
-                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
-                Findline* tool = static_cast<Findline*>(
-                    m_parserDebugBridge.QueryClassObject("Findline", commit.owner_ref));
-                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
-                {
-                    const LineGaugeShape* line =
-                        dynamic_cast<const LineGaugeShape*>(edited->shape.get());
-                    if (line != nullptr)
-                    {
-                        const int x0 = static_cast<int>(std::lround(line->x0()));
-                        const int y0 = static_cast<int>(std::lround(line->y0()));
-                        const int x1 = static_cast<int>(std::lround(line->x1()));
-                        const int y1 = static_cast<int>(std::lround(line->y1()));
-                        const int half_width = std::max(
-                            1, static_cast<int>(std::lround(line->halfWidth())));
-                        tool->setline(x0, y0, x1, y1, half_width);
-                        m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
-                        commit.runtime_writeback = true;
-                        out.reason = "Findline ROI edit written back to setline";
-                    }
-                    else
-                    {
-                        out.reason = "Findline edit rejected: line gauge geometry unavailable";
-                    }
-                }
-                else
-                {
-                    out.reason = "Findline edit rejected: runtime object or shape unavailable";
-                }
-            }
-            else if (ok && commit.owner_type == "Findellipse" && commit.editable &&
-                     commit.owner_binding == "setellipse")
-            {
-                const CxShapeElement* edited =
-                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
-                Findellipse* tool = static_cast<Findellipse*>(
-                    m_parserDebugBridge.QueryClassObject("Findellipse", commit.owner_ref));
-                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
-                {
-                    std::vector<CxShapePoint> points;
-                    edited->shape->exportPoints(points);
-                    if (points.size() >= 3)
-                    {
-                        const double cx = points[0].x;
-                        const double cy = points[0].y;
-                        const double rx = std::abs(points[1].x - cx);
-                        const double ry = std::abs(points[2].y - cy);
-                        if (rx >= 1.0 && ry >= 1.0)
-                        {
-                            tool->setellipse(
-                                static_cast<int>(std::lround(cx - rx)),
-                                static_cast<int>(std::lround(cy - ry)),
-                                static_cast<int>(std::lround(cx + rx)),
-                                static_cast<int>(std::lround(cy + ry)));
-                            m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
-                            commit.runtime_writeback = true;
-                            out.reason = "Findellipse ROI edit written back to setellipse";
-                        }
-                        else
-                        {
-                            out.reason = "Findellipse edit rejected: ellipse radius too small";
-                        }
-                    }
-                    else
-                    {
-                        out.reason = "Findellipse edit rejected: ellipse geometry unavailable";
-                    }
-                }
-                else
-                {
-                    out.reason = "Findellipse edit rejected: runtime object or shape unavailable";
-                }
-            }
-            else if (ok && commit.owner_type == "FindRect" && commit.editable &&
-                     (commit.owner_binding == "setrect" ||
-                      commit.owner_binding == "setrotatedrect"))
-            {
-                const CxShapeElement* edited =
-                    m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
-                FindRect* tool = static_cast<FindRect*>(
-                    m_parserDebugBridge.QueryClassObject("FindRect", commit.owner_ref));
-                if (edited != nullptr && edited->shape != nullptr && tool != nullptr)
-                {
-                    std::vector<CxShapePoint> points;
-                    bool closed = false;
-                    edited->shape->exportPolyline(points, closed);
-                    if (points.empty())
-                        edited->shape->exportPoints(points);
-
-                    if (!points.empty())
-                    {
-                        double min_x = points[0].x;
-                        double min_y = points[0].y;
-                        double max_x = points[0].x;
-                        double max_y = points[0].y;
-                        for (const CxShapePoint& p : points)
-                        {
-                            min_x = std::min(min_x, p.x);
-                            min_y = std::min(min_y, p.y);
-                            max_x = std::max(max_x, p.x);
-                            max_y = std::max(max_y, p.y);
-                        }
-                        const double w = max_x - min_x;
-                        const double h = max_y - min_y;
-                        if (w >= 2.0 && h >= 2.0)
-                        {
-                            tool->setrect(
-                                static_cast<int>(std::lround(min_x)),
-                                static_cast<int>(std::lround(min_y)),
-                                static_cast<int>(std::lround(w)),
-                                static_cast<int>(std::lround(h)));
-                            m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
-                            commit.runtime_writeback = true;
-                            out.reason = "FindRect ROI edit written back to setrect";
-                        }
-                        else
-                        {
-                            out.reason = "FindRect edit rejected: rect too small";
-                        }
-                    }
-                    else
-                    {
-                        out.reason = "FindRect edit rejected: rect geometry unavailable";
-                    }
-                }
-                else
-                {
-                    out.reason = "FindRect edit rejected: runtime object or shape unavailable";
-                }
-            }
-
             if (ok)
             {
                 const CxShapeElement* edited =
                     m_annotationLayer.FindShapeByStableRef(commit.stable_ref);
                 if (edited != nullptr)
                 {
+                    CXLOG_INFO("ImageAnnotationUI", "annotation_drag_export", "running",
+                        "ref=" + commit.stable_ref + ", owner=" + commit.owner_type);
                     UpdateManualGaugeFromShapeElement(m_manualTest, *edited);
                     std::string exportReason;
                     ExportShapeElementToRuntimeGlobals(m_manualTest, *edited, exportReason);
+                    CXLOG_INFO("ImageAnnotationUI", "annotation_drag_export", "finished",
+                        "ref=" + commit.stable_ref + ", reason=" + exportReason);
                 }
             }
 
             if (ok)
             {
                 CXLOG_INFO("ImageAnnotationUI", "annotation_drag_commit", "committed", "reason=" + out.reason);
-                std::string snapshotPath;
-                std::string snapshotReason;
-                if (!SaveCxDebugSnapshotText(m_manualTest, snapshotPath, snapshotReason))
-                {
-                    m_manualTest.debug_reason +=
-                        " | debug snapshot save failed: " + snapshotReason;
-                }
             }
             m_lastPointerResult = out;
             return out;

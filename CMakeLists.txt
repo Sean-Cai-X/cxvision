@@ -102,6 +102,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/ManualConsoleScriptDebugPanel.cpp
   cximage/CxScriptCasePackageWriter.cpp
   cximage/CxScriptHeadlessRunner.cpp
+  cximage/CxScriptGlobalValueSet.cpp
   cximage/CxScriptHeadlessBindings.cpp
   cximage/CxScriptRuntimeCaptureSmoke.cpp
   cximage/CxUnifiedLog.cpp

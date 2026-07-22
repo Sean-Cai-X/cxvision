@@ -48,6 +48,31 @@ class ViewController : protected AIS_ViewController
     double elapsed_ms = 0.0;
     std::vector<std::string> log_lines;
   };
+
+  struct SemanticExecutionContext
+  {
+      bool valid = false;
+      bool from_evidence = false;
+
+      std::string node_id;
+
+      std::string case_id;
+
+      std::string script_id;
+      std::string script_path;
+
+      std::string image_id;
+      std::string image_path;
+
+      std::string target_id;
+      std::string tool;
+
+      std::string parameter_profile_id;
+      std::string parameter_summary;
+
+      std::string reason;
+  };
+
 public:
   //! Construct the controller with default interaction state.
   ViewController();
@@ -63,6 +88,25 @@ public:
       const std::string& scriptPath,
       std::string& reason);
 
+    bool LoadSemanticEvidenceBindingToManualConsole(
+        const std::string& nodeId,
+        const SemanticEvidenceBinding& binding,
+        bool loadImageToView,
+        std::string& reason);
+
+    bool BuildSemanticExecutionContext(
+        const SemanticFlowAction& action,
+        SemanticExecutionContext& out,
+        std::string& reason) const;
+
+    bool ApplySemanticExecutionContextBeforeRun(
+        const SemanticExecutionContext& context,
+        std::string& reason);
+
+    bool ApplyEvidenceParameterSummaryToRuntimeGlobals(
+        const std::string& parameterSummary,
+        std::string& reason);
+
 private:
   void initImGui();
   void initScriptCatalog();
@@ -75,10 +119,48 @@ private:
   void SelectEvidenceChainThumb(int index);
   void DrawEvidenceChainThumbnailRail();
   void RebuildScriptEvidenceGroups();
+  void RebuildScriptEvidenceRowRefs();
   std::string ResolveImagePathFromManifest(const std::string& imageId) const;
   void EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb);
   void SelectScriptEvidenceThumb(int groupIndex, int thumbIndex);
+
+  bool GetSelectedEvidenceSnapshot(
+      CxEvidenceSelectionSnapshot& out,
+      std::string& reason) const;
+
+  bool BuildEvidenceSnapshotFromThumb(
+      int groupIndex,
+      int thumbIndex,
+      const ScriptEvidenceThumb& thumb,
+      CxEvidenceSelectionSnapshot& out,
+      std::string& reason) const;
+
+  bool ApplyEvidenceSelectionSnapshotToManualContext(
+      const CxEvidenceSelectionSnapshot& snapshot,
+      bool loadImageToView,
+      std::string& reason);
+
+    bool RefreshEvidenceSelectionFromThumb(
+        int groupIndex,
+        int thumbIndex,
+        bool loadImageToView,
+        std::string& reason);
+
+    void ResetEvidenceThumbTexture(ScriptEvidenceThumb& thumb);
+
+  void DrawOneScriptEvidenceRow(
+      int groupIndex,
+      int thumbIndex,
+      ScriptEvidenceThumb& thumb,
+      float rowHeight);
   void DrawScriptEvidenceThumbnailRailByGroup();
+  bool LoadImageIntoImageView(const std::string& imagePath,
+                              std::string& reason);
+  bool ActivateScriptEvidenceThumb(const ScriptEvidenceThumb& thumb,
+                                   bool loadImageToView,
+                                   std::string& reason);
+  std::string ResolveCatalogScriptPathById(const std::string& scriptId) const;
+  std::string ResolveCatalogScriptLabelById(const std::string& scriptId) const;
   void DrawScriptEditorBlock(ManualTestContext& context);
   void DrawScriptDebugCompilerBlock(ManualTestContext& context);
   void DrawCxParserExtLineViewsPanel(ManualTestContext& context);
@@ -103,7 +185,9 @@ private:
   ScriptResult RunCxScript(const std::string& theScriptPath);
   void RefreshRuntimeObjectTable(const std::string& lastMethod,
                                  const std::string& runtimeStatus);
-    void SyncRuntimeObjectsToShapeElements();
+  void RequestRuntimeShapeSync(const std::string& reason);
+  void ProcessDeferredRuntimeShapeSync(const char* phase);
+  void SyncRuntimeObjectsToShapeElements();
   bool QueryParserObjectExists(const std::string& type,
                                const std::string& name);
   Image* QueryParserImage(const std::string& name);
@@ -480,6 +564,10 @@ private:
     float m_debugMouseImageY = 0.0f;
     bool m_debugAnnotationDragging = false;
     CxImagePointerResult m_lastPointerResult;
+    bool m_runtimeShapeSyncPending = false;
+    std::string m_runtimeShapeSyncReason;
+    int m_runtimeShapeSyncDeferCount = 0;
+    bool m_runtimeShapeSyncExecuting = false;
 };
 
 #endif // _ViewController_Header

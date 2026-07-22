@@ -6,6 +6,8 @@
 #include "ManualStateTestConsole.h"
 #include "CxCrashLogHandler.h"
 
+#include <unordered_set>
+
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 {
   SetCxCrashBreadcrumb("drawManualStateTestConsole:ScriptEditor:begin");
@@ -86,12 +88,15 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     return;
 
   ImGui::PushID("debug_compiler");
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:push_id");
 
   const float btnWidth = 90.0f;
 
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:header_text");
   ImGui::TextDisabled(
     "Compile: source preflight/line analysis; Run: execute exact editor text via CxParserRuntime::Compile");
 
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:compile_button");
   if (ImGui::Button("Compile", ImVec2(btnWidth, 0)))
   {
     context.debug_action = "Compile";
@@ -110,8 +115,10 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   }
 
   ImGui::SameLine();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:run_button");
   if (ImGui::Button("Run", ImVec2(btnWidth, 0)))
   {
+    SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
     context.debug_action = "Run";
     if (context.editor_text.empty())
     {
@@ -121,25 +128,56 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     }
     else
     {
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:analyze");
       AnalyzeScript(context);
       if (context.current_gauge.has_line_gauge ||
           context.current_gauge.has_circle_gauge ||
           context.current_gauge.has_ellipse_gauge)
       {
+        SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:apply_gauge");
         ApplyManualGaugeToGlobals(context);
       }
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:set_globals");
       for (const auto& input : context.runtime_int_vars)
       {
         if (input.first.rfind("global_", 0) == 0)
           m_parserDebugBridge.SetGlobalInt(input.first, input.second);
       }
 
+      std::stringstream ss;
+      ss << "\nManual effective globals:";
+      ss << "\nimage=" << (m_imageViewImage.empty() ? "s_img0" : "m_imageViewImage");
+      if (!m_imageViewImage.empty())
+        ss << " size=" << m_imageViewImage.cols << "x" << m_imageViewImage.rows;
+      else if (!s_img0.empty())
+        ss << " size=" << s_img0.cols << "x" << s_img0.rows;
+      ss << "\nscript=" << context.loaded_script_path;
+      ss << "\neditor_source=" << context.editor_source;
+      ss << "\nellipse_roi=(" << context.runtime_int_vars["global_ellipse_x0"] << ","
+         << context.runtime_int_vars["global_ellipse_y0"] << ","
+         << context.runtime_int_vars["global_ellipse_x1"] << ","
+         << context.runtime_int_vars["global_ellipse_y1"] << ")";
+      ss << "\nroi=(" << context.runtime_int_vars["global_roi_x0"] << ","
+         << context.runtime_int_vars["global_roi_y0"] << ","
+         << context.runtime_int_vars["global_roi_x1"] << ","
+         << context.runtime_int_vars["global_roi_y1"] << ")";
+      ss << "\ngap=" << context.runtime_int_vars["global_gap"];
+      ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
+      ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
+      ss << "\nmethod=" << context.runtime_int_vars["global_method"];
+      const std::string effectiveGlobals = ss.str();
+
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:bind_image");
       bool imageBound = true;
       if (!m_imageViewImage.empty())
-        imageBound = m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage);
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(m_imageViewImage);
       else if (!s_img0.empty())
-        imageBound = m_parserDebugBridge.SetGlobalMatInput(s_img0);
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(s_img0);
 
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:clear_old_runtime_shapes");
+      m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
+
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:run_script");
       context.run_state = "running";
       const bool ran = imageBound && m_parserDebugBridge.RunScript(context.editor_text);
       context.run_state = ran ? "runtime_finished" : "failed";
@@ -150,6 +188,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
           ? ("ParserDebugBridge rejected the Script Editor text: " +
              m_parserDebugBridge.LastError())
           : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput");
+      context.debug_reason += effectiveGlobals;
 
       m_scriptResult.source = "manual_console_editor";
       m_scriptResult.script_path = context.loaded_script_path;
@@ -159,34 +198,42 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
         ? "runtime_objects_queried"
         : "not_started";
 
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:refresh_runtime_objects");
       RefreshRuntimeObjectTable(
         "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
 
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:save_snapshot");
       std::string snapshotPath;
       std::string snapshotReason;
       if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
       {
         context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
       }
+      SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:end");
     }
   }
 
   ImGui::SameLine();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:step_button");
   if (ImGui::Button("Step", ImVec2(btnWidth, 0)))
   {
+    SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Step:begin");
     DebugStepOnceWithSnapshot(context);
-    SyncRuntimeObjectsToShapeElements();
+    RequestRuntimeShapeSync("DebugCompiler:Step");
     std::string snapshotPath;
     std::string snapshotReason;
     if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
     {
       context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
     }
+    SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Step:end");
   }
 
   ImGui::SameLine();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:continue_button");
   if (ImGui::Button("Continue", ImVec2(btnWidth, 0)))
   {
+    SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Continue:begin");
     context.run_state = "running";
     AnalyzeScript(context);
     const int maxContinueSteps = 512;
@@ -233,16 +280,18 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       }
     }
 
-    SyncRuntimeObjectsToShapeElements();
+    RequestRuntimeShapeSync("DebugCompiler:Continue");
     std::string snapshotPath;
     std::string snapshotReason;
     if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
     {
       context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
     }
+    SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Continue:end");
   }
 
   ImGui::SameLine();
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:reset_button");
   if (ImGui::Button("Reset", ImVec2(btnWidth, 0)))
   {
     ResetDebugRuntimeForReplay(context);
@@ -253,6 +302,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
   ImGui::Separator();
 
+  SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:status_text");
   ImGui::Text("Line: %d/%d",
               context.current_line + 1,
               static_cast<int>(context.line_views.size()));
@@ -260,7 +310,16 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   ImGui::Text("Status: %s", context.debug_status.c_str());
 
   if (!context.debug_reason.empty())
-    ImGui::TextWrapped("Reason: %s", context.debug_reason.c_str());
+  {
+    std::string displayReason = context.debug_reason;
+    constexpr std::size_t kMaxReasonDisplay = 4096;
+    if (displayReason.size() > kMaxReasonDisplay)
+    {
+      displayReason.resize(kMaxReasonDisplay);
+      displayReason += "\n... [reason truncated in UI; full text is saved in debug snapshot/log]";
+    }
+    ImGui::TextWrapped("Reason: %s", displayReason.c_str());
+  }
 
   ImGui::PopID();
   SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:end");

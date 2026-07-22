@@ -4,6 +4,30 @@
 #include <string>
 #include <vector>
 
+struct SemanticEvidenceBinding
+{
+    bool valid = false;
+
+    std::string case_id;
+
+    std::string script_id;
+    std::string script_path;
+
+    std::string image_id;
+    std::string image_path;
+
+    std::string target_id;
+    std::string tool;
+
+    std::string parameter_profile_id;
+    std::string parameter_summary;
+
+    std::string status;
+    std::string reason;
+
+    std::string source;
+};
+
 struct SemanticNode
 {
   std::string id;
@@ -11,6 +35,9 @@ struct SemanticNode
   std::string module;
   std::string title;
   std::string script_path;
+
+  SemanticEvidenceBinding evidence_binding;
+
   std::string status_from;
   std::string status;
   std::string reason;
@@ -41,11 +68,12 @@ enum class SemanticFlowActionType
   None,
 
   /*
-   * Request ViewController to bind the currently selected Script Catalog
-   * item to the currently selected semantic flow node.
+   * Request ViewController to bind the current Evidence selection
+   * to the selected semantic flow node.
    *
-   * SemanticFlowGraph does not know the catalog list. It only raises
-   * this action. ViewController owns the catalog selection.
+   * ViewController should prefer ManualTestContext.current_evidence_selection.
+   * If no Evidence row is selected, it may fallback to the legacy Script Catalog
+   * selection for compatibility.
    */
   BindCatalogScriptToSelectedNode,
 
@@ -59,6 +87,9 @@ struct SemanticFlowAction
   int node_index = -1;
   std::string node_id;
   std::string script_path;
+
+  bool has_evidence_binding = false;
+  SemanticEvidenceBinding evidence_binding;
 };
 
 #endif

@@ -7,6 +7,7 @@
 #include "CxScriptRuntimeResultCapture.h"
 #include "CxShapeOverlayRenderer.h"
 #include "CxScriptRuntimeCaptureSmoke.h"
+#include "CxScriptGlobalValueSet.h"
 
 #include <sstream>
 #include <fstream>
@@ -254,26 +255,18 @@ bool InjectCxScriptGlobals(
     CxScriptGlobalStorage& values,
     std::string& reason)
 {
+    CxScriptGlobalValueSet global_value_set;
+
+    if (!LoadHeadlessGlobalDeclarations(kHeadlessGlobalInitScript, global_value_set, reason))
+        return false;
+
+    if (!BindGlobalValueSetToParser(runtime, global_value_set, reason))
+        return false;
+
     const std::string global_init_source =
         LoadCxScriptSource(kHeadlessGlobalInitScript, reason);
     if (global_init_source.empty())
         return false;
-
-    const std::vector<std::string> global_names =
-        ExtractCxScriptGlobalDeclarations(global_init_source);
-    if (global_names.empty())
-    {
-        reason = "headless global init has no global_ declarations: " +
-            std::string(kHeadlessGlobalInitScript);
-        return false;
-    }
-
-    for (const std::string& name : global_names)
-    {
-        auto inserted = values.emplace(name, 0.0);
-        if (inserted.second)
-            runtime.m_parser.DefineVar(name, &inserted.first->second);
-    }
 
     const std::string prepared_global_init =
         BuildCxScriptGlobalInitRuntimeSource(global_init_source);
@@ -284,61 +277,21 @@ bool InjectCxScriptGlobals(
         return false;
     }
 
-    const std::map<std::string, double> option_globals = {
-        { "global_roi_x0", static_cast<double>(options.roi_x0) },
-        { "global_roi_y0", static_cast<double>(options.roi_y0) },
-        { "global_roi_x1", static_cast<double>(options.roi_x1) },
-        { "global_roi_y1", static_cast<double>(options.roi_y1) },
-        { "global_tool_half_width", static_cast<double>(options.tool_half_width) },
-        { "global_wgap", static_cast<double>(options.wgap) },
-        { "global_hgap", static_cast<double>(options.hgap) },
-        { "global_gap", static_cast<double>(options.gap) },
-        { "global_linegap", static_cast<double>(options.linegap) },
-        { "global_threshold", static_cast<double>(options.threshold) },
-        { "global_method", static_cast<double>(options.method) },
-        { "global_filterprofile", static_cast<double>(options.filterprofile) },
-        { "global_samplerate", static_cast<double>(options.samplerate) },
-        { "global_min_score", options.min_score },
-        { "global_find_num", static_cast<double>(options.find_num) },
-        { "global_compare_gap", static_cast<double>(options.compare_gap) },
-        { "global_learn_roi_x", static_cast<double>(options.learn_roi_x) },
-        { "global_learn_roi_y", static_cast<double>(options.learn_roi_y) },
-        { "global_learn_roi_w", static_cast<double>(options.learn_roi_w) },
-        { "global_learn_roi_h", static_cast<double>(options.learn_roi_h) },
-        { "global_search_roi_x", static_cast<double>(options.search_roi_x) },
-        { "global_search_roi_y", static_cast<double>(options.search_roi_y) },
-        { "global_search_roi_w", static_cast<double>(options.search_roi_w) },
-        { "global_search_roi_h", static_cast<double>(options.search_roi_h) },
-        { "global_expected_rect_x", static_cast<double>(options.expected_rect_x) },
-        { "global_expected_rect_y", static_cast<double>(options.expected_rect_y) },
-        { "global_expected_rect_w", static_cast<double>(options.expected_rect_w) },
-        { "global_expected_rect_h", static_cast<double>(options.expected_rect_h) },
-        { "global_circle_cx", static_cast<double>(options.circle_cx) },
-        { "global_circle_cy", static_cast<double>(options.circle_cy) },
-        { "global_circle_px", static_cast<double>(options.circle_px) },
-        { "global_circle_py", static_cast<double>(options.circle_py) },
-        { "global_ellipse_x0", static_cast<double>(options.ellipse_x0) },
-        { "global_ellipse_y0", static_cast<double>(options.ellipse_y0) },
-        { "global_ellipse_x1", static_cast<double>(options.ellipse_x1) },
-        { "global_ellipse_y1", static_cast<double>(options.ellipse_y1) },
-        { "global_max_elapsed_ms", static_cast<double>(options.max_elapsed_ms) },
-        { "global_max_scan_lines", static_cast<double>(options.max_scan_lines) },
-        { "global_max_samples", static_cast<double>(options.max_samples) },
-        { "global_strategy_id", static_cast<double>(options.strategy_id) },
-        { "global_algorithm_executed", static_cast<double>(options.algorithm_executed) },
-        { "global_selected_method", static_cast<double>(options.method) },
-        { "global_selected_threshold", static_cast<double>(options.threshold) },
-        { "global_selected_wgap", static_cast<double>(options.wgap) },
-        { "global_selected_hgap", static_cast<double>(options.hgap) },
-        { "global_selected_linegap", static_cast<double>(options.linegap) },
-        { "global_selected_filterprofile", static_cast<double>(options.filterprofile) },
-    };
+    std::map<std::string, double> option_globals = BuildHeadlessGlobalOverrides(options);
+    if (!ApplyGlobalOverrides(global_value_set, option_globals, reason))
+        return false;
 
-    for (const auto& item : option_globals)
+    if (!options.globals_path.empty())
     {
-        if (!SetCxScriptGlobalValue(values, item.first, item.second, reason))
+        std::map<std::string, double> file_globals;
+        if (!LoadHeadlessGlobalValuesFile(options.globals_path, file_globals, reason))
+            return false;
+        if (!ApplyGlobalOverrides(global_value_set, file_globals, reason))
             return false;
     }
+
+    if (!ApplyGlobalOverrides(global_value_set, options.cli_global_overrides, reason))
+        return false;
 
     if (options.contract_context_enabled)
     {
@@ -358,12 +311,11 @@ bool InjectCxScriptGlobals(
             { "global_avgdist", options.avgdist },
         };
 
-        for (const auto& item : contract_globals)
-        {
-            if (!SetCxScriptGlobalValue(values, item.first, item.second, reason))
-                return false;
-        }
+        if (!ApplyGlobalOverrides(global_value_set, contract_globals, reason))
+            return false;
     }
+
+    values.swap(global_value_set.numbers);
 
     reason.clear();
     return true;
@@ -517,6 +469,237 @@ bool ExecuteCxScriptSequential(
     return true;
 }
 
+CxScriptResultPackage BuildCxScriptResultPackage(
+    const CxScriptExecutionCapture& capture)
+{
+    CxScriptResultPackage pkg;
+
+    pkg.runtime_globals_after = capture.runtime_globals;
+    pkg.shapes = capture.shapes;
+
+    pkg.status = capture.runtime_completed ? "executed" : "not_executed";
+    pkg.failure_stage = capture.failure_stage;
+    pkg.reason = capture.reason;
+
+    pkg.metrics["elapsed_ms"] = capture.elapsed_ms;
+    pkg.metrics["budget_ms"] = capture.budget_ms;
+    pkg.metrics["max_steps"] = capture.max_steps;
+    pkg.metrics["max_scan_lines"] = capture.max_scan_lines;
+    pkg.metrics["max_samples"] = capture.max_samples;
+    pkg.metrics["scan_line_count"] = capture.scan_line_count;
+    pkg.metrics["sample_count"] = capture.sample_count;
+    pkg.metrics["strategy_id"] = capture.strategy_id;
+    pkg.metrics["selected_method"] = capture.selected_method;
+    pkg.metrics["selected_threshold"] = capture.selected_threshold;
+    pkg.metrics["selected_wgap"] = capture.selected_wgap;
+    pkg.metrics["selected_hgap"] = capture.selected_hgap;
+    pkg.metrics["selected_linegap"] = capture.selected_linegap;
+    pkg.metrics["selected_filterprofile"] = capture.selected_filterprofile;
+    pkg.metrics["valid_points_count"] = capture.valid_points_count;
+    pkg.metrics["circle_radius"] = capture.circle_radius;
+    pkg.metrics["avgdist"] = capture.avgdist;
+    pkg.metrics["result_rect_count"] = capture.result_rect_count;
+    pkg.metrics["model_point_count"] = capture.model_point_count;
+    pkg.metrics["candidate_count"] = capture.candidate_count;
+    pkg.metrics["best_score"] = capture.best_score;
+    pkg.metrics["rendered_measure_points_count"] = capture.rendered_measure_points_count;
+    pkg.metrics["rendered_result_count"] = capture.rendered_result_count;
+    pkg.metrics["result_overlay_changed_pixels"] = capture.result_overlay_changed_pixels;
+
+    pkg.metrics["ellipse_cx"] = capture.ellipse_cx;
+    pkg.metrics["ellipse_cy"] = capture.ellipse_cy;
+    pkg.metrics["ellipse_radius_x"] = capture.ellipse_radius_x;
+    pkg.metrics["ellipse_radius_y"] = capture.ellipse_radius_y;
+    pkg.metrics["ellipse_angle_deg"] = capture.ellipse_angle_deg;
+    pkg.metrics["ellipse_scan_candidate_lines"] = capture.ellipse_scan_candidate_lines;
+    pkg.metrics["ellipse_scan_total_candidates"] = capture.ellipse_scan_total_candidates;
+    pkg.metrics["ellipse_scan_accepted_points_before_gate"] = capture.ellipse_scan_accepted_points_before_gate;
+    pkg.metrics["ellipse_accepted_min_boundary_ratio"] = capture.ellipse_accepted_min_boundary_ratio;
+    pkg.metrics["ellipse_accepted_max_boundary_ratio"] = capture.ellipse_accepted_max_boundary_ratio;
+    pkg.metrics["ellipse_accepted_avg_boundary_ratio"] = capture.ellipse_accepted_avg_boundary_ratio;
+    pkg.metrics["ellipse_scan_lines_cross_outside_ellipse_count"] = capture.ellipse_scan_lines_cross_outside_ellipse_count;
+    pkg.metrics["ellipse_scan_endpoint_norm_min"] = capture.ellipse_scan_endpoint_norm_min;
+    pkg.metrics["ellipse_scan_endpoint_norm_avg"] = capture.ellipse_scan_endpoint_norm_avg;
+    pkg.metrics["ellipse_scan_endpoint_norm_max"] = capture.ellipse_scan_endpoint_norm_max;
+    pkg.metrics["ellipse_accepted_points_outside_ellipse_count"] = capture.ellipse_accepted_points_outside_ellipse_count;
+    pkg.metrics["ellipse_accepted_point_norm_min"] = capture.ellipse_accepted_point_norm_min;
+    pkg.metrics["ellipse_accepted_point_norm_avg"] = capture.ellipse_accepted_point_norm_avg;
+    pkg.metrics["ellipse_accepted_point_norm_max"] = capture.ellipse_accepted_point_norm_max;
+    pkg.metrics["ellipse_rejected_boundary_band_candidate_count"] =
+        capture.ellipse_rejected_boundary_band_candidate_count;
+    pkg.metrics["ellipse_rejected_boundary_band_norm_min"] =
+        capture.ellipse_rejected_boundary_band_norm_min;
+    pkg.metrics["ellipse_rejected_boundary_band_norm_avg"] =
+        capture.ellipse_rejected_boundary_band_norm_avg;
+    pkg.metrics["ellipse_rejected_boundary_band_norm_max"] =
+        capture.ellipse_rejected_boundary_band_norm_max;
+
+    pkg.metrics["fastmatch_model_width"] = capture.fastmatch_model_width;
+    pkg.metrics["fastmatch_model_height"] = capture.fastmatch_model_height;
+    pkg.metrics["fastmatch_pattern_a_count"] = capture.fastmatch_pattern_a_count;
+    pkg.metrics["fastmatch_pattern_b_count"] = capture.fastmatch_pattern_b_count;
+    pkg.metrics["fastmatch_pattern_a_x"] = capture.fastmatch_pattern_a_x;
+    pkg.metrics["fastmatch_pattern_a_y"] = capture.fastmatch_pattern_a_y;
+    pkg.metrics["fastmatch_pattern_a_width"] = capture.fastmatch_pattern_a_width;
+    pkg.metrics["fastmatch_pattern_a_height"] = capture.fastmatch_pattern_a_height;
+    pkg.metrics["fastmatch_pattern_b_x"] = capture.fastmatch_pattern_b_x;
+    pkg.metrics["fastmatch_pattern_b_y"] = capture.fastmatch_pattern_b_y;
+    pkg.metrics["fastmatch_pattern_b_width"] = capture.fastmatch_pattern_b_width;
+    pkg.metrics["fastmatch_pattern_b_height"] = capture.fastmatch_pattern_b_height;
+    pkg.metrics["fastmatch_match_call_count"] = capture.fastmatch_match_call_count;
+    pkg.metrics["fastmatch_match_ab_call_count"] = capture.fastmatch_match_ab_call_count;
+    pkg.metrics["fastmatch_match_sample_ab_call_count"] = capture.fastmatch_match_sample_ab_call_count;
+    pkg.metrics["fastmatch_match_last_stage"] = capture.fastmatch_match_last_stage;
+    pkg.metrics["fastmatch_match_image_width"] = capture.fastmatch_match_image_width;
+    pkg.metrics["fastmatch_match_image_height"] = capture.fastmatch_match_image_height;
+    pkg.metrics["fastmatch_match_rect_x0"] = capture.fastmatch_match_rect_x0;
+    pkg.metrics["fastmatch_match_rect_y0"] = capture.fastmatch_match_rect_y0;
+    pkg.metrics["fastmatch_match_rect_x1"] = capture.fastmatch_match_rect_x1;
+    pkg.metrics["fastmatch_match_rect_y1"] = capture.fastmatch_match_rect_y1;
+    pkg.metrics["fastmatch_raw_probe_count"] = capture.fastmatch_raw_probe_count;
+    pkg.metrics["fastmatch_raw_threshold_hit_count"] = capture.fastmatch_raw_threshold_hit_count;
+    pkg.metrics["fastmatch_result_to_list_count"] = capture.fastmatch_result_to_list_count;
+    pkg.metrics["fastmatch_candidate_insert_count"] = capture.fastmatch_candidate_insert_count;
+    pkg.metrics["fastmatch_candidate_replace_count"] = capture.fastmatch_candidate_replace_count;
+    pkg.metrics["fastmatch_candidate_reject_count"] = capture.fastmatch_candidate_reject_count;
+
+    pkg.metrics["object_filter_borw"] = capture.object_filter_borw;
+    pkg.metrics["object_filter_min"] = capture.object_filter_min;
+    pkg.metrics["object_filter_max"] = capture.object_filter_max;
+    pkg.metrics["fit_filter_input_count"] = capture.fit_filter_input_count;
+    pkg.metrics["fit_filter_kept_count"] = capture.fit_filter_kept_count;
+    pkg.metrics["fit_filter_rejected_count"] = capture.fit_filter_rejected_count;
+    pkg.metrics["fit_filter_sigma"] = capture.fit_filter_sigma;
+    pkg.metrics["fit_filter_threshold"] = capture.fit_filter_threshold;
+    pkg.metrics["findrect_top_points"] = capture.findrect_top_points;
+    pkg.metrics["findrect_bottom_points"] = capture.findrect_bottom_points;
+    pkg.metrics["findrect_left_points"] = capture.findrect_left_points;
+    pkg.metrics["findrect_right_points"] = capture.findrect_right_points;
+    pkg.metrics["findrect_coarse_score"] = capture.findrect_coarse_score;
+    pkg.metrics["findrect_refine_score"] = capture.findrect_refine_score;
+
+    pkg.metrics["segmentation_status_code"] = capture.segmentation_status_code;
+    pkg.metrics["segmentation_contour_count"] = capture.segmentation_contour_count;
+    pkg.metrics["segmentation_primary_area"] = capture.segmentation_primary_area;
+
+    pkg.facts["execution_mode"] = "sequential";
+    pkg.facts["algorithm_executed"] = capture.runtime_completed ? "true" : "false";
+    pkg.facts["budget_exceeded"] = capture.budget_exceeded ? "true" : "false";
+    pkg.facts["has_fit_line"] = capture.has_fit_line ? "true" : "false";
+    pkg.facts["has_fit_circle"] = capture.has_fit_circle ? "true" : "false";
+    pkg.facts["has_fit_ellipse"] = capture.has_fit_ellipse ? "true" : "false";
+    pkg.facts["has_result_rect"] = capture.has_result_rect ? "true" : "false";
+    pkg.facts["has_result_box"] = capture.has_result_box ? "true" : "false";
+    pkg.facts["has_best_result"] = capture.has_best_result ? "true" : "false";
+    pkg.facts["failure_stage"] = capture.failure_stage;
+    pkg.facts["reason"] = capture.reason;
+
+    pkg.facts["ellipse_candidate_policy"] = capture.ellipse_candidate_policy;
+    pkg.facts["ellipse_scan_geometry_policy"] = capture.ellipse_scan_geometry_policy;
+    pkg.facts["object_prefilter_requested"] = capture.object_prefilter_requested ? "true" : "false";
+    pkg.facts["object_prefilter_applied"] = capture.object_prefilter_applied ? "true" : "false";
+    pkg.facts["findrect_seed_valid"] = capture.findrect_seed_valid ? "true" : "false";
+    pkg.facts["findrect_top_valid"] = capture.findrect_top_valid ? "true" : "false";
+    pkg.facts["findrect_bottom_valid"] = capture.findrect_bottom_valid ? "true" : "false";
+    pkg.facts["findrect_left_valid"] = capture.findrect_left_valid ? "true" : "false";
+    pkg.facts["findrect_right_valid"] = capture.findrect_right_valid ? "true" : "false";
+    pkg.facts["segmentation_result_ref"] = capture.segmentation_result_ref;
+    pkg.facts["segmentation_mask_ref"] = capture.segmentation_mask_ref;
+    pkg.facts["segmentation_contour_ref"] = capture.segmentation_contour_ref;
+    pkg.facts["segmentation_overlay_ref"] = capture.segmentation_overlay_ref;
+
+    if (capture.contract_context)
+    {
+        pkg.facts["contract_pass"] = capture.contract_pass ? "true" : "false";
+        pkg.facts["contract_status"] = capture.contract_status;
+        pkg.facts["contract_conclusion"] = capture.contract_conclusion;
+    }
+
+    return pkg;
+}
+
+void WriteJsonNumberMap(
+    std::ofstream& file,
+    const std::string& key,
+    const std::map<std::string, double>& values,
+    bool trailing_comma)
+{
+    file << "  \"" << key << "\": {\n";
+    for (auto it = values.begin(); it != values.end(); ++it)
+    {
+        const auto next = std::next(it);
+        file << "    \"" << JsonEscape(it->first) << "\": " << it->second
+             << (next == values.end() ? "" : ",") << "\n";
+    }
+    file << "  }" << (trailing_comma ? "," : "") << "\n";
+}
+
+void WriteJsonStringMap(
+    std::ofstream& file,
+    const std::string& key,
+    const std::map<std::string, std::string>& values,
+    bool trailing_comma)
+{
+    file << "  \"" << key << "\": {\n";
+    for (auto it = values.begin(); it != values.end(); ++it)
+    {
+        const auto next = std::next(it);
+        file << "    \"" << JsonEscape(it->first) << "\": \""
+             << JsonEscape(it->second) << "\""
+             << (next == values.end() ? "" : ",") << "\n";
+    }
+    file << "  }" << (trailing_comma ? "," : "") << "\n";
+}
+
+void WriteJsonShapeSnapshots(
+    std::ofstream& file,
+    const std::vector<CxShapeElementSnapshot>& shapes,
+    bool trailing_comma)
+{
+    file << "  \"shapes\": [";
+    if (shapes.empty())
+    {
+        file << "]" << (trailing_comma ? "," : "") << "\n";
+        return;
+    }
+
+    for (auto it = shapes.begin(); it != shapes.end(); ++it)
+    {
+        const auto next = std::next(it);
+        const CxShapeElementSnapshot& s = *it;
+        file << "\n    {\n";
+        file << "      \"stable_ref\": \"" << JsonEscape(s.stable_ref) << "\",\n";
+        file << "      \"owner_type\": \"" << JsonEscape(s.owner_type) << "\",\n";
+        file << "      \"owner_ref\": \"" << JsonEscape(s.owner_ref) << "\",\n";
+        file << "      \"semantic_role\": \"" << JsonEscape(s.semantic_role) << "\",\n";
+        file << "      \"shape_kind\": \"" << JsonEscape(s.shape_kind) << "\",\n";
+        file << "      \"editable\": " << (s.editable ? "true" : "false") << ",\n";
+        file << "      \"result_element\": " << (s.result_element ? "true" : "false") << ",\n";
+        file << "      \"center_x\": " << s.center_x << ",\n";
+        file << "      \"center_y\": " << s.center_y << ",\n";
+        file << "      \"radius\": " << s.radius << ",\n";
+        file << "      \"radius_x\": " << s.radius_x << ",\n";
+        file << "      \"radius_y\": " << s.radius_y << ",\n";
+        file << "      \"angle_deg\": " << s.angle_deg << ",\n";
+        file << "      \"points\": [";
+        if (s.points.empty())
+        {
+            file << "]";
+        }
+        else
+        {
+            for (auto pit = s.points.begin(); pit != s.points.end(); ++pit)
+            {
+                const auto pnext = std::next(pit);
+                file << *pit << (pnext == s.points.end() ? "" : ",");
+            }
+            file << "]";
+        }
+        file << "\n    }" << (next == shapes.end() ? "" : ",");
+    }
+    file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
+}
+
 bool SaveCxScriptHeadlessSummaryJson(
     const CxScriptExecutionCapture& capture,
     const std::filesystem::path& outputPath,
@@ -537,118 +720,17 @@ bool SaveCxScriptHeadlessSummaryJson(
         return false;
     }
 
+    CxScriptResultPackage pkg = BuildCxScriptResultPackage(capture);
+
     file << "{\n";
+
     file << "  \"execution_mode\": \"sequential\",\n";
-    file << "  \"algorithm_executed\": " << (capture.runtime_completed ? "true" : "false") << ",\n";
-    file << "  \"elapsed_ms\": " << capture.elapsed_ms << ",\n";
-    file << "  \"budget_ms\": " << capture.budget_ms << ",\n";
-    file << "  \"max_steps\": " << capture.max_steps << ",\n";
-    file << "  \"max_scan_lines\": " << capture.max_scan_lines << ",\n";
-    file << "  \"max_samples\": " << capture.max_samples << ",\n";
-    file << "  \"strategy_id\": " << capture.strategy_id << ",\n";
-    file << "  \"selected_method\": " << capture.selected_method << ",\n";
-    file << "  \"selected_threshold\": " << capture.selected_threshold << ",\n";
-    file << "  \"selected_wgap\": " << capture.selected_wgap << ",\n";
-    file << "  \"selected_hgap\": " << capture.selected_hgap << ",\n";
-    file << "  \"selected_linegap\": " << capture.selected_linegap << ",\n";
-    file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << ",\n";
-    file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << ",\n";
-    file << "  \"scan_line_count\": " << capture.scan_line_count << ",\n";
-    file << "  \"sample_count\": " << capture.sample_count << ",\n";
-    file << "  \"valid_points_count\": " << capture.valid_points_count << ",\n";
-    file << "  \"has_fit_line\": " << (capture.has_fit_line ? "true" : "false") << ",\n";
-    file << "  \"has_fit_circle\": " << (capture.has_fit_circle ? "true" : "false") << ",\n";
-    file << "  \"has_fit_ellipse\": " << (capture.has_fit_ellipse ? "true" : "false") << ",\n";
-    file << "  \"has_result_rect\": " << (capture.has_result_rect ? "true" : "false") << ",\n";
-    file << "  \"circle_radius\": " << capture.circle_radius << ",\n";
-    file << "  \"ellipse_cx\": " << capture.ellipse_cx << ",\n";
-    file << "  \"ellipse_cy\": " << capture.ellipse_cy << ",\n";
-    file << "  \"ellipse_radius_x\": " << capture.ellipse_radius_x << ",\n";
-    file << "  \"ellipse_radius_y\": " << capture.ellipse_radius_y << ",\n";
-    file << "  \"ellipse_angle_deg\": " << capture.ellipse_angle_deg << ",\n";
-    file << "  \"avgdist\": " << capture.avgdist << ",\n";
-    file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
-    file << "  \"model_point_count\": " << capture.model_point_count << ",\n";
-    file << "  \"fastmatch_model_width\": " << capture.fastmatch_model_width << ",\n";
-    file << "  \"fastmatch_model_height\": " << capture.fastmatch_model_height << ",\n";
-    file << "  \"fastmatch_pattern_a_count\": " << capture.fastmatch_pattern_a_count << ",\n";
-    file << "  \"fastmatch_pattern_b_count\": " << capture.fastmatch_pattern_b_count << ",\n";
-    file << "  \"fastmatch_pattern_a_x\": " << capture.fastmatch_pattern_a_x << ",\n";
-    file << "  \"fastmatch_pattern_a_y\": " << capture.fastmatch_pattern_a_y << ",\n";
-    file << "  \"fastmatch_pattern_a_width\": " << capture.fastmatch_pattern_a_width << ",\n";
-    file << "  \"fastmatch_pattern_a_height\": " << capture.fastmatch_pattern_a_height << ",\n";
-    file << "  \"fastmatch_pattern_b_x\": " << capture.fastmatch_pattern_b_x << ",\n";
-    file << "  \"fastmatch_pattern_b_y\": " << capture.fastmatch_pattern_b_y << ",\n";
-    file << "  \"fastmatch_pattern_b_width\": " << capture.fastmatch_pattern_b_width << ",\n";
-    file << "  \"fastmatch_pattern_b_height\": " << capture.fastmatch_pattern_b_height << ",\n";
-    file << "  \"candidate_count\": " << capture.candidate_count << ",\n";
-    file << "  \"best_score\": " << capture.best_score << ",\n";
-    file << "  \"has_result_box\": " << (capture.has_result_box ? "true" : "false") << ",\n";
-    file << "  \"has_best_result\": " << (capture.has_best_result ? "true" : "false") << ",\n";
-    file << "  \"fastmatch_match_call_count\": " << capture.fastmatch_match_call_count << ",\n";
-    file << "  \"fastmatch_match_ab_call_count\": " << capture.fastmatch_match_ab_call_count << ",\n";
-    file << "  \"fastmatch_match_sample_ab_call_count\": " << capture.fastmatch_match_sample_ab_call_count << ",\n";
-    file << "  \"fastmatch_match_last_stage\": " << capture.fastmatch_match_last_stage << ",\n";
-    file << "  \"fastmatch_match_image_width\": " << capture.fastmatch_match_image_width << ",\n";
-    file << "  \"fastmatch_match_image_height\": " << capture.fastmatch_match_image_height << ",\n";
-    file << "  \"fastmatch_match_rect_x0\": " << capture.fastmatch_match_rect_x0 << ",\n";
-    file << "  \"fastmatch_match_rect_y0\": " << capture.fastmatch_match_rect_y0 << ",\n";
-    file << "  \"fastmatch_match_rect_x1\": " << capture.fastmatch_match_rect_x1 << ",\n";
-    file << "  \"fastmatch_match_rect_y1\": " << capture.fastmatch_match_rect_y1 << ",\n";
-    file << "  \"fastmatch_raw_probe_count\": " << capture.fastmatch_raw_probe_count << ",\n";
-    file << "  \"fastmatch_raw_threshold_hit_count\": " << capture.fastmatch_raw_threshold_hit_count << ",\n";
-    file << "  \"fastmatch_result_to_list_count\": " << capture.fastmatch_result_to_list_count << ",\n";
-    file << "  \"fastmatch_candidate_insert_count\": " << capture.fastmatch_candidate_insert_count << ",\n";
-    file << "  \"fastmatch_candidate_replace_count\": " << capture.fastmatch_candidate_replace_count << ",\n";
-    file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
-    file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
-    file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
-    file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
-    file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
-    file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
-    file << "  \"fit_filter_input_count\": " << capture.fit_filter_input_count << ",\n";
-    file << "  \"fit_filter_kept_count\": " << capture.fit_filter_kept_count << ",\n";
-    file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
-    file << "  \"fit_filter_sigma\": " << capture.fit_filter_sigma << ",\n";
-    file << "  \"fit_filter_threshold\": " << capture.fit_filter_threshold << ",\n";
-    file << "  \"findrect_seed_valid\": " << (capture.findrect_seed_valid ? "true" : "false") << ",\n";
-    file << "  \"findrect_top_valid\": " << (capture.findrect_top_valid ? "true" : "false") << ",\n";
-    file << "  \"findrect_bottom_valid\": " << (capture.findrect_bottom_valid ? "true" : "false") << ",\n";
-    file << "  \"findrect_left_valid\": " << (capture.findrect_left_valid ? "true" : "false") << ",\n";
-    file << "  \"findrect_right_valid\": " << (capture.findrect_right_valid ? "true" : "false") << ",\n";
-    file << "  \"findrect_top_points\": " << capture.findrect_top_points << ",\n";
-    file << "  \"findrect_bottom_points\": " << capture.findrect_bottom_points << ",\n";
-    file << "  \"findrect_left_points\": " << capture.findrect_left_points << ",\n";
-    file << "  \"findrect_right_points\": " << capture.findrect_right_points << ",\n";
-    file << "  \"findrect_coarse_score\": " << capture.findrect_coarse_score << ",\n";
-    file << "  \"findrect_refine_score\": " << capture.findrect_refine_score << ",\n";
-    file << "  \"segmentation_status_code\": " << capture.segmentation_status_code << ",\n";
-    file << "  \"segmentation_contour_count\": " << capture.segmentation_contour_count << ",\n";
-    file << "  \"segmentation_primary_area\": " << capture.segmentation_primary_area << ",\n";
-    file << "  \"segmentation_result_ref\": \"" << JsonEscape(capture.segmentation_result_ref) << "\",\n";
-    file << "  \"segmentation_mask_ref\": \"" << JsonEscape(capture.segmentation_mask_ref) << "\",\n";
-    file << "  \"segmentation_contour_ref\": \"" << JsonEscape(capture.segmentation_contour_ref) << "\",\n";
-    file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
-    file << "  \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
-    file << "  \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
-    file << "  \"result_overlay_changed_pixels\": " << capture.result_overlay_changed_pixels << ",\n";
-    file << "  \"runtime_globals\": {\n";
-    for (auto it = capture.runtime_globals.begin(); it != capture.runtime_globals.end(); ++it)
-    {
-        const auto next = std::next(it);
-        file << "    \"" << JsonEscape(it->first) << "\": " << it->second
-             << (next == capture.runtime_globals.end() ? "" : ",") << "\n";
-    }
-    file << "  },\n";
-    file << "  \"failure_stage\": \"" << JsonEscape(capture.failure_stage) << "\",\n";
-    file << "  \"reason\": \"" << JsonEscape(capture.reason) << "\""
-         << (capture.contract_context ? "," : "") << "\n";
-    if (capture.contract_context)
-    {
-        file << "  \"contract_pass\": " << (capture.contract_pass ? "true" : "false") << ",\n";
-        file << "  \"contract_status\": \"" << JsonEscape(capture.contract_status) << "\",\n";
-        file << "  \"contract_conclusion\": \"" << JsonEscape(capture.contract_conclusion) << "\"\n";
-    }
+
+    WriteJsonStringMap(file, "facts", pkg.facts, true);
+    WriteJsonNumberMap(file, "metrics", pkg.metrics, true);
+    WriteJsonNumberMap(file, "runtime_globals", capture.runtime_globals, true);
+    WriteJsonShapeSnapshots(file, pkg.shapes, false);
+
     file << "}\n";
 
     file.flush();
@@ -699,6 +781,8 @@ bool ParseCxScriptHeadlessArgs(
             options.template_image_path = argv[++i];
         else if (arg == "--script" && i + 1 < argc)
             options.script_path = argv[++i];
+        else if (arg == "--globals" && i + 1 < argc)
+            options.globals_path = argv[++i];
         else if (arg == "--case-name" && i + 1 < argc)
             options.case_name = argv[++i];
         else if (arg == "--out" && i + 1 < argc)

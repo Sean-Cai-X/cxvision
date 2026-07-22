@@ -53,6 +53,29 @@ struct CxScriptToolResultCapture
     double ellipse_radius_y = 0.0;
     double ellipse_angle_deg = 0.0;
 
+    int ellipse_scan_candidate_lines = 0;
+    int ellipse_scan_total_candidates = 0;
+    int ellipse_scan_accepted_points_before_gate = 0;
+    double ellipse_accepted_min_boundary_ratio = 0.0;
+    double ellipse_accepted_max_boundary_ratio = 0.0;
+    double ellipse_accepted_avg_boundary_ratio = 0.0;
+    std::string ellipse_candidate_policy;
+
+    int ellipse_scan_lines_outside_roi_count = 0;
+    int ellipse_scan_lines_cross_outside_ellipse_count = 0;
+    double ellipse_scan_endpoint_norm_min = 0.0;
+    double ellipse_scan_endpoint_norm_avg = 0.0;
+    double ellipse_scan_endpoint_norm_max = 0.0;
+    int ellipse_accepted_points_outside_ellipse_count = 0;
+    double ellipse_accepted_point_norm_min = 0.0;
+    double ellipse_accepted_point_norm_avg = 0.0;
+    double ellipse_accepted_point_norm_max = 0.0;
+    int ellipse_rejected_boundary_band_candidate_count = 0;
+    double ellipse_rejected_boundary_band_norm_min = 0.0;
+    double ellipse_rejected_boundary_band_norm_avg = 0.0;
+    double ellipse_rejected_boundary_band_norm_max = 0.0;
+    std::string ellipse_scan_geometry_policy;
+
     int result_rect_count = 0;
 
     int model_point_count = 0;

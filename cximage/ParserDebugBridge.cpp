@@ -6,6 +6,8 @@
 #include "CircleRingGauge.h"
 #include "FastMatchDiagnostic.h"
 #include "FastMatch.h"
+#include "CxCrashLogHandler.h"
+#include "CxUnifiedLog.h"
 
 #if defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
 #include "cxscript_debug_embedded_runner.h"
@@ -38,10 +40,15 @@ bool ParserDebugBridge::RunScript(const std::string& scriptText)
 {
   myLastError.clear();
   if (myOwner == nullptr || scriptText.empty()) return false;
+  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:reset_runtime");
+  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "reset_runtime");
   ResetRuntime();
+  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:rebind_globals");
+  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "rebind_globals");
   if (!RebindGlobalInputs()) return false;
   if (scriptText.find("global_matInput") != std::string::npos)
   {
+    SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:verify_global_matInput");
     Image* inputImage = QueryImage("global_matInput");
     if (inputImage == nullptr)
     {
@@ -54,7 +61,10 @@ bool ParserDebugBridge::RunScript(const std::string& scriptText)
       return false;
     }
   }
+  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:prepare_script");
   const std::string prepared = PrepareScript(scriptText);
+  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:execute_script");
+  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "execute_script");
   return myOwner->ExecuteScript(prepared, myLastError);
 }
 
@@ -212,17 +222,33 @@ std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) cons
   return prepared;
 }
 
-bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
+bool ParserDebugBridge::StageGlobalMatInput(const cv::Mat& image)
 {
   if (image.empty()) return false;
   myGlobalMatInput = image.clone();
+  return !myGlobalMatInput.empty();
+}
+
+bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
+{
+  if (!StageGlobalMatInput(image)) return false;
+  return BindStagedGlobalMatInput();
+}
+
+bool ParserDebugBridge::BindStagedGlobalMatInput()
+{
+  if (myGlobalMatInput.empty()) return false;
   if (myOwner == nullptr) return false;
+  SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:query");
   if (QueryImage("global_matInput") == nullptr)
   {
+    SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:declare");
     if (!myOwner->Compile("Image global_matInput;")) return false;
   }
+  SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:get_image");
   Image* runtimeImage = QueryImage("global_matInput");
   if (runtimeImage == nullptr) return false;
+  SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:copy");
   runtimeImage->copyFromMat(myGlobalMatInput);
   return true;
 }
@@ -248,7 +274,7 @@ bool ParserDebugBridge::RebindGlobalInputs()
 
   if (myGlobalMatInput.empty())
     return true;
-  if (!SetGlobalMatInput(myGlobalMatInput))
+  if (!BindStagedGlobalMatInput())
   {
     myLastError = "failed to bind global_matInput image";
     return false;

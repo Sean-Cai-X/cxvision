@@ -129,6 +129,7 @@ public:
   bool SetGlobalDouble(const std::string& name, double value);
   bool SetGlobalString(const std::string& name, const std::string& value);
   bool ApplyStatement(const std::string& statement);
+  bool StageGlobalMatInput(const cv::Mat& image);
   bool SetGlobalMatInput(const cv::Mat& image);
   void ClearGlobalInputs();
   bool HasGlobalMatInput() const { return !myGlobalMatInput.empty(); }
@@ -148,6 +149,7 @@ public:
 private:
   std::string PrepareScript(const std::string& scriptText) const;
   bool RebindGlobalInputs();
+  bool BindStagedGlobalMatInput();
 
   CxParserRuntimeOwner* myOwner = nullptr;
   cv::Mat myGlobalMatInput;

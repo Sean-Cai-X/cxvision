@@ -1,9 +1,11 @@
 #include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
+#include "ManualConsoleUtils.h"
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
 #include "CxCrashLogHandler.h"
+#include "CxUnifiedLog.h"
 #include <glad/glad.h>
 
 #include "occtinclude.h"
@@ -54,6 +56,7 @@
 #endif
 
 #include <math.h>
+#include <cmath>
 #include <vector>
 #include <algorithm>
 
@@ -494,20 +497,43 @@ void ViewController::run()
 {
     int iw = 2048 / 2;
     int ih = 1536 / 2;
+  SetCxCrashBreadcrumb("ViewController::run:begin");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=begin");
+  SetCxCrashBreadcrumb("ViewController::run:initWindow");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initWindow");
   initWindow (iw, ih, "glfw occt image ai");
+  SetCxCrashBreadcrumb("ViewController::run:initViewer");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initViewer");
   initViewer(iw,ih);
+  SetCxCrashBreadcrumb("ViewController::run:initDemoScene");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initDemoScene");
   initDemoScene();
 
 #if CXCORE_ENABLE_VIEWCONTROLLER_CUDA
   InitializeTextureAndPBO(2048, 1536);
 #endif
+  SetCxCrashBreadcrumb("ViewController::run:Imgui_OpenCV_Ini0");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=Imgui_OpenCV_Ini0");
   Imgui_OpenCV_Ini0();
+  SetCxCrashBreadcrumb("ViewController::run:initScriptCatalog");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initScriptCatalog");
   initScriptCatalog();
+  SetCxCrashBreadcrumb("ViewController::run:initManualStateTestConsole");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initManualStateTestConsole");
   initManualStateTestConsole();
+  SetCxCrashBreadcrumb("ViewController::run:initImageEvidenceLayer");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=initImageEvidenceLayer");
   initImageEvidenceLayer();
+  SetCxCrashBreadcrumb("ViewController::run:semanticFlowInitialize");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=semanticFlowInitialize");
   m_semanticFlowGraph.Initialize(findRepositoryRoot().generic_string());
+  SetCxCrashBreadcrumb("ViewController::run:mainloop");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=mainloop");
   mainloop();
+  SetCxCrashBreadcrumb("ViewController::run:cleanup");
+  CXLOG_INFO("ViewController", "run_stage", "running", "stage=cleanup");
   cleanup();
+  CXLOG_INFO("ViewController", "run_stage", "finished", "stage=end");
 }
 
 void ViewController::initImGui()
@@ -599,6 +625,320 @@ bool ViewController::GetSelectedCatalogScript(std::string& outPath,
   return !outPath.empty();
 }
 
+static SemanticEvidenceBinding MakeSemanticEvidenceBinding(
+    const CxEvidenceSelectionSnapshot& snapshot)
+{
+    SemanticEvidenceBinding binding;
+    binding.valid = snapshot.valid;
+
+    binding.case_id = snapshot.case_id;
+
+    binding.script_id = snapshot.script_id;
+    binding.script_path = snapshot.script_path;
+
+    binding.image_id = snapshot.image_id;
+    binding.image_path = snapshot.image_path;
+
+    binding.target_id = snapshot.target_id;
+    binding.tool = snapshot.tool;
+
+    binding.parameter_profile_id = snapshot.parameter_profile_id;
+    binding.parameter_summary = snapshot.parameter_summary;
+
+    binding.status = snapshot.status;
+    binding.reason = snapshot.reason;
+    binding.source = snapshot.source.empty()
+        ? "evidence_selection"
+        : snapshot.source;
+
+    return binding;
+}
+
+static CxEvidenceSelectionSnapshot MakeEvidenceSelectionSnapshot(
+    const SemanticEvidenceBinding& binding)
+{
+    CxEvidenceSelectionSnapshot snapshot;
+    snapshot.valid = binding.valid;
+
+    snapshot.group_index = -1;
+    snapshot.thumb_index = -1;
+
+    snapshot.case_id = binding.case_id;
+
+    snapshot.script_id = binding.script_id;
+    snapshot.script_path = binding.script_path;
+
+    snapshot.image_id = binding.image_id;
+    snapshot.image_path = binding.image_path;
+
+    snapshot.target_id = binding.target_id;
+    snapshot.tool = binding.tool;
+
+    snapshot.parameter_profile_id = binding.parameter_profile_id;
+    snapshot.parameter_summary = binding.parameter_summary;
+
+    snapshot.status = binding.status;
+    snapshot.reason = binding.reason;
+    snapshot.source = binding.source.empty()
+        ? "semantic_node_evidence"
+        : binding.source;
+
+    return snapshot;
+}
+
+bool ViewController::LoadSemanticEvidenceBindingToManualConsole(
+    const std::string& nodeId,
+    const SemanticEvidenceBinding& binding,
+    bool loadImageToView,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (!binding.valid)
+    {
+        reason = "semantic evidence binding is invalid";
+        return false;
+    }
+
+    if (binding.script_path.empty())
+    {
+        reason = "semantic evidence binding has empty script_path";
+        return false;
+    }
+
+    CxEvidenceSelectionSnapshot snapshot =
+        MakeEvidenceSelectionSnapshot(binding);
+
+    if (!ApplyEvidenceSelectionSnapshotToManualContext(
+            snapshot,
+            loadImageToView,
+            reason))
+    {
+        return false;
+    }
+
+    m_manualTest.bound_state_node_id = nodeId;
+    m_manualTest.bound_state_script_path = binding.script_path;
+    m_manualTest.active_script_case_name = nodeId;
+    m_manualTest.active_script_case_path = binding.script_path;
+    m_manualTest.active_script_case_purpose = "semantic_evidence_binding";
+
+    m_manualTest.debug_status = loadImageToView
+        ? "SEMANTIC_EVIDENCE_LOADED_WITH_IMAGE"
+        : "SEMANTIC_EVIDENCE_LOADED";
+    m_manualTest.debug_reason =
+        "node=" + nodeId +
+        " script=" + binding.script_id +
+        " image=" + binding.image_id +
+        " target=" + binding.target_id +
+        " param=" + binding.parameter_summary;
+
+    reason = m_manualTest.debug_reason;
+    return true;
+}
+
+bool ViewController::BuildSemanticExecutionContext(
+    const SemanticFlowAction& action,
+    SemanticExecutionContext& out,
+    std::string& reason) const
+{
+    reason.clear();
+    out = SemanticExecutionContext{};
+
+    out.node_id = action.node_id;
+
+    if (action.has_evidence_binding && action.evidence_binding.valid)
+    {
+        const SemanticEvidenceBinding& binding = action.evidence_binding;
+
+        if (binding.script_path.empty())
+        {
+            reason = "evidence execution context has empty script_path";
+            return false;
+        }
+
+        out.valid = true;
+        out.from_evidence = true;
+
+        out.case_id = binding.case_id;
+        out.script_id = binding.script_id;
+        out.script_path = binding.script_path;
+        out.image_id = binding.image_id;
+        out.image_path = binding.image_path;
+        out.target_id = binding.target_id;
+        out.tool = binding.tool;
+        out.parameter_profile_id = binding.parameter_profile_id;
+        out.parameter_summary = binding.parameter_summary;
+
+        out.reason =
+            "execution context from semantic evidence: script=" +
+            out.script_id + " image=" + out.image_id +
+            " target=" + out.target_id +
+            " param=" + out.parameter_summary;
+
+        return true;
+    }
+
+    if (action.script_path.empty())
+    {
+        reason = "legacy execution context has empty script_path";
+        return false;
+    }
+
+    out.valid = true;
+    out.from_evidence = false;
+    out.script_path = action.script_path;
+    out.script_id = action.script_path;
+    out.reason = "execution context from legacy node script";
+
+    return true;
+}
+
+bool ViewController::ApplySemanticExecutionContextBeforeRun(
+    const SemanticExecutionContext& context,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (!context.valid)
+    {
+        reason = "invalid semantic execution context";
+        return false;
+    }
+
+    if (context.script_path.empty())
+    {
+        reason = "semantic execution context script_path is empty";
+        return false;
+    }
+
+    if (context.from_evidence)
+    {
+        const std::string previousImagePath = m_manualTest.image_file_path;
+
+        m_manualTest.active_case_id = context.case_id;
+        m_manualTest.active_image_id = context.image_id;
+        m_manualTest.active_target_id = context.target_id;
+
+        m_manualTest.loaded_script_path = context.script_path;
+        m_manualTest.bound_state_node_id = context.node_id;
+        m_manualTest.bound_state_script_path = context.script_path;
+        m_manualTest.active_script_case_name = context.node_id;
+        m_manualTest.active_script_case_path = context.script_path;
+        m_manualTest.active_script_case_purpose = "semantic_evidence_run";
+
+        SeedDefaultManualGlobals(m_manualTest, context.script_path);
+
+        if (!context.image_path.empty())
+        {
+            const bool needLoadImage =
+                m_imageViewImage.empty() ||
+                previousImagePath != context.image_path;
+
+            if (needLoadImage)
+            {
+                if (!LoadImageIntoImageView(context.image_path, reason))
+                    return false;
+            }
+
+            m_manualTest.image_file_path = context.image_path;
+        }
+
+        std::string paramReason;
+        if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
+                context.parameter_summary,
+                paramReason))
+        {
+            m_manualTest.debug_reason =
+                "parameter summary not applied: " + paramReason;
+        }
+
+        m_manualTest.debug_status = "SEMANTIC_EXECUTION_CONTEXT_READY";
+        m_manualTest.debug_reason = context.reason;
+    }
+    else
+    {
+        m_manualTest.loaded_script_path = context.script_path;
+        m_manualTest.bound_state_node_id = context.node_id;
+        m_manualTest.bound_state_script_path = context.script_path;
+        m_manualTest.debug_status = "SEMANTIC_LEGACY_EXECUTION_CONTEXT_READY";
+        m_manualTest.debug_reason = context.reason;
+    }
+
+    reason = context.reason;
+    return true;
+}
+
+bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
+    const std::string& parameterSummary,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (parameterSummary.empty() || parameterSummary == "-")
+    {
+        reason = "parameter summary is empty";
+        return false;
+    }
+
+    auto applyIntToken = [&](const std::string& key,
+                             const std::string& globalName) -> bool
+    {
+        const std::string pattern = key + "=";
+        const std::size_t pos = parameterSummary.find(pattern);
+        if (pos == std::string::npos)
+            return false;
+
+        std::size_t begin = pos + pattern.size();
+        std::size_t end = begin;
+        while (end < parameterSummary.size() &&
+               (std::isdigit(static_cast<unsigned char>(parameterSummary[end])) ||
+                parameterSummary[end] == '-' ||
+                parameterSummary[end] == '+'))
+        {
+            ++end;
+        }
+
+        if (end == begin)
+            return false;
+
+        int value = 0;
+        try
+        {
+            value = std::stoi(parameterSummary.substr(begin, end - begin));
+        }
+        catch (...)
+        {
+            return false;
+        }
+
+        m_manualTest.runtime_int_vars[globalName] = value;
+        return true;
+    };
+
+    int applied = 0;
+
+    applied += applyIntToken("method", "global_method") ? 1 : 0;
+    applied += applyIntToken("threshold", "global_threshold") ? 1 : 0;
+    applied += applyIntToken("wgap", "global_wgap") ? 1 : 0;
+    applied += applyIntToken("hgap", "global_hgap") ? 1 : 0;
+    applied += applyIntToken("gap", "global_gap") ? 1 : 0;
+    applied += applyIntToken("linegap", "global_linegap") ? 1 : 0;
+    applied += applyIntToken("filterprofile", "global_filterprofile") ? 1 : 0;
+    applied += applyIntToken("tool_half_width", "global_tool_half_width") ? 1 : 0;
+
+    if (applied == 0)
+    {
+        reason = "no supported key=value token found in parameter summary: " +
+                 parameterSummary;
+        return false;
+    }
+
+    reason = "applied " + std::to_string(applied) +
+             " runtime globals from parameter summary";
+    return true;
+}
+
 void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
 {
   if (action.type == SemanticFlowActionType::None)
@@ -606,76 +946,224 @@ void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
 
   if (action.type == SemanticFlowActionType::BindCatalogScriptToSelectedNode)
   {
+    CxEvidenceSelectionSnapshot snapshot;
+    std::string evidenceReason;
+
+    if (GetSelectedEvidenceSnapshot(snapshot, evidenceReason))
+    {
+        SemanticEvidenceBinding binding =
+            MakeSemanticEvidenceBinding(snapshot);
+
+        std::string reason;
+        if (!m_semanticFlowGraph.BindEvidenceToNode(
+                action.node_index,
+                binding,
+                reason))
+        {
+            m_scriptResult.source = "semantic_flow";
+            m_scriptResult.status = "PENDING";
+            m_scriptResult.reason = reason;
+            m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
+            return;
+        }
+
+        m_scriptResult.source = "semantic_flow";
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.script_path = binding.script_path;
+        m_scriptResult.image_ref = binding.image_path;
+        m_scriptResult.reason =
+            "bound evidence to semantic node: script=" + binding.script_id +
+            " image=" + binding.image_id +
+            " target=" + binding.target_id +
+            " param=" + binding.parameter_summary;
+        m_scriptResult.runtime_fillback_status =
+            "semantic_node_bound_from_evidence";
+
+        m_manualTest.debug_status = "SEMANTIC_EVIDENCE_BOUND";
+        m_manualTest.debug_reason = m_scriptResult.reason;
+
+        std::string applyReason;
+        if (!ApplyEvidenceSelectionSnapshotToManualContext(
+                snapshot,
+                false,
+                applyReason))
+        {
+            m_manualTest.debug_status = "EVIDENCE_APPLY_FAIL";
+            m_manualTest.debug_reason = applyReason;
+        }
+
+        return;
+    }
+
     std::string scriptPath;
     std::string scriptName;
 
     if (!GetSelectedCatalogScript(scriptPath, scriptName))
     {
-      m_scriptResult.source = "semantic_flow";
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = "no Script Catalog item selected";
-      m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
-      return;
+        m_scriptResult.source = "semantic_flow";
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason =
+            "no selected Evidence row and no legacy Script Catalog item selected: " +
+            evidenceReason;
+        m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
+        return;
     }
 
     std::string reason;
-    if (!m_semanticFlowGraph.BindScriptToNode(action.node_index, scriptPath, scriptName, reason))
+    if (!m_semanticFlowGraph.BindScriptToNode(
+            action.node_index,
+            scriptPath,
+            scriptName,
+            reason))
     {
-      m_scriptResult.source = "semantic_flow";
-      m_scriptResult.status = "PENDING";
-      m_scriptResult.reason = reason;
-      m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
-      return;
+        m_scriptResult.source = "semantic_flow";
+        m_scriptResult.status = "PENDING";
+        m_scriptResult.reason = reason;
+        m_scriptResult.runtime_fillback_status = "semantic_bind_blocked";
+        return;
     }
 
     m_scriptResult.source = "semantic_flow";
     m_scriptResult.status = "PENDING";
     m_scriptResult.script_path = scriptPath;
-    m_scriptResult.reason = reason;
-    m_scriptResult.runtime_fillback_status = "semantic_node_bound_from_catalog";
+    m_scriptResult.reason =
+        "semantic node bound from legacy catalog fallback: " + reason;
+    m_scriptResult.runtime_fillback_status =
+        "semantic_node_bound_from_catalog_fallback";
     return;
   }
 
   if (action.type == SemanticFlowActionType::LoadBoundScript)
   {
     std::string reason;
-    const bool loaded = LoadBoundStateToManualConsole(
-      action.node_id, action.script_path, reason);
+    bool loaded = false;
+
+    if (action.has_evidence_binding && action.evidence_binding.valid)
+    {
+        loaded = LoadSemanticEvidenceBindingToManualConsole(
+            action.node_id,
+            action.evidence_binding,
+            true,
+            reason);
+    }
+    else
+    {
+        loaded = LoadBoundStateToManualConsole(
+            action.node_id,
+            action.script_path,
+            reason);
+    }
 
     m_scriptResult.source = "semantic_flow";
     m_scriptResult.status = loaded ? "PENDING" : "FAIL";
-    m_scriptResult.script_path = action.script_path;
+    m_scriptResult.script_path = action.has_evidence_binding
+        ? action.evidence_binding.script_path
+        : action.script_path;
+    m_scriptResult.image_ref = action.has_evidence_binding
+        ? action.evidence_binding.image_path
+        : "";
     m_scriptResult.reason = reason;
     m_scriptResult.runtime_fillback_status = loaded
-      ? "semantic_node_loaded"
+      ? (action.has_evidence_binding
+          ? "semantic_evidence_node_loaded"
+          : "semantic_node_loaded")
       : "semantic_node_load_failed";
     return;
   }
 
   if (action.type == SemanticFlowActionType::RunBoundScript)
   {
-    std::string loadReason;
-    if (!LoadBoundStateToManualConsole(
-          action.node_id, action.script_path, loadReason))
+    SemanticExecutionContext execContext;
+    std::string contextReason;
+
+    if (!BuildSemanticExecutionContext(
+            action,
+            execContext,
+            contextReason))
     {
-      m_scriptResult.source = "semantic_flow";
-      m_scriptResult.status = "FAIL";
-      m_scriptResult.script_path = action.script_path;
-      m_scriptResult.reason = loadReason;
-      m_scriptResult.runtime_fillback_status = "semantic_node_load_failed";
-      return;
+        m_scriptResult.source = "semantic_flow";
+        m_scriptResult.status = "FAIL";
+        m_scriptResult.script_path = action.script_path;
+        m_scriptResult.reason = contextReason;
+        m_scriptResult.runtime_fillback_status = "semantic_execution_context_failed";
+        return;
     }
 
-    m_scriptResult = RunCxScript(action.script_path);
-    RefreshRuntimeObjectTable("Flow Run",
-      m_scriptResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
-    m_semanticFlowGraph.ApplyScriptResult(action.node_index,
-                                          m_scriptResult.status,
-                                          m_scriptResult.result_ref,
-                                          m_scriptResult.evidence_ref,
-                                          m_scriptResult.issue_entry_ref,
-                                          m_scriptResult.reason);
-    m_scriptResult.runtime_fillback_status = "semantic_bound_script_run_requested";
+    if (!ApplySemanticExecutionContextBeforeRun(
+            execContext,
+            contextReason))
+    {
+        m_scriptResult.source = "semantic_flow";
+        m_scriptResult.status = "FAIL";
+        m_scriptResult.script_path = execContext.script_path;
+        m_scriptResult.reason = contextReason;
+        m_scriptResult.runtime_fillback_status = "semantic_execution_context_apply_failed";
+        return;
+    }
+
+    m_scriptResult = RunCxScript(execContext.script_path);
+
+    m_scriptResult.source = "semantic_flow";
+    m_scriptResult.script_path = execContext.script_path;
+
+    if (execContext.from_evidence)
+    {
+        m_scriptResult.image_ref = execContext.image_path;
+        m_scriptResult.reason =
+            m_scriptResult.reason +
+            " | evidence_context: case=" + execContext.case_id +
+            " image=" + execContext.image_id +
+            " target=" + execContext.target_id +
+            " param=" + execContext.parameter_summary;
+        m_scriptResult.runtime_fillback_status =
+            "semantic_evidence_bound_script_run_requested";
+    }
+    else
+    {
+        m_scriptResult.runtime_fillback_status =
+            "semantic_bound_script_run_requested";
+    }
+
+    m_scriptResult.log_lines.push_back("semantic execution context: " + execContext.reason);
+
+    RefreshRuntimeObjectTable(
+        "Flow Run",
+        m_scriptResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
+
+    m_scriptResult.log_lines.push_back(
+        "after RefreshRuntimeObjectTable: runtime_objects=" +
+        std::to_string(m_manualTest.runtime_objects.size()) +
+        " result_status=" + m_manualTest.current_result_ref.status +
+        " result_source=" + m_manualTest.current_result_ref.source_object);
+
+    if (m_manualTest.runtime_objects.empty())
+    {
+        m_manualTest.debug_status = "SEMANTIC_RUN_NO_RUNTIME_OBJECTS";
+        m_manualTest.debug_reason =
+            "script executed but no Findline/Findcircle/Findellipse runtime object was queried";
+    }
+    else if (m_manualTest.current_result_ref.source_object.empty())
+    {
+        m_manualTest.debug_status = "SEMANTIC_RUN_NO_RESULT_REF";
+        m_manualTest.debug_reason =
+            "runtime objects exist but no result ref was produced";
+    }
+    else
+    {
+        m_manualTest.debug_status = "SEMANTIC_RUN_RESULT_AVAILABLE";
+        m_manualTest.debug_reason =
+            "result from " + m_manualTest.current_result_ref.source_object +
+            " status=" + m_manualTest.current_result_ref.status;
+    }
+
+    m_semanticFlowGraph.ApplyScriptResult(
+        action.node_index,
+        m_scriptResult.status,
+        m_scriptResult.result_ref,
+        m_scriptResult.evidence_ref,
+        m_scriptResult.issue_entry_ref,
+        m_scriptResult.reason);
+
     return;
   }
 }
@@ -750,12 +1238,16 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
   result.status = ran ? "PENDING" : "BLOCKED";
   result.reason = ran ?
     "parser runtime executed; runtime objects require query; no PASS inferred" :
-    (imageBound ? "parser runtime rejected script" :
+    (imageBound ? ("parser runtime rejected script: " +
+                   m_parserDebugBridge.LastError()) :
                   "no Image View/default image available for global_matInput");
   result.runtime_fillback_status = ran ? "runtime_objects_queried" : "not_started";
   result.log_lines.push_back(ran ?
     "Script executed through ParserDebugBridge." :
     "ParserDebugBridge execution failed.");
+  if (!ran && imageBound)
+    result.log_lines.push_back("ParserDebugBridge error: " +
+                               m_parserDebugBridge.LastError());
   return result;
 }
 
@@ -840,7 +1332,10 @@ void ViewController::drawScriptAcceptancePanels()
   const float leftWidth = std::max(260.0f, displaySize.x * 0.28f);
   const float rightWidth = std::max(300.0f, displaySize.x * 0.30f);
   const float middleWidth = std::max(280.0f, displaySize.x - leftWidth - rightWidth - margin * 4.0f);
-  const float catalogHeight = contentHeight * 0.55f;
+  const float catalogHeight =
+    (m_evidenceChainUiSection == 2)
+        ? contentHeight * 0.78f
+        : contentHeight * 0.55f;
   const float runHeight = 155.0f;
   const float middleX = margin * 2.0f + leftWidth;
   const float rightX = middleX + middleWidth + margin;
@@ -911,6 +1406,20 @@ void ViewController::drawScriptAcceptancePanels()
         {
           m_manualTest.active_image_id = item.image_id;
           m_manualTest.image_file_path = item.image_path;
+          if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+          {
+            std::string reason;
+            if (!LoadImageIntoImageView(item.image_path, reason))
+            {
+              m_manualTest.debug_status = "LOAD_IMAGE_FAIL";
+              m_manualTest.debug_reason = reason;
+            }
+            else
+            {
+              m_manualTest.debug_status = "IMAGE_VIEW_LOADED";
+              m_manualTest.debug_reason = "double clicked image set item: " + item.image_path;
+            }
+          }
         }
         ImGui::TextDisabled("%s | %s", item.level.c_str(), item.status.c_str());
         ImGui::PopID();
@@ -930,11 +1439,41 @@ void ViewController::drawScriptAcceptancePanels()
   else if (m_evidenceChainUiSection == 2)
   {
     ImGui::TextUnformatted("Evidence / 脚本 + 参数 + 图片");
+
     EnsureCxScriptWorkbenchAssetsLoaded();
+
+    ImGui::TextUnformatted("Trace Binding / 脚本 + 图片 + 参数");
     DrawScriptEvidenceThumbnailRailByGroup();
+
+    {
+        const CxEvidenceSelectionSnapshot& sel =
+            m_manualTest.current_evidence_selection;
+
+        ImGui::Separator();
+        ImGui::Text("Current Evidence Selection:");
+        ImGui::Text("valid=%d group=%d thumb=%d",
+                    sel.valid ? 1 : 0,
+                    sel.group_index,
+                    sel.thumb_index);
+        ImGui::Text("script=%s", sel.script_id.empty() ? "-" : sel.script_id.c_str());
+        ImGui::Text("image=%s", sel.image_id.empty() ? "-" : sel.image_id.c_str());
+        ImGui::Text("target=%s", sel.target_id.empty() ? "-" : sel.target_id.c_str());
+        ImGui::Text("param=%s", sel.parameter_summary.empty() ? "-" : sel.parameter_summary.c_str());
+    }
+
+    ImGui::Separator();
+    ImGui::Text("thumb_groups=%d",
+        static_cast<int>(m_manualTest.script_evidence_groups.size()));
+    ImGui::Text("evidence_items=%d catalog_entries=%d script_catalog=%d image_manifest=%d",
+        static_cast<int>(m_manualTest.evidence_items.size()),
+        static_cast<int>(m_manualTest.catalog_entries.size()),
+        static_cast<int>(m_scriptCatalog.size()),
+        static_cast<int>(m_manualTest.image_manifest_items.size()));
+
     ImGui::Separator();
     ImGui::Checkbox("Show all catalog scripts", &m_showAllScripts);
-    if (ImGui::CollapsingHeader("CxScript Templates", ImGuiTreeNodeFlags_DefaultOpen))
+
+    if (ImGui::CollapsingHeader("Legacy CxScript File List / 调试用旧列表"))
     {
       for (std::size_t i = 0; i < m_scriptCatalog.size(); ++i)
       {
@@ -1155,12 +1694,27 @@ void ViewController::drawScriptAcceptancePanels()
 
         // Layer 3: Shape Elements from ImageAnnotationLayer
         {
-            std::vector<const CxShapeElement*> shapeElements;
-            m_annotationLayer.EnumerateVisibleShapes(shapeElements);
-
-            for (const CxShapeElement* element : shapeElements)
+            std::vector<std::string> visibleShapeRefs;
+            visibleShapeRefs.reserve(m_annotationLayer.ShapeElements().size());
+            for (const CxShapeElement& element : m_annotationLayer.ShapeElements())
             {
-                DrawShapeElementOnImageView(*element, drawList);
+                if (element.visible && element.shape)
+                    visibleShapeRefs.push_back(element.stable_ref);
+            }
+
+            for (const std::string& ref : visibleShapeRefs)
+            {
+                const CxShapeElement* element = nullptr;
+                for (const CxShapeElement& candidate : m_annotationLayer.ShapeElements())
+                {
+                    if (candidate.stable_ref == ref)
+                    {
+                        element = &candidate;
+                        break;
+                    }
+                }
+                if (element != nullptr)
+                    DrawShapeElementOnImageView(*element, drawList);
             }
         }
 
@@ -1228,8 +1782,31 @@ void ViewController::drawScriptAcceptancePanels()
   else ImGui::TextDisabled("Selected: none");
   if (ImGui::Button("Run Selected Script") && m_selectedScript >= 0)
   {
+    const ScriptCatalogEntry& selectedEntry =
+      m_scriptCatalog[static_cast<std::size_t>(m_selectedScript)];
+
+    std::string selectedText;
+    if (ReadTextFile(selectedEntry.path, selectedText))
+    {
+      m_manualTest.editor_text = selectedText;
+      m_manualTest.loaded_script_path = selectedEntry.path;
+      m_manualTest.script_file_path = selectedEntry.path;
+      m_manualTest.editor_source = "run_control_selected_script";
+      m_manualTest.editor_dirty = false;
+      m_manualTest.active_script_case_name = selectedEntry.name;
+      m_manualTest.active_script_case_path = selectedEntry.path;
+      m_manualTest.active_script_case_purpose = "run_control_selected_script";
+      SeedDefaultManualGlobals(m_manualTest, selectedEntry.path);
+    }
+    else
+    {
+      m_manualTest.debug_status = "RUN_SELECTED_SCRIPT_LOAD_FAIL";
+      m_manualTest.debug_reason =
+        "failed to load selected script before run: " + selectedEntry.path;
+    }
+
     m_scriptRunRequested = true;
-    m_scriptResult = RunCxScript(m_scriptCatalog[m_selectedScript].path);
+    m_scriptResult = RunCxScript(selectedEntry.path);
     RefreshRuntimeObjectTable("Run Selected Script",
       m_scriptResult.status == "BLOCKED" ? "BLOCKED" : "runtime_executed");
     m_scriptRunRequested = false;
@@ -1553,6 +2130,45 @@ void ViewController::UpdateImageViewImage(const cv::Mat& image)
         m_imageViewTexture = 0;
     }
     m_imageViewTexture = CreateTextureFromMat0(m_imageViewImage);
+}
+
+bool ViewController::LoadImageIntoImageView(
+    const std::string& imagePath,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (imagePath.empty())
+    {
+        reason = "image path is empty";
+        return false;
+    }
+
+    std::filesystem::path path(imagePath);
+    if (!std::filesystem::exists(path))
+    {
+        reason = "image file not found: " + imagePath;
+        return false;
+    }
+
+    cv::Mat image = cv::imread(path.string(), cv::IMREAD_COLOR);
+    if (image.empty())
+    {
+        reason = "failed to read image: " + path.string();
+        return false;
+    }
+
+    UpdateImageViewImage(image);
+    m_manualTest.image_file_path = path.string();
+    m_scriptResult.image_ref = path.string();
+    m_scriptResult.reason = "image loaded from evidence chain";
+    m_annotationStatus = "image loaded from evidence chain";
+
+    m_imageViewZoom = 1.0f;
+    m_imageViewPanX = 0.0f;
+    m_imageViewPanY = 0.0f;
+
+    return true;
 }
 #include <Prs3d_ShadingAspect.hxx>
 #include <Prs3d_Drawer.hxx>
@@ -1979,16 +2595,27 @@ static ImVec2 last_window_pos = ImVec2(0, 0);
 void ViewController::mainloop()
 {
      int ifirstrun = 1;
+     int frameLogBudget = 8;
      while (!glfwWindowShouldClose(myOcctWindow->getGlfwWindow()))
      {
          glfwWaitEvents();
 
          if (!m_myView.IsNull())
          {
+             const bool logThisFrame = frameLogBudget > 0;
+             if (logThisFrame)
+             {
+                 --frameLogBudget;
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=frame_begin");
+             }
 
              ImGui_ImplOpenGL3_NewFrame();
              ImGui_ImplGlfw_NewFrame();
              ImGui::NewFrame();
+
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=process_deferred_sync");
+             ProcessDeferredRuntimeShapeSync("frame_begin");
 
              ImGuiIO& io = ImGui::GetIO();
              const bool imguiCapturesMouse =
@@ -2356,20 +2983,36 @@ void ViewController::mainloop()
              }
 
              SetCxCrashBreadcrumb("mainloop:drawScriptAcceptancePanels");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawScriptAcceptancePanels");
              drawScriptAcceptancePanels();
              SetCxCrashBreadcrumb("mainloop:SemanticFlowGraph.Draw");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=SemanticFlowGraph.Draw");
              const SemanticFlowAction flowAction = m_semanticFlowGraph.Draw();
              SetCxCrashBreadcrumb("mainloop:HandleSemanticFlowAction");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=HandleSemanticFlowAction");
              HandleSemanticFlowAction(flowAction);
              SetCxCrashBreadcrumb("mainloop:drawEvidenceAlbumWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawEvidenceAlbumWindow");
              drawEvidenceAlbumWindow();
              SetCxCrashBreadcrumb("mainloop:drawAnnotationToolWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawAnnotationToolWindow");
              drawAnnotationToolWindow();
              SetCxCrashBreadcrumb("mainloop:drawKeyParameterControlsWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawKeyParameterControlsWindow");
              drawKeyParameterControlsWindow();
              SetCxCrashBreadcrumb("mainloop:drawParameterTuningAndConclusionWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawParameterTuningAndConclusionWindow");
              drawParameterTuningAndConclusionWindow();
              SetCxCrashBreadcrumb("mainloop:drawManualStateTestConsole");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawManualStateTestConsole");
              drawManualStateTestConsole();
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
@@ -2415,13 +3058,21 @@ void ViewController::mainloop()
                  Imgui_OpenCV_Window0(&opencvSW);
 
              SetCxCrashBreadcrumb("mainloop:ImGui::Render");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=ImGui::Render");
              ImGui::Render();
              SetCxCrashBreadcrumb("mainloop:RenderDrawData");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=RenderDrawData");
              ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
              SetCxCrashBreadcrumb("mainloop:glfwSwapBuffers");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=glfwSwapBuffers");
              glfwSwapBuffers(myOcctWindow->getGlfwWindow());
              SetCxCrashBreadcrumb("mainloop:frame_complete");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "finished", "stage=frame_complete");
          }
      }
 }
@@ -3645,6 +4296,29 @@ bool ViewController::RunShapeInteractionSmoke(
 
 void ViewController::SyncRuntimeObjectsToShapeElements()
 {
+    if (!m_runtimeShapeSyncExecuting)
+    {
+        RequestRuntimeShapeSync("direct_sync_call_redirected");
+        return;
+    }
+
+    if (m_annotationLayer.HasActiveDrag() || m_annotationDragging)
+    {
+        RequestRuntimeShapeSync("active_drag");
+        return;
+    }
+
+    if (m_annotationImageWidth <= 1.0f || m_annotationImageHeight <= 1.0f)
+    {
+        RequestRuntimeShapeSync("image_canvas_not_ready");
+        return;
+    }
+
+    if (m_manualTest.runtime_objects.empty())
+    {
+        return;
+    }
+
     for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
         if (object.type == "Findline")
@@ -3722,6 +4396,56 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
     }
 }
 
+void ViewController::RequestRuntimeShapeSync(const std::string& reason)
+{
+    m_runtimeShapeSyncPending = true;
+    if (!reason.empty())
+    {
+        if (!m_runtimeShapeSyncReason.empty())
+            m_runtimeShapeSyncReason += "|";
+        m_runtimeShapeSyncReason += reason;
+    }
+    SetCxCrashBreadcrumb("RequestRuntimeShapeSync");
+}
+
+void ViewController::ProcessDeferredRuntimeShapeSync(const char* phase)
+{
+    if (!m_runtimeShapeSyncPending)
+        return;
+
+    SetCxCrashBreadcrumb("ProcessDeferredRuntimeShapeSync:begin");
+
+    if (m_annotationLayer.HasActiveDrag() || m_annotationDragging)
+    {
+        ++m_runtimeShapeSyncDeferCount;
+        SetCxCrashBreadcrumb("ProcessDeferredRuntimeShapeSync:defer_active_drag");
+        return;
+    }
+
+    if (m_annotationImageWidth <= 1.0f || m_annotationImageHeight <= 1.0f)
+    {
+        ++m_runtimeShapeSyncDeferCount;
+        SetCxCrashBreadcrumb("ProcessDeferredRuntimeShapeSync:defer_canvas_not_ready");
+        return;
+    }
+
+    const std::string reason = m_runtimeShapeSyncReason.empty()
+        ? std::string("phase=") + (phase ? phase : "unknown")
+        : (m_runtimeShapeSyncReason + ", phase=" + (phase ? phase : "unknown"));
+
+    m_runtimeShapeSyncPending = false;
+    m_runtimeShapeSyncReason.clear();
+    m_runtimeShapeSyncDeferCount = 0;
+
+    SetCxCrashBreadcrumb("ProcessDeferredRuntimeShapeSync:execute");
+    CXLOG_INFO("ViewController", "runtime_shape_sync", "running", reason);
+    m_runtimeShapeSyncExecuting = true;
+    SyncRuntimeObjectsToShapeElements();
+    m_runtimeShapeSyncExecuting = false;
+    CXLOG_INFO("ViewController", "runtime_shape_sync", "finished", reason);
+    SetCxCrashBreadcrumb("ProcessDeferredRuntimeShapeSync:end");
+}
+
 static const char* ShapeHandleLabel(CxShapeHandleRole role, int vertexIndex)
 {
     switch (role)
@@ -3768,10 +4492,64 @@ static ImU32 ShapeElementStrokeColor(const CxShapeElement& element)
     return IM_COL32(160, 160, 200, 200);
 }
 
+static bool IsFiniteShapePoint(const CxShapePoint& p)
+{
+    return std::isfinite(p.x) && std::isfinite(p.y);
+}
+
+static bool IsRenderableShapeGeometry(const CxShapeElement& element)
+{
+    if (!element.shape)
+        return false;
+
+    CxShapeGeometrySnapshot snap;
+    if (!element.shape->snapshot(snap))
+        return false;
+
+    if (!IsFiniteShapePoint(snap.center))
+        return false;
+    if (!std::isfinite(snap.radius) ||
+        !std::isfinite(snap.inner_radius) ||
+        !std::isfinite(snap.half_width) ||
+        !std::isfinite(snap.radius_x) ||
+        !std::isfinite(snap.radius_y) ||
+        !std::isfinite(snap.angle))
+        return false;
+
+    for (const CxShapePoint& p : snap.points)
+    {
+        if (!IsFiniteShapePoint(p))
+            return false;
+    }
+
+    switch (element.shape->kind())
+    {
+    case CxShapeKind::Circle:
+        return snap.radius >= 0.0 && snap.radius < 1000000.0 &&
+               snap.inner_radius >= 0.0 && snap.inner_radius < 1000000.0;
+    case CxShapeKind::Ellipse:
+        return snap.radius_x >= 0.0 && snap.radius_y >= 0.0 &&
+               snap.radius_x < 1000000.0 && snap.radius_y < 1000000.0;
+    case CxShapeKind::LineGauge:
+        return snap.half_width >= 0.0 && snap.half_width < 1000000.0;
+    default:
+        return true;
+    }
+}
+
 void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList)
 {
     if (!element.shape || !element.visible)
         return;
+
+    if (m_annotationImageWidth <= 1.0f ||
+        m_annotationImageHeight <= 1.0f ||
+        !std::isfinite(m_imageViewZoom) ||
+        m_imageViewZoom <= 0.001f ||
+        !IsRenderableShapeGeometry(element))
+    {
+        return;
+    }
 
     const float sx = m_imageViewZoom;
     const float sy = m_imageViewZoom;
@@ -3924,6 +4702,8 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         for (const CxShapeHandle& h : handles)
         {
             if (h.role == CxShapeHandleRole::Body)
+                continue;
+            if (!IsFiniteShapePoint(h.p))
                 continue;
 
             ImVec2 p = ImageToScreen(h.p.x, h.p.y);

@@ -153,13 +153,72 @@ bool CaptureFindellipseResult(
         ? std::string()
         : (snapshot.measure_points_count > 0 ? "fitellipse" : "measure_points");
 
+    output.ellipse_scan_candidate_lines = snapshot.scan_candidate_lines;
+    output.ellipse_scan_total_candidates = snapshot.scan_total_candidates;
+    output.ellipse_scan_accepted_points_before_gate = snapshot.scan_accepted_points_before_gate;
+    output.ellipse_accepted_min_boundary_ratio = snapshot.accepted_min_boundary_ratio;
+    output.ellipse_accepted_max_boundary_ratio = snapshot.accepted_max_boundary_ratio;
+    output.ellipse_accepted_avg_boundary_ratio = snapshot.accepted_avg_boundary_ratio;
+    output.ellipse_candidate_policy = snapshot.candidate_policy;
+
+    output.ellipse_scan_lines_outside_roi_count = snapshot.scan_lines_outside_roi_count;
+    output.ellipse_scan_lines_cross_outside_ellipse_count = snapshot.scan_lines_cross_outside_ellipse_count;
+    output.ellipse_scan_endpoint_norm_min = snapshot.scan_endpoint_norm_min;
+    output.ellipse_scan_endpoint_norm_avg = snapshot.scan_endpoint_norm_avg;
+    output.ellipse_scan_endpoint_norm_max = snapshot.scan_endpoint_norm_max;
+    output.ellipse_accepted_points_outside_ellipse_count = snapshot.accepted_points_outside_ellipse_count;
+    output.ellipse_accepted_point_norm_min = snapshot.accepted_point_norm_min;
+    output.ellipse_accepted_point_norm_avg = snapshot.accepted_point_norm_avg;
+    output.ellipse_accepted_point_norm_max = snapshot.accepted_point_norm_max;
+    output.ellipse_rejected_boundary_band_candidate_count =
+        snapshot.rejected_boundary_band_candidate_count;
+    output.ellipse_rejected_boundary_band_norm_min =
+        snapshot.rejected_boundary_band_norm_min;
+    output.ellipse_rejected_boundary_band_norm_avg =
+        snapshot.rejected_boundary_band_norm_avg;
+    output.ellipse_rejected_boundary_band_norm_max =
+        snapshot.rejected_boundary_band_norm_max;
+    output.ellipse_scan_geometry_policy = snapshot.scan_geometry_policy;
+
     if (!snapshot.measure_failure_stage.empty())
         output.failure_stage = snapshot.measure_failure_stage;
 
     if (!has_snapshot)
         output.reason = "Findellipse display snapshot is empty";
     else if (!snapshot.measure_failure_stage.empty())
+    {
         output.reason = snapshot.measure_failure_reason;
+        if (snapshot.scan_candidate_lines > 0)
+        {
+            output.reason += " candidate_lines=" + std::to_string(snapshot.scan_candidate_lines);
+            output.reason += " total_candidates=" + std::to_string(snapshot.scan_total_candidates);
+            output.reason += " accepted_before_gate=" + std::to_string(snapshot.scan_accepted_points_before_gate);
+            output.reason += " boundary_ratio=" + std::to_string(snapshot.accepted_min_boundary_ratio);
+            output.reason += "/" + std::to_string(snapshot.accepted_avg_boundary_ratio);
+            output.reason += "/" + std::to_string(snapshot.accepted_max_boundary_ratio);
+            output.reason += " candidate_policy=" + snapshot.candidate_policy;
+        }
+        if (!snapshot.scan_geometry_policy.empty())
+        {
+            output.reason += " scan_lines=" + std::to_string(snapshot.scan_line_count);
+            output.reason += " scan_len=" + std::to_string(snapshot.scan_line_length);
+            output.reason += " scan_outside_lines=" + std::to_string(snapshot.scan_lines_cross_outside_ellipse_count);
+            output.reason += " endpoint_norm=" + std::to_string(snapshot.scan_endpoint_norm_min);
+            output.reason += "/" + std::to_string(snapshot.scan_endpoint_norm_avg);
+            output.reason += "/" + std::to_string(snapshot.scan_endpoint_norm_max);
+            output.reason += " accepted_outside=" + std::to_string(snapshot.accepted_points_outside_ellipse_count);
+            output.reason += " accepted_norm=" + std::to_string(snapshot.accepted_point_norm_min);
+            output.reason += "/" + std::to_string(snapshot.accepted_point_norm_avg);
+            output.reason += "/" + std::to_string(snapshot.accepted_point_norm_max);
+            output.reason += " rejected_boundary_band=" +
+                std::to_string(snapshot.rejected_boundary_band_candidate_count);
+            output.reason += " rejected_norm=" +
+                std::to_string(snapshot.rejected_boundary_band_norm_min);
+            output.reason += "/" + std::to_string(snapshot.rejected_boundary_band_norm_avg);
+            output.reason += "/" + std::to_string(snapshot.rejected_boundary_band_norm_max);
+            output.reason += " scan_policy=" + snapshot.scan_geometry_policy;
+        }
+    }
     else if (!output.has_fit_ellipse && snapshot.measure_points_count > 0)
         output.reason = "Findellipse produced measure points, but fitellipse result is unavailable.";
     else if (!output.has_fit_ellipse)
@@ -321,6 +380,31 @@ static void MergeToolCapture(
         capture.ellipse_radius_y = tool.ellipse_radius_y;
         capture.ellipse_angle_deg = tool.ellipse_angle_deg;
     }
+    capture.ellipse_scan_candidate_lines = tool.ellipse_scan_candidate_lines;
+    capture.ellipse_scan_total_candidates = tool.ellipse_scan_total_candidates;
+    capture.ellipse_scan_accepted_points_before_gate = tool.ellipse_scan_accepted_points_before_gate;
+    capture.ellipse_accepted_min_boundary_ratio = tool.ellipse_accepted_min_boundary_ratio;
+    capture.ellipse_accepted_max_boundary_ratio = tool.ellipse_accepted_max_boundary_ratio;
+    capture.ellipse_accepted_avg_boundary_ratio = tool.ellipse_accepted_avg_boundary_ratio;
+    capture.ellipse_candidate_policy = tool.ellipse_candidate_policy;
+    capture.ellipse_scan_lines_cross_outside_ellipse_count = tool.ellipse_scan_lines_cross_outside_ellipse_count;
+    capture.ellipse_scan_endpoint_norm_min = tool.ellipse_scan_endpoint_norm_min;
+    capture.ellipse_scan_endpoint_norm_avg = tool.ellipse_scan_endpoint_norm_avg;
+    capture.ellipse_scan_endpoint_norm_max = tool.ellipse_scan_endpoint_norm_max;
+    capture.ellipse_accepted_points_outside_ellipse_count = tool.ellipse_accepted_points_outside_ellipse_count;
+    capture.ellipse_accepted_point_norm_min = tool.ellipse_accepted_point_norm_min;
+    capture.ellipse_accepted_point_norm_avg = tool.ellipse_accepted_point_norm_avg;
+    capture.ellipse_accepted_point_norm_max = tool.ellipse_accepted_point_norm_max;
+    capture.ellipse_rejected_boundary_band_candidate_count =
+        tool.ellipse_rejected_boundary_band_candidate_count;
+    capture.ellipse_rejected_boundary_band_norm_min =
+        tool.ellipse_rejected_boundary_band_norm_min;
+    capture.ellipse_rejected_boundary_band_norm_avg =
+        tool.ellipse_rejected_boundary_band_norm_avg;
+    capture.ellipse_rejected_boundary_band_norm_max =
+        tool.ellipse_rejected_boundary_band_norm_max;
+    capture.ellipse_scan_geometry_policy = tool.ellipse_scan_geometry_policy;
+
     capture.result_rect_count += tool.result_rect_count;
     capture.model_point_count += tool.model_point_count;
     if (tool.fastmatch_model_width > 0)
