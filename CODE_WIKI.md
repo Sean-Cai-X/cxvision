@@ -340,8 +340,8 @@ Accepted Gauge
 人工调试工作台主壳，提供证据链浏览、Gauge 编辑、参数调优、审核门和回放功能的统一入口。
 
 #### 核心文件
-- [ManualStateTestConsole.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
-- [ManualStateTestConsole.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.cpp)
+- [ManualStateTestConsole.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
+- [ManualStateTestConsole.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.cpp)
 
 #### 输入
 - Catalog 脚本列表
@@ -379,8 +379,8 @@ Accepted Gauge
 顶层场景控制器，继承自 OpenCASCADE 的 `AIS_ViewController`，负责 ImGui 界面与 OCCT 3D 视图的集成、事件路由和渲染编排。
 
 #### 核心文件
-- [ViewController.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.h)
-- [ViewController.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.cpp)
+- [ViewController.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.h)
+- [ViewController.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.cpp)
 
 #### 状态
 - **[Implemented]**：基础事件路由、图像渲染、Annotation 集成
@@ -403,8 +403,8 @@ Accepted Gauge
 图像注释层，管理 ShapeElements 和 OverlayElements，提供统一的 HitTest、Drag、CommitEdit 接口。
 
 #### 核心文件
-- [ImageAnnotationLayer.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
-- [ImageAnnotationLayer.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
+- [ImageAnnotationLayer.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
+- [ImageAnnotationLayer.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
 
 #### 数据结构
 - `CxShapeElement`：形状元素（含 stable_ref、owner、semantic_role）
@@ -426,8 +426,8 @@ Accepted Gauge
 注释工具运行时，管理 Point/Line/Rect/Circle/Ellipse/Polyline 工具的输入处理和状态。
 
 #### 核心文件
-- [CxAnnotationToolRuntime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
-- [CxAnnotationToolRuntime.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
+- [CxAnnotationToolRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
+- [CxAnnotationToolRuntime.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
 
 #### 状态
 - **[Implemented]**：Point/Line/Rect/Circle/Ellipse/Polyline 创建、最小尺寸保护、ESC 取消
@@ -438,7 +438,7 @@ Accepted Gauge
 手动 Gauge 状态，存储 Line/Circle/Ring Gauge 的几何参数和交互状态。
 
 #### 核心文件
-定义于 [ManualStateTestConsole.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
+定义于 [ManualStateTestConsole.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
 
 #### 数据结构
 - `ManualGaugeState`：Gauge 状态（line_x0/y0/x1/y1, circle_cx/cy/radius 等）
@@ -459,8 +459,8 @@ Accepted Gauge
 图像注释层，管理 ShapeElements 和 OverlayElements，提供统一的 HitTest、Drag、CommitEdit 接口，以及 Runtime Projection 和 Runtime Writeback。
 
 #### 核心文件
-- [ImageAnnotationLayer.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
-- [ImageAnnotationLayer.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
+- [ImageAnnotationLayer.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
+- [ImageAnnotationLayer.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
 
 #### 数据结构
 - `CxShapeElement`：形状元素（含 stable_ref、owner、semantic_role）
@@ -483,8 +483,8 @@ Accepted Gauge
 注释工具运行时，管理 Point/Line/Rect/Circle/Ellipse/Polyline 工具的输入处理和状态。
 
 #### 核心文件
-- [CxAnnotationToolRuntime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
-- [CxAnnotationToolRuntime.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
+- [CxAnnotationToolRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
+- [CxAnnotationToolRuntime.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
 
 #### 状态
 - **[Implemented]**：Point/Line/Rect/Circle/Ellipse/Polyline 创建、最小尺寸保护、ESC 取消
@@ -516,8 +516,8 @@ Accepted Gauge
 将 Runtime 对象的几何信息投影到 ShapeElements，实现脚本执行结果的可视化。
 
 #### 核心文件
-- [CxRuntimeProjectionExecutor.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.h)
-- [CxRuntimeProjectionExecutor.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.cpp)
+- [CxRuntimeProjectionExecutor.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.h)
+- [CxRuntimeProjectionExecutor.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.cpp)
 
 #### 状态
 - **[Implemented]**：基础 Runtime 对象投影
@@ -543,8 +543,8 @@ Accepted Gauge
 Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参数注入和持久化。
 
 #### 核心文件
-- [ManualConsoleGauge.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.h)
-- [ManualConsoleGauge.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.cpp)
+- [ManualConsoleGauge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.h)
+- [ManualConsoleGauge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.cpp)
 
 #### 已实现能力
 - Gauge 几何合法性验证
@@ -565,8 +565,8 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 参数回归面板控制器，提供参数范围、候选表、Probe Runner 和评估报告的 UI 集成。
 
 #### 核心文件
-- [ManualConsoleParamRegressionPanel.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.h)
-- [ManualConsoleParamRegressionPanel.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.cpp)
+- [ManualConsoleParamRegressionPanel.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.h)
+- [ManualConsoleParamRegressionPanel.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.cpp)
 
 #### 已实现能力
 - 当前脚本、工具和 Gauge 上下文
@@ -591,8 +591,8 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 证据链控制器，管理证据链的加载、浏览和操作。
 
 #### 核心文件
-- [ManualConsoleEvidenceChain.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.h)
-- [ManualConsoleEvidenceChain.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.cpp)
+- [ManualConsoleEvidenceChain.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.h)
+- [ManualConsoleEvidenceChain.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.cpp)
 
 #### 状态
 - **[Implemented]**：基础证据链加载和查询
@@ -627,7 +627,7 @@ Findcircle 专用调试面板。
 运行时视图，展示脚本执行后的对象和变量状态。
 
 #### 核心文件
-- [ManualConsoleRuntimeView.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleRuntimeView.h)
+- [ManualConsoleRuntimeView.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleRuntimeView.h)
 
 #### 状态
 - **[Implemented]**：基础运行时对象展示
@@ -650,8 +650,8 @@ CxScript 专用调试面板。
 脚本调试桥接器，负责 CxScript 的编译、执行、调试和全局输入注入。
 
 #### 核心文件
-- [ParserDebugBridge.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.h)
-- [ParserDebugBridge.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.cpp)
+- [ParserDebugBridge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.h)
+- [ParserDebugBridge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.cpp)
 
 #### 数据结构
 - `ParserDebugObjectSnapshot`：对象快照
@@ -668,7 +668,7 @@ CxScript 专用调试面板。
 解析器运行时所有权管理，确保运行时对象的生命周期正确管理。
 
 #### 核心文件
-- [CxParserRuntimeOwner.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParserRuntimeOwner.h)
+- [CxParserRuntimeOwner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParserRuntimeOwner.h)
 
 #### 状态
 - **[Implemented]**：运行时所有权管理
@@ -679,8 +679,8 @@ CxScript 专用调试面板。
 通用 Headless 运行器，不是返回空 `true` 的 Scaffold，执行结束后检查完整的 Artifact。
 
 #### 核心文件
-- [CxScriptHeadlessRunner.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.h)
-- [CxScriptHeadlessRunner.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.cpp)
+- [CxScriptHeadlessRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.h)
+- [CxScriptHeadlessRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.cpp)
 
 #### 已实现能力
 执行结束后检查：
@@ -703,8 +703,8 @@ CxScript 专用调试面板。
 Headless 绑定注册，为 Headless Runner 提供统一的类型和方法绑定。
 
 #### 核心文件
-- [CxScriptHeadlessBindings.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.h)
-- [CxScriptHeadlessBindings.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.cpp)
+- [CxScriptHeadlessBindings.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.h)
+- [CxScriptHeadlessBindings.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.cpp)
 
 #### 状态
 - **[Implemented]**：基础绑定注册
@@ -715,8 +715,8 @@ Headless 绑定注册，为 Headless Runner 提供统一的类型和方法绑定
 Runtime Capture Smoke 测试，验证 Parser 执行后对象和几何 Shape 的捕获能力。
 
 #### 核心文件
-- [CxScriptRuntimeCaptureSmoke.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.h)
-- [CxScriptRuntimeCaptureSmoke.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.cpp)
+- [CxScriptRuntimeCaptureSmoke.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.h)
+- [CxScriptRuntimeCaptureSmoke.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.cpp)
 
 #### 状态
 - **[Implemented]**：基础 Smoke 捕获验证
@@ -727,8 +727,8 @@ Runtime Capture Smoke 测试，验证 Parser 执行后对象和几何 Shape 的�
 Shape 交互测试运行器，执行 Shape 几何测试和交互测试套件。
 
 #### 核心文件
-- [CxShapeInteractionRunner.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.h)
-- [CxShapeInteractionRunner.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.cpp)
+- [CxShapeInteractionRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.h)
+- [CxShapeInteractionRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.cpp)
 
 #### 状态
 - **[Implemented]**：基础交互测试执行
@@ -739,8 +739,8 @@ Shape 交互测试运行器，执行 Shape 几何测试和交互测试套件。
 Shape 交互测试基类，提供统一的测试断言和验证框架。
 
 #### 核心文件
-- [CxShapeInteractionTest.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.h)
-- [CxShapeInteractionTest.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.cpp)
+- [CxShapeInteractionTest.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.h)
+- [CxShapeInteractionTest.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.cpp)
 
 #### 状态
 - **[Implemented]**：基础测试框架
@@ -751,8 +751,8 @@ Shape 交互测试基类，提供统一的测试断言和验证框架。
 Manifest 投影请求解析器，将 manifest 中的目标和测试用例解析为投影请求。
 
 #### 核心文件
-- [CxManifestProjectionRequestResolver.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.h)
-- [CxManifestProjectionRequestResolver.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.cpp)
+- [CxManifestProjectionRequestResolver.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.h)
+- [CxManifestProjectionRequestResolver.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.cpp)
 
 #### 状态
 - **[Implemented]**：基础投影请求解析
@@ -763,8 +763,8 @@ Manifest 投影请求解析器，将 manifest 中的目标和测试用例解析�
 Suite 运行器，支持完整的 5 步测试流程。
 
 #### 核心文件
-- [CxScriptSuiteRunner.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.h)
-- [CxScriptSuiteRunner.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.cpp)
+- [CxScriptSuiteRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.h)
+- [CxScriptSuiteRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.cpp)
 
 #### 执行流程
 1. Dry-run（验证证据链）
@@ -782,8 +782,8 @@ Suite 运行器，支持完整的 5 步测试流程。
 参数探测运行器，正确承接 Headless 结果并以 `probe_ok` 为准。
 
 #### 核心文件
-- [CxParamProbeRunner.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.h)
-- [CxParamProbeRunner.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.cpp)
+- [CxParamProbeRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.h)
+- [CxParamProbeRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.cpp)
 
 #### 已实现能力
 从 `headless_result` 读取：
@@ -808,7 +808,7 @@ Suite 运行器，支持完整的 5 步测试流程。
 Case 包写入器，生成标准测试资产。
 
 #### 核心文件
-- [CxScriptCasePackageWriter.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptCasePackageWriter.h)
+- [CxScriptCasePackageWriter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptCasePackageWriter.h)
 
 #### 状态
 - **[Implemented]**：基础资产写入
@@ -823,9 +823,9 @@ Case 包写入器，生成标准测试资产。
 构建在 cxparser 核心之上的扩展层，提供完整的脚本执行流水线、类型绑定构建、流程路由、验证引擎、结果交付等企业级功能。
 
 #### 核心文件
-- [parser_pipeline.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_pipeline.h)
-- [parser_runtime_facade.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_runtime_facade.h)
-- [cxscript_runtime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/runtime/cxscript_runtime.h)
+- [parser_pipeline.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_pipeline.h)
+- [parser_runtime_facade.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_runtime_facade.h)
+- [cxscript_runtime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/runtime/cxscript_runtime.h)
 
 #### 执行流程
 ```
@@ -841,10 +841,10 @@ PrepareTask → MergeBindingSpec → MergeEvidence → Run → Validate → Deli
 基于 muParser 扩展的脚本解析核心引擎，提供表达式求值、变量绑定、类方法调用、字节码执行等能力。
 
 #### 核心文件
-- [muParser.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParser.h)
-- [muParserBase.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBase.h)
-- [muParserBytecode.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBytecode.h)
-- [muParserClass.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserClass.h)
+- [muParser.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParser.h)
+- [muParserBase.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBase.h)
+- [muParserBytecode.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBytecode.h)
+- [muParserClass.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserClass.h)
 
 #### 状态
 - **[Implemented]**：muParser 核心、类绑定、字节码执行
@@ -901,8 +901,8 @@ cxparser/cxscript/module/
 直线检测算法，支持亚像素级边缘细化和多种参数配置。
 
 #### 核心文件
-- [Findline.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.h)
-- [Findline.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.cpp)
+- [Findline.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.h)
+- [Findline.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.cpp)
 
 #### 输入
 - ROI 区域（起点、终点、半宽）
@@ -922,8 +922,8 @@ cxparser/cxscript/module/
 圆检测算法，支持环形区域扫描和拟合。
 
 #### 核心文件
-- [Findcircle.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.h)
-- [Findcircle.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.cpp)
+- [Findcircle.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.h)
+- [Findcircle.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.cpp)
 
 #### 状态
 - **[Implemented]**：基础圆检测、拟合、超时保护
@@ -958,7 +958,7 @@ cxparser/cxscript/module/
 快速模板匹配算法。
 
 #### 核心文件
-- [FastMatch.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.h)
+- [FastMatch.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.h)
 
 #### 状态
 - **[Implemented]**：基础模板匹配
@@ -985,12 +985,12 @@ cxparser/cxscript/module/
 分割检测算法，支持多种后端实现。
 
 #### 核心文件
-- [FindSegmentation.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.h)
-- [FindSegmentation.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.cpp)
-- [FindSegmentationOpenCvSmokeBackend.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.h)
-- [FindSegmentationOpenCvSmokeBackend.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.cpp)
-- [FindSegmentationEdgeSamBackend.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.h)
-- [FindSegmentationEdgeSamBackend.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.cpp)
+- [FindSegmentation.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.h)
+- [FindSegmentation.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.cpp)
+- [FindSegmentationOpenCvSmokeBackend.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.h)
+- [FindSegmentationOpenCvSmokeBackend.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.cpp)
+- [FindSegmentationEdgeSamBackend.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.h)
+- [FindSegmentationEdgeSamBackend.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.cpp)
 
 #### 后端实现
 - **OpenCV Smoke Backend**：基于 OpenCV 的基础分割实现
@@ -1010,10 +1010,10 @@ cxparser/cxscript/module/
 PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 
 #### 核心文件
-- [TorchRuntimeBridge.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.h)
-- [TorchRuntimeBridge.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.cpp)
-- [TorchRuntimeResultAdapter.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.h)
-- [TorchRuntimeResultAdapter.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.cpp)
+- [TorchRuntimeBridge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.h)
+- [TorchRuntimeBridge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.cpp)
+- [TorchRuntimeResultAdapter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.h)
+- [TorchRuntimeResultAdapter.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.cpp)
 
 #### 已实现能力
 - 配置 `LIBTORCH_ROOT`
@@ -1115,7 +1115,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 工具显示导出，生成工具执行的可视化输出。
 
 #### 核心文件
-- [CxScriptToolDisplayExporter.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptToolDisplayExporter.h)
+- [CxScriptToolDisplayExporter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptToolDisplayExporter.h)
 
 #### 状态
 - **[Implemented]**：基础工具显示导出
@@ -1130,7 +1130,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 证据链管理，关联 Case、Image、Target、Script、Parameter Profile、Contract。
 
 #### 核心文件
-- [CxScriptEvidenceChainRuntime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptEvidenceChainRuntime.h)
+- [CxScriptEvidenceChainRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptEvidenceChainRuntime.h)
 
 #### 状态
 - **[Implemented]**：基础证据链加载和查询
@@ -1157,7 +1157,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 运行轨迹，记录执行过程中的关键事件。
 
 #### 核心文件
-- [CxScriptRunTraceRuntime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRunTraceRuntime.h)
+- [CxScriptRunTraceRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRunTraceRuntime.h)
 
 #### 状态
 - **[Implemented]**：基础轨迹记录
@@ -1192,7 +1192,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 审核门，管理审核阶段和决策。
 
 #### 核心文件
-- [CxScriptReviewGateRuntime.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptReviewGateRuntime.h)
+- [CxScriptReviewGateRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptReviewGateRuntime.h)
 
 #### 数据结构
 - `CxReviewStage`：审核阶段（EvidenceResolved/RoiPreview/HeadlessResult/ToolDisplay/ContractResult/Promotion）
@@ -1331,8 +1331,8 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 统一日志系统，进程级、线程安全、跨进程安全、只追加的 JSONL 文件。
 
 #### 核心文件
-- [CxUnifiedLog.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.h)
-- [CxUnifiedLog.cpp](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.cpp)
+- [CxUnifiedLog.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.h)
+- [CxUnifiedLog.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.cpp)
 
 #### 状态
 - **[Implemented]**：基础日志记录、线程安全、JSONL 格式
@@ -1343,7 +1343,7 @@ PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
 Crash 日志，记录程序崩溃时的状态信息。
 
 #### 核心文件
-- [CxCrashLog.h](/https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxCrashLog.h)
+- [CxCrashLog.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxCrashLog.h)
 
 #### 状态
 - **[Implemented]**：基础 Crash 日志记录
