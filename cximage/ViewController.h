@@ -28,6 +28,7 @@
 #include "ParserDebugBridge.h"
 #include "muParser.h"
 #include "ManualStateTestConsole.h"
+#include "CxEvidenceSelfTestRuntime.h"
 #include "ImageAnnotationLayer.h"
 #include "SemanticFlowGraph.h"
 #include "CxShapeInteractionTest.h"
@@ -107,9 +108,66 @@ public:
         const std::string& parameterSummary,
         std::string& reason);
 
+    bool RunEvidenceChainSelfTest(
+        const CxEvidenceSelfTestRequest& request,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool ResolveEvidenceSelfTestSnapshot(
+        const CxEvidenceSelfTestRequest& request,
+        CxEvidenceSelectionSnapshot& snapshot,
+        std::string& reason);
+
+    bool CheckEvidenceSelfTestImageBinding(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        std::string& reason) const;
+
+    bool CheckEvidenceSelfTestParamBinding(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        std::string& reason) const;
+
+    bool RunEvidenceSelfTestParserCompileStage(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool CheckEvidenceSelfTestGlobalInjection(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        std::string& reason);
+
+    bool RunEvidenceSelfTestRuntimeExecuteStage(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool CheckEvidenceSelfTestRuntimeObjectStage(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool RunEvidenceSelfTestProjectionStage(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool CheckEvidenceSelfTestResultProjectionStage(
+        const CxEvidenceSelectionSnapshot& snapshot,
+        CxEvidenceSelfTestResult& result,
+        std::string& reason);
+
+    bool BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
+        CxEvidenceSelfTestBatchRequest& request,
+        std::string& reason) const;
+
+    bool RunEvidenceSelfTestBatch(
+        const CxEvidenceSelfTestBatchRequest& request,
+        CxEvidenceSelfTestBatchResult& result,
+        std::string& reason);
+
+    bool InitEvidenceSelfTestEnvironment(std::string& reason);
+
 private:
   void initImGui();
-  void initScriptCatalog();
   bool GetSelectedCatalogScript(std::string& outPath,
                                 std::string& outName) const;
   void HandleSemanticFlowAction(const SemanticFlowAction& action);
@@ -156,6 +214,8 @@ private:
   void DrawScriptEvidenceThumbnailRailByGroup();
   bool LoadImageIntoImageView(const std::string& imagePath,
                               std::string& reason);
+  bool LoadImageForEvidenceSelfTest(const std::string& imagePath,
+                                    std::string& reason);
   bool ActivateScriptEvidenceThumb(const ScriptEvidenceThumb& thumb,
                                    bool loadImageToView,
                                    std::string& reason);
@@ -168,6 +228,7 @@ private:
   void DrawCxParserExtObjectAssignmentsPanel(ManualTestContext& context);
   void drawManualStateTestConsole();
   void initManualStateTestConsole();
+  void initScriptCatalog();
   void initImageEvidenceLayer();
   void drawImageEvidencePanels();
   void drawKeyParameterControlsWindow();

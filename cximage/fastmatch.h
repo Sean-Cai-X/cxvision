@@ -14,6 +14,9 @@ class ICxShapeSink;
 typedef vector<int> Cluster;
 using namespace std;
 
+// FastMatch Learn Probe - enable for debugging, disable for release
+#define FASTMATCH_LEARN_PROBE
+
 // fastmatch extends Findline with grid/model learning and match result helpers.
 class fastmatch :public Findline
 {
@@ -57,6 +60,10 @@ public:
 
     std::vector<cv::Point2f> getmodel();
     int getmodelpointcount();
+    int getlearnacount();
+    int getlearnbcount();
+    int getlearna2count();
+    int getlearnb2count();
     int getmodelwidth() const { return m_imodelwith; }
     int getmodelheight() const { return m_imodelheigh; }
     int getpatternapointcount() const;
@@ -381,6 +388,11 @@ private:
     RectsShape m_matchrects;
     gp_Rectangle m_matchrect;
     gp_Rectangle m_expected_rect;
+
+    int m_fastmatch_learn_a_count = 0;
+    int m_fastmatch_learn_b_count = 0;
+    int m_fastmatch_learn_a2_count = 0;
+    int m_fastmatch_learn_b2_count = 0;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;

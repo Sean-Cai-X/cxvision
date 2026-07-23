@@ -3,7 +3,9 @@
 #include "Findcircle.h"
 #include "findline.h"
 #include "Findellipse.h"
+#include "FindRect.h"
 #include "FindSegmentation.h"
+#include "FastMatch.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
@@ -146,6 +148,23 @@ static void FillRuntimeObjectFromFindcircle(
     object.has_measure_points = !object.measure_points_xy.empty();
 
     object.has_fit_result = circle.hasfitresult();
+    const FindcircleMeasureGeometryDebug& debug =
+        circle.lastmeasuregeometrydebug();
+    object.circle_measure_image_ready = debug.image_ready;
+    object.circle_measure_image_width = debug.image_width;
+    object.circle_measure_image_height = debug.image_height;
+    object.circle_measure_image_channels = debug.image_channels;
+    object.circle_measure_backimage_ready = debug.backimage_ready;
+    object.circle_measure_findobject_ready = debug.findobject_ready;
+    object.circle_measure_source = debug.measure_source;
+    object.circle_measure_failure_stage = debug.failure_stage;
+    object.circle_measure_detail = debug.detail;
+    object.circle_scan_line_count = debug.scan_line_count;
+    object.circle_scan_line_length = debug.scan_line_length;
+    object.circle_process_width = debug.process_width;
+    object.circle_scan_lines_processed = debug.scan_lines_processed;
+    object.circle_total_samples = debug.total_samples;
+    object.circle_elapsed_ms = debug.elapsed_ms;
     if (object.has_fit_result)
     {
         object.fit_cx = static_cast<float>(circle.getresultcentx());
@@ -482,7 +501,15 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
 
         return "Findcircle " + object.name +
             " has no fitted conclusion, valid_points=" +
-            std::to_string(object.valid_points_count);
+            std::to_string(object.valid_points_count) +
+            ", failure_stage=" +
+            (object.circle_measure_failure_stage.empty()
+                ? "(none)"
+                : object.circle_measure_failure_stage) +
+            ", detail=" +
+            (object.circle_measure_detail.empty()
+                ? "(none)"
+                : object.circle_measure_detail);
     }
 
     if (object.type == "Findellipse")
@@ -537,6 +564,9 @@ void SeedDefaultManualGlobals(
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
         scriptPath.find("findellipse") != std::string::npos;
+    const bool isRectScript =
+        scriptPath.find("find_rect") != std::string::npos ||
+        scriptPath.find("findrect") != std::string::npos;
     const bool isVerticalLineScript =
         scriptPath.find("find_line_vertical") != std::string::npos ||
         scriptPath.find("findline_vertical") != std::string::npos;
@@ -560,10 +590,14 @@ void SeedDefaultManualGlobals(
 
     if (isCircleScript)
     {
-        set("global_circle_cx", 765);
-        set("global_circle_cy", 471);
-        set("global_circle_px", 1200);
-        set("global_circle_py", 471);
+        // Match the original Run.cpp baseline geometry.  Manual/evidence runs
+        // may override these globals from an accepted gauge or manifest target,
+        // but the default must remain a known historical probe rather than a
+        // new interpreted ROI.
+        set("global_circle_cx", 850);
+        set("global_circle_cy", 690);
+        set("global_circle_px", 0);
+        set("global_circle_py", 690);
         set("global_gap", 5);
         set("global_linegap", 3);
     }
@@ -577,6 +611,17 @@ void SeedDefaultManualGlobals(
         set("global_linegap", 3);
         set("global_threshold", 8);
         set("global_method", 1);
+    }
+    else if (isRectScript)
+    {
+        set("global_roi_x", 120);
+        set("global_roi_y", 120);
+        set("global_roi_width", 640);
+        set("global_roi_height", 480);
+        set("global_gauge", 20);
+        set("global_linegap", 3);
+        set("global_threshold", 20);
+        set("global_method", 0);
     }
     else if (isLineScript)
     {
@@ -771,6 +816,34 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindRect:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("FindRect"))
+    {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindRect:query:" + name);
+        FindRect* rect = static_cast<FindRect*>(
+            m_parserDebugBridge.QueryClassObject("FindRect", name));
+        if (rect == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "FindRect";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = "runtime_object_available";
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.measure_points_count = rect->getresultobjsnum();
+        object.valid_points_count = rect->getresultobjsnum();
+        object.display_summary =
+            "FindRect " + name +
+            " result_rects=" + std::to_string(rect->getresultobjsnum());
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindSegmentation:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindSegmentation"))
@@ -818,6 +891,78 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             " status=" + seg->m_status +
             " contours=" + std::to_string(seg->get_contour_count()) +
             " area=" + std::to_string(seg->get_primary_area());
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:fastmatch:list");
+    struct FastMatchObjectRef
+    {
+        std::string parser_class;
+        std::string name;
+    };
+    std::vector<FastMatchObjectRef> fastmatchObjectRefs;
+    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("Match"))
+    {
+        fastmatchObjectRefs.push_back({"Match", name});
+    }
+    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("fastmatch"))
+    {
+        bool already_seen = false;
+        for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
+        {
+            if (ref.name == name)
+            {
+                already_seen = true;
+                break;
+            }
+        }
+        if (!already_seen)
+            fastmatchObjectRefs.push_back({"fastmatch", name});
+    }
+    for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
+    {
+        const std::string& name = ref.name;
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:fastmatch:query:" + ref.parser_class + ":" + name);
+        fastmatch* matcher = static_cast<fastmatch*>(
+            m_parserDebugBridge.QueryClassObject(ref.parser_class, name));
+        if (matcher == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "fastmatch";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = "runtime_object_available";
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.has_fastmatch_diagnostic = true;
+        object.fastmatch_status = "runtime_object_available";
+        object.fastmatch_result_ref = "runtime_object:" + name;
+        object.fastmatch_model_point_count = matcher->getmodelpointcount();
+        object.fastmatch_learn_a_count = matcher->getlearnacount();
+        object.fastmatch_learn_b_count = matcher->getlearnbcount();
+        object.fastmatch_learn_a2_count = matcher->getlearna2count();
+        object.fastmatch_learn_b2_count = matcher->getlearnb2count();
+        object.fastmatch_pattern_a_count = matcher->getpatternapointcount();
+        object.fastmatch_pattern_b_count = matcher->getpatternbpointcount();
+        object.fastmatch_candidate_count = matcher->getresultcandidatecount();
+        object.fastmatch_best_score = matcher->getresultbestscore();
+        object.measure_points_count = object.fastmatch_model_point_count;
+        object.valid_points_count = object.fastmatch_candidate_count;
+        object.display_summary =
+            "fastmatch " + name +
+            " model_points=" + std::to_string(object.fastmatch_model_point_count) +
+            " learnA=" + std::to_string(object.fastmatch_learn_a_count) +
+            " learnB=" + std::to_string(object.fastmatch_learn_b_count) +
+            " learnA2=" + std::to_string(object.fastmatch_learn_a2_count) +
+            " learnB2=" + std::to_string(object.fastmatch_learn_b2_count) +
+            " patternA=" + std::to_string(object.fastmatch_pattern_a_count) +
+            " patternB=" + std::to_string(object.fastmatch_pattern_b_count) +
+            " candidates=" + std::to_string(object.fastmatch_candidate_count) +
+            " best_score=" + std::to_string(object.fastmatch_best_score);
         m_manualTest.runtime_objects.push_back(object);
     }
 
@@ -895,6 +1040,21 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.points_count = object.measure_points_count;
             m_manualTest.current_result_ref.valid_points_count = object.valid_points_count;
             m_manualTest.current_result_ref.reason = object.ellipse_result_reason;
+        }
+        else if (object.type == "fastmatch")
+        {
+            m_manualTest.current_result_ref.name = "global_match_ref";
+            m_manualTest.current_result_ref.result_type = "FastMatchResult";
+            m_manualTest.current_result_ref.value = object.fastmatch_result_ref.empty()
+                ? ("runtime_object:" + object.name)
+                : object.fastmatch_result_ref;
+            m_manualTest.current_result_ref.status = object.fastmatch_status.empty()
+                ? "runtime_object_available"
+                : object.fastmatch_status;
+            m_manualTest.current_result_ref.points_count =
+                object.measure_points_count;
+            m_manualTest.current_result_ref.valid_points_count =
+                object.valid_points_count;
         }
         else if (object.type == "FindSegmentation")
         {

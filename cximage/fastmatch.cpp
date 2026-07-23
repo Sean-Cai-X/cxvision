@@ -1,8 +1,10 @@
 #include "pch.h"
+#include <windows.h>
 
 #include "FastMatch.h"
 #include "imagemanager.h"
 #include "ImageAnnotationLayer.h"
+#include "CxUnifiedLog.h"
 #include <algorithm>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
@@ -13,6 +15,156 @@
 
 namespace
 {
+#ifdef FASTMATCH_LEARN_PROBE
+void ProbeLog(const std::string& msg)
+{
+    MessageBoxA(NULL, msg.c_str(), "FastMatch Probe", MB_OK);
+    
+    FILE* fp = fopen("D:\\Codex-WorkDir\\Sean_WorkDir\\cxvisionai\\cxscript_runs\\probe_log.txt", "a");
+    if (fp != nullptr)
+    {
+        fprintf(fp, "[%d] %s\n", GetCurrentThreadId(), msg.c_str());
+        fflush(fp);
+        fclose(fp);
+    }
+    OutputDebugStringA(("[FastMatchProbe] " + msg).c_str());
+}
+
+#pragma pack(push, 1)
+struct FastMatchProbeData
+{
+    volatile LONG probe_count;
+    volatile LONG learn_entry_called;
+    volatile LONG learn_before_Learn_called;
+    volatile LONG Learn_entry_called;
+    volatile LONG Learn_after_edgepattern_called;
+    volatile LONG learn_after_Learn_called;
+    volatile LONG learn_fallback_called;
+    volatile LONG pimage_null;
+    volatile LONG image_width;
+    volatile LONG image_height;
+    volatile LONG rect_x;
+    volatile LONG rect_y;
+    volatile LONG rect_w;
+    volatile LONG rect_h;
+    volatile LONG thre;
+    volatile LONG linegap;
+    volatile LONG wgap;
+    volatile LONG hgap;
+    volatile LONG learn_a_count;
+    volatile LONG learn_b_count;
+    volatile LONG learn_a2_count;
+    volatile LONG learn_b2_count;
+    volatile LONG total_points;
+    char last_message[512];
+};
+#pragma pack(pop)
+
+FastMatchProbeData* g_probe_data = nullptr;
+
+void InitProbeSharedMemory()
+{
+    if (g_probe_data != nullptr) return;
+    
+    HANDLE hMapFile = CreateFileMappingA(
+        INVALID_HANDLE_VALUE,
+        nullptr,
+        PAGE_READWRITE,
+        0,
+        sizeof(FastMatchProbeData),
+        "FastMatchProbeSharedMemory");
+    
+    if (hMapFile != nullptr)
+    {
+        g_probe_data = (FastMatchProbeData*)MapViewOfFile(
+            hMapFile,
+            FILE_MAP_ALL_ACCESS,
+            0,
+            0,
+            sizeof(FastMatchProbeData));
+        
+        if (g_probe_data != nullptr)
+        {
+            ZeroMemory((void*)g_probe_data, sizeof(FastMatchProbeData));
+        }
+    }
+}
+
+void ProbeSetLearnEntry(int pimage_null_val)
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->learn_entry_called);
+        g_probe_data->pimage_null = pimage_null_val;
+    }
+}
+
+void ProbeSetLearnBeforeLearn()
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->learn_before_Learn_called);
+    }
+}
+
+void ProbeSetLearnEntryData(int w, int h, int rx, int ry, int rw, int rh, int t, int lg, int wg, int hg)
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->Learn_entry_called);
+        g_probe_data->image_width = w;
+        g_probe_data->image_height = h;
+        g_probe_data->rect_x = rx;
+        g_probe_data->rect_y = ry;
+        g_probe_data->rect_w = rw;
+        g_probe_data->rect_h = rh;
+        g_probe_data->thre = t;
+        g_probe_data->linegap = lg;
+        g_probe_data->wgap = wg;
+        g_probe_data->hgap = hg;
+    }
+}
+
+void ProbeSetLearnAfterEdgepattern(int a, int b, int a2, int b2, int total)
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->Learn_after_edgepattern_called);
+        g_probe_data->learn_a_count = a;
+        g_probe_data->learn_b_count = b;
+        g_probe_data->learn_a2_count = a2;
+        g_probe_data->learn_b2_count = b2;
+        g_probe_data->total_points = total;
+    }
+}
+
+void ProbeSetLearnAfterLearn(int a, int b, int a2, int b2)
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->learn_after_Learn_called);
+        g_probe_data->learn_a_count = a;
+        g_probe_data->learn_b_count = b;
+        g_probe_data->learn_a2_count = a2;
+        g_probe_data->learn_b2_count = b2;
+    }
+}
+
+void ProbeSetLearnFallback()
+{
+    InitProbeSharedMemory();
+    if (g_probe_data != nullptr)
+    {
+        InterlockedIncrement(&g_probe_data->learn_fallback_called);
+    }
+}
+#endif
+
 int FastMatchPositiveInt(int value, int fallback = 1)
 {
     return value > 0 ? value : fallback;
@@ -40,6 +192,242 @@ double FastMatchUnitScore(double value, double fallback = 0.4)
         value = fallback;
     }
     return std::clamp(value, 0.0, 1.0);
+}
+
+bool LearnPatternThroughRectFindline(
+    Image& image,
+    fastmatch& source,
+    int learn_x,
+    int learn_y,
+    int learn_w,
+    int learn_h,
+    bool use_object_filter_fallback,
+    PointsShape& out_pattern,
+    int& out_a_count,
+    int& out_b_count,
+    int& out_a2_count,
+    int& out_b2_count)
+{
+    Findline finder;
+    finder.SetWHgap(source.wgap(), source.hgap());
+    finder.setcomparegap(source.getconparegap());
+    finder.setthre(source.thre());
+    finder.setlinegap(source.linegap());
+    finder.setobjfilter(use_object_filter_fallback ? 1 : source.objfilter());
+    if (use_object_filter_fallback)
+    {
+        finder.setfilterprofile(1);
+        finder.setfilter(21, 5, 100000);
+        finder.setmeasurefallback(1);
+    }
+    finder.setrect(learn_x, learn_y, learn_w, learn_h);
+    finder.edgepattern(image);
+
+    out_a_count = finder.getlearnacount();
+    out_b_count = finder.getlearnbcount();
+    out_a2_count = finder.getlearna2count();
+    out_b2_count = finder.getlearnb2count();
+    const int collected_count =
+        out_a_count + out_b_count + out_a2_count + out_b2_count;
+    if (collected_count <= 0)
+    {
+        return false;
+    }
+
+    if (finder.getpatternpathA().ElementCount() <= 0 ||
+        finder.getpatternpathB().ElementCount() <= 0)
+    {
+        return false;
+    }
+
+    out_pattern = PointsShape();
+    out_pattern.copy(finder.getpattern());
+    return out_pattern.ABsize() > 0;
+}
+
+int PixelGrayAt(const cv::Mat& gray, int x, int y)
+{
+    x = std::clamp(x, 0, gray.cols - 1);
+    y = std::clamp(y, 0, gray.rows - 1);
+    return static_cast<int>(gray.at<unsigned char>(y, x));
+}
+
+bool IsEdgeTransition(const cv::Mat& gray, int x0, int y0, int x1, int y1, int threshold)
+{
+    return std::abs(PixelGrayAt(gray, x1, y1) - PixelGrayAt(gray, x0, y0)) >= threshold;
+}
+
+int CollectVerticalBoundaryPoints(
+    const cv::Mat& gray,
+    int x0,
+    int y0,
+    int x1,
+    int y1,
+    int step,
+    int threshold,
+    bool from_top,
+    PointsShape& out_points)
+{
+    int count = 0;
+    const int left = std::clamp(std::min(x0, x1), 0, gray.cols - 1);
+    const int right = std::clamp(std::max(x0, x1), 0, gray.cols - 1);
+    const int top = std::clamp(std::min(y0, y1), 0, gray.rows - 1);
+    const int bottom = std::clamp(std::max(y0, y1), 0, gray.rows - 1);
+    const int scan_step = std::max(1, step);
+    if (right <= left || bottom <= top)
+        return 0;
+
+    for (int x = left; x <= right; x += scan_step)
+    {
+        if (from_top)
+        {
+            for (int y = top; y < bottom; ++y)
+            {
+                if (IsEdgeTransition(gray, x, y, x, y + 1, threshold))
+                {
+                    out_points.addpoint(x, y + 1);
+                    ++count;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            for (int y = bottom; y > top; --y)
+            {
+                if (IsEdgeTransition(gray, x, y, x, y - 1, threshold))
+                {
+                    out_points.addpoint(x, y - 1);
+                    ++count;
+                    break;
+                }
+            }
+        }
+    }
+    return count;
+}
+
+int CollectHorizontalBoundaryPoints(
+    const cv::Mat& gray,
+    int x0,
+    int y0,
+    int x1,
+    int y1,
+    int step,
+    int threshold,
+    bool from_left,
+    PointsShape& out_points)
+{
+    int count = 0;
+    const int left = std::clamp(std::min(x0, x1), 0, gray.cols - 1);
+    const int right = std::clamp(std::max(x0, x1), 0, gray.cols - 1);
+    const int top = std::clamp(std::min(y0, y1), 0, gray.rows - 1);
+    const int bottom = std::clamp(std::max(y0, y1), 0, gray.rows - 1);
+    const int scan_step = std::max(1, step);
+    if (right <= left || bottom <= top)
+        return 0;
+
+    for (int y = top; y <= bottom; y += scan_step)
+    {
+        if (from_left)
+        {
+            for (int x = left; x < right; ++x)
+            {
+                if (IsEdgeTransition(gray, x, y, x + 1, y, threshold))
+                {
+                    out_points.addpoint(x + 1, y);
+                    ++count;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            for (int x = right; x > left; --x)
+            {
+                if (IsEdgeTransition(gray, x, y, x - 1, y, threshold))
+                {
+                    out_points.addpoint(x - 1, y);
+                    ++count;
+                    break;
+                }
+            }
+        }
+    }
+    return count;
+}
+
+bool LearnPatternByBoundaryPointPairs(
+    Image& image,
+    fastmatch& source,
+    int learn_x,
+    int learn_y,
+    int learn_w,
+    int learn_h,
+    PointsShape& out_pattern,
+    int& out_a_count,
+    int& out_b_count,
+    int& out_a2_count,
+    int& out_b2_count)
+{
+    cv::Mat src = image.getmat();
+    if (src.empty())
+    {
+        out_a_count = -911;
+        return false;
+    }
+
+    cv::Mat gray;
+    if (src.channels() == 1)
+        gray = src;
+    else
+        cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
+
+    if (gray.empty())
+    {
+        out_a_count = -912;
+        return false;
+    }
+
+    const int x0 = std::clamp(learn_x, 0, gray.cols - 1);
+    const int y0 = std::clamp(learn_y, 0, gray.rows - 1);
+    const int x1 = std::clamp(learn_x + std::max(1, learn_w), 0, gray.cols - 1);
+    const int y1 = std::clamp(learn_y + std::max(1, learn_h), 0, gray.rows - 1);
+    if (x1 <= x0 || y1 <= y0)
+    {
+        out_a_count = -913;
+        return false;
+    }
+
+    const int threshold = std::max(4, source.thre());
+    const int compare_gap = std::max(1, source.getconparegap());
+
+    PointsShape top_points;
+    PointsShape bottom_points;
+    PointsShape left_points;
+    PointsShape right_points;
+
+    out_a_count = CollectVerticalBoundaryPoints(
+        gray, x0, y0, x1, y1, source.wgap(), threshold, true, top_points);
+    out_b_count = CollectVerticalBoundaryPoints(
+        gray, x0, y0, x1, y1, source.wgap(), threshold, false, bottom_points);
+    out_a2_count = CollectHorizontalBoundaryPoints(
+        gray, x0, y0, x1, y1, source.hgap(), threshold, true, left_points);
+    out_b2_count = CollectHorizontalBoundaryPoints(
+        gray, x0, y0, x1, y1, source.hgap(), threshold, false, right_points);
+
+    out_pattern = PointsShape();
+    top_points.doublepattern(compare_gap, 6, out_pattern);
+    bottom_points.doublepattern(compare_gap, 12, out_pattern);
+    left_points.doublepattern(compare_gap, 3, out_pattern);
+    right_points.doublepattern(compare_gap, 9, out_pattern);
+
+    if (out_a_count + out_b_count + out_a2_count + out_b2_count <= 0)
+    {
+        out_a_count = -914;
+    }
+
+    return out_pattern.ABsize() > 0;
 }
 }
 
@@ -870,9 +1258,31 @@ void fastmatch::drawshapex(
 
 void fastmatch::Learn(Image& image)
 {
+    CXLOG_INFO("FastMatch", "learn_image_enter", "running",
+        "image=" + std::to_string(image.getWidth()) + "x" + std::to_string(image.getHeight()) +
+        " rect=" + std::to_string(static_cast<int>(rect().TopLeft().X())) + "," +
+        std::to_string(static_cast<int>(rect().TopLeft().Y())) + "," +
+        std::to_string(static_cast<int>(rect().Width())) + "," +
+        std::to_string(static_cast<int>(rect().Height())));
+    m_fastmatch_learn_a_count = -900;
+    m_fastmatch_learn_b_count = 0;
+    m_fastmatch_learn_a2_count = 0;
+    m_fastmatch_learn_b2_count = 0;
+
     edgepattern(image);
+    m_fastmatch_learn_a_count = Findline::getlearnacount();
+    m_fastmatch_learn_b_count = Findline::getlearnbcount();
+    m_fastmatch_learn_a2_count = Findline::getlearna2count();
+    m_fastmatch_learn_b2_count = Findline::getlearnb2count();
+    const int initial_collected_count =
+        m_fastmatch_learn_a_count +
+        m_fastmatch_learn_b_count +
+        m_fastmatch_learn_a2_count +
+        m_fastmatch_learn_b2_count;
+
     if (Findline::getpatternpathA().ElementCount() > 0
-        && Findline::getpatternpathB().ElementCount() > 0)
+        && Findline::getpatternpathB().ElementCount() > 0
+        && initial_collected_count > 0)
     {
         return;
     }
@@ -908,6 +1318,105 @@ void fastmatch::Learn(Image& image)
     setthre(retry_threshold);
     setlinegap(retry_linegap);
     edgepattern(image);
+    m_fastmatch_learn_a_count = Findline::getlearnacount();
+    m_fastmatch_learn_b_count = Findline::getlearnbcount();
+    m_fastmatch_learn_a2_count = Findline::getlearna2count();
+    m_fastmatch_learn_b2_count = Findline::getlearnb2count();
+    const int retry_collected_count =
+        m_fastmatch_learn_a_count +
+        m_fastmatch_learn_b_count +
+        m_fastmatch_learn_a2_count +
+        m_fastmatch_learn_b2_count;
+
+    if (Findline::getpatternpathA().ElementCount() <= 0 ||
+        Findline::getpatternpathB().ElementCount() <= 0 ||
+        retry_collected_count <= 0)
+    {
+        const int learn_x = saved_rect_x;
+        const int learn_y = saved_rect_y;
+        const int learn_w = std::max(1, saved_rect_w);
+        const int learn_h = std::max(1, saved_rect_h);
+
+        PointsShape rect_findline_pattern;
+        if (LearnPatternThroughRectFindline(
+            image,
+            *this,
+            learn_x,
+            learn_y,
+            learn_w,
+            learn_h,
+            false,
+            rect_findline_pattern,
+            m_fastmatch_learn_a_count,
+            m_fastmatch_learn_b_count,
+            m_fastmatch_learn_a2_count,
+            m_fastmatch_learn_b2_count))
+        {
+            Findline::setpattern(rect_findline_pattern);
+            modelzeroposition();
+            gp_Rectangle learned_rect = Findline::patternboundingrectAB();
+            m_imodelwith = static_cast<int>(learned_rect.Width());
+            m_imodelheigh = static_cast<int>(learned_rect.Height());
+        }
+        else if (LearnPatternThroughRectFindline(
+            image,
+            *this,
+            learn_x,
+            learn_y,
+            learn_w,
+            learn_h,
+            true,
+            rect_findline_pattern,
+            m_fastmatch_learn_a_count,
+            m_fastmatch_learn_b_count,
+            m_fastmatch_learn_a2_count,
+            m_fastmatch_learn_b2_count))
+        {
+            Findline::setpattern(rect_findline_pattern);
+            modelzeroposition();
+            gp_Rectangle learned_rect = Findline::patternboundingrectAB();
+            m_imodelwith = static_cast<int>(learned_rect.Width());
+            m_imodelheigh = static_cast<int>(learned_rect.Height());
+        }
+        else if (LearnPatternByBoundaryPointPairs(
+            image,
+            *this,
+            learn_x,
+            learn_y,
+            learn_w,
+            learn_h,
+            rect_findline_pattern,
+            m_fastmatch_learn_a_count,
+            m_fastmatch_learn_b_count,
+            m_fastmatch_learn_a2_count,
+            m_fastmatch_learn_b2_count))
+        {
+            Findline::setpattern(rect_findline_pattern);
+            modelzeroposition();
+            gp_Rectangle learned_rect = Findline::patternboundingrectAB();
+            m_imodelwith = static_cast<int>(learned_rect.Width());
+            m_imodelheigh = static_cast<int>(learned_rect.Height());
+        }
+    }
+
+    if (m_fastmatch_learn_a_count +
+        m_fastmatch_learn_b_count +
+        m_fastmatch_learn_a2_count +
+        m_fastmatch_learn_b2_count <= 0)
+    {
+        m_fastmatch_learn_a_count = std::max(0, static_cast<int>(Findline::getpatternpathA().ElementCount()));
+        m_fastmatch_learn_b_count = std::max(0, static_cast<int>(Findline::getpatternpathB().ElementCount()));
+        m_fastmatch_learn_a2_count = 0;
+        m_fastmatch_learn_b2_count = 0;
+    }
+
+    if (m_fastmatch_learn_a_count +
+        m_fastmatch_learn_b_count +
+        m_fastmatch_learn_a2_count +
+        m_fastmatch_learn_b2_count <= 0)
+    {
+        m_fastmatch_learn_a_count = -920;
+    }
 
     setrect(saved_rect_x, saved_rect_y, saved_rect_w, saved_rect_h);
     SetWHgap(saved_wgap, saved_hgap);
@@ -1065,11 +1574,15 @@ void fastmatch::learn_level4(void* pimage)//pyrDown thre >10
         return;
     Learn_level4(*pgetimage);
 }
+
 void fastmatch::learn(void* pimage)
 {
+    CXLOG_INFO("FastMatch", "learn_void_enter", "running",
+        pimage == nullptr ? "pimage=null" : "pimage=non_null");
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
+
     Learn(*pgetimage);
 }
 void fastmatch::savemodelfile(const char* pchar)
@@ -5283,6 +5796,26 @@ int fastmatch::getmodelpointcount()
     if (sample_count > 0)
         return sample_count;
     return ABpatternsize();
+}
+
+int fastmatch::getlearnacount()
+{
+    return m_fastmatch_learn_a_count;
+}
+
+int fastmatch::getlearnbcount()
+{
+    return m_fastmatch_learn_b_count;
+}
+
+int fastmatch::getlearna2count()
+{
+    return m_fastmatch_learn_a2_count;
+}
+
+int fastmatch::getlearnb2count()
+{
+    return m_fastmatch_learn_b2_count;
 }
 
 int fastmatch::getpatternapointcount() const

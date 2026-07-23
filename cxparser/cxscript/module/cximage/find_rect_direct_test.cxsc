@@ -21,6 +21,4 @@ m_rect.setgauge(gauge);
 
 m_rect.measure(&m_image);
 
-global_current_status = "PENDING";
-
 1+1;

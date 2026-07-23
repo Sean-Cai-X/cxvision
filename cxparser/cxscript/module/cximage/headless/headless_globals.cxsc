@@ -59,8 +59,18 @@ int global_has_fit_circle;
 int global_rendered_measure_points_count;
 int global_rendered_result_count;
 int global_result_overlay_changed_pixels;
+int global_objfilter;
 int global_policy_guard_match;
 double global_circle_radius;
 double global_avgdist;
+int global_learn_a_count;
+int global_learn_b_count;
+int global_learn_a2_count;
+int global_learn_b2_count;
+int global_model_point_count;
+int global_match_count;
+double global_best_score;
+int global_best_x;
+int global_best_y;
 
 global_strategy_id = global_strategy_id;

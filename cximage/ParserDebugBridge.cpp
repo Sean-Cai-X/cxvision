@@ -36,6 +36,51 @@ bool ParserDebugBridge::CompileScript(const std::string& scriptText)
   return myOwner->ExecuteScript(prepared, myLastError);
 }
 
+bool ParserDebugBridge::CompileScriptOnly(const std::string& scriptText)
+{
+    myLastError.clear();
+
+    if (myOwner == nullptr)
+    {
+        myLastError = "parser owner is not bound";
+        return false;
+    }
+
+    if (scriptText.empty())
+    {
+        myLastError = "script text is empty";
+        return false;
+    }
+
+    SetCxCrashBreadcrumb("ParserDebugBridge::CompileScriptOnly:reset_runtime");
+    ResetRuntime();
+
+    SetCxCrashBreadcrumb("ParserDebugBridge::CompileScriptOnly:rebind_globals");
+    if (!RebindGlobalInputs())
+        return false;
+
+    if (scriptText.find("global_matInput") != std::string::npos)
+    {
+        Image* inputImage = QueryImage("global_matInput");
+        if (inputImage == nullptr)
+        {
+            myLastError = "global_matInput is required by script but is not bound";
+            return false;
+        }
+
+        if (inputImage->getmat().empty())
+        {
+            myLastError = "global_matInput image is empty";
+            return false;
+        }
+    }
+
+    const std::string prepared = PrepareScript(scriptText);
+
+    SetCxCrashBreadcrumb("ParserDebugBridge::CompileScriptOnly:compile_only");
+    return myOwner->CompileScriptOnly(prepared, myLastError);
+}
+
 bool ParserDebugBridge::RunScript(const std::string& scriptText)
 {
   myLastError.clear();
@@ -104,6 +149,12 @@ void* ParserDebugBridge::QueryClassObject(const std::string& type,
   void* object = myOwner->GetClassObj(type, name);
   if (object == nullptr && type == "Findcircle")
     object = myOwner->GetClassObj("findcircle", name);
+  if (object == nullptr && type == "Findline")
+    object = myOwner->GetClassObj("findline", name);
+  if (object == nullptr && type == "Match")
+    object = myOwner->GetClassObj("fastmatch", name);
+  if (object == nullptr && type == "fastmatch")
+    object = myOwner->GetClassObj("Match", name);
   if (object == nullptr && type == "fastmatch")
     object = myOwner->GetClassObj("FastMatch", name);
   if (object == nullptr && type == "fastmatch")
@@ -140,7 +191,10 @@ Image* ParserDebugBridge::QueryImage(const std::string& name) const
 
 bool ParserDebugBridge::QueryDouble(const std::string& name, double& value) const
 {
-  if (myOwner == nullptr || !myOwner->IsObjectVar(name.c_str())) return false;
+  if (myOwner == nullptr) return false;
+  if (myOwner->QueryExternalDouble(name, value))
+    return true;
+
   double* runtimeValue = static_cast<double*>(myOwner->GetDoubleValue(name));
   if (runtimeValue == nullptr) return false;
   value = *runtimeValue;
@@ -194,23 +248,11 @@ bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
 {
   std::string prepared = scriptText;
-  // CxScript keeps a C/C++-like surface syntax, so users naturally write
-  // tool.measure(&m_image).  The current muParser class-object call path,
-  // however, passes object arguments by object token (m_image), not by C/C++
-  // address-of syntax.  Leaving the ampersand in place can route an invalid
-  // value into void* class methods such as Findline::measure(void*), which is
-  // exactly the kind of crash the Manual Console must prevent.
-  //
-  // Keep the editor text untouched, but normalize the runtime text submitted to
-  // the parser.  This is intentionally local to the debug bridge; it does not
-  // modify source .cxsc files or muParser itself.
-  std::size_t addressOf = 0;
-  while ((addressOf = prepared.find("(&", addressOf)) != std::string::npos)
-  {
-    prepared.erase(addressOf + 1, 1);
-    ++addressOf;
-  }
-
+  // Do not normalize C/C++-style address-of calls here.
+  // Headless and Manual Console must execute the same cxscript surface syntax:
+  //   tool.measure(&m_image);
+  // Rewriting it to tool.measure(m_image) sends an incompatible argument to
+  // void* class methods and can crash inside the tool's measure() function.
   const std::string source = "global_matInput";
   const std::string runtimeName = "global_matInput";
   std::size_t position = 0;

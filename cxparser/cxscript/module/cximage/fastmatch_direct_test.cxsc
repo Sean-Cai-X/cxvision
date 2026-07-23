@@ -17,5 +17,4 @@ m_match.learn(&m_occtimage);
 m_match.setmatchrect(50, 50, 2200, 1900);
 m_match.match(&m_occtimage);
 
-global_match_ref = m_match.get_result();
-global_current_status = "PENDING";
+1+1;

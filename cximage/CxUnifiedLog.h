@@ -71,6 +71,7 @@ public:
 
     bool IsInitialized() const;
     const std::string& RunId() const;
+    std::string GenerateRunId() const;
     const std::filesystem::path& Path() const;
     const std::string& Mode() const;
 
@@ -96,7 +97,6 @@ private:
     CxUnifiedLog(const CxUnifiedLog&) = delete;
     CxUnifiedLog& operator=(const CxUnifiedLog&) = delete;
 
-    std::string GenerateRunId() const;
     std::string FormatTimestamp() const;
     std::string SerializeEvent(const CxUnifiedLogEvent& event) const;
     std::string EscapeJsonString(const std::string& s) const;

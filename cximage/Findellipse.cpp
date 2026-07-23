@@ -6,6 +6,8 @@
 #include "findobject.h"
 #include "ImageAnnotationLayer.h"
 #include "EllipseShape.h"
+#include "CxCrashLogHandler.h"
+#include "CxUnifiedLog.h"
 
 #include <opencv2/opencv.hpp>		
 #include <opencv2/core/version.hpp>
@@ -17,10 +19,20 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <vector>
  
 namespace
 {
+void LogFindellipseMeasureProbe(
+    const char* phase,
+    const char* status,
+    const std::string& message)
+{
+    CXLOG_INFO("Findellipse", phase, status, message);
+    CxUnifiedLog::Instance().Flush();
+}
+
 double EllipseNorm(
     double x,
     double y,
@@ -678,6 +690,7 @@ void Findellipse::MeasureT(void *pimage)
 }
 void Findellipse::Measure(Image& image)
 {
+    SetCxCrashBreadcrumb("Findellipse::Measure:enter");
     m_has_fit_result = false;
     m_fit_avgdist = 0.0;
     m_measure_failure_stage.clear();
@@ -701,6 +714,31 @@ void Findellipse::Measure(Image& image)
     m_rejected_boundary_band_norm_min = 999.0;
     m_rejected_boundary_band_norm_max = -999.0;
 
+    if (image.getmat().empty() || image.getWidth() <= 0 || image.getHeight() <= 0)
+    {
+        m_measure_failure_stage = "input_image_empty";
+        m_measure_failure_reason = "Findellipse input image is empty or has invalid dimensions.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
+        return;
+    }
+
+    {
+        std::ostringstream oss;
+        oss << "enter image=" << image.getWidth() << "x" << image.getHeight()
+            << " roi=(" << m_roi_x0 << "," << m_roi_y0
+            << ")-(" << m_roi_x1 << "," << m_roi_y1 << ")"
+            << " gap=" << m_igap
+            << " linegap=" << m_iSelectPointGap
+            << " threshold=" << m_iThreshold
+            << " method=" << m_iMethod
+            << " existing_scan_lines=" << m_lines.size();
+        LogFindellipseMeasureProbe("measure_enter", "running", oss.str());
+    }
+
+    SetCxCrashBreadcrumb("Findellipse::Measure:ensure_resources");
     if (!ImageManager::EnsureAlgorithmRuntimeResources(
             image.getWidth(),
             image.getHeight()))
@@ -708,22 +746,35 @@ void Findellipse::Measure(Image& image)
         m_measure_failure_stage = "runtime_resources";
         m_measure_failure_reason =
             "Findellipse failed to initialize ImageManager algorithm runtime resources.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
     g_pbackimage = ImageManager::GetBackImage(1);
     g_pbackfindobject = ImageManager::Getbackfindobject(1);
 
+    SetCxCrashBreadcrumb("Findellipse::Measure:roi_preflight");
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
     {
         m_measure_failure_stage = "roi_outside_image";
         m_measure_failure_reason = "Findellipse ROI rectangle is outside input image.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;//error process
     }
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
     {
         m_measure_failure_stage = "roi_negative";
         m_measure_failure_reason = "Findellipse ROI rectangle has negative origin.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;//error process
     }
     m_measurepoints.clear();
@@ -745,24 +796,40 @@ void Findellipse::Measure(Image& image)
     {
         m_measure_failure_stage = "scan_lines_empty";
         m_measure_failure_reason = "Findellipse has no scan lines; check setellipse/setgap order.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
     if (g_pbackimage == nullptr)
     {
         m_measure_failure_stage = "backimage_null";
         m_measure_failure_reason = "Findellipse back image is null.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
     if (g_pbackimage == &image)
     {
         m_measure_failure_stage = "backimage_alias_input";
         m_measure_failure_reason = "Findellipse back image aliases the input image.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
     if (g_pbackimage->getmat().empty())
     {
         m_measure_failure_stage = "backimage_empty";
         m_measure_failure_reason = "Findellipse back image Mat is empty.";
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
 
@@ -771,32 +838,108 @@ void Findellipse::Measure(Image& image)
     if (isize > 0)
         ilineslen1 = m_lines[0].getlinesize();
 
-    int iprocessw = ilineslen1;
+    int min_line_len = ilineslen1;
+    int max_line_len = ilineslen1;
+    int invalid_line_count = 0;
+    int outside_endpoint_count = 0;
+    for (int i = 0; i < isize; ++i)
+    {
+        const int line_len = m_lines[i].getlinesize();
+        if (line_len <= 0)
+        {
+            ++invalid_line_count;
+            continue;
+        }
+        min_line_len = std::min(min_line_len, line_len);
+        max_line_len = std::max(max_line_len, line_len);
+
+        gp_Pnt p0 = m_lines[i].getlinepoint(0);
+        gp_Pnt p1 = m_lines[i].getlinepoint(line_len - 1);
+        const bool p0_finite = std::isfinite(p0.X()) && std::isfinite(p0.Y());
+        const bool p1_finite = std::isfinite(p1.X()) && std::isfinite(p1.Y());
+        if (!p0_finite || !p1_finite)
+        {
+            ++invalid_line_count;
+            continue;
+        }
+
+        if (p0.X() < 0.0 || p0.Y() < 0.0 ||
+            p0.X() >= static_cast<double>(image.getWidth()) ||
+            p0.Y() >= static_cast<double>(image.getHeight()) ||
+            p1.X() < 0.0 || p1.Y() < 0.0 ||
+            p1.X() >= static_cast<double>(image.getWidth()) ||
+            p1.Y() >= static_cast<double>(image.getHeight()))
+        {
+            ++outside_endpoint_count;
+        }
+    }
+
+    if (invalid_line_count > 0 || min_line_len <= 0)
+    {
+        m_measure_failure_stage = "scan_line_invalid";
+        std::ostringstream oss;
+        oss << "Findellipse generated invalid scan lines before linecopyex."
+            << " invalid_line_count=" << invalid_line_count
+            << " scan_lines=" << isize
+            << " min_line_len=" << min_line_len
+            << " max_line_len=" << max_line_len;
+        m_measure_failure_reason = oss.str();
+        LogFindellipseMeasureProbe("measure_preflight", "failed", m_measure_failure_reason);
+        return;
+    }
+
+    int iprocessw = min_line_len;
 
     if (iprocessw <= 0 ||
         isize > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
     {
         m_measure_failure_stage = "scan_buffer_too_small";
-        m_measure_failure_reason = "Findellipse scan buffer is smaller than generated scan geometry.";
+        std::ostringstream oss;
+        oss << "Findellipse scan buffer is smaller than generated scan geometry."
+            << " scan_lines=" << isize
+            << " process_w=" << iprocessw
+            << " back=" << g_pbackimage->getWidth() << "x" << g_pbackimage->getHeight();
+        m_measure_failure_reason = oss.str();
+        LogFindellipseMeasureProbe(
+            "measure_preflight",
+            "failed",
+            m_measure_failure_reason);
         return;
     }
 
+    {
+        std::ostringstream oss;
+        oss << "scan geometry ready scan_lines=" << isize
+            << " process_w=" << iprocessw
+            << " min_line_len=" << min_line_len
+            << " max_line_len=" << max_line_len
+            << " outside_endpoint_count=" << outside_endpoint_count
+            << " back=" << g_pbackimage->getWidth() << "x" << g_pbackimage->getHeight();
+        LogFindellipseMeasureProbe("measure_scan_geometry", "ready", oss.str());
+    }
+
+    SetCxCrashBreadcrumb("Findellipse::Measure:linecopyex");
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
+    LogFindellipseMeasureProbe("measure_linecopyex", "finished", "Findellipse linecopyex completed.");
 
+    SetCxCrashBreadcrumb("Findellipse::Measure:preprocess_roi");
     g_pbackimage->setroi(0, 0, iprocessw, isize);
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+    LogFindellipseMeasureProbe("measure_preprocess", "finished", "Findellipse preprocess completed.");
 
     if ((m_ifindset & 0x01) && g_pbackfindobject != nullptr)
     {
+        SetCxCrashBreadcrumb("Findellipse::Measure:findobject");
         g_pbackfindobject->setrect(0, 0, iprocessw, isize);
         g_pbackfindobject->setbrow(m_ifilterborw);//21 22
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)), ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
         g_pbackfindobject->Measure(*g_pbackimage);
+        LogFindellipseMeasureProbe("measure_findobject", "finished", "Findellipse FindObject filter completed.");
     }
 
     std::vector<int> irecordpoint;
@@ -809,6 +952,7 @@ void Findellipse::Measure(Image& image)
     int ifixvalue = 3;
 
     cv::Vec3b icolor = 0;
+    SetCxCrashBreadcrumb("Findellipse::Measure:candidate_collect");
     for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++)
     {
         std::vector<int> candidate_positions;
@@ -1022,6 +1166,16 @@ void Findellipse::Measure(Image& image)
                 "Findellipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
         }
     }
+
+    {
+        std::ostringstream oss;
+        oss << "measure finished points=" << m_measurepoints.size()
+            << " candidate_lines=" << m_scan_candidate_lines
+            << " total_candidates=" << m_scan_total_candidates
+            << " accepted_before_gate=" << m_scan_accepted_points_before_gate
+            << " failure_stage=" << m_measure_failure_stage;
+        LogFindellipseMeasureProbe("measure_exit", "finished", oss.str());
+    }
     
 }
 
@@ -1176,9 +1330,16 @@ double Findellipse::hasfitresult()
 
 void Findellipse::measure(void* pimage)
 {
+    SetCxCrashBreadcrumb("Findellipse::measure:void_ptr_enter");
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
+    {
+        m_measure_failure_stage = "input_image_null";
+        m_measure_failure_reason = "Findellipse measure received a null Image pointer.";
+        LogFindellipseMeasureProbe("measure_wrapper", "failed", m_measure_failure_reason);
         return;
+    }
+    LogFindellipseMeasureProbe("measure_wrapper", "running", "Findellipse measure received Image pointer.");
     Measure(*pgetimage);
 }
 void Findellipse::shapesetroi(void* pshape)

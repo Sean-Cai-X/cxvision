@@ -264,6 +264,7 @@ public:
     int hgap() { return m_ihgap; }
     int thre();
     int linegap() { return m_iSelectPointGap; }
+    int objfilter() const { return m_iobjfilterset; }
 
     void clear();
     void setshow(int ishow);
@@ -298,6 +299,10 @@ public:
     void saveABpatternfile(const char* pchar);
     void loadABpatternfile(const char* pchar);
     int ABpatternsize();
+    int getlearnacount();
+    int getlearnbcount();
+    int getlearna2count();
+    int getlearnb2count();
     void samplemodelAB(int inum);
 
     gp_Rectangle patternboundingrect();

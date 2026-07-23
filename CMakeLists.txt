@@ -116,6 +116,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CircleShape.cpp
   cximage/EllipseShape.cpp
   cximage/PolylineShape.cpp
+  cximage/CxEvidenceSelfTestRuntime.cpp
 )
 
 set(CXSCRIPT_RUNTIME_SOURCES

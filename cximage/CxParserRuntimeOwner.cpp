@@ -326,6 +326,48 @@ bool CxParserRuntimeOwner::ExecuteScript(
     return true;
 }
 
+bool CxParserRuntimeOwner::CompileScriptOnly(
+    const std::string& source,
+    std::string& reason)
+{
+    if (!m_initialized || !m_runtime)
+    {
+        reason = "parser owner is not initialized";
+        return false;
+    }
+
+    if (!m_script_local_values.empty())
+    {
+        reason = "parser runtime must be cleared before compiling another script";
+        return false;
+    }
+
+    struct ScriptLocalValueCleanup
+    {
+        std::map<std::string, double>& values;
+        ~ScriptLocalValueCleanup() { values.clear(); }
+    } cleanup{m_script_local_values};
+
+    const std::string prepared =
+        PrepareNumericLocals(source, m_script_local_values);
+
+    for (auto& local : m_script_local_values)
+    {
+        if (!DefineExternalDouble(local.first, &local.second, reason))
+        {
+            reason = "failed to bind CxScript local '" + local.first +
+                     "': " + reason;
+            return false;
+        }
+    }
+
+    if (!m_runtime->CompileCollectedScript(prepared, reason))
+        return false;
+
+    reason.clear();
+    return true;
+}
+
 void CxParserRuntimeOwner::ConfigureStreams(std::ostream* runtime_stream, std::ostream* code_stream)
 {
     if (m_runtime)
@@ -370,6 +412,22 @@ void* CxParserRuntimeOwner::GetDoubleValue(const std::string& strname)
     if (!m_runtime)
         return nullptr;
     return m_runtime->GetDoubleValue(strname);
+}
+
+bool CxParserRuntimeOwner::QueryExternalDouble(
+    const std::string& name,
+    double& value) const
+{
+    if (!m_runtime)
+        return false;
+
+    const mu::varmap_type vars = m_runtime->m_parser.GetVar();
+    const auto it = vars.find(name);
+    if (it == vars.end() || it->second == nullptr)
+        return false;
+
+    value = *(it->second);
+    return true;
 }
 
 void CxParserRuntimeOwner::ClearAll()

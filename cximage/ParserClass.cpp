@@ -707,6 +707,10 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
             m_parser.DefineClassFun("Match", pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
             m_parser.DefineClassFun("Match", pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
+            m_parser.DefineClassFun("Match", pfastmatch, "getlearnacount", &fastmatch::getlearnacount);
+            m_parser.DefineClassFun("Match", pfastmatch, "getlearnbcount", &fastmatch::getlearnbcount);
+            m_parser.DefineClassFun("Match", pfastmatch, "getlearna2count", &fastmatch::getlearna2count);
+            m_parser.DefineClassFun("Match", pfastmatch, "getlearnb2count", &fastmatch::getlearnb2count);
             m_parser.DefineClassFun("Match", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
             m_parser.DefineClassFun("Match", pfastmatch, "setspecshow", &fastmatch::setspecshow);
             m_parser.DefineClassFun("Match", pfastmatch, "setrelresultnum", &fastmatch::setrelationrectfromresultnum);
@@ -718,6 +722,43 @@ namespace mu
             m_parser.DefineClassFun("Match", pfastmatch, "shapesetroi", &fastmatch::shapesetroi);
             m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultx", &fastmatch::getrotateresultx);
             m_parser.DefineClassFun("Match", pfastmatch, "getrotateresulty", &fastmatch::getrotateresulty);
+
+            // Stage 2.x CxScript direct scripts use both names:
+            //   Match m_match;
+            //   fastmatch m_match;
+            // Keep the registration layer thin, but expose the same direct
+            // method surface for the lowercase class name so Evidence Chain
+            // smoke tests do not fail before reaching the real learn/match
+            // algorithm boundary.
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrect", &fastmatch::setrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setthre", &fastmatch::setthre);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setlinegap", &fastmatch::setlinegap);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setwhgap", &fastmatch::SetWHgap);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setobjfilter", &fastmatch::setobjfilter);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setcompgap", &fastmatch::setcomparegap);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setminscore", &fastmatch::setminscore);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setfindnum", &fastmatch::setfindnum);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchthre", &fastmatch::setmatchthre);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "matchstepgap", &fastmatch::matchstepgap);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "learn", &fastmatch::learn);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "match", &fastmatch::match);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "modelzero", &fastmatch::ZeroPOS);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "pattern2org", &fastmatch::pattern2org);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "patternsample", &fastmatch::patternABsample);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "samplemodel", &fastmatch::samplemodelAB);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnacount", &fastmatch::getlearnacount);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnbcount", &fastmatch::getlearnbcount);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearna2count", &fastmatch::getlearna2count);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnb2count", &fastmatch::getlearnb2count);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcentx", &fastmatch::getresultcentx);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcenty", &fastmatch::getresultcenty);
+            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultnum", &fastmatch::getresultnum);
             m_parser.DefineClassFun("Match", pfastmatch, "getrotateresulta", &fastmatch::getrotateresulta);
             m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultscore", &fastmatch::getrotateresultscore);
             m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultscoreA", &fastmatch::getrotateresultscoreA);

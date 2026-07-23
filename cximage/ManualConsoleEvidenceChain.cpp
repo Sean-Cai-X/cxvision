@@ -4,10 +4,109 @@
 #include "ManualStateTestConsole.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+
+static bool EvidenceSnapshotHasLockedParamSummaryLocal(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    std::string& reason)
+{
+    if (!snapshot.valid)
+    {
+        reason = "invalid evidence snapshot";
+        return false;
+    }
+    if (snapshot.parameter_summary.empty() || snapshot.parameter_summary == "-")
+    {
+        reason = "evidence parameter summary is empty";
+        return false;
+    }
+    if (snapshot.parameter_summary.find('=') == std::string::npos)
+    {
+        reason = "evidence parameter summary is not key=value locked data: " +
+                 snapshot.parameter_summary;
+        return false;
+    }
+    reason.clear();
+    return true;
+}
+
+static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
+    ManualTestContext& context,
+    const std::string& scriptPath,
+    const std::string& source)
+{
+    auto getInt = [&](const std::string& key, int fallback) -> int
+    {
+        const auto it = context.runtime_int_vars.find(key);
+        return it == context.runtime_int_vars.end() ? fallback : it->second;
+    };
+
+    const bool isCircleScript =
+        scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos;
+    const bool isLineScript =
+        scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos;
+    const bool isEllipseScript =
+        scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos;
+
+    ManualGaugeState gauge;
+    gauge.case_id = context.active_case_id;
+    gauge.image_id = context.active_image_id;
+    gauge.target_id = context.active_target_id;
+    gauge.source = source;
+    gauge.review_status = "editing";
+    gauge.threshold = getInt("global_threshold", 20);
+    gauge.method = getInt("global_method", 0);
+    gauge.linegap = getInt("global_linegap", 3);
+    gauge.wgap = getInt("global_wgap", 32);
+    gauge.hgap = getInt("global_hgap", 8);
+    gauge.gap = getInt("global_gap", 5);
+    gauge.tool_half_width = getInt("global_tool_half_width", 32);
+    gauge.filterprofile = getInt("global_filterprofile", 1);
+
+    if (isCircleScript)
+    {
+        gauge.tool = "Findcircle";
+        gauge.has_circle_gauge = true;
+        gauge.circle_cx = getInt("global_circle_cx", 0);
+        gauge.circle_cy = getInt("global_circle_cy", 0);
+        gauge.circle_px = getInt("global_circle_px", gauge.circle_cx);
+        gauge.circle_py = getInt("global_circle_py", gauge.circle_cy);
+        gauge.radius = static_cast<int>(std::lround(std::hypot(
+            static_cast<double>(gauge.circle_px - gauge.circle_cx),
+            static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+    }
+    else if (isEllipseScript)
+    {
+        gauge.tool = "Findellipse";
+        gauge.has_ellipse_gauge = true;
+        gauge.ellipse_x0 = getInt("global_ellipse_x0", 0);
+        gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
+        gauge.ellipse_x1 = getInt("global_ellipse_x1", 0);
+        gauge.ellipse_y1 = getInt("global_ellipse_y1", 0);
+    }
+    else if (isLineScript)
+    {
+        gauge.tool = "Findline";
+        gauge.has_line_gauge = true;
+        gauge.line_x0 = getInt("global_roi_x0", 0);
+        gauge.line_y0 = getInt("global_roi_y0", 0);
+        gauge.line_x1 = getInt("global_roi_x1", 0);
+        gauge.line_y1 = getInt("global_roi_y1", 0);
+    }
+
+    if (gauge.has_circle_gauge || gauge.has_line_gauge ||
+        gauge.has_ellipse_gauge)
+    {
+        context.current_gauge = gauge;
+    }
+}
 
 static std::vector<std::string> BuildEvidenceFallbackImageCandidates(
     const ManualTestContext& context)
@@ -673,13 +772,33 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         SeedDefaultManualGlobals(m_manualTest, snapshot.script_path);
     }
 
+    std::string lockedParamReason;
+    if (EvidenceSnapshotHasLockedParamSummaryLocal(snapshot, lockedParamReason))
+    {
+        if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
+                snapshot.parameter_summary,
+                lockedParamReason))
+        {
+            reason = "failed to apply evidence locked parameters: " +
+                     lockedParamReason;
+            return false;
+        }
+        SyncEvidenceLockedGlobalsToManualGaugeLocal(
+            m_manualTest,
+            snapshot.script_path,
+            "evidence_locked");
+    }
+
     m_manualTest.debug_action = "Apply Evidence Selection";
     m_manualTest.debug_status = "PENDING";
     m_manualTest.debug_reason =
         "script=" + snapshot.script_id +
         " image=" + snapshot.image_id +
         " target=" + snapshot.target_id +
-        " param=" + snapshot.parameter_summary;
+        " param=" + snapshot.parameter_summary +
+        (lockedParamReason.empty()
+            ? " | evidence params locked"
+            : " | evidence params not locked: " + lockedParamReason);
 
     if (loadImageToView)
     {
@@ -868,11 +987,36 @@ static std::string BuildCurrentRuntimeParamSummary(
 
     std::ostringstream oss;
     oss << "method=" << getInt("global_method", 0)
-        << " thr=" << getInt("global_threshold", 20)
+        << " threshold=" << getInt("global_threshold", 20)
         << " wgap=" << getInt("global_wgap", 0)
         << " hgap=" << getInt("global_hgap", 0)
         << " gap=" << getInt("global_gap", 0)
-        << " lgap=" << getInt("global_linegap", 0);
+        << " linegap=" << getInt("global_linegap", 0)
+        << " tool_half_width=" << getInt("global_tool_half_width", 0)
+        << " roi_x0=" << getInt("global_roi_x0", 0)
+        << " roi_y0=" << getInt("global_roi_y0", 0)
+        << " roi_x1=" << getInt("global_roi_x1", 0)
+        << " roi_y1=" << getInt("global_roi_y1", 0)
+        << " roi_x=" << getInt("global_roi_x", 0)
+        << " roi_y=" << getInt("global_roi_y", 0)
+        << " roi_width=" << getInt("global_roi_width", 0)
+        << " roi_height=" << getInt("global_roi_height", 0)
+        << " circle_cx=" << getInt("global_circle_cx", 0)
+        << " circle_cy=" << getInt("global_circle_cy", 0)
+        << " circle_px=" << getInt("global_circle_px", 0)
+        << " circle_py=" << getInt("global_circle_py", 0)
+        << " ellipse_x0=" << getInt("global_ellipse_x0", 0)
+        << " ellipse_y0=" << getInt("global_ellipse_y0", 0)
+        << " ellipse_x1=" << getInt("global_ellipse_x1", 0)
+        << " ellipse_y1=" << getInt("global_ellipse_y1", 0)
+        << " learn_roi_x=" << getInt("global_learn_roi_x", 0)
+        << " learn_roi_y=" << getInt("global_learn_roi_y", 0)
+        << " learn_roi_w=" << getInt("global_learn_roi_w", 0)
+        << " learn_roi_h=" << getInt("global_learn_roi_h", 0)
+        << " search_roi_x=" << getInt("global_search_roi_x", 0)
+        << " search_roi_y=" << getInt("global_search_roi_y", 0)
+        << " search_roi_w=" << getInt("global_search_roi_w", 0)
+        << " search_roi_h=" << getInt("global_search_roi_h", 0);
 
     return oss.str();
 }

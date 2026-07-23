@@ -798,6 +798,22 @@ int Findline::ABpatternsize()
 {
     return m_modelpoints.ABsize();
 }
+int Findline::getlearnacount()
+{
+    return static_cast<int>(m_measurepointsA.size());
+}
+int Findline::getlearnbcount()
+{
+    return static_cast<int>(m_measurepointsB.size());
+}
+int Findline::getlearna2count()
+{
+    return static_cast<int>(m_measurepointsA_.size());
+}
+int Findline::getlearnb2count()
+{
+    return static_cast<int>(m_measurepointsB_.size());
+}
 gp_Rectangle Findline::patternboundingrect()
 {
     return m_modelpoints.boundingRect();

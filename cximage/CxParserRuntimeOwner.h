@@ -74,12 +74,14 @@ public:
     bool Compile(const std::string& source, std::string& reason);
     bool Compile(const char* source);
     bool ExecuteScript(const std::string& source, std::string& reason);
+    bool CompileScriptOnly(const std::string& source, std::string& reason);
     void ConfigureStreams(std::ostream* runtime_stream, std::ostream* code_stream);
     int ObjectCount(const std::string& type) const;
     std::string ObjectName(const std::string& type, int index) const;
     void* GetClassObj(const std::string& strclass, const std::string& strobj);
     void* GetClassObj(const std::string& strclass, const int& iobjnum);
     void* GetDoubleValue(const std::string& strname);
+    bool QueryExternalDouble(const std::string& name, double& value) const;
     void ClearAll();
     void StopRun();
     bool IsObjectVar(const char* sz);

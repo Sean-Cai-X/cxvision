@@ -5,6 +5,7 @@
 #include "CxScriptCatalogRuntime.h"
 #include "CxParamRegressionRuntime.h"
 #include "CxScriptHeadlessRuntime.h"
+#include "CxEvidenceSelfTestRuntime.h"
 
 #include <string>
 #include <vector>
@@ -401,6 +402,15 @@ struct RuntimeObjectView
     std::string fastmatch_source_tool;
     std::string fastmatch_profile;
     std::string fastmatch_level;
+    int fastmatch_model_point_count = 0;
+    int fastmatch_learn_a_count = 0;
+    int fastmatch_learn_b_count = 0;
+    int fastmatch_learn_a2_count = 0;
+    int fastmatch_learn_b2_count = 0;
+    int fastmatch_pattern_a_count = 0;
+    int fastmatch_pattern_b_count = 0;
+    int fastmatch_candidate_count = 0;
+    double fastmatch_best_score = 0.0;
 
 };
 
@@ -782,6 +792,8 @@ struct ManualTestContext
   int script_evidence_thumb_load_count_this_frame = 0;
 
   CxEvidenceSelectionSnapshot current_evidence_selection;
+
+  CxEvidenceSelfTestResult last_evidence_selftest_result;
 };
 
 void SeedDefaultManualGlobals(

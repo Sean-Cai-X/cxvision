@@ -117,6 +117,7 @@ class ParserDebugBridge
 public:
   void Bind(CxParserRuntimeOwner* owner) { myOwner = owner; }
   bool CompileScript(const std::string& scriptText);
+  bool CompileScriptOnly(const std::string& scriptText);
   bool RunScript(const std::string& scriptText);
   bool RunPrefixToLine(const std::string& scriptText, int lineNo);
   bool QueryObjectExists(const std::string& type, const std::string& name) const;

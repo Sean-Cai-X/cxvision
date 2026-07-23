@@ -307,6 +307,26 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
         return BuildFindellipseGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
+    if (object.type == "fastmatch")
+    {
+        std::ostringstream ss;
+        ss << "geometry: object=" << object.name
+           << " | tool=fastmatch"
+           << " | model_points=" << object.fastmatch_model_point_count
+           << " | learnA=" << object.fastmatch_learn_a_count
+           << " | learnB=" << object.fastmatch_learn_b_count
+           << " | learnA2=" << object.fastmatch_learn_a2_count
+           << " | learnB2=" << object.fastmatch_learn_b2_count
+           << " | patternA=" << object.fastmatch_pattern_a_count
+           << " | patternB=" << object.fastmatch_pattern_b_count
+           << " | candidates=" << object.fastmatch_candidate_count
+           << " | best_score=" << object.fastmatch_best_score
+           << " | result_ref="
+           << (object.fastmatch_result_ref.empty() ? "(none)" : object.fastmatch_result_ref)
+           << " | status="
+           << (object.fastmatch_status.empty() ? "(none)" : object.fastmatch_status);
+        return ss.str();
+    }
 
     return BuildFindcircleGeometrySummary(object);
 }
@@ -398,6 +418,26 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
         return BuildFindellipseOverlaySummary(context, object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationOverlaySummary(context, object);
+    if (object.type == "fastmatch")
+    {
+        std::ostringstream ss;
+        ss << "image overlay:"
+           << " learn_roi=true"
+           << " | search_roi=true"
+           << " | model_points=" << object.fastmatch_model_point_count
+           << " | learnA=" << object.fastmatch_learn_a_count
+           << " | learnB=" << object.fastmatch_learn_b_count
+           << " | learnA2=" << object.fastmatch_learn_a2_count
+           << " | learnB2=" << object.fastmatch_learn_b2_count
+           << " | patternA=" << object.fastmatch_pattern_a_count
+           << " | patternB=" << object.fastmatch_pattern_b_count
+           << " | candidate_boxes=" << object.fastmatch_candidate_count
+           << " | stale=" << (object.stale ? "true" : "false")
+           << " | source_preview_enabled="
+           << (context.source_preview_enabled ? "true" : "false")
+           << " | manual_elements_count=" << context.manual_elements_count;
+        return ss.str();
+    }
 
     return BuildFindcircleOverlaySummary(context, object);
 }

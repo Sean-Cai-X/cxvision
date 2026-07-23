@@ -27,5 +27,4 @@ m_circle.measure(&m_image);
 m_circle.fitcircle();
 m_circle.FitResultMeasure(&m_image);
 
-global_circle_ref = m_circle.get_result();
-global_current_status = "PENDING";
+1+1;

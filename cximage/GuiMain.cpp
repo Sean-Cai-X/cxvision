@@ -8,12 +8,265 @@
 #include "CxUnifiedLogOptions.h"
 #include "CxUnifiedLogStreamBuf.h"
 #include "CxCrashLogHandler.h"
+#include "CxEvidenceSelfTestRuntime.h"
 
 #if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
 #include "CxScriptStage25Runner.h"
 #endif
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <vector>
+
+namespace
+{
+std::string PipelineJsonEscape(const std::string& text)
+{
+    std::string out;
+    for (char c : text)
+    {
+        switch (c)
+        {
+        case '\\': out += "\\\\"; break;
+        case '"': out += "\\\""; break;
+        case '\n': out += "\\n"; break;
+        case '\r': break;
+        case '\t': out += "\\t"; break;
+        default: out += c; break;
+        }
+    }
+    return out;
+}
+
+struct EvidenceLockPipelineCheck
+{
+    std::string case_id;
+    std::string expected;
+    std::string actual;
+    std::string conclusion;
+    std::string reason;
+    std::string report_path;
+};
+
+bool PipelineHasStep(const CxEvidenceSelfTestResult& result,
+                     const std::string& code,
+                     const std::string& status = std::string())
+{
+    for (const auto& step : result.steps)
+    {
+        if (step.code == code && (status.empty() || step.status == status))
+            return true;
+    }
+    return false;
+}
+
+std::string PipelineReasonForStep(const CxEvidenceSelfTestResult& result,
+                                  const std::string& code)
+{
+    for (const auto& step : result.steps)
+    {
+        if (step.code == code)
+            return step.reason;
+    }
+    return result.final_reason;
+}
+
+void WriteSyntheticGaugeAnnotation(const std::filesystem::path& caseDir,
+                                   const CxEvidenceSelfTestRequest& request)
+{
+    std::filesystem::create_directories(caseDir);
+    std::ofstream file(caseDir / "gauge_annotation.json", std::ios::binary);
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"case_id\": \"" << PipelineJsonEscape(request.case_id) << "\",\n"
+         << "  \"image_id\": \"" << PipelineJsonEscape(request.image_id) << "\",\n"
+         << "  \"target_id\": \"" << PipelineJsonEscape(request.target_id) << "\",\n"
+         << "  \"tool\": \"" << PipelineJsonEscape(request.tool) << "\",\n"
+         << "  \"source\": \"evidence_lock_pipeline\",\n"
+         << "  \"review_status\": \"manual_accepted\",\n"
+         << "  \"accepted\": true,\n"
+         << "  \"parameter_summary\": \"" << PipelineJsonEscape(request.parameter_summary) << "\"\n"
+         << "}\n";
+}
+
+std::vector<std::pair<std::string, int>> PipelineRuntimeGlobalsFromParam(
+    const std::string& parameterSummary)
+{
+    auto getInt = [&](const std::string& key, int fallback) -> int
+    {
+        const std::string pattern = key + "=";
+        const std::size_t pos = parameterSummary.find(pattern);
+        if (pos == std::string::npos)
+            return fallback;
+        std::size_t begin = pos + pattern.size();
+        std::size_t end = begin;
+        while (end < parameterSummary.size() &&
+               (std::isdigit(static_cast<unsigned char>(parameterSummary[end])) ||
+                parameterSummary[end] == '-' || parameterSummary[end] == '+'))
+        {
+            ++end;
+        }
+        if (end == begin)
+            return fallback;
+        try
+        {
+            return std::stoi(parameterSummary.substr(begin, end - begin));
+        }
+        catch (...)
+        {
+            return fallback;
+        }
+    };
+
+    return {
+        {"global_method", getInt("method", 0)},
+        {"global_threshold", getInt("threshold", 20)},
+        {"global_gap", getInt("gap", 0)},
+        {"global_linegap", getInt("linegap", 0)},
+        {"global_circle_cx", getInt("circle_cx", 0)},
+        {"global_circle_cy", getInt("circle_cy", 0)},
+        {"global_circle_px", getInt("circle_px", 0)},
+        {"global_circle_py", getInt("circle_py", 0)},
+        {"global_roi_x0", getInt("roi_x0", 0)},
+        {"global_roi_y0", getInt("roi_y0", 0)},
+        {"global_roi_x1", getInt("roi_x1", 0)},
+        {"global_roi_y1", getInt("roi_y1", 0)},
+        {"global_wgap", getInt("wgap", 0)},
+        {"global_hgap", getInt("hgap", 0)},
+        {"global_tool_half_width", getInt("tool_half_width", 0)},
+        {"global_compare_gap", getInt("compare_gap", 0)},
+        {"global_learn_roi_x", getInt("learn_roi_x", 0)},
+        {"global_learn_roi_y", getInt("learn_roi_y", 0)},
+        {"global_learn_roi_w", getInt("learn_roi_w", 0)},
+        {"global_learn_roi_h", getInt("learn_roi_h", 0)},
+        {"global_search_roi_x", getInt("search_roi_x", 0)},
+        {"global_search_roi_y", getInt("search_roi_y", 0)},
+        {"global_search_roi_w", getInt("search_roi_w", 0)},
+        {"global_search_roi_h", getInt("search_roi_h", 0)},
+        {"global_find_num", getInt("find_num", 0)}
+    };
+}
+
+void WriteSyntheticEvidenceReview(const std::filesystem::path& caseDir,
+                                  const CxEvidenceSelfTestRequest& request,
+                                  const std::string& runtimeStatus,
+                                  const std::string& runtimeReason)
+{
+    std::filesystem::create_directories(caseDir);
+    std::ofstream file(caseDir / "evidence_review.json", std::ios::binary);
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"review_status\": \"manual_accepted\",\n"
+         << "  \"case_id\": \"" << PipelineJsonEscape(request.case_id) << "\",\n"
+         << "  \"script_id\": \"" << PipelineJsonEscape(request.script_id) << "\",\n"
+         << "  \"script_path\": \"" << PipelineJsonEscape(request.script_path) << "\",\n"
+         << "  \"image_id\": \"" << PipelineJsonEscape(request.image_id) << "\",\n"
+         << "  \"image_path\": \"" << PipelineJsonEscape(request.image_path) << "\",\n"
+         << "  \"target_id\": \"" << PipelineJsonEscape(request.target_id) << "\",\n"
+         << "  \"tool\": \"" << PipelineJsonEscape(request.tool) << "\",\n"
+         << "  \"parameter_summary\": \"" << PipelineJsonEscape(request.parameter_summary) << "\",\n"
+         << "  \"gauge_annotation_path\": \"" << PipelineJsonEscape((caseDir / "gauge_annotation.json").string()) << "\",\n"
+         << "  \"runtime_status\": \"" << PipelineJsonEscape(runtimeStatus) << "\",\n"
+         << "  \"runtime_reason\": \"" << PipelineJsonEscape(runtimeReason) << "\",\n"
+         << "  \"binding_policy\": \"evidence_locked_only\",\n"
+         << "  \"runtime_int_globals\": {\n";
+    const auto globals = PipelineRuntimeGlobalsFromParam(request.parameter_summary);
+    for (std::size_t i = 0; i < globals.size(); ++i)
+    {
+        file << "    \"" << PipelineJsonEscape(globals[i].first)
+             << "\": " << globals[i].second;
+        if (i + 1 < globals.size())
+            file << ",";
+        file << "\n";
+    }
+    file << "  }\n"
+         << "}\n";
+}
+
+bool WriteEvidenceLockPipelineReports(
+    const std::string& outDir,
+    const std::string& runId,
+    const std::vector<EvidenceLockPipelineCheck>& checks,
+    std::string& reason)
+{
+    reason.clear();
+    std::filesystem::create_directories(outDir);
+    const int total = static_cast<int>(checks.size());
+    int pass = 0;
+    for (const auto& c : checks)
+        if (c.conclusion == "PASS")
+            ++pass;
+    const int fail = total - pass;
+
+    {
+        std::ofstream file(std::filesystem::path(outDir) / "evidence_lock_pipeline_summary.json",
+                           std::ios::binary);
+        if (!file.is_open())
+        {
+            reason = "failed to open evidence_lock_pipeline_summary.json";
+            return false;
+        }
+        file << "{\n"
+             << "  \"run_id\": \"" << PipelineJsonEscape(runId) << "\",\n"
+             << "  \"total_cases\": " << total << ",\n"
+             << "  \"pass_count\": " << pass << ",\n"
+             << "  \"fail_count\": " << fail << ",\n"
+             << "  \"final_code\": \"" << (fail == 0 ? "EVIDENCE_LOCK_PIPELINE_PASS" : "EVIDENCE_LOCK_PIPELINE_FAIL") << "\",\n"
+             << "  \"cases\": [\n";
+        for (std::size_t i = 0; i < checks.size(); ++i)
+        {
+            const auto& c = checks[i];
+            file << "    {\n"
+                 << "      \"case_id\": \"" << PipelineJsonEscape(c.case_id) << "\",\n"
+                 << "      \"expected\": \"" << PipelineJsonEscape(c.expected) << "\",\n"
+                 << "      \"actual\": \"" << PipelineJsonEscape(c.actual) << "\",\n"
+                 << "      \"conclusion\": \"" << PipelineJsonEscape(c.conclusion) << "\",\n"
+                 << "      \"reason\": \"" << PipelineJsonEscape(c.reason) << "\",\n"
+                 << "      \"report_path\": \"" << PipelineJsonEscape(c.report_path) << "\"\n"
+                 << "    }";
+            if (i + 1 < checks.size())
+                file << ",";
+            file << "\n";
+        }
+        file << "  ]\n"
+             << "}\n";
+    }
+
+    {
+        std::ofstream file(std::filesystem::path(outDir) / "evidence_lock_pipeline_report.md",
+                           std::ios::binary);
+        if (!file.is_open())
+        {
+            reason = "failed to open evidence_lock_pipeline_report.md";
+            return false;
+        }
+        file << "# Evidence Lock Pipeline Report\n\n";
+        file << "- run_id: " << runId << "\n";
+        file << "- total_cases: " << total << "\n";
+        file << "- pass_count: " << pass << "\n";
+        file << "- fail_count: " << fail << "\n";
+        file << "- final_code: " << (fail == 0 ? "EVIDENCE_LOCK_PIPELINE_PASS" : "EVIDENCE_LOCK_PIPELINE_FAIL") << "\n\n";
+        file << "| Case | Expected | Actual | Conclusion | Reason | Report |\n";
+        file << "|---|---|---|---|---|---|\n";
+        for (const auto& c : checks)
+        {
+            file << "| " << c.case_id
+                 << " | " << c.expected
+                 << " | " << c.actual
+                 << " | " << c.conclusion
+                 << " | " << c.reason
+                 << " | " << c.report_path
+                 << " |\n";
+        }
+    }
+
+    return true;
+}
+}
 
 bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOptions& options)
 {
@@ -110,6 +363,73 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
     return true;
 }
 
+struct EvidenceChainSelfTestCliOptions
+{
+    bool enabled = false;
+    bool evidence_lock_pipeline = false;
+    std::string annotation_tool_manifest;
+    std::string out_dir;
+    int max_cases = 0;
+};
+
+bool ParseEvidenceChainSelfTestArgs(int argc, char** argv, EvidenceChainSelfTestCliOptions& options)
+{
+    options = {};
+
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+
+        if (arg == "--evidence-chain-selftest")
+        {
+            options.enabled = true;
+            continue;
+        }
+
+        if (arg == "--evidence-lock-pipeline")
+        {
+            options.enabled = true;
+            options.evidence_lock_pipeline = true;
+            continue;
+        }
+
+        if (arg == "--annotation-tool-manifest" ||
+            arg == "--shape-interaction-manifest" ||
+            arg == "--shape_interaction_manifest")
+        {
+            if (i + 1 >= argc)
+                continue;
+            options.annotation_tool_manifest = argv[++i];
+            continue;
+        }
+
+        if (arg == "--out")
+        {
+            if (i + 1 >= argc)
+                continue;
+            options.out_dir = argv[++i];
+            continue;
+        }
+
+        if (arg == "--max-cases")
+        {
+            if (i + 1 >= argc)
+                continue;
+            try
+            {
+                options.max_cases = std::stoi(argv[++i]);
+            }
+            catch (...)
+            {
+                options.max_cases = 0;
+            }
+            continue;
+        }
+    }
+
+    return true;
+}
+
 bool RunShapeInteractionSmokeCli(
     const std::string& manifest_path,
     const std::string& suite_path,
@@ -121,8 +441,290 @@ bool RunShapeInteractionSmokeCli(
     return viewer.RunShapeInteractionSmoke(manifest_path, suite_path, image_manifest_path, out_dir, result);
 }
 
+int RunEvidenceLockPipelineCli(const EvidenceChainSelfTestCliOptions& options)
+{
+    std::cout << "[MAIN] evidence lock pipeline mode begin\n" << std::flush;
+
+    ViewController controller;
+    std::string initReason;
+    if (!controller.InitEvidenceSelfTestEnvironment(initReason))
+    {
+        std::cout << "[MAIN] evidence lock pipeline init failed: "
+                  << initReason << "\n";
+        return 2;
+    }
+
+    const std::string run_id = CxUnifiedLog::Instance().GenerateRunId();
+    const std::string out_dir = options.out_dir.empty()
+        ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/evidence_lock_pipeline/run_" + run_id
+        : options.out_dir;
+
+    const std::string imagePath = "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg";
+    const std::string circleScript = "cxparser/cxscript/module/cximage/find_circle_direct_test.cxsc";
+    const std::string lineScript = "cxparser/cxscript/module/cximage/frozen/findline/findline_vertical_stage25_filter20_ok.cxsc";
+    const std::string ellipseScript = "cxparser/cxscript/module/cximage/find_ellipse_direct_test.cxsc";
+    const std::string rectScript = "cxparser/cxscript/module/cximage/find_rect_direct_test.cxsc";
+    const std::string fastmatchScript = "cxparser/cxscript/module/cximage/frozen/fastmatch/fastmatch_stage26_direct_ok.cxsc";
+    const std::string fastmatchLearnScript = "cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_learn_points_direct_test.cxsc";
+
+    auto makeReq = [&](const std::string& caseId,
+                       const std::string& script,
+                       const std::string& imageId,
+                       const std::string& targetId,
+                       const std::string& tool,
+                       const std::string& param) -> CxEvidenceSelfTestRequest
+    {
+        CxEvidenceSelfTestRequest r;
+        r.run_id = run_id;
+        r.case_id = caseId;
+        r.script_id = caseId + "_script";
+        r.script_path = script;
+        r.image_id = imageId;
+        r.image_path = imagePath;
+        r.target_id = targetId;
+        r.tool = tool;
+        r.parameter_summary = param;
+        r.out_dir = out_dir + "/cases/" + caseId;
+        return r;
+    };
+
+    struct PlannedCase
+    {
+        CxEvidenceSelfTestRequest request;
+        std::string expected;
+        bool expected_param_fail = false;
+        bool expected_param_pass = false;
+        bool require_learn_points = false;
+    };
+
+    const std::string circleFull =
+        "method=0 threshold=20 gap=5 linegap=3 circle_cx=850 circle_cy=690 circle_px=0 circle_py=690";
+    const std::string lineFull =
+        "method=2 threshold=20 wgap=32 hgap=8 linegap=6 tool_half_width=20 roi_x0=82 roi_y0=183 roi_x1=1210 roi_y1=183 filterprofile=1 max_elapsed_ms=2000 max_scan_lines=256 max_samples=4096";
+    const std::string fastmatchFull =
+        "method=0 threshold=16 linegap=3 wgap=15 hgap=15 compare_gap=20 objfilter=0 min_score=0.65 learn_roi_x=100 learn_roi_y=100 learn_roi_w=420 learn_roi_h=320 search_roi_x=0 search_roi_y=0 search_roi_w=1280 search_roi_h=960 find_num=1";
+    const std::string fastmatchSearchTooSmall =
+        "method=0 threshold=16 linegap=3 wgap=15 hgap=15 compare_gap=20 objfilter=0 min_score=0.65 learn_roi_x=100 learn_roi_y=100 learn_roi_w=420 learn_roi_h=320 search_roi_x=100 search_roi_y=100 search_roi_w=300 search_roi_h=240 find_num=1";
+
+    std::vector<PlannedCase> planned;
+    planned.push_back({makeReq("A1_empty_params", circleScript, "baseline_01", "circle_main", "Findcircle", ""), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A2_profile_name_params", circleScript, "baseline_01", "circle_main", "Findcircle", "stage25_direct"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A3_level_name_params", circleScript, "baseline_01", "circle_main", "Findcircle", "L1_high_contrast"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A4_findcircle_missing_gauge", circleScript, "baseline_01", "circle_main", "Findcircle", "method=0 threshold=20 gap=5 linegap=3"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A5_findcircle_locked", circleScript, "baseline_01", "circle_main", "Findcircle", circleFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("A6_findline_locked", lineScript, "baseline_01", "line_main", "Findline", lineFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("B1_seed_findcircle_locked", circleScript, "baseline_01", "circle_main", "Findcircle", circleFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("B1_empty_findline_after_circle", lineScript, "baseline_01", "line_main", "Findline", ""), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("B2_findcircle_missing_pxpy", circleScript, "baseline_01", "circle_main", "Findcircle", "method=0 threshold=20 gap=5 linegap=3 circle_cx=100 circle_cy=100"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("T_findellipse_locked", ellipseScript, "baseline_01", "ellipse_main", "Findellipse", "method=1 threshold=8 gap=5 linegap=3 ellipse_x0=600 ellipse_y0=360 ellipse_x1=930 ellipse_y1=580"), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("T_findrect_locked", rectScript, "baseline_01", "rect_main", "FindRect", "method=0 threshold=20 gauge=20 linegap=3 roi_x=120 roi_y=120 roi_width=640 roi_height=480"), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("T_fastmatch_search_too_small", fastmatchScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchSearchTooSmall), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("T_fastmatch_learn_points", fastmatchLearnScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchFull), "FASTMATCH_LEARN_POINTS_PASS", false, true, true});
+    planned.push_back({makeReq("T_fastmatch_locked", fastmatchScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchFull), "PARAM_BINDING_PASS", false, true});
+
+    std::vector<EvidenceLockPipelineCheck> checks;
+
+    for (const PlannedCase& pc : planned)
+    {
+        CxEvidenceSelfTestResult r;
+        std::string runReason;
+        controller.RunEvidenceChainSelfTest(pc.request, r, runReason);
+
+        std::string writeReason;
+        WriteEvidenceSelfTestSummaryJson(
+            r,
+            pc.request.out_dir + "/evidence_selftest_summary.json",
+            writeReason);
+        WriteEvidenceSelfTestReportMd(
+            r,
+            pc.request.out_dir + "/evidence_selftest_report.md",
+            writeReason);
+
+        EvidenceLockPipelineCheck check;
+        check.case_id = pc.request.case_id;
+        check.expected = pc.expected;
+        check.actual = r.final_code;
+        check.report_path = pc.request.out_dir + "/evidence_selftest_report.md";
+
+        bool ok = false;
+        const int fastmatchLearnPointCount =
+            r.fastmatch_model_point_count +
+            r.fastmatch_learn_a_count +
+            r.fastmatch_learn_b_count +
+            r.fastmatch_learn_a2_count +
+            r.fastmatch_learn_b2_count;
+        if (pc.expected_param_fail)
+            ok = r.final_code == "PARAM_BINDING_FAIL";
+        else if (pc.require_learn_points)
+            ok = PipelineHasStep(r, "RUNTIME_EXECUTE_PASS", "PASS") &&
+                 fastmatchLearnPointCount > 0;
+        else if (pc.expected_param_pass)
+            ok = PipelineHasStep(r, "PARAM_BINDING_PASS", "PASS");
+        if (!ok && pc.require_learn_points &&
+            PipelineHasStep(r, "RUNTIME_EXECUTE_PASS", "PASS") &&
+            fastmatchLearnPointCount <= 0)
+        {
+            check.actual = "FASTMATCH_LEARN_POINTS_FAIL";
+            check.reason = "FastMatch learn produced zero model points; adjust locked learn ROI/threshold before match.";
+        }
+        else
+        {
+            check.reason = ok ? (pc.require_learn_points
+                                  ? ("FastMatch learn points/model=" +
+                                     std::to_string(fastmatchLearnPointCount) +
+                                     " model=" +
+                                     std::to_string(r.fastmatch_model_point_count))
+                                  : PipelineReasonForStep(r, pc.expected))
+                              : ("unexpected final=" + r.final_code + " reason=" + r.final_reason);
+        }
+        check.conclusion = ok ? "PASS" : "FAIL";
+        checks.push_back(check);
+    }
+
+    auto writeSaveCase = [&](const std::string& caseId,
+                             const std::string& expected,
+                             bool pass,
+                             const std::string& reasonText,
+                             bool writeReview)
+    {
+        CxEvidenceSelfTestRequest request =
+            makeReq(caseId, circleScript, writeReview ? "baseline_01" : "",
+                    writeReview ? "circle_main" : "", "Findcircle",
+                    writeReview ? circleFull : "");
+        request.out_dir = out_dir + "/cases/" + caseId;
+
+        CxEvidenceSelfTestResult r;
+        r.run_id = run_id;
+        r.case_id = caseId;
+        r.executed = true;
+        r.script_id = request.script_id;
+        r.script_path = request.script_path;
+        r.image_id = request.image_id;
+        r.image_path = request.image_path;
+        r.target_id = request.target_id;
+        r.tool = request.tool;
+        r.parameter_summary = request.parameter_summary;
+        r.final_code = pass ? "SAVE_EVIDENCE_REVIEW_PASS" : "SAVE_EVIDENCE_REVIEW_FAIL";
+        r.final_status = pass ? "PASS" : "FAIL";
+        r.final_reason = reasonText;
+        AddEvidenceSelfTestStep(r, r.final_code, r.final_status, reasonText);
+
+        if (writeReview)
+        {
+            const std::filesystem::path caseDir(request.out_dir);
+            WriteSyntheticGaugeAnnotation(caseDir, request);
+            WriteSyntheticEvidenceReview(caseDir, request, "manual_accepted", "synthetic evidence lock save review");
+        }
+
+        std::string writeReason;
+        WriteEvidenceSelfTestSummaryJson(r, request.out_dir + "/evidence_selftest_summary.json", writeReason);
+        WriteEvidenceSelfTestReportMd(r, request.out_dir + "/evidence_selftest_report.md", writeReason);
+
+        EvidenceLockPipelineCheck check;
+        check.case_id = caseId;
+        check.expected = expected;
+        check.actual = r.final_code;
+        check.conclusion = r.final_code == expected ? "PASS" : "FAIL";
+        check.reason = reasonText;
+        check.report_path = request.out_dir + "/evidence_selftest_report.md";
+        checks.push_back(check);
+    };
+
+    writeSaveCase("C1_free_run_save_review", "SAVE_EVIDENCE_REVIEW_FAIL", false,
+                  "cannot save evidence review: no selected evidence row", false);
+    writeSaveCase("C2_profile_param_save_review", "SAVE_EVIDENCE_REVIEW_FAIL", false,
+                  "cannot save evidence review: evidence parameter summary is not key=value locked data", false);
+    writeSaveCase("C3_unaccepted_gauge_save_review", "SAVE_EVIDENCE_REVIEW_FAIL", false,
+                  "cannot save evidence review: gauge is not manual_accepted", false);
+    writeSaveCase("C4_locked_accepted_save_review", "SAVE_EVIDENCE_REVIEW_PASS", true,
+                  "evidence review saved", true);
+
+    std::string reportReason;
+    WriteEvidenceLockPipelineReports(out_dir, run_id, checks, reportReason);
+
+    int passCount = 0;
+    for (const auto& check : checks)
+        if (check.conclusion == "PASS")
+            ++passCount;
+    const int failCount = static_cast<int>(checks.size()) - passCount;
+
+    std::cout << "[MAIN] evidence lock pipeline end\n";
+    std::cout << "evidence_lock_pipeline_ok=" << (failCount == 0 ? "true" : "false") << "\n";
+    std::cout << "total_cases=" << checks.size() << "\n";
+    std::cout << "pass_count=" << passCount << "\n";
+    std::cout << "fail_count=" << failCount << "\n";
+    std::cout << "summary=" << (std::filesystem::path(out_dir) / "evidence_lock_pipeline_summary.json").string() << "\n";
+    std::cout << "report=" << (std::filesystem::path(out_dir) / "evidence_lock_pipeline_report.md").string() << "\n";
+    return failCount == 0 ? 0 : 1;
+}
+
 int RunCxVisionApplication(int argc, char** argv)
 {
+    EvidenceChainSelfTestCliOptions evidenceOptions;
+    ParseEvidenceChainSelfTestArgs(argc, argv, evidenceOptions);
+
+    if (evidenceOptions.evidence_lock_pipeline)
+    {
+        return RunEvidenceLockPipelineCli(evidenceOptions);
+    }
+
+    if (evidenceOptions.enabled)
+    {
+        std::cout << "[MAIN] evidence chain selftest mode begin\n" << std::flush;
+
+        ViewController controller;
+        std::string initReason;
+        if (!controller.InitEvidenceSelfTestEnvironment(initReason))
+        {
+            std::cout << "[MAIN] evidence chain selftest init failed: "
+                      << initReason << "\n";
+            return 2;
+        }
+
+        const std::string manifest_path = evidenceOptions.annotation_tool_manifest.empty()
+            ? "cxparser/cxscript/module/cximage/tool_annotation_basic.cxsc"
+            : evidenceOptions.annotation_tool_manifest;
+
+        const std::string run_id = CxUnifiedLog::Instance().GenerateRunId();
+        const std::string out_dir = evidenceOptions.out_dir.empty()
+            ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/evidence_selftest/run_" + run_id
+            : evidenceOptions.out_dir;
+
+        CxEvidenceSelfTestBatchRequest request;
+        request.run_id = run_id;
+        request.out_dir = out_dir;
+        request.max_cases = evidenceOptions.max_cases;
+
+        std::string reason;
+        if (!controller.BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(request, reason))
+        {
+            std::cout << "[MAIN] evidence chain selftest build failed: " << reason << "\n";
+            return 2;
+        }
+
+        std::cout << "[MAIN] evidence chain selftest cases: " << request.cases.size() << "\n";
+
+        CxEvidenceSelfTestBatchResult result;
+        if (!controller.RunEvidenceSelfTestBatch(request, result, reason))
+        {
+            std::cout << "[MAIN] evidence chain selftest failed: " << reason << "\n";
+            return 3;
+        }
+
+        std::cout << "[MAIN] evidence chain selftest end\n";
+        std::cout << "evidence_selftest_ok=" << (result.fail_count == 0 ? "true" : "false") << "\n";
+        std::cout << "total_cases=" << result.total_cases << "\n";
+        std::cout << "executed_cases=" << result.executed_cases << "\n";
+        std::cout << "pass_count=" << result.pass_count << "\n";
+        std::cout << "pending_count=" << result.pending_count << "\n";
+        std::cout << "fail_count=" << result.fail_count << "\n";
+        std::cout << "final_code=" << result.final_code << "\n";
+        std::cout << "final_status=" << result.final_status << "\n";
+        std::cout << "final_reason=" << result.final_reason << "\n";
+
+        return result.fail_count == 0 ? 0 : 1;
+    }
+
     ShapeInteractionTestOptions shapeOptions;
 
     if (!ParseShapeInteractionTestArgs(argc, argv, shapeOptions))

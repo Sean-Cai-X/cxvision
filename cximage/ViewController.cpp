@@ -35,6 +35,8 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <cctype>
 
 #ifndef CXCORE_ENABLE_VIEWCONTROLLER_CUDA
 #define CXCORE_ENABLE_VIEWCONTROLLER_CUDA 0
@@ -113,6 +115,593 @@ namespace
   {
     return value.empty() ? "(none)" : value.c_str();
   }
+
+  std::string inferEvidenceToolFromScriptPath(const std::string& scriptPath)
+  {
+    if (scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos)
+      return "Findcircle";
+    if (scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos)
+      return "Findline";
+    if (scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos)
+      return "Findellipse";
+    if (scriptPath.find("find_rect") != std::string::npos ||
+        scriptPath.find("findrect") != std::string::npos)
+      return "FindRect";
+    if (scriptPath.find("fastmatch") != std::string::npos)
+      return "fastmatch";
+    if (scriptPath.find("find_segmentation") != std::string::npos ||
+        scriptPath.find("findsegmentation") != std::string::npos)
+      return "FindSegmentation";
+    return "";
+  }
+
+  bool scriptContainsIdentifier(
+      const std::string& scriptText,
+      const std::string& identifier)
+  {
+    std::size_t pos = scriptText.find(identifier);
+    while (pos != std::string::npos)
+    {
+      const bool leftOk =
+          pos == 0 ||
+          !(std::isalnum(static_cast<unsigned char>(scriptText[pos - 1])) ||
+            scriptText[pos - 1] == '_');
+      const std::size_t end = pos + identifier.size();
+      const bool rightOk =
+          end >= scriptText.size() ||
+          !(std::isalnum(static_cast<unsigned char>(scriptText[end])) ||
+            scriptText[end] == '_');
+      if (leftOk && rightOk)
+        return true;
+      pos = scriptText.find(identifier, end);
+    }
+    return false;
+  }
+
+  bool stageEvidenceSelfTestScriptGlobals(
+      ParserDebugBridge& bridge,
+      std::unordered_map<std::string, int>& runtimeIntVars,
+      const std::string& scriptText,
+      const std::string& parameterSummary,
+      int imageWidth,
+      int imageHeight,
+      bool allowFallbackDefaults,
+      std::string& reason)
+  {
+    reason.clear();
+    if (scriptText.empty())
+    {
+      reason = "script text is empty";
+      return false;
+    }
+
+    auto existingOr = [&](const char* key, int fallback) -> int
+    {
+      const auto it = runtimeIntVars.find(key);
+      return it == runtimeIntVars.end() ? fallback : it->second;
+    };
+
+    auto setInt = [&](const char* key, int value)
+    {
+      runtimeIntVars[key] = value;
+      bridge.SetGlobalInt(key, value);
+    };
+
+    std::vector<std::string> missingLockedGlobals;
+
+    auto setIntIfUsed = [&](const char* key, int value) -> bool
+    {
+      if (!scriptContainsIdentifier(scriptText, key))
+        return false;
+      setInt(key, value);
+      return true;
+    };
+
+    auto setRequiredIntIfUsed = [&](const char* key, int fallback) -> bool
+    {
+      if (!scriptContainsIdentifier(scriptText, key))
+        return false;
+      const auto it = runtimeIntVars.find(key);
+      if (it == runtimeIntVars.end() && !allowFallbackDefaults)
+      {
+        missingLockedGlobals.push_back(key);
+        return false;
+      }
+      setInt(key, it == runtimeIntVars.end() ? fallback : it->second);
+      return true;
+    };
+
+    auto parseDoubleToken = [&](const char* key, double& value) -> bool
+    {
+      const std::string pattern = std::string(key) + "=";
+      const std::size_t pos = parameterSummary.find(pattern);
+      if (pos == std::string::npos)
+        return false;
+      std::size_t begin = pos + pattern.size();
+      std::size_t end = begin;
+      while (end < parameterSummary.size() &&
+             (std::isdigit(static_cast<unsigned char>(parameterSummary[end])) ||
+              parameterSummary[end] == '-' || parameterSummary[end] == '+' ||
+              parameterSummary[end] == '.'))
+      {
+        ++end;
+      }
+      if (end == begin)
+        return false;
+      try
+      {
+        value = std::stod(parameterSummary.substr(begin, end - begin));
+      }
+      catch (...)
+      {
+        return false;
+      }
+      return std::isfinite(value);
+    };
+
+    auto setDoubleIfUsed = [&](const char* key, double value) -> bool
+    {
+      if (!scriptContainsIdentifier(scriptText, key))
+        return false;
+      bridge.SetGlobalDouble(key, value);
+      return true;
+    };
+
+    auto setRequiredDoubleIfUsed = [&](const char* key,
+                                       const char* summaryKey,
+                                       double fallback) -> bool
+    {
+      if (!scriptContainsIdentifier(scriptText, key))
+        return false;
+      double value = fallback;
+      if (!parseDoubleToken(summaryKey, value) && !allowFallbackDefaults)
+      {
+        missingLockedGlobals.push_back(key);
+        return false;
+      }
+      bridge.SetGlobalDouble(key, value);
+      return true;
+    };
+
+    const int safeWidth = std::max(1, imageWidth);
+    const int safeHeight = std::max(1, imageHeight);
+    const int roiX0 = existingOr("global_roi_x0", std::max(0, safeWidth / 4));
+    const int roiY0 = existingOr("global_roi_y0", std::max(0, safeHeight / 4));
+    const int roiX1 = existingOr("global_roi_x1", std::max(roiX0 + 8, (safeWidth * 3) / 4));
+    const int roiY1 = existingOr("global_roi_y1", std::max(roiY0 + 8, (safeHeight * 3) / 4));
+    const int roiW = std::max(8, roiX1 - roiX0);
+    const int roiH = std::max(8, roiY1 - roiY0);
+
+    int applied = 0;
+    applied += setRequiredIntIfUsed("global_roi_x0", roiX0) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_y0", roiY0) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_x1", roiX1) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_y1", roiY1) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_x", existingOr("global_roi_x", roiX0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_y", existingOr("global_roi_y", roiY0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_width", existingOr("global_roi_width", roiW)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_roi_height", existingOr("global_roi_height", roiH)) ? 1 : 0;
+
+    applied += setRequiredIntIfUsed("global_learn_roi_x", existingOr("global_learn_roi_x", roiX0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_learn_roi_y", existingOr("global_learn_roi_y", roiY0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_learn_roi_w", existingOr("global_learn_roi_w", roiW)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_learn_roi_h", existingOr("global_learn_roi_h", roiH)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_search_roi_x", existingOr("global_search_roi_x", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_search_roi_y", existingOr("global_search_roi_y", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_search_roi_w", existingOr("global_search_roi_w", safeWidth)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_search_roi_h", existingOr("global_search_roi_h", safeHeight)) ? 1 : 0;
+
+    applied += setRequiredIntIfUsed("global_circle_cx", existingOr("global_circle_cx", safeWidth / 2)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_cy", existingOr("global_circle_cy", safeHeight / 2)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_px", existingOr("global_circle_px", (safeWidth * 3) / 4)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_py", existingOr("global_circle_py", safeHeight / 2)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_ellipse_x0", existingOr("global_ellipse_x0", roiX0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_ellipse_y0", existingOr("global_ellipse_y0", roiY0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_ellipse_x1", existingOr("global_ellipse_x1", roiX1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_ellipse_y1", existingOr("global_ellipse_y1", roiY1)) ? 1 : 0;
+
+    applied += setRequiredIntIfUsed("global_method", existingOr("global_method", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_threshold", existingOr("global_threshold", 20)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_gap", existingOr("global_gap", 5)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_linegap", existingOr("global_linegap", 3)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_wgap", existingOr("global_wgap", 32)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_hgap", existingOr("global_hgap", 8)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_tool_half_width", existingOr("global_tool_half_width", 32)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_filterprofile", existingOr("global_filterprofile", 1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_gauge", existingOr("global_gauge", 20)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_find_num", existingOr("global_find_num", 5)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_compare_gap", existingOr("global_compare_gap", 20)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_objfilter", existingOr("global_objfilter", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_max_elapsed_ms", existingOr("global_max_elapsed_ms", 2000)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_max_scan_lines", existingOr("global_max_scan_lines", 256)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_max_samples", existingOr("global_max_samples", 4096)) ? 1 : 0;
+
+    applied += setRequiredDoubleIfUsed("global_min_score", "min_score", 0.5) ? 1 : 0;
+    applied += setDoubleIfUsed("global_match_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_best_score", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_model_point_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_learn_a_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_learn_b_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_learn_a2_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_learn_b2_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_circle_ref", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_line_ref", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_ellipse_ref", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_rect_ref", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_match_ref", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_segmentation_ref", 0.0) ? 1 : 0;
+
+    if (!missingLockedGlobals.empty())
+    {
+      reason = "evidence locked parameter summary is missing required globals:";
+      for (const auto& key : missingLockedGlobals)
+        reason += " " + key;
+      return false;
+    }
+
+    reason = std::string(allowFallbackDefaults ? "fallback_default " : "evidence_locked ") +
+             "staged " + std::to_string(applied) +
+             " script global bindings for evidence selftest";
+    return true;
+  }
+
+  void syncEvidenceLockedGlobalsToManualGauge(
+      ManualTestContext& context,
+      const std::string& scriptPath,
+      const std::string& source)
+  {
+    auto getInt = [&](const std::string& key, int fallback) -> int
+    {
+      const auto it = context.runtime_int_vars.find(key);
+      return it == context.runtime_int_vars.end() ? fallback : it->second;
+    };
+
+    const bool isCircleScript =
+        scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos;
+    const bool isLineScript =
+        scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos;
+    const bool isEllipseScript =
+        scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos;
+
+    ManualGaugeState gauge;
+    gauge.case_id = context.active_case_id;
+    gauge.image_id = context.active_image_id;
+    gauge.target_id = context.active_target_id;
+    gauge.source = source;
+    gauge.review_status = "editing";
+    gauge.threshold = getInt("global_threshold", 20);
+    gauge.method = getInt("global_method", 0);
+    gauge.linegap = getInt("global_linegap", 3);
+    gauge.wgap = getInt("global_wgap", 32);
+    gauge.hgap = getInt("global_hgap", 8);
+    gauge.gap = getInt("global_gap", 5);
+    gauge.tool_half_width = getInt("global_tool_half_width", 32);
+    gauge.filterprofile = getInt("global_filterprofile", 1);
+
+    if (isCircleScript)
+    {
+      gauge.tool = "Findcircle";
+      gauge.has_circle_gauge = true;
+      gauge.circle_cx = getInt("global_circle_cx", 0);
+      gauge.circle_cy = getInt("global_circle_cy", 0);
+      gauge.circle_px = getInt("global_circle_px", gauge.circle_cx);
+      gauge.circle_py = getInt("global_circle_py", gauge.circle_cy);
+      gauge.radius = static_cast<int>(std::lround(std::hypot(
+          static_cast<double>(gauge.circle_px - gauge.circle_cx),
+          static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+    }
+    else if (isEllipseScript)
+    {
+      gauge.tool = "Findellipse";
+      gauge.has_ellipse_gauge = true;
+      gauge.ellipse_x0 = getInt("global_ellipse_x0", 0);
+      gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
+      gauge.ellipse_x1 = getInt("global_ellipse_x1", 0);
+      gauge.ellipse_y1 = getInt("global_ellipse_y1", 0);
+    }
+    else if (isLineScript)
+    {
+      gauge.tool = "Findline";
+      gauge.has_line_gauge = true;
+      gauge.line_x0 = getInt("global_roi_x0", 0);
+      gauge.line_y0 = getInt("global_roi_y0", 0);
+      gauge.line_x1 = getInt("global_roi_x1", 0);
+      gauge.line_y1 = getInt("global_roi_y1", 0);
+    }
+
+    if (gauge.has_circle_gauge || gauge.has_line_gauge ||
+        gauge.has_ellipse_gauge)
+    {
+      context.current_gauge = gauge;
+    }
+  }
+
+  bool evidenceSnapshotHasLockedParamSummary(
+      const CxEvidenceSelectionSnapshot& snapshot,
+      std::string& reason)
+  {
+    if (!snapshot.valid)
+    {
+      reason = "invalid evidence snapshot";
+      return false;
+    }
+    if (snapshot.parameter_summary.empty() || snapshot.parameter_summary == "-")
+    {
+      reason = "evidence parameter summary is empty";
+      return false;
+    }
+    if (snapshot.parameter_summary.find('=') == std::string::npos)
+    {
+      reason = "evidence parameter summary is not key=value locked data: " +
+               snapshot.parameter_summary;
+      return false;
+    }
+    reason.clear();
+    return true;
+  }
+
+  std::string jsonEscapeEvidenceReview(const std::string& value)
+  {
+    std::ostringstream oss;
+    for (char ch : value)
+    {
+      switch (ch)
+      {
+      case '\\': oss << "\\\\"; break;
+      case '"': oss << "\\\""; break;
+      case '\n': oss << "\\n"; break;
+      case '\r': oss << "\\r"; break;
+      case '\t': oss << "\\t"; break;
+      default: oss << ch; break;
+      }
+    }
+    return oss.str();
+  }
+
+  bool saveLockedEvidenceReview(
+      ManualTestContext& context,
+      std::string& outPath,
+      std::string& reason)
+  {
+    outPath.clear();
+    reason.clear();
+
+    const CxEvidenceSelectionSnapshot& snapshot =
+        context.current_evidence_selection;
+    if (!snapshot.valid)
+    {
+      reason = "cannot save evidence review: no selected evidence row";
+      return false;
+    }
+    if (snapshot.case_id.empty() || snapshot.script_path.empty() ||
+        snapshot.image_path.empty() || snapshot.target_id.empty())
+    {
+      reason = "cannot save evidence review: evidence case/script/image/target is incomplete";
+      return false;
+    }
+
+    std::string paramReason;
+    if (!evidenceSnapshotHasLockedParamSummary(snapshot, paramReason))
+    {
+      reason = "cannot save evidence review: " + paramReason;
+      return false;
+    }
+
+    if (context.image_file_path != snapshot.image_path)
+    {
+      reason = "cannot save evidence review: current image differs from locked evidence image";
+      return false;
+    }
+
+    if (context.current_gauge.review_status != "manual_accepted" ||
+        !context.current_gauge.accepted)
+    {
+      reason = "cannot save evidence review: gauge is not manual_accepted";
+      return false;
+    }
+
+    std::string gaugePath;
+    std::string gaugeReason;
+    if (!SaveManualGaugeAnnotation(context, "", "", gaugePath, gaugeReason))
+    {
+      reason = "cannot save evidence review: " + gaugeReason;
+      return false;
+    }
+
+    std::filesystem::path dir;
+    if (!ResolveManualGaugeCaseDir(context, dir, reason))
+      return false;
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec)
+    {
+      reason = "cannot create evidence review directory: " + ec.message();
+      return false;
+    }
+
+    const std::filesystem::path destination = dir / "evidence_review.json";
+    const std::filesystem::path temporary = destination.string() + ".tmp";
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+    {
+      reason = "cannot open temporary evidence review file";
+      return false;
+    }
+
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"review_status\": \"" << jsonEscapeEvidenceReview(context.current_gauge.review_status) << "\",\n"
+         << "  \"case_id\": \"" << jsonEscapeEvidenceReview(snapshot.case_id) << "\",\n"
+         << "  \"script_id\": \"" << jsonEscapeEvidenceReview(snapshot.script_id) << "\",\n"
+         << "  \"script_path\": \"" << jsonEscapeEvidenceReview(snapshot.script_path) << "\",\n"
+         << "  \"image_id\": \"" << jsonEscapeEvidenceReview(snapshot.image_id) << "\",\n"
+         << "  \"image_path\": \"" << jsonEscapeEvidenceReview(snapshot.image_path) << "\",\n"
+         << "  \"target_id\": \"" << jsonEscapeEvidenceReview(snapshot.target_id) << "\",\n"
+         << "  \"tool\": \"" << jsonEscapeEvidenceReview(snapshot.tool) << "\",\n"
+         << "  \"parameter_summary\": \"" << jsonEscapeEvidenceReview(snapshot.parameter_summary) << "\",\n"
+         << "  \"gauge_annotation_path\": \"" << jsonEscapeEvidenceReview(gaugePath) << "\",\n"
+         << "  \"runtime_status\": \"" << jsonEscapeEvidenceReview(context.debug_status) << "\",\n"
+         << "  \"runtime_reason\": \"" << jsonEscapeEvidenceReview(context.debug_reason) << "\",\n"
+         << "  \"binding_policy\": \"evidence_locked_only\",\n"
+         << "  \"runtime_int_globals\": {";
+
+    bool first = true;
+    for (const auto& kv : context.runtime_int_vars)
+    {
+      if (!first)
+        file << ",";
+      file << "\n    \"" << jsonEscapeEvidenceReview(kv.first)
+           << "\": " << kv.second;
+      first = false;
+    }
+    if (!first)
+      file << "\n  ";
+    file << "}\n"
+         << "}\n";
+    file.flush();
+    const bool writeOk = file.good();
+    file.close();
+    if (!writeOk)
+    {
+      reason = "failed while writing evidence review";
+      return false;
+    }
+
+    std::filesystem::rename(temporary, destination, ec);
+    if (ec)
+    {
+      std::filesystem::remove(destination, ec);
+      ec.clear();
+      std::filesystem::rename(temporary, destination, ec);
+    }
+    if (ec)
+    {
+      reason = "cannot finalize evidence review: " + ec.message();
+      return false;
+    }
+
+    outPath = destination.string();
+    reason = "evidence review saved";
+    return true;
+  }
+
+  void CopyRuntimeObjectDiagnosticsToEvidenceResult(
+      const RuntimeObjectView& object,
+      CxEvidenceSelfTestResult& result)
+  {
+    result.algorithm_status = object.runtime_state;
+    result.measure_points_count = object.measure_points_count;
+    result.valid_points_count = object.valid_points_count;
+    result.has_measure_points =
+        object.has_measure_points || object.has_line_measure_points;
+    result.has_fit_result =
+        object.has_fit_result || object.has_fit_line || object.has_fit_ellipse;
+
+    if (object.type == "Findcircle")
+    {
+      result.algorithm_status = object.has_fit_result
+          ? "fitcircle_available"
+          : (object.valid_points_count > 0 ? "fitcircle_unavailable" : "no_measure_points");
+      if (!object.circle_measure_failure_stage.empty())
+      {
+        result.algorithm_reason =
+            object.circle_measure_failure_stage + ": " + object.circle_measure_detail;
+      }
+      else if (object.valid_points_count <= 0)
+      {
+        result.algorithm_reason = "Findcircle produced zero measure points.";
+      }
+      else if (!object.has_fit_result)
+      {
+        result.algorithm_reason =
+            "Findcircle produced measure points, but fitcircle result is unavailable.";
+      }
+      else
+      {
+        result.algorithm_reason = object.display_summary;
+      }
+      result.avgdist = object.fit_avgdist;
+      result.fit_cx = object.fit_cx;
+      result.fit_cy = object.fit_cy;
+      result.fit_radius = object.fit_radius;
+    }
+    else if (object.type == "Findline")
+    {
+      result.algorithm_status = object.line_result_status.empty()
+          ? object.runtime_state
+          : object.line_result_status;
+      result.algorithm_reason = object.line_result_reason.empty()
+          ? object.line_measure_failure_hint
+          : object.line_result_reason;
+      result.measure_points_count = object.line_measure_points_count;
+      result.valid_points_count = object.valid_line_points_count;
+      result.has_measure_points = object.has_line_measure_points;
+      result.has_fit_result = object.has_fit_line;
+      result.avgdist = object.line_avgdist;
+      result.fit_cx = object.fit_line_x0;
+      result.fit_cy = object.fit_line_y0;
+      result.fit_radius_x = object.fit_line_x1;
+      result.fit_radius_y = object.fit_line_y1;
+    }
+    else if (object.type == "Findellipse")
+    {
+      result.algorithm_status = object.ellipse_result_status.empty()
+          ? object.runtime_state
+          : object.ellipse_result_status;
+      result.algorithm_reason = object.ellipse_result_reason;
+      result.avgdist = object.fit_ellipse_avgdist;
+      result.fit_cx = object.fit_ellipse_cx;
+      result.fit_cy = object.fit_ellipse_cy;
+      result.fit_radius_x = object.fit_ellipse_rx;
+      result.fit_radius_y = object.fit_ellipse_ry;
+      result.fit_angle_deg = object.fit_ellipse_angle_deg;
+    }
+    else if (object.type == "fastmatch")
+    {
+      result.algorithm_status = object.fastmatch_status.empty()
+          ? object.runtime_state
+          : object.fastmatch_status;
+      result.algorithm_reason = object.fastmatch_reason.empty()
+          ? object.display_summary
+          : object.fastmatch_reason;
+      result.measure_points_count = object.measure_points_count;
+      result.valid_points_count = object.valid_points_count;
+      result.has_measure_points = object.measure_points_count > 0;
+      result.has_fit_result = object.valid_points_count > 0;
+      result.fastmatch_model_point_count = object.fastmatch_model_point_count;
+      result.fastmatch_learn_a_count = object.fastmatch_learn_a_count;
+      result.fastmatch_learn_b_count = object.fastmatch_learn_b_count;
+      result.fastmatch_learn_a2_count = object.fastmatch_learn_a2_count;
+      result.fastmatch_learn_b2_count = object.fastmatch_learn_b2_count;
+      result.fastmatch_pattern_a_count = object.fastmatch_pattern_a_count;
+      result.fastmatch_pattern_b_count = object.fastmatch_pattern_b_count;
+      result.fastmatch_candidate_count = object.fastmatch_candidate_count;
+      result.fastmatch_best_score = object.fastmatch_best_score;
+    }
+    else if (object.type == "FindRect")
+    {
+      result.algorithm_reason = object.display_summary;
+    }
+    else if (object.type == "FindSegmentation")
+    {
+      result.algorithm_status = object.segmentation_backend_status.empty()
+          ? object.runtime_state
+          : object.segmentation_backend_status;
+      result.algorithm_reason = object.display_summary;
+      result.measure_points_count = object.measure_points_count;
+      result.valid_points_count = object.valid_points_count;
+      result.has_measure_points = object.has_measure_points;
+      result.has_fit_result = object.segmentation_has_boundary;
+    }
+  }
+
   static Aspect_VKeyMouse mouseButtonFromGlfw (int theButton)
   {
     switch (theButton)
@@ -536,6 +1125,35 @@ void ViewController::run()
   CXLOG_INFO("ViewController", "run_stage", "finished", "stage=end");
 }
 
+bool ViewController::InitEvidenceSelfTestEnvironment(std::string& reason)
+{
+  reason.clear();
+
+  std::string init_reason;
+  if (!m_parserOwner.Initialize(init_reason))
+  {
+    reason = "parser initialization failed: " + init_reason;
+    return false;
+  }
+  m_parserOwner.ConfigureStreams(&m_os, &m_createcodeos);
+  m_parserDebugBridge.Bind(&m_parserOwner);
+
+  initScriptCatalog();
+  initManualStateTestConsole();
+  initImageEvidenceLayer();
+  EnsureCxScriptWorkbenchAssetsLoaded();
+
+  if (m_scriptCatalog.empty() &&
+      m_manualTest.script_evidence_groups.empty())
+  {
+    reason = "evidence selftest environment has no scripts or evidence rows";
+    return false;
+  }
+
+  reason = "evidence selftest environment initialized";
+  return true;
+}
+
 void ViewController::initImGui()
 {
     IMGUI_CHECKVERSION();
@@ -827,7 +1445,35 @@ bool ViewController::ApplySemanticExecutionContextBeforeRun(
         m_manualTest.active_script_case_path = context.script_path;
         m_manualTest.active_script_case_purpose = "semantic_evidence_run";
 
-        SeedDefaultManualGlobals(m_manualTest, context.script_path);
+        m_manualTest.runtime_int_vars.clear();
+
+        if (context.parameter_summary.empty() ||
+            context.parameter_summary == "-" ||
+            context.parameter_summary.find('=') == std::string::npos)
+        {
+            reason = "semantic evidence run requires locked key=value parameters; current param=" +
+                     context.parameter_summary;
+            m_manualTest.debug_status = "EVIDENCE_PARAM_LOCK_REQUIRED";
+            m_manualTest.debug_reason = reason;
+            return false;
+        }
+
+        std::string paramReason;
+        if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
+                context.parameter_summary,
+                paramReason))
+        {
+            reason = "failed to apply locked evidence parameters: " +
+                     paramReason;
+            m_manualTest.debug_status = "EVIDENCE_PARAM_BIND_FAIL";
+            m_manualTest.debug_reason = reason;
+            return false;
+        }
+
+        syncEvidenceLockedGlobalsToManualGauge(
+            m_manualTest,
+            context.script_path,
+            "semantic_evidence_locked");
 
         if (!context.image_path.empty())
         {
@@ -844,17 +1490,37 @@ bool ViewController::ApplySemanticExecutionContextBeforeRun(
             m_manualTest.image_file_path = context.image_path;
         }
 
-        std::string paramReason;
-        if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
-                context.parameter_summary,
-                paramReason))
+        std::string scriptTextForGlobals;
+        std::string scriptGlobalReason;
+        if (!ReadTextFile(context.script_path, scriptTextForGlobals))
         {
-            m_manualTest.debug_reason =
-                "parameter summary not applied: " + paramReason;
+            reason = "failed to read locked evidence script: " +
+                     context.script_path;
+            m_manualTest.debug_status = "EVIDENCE_SCRIPT_READ_FAIL";
+            m_manualTest.debug_reason = reason;
+            return false;
+        }
+        const int imageWidth = m_imageViewImage.empty() ? 0 : m_imageViewImage.cols;
+        const int imageHeight = m_imageViewImage.empty() ? 0 : m_imageViewImage.rows;
+        if (!stageEvidenceSelfTestScriptGlobals(
+                m_parserDebugBridge,
+                m_manualTest.runtime_int_vars,
+                scriptTextForGlobals,
+                context.parameter_summary,
+                imageWidth,
+                imageHeight,
+                false,
+                scriptGlobalReason))
+        {
+            reason = scriptGlobalReason;
+            m_manualTest.debug_status = "EVIDENCE_PARAM_BIND_FAIL";
+            m_manualTest.debug_reason = reason;
+            return false;
         }
 
         m_manualTest.debug_status = "SEMANTIC_EXECUTION_CONTEXT_READY";
-        m_manualTest.debug_reason = context.reason;
+        m_manualTest.debug_reason =
+            context.reason + " | " + paramReason + " | " + scriptGlobalReason;
     }
     else
     {
@@ -920,12 +1586,61 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
 
     applied += applyIntToken("method", "global_method") ? 1 : 0;
     applied += applyIntToken("threshold", "global_threshold") ? 1 : 0;
+    applied += applyIntToken("thr", "global_threshold") ? 1 : 0;
     applied += applyIntToken("wgap", "global_wgap") ? 1 : 0;
     applied += applyIntToken("hgap", "global_hgap") ? 1 : 0;
     applied += applyIntToken("gap", "global_gap") ? 1 : 0;
     applied += applyIntToken("linegap", "global_linegap") ? 1 : 0;
+    applied += applyIntToken("lgap", "global_linegap") ? 1 : 0;
     applied += applyIntToken("filterprofile", "global_filterprofile") ? 1 : 0;
     applied += applyIntToken("tool_half_width", "global_tool_half_width") ? 1 : 0;
+    applied += applyIntToken("half_width", "global_tool_half_width") ? 1 : 0;
+    applied += applyIntToken("gauge", "global_gauge") ? 1 : 0;
+    applied += applyIntToken("find_num", "global_find_num") ? 1 : 0;
+    applied += applyIntToken("compare_gap", "global_compare_gap") ? 1 : 0;
+    applied += applyIntToken("objfilter", "global_objfilter") ? 1 : 0;
+    applied += applyIntToken("max_elapsed_ms", "global_max_elapsed_ms") ? 1 : 0;
+    applied += applyIntToken("max_scan_lines", "global_max_scan_lines") ? 1 : 0;
+    applied += applyIntToken("max_samples", "global_max_samples") ? 1 : 0;
+
+    applied += applyIntToken("roi_x0", "global_roi_x0") ? 1 : 0;
+    applied += applyIntToken("roi_y0", "global_roi_y0") ? 1 : 0;
+    applied += applyIntToken("roi_x1", "global_roi_x1") ? 1 : 0;
+    applied += applyIntToken("roi_y1", "global_roi_y1") ? 1 : 0;
+    applied += applyIntToken("x0", "global_roi_x0") ? 1 : 0;
+    applied += applyIntToken("y0", "global_roi_y0") ? 1 : 0;
+    applied += applyIntToken("x1", "global_roi_x1") ? 1 : 0;
+    applied += applyIntToken("y1", "global_roi_y1") ? 1 : 0;
+
+    applied += applyIntToken("roi_x", "global_roi_x") ? 1 : 0;
+    applied += applyIntToken("roi_y", "global_roi_y") ? 1 : 0;
+    applied += applyIntToken("roi_width", "global_roi_width") ? 1 : 0;
+    applied += applyIntToken("roi_height", "global_roi_height") ? 1 : 0;
+    applied += applyIntToken("roi_w", "global_roi_width") ? 1 : 0;
+    applied += applyIntToken("roi_h", "global_roi_height") ? 1 : 0;
+
+    applied += applyIntToken("circle_cx", "global_circle_cx") ? 1 : 0;
+    applied += applyIntToken("circle_cy", "global_circle_cy") ? 1 : 0;
+    applied += applyIntToken("circle_px", "global_circle_px") ? 1 : 0;
+    applied += applyIntToken("circle_py", "global_circle_py") ? 1 : 0;
+    applied += applyIntToken("cx", "global_circle_cx") ? 1 : 0;
+    applied += applyIntToken("cy", "global_circle_cy") ? 1 : 0;
+    applied += applyIntToken("px", "global_circle_px") ? 1 : 0;
+    applied += applyIntToken("py", "global_circle_py") ? 1 : 0;
+
+    applied += applyIntToken("ellipse_x0", "global_ellipse_x0") ? 1 : 0;
+    applied += applyIntToken("ellipse_y0", "global_ellipse_y0") ? 1 : 0;
+    applied += applyIntToken("ellipse_x1", "global_ellipse_x1") ? 1 : 0;
+    applied += applyIntToken("ellipse_y1", "global_ellipse_y1") ? 1 : 0;
+
+    applied += applyIntToken("learn_roi_x", "global_learn_roi_x") ? 1 : 0;
+    applied += applyIntToken("learn_roi_y", "global_learn_roi_y") ? 1 : 0;
+    applied += applyIntToken("learn_roi_w", "global_learn_roi_w") ? 1 : 0;
+    applied += applyIntToken("learn_roi_h", "global_learn_roi_h") ? 1 : 0;
+    applied += applyIntToken("search_roi_x", "global_search_roi_x") ? 1 : 0;
+    applied += applyIntToken("search_roi_y", "global_search_roi_y") ? 1 : 0;
+    applied += applyIntToken("search_roi_w", "global_search_roi_w") ? 1 : 0;
+    applied += applyIntToken("search_roi_h", "global_search_roi_h") ? 1 : 0;
 
     if (applied == 0)
     {
@@ -937,6 +1652,1280 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     reason = "applied " + std::to_string(applied) +
              " runtime globals from parameter summary";
     return true;
+}
+
+bool ViewController::ResolveEvidenceSelfTestSnapshot(
+    const CxEvidenceSelfTestRequest& request,
+    CxEvidenceSelectionSnapshot& snapshot,
+    std::string& reason)
+{
+    reason.clear();
+    snapshot = CxEvidenceSelectionSnapshot{};
+
+    EnsureCxScriptWorkbenchAssetsLoaded();
+
+    if (!request.script_path.empty() || !request.image_path.empty() ||
+        !request.parameter_summary.empty())
+    {
+        std::string scriptPath = request.script_path;
+        if (scriptPath.empty() && !request.script_id.empty())
+            scriptPath = ResolveCatalogScriptPathById(request.script_id);
+
+        if (scriptPath.empty())
+        {
+            reason = "synthetic evidence request has empty script_path";
+            return false;
+        }
+
+        const bool isDeprecatedScript =
+            scriptPath.find("/deprecated/") != std::string::npos ||
+            scriptPath.find("\\deprecated\\") != std::string::npos ||
+            scriptPath.find("deprecated/") == 0 ||
+            scriptPath.find("deprecated\\") == 0;
+        if (isDeprecatedScript)
+        {
+            reason = "deprecated cxscript cannot be used as Evidence binding: " +
+                     scriptPath;
+            return false;
+        }
+
+        snapshot.valid = true;
+        snapshot.case_id = request.case_id;
+        snapshot.script_id = request.script_id.empty() ? scriptPath : request.script_id;
+        snapshot.script_path = scriptPath;
+        snapshot.image_id = request.image_id;
+        snapshot.image_path = request.image_path;
+        snapshot.target_id = request.target_id;
+        snapshot.tool = request.tool;
+        snapshot.parameter_summary = request.parameter_summary;
+        snapshot.parameter_profile_id = request.parameter_summary;
+        snapshot.status = "synthetic";
+        snapshot.reason = "synthetic evidence lock pipeline case";
+        snapshot.source = "evidence_lock_pipeline";
+        return true;
+    }
+
+    if (request.group_index >= 0 && request.thumb_index >= 0)
+    {
+        if (request.group_index >=
+            static_cast<int>(m_manualTest.script_evidence_groups.size()))
+        {
+            reason = "selftest group_index out of range";
+            return false;
+        }
+
+        const ScriptEvidenceGroup& group =
+            m_manualTest.script_evidence_groups[request.group_index];
+
+        if (request.thumb_index >= static_cast<int>(group.thumbs.size()))
+        {
+            reason = "selftest thumb_index out of range";
+            return false;
+        }
+
+        return BuildEvidenceSnapshotFromThumb(
+            request.group_index,
+            request.thumb_index,
+            group.thumbs[request.thumb_index],
+            snapshot,
+            reason);
+    }
+
+    if (!request.script_id.empty())
+    {
+        for (int gi = 0;
+             gi < static_cast<int>(m_manualTest.script_evidence_groups.size());
+             ++gi)
+        {
+            const ScriptEvidenceGroup& group =
+                m_manualTest.script_evidence_groups[gi];
+
+            for (int ti = 0;
+                 ti < static_cast<int>(group.thumbs.size());
+                 ++ti)
+            {
+                const ScriptEvidenceThumb& thumb = group.thumbs[ti];
+
+                if (thumb.script_id != request.script_id)
+                    continue;
+
+                if (!request.image_id.empty() &&
+                    thumb.image_id != request.image_id)
+                    continue;
+
+                if (!request.target_id.empty() &&
+                    thumb.target_id != request.target_id)
+                    continue;
+
+                return BuildEvidenceSnapshotFromThumb(
+                    gi,
+                    ti,
+                    thumb,
+                    snapshot,
+                    reason);
+            }
+        }
+
+        reason = "no evidence thumb matched request script/image/target";
+        return false;
+    }
+
+    return GetSelectedEvidenceSnapshot(snapshot, reason);
+}
+
+bool ViewController::CheckEvidenceSelfTestImageBinding(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    std::string& reason) const
+{
+    reason.clear();
+
+    if (snapshot.image_path.empty())
+    {
+        reason = "evidence image_path is empty";
+        return false;
+    }
+
+    if (!std::filesystem::exists(snapshot.image_path))
+    {
+        reason = "evidence image file not found: " + snapshot.image_path;
+        return false;
+    }
+
+    if (m_imageViewImage.empty())
+    {
+        reason = "Image View image is empty after evidence load";
+        return false;
+    }
+
+    if (m_manualTest.image_file_path.empty())
+    {
+        reason = "manual context image_file_path is empty after evidence load";
+        return false;
+    }
+
+    reason = "image binding ok: " + snapshot.image_path;
+    return true;
+}
+
+bool ViewController::CheckEvidenceSelfTestParamBinding(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    std::string& reason) const
+{
+    reason.clear();
+
+    auto hasInt = [&](const char* key) -> bool
+    {
+        return m_manualTest.runtime_int_vars.find(key) !=
+               m_manualTest.runtime_int_vars.end();
+    };
+
+    if (snapshot.script_path.find("find_circle") != std::string::npos ||
+        snapshot.script_path.find("findcircle") != std::string::npos)
+    {
+        if (!hasInt("global_circle_cx") ||
+            !hasInt("global_circle_cy") ||
+            !hasInt("global_circle_px") ||
+            !hasInt("global_circle_py") ||
+            !hasInt("global_gap") ||
+            !hasInt("global_linegap") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_method"))
+        {
+            reason = "missing required Findcircle global_* bindings";
+            return false;
+        }
+
+        reason = "Findcircle parameter globals available";
+        return true;
+    }
+
+    if (snapshot.script_path.find("find_line") != std::string::npos ||
+        snapshot.script_path.find("findline") != std::string::npos)
+    {
+        if (!hasInt("global_roi_x0") ||
+            !hasInt("global_roi_y0") ||
+            !hasInt("global_roi_x1") ||
+            !hasInt("global_roi_y1") ||
+            !hasInt("global_tool_half_width") ||
+            !hasInt("global_wgap") ||
+            !hasInt("global_hgap") ||
+            !hasInt("global_linegap") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_method"))
+        {
+            reason = "missing required Findline global_* bindings";
+            return false;
+        }
+
+        reason = "Findline parameter globals available";
+        return true;
+    }
+
+    if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
+        snapshot.script_path.find("findellipse") != std::string::npos)
+    {
+        if (!hasInt("global_ellipse_x0") ||
+            !hasInt("global_ellipse_y0") ||
+            !hasInt("global_ellipse_x1") ||
+            !hasInt("global_ellipse_y1") ||
+            !hasInt("global_gap") ||
+            !hasInt("global_linegap") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_method"))
+        {
+            reason = "missing required Findellipse global_* bindings";
+            return false;
+        }
+
+        reason = "Findellipse parameter globals available";
+        return true;
+    }
+
+    if (snapshot.script_path.find("find_rect") != std::string::npos ||
+        snapshot.script_path.find("findrect") != std::string::npos)
+    {
+        if (!hasInt("global_roi_x") ||
+            !hasInt("global_roi_y") ||
+            !hasInt("global_roi_width") ||
+            !hasInt("global_roi_height") ||
+            !hasInt("global_gauge") ||
+            !hasInt("global_linegap") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_method"))
+        {
+            reason = "missing required FindRect global_* bindings";
+            return false;
+        }
+
+        reason = "FindRect parameter globals available";
+        return true;
+    }
+
+    if (snapshot.script_path.find("find_segmentation") != std::string::npos ||
+        snapshot.script_path.find("findsegmentation") != std::string::npos)
+    {
+        if (!hasInt("global_roi_x0") ||
+            !hasInt("global_roi_y0") ||
+            !hasInt("global_roi_x1") ||
+            !hasInt("global_roi_y1"))
+        {
+            reason = "missing required FindSegmentation global_* bindings";
+            return false;
+        }
+
+        reason = "FindSegmentation parameter globals available";
+        return true;
+    }
+
+    if (snapshot.script_path.find("fastmatch") != std::string::npos)
+    {
+        if (!hasInt("global_learn_roi_x") ||
+            !hasInt("global_learn_roi_y") ||
+            !hasInt("global_learn_roi_w") ||
+            !hasInt("global_learn_roi_h") ||
+            !hasInt("global_search_roi_x") ||
+            !hasInt("global_search_roi_y") ||
+            !hasInt("global_search_roi_w") ||
+            !hasInt("global_search_roi_h") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_wgap") ||
+            !hasInt("global_hgap") ||
+            !hasInt("global_linegap") ||
+            !hasInt("global_compare_gap") ||
+            !hasInt("global_objfilter") ||
+            !hasInt("global_find_num"))
+        {
+            reason = "missing required FastMatch global_* bindings";
+            return false;
+        }
+
+        const int learn_w =
+            m_manualTest.runtime_int_vars.at("global_learn_roi_w");
+        const int learn_h =
+            m_manualTest.runtime_int_vars.at("global_learn_roi_h");
+        const int search_w =
+            m_manualTest.runtime_int_vars.at("global_search_roi_w");
+        const int search_h =
+            m_manualTest.runtime_int_vars.at("global_search_roi_h");
+
+        if (learn_w <= 0 || learn_h <= 0)
+        {
+            reason = "FastMatch learn ROI must have positive width and height";
+            return false;
+        }
+
+        if (search_w <= 0 || search_h <= 0)
+        {
+            reason = "FastMatch search ROI must have positive width and height";
+            return false;
+        }
+
+        if (search_w <= learn_w || search_h <= learn_h)
+        {
+            reason =
+                "FastMatch search ROI must be larger than learn ROI: learn=" +
+                std::to_string(learn_w) + "x" + std::to_string(learn_h) +
+                " search=" + std::to_string(search_w) + "x" +
+                std::to_string(search_h);
+            return false;
+        }
+
+        reason =
+            "FastMatch parameter globals available; search ROI larger than learn ROI";
+        return true;
+    }
+
+    if (snapshot.parameter_summary.empty() || snapshot.parameter_summary == "-")
+    {
+        reason = "parameter summary is empty; defaults may be present but evidence param binding is absent";
+        return false;
+    }
+
+    reason = "generic parameter summary available";
+    return true;
+}
+
+bool ViewController::RunEvidenceChainSelfTest(
+    const CxEvidenceSelfTestRequest& request,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    reason.clear();
+    result = CxEvidenceSelfTestResult{};
+
+    result.run_id = request.run_id;
+    result.case_id = request.case_id.empty()
+        ? "evidence_selftest"
+        : request.case_id;
+
+    result.executed = true;
+    result.final_status = "RUNNING";
+    result.final_code = "EVIDENCE_SELFTEST_RUNNING";
+
+    CxEvidenceSelectionSnapshot snapshot;
+    std::string stepReason;
+
+    if (!ResolveEvidenceSelfTestSnapshot(request, snapshot, stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "EVIDENCE_SELECTION_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "EVIDENCE_SELECTION_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    result.script_id = snapshot.script_id;
+    result.script_path = snapshot.script_path;
+    result.image_id = snapshot.image_id;
+    result.image_path = snapshot.image_path;
+    result.target_id = snapshot.target_id;
+    result.tool = snapshot.tool;
+    const std::string inferredTool = inferEvidenceToolFromScriptPath(snapshot.script_path);
+    if (!inferredTool.empty() &&
+        (result.tool.empty() || result.tool == "module" || result.tool == "integration"))
+    {
+        result.tool = inferredTool;
+    }
+    result.parameter_summary = snapshot.parameter_summary;
+
+    AddEvidenceSelfTestStep(
+        result,
+        "EVIDENCE_SELECTION_PASS",
+        "PASS",
+        "snapshot resolved from evidence chain");
+
+    if (!ApplyEvidenceSelectionSnapshotToManualContext(
+            snapshot,
+            false,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "EVIDENCE_CONTEXT_APPLY_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "EVIDENCE_CONTEXT_APPLY_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    if (!LoadImageForEvidenceSelfTest(snapshot.image_path, stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "IMAGE_BINDING_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "IMAGE_BINDING_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    if (!CheckEvidenceSelfTestImageBinding(snapshot, stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "IMAGE_BINDING_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "IMAGE_BINDING_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "IMAGE_BINDING_PASS",
+        "PASS",
+        stepReason);
+
+    m_manualTest.runtime_int_vars.clear();
+
+    std::string paramApplyReason;
+    if (!evidenceSnapshotHasLockedParamSummary(snapshot, paramApplyReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "PARAM_BINDING_FAIL",
+            "FAIL",
+            paramApplyReason);
+
+        result.final_code = "PARAM_BINDING_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = paramApplyReason;
+        reason = paramApplyReason;
+        return false;
+    }
+
+    if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
+            snapshot.parameter_summary,
+            paramApplyReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "PARAM_BINDING_FAIL",
+            "FAIL",
+            paramApplyReason);
+
+        result.final_code = "PARAM_BINDING_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = paramApplyReason;
+        reason = paramApplyReason;
+        return false;
+    }
+
+    syncEvidenceLockedGlobalsToManualGauge(
+        m_manualTest,
+        snapshot.script_path,
+        "evidence_selftest_locked");
+
+    std::string scriptTextForGlobals;
+    std::string scriptGlobalReason;
+    if (ReadTextFile(snapshot.script_path, scriptTextForGlobals))
+    {
+        const int imageWidth = m_imageViewImage.empty() ? 0 : m_imageViewImage.cols;
+        const int imageHeight = m_imageViewImage.empty() ? 0 : m_imageViewImage.rows;
+        if (!stageEvidenceSelfTestScriptGlobals(
+                m_parserDebugBridge,
+                m_manualTest.runtime_int_vars,
+                scriptTextForGlobals,
+                snapshot.parameter_summary,
+                imageWidth,
+                imageHeight,
+                false,
+                scriptGlobalReason))
+        {
+            AddEvidenceSelfTestStep(
+                result,
+                "PARAM_BINDING_FAIL",
+                "FAIL",
+                scriptGlobalReason);
+
+            result.final_code = "PARAM_BINDING_FAIL";
+            result.final_status = "FAIL";
+            result.final_reason = scriptGlobalReason;
+            reason = scriptGlobalReason;
+            return false;
+        }
+        else
+        {
+            paramApplyReason += " | " + scriptGlobalReason;
+        }
+    }
+    else
+    {
+        paramApplyReason += " | script global staging skipped: script file could not be read";
+    }
+
+    if (!CheckEvidenceSelfTestParamBinding(snapshot, stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "PARAM_BINDING_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "PARAM_BINDING_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "PARAM_BINDING_PASS",
+        "PASS",
+        stepReason + " | " + paramApplyReason);
+
+    if (!RunEvidenceSelfTestParserCompileStage(
+            snapshot,
+            result,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "SCRIPT_COMPILE_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "SCRIPT_COMPILE_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "SCRIPT_COMPILE_PASS",
+        "PASS",
+        "script accepted by compile-only parser path");
+
+    AddEvidenceSelfTestStep(
+        result,
+        "GLOBAL_INJECTION_PASS",
+        "PASS",
+        stepReason);
+
+    result.parser_binding_ok = true;
+
+    if (!RunEvidenceSelfTestRuntimeExecuteStage(
+            snapshot,
+            result,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "RUNTIME_EXECUTE_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "EVIDENCE_SELFTEST_L2_RUNTIME_EXECUTE_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "RUNTIME_EXECUTE_PASS",
+        "PASS",
+        stepReason);
+
+    if (!CheckEvidenceSelfTestRuntimeObjectStage(
+            snapshot,
+            result,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "RUNTIME_OBJECT_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "EVIDENCE_SELFTEST_L2_RUNTIME_OBJECT_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "RUNTIME_OBJECT_PASS",
+        "PASS",
+        stepReason);
+
+    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+    {
+        if (object.name == result.runtime_object_name &&
+            object.type == result.runtime_object_type)
+        {
+            CopyRuntimeObjectDiagnosticsToEvidenceResult(object, result);
+            break;
+        }
+    }
+
+    if (!RunEvidenceSelfTestProjectionStage(
+            snapshot,
+            result,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+            result,
+            "GAUGE_PROJECTION_FAIL",
+            "FAIL",
+            stepReason);
+
+        result.final_code = "EVIDENCE_SELFTEST_L2_GAUGE_PROJECTION_FAIL";
+        result.final_status = "FAIL";
+        result.final_reason = stepReason;
+        reason = stepReason;
+        return false;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "GAUGE_PROJECTION_PASS",
+        "PASS",
+        stepReason);
+
+    if (!CheckEvidenceSelfTestResultProjectionStage(
+            snapshot,
+            result,
+            stepReason))
+    {
+        AddEvidenceSelfTestStep(
+        result,
+        "RESULT_PROJECTION_PENDING",
+        "PENDING",
+        stepReason);
+
+        result.final_code = "RESULT_PROJECTION_PENDING";
+        result.final_status = "PENDING_HUMAN_REVIEW";
+        result.final_reason = stepReason;
+        result.passed_to_human_review = true;
+        reason = stepReason;
+        return true;
+    }
+
+    AddEvidenceSelfTestStep(
+        result,
+        "RESULT_PROJECTION_PASS",
+        "PASS",
+        stepReason);
+
+    result.final_code = "EVIDENCE_SELFTEST_L2_RUNTIME_PROJECTION_PASS";
+    result.final_status = "PENDING_HUMAN_REVIEW";
+    result.final_reason =
+        "Evidence chain runtime object, gauge projection and result projection are available; pending human final review.";
+    result.passed_to_human_review = true;
+
+    reason = result.final_reason;
+    return true;
+}
+
+bool ViewController::RunEvidenceSelfTestParserCompileStage(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (snapshot.script_path.empty())
+    {
+        reason = "snapshot script_path is empty";
+        return false;
+    }
+
+    std::string scriptText;
+    if (!ReadTextFile(snapshot.script_path, scriptText))
+    {
+        reason = "failed to read script for parser compile stage: " +
+                 snapshot.script_path;
+        return false;
+    }
+
+    for (const auto& input : m_manualTest.runtime_int_vars)
+    {
+        if (input.first.rfind("global_", 0) == 0)
+            m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+    }
+
+    bool imageBound = true;
+    if (!m_imageViewImage.empty())
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(m_imageViewImage);
+    else if (!s_img0.empty())
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(s_img0);
+    else
+        imageBound = false;
+
+    if (!imageBound)
+    {
+        reason = "failed to stage global_matInput for parser compile stage";
+        return false;
+    }
+
+    if (!m_parserDebugBridge.CompileScriptOnly(scriptText))
+    {
+        reason = "compile-only rejected script: " +
+                 m_parserDebugBridge.LastError();
+        return false;
+    }
+
+    std::string injectionReason;
+    if (!CheckEvidenceSelfTestGlobalInjection(snapshot, injectionReason))
+    {
+        reason = injectionReason;
+        return false;
+    }
+
+    reason = "compile-only accepted script; " + injectionReason;
+    return true;
+}
+
+bool ViewController::CheckEvidenceSelfTestGlobalInjection(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    std::string& reason)
+{
+    reason.clear();
+
+    auto hasRuntimeInt = [&](const char* key) -> bool
+    {
+        return m_manualTest.runtime_int_vars.find(key) !=
+               m_manualTest.runtime_int_vars.end();
+    };
+
+    auto hasParserVar = [&](const char* key) -> bool
+    {
+        double value = 0.0;
+        return m_parserDebugBridge.QueryDouble(key, value);
+    };
+
+    std::vector<std::string> required;
+
+    if (snapshot.script_path.find("find_circle") != std::string::npos ||
+        snapshot.script_path.find("findcircle") != std::string::npos)
+    {
+        required = {
+            "global_circle_cx",
+            "global_circle_cy",
+            "global_circle_px",
+            "global_circle_py",
+            "global_gap",
+            "global_linegap",
+            "global_threshold",
+            "global_method"
+        };
+    }
+    else if (snapshot.script_path.find("find_line") != std::string::npos ||
+             snapshot.script_path.find("findline") != std::string::npos)
+    {
+        required = {
+            "global_roi_x0",
+            "global_roi_y0",
+            "global_roi_x1",
+            "global_roi_y1",
+            "global_tool_half_width",
+            "global_wgap",
+            "global_hgap",
+            "global_linegap",
+            "global_threshold",
+            "global_method"
+        };
+    }
+    else if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
+             snapshot.script_path.find("findellipse") != std::string::npos)
+    {
+        required = {
+            "global_ellipse_x0",
+            "global_ellipse_y0",
+            "global_ellipse_x1",
+            "global_ellipse_y1",
+            "global_gap",
+            "global_linegap",
+            "global_threshold",
+            "global_method"
+        };
+    }
+    else if (snapshot.script_path.find("find_rect") != std::string::npos ||
+             snapshot.script_path.find("findrect") != std::string::npos)
+    {
+        required = {
+            "global_roi_x",
+            "global_roi_y",
+            "global_roi_width",
+            "global_roi_height",
+            "global_gauge",
+            "global_linegap",
+            "global_threshold",
+            "global_method"
+        };
+    }
+    else if (snapshot.script_path.find("fastmatch") != std::string::npos)
+    {
+        required = {
+            "global_learn_roi_x",
+            "global_learn_roi_y",
+            "global_learn_roi_w",
+            "global_learn_roi_h",
+            "global_search_roi_x",
+            "global_search_roi_y",
+            "global_search_roi_w",
+            "global_search_roi_h",
+            "global_threshold",
+            "global_wgap",
+            "global_hgap",
+            "global_linegap",
+            "global_compare_gap",
+            "global_objfilter",
+            "global_find_num"
+        };
+    }
+    else
+    {
+        reason = "generic script has no required global injection rule";
+        return true;
+    }
+
+    for (const std::string& key : required)
+    {
+        if (!hasRuntimeInt(key.c_str()))
+        {
+            reason = "runtime_int_vars missing " + key;
+            return false;
+        }
+
+        if (!hasParserVar(key.c_str()))
+        {
+            reason = "parser variable missing " + key;
+            return false;
+        }
+    }
+
+    reason = "required global_* vars are available in runtime and parser";
+    return true;
+}
+
+bool ViewController::RunEvidenceSelfTestRuntimeExecuteStage(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (snapshot.script_path.empty())
+    {
+        reason = "runtime execute rejected: snapshot script_path is empty";
+        return false;
+    }
+
+    std::string scriptText;
+    if (!ReadTextFile(snapshot.script_path, scriptText))
+    {
+        reason = "runtime execute rejected: failed to read script " +
+                 snapshot.script_path;
+        return false;
+    }
+
+    for (const auto& input : m_manualTest.runtime_int_vars)
+    {
+        if (input.first.rfind("global_", 0) == 0)
+            m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+    }
+
+    bool imageBound = false;
+    if (!m_imageViewImage.empty())
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(m_imageViewImage);
+    else if (!s_img0.empty())
+        imageBound = m_parserDebugBridge.StageGlobalMatInput(s_img0);
+
+    if (!imageBound)
+    {
+        reason = "runtime execute rejected: failed to stage global_matInput";
+        return false;
+    }
+
+    m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
+
+    const bool ran = m_parserDebugBridge.RunScript(scriptText);
+    result.runtime_executed = ran;
+
+    if (!ran)
+    {
+        reason = "runtime execute failed: " + m_parserDebugBridge.LastError();
+        return false;
+    }
+
+    RefreshRuntimeObjectTable(
+        "Evidence SelfTest Runtime Execute",
+        "runtime_executed");
+
+    result.runtime_object_count =
+        static_cast<int>(m_manualTest.runtime_objects.size());
+
+    reason = "runtime executed and runtime object table refreshed";
+    return true;
+}
+
+bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (m_manualTest.runtime_objects.empty())
+    {
+        reason = "runtime object check failed: no runtime objects queried";
+        return false;
+    }
+
+    auto scriptHas = [&](const char* token) -> bool
+    {
+        return snapshot.script_path.find(token) != std::string::npos;
+    };
+
+    std::string expectedType;
+    if (scriptHas("find_circle") || scriptHas("findcircle"))
+        expectedType = "Findcircle";
+    else if (scriptHas("find_line") || scriptHas("findline"))
+        expectedType = "Findline";
+    else if (scriptHas("find_ellipse") || scriptHas("findellipse"))
+        expectedType = "Findellipse";
+    else if (scriptHas("find_rect") || scriptHas("findrect"))
+        expectedType = "FindRect";
+    else if (scriptHas("fastmatch"))
+        expectedType = "fastmatch";
+    else if (scriptHas("find_segmentation") || scriptHas("findsegmentation"))
+        expectedType = "FindSegmentation";
+
+    if (expectedType.empty())
+    {
+        reason = "runtime object check skipped: generic script has no expected tool type";
+        result.runtime_object_ok = true;
+        return true;
+    }
+
+    for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+    {
+        if (object.type == expectedType)
+        {
+            result.runtime_object_ok = true;
+            result.runtime_object_type = object.type;
+            result.runtime_object_name = object.name;
+            result.runtime_status = object.runtime_state;
+            reason = "runtime object available: " + object.type + " " + object.name;
+            return true;
+        }
+    }
+
+    reason = "runtime object check failed: expected " + expectedType +
+             " but not found";
+    return false;
+}
+
+bool ViewController::RunEvidenceSelfTestProjectionStage(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    (void)snapshot;
+    reason.clear();
+
+    result.shape_element_count_before =
+        static_cast<int>(m_annotationLayer.ShapeElements().size());
+
+    RequestRuntimeShapeSync("evidence_selftest_runtime_projection");
+
+    m_runtimeShapeSyncPending = false;
+    m_runtimeShapeSyncReason.clear();
+    m_runtimeShapeSyncExecuting = true;
+    SyncRuntimeObjectsToShapeElements();
+    m_runtimeShapeSyncExecuting = false;
+
+    result.shape_element_count_after =
+        static_cast<int>(m_annotationLayer.ShapeElements().size());
+
+    result.projected_shape_count =
+        result.shape_element_count_after - result.shape_element_count_before;
+
+    if (result.shape_element_count_after <= 0)
+    {
+        reason = "projection failed: annotation layer has no shape elements";
+        return false;
+    }
+
+    bool hasEditableGauge = false;
+    bool hasResultElement = false;
+    int visibleCount = 0;
+    int gaugeCount = 0;
+    int resultCount = 0;
+
+    for (const CxShapeElement& element : m_annotationLayer.ShapeElements())
+    {
+        if (!element.visible || !element.shape)
+            continue;
+
+        ++visibleCount;
+
+        if (element.editable && !element.result_element)
+        {
+            hasEditableGauge = true;
+            ++gaugeCount;
+        }
+
+        if (element.result_element &&
+            element.semantic_role == "result")
+        {
+            hasResultElement = true;
+            ++resultCount;
+        }
+    }
+
+    result.shape_element_count = visibleCount;
+    result.gauge_shape_count = gaugeCount;
+    result.result_shape_count = resultCount;
+
+    if (!hasEditableGauge)
+    {
+        reason = "projection failed: no editable gauge/ROI shape found";
+        return false;
+    }
+
+    result.gauge_projection_ok = true;
+    result.shape_projection_ok = true;
+
+    reason = hasResultElement
+        ? "gauge and result shape projection available"
+        : "gauge projection available; result shape pending runtime algorithm output";
+
+    result.projection_reason = reason;
+    result.gauge_status = hasEditableGauge ? "gauge_shape_available" : "gauge_shape_missing";
+
+    return true;
+}
+
+bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    CxEvidenceSelfTestResult& result,
+    std::string& reason)
+{
+    reason.clear();
+
+    auto scriptHas = [&](const char* token) -> bool
+    {
+        return snapshot.script_path.find(token) != std::string::npos;
+    };
+
+    bool requiresResult =
+        scriptHas("find_circle") ||
+        scriptHas("findcircle") ||
+        scriptHas("find_line") ||
+        scriptHas("findline") ||
+        scriptHas("find_ellipse") ||
+        scriptHas("findellipse") ||
+        scriptHas("find_rect") ||
+        scriptHas("findrect") ||
+        scriptHas("find_segmentation") ||
+        scriptHas("findsegmentation") ||
+        scriptHas("fastmatch");
+
+    if (!requiresResult)
+    {
+        result.result_projection_ok = true;
+        reason = "generic script does not require geometry result projection";
+        return true;
+    }
+
+    if (result.result_shape_count <= 0)
+    {
+        reason = "result projection pending: runtime object and gauge shape exist, but no result shape was published";
+        return false;
+    }
+
+    result.result_ref = m_manualTest.current_result_ref.source_object;
+    result.evidence_ref = m_scriptResult.evidence_ref;
+    result.result_projection_ok = true;
+
+    if (m_manualTest.current_result_ref.source_object.empty())
+    {
+        reason =
+            "result shape projection available, but current_result_ref is empty; result shapes=" +
+            std::to_string(result.result_shape_count);
+    }
+    else
+    {
+        reason =
+            "result projection available: " +
+            m_manualTest.current_result_ref.source_object +
+            " status=" +
+            m_manualTest.current_result_ref.status;
+    }
+
+    return true;
+}
+
+bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
+    CxEvidenceSelfTestBatchRequest& request,
+    std::string& reason) const
+{
+    reason.clear();
+    request.cases.clear();
+
+    int count = 0;
+
+    for (std::size_t gi = 0; gi < m_manualTest.script_evidence_groups.size(); ++gi)
+    {
+        const ScriptEvidenceGroup& group = m_manualTest.script_evidence_groups[gi];
+
+        for (std::size_t ti = 0; ti < group.thumbs.size(); ++ti)
+        {
+            if (request.max_cases > 0 && count >= request.max_cases)
+                break;
+
+            const ScriptEvidenceThumb& thumb = group.thumbs[ti];
+
+            if (thumb.script_path.empty())
+                continue;
+
+            if (thumb.image_path.empty())
+                continue;
+
+            const bool isCximageToolScript =
+                thumb.script_path.find("find_line") != std::string::npos ||
+                thumb.script_path.find("findline") != std::string::npos ||
+                thumb.script_path.find("find_circle") != std::string::npos ||
+                thumb.script_path.find("findcircle") != std::string::npos ||
+                thumb.script_path.find("find_ellipse") != std::string::npos ||
+                thumb.script_path.find("findellipse") != std::string::npos ||
+                thumb.script_path.find("find_rect") != std::string::npos ||
+                thumb.script_path.find("findrect") != std::string::npos ||
+                thumb.script_path.find("fastmatch") != std::string::npos ||
+                thumb.script_path.find("find_segmentation") != std::string::npos ||
+                thumb.script_path.find("findsegmentation") != std::string::npos;
+
+            if (!request.include_generic_scripts && !isCximageToolScript)
+                continue;
+
+            CxEvidenceSelfTestRequest item;
+            item.run_id = request.run_id;
+            item.case_id = thumb.case_id.empty()
+                ? ("evidence_" + std::to_string(gi) + "_" + std::to_string(ti))
+                : thumb.case_id;
+            item.group_index = static_cast<int>(gi);
+            item.thumb_index = static_cast<int>(ti);
+            item.script_id = thumb.script_id;
+            item.image_id = thumb.image_id;
+            item.target_id = thumb.target_id;
+            item.out_dir =
+                request.out_dir + "/cases/" + item.case_id;
+
+            request.cases.push_back(item);
+            ++count;
+        }
+    }
+
+    if (request.cases.empty())
+    {
+        reason = "no evidence rows with script_path and image_path";
+        return false;
+    }
+
+    reason = "built evidence selftest batch cases=" +
+             std::to_string(request.cases.size());
+    return true;
+}
+
+bool ViewController::RunEvidenceSelfTestBatch(
+    const CxEvidenceSelfTestBatchRequest& request,
+    CxEvidenceSelfTestBatchResult& result,
+    std::string& reason)
+{
+    reason.clear();
+    result = CxEvidenceSelfTestBatchResult{};
+    result.run_id = request.run_id;
+    result.out_dir = request.out_dir;
+    result.total_cases = static_cast<int>(request.cases.size());
+
+    for (const CxEvidenceSelfTestRequest& item : request.cases)
+    {
+        CxEvidenceSelfTestResult caseResult;
+        std::string caseReason;
+
+        const bool ok = RunEvidenceChainSelfTest(
+            item,
+            caseResult,
+            caseReason);
+
+        result.case_results.push_back(caseResult);
+        ++result.executed_cases;
+
+        std::string writeReason;
+        WriteEvidenceSelfTestSummaryJson(
+            caseResult,
+            item.out_dir + "/evidence_selftest_summary.json",
+            writeReason);
+        WriteEvidenceSelfTestReportMd(
+            caseResult,
+            item.out_dir + "/evidence_selftest_report.md",
+            writeReason);
+
+        if (!ok || caseResult.final_status == "FAIL")
+            ++result.fail_count;
+        else if (caseResult.final_status.find("PENDING") != std::string::npos)
+            ++result.pending_count;
+        else
+            ++result.pass_count;
+    }
+
+    if (result.fail_count > 0)
+    {
+        result.final_code = "EVIDENCE_SELFTEST_L3_BATCH_RUNNER_FAIL";
+        result.final_status = "FAIL";
+    }
+    else
+    {
+        result.final_code = "EVIDENCE_SELFTEST_L3_BATCH_RUNNER_PASS";
+        result.final_status = "PENDING_HUMAN_REVIEW";
+    }
+
+    result.final_reason =
+        "batch evidence selftest executed cases=" +
+        std::to_string(result.executed_cases) +
+        " fail=" + std::to_string(result.fail_count) +
+        " pending=" + std::to_string(result.pending_count);
+
+    std::string writeReason;
+    WriteEvidenceSelfTestBatchSummaryJson(
+        result,
+        request.out_dir + "/evidence_selftest_batch_summary.json",
+        writeReason);
+
+    WriteEvidenceSelfTestBatchReportMd(
+        result,
+        request.out_dir + "/evidence_selftest_batch_report.md",
+        writeReason);
+
+    reason = result.final_reason;
+    return result.fail_count == 0;
 }
 
 void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
@@ -1459,6 +3448,111 @@ void ViewController::drawScriptAcceptancePanels()
         ImGui::Text("image=%s", sel.image_id.empty() ? "-" : sel.image_id.c_str());
         ImGui::Text("target=%s", sel.target_id.empty() ? "-" : sel.target_id.c_str());
         ImGui::Text("param=%s", sel.parameter_summary.empty() ? "-" : sel.parameter_summary.c_str());
+
+        if (ImGui::Button("Run Evidence Self Test L0"))
+        {
+            CxEvidenceSelfTestRequest request;
+            request.run_id = "manual_ui_evidence_selftest";
+            request.case_id = "selected_evidence_l0";
+            request.group_index = m_manualTest.selected_evidence_group;
+            request.thumb_index = m_manualTest.selected_evidence_thumb;
+            request.out_dir = "cxscript_runs/evidence_selftest/manual_ui_selected";
+
+            CxEvidenceSelfTestResult selftest;
+            std::string selftestReason;
+
+            const bool ok = RunEvidenceChainSelfTest(
+                request,
+                selftest,
+                selftestReason);
+
+            std::string writeReason;
+            WriteEvidenceSelfTestSummaryJson(
+                selftest,
+                request.out_dir + "/evidence_selftest_summary.json",
+                writeReason);
+
+            WriteEvidenceSelfTestReportMd(
+                selftest,
+                request.out_dir + "/evidence_selftest_report.md",
+                writeReason);
+
+            m_manualTest.debug_status = ok
+                ? "EVIDENCE_SELFTEST_L0_READY"
+                : "EVIDENCE_SELFTEST_L0_FAIL";
+            m_manualTest.debug_reason = selftestReason;
+        }
+
+        if (ImGui::Button("Run Evidence Chain Self Test"))
+        {
+            CxEvidenceSelfTestRequest request;
+            request.run_id = "manual_ui_evidence_chain_selftest";
+            request.case_id = "selected_evidence_chain";
+            request.group_index = m_manualTest.selected_evidence_group;
+            request.thumb_index = m_manualTest.selected_evidence_thumb;
+            request.out_dir = "cxscript_runs/evidence_selftest/manual_ui_chain";
+
+            std::string selftestReason;
+
+            if (!RunEvidenceChainSelfTest(request, m_manualTest.last_evidence_selftest_result, selftestReason))
+            {
+                m_manualTest.debug_status = m_manualTest.last_evidence_selftest_result.final_code.empty()
+                    ? "EVIDENCE_SELFTEST_FAIL"
+                    : m_manualTest.last_evidence_selftest_result.final_code;
+                m_manualTest.debug_reason = selftestReason;
+            }
+            else
+            {
+                m_manualTest.debug_status = m_manualTest.last_evidence_selftest_result.final_code;
+                m_manualTest.debug_reason = m_manualTest.last_evidence_selftest_result.final_reason;
+            }
+
+            std::string writeReason;
+            WriteEvidenceSelfTestSummaryJson(
+                m_manualTest.last_evidence_selftest_result,
+                request.out_dir + "/evidence_selftest_summary.json",
+                writeReason);
+
+            WriteEvidenceSelfTestReportMd(
+                m_manualTest.last_evidence_selftest_result,
+                request.out_dir + "/evidence_selftest_report.md",
+                writeReason);
+        }
+
+        if (ImGui::Button("Run Evidence Batch Self Test"))
+        {
+            CxEvidenceSelfTestBatchRequest request;
+            request.run_id = "manual_ui_evidence_batch_selftest";
+            request.out_dir = "cxscript_runs/evidence_selftest/manual_ui_batch";
+            request.max_cases = 0;
+
+            std::string reason;
+            if (!BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(request, reason))
+            {
+                m_manualTest.debug_status = "EVIDENCE_BATCH_BUILD_FAIL";
+                m_manualTest.debug_reason = reason;
+            }
+            else
+            {
+                CxEvidenceSelfTestBatchResult batch;
+                const bool ok = RunEvidenceSelfTestBatch(request, batch, reason);
+
+                m_manualTest.debug_status = batch.final_code;
+                m_manualTest.debug_reason = batch.final_reason;
+            }
+        }
+
+        ImGui::Text("SelfTest: %s",
+            m_manualTest.last_evidence_selftest_result.final_code.c_str());
+
+        for (const auto& step : m_manualTest.last_evidence_selftest_result.steps)
+        {
+            ImGui::BulletText(
+                "%s | %s | %s",
+                step.code.c_str(),
+                step.status.c_str(),
+                step.reason.c_str());
+        }
     }
 
     ImGui::Separator();
@@ -1516,6 +3610,21 @@ void ViewController::drawScriptAcceptancePanels()
     {
       m_manualTest.current_gauge.review_status = "manual_rejected";
       m_manualTest.current_gauge.accepted = false;
+    }
+    if (ImGui::Button("Save Evidence Review"))
+    {
+      std::string path;
+      std::string saveReason;
+      if (saveLockedEvidenceReview(m_manualTest, path, saveReason))
+      {
+        m_manualTest.debug_status = "evidence_review_saved";
+        m_manualTest.debug_reason = path;
+      }
+      else
+      {
+        m_manualTest.debug_status = "evidence_review_save_failed";
+        m_manualTest.debug_reason = saveReason;
+      }
     }
   }
   ImGui::End();
@@ -1955,6 +4064,22 @@ void ViewController::drawScriptAcceptancePanels()
     }
   }
   ImGui::SameLine();
+  if (ImGui::Button("Save Evidence Review"))
+  {
+    std::string path;
+    std::string reason;
+    if (saveLockedEvidenceReview(m_manualTest, path, reason))
+    {
+      m_manualTest.debug_status = "evidence_review_saved";
+      m_manualTest.debug_reason = path;
+    }
+    else
+    {
+      m_manualTest.debug_status = "evidence_review_save_failed";
+      m_manualTest.debug_reason = reason;
+    }
+  }
+  ImGui::SameLine();
   if (ImGui::Button("Reset From Runtime"))
   {
     gauge.has_line_gauge = false;
@@ -2168,6 +4293,56 @@ bool ViewController::LoadImageIntoImageView(
     m_imageViewPanX = 0.0f;
     m_imageViewPanY = 0.0f;
 
+    return true;
+}
+
+bool ViewController::LoadImageForEvidenceSelfTest(
+    const std::string& imagePath,
+    std::string& reason)
+{
+    reason.clear();
+
+    if (imagePath.empty())
+    {
+        reason = "image path is empty";
+        return false;
+    }
+
+    std::filesystem::path path(imagePath);
+    if (!std::filesystem::exists(path))
+    {
+        reason = "image file not found: " + imagePath;
+        return false;
+    }
+
+    cv::Mat image = cv::imread(path.string(), cv::IMREAD_COLOR);
+    if (image.empty())
+    {
+        reason = "failed to read image: " + path.string();
+        return false;
+    }
+
+    if (!m_imageViewImage.empty() && m_imageViewImage.size() != image.size())
+    {
+        m_annotationLayer.Clear();
+        m_annotationStatus = "image size changed; annotation refs cleared";
+    }
+
+    image.copyTo(m_imageViewImage);
+    m_annotationImageWidth = static_cast<float>(image.cols);
+    m_annotationImageHeight = static_cast<float>(image.rows);
+    if (!m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage))
+    {
+        reason = "failed to bind global_matInput for evidence selftest";
+        return false;
+    }
+
+    m_manualTest.image_file_path = path.string();
+    m_scriptResult.image_ref = path.string();
+    m_annotationStatus = "image loaded for evidence selftest";
+
+    // Headless/CLI selftest has no OpenGL context; keep texture untouched.
+    reason = "image loaded for evidence selftest: " + path.string();
     return true;
 }
 #include <Prs3d_ShadingAspect.hxx>
