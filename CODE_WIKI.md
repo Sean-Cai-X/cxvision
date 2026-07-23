@@ -1,7 +1,8 @@
 # CxVision Code Wiki v2.2
 
-https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/diagram.png
-
+<p align="center">
+<img src="https://raw.githubusercontent.com/Sean-Cai-X/cxvision/codex/cxcore-integration/diagram.png" width="100%">
+</p>
 
 > **文档版本**: v2.2  
 > **对应分支**: codex/cxcore-integration  
@@ -1757,5 +1758,7 @@ Options:
 - **[Legacy/Disabled]**：默认不编译，仅兼容保留
 
 ---
-https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/diagram2.png
+<p align="center">
+<img src="https://raw.githubusercontent.com/Sean-Cai-X/cxvision/codex/cxcore-integration/diagram2.png" width="100%">
+</p>
 *文档版本: v2.1 | 对应分支: codex/cxcore-integration | 核验日期: 2026-07-15 | 基于仓库: cxvision_repo*
