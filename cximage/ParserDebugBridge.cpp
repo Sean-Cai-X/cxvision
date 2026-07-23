@@ -8,6 +8,7 @@
 #include "FastMatch.h"
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
+#include "imagemanager.h"
 
 #if defined(CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC)
 #include "cxscript_debug_embedded_runner.h"
@@ -84,33 +85,27 @@ bool ParserDebugBridge::CompileScriptOnly(const std::string& scriptText)
 bool ParserDebugBridge::RunScript(const std::string& scriptText)
 {
   myLastError.clear();
-  if (myOwner == nullptr || scriptText.empty()) return false;
-  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:reset_runtime");
-  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "reset_runtime");
+
+  if (myOwner == nullptr || scriptText.empty())
+    return false;
+
   ResetRuntime();
-  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:rebind_globals");
-  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "rebind_globals");
-  if (!RebindGlobalInputs()) return false;
+
+  if (!RebindGlobalInputs())
+    return false;
+
   if (scriptText.find("global_matInput") != std::string::npos)
   {
-    SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:verify_global_matInput");
-    Image* inputImage = QueryImage("global_matInput");
-    if (inputImage == nullptr)
-    {
-      myLastError = "global_matInput is required by script but is not bound";
+    if (!EnsureAlgorithmRuntimeResources())
       return false;
-    }
-    if (inputImage->getmat().empty())
-    {
-      myLastError = "global_matInput image is empty";
-      return false;
-    }
   }
-  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:prepare_script");
-  const std::string prepared = PrepareScript(scriptText);
-  SetCxCrashBreadcrumb("ParserDebugBridge::RunScript:execute_script");
-  CXLOG_INFO("ParserDebugBridge", "manual_run_phase", "running", "execute_script");
-  return myOwner->ExecuteScript(prepared, myLastError);
+
+  const std::string prepared =
+      PrepareScript(scriptText);
+
+  return myOwner->ExecuteScript(
+      prepared,
+      myLastError);
 }
 
 bool ParserDebugBridge::RunPrefixToLine(const std::string& scriptText, int lineNo)
@@ -248,11 +243,7 @@ bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
 {
   std::string prepared = scriptText;
-  // Do not normalize C/C++-style address-of calls here.
-  // Headless and Manual Console must execute the same cxscript surface syntax:
-  //   tool.measure(&m_image);
-  // Rewriting it to tool.measure(m_image) sends an incompatible argument to
-  // void* class methods and can crash inside the tool's measure() function.
+
   const std::string source = "global_matInput";
   const std::string runtimeName = "global_matInput";
   std::size_t position = 0;
@@ -261,6 +252,31 @@ std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) cons
     prepared.replace(position, source.size(), runtimeName);
     position += runtimeName.size();
   }
+
+  for (size_t i = 0; i < prepared.size(); ++i)
+  {
+    if (prepared[i] != '&')
+      continue;
+
+    size_t previous = i;
+    while (previous > 0 && std::isspace(static_cast<unsigned char>(prepared[previous - 1])))
+      --previous;
+    size_t next = i + 1;
+    while (next < prepared.size() && std::isspace(static_cast<unsigned char>(prepared[next])))
+      ++next;
+
+    const bool argument_position =
+        previous > 0 && (prepared[previous - 1] == '(' || prepared[previous - 1] == ',');
+    const bool object_identifier =
+        next < prepared.size() &&
+        (std::isalpha(static_cast<unsigned char>(prepared[next])) || prepared[next] == '_');
+    if (argument_position && object_identifier)
+    {
+      prepared.erase(i, 1);
+      --i;
+    }
+  }
+
   return prepared;
 }
 
@@ -292,6 +308,35 @@ bool ParserDebugBridge::BindStagedGlobalMatInput()
   if (runtimeImage == nullptr) return false;
   SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:copy");
   runtimeImage->copyFromMat(myGlobalMatInput);
+  return true;
+}
+
+bool ParserDebugBridge::EnsureAlgorithmRuntimeResources()
+{
+  Image* input_image = QueryImage("global_matInput");
+
+  if (input_image == nullptr)
+  {
+    myLastError = "global_matInput is not bound";
+    return false;
+  }
+
+  const cv::Mat& mat = input_image->getmat();
+
+  if (mat.empty())
+  {
+    myLastError = "global_matInput image is empty";
+    return false;
+  }
+
+  if (!ImageManager::EnsureAlgorithmRuntimeResources(
+          mat.cols,
+          mat.rows))
+  {
+    myLastError = "failed to initialize cximage algorithm resources";
+    return false;
+  }
+
   return true;
 }
 

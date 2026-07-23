@@ -74,6 +74,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FastMatch.cpp
   cximage/FastMatchPolicy.cpp
   cximage/FastMatchDiagnostic.cpp
+  cximage/CxFastMatchRuntimeCapture.cpp
   cximage/Run.cpp
   cximage/ParserClass.cpp
   cximage/CxScriptImagePreflight.cpp

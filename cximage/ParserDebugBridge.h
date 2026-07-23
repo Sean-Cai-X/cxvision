@@ -136,6 +136,7 @@ public:
   bool HasGlobalMatInput() const { return !myGlobalMatInput.empty(); }
   int GlobalMatInputWidth() const { return myGlobalMatInput.cols; }
   int GlobalMatInputHeight() const { return myGlobalMatInput.rows; }
+  bool EnsureAlgorithmRuntimeResources();
   std::vector<ParserDebugObjectSnapshot> SnapshotRuntimeObjects(
     const std::string& lastMethod, int lastUpdateLine,
     const std::string& runtimeStatus) const;

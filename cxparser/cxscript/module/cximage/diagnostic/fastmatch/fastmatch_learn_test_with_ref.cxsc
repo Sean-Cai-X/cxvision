@@ -22,7 +22,7 @@ m_match.setthre(threshold);
 m_match.setlinegap(linegap);
 m_match.setcompgap(compare_gap);
 
-m_match.learn(m_image);
+m_match.learn(&m_image);
 m_match.modelzero();
 m_match.pattern2org();
 m_match.samplemodel(100);

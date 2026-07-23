@@ -1,6 +1,7 @@
 #include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
 #include "ManualConsoleUtils.h"
+#include "CxFastMatchRuntimeCapture.h"
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
@@ -2572,6 +2573,26 @@ bool ViewController::RunEvidenceSelfTestRuntimeExecuteStage(
     {
         reason = "runtime execute failed: " + m_parserDebugBridge.LastError();
         return false;
+    }
+
+    CxFastMatchRuntimeCapture fastmatch_capture;
+    if (snapshot.tool == "fastmatch")
+    {
+        CaptureFastMatchRuntime(
+            m_parserDebugBridge,
+            "m_match",
+            fastmatch_capture);
+
+        result.fastmatch_model_point_count =
+            fastmatch_capture.object_model_point_count;
+        result.fastmatch_learn_a_count =
+            fastmatch_capture.object_learn_a_count;
+        result.fastmatch_learn_b_count =
+            fastmatch_capture.object_learn_b_count;
+        result.fastmatch_learn_a2_count =
+            fastmatch_capture.object_learn_a2_count;
+        result.fastmatch_learn_b2_count =
+            fastmatch_capture.object_learn_b2_count;
     }
 
     RefreshRuntimeObjectTable(

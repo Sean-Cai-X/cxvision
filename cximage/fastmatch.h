@@ -64,6 +64,10 @@ public:
     int getlearnbcount();
     int getlearna2count();
     int getlearnb2count();
+    std::uintptr_t debuglastlearnargument() const noexcept
+    {
+        return reinterpret_cast<std::uintptr_t>(m_debug_last_learn_argument);
+    }
     int getmodelwidth() const { return m_imodelwith; }
     int getmodelheight() const { return m_imodelheigh; }
     int getpatternapointcount() const;
@@ -456,6 +460,8 @@ private:
     int m_resultcandidate_reject_count;
     vector<gp_Pnt> m_rawthresholdhitpoints;
     vector<int> m_rawthresholdhitscores;
+
+    void* m_debug_last_learn_argument = nullptr;
 
     Grid* m_pgrid;//12X12
 

@@ -1577,11 +1577,23 @@ void fastmatch::learn_level4(void* pimage)//pyrDown thre >10
 
 void fastmatch::learn(void* pimage)
 {
+    m_debug_last_learn_argument = pimage;
+
     CXLOG_INFO("FastMatch", "learn_void_enter", "running",
         pimage == nullptr ? "pimage=null" : "pimage=non_null");
     Image* pgetimage = (Image*)pimage;
-    if (pgetimage == nullptr)
+
+    if (pgetimage == nullptr || pgetimage->getmat().empty())
+    {
+        m_modelpoints_sample1.clear();
+        m_modelpoints_sample2.clear();
+        m_modelpoints_sample3.clear();
+        m_fastmatch_learn_a_count = 0;
+        m_fastmatch_learn_b_count = 0;
+        m_fastmatch_learn_a2_count = 0;
+        m_fastmatch_learn_b2_count = 0;
         return;
+    }
 
     Learn(*pgetimage);
 }
