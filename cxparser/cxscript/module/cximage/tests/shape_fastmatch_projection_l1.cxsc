@@ -1,10 +1,10 @@
 CxShapeTest_reset(0);
 
 CxShapeTest_addcase("fastmatch_publish_roi");
-CxShapeTest_settool("fastmatch");
+CxShapeTest_settool("FastMatch");
 CxShapeTest_setoperation("runtime_geometry_publish");
 CxShapeTest_setfrom(100, 100);
-CxShapeTest_setownerbinding("fastmatch.test_case");
+CxShapeTest_setownerbinding("FastMatch.test_case");
 CxShapeTest_setinitiallearnrect(80, 80, 180, 180);
 CxShapeTest_setinitialsearchrect(200, 200, 400, 400);
 
@@ -19,10 +19,10 @@ CxShapeTest_expecteditable(1);
 CxShapeTest_expecteditableelement(0);
 
 CxShapeTest_addcase("fastmatch_republish_no_duplicate_refs");
-CxShapeTest_settool("fastmatch");
+CxShapeTest_settool("FastMatch");
 CxShapeTest_setoperation("runtime_geometry_publish");
 CxShapeTest_setfrom(100, 100);
-CxShapeTest_setownerbinding("fastmatch.test_case2");
+CxShapeTest_setownerbinding("FastMatch.test_case2");
 CxShapeTest_setinitiallearnrect(50, 50, 150, 150);
 CxShapeTest_setinitialsearchrect(180, 180, 380, 380);
 

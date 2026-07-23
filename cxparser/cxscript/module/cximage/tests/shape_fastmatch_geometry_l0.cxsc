@@ -1,7 +1,7 @@
 CxShapeTest_reset(0);
 
 CxShapeTest_addcase("fastmatch_l1_geometry");
-CxShapeTest_settool("fastmatch");
+CxShapeTest_settool("FastMatch");
 CxShapeTest_setoperation("runtime_geometry_publish");
 CxShapeTest_setmanifest("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/stage25_image_manifest.json");
 CxShapeTest_setmanifestmatchcase("fastmatch_bracket_l1_rotation_pose");
@@ -19,7 +19,7 @@ CxShapeTest_expecteditable(0);
 CxShapeTest_expecteditableelement(0);
 
 CxShapeTest_addcase("fastmatch_l2_geometry");
-CxShapeTest_settool("fastmatch");
+CxShapeTest_settool("FastMatch");
 CxShapeTest_setoperation("runtime_geometry_publish");
 CxShapeTest_setmanifest("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/stage25_image_manifest.json");
 CxShapeTest_setmanifestmatchcase("fastmatch_bottle_l2_reflection");
@@ -37,7 +37,7 @@ CxShapeTest_expecteditable(0);
 CxShapeTest_expecteditableelement(0);
 
 CxShapeTest_addcase("fastmatch_l3_geometry");
-CxShapeTest_settool("fastmatch");
+CxShapeTest_settool("FastMatch");
 CxShapeTest_setoperation("runtime_geometry_publish");
 CxShapeTest_setmanifest("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/stage25_image_manifest.json");
 CxShapeTest_setmanifestmatchcase("fastmatch_brakedisk_l3_scale_translation");

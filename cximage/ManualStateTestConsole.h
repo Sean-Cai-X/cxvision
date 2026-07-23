@@ -501,7 +501,7 @@ struct ManualGaugeState
   std::string case_id;
   std::string image_id;
   std::string target_id;
-  std::string tool = "Findline"; // Findline / Findcircle
+  std::string tool = "FindLine"; // Findline / Findcircle
 
   std::string source = "manual"; // manifest / replay / ai_suggested / manual
   std::string review_status = "editing"; // editing / accepted / rejected / promoted

@@ -120,19 +120,19 @@ namespace
   std::string inferEvidenceToolFromScriptPath(const std::string& scriptPath)
   {
     if (scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("findcircle") != std::string::npos)
-      return "Findcircle";
+        scriptPath.find("FindCircle") != std::string::npos)
+      return "FindCircle";
     if (scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("findline") != std::string::npos)
-      return "Findline";
+        scriptPath.find("FindLine") != std::string::npos)
+      return "FindLine";
     if (scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("findellipse") != std::string::npos)
-      return "Findellipse";
+        scriptPath.find("FindEllipse") != std::string::npos)
+      return "FindEllipse";
     if (scriptPath.find("find_rect") != std::string::npos ||
         scriptPath.find("findrect") != std::string::npos)
       return "FindRect";
-    if (scriptPath.find("fastmatch") != std::string::npos)
-      return "fastmatch";
+    if (scriptPath.find("FastMatch") != std::string::npos)
+      return "FastMatch";
     if (scriptPath.find("find_segmentation") != std::string::npos ||
         scriptPath.find("findsegmentation") != std::string::npos)
       return "FindSegmentation";
@@ -362,13 +362,13 @@ namespace
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("findcircle") != std::string::npos;
+        scriptPath.find("FindCircle") != std::string::npos;
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("findline") != std::string::npos;
+        scriptPath.find("FindLine") != std::string::npos;
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("findellipse") != std::string::npos;
+        scriptPath.find("FindEllipse") != std::string::npos;
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -408,7 +408,7 @@ namespace
     }
     else if (isLineScript)
     {
-      gauge.tool = "Findline";
+      gauge.tool = "FindLine";
       gauge.has_line_gauge = true;
       gauge.line_x0 = getInt("global_roi_x0", 0);
       gauge.line_y0 = getInt("global_roi_y0", 0);
@@ -605,7 +605,7 @@ namespace
     result.has_fit_result =
         object.has_fit_result || object.has_fit_line || object.has_fit_ellipse;
 
-    if (object.type == "Findcircle")
+    if (object.type == "FindCircle")
     {
       result.algorithm_status = object.has_fit_result
           ? "fitcircle_available"
@@ -633,7 +633,7 @@ namespace
       result.fit_cy = object.fit_cy;
       result.fit_radius = object.fit_radius;
     }
-    else if (object.type == "Findline")
+    else if (object.type == "FindLine")
     {
       result.algorithm_status = object.line_result_status.empty()
           ? object.runtime_state
@@ -651,7 +651,7 @@ namespace
       result.fit_radius_x = object.fit_line_x1;
       result.fit_radius_y = object.fit_line_y1;
     }
-    else if (object.type == "Findellipse")
+    else if (object.type == "FindEllipse")
     {
       result.algorithm_status = object.ellipse_result_status.empty()
           ? object.runtime_state
@@ -664,7 +664,7 @@ namespace
       result.fit_radius_y = object.fit_ellipse_ry;
       result.fit_angle_deg = object.fit_ellipse_angle_deg;
     }
-    else if (object.type == "fastmatch")
+    else if (object.type == "FastMatch")
     {
       result.algorithm_status = object.fastmatch_status.empty()
           ? object.runtime_state
@@ -1821,7 +1821,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     };
 
     if (snapshot.script_path.find("find_circle") != std::string::npos ||
-        snapshot.script_path.find("findcircle") != std::string::npos)
+        snapshot.script_path.find("FindCircle") != std::string::npos)
     {
         if (!hasInt("global_circle_cx") ||
             !hasInt("global_circle_cy") ||
@@ -1841,7 +1841,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     }
 
     if (snapshot.script_path.find("find_line") != std::string::npos ||
-        snapshot.script_path.find("findline") != std::string::npos)
+        snapshot.script_path.find("FindLine") != std::string::npos)
     {
         if (!hasInt("global_roi_x0") ||
             !hasInt("global_roi_y0") ||
@@ -1863,7 +1863,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     }
 
     if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
-        snapshot.script_path.find("findellipse") != std::string::npos)
+        snapshot.script_path.find("FindEllipse") != std::string::npos)
     {
         if (!hasInt("global_ellipse_x0") ||
             !hasInt("global_ellipse_y0") ||
@@ -1918,7 +1918,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("fastmatch") != std::string::npos)
+    if (snapshot.script_path.find("FastMatch") != std::string::npos)
     {
         if (!hasInt("global_learn_roi_x") ||
             !hasInt("global_learn_roi_y") ||
@@ -2423,7 +2423,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
     std::vector<std::string> required;
 
     if (snapshot.script_path.find("find_circle") != std::string::npos ||
-        snapshot.script_path.find("findcircle") != std::string::npos)
+        snapshot.script_path.find("FindCircle") != std::string::npos)
     {
         required = {
             "global_circle_cx",
@@ -2437,7 +2437,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
         };
     }
     else if (snapshot.script_path.find("find_line") != std::string::npos ||
-             snapshot.script_path.find("findline") != std::string::npos)
+             snapshot.script_path.find("FindLine") != std::string::npos)
     {
         required = {
             "global_roi_x0",
@@ -2453,7 +2453,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
         };
     }
     else if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
-             snapshot.script_path.find("findellipse") != std::string::npos)
+             snapshot.script_path.find("FindEllipse") != std::string::npos)
     {
         required = {
             "global_ellipse_x0",
@@ -2480,7 +2480,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
-    else if (snapshot.script_path.find("fastmatch") != std::string::npos)
+    else if (snapshot.script_path.find("FastMatch") != std::string::npos)
     {
         required = {
             "global_learn_roi_x",
@@ -2576,7 +2576,7 @@ bool ViewController::RunEvidenceSelfTestRuntimeExecuteStage(
     }
 
     CxFastMatchRuntimeCapture fastmatch_capture;
-    if (snapshot.tool == "fastmatch")
+    if (snapshot.tool == "FastMatch")
     {
         CaptureFastMatchRuntime(
             m_parserDebugBridge,
@@ -2625,16 +2625,16 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
     };
 
     std::string expectedType;
-    if (scriptHas("find_circle") || scriptHas("findcircle"))
-        expectedType = "Findcircle";
-    else if (scriptHas("find_line") || scriptHas("findline"))
-        expectedType = "Findline";
-    else if (scriptHas("find_ellipse") || scriptHas("findellipse"))
-        expectedType = "Findellipse";
+    if (scriptHas("find_circle") || scriptHas("FindCircle"))
+        expectedType = "FindCircle";
+    else if (scriptHas("find_line") || scriptHas("FindLine"))
+        expectedType = "FindLine";
+    else if (scriptHas("find_ellipse") || scriptHas("FindEllipse"))
+        expectedType = "FindEllipse";
     else if (scriptHas("find_rect") || scriptHas("findrect"))
         expectedType = "FindRect";
-    else if (scriptHas("fastmatch"))
-        expectedType = "fastmatch";
+    else if (scriptHas("FastMatch"))
+        expectedType = "FastMatch";
     else if (scriptHas("find_segmentation") || scriptHas("findsegmentation"))
         expectedType = "FindSegmentation";
 
@@ -2758,16 +2758,16 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
 
     bool requiresResult =
         scriptHas("find_circle") ||
-        scriptHas("findcircle") ||
+        scriptHas("FindCircle") ||
         scriptHas("find_line") ||
-        scriptHas("findline") ||
+        scriptHas("FindLine") ||
         scriptHas("find_ellipse") ||
-        scriptHas("findellipse") ||
+        scriptHas("FindEllipse") ||
         scriptHas("find_rect") ||
         scriptHas("findrect") ||
         scriptHas("find_segmentation") ||
         scriptHas("findsegmentation") ||
-        scriptHas("fastmatch");
+        scriptHas("FastMatch");
 
     if (!requiresResult)
     {
@@ -2832,14 +2832,14 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
 
             const bool isCximageToolScript =
                 thumb.script_path.find("find_line") != std::string::npos ||
-                thumb.script_path.find("findline") != std::string::npos ||
+                thumb.script_path.find("FindLine") != std::string::npos ||
                 thumb.script_path.find("find_circle") != std::string::npos ||
-                thumb.script_path.find("findcircle") != std::string::npos ||
+                thumb.script_path.find("FindCircle") != std::string::npos ||
                 thumb.script_path.find("find_ellipse") != std::string::npos ||
-                thumb.script_path.find("findellipse") != std::string::npos ||
+                thumb.script_path.find("FindEllipse") != std::string::npos ||
                 thumb.script_path.find("find_rect") != std::string::npos ||
                 thumb.script_path.find("findrect") != std::string::npos ||
-                thumb.script_path.find("fastmatch") != std::string::npos ||
+                thumb.script_path.find("FastMatch") != std::string::npos ||
                 thumb.script_path.find("find_segmentation") != std::string::npos ||
                 thumb.script_path.find("findsegmentation") != std::string::npos;
 
@@ -3267,9 +3267,9 @@ static bool SyncRuntimeObjectToManualGaugeState(
 {
     ManualGaugeState& gauge = context.current_gauge;
 
-    if (object.type == "Findline" && object.has_line_roi)
+    if (object.type == "FindLine" && object.has_line_roi)
     {
-        gauge.tool = "Findline";
+        gauge.tool = "FindLine";
         gauge.source = "runtime_object";
         gauge.review_status = "editing";
 
@@ -3299,7 +3299,7 @@ static bool SyncRuntimeObjectToManualGaugeState(
         return true;
     }
 
-    if (object.type == "Findcircle" && object.has_circle)
+    if (object.type == "FindCircle" && object.has_circle)
     {
         gauge.tool = "Findcircle";
         gauge.source = "runtime_object";
@@ -5249,7 +5249,7 @@ void ViewController::mainloop()
              m_shapex = (Shape*)m_parserOwner.GetClassObj("Shape", "ashape0");
              m_apoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints0");
              m_bpoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints1");
-             m_afindline = (Findline*)m_parserOwner.GetClassObj("Findline", "afindline");
+             m_afindline = (Findline*)m_parserOwner.GetClassObj("FindLine", "afindline");
              if (opencvSW)
                  Imgui_OpenCV_Window0(&opencvSW);
 
@@ -6022,19 +6022,19 @@ Shape* ViewController::indexAt(const gp_Pnt& pos)
             if (pshape->show())
                 return pshape;
     }
-    isize = m_parserOwner.ObjectCount("Findline");
+    isize = m_parserOwner.ObjectCount("FindLine");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("Findline", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("FindLine", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
                 return pshape;
     }
-    isize = m_parserOwner.ObjectCount("findcircle");
+    isize = m_parserOwner.ObjectCount("FindCircle");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("findcircle", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("FindCircle", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
@@ -6049,10 +6049,10 @@ Shape* ViewController::indexAt(const gp_Pnt& pos)
             if (pshape->show())
                 return pshape;
     }
-    isize = m_parserOwner.ObjectCount("findobject");
+    isize = m_parserOwner.ObjectCount("FindObject");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("findobject", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("FindObject", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
@@ -6085,10 +6085,10 @@ Shape* ViewController::indexAt(const gp_Pnt& pos)
             if (pshape->show())
                 return pshape;
     }
-    isize = m_parserOwner.ObjectCount("fastmatch");
+    isize = m_parserOwner.ObjectCount("FastMatch");
     for (int i = 0; i < isize; i++)
     {
-        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("fastmatch", i);
+        Shape* pshape = (Shape*)m_parserOwner.GetClassObj("FastMatch", i);
 
         if (pshape->rect().contains(pos))
             if (pshape->show())
@@ -6517,40 +6517,40 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
 
     for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
-        if (object.type == "Findline")
+        if (object.type == "FindLine")
         {
             Findline* tool = static_cast<Findline*>(
-                m_parserDebugBridge.QueryClassObject("Findline", object.name));
+                m_parserDebugBridge.QueryClassObject("FindLine", object.name));
             if (tool != nullptr)
             {
                 const uint64_t generation =
-                    m_annotationLayer.BeginRuntimeOwnerPublish("Findline", object.name);
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindLine", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findline", object.name, generation);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindLine", object.name, generation);
             }
         }
-        else if (object.type == "Findcircle")
+        else if (object.type == "FindCircle")
         {
             Findcircle* tool = static_cast<Findcircle*>(
-                m_parserDebugBridge.QueryClassObject("Findcircle", object.name));
+                m_parserDebugBridge.QueryClassObject("FindCircle", object.name));
             if (tool != nullptr)
             {
                 const uint64_t generation =
-                    m_annotationLayer.BeginRuntimeOwnerPublish("Findcircle", object.name);
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindCircle", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findcircle", object.name, generation);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindCircle", object.name, generation);
             }
         }
-        else if (object.type == "Findellipse")
+        else if (object.type == "FindEllipse")
         {
             Findellipse* tool = static_cast<Findellipse*>(
-                m_parserDebugBridge.QueryClassObject("Findellipse", object.name));
+                m_parserDebugBridge.QueryClassObject("FindEllipse", object.name));
             if (tool != nullptr)
             {
                 const uint64_t generation =
-                    m_annotationLayer.BeginRuntimeOwnerPublish("Findellipse", object.name);
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindEllipse", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("Findellipse", object.name, generation);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindEllipse", object.name, generation);
             }
         }
         else if (object.type == "FindRect")
@@ -6565,16 +6565,16 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_annotationLayer.EndRuntimeOwnerPublish("FindRect", object.name, generation);
             }
         }
-        else if (object.type == "fastmatch")
+        else if (object.type == "FastMatch")
         {
             fastmatch* tool = static_cast<fastmatch*>(
-                m_parserDebugBridge.QueryClassObject("fastmatch", object.name));
+                m_parserDebugBridge.QueryClassObject("FastMatch", object.name));
             if (tool != nullptr)
             {
                 const uint64_t generation =
-                    m_annotationLayer.BeginRuntimeOwnerPublish("fastmatch", object.name);
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FastMatch", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
-                m_annotationLayer.EndRuntimeOwnerPublish("fastmatch", object.name, generation);
+                m_annotationLayer.EndRuntimeOwnerPublish("FastMatch", object.name, generation);
             }
         }
         else if (object.type == "FindSegmentation")

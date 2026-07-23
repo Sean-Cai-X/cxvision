@@ -116,7 +116,7 @@ void UpdateManualGaugeFromElement(ManualTestContext& context,
   ManualGaugeState& gauge = context.current_gauge;
   if (element.kind == OverlayKind::Line && element.image_points.size() >= 2)
   {
-    gauge.tool = "Findline";
+    gauge.tool = "FindLine";
     gauge.has_line_gauge = true;
     gauge.line_x0 = static_cast<int>(std::lround(element.image_points[0].x));
     gauge.line_y0 = static_cast<int>(std::lround(element.image_points[0].y));
@@ -150,14 +150,14 @@ void UpdateManualGaugeFromShapeElement(
     return;
 
   ManualGaugeState& gauge = context.current_gauge;
-  if (element.owner_type == "Findline" &&
+  if (element.owner_type == "FindLine" &&
       element.shape->kind() == CxShapeKind::LineGauge)
   {
     const auto* line = dynamic_cast<const LineGaugeShape*>(element.shape.get());
     if (line == nullptr)
       return;
 
-    gauge.tool = "Findline";
+    gauge.tool = "FindLine";
     gauge.has_line_gauge = true;
     gauge.has_circle_gauge = false;
     gauge.has_ellipse_gauge = false;
@@ -168,7 +168,7 @@ void UpdateManualGaugeFromShapeElement(
     gauge.tool_half_width = std::max(
         1, static_cast<int>(std::lround(line->halfWidth())));
   }
-  else if (element.owner_type == "Findcircle" &&
+  else if (element.owner_type == "FindCircle" &&
            element.shape->kind() == CxShapeKind::Circle)
   {
     CxShapePoint center;
@@ -646,9 +646,9 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
             const bool deferRuntimeToolWriteback =
                 ok && commit.editable && !commit.owner_binding.empty() &&
-                (commit.owner_type == "Findline" ||
-                 commit.owner_type == "Findcircle" ||
-                 commit.owner_type == "Findellipse" ||
+                (commit.owner_type == "FindLine" ||
+                 commit.owner_type == "FindCircle" ||
+                 commit.owner_type == "FindEllipse" ||
                  commit.owner_type == "FindRect");
 
             if (deferRuntimeToolWriteback)
@@ -664,9 +664,9 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 out.reason = commit.owner_type +
                     " ROI edit accepted; exported to globals; runtime object update deferred until next Run";
             }
-            else if (ok && commit.owner_type == "fastmatch" && commit.editable && !commit.owner_binding.empty())
+            else if (ok && commit.owner_type == "FastMatch" && commit.editable && !commit.owner_binding.empty())
             {
-                void* toolObj = m_parserDebugBridge.QueryClassObject("fastmatch", commit.owner_ref);
+                void* toolObj = m_parserDebugBridge.QueryClassObject("FastMatch", commit.owner_ref);
                 if (toolObj != nullptr)
                 {
                     fastmatch* tool = static_cast<fastmatch*>(toolObj);
@@ -1817,7 +1817,7 @@ void ViewController::drawImageEvidencePanels()
         ImGui::SameLine();
         if (ImGui::Button("Apply To Parser"))
         {
-          if (!QueryParserObjectExists("Findcircle", "afindcircle0"))
+          if (!QueryParserObjectExists("FindCircle", "afindcircle0"))
             m_parserDebugBridge.ApplyStatement("Findcircle afindcircle0;");
           const bool applied = m_parserDebugBridge.ApplyStatement(
             selected->generated_statement);

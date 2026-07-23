@@ -1,5 +1,5 @@
 CxParameterProfile_reset(0);
-CxParameterProfile_settool("Findline");
+CxParameterProfile_settool("FindLine");
 
 CxParameterProfile_add("findline_threshold8_baseline");
 CxParameterProfile_setrole("BASELINE_OK");
@@ -9,7 +9,7 @@ CxParameterProfile_setlinegap(6);
 CxParameterProfile_setwgap(8);
 CxParameterProfile_sethgap(32);
 CxParameterProfile_setfilterprofile(1);
-CxParameterProfile_setdescription("Findline baseline profile from Stage2.5 threshold8 original measure.");
+CxParameterProfile_setdescription("FindLine baseline profile from Stage2.5 threshold8 original measure.");
 
 CxParameterProfile_add("findline_linegap10_baseline");
 CxParameterProfile_setrole("BASELINE_OK");
@@ -19,7 +19,7 @@ CxParameterProfile_setlinegap(10);
 CxParameterProfile_setwgap(8);
 CxParameterProfile_sethgap(32);
 CxParameterProfile_setfilterprofile(1);
-CxParameterProfile_setdescription("Findline baseline profile from Stage2.5 linegap10 original measure.");
+CxParameterProfile_setdescription("FindLine baseline profile from Stage2.5 linegap10 original measure.");
 
 CxParameterProfile_add("findline_stage25_filter20");
 CxParameterProfile_setrole("BASELINE_OK");
@@ -29,7 +29,7 @@ CxParameterProfile_setlinegap(6);
 CxParameterProfile_setwgap(32);
 CxParameterProfile_sethgap(8);
 CxParameterProfile_setfilterprofile(1);
-CxParameterProfile_setdescription("Baseline Findline profile from verified Stage25 filter20 case.");
+CxParameterProfile_setdescription("Baseline FindLine profile from verified Stage25 filter20 case.");
 
 CxParameterProfile_add("findline_filter_relax_diagnostic");
 CxParameterProfile_setrole("DIAGNOSTIC");

@@ -596,12 +596,12 @@ bool ImageAnnotationLayer::CommitEdit(std::string& reason)
 
     auto& element = myShapeElements[myDraggingElement];
 
-    if (element.owner_type == "Findline" && element.owner_binding == "setline")
+    if (element.owner_type == "FindLine" && element.owner_binding == "setline")
     {
         reason = "Findline ROI edited; measure/fit result marked stale";
         MarkOwnerResultStale(element.owner_type, element.owner_ref);
     }
-    else if (element.owner_type == "Findcircle" && element.owner_binding == "setcircle")
+    else if (element.owner_type == "FindCircle" && element.owner_binding == "setcircle")
     {
         reason = "Findcircle ROI radius edited; measure/fit result marked stale";
         MarkOwnerResultStale(element.owner_type, element.owner_ref);

@@ -293,7 +293,7 @@ FormfitGauge MakeRectCircleLineMatchGauge(const OutputRect& rect,
 
     const MatchCandidateOutput& best = match.candidates.front();
     const double match_confidence = std::max(0.25, ClampConfidence(best.score));
-    gauge.elements.push_back(MakeMatchRectGaugeElement(best, "match_rect_0", "fastmatch", match_confidence));
+    gauge.elements.push_back(MakeMatchRectGaugeElement(best, "match_rect_0", "FastMatch", match_confidence));
 
     const double rect_center_x = rect.x + rect.width * 0.5;
     const double rect_center_y = rect.y + rect.height * 0.5;

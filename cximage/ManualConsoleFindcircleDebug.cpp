@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 void RefreshFindcircleDisplaySnapshot(ManualTestContext& context,
     RuntimeObjectView& object)
 {
-    if (object.type != "Findcircle")
+    if (object.type != "FindCircle")
         return;
 
     object.has_circle_roi_outer_polyline = false;
@@ -185,7 +185,7 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        "Findcircle",
+        "FindCircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
     int circleValues[4] = {};
@@ -315,7 +315,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
     if (!isCircleParamMethod)
         return false;
 
-    if (!RuntimeObjectIsType(context, call.object, "Findcircle"))
+    if (!RuntimeObjectIsType(context, call.object, "FindCircle"))
     {
         return false;
     }
@@ -371,7 +371,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
 
         circleIt->second->setfilter(borw, minArea, maxArea);
         RuntimeObjectView& object = EnsureRuntimeObject(
-            context, call.object, "Findcircle", line.line_no);
+            context, call.object, "FindCircle", line.line_no);
         RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
         object.exists_in_parser = true;
         object.last_method = call.method;
@@ -408,7 +408,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         }
         circleIt->second->setlinesamplerate(sampleRate);
         RuntimeObjectView& object = EnsureRuntimeObject(
-            context, call.object, "Findcircle",
+            context, call.object, "FindCircle",
             context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
         RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
         object.exists_in_parser = true;
@@ -470,14 +470,14 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         EnsureRuntimeObject(
             context,
             call.object,
-            "Findcircle",
+            "FindCircle",
             context.line_views[static_cast<std::size_t>(lineIndex)].line_no),
         *circleIt->second);
 
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        "Findcircle",
+        "FindCircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
     object.exists_in_parser = true;
@@ -705,7 +705,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     if (!isFindcircleRuntimeMethod)
         return false;
 
-    if (!RuntimeObjectIsType(context, call.object, "Findcircle"))
+    if (!RuntimeObjectIsType(context, call.object, "FindCircle"))
     {
         return false;
     }
@@ -755,7 +755,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        "Findcircle",
+        "FindCircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
     try
@@ -776,7 +776,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
             if (!circleIt->second->canfitresultmeasure())
             {
                 object.exists_in_parser = true;
-                object.type = "Findcircle";
+                object.type = "FindCircle";
                 object.last_method = "FitResultMeasure";
                 object.last_runtime_status = "PENDING_BINDING";
                 object.runtime_state = "fitresultmeasure_skipped";
@@ -909,7 +909,7 @@ bool TryHandleFindcircleGetResult(ManualTestContext& context,
         return false;
 
     RuntimeObjectView& object = EnsureRuntimeObject(
-        context, call.object, "Findcircle",
+        context, call.object, "FindCircle",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
     object.last_method = call.method;
     object.last_update_line =

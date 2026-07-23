@@ -132,7 +132,7 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
 
     cv::Mat resultView = resultOverlay.clone();
 
-    if (result.tool == "Findline")
+    if (result.tool == "FindLine")
     {
         DrawFindlineGeometry(resultView, result);
     }

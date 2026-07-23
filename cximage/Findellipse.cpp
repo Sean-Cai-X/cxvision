@@ -29,7 +29,7 @@ void LogFindellipseMeasureProbe(
     const char* status,
     const std::string& message)
 {
-    CXLOG_INFO("Findellipse", phase, status, message);
+    CXLOG_INFO("FindEllipse", phase, status, message);
     CxUnifiedLog::Instance().Flush();
 }
 
@@ -1503,7 +1503,7 @@ void Findellipse::PublishDisplayShapes(
 
         sink.UpsertShape(
             owner_ref + ".roi_ellipse",
-            "Findellipse",
+            "FindEllipse",
             owner_ref,
             "setellipse",
             "roi",
@@ -1523,7 +1523,7 @@ void Findellipse::PublishDisplayShapes(
 
         sink.UpsertShape(
             owner_ref + ".measure_points",
-            "Findellipse",
+            "FindEllipse",
             owner_ref,
             "",
             "measure_points",
@@ -1542,7 +1542,7 @@ void Findellipse::PublishDisplayShapes(
 
         sink.UpsertShape(
             owner_ref + ".fit_ellipse",
-            "Findellipse",
+            "FindEllipse",
             owner_ref,
             "",
             "result",

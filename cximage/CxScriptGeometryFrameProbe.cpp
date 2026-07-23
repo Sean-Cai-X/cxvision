@@ -112,7 +112,7 @@ bool ParseProbeScript(const std::filesystem::path& script, ParsedProbeScript& ou
             }
             else if (method == "setline" && params.size() >= 5)
             {
-                out.tool = "Findline";
+                out.tool = "FindLine";
                 out.has_line = true;
                 out.x0 = ResolveInt(out.vars, params[0]);
                 out.y0 = ResolveInt(out.vars, params[1]);
@@ -622,7 +622,7 @@ bool RunGaugeFrameProbe(const GaugeFrameProbeOptions& options, GaugeFrameProbeRe
     result.snapshot_path = out / "snapshot.txt";
 
     std::string imageReason;
-    if (script.tool == "Findline")
+    if (script.tool == "FindLine")
     {
         GaugeLineFrameProbe probe = BuildLineFrame(script, image.cols, image.rows);
         WriteLineJson(probe, result.frame_geometry_path);

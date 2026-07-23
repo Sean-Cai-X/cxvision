@@ -7,7 +7,7 @@
 // method/threshold: {{method}},{{threshold}}
 
 Image m_image;
-Findcircle m_circle;
+FindCircle m_circle;
 
 m_image.copyFromMat(global_matInput);
 

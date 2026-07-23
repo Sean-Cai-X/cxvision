@@ -17,7 +17,7 @@ param_init=thre:8;comparegap:2;linegap:6;wgap:6;hgap:6;minscore:0.40
 objective_weights=rank:4;location:3;margin:2;fp:2;score_stability:1.5
 
 # call
-call_1=FastMatch.Match
+call_1=FastMatch.FastMatch
 call_2=ExportMatchOutput
 call_3=EnsmallenMatchObjectiveEval
 

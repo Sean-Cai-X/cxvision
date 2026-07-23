@@ -30,11 +30,11 @@ bool Fail(CxRuntimeProjectionResult& result, const std::string& stage, const std
 
 std::string OwnerTypeForTool(const std::string& tool_id)
 {
-    if (tool_id == "findline_gauge") return "Findline";
+    if (tool_id == "findline_gauge") return "FindLine";
     if (tool_id == "findcircle_gauge") return "Findcircle";
     if (tool_id == "findellipse_gauge") return "Findellipse";
     if (tool_id == "findrect_gauge") return "FindRect";
-    if (tool_id == "fastmatch") return "fastmatch";
+    if (tool_id == "FastMatch") return "FastMatch";
     return tool_id;
 }
 
@@ -44,7 +44,7 @@ const char* ProjectionScriptForTool(const std::string& tool_id)
     if (tool_id == "findcircle_gauge") return kFindcircleProjectionScript;
     if (tool_id == "findellipse_gauge") return kFindellipseProjectionScript;
     if (tool_id == "findrect_gauge") return kFindRectProjectionScript;
-    if (tool_id == "fastmatch") return kFastMatchProjectionScript;
+    if (tool_id == "FastMatch") return kFastMatchProjectionScript;
     return nullptr;
 }
 
@@ -108,7 +108,7 @@ bool ValidateProjectionRequest(const CxRuntimeProjectionRequest& request,
                 return Fail(result, "request_validation", "FindRect width or height is too small");
         }
     }
-    else if (request.tool_id == "fastmatch")
+    else if (request.tool_id == "FastMatch")
     {
         if (!request.has_learn_roi && !request.has_search_roi)
             return Fail(result, "request_validation", "FastMatch requires at least one of learn_roi or search_roi");
@@ -268,7 +268,7 @@ void PopulateProjectionMetrics(const CxRuntimeProjectionRequest& request,
     {
         result.algorithm_ok = result.has_result_rect;
     }
-    else if (request.tool_id == "fastmatch")
+    else if (request.tool_id == "FastMatch")
     {
         result.algorithm_ok = result.model_point_count > 0;
     }
@@ -323,7 +323,7 @@ CxRuntimeProjectionExecutor::CxRuntimeProjectionExecutor()
     Register("findcircle_gauge", ExecuteViaCxScript);
     Register("findellipse_gauge", ExecuteViaCxScript);
     Register("findrect_gauge", ExecuteViaCxScript);
-    Register("fastmatch", ExecuteViaCxScript);
+    Register("FastMatch", ExecuteViaCxScript);
 }
 
 void CxRuntimeProjectionExecutor::Register(const std::string& tool_id, const ProjectionHandler& handler)

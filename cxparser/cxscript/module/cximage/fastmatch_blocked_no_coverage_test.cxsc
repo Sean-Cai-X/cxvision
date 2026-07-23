@@ -1,7 +1,7 @@
 FastMatchDiagnostic fm;
 
 fm.setpolicy("readiness_only");
-fm.setsource("Findline");
+fm.setsource("FindLine");
 fm.setlevel("L0_basic");
 fm.setprofile("stage25_filter20");
 

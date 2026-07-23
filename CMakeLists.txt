@@ -191,6 +191,7 @@ set(CXPARSER_SOURCES
   cxparser/muParserTest.cpp
   cxparser/muparsertokenreader.cpp
   cxparser/muParserTreeNode.cpp
+  cxparser/CxScriptTypeRegistry.cpp
 )
 
 set(IMGUI_SOURCES

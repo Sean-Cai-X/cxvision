@@ -1,5 +1,5 @@
 Image m_image;
-Findcircle m_circle;
+FindCircle m_circle;
 EnsmallenObjective m_objective;
 EnsmallenParamSpace m_param_space;
 EnsmallenOptimizer m_optimizer;

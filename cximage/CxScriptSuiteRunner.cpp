@@ -648,7 +648,7 @@ namespace
                     return false;
                 }
             }
-            else if (out.target->tool == "Findline")
+            else if (out.target->tool == "FindLine")
             {
                 if (out.target->x0 == 0 && out.target->y0 == 0 && out.target->x1 == 0 && out.target->y1 == 0)
                 {
@@ -812,7 +812,7 @@ namespace
                         cv::LINE_AA);
                 }
             }
-            else if (resolved.target->tool == "Findline")
+            else if (resolved.target->tool == "FindLine")
             {
                 cv::line(
                     preview,
@@ -1624,7 +1624,7 @@ namespace
             LoadSuiteCaseMetricsFromSummary(out.summary_path, out);
             if (out.actual_policy_guard.empty())
             {
-                if (out.tool == "Findline" && out.valid_points_count >= 2 && out.has_fit_line)
+                if (out.tool == "FindLine" && out.valid_points_count >= 2 && out.has_fit_line)
                     out.actual_policy_guard = "MEASURE_AND_FIT_AVAILABLE";
                 else if (out.tool == "Findcircle" && out.valid_points_count >= 3 &&
                          out.has_fit_circle && out.circle_radius > 0.0)

@@ -220,7 +220,7 @@ namespace
         if (r.fallback_used)
             return false;
 
-        if (r.tool == "Findline")
+        if (r.tool == "FindLine")
         {
             return r.valid_points_count >= 2 && r.has_fit_line;
         }
@@ -241,7 +241,7 @@ namespace
         if (r.evidence_summary_path == "EVIDENCE_MISSING")
             return false;
 
-        if (r.tool == "Findline")
+        if (r.tool == "FindLine")
         {
             return r.measured_local_support_score >= 0.60 &&
                    r.measured_local_mean_distance_px <= 3.0;
@@ -265,12 +265,12 @@ namespace
             return "HEADLESS_FAILED";
 
         const double localSupport =
-            r.tool == "Findline"
+            r.tool == "FindLine"
                 ? r.measured_local_support_score
                 : r.circle_local_support_score;
 
         const double localDist =
-            r.tool == "Findline"
+            r.tool == "FindLine"
                 ? r.measured_local_mean_distance_px
                 : r.circle_local_mean_radial_distance_px;
 
@@ -370,10 +370,10 @@ bool RunStage25ManifestFile(
                 target.tool,
                 img.level,
                 img.path,
-                target.tool == "Findline" ? target.x0 : target.cx,
-                target.tool == "Findline" ? target.y0 : target.cy,
-                target.tool == "Findline" ? target.x1 : target.px,
-                target.tool == "Findline" ? target.y1 : target.py,
+                target.tool == "FindLine" ? target.x0 : target.cx,
+                target.tool == "FindLine" ? target.y0 : target.cy,
+                target.tool == "FindLine" ? target.x1 : target.px,
+                target.tool == "FindLine" ? target.y1 : target.py,
                 target.wgap, target.hgap,
                 target.gap, target.linegap);
 
@@ -383,7 +383,7 @@ bool RunStage25ManifestFile(
             {
                 for (const auto& ev_profile : manifest.evidence_profiles)
                 {
-                    if (target.tool == "Findline")
+                    if (target.tool == "FindLine")
                     {
                         for (const auto& profile : manifest.findline_profiles)
                         {
@@ -439,7 +439,7 @@ bool RunStage25ManifestFile(
 
             for (const auto& ev_profile : manifest.evidence_profiles)
             {
-                if (target.tool == "Findline")
+                if (target.tool == "FindLine")
                 {
                     for (const auto& profile : manifest.findline_profiles)
                     {

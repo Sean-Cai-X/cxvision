@@ -14,6 +14,7 @@
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
 #include "CxScriptDirectBindings.h"
+#include "CxScriptTypeTraitsDefs.h"
 #include "CircleRingGauge.h"
 #include "FindSegmentation.h"
 #include "CxCrashLogHandler.h"
@@ -397,65 +398,67 @@ namespace mu
             m_parser.DefineClassFun("LineShape", plineshape, "linecv", &LineShape::linecv);
 
             Findcircle* pfindcircle = nullptr;
-            m_parser.DefineClass("Findcircle", pfindcircle);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle2", &Findcircle::setcircle2);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setcircle", &Findcircle::setcircle);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setgap", &Findcircle::Setgap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "Setgap", &Findcircle::Setgap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "Show", &Findcircle::setshow);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "measure", &Findcircle::measure);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setlinegap", &Findcircle::setlinegap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmethod", &Findcircle::setmethod);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setthre", &Findcircle::setthre);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getshape", &Findcircle::getshape);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setcirclegap", &Findcircle::setcirclegap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "fitcircle", &Findcircle::fitcircle);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "fitcirclefiltered", &Findcircle::fitcirclefiltered);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterinputcount", &Findcircle::getfitfilterinputcount);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterkeptcount", &Findcircle::getfitfilterkeptcount);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterrejectedcount", &Findcircle::getfitfilterrejectedcount);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfiltersigma", &Findcircle::getfitfiltersigma);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getfitfilterthreshold", &Findcircle::getfitfilterthreshold);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getavgdist", &Findcircle::getavgdist);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getresultcentx", &Findcircle::getresultcentx);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getresultcenty", &Findcircle::getresultcenty);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getradius", &Findcircle::getradius);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "getavgdist", &Findcircle::getavgdist);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setfitmeasuregap", &Findcircle::setfitmeasuregap);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "fitmeasure", &Findcircle::FitResultMeasure);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "FitResultMeasure", &Findcircle::FitResultMeasure);
+            const std::string_view findcircle_type_name =
+                CxScriptTypeName(CxScriptTypeTraits<Findcircle>::id);
+            m_parser.DefineClass(findcircle_type_name.data(), pfindcircle);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle2", &Findcircle::setcircle2);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle", &Findcircle::setcircle);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setgap", &Findcircle::Setgap);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Setgap", &Findcircle::Setgap);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Show", &Findcircle::setshow);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "measure", &Findcircle::measure);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setlinegap", &Findcircle::setlinegap);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setmethod", &Findcircle::setmethod);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setthre", &Findcircle::setthre);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getshape", &Findcircle::getshape);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcirclegap", &Findcircle::setcirclegap);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitcircle", &Findcircle::fitcircle);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitcirclefiltered", &Findcircle::fitcirclefiltered);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterinputcount", &Findcircle::getfitfilterinputcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterkeptcount", &Findcircle::getfitfilterkeptcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterrejectedcount", &Findcircle::getfitfilterrejectedcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfiltersigma", &Findcircle::getfitfiltersigma);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterthreshold", &Findcircle::getfitfilterthreshold);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getavgdist", &Findcircle::getavgdist);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getresultcentx", &Findcircle::getresultcentx);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getresultcenty", &Findcircle::getresultcenty);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getradius", &Findcircle::getradius);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getavgdist", &Findcircle::getavgdist);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setfitmeasuregap", &Findcircle::setfitmeasuregap);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitmeasure", &Findcircle::FitResultMeasure);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "FitResultMeasure", &Findcircle::FitResultMeasure);
 
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxelapsedms", &Findcircle::setmaxelapsedms);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxscanlines", &Findcircle::setmaxscanlines);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "setmaxsamples", &Findcircle::setmaxsamples);
-            m_parser.DefineClassFun("Findcircle", pfindcircle, "get_result", &Findcircle::get_result_script);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setmaxelapsedms", &Findcircle::setmaxelapsedms);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setmaxscanlines", &Findcircle::setmaxscanlines);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setmaxsamples", &Findcircle::setmaxsamples);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "get_result", &Findcircle::get_result_script);
 
             m_parser.DefineClassFun(
-                "Findcircle",
+                findcircle_type_name.data(),
                 pfindcircle,
                 "setlinesamplerate",
                 static_cast<void (Findcircle::*)(double)>(&Findcircle::setlinesamplerate));
 
             m_parser.DefineClassFun(
-                "Findcircle",
+                findcircle_type_name.data(),
                 pfindcircle,
                 "setgamarate",
                 static_cast<void (Findcircle::*)(int)>(&Findcircle::setgamarate));
 
             m_parser.DefineClassFun(
-                "Findcircle",
+                findcircle_type_name.data(),
                 pfindcircle,
                 "setfindsetting",
                 static_cast<void (Findcircle::*)(int)>(&Findcircle::setfindsetting));
 
             m_parser.DefineClassFun(
-                "Findcircle",
+                findcircle_type_name.data(),
                 pfindcircle,
                 "setfilter",
                 static_cast<void (Findcircle::*)(int, int, int)>(&Findcircle::setfilter_script));
 
             m_parser.DefineClassFun(
-                "Findcircle",
+                findcircle_type_name.data(),
                 pfindcircle,
                 "setselectedgenum",
                 static_cast<void (Findcircle::*)(int)>(&Findcircle::setselectedgenum));
@@ -492,26 +495,26 @@ namespace mu
             m_parser.DefineClassFun("FastMatchDiagnostic", fastmatch_diagnostic, "run", &FastMatchDiagnostic::run);
 
             Findellipse* pfindellipse = nullptr;
-            m_parser.DefineClass("Findellipse", pfindellipse);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setellipse2", &Findellipse::setellipse2);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setellipse", &Findellipse::setellipse);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setgap", &Findellipse::Setgap);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "Show", &Findellipse::setshow);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setlinegap", &Findellipse::setlinegap);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setmethod", &Findellipse::setmethod);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setthre", &Findellipse::setthre);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "measure", &Findellipse::measure);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "fitellipse", &Findellipse::fitellipse);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultcentx", &Findellipse::getresultcentx);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultcenty", &Findellipse::getresultcenty);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultradiusx", &Findellipse::getresultradiusx);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultradiusy", &Findellipse::getresultradiusy);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getresultangle", &Findellipse::getresultangle);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "getavgdist", &Findellipse::getavgdist);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "hasfitresult", &Findellipse::hasfitresult);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "get_result", &Findellipse::get_result);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "clear", &Findellipse::clear);
-            m_parser.DefineClassFun("Findellipse", pfindellipse, "setlinesample", &Findellipse::setlinesamplerate);
+            m_parser.DefineClass("FindEllipse", pfindellipse);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setellipse2", &Findellipse::setellipse2);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setellipse", &Findellipse::setellipse);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setgap", &Findellipse::Setgap);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "Show", &Findellipse::setshow);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setlinegap", &Findellipse::setlinegap);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod", &Findellipse::setmethod);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setthre", &Findellipse::setthre);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "measure", &Findellipse::measure);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "fitellipse", &Findellipse::fitellipse);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultcentx", &Findellipse::getresultcentx);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultcenty", &Findellipse::getresultcenty);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultradiusx", &Findellipse::getresultradiusx);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultradiusy", &Findellipse::getresultradiusy);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultangle", &Findellipse::getresultangle);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "getavgdist", &Findellipse::getavgdist);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "hasfitresult", &Findellipse::hasfitresult);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "get_result", &Findellipse::get_result);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "clear", &Findellipse::clear);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setlinesample", &Findellipse::setlinesamplerate);
 
             FindRect* pfindrect = nullptr;
             m_parser.DefineClass("FindRect", pfindrect);
@@ -531,78 +534,80 @@ namespace mu
             m_parser.DefineClassFun("FindRect", pfindrect, "clear", &FindRect::clear);
 
             Findline* pfindline = nullptr;
-            m_parser.DefineClass("Findline", pfindline);
-            m_parser.DefineClassFun("Findline", pfindline, "setrect", &Findline::setrect);
-            m_parser.DefineClassFun("Findline", pfindline, "setline", &Findline::setline_script);
-            m_parser.DefineClassFun("Findline", pfindline, "fitline", &Findline::FitLine);
-            m_parser.DefineClassFun("Findline", pfindline, "setfitmode", &Findline::setfitmode);
+            const std::string_view findline_type_name =
+                CxScriptTypeName(CxScriptTypeTraits<Findline>::id);
+            m_parser.DefineClass(findline_type_name.data(), pfindline);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setrect", &Findline::setrect);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setline", &Findline::setline_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "fitline", &Findline::FitLine);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfitmode", &Findline::setfitmode);
             m_parser.DefineClassFun(
-                "Findline",
+                findline_type_name.data(),
                 pfindline,
                 "setfitpointweight",
                 static_cast<void (Findline::*)(int, double)>(&Findline::setfitpointweight));
-            m_parser.DefineClassFun("Findline", pfindline, "translate", &Findline::translate);
-            m_parser.DefineClassFun("Findline", pfindline, "Show", &Findline::setshow);
-            m_parser.DefineClassFun("Findline", pfindline, "clear", &Findline::clear);
-            m_parser.DefineClassFun("Findline", pfindline, "setwhgap", &Findline::SetWHgap);
-            m_parser.DefineClassFun("Findline", pfindline, "SetWHgap", &Findline::SetWHgap);
-            m_parser.DefineClassFun("Findline", pfindline, "measure", &Findline::measure);
-            m_parser.DefineClassFun("Findline", pfindline, "setlinesample", &Findline::setlinesamplerate);
-            m_parser.DefineClassFun("Findline", pfindline, "setlinegap", &Findline::setlinegap);
-            m_parser.DefineClassFun("Findline", pfindline, "setmethod", &Findline::setmethod);
-            m_parser.DefineClassFun("Findline", pfindline, "setthre", &Findline::setthre);
-            m_parser.DefineClassFun("Findline", pfindline, "setgama", &Findline::setgamarate);
-            m_parser.DefineClassFun("Findline", pfindline, "setobjfilter", &Findline::setobjfilter);
-            m_parser.DefineClassFun("Findline", pfindline, "setfilter", &Findline::setfilter);
-            m_parser.DefineClassFun("Findline", pfindline, "findpattern", &Findline::findpattern);
-            m_parser.DefineClassFun("Findline", pfindline, "setcompgap", &Findline::setcomparegap);
-            m_parser.DefineClassFun("Findline", pfindline, "shapesetroi", &Findline::shapesetroi);
-            m_parser.DefineClassFun("Findline", pfindline, "setselectedgenum", &Findline::setselectedgenum);
-            m_parser.DefineClassFun("Findline", pfindline, "patternfilter", &Findline::patternfilter);
-            m_parser.DefineClassFun("Findline", pfindline, "getshape", &Findline::getshape);
-            m_parser.DefineClassFun("Findline", pfindline, "sfilter", &Findline::SmartFilter);
-            m_parser.DefineClassFun("Findline", pfindline, "inflectionpoint", &Findline::InflectionPoint);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "translate", &Findline::translate);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "Show", &Findline::setshow);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "clear", &Findline::clear);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setwhgap", &Findline::SetWHgap);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "SetWHgap", &Findline::SetWHgap);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "measure", &Findline::measure);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinesample", &Findline::setlinesamplerate);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap", &Findline::setlinegap);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod", &Findline::setmethod);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setthre", &Findline::setthre);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setgama", &Findline::setgamarate);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setobjfilter", &Findline::setobjfilter);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfilter", &Findline::setfilter);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "findpattern", &Findline::findpattern);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setcompgap", &Findline::setcomparegap);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "shapesetroi", &Findline::shapesetroi);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setselectedgenum", &Findline::setselectedgenum);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "patternfilter", &Findline::patternfilter);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "getshape", &Findline::getshape);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "sfilter", &Findline::SmartFilter);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "inflectionpoint", &Findline::InflectionPoint);
             m_parser.DefineClassFun(
-                "Findline",
+                findline_type_name.data(),
                 pfindline,
                 "setmeasurefallback",
                 static_cast<void (Findline::*)(int)>(&Findline::setmeasurefallback));
 
-            m_parser.DefineClassFun("Findline", pfindline, "setmaxelapsedms", &Findline::setmaxelapsedms);
-            m_parser.DefineClassFun("Findline", pfindline, "setmaxscanlines", &Findline::setmaxscanlines);
-            m_parser.DefineClassFun("Findline", pfindline, "setmaxsamples", &Findline::setmaxsamples);
-            m_parser.DefineClassFun("Findline", pfindline, "setfilterprofile", &Findline::setfilterprofile);
-            m_parser.DefineClassFun("Findline", pfindline, "get_result", &Findline::get_result_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmaxelapsedms", &Findline::setmaxelapsedms);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmaxscanlines", &Findline::setmaxscanlines);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmaxsamples", &Findline::setmaxsamples);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfilterprofile", &Findline::setfilterprofile);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "get_result", &Findline::get_result_script);
 
-           // m_parser.DefineClassFun("Findline", pfindline, "setlinesegment", &Findline::setlinesegment);
+           // m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinesegment", &Findline::setlinesegment);
 
 
             FindObject* pfobj = nullptr;
-            m_parser.DefineClass("Findobject", pfobj);
-            m_parser.DefineClassFun("Findobject", pfobj, "setrect", &FindObject::setrect);
-            m_parser.DefineClassFun("Findobject", pfobj, "measure", &FindObject::measure);
-            m_parser.DefineClassFun("Findobject", pfobj, "Show", &FindObject::setshow);
-            m_parser.DefineClassFun("Findobject", pfobj, "measurex", &FindObject::measurex);
-            m_parser.DefineClassFun("Findobject", pfobj, "sethsogap", &FindObject::sethsogap);
-            m_parser.DefineClassFun("Findobject", pfobj, "setminmax", &FindObject::setminmaxarea);
-            m_parser.DefineClassFun("Findobject", pfobj, "setminmaxwh", &FindObject::setminmaxwh);
-            m_parser.DefineClassFun("Findobject", pfobj, "setbrow", &FindObject::setbrow);
-            m_parser.DefineClassFun("Findobject", pfobj, "setdistance", &FindObject::setdistance);
-            m_parser.DefineClassFun("Findobject", pfobj, "setsearchtype", &FindObject::setsearchtype);
-            m_parser.DefineClassFun("Findobject", pfobj, "edgeimage", &FindObject::edgeimage);
-            m_parser.DefineClassFun("Findobject", pfobj, "setedgeoi", &FindObject::setedgeoi);
-            m_parser.DefineClassFun("Findobject", pfobj, "setoffset", &FindObject::setoffset);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultcentx", &FindObject::getresultcentx);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultcenty", &FindObject::getresultcenty);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultx", &FindObject::getresultx);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresulty", &FindObject::getresulty);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultw", &FindObject::getresultw);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresulth", &FindObject::getresulth);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultsize", &FindObject::getresultsize);
-            m_parser.DefineClassFun("Findobject", pfobj, "getresultobjsnum", &FindObject::getresultobjsnum);
-            m_parser.DefineClassFun("Findobject", pfobj, "objectgrid", &FindObject::objectgrid);
-            m_parser.DefineClassFun("Findobject", pfobj, "setobjectgrid", &FindObject::setobjectgrid);
-            m_parser.DefineClassFun("Findobject", pfobj, "objectsort", &FindObject::objectsort);
+            m_parser.DefineClass("FindObject", pfobj);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrect", &FindObject::setrect);
+            m_parser.DefineClassFun("FindObject", pfobj, "measure", &FindObject::measure);
+            m_parser.DefineClassFun("FindObject", pfobj, "Show", &FindObject::setshow);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurex", &FindObject::measurex);
+            m_parser.DefineClassFun("FindObject", pfobj, "sethsogap", &FindObject::sethsogap);
+            m_parser.DefineClassFun("FindObject", pfobj, "setminmax", &FindObject::setminmaxarea);
+            m_parser.DefineClassFun("FindObject", pfobj, "setminmaxwh", &FindObject::setminmaxwh);
+            m_parser.DefineClassFun("FindObject", pfobj, "setbrow", &FindObject::setbrow);
+            m_parser.DefineClassFun("FindObject", pfobj, "setdistance", &FindObject::setdistance);
+            m_parser.DefineClassFun("FindObject", pfobj, "setsearchtype", &FindObject::setsearchtype);
+            m_parser.DefineClassFun("FindObject", pfobj, "edgeimage", &FindObject::edgeimage);
+            m_parser.DefineClassFun("FindObject", pfobj, "setedgeoi", &FindObject::setedgeoi);
+            m_parser.DefineClassFun("FindObject", pfobj, "setoffset", &FindObject::setoffset);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultcentx", &FindObject::getresultcentx);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultcenty", &FindObject::getresultcenty);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultx", &FindObject::getresultx);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresulty", &FindObject::getresulty);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultw", &FindObject::getresultw);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresulth", &FindObject::getresulth);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultsize", &FindObject::getresultsize);
+            m_parser.DefineClassFun("FindObject", pfobj, "getresultobjsnum", &FindObject::getresultobjsnum);
+            m_parser.DefineClassFun("FindObject", pfobj, "objectgrid", &FindObject::objectgrid);
+            m_parser.DefineClassFun("FindObject", pfobj, "setobjectgrid", &FindObject::setobjectgrid);
+            m_parser.DefineClassFun("FindObject", pfobj, "objectsort", &FindObject::objectsort);
 
             FindSegmentation* pfindsegmentation = nullptr;
             m_parser.DefineClass("FindSegmentation", pfindsegmentation);
@@ -620,166 +625,113 @@ namespace mu
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "status_code", &FindSegmentation::status_code);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_contour_count", &FindSegmentation::get_contour_count);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_primary_area", &FindSegmentation::get_primary_area);
-            m_parser.DefineClassFun("Findobject", pfobj, "edge", &FindObject::Edge);
-            m_parser.DefineClassFun("Findobject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);
-            m_parser.DefineClassFun("Findobject", pfobj, "setrelmatch", &FindObject::setrelationrectfrom_matchresult);
-            m_parser.DefineClassFun("Findobject", pfobj, "setrelxy", &FindObject::setrelationxy);
-            m_parser.DefineClassFun("Findobject", pfobj, "setrelzoom", &FindObject::setrelationzoom);
-            m_parser.DefineClassFun("Findobject", pfobj, "setreltorect", &FindObject::setrelationtorect);
-            m_parser.DefineClassFun("Findobject", pfobj, "setcolor", &FindObject::setcolorstyle);
-            m_parser.DefineClassFun("Findobject", pfobj, "setroithre", &FindObject::SetImageROIthre);
-            m_parser.DefineClassFun("Findobject", pfobj, "setroiincrease", &FindObject::SetImageROIincrease);
-            m_parser.DefineClassFun("Findobject", pfobj, "setroicomparegap", &FindObject::SetImageROIcomparegap);
-            m_parser.DefineClassFun("Findobject", pfobj, "setroifindborw", &FindObject::SetImageROIfindBorW);
-            m_parser.DefineClassFun("Findobject", pfobj, "setroiedge5o7", &FindObject::SetImageROIedge_5o7);
-            m_parser.DefineClassFun("Findobject", pfobj, "roithre", &FindObject::ImageROIthre);
-            m_parser.DefineClassFun("Findobject", pfobj, "roiedge", &FindObject::ImageROIedge);
-            m_parser.DefineClassFun("Findobject", pfobj, "roiedgeh", &FindObject::ImageROIedgeH);
-            m_parser.DefineClassFun("Findobject", pfobj, "shapesetroi", &FindObject::shapesetroi);
-            m_parser.DefineClassFun("Findobject", pfobj, "getshape", &FindObject::getshape);
+            m_parser.DefineClassFun("FindObject", pfobj, "edge", &FindObject::Edge);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrelmatch", &FindObject::setrelationrectfrom_matchresult);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrelxy", &FindObject::setrelationxy);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrelzoom", &FindObject::setrelationzoom);
+            m_parser.DefineClassFun("FindObject", pfobj, "setreltorect", &FindObject::setrelationtorect);
+            m_parser.DefineClassFun("FindObject", pfobj, "setcolor", &FindObject::setcolorstyle);
+            m_parser.DefineClassFun("FindObject", pfobj, "setroithre", &FindObject::SetImageROIthre);
+            m_parser.DefineClassFun("FindObject", pfobj, "setroiincrease", &FindObject::SetImageROIincrease);
+            m_parser.DefineClassFun("FindObject", pfobj, "setroicomparegap", &FindObject::SetImageROIcomparegap);
+            m_parser.DefineClassFun("FindObject", pfobj, "setroifindborw", &FindObject::SetImageROIfindBorW);
+            m_parser.DefineClassFun("FindObject", pfobj, "setroiedge5o7", &FindObject::SetImageROIedge_5o7);
+            m_parser.DefineClassFun("FindObject", pfobj, "roithre", &FindObject::ImageROIthre);
+            m_parser.DefineClassFun("FindObject", pfobj, "roiedge", &FindObject::ImageROIedge);
+            m_parser.DefineClassFun("FindObject", pfobj, "roiedgeh", &FindObject::ImageROIedgeH);
+            m_parser.DefineClassFun("FindObject", pfobj, "shapesetroi", &FindObject::shapesetroi);
+            m_parser.DefineClassFun("FindObject", pfobj, "getshape", &FindObject::getshape);
 
             fastmatch* pfastmatch = nullptr;
-            m_parser.DefineClass("Match", pfastmatch);
-            m_parser.DefineClass("fastmatch", pfastmatch);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrect", &fastmatch::setrect);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
-            m_parser.DefineClassFun("Match", pfastmatch, "Show", &fastmatch::setshow);
-            m_parser.DefineClassFun("Match", pfastmatch, "learn", &fastmatch::learn);
-            m_parser.DefineClassFun("Match", pfastmatch, "setcompgap", &fastmatch::setcomparegap);
-            m_parser.DefineClassFun("Match", pfastmatch, "setwhgap", &fastmatch::SetWHgap);
-            m_parser.DefineClassFun("Match", pfastmatch, "setlinesample", &fastmatch::setlinesamplerate);
-            m_parser.DefineClassFun("Match", pfastmatch, "setlinegap", &fastmatch::setlinegap);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmethod", &fastmatch::setmethod);
-            m_parser.DefineClassFun("Match", pfastmatch, "setthre", &fastmatch::setthre);
-            m_parser.DefineClassFun("Match", pfastmatch, "setobjfilter", &fastmatch::setobjfilter);
-            m_parser.DefineClassFun("Match", pfastmatch, "setfilter", &fastmatch::setfilter);
-            m_parser.DefineClassFun("Match", pfastmatch, "savemodel", &fastmatch::savemodelfile);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadmodel", &fastmatch::loadmodelfile);
-            m_parser.DefineClassFun("Match", pfastmatch, "modelzero", &fastmatch::ZeroPOS);
-            m_parser.DefineClassFun("Match", pfastmatch, "modelrotate", &fastmatch::modelrotate);
-            m_parser.DefineClassFun("Match", pfastmatch, "modelzoom", &fastmatch::modelzoom);
-            m_parser.DefineClassFun("Match", pfastmatch, "modelzeroposition", &fastmatch::modelzeroposition);
-            m_parser.DefineClassFun("Match", pfastmatch, "match", &fastmatch::match);
-            m_parser.DefineClassFun("Match", pfastmatch, "matchmore", &fastmatch::matchmore);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
-            m_parser.DefineClassFun("Match", pfastmatch, "setminscore", &fastmatch::setminscore);
-            m_parser.DefineClassFun("Match", pfastmatch, "matchstepgap", &fastmatch::matchstepgap);
-            m_parser.DefineClassFun("Match", pfastmatch, "patternrootgrid", &fastmatch::patternrootgrid);
-            m_parser.DefineClassFun("Match", pfastmatch, "patternzoom", &fastmatch::patternzoom);
-            m_parser.DefineClassFun("Match", pfastmatch, "modeltranform", &fastmatch::patterntranform);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotatematch", &fastmatch::rotatematch);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotatematchAB", &fastmatch::rotatematchAB);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotatematch_upgrade", &fastmatch::rotatematchAB_upgrade);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotatematchAB05_upgrade", &fastmatch::rotatematchAB05_upgrade);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotatematchAB025_upgrade", &fastmatch::rotatematchAB025_upgrade);
-            m_parser.DefineClassFun("Match", pfastmatch, "setupgradenum", &fastmatch::setupgradenum);
-            m_parser.DefineClassFun("Match", pfastmatch, "patterngap", &fastmatch::patternABgap2gap);
-            m_parser.DefineClassFun("Match", pfastmatch, "patternsample", &fastmatch::patternABsample);
-            m_parser.DefineClassFun("Match", pfastmatch, "pattern2org", &fastmatch::pattern2org);
-            m_parser.DefineClassFun("Match", pfastmatch, "reorgpattern", &fastmatch::org2pattern);
-            m_parser.DefineClassFun("Match", pfastmatch, "patternsize", &fastmatch::ABpatternsize);
-            m_parser.DefineClassFun("Match", pfastmatch, "samplemodel", &fastmatch::samplemodelAB);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadrotatemodel", &fastmatch::loadrotatemodelfile);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadrotate05model", &fastmatch::loadrotate05modelfile);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadrotate025model", &fastmatch::loadrotate025modelfile);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrotateangle", &fastmatch::setrotateangle);
-            m_parser.DefineClassFun("Match", pfastmatch, "setanglescale", &fastmatch::setrotateanglescale);
-            m_parser.DefineClassFun("Match", pfastmatch, "multimatch", &fastmatch::multimatch);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmultimatchrect", &fastmatch::setmultimatchrect);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmatchrectnum", &fastmatch::setmatchrectnum);
-            m_parser.DefineClassFun("Match", pfastmatch, "imagelearn", &fastmatch::imagelearn);
-            m_parser.DefineClassFun("Match", pfastmatch, "imagematch", &fastmatch::imagematch);
-            m_parser.DefineClassFun("Match", pfastmatch, "imagemodelcompareshow", &fastmatch::imagemodelcompareshow);
-            m_parser.DefineClassFun("Match", pfastmatch, "savematchroi", &fastmatch::savematchroi);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadmapmodel", &fastmatch::loadfastimagemodel);
-            m_parser.DefineClassFun("Match", pfastmatch, "savemapmodel", &fastmatch::savefastimagemodel);
-            m_parser.DefineClassFun("Match", pfastmatch, "loadcalibration", &fastmatch::loadcalibration);
-            m_parser.DefineClassFun("Match", pfastmatch, "savecalibration", &fastmatch::savecalibration);
-            m_parser.DefineClassFun("Match", pfastmatch, "getimagemodelreslut", &fastmatch::getimagemodelreslut);
-            m_parser.DefineClassFun("Match", pfastmatch, "setclustergap", &fastmatch::setclustergap);
-            m_parser.DefineClassFun("Match", pfastmatch, "saveimagemodel", &fastmatch::savematchimagemodel);
-            m_parser.DefineClassFun("Match", pfastmatch, "setmatchthre", &fastmatch::setmatchthre);
-            m_parser.DefineClassFun("Match", pfastmatch, "setfindnum", &fastmatch::setfindnum);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultnum", &fastmatch::getresultnum);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultcentx", &fastmatch::getresultcentx);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultcenty", &fastmatch::getresultcenty);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
-            m_parser.DefineClassFun("Match", pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
-            m_parser.DefineClassFun("Match", pfastmatch, "getlearnacount", &fastmatch::getlearnacount);
-            m_parser.DefineClassFun("Match", pfastmatch, "getlearnbcount", &fastmatch::getlearnbcount);
-            m_parser.DefineClassFun("Match", pfastmatch, "getlearna2count", &fastmatch::getlearna2count);
-            m_parser.DefineClassFun("Match", pfastmatch, "getlearnb2count", &fastmatch::getlearnb2count);
-            m_parser.DefineClassFun("Match", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
-            m_parser.DefineClassFun("Match", pfastmatch, "setspecshow", &fastmatch::setspecshow);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrelresultnum", &fastmatch::setrelationrectfromresultnum);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrelmatch", &fastmatch::setrelationrectfrom_matchresult);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrelxy", &fastmatch::setrelationxy);
-            m_parser.DefineClassFun("Match", pfastmatch, "setrelzoom", &fastmatch::setrelationzoom);
-            m_parser.DefineClassFun("Match", pfastmatch, "setreltorect", &fastmatch::setrelationtorect);
-            m_parser.DefineClassFun("Match", pfastmatch, "setcolor", &fastmatch::setcolorstyle);
-            m_parser.DefineClassFun("Match", pfastmatch, "shapesetroi", &fastmatch::shapesetroi);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultx", &fastmatch::getrotateresultx);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresulty", &fastmatch::getrotateresulty);
+            const std::string_view fastmatch_type_name =
+                CxScriptTypeName(CxScriptTypeTraits<fastmatch>::id);
+            m_parser.DefineClass(fastmatch_type_name.data(), pfastmatch);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrect", &fastmatch::setrect);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "Show", &fastmatch::setshow);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "learn", &fastmatch::learn);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setcompgap", &fastmatch::setcomparegap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setwhgap", &fastmatch::SetWHgap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setlinesample", &fastmatch::setlinesamplerate);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setlinegap", &fastmatch::setlinegap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmethod", &fastmatch::setmethod);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setthre", &fastmatch::setthre);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setobjfilter", &fastmatch::setobjfilter);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setfilter", &fastmatch::setfilter);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemodel", &fastmatch::savemodelfile);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadmodel", &fastmatch::loadmodelfile);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modelzero", &fastmatch::ZeroPOS);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modelrotate", &fastmatch::modelrotate);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modelzoom", &fastmatch::modelzoom);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modelzeroposition", &fastmatch::modelzeroposition);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "match", &fastmatch::match);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchmore", &fastmatch::matchmore);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setminscore", &fastmatch::setminscore);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchstepgap", &fastmatch::matchstepgap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patternrootgrid", &fastmatch::patternrootgrid);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patternzoom", &fastmatch::patternzoom);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modeltranform", &fastmatch::patterntranform);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "rotatematch", &fastmatch::rotatematch);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "rotatematchAB", &fastmatch::rotatematchAB);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "rotatematch_upgrade", &fastmatch::rotatematchAB_upgrade);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "rotatematchAB05_upgrade", &fastmatch::rotatematchAB05_upgrade);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "rotatematchAB025_upgrade", &fastmatch::rotatematchAB025_upgrade);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setupgradenum", &fastmatch::setupgradenum);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patterngap", &fastmatch::patternABgap2gap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patternsample", &fastmatch::patternABsample);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "pattern2org", &fastmatch::pattern2org);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "reorgpattern", &fastmatch::org2pattern);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patternsize", &fastmatch::ABpatternsize);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "samplemodel", &fastmatch::samplemodelAB);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadrotatemodel", &fastmatch::loadrotatemodelfile);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadrotate05model", &fastmatch::loadrotate05modelfile);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadrotate025model", &fastmatch::loadrotate025modelfile);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrotateangle", &fastmatch::setrotateangle);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setanglescale", &fastmatch::setrotateanglescale);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "multimatch", &fastmatch::multimatch);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmultimatchrect", &fastmatch::setmultimatchrect);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrectnum", &fastmatch::setmatchrectnum);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagelearn", &fastmatch::imagelearn);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagematch", &fastmatch::imagematch);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagemodelcompareshow", &fastmatch::imagemodelcompareshow);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savematchroi", &fastmatch::savematchroi);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadmapmodel", &fastmatch::loadfastimagemodel);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemapmodel", &fastmatch::savefastimagemodel);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadcalibration", &fastmatch::loadcalibration);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savecalibration", &fastmatch::savecalibration);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getimagemodelreslut", &fastmatch::getimagemodelreslut);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setclustergap", &fastmatch::setclustergap);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "saveimagemodel", &fastmatch::savematchimagemodel);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchthre", &fastmatch::setmatchthre);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setfindnum", &fastmatch::setfindnum);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultnum", &fastmatch::getresultnum);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultcentx", &fastmatch::getresultcentx);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultcenty", &fastmatch::getresultcenty);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnacount", &fastmatch::getlearnacount);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnbcount", &fastmatch::getlearnbcount);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearna2count", &fastmatch::getlearna2count);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnb2count", &fastmatch::getlearnb2count);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setspecshow", &fastmatch::setspecshow);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrelresultnum", &fastmatch::setrelationrectfromresultnum);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrelmatch", &fastmatch::setrelationrectfrom_matchresult);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrelxy", &fastmatch::setrelationxy);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrelzoom", &fastmatch::setrelationzoom);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setreltorect", &fastmatch::setrelationtorect);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setcolor", &fastmatch::setcolorstyle);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "shapesetroi", &fastmatch::shapesetroi);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getrotateresultx", &fastmatch::getrotateresultx);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getrotateresulty", &fastmatch::getrotateresulty);
 
-            // Stage 2.x CxScript direct scripts use both names:
-            //   Match m_match;
-            //   fastmatch m_match;
-            // Keep the registration layer thin, but expose the same direct
-            // method surface for the lowercase class name so Evidence Chain
-            // smoke tests do not fail before reaching the real learn/match
-            // algorithm boundary.
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrect", &fastmatch::setrect);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setthre", &fastmatch::setthre);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setlinegap", &fastmatch::setlinegap);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setwhgap", &fastmatch::SetWHgap);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setobjfilter", &fastmatch::setobjfilter);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setcompgap", &fastmatch::setcomparegap);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setminscore", &fastmatch::setminscore);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setfindnum", &fastmatch::setfindnum);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchthre", &fastmatch::setmatchthre);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "matchstepgap", &fastmatch::matchstepgap);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "learn", &fastmatch::learn);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "match", &fastmatch::match);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "modelzero", &fastmatch::ZeroPOS);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "pattern2org", &fastmatch::pattern2org);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "patternsample", &fastmatch::patternABsample);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "samplemodel", &fastmatch::samplemodelAB);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcandidatecount", &fastmatch::getresultcandidatecount);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultbestscore", &fastmatch::getresultbestscore);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getmodelpointcount", &fastmatch::getmodelpointcount);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnacount", &fastmatch::getlearnacount);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnbcount", &fastmatch::getlearnbcount);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearna2count", &fastmatch::getlearna2count);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getlearnb2count", &fastmatch::getlearnb2count);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcentx", &fastmatch::getresultcentx);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultcenty", &fastmatch::getresultcenty);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getresultnum", &fastmatch::getresultnum);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresulta", &fastmatch::getrotateresulta);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultscore", &fastmatch::getrotateresultscore);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultscoreA", &fastmatch::getrotateresultscoreA);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultcentx", &fastmatch::getrotateresultcentx);
-            m_parser.DefineClassFun("Match", pfastmatch, "getrotateresultcenty", &fastmatch::getrotateresultcenty);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotateresultsfilter", &fastmatch::rotateresultsortfilter);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotateresultsfilterA", &fastmatch::rotateresultsortfilterA);
-            m_parser.DefineClassFun("Match", pfastmatch, "rotateresultsize", &fastmatch::rotateresultsize);
-            m_parser.DefineClassFun("Match", pfastmatch, "setupgradescale", &fastmatch::Setupgradescale);
-            m_parser.DefineClassFun("Match", pfastmatch, "setshownum", &fastmatch::setshownum);
-            m_parser.DefineClassFun("Match", pfastmatch, "getresultcentpoints", &fastmatch::getresultcentpoints);
-            m_parser.DefineClassFun("Match", pfastmatch, "getshape", &fastmatch::getshape);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrect", &fastmatch::setrect);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setrectxywh", &fastmatch::setrectxywh);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setthre", &fastmatch::setthre);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setlinegap", &fastmatch::setlinegap);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "learn", &fastmatch::learn);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrect", &fastmatch::setmatchrect);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "setmatchrectxywh", &fastmatch::setmatchrectxywh);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "match", &fastmatch::match);
-            m_parser.DefineClassFun("fastmatch", pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getresultcentpoints", &fastmatch::getresultcentpoints);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getshape", &fastmatch::getshape);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getmaxresult", &fastmatch::getmaxresult);
 
             RegisterPendingDirectCxScriptBindings(m_parser);
 
@@ -1747,7 +1699,7 @@ namespace mu
         for (; item!=classmap.begin(); )
         {
             --item;
-            if("CFastMatch"==item->first)
+            if("FastMatch"==item->first)
             {
 #ifdef USE_CFastMatch
 
@@ -1770,7 +1722,7 @@ namespace mu
         for (; item!=classmap.begin(); )
         {
             --item;
-            if("CFastMatch"==item->first)
+            if("FastMatch"==item->first)
             {
 #ifdef USE_CFastMatch
 
@@ -1885,7 +1837,7 @@ namespace mu
             }
             else if("ShapeBase"==item->first){}
             else if("LineShape"==item->first){}
-            else if("Findline"==item->first)
+            else if("FindLine"==item->first)
             {
                 Findline*ashape=0;
                 for(int i=0;i<pclass->size();i++)

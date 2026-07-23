@@ -1,5 +1,5 @@
 CxParameterProfile_reset(0);
-CxParameterProfile_settool("Findcircle");
+CxParameterProfile_settool("FindCircle");
 
 CxParameterProfile_add("findcircle_stage25_direct");
 CxParameterProfile_setrole("BASELINE_OK");
@@ -8,7 +8,7 @@ CxParameterProfile_setthreshold(20);
 CxParameterProfile_setgap(5);
 CxParameterProfile_setlinegap(6);
 CxParameterProfile_setfilterprofile(0);
-CxParameterProfile_setdescription("Baseline Findcircle direct profile from verified basic-dot case.");
+CxParameterProfile_setdescription("Baseline FindCircle direct profile from verified basic-dot case.");
 
 CxParameterProfile_add("findcircle_threshold8");
 CxParameterProfile_setrole("DIAGNOSTIC_LOW_CONTRAST");

@@ -937,7 +937,7 @@ bool TryExecuteDeclaration(ManualTestContext& context,
         object.display_summary = "Image runtime object created";
         object.visualizable = false;
     }
-    else if (type == "Findcircle")
+    else if (type == "FindCircle")
     {
         PrepareFindcircleDebugRuntime();
         runtime.circles[name] = std::make_unique<Findcircle>();
@@ -951,7 +951,7 @@ bool TryExecuteDeclaration(ManualTestContext& context,
         object.has_fit_result = false;
         object.has_result_measure = false;
     }
-    else if (type == "Findline")
+    else if (type == "FindLine")
     {
         runtime.lines[name] = std::make_unique<Findline>();
         object.exists_in_parser = true;
@@ -1333,7 +1333,7 @@ void DebugStepOnce(ManualTestContext& context)
         RuntimeObjectView& object = EnsureRuntimeObject(
             context,
             call.object,
-            call.object.find("circle") != std::string::npos ? "Findcircle" : "unknown",
+            call.object.find("circle") != std::string::npos ? "FindCircle" : "unknown",
             line.line_no);
 
         object.last_method = call.method;
@@ -1816,7 +1816,7 @@ bool SaveCxDebugSnapshotText(ManualTestContext& context,
             file << "  avgdist: " << object.fit_avgdist << "\n";
             file << "  display_version: " << object.display_version << "\n";
 
-            if (object.type == "Findcircle")
+            if (object.type == "FindCircle")
             {
                 file << "  circle_roi_outer_polyline: "
                      << (object.has_circle_roi_outer_polyline ? "true" : "false") << "\n";
@@ -1883,7 +1883,7 @@ bool SaveCxDebugSnapshotText(ManualTestContext& context,
                      << object.circle_measure_detail << "\n";
             }
 
-            if (object.type == "Findline")
+            if (object.type == "FindLine")
             {
                 file << "  line_roi: "
                      << object.line_x0 << ", "

@@ -53,7 +53,7 @@ sin(angle)
 ```cpp
 Image image;
 Findline line;
-line.measure(&image);
+line.measure(image);
 ```
 
 原因：表达式求值入口不支持 CxScript 的对象声明和多语句语义，会产生：
@@ -262,7 +262,22 @@ global_matInput 必须是解析器中的 Image 对象，不得通过 DefineVar �
 
 > cxscript 不允许使用点号伪装命名空间或对象成员。点号只用于已注册对象的方法调用；外部输入统一使用 `global_` 前缀的扁平名称
 
+---
 
+# CxScript 对象参数与 DefineClassFun 注册约束
+
+## 一、CxScript 对象参数的唯一书写语义
+
+CxScript 中，对象作为已注册方法的参数时，必须直接传递对象变量名。
+
+正确：
+
+```cpp
+Image m_image;
+Match m_match;
+
+m_image.copyFromMat(global_matInput);
+m_match.learn(m_image);
 ---
 
 # 编译、测试与验收硬约束
@@ -359,13 +374,13 @@ FastMatch/Findline/Findcircle 算法或接口
 只修改以下 cxscript 资产时，可直接使用现有二进制测试：
 
 ```text
-catalog/*.cxsc
-suite/*.cxsc
-contract/*.cxsc
-profile/*.cxsc
-frozen/*.cxsc
-diagnostic/*.cxsc
-manifest/*.cxsc
+catalog/　*.cxsc
+suite/ *.cxsc
+contract/ *.cxsc
+profile/ *.cxsc
+frozen/ *.cxsc
+diagnostic/ *.cxsc
+manifest/ *.cxsc
 ```
 
 但满足以下情况仍必须编译：
@@ -2405,7 +2420,7 @@ PASS
    - _direct
    - _smoke
    或放在：
-   - cxparser/cxscript/module/**/headless/
+   - cxparser/cxscript/module/ **/headless/
 
 4. 推荐人工测试脚本放置路径：
    - cxparser/cxscript/module/cximage/manual/
@@ -2433,3 +2448,44 @@ PASS
 3. measure() 内禁止 g_pbackimage = 输入图。
 4. BackImage 尺寸不够时，由 ImageManager::EnsureAlgorithmRuntimeResources(width, height) 扩容。
 5. 如果 BackImage 不存在、为空、或等于输入图，直接失败返回，不继续算法。
+
+
+### Headless Options / Result 结构约束
+
+`CxScriptHeadlessOptions` 只允许保存 Headless 执行入口元信息，不允许继续扩展为工具参数大表。
+
+允许字段：
+
+- case_id
+- script_path
+- image_path
+- template_image_path
+- output_dir
+- globals_path
+- manifest_path
+- image_id
+- target_id
+- timeout_sec
+- max_steps
+- contract_context_enabled
+- runtime_capture_smoke
+- cli_global_overrides
+
+禁止新增以下类型字段：
+
+- global_roi_x0 / roi_x0
+- threshold / method / gap / linegap
+- circle_cx / circle_px
+- learn_roi_x / search_roi_x
+- torch input size / mean / std
+- mlpack feature size / threshold
+- ensmallen optimizer 参数
+- 任意具体工具参数
+
+工具参数必须通过以下方式进入 cxscript：
+
+```text
+headless_globals.cxsc 声明变量
+globals value 文件 / manifest / suite / CLI override 提供值
+C++ 循环绑定变量
+cxscript 直接读取 global_xxx

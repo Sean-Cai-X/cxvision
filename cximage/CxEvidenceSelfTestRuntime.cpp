@@ -171,7 +171,7 @@ bool WriteEvidenceSelfTestReportMd(
     file << "- has_measure_points: " << (result.has_measure_points ? "true" : "false") << "\n";
     file << "- has_fit_result: " << (result.has_fit_result ? "true" : "false") << "\n";
     file << "- avgdist: " << result.avgdist << "\n";
-    if (result.tool == "fastmatch" || result.runtime_object_type == "fastmatch")
+    if (result.tool == "FastMatch" || result.runtime_object_type == "FastMatch")
     {
         file << "- fastmatch_model_point_count: " << result.fastmatch_model_point_count << "\n";
         file << "- fastmatch_learn_a_count: " << result.fastmatch_learn_a_count << "\n";

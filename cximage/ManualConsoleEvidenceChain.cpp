@@ -47,13 +47,13 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("findcircle") != std::string::npos;
+        scriptPath.find("FindCircle") != std::string::npos;
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("findline") != std::string::npos;
+        scriptPath.find("FindLine") != std::string::npos;
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("findellipse") != std::string::npos;
+        scriptPath.find("FindEllipse") != std::string::npos;
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -93,7 +93,7 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     }
     else if (isLineScript)
     {
-        gauge.tool = "Findline";
+        gauge.tool = "FindLine";
         gauge.has_line_gauge = true;
         gauge.line_x0 = getInt("global_roi_x0", 0);
         gauge.line_y0 = getInt("global_roi_y0", 0);

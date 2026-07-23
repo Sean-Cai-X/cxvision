@@ -5894,7 +5894,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         learn_roi_shape->setRect(learn_x, learn_y, learn_x + learn_w, learn_y + learn_h);
         sink.UpsertShape(
             owner_ref + ".learn_roi",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "learn_roi",
             "learn_roi",
@@ -5915,7 +5915,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         search_roi_shape->setRect(search_x, search_y, search_x + search_w, search_y + search_h);
         sink.UpsertShape(
             owner_ref + ".search_roi",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "search_roi",
             "search_roi",
@@ -5934,7 +5934,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         expected_shape->setRect(expected_x, expected_y, expected_x + expected_w, expected_y + expected_h);
         sink.UpsertShape(
             owner_ref + ".expected_gt",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "expected_gt",
             "expected_gt",
@@ -5953,7 +5953,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         }
         sink.UpsertShape(
             owner_ref + ".model_points",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "",
             "model",
@@ -5972,7 +5972,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
         }
         sink.UpsertShape(
             owner_ref + ".candidate_centers",
-            "fastmatch",
+            "FastMatch",
             owner_ref,
             "",
             "measure_points",
@@ -5992,7 +5992,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
                                  r.BottomRight().X(), r.BottomRight().Y());
             sink.UpsertShape(
                 owner_ref + ".result_boxes." + std::to_string(i),
-                "fastmatch",
+                "FastMatch",
                 owner_ref,
                 "result",
                 "result",
@@ -6011,7 +6011,7 @@ void fastmatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
             best_shape->addpoint(getresolvedresultcentx(best_index), getresolvedresultcenty(best_index));
             sink.UpsertShape(
                 owner_ref + ".best_center",
-                "fastmatch",
+                "FastMatch",
                 owner_ref,
                 "",
                 "best_result",

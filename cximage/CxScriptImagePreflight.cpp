@@ -40,7 +40,7 @@ Stage25ImagePreflightResult Stage25ImagePreflight::Run(
 
     int roi_x, roi_y, roi_w, roi_h;
 
-    if (tool == "Findline")
+    if (tool == "FindLine")
     {
         int min_x = std::min(x0, x1) - wgap;
         int max_x = std::max(x0, x1) + wgap;

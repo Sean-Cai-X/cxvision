@@ -142,18 +142,18 @@ void* ParserDebugBridge::QueryClassObject(const std::string& type,
 {
   if (myOwner == nullptr) return nullptr;
   void* object = myOwner->GetClassObj(type, name);
-  if (object == nullptr && type == "Findcircle")
-    object = myOwner->GetClassObj("findcircle", name);
-  if (object == nullptr && type == "Findline")
-    object = myOwner->GetClassObj("findline", name);
-  if (object == nullptr && type == "Match")
-    object = myOwner->GetClassObj("fastmatch", name);
-  if (object == nullptr && type == "fastmatch")
-    object = myOwner->GetClassObj("Match", name);
-  if (object == nullptr && type == "fastmatch")
+  if (object == nullptr && type == "FindCircle")
+    object = myOwner->GetClassObj("FindCircle", name);
+  if (object == nullptr && type == "FindLine")
+    object = myOwner->GetClassObj("FindLine", name);
+  if (object == nullptr && type == "FastMatch")
     object = myOwner->GetClassObj("FastMatch", name);
-  if (object == nullptr && type == "fastmatch")
-    object = myOwner->GetClassObj("CFastMatch", name);
+  if (object == nullptr && type == "FastMatch")
+    object = myOwner->GetClassObj("FastMatch", name);
+  if (object == nullptr && type == "FastMatch")
+    object = myOwner->GetClassObj("FastMatch", name);
+  if (object == nullptr && type == "FastMatch")
+    object = myOwner->GetClassObj("FastMatch", name);
   return object;
 }
 
@@ -381,11 +381,11 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
 {
   const std::pair<const char*, const char*> objects[] = {
     {"Image", "global_matInput"}, {"Image", "m_occtimage"},
-    {"Findcircle", "afindcircle0"},
-    {"Findcircle", "afindcircle1"},
+    {"FindCircle", "afindcircle0"},
+    {"FindCircle", "afindcircle1"},
     {"CircleRingGauge", "ring_gauge"},
     {"FastMatchDiagnostic", "fm"},
-    {"fastmatch", "m_match"}
+    {"FastMatch", "m_match"}
   };
   std::vector<ParserDebugObjectSnapshot> snapshots;
   for (const auto& item : objects)
@@ -411,7 +411,7 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
           std::to_string(image->getmat().cols) + "x" +
           std::to_string(image->getmat().rows);
     }
-    else if (snapshot.type == "Findcircle" && snapshot.exists_in_parser)
+    else if (snapshot.type == "FindCircle" && snapshot.exists_in_parser)
     {
       Findcircle* circle = static_cast<Findcircle*>(
         QueryClassObject(snapshot.type, snapshot.name));
@@ -466,7 +466,7 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
           ", status_code=" + std::to_string(fm->status_code());
       }
     }
-    else if (snapshot.type == "fastmatch" && snapshot.exists_in_parser)
+    else if (snapshot.type == "FastMatch" && snapshot.exists_in_parser)
     {
       fastmatch* fm = static_cast<fastmatch*>(
         QueryClassObject(snapshot.type, snapshot.name));

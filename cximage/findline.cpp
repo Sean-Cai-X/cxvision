@@ -36,7 +36,7 @@ void LogFindlineMeasureProbe(
     const char* status,
     const std::string& message)
 {
-    CXLOG_INFO("Findline", phase, status, message);
+    CXLOG_INFO("FindLine", phase, status, message);
     CxUnifiedLog::Instance().Flush();
 }
 
@@ -3957,7 +3957,7 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
             snapshot.scan_half_width);
         sink.UpsertShape(
             owner_ref + ".roi_axis",
-            "Findline",
+            "FindLine",
             owner_ref,
             "setline",
             "roi",
@@ -3977,7 +3977,7 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
         box_shape->close(true);
         sink.UpsertShape(
             owner_ref + ".scan_box",
-            "Findline",
+            "FindLine",
             owner_ref,
             "",
             "scan",
@@ -3996,7 +3996,7 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
         }
         sink.UpsertShape(
             owner_ref + ".measure_points_w",
-            "Findline",
+            "FindLine",
             owner_ref,
             "",
             "measure_points",
@@ -4015,7 +4015,7 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
         }
         sink.UpsertShape(
             owner_ref + ".measure_points_h",
-            "Findline",
+            "FindLine",
             owner_ref,
             "",
             "measure_points",
@@ -4034,7 +4034,7 @@ void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
             static_cast<int>(std::lround(getresulty1())));
         sink.UpsertShape(
             owner_ref + ".fit_line",
-            "Findline",
+            "FindLine",
             owner_ref,
             "",
             "result",

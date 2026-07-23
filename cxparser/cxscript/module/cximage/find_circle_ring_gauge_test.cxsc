@@ -1,7 +1,7 @@
 Image m_image;
 
-Findcircle outer_circle;
-Findcircle inner_circle;
+FindCircle outer_circle;
+FindCircle inner_circle;
 
 CircleRingGauge ring_gauge;
 

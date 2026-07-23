@@ -67,8 +67,8 @@ inline std::string TorchGeometryCxscript_InputPriorRoiLinePointSet()
     return
         "Image source;\n"
         "Shape roi;\n"
-        "Findline line;\n"
-        "Match matcher;\n"
+        "FindLine line;\n"
+        "FastMatch matcher;\n"
         "\n"
         "roi.setname(\"roi_input_prior\");\n"
         "source.getshape(roi);\n"
@@ -93,7 +93,7 @@ inline std::string TorchGeometryCxscript_LabelMaskBoundaryKeypoints()
         "Image source;\n"
         "Image labelMask;\n"
         "Shape roi;\n"
-        "Findline line;\n"
+        "FindLine line;\n"
         "\n"
         "source.getshape(roi);\n"
         "labelMask.getshape(roi);\n"
@@ -138,7 +138,7 @@ inline std::string TorchGeometryCxscript_AttachBackToGeometry()
 inline std::string TorchGeometryCxscript_StructuralEvidenceBundle()
 {
     return
-        "Match matcher;\n"
+        "FastMatch matcher;\n"
         "\n"
         "cxcore.load.fractal_partition_object(\"fract_main\");\n"
         "cxcore.load.distance_field_object(\"dist_main\");\n"

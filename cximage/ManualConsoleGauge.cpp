@@ -116,7 +116,7 @@ bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
 {
-    if (gauge.tool == "Findline")
+    if (gauge.tool == "FindLine")
     {
         if (!gauge.has_line_gauge)
             reason = "line gauge is unavailable";
@@ -198,7 +198,7 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
         context.debug_reason = reason;
         return;
     }
-    if (gauge.tool == "Findline")
+    if (gauge.tool == "FindLine")
     {
         InjectManualGaugeInt(context, "global_roi_x0", gauge.line_x0);
         InjectManualGaugeInt(context, "global_roi_y0", gauge.line_y0);
@@ -491,7 +491,7 @@ bool ExportManualGaugeManifestCandidate(
          << "m.setname(\"manual_gauge_candidate_" << GaugeJsonEscape(gauge.case_id) << "\");\n"
          << "m.addimage(\"" << GaugeJsonEscape(gauge.image_id) << "\", \"manual_candidate\", \""
          << GaugeJsonEscape(context.image_file_path) << "\");\n";
-    if (gauge.tool == "Findline")
+    if (gauge.tool == "FindLine")
         file << "m.image_addfindlinetarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
              << gauge.line_x0 << ", " << gauge.line_y0 << ", " << gauge.line_x1 << ", "
              << gauge.line_y1 << ", " << gauge.wgap << ", " << gauge.hgap << ");\n";

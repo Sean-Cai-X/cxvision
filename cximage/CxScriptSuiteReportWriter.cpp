@@ -297,7 +297,7 @@ void CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
     int passed = 0, failed = 0;
     for (const auto& result : caseResults)
     {
-        if (result.tool != "Findline")
+        if (result.tool != "FindLine")
             continue;
 
         file << "| " << result.level << " | ";
@@ -449,7 +449,7 @@ void CxScriptSuiteReportWriter::WriteFailureClassificationReport(
         file << "- **Conclusion**: " << result.conclusion << "\n";
         file << "- **Valid Points**: " << result.valid_points_count << "\n";
 
-        if (result.tool == "Findline")
+        if (result.tool == "FindLine")
         {
             file << "- **Has Fit Line**: " << (result.has_fit_line ? "yes" : "no") << "\n";
             file << "- **Local Support**: " << std::fixed << std::setprecision(2) << result.local_support << "\n";

@@ -16,7 +16,7 @@ param_init=thre:8;comparegap:2;gap:6;linesamplerate:0.004;fitmeasuregap:80
 objective_weights=center:3;radius:2;avg_dist:2;invalid:4;stability:1.5
 
 # call
-call_1=Findcircle.Measure
+call_1=FindCircle.Measure
 call_2=ExportCircleMeasurement
 call_3=EnsmallenCircleObjectiveEval
 

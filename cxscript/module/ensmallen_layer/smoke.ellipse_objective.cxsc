@@ -16,7 +16,7 @@ param_init=thre:8;comparegap:2;gap:6;linesamplerate:0.004
 objective_weights=bbox_center:3;bbox_size:2;fit_residual:2.5;coverage:1.5;stability:1.5
 
 # call
-call_1=Findellipse.Measure
+call_1=FindEllipse.Measure
 call_2=ExportEllipseMeasurement
 call_3=EnsmallenEllipseObjectiveEval
 

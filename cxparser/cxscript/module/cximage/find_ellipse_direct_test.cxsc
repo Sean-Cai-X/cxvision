@@ -1,5 +1,5 @@
 Image m_image;
-Findellipse m_ellipse;
+FindEllipse m_ellipse;
 
 m_image.copyFromMat(global_matInput);
 

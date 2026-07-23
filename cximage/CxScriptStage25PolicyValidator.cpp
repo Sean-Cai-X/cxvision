@@ -147,7 +147,7 @@ Stage25CoverageGateResult EvaluateStage25CoverageGate(
     {
         for (const auto& target : img.targets)
         {
-            if (target.tool == "Findline")
+            if (target.tool == "FindLine")
             {
                 if (img.level == "L1_high_contrast")
                     r.l1_findline_targets++;

@@ -13,7 +13,7 @@ s.addimage("L2_fastmatch_bottle_test", "L2_low_contrast_illumination", "L2_low_c
 s.addimage("L3_fastmatch_brakedisk_template", "L3_complex_boundary", "L3_complex_boundary/fastmatch_brakedisk_template_l3.jpg");
 s.addimage("L3_fastmatch_brakedisk_test", "L3_complex_boundary", "L3_complex_boundary/fastmatch_brakedisk_test_l3.jpg");
 
-s.addcatalogentry("fastmatch_l1_baseline_regression", "fastmatch", "cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_l1_baseline_regression.cxsc");
+s.addcatalogentry("fastmatch_l1_baseline_regression", "FastMatch", "cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_l1_baseline_regression.cxsc");
 
 s.addcase("fastmatch_l1_high_contrast_bracket");
 s.case_setimage("L1_fastmatch_bracket_template");

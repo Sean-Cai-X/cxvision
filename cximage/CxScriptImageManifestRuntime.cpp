@@ -625,7 +625,7 @@ namespace
                                             break;
                                     }
 
-                                    if (target.tool == "Findline")
+                                    if (target.tool == "FindLine")
                                     {
                                         target.has_line = seen_x0 && seen_y0 && seen_x1 && seen_y1;
                                     }
@@ -1056,7 +1056,7 @@ namespace
         const CxScriptImageTargetRoi& target,
         CxScriptImageManifestValidationResult& result)
     {
-        if (target.tool == "Findline")
+        if (target.tool == "FindLine")
         {
             if (!target.has_line)
             {
@@ -1394,7 +1394,7 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
                     target.target_id,
                     "Target has empty tool");
             }
-            else if (target.tool != "Findline" &&
+            else if (target.tool != "FindLine" &&
                      target.tool != "Findcircle" &&
                      target.tool != "Findellipse" &&
                      target.tool != "FindRect")

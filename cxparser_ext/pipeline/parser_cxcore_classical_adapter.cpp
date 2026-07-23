@@ -1143,11 +1143,11 @@ CxcoreClassicalReviewAdapterResult BuildCxcoreClassicalReviewAdapter(const CxScr
   }
 
   if (result.layer == "feature" &&
-      (result.case_name == "circle_measure_fit" || result.case_name == "findcircle"))
+      (result.case_name == "circle_measure_fit" || result.case_name == "FindCircle"))
   {
     adapter.matched_case = true;
     const std::string case_focus_id =
-      result.case_name == "findcircle" ? "findcircle" : "circle_measure_fit";
+      result.case_name == "FindCircle" ? "FindCircle" : "circle_measure_fit";
     const std::string input_image_ref = SelectClassicalInputImageRef(result);
     PushUniqueReviewText(adapter.focus_image_ids, case_focus_id);
     PushUniqueReviewText(adapter.focus_image_ids, "circle_overlay");

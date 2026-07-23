@@ -122,7 +122,7 @@ static void FillRuntimeObjectFromFindcircle(
 {
     object = RuntimeObjectView{};
     object.name = name;
-    object.type = "Findcircle";
+    object.type = "FindCircle";
     object.exists_in_parser = true;
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_executed";
@@ -184,7 +184,7 @@ static void FillRuntimeObjectFromFindline(
 {
     object = RuntimeObjectView{};
     object.name = name;
-    object.type = "Findline";
+    object.type = "FindLine";
     object.exists_in_parser = true;
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_executed";
@@ -361,7 +361,7 @@ static void FillRuntimeObjectFromFindellipse(
 {
     object = RuntimeObjectView{};
     object.name = name;
-    object.type = "Findellipse";
+    object.type = "FindEllipse";
     object.exists_in_parser = true;
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_executed";
@@ -467,7 +467,7 @@ static void FillRuntimeObjectFromFindellipse(
 
 static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
 {
-    if (object.type == "Findline")
+    if (object.type == "FindLine")
     {
         if (object.has_fit_line)
         {
@@ -490,7 +490,7 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
         return reason;
     }
 
-    if (object.type == "Findcircle")
+    if (object.type == "FindCircle")
     {
         if (object.has_fit_result)
             return "Findcircle " + object.name +
@@ -512,7 +512,7 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
                 : object.circle_measure_detail);
     }
 
-    if (object.type == "Findellipse")
+    if (object.type == "FindEllipse")
     {
         return "Findellipse " + object.name +
             " roi=" + (object.has_ellipse_roi ? "available" : "missing") +
@@ -557,13 +557,13 @@ void SeedDefaultManualGlobals(
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("findcircle") != std::string::npos;
+        scriptPath.find("FindCircle") != std::string::npos;
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("findline") != std::string::npos;
+        scriptPath.find("FindLine") != std::string::npos;
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("findellipse") != std::string::npos;
+        scriptPath.find("FindEllipse") != std::string::npos;
     const bool isRectScript =
         scriptPath.find("find_rect") != std::string::npos ||
         scriptPath.find("findrect") != std::string::npos;
@@ -668,7 +668,7 @@ void SeedDefaultManualGlobals(
     }
     else if (isLineScript)
     {
-        gauge.tool = "Findline";
+        gauge.tool = "FindLine";
         gauge.has_line_gauge = true;
         gauge.line_x0 = context.runtime_int_vars["global_roi_x0"];
         gauge.line_y0 = context.runtime_int_vars["global_roi_y0"];
@@ -764,11 +764,11 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
 
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:list");
     for (const std::string& name :
-         m_parserDebugBridge.ListClassObjectNames("Findcircle"))
+         m_parserDebugBridge.ListClassObjectNames("FindCircle"))
     {
         SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:query:" + name);
         Findcircle* circle = static_cast<Findcircle*>(
-            m_parserDebugBridge.QueryClassObject("Findcircle", name));
+            m_parserDebugBridge.QueryClassObject("FindCircle", name));
         if (circle == nullptr)
             continue;
 
@@ -782,11 +782,11 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
 
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:list");
     for (const std::string& name :
-         m_parserDebugBridge.ListClassObjectNames("Findline"))
+         m_parserDebugBridge.ListClassObjectNames("FindLine"))
     {
         SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:query:" + name);
         Findline* line = static_cast<Findline*>(
-            m_parserDebugBridge.QueryClassObject("Findline", name));
+            m_parserDebugBridge.QueryClassObject("FindLine", name));
         if (line == nullptr)
             continue;
 
@@ -800,11 +800,11 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
 
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:list");
     for (const std::string& name :
-         m_parserDebugBridge.ListClassObjectNames("Findellipse"))
+         m_parserDebugBridge.ListClassObjectNames("FindEllipse"))
     {
         SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:query:" + name);
         Findellipse* ellipse = static_cast<Findellipse*>(
-            m_parserDebugBridge.QueryClassObject("Findellipse", name));
+            m_parserDebugBridge.QueryClassObject("FindEllipse", name));
         if (ellipse == nullptr)
             continue;
 
@@ -901,11 +901,11 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         std::string name;
     };
     std::vector<FastMatchObjectRef> fastmatchObjectRefs;
-    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("Match"))
+    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
-        fastmatchObjectRefs.push_back({"Match", name});
+        fastmatchObjectRefs.push_back({"FastMatch", name});
     }
-    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("fastmatch"))
+    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
         bool already_seen = false;
         for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
@@ -917,7 +917,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             }
         }
         if (!already_seen)
-            fastmatchObjectRefs.push_back({"fastmatch", name});
+            fastmatchObjectRefs.push_back({"FastMatch", name});
     }
     for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
     {
@@ -930,7 +930,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
 
         RuntimeObjectView object;
         object.name = name;
-        object.type = "fastmatch";
+        object.type = "FastMatch";
         object.exists_in_parser = true;
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
@@ -1003,7 +1003,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.current_result_ref.value = "runtime_object:" + object.name;
         m_manualTest.current_result_ref.status = "runtime_object_available";
 
-        if (object.type == "Findcircle")
+        if (object.type == "FindCircle")
         {
             m_manualTest.current_result_ref.name = "global_circle_ref";
             m_manualTest.current_result_ref.result_type = "FindcircleResult";
@@ -1014,7 +1014,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.points_count = object.measure_points_count;
             m_manualTest.current_result_ref.valid_points_count = object.valid_points_count;
         }
-        else if (object.type == "Findline")
+        else if (object.type == "FindLine")
         {
             m_manualTest.current_result_ref.name = "global_line_ref";
             m_manualTest.current_result_ref.result_type = "FindlineResult";
@@ -1026,7 +1026,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.line_points_count = object.line_measure_points_count;
             m_manualTest.current_result_ref.valid_line_points_count = object.valid_points_count;
         }
-        else if (object.type == "Findellipse")
+        else if (object.type == "FindEllipse")
         {
             m_manualTest.current_result_ref.name = "global_ellipse_ref";
             m_manualTest.current_result_ref.result_type = "FindellipseResult";
@@ -1041,7 +1041,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.valid_points_count = object.valid_points_count;
             m_manualTest.current_result_ref.reason = object.ellipse_result_reason;
         }
-        else if (object.type == "fastmatch")
+        else if (object.type == "FastMatch")
         {
             m_manualTest.current_result_ref.name = "global_match_ref";
             m_manualTest.current_result_ref.result_type = "FastMatchResult";
@@ -1082,7 +1082,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             if (object.stale)
                 continue;
 
-            if (object.type == "Findline" && !object.has_fit_line)
+            if (object.type == "FindLine" && !object.has_fit_line)
             {
                 m_manualTest.debug_status = "runtime_executed_without_result";
                 m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
@@ -1105,7 +1105,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                 break;
             }
 
-            if (object.type == "Findcircle" && !object.has_fit_result)
+            if (object.type == "FindCircle" && !object.has_fit_result)
             {
                 m_manualTest.debug_status = "runtime_executed_without_result";
                 m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
@@ -1129,7 +1129,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                 break;
             }
 
-            if (object.type == "Findellipse" && !object.has_fit_ellipse)
+            if (object.type == "FindEllipse" && !object.has_fit_ellipse)
             {
                 m_manualTest.debug_status = "runtime_executed_without_fitellipse";
                 m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);

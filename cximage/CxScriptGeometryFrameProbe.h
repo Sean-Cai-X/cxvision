@@ -35,7 +35,7 @@ struct GaugePoint2d
 
 struct GaugeLineFrameProbe
 {
-    std::string tool = "Findline";
+    std::string tool = "FindLine";
     int image_width = 0;
     int image_height = 0;
     double x0 = 0.0;

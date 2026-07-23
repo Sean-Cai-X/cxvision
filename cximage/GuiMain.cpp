@@ -507,20 +507,20 @@ int RunEvidenceLockPipelineCli(const EvidenceChainSelfTestCliOptions& options)
         "method=0 threshold=16 linegap=3 wgap=15 hgap=15 compare_gap=20 objfilter=0 min_score=0.65 learn_roi_x=100 learn_roi_y=100 learn_roi_w=420 learn_roi_h=320 search_roi_x=100 search_roi_y=100 search_roi_w=300 search_roi_h=240 find_num=1";
 
     std::vector<PlannedCase> planned;
-    planned.push_back({makeReq("A1_empty_params", circleScript, "baseline_01", "circle_main", "Findcircle", ""), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("A2_profile_name_params", circleScript, "baseline_01", "circle_main", "Findcircle", "stage25_direct"), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("A3_level_name_params", circleScript, "baseline_01", "circle_main", "Findcircle", "L1_high_contrast"), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("A4_findcircle_missing_gauge", circleScript, "baseline_01", "circle_main", "Findcircle", "method=0 threshold=20 gap=5 linegap=3"), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("A5_findcircle_locked", circleScript, "baseline_01", "circle_main", "Findcircle", circleFull), "PARAM_BINDING_PASS", false, true});
-    planned.push_back({makeReq("A6_findline_locked", lineScript, "baseline_01", "line_main", "Findline", lineFull), "PARAM_BINDING_PASS", false, true});
-    planned.push_back({makeReq("B1_seed_findcircle_locked", circleScript, "baseline_01", "circle_main", "Findcircle", circleFull), "PARAM_BINDING_PASS", false, true});
-    planned.push_back({makeReq("B1_empty_findline_after_circle", lineScript, "baseline_01", "line_main", "Findline", ""), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("B2_findcircle_missing_pxpy", circleScript, "baseline_01", "circle_main", "Findcircle", "method=0 threshold=20 gap=5 linegap=3 circle_cx=100 circle_cy=100"), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("T_findellipse_locked", ellipseScript, "baseline_01", "ellipse_main", "Findellipse", "method=1 threshold=8 gap=5 linegap=3 ellipse_x0=600 ellipse_y0=360 ellipse_x1=930 ellipse_y1=580"), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("A1_empty_params", circleScript, "baseline_01", "circle_main", "FindCircle", ""), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A2_profile_name_params", circleScript, "baseline_01", "circle_main", "FindCircle", "stage25_direct"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A3_level_name_params", circleScript, "baseline_01", "circle_main", "FindCircle", "L1_high_contrast"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A4_findcircle_missing_gauge", circleScript, "baseline_01", "circle_main", "FindCircle", "method=0 threshold=20 gap=5 linegap=3"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("A5_findcircle_locked", circleScript, "baseline_01", "circle_main", "FindCircle", circleFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("A6_findline_locked", lineScript, "baseline_01", "line_main", "FindLine", lineFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("B1_seed_findcircle_locked", circleScript, "baseline_01", "circle_main", "FindCircle", circleFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("B1_empty_findline_after_circle", lineScript, "baseline_01", "line_main", "FindLine", ""), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("B2_findcircle_missing_pxpy", circleScript, "baseline_01", "circle_main", "FindCircle", "method=0 threshold=20 gap=5 linegap=3 circle_cx=100 circle_cy=100"), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("T_findellipse_locked", ellipseScript, "baseline_01", "ellipse_main", "FindEllipse", "method=1 threshold=8 gap=5 linegap=3 ellipse_x0=600 ellipse_y0=360 ellipse_x1=930 ellipse_y1=580"), "PARAM_BINDING_PASS", false, true});
     planned.push_back({makeReq("T_findrect_locked", rectScript, "baseline_01", "rect_main", "FindRect", "method=0 threshold=20 gauge=20 linegap=3 roi_x=120 roi_y=120 roi_width=640 roi_height=480"), "PARAM_BINDING_PASS", false, true});
-    planned.push_back({makeReq("T_fastmatch_search_too_small", fastmatchScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchSearchTooSmall), "PARAM_BINDING_FAIL", true, false});
-    planned.push_back({makeReq("T_fastmatch_learn_points", fastmatchLearnScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchFull), "FASTMATCH_LEARN_POINTS_PASS", false, true, true});
-    planned.push_back({makeReq("T_fastmatch_locked", fastmatchScript, "baseline_01", "fastmatch_main", "fastmatch", fastmatchFull), "PARAM_BINDING_PASS", false, true});
+    planned.push_back({makeReq("T_fastmatch_search_too_small", fastmatchScript, "baseline_01", "fastmatch_main", "FastMatch", fastmatchSearchTooSmall), "PARAM_BINDING_FAIL", true, false});
+    planned.push_back({makeReq("T_fastmatch_learn_points", fastmatchLearnScript, "baseline_01", "fastmatch_main", "FastMatch", fastmatchFull), "FASTMATCH_LEARN_POINTS_PASS", false, true, true});
+    planned.push_back({makeReq("T_fastmatch_locked", fastmatchScript, "baseline_01", "fastmatch_main", "FastMatch", fastmatchFull), "PARAM_BINDING_PASS", false, true});
 
     std::vector<EvidenceLockPipelineCheck> checks;
 
@@ -589,7 +589,7 @@ int RunEvidenceLockPipelineCli(const EvidenceChainSelfTestCliOptions& options)
     {
         CxEvidenceSelfTestRequest request =
             makeReq(caseId, circleScript, writeReview ? "baseline_01" : "",
-                    writeReview ? "circle_main" : "", "Findcircle",
+                    writeReview ? "circle_main" : "", "FindCircle",
                     writeReview ? circleFull : "");
         request.out_dir = out_dir + "/cases/" + caseId;
 

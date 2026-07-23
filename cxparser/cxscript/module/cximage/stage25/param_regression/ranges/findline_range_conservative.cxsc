@@ -1,10 +1,10 @@
-// Stage25 Parameter Regression Range: Findline Conservative
+// Stage25 Parameter Regression Range: FindLine Conservative
 // This is a cxscript-readable task asset, not a JSON/YAML config.
 // Parameter regression starts only after ManualGaugeState is accepted.
 
 ParamRegressionTask_reset(0);
 ParamRangeSet_reset(0);
-ParamRangeSet_settool("Findline");
+ParamRangeSet_settool("FindLine");
 ParamRangeSet_setid("findline_conservative_range");
 ParamRangeSet_setmaxcandidates(12);
 ParamRangeSet_setmaxcaseseconds(10);

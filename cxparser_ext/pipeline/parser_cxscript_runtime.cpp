@@ -1933,7 +1933,7 @@ std::string BuildDetectionTemplateRelation(const CxScriptExecutionResult &result
       return "selected_from_candidate_pool";
     return "linked_template";
   }
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
   {
     if (element_type == "arc")
       return "arc_supports_circle_fit";
@@ -1996,7 +1996,7 @@ std::string BuildDetectionDriftSummary(const CxScriptExecutionResult &result,
            ",risk_axis=" + risk_axis;
   }
 
-  if ((result.case_name == "findcircle" || result.case_name == "circle_measure_fit") &&
+  if ((result.case_name == "FindCircle" || result.case_name == "circle_measure_fit") &&
       (element_type == "circle" || element_type == "arc"))
   {
     return "circle_avg_distance=" + FormatElementNumber(result.circle_avg_distance_value) +
@@ -2186,7 +2186,7 @@ std::string BuildDetectionElementFindings(const CxScriptExecutionResult &result,
            ";line_angle=" + FormatElementNumber(result.line_angle_value);
   }
 
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
   {
     if (element_type == "circle")
       return "center=" + FormatElementNumber(result.circle_center_x_value) + "," +
@@ -2291,7 +2291,7 @@ std::string BuildDetectionElementLevelFocus(const CxScriptExecutionResult &resul
 
   if (result.case_name == "line_measure_roi")
     return "verify point-chain continuity and bounds alignment";
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
     return element_type == "arc"
              ? "inspect arc completeness and ellipse rejection boundary"
              : "verify center and radius stability under partial edges";
@@ -2384,7 +2384,7 @@ std::string DetermineDetectionMatchStatus(const CxScriptExecutionResult &result,
                                            : "region_match_confirmed";
   }
 
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
   {
     if (element_type == "arc")
       return consistency_status == "drifted" ? "arc_support_drifted" : "arc_support_ready";
@@ -2427,7 +2427,7 @@ std::string BuildDetectionManualReviewSignal(const CxScriptExecutionResult &resu
     if (result.case_name == "fast_template_match" ||
         result.case_name == "fastmatch_template")
       return "manual_review_match_drift";
-    if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+    if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
       return "manual_review_circle_fit_drift";
     if (result.case_name == "formfit_rect_candidate")
       return "manual_review_candidate_selection_drift";
@@ -2471,7 +2471,7 @@ std::string BuildDetectionElementGroupId(const CxScriptExecutionResult &result,
   if (result.case_name == "formfit_rect_candidate")
     return semantic_role == "candidate" ? case_prefix + ".candidate_pool"
                                         : case_prefix + ".selected_geometry";
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
     return element_type == "circle" ? case_prefix + ".circle_fit" : case_prefix + ".fit_support";
   if (result.case_name == "line_measure_roi")
     return element_type == "line_segment" ? case_prefix + ".line_fit" : case_prefix + ".sample_chain";
@@ -2501,7 +2501,7 @@ std::string BuildDetectionElementGroupLabel(const CxScriptExecutionResult &resul
   }
   if (result.case_name == "formfit_rect_candidate")
     return semantic_role == "candidate" ? "formfit_candidate_pool" : "formfit_selected_geometry";
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
     return element_type == "circle" ? "circle_fit" : "circle_fit_support";
   if (result.case_name == "line_measure_roi")
     return element_type == "line_segment" ? "line_fit" : "line_sample_chain";
@@ -4678,7 +4678,7 @@ bool ParserCxScriptRuntime::ExecuteScriptText(const std::string &script_name,
     context.module == "cximage" &&
     ((context.layer == "feature" &&
       (context.case_name == "line_measure_roi" ||
-       context.case_name == "findcircle" ||
+       context.case_name == "FindCircle" ||
        context.case_name == "circle_measure_fit" ||
        context.case_name == "formfit_rect_candidate")) ||
      (context.layer == "matcher" &&

@@ -767,11 +767,11 @@ bool ResolveDispatchCase(const ParserDispatchRequest &raw_request,
     return true;
   }
 
-  if (MatchRequest(request, "feature", "cximage", "findcircle"))
+  if (MatchRequest(request, "feature", "cximage", "FindCircle"))
   {
     FillCximageModuleScriptCase(spec,
                                 "feature",
-                                "findcircle",
+                                "FindCircle",
                                 "cxparser/rag_script_cases/cximage/feature/cximage_findcircle_feature.cxsc",
                                 "cximage_findcircle");
     return true;

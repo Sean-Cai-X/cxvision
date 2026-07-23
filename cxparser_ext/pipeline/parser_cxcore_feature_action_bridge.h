@@ -13,7 +13,7 @@ inline bool IsCximageFeatureBridgeCase(const CxScriptExecutionContext &context)
          context.layer == "feature" &&
          (context.case_name == "line_measure_roi" ||
           context.case_name == "binary_region" ||
-          context.case_name == "findcircle" ||
+          context.case_name == "FindCircle" ||
           context.case_name == "circle_measure_fit" ||
           context.case_name == "formfit_rect_candidate");
 }

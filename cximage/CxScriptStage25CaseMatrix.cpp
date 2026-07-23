@@ -59,7 +59,7 @@ std::vector<Stage25CaseMatrixEntry> BuildStage25CaseMatrix(
     {
         for (const auto& target : image.targets)
         {
-            if (target.tool == "Findline")
+            if (target.tool == "FindLine")
             {
                 for (const auto& profile : manifest.findline_profiles)
                 {
@@ -69,7 +69,7 @@ std::vector<Stage25CaseMatrixEntry> BuildStage25CaseMatrix(
                         entry.image_id = image.image_id;
                         entry.level = image.level;
                         entry.target_id = target.target_id;
-                        entry.tool = "Findline";
+                        entry.tool = "FindLine";
                         entry.profile_id = profile.profile_id;
                         entry.parameter_policy_id = profile.parameter_policy_id;
                         entry.parameter_role = profile.parameter_role;
@@ -86,7 +86,7 @@ std::vector<Stage25CaseMatrixEntry> BuildStage25CaseMatrix(
                         entry.image_id = image.image_id;
                         entry.level = image.level;
                         entry.target_id = target.target_id;
-                        entry.tool = "Findline";
+                        entry.tool = "FindLine";
                         entry.profile_id = profile.profile_id;
                         entry.parameter_policy_id = profile.parameter_policy_id;
                         entry.parameter_role = profile.parameter_role;

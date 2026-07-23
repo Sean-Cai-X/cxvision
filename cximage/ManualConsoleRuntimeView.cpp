@@ -301,13 +301,13 @@ std::string BuildFindellipseGeometrySummary(const RuntimeObjectView& object)
 
 std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
-    if (object.type == "Findline")
+    if (object.type == "FindLine")
         return BuildFindlineGeometrySummary(object);
-    if (object.type == "Findellipse")
+    if (object.type == "FindEllipse")
         return BuildFindellipseGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
-    if (object.type == "fastmatch")
+    if (object.type == "FastMatch")
     {
         std::ostringstream ss;
         ss << "geometry: object=" << object.name
@@ -412,13 +412,13 @@ std::string BuildFindellipseOverlaySummary(const ManualTestContext& context,
 std::string BuildOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
-    if (object.type == "Findline")
+    if (object.type == "FindLine")
         return BuildFindlineOverlaySummary(context, object);
-    if (object.type == "Findellipse")
+    if (object.type == "FindEllipse")
         return BuildFindellipseOverlaySummary(context, object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationOverlaySummary(context, object);
-    if (object.type == "fastmatch")
+    if (object.type == "FastMatch")
     {
         std::ostringstream ss;
         ss << "image overlay:"
@@ -542,7 +542,7 @@ std::string ModuleForType(const std::string& type)
     if (type.rfind("Torch", 0) == 0) return "torch";
     if (type.rfind("Mlpack", 0) == 0) return "mlpack";
     if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
-    if (type == "Image" || type.rfind("Find", 0) == 0 || type == "fastmatch" ||
+    if (type == "Image" || type.rfind("Find", 0) == 0 || type == "FastMatch" ||
         type == "FormfitGauge" || type == "CxOverlay" || type == "CircleRingGauge") return "cximage";
     return "cxscript";
 }
@@ -558,6 +558,6 @@ std::string ModuleForStatement(const std::string& statement)
     if (statement.find("mlpack.") != std::string::npos || statement.find("Mlpack") != std::string::npos) return "mlpack";
     if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
     if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
-        statement.find("Find") != std::string::npos || statement.find("fastmatch") != std::string::npos) return "cximage";
+        statement.find("Find") != std::string::npos || statement.find("FastMatch") != std::string::npos) return "cximage";
     return "cxscript";
 }

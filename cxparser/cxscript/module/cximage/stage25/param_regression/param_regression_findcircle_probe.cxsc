@@ -1,8 +1,8 @@
-// Stage25 Findcircle Parameter Regression Probe
+// Stage25 FindCircle Parameter Regression Probe
 // C/C++-style direct replay script. Values come from accepted gauge + candidate.
 
 Image m_image;
-Findcircle m_circle;
+FindCircle m_circle;
 
 m_image.copyFromMat(global_matInput);
 

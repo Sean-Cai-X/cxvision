@@ -1,10 +1,10 @@
 kind=module
 layer=feature
 module=cximage
-case=findcircle
+case=FindCircle
 mode=build-run
 report=on
-Flow.Begin("cximage.findcircle");
+Flow.Begin("cximage.FindCircle");
 Input.Image("source_image","synthetic.circle.primary");
 Input.Roi("roi_circle",18,16,36,36);
 Input.Param("fit_mode","enhanced_fit");

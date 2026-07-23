@@ -210,7 +210,7 @@ inline const char* BaselineFeatureSource()
 
 inline const char* FastMatchFeatureSource()
 {
-    return "fastmatch";
+    return "FastMatch";
 }
 
 inline const char* FractalPartitionFeatureSource()

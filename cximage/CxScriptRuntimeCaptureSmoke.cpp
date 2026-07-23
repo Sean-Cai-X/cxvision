@@ -36,20 +36,20 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 {
     capture.smoke_pass = false;
 
-    if (runtime.GetClassObjSum("Findline") != 1)
+    if (runtime.GetClassObjSum("FindLine") != 1)
     {
         reason = "expected exactly one Findline object";
         return false;
     }
 
-    capture.smoke_findline_object_name = runtime.GetClassObjName("Findline", 0);
+    capture.smoke_findline_object_name = runtime.GetClassObjName("FindLine", 0);
     if (capture.smoke_findline_object_name != "m_line")
     {
         reason = "Findline object name mismatch";
         return false;
     }
 
-    if (runtime.GetClassObj("Findline", "m_line") == nullptr)
+    if (runtime.GetClassObj("FindLine", "m_line") == nullptr)
     {
         reason = "Findline object m_line is unavailable";
         return false;
@@ -57,7 +57,7 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     const auto* line_roi = FindShape(
         capture,
-        "Findline",
+        "FindLine",
         "m_line",
         "m_line.roi_axis",
         "roi");
@@ -71,7 +71,7 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     const auto* line_scan = FindShape(
         capture,
-        "Findline",
+        "FindLine",
         "m_line",
         "m_line.scan_box",
         "scan");
@@ -91,20 +91,20 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
         return false;
     }
 
-    if (runtime.GetClassObjSum("Findcircle") != 1)
+    if (runtime.GetClassObjSum("FindCircle") != 1)
     {
         reason = "expected exactly one Findcircle object";
         return false;
     }
 
-    capture.smoke_findcircle_object_name = runtime.GetClassObjName("Findcircle", 0);
+    capture.smoke_findcircle_object_name = runtime.GetClassObjName("FindCircle", 0);
     if (capture.smoke_findcircle_object_name != "m_circle")
     {
         reason = "Findcircle object name mismatch";
         return false;
     }
 
-    if (runtime.GetClassObj("Findcircle", "m_circle") == nullptr)
+    if (runtime.GetClassObj("FindCircle", "m_circle") == nullptr)
     {
         reason = "Findcircle object m_circle is unavailable";
         return false;
@@ -112,7 +112,7 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     const auto* circle_roi = FindShape(
         capture,
-        "Findcircle",
+        "FindCircle",
         "m_circle",
         "m_circle.roi_circle",
         "roi");
@@ -145,7 +145,7 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     const auto* circle_scan = FindShape(
         capture,
-        "Findcircle",
+        "FindCircle",
         "m_circle",
         "m_circle.outer_scan_circle",
         "scan");

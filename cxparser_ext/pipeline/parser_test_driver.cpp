@@ -186,7 +186,7 @@ void MaybeAttachCximageReviewRefs(ParserTestRunResult &result)
 
   if (result.module == "cximage" &&
       result.layer == "feature" &&
-      result.case_name == "findcircle")
+      result.case_name == "FindCircle")
   {
     if (result.circle_overlay_ref.empty())
       result.circle_overlay_ref = prefix + "::circle_overlay";

@@ -6,7 +6,7 @@ ParamRegressionTask_setid("stage25_param_regression_three_anchor_phase1");
 ParamRegressionTask_setcase("THREE_ANCHOR_PHASE1");
 ParamRegressionTask_setimage("manual_anchor_set");
 ParamRegressionTask_settarget("manual_accepted_gauge");
-ParamRegressionTask_settool("Findline_Findcircle");
+ParamRegressionTask_settool("FindLine_FindCircle");
 ParamRegressionTask_setscript("param_regression_findline_probe_or_findcircle_probe");
 ParamRegressionTask_setbaseprofile("manual_gauge_seed");
 ParamRegressionTask_setmaxcandidates(12);

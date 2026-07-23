@@ -1,23 +1,23 @@
 global_contract_pass = 0;
 global_contract_status = "findline_fail_unknown";
-global_contract_conclusion = "Findline failure classification not determined";
+global_contract_conclusion = "FindLine failure classification not determined";
 
 if (global_failure_stage == "findobject_filter_result_empty") {
     global_contract_status = "findline_fail_filter_reject";
-    global_contract_conclusion = "Findline failed because component filter rejected all candidates.";
+    global_contract_conclusion = "FindLine failed because component filter rejected all candidates.";
 }
 
 if (global_valid_points_count > 0 && global_has_fit_line == 0) {
     global_contract_status = "findline_fail_fit_degenerate";
-    global_contract_conclusion = "Findline produced points but fit line was degenerate.";
+    global_contract_conclusion = "FindLine produced points but fit line was degenerate.";
 }
 
 if (global_local_support < 0.6) {
     global_contract_status = "findline_fail_low_support";
-    global_contract_conclusion = "Findline local evidence support is too low.";
+    global_contract_conclusion = "FindLine local evidence support is too low.";
 }
 
 if (global_valid_points_count == 0) {
     global_contract_status = "findline_fail_no_points";
-    global_contract_conclusion = "Findline failed to produce any valid points.";
+    global_contract_conclusion = "FindLine failed to produce any valid points.";
 }

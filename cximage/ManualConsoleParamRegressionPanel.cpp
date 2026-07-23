@@ -16,7 +16,7 @@ CxParamRegressionTask BuildParamRegressionTaskFromManualGauge(
     task.case_id = gauge.case_id.empty() ? "manual_case" : gauge.case_id;
     task.image_id = gauge.image_id;
     task.target_id = gauge.target_id;
-    task.tool = gauge.tool.empty() ? "Findline" : gauge.tool;
+    task.tool = gauge.tool.empty() ? "FindLine" : gauge.tool;
     task.task_id = "param_regression_" + task.case_id;
     task.gauge_annotation_path =
         (ManualGaugeCaseDir(context) / "gauge_annotation.json").string();
@@ -255,7 +255,7 @@ bool ExportParamRegressionManualAcceptanceChecklist(
 bool IsFindlineFindcircleContext(ManualTestContext& context)
 {
     const ManualGaugeState& g = context.current_gauge;
-    return (g.tool == "Findline" || g.tool == "Findcircle") ||
+    return (g.tool == "FindLine" || g.tool == "Findcircle") ||
            g.has_line_gauge || g.has_circle_gauge;
 }
 
@@ -544,8 +544,8 @@ void DrawConclusionSummaryPanel(const ManualTestContext& context)
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
   {
     ImGui::TableSetupColumn("Metric");
-    ImGui::TableSetupColumn("Findline");
-    ImGui::TableSetupColumn("Findcircle");
+    ImGui::TableSetupColumn("FindLine");
+    ImGui::TableSetupColumn("FindCircle");
     ImGui::TableSetupColumn("Evidence");
     ImGui::TableHeadersRow();
     ImGui::TableNextRow();

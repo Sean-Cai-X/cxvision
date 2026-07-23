@@ -34,7 +34,7 @@ void LogFindcircleMeasureProbe(
     const char* status,
     const std::string& message)
 {
-    CXLOG_INFO("Findcircle", phase, status, message);
+    CXLOG_INFO("FindCircle", phase, status, message);
     CxUnifiedLog::Instance().Flush();
 }
 
@@ -1035,7 +1035,7 @@ void Findcircle::Measure(Image& image)
       int elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count());
 
       CxAlgorithmTraceScope::Emit({
-          "Findcircle",
+          "FindCircle",
           "measure",
           "begin",
           "Findcircle measure begin",
@@ -1090,7 +1090,7 @@ void Findcircle::Measure(Image& image)
               if (budgetExceeded()) {
                   auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
                   CxAlgorithmTraceScope::Emit({
-                      "Findcircle",
+                      "FindCircle",
                       "measure",
                       "abort",
                       "budget exceeded: " + m_lastMeasureGeometryDebug.failure_stage,
@@ -1117,7 +1117,7 @@ void Findcircle::Measure(Image& image)
                     if (budgetExceeded()) {
                         auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
                         CxAlgorithmTraceScope::Emit({
-                            "Findcircle",
+                            "FindCircle",
                             "measure",
                             "abort",
                             "budget exceeded: " + m_lastMeasureGeometryDebug.failure_stage,
@@ -1133,7 +1133,7 @@ void Findcircle::Measure(Image& image)
                     auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
                     std::cout << "[DEBUG MEASURE] progress elapsed_ms=" << elapsed_ms << ", valid=" << valid_points_count << "\n";
                     CxAlgorithmTraceScope::Emit({
-                        "Findcircle",
+                        "FindCircle",
                         "measure",
                         "progress",
                         "sampling circle edge",
@@ -1294,7 +1294,7 @@ void Findcircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.budget_max_elapsed_ms = m_budget.max_elapsed_ms;
 
     CxAlgorithmTraceScope::Emit({
-        "Findcircle",
+        "FindCircle",
         "measure",
         "end",
         "Findcircle measure end",
@@ -1568,7 +1568,7 @@ void Findcircle::fitcircle()
     int initial_points = m_measurepoints.size();
 
     CxAlgorithmTraceScope::Emit({
-        "Findcircle",
+        "FindCircle",
         "fitcircle",
         "begin",
         "Findcircle fitcircle begin",
@@ -1597,7 +1597,7 @@ void Findcircle::fitcircle()
 
         auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
         CxAlgorithmTraceScope::Emit({
-            "Findcircle",
+            "FindCircle",
             "fitcircle",
             "fail",
             "Findcircle fitcircle failed: insufficient points",
@@ -1621,7 +1621,7 @@ void Findcircle::fitcircle()
 
         auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
         CxAlgorithmTraceScope::Emit({
-            "Findcircle",
+            "FindCircle",
             "fitcircle",
             "fail",
             "Findcircle fitcircle failed: degenerate or non-finite result",
@@ -1672,7 +1672,7 @@ void Findcircle::fitcircle()
 
      auto elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin_time).count());
      CxAlgorithmTraceScope::Emit({
-         "Findcircle",
+         "FindCircle",
          "fitcircle",
          "end",
          "Findcircle fitcircle end radius=" + std::to_string(m_dradius),
@@ -2367,7 +2367,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         roi_radius);
     sink.UpsertShape(
         owner_ref + ".roi_circle",
-        "Findcircle",
+        "FindCircle",
         owner_ref,
         "setcircle",
         "roi",
@@ -2383,7 +2383,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         outer_radius);
     sink.UpsertShape(
         owner_ref + ".outer_scan_circle",
-        "Findcircle",
+        "FindCircle",
         owner_ref,
         "",
         "scan",
@@ -2401,7 +2401,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
             inner_radius);
         sink.UpsertShape(
             owner_ref + ".inner_scan_circle",
-            "Findcircle",
+            "FindCircle",
             owner_ref,
             "",
             "scan",
@@ -2420,7 +2420,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         }
         sink.UpsertShape(
             owner_ref + ".measure_points",
-            "Findcircle",
+            "FindCircle",
             owner_ref,
             "",
             "measure_points",
@@ -2437,7 +2437,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
             getradius());
         sink.UpsertShape(
             owner_ref + ".fit_circle",
-            "Findcircle",
+            "FindCircle",
             owner_ref,
             "",
             "result",

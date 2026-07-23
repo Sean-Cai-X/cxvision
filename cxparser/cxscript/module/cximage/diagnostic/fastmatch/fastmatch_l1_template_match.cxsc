@@ -1,6 +1,6 @@
 Image m_template;
 Image m_image;
-Match m_match;
+FastMatch m_match;
 
 m_template.copyFromMat(global_templateInput);
 m_image.copyFromMat(global_matInput);

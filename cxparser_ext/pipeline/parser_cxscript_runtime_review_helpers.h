@@ -307,7 +307,7 @@ std::string SelectUnifiedChainRef(const CxScriptExecutionResult &result,
           return line_measure_bounds_ref;
         return FindNamedResultFieldValue(result, "refs", "line_point_set_ref");
       }
-      if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+      if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
       {
         if (!result.circle_edge_overlay_ref.empty())
           return result.circle_edge_overlay_ref + "#arc_support";
@@ -430,7 +430,7 @@ std::string DetermineCximageClassicalRoiDiffStatus(
     return "matched";
   }
 
-  if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+  if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
   {
     if (!result.circle_failure_stage.empty() && result.circle_failure_stage != "none")
       return "abnormal";
@@ -609,7 +609,7 @@ std::string BuildUnifiedChainFocus(const CxScriptExecutionResult &result,
     {
       if (result.case_name == "line_measure_roi")
         return "inspect line fit residuals, subpixel adjustment, and ROI bounds continuity";
-      if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+      if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
         return "inspect arc completeness, circle residual drift, and ellipse-like rejection evidence";
       if (result.case_name == "fast_template_match" ||
           result.case_name == "fastmatch_template")
@@ -710,7 +710,7 @@ std::string BuildUnifiedChainFindings(const CxScriptExecutionResult &result,
         items.push_back("subpixel_adjust_avg=" +
                         FormatElementNumber(result.subpixel_adjust_avg_value));
       }
-      else if (result.case_name == "findcircle" || result.case_name == "circle_measure_fit")
+      else if (result.case_name == "FindCircle" || result.case_name == "circle_measure_fit")
       {
         items.push_back("circle_avg_distance=" +
                         FormatElementNumber(result.circle_avg_distance_value));
@@ -3401,7 +3401,7 @@ bool IsCximageClassicalReviewCase(const CxScriptExecutionResult &result)
 {
   const bool known_case =
     result.case_name == "line_measure_roi" ||
-    result.case_name == "findcircle" ||
+    result.case_name == "FindCircle" ||
     result.case_name == "circle_measure_fit" ||
     result.case_name == "formfit_rect_candidate" ||
     result.case_name == "binary_region" ||

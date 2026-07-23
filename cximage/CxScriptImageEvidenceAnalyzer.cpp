@@ -350,7 +350,7 @@ static void AnalyzeFindlineEvidence(
     CxImageEvidenceSummary& summary,
     const fs::path& outputDir)
 {
-    summary.tool = "Findline";
+    summary.tool = "FindLine";
     summary.object_name = object.name;
     summary.reference_available = false;
 
@@ -1290,7 +1290,7 @@ static bool SaveEvidenceOverlay(
 
         for (const RuntimeObjectView& object : context.runtime_objects)
         {
-            if (object.type == "Findline")
+            if (object.type == "FindLine")
             {
                 if (object.has_line_roi)
                 {
@@ -1326,7 +1326,7 @@ static bool SaveEvidenceOverlay(
                         cv::Scalar(0, 255, 255), 2);
                 }
             }
-            else if (object.type == "Findcircle")
+            else if (object.type == "FindCircle")
             {
                 if (object.has_circle)
                 {
@@ -1543,12 +1543,12 @@ bool AnalyzeCxScriptImageEvidence(
         {
             CxImageEvidenceSummary summary;
 
-            if (object.type == "Findline")
+            if (object.type == "FindLine")
             {
                 AnalyzeFindlineEvidence(image, object, options, summary, outputDir);
                 summaries.push_back(summary);
             }
-            else if (object.type == "Findcircle")
+            else if (object.type == "FindCircle")
             {
                 AnalyzeFindcircleEvidence(image, object, options, summary, outputDir);
                 summaries.push_back(summary);

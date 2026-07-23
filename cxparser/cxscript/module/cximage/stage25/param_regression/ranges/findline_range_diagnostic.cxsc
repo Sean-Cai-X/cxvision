@@ -1,9 +1,9 @@
-// Stage25 Parameter Regression Range: Findline Diagnostic
+// Stage25 Parameter Regression Range: FindLine Diagnostic
 // Wider diagnostic range. Candidates are not promoted without human review.
 
 ParamRegressionTask_reset(0);
 ParamRangeSet_reset(0);
-ParamRangeSet_settool("Findline");
+ParamRangeSet_settool("FindLine");
 ParamRangeSet_setid("findline_diagnostic_range");
 ParamRangeSet_setmaxcandidates(24);
 ParamRangeSet_setmaxcaseseconds(10);

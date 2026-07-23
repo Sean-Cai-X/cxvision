@@ -32,7 +32,7 @@ void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
                                    RuntimeObjectView& object,
                                    Findline& lineTool)
 {
-    if (object.type != "Findline")
+    if (object.type != "FindLine")
     {
         object.has_line_scan_box = false;
         return;
@@ -486,11 +486,11 @@ bool ApplyRuntimeFindlineWHgap(
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         objectName,
-        "Findline",
+        "FindLine",
         updateLineNo);
 
     object.exists_in_parser = true;
-    object.type = "Findline";
+    object.type = "FindLine";
     object.last_method = "SetWHgap";
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "line_param_updated_measure_pending";
@@ -581,11 +581,11 @@ bool TryExecuteFindlineSetline(ManualTestContext& context,
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        "Findline",
+        "FindLine",
         line.line_no);
 
     object.exists_in_parser = true;
-    object.type = "Findline";
+    object.type = "FindLine";
     object.last_method = "setline";
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_param_set";
@@ -650,7 +650,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     if (!isFindlineParamMethod)
         return false;
 
-    if (!RuntimeObjectIsType(context, call.object, "Findline"))
+    if (!RuntimeObjectIsType(context, call.object, "FindLine"))
         return false;
 
     DebugCximageRuntime& runtime = CxRuntime(context);
@@ -801,11 +801,11 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         RuntimeObjectView& object = EnsureRuntimeObject(
             context,
             call.object,
-            "Findline",
+            "FindLine",
             line.line_no);
 
         object.exists_in_parser = true;
-        object.type = "Findline";
+        object.type = "FindLine";
         object.last_method = "setfilter";
         object.last_runtime_status = "runtime_executed";
         object.runtime_state = "line_param_updated_measure_pending";
@@ -859,11 +859,11 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         RuntimeObjectView& object = EnsureRuntimeObject(
             context,
             call.object,
-            "Findline",
+            "FindLine",
             line.line_no);
 
         object.exists_in_parser = true;
-        object.type = "Findline";
+        object.type = "FindLine";
         object.last_method = "setfilterprofile";
         object.last_runtime_status = "runtime_executed";
         object.runtime_state = "line_param_updated_measure_pending";
@@ -934,11 +934,11 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        "Findline",
+        "FindLine",
         line.line_no);
 
     object.exists_in_parser = true;
-    object.type = "Findline";
+    object.type = "FindLine";
     object.last_method = call.method;
     object.last_runtime_status = "runtime_executed";
     object.runtime_state = "runtime_param_set";
@@ -990,7 +990,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
     if (!isFindlineRuntimeMethod)
         return false;
 
-    if (!RuntimeObjectIsType(context, call.object, "Findline"))
+    if (!RuntimeObjectIsType(context, call.object, "FindLine"))
         return false;
 
     DebugCximageRuntime& runtime = CxRuntime(context);
@@ -999,7 +999,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         return false;
 
     Findline& tool = *it->second;
-    RuntimeObjectView& object = EnsureRuntimeObject(context, call.object, "Findline", context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
+    RuntimeObjectView& object = EnsureRuntimeObject(context, call.object, "FindLine", context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
 
     if (call.method == "measure")
@@ -1035,7 +1035,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         RefreshFindlineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
-        object.type = "Findline";
+        object.type = "FindLine";
         object.last_method = "measure";
         object.last_runtime_status = "runtime_executed";
         object.runtime_state = "line_measure_points_available";
@@ -1067,7 +1067,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         RefreshFindlineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
-        object.type = "Findline";
+        object.type = "FindLine";
         object.last_method = call.method;
         object.last_update_line = line.line_no;
         object.visualizable = true;
@@ -1158,7 +1158,7 @@ bool TryExecutePendingRuntimeMethod(ManualTestContext& context,
     RuntimeObjectView& object = EnsureRuntimeObject(
         context,
         call.object,
-        call.object.find("circle") != std::string::npos ? "Findcircle" : "unknown",
+        call.object.find("circle") != std::string::npos ? "FindCircle" : "unknown",
         context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
 
     object.exists_in_parser = true;
@@ -1267,7 +1267,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     {
         line.status = "PENDING_BINDING";
 
-        if (sourceObject->type == "Findline")
+        if (sourceObject->type == "FindLine")
         {
             line.reason = sourceObject->line_result_reason.empty()
                 ? "get_result requires a valid Findline fit result"
@@ -1301,13 +1301,13 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref = ResultRefView();
         context.current_result_ref.name = lhs;
         context.current_result_ref.source_object = sourceObjectName;
-        context.current_result_ref.result_type = sourceObject->type == "Findline" ?
+        context.current_result_ref.result_type = sourceObject->type == "FindLine" ?
             "FindlineResult" : "FindcircleResult";
         context.current_result_ref.status = "PENDING_BINDING";
         context.current_result_ref.reason = line.reason;
         context.current_result_ref.line_no = line.line_no;
 
-        if (sourceObject->type == "Findline")
+        if (sourceObject->type == "FindLine")
         {
             context.current_result_ref.line_result_status =
                 sourceObject->line_result_status;
@@ -1345,7 +1345,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.current_result_ref.name = lhs;
     context.current_result_ref.value = refValue;
     context.current_result_ref.source_object = sourceObjectName;
-    context.current_result_ref.result_type = sourceObject->type == "Findline" ?
+    context.current_result_ref.result_type = sourceObject->type == "FindLine" ?
         "FindlineResult" : "FindcircleResult";
     context.current_result_ref.status = "geometry_result_available";
     context.current_result_ref.reason = "bound to runtime object geometry result";
@@ -1355,7 +1355,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.current_result_ref.avgdist = sourceObject->fit_avgdist;
     context.current_result_ref.points_count = sourceObject->measure_points_count;
     context.current_result_ref.valid_points_count = sourceObject->valid_points_count;
-    if (sourceObject->type == "Findline")
+    if (sourceObject->type == "FindLine")
     {
         context.current_result_ref.line_x0 = sourceObject->fit_line_x0;
         context.current_result_ref.line_y0 = sourceObject->fit_line_y0;
@@ -1544,7 +1544,7 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     }
 
     object->exists_in_parser = true;
-    object->type = "Findline";
+    object->type = "FindLine";
     object->last_method = "ui_drag_setline";
     object->last_runtime_status = "runtime_executed";
     object->runtime_state = "runtime_param_set";

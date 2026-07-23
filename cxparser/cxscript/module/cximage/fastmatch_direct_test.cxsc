@@ -1,5 +1,5 @@
 Image m_occtimage;
-fastmatch m_match;
+FastMatch m_match;
 
 m_occtimage.copyFromMat(global_matInput);
 

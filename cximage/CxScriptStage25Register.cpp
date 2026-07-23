@@ -100,7 +100,7 @@ public:
 
         Stage25ImageTarget target;
         target.target_id = params[0];
-        target.tool = "Findline";
+        target.tool = "FindLine";
         target.x0 = std::stoi(params[1]);
         target.y0 = std::stoi(params[2]);
         target.x1 = std::stoi(params[3]);

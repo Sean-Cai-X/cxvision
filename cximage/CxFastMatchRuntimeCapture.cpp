@@ -6,8 +6,6 @@
 
 #include <cmath>
 #include <limits>
-#include <array>
-#include <map>
 #include <sstream>
 
 namespace
@@ -48,69 +46,23 @@ bool CaptureFastMatchRuntime(
 {
     capture = {};
 
-    static constexpr std::array<const char*, 4> aliases = {
-        "Match",
-        "fastmatch",
-        "FastMatch",
-        "CFastMatch"
-    };
+    void* object =
+        bridge.QueryClassObject("FastMatch", object_name);
 
-    std::map<void*, std::string> unique_objects;
-
-    for (const char* class_name : aliases)
-    {
-        for (const std::string& name :
-             bridge.ListClassObjectNames(class_name))
-        {
-            if (name != object_name)
-                continue;
-
-            void* object =
-                bridge.QueryClassObject(class_name, name);
-
-            if (object == nullptr)
-                continue;
-
-            auto [it, inserted] =
-                unique_objects.emplace(object, class_name);
-
-            if (!inserted)
-                it->second += std::string("|") + class_name;
-        }
-    }
-
-    if (unique_objects.empty())
+    if (object == nullptr)
     {
         capture.failure_stage = "fastmatch_object_lookup";
         capture.reason = "runtime object not found: " + object_name;
         return false;
     }
 
-    if (unique_objects.size() != 1)
-    {
-        std::ostringstream message;
-        message << "multiple FastMatch runtime objects for "
-                << object_name << ": ";
-
-        for (const auto& item : unique_objects)
-        {
-            message << item.second << "@"
-                    << item.first << " ";
-        }
-
-        capture.failure_stage = "fastmatch_object_ambiguity";
-        capture.reason = message.str();
-        return false;
-    }
-
     capture.object_found = true;
     capture.object_unique = true;
-    capture.object_address = reinterpret_cast<std::uintptr_t>(
-        unique_objects.begin()->first);
-    capture.object_aliases = unique_objects.begin()->second;
+    capture.object_address = reinterpret_cast<std::uintptr_t>(object);
+    capture.object_aliases = "FastMatch";
 
     auto* matcher =
-        static_cast<fastmatch*>(unique_objects.begin()->first);
+        static_cast<fastmatch*>(object);
 
     capture.object_model_point_count =
         matcher->getmodelpointcount();

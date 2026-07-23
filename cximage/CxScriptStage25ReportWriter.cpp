@@ -62,7 +62,7 @@ void Stage25ReportWriter::WriteBatchReport(
 
     for (const auto& r : results)
     {
-        if (r.tool != "Findline") continue;
+        if (r.tool != "FindLine") continue;
 
         std::string component_warning = "";
         if (r.component_shape == "FOREGROUND_DOMINATED_BY_SINGLE_COMPONENT")
@@ -177,7 +177,7 @@ void Stage25ReportWriter::WriteCoverageReport(
 
         for (const auto& target : img.targets)
         {
-            if (target.tool == "Findline")
+            if (target.tool == "FindLine")
             {
                 findline_target_count_by_level[img.level]++;
                 total_findline++;
@@ -231,7 +231,7 @@ void Stage25ReportWriter::WriteStabilityReport(
 
     file << "# Stage 2.5 L1~L3 Parameter Stability Report\n\n";
 
-    for (const std::string& tool : {"Findline", "Findcircle"})
+    for (const std::string& tool : {"FindLine", "Findcircle"})
     {
         std::vector<Stage25CaseResult> tool_results;
         std::copy_if(results.begin(), results.end(), std::back_inserter(tool_results),
@@ -268,8 +268,8 @@ void Stage25ReportWriter::WriteStabilityReport(
 
                 for (const auto& r : lev_results)
                 {
-                    mean_support += (tool == "Findline") ? r.measured_local_support_score : r.circle_local_support_score;
-                    mean_dist += (tool == "Findline") ? r.measured_local_mean_distance_px : r.circle_local_mean_radial_distance_px;
+                    mean_support += (tool == "FindLine") ? r.measured_local_support_score : r.circle_local_support_score;
+                    mean_dist += (tool == "FindLine") ? r.measured_local_mean_distance_px : r.circle_local_mean_radial_distance_px;
                 }
 
                 if (total > 0)
@@ -305,7 +305,7 @@ void Stage25ReportWriter::WriteStabilityReport(
             double mean_support = 0.0;
             for (const auto& r : prof_results)
             {
-                mean_support += (tool == "Findline") ? r.measured_local_support_score : r.circle_local_support_score;
+                mean_support += (tool == "FindLine") ? r.measured_local_support_score : r.circle_local_support_score;
             }
             if (total > 0) mean_support /= total;
 
@@ -328,7 +328,7 @@ void Stage25ReportWriter::WriteStabilityReport(
                  << " | " << recommendation << " |\n";
         }
 
-        if (tool == "Findline")
+        if (tool == "FindLine")
         {
             file << "\n## Findline Product Default Gate\n\n";
             file << "| Profile | ParamPolicy | Role | Images | Levels | Orientations | T1Rate | T2Rate | LocalConfirmedRate | ComponentWarningRate | MeanFitOffset | CanPromote | GateReason |\n";
@@ -338,7 +338,7 @@ void Stage25ReportWriter::WriteStabilityReport(
             {
                 Stage25ProfileAggregate agg;
                 agg.profile_id = profile_id;
-                agg.tool = "Findline";
+                agg.tool = "FindLine";
 
                 if (!prof_results.empty())
                 {
@@ -449,7 +449,7 @@ void Stage25ReportWriter::WritePolicyReport(
 
     std::vector<Stage25CaseResult> findline_results;
     std::copy_if(results.begin(), results.end(), std::back_inserter(findline_results),
-        [](const auto& r) { return r.tool == "Findline" && !r.skipped_by_preflight; });
+        [](const auto& r) { return r.tool == "FindLine" && !r.skipped_by_preflight; });
 
     file << "\n## Findline Policy Statistics\n\n";
     file << "| PolicyID | Total | T1Pass | T1Rate | T2Pass | T2Rate | MeanSupport | MeanDist |\n";
@@ -783,7 +783,7 @@ static std::string DiagnoseStage25Case(const Stage25CaseResult& r)
         return "Missing evidence_summary.json";
 
     const double support =
-        r.tool == "Findline"
+        r.tool == "FindLine"
             ? r.measured_local_support_score
             : r.circle_local_support_score;
 
@@ -846,13 +846,13 @@ void Stage25ReportWriter::WriteDiagnosticReport(
     for (const auto& r : results)
     {
         const double support =
-            r.tool == "Findline"
+            r.tool == "FindLine"
                 ? r.measured_local_support_score
                 : r.circle_local_support_score;
 
         file << "| " << r.case_id << " | " << r.tool << " | " << r.profile_id << " | "
              << r.valid_points_count << " | "
-             << (r.tool == "Findline" ? (r.has_fit_line ? "true" : "false") : (r.has_fit_circle ? "true" : "false"))
+             << (r.tool == "FindLine" ? (r.has_fit_line ? "true" : "false") : (r.has_fit_circle ? "true" : "false"))
              << " | " << r.failure_stage << " | " << r.failure_reason << " | "
              << std::fixed << std::setprecision(3) << support << " | "
              << DiagnoseStage25Case(r) << " |\n";

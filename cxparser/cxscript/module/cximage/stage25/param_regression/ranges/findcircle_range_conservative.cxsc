@@ -1,9 +1,9 @@
-// Stage25 Parameter Regression Range: Findcircle Conservative
+// Stage25 Parameter Regression Range: FindCircle Conservative
 // This range is used after accepted circle gauge annotation.
 
 ParamRegressionTask_reset(0);
 ParamRangeSet_reset(0);
-ParamRangeSet_settool("Findcircle");
+ParamRangeSet_settool("FindCircle");
 ParamRangeSet_setid("findcircle_conservative_range");
 ParamRangeSet_setmaxcandidates(12);
 ParamRangeSet_setmaxcaseseconds(10);

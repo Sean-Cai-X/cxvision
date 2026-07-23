@@ -15,7 +15,7 @@
 // method/threshold/linegap/filter_profile: {{method}},{{threshold}},{{linegap}},{{filter_profile}}
 
 Image m_image;
-Findline m_line;
+FindLine m_line;
 
 m_image.copyFromMat(global_matInput);
 

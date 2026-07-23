@@ -92,7 +92,7 @@ void RefreshNamedResultViews(CxScriptExecutionResult &result)
 
   if (result.module == "cximage" &&
       result.layer == "feature" &&
-      result.case_name == "findcircle")
+      result.case_name == "FindCircle")
   {
     ensure_cximage_review_ref(result.circle_overlay_ref, "circle_overlay");
     ensure_cximage_review_ref(result.circle_edge_overlay_ref, "edge_overlay");

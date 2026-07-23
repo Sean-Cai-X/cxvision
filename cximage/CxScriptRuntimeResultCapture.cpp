@@ -60,7 +60,7 @@ bool CaptureFindlineResult(
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
-    output.type = "Findline";
+    output.type = "FindLine";
     output.name = object_name;
     output.owner_ref = object_name;
 
@@ -98,7 +98,7 @@ bool CaptureFindcircleResult(
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
-    output.type = "Findcircle";
+    output.type = "FindCircle";
     output.name = object_name;
     output.owner_ref = object_name;
 
@@ -135,7 +135,7 @@ bool CaptureFindellipseResult(
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
-    output.type = "Findellipse";
+    output.type = "FindEllipse";
     output.name = object_name;
     output.owner_ref = object_name;
 
@@ -526,12 +526,12 @@ bool CaptureRuntimeToolResults(
     bool supported_object_found = false;
     std::unordered_set<void*> captured_objects;
 
-    const int findline_count = runtime.GetClassObjSum("Findline");
+    const int findline_count = runtime.GetClassObjSum("FindLine");
 
     for (int i = 0; i < findline_count; ++i)
     {
         Findline* tool = static_cast<Findline*>(
-            runtime.GetClassObj("Findline", i));
+            runtime.GetClassObj("FindLine", i));
 
         if (tool == nullptr)
             continue;
@@ -543,7 +543,7 @@ bool CaptureRuntimeToolResults(
         CxScriptToolResultCapture tool_capture;
 
         const std::string object_name =
-            runtime.GetClassObjName("Findline", i);
+            runtime.GetClassObjName("FindLine", i);
 
         try
         {
@@ -565,12 +565,12 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
-    const int findcircle_count = runtime.GetClassObjSum("Findcircle");
+    const int findcircle_count = runtime.GetClassObjSum("FindCircle");
 
     for (int i = 0; i < findcircle_count; ++i)
     {
         Findcircle* tool = static_cast<Findcircle*>(
-            runtime.GetClassObj("Findcircle", i));
+            runtime.GetClassObj("FindCircle", i));
 
         if (tool == nullptr)
             continue;
@@ -582,7 +582,7 @@ bool CaptureRuntimeToolResults(
         CxScriptToolResultCapture tool_capture;
 
         const std::string object_name =
-            runtime.GetClassObjName("Findcircle", i);
+            runtime.GetClassObjName("FindCircle", i);
 
         try
         {
@@ -604,12 +604,12 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
-    const int findellipse_count = runtime.GetClassObjSum("Findellipse");
+    const int findellipse_count = runtime.GetClassObjSum("FindEllipse");
 
     for (int i = 0; i < findellipse_count; ++i)
     {
         Findellipse* tool = static_cast<Findellipse*>(
-            runtime.GetClassObj("Findellipse", i));
+            runtime.GetClassObj("FindEllipse", i));
 
         if (tool == nullptr)
             continue;
@@ -621,7 +621,7 @@ bool CaptureRuntimeToolResults(
         CxScriptToolResultCapture tool_capture;
 
         const std::string object_name =
-            runtime.GetClassObjName("Findellipse", i);
+            runtime.GetClassObjName("FindEllipse", i);
 
         try
         {
@@ -676,44 +676,40 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
-    const char* fastmatch_class_names[] = { "Match", "fastmatch" };
-    for (const char* class_name : fastmatch_class_names)
+    const int fastmatch_count = runtime.GetClassObjSum("FastMatch");
+
+    for (int i = 0; i < fastmatch_count; ++i)
     {
-        const int fastmatch_count = runtime.GetClassObjSum(class_name);
+        fastmatch* tool = static_cast<fastmatch*>(
+            runtime.GetClassObj("FastMatch", i));
 
-        for (int i = 0; i < fastmatch_count; ++i)
+        if (tool == nullptr)
+            continue;
+        if (!captured_objects.insert(tool).second)
+            continue;
+
+        supported_object_found = true;
+
+        CxScriptToolResultCapture tool_capture;
+
+        const std::string object_name =
+            runtime.GetClassObjName("FastMatch", i);
+
+        try
         {
-            fastmatch* tool = static_cast<fastmatch*>(
-                runtime.GetClassObj(class_name, i));
-
-            if (tool == nullptr)
-                continue;
-            if (!captured_objects.insert(tool).second)
-                continue;
-
-            supported_object_found = true;
-
-            CxScriptToolResultCapture tool_capture;
-
-            const std::string object_name =
-                runtime.GetClassObjName(class_name, i);
-
-            try
+            if (!CaptureFastMatchResult(*tool, object_name, tool_capture))
             {
-                if (!CaptureFastMatchResult(*tool, object_name, tool_capture))
-                {
-                    reason = std::string("failed to capture ") + class_name + ": " + object_name;
-                    return false;
-                }
-            }
-            catch (...)
-            {
-                reason = std::string("CaptureFastMatchResult crashed for: ") + object_name;
+                reason = "failed to capture FastMatch: " + object_name;
                 return false;
             }
-
-            MergeToolCapture(tool_capture, capture);
         }
+        catch (...)
+        {
+            reason = "CaptureFastMatchResult crashed for: " + object_name;
+            return false;
+        }
+
+        MergeToolCapture(tool_capture, capture);
     }
 
     const int findseg_count = runtime.GetClassObjSum("FindSegmentation");
