@@ -72,7 +72,7 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
 
     if (isCircleScript)
     {
-        gauge.tool = "Findcircle";
+        gauge.tool = "FindCircle";
         gauge.has_circle_gauge = true;
         gauge.circle_cx = getInt("global_circle_cx", 0);
         gauge.circle_cy = getInt("global_circle_cy", 0);

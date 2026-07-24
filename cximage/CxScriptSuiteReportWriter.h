@@ -33,11 +33,11 @@ public:
         const std::filesystem::path& outRoot,
         const std::vector<CxScriptSuiteCaseResult>& caseResults);
 
-    static void WriteFindlineAlgorithmIterationReport(
+    static void WriteFindLineAlgorithmIterationReport(
         const std::filesystem::path& outRoot,
         const std::vector<CxScriptSuiteCaseResult>& caseResults);
 
-    static void WriteFindcircleAlgorithmIterationReport(
+    static void WriteFindCircleAlgorithmIterationReport(
         const std::filesystem::path& outRoot,
         const std::vector<CxScriptSuiteCaseResult>& caseResults);
 

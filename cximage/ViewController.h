@@ -1,4 +1,4 @@
-#ifndef _ViewController_Header
+﻿#ifndef _ViewController_Header
 #define _ViewController_Header
 
 #include "Window.h"
@@ -20,7 +20,7 @@
 
 #include "Shape.h"
 #include "shapebase.h"
-#include "Findline.h"
+#include "FindLine.h"
 
 #include "FastMatch.h"
 #include "imagemanager.h"
@@ -501,11 +501,11 @@ protected:
     PointsShape* m_apoints;
     PointsShape* m_bpoints;
 
-    Findline* m_afindline;
+    FindLine* m_afindline;
 
     Shape m_shape0;
 
-    fastmatch m_Match;
+    FastMatch m_Match;
 
     void drawline();
     void ReduceView();

@@ -62,7 +62,7 @@ bool CaptureFastMatchRuntime(
     capture.object_aliases = "FastMatch";
 
     auto* matcher =
-        static_cast<fastmatch*>(object);
+        static_cast<FastMatch*>(object);
 
     capture.object_model_point_count =
         matcher->getmodelpointcount();

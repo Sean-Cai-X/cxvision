@@ -1,7 +1,7 @@
 #include "CxScriptGeometryFrameProbe.h"
 #include "CxScriptGeometryFrameOverlay.h"
-#include "Findline.h"
-#include "Findcircle.h"
+#include "FindLine.h"
+#include "FindCircle.h"
 #include "FormfitGauge.h"
 #include <opencv2/opencv.hpp>
 #include <algorithm>
@@ -128,7 +128,7 @@ bool ParseProbeScript(const std::filesystem::path& script, ParsedProbeScript& ou
             }
             else if (method == "setcircle" && params.size() >= 4)
             {
-                out.tool = "Findcircle";
+                out.tool = "FindCircle";
                 out.cx = ResolveInt(out.vars, params[0]);
                 out.cy = ResolveInt(out.vars, params[1]);
                 out.px = ResolveInt(out.vars, params[2]);
@@ -224,11 +224,11 @@ GaugeLineFrameProbe BuildLineFrame(const ParsedProbeScript& s, int image_w, int 
     p.roi_intersects_image = RectIntersectsImage(p.rect, image_w, image_h);
     p.roi_fully_inside_image = RectInsideImage(p.rect, image_w, image_h);
 
-    Findline runtime;
+    FindLine runtime;
     if (s.wgap > 0 || s.hgap > 0) runtime.SetWHgap(std::max(1, s.wgap), std::max(1, s.hgap));
     if (s.linegap > 0) runtime.setlinegap(s.linegap);
     runtime.setline(s.x0, s.y0, s.x1, s.y1, s.tool_half_width);
-    FindlineDisplaySnapshot snap;
+    FindLineDisplaySnapshot snap;
     p.runtime_has_scan_box = runtime.getdisplaysnapshot(snap) && snap.has_scan_box;
     if (p.runtime_has_scan_box)
     {
@@ -248,7 +248,7 @@ GaugeLineFrameProbe BuildLineFrame(const ParsedProbeScript& s, int image_w, int 
     else
     {
         p.frame_compare_status = "RUNTIME_FRAME_UNAVAILABLE";
-        p.frame_compare_reason = "Findline runtime did not expose scan box";
+        p.frame_compare_reason = "FindLine runtime did not expose scan box";
     }
     if (!p.roi_intersects_image)
     {
@@ -269,7 +269,7 @@ GaugeCircleFrameProbe BuildCircleFrame(const ParsedProbeScript& s, int image_w, 
     p.circle_intersects_image = (p.cx + p.radius >= 0.0 && p.cy + p.radius >= 0.0 && p.cx - p.radius <= image_w - 1 && p.cy - p.radius <= image_h - 1);
     p.circle_fully_inside_image = (p.cx - p.radius >= 0.0 && p.cy - p.radius >= 0.0 && p.cx + p.radius <= image_w - 1 && p.cy + p.radius <= image_h - 1);
 
-    Findcircle runtime;
+    FindCircle runtime;
     if (s.gap > 0) runtime.Setgap(s.gap);
     if (s.linegap > 0) runtime.setlinegap(s.linegap);
     runtime.setcircle(s.cx, s.cy, s.px, s.py);
@@ -335,8 +335,8 @@ GaugeCircleRingFrameProbe BuildCircleRingFrame(const ParsedProbeScript& s, int i
     p.inner_circle_fully_inside_image = CircleInsideImage(p.inner_cx, p.inner_cy, p.inner_radius, image_w, image_h);
     p.ring_geometry_valid = p.outer_radius > 0.0 && p.inner_radius > 0.0 && p.outer_radius > p.inner_radius && (p.center_distance + p.inner_radius) <= p.outer_radius;
 
-    Findcircle outer_runtime;
-    Findcircle inner_runtime;
+    FindCircle outer_runtime;
+    FindCircle inner_runtime;
     if (p.outer_gap > 0) outer_runtime.Setgap(p.outer_gap);
     if (p.inner_gap > 0) inner_runtime.Setgap(p.inner_gap);
     if (p.linegap > 0) { outer_runtime.setlinegap(p.linegap); inner_runtime.setlinegap(p.linegap); }
@@ -417,7 +417,7 @@ void WriteLineJson(const GaugeLineFrameProbe& p, const std::filesystem::path& pa
 {
     std::ofstream f(path);
     f << "{\n";
-    f << "  \"tool\": \"Findline\",\n";
+    f << "  \"tool\": \"FindLine\",\n";
     f << "  \"image_width\": " << p.image_width << ",\n";
     f << "  \"image_height\": " << p.image_height << ",\n";
     f << "  \"x0\": " << p.x0 << ", \"y0\": " << p.y0 << ",\n";
@@ -453,7 +453,7 @@ void WriteCircleJson(const GaugeCircleFrameProbe& p, const std::filesystem::path
 {
     std::ofstream f(path);
     f << "{\n";
-    f << "  \"tool\": \"Findcircle\",\n";
+    f << "  \"tool\": \"FindCircle\",\n";
     f << "  \"image_width\": " << p.image_width << ",\n";
     f << "  \"image_height\": " << p.image_height << ",\n";
     f << "  \"cx\": " << p.cx << ", \"cy\": " << p.cy << ",\n";
@@ -630,7 +630,7 @@ bool RunGaugeFrameProbe(const GaugeFrameProbeOptions& options, GaugeFrameProbeRe
         if (!SaveLineFrameProbeImages(probe, image, result.frame_black_path, result.frame_on_image_path, imageReason))
         { result.reason = imageReason; return false; }
         std::ofstream s(result.snapshot_path);
-        s << "tool: Findline\nscript_path: " << options.script_path.string() << "\nframe_compare_status: " << probe.frame_compare_status << "\nscan_line_count: " << probe.scan_line_count << "\nscan_line_length: " << probe.scan_line_length << "\n";
+        s << "tool: FindLine\nscript_path: " << options.script_path.string() << "\nframe_compare_status: " << probe.frame_compare_status << "\nscan_line_count: " << probe.scan_line_count << "\nscan_line_length: " << probe.scan_line_length << "\n";
         result.ok = (probe.frame_compare_status == "FRAME_MATCH");
     }
     else if (script.tool == "CircleRingLineFormfitGauge")
@@ -675,7 +675,7 @@ bool RunGaugeFrameProbe(const GaugeFrameProbeOptions& options, GaugeFrameProbeRe
         if (!SaveCircleFrameProbeImages(probe, image, result.frame_black_path, result.frame_on_image_path, imageReason))
         { result.reason = imageReason; return false; }
         std::ofstream s(result.snapshot_path);
-        s << "tool: Findcircle\nscript_path: " << options.script_path.string() << "\nframe_compare_status: " << probe.frame_compare_status << "\nradius: " << probe.radius << "\nscan_line_count: " << probe.scan_line_count << "\n";
+        s << "tool: FindCircle\nscript_path: " << options.script_path.string() << "\nframe_compare_status: " << probe.frame_compare_status << "\nradius: " << probe.radius << "\nscan_line_count: " << probe.scan_line_count << "\n";
         result.ok = (probe.frame_compare_status == "FRAME_MATCH");
     }
 

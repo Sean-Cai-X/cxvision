@@ -6,11 +6,11 @@
 
 class Image;
 class PointsShape;
-class Findline;
-class Findcircle;
-class Findellipse;
+class FindLine;
+class FindCircle;
+class FindEllipse;
 class FindObject;
-class fastmatch;
+class FastMatch;
 namespace cxcore { struct RegionPatternDescriptor; struct RegionPatternScore; }
 
 namespace cxcore {
@@ -361,11 +361,11 @@ struct BaselineSummaryRecordV1
 
 PointSetOutput ExportPointSet(PointsShape& points);
 ImageAnalysisOutput ExportImageAnalysis(const Image& image, double min_area, int min_width = 0, int min_height = 0);
-LineMeasurementOutput ExportLineMeasurement(Findline& line);
-CircleMeasurementOutput ExportCircleMeasurement(Findcircle& circle);
-EllipseMeasurementOutput ExportEllipseMeasurement(Findellipse& ellipse);
+LineMeasurementOutput ExportLineMeasurement(FindLine& line);
+CircleMeasurementOutput ExportCircleMeasurement(FindCircle& circle);
+EllipseMeasurementOutput ExportEllipseMeasurement(FindEllipse& ellipse);
 DetectionOutput ExportDetections(FindObject& object);
-MatchOutput ExportMatchOutput(fastmatch& matcher, int max_candidates);
+MatchOutput ExportMatchOutput(FastMatch& matcher, int max_candidates);
 RegionPatternDescriptorOutput ExportRegionPatternDescriptor(const RegionPatternDescriptor& descriptor);
 RegionPatternScoreOutput ExportRegionPatternScore(const RegionPatternScore& score);
 

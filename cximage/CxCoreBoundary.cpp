@@ -1,12 +1,12 @@
 #include "CxCoreBoundary.h"
 
 #include "FastMatch.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
-#include "Findline.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
+#include "FindLine.h"
 #include "Image.h"
 #include "RegionPatternNet.h"
-#include "findobject.h"
+#include "FindObject.h"
 #include "shapebase.h"
 
 #include <algorithm>
@@ -407,7 +407,7 @@ ImageAnalysisOutput ExportImageAnalysis(const Image& image, double min_area, int
     return output;
 }
 
-LineMeasurementOutput ExportLineMeasurement(Findline& line)
+LineMeasurementOutput ExportLineMeasurement(FindLine& line)
 {
     LineMeasurementOutput output;
     output.horizontal_samples = ExportPointSetInternal(line.getresultpointsw());
@@ -416,7 +416,7 @@ LineMeasurementOutput ExportLineMeasurement(Findline& line)
     return output;
 }
 
-CircleMeasurementOutput ExportCircleMeasurement(Findcircle& circle)
+CircleMeasurementOutput ExportCircleMeasurement(FindCircle& circle)
 {
     CircleMeasurementOutput output;
     output.sample_points = ExportPointSetInternal(circle.getresultpoints());
@@ -428,7 +428,7 @@ CircleMeasurementOutput ExportCircleMeasurement(Findcircle& circle)
     return output;
 }
 
-EllipseMeasurementOutput ExportEllipseMeasurement(Findellipse& ellipse)
+EllipseMeasurementOutput ExportEllipseMeasurement(FindEllipse& ellipse)
 {
     EllipseMeasurementOutput output;
     output.sample_points = ExportPointSetInternal(ellipse.getresultpoints());
@@ -449,7 +449,7 @@ DetectionOutput ExportDetections(FindObject& object)
     return output;
 }
 
-MatchOutput ExportMatchOutput(fastmatch& matcher, int max_candidates)
+MatchOutput ExportMatchOutput(FastMatch& matcher, int max_candidates)
 {
     MatchOutput output;
     output.max_score = matcher.getmaxresult();

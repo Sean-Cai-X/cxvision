@@ -7,10 +7,10 @@
 #include "Shape.h"
 #include "imagemanager.h"
 
-#include "Findline.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
-#include "findobject.h"
+#include "FindLine.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
+#include "FindObject.h"
 #include "FastMatch.h"
 
  
@@ -20,7 +20,7 @@ void RunClass::Run()
     ImageManager m_amodule;//
 #endif
     Image m_occtimage;
-    fastmatch m_Match;
+    FastMatch m_Match;
 	/*
 	              "if(1){aimage1.load(\"1.bmp\");}\n"
                  "aimage1.Show(1);\n" 
@@ -84,8 +84,8 @@ double RunClass::fitcircle_(cv::Mat matInput, cv::Point2f& ptOut, double& radius
     ImageManager m_amodule;//
 #endif
     Image m_occtimage; 
-    Findcircle afindcircle0;
-    Findcircle afindcircle1;
+    FindCircle afindcircle0;
+    FindCircle afindcircle1;
     m_occtimage.copyFromMat(matInput);
     CXLOG_INFO("Run", "image_copy", "ok", "copy ok");
     if (0 == m_isetcircle)
@@ -177,7 +177,7 @@ double RunClass::ProcessIdentifyCoordPattern(cv::Mat matInput, std::vector<cv::P
     newmodule();//
 #endif
     Image m_occtimage;
-    fastmatch m_Match;
+    FastMatch m_Match;
 
     m_occtimage.copyFromMat(matInput);
     //   log_alg << "copy ok" << endl;
@@ -255,7 +255,7 @@ double RunClass::ProcessIdentifyCoordMatch(cv::Mat matInput, std::vector<cv::Poi
     newmodule();//
 #endif
     Image m_occtimage;
-    fastmatch m_Match;
+    FastMatch m_Match;
 
     m_occtimage.copyFromMat(matInput);
   

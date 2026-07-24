@@ -1,15 +1,15 @@
 #include "pch.h"
-#include "ManualConsoleFindlineDebug.h"
+#include "ManualConsoleFindLineDebug.h"
 #include "ManualConsoleUtils.h"
 #include "ManualConsoleRuntimeView.h"
 #include "ManualConsoleCxScriptDebug.h"
-#include "ManualConsoleFindcircleDebug.h"
+#include "ManualConsoleFindCircleDebug.h"
 #include "CxScriptRunTraceRuntime.h"
 
 #include <sstream>
 #include <cmath>
 
-const char* FindlineModeName(int mode)
+const char* FindLineModeName(int mode)
 {
     static const char* names[] = {"Unspecified", "LeastSquares", "MinimumZone", "Ransac", "SingleEdge", "EdgePairCenter", "HorizontalVerticalPriority", "WeightedMeasurementPoints"};
     return mode >= 0 && mode < 8 ? names[mode] : "Unspecified";
@@ -28,9 +28,9 @@ void AppendPointsShapeToXY(PointsShape& points, std::vector<float>& outXY)
     }
 }
 
-void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
+void RefreshFindLineDisplaySnapshot(ManualTestContext& context,
                                    RuntimeObjectView& object,
-                                   Findline& lineTool)
+    FindLine& lineTool)
 {
     if (object.type != "FindLine")
     {
@@ -38,13 +38,13 @@ void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
         return;
     }
 
-    FindlineDisplaySnapshot snapshot;
+    FindLineDisplaySnapshot snapshot;
 
     if (!lineTool.getdisplaysnapshot(snapshot))
     {
         object.has_line_roi = false;
         object.has_line_scan_box = false;
-        object.line_display_source = "Findline::getdisplaysnapshot unavailable";
+        object.line_display_source = "FindLine::getdisplaysnapshot unavailable";
         return;
     }
 
@@ -68,20 +68,20 @@ void RefreshFindlineDisplaySnapshot(ManualTestContext& context,
     ++context.runtime_overlay_version;
 }
 
-std::string BuildFindlineMeasureHint(const RuntimeObjectView& object)
+std::string BuildFindLineMeasureHint(const RuntimeObjectView& object)
 {
     if (object.valid_line_points_count > 0)
         return "";
 
     if (!object.line_measure_roi_intersects_image)
-        return "Findline ROI does not intersect image.";
+        return "FindLine ROI does not intersect image.";
 
     if (object.line_measure_findobject_called &&
         object.line_measure_cc_selected_accepted == 0 &&
         object.line_measure_cc_selected_total > 0 &&
         object.line_measure_effective_filter_min > object.line_measure_cc_selected_area_p90)
     {
-        return "Findline original Measure produced no points because FindObject accepted no connected components. effective_filter_min is higher than selected component P90. Try Stage25 filter profile: m_line.setfilterprofile(1).";
+        return "FindLine original Measure produced no points because FindObject accepted no connected components. effective_filter_min is higher than selected component P90. Try Stage25 filter profile: m_line.setfilterprofile(1).";
     }
 
     if (object.line_measure_binary_foreground_pixels > 0 &&
@@ -98,13 +98,13 @@ std::string BuildFindlineMeasureHint(const RuntimeObjectView& object)
     }
 
     if (object.line_measure_binary_foreground_pixels == 0)
-        return "Findline binary foreground is empty. Check threshold, method polarity, and gamma.";
+        return "FindLine binary foreground is empty. Check threshold, method polarity, and gamma.";
 
-    return "Findline original Measure produced no valid points. Check ROI, scan width, threshold, polarity, and filter settings.";
+    return "FindLine original Measure produced no valid points. Check ROI, scan width, threshold, polarity, and filter settings.";
 }
 
-void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
-    Findline& lineTool)
+void RefreshFindLineMeasureSnapshot(RuntimeObjectView& object,
+    FindLine& lineTool)
 {
     object.line_measure_points_xy.clear();
 
@@ -139,7 +139,7 @@ void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.has_line_seek_points =
         !object.line_seek_points_xy.empty();
 
-    const FindlineMeasureProfileStats& stats =
+    const FindLineMeasureProfileStats& stats =
         lineTool.lastmeasureprofilestats();
 
     object.line_profile_point_count = stats.point_count;
@@ -163,7 +163,7 @@ void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
         object.line_measure_failure_stage = "chain_not_converted_to_measure_points";
     }
 
-    const FindlineMeasureInputDebug& input =
+    const FindLineMeasureInputDebug& input =
         lineTool.lastmeasureinputdebug();
 
     object.line_measure_image_ready = input.image_mat_ready;
@@ -347,7 +347,7 @@ void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
         object.line_measure_failure_stage = input.failure_stage;
     }
 
-    object.line_measure_hint = BuildFindlineMeasureHint(object);
+    object.line_measure_hint = BuildFindLineMeasureHint(object);
     object.line_filter_min_exceeds_component_p90 =
         object.line_measure_failure_stage == "findobject_filter_result_empty" &&
         object.line_measure_effective_filter_min > 0 &&
@@ -453,7 +453,7 @@ void RefreshFindlineMeasureSnapshot(RuntimeObjectView& object,
     object.line_measure_status = status.str();
 }
 
-bool ApplyRuntimeFindlineWHgap(
+bool ApplyRuntimeFindLineWHgap(
     ManualTestContext& context,
     const std::string& objectName,
     int wgap,
@@ -465,7 +465,7 @@ bool ApplyRuntimeFindlineWHgap(
     if (wgap <= 0 || hgap <= 0)
     {
         std::ostringstream ss;
-        ss << "Findline.SetWHgap rejected invalid value"
+        ss << "FindLine.SetWHgap rejected invalid value"
            << " | wgap=" << wgap
            << " | hgap=" << hgap;
         outReason = ss.str();
@@ -476,11 +476,11 @@ bool ApplyRuntimeFindlineWHgap(
     auto it = runtime.lines.find(objectName);
     if (it == runtime.lines.end() || it->second == nullptr)
     {
-        outReason = "Findline runtime object not found: " + objectName;
+        outReason = "FindLine runtime object not found: " + objectName;
         return false;
     }
 
-    Findline& lineTool = *it->second;
+    FindLine& lineTool = *it->second;
     lineTool.SetWHgap(wgap, hgap);
 
     RuntimeObjectView& object = EnsureRuntimeObject(
@@ -501,11 +501,11 @@ bool ApplyRuntimeFindlineWHgap(
     object.line_tool_wgap = wgap;
     object.line_tool_hgap = hgap;
 
-    RefreshFindlineDisplaySnapshot(context, object, lineTool);
-    RefreshFindlineMeasureSnapshot(object, lineTool);
+    RefreshFindLineDisplaySnapshot(context, object, lineTool);
+    RefreshFindLineMeasureSnapshot(object, lineTool);
 
     std::ostringstream ss;
-    ss << "Findline.SetWHgap applied"
+    ss << "FindLine.SetWHgap applied"
        << " | source="
        << (updateSource != nullptr ? updateSource : "unknown")
        << " | wgap=" << wgap
@@ -536,7 +536,7 @@ bool ResolveDebugIntValue(ManualTestContext& context, const std::string& token, 
     value = static_cast<int>(parsed); return true;
 }
 
-bool TryExecuteFindlineSetline(ManualTestContext& context,
+bool TryExecuteFindLineSetline(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {
@@ -553,7 +553,7 @@ bool TryExecuteFindlineSetline(ManualTestContext& context,
     if (call.args.size() < 5)
     {
         line.status = "BLOCKED";
-        line.reason = "Findline.setline requires 5 parameters";
+        line.reason = "FindLine.setline requires 5 parameters";
         line.timestamp = CurrentTimestamp();
         context.run_state = "blocked";
         context.debug_status = "BLOCKED";
@@ -567,7 +567,7 @@ bool TryExecuteFindlineSetline(ManualTestContext& context,
         if (!ResolveDebugIntValue(context, call.args[static_cast<std::size_t>(i)], values[i]))
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.setline unresolved parameter: " + call.args[static_cast<std::size_t>(i)];
+            line.reason = "FindLine.setline unresolved parameter: " + call.args[static_cast<std::size_t>(i)];
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -598,14 +598,14 @@ bool TryExecuteFindlineSetline(ManualTestContext& context,
     object.line_y1 = static_cast<float>(values[3]);
     object.line_scale = static_cast<float>(values[4]);
 
-    RefreshFindlineDisplaySnapshot(context, object, *it->second);
+    RefreshFindLineDisplaySnapshot(context, object, *it->second);
 
     object.visualizable = true;
     object.visual_source = "runtime_object";
     object.stale = false;
 
     std::ostringstream summary;
-    summary << "Findline.setline executed"
+    summary << "FindLine.setline executed"
             << " | line_roi=("
             << object.line_x0 << "," << object.line_y0
             << ")->(" << object.line_x1 << "," << object.line_y1 << ")"
@@ -626,7 +626,7 @@ bool TryExecuteFindlineSetline(ManualTestContext& context,
     return true;
 }
 
-bool TryExecuteFindlineParamMethod(ManualTestContext& context,
+bool TryExecuteFindLineParamMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {
@@ -634,7 +634,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     if (!call.valid)
         return false;
 
-    const bool isFindlineParamMethod =
+    const bool isFindLineParamMethod =
         call.method == "setmethod" ||
         call.method == "setthre" ||
         call.method == "setlinegap" ||
@@ -647,7 +647,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         call.method == "setfilter" ||
         call.method == "setfilterprofile";
 
-    if (!isFindlineParamMethod)
+    if (!isFindLineParamMethod)
         return false;
 
     if (!RuntimeObjectIsType(context, call.object, "FindLine"))
@@ -675,7 +675,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         if (call.args.size() < 2)
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.SetWHgap requires wgap and hgap";
+            line.reason = "FindLine.SetWHgap requires wgap and hgap";
             line.timestamp = CurrentTimestamp();
 
             context.run_state = "blocked";
@@ -691,7 +691,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             !ResolveDebugIntValue(context, call.args[1], hgap))
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.SetWHgap failed to resolve wgap/hgap";
+            line.reason = "FindLine.SetWHgap failed to resolve wgap/hgap";
             line.timestamp = CurrentTimestamp();
 
             context.run_state = "blocked";
@@ -705,7 +705,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             line.status = "BLOCKED";
 
             std::ostringstream reason;
-            reason << "Findline.SetWHgap blocked"
+            reason << "FindLine.SetWHgap blocked"
                    << " | invalid wgap=" << wgap
                    << " | invalid hgap=" << hgap;
 
@@ -719,7 +719,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         }
 
         std::string applyReason;
-        if (!ApplyRuntimeFindlineWHgap(
+        if (!ApplyRuntimeFindLineWHgap(
                 context,
                 call.object,
                 wgap,
@@ -769,7 +769,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         if (call.args.size() < 3)
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.setfilter requires borw, min, max";
+            line.reason = "FindLine.setfilter requires borw, min, max";
             line.timestamp = CurrentTimestamp();
 
             context.run_state = "blocked";
@@ -787,7 +787,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
             !ResolveDebugIntValue(context, call.args[2], maxArea))
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.setfilter failed to resolve parameters";
+            line.reason = "FindLine.setfilter failed to resolve parameters";
             line.timestamp = CurrentTimestamp();
 
             context.run_state = "blocked";
@@ -814,11 +814,11 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         object.visual_source = "runtime_object";
         object.stale = false;
 
-        RefreshFindlineDisplaySnapshot(context, object, *it->second);
-        RefreshFindlineMeasureSnapshot(object, *it->second);
+        RefreshFindLineDisplaySnapshot(context, object, *it->second);
+        RefreshFindLineMeasureSnapshot(object, *it->second);
 
         std::ostringstream summary;
-        summary << "Findline.setfilter executed"
+        summary << "FindLine.setfilter executed"
                 << " | borw=" << borw
                 << " | min=" << minArea
                 << " | max=" << maxArea
@@ -846,7 +846,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         if (!ResolveDebugIntValue(context, call.args[0], profile))
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.setfilterprofile unresolved parameter";
+            line.reason = "FindLine.setfilterprofile unresolved parameter";
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -873,11 +873,11 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
         object.visual_source = "runtime_object";
         object.stale = false;
 
-        RefreshFindlineDisplaySnapshot(context, object, *it->second);
-        RefreshFindlineMeasureSnapshot(object, *it->second);
+        RefreshFindLineDisplaySnapshot(context, object, *it->second);
+        RefreshFindLineMeasureSnapshot(object, *it->second);
 
         std::ostringstream summary;
-        summary << "Findline.setfilterprofile executed"
+        summary << "FindLine.setfilterprofile executed"
                 << " | profile=" << profile
                 << " | measure_pending=true";
 
@@ -948,7 +948,7 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     object.stale = false;
 
     if (call.method == "setfitmode")
-        object.line_fit_mode = FindlineModeName(value);
+        object.line_fit_mode = FindLineModeName(value);
 
     if (call.method == "setmeasurefallback")
     {
@@ -959,13 +959,13 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
 
     if (updatedLineGap)
     {
-        RefreshFindlineDisplaySnapshot(context, object, *it->second);
+        RefreshFindLineDisplaySnapshot(context, object, *it->second);
     }
 
-    object.display_summary = "Findline." + call.method + "(" + call.params + ")";
+    object.display_summary = "FindLine." + call.method + "(" + call.params + ")";
 
     line.status = "runtime_executed";
-    line.reason = "Findline." + call.method + " executed";
+    line.reason = "FindLine." + call.method + " executed";
     line.timestamp = CurrentTimestamp();
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
@@ -976,18 +976,18 @@ bool TryExecuteFindlineParamMethod(ManualTestContext& context,
     return true;
 }
 
-bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, const std::string& statement)
+bool TryExecuteFindLineRuntimeMethod(ManualTestContext& context, int lineIndex, const std::string& statement)
 {
     const ParsedMethodCall call = ParseMethodCall(statement);
     if (!call.valid)
         return false;
 
-    const bool isFindlineRuntimeMethod =
+    const bool isFindLineRuntimeMethod =
         call.method == "measure" ||
         call.method == "fitline" ||
         call.method == "FitLine";
 
-    if (!isFindlineRuntimeMethod)
+    if (!isFindLineRuntimeMethod)
         return false;
 
     if (!RuntimeObjectIsType(context, call.object, "FindLine"))
@@ -998,7 +998,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
     if (it == runtime.lines.end() || !it->second)
         return false;
 
-    Findline& tool = *it->second;
+    FindLine& tool = *it->second;
     RuntimeObjectView& object = EnsureRuntimeObject(context, call.object, "FindLine", context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
 
@@ -1007,7 +1007,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         if (call.args.empty())
         {
             line.status = "BLOCKED";
-            line.reason = "Findline.measure requires image";
+            line.reason = "FindLine.measure requires image";
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -1020,7 +1020,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         if (imageIt == runtime.images.end() || !imageIt->second)
         {
             line.status = "BLOCKED";
-            line.reason = "Findline image object missing: " + imageName;
+            line.reason = "FindLine image object missing: " + imageName;
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -1031,8 +1031,8 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         Image* image = imageIt->second.get();
         tool.measure(static_cast<void*>(image));
 
-        RefreshFindlineMeasureSnapshot(object, tool);
-        RefreshFindlineDisplaySnapshot(context, object, tool);
+        RefreshFindLineMeasureSnapshot(object, tool);
+        RefreshFindLineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
         object.type = "FindLine";
@@ -1045,7 +1045,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         object.stale = false;
 
         std::ostringstream summary;
-        summary << "Findline.measure executed"
+        summary << "FindLine.measure executed"
                 << " | line_roi=("
                 << object.line_x0 << "," << object.line_y0
                 << ")->(" << object.line_x1 << "," << object.line_y1 << ")"
@@ -1053,7 +1053,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
                 << " | " << object.line_measure_status;
 
         if (object.line_measure_points_count == 0)
-            summary << " | no measure points returned by Findline tool";
+            summary << " | no measure points returned by FindLine tool";
 
         object.display_summary = summary.str();
 
@@ -1063,8 +1063,8 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
     else
     {
         tool.fitline();
-        RefreshFindlineMeasureSnapshot(object, tool);
-        RefreshFindlineDisplaySnapshot(context, object, tool);
+        RefreshFindLineMeasureSnapshot(object, tool);
+        RefreshFindLineDisplaySnapshot(context, object, tool);
 
         object.exists_in_parser = true;
         object.type = "FindLine";
@@ -1074,7 +1074,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
         object.visual_source = "runtime_object";
         object.stale = false;
         object.line_fit_status = tool.getfitstatus();
-        object.line_fit_mode = FindlineModeName(tool.getfitmodevalue());
+        object.line_fit_mode = FindLineModeName(tool.getfitmodevalue());
         object.has_fit_line = tool.hasfitresult();
 
         if (object.has_fit_line)
@@ -1098,7 +1098,7 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
             {
                 object.line_result_status = "NO_VALID_MEASURE_POINTS";
                 object.line_result_reason =
-                    "Findline.fitline requires at least two valid measure points; "
+                    "FindLine.fitline requires at least two valid measure points; "
                     + object.line_measure_status;
             }
             else
@@ -1108,10 +1108,10 @@ bool TryExecuteFindlineRuntimeMethod(ManualTestContext& context, int lineIndex, 
             }
         }
 
-        RefreshFindlineDisplaySnapshot(context, object, tool);
+        RefreshFindLineDisplaySnapshot(context, object, tool);
 
         std::ostringstream summary;
-        summary << "Findline." << call.method << " executed"
+        summary << "FindLine." << call.method << " executed"
                 << " | result_status=" << object.line_result_status
                 << " | reason=" << object.line_result_reason
                 << " | fit_mode=" << object.line_fit_mode
@@ -1270,7 +1270,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
         if (sourceObject->type == "FindLine")
         {
             line.reason = sourceObject->line_result_reason.empty()
-                ? "get_result requires a valid Findline fit result"
+                ? "get_result requires a valid FindLine fit result"
                 : sourceObject->line_result_reason;
         }
         else
@@ -1302,7 +1302,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
         context.current_result_ref.name = lhs;
         context.current_result_ref.source_object = sourceObjectName;
         context.current_result_ref.result_type = sourceObject->type == "FindLine" ?
-            "FindlineResult" : "FindcircleResult";
+            "FindLineResult" : "FindCircleResult";
         context.current_result_ref.status = "PENDING_BINDING";
         context.current_result_ref.reason = line.reason;
         context.current_result_ref.line_no = line.line_no;
@@ -1346,7 +1346,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.current_result_ref.value = refValue;
     context.current_result_ref.source_object = sourceObjectName;
     context.current_result_ref.result_type = sourceObject->type == "FindLine" ?
-        "FindlineResult" : "FindcircleResult";
+        "FindLineResult" : "FindCircleResult";
     context.current_result_ref.status = "geometry_result_available";
     context.current_result_ref.reason = "bound to runtime object geometry result";
     context.current_result_ref.fit_cx = sourceObject->fit_cx;
@@ -1400,7 +1400,7 @@ bool TryExecuteGetResultBinding(ManualTestContext& context,
     context.runtime_current_status = "PENDING";
     context.run_state = "runtime_step";
 
-    UpdateFindcircleDebugSnapshot(context, *sourceObject, line.line_no, statement);
+    UpdateFindCircleDebugSnapshot(context, *sourceObject, line.line_no, statement);
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
 
@@ -1505,7 +1505,7 @@ bool TryExecuteImageCopyFromMat(ManualTestContext& context,
     return true;
 }
 
-bool UpdateRuntimeFindlineSetlineFromUi(
+bool UpdateRuntimeFindLineSetlineFromUi(
     ManualTestContext& context,
     const std::string& objectName,
     float x0,
@@ -1522,7 +1522,7 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     auto it = runtime.lines.find(objectName);
     if (it == runtime.lines.end() || !it->second)
     {
-        outReason = "Findline runtime object not found: " + objectName;
+        outReason = "FindLine runtime object not found: " + objectName;
         return false;
     }
 
@@ -1552,10 +1552,10 @@ bool UpdateRuntimeFindlineSetlineFromUi(
     object->visual_source = "runtime_object";
     object->stale = false;
 
-    RefreshFindlineDisplaySnapshot(context, *object, *it->second);
+    RefreshFindLineDisplaySnapshot(context, *object, *it->second);
 
     std::ostringstream ss;
-    ss << "Findline UI drag updated setline"
+    ss << "FindLine UI drag updated setline"
        << " | line_roi=("
        << object->line_x0 << "," << object->line_y0
        << ")->("

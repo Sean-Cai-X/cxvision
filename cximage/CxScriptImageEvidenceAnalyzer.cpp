@@ -845,20 +845,20 @@ static void AnalyzeFindlineEvidence(
     }
 }
 
-static void AnalyzeFindcircleEvidence(
+static void AnalyzeFindCircleEvidence(
     const cv::Mat& image,
     const RuntimeObjectView& object,
     const CxImageEvidenceOptions& options,
     CxImageEvidenceSummary& summary,
     const fs::path& outputDir)
 {
-    summary.tool = "Findcircle";
+    summary.tool = "FindCircle";
     summary.object_name = object.name;
     summary.reference_available = false;
 
     if (!object.has_circle)
     {
-        summary.conclusion = "Findcircle ROI not available";
+        summary.conclusion = "FindCircle ROI not available";
         return;
     }
 
@@ -885,7 +885,7 @@ static void AnalyzeFindcircleEvidence(
 
     if (radius < 1.0)
     {
-        summary.conclusion = "Findcircle radius too small";
+        summary.conclusion = "FindCircle radius too small";
         return;
     }
 
@@ -1550,7 +1550,7 @@ bool AnalyzeCxScriptImageEvidence(
             }
             else if (object.type == "FindCircle")
             {
-                AnalyzeFindcircleEvidence(image, object, options, summary, outputDir);
+                AnalyzeFindCircleEvidence(image, object, options, summary, outputDir);
                 summaries.push_back(summary);
             }
         }

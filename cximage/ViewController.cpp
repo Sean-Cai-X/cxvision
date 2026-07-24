@@ -387,7 +387,7 @@ namespace
 
     if (isCircleScript)
     {
-      gauge.tool = "Findcircle";
+      gauge.tool = "FindCircle";
       gauge.has_circle_gauge = true;
       gauge.circle_cx = getInt("global_circle_cx", 0);
       gauge.circle_cy = getInt("global_circle_cy", 0);
@@ -617,12 +617,12 @@ namespace
       }
       else if (object.valid_points_count <= 0)
       {
-        result.algorithm_reason = "Findcircle produced zero measure points.";
+        result.algorithm_reason = "FindCircle produced zero measure points.";
       }
       else if (!object.has_fit_result)
       {
         result.algorithm_reason =
-            "Findcircle produced measure points, but fitcircle result is unavailable.";
+            "FindCircle produced measure points, but fitcircle result is unavailable.";
       }
       else
       {
@@ -1832,11 +1832,11 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
             !hasInt("global_threshold") ||
             !hasInt("global_method"))
         {
-            reason = "missing required Findcircle global_* bindings";
+            reason = "missing required FindCircle global_* bindings";
             return false;
         }
 
-        reason = "Findcircle parameter globals available";
+        reason = "FindCircle parameter globals available";
         return true;
     }
 
@@ -3150,7 +3150,7 @@ void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
     {
         m_manualTest.debug_status = "SEMANTIC_RUN_NO_RUNTIME_OBJECTS";
         m_manualTest.debug_reason =
-            "script executed but no Findline/Findcircle/Findellipse runtime object was queried";
+            "script executed but no Findline/FindCircle/Findellipse runtime object was queried";
     }
     else if (m_manualTest.current_result_ref.source_object.empty())
     {
@@ -3301,7 +3301,7 @@ static bool SyncRuntimeObjectToManualGaugeState(
 
     if (object.type == "FindCircle" && object.has_circle)
     {
-        gauge.tool = "Findcircle";
+        gauge.tool = "FindCircle";
         gauge.source = "runtime_object";
         gauge.review_status = "editing";
 
@@ -5249,7 +5249,7 @@ void ViewController::mainloop()
              m_shapex = (Shape*)m_parserOwner.GetClassObj("Shape", "ashape0");
              m_apoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints0");
              m_bpoints = (PointsShape*)m_parserOwner.GetClassObj("PointsShape", "apoints1");
-             m_afindline = (Findline*)m_parserOwner.GetClassObj("FindLine", "afindline");
+             m_afindline = (FindLine*)m_parserOwner.GetClassObj("FindLine", "afindline");
              if (opencvSW)
                  Imgui_OpenCV_Window0(&opencvSW);
 
@@ -6336,9 +6336,9 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 #include "CxShapeInteractionRunner.h"
 #include "CxRuntimeProjectionExecutor.h"
 #include "CxUnifiedLog.h"
-#include "Findline.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
+#include "FindLine.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
@@ -6519,7 +6519,7 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
     {
         if (object.type == "FindLine")
         {
-            Findline* tool = static_cast<Findline*>(
+            FindLine* tool = static_cast<FindLine*>(
                 m_parserDebugBridge.QueryClassObject("FindLine", object.name));
             if (tool != nullptr)
             {
@@ -6531,7 +6531,7 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
         }
         else if (object.type == "FindCircle")
         {
-            Findcircle* tool = static_cast<Findcircle*>(
+            FindCircle* tool = static_cast<FindCircle*>(
                 m_parserDebugBridge.QueryClassObject("FindCircle", object.name));
             if (tool != nullptr)
             {
@@ -6543,7 +6543,7 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
         }
         else if (object.type == "FindEllipse")
         {
-            Findellipse* tool = static_cast<Findellipse*>(
+            FindEllipse* tool = static_cast<FindEllipse*>(
                 m_parserDebugBridge.QueryClassObject("FindEllipse", object.name));
             if (tool != nullptr)
             {
@@ -6567,7 +6567,7 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
         }
         else if (object.type == "FastMatch")
         {
-            fastmatch* tool = static_cast<fastmatch*>(
+            FastMatch* tool = static_cast<FastMatch*>(
                 m_parserDebugBridge.QueryClassObject("FastMatch", object.name));
             if (tool != nullptr)
             {

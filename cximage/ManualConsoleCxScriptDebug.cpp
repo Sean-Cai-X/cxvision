@@ -1,8 +1,8 @@
 #include "ManualConsoleCxScriptDebug.h"
 #include "ManualConsoleUtils.h"
 #include "ManualConsoleRuntimeView.h"
-#include "ManualConsoleFindcircleDebug.h"
-#include "ManualConsoleFindlineDebug.h"
+#include "ManualConsoleFindCircleDebug.h"
+#include "ManualConsoleFindLineDebug.h"
 #include "CxScriptRunTraceRuntime.h"
 
 #include <sstream>
@@ -74,7 +74,7 @@ ParsedMethodCall ParseMethodCall(const std::string& statement)
     return result;
 }
 
-void PrepareFindcircleDebugRuntime()
+void PrepareFindCircleDebugRuntime()
 {
     ImageManager::m_imodulid = 1;
     ImageManager::GetBackImage(1);
@@ -939,12 +939,12 @@ bool TryExecuteDeclaration(ManualTestContext& context,
     }
     else if (type == "FindCircle")
     {
-        PrepareFindcircleDebugRuntime();
-        runtime.circles[name] = std::make_unique<Findcircle>();
+        PrepareFindCircleDebugRuntime();
+        runtime.circles[name] = std::make_unique<FindCircle>();
         object.exists_in_parser = true;
         object.runtime_state = "runtime_object_created";
         object.last_runtime_status = "PENDING";
-        object.display_summary = "Findcircle runtime object created";
+        object.display_summary = "FindCircle runtime object created";
         object.visualizable = false;
         object.has_circle = false;
         object.has_measure_points = false;
@@ -953,7 +953,7 @@ bool TryExecuteDeclaration(ManualTestContext& context,
     }
     else if (type == "FindLine")
     {
-        runtime.lines[name] = std::make_unique<Findline>();
+        runtime.lines[name] = std::make_unique<FindLine>();
         object.exists_in_parser = true;
         object.runtime_state = "runtime_object_created";
         object.last_runtime_status = "runtime_executed";
@@ -1271,22 +1271,22 @@ void DebugStepOnce(ManualTestContext& context)
     if (TryExecuteImageCopyFromMat(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindlineSetline(context, lineIndex, statement))
+    if (TryExecuteFindLineSetline(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindlineParamMethod(context, lineIndex, statement))
+    if (TryExecuteFindLineParamMethod(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindlineRuntimeMethod(context, lineIndex, statement))
+    if (TryExecuteFindLineRuntimeMethod(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindcircleSetcircle(context, lineIndex, statement))
+    if (TryExecuteFindCircleSetcircle(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindcircleParamMethod(context, lineIndex, statement))
+    if (TryExecuteFindCircleParamMethod(context, lineIndex, statement))
         return;
 
-    if (TryExecuteFindcircleRuntimeMethod(context, lineIndex, statement))
+    if (TryExecuteFindCircleRuntimeMethod(context, lineIndex, statement))
     {
         DebugScriptLineEnd(context, lineIndex, "runtime_executed");
         return;
@@ -1301,7 +1301,7 @@ void DebugStepOnce(ManualTestContext& context)
         DebugScriptLineEnd(context, lineIndex, "get_result_bound");
         return;
     }
-    if (TryHandleFindcircleGetResult(context, lineIndex, statement))
+    if (TryHandleFindCircleGetResult(context, lineIndex, statement))
     {
         DebugScriptLineEnd(context, lineIndex, "findcircle_get_result");
         return;

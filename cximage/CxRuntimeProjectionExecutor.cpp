@@ -12,7 +12,7 @@ namespace {
 
 static const char* kFindlineProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findline_projection.cxsc";
-static const char* kFindcircleProjectionScript =
+static const char* kFindCircleProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findcircle_projection.cxsc";
 static const char* kFindellipseProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findellipse_projection.cxsc";
@@ -31,7 +31,7 @@ bool Fail(CxRuntimeProjectionResult& result, const std::string& stage, const std
 std::string OwnerTypeForTool(const std::string& tool_id)
 {
     if (tool_id == "findline_gauge") return "FindLine";
-    if (tool_id == "findcircle_gauge") return "Findcircle";
+    if (tool_id == "findcircle_gauge") return "FindCircle";
     if (tool_id == "findellipse_gauge") return "Findellipse";
     if (tool_id == "findrect_gauge") return "FindRect";
     if (tool_id == "FastMatch") return "FastMatch";
@@ -41,7 +41,7 @@ std::string OwnerTypeForTool(const std::string& tool_id)
 const char* ProjectionScriptForTool(const std::string& tool_id)
 {
     if (tool_id == "findline_gauge") return kFindlineProjectionScript;
-    if (tool_id == "findcircle_gauge") return kFindcircleProjectionScript;
+    if (tool_id == "findcircle_gauge") return kFindCircleProjectionScript;
     if (tool_id == "findellipse_gauge") return kFindellipseProjectionScript;
     if (tool_id == "findrect_gauge") return kFindRectProjectionScript;
     if (tool_id == "FastMatch") return kFastMatchProjectionScript;
@@ -80,7 +80,7 @@ bool ValidateProjectionRequest(const CxRuntimeProjectionRequest& request,
         const double dx = request.circle_px - request.circle_cx;
         const double dy = request.circle_py - request.circle_cy;
         if (std::hypot(dx, dy) < 2.0)
-            return Fail(result, "request_validation", "Findcircle radius is too small");
+            return Fail(result, "request_validation", "FindCircle radius is too small");
     }
     else if (request.tool_id == "findellipse_gauge")
     {

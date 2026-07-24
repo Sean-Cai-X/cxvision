@@ -8,12 +8,12 @@ namespace mu
     class CxParserRuntime;
 }
 
-class Findline;
-class Findcircle;
-class Findellipse;
+class FindLine;
+class FindCircle;
+class FindEllipse;
 class FindRect;
 class FindSegmentation;
-class fastmatch;
+class FastMatch;
 
 struct CxScriptToolResultCapture
 {
@@ -154,18 +154,18 @@ bool CaptureRuntimeToolResults(
     CxScriptExecutionCapture& capture,
     std::string& reason);
 
-bool CaptureFindlineResult(
-    class Findline& tool,
+bool CaptureFindLineResult(
+    class FindLine& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 
-bool CaptureFindcircleResult(
-    class Findcircle& tool,
+bool CaptureFindCircleResult(
+    class FindCircle& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 
-bool CaptureFindellipseResult(
-    class Findellipse& tool,
+bool CaptureFindEllipseResult(
+    class FindEllipse& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 
@@ -175,7 +175,7 @@ bool CaptureFindRectResult(
     CxScriptToolResultCapture& output);
 
 bool CaptureFastMatchResult(
-    class fastmatch& tool,
+    class FastMatch& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 

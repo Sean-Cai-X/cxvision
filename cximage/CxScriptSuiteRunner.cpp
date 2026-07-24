@@ -640,7 +640,7 @@ namespace
 
         if (out.target)
         {
-            if (out.target->tool == "Findcircle")
+            if (out.target->tool == "FindCircle")
             {
                 if (out.target->cx == 0 || out.target->cy == 0 || out.target->px == 0 || out.target->py == 0)
                 {
@@ -795,7 +795,7 @@ namespace
 
         if (resolved.target)
         {
-            if (resolved.target->tool == "Findcircle")
+            if (resolved.target->tool == "FindCircle")
             {
                 const double roiRadius = std::hypot(
                     static_cast<double>(resolved.target->px - resolved.target->cx),
@@ -1496,12 +1496,12 @@ namespace
                     headless.threshold = resolved.target->threshold;
 
                 // Stage25 historically shared a Findline-oriented method=2
-                // default across every tool. Findcircle's verified direct
+                // default across every tool. FindCircle's verified direct
                 // execution branch is method=0. Preserve an explicit manifest
                 // value, otherwise select the baseline by target tool.
                 if (resolved.target->has_method)
                     headless.method = resolved.target->method;
-                else if (resolved.target->tool == "Findcircle")
+                else if (resolved.target->tool == "FindCircle")
                     headless.method = 0;
 
                 out.roi_x0 = resolved.target->x0;
@@ -1626,7 +1626,7 @@ namespace
             {
                 if (out.tool == "FindLine" && out.valid_points_count >= 2 && out.has_fit_line)
                     out.actual_policy_guard = "MEASURE_AND_FIT_AVAILABLE";
-                else if (out.tool == "Findcircle" && out.valid_points_count >= 3 &&
+                else if (out.tool == "FindCircle" && out.valid_points_count >= 3 &&
                          out.has_fit_circle && out.circle_radius > 0.0)
                     out.actual_policy_guard = "CIRCLE_MEASURE_AND_FIT_AVAILABLE";
                 out.policy_guard = out.actual_policy_guard;
@@ -2314,13 +2314,13 @@ bool RunCxScriptSuite(
         }
 
         std::cout << "[SUITE] report findline_algorithm begin\n" << std::flush;
-        CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
+        CxScriptSuiteReportWriter::WriteFindLineAlgorithmIterationReport(
             outRoot,
             result.case_results);
         std::cout << "[SUITE] report findline_algorithm end\n" << std::flush;
 
         std::cout << "[SUITE] report findcircle_algorithm begin\n" << std::flush;
-        CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
+        CxScriptSuiteReportWriter::WriteFindCircleAlgorithmIterationReport(
             outRoot,
             result.case_results);
         std::cout << "[SUITE] report findcircle_algorithm end\n" << std::flush;

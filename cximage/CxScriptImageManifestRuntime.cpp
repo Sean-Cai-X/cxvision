@@ -629,7 +629,7 @@ namespace
                                     {
                                         target.has_line = seen_x0 && seen_y0 && seen_x1 && seen_y1;
                                     }
-                                    else if (target.tool == "Findcircle")
+                                    else if (target.tool == "FindCircle")
                                     {
                                         target.has_circle = seen_cx && seen_cy && seen_px && seen_py;
                                     }
@@ -1091,7 +1091,7 @@ namespace
             }
         }
 
-        if (target.tool == "Findcircle")
+        if (target.tool == "FindCircle")
         {
             if (!target.has_circle)
             {
@@ -1100,7 +1100,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findcircle ROI missing required fields");
+                    "FindCircle ROI missing required fields");
                 return;
             }
 
@@ -1112,7 +1112,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findcircle ROI is outside image");
+                    "FindCircle ROI is outside image");
             }
 
             const int dx = target.px - target.cx;
@@ -1124,7 +1124,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findcircle radius is too small");
+                    "FindCircle radius is too small");
             }
         }
 
@@ -1395,7 +1395,7 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
                     "Target has empty tool");
             }
             else if (target.tool != "FindLine" &&
-                     target.tool != "Findcircle" &&
+                     target.tool != "FindCircle" &&
                      target.tool != "Findellipse" &&
                      target.tool != "FindRect")
             {

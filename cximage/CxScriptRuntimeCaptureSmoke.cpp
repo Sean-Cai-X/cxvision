@@ -93,20 +93,20 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     if (runtime.GetClassObjSum("FindCircle") != 1)
     {
-        reason = "expected exactly one Findcircle object";
+        reason = "expected exactly one FindCircle object";
         return false;
     }
 
     capture.smoke_findcircle_object_name = runtime.GetClassObjName("FindCircle", 0);
     if (capture.smoke_findcircle_object_name != "m_circle")
     {
-        reason = "Findcircle object name mismatch";
+        reason = "FindCircle object name mismatch";
         return false;
     }
 
     if (runtime.GetClassObj("FindCircle", "m_circle") == nullptr)
     {
-        reason = "Findcircle object m_circle is unavailable";
+        reason = "FindCircle object m_circle is unavailable";
         return false;
     }
 
@@ -119,27 +119,27 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
 
     if (circle_roi == nullptr)
     {
-        reason = "missing Findcircle roi circle";
+        reason = "missing FindCircle roi circle";
         return false;
     }
 
     capture.smoke_findcircle_roi_shape_kind = circle_roi->shape_kind;
     if (capture.smoke_findcircle_roi_shape_kind != "CircleShape")
     {
-        reason = "Findcircle roi is not CircleShape";
+        reason = "FindCircle roi is not CircleShape";
         return false;
     }
 
     if (circle_roi->radius <= 0.0)
     {
-        reason = "Findcircle roi radius is zero";
+        reason = "FindCircle roi radius is zero";
         return false;
     }
 
     capture.smoke_findcircle_roi_radius = circle_roi->radius;
     if (std::abs(capture.smoke_findcircle_roi_radius - 100.0) > 0.001)
     {
-        reason = "Findcircle roi radius mismatch";
+        reason = "FindCircle roi radius mismatch";
         return false;
     }
 
@@ -154,7 +154,7 @@ bool ValidateCxScriptRuntimeCaptureSmoke(
         circle_scan->shape_kind != "CircleShape" ||
         circle_scan->radius <= circle_roi->radius)
     {
-        reason = "Findcircle outer scan circle is invalid";
+        reason = "FindCircle outer scan circle is invalid";
         return false;
     }
 

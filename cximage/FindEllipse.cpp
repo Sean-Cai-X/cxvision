@@ -125,8 +125,8 @@ bool HasSufficientEllipseAngularCoverage(
 }
  
  
-int Findellipse::m_curfindlinenum = 0;
-Findellipse::Findellipse() :Shape(),
+int FindEllipse::m_curfindlinenum = 0;
+FindEllipse::FindEllipse() :Shape(),
 m_igap(6),
 m_iSelectPointGap(3),
 m_iMethod(1),
@@ -152,16 +152,16 @@ m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
     g_pbackfindobject = ImageManager::Getbackfindobject(icurmodule);
 
 }
-Findellipse::~Findellipse()
+FindEllipse::~FindEllipse()
 {
 
 }
-void Findellipse::setcomparegap(int igap)
+void FindEllipse::setcomparegap(int igap)
 {
     m_icomparegap = igap;
 }
 
-void Findellipse::setshow(int ishow)
+void FindEllipse::setshow(int ishow)
 {
     if (ishow == 0)
     {
@@ -190,11 +190,11 @@ void Findellipse::setshow(int ishow)
     } 
     Shape::setshow(ishow);
 }
-void Findellipse::setselectedgenum(int iedgenum)
+void FindEllipse::setselectedgenum(int iedgenum)
 {
     m_iselectedgenum = iedgenum;
 }
-void Findellipse::clear()
+void FindEllipse::clear()
 {
     m_lines.clear();
     m_measurepoints.clear();
@@ -219,7 +219,7 @@ void Findellipse::clear()
     m_accepted_boundary_ratio_max = -999.0;
     m_candidate_policy.clear();
 }
-void Findellipse::Setgap(int gap)
+void FindEllipse::Setgap(int gap)
 {
     m_igap = gap;
     for (std::size_t i = 0; i < m_lines.size(); ++i)
@@ -293,7 +293,7 @@ void Findellipse::Setgap(int gap)
         }
     }
 }
-void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
+void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay)
 {
     Shape::setellipse(icentx, icenty, ipax, ipay);
     m_has_fit_result = false;
@@ -413,7 +413,7 @@ void Findellipse::setellipse(int icentx, int icenty, int ipax, int ipay)
     }
     */
 }
-void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idis)
+void FindEllipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idis)
 {
     Shape::setellipse2(icentx, icenty, ipax, ipay, idis);
     m_has_fit_result = false;
@@ -516,11 +516,11 @@ void Findellipse::setellipse2(int icentx, int icenty, int ipax, int ipay,int idi
     */
 }
 
-void Findellipse::translate(int ix,int iy)
+void FindEllipse::translate(int ix,int iy)
 {
     Translate(gp_Vec(ix, iy, 0)); 
 }
-void Findellipse::Translate(const gp_Vec& translationVector)
+void FindEllipse::Translate(const gp_Vec& translationVector)
 { 
    int ix0 = RoundToInt(translationVector.X());
    int iy0 = RoundToInt(translationVector.Y());
@@ -537,7 +537,7 @@ void Findellipse::Translate(const gp_Vec& translationVector)
     m_roi_x1 += ix0;
     m_roi_y1 += iy0;
 }
-void Findellipse::drawpattern()
+void FindEllipse::drawpattern()
 { 
     m_modelpoints.setshow(8);
     m_modelpoints.drawshape(getpath());
@@ -545,7 +545,7 @@ void Findellipse::drawpattern()
     m_measurepoints_.drawshape(getpath());
 
 }
-void Findellipse::drawpatternx(double dmovx, double dmovy,
+void FindEllipse::drawpatternx(double dmovx, double dmovy,
     double dangle,
     double dzoomx, double dzoomy)
 {
@@ -557,7 +557,7 @@ void Findellipse::drawpatternx(double dmovx, double dmovy,
     m_measurepoints_.drawshapex(getpath(), dmovx, dmovy,
         dangle, dzoomx, dzoomy);
 }
-void Findellipse::edgepattern(Image& image)
+void FindEllipse::edgepattern(Image& image)
 {
     m_measurepoints.clear();
     m_measurepoints_.clear();
@@ -580,67 +580,67 @@ void Findellipse::edgepattern(Image& image)
     m_measurepoints_.doublepattern(m_icomparegap, 6, m_modelpoints);
 
 }
-void Findellipse::patternzeroposition()
+void FindEllipse::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRect();
     m_modelpoints.Move(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 }
-void Findellipse::savepatternfile(const char* pchar)
+void FindEllipse::savepatternfile(const char* pchar)
 {
     m_modelpoints.save(pchar);
 }
-void Findellipse::loadpatternfile(const char* pchar)
+void FindEllipse::loadpatternfile(const char* pchar)
 {
     m_modelpoints.load(pchar);
 }
-gp_Rectangle Findellipse::patternboundingrect()
+gp_Rectangle FindEllipse::patternboundingrect()
 {
     return m_modelpoints.boundingRect();
 }
-void Findellipse::patterngap2gap(int inewgap)
+void FindEllipse::patterngap2gap(int inewgap)
 {
     m_modelpoints.patterngap2gap(inewgap);
 }
-void Findellipse::patternrootgrid(double itype, double drate, double ilevel)
+void FindEllipse::patternrootgrid(double itype, double drate, double ilevel)
 {
     m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
-void Findellipse::patterntranform(int igap, int itype, int isgap, int iline)
+void FindEllipse::patterntranform(int igap, int itype, int isgap, int iline)
 {
     m_modelpoints.patterntranform(igap, itype, isgap, iline);
 }
-void Findellipse::patternzoom(double dx, double dy, double igap, double itype)
+void FindEllipse::patternzoom(double dx, double dy, double igap, double itype)
 {
     m_modelpoints.patternzoom(RoundToInt(dx), RoundToInt(dy), RoundToInt(igap), RoundToInt(itype));
 }
-void Findellipse::patternrotate(double dangle)
+void FindEllipse::patternrotate(double dangle)
 {
     m_modelpoints.Rotate(RoundToInt(dangle));
 }
-void Findellipse::modelzoom(double dx, double dy)
+void FindEllipse::modelzoom(double dx, double dy)
 {
     m_modelpoints.Zoom(RoundToInt(dx), RoundToInt(dy));
 }
-gp_Path& Findellipse::getpatternpath()
+gp_Path& FindEllipse::getpatternpath()
 {
     return m_modelpoints.getpath();
 }
-PointsShape& Findellipse::getpattern()
+PointsShape& FindEllipse::getpattern()
 {
     return m_modelpoints;
 }
-void Findellipse::findpattern(void* pimage)
+void FindEllipse::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
     edgepattern(*pgetimage);
 }
-void Findellipse::drawshape()
+void FindEllipse::drawshape()
 {
     Shape::drawshape();
 }
-void Findellipse::drawshapex(
+void FindEllipse::drawshapex(
     double dmovx, double dmovy,
     double dangle,
     double dzoomx, double dzoomy)
@@ -649,48 +649,48 @@ void Findellipse::drawshapex(
         dangle, dzoomx, dzoomy);
 }
 
-void Findellipse::setlinesamplerate(double dsamplerate)
+void FindEllipse::setlinesamplerate(double dsamplerate)
 {
     m_dsamplerate = dsamplerate;
 }
-void Findellipse::setlinegap(int igap)
+void FindEllipse::setlinegap(int igap)
 {
     m_iSelectPointGap = igap;
 }
-void Findellipse::setmethod(int imethod)
+void FindEllipse::setmethod(int imethod)
 {
     m_iMethod = imethod;
 }
-void Findellipse::setthre(int ithre)
+void FindEllipse::setthre(int ithre)
 {
     m_iThreshold = ithre;
 }
-int Findellipse::thre()
+int FindEllipse::thre()
 {
     return m_iThreshold;
 }
-void Findellipse::setgamarate(int igama)
+void FindEllipse::setgamarate(int igama)
 {
     m_igamarate = igama;
 }
 
-void Findellipse::setfindsetting(int ifindset)
+void FindEllipse::setfindsetting(int ifindset)
 {
     m_ifindset = ifindset;
 }
-void Findellipse::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
+void FindEllipse::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 {
     m_ifilterborw = ifilterborw;
     m_ifiltermin = ifiltermin;
     m_ifiltermax = ifiltermax;
 }
-void Findellipse::MeasureT(void *pimage)
+void FindEllipse::MeasureT(void *pimage)
 {
     (void)pimage;
 }
-void Findellipse::Measure(Image& image)
+void FindEllipse::Measure(Image& image)
 {
-    SetCxCrashBreadcrumb("Findellipse::Measure:enter");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:enter");
     m_has_fit_result = false;
     m_fit_avgdist = 0.0;
     m_measure_failure_stage.clear();
@@ -738,7 +738,7 @@ void Findellipse::Measure(Image& image)
         LogFindellipseMeasureProbe("measure_enter", "running", oss.str());
     }
 
-    SetCxCrashBreadcrumb("Findellipse::Measure:ensure_resources");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:ensure_resources");
     if (!ImageManager::EnsureAlgorithmRuntimeResources(
             image.getWidth(),
             image.getHeight()))
@@ -755,7 +755,7 @@ void Findellipse::Measure(Image& image)
     g_pbackimage = ImageManager::GetBackImage(1);
     g_pbackfindobject = ImageManager::Getbackfindobject(1);
 
-    SetCxCrashBreadcrumb("Findellipse::Measure:roi_preflight");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:roi_preflight");
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
     {
@@ -919,14 +919,14 @@ void Findellipse::Measure(Image& image)
         LogFindellipseMeasureProbe("measure_scan_geometry", "ready", oss.str());
     }
 
-    SetCxCrashBreadcrumb("Findellipse::Measure:linecopyex");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:linecopyex");
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
     LogFindellipseMeasureProbe("measure_linecopyex", "finished", "Findellipse linecopyex completed.");
 
-    SetCxCrashBreadcrumb("Findellipse::Measure:preprocess_roi");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:preprocess_roi");
     g_pbackimage->setroi(0, 0, iprocessw, isize);
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
@@ -934,7 +934,7 @@ void Findellipse::Measure(Image& image)
 
     if ((m_ifindset & 0x01) && g_pbackfindobject != nullptr)
     {
-        SetCxCrashBreadcrumb("Findellipse::Measure:findobject");
+        SetCxCrashBreadcrumb("FindEllipse::Measure:findobject");
         g_pbackfindobject->setrect(0, 0, iprocessw, isize);
         g_pbackfindobject->setbrow(m_ifilterborw);//21 22
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)), ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
@@ -952,7 +952,7 @@ void Findellipse::Measure(Image& image)
     int ifixvalue = 3;
 
     cv::Vec3b icolor = 0;
-    SetCxCrashBreadcrumb("Findellipse::Measure:candidate_collect");
+    SetCxCrashBreadcrumb("FindEllipse::Measure:candidate_collect");
     for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++)
     {
         std::vector<int> candidate_positions;
@@ -1179,12 +1179,12 @@ void Findellipse::Measure(Image& image)
     
 }
 
-PointsShape& Findellipse::getresultpoints()
+PointsShape& FindEllipse::getresultpoints()
 {
     return m_measurepoints;
 }
 
-void Findellipse::fitellipse()
+void FindEllipse::fitellipse()
 {
     m_has_fit_result = false;
     m_fit_center_x = 0.0;
@@ -1292,45 +1292,45 @@ void Findellipse::fitellipse()
     m_has_fit_result = true;
 }
 
-double Findellipse::getresultcentx()
+double FindEllipse::getresultcentx()
 {
     return m_fit_center_x;
 }
 
-double Findellipse::getresultcenty()
+double FindEllipse::getresultcenty()
 {
     return m_fit_center_y;
 }
 
-double Findellipse::getresultradiusx()
+double FindEllipse::getresultradiusx()
 {
     return m_fit_radius_x;
 }
 
-double Findellipse::getresultradiusy()
+double FindEllipse::getresultradiusy()
 {
     return m_fit_radius_y;
 }
 
-double Findellipse::getresultangle()
+double FindEllipse::getresultangle()
 {
     return m_fit_angle_deg;
 }
 
-double Findellipse::getavgdist()
+double FindEllipse::getavgdist()
 {
     return m_fit_avgdist;
 }
 
-double Findellipse::hasfitresult()
+double FindEllipse::hasfitresult()
 {
     return m_has_fit_result ? 1.0 : 0.0;
 }
 
 
-void Findellipse::measure(void* pimage)
+void FindEllipse::measure(void* pimage)
 {
-    SetCxCrashBreadcrumb("Findellipse::measure:void_ptr_enter");
+    SetCxCrashBreadcrumb("FindEllipse::measure:void_ptr_enter");
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
     {
@@ -1342,13 +1342,13 @@ void Findellipse::measure(void* pimage)
     LogFindellipseMeasureProbe("measure_wrapper", "running", "Findellipse measure received Image pointer.");
     Measure(*pgetimage);
 }
-void Findellipse::shapesetroi(void* pshape)
+void FindEllipse::shapesetroi(void* pshape)
 {
     if (pshape == nullptr)
         return;
     Shape::shapesetroi(pshape);
 }
-void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
+void FindEllipse::easycluster(int igapx, int igapy, int iclusternum)
 {
     PointsShape resultpoints;
     resultpoints.addpoints(getresultpoints());
@@ -1395,7 +1395,7 @@ void Findellipse::easycluster(int igapx, int igapy, int iclusternum)
 
 }
 
-bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
+bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot& out) const
 {
     out = {};
 
@@ -1409,7 +1409,7 @@ bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
         out.radius_y = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0)) * 0.5;
     }
 
-    const PointsShape& points = const_cast<Findellipse*>(this)->getresultpoints();
+    const PointsShape& points = const_cast<FindEllipse*>(this)->getresultpoints();
     out.has_measure_points = points.size() > 0;
     out.measure_points_count = static_cast<int>(points.size());
     out.has_fit_ellipse = m_has_fit_result;
@@ -1485,11 +1485,11 @@ bool Findellipse::getdisplaysnapshot(FindellipseDisplaySnapshot& out) const
     return out.has_roi || out.has_measure_points || out.has_fit_ellipse;
 }
 
-void Findellipse::PublishDisplayShapes(
+void FindEllipse::PublishDisplayShapes(
     ICxShapeSink& sink,
     const std::string& owner_ref) const
 {
-    FindellipseDisplaySnapshot snapshot;
+    FindEllipseDisplaySnapshot snapshot;
     if (!getdisplaysnapshot(snapshot))
         return;
 
@@ -1512,7 +1512,7 @@ void Findellipse::PublishDisplayShapes(
             std::move(roi));
     }
 
-    const PointsShape& points = const_cast<Findellipse*>(this)->getresultpoints();
+    const PointsShape& points = const_cast<FindEllipse*>(this)->getresultpoints();
     if (points.size() > 0)
     {
         auto resultPoints = std::make_unique<PointsShape>();

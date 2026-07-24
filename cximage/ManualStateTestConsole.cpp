@@ -1,8 +1,8 @@
 #include "ViewController.h"
 #include "Image.h"
-#include "Findcircle.h"
+#include "FindCircle.h"
 #include "findline.h"
-#include "Findellipse.h"
+#include "FindEllipse.h"
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
@@ -11,15 +11,15 @@
 #include "imagemanager.h"
 #include "CxScriptImageEvidenceAnalyzer.h"
 #include "CxScriptGeometryFrameProbe.h"
-#include "FindlineParameterPolicy.h"
+#include "FindLineParameterPolicy.h"
 #include "CxScriptCatalogRuntime.h"
 #include "CxParamProbeRunner.h"
 #include "CxScriptRunTraceRuntime.h"
 #include "ManualConsoleUtils.h"
 #include "ManualConsoleRuntimeView.h"
 #include "ManualConsoleCxScriptDebug.h"
-#include "ManualConsoleFindcircleDebug.h"
-#include "ManualConsoleFindlineDebug.h"
+#include "ManualConsoleFindCircleDebug.h"
+#include "ManualConsoleFindLineDebug.h"
 #include "CxCrashLogHandler.h"
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
@@ -115,10 +115,10 @@ static void CopyPointsToFloatXY(const PointsShape& points, std::vector<float>& o
     }
 }
 
-static void FillRuntimeObjectFromFindcircle(
+static void FillRuntimeObjectFromFindCircle(
     RuntimeObjectView& object,
     const std::string& name,
-    Findcircle& circle)
+    FindCircle& circle)
 {
     object = RuntimeObjectView{};
     object.name = name;
@@ -148,7 +148,7 @@ static void FillRuntimeObjectFromFindcircle(
     object.has_measure_points = !object.measure_points_xy.empty();
 
     object.has_fit_result = circle.hasfitresult();
-    const FindcircleMeasureGeometryDebug& debug =
+    const FindCircleMeasureGeometryDebug& debug =
         circle.lastmeasuregeometrydebug();
     object.circle_measure_image_ready = debug.image_ready;
     object.circle_measure_image_width = debug.image_width;
@@ -174,13 +174,13 @@ static void FillRuntimeObjectFromFindcircle(
         object.runtime_state = "geometry_result_available";
     }
 
-    object.display_summary = BuildFindcircleGeometrySummary(object);
+    object.display_summary = BuildFindCircleGeometrySummary(object);
 }
 
-static void FillRuntimeObjectFromFindline(
+static void FillRuntimeObjectFromFindLine(
     RuntimeObjectView& object,
     const std::string& name,
-    Findline& line)
+    FindLine& line)
 {
     object = RuntimeObjectView{};
     object.name = name;
@@ -192,7 +192,7 @@ static void FillRuntimeObjectFromFindline(
     object.visual_source = "runtime_object";
     object.stale = false;
 
-    FindlineDisplaySnapshot snapshot;
+    FindLineDisplaySnapshot snapshot;
     if (line.getdisplaysnapshot(snapshot))
     {
         object.has_line_roi = snapshot.has_line_roi;
@@ -227,8 +227,8 @@ static void FillRuntimeObjectFromFindline(
     object.valid_points_count = object.valid_line_points_count;
     object.has_line_measure_points = !object.line_measure_points_xy.empty();
 
-    const FindlineMeasureInputDebug& inputDebug = line.lastmeasureinputdebug();
-    const FindlineMeasureProfileStats& profileStats = line.lastmeasureprofilestats();
+    const FindLineMeasureInputDebug& inputDebug = line.lastmeasureinputdebug();
+    const FindLineMeasureProfileStats& profileStats = line.lastmeasureprofilestats();
     object.line_measure_image_ready = inputDebug.image_mat_ready;
     object.line_measure_image_width = inputDebug.image_width;
     object.line_measure_image_height = inputDebug.image_height;
@@ -339,7 +339,7 @@ static void FillRuntimeObjectFromFindline(
         object.runtime_state = "runtime_result_unavailable";
         object.line_result_status = "no_measure_points";
         object.line_result_reason = object.line_measure_failure_stage.empty()
-            ? "Findline produced zero valid points."
+            ? "FindLine produced zero valid points."
             : object.line_measure_failure_stage + ": " +
               object.line_measure_failure_hint;
     }
@@ -348,16 +348,16 @@ static void FillRuntimeObjectFromFindline(
         object.runtime_state = "fitline_unavailable";
         object.line_result_status = line.getfitstatus();
         object.line_result_reason =
-            "Findline produced measure points, but no fitted line is available.";
+            "FindLine produced measure points, but no fitted line is available.";
     }
 
-    object.display_summary = BuildFindlineGeometrySummary(object);
+    object.display_summary = BuildFindLineGeometrySummary(object);
 }
 
-static void FillRuntimeObjectFromFindellipse(
+static void FillRuntimeObjectFromFindEllipse(
     RuntimeObjectView& object,
     const std::string& name,
-    Findellipse& ellipse)
+    FindEllipse& ellipse)
 {
     object = RuntimeObjectView{};
     object.name = name;
@@ -369,7 +369,7 @@ static void FillRuntimeObjectFromFindellipse(
     object.visual_source = "runtime_object";
     object.stale = false;
 
-    FindellipseDisplaySnapshot snapshot;
+    FindEllipseDisplaySnapshot snapshot;
     if (ellipse.getdisplaysnapshot(snapshot))
     {
         object.has_ellipse_roi = snapshot.has_roi;
@@ -457,8 +457,8 @@ static void FillRuntimeObjectFromFindellipse(
         if (object.ellipse_result_reason.empty())
         {
             object.ellipse_result_reason = object.has_measure_points
-                ? "Findellipse produced measure points, but fitellipse result is unavailable."
-                : "Findellipse produced zero measure points.";
+                ? "FindEllipse produced measure points, but fitellipse result is unavailable."
+                : "FindEllipse produced zero measure points.";
         }
     }
 
@@ -471,13 +471,13 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
     {
         if (object.has_fit_line)
         {
-            return "Findline " + object.name +
+            return "FindLine " + object.name +
                 " result available: valid_points=" +
                 std::to_string(object.valid_line_points_count) +
                 ", avgdist=" + std::to_string(object.line_avgdist);
         }
 
-        std::string reason = "Findline " + object.name +
+        std::string reason = "FindLine " + object.name +
             " has no fitted conclusion";
         reason += ", valid_points=" +
             std::to_string(object.valid_line_points_count);
@@ -493,13 +493,13 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
     if (object.type == "FindCircle")
     {
         if (object.has_fit_result)
-            return "Findcircle " + object.name +
+            return "FindCircle " + object.name +
                 " result available: valid_points=" +
                 std::to_string(object.valid_points_count) +
                 ", radius=" + std::to_string(object.fit_radius) +
                 ", avgdist=" + std::to_string(object.fit_avgdist);
 
-        return "Findcircle " + object.name +
+        return "FindCircle " + object.name +
             " has no fitted conclusion, valid_points=" +
             std::to_string(object.valid_points_count) +
             ", failure_stage=" +
@@ -514,7 +514,7 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
 
     if (object.type == "FindEllipse")
     {
-        return "Findellipse " + object.name +
+        return "FindEllipse " + object.name +
             " roi=" + (object.has_ellipse_roi ? "available" : "missing") +
             ", measure_points=" + std::to_string(object.valid_points_count) +
             ", fit_status=" + object.ellipse_result_status +
@@ -645,7 +645,7 @@ void SeedDefaultManualGlobals(
 
     if (isCircleScript)
     {
-        gauge.tool = "Findcircle";
+        gauge.tool = "FindCircle";
         gauge.has_circle_gauge = true;
         gauge.circle_cx = context.runtime_int_vars["global_circle_cx"];
         gauge.circle_cy = context.runtime_int_vars["global_circle_cy"];
@@ -658,7 +658,7 @@ void SeedDefaultManualGlobals(
     }
     else if (isEllipseScript)
     {
-        gauge.tool = "Findellipse";
+        gauge.tool = "FindEllipse";
         gauge.has_ellipse_gauge = true;
         gauge.ellipse_x0 = context.runtime_int_vars["global_ellipse_x0"];
         gauge.ellipse_y0 = context.runtime_int_vars["global_ellipse_y0"];
@@ -762,55 +762,55 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:begin");
     m_manualTest.runtime_objects.clear();
 
-    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:list");
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindCircle:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindCircle"))
     {
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:query:" + name);
-        Findcircle* circle = static_cast<Findcircle*>(
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindCircle:query:" + name);
+        FindCircle* circle = static_cast<FindCircle*>(
             m_parserDebugBridge.QueryClassObject("FindCircle", name));
         if (circle == nullptr)
             continue;
 
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findcircle:fill:" + name);
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindCircle:fill:" + name);
         RuntimeObjectView object;
-        FillRuntimeObjectFromFindcircle(object, name, *circle);
+        FillRuntimeObjectFromFindCircle(object, name, *circle);
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
         m_manualTest.runtime_objects.push_back(object);
     }
 
-    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:list");
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindLine:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindLine"))
     {
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:query:" + name);
-        Findline* line = static_cast<Findline*>(
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindLine:query:" + name);
+        FindLine* line = static_cast<FindLine*>(
             m_parserDebugBridge.QueryClassObject("FindLine", name));
         if (line == nullptr)
             continue;
 
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findline:fill:" + name);
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindLine:fill:" + name);
         RuntimeObjectView object;
-        FillRuntimeObjectFromFindline(object, name, *line);
+        FillRuntimeObjectFromFindLine(object, name, *line);
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
         m_manualTest.runtime_objects.push_back(object);
     }
 
-    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:list");
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindEllipse:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindEllipse"))
     {
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:query:" + name);
-        Findellipse* ellipse = static_cast<Findellipse*>(
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindEllipse:query:" + name);
+        FindEllipse* ellipse = static_cast<FindEllipse*>(
             m_parserDebugBridge.QueryClassObject("FindEllipse", name));
         if (ellipse == nullptr)
             continue;
 
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:Findellipse:fill:" + name);
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindEllipse:fill:" + name);
         RuntimeObjectView object;
-        FillRuntimeObjectFromFindellipse(object, name, *ellipse);
+        FillRuntimeObjectFromFindEllipse(object, name, *ellipse);
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
         m_manualTest.runtime_objects.push_back(object);
@@ -894,21 +894,21 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
-    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:fastmatch:list");
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:list");
     struct FastMatchObjectRef
     {
         std::string parser_class;
         std::string name;
     };
-    std::vector<FastMatchObjectRef> fastmatchObjectRefs;
+    std::vector<FastMatchObjectRef> FastMatchObjectRefs;
     for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
-        fastmatchObjectRefs.push_back({"FastMatch", name});
+        FastMatchObjectRefs.push_back({"FastMatch", name});
     }
     for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
         bool already_seen = false;
-        for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
+        for (const FastMatchObjectRef& ref : FastMatchObjectRefs)
         {
             if (ref.name == name)
             {
@@ -917,13 +917,13 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             }
         }
         if (!already_seen)
-            fastmatchObjectRefs.push_back({"FastMatch", name});
+            FastMatchObjectRefs.push_back({"FastMatch", name});
     }
-    for (const FastMatchObjectRef& ref : fastmatchObjectRefs)
+    for (const FastMatchObjectRef& ref : FastMatchObjectRefs)
     {
         const std::string& name = ref.name;
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:fastmatch:query:" + ref.parser_class + ":" + name);
-        fastmatch* matcher = static_cast<fastmatch*>(
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:query:" + ref.parser_class + ":" + name);
+        FastMatch* matcher = static_cast<FastMatch*>(
             m_parserDebugBridge.QueryClassObject(ref.parser_class, name));
         if (matcher == nullptr)
             continue;
@@ -953,7 +953,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.measure_points_count = object.fastmatch_model_point_count;
         object.valid_points_count = object.fastmatch_candidate_count;
         object.display_summary =
-            "fastmatch " + name +
+            "FastMatch " + name +
             " model_points=" + std::to_string(object.fastmatch_model_point_count) +
             " learnA=" + std::to_string(object.fastmatch_learn_a_count) +
             " learnB=" + std::to_string(object.fastmatch_learn_b_count) +
@@ -1006,7 +1006,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         if (object.type == "FindCircle")
         {
             m_manualTest.current_result_ref.name = "global_circle_ref";
-            m_manualTest.current_result_ref.result_type = "FindcircleResult";
+            m_manualTest.current_result_ref.result_type = "FindCircleResult";
             m_manualTest.current_result_ref.fit_cx = object.fit_cx;
             m_manualTest.current_result_ref.fit_cy = object.fit_cy;
             m_manualTest.current_result_ref.fit_radius = object.fit_radius;
@@ -1017,7 +1017,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         else if (object.type == "FindLine")
         {
             m_manualTest.current_result_ref.name = "global_line_ref";
-            m_manualTest.current_result_ref.result_type = "FindlineResult";
+            m_manualTest.current_result_ref.result_type = "FindLineResult";
             m_manualTest.current_result_ref.line_x0 = object.fit_line_x0;
             m_manualTest.current_result_ref.line_y0 = object.fit_line_y0;
             m_manualTest.current_result_ref.line_x1 = object.fit_line_x1;
@@ -1029,7 +1029,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         else if (object.type == "FindEllipse")
         {
             m_manualTest.current_result_ref.name = "global_ellipse_ref";
-            m_manualTest.current_result_ref.result_type = "FindellipseResult";
+            m_manualTest.current_result_ref.result_type = "FindEllipseResult";
             m_manualTest.current_result_ref.status = object.ellipse_result_status.empty()
                 ? (object.has_fit_ellipse ? "fitellipse_available" : "no_measure_points")
                 : object.ellipse_result_status;
@@ -1092,7 +1092,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                 {
                     m_manualTest.current_result_ref.source_object = object.name;
                     m_manualTest.current_result_ref.name = "global_line_ref";
-                    m_manualTest.current_result_ref.result_type = "FindlineResult";
+                    m_manualTest.current_result_ref.result_type = "FindLineResult";
                     m_manualTest.current_result_ref.value =
                         "runtime_object:" + object.name;
                     m_manualTest.current_result_ref.status =
@@ -1116,7 +1116,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                     m_manualTest.current_result_ref.source_object = object.name;
                     m_manualTest.current_result_ref.name = "global_circle_ref";
                     m_manualTest.current_result_ref.result_type =
-                        "FindcircleResult";
+                        "FindCircleResult";
                     m_manualTest.current_result_ref.value =
                         "runtime_object:" + object.name;
                     m_manualTest.current_result_ref.status =
@@ -1140,7 +1140,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                     m_manualTest.current_result_ref.source_object = object.name;
                     m_manualTest.current_result_ref.name = "global_ellipse_ref";
                     m_manualTest.current_result_ref.result_type =
-                        "FindellipseResult";
+                        "FindEllipseResult";
                     m_manualTest.current_result_ref.value =
                         "runtime_object:" + object.name;
                     m_manualTest.current_result_ref.status =
@@ -1203,7 +1203,7 @@ void ViewController::drawKeyParameterControlsWindow()
         return;
     }
 
-    if (IsFindlineFindcircleContext(m_manualTest))
+    if (IsFindLineFindCircleContext(m_manualTest))
     {
         DrawKeyParameterControlPanel(m_manualTest);
     }
@@ -1225,7 +1225,7 @@ void ViewController::drawParameterTuningAndConclusionWindow()
         return;
     }
 
-    if (IsFindlineFindcircleContext(m_manualTest))
+    if (IsFindLineFindCircleContext(m_manualTest))
     {
         DrawParamTuningScatterPanel(m_manualTest);
     }

@@ -65,7 +65,7 @@ void DrawCircleFrame(cv::Mat& canvas, const GaugeCircleFrameProbe& p)
 
     cv::circle(canvas, c, 5, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
     cv::circle(canvas, pass, 5, cv::Scalar(255, 255, 0), -1, cv::LINE_AA);
-    PutLabel(canvas, "Findcircle Gauge Frame Probe", 0);
+    PutLabel(canvas, "FindCircle Gauge Frame Probe", 0);
     PutLabel(canvas, "center=(" + std::to_string((int)p.cx) + "," + std::to_string((int)p.cy) + ") pass=(" + std::to_string((int)p.px) + "," + std::to_string((int)p.py) + ") radius=" + std::to_string((int)std::lround(p.radius)), 1);
     PutLabel(canvas, "gap=" + std::to_string(p.gap) + " linegap=" + std::to_string(p.linegap) + " scan_line_count=" + std::to_string(p.scan_line_count) + " compare=" + p.frame_compare_status, 2);
 }

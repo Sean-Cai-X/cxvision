@@ -5,7 +5,7 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
-#include "Findline.h"
+#include "FindLine.h"
 #include "Grid.h"
 #include <opencv2/core/mat.hpp>
 
@@ -18,11 +18,11 @@ using namespace std;
 #define FASTMATCH_LEARN_PROBE
 
 // fastmatch extends Findline with grid/model learning and match result helpers.
-class fastmatch :public Findline
+class FastMatch :public FindLine
 {
 public:
-    fastmatch();
-    ~fastmatch();
+    FastMatch();
+    ~FastMatch();
 
     void setshow(int ishow);
 
@@ -515,7 +515,7 @@ private:
 
     static int m_curfastmatchnum;
 
-    fastmatch* m_prelationmatch;
+    FastMatch* m_prelationmatch;
 
     int m_irelationresultnum;
 

@@ -63,14 +63,14 @@ set(CXIMAGE_CORE_SOURCES
   cximage/shapebase.cpp
   cximage/gp_path.cpp
   cximage/Grid.cpp
-  cximage/Findline.cpp
-  cximage/Findcircle.cpp
-  cximage/Findellipse.cpp
+  cximage/FindLine.cpp
+  cximage/FindCircle.cpp
+  cximage/FindEllipse.cpp
   cximage/FindRect.cpp
   cximage/FindSegmentation.cpp
   cximage/FindSegmentationOpenCvSmokeBackend.cpp
   cximage/FindSegmentationEdgeSamBackend.cpp
-  cximage/findobject.cpp
+  cximage/FindObject.cpp
   cximage/FastMatch.cpp
   cximage/FastMatchPolicy.cpp
   cximage/FastMatchDiagnostic.cpp
@@ -95,8 +95,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/ManualConsoleUtils.cpp
   cximage/ManualConsoleRuntimeView.cpp
   cximage/ManualConsoleCxScriptDebug.cpp
-  cximage/ManualConsoleFindcircleDebug.cpp
-  cximage/ManualConsoleFindlineDebug.cpp
+  cximage/ManualConsoleFindCircleDebug.cpp
+  cximage/ManualConsoleFindLineDebug.cpp
   cximage/ManualConsoleGauge.cpp
   cximage/ManualConsoleParamRegressionPanel.cpp
   cximage/ManualConsoleEvidenceChain.cpp

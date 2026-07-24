@@ -12,7 +12,7 @@ namespace
         if (r.tool == "FindLine" && (!r.has_fit_line || r.valid_points_count < 2))
             return false;
 
-        if (r.tool == "Findcircle" && (!r.has_fit_circle || r.valid_points_count < 3))
+        if (r.tool == "FindCircle" && (!r.has_fit_circle || r.valid_points_count < 3))
             return false;
 
         return true;

@@ -7,7 +7,7 @@
 #include <memory>
 #include <filesystem>
 #include "ViewController.h"
-#include "Findcircle.h"
+#include "FindCircle.h"
 #include "findline.h"
 
 struct ParsedMethodCall
@@ -22,8 +22,8 @@ struct ParsedMethodCall
 struct DebugCximageRuntime
 {
     std::unordered_map<std::string, std::unique_ptr<Image>> images;
-    std::unordered_map<std::string, std::unique_ptr<Findcircle>> circles;
-    std::unordered_map<std::string, std::unique_ptr<Findline>> lines;
+    std::unordered_map<std::string, std::unique_ptr<FindCircle>> circles;
+    std::unordered_map<std::string, std::unique_ptr<FindLine>> lines;
 };
 
 extern std::unordered_map<ManualTestContext*, DebugCximageRuntime> g_cximageRuntime;
@@ -40,7 +40,7 @@ std::string ExtractIfCondition(const std::string& line);
 
 ParsedMethodCall ParseMethodCall(const std::string& statement);
 
-void PrepareFindcircleDebugRuntime();
+void PrepareFindCircleDebugRuntime();
 
 std::string GetGlobalMatInputPath(const ManualTestContext& context);
 

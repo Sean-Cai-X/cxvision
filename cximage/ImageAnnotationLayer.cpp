@@ -603,7 +603,7 @@ bool ImageAnnotationLayer::CommitEdit(std::string& reason)
     }
     else if (element.owner_type == "FindCircle" && element.owner_binding == "setcircle")
     {
-        reason = "Findcircle ROI radius edited; measure/fit result marked stale";
+        reason = "FindCircle ROI radius edited; measure/fit result marked stale";
         MarkOwnerResultStale(element.owner_type, element.owner_ref);
     }
     else

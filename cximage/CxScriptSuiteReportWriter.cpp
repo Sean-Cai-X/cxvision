@@ -277,7 +277,7 @@ void CxScriptSuiteReportWriter::WriteToolDisplayIndex(
     }
 }
 
-void CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
+void CxScriptSuiteReportWriter::WriteFindLineAlgorithmIterationReport(
     const std::filesystem::path& outRoot,
     const std::vector<CxScriptSuiteCaseResult>& caseResults)
 {
@@ -324,7 +324,7 @@ void CxScriptSuiteReportWriter::WriteFindlineAlgorithmIterationReport(
     file << "- Contract fail: " << failed << "\n";
 }
 
-void CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
+void CxScriptSuiteReportWriter::WriteFindCircleAlgorithmIterationReport(
     const std::filesystem::path& outRoot,
     const std::vector<CxScriptSuiteCaseResult>& caseResults)
 {
@@ -337,14 +337,14 @@ void CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
     if (!file.is_open())
         return;
 
-    file << "# Findcircle Algorithm Iteration Report\n\n";
+    file << "# FindCircle Algorithm Iteration Report\n\n";
     file << "| Level | Image | Target | Script | Points | FitCircle | Radius | AvgDist | Contract | Status | Conclusion | ToolDisplay |\n";
     file << "|-------|-------|--------|--------|--------|-----------|--------|---------|----------|--------|------------|-------------|\n";
 
     int passed = 0, failed = 0;
     for (const auto& result : caseResults)
     {
-        if (result.tool != "Findcircle")
+        if (result.tool != "FindCircle")
             continue;
 
         file << "| " << result.level << " | ";
@@ -365,7 +365,7 @@ void CxScriptSuiteReportWriter::WriteFindcircleAlgorithmIterationReport(
     }
 
     file << "\n## Summary\n\n";
-    file << "- Total Findcircle cases: " << (passed + failed) << "\n";
+    file << "- Total FindCircle cases: " << (passed + failed) << "\n";
     file << "- Contract pass: " << passed << "\n";
     file << "- Contract fail: " << failed << "\n";
 }
@@ -455,7 +455,7 @@ void CxScriptSuiteReportWriter::WriteFailureClassificationReport(
             file << "- **Local Support**: " << std::fixed << std::setprecision(2) << result.local_support << "\n";
             file << "- **Mean Distance**: " << std::fixed << std::setprecision(2) << result.local_mean_distance << "\n";
         }
-        else if (result.tool == "Findcircle")
+        else if (result.tool == "FindCircle")
         {
             file << "- **Has Fit Circle**: " << (result.has_fit_circle ? "yes" : "no") << "\n";
             file << "- **Circle Radius**: " << std::fixed << std::setprecision(2) << result.circle_radius << "\n";

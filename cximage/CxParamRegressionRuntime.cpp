@@ -92,14 +92,14 @@ CxParamRangeSet MakeConservativeRangeSet(const std::string& tool)
 {
     CxParamRangeSet set;
     set.tool = tool;
-    set.range_set_id = tool == "Findcircle"
+    set.range_set_id = tool == "FindCircle"
         ? "findcircle_conservative_range"
         : "findline_conservative_range";
     set.max_candidates = 12;
     set.max_case_seconds = 10;
     set.max_total_seconds = 60;
 
-    if (tool == "Findcircle")
+    if (tool == "FindCircle")
     {
         set.ranges.push_back(RangeValues("threshold", {8, 12, 20, 30}));
         set.ranges.push_back(RangeValues("gap", {3, 5, 8, 12}));

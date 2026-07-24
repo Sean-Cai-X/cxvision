@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Findcircle.h"
+#include "FindCircle.h"
 
 #include <string>
 
@@ -48,8 +48,8 @@ public:
     std::string m_result_ref;
 
 private:
-    Findcircle* m_outer_circle = nullptr;
-    Findcircle* m_inner_circle = nullptr;
+    FindCircle* m_outer_circle = nullptr;
+    FindCircle* m_inner_circle = nullptr;
 
     int StatusCodeFromString(const std::string& status) const;
 };

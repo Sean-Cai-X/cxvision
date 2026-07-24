@@ -20,7 +20,7 @@ CxParamRegressionTask BuildParamRegressionTaskFromManualGauge(
     task.task_id = "param_regression_" + task.case_id;
     task.gauge_annotation_path =
         (ManualGaugeCaseDir(context) / "gauge_annotation.json").string();
-    task.base_script_id = task.tool == "Findcircle"
+    task.base_script_id = task.tool == "FindCircle"
         ? "findcircle_stage25_direct_ok"
         : "findline_stage25_filter20_ok";
     task.base_parameter_profile_id = "manual_gauge_seed";
@@ -44,7 +44,7 @@ CxParamEvalRecord BuildManualSeedEvalRecord(
     record.case_id = task.case_id;
     record.tool = task.tool;
     record.executed = true;
-    if (task.tool == "Findcircle")
+    if (task.tool == "FindCircle")
     {
         record.points = result.valid_points_count > 0
             ? result.valid_points_count
@@ -252,10 +252,10 @@ bool ExportParamRegressionManualAcceptanceChecklist(
     return true;
 }
 
-bool IsFindlineFindcircleContext(ManualTestContext& context)
+bool IsFindLineFindCircleContext(ManualTestContext& context)
 {
     const ManualGaugeState& g = context.current_gauge;
-    return (g.tool == "FindLine" || g.tool == "Findcircle") ||
+    return (g.tool == "FindLine" || g.tool == "FindCircle") ||
            g.has_line_gauge || g.has_circle_gauge;
 }
 
@@ -264,9 +264,9 @@ void DrawKeyParameterUnavailableNotice(const ManualTestContext& context)
   if (!ImGui::CollapsingHeader("关键参数 UI / 参数整定图", ImGuiTreeNodeFlags_DefaultOpen))
     return;
   ImGui::TextColored(ImVec4(1.0f, 0.68f, 0.25f, 1.0f),
-                     "Current image/tool is not suitable for Findline/Findcircle key-parameter tuning.");
+                     "Current image/tool is not suitable for Findline/FindCircle key-parameter tuning.");
   ImGui::TextWrapped(
-    "Select or create a Line/Circle annotation tool, or load a script containing Findline/Findcircle. "
+    "Select or create a Line/Circle annotation tool, or load a script containing Findline/FindCircle. "
     "After selecting a Line/Circle element, the center/boundary handles sync ManualGaugeState and the key-parameter UI will appear.");
   ImGui::Text("current gauge tool=%s line_gauge=%s circle_gauge=%s",
               context.current_gauge.tool.c_str(),
@@ -282,7 +282,7 @@ void DrawCxScriptWorkbenchOverview(ManualTestContext& context)
   const ManualGaugeState& gauge = context.current_gauge;
   const ManualParamRegressionState& reg = context.param_regression;
   const bool gaugeAccepted = ManualGaugeAcceptedForParamRegression(gauge);
-  const bool keyParamSuitable = IsFindlineFindcircleContext(context);
+  const bool keyParamSuitable = IsFindLineFindCircleContext(context);
 
   ImGui::TextWrapped(
     "This overview mirrors the design map: Evidence/Annotation -> cxparser script template -> Key Parameters -> Param Regression -> Conclusion/Evidence.");
@@ -321,7 +321,7 @@ void DrawCxScriptWorkbenchOverview(ManualTestContext& context)
     ImGui::Text("Status");
     ImGui::BulletText("gauge: %s", gaugeAccepted ? "manual_accepted" : gauge.review_status.c_str());
     ImGui::BulletText("param regression: %s", reg.status.c_str());
-    ImGui::BulletText("key parameter UI: %s", keyParamSuitable ? "visible" : "waiting for Findline/Findcircle");
+    ImGui::BulletText("key parameter UI: %s", keyParamSuitable ? "visible" : "waiting for Findline/FindCircle");
     ImGui::BulletText("candidates: %d selected: %d",
                       static_cast<int>(reg.candidates.size()),
                       CountSelectedParamCandidates(context));
@@ -574,12 +574,12 @@ void SyncKeyParameterUiToGauge(ManualTestContext& context)
   g.threshold = ui.contrast_percent;
   g.linegap = ui.measure_order;
   g.filterprofile = ui.enable_filter ? 1 : 0;
-  if (g.has_line_gauge || g.tool != "Findcircle")
+  if (g.has_line_gauge || g.tool != "FindCircle")
   {
     g.wgap = std::max(1, ui.sample_points);
     g.hgap = std::max(1, ui.valid_length_percent);
   }
-  if (g.has_circle_gauge || g.tool == "Findcircle")
+  if (g.has_circle_gauge || g.tool == "FindCircle")
   {
     g.gap = std::max(1, ui.sample_points);
   }
@@ -618,7 +618,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   if (ImGui::CollapsingHeader("Geometry"))
   {
       ImGui::PushID("geometry");
-      if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+      if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
       {
           ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("cx", &gauge.circle_cx);
           ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("cy", &gauge.circle_cy);
@@ -662,7 +662,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##lg_val", &gauge.linegap);
       gauge.linegap = std::max(0, std::min(50, gauge.linegap));
 
-      if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
+      if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
       {
           ImGui::TextUnformatted("gap");
           ImGui::SameLine(80.0f);

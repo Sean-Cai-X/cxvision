@@ -17,12 +17,12 @@ void CircleRingGauge::settolerance(
 
 void CircleRingGauge::setouter(void* outer_circle_ptr)
 {
-    m_outer_circle = static_cast<Findcircle*>(outer_circle_ptr);
+    m_outer_circle = static_cast<FindCircle*>(outer_circle_ptr);
 }
 
 void CircleRingGauge::setinner(void* inner_circle_ptr)
 {
-    m_inner_circle = static_cast<Findcircle*>(inner_circle_ptr);
+    m_inner_circle = static_cast<FindCircle*>(inner_circle_ptr);
 }
 
 void CircleRingGauge::build()

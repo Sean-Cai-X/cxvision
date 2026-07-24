@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "ManualConsoleFindcircleDebug.h"
+#include "ManualConsoleFindCircleDebug.h"
 #include "ManualConsoleUtils.h"
 #include "ManualConsoleRuntimeView.h"
 #include "ManualConsoleCxScriptDebug.h"
@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-void RefreshFindcircleDisplaySnapshot(ManualTestContext& context,
+void RefreshFindCircleDisplaySnapshot(ManualTestContext& context,
     RuntimeObjectView& object)
 {
     if (object.type != "FindCircle")
@@ -72,11 +72,11 @@ void RefreshFindcircleDisplaySnapshot(ManualTestContext& context,
     ++context.runtime_overlay_version;
 }
 
-void RefreshFindcircleMeasureGeometrySnapshot(
+void RefreshFindCircleMeasureGeometrySnapshot(
     RuntimeObjectView& object,
-    Findcircle& circle)
+    FindCircle& circle)
 {
-    const FindcircleMeasureGeometryDebug& dbg =
+    const FindCircleMeasureGeometryDebug& dbg =
         circle.lastmeasuregeometrydebug();
 
     object.circle_measure_geometry_request_valid =
@@ -159,7 +159,7 @@ bool ResolveDebugIntToken(ManualTestContext& context, const std::string& token, 
     value = static_cast<int>(parsed); return true;
 }
 
-bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
+bool TryExecuteFindCircleSetcircle(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {
@@ -199,7 +199,7 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
             ScriptLineView& line =
                 context.line_views[static_cast<std::size_t>(lineIndex)];
             line.status = "BLOCKED";
-            line.reason = "Findcircle.setcircle unresolved parameter: " +
+            line.reason = "FindCircle.setcircle unresolved parameter: " +
                 call.args[static_cast<std::size_t>(index)];
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
@@ -219,8 +219,8 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     auto circleIt = runtime.circles.find(call.object);
     if (circleIt == runtime.circles.end() || !circleIt->second)
     {
-        PrepareFindcircleDebugRuntime();
-        runtime.circles[call.object] = std::make_unique<Findcircle>();
+        PrepareFindCircleDebugRuntime();
+        runtime.circles[call.object] = std::make_unique<FindCircle>();
         circleIt = runtime.circles.find(call.object);
     }
 
@@ -239,10 +239,10 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
 
     circleIt->second->setcircle(cx, cy, perimeterX, perimeterY);
 
-    RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+    RefreshFindCircleMeasureGeometrySnapshot(object, *circleIt->second);
 
     object.has_circle = true;
-    RefreshFindcircleDisplaySnapshot(context, object);
+    RefreshFindCircleDisplaySnapshot(context, object);
     object.visualizable = true;
     object.exists_in_parser = true;
     object.stale = false;
@@ -253,7 +253,7 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
 
     std::ostringstream summary;
-    summary << "Findcircle.setcircle executed"
+    summary << "FindCircle.setcircle executed"
             << " | script_circle=("
             << object.circle_cx << ", "
             << object.circle_cy << ", "
@@ -267,7 +267,7 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_executed";
-    line.reason = "Findcircle.setcircle executed";
+    line.reason = "FindCircle.setcircle executed";
     line.timestamp = CurrentTimestamp();
 
     context.runtime_current_status = "PENDING";
@@ -290,7 +290,7 @@ bool TryExecuteFindcircleSetcircle(ManualTestContext& context,
     return true;
 }
 
-bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
+bool TryExecuteFindCircleParamMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {
@@ -345,7 +345,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         if (call.args.size() < 3)
         {
             line.status = "BLOCKED";
-            line.reason = "Findcircle.setfilter requires borw, min, max";
+            line.reason = "FindCircle.setfilter requires borw, min, max";
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -361,7 +361,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
             !ResolveDebugIntToken(context, call.args[2], maxArea))
         {
             line.status = "BLOCKED";
-            line.reason = "Findcircle.setfilter unresolved parameter";
+            line.reason = "FindCircle.setfilter unresolved parameter";
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -372,7 +372,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         circleIt->second->setfilter(borw, minArea, maxArea);
         RuntimeObjectView& object = EnsureRuntimeObject(
             context, call.object, "FindCircle", line.line_no);
-        RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+        RefreshFindCircleMeasureGeometrySnapshot(object, *circleIt->second);
         object.exists_in_parser = true;
         object.last_method = call.method;
         object.last_runtime_status = "runtime_executed";
@@ -381,7 +381,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         object.display_summary = "setfilter(" + call.params + ")";
         object.stale = false;
         line.status = "runtime_executed";
-        line.reason = "Findcircle.setfilter executed";
+        line.reason = "FindCircle.setfilter executed";
         line.timestamp = CurrentTimestamp();
         context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
         context.run_state = "runtime_step";
@@ -399,7 +399,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         {
             ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
             line.status = "BLOCKED";
-            line.reason = "Findcircle.setlinesamplerate unresolved parameter: " + token;
+            line.reason = "FindCircle.setlinesamplerate unresolved parameter: " + token;
             line.timestamp = CurrentTimestamp();
             context.run_state = "blocked";
             context.debug_status = "BLOCKED";
@@ -410,7 +410,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         RuntimeObjectView& object = EnsureRuntimeObject(
             context, call.object, "FindCircle",
             context.line_views[static_cast<std::size_t>(lineIndex)].line_no);
-        RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+        RefreshFindCircleMeasureGeometrySnapshot(object, *circleIt->second);
         object.exists_in_parser = true;
         object.last_method = call.method;
         object.last_runtime_status = "runtime_executed";
@@ -420,7 +420,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         object.stale = false;
         ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
         line.status = "runtime_executed";
-        line.reason = "Findcircle.setlinesamplerate executed";
+        line.reason = "FindCircle.setlinesamplerate executed";
         line.timestamp = CurrentTimestamp();
         context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
         context.run_state = "runtime_step";
@@ -435,7 +435,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         ScriptLineView& line =
             context.line_views[static_cast<std::size_t>(lineIndex)];
         line.status = "BLOCKED";
-        line.reason = "Findcircle." + call.method +
+        line.reason = "FindCircle." + call.method +
             " unresolved parameter: " + call.args[0];
         line.timestamp = CurrentTimestamp();
         context.run_state = "blocked";
@@ -466,7 +466,7 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
         circleIt->second->setlinesamplerate(
             static_cast<double>(value));
 
-    RefreshFindcircleMeasureGeometrySnapshot(
+    RefreshFindCircleMeasureGeometrySnapshot(
         EnsureRuntimeObject(
             context,
             call.object,
@@ -490,19 +490,19 @@ bool TryExecuteFindcircleParamMethod(ManualTestContext& context,
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_executed";
-    line.reason = "Findcircle." + call.method + " executed";
+    line.reason = "FindCircle." + call.method + " executed";
     line.timestamp = CurrentTimestamp();
 
     context.current_line = FindNextNonEmptyLine(context, lineIndex + 1);
     context.run_state = "runtime_step";
     context.debug_status = "PENDING";
-    context.debug_reason = "Findcircle parameter method executed";
+    context.debug_reason = "FindCircle parameter method executed";
 
     return true;
 }
 
-void FillFindcircleResultView(RuntimeObjectView& object,
-    Findcircle& circle,
+void FillFindCircleResultView(RuntimeObjectView& object,
+    FindCircle& circle,
     const std::string& methodName)
 {
     object.exists_in_parser = true;
@@ -572,10 +572,10 @@ void FillFindcircleResultView(RuntimeObjectView& object,
     object.valid_points_count = static_cast<int>(object.measure_points_xy.size() / 2);
     object.has_measure_points = !object.measure_points_xy.empty();
 
-    RefreshFindcircleMeasureGeometrySnapshot(object, circle);
+    RefreshFindCircleMeasureGeometrySnapshot(object, circle);
 }
 
-bool SaveFindcircleDebugSnapshotJson(const ManualTestContext& context,
+bool SaveFindCircleDebugSnapshotJson(const ManualTestContext& context,
     std::string& outPath,
     std::string& outReason)
 {
@@ -688,7 +688,7 @@ bool SaveFindcircleDebugSnapshotJson(const ManualTestContext& context,
     }
 }
 
-bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
+bool TryExecuteFindCircleRuntimeMethod(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {
@@ -697,12 +697,12 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     if (!call.valid)
         return false;
 
-    const bool isFindcircleRuntimeMethod =
+    const bool isFindCircleRuntimeMethod =
         call.method == "measure" ||
         call.method == "fitcircle" ||
         call.method == "FitResultMeasure";
 
-    if (!isFindcircleRuntimeMethod)
+    if (!isFindCircleRuntimeMethod)
         return false;
 
     if (!RuntimeObjectIsType(context, call.object, "FindCircle"))
@@ -764,12 +764,12 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
         if (call.method == "measure")
         {
             circleIt->second->measure(image);
-            FillFindcircleResultView(object, *circleIt->second, "measure");
+            FillFindCircleResultView(object, *circleIt->second, "measure");
         }
         else if (call.method == "fitcircle")
         {
             circleIt->second->fitcircle();
-            FillFindcircleResultView(object, *circleIt->second, "fitcircle");
+            FillFindCircleResultView(object, *circleIt->second, "fitcircle");
         }
         else if (call.method == "FitResultMeasure")
         {
@@ -785,7 +785,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
                 object.stale = false;
 
                 object.display_summary =
-                    "Findcircle.FitResultMeasure skipped | reason=fitcircle result is not valid";
+                    "FindCircle.FitResultMeasure skipped | reason=fitcircle result is not valid";
 
                 ScriptLineView& skipLine = context.line_views[static_cast<std::size_t>(lineIndex)];
                 skipLine.status = "PENDING_BINDING";
@@ -797,8 +797,8 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
                 context.debug_status = "PENDING";
                 context.debug_reason = skipLine.reason;
 
-                RefreshFindcircleDisplaySnapshot(context, object);
-                RefreshFindcircleMeasureGeometrySnapshot(object, *circleIt->second);
+                RefreshFindCircleDisplaySnapshot(context, object);
+                RefreshFindCircleMeasureGeometrySnapshot(object, *circleIt->second);
 
                 std::ostringstream diagnostics;
                 diagnostics << object.display_summary
@@ -816,12 +816,12 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
             }
 
             circleIt->second->FitResultMeasure(image);
-            FillFindcircleResultView(object, *circleIt->second, "FitResultMeasure");
+            FillFindCircleResultView(object, *circleIt->second, "FitResultMeasure");
             object.has_result_measure =
                 object.has_fit_result || object.has_measure_points;
         }
 
-        RefreshFindcircleDisplaySnapshot(context, object);
+        RefreshFindCircleDisplaySnapshot(context, object);
 
         std::ostringstream diagnostics;
         diagnostics << object.display_summary
@@ -841,7 +841,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     {
         ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
         line.status = "BLOCKED";
-        line.reason = std::string("Findcircle runtime exception: ") + e.what();
+        line.reason = std::string("FindCircle runtime exception: ") + e.what();
         line.timestamp = CurrentTimestamp();
 
         object.last_runtime_status = "BLOCKED";
@@ -857,7 +857,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     {
         ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
         line.status = "BLOCKED";
-        line.reason = "Findcircle runtime unknown exception";
+        line.reason = "FindCircle runtime unknown exception";
         line.timestamp = CurrentTimestamp();
 
         object.last_runtime_status = "BLOCKED";
@@ -874,7 +874,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
     line.status = "runtime_executed";
-    line.reason = "Findcircle." + call.method +
+    line.reason = "FindCircle." + call.method +
         " executed by direct runtime bridge | " + object.display_summary;
     line.timestamp = CurrentTimestamp();
     AppendCxDebugEvent(
@@ -900,7 +900,7 @@ bool TryExecuteFindcircleRuntimeMethod(ManualTestContext& context,
     return true;
 }
 
-bool TryHandleFindcircleGetResult(ManualTestContext& context,
+bool TryHandleFindCircleGetResult(ManualTestContext& context,
     int lineIndex,
     const std::string& statement)
 {

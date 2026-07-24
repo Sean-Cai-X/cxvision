@@ -1,7 +1,7 @@
 
 #include "pch.h"
 
-#include "Findcircle.h"
+#include "FindCircle.h"
 #include "CircleShape.h"
 #include "PolylineShape.h"
 #include "ImageAnnotationLayer.h"
@@ -29,7 +29,7 @@
 namespace {
 constexpr int kEdgeDetectMinNum = 10;
 
-void LogFindcircleMeasureProbe(
+void LogFindCircleMeasureProbe(
     const char* phase,
     const char* status,
     const std::string& message)
@@ -38,7 +38,7 @@ void LogFindcircleMeasureProbe(
     CxUnifiedLog::Instance().Flush();
 }
 
-std::string FindcircleMeasureMessage(
+std::string FindCircleMeasureMessage(
     const char* detail,
     int image_w,
     int image_h,
@@ -295,8 +295,8 @@ void AppendSimulatedCirclePoints(PointsShape& points,
 }
 }
 
-int Findcircle::m_curfindlinenum = 0;
-Findcircle::Findcircle() :Shape(),
+int FindCircle::m_curfindlinenum = 0;
+FindCircle::FindCircle() :Shape(),
 m_dresultcentx(0.0),
 m_dresultcenty(0.0),
 m_dradius(0.0),
@@ -328,16 +328,16 @@ m_last_compact_path_used(0)
     g_pbackfindobject = ImageManager::Getbackfindobject(icurmodule);
 
 }
-Findcircle::~Findcircle()
+FindCircle::~FindCircle()
 {
 
 }
-void Findcircle::setcomparegap(int igap)
+void FindCircle::setcomparegap(int igap)
 {
     m_icomparegap = igap;
 }
 
-void Findcircle::setshow(int ishow)
+void FindCircle::setshow(int ishow)
 {
     if (ishow == 0)
     {
@@ -374,11 +374,11 @@ void Findcircle::setshow(int ishow)
     } 
     Shape::setshow(ishow);
 }
-void Findcircle::setselectedgenum(int iedgenum)
+void FindCircle::setselectedgenum(int iedgenum)
 {
     m_iselectedgenum = iedgenum;
 }
-void Findcircle::getshape(void* pshape)
+void FindCircle::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
     if (pshape0 == nullptr)
@@ -398,17 +398,17 @@ void Findcircle::getshape(void* pshape)
     setcircle(icentx, icenty, ipax, ipay);
 }
 
-void Findcircle::setcirclegap(int ivalue)
+void FindCircle::setcirclegap(int ivalue)
 {
     m_idisgap = std::max(0, ivalue);
 
     setcircle2(m_icentx, m_icenty, m_ipax, m_ipay, m_idisgap);
 }
-void Findcircle::clear()
+void FindCircle::clear()
 {
     m_lines.clear();
 }
-void Findcircle::Setgap(int gap)
+void FindCircle::Setgap(int gap)
 {
     m_igap = std::max(1, gap);
 
@@ -423,7 +423,7 @@ void Findcircle::Setgap(int gap)
         MarkCircleMeasureGeometryDirty();
     }
 }
-void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
+void FindCircle::setcircle(int icentx, int icenty, int ipax, int ipay)
 {
     m_icentx = icentx;
     m_icenty = icenty;
@@ -442,7 +442,7 @@ void Findcircle::setcircle(int icentx, int icenty, int ipax, int ipay)
         m_measure_geometry_built_version = m_measure_geometry_request.version;
     }
 }
-void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay, int idis)
+void FindCircle::setcircle2(int icentx, int icenty, int ipax, int ipay, int idis)
 {
     m_icentx = icentx;
     m_icenty = icenty;
@@ -462,11 +462,11 @@ void Findcircle::setcircle2(int icentx, int icenty, int ipax, int ipay, int idis
         m_measure_geometry_built_version = m_measure_geometry_request.version;
     }
 }
-void Findcircle::translate(int ix,int iy)
+void FindCircle::translate(int ix,int iy)
 {
     Translate(gp_Vec(ix, iy, 0)); 
 }
-void Findcircle::Translate(const gp_Vec& translationVector)
+void FindCircle::Translate(const gp_Vec& translationVector)
 { 
    int ix0 = RoundToInt(translationVector.X());
    int iy0 = RoundToInt(translationVector.Y());
@@ -478,7 +478,7 @@ void Findcircle::Translate(const gp_Vec& translationVector)
         m_lines[i].Move(ix0, iy0);
     } 
 }
-void Findcircle::drawpattern()
+void FindCircle::drawpattern()
 { 
     m_modelpoints.setshow(8);
     m_modelpoints.drawshape(getpath());
@@ -486,7 +486,7 @@ void Findcircle::drawpattern()
     m_measurepoints_.drawshape(getpath());
 
 }
-void Findcircle::drawpatternx(double dmovx, double dmovy,
+void FindCircle::drawpatternx(double dmovx, double dmovy,
     double dangle,
     double dzoomx, double dzoomy)
 {
@@ -498,7 +498,7 @@ void Findcircle::drawpatternx(double dmovx, double dmovy,
     m_measurepoints_.drawshapex(getpath(), dmovx, dmovy,
         dangle, dzoomx, dzoomy);
 }
-void Findcircle::edgepattern(Image& image)
+void FindCircle::edgepattern(Image& image)
 {
     m_measurepoints.clear();
     m_measurepoints_.clear();
@@ -521,67 +521,67 @@ void Findcircle::edgepattern(Image& image)
     m_measurepoints_.doublepattern(m_icomparegap, 6, m_modelpoints);
 
 }
-void Findcircle::patternzeroposition()
+void FindCircle::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRect();
     m_modelpoints.Move(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 }
-void Findcircle::savepatternfile(const char* pchar)
+void FindCircle::savepatternfile(const char* pchar)
 {
     m_modelpoints.save(pchar);
 }
-void Findcircle::loadpatternfile(const char* pchar)
+void FindCircle::loadpatternfile(const char* pchar)
 {
     m_modelpoints.load(pchar);
 }
-gp_Rectangle Findcircle::patternboundingrect()
+gp_Rectangle FindCircle::patternboundingrect()
 {
     return m_modelpoints.boundingRect();
 }
-void Findcircle::patterngap2gap(int inewgap)
+void FindCircle::patterngap2gap(int inewgap)
 {
     m_modelpoints.patterngap2gap(inewgap);
 }
-void Findcircle::patternrootgrid(double itype, double drate, double ilevel)
+void FindCircle::patternrootgrid(double itype, double drate, double ilevel)
 {
     m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
-void Findcircle::patterntranform(int igap, int itype, int isgap, int iline)
+void FindCircle::patterntranform(int igap, int itype, int isgap, int iline)
 {
     m_modelpoints.patterntranform(igap, itype, isgap, iline);
 }
-void Findcircle::patternzoom(double dx, double dy, double igap, double itype)
+void FindCircle::patternzoom(double dx, double dy, double igap, double itype)
 {
     m_modelpoints.patternzoom(RoundToInt(dx), RoundToInt(dy), RoundToInt(igap), RoundToInt(itype));
 }
-void Findcircle::patternrotate(double dangle)
+void FindCircle::patternrotate(double dangle)
 {
     m_modelpoints.Rotate(RoundToInt(dangle));
 }
-void Findcircle::modelzoom(double dx, double dy)
+void FindCircle::modelzoom(double dx, double dy)
 {
     m_modelpoints.Zoom(RoundToInt(dx), RoundToInt(dy));
 }
-gp_Path& Findcircle::getpatternpath()
+gp_Path& FindCircle::getpatternpath()
 {
     return m_modelpoints.getpath();
 }
-PointsShape& Findcircle::getpattern()
+PointsShape& FindCircle::getpattern()
 {
     return m_modelpoints;
 }
-void Findcircle::findpattern(void* pimage)
+void FindCircle::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
     edgepattern(*pgetimage);
 }
-void Findcircle::drawshape()
+void FindCircle::drawshape()
 {
     Shape::drawshape();
 }
-void Findcircle::drawshapex(
+void FindCircle::drawshapex(
     double dmovx, double dmovy,
     double dangle,
     double dzoomx, double dzoomy)
@@ -590,7 +590,7 @@ void Findcircle::drawshapex(
         dangle, dzoomx, dzoomy);
 }
 
-void Findcircle::setlinesamplerate(double dsamplerate)
+void FindCircle::setlinesamplerate(double dsamplerate)
 {
     m_dsamplerate = dsamplerate;
 
@@ -602,7 +602,7 @@ void Findcircle::setlinesamplerate(double dsamplerate)
         m_measure_geometry_request.version = m_measure_geometry_version;
     }
 }
-void Findcircle::setlinegap(int igap)
+void FindCircle::setlinegap(int igap)
 {
     m_iSelectPointGap = std::max(1, igap);
 
@@ -617,34 +617,34 @@ void Findcircle::setlinegap(int igap)
         MarkCircleMeasureGeometryDirty();
     }
 }
-void Findcircle::setmethod(int imethod)
+void FindCircle::setmethod(int imethod)
 {
     m_iMethod = imethod;
 }
-void Findcircle::setthre(int ithre)
+void FindCircle::setthre(int ithre)
 {
     m_iThreshold = ithre;
 }
-int Findcircle::thre()
+int FindCircle::thre()
 {
     return m_iThreshold;
 }
-void Findcircle::setgamarate(int igama)
+void FindCircle::setgamarate(int igama)
 {
     m_igamarate = igama;
 }
 
-void Findcircle::setfindsetting(int ifindset)
+void FindCircle::setfindsetting(int ifindset)
 {
     m_ifindset = ifindset;
 }
-void Findcircle::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
+void FindCircle::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 {
     m_ifilterborw = ifilterborw;
     m_ifiltermin = ifiltermin;
     m_ifiltermax = ifiltermax;
 }
-void Findcircle::MeasureT(void *pimage)
+void FindCircle::MeasureT(void *pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
@@ -663,13 +663,13 @@ void Findcircle::MeasureT(void *pimage)
     m_resultcircle.setshow(1);
     
 }
-void Findcircle::Measure(Image& image)
+void FindCircle::Measure(Image& image)
 {
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_image_enter",
         "running",
-        FindcircleMeasureMessage(
-            "Findcircle::Measure(Image&) enter",
+        FindCircleMeasureMessage(
+            "FindCircle::Measure(Image&) enter",
             image.getmat().empty() ? 0 : image.getmat().cols,
             image.getmat().empty() ? 0 : image.getmat().rows,
             image.getmat().empty() ? 0 : image.getmat().channels(),
@@ -712,7 +712,7 @@ void Findcircle::Measure(Image& image)
 
     if (image.getmat().empty())
     {
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_image_fail",
             "failed",
             "failure_stage=image_mat_empty");
@@ -728,10 +728,10 @@ void Findcircle::Measure(Image& image)
 
     if (left < 0.0 || top < 0.0)
     {
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_image_fail",
             "failed",
-            FindcircleMeasureMessage(
+            FindCircleMeasureMessage(
                 "failure_stage=circle_roi_negative",
                 image.getWidth(),
                 image.getHeight(),
@@ -750,10 +750,10 @@ void Findcircle::Measure(Image& image)
     if (right >= static_cast<double>(image.getWidth()) ||
         bottom >= static_cast<double>(image.getHeight()))
     {
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_image_fail",
             "failed",
-            FindcircleMeasureMessage(
+            FindCircleMeasureMessage(
                 "failure_stage=circle_roi_outside_image",
                 image.getWidth(),
                 image.getHeight(),
@@ -779,9 +779,9 @@ void Findcircle::Measure(Image& image)
             "circle_scan_lines_empty";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle Measure has zero scan lines; check setcircle/setcircle2, Setgap and geometry cache.";
+            "FindCircle Measure has zero scan lines; check setcircle/setcircle2, Setgap and geometry cache.";
 
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_geometry_fail",
             "failed",
             "failure_stage=circle_scan_lines_empty");
@@ -795,12 +795,12 @@ void Findcircle::Measure(Image& image)
             "circle_scan_workspace_unavailable";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle Measure requires an independent ImageManager BackImage workspace.";
+            "FindCircle Measure requires an independent ImageManager BackImage workspace.";
 
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_image_fail",
             "failed",
-            FindcircleMeasureMessage(
+            FindCircleMeasureMessage(
                 "failure_stage=circle_scan_workspace_unavailable",
                 image.getWidth(),
                 image.getHeight(),
@@ -825,10 +825,10 @@ void Findcircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.scan_line_length =
         ilineslen1;
 
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_before_capacity_check",
         "running",
-        FindcircleMeasureMessage(
+        FindCircleMeasureMessage(
             "before workspace capacity check",
             image.getWidth(),
             image.getHeight(),
@@ -851,9 +851,9 @@ void Findcircle::Measure(Image& image)
             "circle_process_width_zero";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle scan lines exist, but scan line length is zero.";
+            "FindCircle scan lines exist, but scan line length is zero.";
 
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_geometry_fail",
             "failed",
             "failure_stage=circle_process_width_zero");
@@ -867,12 +867,12 @@ void Findcircle::Measure(Image& image)
             "circle_scan_workspace_capacity_exceeded";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle Measure skipped because scan geometry exceeds the BackImage workspace.";
+            "FindCircle Measure skipped because scan geometry exceeds the BackImage workspace.";
 
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_capacity_fail",
             "failed",
-            FindcircleMeasureMessage(
+            FindCircleMeasureMessage(
                 "failure_stage=circle_scan_workspace_capacity_exceeded",
                 image.getWidth(),
                 image.getHeight(),
@@ -890,7 +890,7 @@ void Findcircle::Measure(Image& image)
 
     const int stage_limit = ReadCircleMeasureStageLimit();
 
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_stage_limit",
         "running",
         "stage_limit=" + std::to_string(stage_limit));
@@ -901,10 +901,10 @@ void Findcircle::Measure(Image& image)
     if (stage_limit == 2)
         return;
 
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_before_linecopyex",
         "running",
-        FindcircleMeasureMessage(
+        FindCircleMeasureMessage(
             "before linecopyex",
             image.getWidth(),
             image.getHeight(),
@@ -921,20 +921,20 @@ void Findcircle::Measure(Image& image)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_after_linecopyex",
         "running",
         "linecopyex complete");
     if (stage_limit == 3)
         return;
 
-      LogFindcircleMeasureProbe(
+      LogFindCircleMeasureProbe(
           "measure_before_backimage_roi",
           "running",
           "setroi=(0,0," + std::to_string(iprocessw + 3) + "," +
               std::to_string(isize + 5) + ")");
       g_pbackimage->setroi(0, 0, iprocessw+3, isize+5);
-      LogFindcircleMeasureProbe(
+      LogFindCircleMeasureProbe(
           "measure_before_blur_threshold",
           "running",
           "threshold=" + std::to_string(m_iThreshold) +
@@ -942,7 +942,7 @@ void Findcircle::Measure(Image& image)
               ", linegap=" + std::to_string(m_iSelectPointGap) +
               ", method=" + std::to_string(m_iMethod));
       g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
-      LogFindcircleMeasureProbe(
+      LogFindCircleMeasureProbe(
           "measure_after_blur_threshold",
           "running",
           "blur/threshold complete");
@@ -952,7 +952,7 @@ void Findcircle::Measure(Image& image)
       const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
       if (!compact_domain && g_pbackfindobject != nullptr && ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize))
       {
-          LogFindcircleMeasureProbe(
+          LogFindCircleMeasureProbe(
               "measure_before_object_prefilter",
               "running",
               "ifindset=" + std::to_string(m_ifindset));
@@ -967,7 +967,7 @@ void Findcircle::Measure(Image& image)
               m_ifilterborw,
               filter_min,
               static_cast<int>(m_ifiltermax));
-          LogFindcircleMeasureProbe(
+          LogFindCircleMeasureProbe(
               "measure_after_object_prefilter",
               "running",
               "object prefilter complete");
@@ -990,10 +990,10 @@ void Findcircle::Measure(Image& image)
       if (stage_limit == 5)
           return;
 
-      LogFindcircleMeasureProbe(
+      LogFindCircleMeasureProbe(
           "measure_before_sampling_loop",
           "running",
-          FindcircleMeasureMessage(
+          FindCircleMeasureMessage(
               "before sampling loop",
               image.getWidth(),
               image.getHeight(),
@@ -1038,7 +1038,7 @@ void Findcircle::Measure(Image& image)
           "FindCircle",
           "measure",
           "begin",
-          "Findcircle measure begin",
+          "FindCircle measure begin",
           0,
           0,
           0,
@@ -1057,7 +1057,7 @@ void Findcircle::Measure(Image& image)
               m_budget_state.exceeded = true;
               m_budget_state.exceeded_kind = "scan_line_budget_exceeded";
               m_lastMeasureGeometryDebug.failure_stage = "scan_line_budget_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure scan lines exceeded budget: " + std::to_string(scan_lines_processed) + " > " + std::to_string(m_budget.max_scan_lines);
+              m_lastMeasureGeometryDebug.detail = "FindCircle Measure scan lines exceeded budget: " + std::to_string(scan_lines_processed) + " > " + std::to_string(m_budget.max_scan_lines);
               return true;
           }
 
@@ -1065,7 +1065,7 @@ void Findcircle::Measure(Image& image)
               m_budget_state.exceeded = true;
               m_budget_state.exceeded_kind = "sample_budget_exceeded";
               m_lastMeasureGeometryDebug.failure_stage = "sample_budget_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure samples exceeded budget: " + std::to_string(total_samples) + " > " + std::to_string(m_budget.max_samples);
+              m_lastMeasureGeometryDebug.detail = "FindCircle Measure samples exceeded budget: " + std::to_string(total_samples) + " > " + std::to_string(m_budget.max_samples);
               return true;
           }
 
@@ -1073,7 +1073,7 @@ void Findcircle::Measure(Image& image)
               m_budget_state.exceeded = true;
               m_budget_state.exceeded_kind = "algorithm_budget_exceeded";
               m_lastMeasureGeometryDebug.failure_stage = "algorithm_budget_exceeded";
-              m_lastMeasureGeometryDebug.detail = "Findcircle Measure time exceeded budget: " + std::to_string(elapsed_ms) + "ms > " + std::to_string(m_budget.max_elapsed_ms) + "ms";
+              m_lastMeasureGeometryDebug.detail = "FindCircle Measure time exceeded budget: " + std::to_string(elapsed_ms) + "ms > " + std::to_string(m_budget.max_elapsed_ms) + "ms";
               return true;
           }
 
@@ -1271,7 +1271,7 @@ void Findcircle::Measure(Image& image)
             "result_points_available";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle original Measure produced result points.";
+            "FindCircle original Measure produced result points.";
     }
     else
     {
@@ -1279,7 +1279,7 @@ void Findcircle::Measure(Image& image)
             "circle_measure_no_result_points";
 
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle original Measure completed, but produced zero result points.";
+            "FindCircle original Measure completed, but produced zero result points.";
     }
 
     m_lastMeasureGeometryDebug.scan_lines_processed = scan_lines_processed;
@@ -1297,13 +1297,13 @@ void Findcircle::Measure(Image& image)
         "FindCircle",
         "measure",
         "end",
-        "Findcircle measure end",
+        "FindCircle measure end",
         scan_lines_processed,
         total_samples,
         static_cast<int>(m_measurepoints.size()),
         m_lastMeasureGeometryDebug.elapsed_ms
     });
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_image_exit",
         "finished",
         "scan_lines_processed=" + std::to_string(scan_lines_processed) +
@@ -1312,7 +1312,7 @@ void Findcircle::Measure(Image& image)
             ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
 
-void Findcircle::MeasureBalanced(Image& image)
+void FindCircle::MeasureBalanced(Image& image)
 {
     m_last_compact_path_used = 0;
     struct MeasureCandidate
@@ -1541,12 +1541,12 @@ void Findcircle::MeasureBalanced(Image& image)
     }
 }
 
-PointsShape& Findcircle::getresultpoints()
+PointsShape& FindCircle::getresultpoints()
 {
     return m_measurepoints;
 }
 
-const PointsShape& Findcircle::getresultpoints() const
+const PointsShape& FindCircle::getresultpoints() const
 {
     return m_measurepoints;
 }
@@ -1557,7 +1557,7 @@ const PointsShape& Findcircle::getresultpoints() const
     return std::sqrt(dx * dx + dy * dy);
 }
 
-void Findcircle::fitcircle()
+void FindCircle::fitcircle()
 { 
    // for (const auto& apoint : m_measurepoints) {
    //     m_curgroundBias.push_back(apoint);
@@ -1571,7 +1571,7 @@ void Findcircle::fitcircle()
         "FindCircle",
         "fitcircle",
         "begin",
-        "Findcircle fitcircle begin",
+        "FindCircle fitcircle begin",
         0,
         0,
         initial_points,
@@ -1600,7 +1600,7 @@ void Findcircle::fitcircle()
             "FindCircle",
             "fitcircle",
             "fail",
-            "Findcircle fitcircle failed: insufficient points",
+            "FindCircle fitcircle failed: insufficient points",
             0,
             0,
             initial_points,
@@ -1624,7 +1624,7 @@ void Findcircle::fitcircle()
             "FindCircle",
             "fitcircle",
             "fail",
-            "Findcircle fitcircle failed: degenerate or non-finite result",
+            "FindCircle fitcircle failed: degenerate or non-finite result",
             0,
             0,
             initial_points,
@@ -1675,7 +1675,7 @@ void Findcircle::fitcircle()
          "FindCircle",
          "fitcircle",
          "end",
-         "Findcircle fitcircle end radius=" + std::to_string(m_dradius),
+         "FindCircle fitcircle end radius=" + std::to_string(m_dradius),
          0,
          0,
          initial_points,
@@ -1683,7 +1683,7 @@ void Findcircle::fitcircle()
      });
 }
 
-void Findcircle::fitcirclefiltered()
+void FindCircle::fitcirclefiltered()
 {
     m_fitfilter_input_count = m_measurepoints.size();
     m_fitfilter_kept_count = 0;
@@ -1788,7 +1788,7 @@ void Findcircle::fitcirclefiltered()
     fitcircle();
 }
 
-void Findcircle::FitResultMeasure(void* pimage)
+void FindCircle::FitResultMeasure(void* pimage)
 {
     Image* pgetimage = static_cast<Image*>(pimage);
 
@@ -1848,35 +1848,35 @@ void Findcircle::FitResultMeasure(void* pimage)
         m_avgdist = pre_avg_distance;
     }
 }
-void Findcircle::setfitmeasuregap(int igap)
+void FindCircle::setfitmeasuregap(int igap)
 {
     m_fitmeasuregap = std::max(1, igap);
 }
 
-double Findcircle::getresultcentx()
+double FindCircle::getresultcentx()
 {
     return m_dresultcentx;
 }
-double Findcircle::getresultcenty()
+double FindCircle::getresultcenty()
 {
     return m_dresultcenty;
 }
-double Findcircle::getradius()
+double FindCircle::getradius()
 {
     return m_dradius;
 }
 
-double Findcircle::getavgdist()
+double FindCircle::getavgdist()
 {
     return m_avgdist;
 }
 
-int Findcircle::getvalidpointcount()
+int FindCircle::getvalidpointcount()
 {
     return static_cast<int>(m_measurepoints.size());
 }
 
-bool Findcircle::hasfitresult()
+bool FindCircle::hasfitresult()
 {
     return m_measurepoints.size() >= 3 &&
            m_dradius > 0.0 &&
@@ -1886,10 +1886,10 @@ bool Findcircle::hasfitresult()
            std::isfinite(m_avgdist);
 }
 
-double Findcircle::getresultcentx() const { return m_dresultcentx; }
-double Findcircle::getresultcenty() const { return m_dresultcenty; }
-double Findcircle::getradius() const { return m_dradius; }
-bool Findcircle::hasfitresult() const
+double FindCircle::getresultcentx() const { return m_dresultcentx; }
+double FindCircle::getresultcenty() const { return m_dresultcenty; }
+double FindCircle::getradius() const { return m_dradius; }
+bool FindCircle::hasfitresult() const
 {
     return m_measurepoints.size() >= 3 &&
            m_dradius > 0.0 &&
@@ -1899,12 +1899,12 @@ bool Findcircle::hasfitresult() const
            std::isfinite(m_avgdist);
 }
 
-bool Findcircle::canfitresultmeasure()
+bool FindCircle::canfitresultmeasure()
 {
     return hasfitresult() && m_fitmeasuregap > 0;
 }
 
-GeomAdaptor_Curve Findcircle::GetCurve(gp_Pnt center_p, Standard_Real radius)
+GeomAdaptor_Curve FindCircle::GetCurve(gp_Pnt center_p, Standard_Real radius)
 {
     GeomAdaptor_Curve adaptorCurve;
     gp_Pnt centerP = center_p; 
@@ -1916,7 +1916,7 @@ GeomAdaptor_Curve Findcircle::GetCurve(gp_Pnt center_p, Standard_Real radius)
     adaptorCurve = GeomAdaptor_Curve(theCircle);
     return adaptorCurve;
 }
-gp_Pnt Findcircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint)
+gp_Pnt FindCircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint)
 {
     // 3.   ʼ    ֵ   㹤 ߣ  㵽   ߣ 
     Extrema_ExtPC extremaCalculator(externalPoint, myCurve,
@@ -1944,9 +1944,9 @@ gp_Pnt Findcircle::FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt exte
     }
     return closestPoint;
 }
-void Findcircle::measure(void* pimage)
+void FindCircle::measure(void* pimage)
 {
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_void_enter",
         "running",
         std::string("pimage_null=") + (pimage == nullptr ? "true" : "false"));
@@ -1960,7 +1960,7 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_void_fail",
             "failed",
             "failure_stage=image_pointer_null");
@@ -1974,7 +1974,7 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_void_fail",
             "failed",
             "failure_stage=image_mat_empty");
@@ -1990,7 +1990,7 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_void_fail",
             "failed",
             "failure_stage=circle_scan_workspace_unavailable, reason=EnsureAlgorithmRuntimeResources failed");
@@ -2010,8 +2010,8 @@ void Findcircle::measure(void* pimage)
         m_lastMeasureGeometryDebug.failure_stage =
             "circle_scan_workspace_unavailable";
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle.measure requires an independent ImageManager BackImage workspace.";
-        LogFindcircleMeasureProbe(
+            "FindCircle.measure requires an independent ImageManager BackImage workspace.";
+        LogFindCircleMeasureProbe(
             "measure_void_fail",
             "failed",
             "failure_stage=circle_scan_workspace_unavailable, backimage_null=" +
@@ -2028,17 +2028,17 @@ void Findcircle::measure(void* pimage)
         m_dresultcenty = 0.0;
         m_dradius = 0.0;
         m_avgdist = 0.0;
-        LogFindcircleMeasureProbe(
+        LogFindCircleMeasureProbe(
             "measure_void_fail",
             "failed",
             "failure_stage=circle_measure_geometry_not_ready");
         return;
     }
 
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_void_before_measure_image",
         "running",
-        FindcircleMeasureMessage(
+        FindCircleMeasureMessage(
             "before Measure(Image&)",
             pgetimage->getWidth(),
             pgetimage->getHeight(),
@@ -2052,24 +2052,24 @@ void Findcircle::measure(void* pimage)
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
     Measure(*pgetimage);
-    LogFindcircleMeasureProbe(
+    LogFindCircleMeasureProbe(
         "measure_void_after_measure_image",
         "finished",
         "measure_points=" + std::to_string(m_measurepoints.size()) +
             ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
-void Findcircle::automeasure(void* pimage)
+void FindCircle::automeasure(void* pimage)
 {
     (void)pimage;
  
 }
-void Findcircle::shapesetroi(void* pshape)
+void FindCircle::shapesetroi(void* pshape)
 {
     if (pshape == nullptr)
         return;
     Shape::shapesetroi(pshape);
 }
-void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
+void FindCircle::easycluster(int igapx, int igapy, int iclusternum)
 {
     PointsShape resultpoints;
     resultpoints.addpoints(getresultpoints());
@@ -2115,14 +2115,14 @@ void Findcircle::easycluster(int igapx, int igapy, int iclusternum)
     }
 }
 
-void Findcircle::MarkCircleMeasureGeometryDirty()
+void FindCircle::MarkCircleMeasureGeometryDirty()
 {
     m_measure_geometry_dirty = true;
     m_measure_geometry_ready = false;
     ++m_measure_geometry_version;
 }
 
-void Findcircle::UpdateCircleMeasureGeometryRequest(bool hasInnerGap)
+void FindCircle::UpdateCircleMeasureGeometryRequest(bool hasInnerGap)
 {
     m_measure_geometry_request.valid = true;
 
@@ -2144,7 +2144,7 @@ void Findcircle::UpdateCircleMeasureGeometryRequest(bool hasInnerGap)
     m_measure_geometry_request.version = m_measure_geometry_version;
 }
 
-bool Findcircle::EnsureCircleMeasureGeometryReady()
+bool FindCircle::EnsureCircleMeasureGeometryReady()
 {
     if (!m_measure_geometry_request.valid)
     {
@@ -2153,7 +2153,7 @@ bool Findcircle::EnsureCircleMeasureGeometryReady()
         m_lastMeasureGeometryDebug.failure_stage =
             "circle_measure_request_invalid";
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle measure request is invalid; call setcircle or setcircle2 before measure.";
+            "FindCircle measure request is invalid; call setcircle or setcircle2 before measure.";
         return false;
     }
 
@@ -2188,8 +2188,8 @@ bool Findcircle::EnsureCircleMeasureGeometryReady()
     return ok;
 }
 
-bool Findcircle::BuildCircleMeasureGeometryFromRequest(
-    const FindcircleMeasureGeometryRequest& request)
+bool FindCircle::BuildCircleMeasureGeometryFromRequest(
+    const FindCircleMeasureGeometryRequest& request)
 {
     if (!request.valid)
         return false;
@@ -2229,14 +2229,14 @@ bool Findcircle::BuildCircleMeasureGeometryFromRequest(
         m_lastMeasureGeometryDebug.failure_stage =
             "circle_scan_lines_empty";
         m_lastMeasureGeometryDebug.detail =
-            "Findcircle geometry build produced zero scan lines; check setcircle/setcircle2 request and gap.";
+            "FindCircle geometry build produced zero scan lines; check setcircle/setcircle2 request and gap.";
     }
 
     return ok;
 }
 
-void Findcircle::BuildCircleMeasureGeometryCore(
-    const FindcircleMeasureGeometryRequest& request)
+void FindCircle::BuildCircleMeasureGeometryCore(
+    const FindCircleMeasureGeometryRequest& request)
 {
     Shape::clear();
 
@@ -2350,7 +2350,7 @@ void Findcircle::BuildCircleMeasureGeometryCore(
     }
 }
 
-void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
 {
     const int cx = getcirclecentx();
     const int cy = getcirclecenty();
@@ -2391,7 +2391,7 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         false,
         std::move(outer_scan));
 
-    const FindcircleMeasureGeometryDebug& debug = lastmeasuregeometrydebug();
+    const FindCircleMeasureGeometryDebug& debug = lastmeasuregeometrydebug();
     if (debug.has_inner_gap && debug.inner_gap > 0)
     {
         const double inner_radius = std::max(1.0, roi_radius - static_cast<double>(debug.inner_gap));
@@ -2447,42 +2447,42 @@ void Findcircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
     }
 }
 
-void Findcircle::setmaxelapsedms(int value)
+void FindCircle::setmaxelapsedms(int value)
 {
     m_budget.max_elapsed_ms = value;
 }
 
-void Findcircle::setmaxscanlines(int value)
+void FindCircle::setmaxscanlines(int value)
 {
     m_budget.max_scan_lines = value;
 }
 
-void Findcircle::setmaxsamples(int value)
+void FindCircle::setmaxsamples(int value)
 {
     m_budget.max_samples = value;
 }
 
-bool Findcircle::budgetexceeded() const
+bool FindCircle::budgetexceeded() const
 {
     return m_budget_state.exceeded;
 }
 
-int Findcircle::getelapsedms() const
+int FindCircle::getelapsedms() const
 {
     return m_budget_state.elapsed_ms;
 }
 
-int Findcircle::getscanlinecount() const
+int FindCircle::getscanlinecount() const
 {
     return m_budget_state.scan_line_count;
 }
 
-int Findcircle::getsamplecount() const
+int FindCircle::getsamplecount() const
 {
     return m_budget_state.sample_count;
 }
 
-const std::string& Findcircle::getfailurestage() const
+const std::string& FindCircle::getfailurestage() const
 {
     return m_lastMeasureGeometryDebug.failure_stage;
 }

@@ -204,8 +204,8 @@ double ComputeEdgeTransitionCost(const EdgeBandCandidate& previous,
 }
 }
 
-int Findline::m_curfindlinenum = 0;
-Findline::Findline() :Shape(),
+int FindLine::m_curfindlinenum = 0;
+FindLine::FindLine() :Shape(),
 m_ihgap(6),
 m_iwgap(6),
 m_iSelectPointGap(3),
@@ -238,15 +238,15 @@ m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
     g_pyrimage1 = ImageManager::GetPyrDownImage(icurmodule, 1);
     g_pyrimage2 = ImageManager::GetPyrDownImage(icurmodule, 2);
 }
-Findline::~Findline()
+FindLine::~FindLine()
 {
 
 }
-void Findline::setcomparegap(int igap)
+void FindLine::setcomparegap(int igap)
 {
     m_icomparegap = igap;
 }
-void Findline::setmeasurefallback(int mode)
+void FindLine::setmeasurefallback(int mode)
 {
     if (mode < 0)
         mode = 0;
@@ -256,7 +256,7 @@ void Findline::setmeasurefallback(int mode)
 
     m_measure_fallback_mode = mode;
 }
-void Findline::setshow(int ishow)
+void FindLine::setshow(int ishow)
 {
     if (ishow & 0x02)
     {
@@ -353,17 +353,17 @@ void Findline::setshow(int ishow)
     //m_lines_h[i].setshow(false);
     Shape::setshow(ishow);
 }
-void Findline::setselectedgenum(int iedgenum)
+void FindLine::setselectedgenum(int iedgenum)
 {
     m_iselectedgenum = iedgenum;
 }
-void Findline::clear()
+void FindLine::clear()
 {
     m_lines_w.clear();
     m_lines_h.clear();
 
 }
-void Findline::SetWHgap(int wgap, int hgap)
+void FindLine::SetWHgap(int wgap, int hgap)
 {
     const int newWgap = std::max(1, wgap);
     const int newHgap = std::max(1, hgap);
@@ -400,7 +400,7 @@ void Findline::SetWHgap(int wgap, int hgap)
             "SetWHgap_changed");
     }
 }
-void Findline::setlinesegment(double ix0, double iy0,
+void FindLine::setlinesegment(double ix0, double iy0,
     double ix1, double iy1, double dscale)
 {
     if (!std::isfinite(ix0) || !std::isfinite(iy0) || !std::isfinite(ix1) || !std::isfinite(iy1) ||
@@ -538,12 +538,12 @@ void Findline::setlinesegment(double ix0, double iy0,
         "setline_changed");
 }
 
-bool Findline::HasOriginalMeasureScanGeometry() const
+bool FindLine::HasOriginalMeasureScanGeometry() const
 {
     return !m_lines_w.empty() || !m_lines_h.empty();
 }
 
-void Findline::SyncMeasureGeometryCacheAfterNativeBuild(
+void FindLine::SyncMeasureGeometryCacheAfterNativeBuild(
     double nativeHalfWidth)
 {
     if (!m_measure_geometry_request.valid)
@@ -572,7 +572,7 @@ void Findline::SyncMeasureGeometryCacheAfterNativeBuild(
     }
 }
 
-void Findline::InvalidateMeasureAndFitAfterParamChange(
+void FindLine::InvalidateMeasureAndFitAfterParamChange(
     const char* reason)
 {
     m_measurepoints_w.clear();
@@ -581,7 +581,7 @@ void Findline::InvalidateMeasureAndFitAfterParamChange(
     m_scanEdgeBands.clear();
     m_bestEdgeChain.clear();
 
-    m_lastMeasureProfile = FindlineMeasureProfileStats();
+    m_lastMeasureProfile = FindLineMeasureProfileStats();
 
     clearfitresult();
 
@@ -595,7 +595,7 @@ void Findline::InvalidateMeasureAndFitAfterParamChange(
         "Findline parameter changed; previous measure points and fitline were invalidated. Run measure and fitline again.";
 }
 
-void Findline::setrect(int ix, int iy, int iw, int ih)
+void FindLine::setrect(int ix, int iy, int iw, int ih)
 { 
     m_iwgap = PositiveGap(m_iwgap);
     m_ihgap = PositiveGap(m_ihgap);
@@ -672,7 +672,7 @@ void Findline::setrect(int ix, int iy, int iw, int ih)
 
     Shape::setrect(ix, iy, iw, ih);
 }
-void Findline::getshape(void* pshape)
+void FindLine::getshape(void* pshape)
 {
     Shape* pshape0 = (Shape*)pshape;
     if (pshape0 == nullptr)
@@ -684,11 +684,11 @@ void Findline::getshape(void* pshape)
         RoundToInt(arect.Width()),
         RoundToInt(arect.Height()));
 }
-void Findline::translate(int ix,int iy)
+void FindLine::translate(int ix,int iy)
 {
     Translate(gp_Vec(ix, iy, 0)); 
 }
-void Findline::Translate(const gp_Vec& translationVector)
+void FindLine::Translate(const gp_Vec& translationVector)
 { 
    int ix0 = RoundToInt(translationVector.X());
    int iy0 = RoundToInt(translationVector.Y());
@@ -705,7 +705,7 @@ void Findline::Translate(const gp_Vec& translationVector)
         m_lines_h[i].Move(ix0, iy0);
     } 
 }
-void Findline::drawpattern()
+void FindLine::drawpattern()
 { 
     m_modelpoints.setshow(8);
     m_modelpoints.drawshape(getpath());
@@ -715,7 +715,7 @@ void Findline::drawpattern()
     m_measurepointsB_.drawshape(getpath());
 
 }
-void Findline::drawpatternx(double dmovx, double dmovy,
+void FindLine::drawpatternx(double dmovx, double dmovy,
     double dangle,double dzoomx, double dzoomy)
 {
     m_modelpoints.setshow(8);
@@ -730,7 +730,7 @@ void Findline::drawpatternx(double dmovx, double dmovy,
     m_measurepointsB_.drawshapex(getpath(), dmovx, dmovy,
         dangle, dzoomx, dzoomy);
 }
-void Findline::edgepattern(Image& image)
+void FindLine::edgepattern(Image& image)
 {
     m_measurepointsA.clear();
     m_measurepointsB.clear();
@@ -762,133 +762,133 @@ void Findline::edgepattern(Image& image)
     m_measurepointsB_.doublepattern(m_icomparegap, 3, m_modelpoints);
 
 }
-void Findline::patternzeroposition()
+void FindLine::patternzeroposition()
 {
     gp_Rectangle arect1 = m_modelpoints.boundingRectAB();
     m_modelpoints.MoveAB(RoundToInt(-arect1.TopLeft().X()), RoundToInt(-arect1.TopLeft().Y()));
 
 }
-void Findline::savepatternfile(const char* pchar)
+void FindLine::savepatternfile(const char* pchar)
 {
     //m_modelpoints.save(pchar);
     saveABpatternfile(pchar);
 }
-void Findline::loadpatternfile(const char* pchar)
+void FindLine::loadpatternfile(const char* pchar)
 {
     //m_modelpoints.load(pchar);
     loadABpatternfile(pchar);
 }
-void Findline::samplemodelAB(int inum)
+void FindLine::samplemodelAB(int inum)
 {
     m_modelpoints.resampleAB(inum);
 }
-void Findline::ABtoShape(std::vector<cv::Point2f>& points)
+void FindLine::ABtoShape(std::vector<cv::Point2f>& points)
 {
     m_modelpoints.ABtoShape(points);
 }
-void Findline::saveABpatternfile(const char* pchar)
+void FindLine::saveABpatternfile(const char* pchar)
 {
     m_modelpoints.saveAB(pchar);
 }
-void Findline::loadABpatternfile(const char* pchar)
+void FindLine::loadABpatternfile(const char* pchar)
 {
     m_modelpoints.loadAB(pchar);
 }
-int Findline::ABpatternsize()
+int FindLine::ABpatternsize()
 {
     return m_modelpoints.ABsize();
 }
-int Findline::getlearnacount()
+int FindLine::getlearnacount()
 {
     return static_cast<int>(m_measurepointsA.size());
 }
-int Findline::getlearnbcount()
+int FindLine::getlearnbcount()
 {
     return static_cast<int>(m_measurepointsB.size());
 }
-int Findline::getlearna2count()
+int FindLine::getlearna2count()
 {
     return static_cast<int>(m_measurepointsA_.size());
 }
-int Findline::getlearnb2count()
+int FindLine::getlearnb2count()
 {
     return static_cast<int>(m_measurepointsB_.size());
 }
-gp_Rectangle Findline::patternboundingrect()
+gp_Rectangle FindLine::patternboundingrect()
 {
     return m_modelpoints.boundingRect();
 }
-gp_Rectangle Findline::patternboundingrectAB()
+gp_Rectangle FindLine::patternboundingrectAB()
 {
     return m_modelpoints.boundingRectAB();
 }
-gp_Rectangle Findline::patternboundingrectA()
+gp_Rectangle FindLine::patternboundingrectA()
 {
     return m_modelpoints.boundingRectA();
 }
-gp_Rectangle Findline::patternboundingrectB()
+gp_Rectangle FindLine::patternboundingrectB()
 {
     return m_modelpoints.boundingRect();
 }
 
-void Findline::patterngap2gap(int inewgap)
+void FindLine::patterngap2gap(int inewgap)
 {
     m_modelpoints.patterngap2gap(inewgap);
 }
-void Findline::patternABgap2gap(double dnewgaprate)
+void FindLine::patternABgap2gap(double dnewgaprate)
 {
     m_modelpoints.patternABgap2gap(dnewgaprate);
 }
-void Findline::patternABsample(int irate)
+void FindLine::patternABsample(int irate)
 {
     m_modelpoints.patternABsample(irate);
 }
-void Findline::pattern2org()
+void FindLine::pattern2org()
 {
     m_modelpoints_org.copy(m_modelpoints);
 }
-void Findline::org2pattern()
+void FindLine::org2pattern()
 {
     m_modelpoints.copy(m_modelpoints_org);
 }
-void Findline::patternrootgrid(double itype, double drate, double ilevel)
+void FindLine::patternrootgrid(double itype, double drate, double ilevel)
 {
     m_modelpoints.keysrootgrid(RoundToInt(itype), drate, RoundToInt(ilevel));
 }
-void Findline::patterntranform(int igap, int itype, int isgap, int iline)
+void FindLine::patterntranform(int igap, int itype, int isgap, int iline)
 {
     m_modelpoints.patterntranform(igap, itype, isgap, iline);
 }
-void Findline::patternzoom(double dx, double dy, double igap, double itype)
+void FindLine::patternzoom(double dx, double dy, double igap, double itype)
 {
     m_modelpoints.patternzoom(dx, dy, RoundToInt(igap), RoundToInt(itype));
 }
-void Findline::patternrotate(double dangle)
+void FindLine::patternrotate(double dangle)
 {
     m_modelpoints.RotateAB(dangle);
 }
-void Findline::modelzoom(double dx, double dy)
+void FindLine::modelzoom(double dx, double dy)
 {
     m_modelpoints.Zoom(dx, dy);
 }
-gp_Path& Findline::getpatternpath()
+gp_Path& FindLine::getpatternpath()
 {
     return m_modelpoints.getpath();
 }
-gp_Path& Findline::getpatternpathA()
+gp_Path& FindLine::getpatternpathA()
 {
     return m_modelpoints.getpathA();
 }
-gp_Path& Findline::getpatternpathB()
+gp_Path& FindLine::getpatternpathB()
 {
     return m_modelpoints.getpathB();
 }
-PointsShape& Findline::getpattern()
+PointsShape& FindLine::getpattern()
 {
     return m_modelpoints;
 }
 
-void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
+void FindLine::patternfilter(double distanceThreshold , double waveletThreshold)
 {
     (void)distanceThreshold;
     (void)waveletThreshold;
@@ -938,14 +938,14 @@ void Findline::patternfilter(double distanceThreshold , double waveletThreshold)
     }
 #endif
 }
-void Findline::findpattern(void* pimage)
+void FindLine::findpattern(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
     edgepattern(*pgetimage);
 }
-void Findline::drawshape()
+void FindLine::drawshape()
 {
     if (show() & 0x04)
     {
@@ -974,7 +974,7 @@ void Findline::drawshape()
     }
     Shape::drawshape();
 }
-void Findline::drawshapex(double dmovx,double dmovy,double dangle,double dzoomx, double dzoomy)
+void FindLine::drawshapex(double dmovx,double dmovy,double dangle,double dzoomx, double dzoomy)
 {
     if (show() & 0x04)
     {
@@ -1006,11 +1006,11 @@ void Findline::drawshapex(double dmovx,double dmovy,double dangle,double dzoomx,
     }
     Shape::drawshapex( dmovx, dmovy, dangle, dzoomx, dzoomy);
 }
-void Findline::setlinesamplerate(double dsamplerate)
+void FindLine::setlinesamplerate(double dsamplerate)
 {
     m_dsamplerate = dsamplerate;
 }
-void Findline::setlinegap(int igap)
+void FindLine::setlinegap(int igap)
 {
     m_iSelectPointGap = std::max(1, igap);
 
@@ -1021,27 +1021,27 @@ void Findline::setlinegap(int igap)
 
     MarkMeasureGeometryDirty();
 }
-void Findline::setmethod(int imethod)
+void FindLine::setmethod(int imethod)
 {
     m_iMethod = imethod;
 }
-void Findline::setthre(int ithre)
+void FindLine::setthre(int ithre)
 {
     m_iThreshold = ithre;
 }
-int Findline::thre()
+int FindLine::thre()
 {
     return m_iThreshold;
 }
-void Findline::setgamarate(int igama)
+void FindLine::setgamarate(int igama)
 {
     m_igamarate = igama;
 }
-void Findline::setobjfilter(int ifindset)
+void FindLine::setobjfilter(int ifindset)
 {
     m_iobjfilterset = ifindset;
 }
-void Findline::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
+void FindLine::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
 {
     m_ifilterborw = ifilterborw;
     m_ifiltermin = ifiltermin;
@@ -1049,7 +1049,7 @@ void Findline::setfilter(int ifilterborw, int ifiltermin, int ifiltermax)
     m_filter_explicit = true;
 }
 
-void Findline::setfilterprofile(int profile)
+void FindLine::setfilterprofile(int profile)
 {
     if (profile < 0)
         profile = 0;
@@ -1058,7 +1058,7 @@ void Findline::setfilterprofile(int profile)
     m_filter_profile = profile;
 }
 
-int Findline::effectivefiltermin() const
+int FindLine::effectivefiltermin() const
 {
     if (m_filter_explicit)
         return static_cast<int>(m_ifiltermin);
@@ -1067,16 +1067,16 @@ int Findline::effectivefiltermin() const
     return static_cast<int>(m_ifiltermin);
 }
 
-int Findline::effectivefiltermax() const
+int FindLine::effectivefiltermax() const
 {
     return static_cast<int>(m_ifiltermax);
 }
 
-int Findline::effectivefilterborw() const
+int FindLine::effectivefilterborw() const
 {
     return m_ifilterborw;
 }
-void Findline::MeasureT(void *pimage)
+void FindLine::MeasureT(void *pimage)
 {
     Image* image = (Image*)pimage;
     if (image == nullptr || image->getmat().empty() || g_pbackimage == nullptr || g_pbackimage == image)
@@ -1121,7 +1121,7 @@ void Findline::MeasureT(void *pimage)
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
 }
-void Findline::Measure(Image& image)
+void FindLine::Measure(Image& image)
 {
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
@@ -1130,7 +1130,7 @@ void Findline::Measure(Image& image)
         "measure_image_enter",
         "running",
         FindlineMeasureMessage(
-            "Findline::Measure(Image&) enter",
+            "FindLine::Measure(Image&) enter",
             image.getmat().empty() ? 0 : image.getmat().cols,
             image.getmat().empty() ? 0 : image.getmat().rows,
             image.getmat().empty() ? 0 : image.getmat().channels(),
@@ -1521,8 +1521,8 @@ void Findline::Measure(Image& image)
             m_effective_filter_min = effectivefiltermin();
             m_effective_filter_max = effectivefiltermax();
 
-            auto ComputeComponentStats = [&](const cv::Mat& binary, bool whiteForeground, int minArea, int maxArea) -> FindlineMeasureInputDebug::ComponentStats {
-                FindlineMeasureInputDebug::ComponentStats statsOut;
+            auto ComputeComponentStats = [&](const cv::Mat& binary, bool whiteForeground, int minArea, int maxArea) -> FindLineMeasureInputDebug::ComponentStats {
+                FindLineMeasureInputDebug::ComponentStats statsOut;
 
                 cv::Mat mask;
                 if (whiteForeground)
@@ -1942,9 +1942,9 @@ void Findline::Measure(Image& image)
     */
 
 }
-void Findline::MeasureBalanced(Image& image)
+void FindLine::MeasureBalanced(Image& image)
 {
-    FindlineMeasureProfileStats stats;
+    FindLineMeasureProfileStats stats;
     const std::chrono::steady_clock::time_point total_begin = std::chrono::steady_clock::now();
 
     m_budget_state = CxAlgorithmBudgetState();
@@ -1994,7 +1994,7 @@ void Findline::MeasureBalanced(Image& image)
         stats.edgeband_count <= 0 &&
         m_measure_fallback_mode == 2)
     {
-        FindlineMeasureProfileStats fallbackStats;
+        FindLineMeasureProfileStats fallbackStats;
 
         if (MeasureSimpleRoiGradientPoints(image, fallbackStats))
         {
@@ -2025,16 +2025,16 @@ void Findline::MeasureBalanced(Image& image)
 
 }
 
-void Findline::ClearMeasureState()
+void FindLine::ClearMeasureState()
 {
     m_scanEdgeBands.clear();
     m_bestEdgeChain.clear();
-    m_lastMeasureProfile = FindlineMeasureProfileStats();
+    m_lastMeasureProfile = FindLineMeasureProfileStats();
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
 }
 
-void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stats, const std::chrono::steady_clock::time_point& total_begin)
+void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stats, const std::chrono::steady_clock::time_point& total_begin)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     if (g_pbackimage == nullptr)
@@ -2161,7 +2161,7 @@ void Findline::BuildScanProfiles(Image& image, FindlineMeasureProfileStats& stat
     stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::CollectAllEdgeBands(Image& image, FindlineMeasureProfileStats& stats)
+void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& stats)
 {
     (void)image;
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -2271,13 +2271,13 @@ void Findline::CollectAllEdgeBands(Image& image, FindlineMeasureProfileStats& st
     stats.edgeband_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::BuildEdgeBandGraph(FindlineMeasureProfileStats& stats)
+void FindLine::BuildEdgeBandGraph(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     stats.graph_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::SolveBestEdgeChain(FindlineMeasureProfileStats& stats)
+void FindLine::SolveBestEdgeChain(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     m_bestEdgeChain.clear();
@@ -2357,7 +2357,7 @@ void Findline::SolveBestEdgeChain(FindlineMeasureProfileStats& stats)
     stats.path_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::ConvertBestChainToMeasurePoints(FindlineMeasureProfileStats& stats)
+void FindLine::ConvertBestChainToMeasurePoints(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     m_measurepoints_w.clear();
@@ -2386,7 +2386,7 @@ void Findline::ConvertBestChainToMeasurePoints(FindlineMeasureProfileStats& stat
     stats.graph_ms += ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::RefineBestChainSubpixel(Image& image, FindlineMeasureProfileStats& stats)
+void FindLine::RefineBestChainSubpixel(Image& image, FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     double total_adjust = 0.0;
@@ -2465,7 +2465,7 @@ void Findline::RefineBestChainSubpixel(Image& image, FindlineMeasureProfileStats
     stats.subpixel_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::FilterMeasurePoints(FindlineMeasureProfileStats& stats)
+void FindLine::FilterMeasurePoints(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     SmartFilter(-1, -1);
@@ -2473,7 +2473,7 @@ void Findline::FilterMeasurePoints(FindlineMeasureProfileStats& stats)
     ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::FitWeightedLeastSquares(FindlineMeasureProfileStats& stats)
+void FindLine::FitWeightedLeastSquares(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     if (m_bestEdgeChain.size() < 2)
@@ -2570,7 +2570,7 @@ void Findline::FitWeightedLeastSquares(FindlineMeasureProfileStats& stats)
     stats.fit_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::RefineJointConsistency(FindlineMeasureProfileStats& stats)
+void FindLine::RefineJointConsistency(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     if (m_bestEdgeChain.size() < 3)
@@ -2630,7 +2630,7 @@ void Findline::RefineJointConsistency(FindlineMeasureProfileStats& stats)
     stats.joint_refine_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
-void Findline::SmartFilter(double dist, double filtnum)
+void FindLine::SmartFilter(double dist, double filtnum)
 {
     int igapvalue_h = m_ihgap;
     int igapvalue_w = m_iwgap;
@@ -2650,36 +2650,36 @@ void Findline::SmartFilter(double dist, double filtnum)
    // m_measurepoints_w.SortPoints(0, igapvalue_w,10,45);
     //m_measurepoints_h
 }
-void Findline::PyrImage(Image& image)
+void FindLine::PyrImage(Image& image)
 {
     (void)image;
 }
-PointsShape& Findline::getresultpointsw()
+PointsShape& FindLine::getresultpointsw()
 {
     return m_measurepoints_w;
 }
 
-const PointsShape& Findline::getresultpointsw() const
+const PointsShape& FindLine::getresultpointsw() const
 {
     return m_measurepoints_w;
 }
-PointsShape& Findline::getresultpointsh()
+PointsShape& FindLine::getresultpointsh()
 {
     return m_measurepoints_h;
 }
 
-const PointsShape& Findline::getresultpointsh() const
+const PointsShape& FindLine::getresultpointsh() const
 {
     return m_measurepoints_h;
 }
-void Findline::measure(void* pimage)
+void FindLine::measure(void* pimage)
 {
     LogFindlineMeasureProbe(
         "measure_void_enter",
         "running",
         std::string("pimage_null=") + (pimage == nullptr ? "true" : "false"));
 
-    m_lastMeasureInputDebug = FindlineMeasureInputDebug();
+    m_lastMeasureInputDebug = FindLineMeasureInputDebug();
     m_lastMeasureInputDebug.image_ptr_valid = (pimage != nullptr);
     m_lastMeasureInputDebug.method = m_iMethod;
     m_lastMeasureInputDebug.threshold = m_iThreshold;
@@ -2775,7 +2775,7 @@ void Findline::measure(void* pimage)
         return;
     }
 
-    FindlineDisplaySnapshot displaySnapshot;
+    FindLineDisplaySnapshot displaySnapshot;
     if (getdisplaysnapshot(displaySnapshot))
     {
         m_lastMeasureInputDebug.has_line_roi = true;
@@ -3016,7 +3016,7 @@ void Findline::measure(void* pimage)
         m_lastMeasureInputDebug.original_detail =
             m_lastMeasureInputDebug.detail;
 
-        FindlineMeasureProfileStats fallbackStats;
+        FindLineMeasureProfileStats fallbackStats;
         if (MeasureSimpleRoiGradientPoints(*image, fallbackStats))
         {
             fallbackStats.total_ms = m_lastMeasureProfile.total_ms;
@@ -3049,7 +3049,7 @@ void Findline::measure(void* pimage)
             "original_measure_pipeline_diagnostics_only";
     }
 }
-void Findline::ProbeDisplayRoiGrayStats(Image& image)
+void FindLine::ProbeDisplayRoiGrayStats(Image& image)
 {
     cv::Mat src = image.getmat();
     if (src.empty())
@@ -3065,7 +3065,7 @@ void Findline::ProbeDisplayRoiGrayStats(Image& image)
         cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
     }
 
-    FindlineDisplaySnapshot snapshot;
+    FindLineDisplaySnapshot snapshot;
     if (!getdisplaysnapshot(snapshot) || !snapshot.has_line_roi)
         return;
 
@@ -3141,8 +3141,8 @@ void Findline::ProbeDisplayRoiGrayStats(Image& image)
     }
 }
 
-bool Findline::MeasureSimpleRoiGradientPoints(Image& image,
-                                              FindlineMeasureProfileStats& stats)
+bool FindLine::MeasureSimpleRoiGradientPoints(Image& image,
+                                              FindLineMeasureProfileStats& stats)
 {
     cv::Mat src = image.getmat();
 
@@ -3160,7 +3160,7 @@ bool Findline::MeasureSimpleRoiGradientPoints(Image& image,
         cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
     }
 
-    FindlineDisplaySnapshot roi;
+    FindLineDisplaySnapshot roi;
 
     if (!getdisplaysnapshot(roi) || !roi.has_line_roi || !roi.has_scan_box)
         return false;
@@ -3297,20 +3297,20 @@ bool Findline::MeasureSimpleRoiGradientPoints(Image& image,
     return stats.point_count >= 2;
 }
 
-void Findline::pyrimage(void* pimage)
+void FindLine::pyrimage(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
     if (pgetimage == nullptr)
         return;
     PyrImage(*pgetimage);
 }
-void Findline::shapesetroi(void* pshape)
+void FindLine::shapesetroi(void* pshape)
 {
     if (pshape == nullptr)
         return;
     Shape::shapesetroi(pshape);
 }
-void Findline::easycluster(int igapx, int igapy, int iclusternum)
+void FindLine::easycluster(int igapx, int igapy, int iclusternum)
 {
     PointsShape resultpoints;
     resultpoints.addpoints(getresultpointsw());
@@ -3368,7 +3368,7 @@ void Findline::easycluster(int igapx, int igapy, int iclusternum)
         }
     }
 }
-void Findline::InflectionPoint(void* points)
+void FindLine::InflectionPoint(void* points)
 { 
     PointsShape* tpoints = (PointsShape*)points;
     if (tpoints == nullptr)
@@ -3385,9 +3385,9 @@ void Findline::InflectionPoint(void* points)
     } 
 }
 
-bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
+bool FindLine::getdisplaysnapshot(FindLineDisplaySnapshot& out) const
 {
-    out = FindlineDisplaySnapshot();
+    out = FindLineDisplaySnapshot();
 
     if (!m_has_display_line_roi)
         return false;
@@ -3423,12 +3423,12 @@ bool Findline::getdisplaysnapshot(FindlineDisplaySnapshot& out) const
         out.scan_half_width = box.half_width;
     }
 
-    out.source = "Findline::getdisplaysnapshot";
+    out.source = "FindLine::getdisplaysnapshot";
 
     return true;
 }
 
-void Findline::exportmeasuredebugpoints(std::vector<float>& outXY) const
+void FindLine::exportmeasuredebugpoints(std::vector<float>& outXY) const
 {
     outXY.clear();
 
@@ -3448,42 +3448,42 @@ void Findline::exportmeasuredebugpoints(std::vector<float>& outXY) const
     }
 }
 
-void Findline::setmaxelapsedms(int value)
+void FindLine::setmaxelapsedms(int value)
 {
     m_budget.max_elapsed_ms = value;
 }
 
-void Findline::setmaxscanlines(int value)
+void FindLine::setmaxscanlines(int value)
 {
     m_budget.max_scan_lines = value;
 }
 
-void Findline::setmaxsamples(int value)
+void FindLine::setmaxsamples(int value)
 {
     m_budget.max_samples = value;
 }
 
-bool Findline::budgetexceeded() const
+bool FindLine::budgetexceeded() const
 {
     return m_budget_state.exceeded;
 }
 
-int Findline::getelapsedms() const
+int FindLine::getelapsedms() const
 {
     return m_budget_state.elapsed_ms;
 }
 
-int Findline::getscanlinecount() const
+int FindLine::getscanlinecount() const
 {
     return m_budget_state.scan_line_count;
 }
 
-int Findline::getsamplecount() const
+int FindLine::getsamplecount() const
 {
     return m_budget_state.sample_count;
 }
 
-const std::string& Findline::getfailurestage() const
+const std::string& FindLine::getfailurestage() const
 {
     return m_lastMeasureInputDebug.failure_stage;
 }
@@ -3598,20 +3598,20 @@ LineFitResult FitAxisPriority(const std::vector<LineFitSample>& points)
 }
 }
 
-void Findline::clearfitresult()
+void FindLine::clearfitresult()
 {
     m_result_x0=m_result_y0=m_result_x1=m_result_y1=m_result_avgdist=0.0;
     m_result_valid_points=0; m_has_fit_result=false;
 }
 
-void Findline::setfitmode(int mode)
+void FindLine::setfitmode(int mode)
 {
     m_fitline_mode = mode >= static_cast<int>(FitlineMode::LeastSquares) &&
         mode <= static_cast<int>(FitlineMode::WeightedMeasurementPoints)
         ? static_cast<FitlineMode>(mode) : FitlineMode::Unspecified;
 }
 
-void Findline::setfitpointweight(int index, double weight)
+void FindLine::setfitpointweight(int index, double weight)
 {
     if (index < 0) return;
     if (m_fit_point_weights.size() <= static_cast<std::size_t>(index))
@@ -3619,9 +3619,9 @@ void Findline::setfitpointweight(int index, double weight)
     m_fit_point_weights[static_cast<std::size_t>(index)] = std::isfinite(weight) && weight > 0.0 ? weight : 1.0;
 }
 
-void Findline::fitline() { fitline(m_fitline_mode); }
+void FindLine::fitline() { fitline(m_fitline_mode); }
 
-void Findline::fitline(FitlineMode mode)
+void FindLine::fitline(FitlineMode mode)
 {
     clearfitresult();
     if (mode == FitlineMode::Unspecified) mode = FitlineMode::LeastSquares;
@@ -3660,7 +3660,7 @@ void Findline::fitline(FitlineMode mode)
     m_fitline_status=std::string("geometry_result_available: ")+names[mode_index];
 }
 
-/*void Findline::SeekPoints(PointsShape& seekpoints, gp_Pnt& point, int ivect)
+/*void FindLine::SeekPoints(PointsShape& seekpoints, gp_Pnt& point, int ivect)
 {
     //LineMeasurePoints m_l_measure_h_seek;
     cv::Mat binaryImage;
@@ -3688,14 +3688,14 @@ void Findline::fitline(FitlineMode mode)
    
 }*/
 
-void Findline::MarkMeasureGeometryDirty()
+void FindLine::MarkMeasureGeometryDirty()
 {
     m_measure_geometry_dirty = true;
     m_measure_geometry_ready = false;
     ++m_measure_geometry_version;
 }
 
-double Findline::ComputeMeasureHalfWidthForLine(double x0,
+double FindLine::ComputeMeasureHalfWidthForLine(double x0,
                                                 double y0,
                                                 double x1,
                                                 double y1) const
@@ -3718,7 +3718,7 @@ double Findline::ComputeMeasureHalfWidthForLine(double x0,
     return std::max(1.0, projectedHalfWidth);
 }
 
-void Findline::UpdateMeasureGeometryRequest(double x0,
+void FindLine::UpdateMeasureGeometryRequest(double x0,
                                             double y0,
                                             double x1,
                                             double y1,
@@ -3744,7 +3744,7 @@ void Findline::UpdateMeasureGeometryRequest(double x0,
     MarkMeasureGeometryDirty();
 }
 
-void Findline::BuildOriginalMeasureGeometryCore(double ix0,
+void FindLine::BuildOriginalMeasureGeometryCore(double ix0,
                                                 double iy0,
                                                 double ix1,
                                                 double iy1,
@@ -3868,8 +3868,8 @@ void Findline::BuildOriginalMeasureGeometryCore(double ix0,
     );
 }
 
-bool Findline::BuildOriginalMeasureGeometryFromRequest(
-    const FindlineMeasureGeometryRequest& request)
+bool FindLine::BuildOriginalMeasureGeometryFromRequest(
+    const FindLineMeasureGeometryRequest& request)
 {
     if (!request.valid)
         return false;
@@ -3898,7 +3898,7 @@ bool Findline::BuildOriginalMeasureGeometryFromRequest(
     return true;
 }
 
-bool Findline::EnsureOriginalMeasureGeometryReady()
+bool FindLine::EnsureOriginalMeasureGeometryReady()
 {
     if (!m_measure_geometry_request.valid)
     {
@@ -3943,9 +3943,9 @@ bool Findline::EnsureOriginalMeasureGeometryReady()
     return ok;
 }
 
-void Findline::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
+void FindLine::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
 {
-    FindlineDisplaySnapshot snapshot;
+    FindLineDisplaySnapshot snapshot;
     if (!getdisplaysnapshot(snapshot))
         return;
 

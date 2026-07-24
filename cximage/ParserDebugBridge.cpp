@@ -1,6 +1,6 @@
 #include "ParserDebugBridge.h"
 
-#include "Findcircle.h"
+#include "FindCircle.h"
 #include "findline.h"
 #include "Image.h"
 #include "CircleRingGauge.h"
@@ -413,7 +413,7 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
     }
     else if (snapshot.type == "FindCircle" && snapshot.exists_in_parser)
     {
-      Findcircle* circle = static_cast<Findcircle*>(
+      FindCircle* circle = static_cast<FindCircle*>(
         QueryClassObject(snapshot.type, snapshot.name));
       if (circle != nullptr)
       {
@@ -468,7 +468,7 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
     }
     else if (snapshot.type == "FastMatch" && snapshot.exists_in_parser)
     {
-      fastmatch* fm = static_cast<fastmatch*>(
+      FastMatch* fm = static_cast<FastMatch*>(
         QueryClassObject(snapshot.type, snapshot.name));
       if (fm != nullptr)
       {
@@ -489,7 +489,7 @@ std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects
         const RectsShape& result_rects = *fm->getresultrects();
         snapshot.fastmatch_has_result_box = result_rects.size() > 0;
         snapshot.fastmatch_result_status = candidate_count > 0 ? "geometry_result_available" : "PENDING";
-        snapshot.value_summary = "fastmatch: candidates=" + std::to_string(candidate_count) +
+        snapshot.value_summary = "FastMatch: candidates=" + std::to_string(candidate_count) +
           ", best_score=" + std::to_string(fm->getresultbestscore());
       }
     }

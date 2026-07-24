@@ -9,7 +9,7 @@
 
 #include "CxAnnotationToolRuntime.h"
 #include "CxUnifiedLog.h"
-#include "Findcircle.h"
+#include "FindCircle.h"
 #include "Findellipse.h"
 #include "FindRect.h"
 #include "findline.h"
@@ -129,7 +129,7 @@ void UpdateManualGaugeFromElement(ManualTestContext& context,
   }
   else if (element.kind == OverlayKind::Circle && !element.image_points.empty())
   {
-    gauge.tool = "Findcircle";
+    gauge.tool = "FindCircle";
     gauge.has_circle_gauge = true;
     gauge.circle_cx = static_cast<int>(std::lround(element.image_points[0].x));
     gauge.circle_cy = static_cast<int>(std::lround(element.image_points[0].y));
@@ -177,7 +177,7 @@ void UpdateManualGaugeFromShapeElement(
     if (!element.shape->exportCircle(center, radius, inner_radius))
       return;
 
-    gauge.tool = "Findcircle";
+    gauge.tool = "FindCircle";
     gauge.has_circle_gauge = true;
     gauge.has_line_gauge = false;
     gauge.has_ellipse_gauge = false;
@@ -400,7 +400,7 @@ bool ViewController::IsMouseInsideImageCanvas(const ImVec2& p) const
 bool ViewController::HasActiveFindCircleGauge() const
 {
     return m_manualTest.current_gauge.has_circle_gauge ||
-           m_manualTest.current_gauge.tool == "Findcircle";
+           m_manualTest.current_gauge.tool == "FindCircle";
 }
 
 bool ViewController::HasEditableFindCircleGauge() const
@@ -618,7 +618,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         if (frame.left_down)
         {
             // Existing gauge/ROI handles must be allowed to move outside the
-            // image bounds.  Findcircle radius handles and wide Findline
+            // image bounds.  FindCircle radius handles and wide Findline
             // boxes often intentionally extend past the visible image while
             // the center or fitted result remains meaningful.  New shape
             // creation is still clamped in its draft path below.
@@ -669,7 +669,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 void* toolObj = m_parserDebugBridge.QueryClassObject("FastMatch", commit.owner_ref);
                 if (toolObj != nullptr)
                 {
-                    fastmatch* tool = static_cast<fastmatch*>(toolObj);
+                    FastMatch* tool = static_cast<FastMatch*>(toolObj);
                     auto* layer = &m_annotationLayer;
                     const auto& elements = layer->ShapeElements();
                     for (const auto& elem : elements)
@@ -1818,7 +1818,7 @@ void ViewController::drawImageEvidencePanels()
         if (ImGui::Button("Apply To Parser"))
         {
           if (!QueryParserObjectExists("FindCircle", "afindcircle0"))
-            m_parserDebugBridge.ApplyStatement("Findcircle afindcircle0;");
+            m_parserDebugBridge.ApplyStatement("FindCircle afindcircle0;");
           const bool applied = m_parserDebugBridge.ApplyStatement(
             selected->generated_statement);
           m_scriptResult.status = applied ? "PENDING" : "BLOCKED";

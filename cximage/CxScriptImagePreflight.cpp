@@ -56,7 +56,7 @@ Stage25ImagePreflightResult Stage25ImagePreflight::Run(
             (min_x >= 0 && max_x <= result.image_width &&
              min_y >= 0 && max_y <= result.image_height);
     }
-    else if (tool == "Findcircle")
+    else if (tool == "FindCircle")
     {
         double radius = std::sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
         int min_x = static_cast<int>(x0 - radius - gap - linegap);

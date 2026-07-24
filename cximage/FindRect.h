@@ -4,7 +4,7 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
-#include "Findline.h"
+#include "FindLine.h"
 #include "../cxgeom/include/CxGeomElementBody.h"
 
 class ICxShapeSink;
@@ -82,7 +82,7 @@ public:
             double fit_error = 0.0;
             double angle = 0.0;
         } line;
-        FindlineMeasureProfileStats stats;
+        FindLineMeasureProfileStats stats;
         gp_Rectangle roi = gp_Rectangle(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
     };
 
@@ -143,10 +143,10 @@ private:
     int m_imaxobjh;
     double m_depsilonratio;
     double m_dminfillratio;
-    Findline m_topfinder;
-    Findline m_bottomfinder;
-    Findline m_leftfinder;
-    Findline m_rightfinder;
+    FindLine m_topfinder;
+    FindLine m_bottomfinder;
+    FindLine m_leftfinder;
+    FindLine m_rightfinder;
     static int m_curfindrectnum;
 };
 

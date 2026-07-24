@@ -128,7 +128,7 @@ bool ValidateManualGaugeGeometryForEditing(
             reason.clear();
         return reason.empty();
     }
-    if (gauge.tool == "Findcircle")
+    if (gauge.tool == "FindCircle")
     {
         if (!gauge.has_circle_gauge)
             reason = "circle gauge is unavailable";
@@ -212,7 +212,7 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
         InjectManualGaugeInt(context, "global_method", gauge.method);
     }
-    else if (gauge.tool == "Findcircle")
+    else if (gauge.tool == "FindCircle")
     {
         NormalizeManualGaugeGeometry(gauge);
         InjectManualGaugeInt(context, "global_circle_cx", gauge.circle_cx);
@@ -495,7 +495,7 @@ bool ExportManualGaugeManifestCandidate(
         file << "m.image_addfindlinetarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
              << gauge.line_x0 << ", " << gauge.line_y0 << ", " << gauge.line_x1 << ", "
              << gauge.line_y1 << ", " << gauge.wgap << ", " << gauge.hgap << ");\n";
-    else if (gauge.tool == "Findcircle")
+    else if (gauge.tool == "FindCircle")
         file << "m.image_addfindcircletarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
              << gauge.circle_cx << ", " << gauge.circle_cy << ", " << gauge.circle_px << ", "
              << gauge.circle_py << ", " << gauge.gap << ", " << gauge.linegap << ");\n";

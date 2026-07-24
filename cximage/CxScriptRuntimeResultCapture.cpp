@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "CxScriptRuntimeResultCapture.h"
-#include "Findline.h"
-#include "Findcircle.h"
-#include "Findellipse.h"
+#include "FindLine.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
@@ -55,8 +55,8 @@ void CopyShapeElementsToSnapshots(
     }
 }
 
-bool CaptureFindlineResult(
-    Findline& tool,
+bool CaptureFindLineResult(
+    FindLine& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
@@ -67,7 +67,7 @@ bool CaptureFindlineResult(
     output.valid_points_count = tool.getvalidpointcount();
     output.has_fit_line = tool.hasfitresult();
     output.avgdist = tool.getavgdist();
-    const FindlineMeasureInputDebug& debug = tool.lastmeasureinputdebug();
+    const FindLineMeasureInputDebug& debug = tool.lastmeasureinputdebug();
     output.object_prefilter_requested = (debug.objfilterset & 0x01) != 0;
     output.object_prefilter_applied = debug.findobject_measure_called;
     output.object_filter_borw = debug.effective_filter_borw;
@@ -93,8 +93,8 @@ bool CaptureFindlineResult(
     return true;
 }
 
-bool CaptureFindcircleResult(
-    Findcircle& tool,
+bool CaptureFindCircleResult(
+    FindCircle& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
@@ -130,8 +130,8 @@ bool CaptureFindcircleResult(
     return true;
 }
 
-bool CaptureFindellipseResult(
-    Findellipse& tool,
+bool CaptureFindEllipseResult(
+    FindEllipse& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
@@ -139,7 +139,7 @@ bool CaptureFindellipseResult(
     output.name = object_name;
     output.owner_ref = object_name;
 
-    FindellipseDisplaySnapshot snapshot;
+    FindEllipseDisplaySnapshot snapshot;
     const bool has_snapshot = tool.getdisplaysnapshot(snapshot);
     output.valid_points_count = snapshot.measure_points_count;
     output.has_fit_ellipse = tool.hasfitresult() != 0.0;
@@ -271,7 +271,7 @@ bool CaptureFindRectResult(
 }
 
 bool CaptureFastMatchResult(
-    fastmatch& tool,
+    FastMatch& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output)
 {
@@ -530,7 +530,7 @@ bool CaptureRuntimeToolResults(
 
     for (int i = 0; i < findline_count; ++i)
     {
-        Findline* tool = static_cast<Findline*>(
+        FindLine* tool = static_cast<FindLine*>(
             runtime.GetClassObj("FindLine", i));
 
         if (tool == nullptr)
@@ -547,7 +547,7 @@ bool CaptureRuntimeToolResults(
 
         try
         {
-            if (!CaptureFindlineResult(*tool, object_name, tool_capture))
+            if (!CaptureFindLineResult(*tool, object_name, tool_capture))
             {
                 reason = "failed to capture Findline: " + object_name;
                 return false;
@@ -555,7 +555,7 @@ bool CaptureRuntimeToolResults(
         }
         catch (...)
         {
-            reason = "CaptureFindlineResult crashed for: " + object_name;
+            reason = "CaptureFindLineResult crashed for: " + object_name;
             return false;
         }
 
@@ -569,7 +569,7 @@ bool CaptureRuntimeToolResults(
 
     for (int i = 0; i < findcircle_count; ++i)
     {
-        Findcircle* tool = static_cast<Findcircle*>(
+        FindCircle* tool = static_cast<FindCircle*>(
             runtime.GetClassObj("FindCircle", i));
 
         if (tool == nullptr)
@@ -586,15 +586,15 @@ bool CaptureRuntimeToolResults(
 
         try
         {
-            if (!CaptureFindcircleResult(*tool, object_name, tool_capture))
+            if (!CaptureFindCircleResult(*tool, object_name, tool_capture))
             {
-                reason = "failed to capture Findcircle: " + object_name;
+                reason = "failed to capture FindCircle: " + object_name;
                 return false;
             }
         }
         catch (...)
         {
-            reason = "CaptureFindcircleResult crashed for: " + object_name;
+            reason = "CaptureFindCircleResult crashed for: " + object_name;
             return false;
         }
 
@@ -608,7 +608,7 @@ bool CaptureRuntimeToolResults(
 
     for (int i = 0; i < findellipse_count; ++i)
     {
-        Findellipse* tool = static_cast<Findellipse*>(
+        FindEllipse* tool = static_cast<FindEllipse*>(
             runtime.GetClassObj("FindEllipse", i));
 
         if (tool == nullptr)
@@ -625,7 +625,7 @@ bool CaptureRuntimeToolResults(
 
         try
         {
-            if (!CaptureFindellipseResult(*tool, object_name, tool_capture))
+            if (!CaptureFindEllipseResult(*tool, object_name, tool_capture))
             {
                 reason = "failed to capture Findellipse: " + object_name;
                 return false;
@@ -633,7 +633,7 @@ bool CaptureRuntimeToolResults(
         }
         catch (...)
         {
-            reason = "CaptureFindellipseResult crashed for: " + object_name;
+            reason = "CaptureFindEllipseResult crashed for: " + object_name;
             return false;
         }
 
@@ -680,7 +680,7 @@ bool CaptureRuntimeToolResults(
 
     for (int i = 0; i < fastmatch_count; ++i)
     {
-        fastmatch* tool = static_cast<fastmatch*>(
+        FastMatch* tool = static_cast<FastMatch*>(
             runtime.GetClassObj("FastMatch", i));
 
         if (tool == nullptr)
@@ -750,7 +750,7 @@ bool CaptureRuntimeToolResults(
 
     if (!supported_object_found)
     {
-        reason = "no supported cximage runtime object found; expected one of Findline, Findcircle, Findellipse, FindRect, FindSegmentation, Match or fastmatch";
+        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindRect, FindSegmentation, Match or fastmatch";
         return false;
     }
 

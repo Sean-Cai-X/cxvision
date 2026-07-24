@@ -37,7 +37,7 @@ void ExportParamRegressionManualAcceptanceChecklist(
     const std::string& objectName,
     const std::string& gaugeName);
 
-bool IsFindlineFindcircleContext(ManualTestContext& context);
+bool IsFindLineFindCircleContext(ManualTestContext& context);
 
 void DrawKeyParameterUnavailableNotice(const ManualTestContext& context);
 

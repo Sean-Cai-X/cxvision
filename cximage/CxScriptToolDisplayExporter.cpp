@@ -52,7 +52,7 @@ static void DrawFindlineGeometry(
     }
 }
 
-static void DrawFindcircleGeometry(
+static void DrawFindCircleGeometry(
     cv::Mat& image,
     const CxScriptSuiteCaseResult& r)
 {
@@ -136,9 +136,9 @@ std::string CxScriptToolDisplayExporter::ExportToolDisplay(
     {
         DrawFindlineGeometry(resultView, result);
     }
-    else if (result.tool == "Findcircle")
+    else if (result.tool == "FindCircle")
     {
-        DrawFindcircleGeometry(resultView, result);
+        DrawFindCircleGeometry(resultView, result);
     }
 
     if (result.headless_ok)

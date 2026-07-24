@@ -22,18 +22,18 @@ RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
     const std::string& type,
     int declaredLine);
 
-std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& object);
+std::string BuildFindCircleGeometrySummary(const RuntimeObjectView& object);
 
-std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object);
+std::string BuildFindLineGeometrySummary(const RuntimeObjectView& object);
 
 std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object);
 
 std::string BuildGeometrySummary(const RuntimeObjectView& object);
 
-std::string BuildFindcircleOverlaySummary(const ManualTestContext& context,
+std::string BuildFindCircleOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object);
 
-std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
+std::string BuildFindLineOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object);
 
 std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context,
@@ -42,7 +42,7 @@ std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context
 std::string BuildOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object);
 
-void UpdateFindcircleDebugSnapshot(ManualTestContext& context,
+void UpdateFindCircleDebugSnapshot(ManualTestContext& context,
     const RuntimeObjectView& object,
     int lineNo,
     const std::string& statement);

@@ -1155,7 +1155,7 @@ void PointsShape::pointslineadd(void *pointsB)
 }
 void PointsShape::getfindlinemodel(void* findline)
 { 
-    Findline* pfindline = (Findline*)findline;
+    FindLine* pfindline = (FindLine*)findline;
     if (pfindline == nullptr)
         return;
     pfindline->getpattern();

@@ -91,7 +91,7 @@ int RoundNonNegativeToInt(double value)
     return static_cast<int>(std::min(max_int, std::round(value)));
 }
 
-PointsShape CollectLinePoints(Findline& finder)
+PointsShape CollectLinePoints(FindLine& finder)
 {
     PointsShape points;
     points.addpoints(finder.getresultpointsw());
@@ -286,7 +286,7 @@ gp_Rectangle EstimateSeedRect(Image& image, const gp_Rectangle& working_rect, in
     return gp_Rectangle(gp_Pnt(seed_x0, seed_y0, 0), gp_Pnt(seed_x1, seed_y1, 0));
 }
 
-void ConfigureEdgeFinder(Findline& finder,
+void ConfigureEdgeFinder(FindLine& finder,
                          int x,
                          int y,
                          int w,
@@ -313,7 +313,7 @@ void ConfigureEdgeFinder(Findline& finder,
     finder.setshow(0);
 }
 
-bool MeasureEdgeFinder(Findline& finder, Image& image, FindRect::EdgeLearnResult& edge)
+bool MeasureEdgeFinder(FindLine& finder, Image& image, FindRect::EdgeLearnResult& edge)
 {
     finder.Measure(image);
     PointsShape points = CollectLinePoints(finder);

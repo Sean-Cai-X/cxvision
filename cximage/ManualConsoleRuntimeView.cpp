@@ -76,7 +76,7 @@ RuntimeObjectView& EnsureRuntimeObject(ManualTestContext& context,
     return context.runtime_objects.back();
 }
 
-std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& object)
+std::string BuildFindCircleGeometrySummary(const RuntimeObjectView& object)
 {
     std::ostringstream ss;
 
@@ -135,7 +135,7 @@ std::string BuildFindcircleGeometrySummary(const RuntimeObjectView& object)
     return ss.str();
 }
 
-std::string BuildFindlineGeometrySummary(const RuntimeObjectView& object)
+std::string BuildFindLineGeometrySummary(const RuntimeObjectView& object)
 {
     std::ostringstream ss;
 
@@ -302,7 +302,7 @@ std::string BuildFindellipseGeometrySummary(const RuntimeObjectView& object)
 std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
     if (object.type == "FindLine")
-        return BuildFindlineGeometrySummary(object);
+        return BuildFindLineGeometrySummary(object);
     if (object.type == "FindEllipse")
         return BuildFindellipseGeometrySummary(object);
     if (object.type == "FindSegmentation")
@@ -328,10 +328,10 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
         return ss.str();
     }
 
-    return BuildFindcircleGeometrySummary(object);
+    return BuildFindCircleGeometrySummary(object);
 }
 
-std::string BuildFindcircleOverlaySummary(const ManualTestContext& context,
+std::string BuildFindCircleOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     std::ostringstream ss;
@@ -348,7 +348,7 @@ std::string BuildFindcircleOverlaySummary(const ManualTestContext& context,
     return ss.str();
 }
 
-std::string BuildFindlineOverlaySummary(const ManualTestContext& context,
+std::string BuildFindLineOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     std::ostringstream ss;
@@ -413,7 +413,7 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     if (object.type == "FindLine")
-        return BuildFindlineOverlaySummary(context, object);
+        return BuildFindLineOverlaySummary(context, object);
     if (object.type == "FindEllipse")
         return BuildFindellipseOverlaySummary(context, object);
     if (object.type == "FindSegmentation")
@@ -439,10 +439,10 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
         return ss.str();
     }
 
-    return BuildFindcircleOverlaySummary(context, object);
+    return BuildFindCircleOverlaySummary(context, object);
 }
 
-void UpdateFindcircleDebugSnapshot(ManualTestContext& context,
+void UpdateFindCircleDebugSnapshot(ManualTestContext& context,
     const RuntimeObjectView& object,
     int lineNo,
     const std::string& statement)
@@ -488,7 +488,7 @@ void RefreshSnapshotFromCurrentResultRef(ManualTestContext& context)
     if (object == nullptr)
         return;
 
-    UpdateFindcircleDebugSnapshot(
+    UpdateFindCircleDebugSnapshot(
         context,
         *object,
         context.current_result_ref.line_no,
