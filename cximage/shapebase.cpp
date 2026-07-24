@@ -1,7 +1,7 @@
 #include "pch.h"
 
 #include "shapebase.h"
-#include "Findline.h"
+#include "FindLine.h"
 #include "Sysctl.h"
 #if defined USE_AI
 #include "mlpackrun.h"

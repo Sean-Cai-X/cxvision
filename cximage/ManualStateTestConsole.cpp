@@ -1,7 +1,7 @@
 #include "ViewController.h"
 #include "Image.h"
 #include "FindCircle.h"
-#include "findline.h"
+#include "FindLine.h"
 #include "FindEllipse.h"
 #include "FindRect.h"
 #include "FindSegmentation.h"

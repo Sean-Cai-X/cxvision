@@ -1,6 +1,6 @@
 #include "pch.h"
 
-#include "Findline.h"
+#include "FindLine.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
 #include "findobject.h"

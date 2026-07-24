@@ -66,17 +66,17 @@ OutputRect GaugeBuilder::MakeRectOutput(const FindRect& rect, int index)
     return NormalizeRect(output);
 }
 
-LineMeasurementOutput GaugeBuilder::MakeLineOutput(Findline& line)
+LineMeasurementOutput GaugeBuilder::MakeLineOutput(FindLine& line)
 {
     return ExportLineMeasurement(line);
 }
 
-CircleMeasurementOutput GaugeBuilder::MakeCircleOutput(Findcircle& circle)
+CircleMeasurementOutput GaugeBuilder::MakeCircleOutput(FindCircle& circle)
 {
     return ExportCircleMeasurement(circle);
 }
 
-MatchOutput GaugeBuilder::MakeMatchOutput(fastmatch& matcher, int max_candidates)
+MatchOutput GaugeBuilder::MakeMatchOutput(FastMatch& matcher, int max_candidates)
 {
     MatchOutput output = ExportMatchOutput(matcher, ClampCandidateLimit(max_candidates));
     std::vector<MatchCandidateOutput> filtered;
@@ -117,7 +117,7 @@ FitOperationConfig GaugeBuilder::MakeCircleRingCompositeConfig()
 }
 `n
 PrototypeRunResult GaugeBuilder::BuildAndRunRectCirclePrototype(const FindRect& rect,
-                                                                Findcircle& circle,
+                                                                FindCircle& circle,
                                                                 const FitOperationConfig& operation_config,
                                                                 int rect_index)
 {
@@ -127,8 +127,8 @@ PrototypeRunResult GaugeBuilder::BuildAndRunRectCirclePrototype(const FindRect& 
 }
 
 PrototypeRunResult GaugeBuilder::BuildAndRunRectCircleLinePrototype(const FindRect& rect,
-                                                                    Findline& line,
-                                                                    Findcircle& circle,
+                                                                    FindLine& line,
+                                                                    FindCircle& circle,
                                                                     const FitOperationConfig& operation_config,
                                                                     int rect_index)
 {
@@ -139,9 +139,9 @@ PrototypeRunResult GaugeBuilder::BuildAndRunRectCircleLinePrototype(const FindRe
 }
 
 PrototypeRunResult GaugeBuilder::BuildAndRunRectCircleLineMatchPrototype(const FindRect& rect,
-                                                                         Findline& line,
-                                                                         Findcircle& circle,
-                                                                         fastmatch& matcher,
+                                                                         FindLine& line,
+                                                                         FindCircle& circle,
+                                                                         FastMatch& matcher,
                                                                          const FitOperationConfig& operation_config,
                                                                          int rect_index,
                                                                          int max_candidates)
@@ -153,8 +153,8 @@ PrototypeRunResult GaugeBuilder::BuildAndRunRectCircleLineMatchPrototype(const F
     return RunRectCircleLineMatchPrototype(rect_output, circle_output, line_output, match_output, operation_config);
 }
 
-PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingPrototype(Findcircle& outer_circle,
-                                                               Findcircle& inner_circle,
+PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingPrototype(FindCircle& outer_circle,
+                                                               FindCircle& inner_circle,
                                                                const FitOperationConfig& operation_config,
                                                                double center_tolerance,
                                                                double thickness_tolerance)
@@ -170,9 +170,9 @@ PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingPrototype(Findcircle& oute
         thickness_tolerance);
 }
 
-PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingLinePrototype(Findcircle& outer_circle,
-                                                                   Findcircle& inner_circle,
-                                                                   Findline& line,
+PrototypeRunResult GaugeBuilder::BuildAndRunCircleRingLinePrototype(FindCircle& outer_circle,
+                                                                   FindCircle& inner_circle,
+                                                                   FindLine& line,
                                                                    const FitOperationConfig& operation_config,
                                                                    double center_tolerance,
                                                                    double thickness_tolerance)

@@ -1,7 +1,7 @@
 #include "ParserDebugBridge.h"
 
 #include "FindCircle.h"
-#include "findline.h"
+#include "FindLine.h"
 #include "Image.h"
 #include "CircleRingGauge.h"
 #include "FastMatchDiagnostic.h"
@@ -141,20 +141,7 @@ void* ParserDebugBridge::QueryClassObject(const std::string& type,
                                           const std::string& name) const
 {
   if (myOwner == nullptr) return nullptr;
-  void* object = myOwner->GetClassObj(type, name);
-  if (object == nullptr && type == "FindCircle")
-    object = myOwner->GetClassObj("FindCircle", name);
-  if (object == nullptr && type == "FindLine")
-    object = myOwner->GetClassObj("FindLine", name);
-  if (object == nullptr && type == "FastMatch")
-    object = myOwner->GetClassObj("FastMatch", name);
-  if (object == nullptr && type == "FastMatch")
-    object = myOwner->GetClassObj("FastMatch", name);
-  if (object == nullptr && type == "FastMatch")
-    object = myOwner->GetClassObj("FastMatch", name);
-  if (object == nullptr && type == "FastMatch")
-    object = myOwner->GetClassObj("FastMatch", name);
-  return object;
+  return myOwner->GetClassObj(type, name);
 }
 
 bool ParserDebugBridge::QueryObjectExists(const std::string& type,

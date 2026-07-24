@@ -8,7 +8,7 @@
 #include <filesystem>
 #include "ViewController.h"
 #include "FindCircle.h"
-#include "findline.h"
+#include "FindLine.h"
 
 struct ParsedMethodCall
 {

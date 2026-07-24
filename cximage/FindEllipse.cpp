@@ -1,6 +1,6 @@
 #include "pch.h"
 
-#include "Findellipse.h"
+#include "FindEllipse.h"
 #include "occtinclude.h"
 #include "imagemanager.h"
 #include "findobject.h"
