@@ -285,6 +285,12 @@ if(LIBTORCH_MODULE_BUILD_RUNTIME_DLL)
     if(OpenCV_FOUND)
         set(LIBTORCH_MODULE_CORE_SOURCES
             torch_runtime_core.cpp
+            torch_runtime_task_dispatcher.cpp
+            torch_runtime_manifest.cpp
+            torch_runtime_artifact_writer.cpp
+            torch_runtime_contract.cpp
+            torch_runtime_segmentation_executor.cpp
+            torch_runtime_detection_executor.cpp
             torch_test_host.h
             torch_alltest.h
             torch_alltest_2.h

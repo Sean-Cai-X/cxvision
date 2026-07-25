@@ -9,6 +9,16 @@ void TorchTask::settask(const char* value)
         task_.kind = CxTorchTaskKind::DeviceDiagnostic;
     else if (task_.task_id == "torch.weight.diagnostic")
         task_.kind = CxTorchTaskKind::WeightDiagnostic;
+    else if (task_.task_id == "torch.runtime.capabilities.v1")
+        task_.kind = CxTorchTaskKind::RuntimeCapabilities;
+    else if (task_.task_id == "torch.contract.segmentation.v1")
+        task_.kind = CxTorchTaskKind::SegmentationContract;
+    else if (task_.task_id == "torch.contract.detection.v1")
+        task_.kind = CxTorchTaskKind::DetectionContract;
+    else if (task_.task_id == "torch.infer.segmentation.deeplabv3plus.v1")
+        task_.kind = CxTorchTaskKind::Segmentation;
+    else if (task_.task_id == "torch.infer.detection.yolov8.v1")
+        task_.kind = CxTorchTaskKind::Detection;
     else if (task_.task_id.find("segmentation") != std::string::npos)
         task_.kind = CxTorchTaskKind::Segmentation;
     else if (task_.task_id.find("detection") != std::string::npos || task_.task_id.find("yolo") != std::string::npos)

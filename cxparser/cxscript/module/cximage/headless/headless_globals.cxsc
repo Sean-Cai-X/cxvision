@@ -73,4 +73,9 @@ double global_best_score;
 int global_best_x;
 int global_best_y;
 
+int global_torch_ok;
+int global_torch_mask_available;
+int global_torch_result_count;
+double global_torch_infer_ms;
+
 global_strategy_id = global_strategy_id;

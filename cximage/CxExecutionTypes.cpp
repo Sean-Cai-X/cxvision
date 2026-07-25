@@ -33,7 +33,9 @@ bool ValidateCxTorchTaskSpec(const CxTorchTaskSpec& task, std::string& reason)
         task.kind == CxTorchTaskKind::Detection ||
         task.kind == CxTorchTaskKind::Classification ||
         task.kind == CxTorchTaskKind::FeatureExtraction ||
-        task.kind == CxTorchTaskKind::TemplateDifference;
+        task.kind == CxTorchTaskKind::TemplateDifference ||
+        task.kind == CxTorchTaskKind::SegmentationContract ||
+        task.kind == CxTorchTaskKind::DetectionContract;
 
     if (needs_image && task.input_image_path.empty())
     {
