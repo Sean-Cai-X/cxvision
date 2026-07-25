@@ -89,6 +89,10 @@ set(CXIMAGE_CORE_SOURCES
   cximage/TorchRuntimeBridge.cpp
   cximage/CxTorchRuntimeService.cpp
   cximage/TorchRuntimeResultAdapter.cpp
+  cximage/CxExecutionTypes.cpp
+  cximage/CxTorchExecutionAdapter.cpp
+  cximage/CxTorchResultProjector.cpp
+  cximage/TorchTask.cpp
   cximage/CxShapeInteractionRunner.cpp
   cximage/CxRuntimeProjectionExecutor.cpp
   cximage/CxShapeInteractionTest.cpp
@@ -300,6 +304,11 @@ if(CXVISION_ENABLE_TORCH_RUNTIME AND TARGET libtorch_module_runtime)
             "$<TARGET_FILE:libtorch_module_runtime>"
             "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
     COMMENT "Copy libtorch_module_runtime next to cxvision_imgui_acceptance"
+  )
+
+  target_compile_definitions(
+    cxvision_imgui_acceptance
+    PRIVATE CXVISION_ENABLE_TORCH_RUNTIME=1
   )
 elseif(CXVISION_ENABLE_TORCH_RUNTIME)
   message(STATUS "CXVISION_ENABLE_TORCH_RUNTIME=ON but libtorch_module_runtime target not found")

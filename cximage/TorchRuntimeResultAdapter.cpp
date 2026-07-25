@@ -1,7 +1,57 @@
 #include "TorchRuntimeResultAdapter.h"
 #include <sstream>
 
-TorchRuntimeGuiReview TorchRuntimeResultAdapter::Adapt(const TorchRuntimeGuiResult& result)
+bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
+    const TorchRuntimeGuiResult& source,
+    const CxTorchTaskSpec& task,
+    CxInferenceResult& target,
+    std::string& reason)
+{
+    target = {};
+
+    target.executed = true;
+    target.ok = source.ok;
+    target.error_code = source.error_code;
+
+    target.task_id = task.task_id;
+    target.case_id = task.case_id;
+    target.model_id = task.model_id;
+
+    target.requested_device = source.requested_device;
+    target.actual_device = source.actual_device;
+
+    target.status = source.status;
+    target.reason = source.error_message;
+
+    target.train_runtime_ms = source.train_runtime_ms;
+    target.infer_runtime_ms = source.infer_runtime_ms;
+    target.algorithm_runtime_ms = source.algorithm_runtime_ms;
+    target.total_runtime_ms =
+        source.train_runtime_ms +
+        source.infer_runtime_ms +
+        source.algorithm_runtime_ms +
+        source.placeholder_runtime_ms;
+
+    target.raw_result_json = source.result_json;
+    target.evidence_ref = source.evidence_ref;
+    target.result_ref = source.result_ref;
+    target.primary_visual_ref = source.primary_visual_ref;
+    target.bbox_candidate_list_ref = source.bbox_candidate_list_ref;
+    target.roi_crop_packet_ref = source.roi_crop_packet_ref;
+    target.template_alignment_ref = source.template_alignment_ref;
+    target.roi_diff_candidate_ref = source.roi_diff_candidate_ref;
+
+    if (!source.ok) {
+        target.failure_stage = "torch_task_execute";
+        reason = target.reason.empty() ? "torch task returned failure" : target.reason;
+        return false;
+    }
+
+    reason.clear();
+    return true;
+}
+
+TorchRuntimeGuiReview TorchRuntimeResultAdapter::AdaptToGuiReview(const CxInferenceResult& result)
 {
     TorchRuntimeGuiReview review;
 
@@ -9,9 +59,6 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::Adapt(const TorchRuntimeGuiResu
     review.stages.push_back({"torch_task_execution", "Task Execution", result.status});
     review.stages.push_back({"torch_runtime_end", "Torch Runtime End", result.ok ? "success" : "failed"});
 
-    if (!result.input_image_ref.empty()) {
-        review.image_refs.push_back({"input_image", result.input_image_ref, "Input Image"});
-    }
     if (!result.primary_visual_ref.empty()) {
         review.image_refs.push_back({"primary_visual", result.primary_visual_ref, "Primary Visual"});
     }
@@ -54,20 +101,20 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::Adapt(const TorchRuntimeGuiResu
     if (!result.evidence_ref.empty()) {
         review.result_fields.push_back({"Evidence Ref", result.evidence_ref, ""});
     }
-    if (!result.attach_back_ref.empty()) {
-        review.result_fields.push_back({"Attach Back", result.attach_back_ref, ""});
-    }
 
-    if (!result.trainer_lifecycle_summary.empty()) {
-        review.result_fields.push_back({"Trainer Lifecycle", result.trainer_lifecycle_summary, ""});
-    }
-    if (!result.unified_mainline_summary.empty()) {
-        review.result_fields.push_back({"Mainline Summary", result.unified_mainline_summary, ""});
-    }
-
-    if (!result.error_message.empty()) {
-        review.issue_refs.push_back("error: " + result.error_message);
+    if (!result.reason.empty()) {
+        review.issue_refs.push_back("error: " + result.reason);
     }
 
     return review;
+}
+
+TorchRuntimeGuiReview TorchRuntimeResultAdapter::Adapt(const TorchRuntimeGuiResult& result)
+{
+    CxTorchTaskSpec dummy_task;
+    CxInferenceResult inference_result;
+    std::string reason;
+
+    AdaptToInferenceResult(result, dummy_task, inference_result, reason);
+    return AdaptToGuiReview(inference_result);
 }

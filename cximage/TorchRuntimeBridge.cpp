@@ -108,6 +108,7 @@ void PrependRuntimeDllSearchPath(const std::string& dll_path)
     const std::string cxvision_opencv_bin = GetEnvironmentValue("CXVISION_OPENCV_BIN");
     const std::string cuda_path = GetEnvironmentValue("CUDA_PATH");
 
+    AddExistingDirectory(dirs, std::filesystem::path(dll_path).parent_path());
     AddExistingDirectory(dirs, cxvision_libtorch_bin);
     if (!libtorch_root.empty()) {
         AddExistingDirectory(dirs, std::filesystem::path(libtorch_root) / "lib");

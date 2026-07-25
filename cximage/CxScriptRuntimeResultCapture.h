@@ -14,6 +14,7 @@ class FindEllipse;
 class FindRect;
 class FindSegmentation;
 class FastMatch;
+class TorchTask;
 
 struct CxScriptToolResultCapture
 {
@@ -143,6 +144,14 @@ struct CxScriptToolResultCapture
     std::string segmentation_contour_ref;
     std::string segmentation_overlay_ref;
 
+    int torch_ok = 0;
+    int torch_error_code = 0;
+    double torch_infer_ms = 0.0;
+    std::string torch_status;
+    std::string torch_failure_stage;
+    std::string torch_reason;
+    int torch_result_count = 0;
+
     std::string failure_stage;
     std::string reason;
 
@@ -181,6 +190,11 @@ bool CaptureFastMatchResult(
 
 bool CaptureFindSegmentationResult(
     class FindSegmentation& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureTorchTaskResult(
+    class TorchTask& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 

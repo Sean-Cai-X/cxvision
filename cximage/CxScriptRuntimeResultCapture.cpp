@@ -6,6 +6,8 @@
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
+#include "TorchTask.h"
+#include "CxTorchResultProjector.h"
 #include "ParserClass.h"
 #include "ImageAnnotationLayer.h"
 #include "shapebase.h"
@@ -748,12 +750,80 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
+    const int torch_count = runtime.GetClassObjSum("TorchTask");
+
+    for (int i = 0; i < torch_count; ++i)
+    {
+        TorchTask* tool = static_cast<TorchTask*>(
+            runtime.GetClassObj("TorchTask", i));
+
+        if (tool == nullptr)
+            continue;
+        if (!captured_objects.insert(tool).second)
+            continue;
+
+        supported_object_found = true;
+
+        CxScriptToolResultCapture tool_capture;
+
+        const std::string object_name =
+            runtime.GetClassObjName("TorchTask", i);
+
+        try
+        {
+            if (!CaptureTorchTaskResult(*tool, object_name, tool_capture))
+            {
+                reason = "failed to capture TorchTask: " + object_name;
+                return false;
+            }
+        }
+        catch (...)
+        {
+            reason = "CaptureTorchTaskResult crashed for: " + object_name;
+            return false;
+        }
+
+        MergeToolCapture(tool_capture, capture);
+    }
+
     if (!supported_object_found)
     {
-        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindRect, FindSegmentation, Match or fastmatch";
+        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindRect, FindSegmentation, Match, fastmatch or TorchTask";
         return false;
     }
 
     reason.clear();
+    return true;
+}
+
+bool CaptureTorchTaskResult(
+    TorchTask& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output)
+{
+    output.type = "TorchTask";
+    output.name = object_name;
+    output.owner_ref = object_name;
+
+    output.torch_ok = tool.getok();
+    output.torch_error_code = tool.geterrorcode();
+    output.torch_infer_ms = tool.getinferms();
+    output.torch_status = tool.getstatus();
+    output.torch_failure_stage = tool.getfailstage();
+    output.torch_reason = tool.getreason();
+    output.torch_result_count = tool.getresultcount();
+
+    output.algorithm_executed = tool.getok() != 0;
+    output.measure_completed = tool.getok() != 0;
+
+    if (tool.getok() == 0)
+    {
+        output.failure_stage = output.torch_failure_stage.empty() ? "torch_execute_failed" : output.torch_failure_stage;
+        output.reason = output.torch_reason;
+    }
+
+    const CxInferenceResult& inference_result = tool.GetInferenceResult();
+    CxTorchResultProjector::Project(inference_result, "TorchTask", object_name, output.shapes);
+
     return true;
 }

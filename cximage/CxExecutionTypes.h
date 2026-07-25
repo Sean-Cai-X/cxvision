@@ -4,6 +4,7 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
+#include <map>
 
 struct CxPoint2D
 {
@@ -44,20 +45,92 @@ struct CxMatchResult
     bool has_result_box = false;
 };
 
+enum class CxTorchTaskKind
+{
+    Unknown = 0,
+    RuntimeDiagnostic,
+    DeviceDiagnostic,
+    WeightDiagnostic,
+    Segmentation,
+    Detection,
+    Classification,
+    FeatureExtraction,
+    TemplateDifference,
+    TrainingLifecycle
+};
+
+struct CxTorchTaskSpec
+{
+    CxTorchTaskKind kind = CxTorchTaskKind::Unknown;
+    std::string task_id;
+    std::string case_id;
+    std::string model_id;
+    std::filesystem::path model_path;
+    std::filesystem::path manifest_path;
+    std::filesystem::path input_image_path;
+    std::filesystem::path template_image_path;
+    std::string requested_device = "cpu";
+    int timeout_ms = 0;
+    std::string extra_json;
+};
+
+struct CxTorchDetection
+{
+    int class_id = -1;
+    std::string class_name;
+    double confidence = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+struct CxTorchMask
+{
+    bool available = false;
+    int width = 0;
+    int height = 0;
+    double foreground_ratio = 0.0;
+    std::string mask_ref;
+    std::string contour_ref;
+    std::string overlay_ref;
+};
+
 struct CxInferenceResult
 {
-    int class_id = 0;
-    double confidence = 0.0;
-    std::string class_name;
-    std::string mask_ref;
-    double bbox_x = 0.0;
-    double bbox_y = 0.0;
-    double bbox_w = 0.0;
-    double bbox_h = 0.0;
-    std::string feature_summary;
-    std::string result_json;
+    bool executed = false;
+    bool ok = false;
+    int error_code = 0;
+    std::string schema;
+    std::string schema_version;
+    std::string task_id;
+    std::string case_id;
+    std::string model_id;
+    std::string model_hash;
+    std::string requested_device;
+    std::string actual_device;
+    std::string status;
+    std::string failure_stage;
+    std::string reason;
+    double train_runtime_ms = 0.0;
+    double infer_runtime_ms = 0.0;
+    double algorithm_runtime_ms = 0.0;
+    double total_runtime_ms = 0.0;
+    std::vector<CxTorchDetection> detections;
+    std::optional<CxTorchMask> mask;
+    std::map<std::string, double> metrics;
+    std::vector<std::string> artifact_refs;
     std::string evidence_ref;
+    std::string result_ref;
+    std::string primary_visual_ref;
+    std::string bbox_candidate_list_ref;
+    std::string roi_crop_packet_ref;
+    std::string template_alignment_ref;
+    std::string roi_diff_candidate_ref;
+    std::string raw_result_json;
 };
+
+bool ValidateCxTorchTaskSpec(const CxTorchTaskSpec& task, std::string& reason);
 
 struct CxImageInput
 {

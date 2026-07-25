@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TorchRuntimeTypes.h"
+#include "CxExecutionTypes.h"
 #include <vector>
 
 struct TorchRuntimeStageRef
@@ -35,5 +36,12 @@ struct TorchRuntimeGuiReview
 class TorchRuntimeResultAdapter
 {
 public:
+    static bool AdaptToInferenceResult(
+        const TorchRuntimeGuiResult& source,
+        const CxTorchTaskSpec& task,
+        CxInferenceResult& target,
+        std::string& reason);
+
+    static TorchRuntimeGuiReview AdaptToGuiReview(const CxInferenceResult& result);
     static TorchRuntimeGuiReview Adapt(const TorchRuntimeGuiResult& result);
 };

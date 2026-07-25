@@ -17,6 +17,7 @@
 #include "CxScriptTypeTraitsDefs.h"
 #include "CircleRingGauge.h"
 #include "FindSegmentation.h"
+#include "TorchTask.h"
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
 
@@ -625,6 +626,30 @@ namespace mu
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "status_code", &FindSegmentation::status_code);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_contour_count", &FindSegmentation::get_contour_count);
             m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "get_primary_area", &FindSegmentation::get_primary_area);
+
+            TorchTask* ptorch_task = nullptr;
+            m_parser.DefineClass("TorchTask", ptorch_task);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "settask", &TorchTask::settask);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setcase", &TorchTask::setcase);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setmodel", &TorchTask::setmodel);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setmanifest", &TorchTask::setmanifest);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setdevice", &TorchTask::setdevice);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setinputpath", &TorchTask::setinputpath);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "settemplatepath", &TorchTask::settemplatepath);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "settimeout", &TorchTask::settimeout);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "run", &TorchTask::run);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getok", &TorchTask::getok);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "geterrorcode", &TorchTask::geterrorcode);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getresultcount", &TorchTask::getresultcount);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getmaskavailable", &TorchTask::getmaskavailable);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getinferms", &TorchTask::getinferms);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getstatus", &TorchTask::getstatus);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getreason", &TorchTask::getreason);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getactualdevice", &TorchTask::getactualdevice);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getresultref", &TorchTask::getresultref);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getmaskref", &TorchTask::getmaskref);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getoverlayref", &TorchTask::getoverlayref);
+
             m_parser.DefineClassFun("FindObject", pfobj, "edge", &FindObject::Edge);
             m_parser.DefineClassFun("FindObject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);
             m_parser.DefineClassFun("FindObject", pfobj, "setrelmatch", &FindObject::setrelationrectfrom_matchresult);
