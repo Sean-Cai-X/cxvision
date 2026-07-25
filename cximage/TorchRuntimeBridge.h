@@ -1,12 +1,15 @@
 #pragma once
 
 #include "TorchRuntimeTypes.h"
+#include "../libtorch_module/libtorch_module_runtime_c_api.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <dlfcn.h>
 #endif
+
+#include <string>
 
 class TorchRuntimeBridge
 {
@@ -20,6 +23,7 @@ public:
     void Destroy();
 
     bool IsLoaded() const;
+    std::string RuntimeVersion() const;
 
 private:
 #ifdef _WIN32
@@ -27,12 +31,12 @@ private:
 #else
     void* dll_ = nullptr;
 #endif
-    void* handle_ = nullptr;
+    TorchRuntimeHandle handle_ = nullptr;
 
-    using CreateFn = int (*)(const void*, void**);
-    using DestroyFn = int (*)(void*);
-    using RunTaskFn = int (*)(void*, const void*, void*);
-    using FreeResultFn = void (*)(void*);
+    using CreateFn = int (*)(const TorchRuntimeConfig*, TorchRuntimeHandle*);
+    using DestroyFn = int (*)(TorchRuntimeHandle);
+    using RunTaskFn = int (*)(TorchRuntimeHandle, const TorchTaskRequest*, TorchTaskResult*);
+    using FreeResultFn = void (*)(TorchTaskResult*);
     using VersionFn = const char* (*)();
 
     CreateFn create_ = nullptr;

@@ -9,6 +9,7 @@
 #include "CxUnifiedLogStreamBuf.h"
 #include "CxCrashLogHandler.h"
 #include "CxEvidenceSelfTestRuntime.h"
+#include "CxTorchRuntimeService.h"
 
 #if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
 #include "CxScriptStage25Runner.h"
@@ -1068,6 +1069,115 @@ int RunUnifiedLogSmoke(const CxUnifiedLogOptions& options)
     return 0;
 }
 
+void SaveTorchRuntimeSmokeJson(
+    const CxUnifiedLogOptions& options,
+    bool initialized,
+    bool ready,
+    bool shutdown_ok,
+    const std::string& version,
+    const std::string& reason)
+{
+    if (options.torch_runtime_smoke.output_dir.empty())
+        return;
+
+    std::filesystem::create_directories(options.torch_runtime_smoke.output_dir);
+
+    std::ofstream file(options.torch_runtime_smoke.output_dir / "torch_runtime_service_smoke.json");
+    file << "{\n";
+    file << "  \"schema_version\": 1,\n";
+    file << "  \"run_id\": \"" << CxUnifiedLog::Instance().RunId() << "\",\n";
+    file << "  \"runtime_dll\": \"" << options.torch_runtime_smoke.runtime_dll.string() << "\",\n";
+    file << "  \"device\": \"" << options.torch_runtime_smoke.device << "\",\n";
+    file << "  \"model_root\": \"" << options.torch_runtime_smoke.model_root << "\",\n";
+    file << "  \"initialized\": " << (initialized ? "true" : "false") << ",\n";
+    file << "  \"ready\": " << (ready ? "true" : "false") << ",\n";
+    file << "  \"shutdown_ok\": " << (shutdown_ok ? "true" : "false") << ",\n";
+    file << "  \"version\": \"" << version << "\",\n";
+    file << "  \"reason\": \"" << reason << "\"\n";
+    file << "}\n";
+}
+
+int RunCxTorchRuntimeSmoke(const CxUnifiedLogOptions& options)
+{
+    CXLOG_INFO("CxTorchRuntime", "smoke_begin", "running", "mode=torch_runtime_smoke");
+
+    std::filesystem::create_directories(options.torch_runtime_smoke.output_dir);
+
+    const std::filesystem::path runtime_dll = options.torch_runtime_smoke.runtime_dll;
+    const std::filesystem::path runtime_dir = runtime_dll.parent_path();
+
+    if (runtime_dir.empty()) {
+        std::string reason = "Runtime DLL directory is empty";
+        SaveTorchRuntimeSmokeJson(options, false, false, false, "", reason);
+        CXLOG_ERROR("CxTorchRuntime", "smoke_end", "failed", "reason=" + reason);
+        std::cout << "torch_runtime_smoke_ok=false\n";
+        std::cout << "reason=" << reason << "\n";
+        return 1;
+    }
+
+    const char* old_path = std::getenv("PATH");
+    std::string new_path;
+    if (old_path) {
+        new_path = runtime_dir.string() + ";" + old_path;
+    } else {
+        new_path = runtime_dir.string();
+    }
+    SetEnvironmentVariableA("PATH", new_path.c_str());
+
+    std::cout << "runtime_dll=" << runtime_dll.string() << "\n";
+    std::cout << "runtime_dir=" << runtime_dir.string() << "\n";
+    std::cout << "device=" << options.torch_runtime_smoke.device << "\n";
+    std::cout << "model_root=" << options.torch_runtime_smoke.model_root << "\n";
+
+    CxTorchRuntimeService service;
+    CxTorchRuntimeConfig config;
+
+    config.runtime_dll_path = runtime_dll.string();
+    config.device = options.torch_runtime_smoke.device;
+    config.model_root = options.torch_runtime_smoke.model_root;
+
+    std::string reason;
+    bool initialized = false;
+    bool ready = false;
+    std::string version;
+
+    try {
+        initialized = service.Initialize(config, reason);
+        ready = service.IsReady();
+        version = service.RuntimeVersion();
+    } catch (const std::exception& e) {
+        reason = "exception during initialization: " + std::string(e.what());
+        initialized = false;
+        ready = false;
+        version = "";
+    }
+
+    service.Shutdown();
+    const bool shutdown_ok = !service.IsReady();
+
+    SaveTorchRuntimeSmokeJson(options, initialized, ready, shutdown_ok, version, reason);
+
+    CXLOG_INFO(
+        "CxTorchRuntime",
+        "smoke_end",
+        initialized && ready && shutdown_ok && !version.empty() ? "completed" : "failed",
+        "initialized=" + std::string(initialized ? "true" : "false") +
+        ",ready=" + std::string(ready ? "true" : "false") +
+        ",shutdown_ok=" + std::string(shutdown_ok ? "true" : "false") +
+        ",version=" + version +
+        ",reason=" + reason);
+
+    std::cout << "torch_runtime_smoke_ok=" << (initialized && ready && shutdown_ok && !version.empty() ? "true" : "false") << "\n";
+    std::cout << "initialized=" << (initialized ? "true" : "false") << "\n";
+    std::cout << "ready=" << (ready ? "true" : "false") << "\n";
+    std::cout << "shutdown_ok=" << (shutdown_ok ? "true" : "false") << "\n";
+    std::cout << "version=" << version << "\n";
+    std::cout << "reason=" << reason << "\n";
+    std::cout << "run_id=" << CxUnifiedLog::Instance().RunId() << "\n";
+
+    return (initialized && ready && shutdown_ok && !version.empty()) ? 0 : 1;
+}
+
 int main(int argc, char** argv)
 {
     CxUnifiedLogOptions logOptions;
@@ -1126,7 +1236,11 @@ int main(int argc, char** argv)
 
     int exitCode = 0;
 
-    if (logOptions.smoke_mode)
+    if (logOptions.torch_runtime_smoke.enabled)
+    {
+        exitCode = RunCxTorchRuntimeSmoke(logOptions);
+    }
+    else if (logOptions.smoke_mode)
     {
         exitCode = RunUnifiedLogSmoke(logOptions);
     }

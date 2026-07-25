@@ -134,7 +134,7 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
 ┌────────────────────────▼─────────────────────────────────────┐
 │ 4. Manual Console Controllers                                │
 │ ManualConsoleGauge / Evidence / Param / Debug                │
-│ ManualConsoleFindlineDebug / FindcircleDebug / RuntimeView   │
+│ ManualConsoleFindLineDebug / FindCircleDebug / RuntimeView   │
 └────────────────────────┬─────────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────┐
@@ -155,7 +155,7 @@ CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了
        ▼                                   ▼
 ┌──────────────────────────────┐ ┌──────────────────────────────┐
 │ 7. Vision Tool Runtime       │ │ 8. Model & Optimization      │
-│ Findline / Findcircle        │ │ torch 主模型                 │
+│ FindLine / FindCircle        │ │ torch 主模型                 │
 │ Findellipse / FindRect       │ │ mlpack 基础模型              │
 │ FindObject / FastMatch       │ │ ensmallen 优化层             │
 │ FindSegmentation             │ │ 参数搜索策略                 │
@@ -198,8 +198,8 @@ cxvision_repo/
 │   ├── ManualConsoleEvidenceChain.h/cpp    # 证据链控制器
 │   ├── ManualConsoleParamRegressionPanel.h/cpp  # 参数回归面板
 │   ├── ManualConsoleScriptDebugPanel.h/cpp      # 脚本调试面板
-│   ├── ManualConsoleFindlineDebug.h/cpp         # Findline 调试
-│   ├── ManualConsoleFindcircleDebug.h/cpp       # Findcircle 调试
+│   ├── ManualConsoleFindLineDebug.h/cpp         # FindLine 调试
+│   ├── ManualConsoleFindCircleDebug.h/cpp       # FindCircle 调试
 │   ├── ManualConsoleRuntimeView.h/cpp           # 运行时视图
 │   ├── ManualConsoleCxScriptDebug.h/cpp         # CxScript 调试
 │   ├── ParserDebugBridge.h/cpp                  # 脚本调试桥接
@@ -549,7 +549,7 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 #### 已实现能力
 - Gauge 几何合法性验证
 - `accepted / manual_accepted / dirty` 审核状态检查
-- Findline 和 Findcircle 参数向脚本 globals 注入
+- FindLine 和 FindCircle 参数向脚本 globals 注入
 - `gauge_annotation.json` 保存与加载
 - `gauge_manifest_candidate.cxsc` 导出
 - 参数回归前置条件检查
@@ -605,18 +605,18 @@ Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参�
 #### 状态
 - **[Implemented]**：基础脚本调试功能
 
-### 7.5 ManualConsoleFindlineDebug
+### 7.5 ManualConsoleFindLineDebug
 
 #### 定位
-Findline 专用调试面板。
+FindLine 专用调试面板。
 
 #### 状态
 - **[Implemented]**：基础调试功能
 
-### 7.6 ManualConsoleFindcircleDebug
+### 7.6 ManualConsoleFindCircleDebug
 
 #### 定位
-Findcircle 专用调试面板。
+FindCircle 专用调试面板。
 
 #### 状态
 - **[Implemented]**：基础调试功能
@@ -895,14 +895,14 @@ cxparser/cxscript/module/
 
 ## 11. Vision Tool Runtime
 
-### 11.1 Findline
+### 11.1 FindLine
 
 #### 定位
 直线检测算法，支持亚像素级边缘细化和多种参数配置。
 
 #### 核心文件
-- [Findline.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.h)
-- [Findline.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findline.cpp)
+- [FindLine.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindLine.h)
+- [FindLine.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindLine.cpp)
 
 #### 输入
 - ROI 区域（起点、终点、半宽）
@@ -916,19 +916,21 @@ cxparser/cxscript/module/
 #### 状态
 - **[Implemented]**：基础直线检测、拟合、参数配置
 
-### 11.2 Findcircle
+### 11.2 FindCircle
 
 #### 定位
 圆检测算法，支持环形区域扫描和拟合。
 
 #### 核心文件
-- [Findcircle.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.h)
-- [Findcircle.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/Findcircle.cpp)
+- [FindCircle.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindCircle.h)
+- [FindCircle.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindCircle.cpp)
 
 #### 状态
 - **[Implemented]**：基础圆检测、拟合、超时保护
 
-### 11.3 Findellipse
+### 11.3 FindEllipse
+- [FindEllipse.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindEllipse.h)
+- [FindEllipse.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindEllipse.cpp)
 
 #### 定位
 椭圆检测算法。
@@ -945,6 +947,10 @@ cxparser/cxscript/module/
 - **[Implemented]**：基础矩形检测
 
 ### 11.5 FindObject
+- [FindObject.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindObject.h)
+- [FindObject.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindObject.cpp)
+
+
 
 #### 定位
 对象检测算法。
@@ -959,6 +965,7 @@ cxparser/cxscript/module/
 
 #### 核心文件
 - [FastMatch.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.h)
+- [FastMatch.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.cpp)
 
 #### 状态
 - **[Implemented]**：基础模板匹配
@@ -1510,8 +1517,8 @@ Load Case → Edit Gauge → Apply To Globals → Run Probe
 
 ### 18.6 Contract Pass 规则
 
-- **Findline**：有效点数 < 2 时失败
-- **Findcircle**：有效点数 < 3 时失败
+- **FindLine**：有效点数 < 2 时失败
+- **FindCircle**：有效点数 < 3 时失败
 
 ---
 
@@ -1557,9 +1564,9 @@ Load Case → Edit Gauge → Apply To Globals → Run Probe
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
 | P0 | 三条标准链跨入口一致性 | Manual / Headless / Suite 使用相同输入和结果 |
-| P1 | Findline、Findcircle 固定 IMG-L1/L2/L3 基线 | 建立固定难度等级的测试基线 |
+| P1 | FindLine、FindCircle 固定 IMG-L1/L2/L3 基线 | 建立固定难度等级的测试基线 |
 | P2 | Parameter Regression Panel | Candidate → ParamProbe → EvalRecord 真正循环 |
-| P3 | 真实 Hit Distribution | Findline 沿线分布、Findcircle 角度和半径分布 |
+| P3 | 真实 Hit Distribution | FindLine 沿线分布、FindCircle 角度和半径分布 |
 | P4 | Accuracy / Stability 跨 Case 汇总 | 完整的准确性和稳定性统计 |
 | P5 | mlpack Rank 接入真实历史记录 | 将 mlpack 排序接入实际评估记录 |
 | P6 | ensmallen Objective 接入真实 Probe | 将 ensmallen 优化接入实际探测结果 |
@@ -1737,7 +1744,7 @@ Options:
 |--------|-------------|----------|
 | mlpack Rank | v2.2 | mlpack 原生构建集成 |
 | ensmallen Optimize | v2.2 | ensmallen 原生构建集成 |
-| Hit Distribution | v2.1.1 | Findline/Findcircle 稳定基线 |
+| Hit Distribution | v2.1.1 | FindLine/FindCircle 稳定基线 |
 | Tuning Map Animate | v2.1.1 | 参数回归闭环完成 |
 
 ---

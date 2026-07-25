@@ -1,0 +1,186 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <optional>
+#include <filesystem>
+
+struct CxPoint2D
+{
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct CxLineResult
+{
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    double avgdist = 0.0;
+};
+
+struct CxCircleResult
+{
+    double cx = 0.0;
+    double cy = 0.0;
+    double radius = 0.0;
+};
+
+struct CxMatchResult
+{
+    std::string template_id;
+    double search_roi_x = 0.0;
+    double search_roi_y = 0.0;
+    double search_roi_w = 0.0;
+    double search_roi_h = 0.0;
+    double score = 0.0;
+    double angle = 0.0;
+    double scale = 0.0;
+    double matched_x = 0.0;
+    double matched_y = 0.0;
+    int model_point_count = 0;
+    int candidate_count = 0;
+    bool has_result_box = false;
+};
+
+struct CxInferenceResult
+{
+    int class_id = 0;
+    double confidence = 0.0;
+    std::string class_name;
+    std::string mask_ref;
+    double bbox_x = 0.0;
+    double bbox_y = 0.0;
+    double bbox_w = 0.0;
+    double bbox_h = 0.0;
+    std::string feature_summary;
+    std::string result_json;
+    std::string evidence_ref;
+};
+
+struct CxImageInput
+{
+    std::filesystem::path path;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    std::string hash;
+};
+
+struct CxGaugeSnapshot
+{
+    std::string type;
+    std::string revision;
+    std::string source;
+    std::string hash;
+
+    double roi_x0 = 0.0;
+    double roi_y0 = 0.0;
+    double roi_x1 = 0.0;
+    double roi_y1 = 0.0;
+};
+
+struct CxParameterSnapshot
+{
+    std::string profile_id;
+    std::string revision;
+};
+
+struct CxExecutionBudget
+{
+    int max_elapsed_ms = 0;
+    int max_scan_lines = 0;
+    int max_samples = 0;
+};
+
+struct CxContractSpec
+{
+    std::filesystem::path contract_path;
+    bool enabled = false;
+};
+
+struct CxMetricSummary
+{
+    int elapsed_ms = 0;
+    int scan_line_count = 0;
+    int sample_count = 0;
+    int valid_points_count = 0;
+    int rejected_points_count = 0;
+};
+
+struct CxExecutionTraceSummary
+{
+    std::string run_id;
+    std::string case_id;
+    std::string script_id;
+};
+
+struct CxExecutionRequest
+{
+    std::string run_id;
+    std::string case_id;
+    std::string image_id;
+    std::string target_id;
+
+    std::string tool;
+    std::string script_path;
+
+    CxImageInput image;
+    CxGaugeSnapshot gauge;
+    CxParameterSnapshot parameters;
+
+    CxExecutionBudget budget;
+    CxContractSpec contract;
+};
+
+struct CxExecutionResult
+{
+    std::string run_id;
+    std::string case_id;
+    std::string tool;
+    std::string object_name;
+
+    bool executed = false;
+    bool geometry_available = false;
+    bool fit_available = false;
+
+    std::string status;
+    std::string failure_stage;
+    std::string reason;
+
+    CxGaugeSnapshot input_gauge;
+    CxParameterSnapshot input_parameters;
+
+    std::vector<CxPoint2D> measure_points;
+    std::vector<CxPoint2D> valid_points;
+    std::vector<CxPoint2D> rejected_points;
+
+    std::optional<CxLineResult> line_result;
+    std::optional<CxCircleResult> circle_result;
+    std::optional<CxMatchResult> match_result;
+    std::optional<CxInferenceResult> inference_result;
+
+    CxMetricSummary metrics;
+    CxExecutionTraceSummary trace;
+};
+
+struct CxEvidencePackage
+{
+    std::filesystem::path snapshot_path;
+    std::filesystem::path summary_path;
+    std::filesystem::path result_overlay_path;
+    std::filesystem::path evidence_overlay_path;
+    std::filesystem::path tool_display_path;
+    std::filesystem::path trace_path;
+    std::filesystem::path replay_package_path;
+    std::filesystem::path contract_result_path;
+};
+
+struct CxReviewDecision
+{
+    std::string run_id;
+    std::string decision;
+    std::string reason;
+    std::string reviewer;
+};

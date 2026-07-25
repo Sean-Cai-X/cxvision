@@ -76,6 +76,36 @@ bool ParseUnifiedLogArgs(
             options.smoke_id = argv[++i];
             continue;
         }
+
+        if (arg == "--torch-runtime-smoke")
+        {
+            options.torch_runtime_smoke.enabled = true;
+            continue;
+        }
+
+        if (arg == "--torch-runtime-dll" && i + 1 < argc)
+        {
+            options.torch_runtime_smoke.runtime_dll = argv[++i];
+            continue;
+        }
+
+        if (arg == "--torch-device" && i + 1 < argc)
+        {
+            options.torch_runtime_smoke.device = argv[++i];
+            continue;
+        }
+
+        if (arg == "--torch-model-root" && i + 1 < argc)
+        {
+            options.torch_runtime_smoke.model_root = argv[++i];
+            continue;
+        }
+
+        if (arg == "--out" && i + 1 < argc)
+        {
+            options.torch_runtime_smoke.output_dir = argv[++i];
+            continue;
+        }
     }
 
     if (options.path.empty())
@@ -128,6 +158,8 @@ std::string DetectCxVisionRunMode(int argc, char** argv)
             return "parameter_regression";
         if (arg == "--unified-log-smoke")
             return "unified_log_smoke";
+        if (arg == "--torch-runtime-smoke")
+            return "torch_runtime_smoke";
     }
 
     return "gui";

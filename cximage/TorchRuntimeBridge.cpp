@@ -1,5 +1,4 @@
 #include "TorchRuntimeBridge.h"
-#include "libtorch_module_runtime_c_api.h"
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
@@ -185,13 +184,14 @@ bool TorchRuntimeBridge::Load(const std::string& dll_path)
     free_result_ = reinterpret_cast<FreeResultFn>(GetProcAddress(dll_, "torch_runtime_free_result"));
     version_ = reinterpret_cast<VersionFn>(GetProcAddress(dll_, "torch_runtime_version"));
 
-    if (!create_ || !destroy_ || !run_task_ || !free_result_) {
+    if (!create_ || !destroy_ || !run_task_ || !free_result_ || !version_) {
         std::ostringstream oss;
         oss << "torch runtime exports missing:";
         if (!create_) oss << " torch_runtime_create";
         if (!destroy_) oss << " torch_runtime_destroy";
         if (!run_task_) oss << " torch_runtime_run_task";
         if (!free_result_) oss << " torch_runtime_free_result";
+        if (!version_) oss << " torch_runtime_version";
         last_error_message_ = oss.str();
         Unload();
         return false;
@@ -210,7 +210,7 @@ bool TorchRuntimeBridge::Load(const std::string& dll_path)
     free_result_ = reinterpret_cast<FreeResultFn>(dlsym(dll_, "torch_runtime_free_result"));
     version_ = reinterpret_cast<VersionFn>(dlsym(dll_, "torch_runtime_version"));
 
-    if (!create_ || !destroy_ || !run_task_ || !free_result_) {
+    if (!create_ || !destroy_ || !run_task_ || !free_result_ || !version_) {
         last_error_message_ = "torch runtime exports missing";
         Unload();
         return false;
@@ -265,7 +265,7 @@ bool TorchRuntimeBridge::Create(const TorchRuntimeGuiConfig& config)
     if (!config.device.empty()) c_api_config.device = config.device.c_str();
     if (!config.log_level.empty()) c_api_config.log_level = config.log_level.c_str();
 
-    int ret = create_(&c_api_config, reinterpret_cast<void**>(&handle_));
+    int ret = create_(&c_api_config, &handle_);
     return (ret == 0 && handle_ != nullptr);
 }
 
@@ -288,6 +288,21 @@ TorchRuntimeGuiResult TorchRuntimeBridge::RunTask(const TorchRuntimeGuiRequest& 
     if (!request.extra_json.empty()) c_api_request.extra_json = request.extra_json.c_str();
 
     TorchTaskResult c_api_result{};
+
+    struct ResultGuard
+    {
+        FreeResultFn free_result = nullptr;
+        TorchTaskResult* result = nullptr;
+
+        ~ResultGuard()
+        {
+            if (free_result != nullptr && result != nullptr) {
+                free_result(result);
+            }
+        }
+    };
+
+    ResultGuard guard{free_result_, &c_api_result};
 
     int ret = run_task_(handle_, &c_api_request, &c_api_result);
     if (ret != 0) {
@@ -321,8 +336,6 @@ TorchRuntimeGuiResult TorchRuntimeBridge::RunTask(const TorchRuntimeGuiRequest& 
     if (c_api_result.trainer_lifecycle_summary) result.trainer_lifecycle_summary = c_api_result.trainer_lifecycle_summary;
     if (c_api_result.unified_mainline_summary) result.unified_mainline_summary = c_api_result.unified_mainline_summary;
 
-    free_result_(&c_api_result);
-
     return result;
 }
 
@@ -336,7 +349,17 @@ void TorchRuntimeBridge::Destroy()
 
 bool TorchRuntimeBridge::IsLoaded() const
 {
-    return dll_ != nullptr && create_ != nullptr && destroy_ != nullptr && run_task_ != nullptr && free_result_ != nullptr;
+    return dll_ != nullptr && create_ != nullptr && destroy_ != nullptr && run_task_ != nullptr && free_result_ != nullptr && version_ != nullptr;
+}
+
+std::string TorchRuntimeBridge::RuntimeVersion() const
+{
+    if (version_ == nullptr) {
+        return {};
+    }
+
+    const char* version = version_();
+    return version != nullptr ? std::string(version) : std::string();
 }
 
 const std::string& TorchRuntimeBridge::LastErrorMessage() const

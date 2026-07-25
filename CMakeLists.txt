@@ -35,6 +35,10 @@ option(CXVISION_COPY_RUNTIME_DLLS
        "Copy OCCT/OpenCV/LibTorch runtime DLLs next to cxvision_imgui_acceptance after build"
        OFF)
 
+option(CXVISION_ENABLE_TORCH_RUNTIME
+       "Build and integrate libtorch runtime service"
+       ON)
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -83,6 +87,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp
   cximage/TorchRuntimeBridge.cpp
+  cximage/CxTorchRuntimeService.cpp
   cximage/TorchRuntimeResultAdapter.cpp
   cximage/CxShapeInteractionRunner.cpp
   cximage/CxRuntimeProjectionExecutor.cpp
@@ -283,6 +288,22 @@ set_target_properties(cxvision_imgui_acceptance PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
   RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
 )
+
+if(CXVISION_ENABLE_TORCH_RUNTIME AND TARGET libtorch_module_runtime)
+  add_dependencies(
+    cxvision_imgui_acceptance
+    libtorch_module_runtime
+  )
+
+  add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:libtorch_module_runtime>"
+            "$<TARGET_FILE_DIR:cxvision_imgui_acceptance>"
+    COMMENT "Copy libtorch_module_runtime next to cxvision_imgui_acceptance"
+  )
+elseif(CXVISION_ENABLE_TORCH_RUNTIME)
+  message(STATUS "CXVISION_ENABLE_TORCH_RUNTIME=ON but libtorch_module_runtime target not found")
+endif()
 
 if(CXVISION_COPY_RUNTIME_DLLS)
   add_custom_command(TARGET cxvision_imgui_acceptance POST_BUILD

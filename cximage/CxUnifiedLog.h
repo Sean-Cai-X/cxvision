@@ -6,6 +6,7 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
+#include <fstream>
 
 enum class CxLogLevel
 {
@@ -112,7 +113,7 @@ private:
     std::string mode_;
     std::chrono::steady_clock::time_point start_time_;
 
-    void* file_handle_ = nullptr;
+    std::ofstream file_stream_;
     std::mutex mutex_;
     std::atomic<unsigned long long> sequence_{0};
 

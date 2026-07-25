@@ -5,6 +5,15 @@
 #include <filesystem>
 #include "CxUnifiedLog.h"
 
+struct CxTorchRuntimeSmokeOptions
+{
+    bool enabled = false;
+    std::filesystem::path runtime_dll;
+    std::filesystem::path output_dir;
+    std::string device = "cpu";
+    std::string model_root;
+};
+
 struct CxUnifiedLogOptions
 {
     std::filesystem::path path;
@@ -13,6 +22,8 @@ struct CxUnifiedLogOptions
     CxLogLevel min_level = CxLogLevel::Info;
     std::string smoke_id;
     bool smoke_mode = false;
+
+    CxTorchRuntimeSmokeOptions torch_runtime_smoke;
 };
 
 bool ParseUnifiedLogArgs(

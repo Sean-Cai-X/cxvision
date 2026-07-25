@@ -118,15 +118,13 @@ DeprecatedTypeNameSuggestion(
         return "FindLine";
     }
 
-    if (name == "FindCircle" ||
-        name == "findcircle" ||
+    if (name == "findcircle" ||
         name == "find_circle")
     {
         return "FindCircle";
     }
 
-    if (name == "FindEllipse" ||
-        name == "findellipse")
+    if (name == "findellipse")
     {
         return "FindEllipse";
     }

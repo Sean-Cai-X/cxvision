@@ -12,10 +12,9 @@ CxUnifiedLog::CxUnifiedLog() = default;
 
 CxUnifiedLog::~CxUnifiedLog()
 {
-    if (file_handle_ != nullptr)
+    if (file_stream_.is_open())
     {
-        CloseHandle((HANDLE)file_handle_);
-        file_handle_ = nullptr;
+        file_stream_.close();
     }
 }
 
@@ -57,19 +56,13 @@ bool CxUnifiedLog::Initialize(
         }
     }
 
-    file_handle_ = CreateFileW(
-        log_path_.c_str(),
-        FILE_APPEND_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
+    file_stream_.open(
+        log_path_,
+        std::ios::out | std::ios::app | std::ios::binary);
 
-    if (file_handle_ == INVALID_HANDLE_VALUE)
+    if (!file_stream_.is_open())
     {
-        reason = "failed to open log file: " + std::to_string(GetLastError());
-        file_handle_ = nullptr;
+        reason = "failed to open log file: " + log_path_.string();
         return false;
     }
 
@@ -148,10 +141,9 @@ void CxUnifiedLog::Shutdown(int exitCode, const std::string& conclusion)
 
     Flush();
 
-    if (file_handle_ != nullptr)
+    if (file_stream_.is_open())
     {
-        CloseHandle((HANDLE)file_handle_);
-        file_handle_ = nullptr;
+        file_stream_.close();
     }
 
     initialized_ = false;
@@ -234,10 +226,11 @@ void CxUnifiedLog::Write(
 
 void CxUnifiedLog::Flush()
 {
-    if (!initialized_ || file_handle_ == nullptr)
+    if (!initialized_ || !file_stream_.is_open())
         return;
 
-    FlushFileBuffers((HANDLE)file_handle_);
+    std::lock_guard<std::mutex> lock(mutex_);
+    file_stream_.flush();
 }
 
 std::string CxUnifiedLog::GenerateRunId() const
@@ -362,7 +355,7 @@ std::string CxUnifiedLog::LevelToString(CxLogLevel level) const
 
 void CxUnifiedLog::WriteLine(const std::string& line)
 {
-    if (!initialized_ || file_handle_ == nullptr)
+    if (!initialized_ || !file_stream_.is_open())
         return;
 
     thread_local bool inside_write = false;
@@ -384,27 +377,24 @@ void CxUnifiedLog::WriteLine(const std::string& line)
 
 bool CxUnifiedLog::WriteWithLock(const std::string& line)
 {
-    std::string line_with_newline = line + "\n";
-    DWORD bytes_written = 0;
-    const BOOL write_ok = WriteFile(
-        static_cast<HANDLE>(file_handle_),
-        line_with_newline.c_str(),
-        static_cast<DWORD>(line_with_newline.size()),
-        &bytes_written,
-        nullptr);
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    const bool full_write = write_ok && bytes_written == line_with_newline.size();
-    if (!full_write)
+    if (!file_stream_.is_open())
     {
-        char buf[128];
-        sprintf_s(buf, "WriteFile failed: write_ok=%d, bytes_written=%lu, expected=%zu, error=%lu",
-            write_ok, bytes_written, line_with_newline.size(), GetLastError());
-        RawFallbackWrite(buf);
+        return false;
     }
 
-    FlushFileBuffers(static_cast<HANDLE>(file_handle_));
+    file_stream_ << line << '\n';
+    const bool write_ok = file_stream_.good();
 
-    return full_write;
+    if (!write_ok)
+    {
+        RawFallbackWrite("ofstream write failed");
+    }
+
+    file_stream_.flush();
+
+    return write_ok;
 }
 
 CxScopedLogContext::CxScopedLogContext(const CxUnifiedLogContext& patch)
