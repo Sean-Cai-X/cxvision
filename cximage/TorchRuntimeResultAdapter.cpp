@@ -1,5 +1,52 @@
 #include "TorchRuntimeResultAdapter.h"
+#include <filesystem>
 #include <sstream>
+
+namespace
+{
+
+bool IsSegmentationTask(const CxTorchTaskSpec& task)
+{
+    return task.kind == CxTorchTaskKind::Segmentation ||
+           task.kind == CxTorchTaskKind::SegmentationContract ||
+           task.task_id.find("segmentation") != std::string::npos ||
+           task.task_id.find("deeplab") != std::string::npos;
+}
+
+void AttachSegmentationMaskRefs(
+    const TorchRuntimeGuiResult& source,
+    const CxTorchTaskSpec& task,
+    CxInferenceResult& target)
+{
+    if (!IsSegmentationTask(task) || source.result_ref.empty()) {
+        return;
+    }
+
+    const std::filesystem::path result_path(source.result_ref);
+    const std::filesystem::path result_dir = result_path.parent_path();
+    const std::filesystem::path mask_path = result_dir / "mask_binary.png";
+    const std::filesystem::path contour_path = result_dir / "contours.json";
+    const std::filesystem::path overlay_path = source.primary_visual_ref.empty()
+        ? result_dir / "mask_overlay.png"
+        : std::filesystem::path(source.primary_visual_ref);
+
+    if (!std::filesystem::exists(mask_path)) {
+        return;
+    }
+
+    CxTorchMask mask;
+    mask.available = true;
+    mask.mask_ref = mask_path.string();
+    if (std::filesystem::exists(contour_path)) {
+        mask.contour_ref = contour_path.string();
+    }
+    if (std::filesystem::exists(overlay_path)) {
+        mask.overlay_ref = overlay_path.string();
+    }
+    target.mask = mask;
+}
+
+} // namespace
 
 bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
     const TorchRuntimeGuiResult& source,
@@ -40,6 +87,8 @@ bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
     target.roi_crop_packet_ref = source.roi_crop_packet_ref;
     target.template_alignment_ref = source.template_alignment_ref;
     target.roi_diff_candidate_ref = source.roi_diff_candidate_ref;
+
+    AttachSegmentationMaskRefs(source, task, target);
 
     if (!source.ok) {
         target.failure_stage = "torch_task_execute";

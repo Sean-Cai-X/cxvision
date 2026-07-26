@@ -19,3 +19,7 @@ std::filesystem::path BuildTorchCaseDirectory(
     const TorchRuntimeCoreConfig& config,
     const TorchTaskRequestCpp& request,
     std::string& reason);
+
+std::string EscapeTorchJsonString(const std::string& value);
+
+std::string QuoteTorchJsonString(const std::string& value);

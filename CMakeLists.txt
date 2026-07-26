@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(CTest)
+
 set(GLFW_ROOT "D:/glfw-3.3.10" CACHE PATH "Path to the GLFW source tree")
 set(GLAD_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../analysis_workspace/imGuIZMO.quat/libs/glad" CACHE PATH "Path to glad sources")
 set(OCCT_ROOT "D:/OpenCASCADE-7.7.0-vc14-64/opencascade-7.7.0" CACHE PATH "Path to OpenCASCADE")
@@ -353,6 +355,51 @@ if(CXVISION_COPY_RUNTIME_DLLS)
   endif()
 else()
   message(STATUS "Runtime DLL post-build copy is disabled (CXVISION_COPY_RUNTIME_DLLS=OFF)")
+endif()
+
+if(BUILD_TESTING AND
+   CXVISION_ENABLE_TORCH_RUNTIME AND
+   TARGET libtorch_module_segmentation_stage_tests AND
+   TARGET cxvision_imgui_acceptance)
+  set(CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_WEIGHT
+      "${CMAKE_CURRENT_SOURCE_DIR}/libtorch_module/models/deeplab_cpp_state_dict_smoke_v1/weights/deeplab_cpp_state_dict_smoke.pt")
+  set(CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_SCRIPT
+      "${CMAKE_CURRENT_SOURCE_DIR}/cxparser/cxscript/module/torch/torch_segmentation_cpp_state_dict_cpu_direct.cxsc")
+  set(CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_IMAGE
+      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_001.jpg")
+  set(CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_RUN_ROOT
+      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs")
+
+  set(_cxvision_torch_ctest_path
+      "${LIBTORCH_ROOT}/lib;${OpenCV_DIR}/x64/vc16/bin;$ENV{PATH}")
+  string(REPLACE ";" "\\;" _cxvision_torch_ctest_path "${_cxvision_torch_ctest_path}")
+
+  add_test(
+    NAME torch_segmentation_cpp_state_dict_weight_export
+    COMMAND $<TARGET_FILE:libtorch_module_segmentation_stage_tests>
+            --mode export-cpp-state-dict
+            --export-path "${CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_WEIGHT}")
+
+  set_tests_properties(torch_segmentation_cpp_state_dict_weight_export PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    ENVIRONMENT "PATH=${_cxvision_torch_ctest_path};LIBTORCH_MODULE_USE_CUDA=0")
+
+  add_test(
+    NAME torch_segmentation_cpp_state_dict_headless
+    COMMAND $<TARGET_FILE:cxvision_imgui_acceptance>
+            --headless
+            --cxscript-headless
+            --image "${CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_IMAGE}"
+            --script "${CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_SCRIPT}"
+            --case-name "T5_torch_segmentation_cpp_state_dict_ctest"
+            --out "${CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_RUN_ROOT}/headless/T5_torch_segmentation_cpp_state_dict_ctest"
+            --max-steps 10000
+            --unified-log "${CXVISION_T5_SEGMENTATION_CPP_STATE_DICT_RUN_ROOT}/_shared/cxvision_imgui_acceptance.jsonl")
+
+  set_tests_properties(torch_segmentation_cpp_state_dict_headless PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS torch_segmentation_cpp_state_dict_weight_export
+    ENVIRONMENT "PATH=${_cxvision_torch_ctest_path};LIBTORCH_MODULE_USE_CUDA=0")
 endif()
 
 

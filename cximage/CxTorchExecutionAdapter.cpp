@@ -107,6 +107,7 @@ bool CxTorchExecutionAdapter::BuildRuntimeRequest(const CxTorchTaskSpec& task, C
     request.manifest_path = task.manifest_path.string();
     request.case_name = task.case_id;
     request.extra_json = task.extra_json;
+    request.output_dir = task.output_dir.string();
 
     if (request.task.empty()) {
         reason = "runtime task is empty";

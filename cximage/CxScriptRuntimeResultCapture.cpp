@@ -482,6 +482,20 @@ static void MergeToolCapture(
     if (!tool.segmentation_overlay_ref.empty())
         capture.segmentation_overlay_ref = tool.segmentation_overlay_ref;
 
+    if (tool.torch_ok != 0)
+        capture.torch_ok = tool.torch_ok;
+    if (tool.torch_error_code != 0)
+        capture.torch_error_code = tool.torch_error_code;
+    if (tool.torch_infer_ms != 0.0)
+        capture.torch_infer_ms = tool.torch_infer_ms;
+    capture.torch_result_count += tool.torch_result_count;
+    if (!tool.torch_status.empty())
+        capture.torch_status = tool.torch_status;
+    if (!tool.torch_failure_stage.empty())
+        capture.torch_failure_stage = tool.torch_failure_stage;
+    if (!tool.torch_reason.empty())
+        capture.torch_reason = tool.torch_reason;
+
     if (capture.failure_stage.empty() && !tool.failure_stage.empty())
         capture.failure_stage = tool.failure_stage;
 
@@ -813,6 +827,15 @@ bool CaptureTorchTaskResult(
     output.torch_reason = tool.getreason();
     output.torch_result_count = tool.getresultcount();
 
+    output.segmentation_result_ref = tool.getresultref();
+    output.segmentation_mask_ref = tool.getmaskref();
+    output.segmentation_overlay_ref = tool.getoverlayref();
+    const CxInferenceResult& inference_result = tool.GetInferenceResult();
+    if (inference_result.mask.has_value())
+    {
+        output.segmentation_contour_ref = inference_result.mask->contour_ref;
+    }
+
     output.algorithm_executed = tool.getok() != 0;
     output.measure_completed = tool.getok() != 0;
 
@@ -822,7 +845,6 @@ bool CaptureTorchTaskResult(
         output.reason = output.torch_reason;
     }
 
-    const CxInferenceResult& inference_result = tool.GetInferenceResult();
     CxTorchResultProjector::Project(inference_result, "TorchTask", object_name, output.shapes);
 
     return true;

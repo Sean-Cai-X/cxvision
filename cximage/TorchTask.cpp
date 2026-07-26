@@ -70,6 +70,11 @@ void TorchTask::settemplatepath(const char* value)
     task_.template_image_path = value;
 }
 
+void TorchTask::setoutputdir(const char* value)
+{
+    task_.output_dir = value;
+}
+
 void TorchTask::settimeout(int value)
 {
     task_.timeout_ms = value;

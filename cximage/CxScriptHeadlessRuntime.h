@@ -129,6 +129,14 @@ struct CxScriptExecutionCapture
     std::string segmentation_contour_ref;
     std::string segmentation_overlay_ref;
 
+    int torch_ok = 0;
+    int torch_error_code = 0;
+    double torch_infer_ms = 0.0;
+    int torch_result_count = 0;
+    std::string torch_status;
+    std::string torch_failure_stage;
+    std::string torch_reason;
+
     bool budget_exceeded = false;
 
     int rendered_roi_count = 0;

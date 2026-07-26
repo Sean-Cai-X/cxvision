@@ -581,6 +581,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["segmentation_status_code"] = capture.segmentation_status_code;
     pkg.metrics["segmentation_contour_count"] = capture.segmentation_contour_count;
     pkg.metrics["segmentation_primary_area"] = capture.segmentation_primary_area;
+    pkg.metrics["torch_ok"] = capture.torch_ok;
+    pkg.metrics["torch_error_code"] = capture.torch_error_code;
+    pkg.metrics["torch_infer_ms"] = capture.torch_infer_ms;
+    pkg.metrics["torch_result_count"] = capture.torch_result_count;
 
     pkg.facts["execution_mode"] = "sequential";
     pkg.facts["algorithm_executed"] = capture.runtime_completed ? "true" : "false";
@@ -607,6 +611,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["segmentation_mask_ref"] = capture.segmentation_mask_ref;
     pkg.facts["segmentation_contour_ref"] = capture.segmentation_contour_ref;
     pkg.facts["segmentation_overlay_ref"] = capture.segmentation_overlay_ref;
+    pkg.facts["torch_ok"] = capture.torch_ok != 0 ? "true" : "false";
+    pkg.facts["torch_status"] = capture.torch_status;
+    pkg.facts["torch_failure_stage"] = capture.torch_failure_stage;
+    pkg.facts["torch_reason"] = capture.torch_reason;
 
     if (capture.contract_context)
     {
@@ -1117,6 +1125,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"segmentation_mask_ref\": \"" << JsonEscape(capture.segmentation_mask_ref) << "\",\n";
         object_state_file << "  \"segmentation_contour_ref\": \"" << JsonEscape(capture.segmentation_contour_ref) << "\",\n";
         object_state_file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
+        object_state_file << "  \"torch_ok\": " << capture.torch_ok << ",\n";
+        object_state_file << "  \"torch_error_code\": " << capture.torch_error_code << ",\n";
+        object_state_file << "  \"torch_infer_ms\": " << capture.torch_infer_ms << ",\n";
+        object_state_file << "  \"torch_result_count\": " << capture.torch_result_count << ",\n";
+        object_state_file << "  \"torch_status\": \"" << JsonEscape(capture.torch_status) << "\",\n";
         object_state_file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << "\n";
         object_state_file << "}\n";
         object_state_file.close();
@@ -1192,6 +1205,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "model_point_count: " << capture.model_point_count << "\n";
         log_file << "candidate_count: " << capture.candidate_count << "\n";
         log_file << "best_score: " << capture.best_score << "\n";
+        log_file << "torch_ok: " << capture.torch_ok << "\n";
+        log_file << "torch_status: " << capture.torch_status << "\n";
+        log_file << "torch_infer_ms: " << capture.torch_infer_ms << "\n";
         log_file << "case_end\n";
         log_file << "run_end\n";
         log_file.close();
@@ -1199,8 +1215,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     bool snapshot_ok = !result.snapshot_path.empty();
     bool summary_ok = !result.summary_path.empty();
+    const bool torch_task_ok = capture.torch_ok != 0;
     bool evidence_ok = options.contract_context_enabled ||
-        (!result.evidence_overlay_path.empty() && capture.rendered_roi_count > 0);
+        (!result.evidence_overlay_path.empty() && (capture.rendered_roi_count > 0 || torch_task_ok));
     bool result_ok = !result.result_overlay_path.empty();
     bool tool_display_ok = !result.tool_display_path.empty();
 

@@ -287,6 +287,7 @@ TorchRuntimeGuiResult TorchRuntimeBridge::RunTask(const TorchRuntimeGuiRequest& 
     if (!request.manifest_path.empty()) c_api_request.manifest_path = request.manifest_path.c_str();
     if (!request.case_name.empty()) c_api_request.case_name = request.case_name.c_str();
     if (!request.extra_json.empty()) c_api_request.extra_json = request.extra_json.c_str();
+    if (!request.output_dir.empty()) c_api_request.output_dir = request.output_dir.c_str();
 
     TorchTaskResult c_api_result{};
 

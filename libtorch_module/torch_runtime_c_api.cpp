@@ -95,6 +95,7 @@ TORCH_RUNTIME_API int torch_runtime_run_task(
         if (request->manifest_path) cpp_request.manifest_path = request->manifest_path;
         if (request->case_name) cpp_request.case_name = request->case_name;
         if (request->extra_json) cpp_request.extra_json = request->extra_json;
+        if (request->output_dir) cpp_request.output_dir = request->output_dir;
 
         TorchTaskResultCpp cpp_result = RunTorchTask(impl->config, cpp_request);
 

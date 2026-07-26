@@ -1,6 +1,8 @@
 #include "torch_runtime_artifact_writer.h"
 #include <opencv2/imgcodecs.hpp>
 #include <fstream>
+#include <sstream>
+#include <iomanip>
 
 bool WriteTorchTextArtifact(
     const std::filesystem::path& path,
@@ -68,33 +70,41 @@ std::filesystem::path BuildTorchCaseDirectory(
     const TorchTaskRequestCpp& request,
     std::string& reason)
 {
-    if (config.output_root.empty())
+    std::filesystem::path base_dir;
+
+    if (!request.output_dir.empty())
     {
-        reason = "output_root is empty";
+        base_dir = std::filesystem::path(request.output_dir);
+    }
+    else if (!config.output_root.empty())
+    {
+        std::string case_name = request.case_name;
+        if (case_name.empty())
+        {
+            case_name = "unnamed_case";
+        }
+
+        std::replace(case_name.begin(), case_name.end(), '/', '_');
+        std::replace(case_name.begin(), case_name.end(), '\\', '_');
+        std::replace(case_name.begin(), case_name.end(), ':', '_');
+        std::replace(case_name.begin(), case_name.end(), '*', '_');
+        std::replace(case_name.begin(), case_name.end(), '?', '_');
+        std::replace(case_name.begin(), case_name.end(), '"', '_');
+        std::replace(case_name.begin(), case_name.end(), '<', '_');
+        std::replace(case_name.begin(), case_name.end(), '>', '_');
+        std::replace(case_name.begin(), case_name.end(), '|', '_');
+
+        base_dir = std::filesystem::path(config.output_root) / case_name;
+    }
+    else
+    {
+        reason = "output_root and output_dir are both empty";
         return {};
     }
 
-    std::string case_name = request.case_name;
-    if (case_name.empty())
-    {
-        case_name = "unnamed_case";
-    }
-
-    std::replace(case_name.begin(), case_name.end(), '/', '_');
-    std::replace(case_name.begin(), case_name.end(), '\\', '_');
-    std::replace(case_name.begin(), case_name.end(), ':', '_');
-    std::replace(case_name.begin(), case_name.end(), '*', '_');
-    std::replace(case_name.begin(), case_name.end(), '?', '_');
-    std::replace(case_name.begin(), case_name.end(), '"', '_');
-    std::replace(case_name.begin(), case_name.end(), '<', '_');
-    std::replace(case_name.begin(), case_name.end(), '>', '_');
-    std::replace(case_name.begin(), case_name.end(), '|', '_');
-
-    std::filesystem::path case_dir = std::filesystem::path(config.output_root) / case_name;
-
     try
     {
-        std::filesystem::create_directories(case_dir);
+        std::filesystem::create_directories(base_dir);
     }
     catch (const std::exception& e)
     {
@@ -102,5 +112,39 @@ std::filesystem::path BuildTorchCaseDirectory(
         return {};
     }
 
-    return case_dir;
+    return base_dir;
+}
+
+std::string EscapeTorchJsonString(const std::string& value)
+{
+    std::ostringstream os;
+    for (char c : value)
+    {
+        switch (c)
+        {
+        case '\\': os << "\\\\"; break;
+        case '"': os << "\\\""; break;
+        case '\n': os << "\\n"; break;
+        case '\r': os << "\\r"; break;
+        case '\t': os << "\\t"; break;
+        case '\b': os << "\\b"; break;
+        case '\f': os << "\\f"; break;
+        default:
+            if (c < 0x20)
+            {
+                os << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(c);
+            }
+            else
+            {
+                os << c;
+            }
+            break;
+        }
+    }
+    return os.str();
+}
+
+std::string QuoteTorchJsonString(const std::string& value)
+{
+    return "\"" + EscapeTorchJsonString(value) + "\"";
 }

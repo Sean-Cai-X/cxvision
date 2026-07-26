@@ -93,6 +93,10 @@ bool CxTorchRuntimeService::Execute(
     gui_request.case_name = request.case_name;
     gui_request.extra_json = request.extra_json;
 
+    if (!request.output_dir.empty()) {
+        gui_request.output_dir = request.output_dir;
+    }
+
     const TorchRuntimeGuiResult gui_result = bridge_.RunTask(gui_request);
     CopyGuiResultToResponse(gui_result, response);
 

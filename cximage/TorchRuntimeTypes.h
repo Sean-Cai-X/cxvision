@@ -18,6 +18,7 @@ struct TorchRuntimeGuiRequest
     std::string manifest_path;
     std::string case_name;
     std::string extra_json;
+    std::string output_dir;
 };
 
 struct TorchRuntimeGuiResult

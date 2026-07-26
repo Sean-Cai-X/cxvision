@@ -32,6 +32,7 @@ typedef struct TorchTaskRequest
   const char* manifest_path;
   const char* case_name;
   const char* extra_json;
+  const char* output_dir;
 } TorchTaskRequest;
 
 typedef struct TorchTaskResult

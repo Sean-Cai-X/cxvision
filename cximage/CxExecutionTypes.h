@@ -72,6 +72,7 @@ struct CxTorchTaskSpec
     std::filesystem::path manifest_path;
     std::filesystem::path input_image_path;
     std::filesystem::path template_image_path;
+    std::filesystem::path output_dir;
     std::string requested_device = "cpu";
     int timeout_ms = 0;
     std::string extra_json;

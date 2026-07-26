@@ -15,6 +15,7 @@ public:
     void setdevice(const char* value);
     void setinputpath(const char* value);
     void settemplatepath(const char* value);
+    void setoutputdir(const char* value);
     void settimeout(int value);
 
     void run(void* image_object);

@@ -636,6 +636,7 @@ namespace mu
             m_parser.DefineClassFun("TorchTask", ptorch_task, "setdevice", &TorchTask::setdevice);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "setinputpath", &TorchTask::setinputpath);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "settemplatepath", &TorchTask::settemplatepath);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setoutputdir", &TorchTask::setoutputdir);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "settimeout", &TorchTask::settimeout);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "run", &TorchTask::run);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getok", &TorchTask::getok);

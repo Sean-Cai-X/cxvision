@@ -6,6 +6,7 @@ m_image.copyFromMat(global_matInput);
 m_task.settask("torch.runtime.capabilities.v1");
 m_task.setcase("T_torch_capabilities");
 m_task.setdevice("cpu");
+m_task.setoutputdir("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/T4_torch_capabilities");
 
 m_task.run(m_image);
 

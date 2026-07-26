@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -11,34 +12,47 @@ namespace {
 enum class SegmentationStageMode {
     Infer,
     Train,
+    ExportCppStateDict,
     All
 };
 
-SegmentationStageMode parse_mode(int argc, char** argv) {
+struct SegmentationStageOptions {
     SegmentationStageMode mode = SegmentationStageMode::All;
+    std::string export_path;
+};
+
+SegmentationStageOptions parse_options(int argc, char** argv) {
+    SegmentationStageOptions options;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: libtorch_module_segmentation_stage_tests [--mode infer|train|all]\n";
+            std::cout << "Usage: libtorch_module_segmentation_stage_tests [--mode infer|train|all|export-cpp-state-dict] [--export-path path]\n";
             std::exit(0);
         }
         if (arg == "--mode") {
             TORCH_CHECK(i + 1 < argc, "--mode requires a value");
             const std::string value = argv[++i];
             if (value == "infer") {
-                mode = SegmentationStageMode::Infer;
+                options.mode = SegmentationStageMode::Infer;
             } else if (value == "train") {
-                mode = SegmentationStageMode::Train;
+                options.mode = SegmentationStageMode::Train;
             } else if (value == "all") {
-                mode = SegmentationStageMode::All;
+                options.mode = SegmentationStageMode::All;
+            } else if (value == "export-cpp-state-dict") {
+                options.mode = SegmentationStageMode::ExportCppStateDict;
             } else {
                 TORCH_CHECK(false, "Unknown segmentation stage mode: ", value);
             }
             continue;
         }
+        if (arg == "--export-path") {
+            TORCH_CHECK(i + 1 < argc, "--export-path requires a value");
+            options.export_path = argv[++i];
+            continue;
+        }
         TORCH_CHECK(false, "Unknown argument: ", arg);
     }
-    return mode;
+    return options;
 }
 
 const char* mode_name(SegmentationStageMode mode) {
@@ -47,6 +61,8 @@ const char* mode_name(SegmentationStageMode mode) {
         return "infer";
     case SegmentationStageMode::Train:
         return "train";
+    case SegmentationStageMode::ExportCppStateDict:
+        return "export-cpp-state-dict";
     case SegmentationStageMode::All:
     default:
         return "all";
@@ -133,10 +149,51 @@ int run_segmentation_train_stage() {
     }
 }
 
+int export_cpp_state_dict_stage(const std::string& export_path) {
+    try {
+        TORCH_CHECK(!export_path.empty(), "--export-path is required for export-cpp-state-dict mode");
+
+        const std::filesystem::path output_path(export_path);
+        if (!output_path.parent_path().empty()) {
+            std::filesystem::create_directories(output_path.parent_path());
+        }
+
+        DeepLabV3Plus model("mobilenet_v3_large", 2);
+        model->eval();
+        torch::save(model, output_path.string());
+
+        DeepLabV3Plus reload_model("mobilenet_v3_large", 2);
+        torch::load(reload_model, output_path.string());
+        reload_model->eval();
+
+        torch::NoGradGuard no_grad;
+        const auto smoke_input = torch::randn({1, 3, 64, 64}, torch::kFloat32);
+        const auto output = reload_model->forward(smoke_input);
+        TORCH_CHECK(output.count("out") == 1, "Exported DeepLabV3Plus state_dict reload missing out tensor");
+        const auto out_sizes = output.at("out").sizes();
+        TORCH_CHECK(out_sizes.size() == 4,
+                    "Exported DeepLabV3Plus output must be NCHW");
+        TORCH_CHECK(out_sizes[0] == smoke_input.size(0) &&
+                    out_sizes[1] == 2 &&
+                    out_sizes[2] == smoke_input.size(2) &&
+                    out_sizes[3] == smoke_input.size(3),
+                    "Exported DeepLabV3Plus output shape mismatch");
+
+        std::cout << "OK exported cpp_state_dict deeplab smoke weight: "
+                  << output_path.string() << "\n";
+        return 0;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "FAIL export cpp_state_dict deeplab smoke weight: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    const auto mode = parse_mode(argc, argv);
+    const auto options = parse_options(argc, argv);
+    const auto mode = options.mode;
     std::cout << "=================================\n";
     std::cout << " libtorch_module segmentation stage validation\n";
     std::cout << " active mode = " << mode_name(mode) << "\n";
@@ -147,6 +204,8 @@ int main(int argc, char** argv) {
         failures = run_segmentation_infer_stage();
     } else if (mode == SegmentationStageMode::Train) {
         failures = run_segmentation_train_stage();
+    } else if (mode == SegmentationStageMode::ExportCppStateDict) {
+        failures = export_cpp_state_dict_stage(options.export_path);
     } else {
         failures += run_segmentation_infer_stage();
         failures += run_segmentation_train_stage();
