@@ -1,311 +1,336 @@
-# CxVision Code Wiki v2.2
+# CxVision Code Wiki v2.3
 
-<p align="center">
-<img src="https://raw.githubusercontent.com/Sean-Cai-X/cxvision/codex/cxcore-integration/diagram.png" width="100%">
-</p>
-
-
-
-
-> **文档版本**: v2.2  
-> **对应分支**: codex/cxcore-integration  
-> **核验日期**: 2026-07-16  
-> **文档标题**: Standardized Execution Chain and Integration Baseline
-
-## 目录
-
-0. [文档元信息与状态标签](#0-文档元信息与状态标签)
-1. [项目定位和当前阶段](#1-项目定位和当前阶段)
-2. [完整系统架构](#2-完整系统架构)
-3. [三条标准执行链](#3-三条标准执行链)
-4. [Application / UI](#4-application--ui)
-5. [Workbench State](#5-workbench-state)
-6. [Interaction / Annotation](#6-interaction--annotation)
-7. [Manual Console Controllers](#7-manual-console-controllers)
-8. [Unified Execution / Orchestration](#8-unified-execution--orchestration)
-9. [cxparser / cxparser_ext Runtime](#9-cxparser--cxparser_ext-runtime)
-10. [CxScript Asset System](#10-cxscript-asset-system)
-11. [Vision Tool Runtime](#11-vision-tool-runtime)
-12. [Model & Optimization Capability](#12-model--optimization-capability)
-    - 12.1 [torch 主模型](#121-torch-主模型)
-    - 12.2 [mlpack 基础模型](#122-mlpack-基础模型)
-    - 12.3 [ensmallen 优化层](#123-ensmallen-优化层)
-    - 12.4 [参数搜索策略](#124-参数搜索策略)
-13. [Canonical Result / Projection / Display](#13-canonical-result--projection--display)
-14. [Evidence / Review / Artifact](#14-evidence--review--artifact)
-15. [Parameter Regression](#15-parameter-regression)
-16. [Fixed Baseline and Regression Policy](#16-fixed-baseline-and-regression-policy)
-17. [Observability / Reliability](#17-observability--reliability)
-18. [OpenCV / OCCT / cxgeom / cxcloud](#18-opencv--occt--cxgeom--cxcloud)
-19. [Build / Runtime](#19-build--runtime)
-20. [Test Taxonomy / Acceptance](#20-test-taxonomy--acceptance)
-21. [Current Status Matrix](#21-current-status-matrix)
-22. [Roadmap](#22-roadmap)
-23. [Architecture Rules](#23-architecture-rules)
-
-## Appendix A. Core File Index
-## Appendix B. CxScript Asset Index
-## Appendix C. Artifact Schemas
-## Appendix D. CLI Options
-## Appendix E. Placeholder Register
-## Appendix F. Legacy Stage25 C++
+> **文档版本**：v2.3
+> **对应分支**：`codex/cxcore-integration`
+> **核验日期**：2026-07-26
+> **文档标题**：Core Boundary、Torch Geometry Handoff 与统一执行链更新基线
+> **替代版本**：v2.2，核验日期 2026-07-16
+> **核验方式**：当前分支静态代码、CMake 构建清单、提交记录与已有模块测试结论综合判断
 
 ---
 
-## 0. 文档元信息与状态标签
+## 0. 文档状态规则
 
-### 0.1 状态标签定义
+### 0.1 状态标签
 
-| 标签 | 含义 |
-|------|------|
-| **[Verified]** | 已通过实际操作和固定 Case 回归验证 |
-| **[Implemented]** | 核心代码已经实现，但没有覆盖全部入口 |
-| **[Partial]** | 部分路径可运行，仍存在明确断点 |
-| **[Scaffold]** | 接口存在，核心实现尚未完成 |
-| **[Placeholder]** | 使用模拟、规则或静态数据 |
-| **[Disabled]** | 代码存在，但默认关闭 |
-| **[Legacy]** | 旧路径，仅兼容保留 |
-| **[Planned]** | 尚未进入代码 |
+| 标签                         | 定义                               |
+| -------------------------- | -------------------------------- |
+| **[Verified]**             | 已进入正式构建，并通过固定输入、固定输出和实际运行回归      |
+| **[Module Verified]**      | 已在独立模块测试中完成，但尚未验证完整 cxvision 接入链 |
+| **[Implemented]**          | 代码已实现且进入构建，尚未覆盖所有正式入口            |
+| **[Partial]**              | 主链已建立，但存在明确数据断点或结果缺口             |
+| **[Contract]**             | 数据结构、接口或协议已定义，尚未证明真实运行           |
+| **[Scaffold]**             | 框架或示例存在，核心执行尚未接通                 |
+| **[Placeholder]**          | 当前结果来自规则、静态引用或模拟数据               |
+| **[Build Pending]**        | 文件存在，但未确认进入正式 CMake 目标           |
+| **[Verification Pending]** | 功能实现存在，但缺固定 Case 或跨入口一致性验证       |
+| **[Disabled]**             | 实现存在，但默认关闭                       |
+| **[Legacy]**               | 兼容旧流程，禁止作为新功能主要入口                |
+| **[Planned]**              | 尚未进入代码                           |
 
-### 0.2 当前阶段定位
+### 0.2 判定原则
 
-> **人工 Gauge 数据链和通用 Headless 执行链已经进入实现阶段；参数回归的数据、UI 和执行适配器已形成，但完整候选循环、真实命中分布、mlpack 排序和 ensmallen 优化仍未闭合。Torch 已经是实际运行能力层，不再只是规划项。**
+本项目今后不得再将"文件存在"直接写成"功能完成"。状态必须依次区分：
 
----
-
-## 1. 项目定位和当前阶段
-
-### 1.1 项目简介
-
-CxVision 是一个基于 C++ 的计算机视觉与几何分析平台，集成了图像处理、几何建模、脚本自动化以及交互式调试工作台。项目采用模块化设计，支持通过自定义脚本语言（CxScript）驱动视觉检测与几何测量工作流，并提供完整的证据链、审核门和参数回归体系。
-
-### 1.2 核心能力
-
-- **图像分析**：边缘检测、特征提取、模板匹配、形态学操作
-- **几何建模**：基于 OpenCASCADE 的参数化几何构建与测量
-- **脚本自动化**：基于 muParser 扩展的 CxScript 领域特定语言
-- **GUI 交互**：基于 ImGui + GLFW + OpenCASCADE 的可视化界面
-- **证据链管理**：Manifest/Catalog/Suite/Contract 完整证据体系
-- **参数回归**：参数范围探索、候选生成、评估记录、准确性统计
-- **机器学习集成**：Torch 主模型运行时、mlpack 基础模型、ensmallen 优化层
-- **人工审核**：Review Gate、Replay Package、Human Review
-
-### 1.3 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| 编程语言 | C++17 / C++14 |
-| 构建系统 | CMake 3.21+ |
-| 图像库 | OpenCV |
-| 几何内核 | OpenCASCADE 7.7.0 |
-| GUI 框架 | ImGui + GLFW + OpenGL (GLAD) |
-| 脚本引擎 | muParser (扩展定制版) |
-| 点云索引 | nanoflann |
-| 机器学习 | PyTorch (libtorch) |
-| 参数优化 | mlpack / ensmallen (脚本语义层) |
-
----
-
-## 2. 完整系统架构
-
-### 2.1 十一层架构
-
+```text
+Source Exists
+→ Build Registered
+→ Runtime Reachable
+→ Real Data Executed
+→ Result Projected
+→ Evidence Generated
+→ Fixed Regression Verified
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ 1. Application / UI                                          │
-│ Script Catalog / Semantic Flow Graph / Image View            │
-│ Manual State Test Console / Annotation / Evidence UI         │
-│ Key Parameter UI / Tuning Map / Conclusion UI                │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 2. Workbench State                                           │
-│ ManualTestContext / ManualGaugeState                         │
-│ ManualParamRegressionState / RuntimeObjectView               │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 3. Interaction / Annotation                                  │
-│ ImageAnnotationLayer / CxAnnotationToolRuntime               │
-│ Shape Elements / HitTest / Drag / CommitEdit                 │
-│ Runtime Projection / Runtime Writeback                       │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 4. Manual Console Controllers                                │
-│ ManualConsoleGauge / Evidence / Param / Debug                │
-│ ManualConsoleFindLineDebug / FindCircleDebug / RuntimeView   │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 5. Unified Execution & Orchestration                         │
-│ ParserDebugBridge / CxParserRuntimeOwner                     │
-│ CxScriptHeadlessRunner / CxScriptSuiteRunner                 │
-│ CxParamProbeRunner / RuntimeResultCapture                    │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 6. CxScript Runtime & Asset System                           │
-│ cxparser / cxparser_ext                                      │
-│ Catalog / Frozen / Diagnostic / Manifest / Suite             │
-│ Contract / Parameter Profile / Param Regression              │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-       ┌─────────────────┴─────────────────┐
-       ▼                                   ▼
-┌──────────────────────────────┐ ┌──────────────────────────────┐
-│ 7. Vision Tool Runtime       │ │ 8. Model & Optimization      │
-│ FindLine / FindCircle        │ │ torch 主模型                 │
-│ Findellipse / FindRect       │ │ mlpack 基础模型              │
-│ FindObject / FastMatch       │ │ ensmallen 优化层             │
-│ FindSegmentation             │ │ 参数搜索策略                 │
-│ CircleRing / Formfit         │ │                              │
-└──────────────┬───────────────┘ └──────────────┬───────────────┘
-               └───────────────┬────────────────┘
+
+只有完成最后一步，才允许标记为 `[Verified]`。
+
+---
+
+# 1. 项目定位与当前阶段
+
+## 1.1 项目定位
+
+CxVision 是一个以 C++ 为核心的精密图像分析、几何测量、脚本执行和人工复核平台。系统通过 CxScript 驱动图像工具、几何对象和模型模块，并将执行结果统一投影到交互界面、证据链和回归体系中。
+
+当前架构的核心不再是简单地"调用算法"，而是建立以下完整闭环：
+
+```text
+图像与几何输入
+→ 脚本和人工工具定义
+→ 统一执行入口
+→ 算法或模型运行
+→ 统一结果
+→ 几何对象
+→ Overlay
+→ Evidence
+→ Review
+→ Regression
+```
+
+旧版 Wiki 已经定义了脚本运行、人工 Gauge、结果捕获和证据链三条标准执行链，但当前代码增加了 `CxCoreBoundary`、AI 路由、几何 Attach 和 Torch Handoff，因此需要把"模型结果如何回到几何层"正式纳入架构。
+
+## 1.2 当前阶段判断
+
+当前项目已经从"搭建调试框架"进入：
+
+> **统一执行链固化、CxCore 边界定义、Torch 结果接入几何层、跨入口结果一致性验证阶段。**
+
+当前不是重新开发 `libtorch_module` 的训练和推理能力。按模块测试结论，模型定义、训练、评估和推理已在模块内部完成；当前主要任务是：
+
+```text
+已有 libtorch_module 能力
+→ TorchTask 脚本入口
+→ Runtime DLL
+→ CxInferenceResult
+→ Geometry Attach / Shape
+→ Overlay / Evidence
+```
+
+当前分支最近的主要公开提交包括 Torch Runtime Service 和 Torch Execution Adapter，说明外部调用骨架已经补齐；根 CMake 也已把 `TorchTask.cpp`、`CxTorchExecutionAdapter.cpp`、`CxTorchRuntimeService.cpp`、`TorchRuntimeResultAdapter.cpp` 和 `CxTorchResultProjector.cpp` 纳入主程序目标。
+
+---
+
+# 2. v2.2 到 v2.3 的主要架构变化
+
+## 2.1 新增 CxCore 稳定边界
+
+当前 `cximage` 中新增：
+
+```text
+CxCoreBoundary.h/.cpp
+CxCoreAiBoundary.h
+CxCoreGeometryAttach.h
+CxCoreTorchHandoffBridge.h
+CxCoreTorchGeometryCxscript.h
+```
+
+这些文件不是新的算法实现层，而是用于明确四类跨模块合同：
+
+1. 传统图像算法和几何算法输出合同；
+2. CxCore、mlpack、Torch 之间的 AI 路由合同；
+3. 模型结果与几何对象之间的 Attach 合同；
+4. Torch 任务输入、结果引用和证据引用的 Handoff 合同。
+
+## 2.2 Torch 外层链已进入正式构建
+
+v2.2 只描述了 `TorchRuntimeBridge` 和 `TorchRuntimeResultAdapter`。当前主程序构建清单已经纳入：
+
+```text
+TorchRuntimeBridge.cpp
+CxTorchRuntimeService.cpp
+TorchRuntimeResultAdapter.cpp
+CxExecutionTypes.cpp
+CxTorchExecutionAdapter.cpp
+CxTorchResultProjector.cpp
+TorchTask.cpp
+```
+
+因此 Torch 外层调用已经不能继续只描述为"桥接原型"，而应明确为：
+
+```text
+控制链：[Implemented]
+真实模型主线接入：[Partial]
+结构化结果解析：[Partial]
+几何结果投影：[Partial]
+证据链闭合：[Verification Pending]
+```
+
+## 2.3 Wiki 原目录描述需要纠正
+
+v2.2 的目录示例把：
+
+```text
+TorchRuntimeBridge.cpp
+TorchRuntimeResultAdapter.cpp
+```
+
+列在 `libtorch_module/` 下，但实际文件位于 `cximage/`。
+
+正确职责是：
+
+```text
+cximage/
+  TorchTask
+  CxTorchExecutionAdapter
+  CxTorchRuntimeService
+  TorchRuntimeBridge
+  TorchRuntimeResultAdapter
+  CxTorchResultProjector
+
+libtorch_module/
+  模型结构
+  训练和推理主线
+  模块测试
+  Runtime C API
+  Runtime Core
+```
+
+---
+
+# 3. 更新后的完整系统架构
+
+以下是逻辑职责视图，不表示必须继续增加十二套类或十二个独立 DLL。
+
+```text
+┌───────────────────────────────────────────────────────────────┐
+│ 1. Application / UI                                           │
+│ ManualStateTestConsole / Image View / Script Catalog          │
+│ Semantic Flow Graph / Parameter UI / Evidence UI              │
+└──────────────────────────────┬────────────────────────────────┘
                                ▼
-┌──────────────────────────────────────────────────────┐
-│ 9. Canonical Result & Projection                        │
-│ Runtime Capture / Tool Result / Metrics                 │
-│ Shape Overlay / Result Projector / ToolDisplay         │
-└────────────────────────┬─────────────────────────────┘
-                         │
-        ┌────────────────┴────────────────┐
-        ▼                                 ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 2. Workbench State & Interaction                              │
+│ ManualTestContext / ManualGaugeState                          │
+│ ImageAnnotationLayer / AnnotationToolRuntime                  │
+│ Shape / HitTest / Drag / CommitEdit / Writeback               │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 3. Manual Controllers                                         │
+│ ManualConsoleGauge / RuntimeView / ScriptDebug                │
+│ FindLineDebug / FindCircleDebug / ParamRegressionPanel        │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 4. Unified Execution / Orchestration                          │
+│ ParserDebugBridge / HeadlessRunner / SuiteRunner              │
+│ ParamProbeRunner / CxTorchExecutionAdapter                    │
+│ CxParserRuntimeOwner / Manifest Resolver                      │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 5. CxScript Runtime & Asset System                            │
+│ cxparser / cxparser_ext                                       │
+│ Catalog / Frozen / Diagnostic / Manifest / Suite              │
+│ Parameter Profile / Contract / Review / Trace                 │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 6. CxCore Stable Boundary                                     │
+│ CxCoreBoundary                                                │
+│ CxCoreAiBoundary                                              │
+│ BaselineFeatureSample / Route Decision                        │
+└───────────────┬───────────────────────────────┬───────────────┘
+                ▼                               ▼
 ┌──────────────────────────────┐ ┌──────────────────────────────┐
-│ 10. Evidence / Review        │ │ 11. Parameter Regression     │
-│ Snapshot / Summary / Trace   │ │ Range / Candidate / Probe    │
-│ Overlay / Replay / Contract  │ │ HitDistribution / Accuracy   │
-│ Human Review / Promotion     │ │ mlpack Rank / ensmallen Opt  │
-└──────────────────────────────┘ └──────────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│ 12. Foundation & Observability                              │
-│ OpenCV / OCCT / cxgeom / cxcloud                            │
-│ UnifiedLog / CrashLog / Run Context                         │
-└──────────────────────────────────────────────────────────────┘
+│ 7A. Vision Tool Runtime      │ │ 7B. Model Runtime            │
+│ FindLine / FindCircle        │ │ libtorch_module              │
+│ FindEllipse / FindRect       │ │ Segmentation / YOLO          │
+│ FindObject / FastMatch       │ │ MobileViT / Train / Infer    │
+│ FindSegmentation / Gauges    │ │ mlpack / ensmallen semantics │
+└───────────────┬──────────────┘ └───────────────┬──────────────┘
+                └────────────────────┬───────────┘
+                                     ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 8. Canonical Execution Result                                  │
+│ CxExecutionResult / CxInferenceResult                         │
+│ Detection / Mask / Metrics / Artifact Refs                    │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 9. Geometry Object & Attach                                   │
+│ CxCoreGeometryAttach                                          │
+│ StableGeometryRef / Mask / Boundary / Keypoints               │
+│ GeometryAttachRecord / TorchHandoff                           │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 10. Projection / Display                                      │
+│ CxRuntimeProjectionExecutor / CxTorchResultProjector          │
+│ CxShapeElementSnapshot / Shape Overlay / ToolDisplay          │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 11. Evidence / Review / Regression                            │
+│ Snapshot / Summary / Trace / Overlay / Replay                 │
+│ Contract / Review Gate / Parameter Regression                 │
+└──────────────────────────────┬────────────────────────────────┘
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 12. Foundation / Build / Observability                        │
+│ OpenCV / OCCT / cxgeom / LibTorch / CMake                     │
+│ UnifiedLog / CrashLog / Runtime DLL                           │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 目录结构
-
-```
-cxvision_repo/
-├── CMakeLists.txt              # 根构建脚本
-├── cximage/                    # 图像处理与 GUI 模块
-│   ├── GuiMain.cpp             # GUI 入口
-│   ├── ViewController.h/cpp    # 视图控制器 (顶层场景)
-│   ├── ManualStateTestConsole.h/cpp  # 人工调试工作台主壳
-│   ├── ManualConsoleGauge.h/cpp      # Gauge 控制器
-│   ├── ManualConsoleEvidenceChain.h/cpp    # 证据链控制器
-│   ├── ManualConsoleParamRegressionPanel.h/cpp  # 参数回归面板
-│   ├── ManualConsoleScriptDebugPanel.h/cpp      # 脚本调试面板
-│   ├── ManualConsoleFindLineDebug.h/cpp         # FindLine 调试
-│   ├── ManualConsoleFindCircleDebug.h/cpp       # FindCircle 调试
-│   ├── ManualConsoleRuntimeView.h/cpp           # 运行时视图
-│   ├── ManualConsoleCxScriptDebug.h/cpp         # CxScript 调试
-│   ├── ParserDebugBridge.h/cpp                  # 脚本调试桥接
-│   ├── CxParserRuntimeOwner.h/cpp               # 解析器运行时所有权
-│   ├── CxScriptHeadlessRunner.h/cpp             # 通用 Headless 运行器
-│   ├── CxScriptHeadlessBindings.h/cpp           # Headless 绑定注册
-│   ├── CxScriptSuiteRunner.h/cpp                # Suite 运行器
-│   ├── CxParamProbeRunner.h/cpp                 # 参数探测运行器
-│   ├── CxScriptCasePackageWriter.h/cpp          # Case 包写入器
-│   ├── CxScriptRuntimeCaptureSmoke.h/cpp        # Runtime Capture Smoke
-│   ├── CxRuntimeProjectionExecutor.h/cpp        # Runtime 投影执行器
-│   ├── CxShapeInteractionRunner.h/cpp           # Shape 交互测试运行器
-│   ├── CxShapeInteractionTest.h/cpp             # Shape 交互测试基类
-│   ├── CxManifestProjectionRequestResolver.h/cpp  # Manifest 投影解析器
-│   ├── ImageAnnotationLayer.h/cpp               # 图像注释层
-│   ├── CxAnnotationToolRuntime.h/cpp            # 注释工具运行时
-│   ├── FindSegmentation.h/cpp                   # 分割检测算法
-│   ├── FindSegmentationOpenCvSmokeBackend.h/cpp # OpenCV 分割后端
-│   ├── FindSegmentationEdgeSamBackend.h/cpp     # EdgeSam 分割后端
-│   ├── TorchRuntimeBridge.h/cpp                 # Torch 运行时桥接
-│   ├── TorchRuntimeResultAdapter.h/cpp          # Torch 结果适配器
-│   ├── CxUnifiedLog.h/cpp                       # 统一日志
-│   ├── CxCrashLog.h/cpp                         # Crash 日志
-│   └── ...
-├── cxgeom/                     # 几何建模模块
-│   ├── include/
-│   └── src/
-├── cxcloud/                    # 点云处理模块
-│   ├── include/
-│   └── src/
-├── cxparser/                   # 脚本解析核心
-│   ├── muParser*.h/cpp         # muParser 核心文件
-│   ├── cxscript/               # CxScript 脚本案例
-│   │   ├── module/
-│   │   │   ├── cximage/        # cximage 脚本
-│   │   │   ├── torch/          # torch 脚本
-│   │   │   ├── mlpack/         # mlpack 脚本
-│   │   │   └── ensmallen/      # ensmallen 脚本
-│   │   └── integration/        # 集成测试
-│   └── CMakeLists.txt
-├── cxparser_ext/               # 脚本扩展层
-│   ├── pipeline/               # 流水线组件
-│   ├── runtime/                # CxScript 运行时
-│   ├── catalog/                # 脚本目录
-│   ├── validation/             # 验证引擎
-│   ├── meta/                   # 元数据类型
-│   ├── debug/                  # 调试嵌入层
-│   ├── drivers/                # 驱动层
-│   └── scenarios/              # 场景封装
-├── libtorch_module/            # PyTorch 模块
-│   ├── TorchRuntimeBridge.cpp
-│   ├── TorchRuntimeResultAdapter.cpp
-│   └── ...
-└── 3D/                         # 三维场景集成模块
-    ├── src/
-    └── tests/
-```
+该架构保留了 v2.2 的 UI、脚本、工具、结果、证据和参数回归主干，只在算法与模型之间增加一个稳定的 CxCore 边界，并把模型结果回填几何层的职责正式拆清。
 
 ---
 
-## 3. 三条标准执行链
+# 4. 更新后的标准执行链
 
-### 3.1 链路 1：脚本载入到算法/模型运行
+## 4.1 传统图像工具链
 
 ```text
 Catalog / Frozen / Flow Node
 → CxScript
 → cxparser
-→ ParserDebugBridge / HeadlessRunner
-→ Find* / FastMatch / torch / mlpack / ensmallen
-→ Runtime Result
+→ ParserDebugBridge / HeadlessRunner / SuiteRunner
+→ FindLine / FindCircle / FindEllipse / FindRect / FastMatch
+→ Runtime Result Capture
+→ Shape Snapshot
+→ Overlay / Evidence
 ```
 
-**目的**：确保脚本语义和实际算法调用的一致性。
+Manual、Headless 和 Suite 必须调用同一工具对象和同一结果捕获函数。旧版 Wiki 已明确禁止不同入口维护不同结果结构。
 
-### 3.2 链路 2：界面仿真与参数整定到运行
+## 4.2 人工 Gauge 链
 
 ```text
-Annotation / Gauge / Key Parameter UI
+ImageAnnotationLayer
+→ Gauge Shape
 → ManualGaugeState
-→ Globals / Candidate
-→ 同一个执行核心
-→ Find* / Model
+→ Apply To Globals
+→ CxScript
+→ 同一个 Find* 执行对象
+→ Runtime Capture
+→ 结果 Shape
+→ Review
 ```
 
-**约束**：人工调参、Grid Search、mlpack Rank、ensmallen Optimize 的差异只能是"谁生成下一组参数"，不能建立第二套算法执行路径。
+人工界面只生成几何输入和参数，不得在 UI 中重新实现算法。
 
-### 3.3 链路 3：运行结果到界面和结论
+## 4.3 CxCore AI 路由链
 
 ```text
-Runtime Result
-→ Canonical Result Capture
-→ Overlay / ToolDisplay
-→ Image View / Conclusion UI
-→ Evidence / Review
+CxCore Algorithm Output
+→ BaselineFeatureSample / Geometry Descriptor
+→ AiTaskEnvelope
+→ Route Decision
+   ├─ StayInCxcore
+   ├─ RouteToMlpack
+   ├─ UpgradeToTorchModule
+   └─ ManualReview
 ```
 
-**约束**：Manual、Suite、Headless、Torch 必须共享统一的结果定义，不能各自维护不同结果结构。
+`CxCoreAiBoundary` 已定义直接测量、数值分类、几何匹配、区域检测优化、密集分割和视觉嵌入等任务类型，并根据图像 Tensor、结构化描述符和端到端学习需求进行路由。它的作用是明确职责边界，而不是在路由层执行模型。
 
-### 3.4 证据链（扩展链）
+## 4.4 Torch 几何接入链
 
 ```text
-Image + Gauge + Parameter + Script
+ROI / Line / PointSet / Prior Geometry
+→ TorchTask
+→ CxTorchExecutionAdapter
+→ CxTorchRuntimeService
+→ Runtime DLL
+→ libtorch_module 已有模型主线
+→ Result JSON
+→ CxInferenceResult
+→ Geometry Attach
+→ Rect / Mask / Boundary / Keypoints
+→ Overlay / Evidence
+```
+
+`CxCoreTorchGeometryCxscript.h` 已经定义输入先验、训练标签、结果 Attach、结构证据以及结果回读等脚本片段；`CxCoreTorchHandoffBridge.h` 定义了 source hash、model version、result/evidence refs、bbox/mask/ROI/contour 和下一步动作等 Handoff 元数据。当前应把这些合同接到真实运行结果，而不是再建立第二套模型执行框架。
+
+## 4.5 证据链
+
+```text
+Image + Geometry + Parameter + Script + Model
 → Snapshot
 → Result Summary
-→ Result/Evidence Overlay
+→ Result Overlay
+→ Evidence Overlay
 → ToolDisplay
 → Trace
 → Replay
@@ -313,1462 +338,1049 @@ Image + Gauge + Parameter + Script
 → Human Review
 ```
 
-### 3.5 参数回归链（扩展链）
+每个入口必须生成可追溯的输入、执行结果和几何结果，不得仅依据 `status=success` 判定完成。旧版证据链已经具备 Snapshot、Summary、Trace、Overlay、Replay、Contract 和 Review Gate 基础结构。
+
+---
+
+# 5. CxCore 边界说明
+
+## 5.1 `CxCoreBoundary`
+
+### 定位
+
+`CxCoreBoundary` 是传统图像和几何算法向上层提供稳定结果的边界。
+
+主要结果包括：
 
 ```text
-Accepted Gauge
-→ Parameter Range
-→ Candidate
-→ Real Probe
-→ EvalRecord
-→ Hit Distribution
-→ Accuracy/Stability
-→ mlpack Rank
-→ ensmallen Suggest
-→ Human Review
-→ Mini Regression
-→ Promotion
+PointSetOutput
+ImageAnalysisOutput
+LineOutput
+CircleOutput
+EllipseOutput
+DetectionOutput
+MatchOutput
+```
+
+并扩展了：
+
+```text
+FractalPartition
+DistanceField
+Skeleton
+Centerline
+TopologyRepair
+BaselineFeatureSampleV1
+```
+
+这些结构用于把图像工具结果转换为稳定、可记录、可供模型或统计模块使用的描述，而不是替代 `FindLine`、`FindCircle` 等算法本身。
+
+### 当前状态
+
+* 接口与主要实现：**[Implemented]**
+* 文件已存在：**[Implemented]**
+* `CxCoreBoundary.cpp` 已纳入 `CXIMAGE_CORE_SOURCES`：**[Implemented]**
+* 与固定 Case 的输出一致性：**[Verification Pending]**
+
+因此 CxCore 稳定输出合同已形成且已进入正式构建，但端到端使用位置仍需固化。
+
+## 5.2 `CxCoreAiBoundary`
+
+### 定位
+
+定义从传统算法、结构化特征到 mlpack、Torch 或人工复核的路由规则。
+
+### 约束
+
+```text
+Direct Measurement
+→ 不应无理由升级到 Torch
+
+Geometry / Descriptor Task
+→ 优先 CxCore 或 mlpack
+
+Dense Image / End-to-End Learning
+→ Torch
+
+信息不足或信号混合
+→ Manual Review
+```
+
+### 当前状态
+
+* 数据合同和路由规则：**[Contract/Implemented]**
+* 是否已被正式执行入口调用：**[Verification Pending]**
+
+## 5.3 `CxCoreGeometryAttach`
+
+### 定位
+
+管理模型结果与稳定几何对象之间的关系。
+
+主要对象：
+
+```text
+RoiObject
+LineObject
+PointSetObject
+MaskObject
+BoundaryObject
+KeypointsObject
+FractalPartitionObject
+DistanceFieldObject
+SkeletonObject
+```
+
+主要关系：
+
+```text
+Model Result
+→ GeometryAttachRecord
+→ StableGeometryRef
+→ Display Hint
+→ Evidence Ref
+```
+
+它解决的是"模型输出属于哪个 ROI、对应哪个几何对象、如何显示和追溯"，而不是模型推理本身。
+
+### 当前状态
+
+* 对象合同和校验：**[Contract/Implemented]**
+* 与 `CxInferenceResult` 的正式转换：**[Partial]**
+* 与 `ImageAnnotationLayer` 的固定回归：**[Verification Pending]**
+
+## 5.4 `CxCoreTorchHandoffBridge`
+
+### 定位
+
+描述 Torch 与 CxCore/几何层之间的引用和证据合同。
+
+必须记录：
+
+```text
+source_hash
+model_version
+result_ref
+evidence_ref
+log_path
+bbox_ref
+mask_ref
+roi_ref
+contour_ref
+geometry_ref
+measurement_ref
+next_action
+```
+
+### 当前状态
+
+* Handoff 数据结构：**[Contract/Implemented]**
+* 任务快照和发布字段：**[Implemented]**
+* 真实 Runtime 结果填充：**[Partial]**
+* CxScript 回读验证：**[Verification Pending]**
+
+---
+
+# 6. Vision Tool Runtime
+
+## 6.1 当前工具范围
+
+```text
+FindLine
+FindCircle
+FindEllipse
+FindRect
+FindObject
+FastMatch
+FindSegmentation
+CircleRingGauge
+FormfitGauge
+```
+
+旧版 Wiki 已将这些基础算法标记为 Implemented，其中 FindSegmentation 仍需要完整效果验证；近期提交还包括 FastMatch 修复、FindEllipse 修复、Evidence Chain 修复以及形状投影测试。
+
+## 6.2 运行结果捕获
+
+`CxScriptRuntimeResultCapture` 当前支持捕获：
+
+```text
+FindLine
+FindCircle
+FindEllipse
+FindRect
+FindSegmentation
+FastMatch
+TorchTask
+```
+
+对于 TorchTask，它会读取 `CxInferenceResult`，调用 `CxTorchResultProjector::Project()`，并将模型结果加入统一 Shape Snapshot。这说明 Torch 已经进入统一结果捕获入口，而不是独立维护另一套 UI 输出。
+
+## 6.3 当前主要传统工具缺口
+
+| 项目                                          | 状态                     |
+| ------------------------------------------- | ---------------------- |
+| FindLine 基础运行和结果捕获                          | [Implemented]          |
+| FindCircle 基础运行和结果捕获                        | [Implemented]          |
+| FindEllipse / FindRect / FastMatch Shape 投影 | [Implemented]          |
+| 固定 Gauge 与真实边缘一致性                           | [Verification Pending] |
+| FindLine / FindCircle IMG-L1～L3 固定回归        | [Partial]              |
+| FindSegmentation 多后端效果                      | [Verification Pending] |
+| 多入口完全一致结果                                   | [Partial]              |
+| 真实 Accuracy/Stability 跨 Case 汇总             | [Partial]              |
+
+---
+
+# 7. `libtorch_module` 模型能力
+
+## 7.1 模块定位
+
+`libtorch_module` 是模型定义、训练、推理、评估和模块测试层。
+
+当前目录已经包含：
+
+```text
+DeepLabV3 / DeepLabV3Plus
+MobileNetV3
+MobileViTv2
+YOLOv8
+Segmentation Mainline Bridge
+MobileViT Mainline Bridge
+YOLO Mainline Bridge
+Train / Eval / Infer
+Task Routing
+Test Host
+Runtime C API
+```
+
+模块 CMake 还定义了 Minimal、Full、Contract、MobileViT、Segmentation 和 Runtime DLL 等目标，并为 MobileViT 与 Segmentation 分别建立 train/infer 测试入口。
+
+## 7.2 模块内状态
+
+按当前模块测试结论：
+
+| 能力                        | 状态                |
+| ------------------------- | ----------------- |
+| 模型结构                      | [Module Verified] |
+| Smoke Train               | [Module Verified] |
+| Eval / Infer              | [Module Verified] |
+| Device Policy             | [Implemented]     |
+| Segmentation Mainline     | [Module Verified] |
+| YOLO / Detection Mainline | [Module Verified] |
+| MobileViT Mainline        | [Module Verified] |
+| 任务边界和基础路由                 | [Implemented]     |
+
+例如，Segmentation Mainline 已经包含模型构建、device 选择、forward、cross entropy、梯度检查、IoU、平均置信度、训练生命周期和统一 mainline summary。
+
+## 7.3 Runtime DLL 当前实际状态
+
+当前 Runtime DLL 构建目标主要包含：
+
+```text
+torch_runtime_c_api.cpp
+torch_runtime_core.cpp
+torch_test_host.h
+torch_alltest.h
+torch_alltest_2.h
+```
+
+`torch_runtime_core.cpp` 当前仍通过：
+
+```cpp
+TorchTestHost host;
+host.run_task_report(request.task, requested_device);
+```
+
+执行任务，并生成状态、运行时间和静态 Handoff 引用。它尚未根据 `TorchTask` 请求直接调用已经存在的 Segmentation、YOLO 或 MobileViT 主线。
+
+因此必须区分：
+
+```text
+libtorch_module 内部模型能力       [Module Verified]
+Runtime DLL 生命周期和诊断         [Implemented]
+Runtime DLL 调用真实模型主线       [Partial]
+模型结果进入几何层                 [Partial]
+```
+
+这也是当前 Torch 链的核心断点。
+
+---
+
+# 8. Torch 外层接入链
+
+## 8.1 当前调用骨架
+
+```text
+TorchTask
+→ CxTorchExecutionAdapter
+→ CxTorchRuntimeService
+→ TorchRuntimeBridge
+→ libtorch_module_runtime.dll
+→ TorchRuntimeResultAdapter
+→ CxInferenceResult
+→ CxTorchResultProjector
+→ CxScriptRuntimeResultCapture
+```
+
+上述 `.cpp` 已经进入根 CMake 的 `CXIMAGE_CORE_SOURCES`，因此控制骨架属于正式构建内容。
+
+## 8.2 `TorchTask`
+
+`TorchTask` 已具有：
+
+```text
+settask
+setcase
+setmodel
+setmanifest
+setdevice
+setinput
+settemplate
+settimeout
+run
+getstatus
+getresultcount
+getmaskavailable
+```
+
+`CxTorchTaskSpec` 也已保存：
+
+```text
+task_id
+case_id
+model_id
+model_path
+manifest_path
+input_image_path
+template_image_path
+requested_device
+timeout_ms
+extra_json
+```
+
+而 `CxInferenceResult` 已定义 detections、mask、metrics、artifact refs 和 evidence refs。
+
+## 8.3 当前请求断点
+
+虽然 `CxTorchTaskSpec` 已保存 `model_path`，但 `CxTorchExecutionAdapter::BuildRuntimeRequest()` 当前只传递：
+
+```text
+task
+input_image
+manifest_path
+case_name
+extra_json
+```
+
+`CxTorchRuntimeService` 和 C API 请求结构也没有 `model_path`、`template_image` 和 `timeout_ms`。
+
+因此当前真实情况是：
+
+```text
+脚本能够设置模型
+但 Runtime DLL 接收不到脚本指定的模型路径
+```
+
+这不是重新建设复杂 ABI 的理由，只需要在现有请求合同中补齐真正需要的少量字段。
+
+## 8.4 Device 语义问题
+
+外层 `CxTorchTaskSpec` 默认使用：
+
+```text
+cpu / cuda / auto
+```
+
+而当前 Runtime Core 判断的是：
+
+```text
+cpu / gpu
+```
+
+因此 `cuda` 与 `gpu` 语义需要统一。当前环境变量控制逻辑在收到 `gpu` 时才启用 CUDA。
+
+建议全链统一：
+
+```text
+cpu
+cuda
+auto
 ```
 
 ---
 
-## 4. Application / UI
+# 9. Canonical Result 与数据边界
 
-### 4.1 ManualStateTestConsole
+当前代码中存在四类结果结构，必须明确各自职责，避免继续重复扩展。
 
-#### 定位
-人工调试工作台主壳，提供证据链浏览、Gauge 编辑、参数调优、审核门和回放功能的统一入口。
+## 9.1 `CxCoreBoundary` 输出
 
-#### 核心文件
-- [ManualStateTestConsole.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
-- [ManualStateTestConsole.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.cpp)
+用途：
 
-#### 输入
-- Catalog 脚本列表
-- Image Manifest
-- Evidence Chain
-- 人工 Gauge 状态
-
-#### 输出
-- Script Evidence Thumbs
-- ManualGaugeState 更新
-- Param Regression 记录
-- Replay Package 路径
-
-#### 数据结构
-- `ManualTestContext`：工作台主上下文
-- `ManualGaugeState`：手动 Gauge 状态（line/circle 参数）
-- `ManualParamRegressionState`：参数回归状态
-- `EvidenceChainThumb`：证据链缩略图
-- `ScriptEvidenceGroup`：脚本证据分组
-
-#### 执行流程
-1. Load Catalog → Load Manifest → Load Evidence Chain
-2. Select Evidence Case → Load Gauge → Edit Gauge
-3. Apply to Globals → Run Probe → View Result Overlay
-4. Human Review → Save Annotation → Generate Manifest Candidate
-5. (Optional) Param Regression → Mini Regression → Promotion
-
-#### 状态
-- **[Implemented]**：基础 UI 框架、证据链浏览、Gauge 编辑、参数调优面板
-- **[Planned]**：完整 Promotion 流程、批量审核
-
-### 4.2 ViewController
-
-#### 定位
-顶层场景控制器，继承自 OpenCASCADE 的 `AIS_ViewController`，负责 ImGui 界面与 OCCT 3D 视图的集成、事件路由和渲染编排。
-
-#### 核心文件
-- [ViewController.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.h)
-- [ViewController.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ViewController.cpp)
-
-#### 状态
-- **[Implemented]**：基础事件路由、图像渲染、Annotation 集成
-
-### 4.3 关键参数 UI
-
-#### 定位
-关键参数调优界面，提供参数范围、候选生成和整定散点图。
-
-#### 状态
-- **[Implemented/Partial]**：参数范围与候选模型已实现；关键参数 UI 部分实现；参数整定散点图为可视化占位
-
----
-
-## 5. Workbench State
-
-### 5.1 ImageAnnotationLayer
-
-#### 定位
-图像注释层，管理 ShapeElements 和 OverlayElements，提供统一的 HitTest、Drag、CommitEdit 接口。
-
-#### 核心文件
-- [ImageAnnotationLayer.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
-- [ImageAnnotationLayer.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
-
-#### 数据结构
-- `CxShapeElement`：形状元素（含 stable_ref、owner、semantic_role）
-- `OverlayElement`：覆盖层元素
-- `CxShapeHitResult`：命中测试结果
-- `CxShapeCommitResult`：提交结果
-
-#### 执行流程
-1. HitTest → BeginDrag → UpdateDrag → CommitEdit / CancelDrag
-2. Runtime Object Publish → RefreshRuntimeObjectTable → SyncRuntimeObjectsToShapeElements
-3. Annotation Tool Create → Draft → Commit → UpsertShape
-
-#### 状态
-- **[Implemented]**：ShapeElements 管理、HitTest、Drag、CommitEdit、Runtime 投影
-
-### 5.2 CxAnnotationToolRuntime
-
-#### 定位
-注释工具运行时，管理 Point/Line/Rect/Circle/Ellipse/Polyline 工具的输入处理和状态。
-
-#### 核心文件
-- [CxAnnotationToolRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
-- [CxAnnotationToolRuntime.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
-
-#### 状态
-- **[Implemented]**：Point/Line/Rect/Circle/Ellipse/Polyline 创建、最小尺寸保护、ESC 取消
-
-### 5.3 ManualGaugeState
-
-#### 定位
-手动 Gauge 状态，存储 Line/Circle/Ring Gauge 的几何参数和交互状态。
-
-#### 核心文件
-定义于 [ManualStateTestConsole.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualStateTestConsole.h)
-
-#### 数据结构
-- `ManualGaugeState`：Gauge 状态（line_x0/y0/x1/y1, circle_cx/cy/radius 等）
-- `GaugeHandleType`：Handle 类型（LineP0/LineP1/CircleCenter/CircleRadius 等）
-- `LineGaugeGeometry`：直线 Gauge 几何
-- `CircleGaugeGeometry`：圆形 Gauge 几何
-
-#### 状态
-- **[Implemented]**：Line/Circle/Ring Gauge 编辑、Handle 拖动、参数写回
-
----
-
-## 6. Interaction / Annotation
-
-### 6.1 ImageAnnotationLayer
-
-#### 定位
-图像注释层，管理 ShapeElements 和 OverlayElements，提供统一的 HitTest、Drag、CommitEdit 接口，以及 Runtime Projection 和 Runtime Writeback。
-
-#### 核心文件
-- [ImageAnnotationLayer.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.h)
-- [ImageAnnotationLayer.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ImageAnnotationLayer.cpp)
-
-#### 数据结构
-- `CxShapeElement`：形状元素（含 stable_ref、owner、semantic_role）
-- `OverlayElement`：覆盖层元素
-- `CxShapeHitResult`：命中测试结果
-- `CxShapeCommitResult`：提交结果
-
-#### 交互流程
-1. HitTest → BeginDrag → UpdateDrag → CommitEdit / CancelDrag
-2. Runtime Object Publish → RefreshRuntimeObjectTable → SyncRuntimeObjectsToShapeElements
-3. Annotation Tool Create → Draft → Commit → UpsertShape
-
-#### 状态
-- **[Implemented]**：ShapeElements 管理、HitTest、Drag、CommitEdit、Runtime 投影
-- **[Partial]**：Commit → Runtime Object 即时写回
-
-### 6.2 CxAnnotationToolRuntime
-
-#### 定位
-注释工具运行时，管理 Point/Line/Rect/Circle/Ellipse/Polyline 工具的输入处理和状态。
-
-#### 核心文件
-- [CxAnnotationToolRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.h)
-- [CxAnnotationToolRuntime.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxAnnotationToolRuntime.cpp)
-
-#### 状态
-- **[Implemented]**：Point/Line/Rect/Circle/Ellipse/Polyline 创建、最小尺寸保护、ESC 取消
-
-### 6.3 Shape Elements
-
-#### LineGaugeShape
-直线 Gauge 形状，支持 P0/P1/Center/Width 四个拖动控制点。
-
-#### CircleGaugeShape
-圆形 Gauge 形状，支持 Center 和 Radius 控制点。
-
-#### RectShape
-矩形形状，支持 Corner 和 Center 控制点。
-
-#### EllipseShape
-椭圆形状，支持 Center、Rx、Ry 和 Angle 控制点。
-
-#### PolylineShape
-折线形状，支持顶点拖动和新增。
-
-#### 状态
-- **[Implemented]**：Shape 拖动、stale 标记
-- **[Verification Pending]**：重新运行后 Overlay 一致性
-
-### 6.4 Runtime Projection
-
-#### 定位
-将 Runtime 对象的几何信息投影到 ShapeElements，实现脚本执行结果的可视化。
-
-#### 核心文件
-- [CxRuntimeProjectionExecutor.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.h)
-- [CxRuntimeProjectionExecutor.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxRuntimeProjectionExecutor.cpp)
-
-#### 状态
-- **[Implemented]**：基础 Runtime 对象投影
-
-### 6.5 Runtime Writeback
-
-#### 定位
-将用户编辑的 Shape 几何写回 Runtime 对象和参数，实现交互闭环。
-
-#### 状态
-- **[Partial]**：Shape Commit → ManualGaugeState 同步
-- **[Partial]**：ManualGaugeState → Globals 同步
-- **[Partial]**：Globals → Runtime Tool Object 同步
-- **[Verification Pending]**：Result Overlay 一致性
-
----
-
-## 7. Manual Console Controllers
-
-### 7.1 ManualConsoleGauge
-
-#### 定位
-Gauge 控制器，负责 Gauge 几何合法性验证、审核状态检查、参数注入和持久化。
-
-#### 核心文件
-- [ManualConsoleGauge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.h)
-- [ManualConsoleGauge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleGauge.cpp)
-
-#### 已实现能力
-- Gauge 几何合法性验证
-- `accepted / manual_accepted / dirty` 审核状态检查
-- FindLine 和 FindCircle 参数向脚本 globals 注入
-- `gauge_annotation.json` 保存与加载
-- `gauge_manifest_candidate.cxsc` 导出
-- 参数回归前置条件检查
-- `ManualGaugeAcceptedForParamRegression()` 不再固定返回 `false`
-
-#### 状态
-- **[Implemented]**：Gauge → Globals 注入、保存/加载、manifest candidate、accepted gate
-- **[Implemented / Verification Pending]**：控制点实际显示、鼠标拖动、缩放坐标转换、运行后显示一致性
-
-### 7.2 ManualConsoleParamRegressionPanel
-
-#### 定位
-参数回归面板控制器，提供参数范围、候选表、Probe Runner 和评估报告的 UI 集成。
-
-#### 核心文件
-- [ManualConsoleParamRegressionPanel.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.h)
-- [ManualConsoleParamRegressionPanel.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleParamRegressionPanel.cpp)
-
-#### 已实现能力
-- 当前脚本、工具和 Gauge 上下文
-- 关键参数 UI
-- 参数范围与候选
-- manual seed
-- 候选表
-- 参数整定散点图（可视化占位）
-- 候选、评估、准确率和推荐报告的文件清单
-- 人工验收 Checklist
-- Workbench 总览
-- 关键参数、参数回归和结论之间的 UI 映射
-
-#### 状态
-- **[Implemented Phase 1]**：参数范围、候选、报告导出
-- **[Partial]**：UI 候选批量 Probe 循环
-- **[Placeholder]**：真实 Hit Distribution、mlpack Rank、ensmallen Optimize
-
-### 7.3 ManualConsoleEvidenceChain
-
-#### 定位
-证据链控制器，管理证据链的加载、浏览和操作。
-
-#### 核心文件
-- [ManualConsoleEvidenceChain.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.h)
-- [ManualConsoleEvidenceChain.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleEvidenceChain.cpp)
-
-#### 状态
-- **[Implemented]**：基础证据链加载和查询
-
-### 7.4 ManualConsoleScriptDebugPanel
-
-#### 定位
-脚本调试面板，提供脚本编译、执行和调试功能。
-
-#### 状态
-- **[Implemented]**：基础脚本调试功能
-
-### 7.5 ManualConsoleFindLineDebug
-
-#### 定位
-FindLine 专用调试面板。
-
-#### 状态
-- **[Implemented]**：基础调试功能
-
-### 7.6 ManualConsoleFindCircleDebug
-
-#### 定位
-FindCircle 专用调试面板。
-
-#### 状态
-- **[Implemented]**：基础调试功能
-
-### 7.7 ManualConsoleRuntimeView
-
-#### 定位
-运行时视图，展示脚本执行后的对象和变量状态。
-
-#### 核心文件
-- [ManualConsoleRuntimeView.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ManualConsoleRuntimeView.h)
-
-#### 状态
-- **[Implemented]**：基础运行时对象展示
-
-### 7.8 ManualConsoleCxScriptDebug
-
-#### 定位
-CxScript 专用调试面板。
-
-#### 状态
-- **[Implemented]**：基础调试功能
-
----
-
-## 8. Unified Execution / Orchestration
-
-### 8.1 ParserDebugBridge
-
-#### 定位
-脚本调试桥接器，负责 CxScript 的编译、执行、调试和全局输入注入。
-
-#### 核心文件
-- [ParserDebugBridge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.h)
-- [ParserDebugBridge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/ParserDebugBridge.cpp)
-
-#### 数据结构
-- `ParserDebugObjectSnapshot`：对象快照
-- `CxScriptLineView`：脚本行视图
-- `CxScriptStatementView`：语句视图
-- `CxScriptSemanticBridgeResult`：语义桥结果
-
-#### 状态
-- **[Implemented]**：脚本编译/执行、全局输入注入、分步执行、运行时快照
-
-### 8.2 CxParserRuntimeOwner
-
-#### 定位
-解析器运行时所有权管理，确保运行时对象的生命周期正确管理。
-
-#### 核心文件
-- [CxParserRuntimeOwner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParserRuntimeOwner.h)
-
-#### 状态
-- **[Implemented]**：运行时所有权管理
-
-### 8.3 CxScriptHeadlessRunner
-
-#### 定位
-通用 Headless 运行器，不是返回空 `true` 的 Scaffold，执行结束后检查完整的 Artifact。
-
-#### 核心文件
-- [CxScriptHeadlessRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.h)
-- [CxScriptHeadlessRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessRunner.cpp)
-
-#### 已实现能力
-执行结束后检查：
-- executed / runtime_ok
-- snapshot / summary
-- evidence overlay / result overlay
-- tool display
-- assets_complete 和最终 result.ok
-- 有效点数、直线/圆拟合状态、圆半径和平均距离回填
-
-#### 状态
-- **[Implemented/Partial]**：Basic Sequential Headless Execution
-
-#### 待固化问题
-与 `ParserDebugBridge`、`CxScriptSuiteRunner` 是否共享完全一致的 global 注入、对象生命周期、算法调用顺序和结果抓取语义。
-
-### 8.4 CxScriptHeadlessBindings
-
-#### 定位
-Headless 绑定注册，为 Headless Runner 提供统一的类型和方法绑定。
-
-#### 核心文件
-- [CxScriptHeadlessBindings.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.h)
-- [CxScriptHeadlessBindings.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptHeadlessBindings.cpp)
-
-#### 状态
-- **[Implemented]**：基础绑定注册
-
-### 8.5 CxScriptRuntimeCaptureSmoke
-
-#### 定位
-Runtime Capture Smoke 测试，验证 Parser 执行后对象和几何 Shape 的捕获能力。
-
-#### 核心文件
-- [CxScriptRuntimeCaptureSmoke.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.h)
-- [CxScriptRuntimeCaptureSmoke.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRuntimeCaptureSmoke.cpp)
-
-#### 状态
-- **[Implemented]**：基础 Smoke 捕获验证
-
-### 8.6 CxShapeInteractionRunner
-
-#### 定位
-Shape 交互测试运行器，执行 Shape 几何测试和交互测试套件。
-
-#### 核心文件
-- [CxShapeInteractionRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.h)
-- [CxShapeInteractionRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionRunner.cpp)
-
-#### 状态
-- **[Implemented]**：基础交互测试执行
-
-### 8.7 CxShapeInteractionTest
-
-#### 定位
-Shape 交互测试基类，提供统一的测试断言和验证框架。
-
-#### 核心文件
-- [CxShapeInteractionTest.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.h)
-- [CxShapeInteractionTest.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxShapeInteractionTest.cpp)
-
-#### 状态
-- **[Implemented]**：基础测试框架
-
-### 8.8 CxManifestProjectionRequestResolver
-
-#### 定位
-Manifest 投影请求解析器，将 manifest 中的目标和测试用例解析为投影请求。
-
-#### 核心文件
-- [CxManifestProjectionRequestResolver.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.h)
-- [CxManifestProjectionRequestResolver.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxManifestProjectionRequestResolver.cpp)
-
-#### 状态
-- **[Implemented]**：基础投影请求解析
-
-### 8.9 CxScriptSuiteRunner
-
-#### 定位
-Suite 运行器，支持完整的 5 步测试流程。
-
-#### 核心文件
-- [CxScriptSuiteRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.h)
-- [CxScriptSuiteRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptSuiteRunner.cpp)
-
-#### 执行流程
-1. Dry-run（验证证据链）
-2. ROI Preview（可选）
-3. Headless Only（执行脚本）
-4. Contract（契约判断）
-5. Promotion（升级）
-
-#### 状态
-- **[Implemented]**：Dry-run、Headless、Contract、基础报告
-
-### 8.10 CxParamProbeRunner
-
-#### 定位
-参数探测运行器，正确承接 Headless 结果并以 `probe_ok` 为准。
-
-#### 核心文件
-- [CxParamProbeRunner.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.h)
-- [CxParamProbeRunner.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxParamProbeRunner.cpp)
-
-#### 已实现能力
-从 `headless_result` 读取：
-- launched / executed / runtime_ok
-- assets_complete / timeout / exit_code
-- snapshot / summary / overlay / tool display
-- valid points
-- fit line / fit circle
-- average distance
-- support score
-- failure stage
-
-返回值以 `probe_ok` 为准，不再只是"进程启动成功"。
-
-#### 状态
-- **[Implemented]**：Adapter 已实现
-- **[Integration Pending]**：Parameter Regression Panel 尚未完全连成自动循环
-
-### 8.11 CxScriptCasePackageWriter
-
-#### 定位
-Case 包写入器，生成标准测试资产。
-
-#### 核心文件
-- [CxScriptCasePackageWriter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptCasePackageWriter.h)
-
-#### 状态
-- **[Implemented]**：基础资产写入
-
----
-
-## 9. cxparser / cxparser_ext Runtime
-
-### 9.1 cxparser_ext
-
-#### 定位
-构建在 cxparser 核心之上的扩展层，提供完整的脚本执行流水线、类型绑定构建、流程路由、验证引擎、结果交付等企业级功能。
-
-#### 核心文件
-- [parser_pipeline.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_pipeline.h)
-- [parser_runtime_facade.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/pipeline/parser_runtime_facade.h)
-- [cxscript_runtime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser_ext/runtime/cxscript_runtime.h)
-
-#### 执行流程
-```
-PrepareTask → MergeBindingSpec → MergeEvidence → Run → Validate → Deliver
+```text
+算法模块稳定输出
+基础特征提取
+AI 路由输入
+跨模块低耦合合同
 ```
 
-#### 状态
-- **[Implemented]**：基础流水线、绑定构建、验证引擎
+不得承载 UI 状态、Review 状态或完整执行生命周期。
 
-### 9.2 cxparser
+## 9.2 `CxExecutionResult`
 
-#### 定位
-基于 muParser 扩展的脚本解析核心引擎，提供表达式求值、变量绑定、类方法调用、字节码执行等能力。
+用途：
 
-#### 核心文件
-- [muParser.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParser.h)
-- [muParserBase.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBase.h)
-- [muParserBytecode.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserBytecode.h)
-- [muParserClass.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cxparser/muParserClass.h)
-
-#### 状态
-- **[Implemented]**：muParser 核心、类绑定、字节码执行
-
----
-
-## 10. CxScript Asset System
-
-### 10.1 Asset 目录结构
-
-```
-cxparser/cxscript/module/
-├── cximage/                    # cximage 脚本资产
-│   ├── catalog/                # 目录注册
-│   ├── stage25/                # Stage2.5 资产
-│   ├── frozen/                 # 冻结脚本
-│   ├── tests/                  # 测试脚本
-│   ├── frame_probe/            # 帧探测
-│   └── diagnostic/             # 诊断脚本
-├── torch/                      # torch 脚本资产
-│   ├── detect_direct_test.cxsc
-│   ├── segmentation_direct_test.cxsc
-│   └── ...
-├── mlpack/                     # mlpack 脚本资产
-│   ├── logreg_predict_direct_test.cxsc
-│   ├── mlpack_logreg_predict_direct_test.cxsc
-│   └── ...
-└── ensmallen/                  # ensmallen 脚本资产
-    ├── ensmallen_geometry_tuning_direct_test.cxsc
-    ├── geometry_tuning_direct_test.cxsc
-    └── ...
+```text
+一次完整运行的统一执行结果
+输入 Gauge 和参数快照
+测量点和拟合结果
+运行指标
+Trace
+可选 inference_result
 ```
 
-### 10.2 Asset 类型定义
-
-| 类型 | 说明 | 状态 |
-|------|------|------|
-| Catalog | 脚本目录注册 | [Implemented] |
-| Frozen | GUI 可见的冻结脚本 | [Implemented] |
-| Diagnostic | 诊断脚本 | [Implemented] |
-| Manifest | 图像清单 | [Implemented] |
-| Suite | 测试套件 | [Implemented] |
-| Contract | 契约定义 | [Implemented] |
-| Parameter Profile | 参数配置 | [Implemented] |
-| Param Regression | 参数回归脚本 | [Implemented Phase 1] |
-
----
-
-## 11. Vision Tool Runtime
-
-### 11.1 FindLine
-
-#### 定位
-直线检测算法，支持亚像素级边缘细化和多种参数配置。
-
-#### 核心文件
-- [FindLine.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindLine.h)
-- [FindLine.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindLine.cpp)
-
-#### 输入
-- ROI 区域（起点、终点、半宽）
-- 参数（threshold, linegap, wgap, hgap, filterprofile, method）
-
-#### 输出
-- 测量点（w/h 方向）
-- 拟合直线
-- 支持度/距离统计
-
-#### 状态
-- **[Implemented]**：基础直线检测、拟合、参数配置
-
-### 11.2 FindCircle
-
-#### 定位
-圆检测算法，支持环形区域扫描和拟合。
-
-#### 核心文件
-- [FindCircle.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindCircle.h)
-- [FindCircle.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindCircle.cpp)
-
-#### 状态
-- **[Implemented]**：基础圆检测、拟合、超时保护
-
-### 11.3 FindEllipse
-- [FindEllipse.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindEllipse.h)
-- [FindEllipse.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindEllipse.cpp)
-
-#### 定位
-椭圆检测算法。
-
-#### 状态
-- **[Implemented]**：基础椭圆检测
-
-### 11.4 FindRect
-
-#### 定位
-矩形检测算法。
-
-#### 状态
-- **[Implemented]**：基础矩形检测
-
-### 11.5 FindObject
-- [FindObject.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindObject.h)
-- [FindObject.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindObject.cpp)
-
-
-
-#### 定位
-对象检测算法。
-
-#### 状态
-- **[Implemented]**：基础对象检测
-
-### 11.6 FastMatch
-
-#### 定位
-快速模板匹配算法。
-
-#### 核心文件
-- [FastMatch.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.h)
-- [FastMatch.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FastMatch.cpp)
-
-#### 状态
-- **[Implemented]**：基础模板匹配
-
-### 11.7 CircleRingGauge
-
-#### 定位
-圆环规，验证同心圆、厚度和位置。
-
-#### 状态
-- **[Implemented]**：基础圆环测量和判断
-
-### 11.8 FormfitGauge
-
-#### 定位
-形位公差规，支持多种拟合方法。
-
-#### 状态
-- **[Implemented]**：基础形位公差测量
-
-### 11.9 FindSegmentation
-
-#### 定位
-分割检测算法，支持多种后端实现。
-
-#### 核心文件
-- [FindSegmentation.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.h)
-- [FindSegmentation.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentation.cpp)
-- [FindSegmentationOpenCvSmokeBackend.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.h)
-- [FindSegmentationOpenCvSmokeBackend.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationOpenCvSmokeBackend.cpp)
-- [FindSegmentationEdgeSamBackend.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.h)
-- [FindSegmentationEdgeSamBackend.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/FindSegmentationEdgeSamBackend.cpp)
-
-#### 后端实现
-- **OpenCV Smoke Backend**：基于 OpenCV 的基础分割实现
-- **EdgeSam Backend**：基于 EdgeSam 的边缘分割实现
-
-#### 状态
-- **[Implemented]**：基础分割框架和后端接口
-- **[Verification Pending]**：完整分割效果验证
-
----
-
-## 12. Model & Optimization Capability
-
-### 12.1 torch 主模型
-
-#### 定位
-PyTorch 主模型运行时，通过动态 DLL 加载实现 C API 调用。
-
-#### 核心文件
-- [TorchRuntimeBridge.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.h)
-- [TorchRuntimeBridge.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeBridge.cpp)
-- [TorchRuntimeResultAdapter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.h)
-- [TorchRuntimeResultAdapter.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/TorchRuntimeResultAdapter.cpp)
-
-#### 已实现能力
-- 配置 `LIBTORCH_ROOT`
-- 独立 `libtorch_module` 子目录构建
-- 动态加载 Runtime DLL
-- 解析 C API：
-  - `torch_runtime_create`
-  - `torch_runtime_destroy`
-  - `torch_runtime_run_task`
-  - `torch_runtime_free_result`
-  - `torch_runtime_version`
-- GUI 请求转换为 C API 请求
-- 回收训练、推理和结果信息
-
-#### 状态
-- **[Implemented/Partial]**：动态 Runtime Bridge、C API Task 调用、结果适配、独立 libtorch_module 构建
-- **[Partial]**：统一进入公共 ExecutionResult、统一 EvidencePackage、CxScript → Torch → UI 的正式回归验证
-
-### 12.2 mlpack 基础模型
-
-#### 定位
-基于 mlpack 的机器学习模型脚本语义层。
-
-#### 脚本资产
-- Logistic Regression 脚本
-- Handoff 脚本
-- 参数评估脚本
-
-#### 状态
-- **[Implemented Assets]**：脚本语义层已存在
-- **[Runtime Verification Pending]**：根目录 CMake 中无原生构建项
-- **[Placeholder]**：Parameter Regression 的 mlpack Rank
-
-### 12.3 ensmallen 优化层
-
-#### 定位
-基于 ensmallen 的参数优化脚本语义层。
-
-#### 脚本资产
-- 参数评估脚本
-- 参数优化脚本
-- 回放脚本
-- 稳定性脚本
-- baseline/best 对比脚本
-
-#### 状态
-- **[Implemented Assets]**：脚本语义层已存在
-- **[Runtime Verification Pending]**：根目录 CMake 中无原生构建项
-- **[Placeholder]**：Parameter Regression 的 ensmallen Suggest
-
-### 12.4 参数搜索策略
-
-| 策略 | 状态 | 说明 |
-|------|------|------|
-| 手动种子 | [Implemented] | 人工指定候选参数 |
-| Grid Search | [Implemented] | 网格搜索 |
-| mlpack Rank | [Placeholder] | 基于历史记录排序 |
-| ensmallen Optimize | [Placeholder] | 基于真实 Probe 优化 |
-
----
-
-## 13. Canonical Result / Projection / Display
-
-### 13.1 RuntimeResultCapture
-
-#### 定位
-运行时结果捕获，统一收集脚本执行后的所有结果数据。
-
-#### 状态
-- **[Implemented]**：基础结果捕获
-
-### 13.2 ToolResult
-
-#### 定位
-工具执行结果，包含测量点、拟合结果和统计指标。
-
-#### 状态
-- **[Implemented]**：基础工具结果
-
-### 13.3 ShapeOverlay
-
-#### 定位
-形状覆盖层，在图像上渲染检测到的几何形状。
-
-#### 状态
-- **[Implemented]**：基础形状渲染
-
-### 13.4 ResultProjector
-
-#### 定位
-结果投影器，将工具结果投影到 UI 和证据链。
-
-#### 状态
-- **[Implemented]**：基础投影
-
-### 13.5 ToolDisplay
-
-#### 定位
-工具显示导出，生成工具执行的可视化输出。
-
-#### 核心文件
-- [CxScriptToolDisplayExporter.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptToolDisplayExporter.h)
-
-#### 状态
-- **[Implemented]**：基础工具显示导出
-
----
-
-## 14. Evidence / Review / Artifact
-
-### 14.1 EvidenceChain
-
-#### 定位
-证据链管理，关联 Case、Image、Target、Script、Parameter Profile、Contract。
-
-#### 核心文件
-- [CxScriptEvidenceChainRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptEvidenceChainRuntime.h)
-
-#### 状态
-- **[Implemented]**：基础证据链加载和查询
-
-### 14.2 Snapshot
-
-#### 定位
-执行快照，记录脚本执行时的完整状态。
-
-#### 状态
-- **[Implemented]**：基础快照生成
-
-### 14.3 Summary
-
-#### 定位
-结果摘要，生成结构化的执行结果摘要。
-
-#### 状态
-- **[Implemented]**：基础摘要生成
-
-### 14.4 Trace
-
-#### 定位
-运行轨迹，记录执行过程中的关键事件。
-
-#### 核心文件
-- [CxScriptRunTraceRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptRunTraceRuntime.h)
-
-#### 状态
-- **[Implemented]**：基础轨迹记录
-
-### 14.5 Overlay
-
-#### 定位
-覆盖层图像，包含结果叠加和证据叠加。
-
-#### 状态
-- **[Implemented]**：基础覆盖层生成
-
-### 14.6 Replay
-
-#### 定位
-回放包，支持完整的执行过程重现。
-
-#### 状态
-- **[Implemented]**：基础回放包生成
-
-### 14.7 Contract
-
-#### 定位
-契约定义，包含预期结果、最小点数、失败阶段等判断规则。
-
-#### 状态
-- **[Implemented]**：基础契约判断
-
-### 14.8 Review Gate
-
-#### 定位
-审核门，管理审核阶段和决策。
-
-#### 核心文件
-- [CxScriptReviewGateRuntime.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxScriptReviewGateRuntime.h)
-
-#### 数据结构
-- `CxReviewStage`：审核阶段（EvidenceResolved/RoiPreview/HeadlessResult/ToolDisplay/ContractResult/Promotion）
-- `CxReviewDecision`：审核决策（Accept/RejectRoi/RejectParameter/DeriveProfile/Stop）
-
-#### 状态
-- **[Implemented]**：基础审核状态定义和 JSON 序列化
-
-### 14.9 Human Review
-
-#### 定位
-人工审核记录和决策。
-
-#### 状态
-- **[Implemented]**：基础人工审核记录
-
-### 13.10 Promotion
-
-#### 定位
-参数升级门，决定是否将候选参数升级为正式配置。
-
-#### 状态
-- **[Disabled]**：当前 Can Promote=no
-
----
-
-## 14. Parameter Regression
-
-### 14.1 ParamRange
-
-#### 定位
-参数范围定义，支持连续范围和离散值。
-
-#### 数据结构
-- `CxParamRange`：参数范围（name, min_value, max_value, step, discrete_values, role）
-
-#### 状态
-- **[Implemented]**：基础范围定义
-
-### 14.2 Candidate
-
-#### 定位
-候选参数生成，支持手动种子、网格搜索、mlpack 排序、ensmallen 优化。
-
-#### 数据结构
-- `CxParamCandidate`：候选参数（source, method, threshold, gap, linegap, wgap, hgap, filterprofile, predicted_quality）
-
-#### 状态
-- **[Implemented]**：手动种子、基础网格搜索
-- **[Placeholder]**：mlpack_rank、ensmallen_opt
-
-### 14.3 EvalRecord
-
-#### 定位
-评估记录，记录候选参数的执行结果。
-
-#### 数据结构
-- `CxParamEvalRecord`：评估记录（candidate_id, case_id, executed, timeout, points, support_score, mean_distance）
-
-#### 状态
-- **[Implemented]**：基础评估记录
-
-### 14.4 HitDistribution
-
-#### 定位
-命中分布统计，分析测量点的分布特征。
-
-#### 状态
-- **[Placeholder]**：分布区间和汇总均为占位实现
-
-### 14.5 Accuracy/Stability
-
-#### 定位
-准确性和稳定性统计。
-
-#### 数据结构
-- `CxParamAccuracyStats`：准确性统计（total_cases, executed_cases, geometry_pass, evidence_pass, human_accept, stability_score, risk_score）
-
-#### 状态
-- **[Partial]**：基础统计指标已实现，但跨 Case 汇总不完整
-
-### 14.6 mlpack Rank
-
-#### 定位
-基于 mlpack 的参数排序。
-
-#### 状态
-- **[Placeholder]**：`AddMlpackRankPlaceholderCandidates()` 为空实现
-
-### 14.7 ensmallen Optimize
-
-#### 定位
-基于 ensmallen 的参数优化建议。
-
-#### 状态
-- **[Placeholder]**：`AddEnsmallenOptPlaceholderCandidates()` 为空实现
-
-### 14.8 Mini Regression
-
-#### 定位
-迷你回归测试，验证参数候选的泛化能力。
-
-#### 状态
-- **[Planned]**：尚未进入代码
-
-### 14.9 Promotion
-
-#### 定位
-参数升级门，决定是否将候选参数升级为正式配置。
-
-#### 状态
-- **[Disabled]**：代码存在，但默认关闭
-
-### 14.10 参数回归状态汇总
-
-| 子系统 | 当前状态 |
-|--------|----------|
-| 参数范围与候选模型 | [Implemented] |
-| 关键参数 UI | [Implemented/Partial] |
-| 候选与报告导出 | [Implemented Phase 1] |
-| ParamProbe Adapter | [Implemented] |
-| UI 候选批量 Probe 循环 | [Partial] |
-| 真实 Hit Distribution | [Placeholder] |
-| 真实 mlpack Rank | [Placeholder] |
-| 真实 ensmallen Optimize | [Placeholder] |
-| Mini Regression | [Planned] |
-| Promotion | [Disabled] |
-
----
-
-## 15. Observability / Reliability
-
-### 15.1 CxUnifiedLog
-
-#### 定位
-统一日志系统，进程级、线程安全、跨进程安全、只追加的 JSONL 文件。
-
-#### 核心文件
-- [CxUnifiedLog.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.h)
-- [CxUnifiedLog.cpp](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxUnifiedLog.cpp)
-
-#### 状态
-- **[Implemented]**：基础日志记录、线程安全、JSONL 格式
-
-### 15.2 CxCrashLog
-
-#### 定位
-Crash 日志，记录程序崩溃时的状态信息。
-
-#### 核心文件
-- [CxCrashLog.h](https://github.com/Sean-Cai-X/cxvision/blob/codex/cxcore-integration/cximage/CxCrashLog.h)
-
-#### 状态
-- **[Implemented]**：基础 Crash 日志记录
-
-### 15.3 Run Context
-
-#### 定位
-运行上下文，管理每次脚本执行的环境信息。
-
-#### 状态
-- **[Implemented]**：基础运行上下文管理
-
----
-
-## 16. OpenCV / OCCT / cxgeom / cxcloud
-
-### 16.1 OpenCV
-
-#### 定位
-图像处理库，提供图像加载、处理、特征检测等能力。
-
-#### 状态
-- **[Implemented]**：集成到 cximage 模块
-
-### 16.2 OpenCASCADE (OCCT)
-
-#### 定位
-几何建模内核，提供参数化几何构建、布尔运算、渲染等能力。
-
-#### 链接库
-- TKernel / TKMath / TKG2d / TKG3d
-- TKService / TKV3d / TKOpenGl
-- TKGeomBase / TKBRep / TKGeomAlgo
-- TKTopAlgo / TKPrim / TKBO / TKOffset
-- TKXSBase / TKSTEPBase / TKIGES / TKLCAF
-
-#### 状态
-- **[Implemented]**：集成到 cxgeom 和 ViewController
-
-### 16.3 cxgeom
-
-#### 定位
-几何建模模块，封装 OpenCASCADE 的几何对象创建、表示和操作。
-
-#### 核心组件
-- `CxGeometryItem`：几何项封装
-- `CxShapeHandle`：OCCT 形状句柄
-- `CxCurveBuilder`：曲线构建器
-- `CxFaceBuilder`：曲面构建器
-- `CxGeometryOperations`：几何操作门面
-
-#### 状态
-- **[Implemented]**：基础几何建模能力
-
-### 16.4 cxcloud
-
-#### 定位
-点云处理模块，提供点云数据管理、八叉树索引、法向量估计等能力。
-
-#### 核心组件
-- `CxCloudItem`：点云项
-- `CxOctreeAdapter`：八叉树索引
-- `CxNormalEstimator`：法向量估计
-- `CxDistanceAnalyzer`：距离分析
-
-#### 状态
-- **[Implemented]**：基础点云处理能力
-
----
-
-## 17. Build / Runtime
-
-### 17.1 前置要求
-
-- **操作系统**：Windows
-- **编译器**：MSVC (Visual Studio)
-- **CMake**：3.21 或更高
-- **C++ 标准**：C++17 (主程序) / C++14 (cxparser)
-- **第三方库**：GLFW 3.3.10、OpenCASCADE 7.7.0、OpenCV、PyTorch (libtorch)
-
-### 17.2 编译选项
-
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `CXVISION_ENABLE_CXPARSER_EXT_DEBUG_INPROC` | ON | 嵌入 cxparser_ext 调试层 |
-| `CXVISION_ENABLE_LEGACY_STAGE25_CPP` | OFF | 构建已弃用的 C++ Stage25 实现 |
-| `CXVISION_BUILD_CXPARSER_RETURN_TESTS` | ON | 构建 return 关键字回归测试 |
-| `LIBTORCH_ROOT` | - | PyTorch 库路径 |
-
-### 17.3 构建目标
-
-#### 主目标：cxvision_imgui_acceptance
-
-```bash
-mkdir build && cd build
-cmake .. -DGLFW_ROOT="D:/glfw-3.3.10" ^
-         -DGLAD_ROOT="path/to/glad" ^
-         -DOCCT_ROOT="D:/OpenCASCADE-7.7.0-vc14-64/opencascade-7.7.0" ^
-         -DOpenCV_DIR="D:/opencv/build" ^
-         -DLIBTORCH_ROOT="path/to/libtorch"
-cmake --build . --config Release
+这是 Manual、Headless、Suite 和模型任务的统一执行结果。
+
+## 9.3 `CxInferenceResult`
+
+用途：
+
+```text
+模型任务的结构化结果
+detections
+mask
+metrics
+model/device/status
+artifact refs
+evidence refs
 ```
 
-### 17.4 运行方式
+这是模型结果进入几何层的唯一正式入口。
 
-直接运行 `cxvision_imgui_acceptance.exe`，启动 ManualStateTestConsole 工作台。
+## 9.4 `CxCoreGeometryAttach`
 
----
+用途：
 
-## 18. Test Taxonomy / Acceptance
-
-### 18.1 测试分级命名规范
-
-为避免与 Stage25 的图像难度等级混淆，测试分级统一命名为：
-
-| 类别 | 等级 | 说明 |
-|------|------|------|
-| IMG-L0 / IMG-L1 / IMG-L2 / IMG-L3 | 图像难度 | 图像和算法难度等级 |
-| UI-L0 / UI-L1 / UI-L2 / UI-L3 | UI 交互 | Shape、Gauge 和 Pointer 交互等级 |
-| REG-S0 / REG-S1 / REG-S2 / REG-S3 | 回归测试 | 单 case、三锚点、mini regression、正式 regression |
-
-### 18.2 测试策略
-
-项目采用三锚点人工 Gauge 闭环 + 短时单 case Probe + 异常进入 Replay/Review + mini-regression 的测试策略。
-
-### 18.3 测试流程
-
-```
-Load Case → Edit Gauge → Apply To Globals → Run Probe
-    │            │              │              │
-    ▼            ▼              ▼              ▼
- 验证几何    人工审核        参数注入        结果评估
-    │                                        │
-    ▼                                        ▼
-成功 → Short Probe → Contract → Promotion
-失败 → Replay/Review → 参数调优 → Mini Regression
+```text
+把 CxInferenceResult 中的模型语义
+关联到稳定 ROI、Mask、Boundary、Keypoints 和其他几何对象
 ```
 
-### 18.4 测试类型
+它描述的是对象关系，不是另一个执行结果。
 
-| 类型 | 说明 | 状态 |
-|------|------|------|
-| IMG-L0 | 烟雾测试 | [Implemented] |
-| IMG-L1 | 简单几何测试 | [Implemented] |
-| IMG-L2 | 中等难度几何测试 | [Implemented] |
-| IMG-L3 | 复杂几何测试 | [Planned] |
-| UI-L0 | Shape 几何测试 | [Implemented] |
-| UI-L1 | HitTest / Drag 测试 | [Implemented] |
-| UI-L2 | GUI Pointer 测试 | [Implemented] |
-| UI-L3 | 完整交互测试 | [Planned] |
-| REG-S0 | 单 case 回归 | [Implemented] |
-| REG-S1 | 三锚点回归 | [Implemented] |
-| REG-S2 | Mini Regression | [Planned] |
-| REG-S3 | 正式 Regression | [Planned] |
+## 9.5 `CxShapeElementSnapshot`
 
-### 18.5 测试资产输出
+用途：
 
-每个测试 Case 必须生成：
-- `snapshot.txt`
-- `result_summary.json`
-- `result_overlay.png`
-- `evidence_overlay.png`
-- `tool_display.png`
-
-### 18.6 Contract Pass 规则
-
-- **FindLine**：有效点数 < 2 时失败
-- **FindCircle**：有效点数 < 3 时失败
-
----
-
-## 19. Current Status Matrix
-
-| 子系统 | 当前状态 |
-|--------|----------|
-| Manual Console 模块拆分 | [Implemented] |
-| Annotation Tool Runtime | [Implemented/Partial] |
-| ManualGaugeState | [Implemented] |
-| Gauge → Globals | [Implemented] |
-| Gauge Annotation Save/Load | [Implemented] |
-| Manifest Candidate | [Implemented] |
-| Gauge Accepted Gate | [Implemented] |
-| Gauge 实际拖动和显示一致性 | [Implemented / Verification Pending] |
-| ParserDebugBridge | [Implemented] |
-| SuiteRunner | [Implemented] |
-| 通用 Headless Runner | [Implemented/Partial] |
-| ParamProbe Adapter | [Implemented] |
-| Key Parameter UI | [Implemented/Partial] |
-| 参数范围/候选/报告 | [Implemented Phase 1] |
-| UI 候选批量 Probe 循环 | [Partial] |
-| Hit Distribution | [Placeholder] |
-| Accuracy/Stability | [Partial] |
-| Torch Runtime Bridge | [Implemented/Partial] |
-| Torch 统一结果与证据链 | [Partial] |
-| mlpack 脚本资产 | [Implemented Assets] |
-| mlpack Param Rank | [Placeholder] |
-| ensmallen 脚本资产 | [Implemented Assets] |
-| ensmallen Param Optimize | [Placeholder] |
-| Mini Regression | [Planned] |
-| Profile Promotion | [Disabled] |
-| Legacy C++ Stage25 | [Legacy/Disabled] |
-
----
-
-## 20. Roadmap
-
-### 当前推进顺序
-
-现在不再需要继续新增框架，应该按现有框架完成固化：
-
-| 优先级 | 任务 | 说明 |
-|--------|------|------|
-| P0 | 三条标准链跨入口一致性 | Manual / Headless / Suite 使用相同输入和结果 |
-| P1 | FindLine、FindCircle 固定 IMG-L1/L2/L3 基线 | 建立固定难度等级的测试基线 |
-| P2 | Parameter Regression Panel | Candidate → ParamProbe → EvalRecord 真正循环 |
-| P3 | 真实 Hit Distribution | FindLine 沿线分布、FindCircle 角度和半径分布 |
-| P4 | Accuracy / Stability 跨 Case 汇总 | 完整的准确性和稳定性统计 |
-| P5 | mlpack Rank 接入真实历史记录 | 将 mlpack 排序接入实际评估记录 |
-| P6 | ensmallen Objective 接入真实 Probe | 将 ensmallen 优化接入实际探测结果 |
-| P7 | Torch Result 接入统一结果和 Evidence | 统一 Torch 结果格式 |
-| P8 | Mini Regression 与 Promotion Gate | 完整的参数升级流程 |
-
----
-
-## 21. Architecture Rules
-
-### 21.1 统一执行原则
-
-1. **单一算法入口**：所有脚本路径（Manual、Headless、Suite、Torch）必须使用同一套算法执行入口
-2. **统一结果格式**：所有执行路径必须生成统一的 `RuntimeResult` 格式
-3. **全局注入一致**：`ParserDebugBridge`、`HeadlessRunner`、`SuiteRunner` 必须共享一致的 global 注入语义
-
-### 21.2 参数回归原则
-
-1. **候选来源可替换**：人工种子、Grid Search、mlpack Rank、ensmallen Optimize 可以替换，但不能改变算法执行路径
-2. **评估记录统一**：所有候选参数的执行结果必须写入统一的 `EvalRecord`
-3. **Promotion Gate 独立**：参数升级门必须独立于参数生成和评估逻辑
-
-### 21.3 证据链原则
-
-1. **完整可追溯**：每次执行必须生成完整的证据链（Image + Gauge + Parameter + Script + Result）
-2. **可回放**：证据链必须支持完整的执行过程重现
-3. **审核门强制**：关键决策点必须经过审核门
-
-### 21.4 状态标签原则
-
-1. **禁止过度标记**：不能把脚本文件存在写成原生模型已完成
-2. **禁止虚假验证**：不能把 UI 图表存在写成参数回归已闭环
-3. **禁止提前标记**：不能把已实现写成已经通过固定 Case 验证
-
----
-
-## Appendix A. Core File Index
-
-### A.1 cximage 核心文件
-
-| 文件 | 定位 |
-|------|------|
-| `GuiMain.cpp` | GUI 入口 |
-| `ViewController.h/cpp` | 视图控制器 |
-| `ManualStateTestConsole.h/cpp` | 工作台主壳 |
-| `ManualConsoleGauge.h/cpp` | Gauge 控制器 |
-| `ManualConsoleParamRegressionPanel.h/cpp` | 参数回归面板 |
-| `ManualConsoleEvidenceChain.h/cpp` | 证据链控制器 |
-| `ParserDebugBridge.h/cpp` | 脚本调试桥接 |
-| `CxParserRuntimeOwner.h/cpp` | 解析器运行时所有权 |
-| `CxScriptHeadlessRunner.h/cpp` | 通用 Headless 运行器 |
-| `CxScriptSuiteRunner.h/cpp` | Suite 运行器 |
-| `CxParamProbeRunner.h/cpp` | 参数探测运行器 |
-| `TorchRuntimeBridge.h/cpp` | Torch 运行时桥接 |
-| `TorchRuntimeResultAdapter.h/cpp` | Torch 结果适配器 |
-| `CxUnifiedLog.h/cpp` | 统一日志 |
-| `CxCrashLog.h/cpp` | Crash 日志 |
-
-### A.2 cxparser_ext 核心文件
-
-| 文件 | 定位 |
-|------|------|
-| `parser_pipeline.h` | 执行流水线 |
-| `parser_runtime_facade.h` | 运行时门面 |
-| `cxscript_runtime.h` | CxScript 运行时 |
-| `parser_binding_builder.h` | 绑定构建器 |
-| `parser_flow_router.h` | 流程路由器 |
-| `parser_validation_engine.h` | 验证引擎 |
-
----
-
-## Appendix B. CxScript Asset Index
-
-### B.1 cximage 脚本
-
-| 类型 | 路径 |
-|------|------|
-| Catalog | `cxparser/cxscript/module/cximage/catalog/` |
-| Stage25 | `cxparser/cxscript/module/cximage/stage25/` |
-| Frozen | `cxparser/cxscript/module/cximage/frozen/` |
-| Tests | `cxparser/cxscript/module/cximage/tests/` |
-| Frame Probe | `cxparser/cxscript/module/cximage/frame_probe/` |
-| Diagnostic | `cxparser/cxscript/module/cximage/diagnostic/` |
-
-### B.2 torch 脚本
-
-| 类型 | 路径 |
-|------|------|
-| Detection | `cxparser/cxscript/module/torch/detect_direct_test.cxsc` |
-| Segmentation | `cxparser/cxscript/module/torch/segmentation_direct_test.cxsc` |
-
-### B.3 mlpack 脚本
-
-| 类型 | 路径 |
-|------|------|
-| Logistic Regression | `cxparser/cxscript/module/mlpack/logreg_predict_direct_test.cxsc` |
-| Handoff | `cxparser/cxscript/module/mlpack/mlpack_logreg_predict_direct_test.cxsc` |
-
-### B.4 ensmallen 脚本
-
-| 类型 | 路径 |
-|------|------|
-| Geometry Tuning | `cxparser/cxscript/module/ensmallen/ensmallen_geometry_tuning_direct_test.cxsc` |
-| Parameter Optimization | `cxparser/cxscript/module/ensmallen/geometry_tuning_direct_test.cxsc` |
-
----
-
-## Appendix C. Artifact Schemas
-
-### C.1 result_summary.json
-
-```json
-{
-  "case_id": "...",
-  "script_path": "...",
-  "executed": true,
-  "runtime_ok": true,
-  "assets_complete": true,
-  "exit_code": 0,
-  "timeout": false,
-  "valid_points": 10,
-  "fit_line": { "slope": 0.5, "intercept": 1.0 },
-  "fit_circle": { "cx": 100, "cy": 200, "radius": 50, "mean_distance": 2.3 },
-  "support_score": 0.95,
-  "failure_stage": ""
-}
+```text
+将算法或模型结果转换成显示和 Evidence 使用的几何快照
 ```
 
-### C.2 gauge_annotation.json
+它属于投影层，不应反向成为模型或算法的核心结果。
 
-```json
-{
-  "gauge_type": "line",
-  "geometry": { "x0": 100, "y0": 50, "x1": 200, "y1": 150 },
-  "parameters": { "threshold": 50, "linegap": 10 },
-  "accepted": true,
-  "manual_accepted": true,
-  "dirty": false
-}
+## 9.6 统一转换方向
+
+```text
+Find* / Torch Module
+→ CxCore Output 或 Module Result
+→ CxExecutionResult / CxInferenceResult
+→ GeometryAttachRecord
+→ CxShapeElementSnapshot
+→ Overlay / Evidence
+```
+
+禁止形成反向依赖：
+
+```text
+算法模块
+→ 直接读取 UI Shape
+```
+
+也禁止形成并行结果：
+
+```text
+Torch GUI Result
+Torch Evidence Result
+Torch Shape Result
+Torch Script Result
+```
+
+所有模型结果必须先进入同一个 `CxInferenceResult`。
+
+---
+
+# 10. Torch Result Adapter 当前状态
+
+`TorchRuntimeResultAdapter` 当前已经写入：
+
+```text
+executed
+ok
+error_code
+task_id
+case_id
+model_id
+requested_device
+actual_device
+status
+runtime
+raw_result_json
+result_ref
+evidence_ref
+primary_visual_ref
+```
+
+但没有解析 `result_json` 中的：
+
+```text
+schema
+schema_version
+model_hash
+detections
+mask
+metrics
+artifact_refs
+```
+
+因此 `CxInferenceResult.detections` 和 `CxInferenceResult.mask` 在当前外层链中仍可能为空。
+
+### 更新状态
+
+| 子项               | 状态            |
+| ---------------- | ------------- |
+| 状态和运行时间适配        | [Implemented] |
+| Handoff 引用适配     | [Implemented] |
+| Detection 结构化解析  | [Partial]     |
+| Mask 结构化解析       | [Partial]     |
+| Metrics 解析       | [Partial]     |
+| Artifact refs 解析 | [Partial]     |
+| Schema 校验        | [Planned]     |
+
+---
+
+# 11. Geometry Projection 当前状态
+
+## 11.1 Detection
+
+`CxTorchResultProjector` 已能够把每个 `CxTorchDetection` 转为矩形快照：
+
+```text
+x/y/width/height
+→ center
+→ 四个角点
+→ closed rect
+```
+
+第一项标记为 `model_best_result`，其他项标记为 `model_candidate`。如果 `detections` 被正确填充，这条几何投影已具备基本能力。
+
+状态：
+
+```text
+Detection → Rect Snapshot  [Implemented]
+真实 Detection 数据进入   [Partial]
+原图坐标一致性             [Verification Pending]
+```
+
+## 11.2 Mask
+
+当前 Mask 投影只创建：
+
+```text
+shape_kind = mask
+semantic_role = model_segmentation_mask
+```
+
+如果存在 `contour_ref`，再创建一个没有实际点集的 Polyline Snapshot。
+
+它尚未把：
+
+```text
+mask.width
+mask.height
+mask_ref
+overlay_ref
+contour points
+```
+
+转成可渲染的真实几何内容。
+
+状态：
+
+```text
+Mask 语义对象              [Implemented]
+Mask 实际图像或像素投影    [Partial]
+Contour 实际点集投影       [Partial]
+Mask 与原图坐标对齐        [Verification Pending]
+```
+
+## 11.3 正确推进原则
+
+不应在 `CxTorchResultProjector` 中重新运行分割或检测。
+
+正确职责是：
+
+```text
+libtorch_module 产生模型结果
+→ ResultAdapter 解析模型结果
+→ GeometryAttach 建立对象关系
+→ ResultProjector 转成 Shape 或 Overlay
 ```
 
 ---
 
-## Appendix D. CLI Options
+# 12. CxScript Asset System
 
-### D.1 主程序命令行选项
+## 12.1 资产层级
 
+```text
+catalog/
+frozen/
+diagnostic/
+manifest/
+suite/
+parameter profile/
+contract/
+review/
+trace/
 ```
-cxvision_imgui_acceptance [options]
 
-Options:
-  --script <path>    Load and execute specified CxScript
-  --manifest <path>  Load specified image manifest
-  --catalog <path>   Load specified script catalog
-  --debug            Enable debug mode
-  --log <path>       Set unified log output path
+Catalog、Frozen 和 Flow Node 负责脚本选择和语义绑定；它们不得复制算法实现。
+
+## 12.2 Torch 脚本资产
+
+Torch 脚本应分为：
+
+```text
+runtime diagnostic
+device diagnostic
+module task invocation
+segmentation inference
+detection inference
+training lifecycle
+geometry handoff
+result readback
+```
+
+`CxCoreTorchGeometryCxscript.h` 中已经给出输入先验、标签、结果 Attach 和证据回读协议。当前需要确认这些片段是否已注册成实际 CxScript 类型或函数；仅在头文件中存在示例文本不能直接标记为运行时 Verified。
+
+## 12.3 CxScript 约束
+
+1. `.cxsc` 只描述流程和参数；
+2. 模型和算法实现留在所属模块；
+3. Flow Node 只绑定脚本，不承载模型参数结构；
+4. Manual、Headless 和 Suite 共享同一脚本对象；
+5. 结果统一由 Runtime Capture 获取；
+6. 禁止在脚本测试中伪造 PASS；
+7. 引用不存在的 model、image 或 evidence 必须明确失败。
+
+---
+
+# 13. Evidence / Review / Artifact
+
+## 13.1 每个固定 Case 的最低资产
+
+```text
+snapshot.txt
+result_summary.json
+result_overlay.png
+evidence_overlay.png
+tool_display.png
+runtime_trace.json
+contract_result.json
+```
+
+Torch Case 还应记录：
+
+```text
+task_id
+model_id
+model_path 或模型版本
+model_hash
+requested_device
+actual_device
+input_image_ref
+result_ref
+evidence_ref
+mask_ref / bbox refs
+```
+
+旧版 Wiki 规定每个 Case 至少输出 snapshot、summary、result overlay、evidence overlay 和 tool display；新版需要把 Trace 和模型引用也提升为 Torch 接入的必需资产。
+
+## 13.2 PASS 定义
+
+### 传统工具 PASS
+
+```text
+算法实际执行
+必要测量点满足最小要求
+拟合结果存在
+Shape 可投影
+Contract 通过
+Evidence 可回放
+```
+
+### Torch PASS
+
+```text
+模块真实执行
+不是 TestHost 静态任务报告
+结构化 Detection 或 Mask 存在
+Geometry Attach 成功
+Shape 或 Overlay 可见
+Result 与 Evidence 引用有效
+跨入口结果一致
+```
+
+仅有：
+
+```text
+status = success
+result_ref 非空
+```
+
+不能判定完整 Torch Gate 通过。
+
+---
+
+# 14. Build / Runtime
+
+## 14.1 根构建目标
+
+主目标：
+
+```text
+cxvision_imgui_acceptance
+```
+
+当前根 CMake 已纳入：
+
+* Manual Console；
+* ImageAnnotationLayer；
+* Find* 与 FastMatch；
+* ParserDebugBridge；
+* Headless、Suite、Evidence、Review、Trace；
+* Torch Bridge、Service、Adapter、Projector 和 TorchTask；
+* `CxCoreBoundary`（稳定边界输出合同）；
+* cxgeom；
+* cxparser；
+* ImGui；
+* `libtorch_module` 子目录。
+
+## 14.2 Runtime DLL
+
+当：
+
+```text
+CXVISION_ENABLE_TORCH_RUNTIME=ON
+```
+
+并成功建立 `libtorch_module_runtime` 目标时，主程序会依赖该目标，并将 DLL 复制到主程序输出目录。
+
+## 14.3 当前构建问题
+
+### CxCore 实现注册
+
+`CxCoreBoundary.cpp` 已于本次（P0）修改中加入 `CXIMAGE_CORE_SOURCES`。后续应通过一次完整构建验证：主程序能够链接 CxCore 稳定边界，且下游 `FindRect` / `Formfit` / `cxparser_ext` 等对 `CxCoreBoundary` 的引用不再产生孤立目标。
+
+### 环境路径
+
+当前 CMake 仍包含多个 Windows 默认绝对路径：
+
+```text
+GLFW_ROOT
+GLAD_ROOT
+OCCT_ROOT
+OpenCV_DIR
+LIBTORCH_ROOT
+NvToolsExt shim
+```
+
+这些路径可以作为本机默认值，但 Wiki 必须标记为可配置 Cache 变量，禁止将其描述成通用环境。
+
+### Runtime DLL 复制
+
+`CXVISION_COPY_RUNTIME_DLLS` 默认关闭，但 Torch Runtime DLL 在目标存在时会单独复制；OpenCV、OCCT 和完整 LibTorch DLL 的复制由可选开关控制。部署测试需要明确区分"编译成功"和"运行依赖完整"。
+
+---
+
+# 15. 更新后的 Current Status Matrix
+
+| 子系统                           | 当前状态                               | 说明                               |
+| ----------------------------- | ---------------------------------- | -------------------------------- |
+| ManualStateTestConsole 模块拆分   | [Implemented]                      | 主工作台和控制器已拆分                      |
+| ImageAnnotationLayer          | [Implemented]                      | Shape、HitTest、Drag、Commit        |
+| Annotation Tool Runtime       | [Implemented/Partial]              | 基础创建完成，复杂交互仍需回归                  |
+| ManualGaugeState              | [Implemented]                      | Line/Circle/Ring Gauge 状态        |
+| Gauge → Globals               | [Implemented]                      | 可进入脚本执行参数                        |
+| Runtime Projection            | [Implemented]                      | 传统工具基础投影                         |
+| Runtime Writeback             | [Partial]                          | 需继续验证重新执行一致性                     |
+| ParserDebugBridge             | [Implemented]                      | Manual 调试入口                      |
+| SuiteRunner                   | [Implemented]                      | Suite 运行和报告基础存在                  |
+| HeadlessRunner                | [Implemented/Partial]              | 通用入口存在，跨入口一致性未全部验证               |
+| Runtime Result Capture        | [Implemented]                      | 已支持传统工具和 TorchTask               |
+| Evidence Chain                | [Implemented/Partial]              | 基础资产存在，模型真实结果链未闭合                |
+| Parameter Range / Candidate   | [Implemented Phase 1]              | 参数范围和候选结构存在                      |
+| Candidate → Probe 循环          | [Partial]                          | UI 批量循环未完全闭合                     |
+| Hit Distribution              | [Placeholder]                      | 仍需真实空间分布                         |
+| Accuracy / Stability          | [Partial]                          | 缺跨 Case 固定汇总                     |
+| mlpack 脚本资产                   | [Implemented Assets]               | 原生 Runtime 接入待验证                 |
+| mlpack Rank                   | [Placeholder]                      | 尚未使用真实 EvalRecord                |
+| ensmallen 脚本资产                | [Implemented Assets]               | 语义资产存在                           |
+| ensmallen Optimize            | [Placeholder]                      | 尚未接真实 Objective                  |
+| CxCoreBoundary 合同             | [Implemented]                      | 输出和特征合同已形成                       |
+| CxCoreBoundary 主构建            | [Implemented]                      | `.cpp` 已纳入 `CXIMAGE_CORE_SOURCES` |
+| CxCoreAiBoundary              | [Contract/Implemented]             | 路由规则已定义                          |
+| CxCoreGeometryAttach          | [Contract/Implemented]             | 几何对象和 Attach 已定义                 |
+| Torch 模块训练/推理                 | [Module Verified]                  | 模块内测试完成                          |
+| Torch Runtime DLL 生命周期        | [Implemented]                      | create/run/free/version          |
+| Torch 外层控制链                   | [Implemented]                      | Task/Adapter/Service/Bridge 已进构建 |
+| Torch 真实模型主线接入                | [Partial]                          | Runtime Core 仍使用 TestHost        |
+| Torch 请求模型参数                  | [Partial]                          | model_path 未传入 DLL               |
+| Torch Result Adapter          | [Partial]                          | 状态已适配，mask/detections 未解析        |
+| Detection Geometry Projection | [Implemented/Verification Pending] | Rect 生成逻辑存在                      |
+| Mask Geometry Projection      | [Partial]                          | 目前主要为语义占位                        |
+| Torch Evidence 闭环             | [Partial]                          | Handoff refs 存在，真实结果未完全填充        |
+| Mini Regression               | [Planned]                          | 固定小型回归尚未闭合                       |
+| Promotion Gate                | [Disabled]                         | 保持关闭                             |
+| Legacy Stage25                | [Legacy/Disabled]                  | 默认不构建                            |
+
+---
+
+# 16. 当前关键断点
+
+## P0：文档和构建一致性
+
+1. ~~更新 `CODE_WIKI.md` 版本和核验日期~~（本次已完成）；
+2. ~~修正 Torch 文件所属目录~~（本次已完成，见 §2.3）；
+3. ~~将 `CxCoreBoundary.cpp` 纳入正式构建或明确独立目标~~（本次已完成，见 `CMakeLists.txt`）；
+4. ~~为新增 CxCore 文件建立状态说明~~（本次已完成，见 §5）；
+5. ~~修正旧版章节编号错位~~（本次已完成，章节编号已按 v2.3 重排）。
+
+## P1：Torch 主线链接
+
+当前 Runtime Core：
+
+```text
+TorchTask
+→ TorchTestHost
+```
+
+目标：
+
+```text
+Diagnostic Task
+→ TorchTestHost
+
+Segmentation Task
+→ 已有 Segmentation Mainline
+
+Detection Task
+→ 已有 YOLO Mainline
+
+Classification / Embedding
+→ 已有 MobileViT Mainline
+```
+
+禁止重新实现第二套 DeepLab 或 YOLO Executor。
+
+## P2：请求合同补齐
+
+在现有请求中补充必要字段：
+
+```text
+model_path
+template_image
+timeout_ms
+task_kind 或明确 task id
+```
+
+不需要建设复杂版本化平台，但必须保证 `TorchTask.setmodel()` 的值能到达模块主线。
+
+## P3：结构化结果接入
+
+模块真实结果必须填入：
+
+```text
+CxInferenceResult.detections
+CxInferenceResult.mask
+CxInferenceResult.metrics
+CxInferenceResult.artifact_refs
+```
+
+禁止只返回 summary 文本和静态引用。
+
+## P4：几何 Attach 与投影
+
+```text
+Detection
+→ Rect Shape
+
+Mask
+→ Mask Overlay
+
+Boundary
+→ Polyline
+
+Keypoints
+→ Point Set
+```
+
+必须保持原图坐标，并生成稳定 `owner_ref` 和 `stable_ref`。
+
+## P5：固定回归
+
+建立：
+
+```text
+T0 Asset Preflight
+T1 Parser Binding
+T2 Runtime Lifecycle
+T3 Module/Mainline Parity
+T4 Structured Result
+T5 Geometry Projection
+T6 Evidence Output
+T7 Manual/Headless/Suite Parity
 ```
 
 ---
 
-## Appendix E. Placeholder Register
+# 17. 更新后的推进顺序
 
-### E.1 当前占位实现清单
-
-| 占位项 | 文件位置 | 状态 |
-|--------|----------|------|
-| `AddMlpackRankPlaceholderCandidates()` | `ManualConsoleParamRegressionPanel.cpp` | [Placeholder] |
-| `AddEnsmallenOptPlaceholderCandidates()` | `ManualConsoleParamRegressionPanel.cpp` | [Placeholder] |
-| Tuning Map Animate | `ManualConsoleParamRegressionPanel.cpp` | [Visual Placeholder] |
-| Hit Distribution bins | `CxParamRegressionRuntime.cpp` | [Placeholder] |
-
-### E.2 Placeholder 清理计划
-
-| 占位项 | 计划清理版本 | 依赖条件 |
-|--------|-------------|----------|
-| mlpack Rank | v2.2 | mlpack 原生构建集成 |
-| ensmallen Optimize | v2.2 | ensmallen 原生构建集成 |
-| Hit Distribution | v2.1.1 | FindLine/FindCircle 稳定基线 |
-| Tuning Map Animate | v2.1.1 | 参数回归闭环完成 |
+| 优先级 | 工作                   | 完成定义                              |
+| --- | -------------------- | --------------------------------- |
+| P0  | Wiki 与 CMake 同步      | 文件、层级、状态和构建清单一致（本次完成）             |
+| P1  | CxCoreBoundary 正式构建  | 主程序可调用稳定边界输出（已纳入 `CXIMAGE_CORE_SOURCES`） |
+| P2  | Torch Runtime 调用已有主线 | 不再以 TestHost 代替真实推理               |
+| P3  | 补齐 model/input 请求    | 脚本设置值可到达模块                        |
+| P4  | 解析 Detection/Mask    | `CxInferenceResult` 有真实结构化数据      |
+| P5  | Geometry Attach      | 模型结果关联稳定几何对象                      |
+| P6  | Shape / Overlay      | Rect、Mask、Boundary、Keypoints 可见   |
+| P7  | Evidence 固化          | Snapshot、Summary、Overlay、Trace 完整 |
+| P8  | 跨入口一致性               | Manual、Headless、Suite 结果一致        |
+| P9  | Mini Regression      | 固定 Case 自动回归                      |
+| P10 | 参数 Rank/Optimize     | mlpack/ensmallen 接真实 EvalRecord   |
 
 ---
 
-## Appendix F. Legacy Stage25 C++
+# 18. Architecture Rules
 
-以下文件已标记为 Legacy，仅在 `CXVISION_ENABLE_LEGACY_STAGE25_CPP=ON` 时编译：
+## 18.1 单一算法和模型主线
 
-| 文件 | 说明 |
-|------|------|
-| `CxScriptStage25Manifest.cpp` | Stage25 清单实现 |
-| `CxScriptStage25Template.cpp` | Stage25 模板实现 |
-| `CxScriptStage25Runner.cpp` | Stage25 运行器 |
-| `CxScriptStage25ReportWriter.cpp` | Stage25 报告输出 |
-| `CxScriptStage25Register.cpp` | Stage25 注册 |
-| `CxScriptStage25JsonLite.cpp` | Stage25 JSON 轻量解析 |
-| `CxScriptStage25PolicyValidator.cpp` | Stage25 策略验证 |
-| `CxScriptStage25CaseMatrix.cpp` | Stage25 Case 矩阵 |
+1. Manual、Headless、Suite 不得各自实现算法；
+2. `libtorch_module` 模块测试和 cxvision Runtime 必须调用同一模型主线；
+3. TestHost 只用于诊断和测试编排；
+4. UI 不执行模型前处理或后处理；
+5. Result Projector 不重新运行算法。
 
-#### 状态
-- **[Legacy/Disabled]**：默认不编译，仅兼容保留
+## 18.2 单一结果入口
+
+1. 传统工具进入 `CxExecutionResult`；
+2. 模型结果进入 `CxInferenceResult`；
+3. `CxInferenceResult` 作为 `CxExecutionResult.inference_result` 的模型子结果；
+4. Geometry Attach 只描述对象关系；
+5. Shape Snapshot 只用于显示和证据；
+6. 禁止新增平行的 Torch GUI Result、Torch Evidence Result 或 Torch Shape Result 作为正式数据源。
+
+## 18.3 模块归属
+
+```text
+模型训练和推理
+→ libtorch_module
+
+传统图像算法
+→ cximage
+
+几何构建
+→ cxgeom / OCCT
+
+脚本解析
+→ cxparser / cxparser_ext
+
+执行编排和结果适配
+→ cximage integration layer
+
+显示和人工交互
+→ Manual Console / ImageAnnotationLayer
+
+证据和回归
+→ CxScript Evidence / Suite / Regression
+```
+
+## 18.4 CxCore 边界规则
+
+1. CxCoreBoundary 不依赖 UI；
+2. CxCoreAiBoundary 不直接运行模型；
+3. GeometryAttach 不保存模型对象；
+4. Handoff Bridge 不替代真实结果；
+5. 所有引用必须可追踪到 source hash、model version、result 和 evidence；
+6. 合同文件必须通过固定 Case 验证后才能标记 Verified。
 
 ---
-<p align="center">
-<img src="https://raw.githubusercontent.com/Sean-Cai-X/cxvision/codex/cxcore-integration/diagram2.png" width="100%">
-</p>
-*文档版本: v2.1 | 对应分支: codex/cxcore-integration | 核验日期: 2026-07-15 | 基于仓库: cxvision_repo*
+
+# 19. Wiki 更新清单
+
+本次 v2.3 更新已覆盖以下内容：
+
+1. 标题从 `v2.2` 更新为 `v2.3`；
+2. 核验日期更新为 `2026-07-26`；
+3. 项目阶段改为"CxCore 边界固化与 Torch 几何接入"；
+4. 完整架构增加 CxCore Boundary 和 Geometry Attach；
+5. 目录树修正 Torch Bridge 和 Adapter 的真实位置；
+6. Torch 章节增加 Task、Adapter、Service、Projector；
+7. 区分模块测试完成与 Runtime 接入完成；
+8. 明确 Runtime Core 当前仍调用 TestHost；
+9. 增加请求缺少 `model_path` 的断点；
+10. 增加 `CxInferenceResult` 的正式字段说明；
+11. 增加 Detection 与 Mask 投影的不同完成状态；
+12. 增加 CxCoreBoundary 的 Build Pending/Implemented 状态；
+13. 更新 Current Status Matrix；
+14. 更新 Roadmap，将 Torch 主线和几何接入提升到 P0/P1；
+15. 增加"Source/Build/Runtime/Regression"四级核验规则。
+
+---
+
+# 20. 当前管理结论
+
+当前框架已经完成了主要骨架建设：
+
+```text
+GUI
+CxScript
+Parser
+Headless/Suite
+传统工具
+Torch 外层控制链
+Canonical Result
+Projection
+Evidence
+```
+
+新加入的 CxCore 边界又补充了：
+
+```text
+算法稳定输出
+AI 路由
+几何对象 Attach
+Torch Handoff
+```
+
+当前最大问题已经不是"缺少框架"，而是多个已经存在的结构尚未由真实数据贯通：
+
+```text
+libtorch_module 已有模型能力
+但 Runtime Core 仍走 TestHost；
+
+TorchTask 已能设置 model_path
+但 DLL 请求未携带 model_path；
+
+CxInferenceResult 已有 detections 和 mask
+但 ResultAdapter 尚未填充；
+
+Detection 投影已有矩形逻辑
+但真实 detection 尚未进入；
+
+Mask 已有语义 Shape
+但实际 mask、轮廓和坐标尚未进入；
+
+CxCoreBoundary 已有实现
+且已纳入 `CXIMAGE_CORE_SOURCES`，仍需通过构建和固定回归验证。
+```
