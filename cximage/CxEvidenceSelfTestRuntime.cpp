@@ -112,6 +112,7 @@ bool WriteEvidenceSelfTestSummaryJson(
     file << "  \"fastmatch_learn_b_count\": " << result.fastmatch_learn_b_count << ",\n";
     file << "  \"fastmatch_learn_a2_count\": " << result.fastmatch_learn_a2_count << ",\n";
     file << "  \"fastmatch_learn_b2_count\": " << result.fastmatch_learn_b2_count << ",\n";
+    file << "  \"fastmatch_learn_status_code\": " << result.fastmatch_learn_status_code << ",\n";
     file << "  \"fastmatch_pattern_a_count\": " << result.fastmatch_pattern_a_count << ",\n";
     file << "  \"fastmatch_pattern_b_count\": " << result.fastmatch_pattern_b_count << ",\n";
     file << "  \"fastmatch_candidate_count\": " << result.fastmatch_candidate_count << ",\n";
@@ -178,6 +179,7 @@ bool WriteEvidenceSelfTestReportMd(
         file << "- fastmatch_learn_b_count: " << result.fastmatch_learn_b_count << "\n";
         file << "- fastmatch_learn_a2_count: " << result.fastmatch_learn_a2_count << "\n";
         file << "- fastmatch_learn_b2_count: " << result.fastmatch_learn_b2_count << "\n";
+        file << "- fastmatch_learn_status_code: " << result.fastmatch_learn_status_code << "\n";
         file << "- fastmatch_pattern_a_count: " << result.fastmatch_pattern_a_count << "\n";
         file << "- fastmatch_pattern_b_count: " << result.fastmatch_pattern_b_count << "\n";
         file << "- fastmatch_candidate_count: " << result.fastmatch_candidate_count << "\n";

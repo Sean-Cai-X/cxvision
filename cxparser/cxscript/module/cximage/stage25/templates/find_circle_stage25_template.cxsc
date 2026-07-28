@@ -29,7 +29,7 @@ m_circle.setmethod(method);
 {{optional_findcircle_filter}}
 {{optional_findcircle_samplerate}}
 
-m_circle.setcircle(cx, cy, px, py);
+m_circle.setcircle(py, px, cy, cx);
 
 m_circle.measure(&m_image);
 m_circle.fitcircle();

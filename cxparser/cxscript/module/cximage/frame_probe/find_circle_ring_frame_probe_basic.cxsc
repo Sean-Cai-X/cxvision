@@ -18,11 +18,11 @@ int thickness_tolerance = 5;
 
 m_outer_circle.Setgap(gap);
 m_outer_circle.setlinegap(linegap);
-m_outer_circle.setcircle(cx, cy, outer_px, outer_py);
+m_outer_circle.setcircle(outer_py, outer_px, cy, cx);
 
 m_inner_circle.Setgap(gap);
 m_inner_circle.setlinegap(linegap);
-m_inner_circle.setcircle(cx, cy, inner_px, inner_py);
+m_inner_circle.setcircle(inner_py, inner_px, cy, cx);
 
 m_ring_gauge.settolerance(concentric_tolerance, thickness_tolerance);
 m_ring_gauge.setouter(&m_outer_circle);

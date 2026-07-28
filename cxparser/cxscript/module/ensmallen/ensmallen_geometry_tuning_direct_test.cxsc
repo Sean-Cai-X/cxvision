@@ -9,7 +9,7 @@ EnsmallenMetric m_baseline_metric;
 EnsmallenMetric m_candidate_metric;
 
 m_image.copyFromMat(global_matInput);
-m_circle.setcircle(850, 690, 0, 690);
+m_circle.setcircle(690, 0, 690, 850);
 m_circle.setmethod(0);
 m_circle.setthre(20);
 m_circle.setlinegap(3);

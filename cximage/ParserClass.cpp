@@ -587,8 +587,14 @@ namespace mu
             m_parser.DefineClass("FindObject", pfobj);
             m_parser.DefineClassFun("FindObject", pfobj, "setrect", &FindObject::setrect);
             m_parser.DefineClassFun("FindObject", pfobj, "measure", &FindObject::measure);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurefast", &FindObject::measurefast);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurecc", &FindObject::measurecc);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurexbfs", &FindObject::measurexbfs);
             m_parser.DefineClassFun("FindObject", pfobj, "Show", &FindObject::setshow);
             m_parser.DefineClassFun("FindObject", pfobj, "measurex", &FindObject::measurex);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurexfast", &FindObject::measurexfast);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurexcc", &FindObject::measurexcc);
+            m_parser.DefineClassFun("FindObject", pfobj, "measurexpeakbfs", &FindObject::measurexpeakbfs);
             m_parser.DefineClassFun("FindObject", pfobj, "sethsogap", &FindObject::sethsogap);
             m_parser.DefineClassFun("FindObject", pfobj, "setminmax", &FindObject::setminmaxarea);
             m_parser.DefineClassFun("FindObject", pfobj, "setminmaxwh", &FindObject::setminmaxwh);
@@ -606,6 +612,12 @@ namespace mu
             m_parser.DefineClassFun("FindObject", pfobj, "getresulth", &FindObject::getresulth);
             m_parser.DefineClassFun("FindObject", pfobj, "getresultsize", &FindObject::getresultsize);
             m_parser.DefineClassFun("FindObject", pfobj, "getresultobjsnum", &FindObject::getresultobjsnum);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugcomponentcount", &FindObject::getdebugcomponentcount);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugacceptedcount", &FindObject::getdebugacceptedcount);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugrejectedcount", &FindObject::getdebugrejectedcount);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugmaxcomponentarea", &FindObject::getdebugmaxcomponentarea);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugmaxcomponentw", &FindObject::getdebugmaxcomponentw);
+            m_parser.DefineClassFun("FindObject", pfobj, "getdebugmaxcomponenth", &FindObject::getdebugmaxcomponenth);
             m_parser.DefineClassFun("FindObject", pfobj, "objectgrid", &FindObject::objectgrid);
             m_parser.DefineClassFun("FindObject", pfobj, "setobjectgrid", &FindObject::setobjectgrid);
             m_parser.DefineClassFun("FindObject", pfobj, "objectsort", &FindObject::objectsort);
@@ -743,6 +755,7 @@ namespace mu
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnbcount", &FastMatch::getlearnbcount);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearna2count", &FastMatch::getlearna2count);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnb2count", &FastMatch::getlearnb2count);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getlearnstatuscode", &FastMatch::getlearnstatuscode);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "getmaxresult", &FastMatch::getmaxresult);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setspecshow", &FastMatch::setspecshow);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrelresultnum", &FastMatch::setrelationrectfromresultnum);

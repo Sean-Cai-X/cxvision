@@ -4043,3 +4043,700 @@ void FindLine::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
             std::move(fit_line));
     }
 }
+
+// ============================================================================
+// Robust Measurement Implementation
+// ============================================================================
+
+namespace
+{
+struct RobustFeatureGraphContext
+{
+    FeatureGraph graph;
+    std::vector<std::vector<int>> components;
+};
+
+RobustFeatureGraphContext g_robust_ctx;
+
+double DotProduct(const std::vector<double>& a, const std::vector<double>& b)
+{
+    const std::size_t n = std::min(a.size(), b.size());
+    double sum = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+        sum += a[i] * b[i];
+    return sum;
+}
+
+double Mean(const std::vector<double>& v)
+{
+    if (v.empty())
+        return 0.0;
+    double sum = 0.0;
+    for (double x : v)
+        sum += x;
+    return sum / static_cast<double>(v.size());
+}
+
+double CalculateNCC(const std::vector<double>& a, const std::vector<double>& b)
+{
+    if (a.empty() || b.empty())
+        return 0.0;
+
+    const std::size_t n = std::min(a.size(), b.size());
+    if (n < 2)
+        return 0.0;
+
+    std::vector<double> a_trim(a.begin(), a.begin() + static_cast<long>(n));
+    std::vector<double> b_trim(b.begin(), b.begin() + static_cast<long>(n));
+
+    const double mean_a = Mean(a_trim);
+    const double mean_b = Mean(b_trim);
+
+    double num = 0.0;
+    double den_a = 0.0;
+    double den_b = 0.0;
+
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const double da = a_trim[i] - mean_a;
+        const double db = b_trim[i] - mean_b;
+        num += da * db;
+        den_a += da * da;
+        den_b += db * db;
+    }
+
+    const double den = std::sqrt(den_a * den_b);
+    if (den < 1.0e-9)
+        return 0.0;
+
+    return std::max(-1.0, std::min(1.0, num / den));
+}
+
+std::vector<double> ExtractProfileAt(const cv::Mat& gray,
+                                      double cx,
+                                      double cy,
+                                      int half_width,
+                                      int scan_type)
+{
+    std::vector<double> profile;
+    if (gray.empty() || half_width < 1)
+        return profile;
+
+    const int px = static_cast<int>(std::lround(cx));
+    const int py = static_cast<int>(std::lround(cy));
+
+    if (scan_type == 0)
+    {
+        for (int dy = -half_width; dy <= half_width; ++dy)
+        {
+            const int y = py + dy;
+            if (px < 0 || px >= gray.cols || y < 0 || y >= gray.rows)
+                break;
+            profile.push_back(static_cast<double>(gray.at<uchar>(y, px)));
+        }
+    }
+    else
+    {
+        for (int dx = -half_width; dx <= half_width; ++dx)
+        {
+            const int x = px + dx;
+            if (x < 0 || x >= gray.cols || py < 0 || py >= gray.rows)
+                break;
+            profile.push_back(static_cast<double>(gray.at<uchar>(py, x)));
+        }
+    }
+
+    return profile;
+}
+}
+
+void FindLine::MeasureRobust(Image& image)
+{
+    const std::chrono::steady_clock::time_point total_begin = std::chrono::steady_clock::now();
+
+    m_budget_state = CxAlgorithmBudgetState();
+
+    MarkMeasureGeometryDirty();
+    if (!EnsureOriginalMeasureGeometryReady())
+    {
+        m_lastMeasureProfile = FindLineMeasureProfileStats();
+        return;
+    }
+
+    ClearMeasureState();
+
+    m_fit_candidate_sequences.clear();
+    m_best_sequence_index = -1;
+    g_robust_ctx = RobustFeatureGraphContext();
+
+    ProbeDisplayRoiGrayStats(image);
+
+    FindLineMeasureProfileStats stats;
+
+    BuildScanProfiles(image, stats, total_begin);
+
+    if (m_budget_state.exceeded)
+    {
+        m_lastMeasureProfile = stats;
+        return;
+    }
+
+    CollectEdgeBandsRobust(image, stats);
+
+    if (m_scanEdgeBands.empty())
+    {
+        m_lastMeasureProfile = stats;
+        return;
+    }
+
+    BuildFeatureGraph(stats);
+
+    FindComponentsInGraph(stats);
+
+    SelectBestSequence(stats);
+
+    if (m_best_sequence_index >= 0 &&
+        m_best_sequence_index < static_cast<int>(m_fit_candidate_sequences.size()))
+    {
+        ConvertSequenceToMeasurePoints(m_fit_candidate_sequences[m_best_sequence_index]);
+
+        if (m_bestEdgeChain.size() >= 2)
+        {
+            RefineJointConsistency(stats);
+            FitWeightedLeastSquares(stats);
+        }
+    }
+
+    stats.point_count = m_measurepoints_w.size() + m_measurepoints_h.size();
+    stats.chain_length = static_cast<int>(m_bestEdgeChain.size());
+    stats.total_ms = ElapsedMilliseconds(total_begin, std::chrono::steady_clock::now());
+
+    m_lastMeasureInputDebug.original_point_count = stats.point_count;
+    m_lastMeasureInputDebug.original_edgeband_count = stats.edgeband_count;
+    m_lastMeasureInputDebug.original_chain_length = stats.chain_length;
+
+    if (stats.point_count > 0)
+        m_lastMeasureInputDebug.measure_source = "robust_measure_pipeline";
+    else
+        m_lastMeasureInputDebug.measure_source = "robust_measure_pipeline_no_result";
+
+    m_lastMeasureProfile = stats;
+}
+
+void FindLine::BuildScanProfilesRobust(Image& image,
+                                        FindLineMeasureProfileStats& stats)
+{
+    const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+    if (g_pbackimage == nullptr)
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    if (image.getWidth() < rect().TopLeft().X() + rect().Width()
+        || image.getHeight() < rect().TopLeft().Y() + rect().Height()
+        || rect().TopLeft().X() < 0
+        || rect().TopLeft().Y() < 0)
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    const int iwsize = ClampSizeToInt(m_lines_w.size());
+    const int ihsize = ClampSizeToInt(m_lines_h.size());
+
+    if (iwsize <= 0 && ihsize <= 0)
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    int ilineslen1 = 0;
+    int ilineslen2 = 0;
+    if (iwsize > 0)
+        ilineslen1 = m_lines_w[0].getlinesize();
+    if (ihsize > 0)
+        ilineslen2 = m_lines_h[0].getlinesize();
+
+    const int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
+    if (iprocessw <= 0)
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+        iprocessw > g_pbackimage->getWidth())
+    {
+        stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    for (int i = 0; i < iwsize; ++i)
+    {
+        m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
+    }
+    for (int i = 0; i < ihsize; ++i)
+    {
+        m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
+    }
+
+    g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
+    g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+
+    if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
+    {
+        g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
+
+        m_effective_filter_borw = effectivefilterborw();
+        m_effective_filter_min = effectivefiltermin();
+        m_effective_filter_max = effectivefiltermax();
+
+        g_pbackfindobject->setbrow(m_effective_filter_borw);
+        g_pbackfindobject->setminmaxarea(
+            ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
+            ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
+        g_pbackfindobject->Measure(*g_pbackimage);
+    }
+
+    stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+}
+
+void FindLine::CollectEdgeBandsRobust(Image& image,
+                                       FindLineMeasureProfileStats& stats)
+{
+    const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+    if (g_pbackimage == nullptr)
+    {
+        stats.edgeband_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    cv::Mat gray_src;
+    const cv::Mat& src_mat = image.getmat();
+    if (!src_mat.empty())
+    {
+        if (src_mat.channels() == 1)
+            gray_src = src_mat.clone();
+        else
+            cv::cvtColor(src_mat, gray_src, cv::COLOR_BGR2GRAY);
+    }
+
+    const int ifixvalue = 3;
+    const int max_band_width = 70;
+    const int profile_half_width = 5;
+
+    const int iwsize = ClampSizeToInt(m_lines_w.size());
+    const int ihsize = ClampSizeToInt(m_lines_h.size());
+    const int ilineslen1 = iwsize > 0 ? m_lines_w[0].getlinesize() : 0;
+    const int ilineslen2 = ihsize > 0 ? m_lines_h[0].getlinesize() : 0;
+
+    auto append_scan_band_robust = [&](int scan_type,
+                                        int line_index,
+                                        int row_index,
+                                        int line_length)
+    {
+        ScanLineEdgeBands scan_bands;
+        scan_bands.scan_index = static_cast<int>(m_scanEdgeBands.size());
+        scan_bands.scan_type = scan_type;
+
+        bool collecting = false;
+        int band_start = 0;
+        int band_rank = 0;
+
+        auto finalize_band = [&](int band_end)
+        {
+            if (!collecting)
+                return;
+
+            const int band_width = band_end - band_start + 1;
+            collecting = false;
+            if (band_width <= 0 || band_width > max_band_width)
+                return;
+
+            const int center_index = m_ineedfixs + band_start + (band_width >> 1);
+            if (center_index <= m_iSelectPointGap + 3 ||
+                center_index >= line_length - m_iSelectPointGap - 3)
+                return;
+
+            EdgeBandCandidate candidate;
+            candidate.scan_index = scan_bands.scan_index;
+            candidate.scan_type = scan_type;
+            candidate.line_index = line_index;
+            candidate.candidate_index = static_cast<int>(scan_bands.bands.size());
+            candidate.start_index = band_start;
+            candidate.end_index = band_end;
+            candidate.center_index = center_index;
+            candidate.width = static_cast<double>(band_width);
+            candidate.edge_rank = band_rank++;
+            candidate.response_strength = static_cast<double>(band_width);
+            candidate.polarity = m_iMethod == 0 ? 1.0 : -1.0;
+            candidate.valid = (m_iselectedgenum == 0 || (candidate.edge_rank + 1) == m_iselectedgenum);
+
+            const gp_Pnt point = scan_type == 0
+                ? m_lines_w[line_index].getlinepoint(center_index)
+                : m_lines_h[line_index].getlinepoint(center_index);
+            candidate.x = point.X();
+            candidate.y = point.Y();
+
+            if (!gray_src.empty())
+            {
+                candidate.profile = ExtractProfileAt(
+                    gray_src, candidate.x, candidate.y, profile_half_width, scan_type);
+            }
+
+            if (candidate.profile.size() < 3)
+                candidate.profile.clear();
+
+            scan_bands.bands.push_back(candidate);
+        };
+
+        for (int col_index = 0; col_index < line_length; ++col_index)
+        {
+            const cv::Vec3b color = g_pbackimage->pixel(col_index, row_index);
+            const bool active = color[0] > 0;
+            if (active && !collecting)
+            {
+                collecting = true;
+                band_start = col_index;
+            }
+            else if (!active && collecting)
+            {
+                finalize_band(col_index - 1);
+            }
+        }
+
+        if (collecting)
+            finalize_band(line_length - 1);
+
+        if (!scan_bands.bands.empty())
+            m_scanEdgeBands.push_back(scan_bands);
+    };
+
+    for (int line_index = ifixvalue; line_index < iwsize - ifixvalue; ++line_index)
+        append_scan_band_robust(0, line_index, line_index, ilineslen1);
+
+    for (int line_index = ifixvalue; line_index < ihsize - ifixvalue; ++line_index)
+        append_scan_band_robust(1, line_index, iwsize + line_index, ilineslen2);
+
+    stats.edgeband_count = 0;
+    for (size_t i = 0; i < m_scanEdgeBands.size(); ++i)
+        stats.edgeband_count += static_cast<int>(m_scanEdgeBands[i].bands.size());
+
+    if (stats.edgeband_count <= 0)
+    {
+        m_lastMeasureInputDebug.failure_stage = "no_edge_band_candidates";
+    }
+
+    stats.edgeband_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+}
+
+void FindLine::BuildFeatureGraph(FindLineMeasureProfileStats& stats)
+{
+    const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+    g_robust_ctx = RobustFeatureGraphContext();
+
+    if (m_scanEdgeBands.empty())
+    {
+        stats.graph_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    const double T_space = 10.0;
+    const double T_width = 5.0;
+    const double T_ncc = 0.85;
+
+    int total_candidates = 0;
+    for (const auto& scan : m_scanEdgeBands)
+        total_candidates += static_cast<int>(scan.bands.size());
+
+    g_robust_ctx.graph.nodes.reserve(static_cast<std::size_t>(total_candidates));
+
+    int node_id = 0;
+    for (const auto& scan : m_scanEdgeBands)
+    {
+        for (const auto& band : scan.bands)
+        {
+            FeatureGraphNode node;
+            node.id = node_id++;
+            node.candidate = band;
+            node.visited = false;
+            node.component_id = -1;
+            g_robust_ctx.graph.nodes.push_back(node);
+        }
+    }
+
+    int scan_offset = 0;
+    std::vector<int> scan_start_offsets;
+    for (const auto& scan : m_scanEdgeBands)
+    {
+        scan_start_offsets.push_back(scan_offset);
+        scan_offset += static_cast<int>(scan.bands.size());
+    }
+    scan_start_offsets.push_back(scan_offset);
+
+    for (std::size_t scan_idx = 0; scan_idx + 1 < m_scanEdgeBands.size(); ++scan_idx)
+    {
+        const auto& current_scan = m_scanEdgeBands[scan_idx];
+        const auto& next_scan = m_scanEdgeBands[scan_idx + 1];
+
+        const int current_offset = scan_start_offsets[scan_idx];
+        const int next_offset = scan_start_offsets[scan_idx + 1];
+
+        for (std::size_t ci = 0; ci < current_scan.bands.size(); ++ci)
+        {
+            const EdgeBandCandidate& cand_a = current_scan.bands[ci];
+            if (!cand_a.valid || cand_a.profile.size() < 3)
+                continue;
+
+            const int node_a_id = current_offset + static_cast<int>(ci);
+
+            for (std::size_t cj = 0; cj < next_scan.bands.size(); ++cj)
+            {
+                const EdgeBandCandidate& cand_b = next_scan.bands[cj];
+                if (!cand_b.valid || cand_b.profile.size() < 3)
+                    continue;
+
+                const double spatial_dist = std::abs(
+                    cand_a.scan_type == 0
+                        ? cand_a.x - cand_b.x
+                        : cand_a.y - cand_b.y);
+
+                if (spatial_dist > T_space)
+                    continue;
+
+                const double width_diff = std::abs(cand_a.width - cand_b.width);
+                if (width_diff > T_width)
+                    continue;
+
+                if (cand_a.polarity != cand_b.polarity)
+                    continue;
+
+                const double ncc = CalculateNCC(cand_a.profile, cand_b.profile);
+                if (ncc <= T_ncc)
+                    continue;
+
+                const int node_b_id = next_offset + static_cast<int>(cj);
+
+                FeatureGraphEdge edge;
+                edge.node_a = node_a_id;
+                edge.node_b = node_b_id;
+                edge.ncc_score = ncc;
+                edge.spatial_distance = spatial_dist;
+                edge.valid = true;
+                g_robust_ctx.graph.edges.push_back(edge);
+
+                g_robust_ctx.graph.nodes[node_a_id].neighbors.push_back(node_b_id);
+                g_robust_ctx.graph.nodes[node_b_id].neighbors.push_back(node_a_id);
+            }
+        }
+    }
+
+    stats.graph_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+}
+
+void FindLine::FindComponentsInGraph(FindLineMeasureProfileStats& stats)
+{
+    const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+    g_robust_ctx.components.clear();
+
+    FeatureGraph& graph = g_robust_ctx.graph;
+    const int node_count = static_cast<int>(graph.nodes.size());
+
+    std::vector<bool> visited(static_cast<std::size_t>(node_count), false);
+
+    for (int start = 0; start < node_count; ++start)
+    {
+        if (visited[start])
+            continue;
+
+        std::vector<int> component;
+        std::vector<int> stack;
+        stack.push_back(start);
+
+        while (!stack.empty())
+        {
+            const int current = stack.back();
+            stack.pop_back();
+
+            if (visited[current])
+                continue;
+
+            visited[current] = true;
+            component.push_back(current);
+
+            for (int neighbor : graph.nodes[static_cast<std::size_t>(current)].neighbors)
+            {
+                if (!visited[static_cast<std::size_t>(neighbor)])
+                    stack.push_back(neighbor);
+            }
+        }
+
+        if (static_cast<int>(component.size()) >= 2)
+        {
+            for (int node_id : component)
+                graph.nodes[static_cast<std::size_t>(node_id)].component_id =
+                    static_cast<int>(g_robust_ctx.components.size());
+
+            g_robust_ctx.components.push_back(component);
+        }
+        else
+        {
+            for (int node_id : component)
+                visited[static_cast<std::size_t>(node_id)] = false;
+        }
+    }
+
+    if (!g_robust_ctx.components.empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "graph_components_found";
+    }
+
+    stats.graph_ms += ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+}
+
+void FindLine::SelectBestSequence(FindLineMeasureProfileStats& stats)
+{
+    const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+    m_fit_candidate_sequences.clear();
+    m_best_sequence_index = -1;
+
+    if (g_robust_ctx.components.empty())
+    {
+        stats.path_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+        return;
+    }
+
+    FeatureGraph& graph = g_robust_ctx.graph;
+
+    for (const auto& component : g_robust_ctx.components)
+    {
+        FitCandidateSequence seq;
+        seq.valid = true;
+        seq.node_count = static_cast<int>(component.size());
+
+        double total_response = 0.0;
+        double sum_ncc = 0.0;
+        int edge_count = 0;
+
+        std::vector<const EdgeBandCandidate*> component_candidates;
+        component_candidates.reserve(component.size());
+
+        for (int node_id : component)
+        {
+            const FeatureGraphNode& node = graph.nodes[static_cast<std::size_t>(node_id)];
+            component_candidates.push_back(&node.candidate);
+            total_response += node.candidate.response_strength;
+        }
+
+        std::sort(component_candidates.begin(), component_candidates.end(),
+            [](const EdgeBandCandidate* a, const EdgeBandCandidate* b)
+            {
+                if (a->scan_index != b->scan_index)
+                    return a->scan_index < b->scan_index;
+                return a->scan_type < b->scan_type;
+            });
+
+        for (const EdgeBandCandidate* cand : component_candidates)
+        {
+            seq.points.push_back(cv::Point2d(cand->x, cand->y));
+        }
+
+        for (const auto& edge : graph.edges)
+        {
+            bool a_in_comp = false;
+            bool b_in_comp = false;
+            for (int nid : component)
+            {
+                if (nid == edge.node_a) a_in_comp = true;
+                if (nid == edge.node_b) b_in_comp = true;
+            }
+            if (a_in_comp && b_in_comp)
+            {
+                sum_ncc += edge.ncc_score;
+                ++edge_count;
+            }
+        }
+
+        seq.avg_ncc = edge_count > 0 ? sum_ncc / static_cast<double>(edge_count) : 0.0;
+        seq.total_response = total_response;
+        seq.score = seq.node_count * 100.0 + seq.avg_ncc * 50.0 + total_response;
+
+        m_fit_candidate_sequences.push_back(seq);
+    }
+
+    std::sort(m_fit_candidate_sequences.begin(), m_fit_candidate_sequences.end(),
+        [](const FitCandidateSequence& a, const FitCandidateSequence& b)
+        {
+            return a.score > b.score;
+        });
+
+    if (m_fit_candidate_sequences.size() > 5)
+        m_fit_candidate_sequences.resize(5);
+
+    if (!m_fit_candidate_sequences.empty())
+        m_best_sequence_index = 0;
+
+    stats.path_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
+}
+
+void FindLine::ConvertSequenceToMeasurePoints(FitCandidateSequence& seq)
+{
+    m_measurepoints_w.clear();
+    m_measurepoints_h.clear();
+    m_bestEdgeChain.clear();
+
+    if (!seq.valid || seq.points.empty())
+        return;
+
+    for (const auto& pt : seq.points)
+    {
+        Standard_Real x = pt.x;
+        Standard_Real y = pt.y;
+
+        bool added = false;
+
+        for (const auto& scan : m_scanEdgeBands)
+        {
+            for (const auto& band : scan.bands)
+            {
+                if (!band.valid)
+                    continue;
+                if (std::abs(band.x - pt.x) < 1.5 && std::abs(band.y - pt.y) < 1.5)
+                {
+                    if (band.scan_type == 0)
+                        m_measurepoints_w.addpoint(x, y);
+                    else
+                        m_measurepoints_h.addpoint(x, y);
+
+                    m_bestEdgeChain.push_back(band);
+                    added = true;
+                    break;
+                }
+            }
+            if (added)
+                break;
+        }
+
+        if (!added)
+        {
+            if (std::abs(pt.x) > std::abs(pt.y))
+                m_measurepoints_w.addpoint(x, y);
+            else
+                m_measurepoints_h.addpoint(x, y);
+        }
+    }
+
+    if (m_measurepoints_w.size() + m_measurepoints_h.size() > 0)
+    {
+        PointsShape all_points;
+        all_points.addpoints(m_measurepoints_w);
+        all_points.addpoints(m_measurepoints_h);
+        m_measurepointsboundingRect = all_points.boundingRect();
+    }
+}

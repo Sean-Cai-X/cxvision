@@ -895,36 +895,11 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
     }
 
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:list");
-    struct FastMatchObjectRef
-    {
-        std::string parser_class;
-        std::string name;
-    };
-    std::vector<FastMatchObjectRef> FastMatchObjectRefs;
     for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
-        FastMatchObjectRefs.push_back({"FastMatch", name});
-    }
-    for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
-    {
-        bool already_seen = false;
-        for (const FastMatchObjectRef& ref : FastMatchObjectRefs)
-        {
-            if (ref.name == name)
-            {
-                already_seen = true;
-                break;
-            }
-        }
-        if (!already_seen)
-            FastMatchObjectRefs.push_back({"FastMatch", name});
-    }
-    for (const FastMatchObjectRef& ref : FastMatchObjectRefs)
-    {
-        const std::string& name = ref.name;
-        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:query:" + ref.parser_class + ":" + name);
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:query:FastMatch:" + name);
         FastMatch* matcher = static_cast<FastMatch*>(
-            m_parserDebugBridge.QueryClassObject(ref.parser_class, name));
+            m_parserDebugBridge.QueryClassObject("FastMatch", name));
         if (matcher == nullptr)
             continue;
 
@@ -946,6 +921,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.fastmatch_learn_b_count = matcher->getlearnbcount();
         object.fastmatch_learn_a2_count = matcher->getlearna2count();
         object.fastmatch_learn_b2_count = matcher->getlearnb2count();
+        object.fastmatch_learn_status_code = matcher->getlearnstatuscode();
         object.fastmatch_pattern_a_count = matcher->getpatternapointcount();
         object.fastmatch_pattern_b_count = matcher->getpatternbpointcount();
         object.fastmatch_candidate_count = matcher->getresultcandidatecount();
@@ -959,6 +935,7 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             " learnB=" + std::to_string(object.fastmatch_learn_b_count) +
             " learnA2=" + std::to_string(object.fastmatch_learn_a2_count) +
             " learnB2=" + std::to_string(object.fastmatch_learn_b2_count) +
+            " learn_status=" + std::to_string(object.fastmatch_learn_status_code) +
             " patternA=" + std::to_string(object.fastmatch_pattern_a_count) +
             " patternB=" + std::to_string(object.fastmatch_pattern_b_count) +
             " candidates=" + std::to_string(object.fastmatch_candidate_count) +

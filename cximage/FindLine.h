@@ -79,6 +79,42 @@ struct EdgeBandCandidate
     double width = 0.0;
     int edge_rank = -1;
     bool valid = false;
+    std::vector<double> profile;
+};
+
+struct FitCandidateSequence
+{
+    std::vector<cv::Point2d> points;
+    double score = 0.0;
+    int node_count = 0;
+    double avg_ncc = 0.0;
+    double total_response = 0.0;
+    bool valid = false;
+};
+
+struct FeatureGraphNode
+{
+    int id = -1;
+    EdgeBandCandidate candidate;
+    std::vector<int> neighbors;
+    bool visited = false;
+    int component_id = -1;
+};
+
+struct FeatureGraphEdge
+{
+    int node_a = -1;
+    int node_b = -1;
+    double ncc_score = 0.0;
+    double spatial_distance = 0.0;
+    bool valid = false;
+};
+
+struct FeatureGraph
+{
+    std::vector<FeatureGraphNode> nodes;
+    std::vector<FeatureGraphEdge> edges;
+    int next_component_id = 0;
 };
 
 struct ScanLineEdgeBands
@@ -357,6 +393,7 @@ public:
     const PointsShape& getresultpointsh() const;
     void Measure(Image& image);
     void MeasureBalanced(Image& image);
+    void MeasureRobust(Image& image);
     void PyrImage(Image& image);
 
     void SmartFilter(double dist,double filtnum);
@@ -510,6 +547,13 @@ private:
     bool MeasureSimpleRoiGradientPoints(Image& image,
                                         FindLineMeasureProfileStats& stats);
 
+    void BuildScanProfilesRobust(Image& image, FindLineMeasureProfileStats& stats);
+    void CollectEdgeBandsRobust(Image& image, FindLineMeasureProfileStats& stats);
+    void BuildFeatureGraph(FindLineMeasureProfileStats& stats);
+    void FindComponentsInGraph(FindLineMeasureProfileStats& stats);
+    void SelectBestSequence(FindLineMeasureProfileStats& stats);
+    void ConvertSequenceToMeasurePoints(FitCandidateSequence& seq);
+
     void MarkMeasureGeometryDirty();
 
     double ComputeMeasureHalfWidthForLine(double x0,
@@ -547,6 +591,9 @@ private:
     FindLineMeasureProfileStats m_lastMeasureProfile;
     FindLineMeasureInputDebug m_lastMeasureInputDebug;
     int m_measure_fallback_mode = 0;
+
+    std::vector<FitCandidateSequence> m_fit_candidate_sequences;
+    int m_best_sequence_index = -1;
 
     FindLineMeasureGeometryRequest m_measure_geometry_request;
 

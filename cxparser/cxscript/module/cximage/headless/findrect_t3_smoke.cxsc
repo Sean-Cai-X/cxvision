@@ -15,7 +15,7 @@ int threshold = global_threshold;
 int linegap = global_linegap;
 int method = global_method;
 
-m_rect.setrect(x0, y0, width, height);
+m_rect.setrect(height, width, y0, x0);
 m_rect.setthre(threshold);
 m_rect.setlinegap(linegap);
 m_rect.setmethod(method);

@@ -6,6 +6,6 @@ m_line.setlinegap(6);
 m_line.setline(100, 120, 500, 120, 20);
 
 m_circle.setlinegap(6);
-m_circle.setcircle(320, 320, 420, 320);
+m_circle.setcircle(320, 420, 320, 320);
 
 0;

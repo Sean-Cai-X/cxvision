@@ -14,8 +14,9 @@ class ICxShapeSink;
 typedef vector<int> Cluster;
 using namespace std;
 
-// FastMatch Learn Probe - enable for debugging, disable for release
-#define FASTMATCH_LEARN_PROBE
+// FastMatch Learn Probe is intentionally disabled in normal builds.
+// Headless/evidence runs must never show modal UI or block on debug probes.
+// #define FASTMATCH_LEARN_PROBE
 
 // fastmatch extends Findline with grid/model learning and match result helpers.
 class FastMatch :public FindLine
@@ -64,6 +65,7 @@ public:
     int getlearnbcount();
     int getlearna2count();
     int getlearnb2count();
+    int getlearnstatuscode() { return m_fastmatch_learn_status_code; }
     std::uintptr_t debuglastlearnargument() const noexcept
     {
         return reinterpret_cast<std::uintptr_t>(m_debug_last_learn_argument);
@@ -397,6 +399,7 @@ private:
     int m_fastmatch_learn_b_count = 0;
     int m_fastmatch_learn_a2_count = 0;
     int m_fastmatch_learn_b2_count = 0;
+    int m_fastmatch_learn_status_code = 0;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;

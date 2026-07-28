@@ -25,14 +25,17 @@ struct CxFastMatchRuntimeCapture
     int object_learn_b_count = 0;
     int object_learn_a2_count = 0;
     int object_learn_b2_count = 0;
+    int object_learn_status_code = 0;
 
     bool global_model_found = false;
     bool global_learn_a_found = false;
     bool global_learn_b_found = false;
+    bool global_learn_status_found = false;
 
     int global_model_point_count = 0;
     int global_learn_a_count = 0;
     int global_learn_b_count = 0;
+    int global_learn_status_code = 0;
 
     std::string object_aliases;
     std::string failure_stage;

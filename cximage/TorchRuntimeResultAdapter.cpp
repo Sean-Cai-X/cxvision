@@ -1,4 +1,7 @@
 #include "TorchRuntimeResultAdapter.h"
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
 #include <filesystem>
 #include <sstream>
 
@@ -11,6 +14,149 @@ bool IsSegmentationTask(const CxTorchTaskSpec& task)
            task.kind == CxTorchTaskKind::SegmentationContract ||
            task.task_id.find("segmentation") != std::string::npos ||
            task.task_id.find("deeplab") != std::string::npos;
+}
+
+bool IsDetectionTask(const CxTorchTaskSpec& task)
+{
+    return task.kind == CxTorchTaskKind::Detection ||
+           task.kind == CxTorchTaskKind::DetectionContract ||
+           task.task_id.find("detection") != std::string::npos ||
+           task.task_id.find("yolo") != std::string::npos;
+}
+
+bool ReadTorchAdapterTextFile(
+    const std::filesystem::path& path,
+    std::string& text)
+{
+    text.clear();
+    if (path.empty() || !std::filesystem::exists(path))
+        return false;
+
+    std::ifstream input(path);
+    if (!input)
+        return false;
+
+    text.assign(
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>());
+    return true;
+}
+
+bool ExtractTorchAdapterJsonNumber(
+    const std::string& json,
+    const std::string& key,
+    double& value)
+{
+    const std::string needle = "\"" + key + "\"";
+    const std::size_t key_pos = json.find(needle);
+    if (key_pos == std::string::npos)
+        return false;
+
+    const std::size_t colon_pos = json.find(':', key_pos + needle.size());
+    if (colon_pos == std::string::npos)
+        return false;
+
+    const char* cursor = json.c_str() + colon_pos + 1;
+    while (*cursor != '\0' && std::isspace(static_cast<unsigned char>(*cursor)))
+        ++cursor;
+
+    char* end = nullptr;
+    const double parsed = std::strtod(cursor, &end);
+    if (end == cursor)
+        return false;
+
+    value = parsed;
+    return true;
+}
+
+void AttachDetectionResults(
+    const TorchRuntimeGuiResult& source,
+    const CxTorchTaskSpec& task,
+    CxInferenceResult& target)
+{
+    if (!IsDetectionTask(task))
+        return;
+
+    std::filesystem::path detections_path;
+    if (!source.bbox_candidate_list_ref.empty())
+        detections_path = source.bbox_candidate_list_ref;
+
+    if (detections_path.empty() && !source.result_ref.empty())
+        detections_path = std::filesystem::path(source.result_ref).parent_path() / "detections.json";
+
+    std::string json;
+    if (!ReadTorchAdapterTextFile(detections_path, json))
+        return;
+
+    const std::size_t detections_key = json.find("\"detections\"");
+    if (detections_key == std::string::npos)
+        return;
+
+    const std::size_t array_begin = json.find('[', detections_key);
+    if (array_begin == std::string::npos)
+        return;
+
+    int depth = 0;
+    std::size_t array_end = std::string::npos;
+    for (std::size_t i = array_begin; i < json.size(); ++i)
+    {
+        if (json[i] == '[')
+            ++depth;
+        else if (json[i] == ']')
+        {
+            --depth;
+            if (depth == 0)
+            {
+                array_end = i;
+                break;
+            }
+        }
+    }
+
+    if (array_end == std::string::npos)
+        return;
+
+    std::size_t object_pos = json.find('{', array_begin);
+    while (object_pos != std::string::npos && object_pos < array_end)
+    {
+        const std::size_t object_end = json.find('}', object_pos);
+        if (object_end == std::string::npos || object_end > array_end)
+            break;
+
+        const std::string object_json = json.substr(object_pos, object_end - object_pos + 1);
+
+        double x1 = 0.0;
+        double y1 = 0.0;
+        double x2 = 0.0;
+        double y2 = 0.0;
+        double confidence = 0.0;
+        double class_id = -1.0;
+
+        const bool has_box =
+            ExtractTorchAdapterJsonNumber(object_json, "x1", x1) &&
+            ExtractTorchAdapterJsonNumber(object_json, "y1", y1) &&
+            ExtractTorchAdapterJsonNumber(object_json, "x2", x2) &&
+            ExtractTorchAdapterJsonNumber(object_json, "y2", y2);
+
+        if (has_box)
+        {
+            ExtractTorchAdapterJsonNumber(object_json, "confidence", confidence);
+            ExtractTorchAdapterJsonNumber(object_json, "class_id", class_id);
+
+            CxTorchDetection detection;
+            detection.x = x1;
+            detection.y = y1;
+            detection.width = x2 - x1;
+            detection.height = y2 - y1;
+            detection.confidence = confidence;
+            detection.class_id = static_cast<int>(class_id);
+
+            if (detection.width > 0.0 && detection.height > 0.0)
+                target.detections.push_back(detection);
+        }
+
+        object_pos = json.find('{', object_end + 1);
+    }
 }
 
 void AttachSegmentationMaskRefs(
@@ -89,6 +235,7 @@ bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
     target.roi_diff_candidate_ref = source.roi_diff_candidate_ref;
 
     AttachSegmentationMaskRefs(source, task, target);
+    AttachDetectionResults(source, task, target);
 
     if (!source.ok) {
         target.failure_stage = "torch_task_execute";
@@ -110,6 +257,18 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::AdaptToGuiReview(const CxInfere
 
     if (!result.primary_visual_ref.empty()) {
         review.image_refs.push_back({"primary_visual", result.primary_visual_ref, "Primary Visual"});
+    }
+    if (result.mask.has_value()) {
+        const CxTorchMask& mask = result.mask.value();
+        if (!mask.mask_ref.empty()) {
+            review.image_refs.push_back({"segmentation_mask", mask.mask_ref, "Segmentation Mask"});
+        }
+        if (!mask.overlay_ref.empty()) {
+            review.image_refs.push_back({"segmentation_overlay", mask.overlay_ref, "Segmentation Overlay"});
+        }
+        if (!mask.contour_ref.empty()) {
+            review.result_fields.push_back({"Mask Contours", mask.contour_ref, ""});
+        }
     }
     if (!result.bbox_candidate_list_ref.empty()) {
         review.image_refs.push_back({"bbox_candidates", result.bbox_candidate_list_ref, "BBox Candidates"});
@@ -149,6 +308,19 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::AdaptToGuiReview(const CxInfere
     }
     if (!result.evidence_ref.empty()) {
         review.result_fields.push_back({"Evidence Ref", result.evidence_ref, ""});
+    }
+    if (!result.detections.empty()) {
+        review.result_fields.push_back({"Detection Count", std::to_string(result.detections.size()), ""});
+    }
+    if (result.mask.has_value()) {
+        const CxTorchMask& mask = result.mask.value();
+        review.result_fields.push_back({"Mask Available", mask.available ? "true" : "false", ""});
+        if (!mask.mask_ref.empty()) {
+            review.result_fields.push_back({"Mask Ref", mask.mask_ref, ""});
+        }
+        if (!mask.overlay_ref.empty()) {
+            review.result_fields.push_back({"Mask Overlay Ref", mask.overlay_ref, ""});
+        }
     }
 
     if (!result.reason.empty()) {

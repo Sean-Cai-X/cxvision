@@ -317,6 +317,7 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
            << " | learnB=" << object.fastmatch_learn_b_count
            << " | learnA2=" << object.fastmatch_learn_a2_count
            << " | learnB2=" << object.fastmatch_learn_b2_count
+           << " | learn_status=" << object.fastmatch_learn_status_code
            << " | patternA=" << object.fastmatch_pattern_a_count
            << " | patternB=" << object.fastmatch_pattern_b_count
            << " | candidates=" << object.fastmatch_candidate_count
@@ -429,6 +430,7 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
            << " | learnB=" << object.fastmatch_learn_b_count
            << " | learnA2=" << object.fastmatch_learn_a2_count
            << " | learnB2=" << object.fastmatch_learn_b2_count
+           << " | learn_status=" << object.fastmatch_learn_status_code
            << " | patternA=" << object.fastmatch_pattern_a_count
            << " | patternB=" << object.fastmatch_pattern_b_count
            << " | candidate_boxes=" << object.fastmatch_candidate_count

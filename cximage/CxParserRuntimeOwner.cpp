@@ -8,10 +8,13 @@
 #include "CxScriptCatalogRegister.h"
 #include "CxParameterProfileRuntime.h"
 #include "CxParameterProfileRegister.h"
+#include "CxParamRegressionRuntime.h"
+#include "CxParamRegressionRegister.h"
 #include "ParserClass.h"
 #include <cctype>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 
 namespace
 {
@@ -76,6 +79,23 @@ std::string PrepareNumericLocals(
         prepared << line << '\n';
     }
     return prepared.str();
+}
+
+std::string RemoveCommentOnlyLines(const std::string& source)
+{
+    std::istringstream input(source);
+    std::ostringstream out;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        const std::size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos)
+            continue;
+        if (line.compare(first, 2, "//") == 0)
+            continue;
+        out << line << '\n';
+    }
+    return out.str();
 }
 }
 
@@ -217,6 +237,13 @@ bool CxParserRuntimeOwner::EnsureBindings(
             {
                 RegisterCxParameterProfileBindings(m_runtime->m_parser);
                 m_parameter_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::ParamRegression:
+            if (!m_param_regression_bindings_registered)
+            {
+                RegisterCxParamRegressionBindings(m_runtime->m_parser);
+                m_param_regression_bindings_registered = true;
             }
             break;
         }
@@ -729,6 +756,49 @@ bool CxParserRuntimeOwner::ParseParameterProfile(
     if (snapshot.profiles.empty())
     {
         reason = "parameter profile document produced no profiles";
+        return false;
+    }
+    return true;
+}
+
+bool CxParserRuntimeOwner::ParseParamRegression(
+    const std::string& path,
+    CxParamRegressionRuntime& snapshot,
+    std::string& reason)
+{
+    snapshot = {};
+    std::string source;
+    if (!ReadScript(path, source, reason) ||
+        !BeginExecution(CxParserDocumentKind::ParamRegression, path, reason))
+        return false;
+
+    CxParserExecutionGuard guard(*this);
+    g_cxscript_param_regression.Clear();
+    g_current_param_candidate = nullptr;
+    g_current_param_range = nullptr;
+
+    try
+    {
+        const std::string preparedSource = RemoveCommentOnlyLines(source);
+        if (!m_runtime->Compile(preparedSource.c_str()))
+        {
+            reason = "param regression Compile failed";
+            return false;
+        }
+        snapshot = g_cxscript_param_regression;
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "param regression parse error: " + std::string(error.GetMsg());
+        return false;
+    }
+
+    g_cxscript_param_regression.Clear();
+    g_current_param_candidate = nullptr;
+    g_current_param_range = nullptr;
+    if (snapshot.task.task_id.empty() && snapshot.candidates.empty() && snapshot.range_set.ranges.empty())
+    {
+        reason = "param regression document produced no task, ranges or candidates";
         return false;
     }
     return true;

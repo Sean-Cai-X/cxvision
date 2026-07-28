@@ -3,6 +3,7 @@
 #include "FindLine.h"
 #include "FindCircle.h"
 #include "FindEllipse.h"
+#include "FindObject.h"
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
@@ -12,7 +13,82 @@
 #include "ImageAnnotationLayer.h"
 #include "shapebase.h"
 
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #include <unordered_set>
+
+namespace
+{
+bool ReadTextFileForRuntimeCapture(
+    const std::string& path,
+    std::string& text)
+{
+    text.clear();
+    if (path.empty())
+        return false;
+
+    std::ifstream input(path);
+    if (!input)
+        return false;
+
+    text.assign(
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>());
+    return true;
+}
+
+bool ExtractJsonNumberForRuntimeCapture(
+    const std::string& json,
+    const std::string& key,
+    double& value)
+{
+    const std::string needle = "\"" + key + "\"";
+    const std::size_t key_pos = json.find(needle);
+    if (key_pos == std::string::npos)
+        return false;
+
+    const std::size_t colon_pos = json.find(':', key_pos + needle.size());
+    if (colon_pos == std::string::npos)
+        return false;
+
+    const char* begin = json.c_str() + colon_pos + 1;
+    while (*begin != '\0' && std::isspace(static_cast<unsigned char>(*begin)))
+        ++begin;
+
+    char* end = nullptr;
+    const double parsed = std::strtod(begin, &end);
+    if (end == begin)
+        return false;
+
+    value = parsed;
+    return true;
+}
+
+void BackfillTorchSegmentationMetricsFromArtifacts(
+    const std::string& contour_ref,
+    CxScriptToolResultCapture& output)
+{
+    std::string contour_json;
+    if (!ReadTextFileForRuntimeCapture(contour_ref, contour_json))
+        return;
+
+    double contour_count = 0.0;
+    if (ExtractJsonNumberForRuntimeCapture(contour_json, "contour_count", contour_count) &&
+        contour_count >= 0.0)
+    {
+        output.segmentation_contour_count = static_cast<int>(contour_count);
+    }
+
+    double primary_area = 0.0;
+    if (ExtractJsonNumberForRuntimeCapture(contour_json, "area", primary_area) &&
+        primary_area > 0.0)
+    {
+        output.segmentation_primary_area = primary_area;
+    }
+}
+}
 
 void CopyShapeElementsToSnapshots(
     const ImageAnnotationLayer& layer,
@@ -272,6 +348,62 @@ bool CaptureFindRectResult(
     return true;
 }
 
+bool CaptureFindObjectResult(
+    FindObject& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output)
+{
+    output.type = "FindObject";
+    output.name = object_name;
+    output.owner_ref = object_name;
+
+    output.result_rect_count = tool.getresultobjsnum();
+    output.has_result_rect = output.result_rect_count > 0;
+    output.valid_points_count = output.result_rect_count;
+    output.failure_stage = output.has_result_rect ? std::string() : "result_rect";
+    if (!output.has_result_rect)
+        output.reason = "FindObject result unavailable";
+
+    if (output.result_rect_count > 0)
+    {
+        gp_Rectangle first_rect = tool.getresultrects().getrect(0);
+        output.top1_rect_x = static_cast<int>(first_rect.TopLeft().X());
+        output.top1_rect_y = static_cast<int>(first_rect.TopLeft().Y());
+        output.top1_rect_w = static_cast<int>(first_rect.Width());
+        output.top1_rect_h = static_cast<int>(first_rect.Height());
+    }
+
+    for (int i = 0; i < output.result_rect_count; ++i)
+    {
+        CxShapeElementSnapshot shape;
+        shape.stable_ref = object_name + ".result_rect." + std::to_string(i);
+        shape.owner_type = "FindObject";
+        shape.owner_ref = object_name;
+        shape.semantic_role = "result";
+        shape.shape_kind = "rect";
+        shape.editable = false;
+        shape.result_element = true;
+
+        gp_Rectangle rect = tool.getresultrects().getrect(i);
+        const int x = static_cast<int>(rect.TopLeft().X());
+        const int y = static_cast<int>(rect.TopLeft().Y());
+        const int w = static_cast<int>(rect.Width());
+        const int h = static_cast<int>(rect.Height());
+        shape.center_x = x + w * 0.5;
+        shape.center_y = y + h * 0.5;
+        shape.points = {
+            static_cast<double>(x), static_cast<double>(y),
+            static_cast<double>(x + w), static_cast<double>(y),
+            static_cast<double>(x + w), static_cast<double>(y + h),
+            static_cast<double>(x), static_cast<double>(y + h)
+        };
+        shape.closed = true;
+        output.shapes.push_back(shape);
+    }
+
+    return true;
+}
+
 bool CaptureFastMatchResult(
     FastMatch& tool,
     const std::string& object_name,
@@ -281,6 +413,11 @@ bool CaptureFastMatchResult(
     output.name = object_name;
     output.owner_ref = object_name;
 
+    output.fastmatch_learn_a_count = tool.getlearnacount();
+    output.fastmatch_learn_b_count = tool.getlearnbcount();
+    output.fastmatch_learn_a2_count = tool.getlearna2count();
+    output.fastmatch_learn_b2_count = tool.getlearnb2count();
+    output.fastmatch_learn_status_code = tool.getlearnstatuscode();
     output.model_point_count = tool.getmodelpointcount();
     output.fastmatch_model_width = tool.getmodelwidth();
     output.fastmatch_model_height = tool.getmodelheight();
@@ -316,13 +453,29 @@ bool CaptureFastMatchResult(
     output.fastmatch_candidate_replace_count = tool.getresultcandidatereplacecount();
     output.fastmatch_candidate_reject_count = tool.getresultcandidaterejectcount();
 
-    if (output.model_point_count <= 0)
+    const int learn_point_count =
+        output.fastmatch_learn_a_count +
+        output.fastmatch_learn_b_count +
+        output.fastmatch_learn_a2_count +
+        output.fastmatch_learn_b2_count;
+
+    if (learn_point_count <= 0)
+        output.failure_stage = "learn_points";
+    else if (output.model_point_count <= 0)
         output.failure_stage = "model_points";
     else if (output.candidate_count <= 0)
         output.failure_stage = "match_candidates";
 
     if (!output.failure_stage.empty())
-        output.reason = "FastMatch result unavailable";
+        output.reason =
+            "FastMatch result unavailable: learn_points=" +
+            std::to_string(learn_point_count) +
+            ", learn_status_code=" +
+            std::to_string(output.fastmatch_learn_status_code) +
+            ", model_points=" +
+            std::to_string(output.model_point_count) +
+            ", candidates=" +
+            std::to_string(output.candidate_count);
 
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
@@ -408,6 +561,19 @@ static void MergeToolCapture(
     capture.ellipse_scan_geometry_policy = tool.ellipse_scan_geometry_policy;
 
     capture.result_rect_count += tool.result_rect_count;
+    if (tool.has_result_rect && capture.top1_rect_w == 0 && capture.top1_rect_h == 0)
+    {
+        capture.top1_rect_x = tool.top1_rect_x;
+        capture.top1_rect_y = tool.top1_rect_y;
+        capture.top1_rect_w = tool.top1_rect_w;
+        capture.top1_rect_h = tool.top1_rect_h;
+    }
+    capture.fastmatch_learn_a_count += tool.fastmatch_learn_a_count;
+    capture.fastmatch_learn_b_count += tool.fastmatch_learn_b_count;
+    capture.fastmatch_learn_a2_count += tool.fastmatch_learn_a2_count;
+    capture.fastmatch_learn_b2_count += tool.fastmatch_learn_b2_count;
+    if (tool.fastmatch_learn_status_code != 0)
+        capture.fastmatch_learn_status_code = tool.fastmatch_learn_status_code;
     capture.model_point_count += tool.model_point_count;
     if (tool.fastmatch_model_width > 0)
         capture.fastmatch_model_width = tool.fastmatch_model_width;
@@ -692,6 +858,42 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
+    const int findobject_count = runtime.GetClassObjSum("FindObject");
+
+    for (int i = 0; i < findobject_count; ++i)
+    {
+        FindObject* tool = static_cast<FindObject*>(
+            runtime.GetClassObj("FindObject", i));
+
+        if (tool == nullptr)
+            continue;
+        if (!captured_objects.insert(tool).second)
+            continue;
+
+        supported_object_found = true;
+
+        CxScriptToolResultCapture tool_capture;
+
+        const std::string object_name =
+            runtime.GetClassObjName("FindObject", i);
+
+        try
+        {
+            if (!CaptureFindObjectResult(*tool, object_name, tool_capture))
+            {
+                reason = "failed to capture FindObject: " + object_name;
+                return false;
+            }
+        }
+        catch (...)
+        {
+            reason = "CaptureFindObjectResult crashed for: " + object_name;
+            return false;
+        }
+
+        MergeToolCapture(tool_capture, capture);
+    }
+
     const int fastmatch_count = runtime.GetClassObjSum("FastMatch");
 
     for (int i = 0; i < fastmatch_count; ++i)
@@ -802,7 +1004,7 @@ bool CaptureRuntimeToolResults(
 
     if (!supported_object_found)
     {
-        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindRect, FindSegmentation, Match, fastmatch or TorchTask";
+        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindObject, FindRect, FindSegmentation, Match, fastmatch or TorchTask";
         return false;
     }
 
@@ -830,14 +1032,23 @@ bool CaptureTorchTaskResult(
     output.segmentation_result_ref = tool.getresultref();
     output.segmentation_mask_ref = tool.getmaskref();
     output.segmentation_overlay_ref = tool.getoverlayref();
+    output.segmentation_status_code = tool.getok() != 0 ? 1 : 0;
     const CxInferenceResult& inference_result = tool.GetInferenceResult();
     if (inference_result.mask.has_value())
     {
         output.segmentation_contour_ref = inference_result.mask->contour_ref;
     }
+    BackfillTorchSegmentationMetricsFromArtifacts(
+        output.segmentation_contour_ref,
+        output);
 
     output.algorithm_executed = tool.getok() != 0;
     output.measure_completed = tool.getok() != 0;
+    output.valid_points_count = output.segmentation_contour_count;
+    output.has_result_rect = output.segmentation_contour_count > 0;
+    output.result_rect_count = output.segmentation_contour_count;
+    if (output.segmentation_primary_area > 0.0)
+        output.avgdist = output.segmentation_primary_area;
 
     if (tool.getok() == 0)
     {

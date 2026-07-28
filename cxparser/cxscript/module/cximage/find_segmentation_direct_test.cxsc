@@ -10,7 +10,7 @@ int y1 = global_roi_y1;
 double threshold = 0.5;
 
 m_seg.setthreshold(threshold);
-m_seg.setpromptrect(x0, y0, x1, y1);
+m_seg.setpromptrect(y1, x1, y0, x0);
 m_seg.setmode(2);
 
 m_seg.segment(&m_image);

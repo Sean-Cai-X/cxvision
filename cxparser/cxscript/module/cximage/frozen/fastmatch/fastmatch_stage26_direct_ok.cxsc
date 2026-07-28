@@ -22,7 +22,7 @@ int objfilter = global_objfilter;
 double min_score = global_min_score;
 int find_num = global_find_num;
 
-m_match.setrect(learn_x, learn_y, learn_w, learn_h);
+m_match.setrect(learn_h, learn_w, learn_y, learn_x);
 m_match.setobjfilter(objfilter);
 m_match.setwhgap(wgap, hgap);
 m_match.setthre(threshold);
@@ -33,7 +33,7 @@ m_match.modelzero();
 m_match.pattern2org();
 m_match.samplemodel(100);
 
-m_match.setmatchrect(search_x, search_y, search_w, search_h);
+m_match.setmatchrect(search_h, search_w, search_y, search_x);
 m_match.matchstepgap(10, 10);
 m_match.setmatchthre(10);
 m_match.setminscore(min_score);
@@ -44,6 +44,7 @@ global_learn_a_count = m_match.getlearnacount();
 global_learn_b_count = m_match.getlearnbcount();
 global_learn_a2_count = m_match.getlearna2count();
 global_learn_b2_count = m_match.getlearnb2count();
+global_learn_status_code = m_match.getlearnstatuscode();
 global_match_count = m_match.getresultcandidatecount();
 global_best_score = m_match.getresultbestscore();
 global_model_point_count = m_match.getmodelpointcount();

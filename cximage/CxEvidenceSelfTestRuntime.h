@@ -105,6 +105,7 @@ struct CxEvidenceSelfTestResult
     int fastmatch_learn_b_count = 0;
     int fastmatch_learn_a2_count = 0;
     int fastmatch_learn_b2_count = 0;
+    int fastmatch_learn_status_code = 0;
     int fastmatch_pattern_a_count = 0;
     int fastmatch_pattern_b_count = 0;
     int fastmatch_candidate_count = 0;

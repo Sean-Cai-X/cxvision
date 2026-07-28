@@ -25,7 +25,7 @@ outer_circle.Setgap(gap);
 outer_circle.setlinegap(linegap);
 outer_circle.setthre(threshold);
 outer_circle.setmethod(method);
-outer_circle.setcircle(cx, cy, outer_px, outer_py);
+outer_circle.setcircle(outer_py, outer_px, cy, cx);
 outer_circle.measure(&m_image);
 outer_circle.fitcircle();
 
@@ -33,7 +33,7 @@ inner_circle.Setgap(gap);
 inner_circle.setlinegap(linegap);
 inner_circle.setthre(threshold);
 inner_circle.setmethod(method);
-inner_circle.setcircle(cx, cy, inner_px, inner_py);
+inner_circle.setcircle(inner_py, inner_px, cy, cx);
 inner_circle.measure(&m_image);
 inner_circle.fitcircle();
 

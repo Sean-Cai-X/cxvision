@@ -12,7 +12,7 @@ int linegap = global_linegap;
 int threshold = global_threshold;
 int method = global_method;
 
-m_circle.setcircle(cx, cy, px, py);
+m_circle.setcircle(py, px, cy, cx);
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
 m_circle.setthre(threshold);

@@ -15,7 +15,7 @@ int gap = 5;
 int linegap = 3;
 int fitMeasureGap = 80;
 
-m_circle.setcircle(cx, cy, inner, radius);
+m_circle.setcircle(radius, inner, cy, cx);
 m_circle.setcirclegap(circleGap);
 m_circle.setmethod(method);
 m_circle.Setgap(gap);

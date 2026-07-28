@@ -2486,3 +2486,496 @@ const std::string& FindCircle::getfailurestage() const
 {
     return m_lastMeasureGeometryDebug.failure_stage;
 }
+
+void FindCircle::ClearMeasureState()
+{
+    m_measurepoints.clear();
+    m_circle_fit_candidate_sequences.clear();
+    m_circle_best_sequence_index = -1;
+    m_circle_edge_band_candidates.clear();
+    m_circle_feature_graph = CircleFeatureGraph();
+}
+
+namespace {
+
+double CircleDotProduct(const std::vector<double>& a, const std::vector<double>& b)
+{
+    if (a.size() != b.size()) return 0.0;
+    double sum = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i) sum += a[i] * b[i];
+    return sum;
+}
+
+double CircleMean(const std::vector<double>& v)
+{
+    if (v.empty()) return 0.0;
+    double sum = 0.0;
+    for (double x : v) sum += x;
+    return sum / static_cast<double>(v.size());
+}
+
+double CircleCalculateNCC(const std::vector<double>& a, const std::vector<double>& b)
+{
+    if (a.empty() || b.empty()) return 0.0;
+    std::size_t n = std::min(a.size(), b.size());
+    if (n < 2) return 0.0;
+
+    std::vector<double> a_aligned(a.begin(), a.begin() + n);
+    std::vector<double> b_aligned(b.begin(), b.begin() + n);
+
+    double mean_a = CircleMean(a_aligned);
+    double mean_b = CircleMean(b_aligned);
+
+    std::vector<double> a_centered(n), b_centered(n);
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        a_centered[i] = a_aligned[i] - mean_a;
+        b_centered[i] = b_aligned[i] - mean_b;
+    }
+
+    double numerator = CircleDotProduct(a_centered, b_centered);
+    double denom_a = std::sqrt(CircleDotProduct(a_centered, a_centered));
+    double denom_b = std::sqrt(CircleDotProduct(b_centered, b_centered));
+
+    if (denom_a < 1e-8 || denom_b < 1e-8) return 0.0;
+    double ncc = numerator / (denom_a * denom_b);
+    return std::max(-1.0, std::min(1.0, ncc));
+}
+
+std::vector<double> ExtractCircleProfileAt(const cv::Mat& gray,
+                                            int cx, int cy, int radius,
+                                            int half_width,
+                                            double angle_deg)
+{
+    std::vector<double> profile;
+    double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+    double tangent_x = -std::sin(angle_rad);
+    double tangent_y = std::cos(angle_rad);
+
+    int w = gray.cols;
+    int h = gray.rows;
+
+    for (int offset = -half_width; offset <= half_width; ++offset)
+    {
+        double px = cx + radius * std::cos(angle_rad) + tangent_x * offset;
+        double py = cy + radius * std::sin(angle_rad) + tangent_y * offset;
+
+        int ix = static_cast<int>(std::lround(px));
+        int iy = static_cast<int>(std::lround(py));
+
+        if (ix >= 0 && ix < w && iy >= 0 && iy < h)
+        {
+            profile.push_back(static_cast<double>(gray.at<uchar>(iy, ix)));
+        }
+        else
+        {
+            profile.push_back(0.0);
+        }
+    }
+    return profile;
+}
+
+} // anonymous namespace
+
+void FindCircle::MeasureRobust(Image& image)
+{
+    ClearMeasureState();
+    m_circle_fit_candidate_sequences.clear();
+    m_circle_best_sequence_index = -1;
+    m_circle_edge_band_candidates.clear();
+    m_circle_feature_graph = CircleFeatureGraph();
+
+    if (!EnsureCircleMeasureGeometryReady())
+    {
+        LogFindCircleMeasureProbe("robust_measure", "skipped", "geometry not ready");
+        return;
+    }
+
+    CollectCircleEdgeBandsRobust(image);
+
+    if (m_circle_edge_band_candidates.empty())
+    {
+        LogFindCircleMeasureProbe("robust_measure", "no_candidates", "no edge bands found");
+        return;
+    }
+
+    BuildCircleFeatureGraph();
+
+    if (m_circle_feature_graph.nodes.empty())
+    {
+        LogFindCircleMeasureProbe("robust_measure", "no_graph", "feature graph empty");
+        return;
+    }
+
+    FindCircleComponentsInGraph();
+
+    SelectBestCircleSequence();
+
+    if (m_circle_best_sequence_index < 0 ||
+        m_circle_best_sequence_index >= static_cast<int>(m_circle_fit_candidate_sequences.size()))
+    {
+        LogFindCircleMeasureProbe("robust_measure", "no_sequence", "no valid sequence selected");
+        return;
+    }
+
+    ConvertCircleSequenceToMeasurePoints(m_circle_best_sequence_index);
+
+    LogFindCircleMeasureProbe("robust_measure", "success",
+        "robust measurement completed with " +
+        std::to_string(m_circle_fit_candidate_sequences[m_circle_best_sequence_index].node_count) +
+        " points");
+}
+
+void FindCircle::CollectCircleEdgeBandsRobust(Image& image)
+{
+    m_circle_edge_band_candidates.clear();
+
+    if (g_pbackimage == nullptr || g_pbackimage->mat().empty())
+    {
+        g_pbackfindobject->Measure(*g_pbackimage);
+        if (!g_pbackfindobject->hasresult())
+        {
+            return;
+        }
+    }
+
+    cv::Mat gray;
+    if (image.channels() == 1)
+        gray = image.mat().clone();
+    else if (image.channels() == 3)
+        cv::cvtColor(image.mat(), gray, cv::COLOR_BGR2GRAY);
+    else
+        gray = image.mat();
+
+    cv::Mat binary = g_pbackimage->mat();
+
+    int w = binary.cols;
+    int h = binary.rows;
+    int cx = m_icentx;
+    int cy = m_icenty;
+
+    if (w <= 0 || h <= 0)
+        return;
+
+    int half_width = m_igap;
+    if (half_width < 1) half_width = 3;
+
+    for (int line_idx = 0; line_idx < static_cast<int>(m_lines.size()); ++line_idx)
+    {
+        const auto& line = m_lines[line_idx];
+        int candidate_index = 0;
+
+        bool in_foreground = false;
+        int seg_start = -1;
+        int seg_end = -1;
+
+        for (int pt_idx = 0; pt_idx < static_cast<int>(line.size()); ++pt_idx)
+        {
+            const auto& pt = line[pt_idx];
+            int ix = static_cast<int>(std::lround(pt.X()));
+            int iy = static_cast<int>(std::lround(pt.Y()));
+
+            if (ix < 0 || ix >= w || iy < 0 || iy >= h)
+                continue;
+
+            bool is_foreground = binary.at<uchar>(iy, ix) > 0;
+
+            if (is_foreground && !in_foreground)
+            {
+                in_foreground = true;
+                seg_start = pt_idx;
+            }
+            else if (!is_foreground && in_foreground)
+            {
+                in_foreground = false;
+                seg_end = pt_idx;
+
+                int seg_len = seg_end - seg_start;
+                if (seg_len >= 2)
+                {
+                    int seg_center = (seg_start + seg_end) / 2;
+                    const auto& center_pt = line[seg_center];
+
+                    CircleEdgeBandCandidate candidate;
+                    candidate.scan_index = line_idx;
+                    candidate.candidate_index = candidate_index++;
+                    candidate.start_angle = seg_start;
+                    candidate.end_angle = seg_end;
+                    candidate.center_angle = seg_center;
+                    candidate.x = center_pt.X();
+                    candidate.y = center_pt.Y();
+                    candidate.arc_length = static_cast<double>(seg_len);
+                    candidate.response_strength = static_cast<double>(seg_len);
+                    candidate.polarity = 1.0;
+                    candidate.edge_rank = seg_len >= 5 ? 0 : (seg_len >= 3 ? 1 : 2);
+                    candidate.valid = true;
+
+                    double dx = candidate.x - cx;
+                    double dy = candidate.y - cy;
+                    double dist = std::sqrt(dx * dx + dy * dy);
+                    double angle_deg = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
+
+                    candidate.profile = ExtractCircleProfileAt(
+                        gray, cx, cy,
+                        static_cast<int>(std::lround(dist)),
+                        half_width, angle_deg);
+
+                    if (candidate.profile.size() >= 5)
+                    {
+                        m_circle_edge_band_candidates.push_back(candidate);
+                    }
+                }
+            }
+        }
+
+        if (in_foreground)
+        {
+            seg_end = static_cast<int>(line.size());
+            int seg_len = seg_end - seg_start;
+            if (seg_len >= 2)
+            {
+                int seg_center = (seg_start + seg_end) / 2;
+                const auto& center_pt = line[seg_center];
+
+                CircleEdgeBandCandidate candidate;
+                candidate.scan_index = line_idx;
+                candidate.candidate_index = candidate_index++;
+                candidate.start_angle = seg_start;
+                candidate.end_angle = seg_end;
+                candidate.center_angle = seg_center;
+                candidate.x = center_pt.X();
+                candidate.y = center_pt.Y();
+                candidate.arc_length = static_cast<double>(seg_len);
+                candidate.response_strength = static_cast<double>(seg_len);
+                candidate.polarity = 1.0;
+                candidate.edge_rank = 0;
+                candidate.valid = true;
+
+                double dx = candidate.x - cx;
+                double dy = candidate.y - cy;
+                double dist = std::sqrt(dx * dx + dy * dy);
+                double angle_deg = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
+
+                candidate.profile = ExtractCircleProfileAt(
+                    gray, cx, cy,
+                    static_cast<int>(std::lround(dist)),
+                    half_width, angle_deg);
+
+                if (candidate.profile.size() >= 5)
+                {
+                    m_circle_edge_band_candidates.push_back(candidate);
+                }
+            }
+        }
+    }
+}
+
+void FindCircle::BuildCircleFeatureGraph()
+{
+    m_circle_feature_graph = CircleFeatureGraph();
+
+    for (std::size_t i = 0; i < m_circle_edge_band_candidates.size(); ++i)
+    {
+        CircleFeatureNode node;
+        node.id = static_cast<int>(i);
+        node.candidate = m_circle_edge_band_candidates[i];
+        m_circle_feature_graph.nodes.push_back(node);
+    }
+
+    if (m_circle_feature_graph.nodes.size() < 2)
+        return;
+
+    double T_space = 15.0;
+    double T_width = 10.0;
+    double T_ncc = 0.75;
+
+    for (std::size_t i = 0; i < m_circle_feature_graph.nodes.size(); ++i)
+    {
+        for (std::size_t j = i + 1; j < m_circle_feature_graph.nodes.size(); ++j)
+        {
+            const auto& node_a = m_circle_feature_graph.nodes[i];
+            const auto& node_b = m_circle_feature_graph.nodes[j];
+
+            int scan_diff = std::abs(node_a.candidate.scan_index - node_b.candidate.scan_index);
+            if (scan_diff != 1)
+                continue;
+
+            double dx = node_a.candidate.x - node_b.candidate.x;
+            double dy = node_a.candidate.y - node_b.candidate.y;
+            double spatial_dist = std::sqrt(dx * dx + dy * dy);
+
+            if (spatial_dist > T_space)
+                continue;
+
+            double width_diff = std::abs(node_a.candidate.arc_length - node_b.candidate.arc_length);
+            if (width_diff > T_width)
+                continue;
+
+            if (node_a.candidate.polarity != node_b.candidate.polarity)
+                continue;
+
+            double ncc = CircleCalculateNCC(node_a.candidate.profile, node_b.candidate.profile);
+            if (ncc <= T_ncc)
+                continue;
+
+            CircleFeatureEdge edge;
+            edge.node_a = static_cast<int>(i);
+            edge.node_b = static_cast<int>(j);
+            edge.ncc_score = ncc;
+            edge.angular_distance = spatial_dist;
+            edge.valid = true;
+
+            m_circle_feature_graph.edges.push_back(edge);
+            m_circle_feature_graph.nodes[i].neighbors.push_back(static_cast<int>(j));
+            m_circle_feature_graph.nodes[j].neighbors.push_back(static_cast<int>(i));
+        }
+    }
+}
+
+void FindCircle::FindCircleComponentsInGraph()
+{
+    m_circle_feature_graph.next_component_id = 0;
+
+    for (auto& node : m_circle_feature_graph.nodes)
+    {
+        node.visited = false;
+        node.component_id = -1;
+    }
+
+    for (std::size_t i = 0; i < m_circle_feature_graph.nodes.size(); ++i)
+    {
+        if (m_circle_feature_graph.nodes[i].visited)
+            continue;
+
+        int component_id = m_circle_feature_graph.next_component_id++;
+        std::vector<int> stack;
+        stack.push_back(static_cast<int>(i));
+
+        while (!stack.empty())
+        {
+            int current = stack.back();
+            stack.pop_back();
+
+            if (m_circle_feature_graph.nodes[current].visited)
+                continue;
+
+            m_circle_feature_graph.nodes[current].visited = true;
+            m_circle_feature_graph.nodes[current].component_id = component_id;
+
+            for (int neighbor : m_circle_feature_graph.nodes[current].neighbors)
+            {
+                if (!m_circle_feature_graph.nodes[neighbor].visited)
+                {
+                    stack.push_back(neighbor);
+                }
+            }
+        }
+    }
+}
+
+void FindCircle::SelectBestCircleSequence()
+{
+    m_circle_fit_candidate_sequences.clear();
+
+    if (m_circle_feature_graph.nodes.empty())
+        return;
+
+    int max_component_id = m_circle_feature_graph.next_component_id;
+    if (max_component_id <= 0)
+        return;
+
+    std::vector<std::vector<int>> component_nodes(max_component_id);
+
+    for (const auto& node : m_circle_feature_graph.nodes)
+    {
+        if (node.component_id >= 0 && node.component_id < max_component_id)
+        {
+            component_nodes[node.component_id].push_back(node.id);
+        }
+    }
+
+    for (const auto& node_ids : component_nodes)
+    {
+        if (node_ids.size() < 2)
+            continue;
+
+        CircleFitCandidateSequence seq;
+
+        std::vector<const CircleFeatureNode*> sorted_nodes;
+        for (int id : node_ids)
+        {
+            sorted_nodes.push_back(&m_circle_feature_graph.nodes[id]);
+        }
+
+        std::sort(sorted_nodes.begin(), sorted_nodes.end(),
+            [](const CircleFeatureNode* a, const CircleFeatureNode* b)
+            {
+                return a->candidate.scan_index < b->candidate.scan_index;
+            });
+
+        double total_ncc = 0.0;
+        double total_response = 0.0;
+
+        for (const auto* node : sorted_nodes)
+        {
+            cv::Point2d pt(node->candidate.x, node->candidate.y);
+            seq.points.push_back(pt);
+            total_response += node->candidate.response_strength;
+        }
+
+        int edge_count = 0;
+        for (const auto& edge : m_circle_feature_graph.edges)
+        {
+            if (edge.valid &&
+                std::find(node_ids.begin(), node_ids.end(), edge.node_a) != node_ids.end() &&
+                std::find(node_ids.begin(), node_ids.end(), edge.node_b) != node_ids.end())
+            {
+                total_ncc += edge.ncc_score;
+                edge_count++;
+            }
+        }
+
+        seq.node_count = static_cast<int>(sorted_nodes.size());
+        seq.avg_ncc = edge_count > 0 ? total_ncc / edge_count : 0.0;
+        seq.total_response = total_response;
+        seq.score = seq.node_count * 100.0 + seq.avg_ncc * 50.0 + total_response;
+        seq.valid = true;
+
+        m_circle_fit_candidate_sequences.push_back(seq);
+    }
+
+    std::sort(m_circle_fit_candidate_sequences.begin(), m_circle_fit_candidate_sequences.end(),
+        [](const CircleFitCandidateSequence& a, const CircleFitCandidateSequence& b)
+        {
+            return a.score > b.score;
+        });
+
+    if (m_circle_fit_candidate_sequences.size() > 5)
+    {
+        m_circle_fit_candidate_sequences.resize(5);
+    }
+
+    if (!m_circle_fit_candidate_sequences.empty())
+    {
+        m_circle_best_sequence_index = 0;
+    }
+    else
+    {
+        m_circle_best_sequence_index = -1;
+    }
+}
+
+void FindCircle::ConvertCircleSequenceToMeasurePoints(int sequence_index)
+{
+    if (sequence_index < 0 ||
+        sequence_index >= static_cast<int>(m_circle_fit_candidate_sequences.size()))
+        return;
+
+    const auto& seq = m_circle_fit_candidate_sequences[sequence_index];
+    m_measurepoints.clear();
+
+    for (const auto& pt : seq.points)
+    {
+        m_measurepoints.addpoint(gp_Pnt(pt.x, pt.y, 0.0));
+    }
+}

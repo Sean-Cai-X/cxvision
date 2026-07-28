@@ -50,10 +50,22 @@ public:
     void drawshapex(double dmovx,double dmovy,
         double dangle,double dzoomx,double dzoomy);
     void Measure(Image& image);
+    void MeasureFast(Image& image);
+    void MeasureConnectedComponents(Image& image);
+    void MeasurePeakLocalBFS(Image& image);
     void MeasureGrid(Grid* grid);
     void MeasureX(Image& image);
+    void MeasureXFast(Image& image);
+    void MeasureXConnectedComponents(Image& image);
+    void MeasureXPeakLocalBFS(Image& image);
     void measure(void* pimage);
+    void measurefast(void* pimage);
+    void measurecc(void* pimage);
+    void measurexbfs(void* pimage);
     void measurex(void* pimage);
+    void measurexfast(void* pimage);
+    void measurexcc(void* pimage);
+    void measurexpeakbfs(void* pimage);
 
     void edgeimage(void* pimage);
     void setedgeoi(int iw, int ioffset, int iheadtail);
@@ -74,6 +86,12 @@ public:
     int getresulth(int inum);
     int getresultsize(int inum);
     int getresultobjsnum();
+    int getdebugcomponentcount();
+    int getdebugacceptedcount();
+    int getdebugrejectedcount();
+    int getdebugmaxcomponentarea();
+    int getdebugmaxcomponentw();
+    int getdebugmaxcomponenth();
     void setsearchtype(int itype);
     void setoffset(int ix0, int ix1, int iy0, int iy1);
     RectsShape& getresultrects() { return m_rectresults; }
@@ -169,6 +187,38 @@ private:
     int m_imagecomparegap;
     int m_imagefindBorW;
     int m_imageedge_5o7;
+    int m_debug_component_count;
+    int m_debug_accepted_count;
+    int m_debug_rejected_count;
+    int m_debug_max_component_area;
+    int m_debug_max_component_w;
+    int m_debug_max_component_h;
+    bool RefreshAlgorithmRuntimeResources(int image_width, int image_height);
+    void FinalizeRegionGrowthDebugCounters();
+    void ObserveDebugComponent(int area, int width, int height);
+    bool IsSamePixel(const cv::Vec3b& lhs, const cv::Vec3b& rhs) const;
+
+    std::vector<cv::Point> DetectPeakSeeds(const cv::Mat& distance_map,
+                                           double min_peak_distance) const;
+    cv::Rect ComputeLocalSearchROI(const cv::Point& peak,
+                                   const cv::Mat& distance_map,
+                                   int max_edge_width) const;
+    void RunPreemptiveLocalBFS(const cv::Point& peak,
+                               const cv::Rect& roi,
+                               const cv::Mat& binary_image,
+                               cv::Mat& label_map,
+                               int component_id,
+                               std::vector<cv::Rect>& out_bboxes,
+                               int& out_area,
+                               bool is_white_region) const;
+    void CollectComponentFromLabels(const cv::Mat& labels,
+                                    int component_id,
+                                    const cv::Rect& roi,
+                                    int& out_x, int& out_y,
+                                    int& out_w, int& out_h) const;
+    void AcceptPeakComponent(int local_x, int local_y,
+                             int comp_w, int comp_h, int area,
+                             bool is_white_region);
 public:
     void setrelationrectfromresultnum(int inum);
     void setrelationrectfrom_matchresult(void* pmatch);
@@ -214,6 +264,22 @@ public:
     int GetEdgeValue(cv::Vec4b rgbx)
     {
         return rgbx[3];
+    }
+    struct MapState
+    {
+        int service;
+        int pixel;
+        int analysis;
+        int edge;
+    };
+    MapState DecodeMapState(const cv::Vec4b& rgbx) const
+    {
+        return {
+            static_cast<int>(rgbx[0]),
+            static_cast<int>(rgbx[1]),
+            static_cast<int>(rgbx[2]),
+            static_cast<int>(rgbx[3])
+        };
     }
     cv::Vec4b SetServiceValue(cv::Vec4b rgbx, int ivalue)
     {
@@ -332,6 +398,13 @@ public:
     void SetMAP_edge(int ix, int iy, int ivalue)
     {
         SetMAP(ix, iy, SetEdgeValue(MAP(ix, iy), ivalue));
+    }
+    void SetMAP_service_pixel(int ix, int iy, int iservice, int ipixel)
+    {
+        cv::Vec4b map_value = MAP(ix, iy);
+        map_value[0] = static_cast<uchar>(iservice);
+        map_value[1] = static_cast<uchar>(ipixel);
+        SetMAP(ix, iy, map_value);
     }
 
 

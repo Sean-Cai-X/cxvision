@@ -13,7 +13,7 @@ int linegap = global_linegap;
 int threshold = global_threshold;
 int method = global_method;
 
-m_ellipse.setellipse(x0, y0, x1, y1);
+m_ellipse.setellipse(y1, x1, y0, x0);
 m_ellipse.setgap(gap);
 m_ellipse.setlinegap(linegap);
 m_ellipse.setthre(threshold);

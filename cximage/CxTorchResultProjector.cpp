@@ -1,5 +1,110 @@
 #include "CxTorchResultProjector.h"
 
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <vector>
+
+namespace
+{
+bool LoadFirstContourPoints(
+    const std::string& contour_ref,
+    std::vector<double>& out_points,
+    double& out_center_x,
+    double& out_center_y)
+{
+    out_points.clear();
+    out_center_x = 0.0;
+    out_center_y = 0.0;
+
+    if (contour_ref.empty())
+        return false;
+
+    std::ifstream input(contour_ref);
+    if (!input)
+        return false;
+
+    const std::string json(
+        (std::istreambuf_iterator<char>(input)),
+        std::istreambuf_iterator<char>());
+
+    const std::size_t points_key = json.find("\"points\"");
+    if (points_key == std::string::npos)
+        return false;
+
+    const std::size_t array_begin = json.find('[', points_key);
+    if (array_begin == std::string::npos)
+        return false;
+
+    int depth = 0;
+    std::size_t array_end = std::string::npos;
+    for (std::size_t i = array_begin; i < json.size(); ++i)
+    {
+        if (json[i] == '[')
+            ++depth;
+        else if (json[i] == ']')
+        {
+            --depth;
+            if (depth == 0)
+            {
+                array_end = i;
+                break;
+            }
+        }
+    }
+
+    if (array_end == std::string::npos || array_end <= array_begin)
+        return false;
+
+    const std::string array_text = json.substr(array_begin, array_end - array_begin + 1);
+    const char* cursor = array_text.c_str();
+    char* next = nullptr;
+    std::vector<double> values;
+
+    while (*cursor != '\0')
+    {
+        if (std::isdigit(static_cast<unsigned char>(*cursor)) ||
+            *cursor == '-' ||
+            *cursor == '+' ||
+            *cursor == '.')
+        {
+            const double value = std::strtod(cursor, &next);
+            if (next != cursor)
+            {
+                values.push_back(value);
+                cursor = next;
+                continue;
+            }
+        }
+        ++cursor;
+    }
+
+    if (values.size() < 4 || (values.size() % 2) != 0)
+        return false;
+
+    out_points = values;
+
+    double min_x = values[0];
+    double max_x = values[0];
+    double min_y = values[1];
+    double max_y = values[1];
+    for (std::size_t i = 0; i + 1 < values.size(); i += 2)
+    {
+        const double x = values[i];
+        const double y = values[i + 1];
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+    }
+
+    out_center_x = (min_x + max_x) * 0.5;
+    out_center_y = (min_y + max_y) * 0.5;
+    return true;
+}
+}
+
 bool CxTorchResultProjector::Project(
     const CxInferenceResult& inference_result,
     const std::string& owner_type,
@@ -35,6 +140,7 @@ void CxTorchResultProjector::ProjectDetections(
         CxShapeElementSnapshot box;
 
         box.shape_kind = "rect";
+        box.stable_ref = owner_ref + ".detection_" + std::to_string(index);
         box.semantic_role = (index == 0) ? "model_best_result" : "model_candidate";
         box.owner_type = owner_type;
         box.owner_ref = owner_ref;
@@ -68,6 +174,7 @@ void CxTorchResultProjector::ProjectMask(
         return;
 
     CxShapeElementSnapshot mask_element;
+    mask_element.stable_ref = owner_ref + ".segmentation_mask";
     mask_element.shape_kind = "mask";
     mask_element.semantic_role = "model_segmentation_mask";
     mask_element.owner_type = owner_type;
@@ -80,12 +187,19 @@ void CxTorchResultProjector::ProjectMask(
     if (!mask.contour_ref.empty())
     {
         CxShapeElementSnapshot contour_element;
+        contour_element.stable_ref = owner_ref + ".segmentation_contour";
         contour_element.shape_kind = "polyline";
         contour_element.semantic_role = "model_segmentation_contour";
         contour_element.owner_type = owner_type;
         contour_element.owner_ref = owner_ref;
         contour_element.result_element = true;
         contour_element.editable = false;
+        contour_element.closed = true;
+        LoadFirstContourPoints(
+            mask.contour_ref,
+            contour_element.points,
+            contour_element.center_x,
+            contour_element.center_y);
 
         shapes.push_back(std::move(contour_element));
     }

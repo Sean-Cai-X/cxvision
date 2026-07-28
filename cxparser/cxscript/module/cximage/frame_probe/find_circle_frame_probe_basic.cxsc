@@ -13,6 +13,6 @@ int linegap = 3;
 
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
-m_circle.setcircle(cx, cy, px, py);
+m_circle.setcircle(py, px, cy, cx);
 
 global_current_status = "FRAME_PROBE_ONLY";

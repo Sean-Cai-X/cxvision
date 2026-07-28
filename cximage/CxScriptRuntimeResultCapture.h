@@ -11,6 +11,7 @@ namespace mu
 class FindLine;
 class FindCircle;
 class FindEllipse;
+class FindObject;
 class FindRect;
 class FindSegmentation;
 class FastMatch;
@@ -78,8 +79,16 @@ struct CxScriptToolResultCapture
     std::string ellipse_scan_geometry_policy;
 
     int result_rect_count = 0;
-
+    int top1_rect_x = 0;
+    int top1_rect_y = 0;
+    int top1_rect_w = 0;
+    int top1_rect_h = 0;
     int model_point_count = 0;
+    int fastmatch_learn_a_count = 0;
+    int fastmatch_learn_b_count = 0;
+    int fastmatch_learn_a2_count = 0;
+    int fastmatch_learn_b2_count = 0;
+    int fastmatch_learn_status_code = 0;
     int fastmatch_model_width = 0;
     int fastmatch_model_height = 0;
     int fastmatch_pattern_a_count = 0;
@@ -180,6 +189,11 @@ bool CaptureFindEllipseResult(
 
 bool CaptureFindRectResult(
     class FindRect& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
+
+bool CaptureFindObjectResult(
+    class FindObject& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 

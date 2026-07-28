@@ -1,6 +1,4 @@
 #include "pch.h"
-#include <windows.h>
-
 #include "FastMatch.h"
 #include "imagemanager.h"
 #include "ImageAnnotationLayer.h"
@@ -371,9 +369,13 @@ bool LearnPatternByBoundaryPointPairs(
     int& out_b2_count)
 {
     cv::Mat src = image.getmat();
+    out_a_count = 0;
+    out_b_count = 0;
+    out_a2_count = 0;
+    out_b2_count = 0;
+
     if (src.empty())
     {
-        out_a_count = -911;
         return false;
     }
 
@@ -385,7 +387,6 @@ bool LearnPatternByBoundaryPointPairs(
 
     if (gray.empty())
     {
-        out_a_count = -912;
         return false;
     }
 
@@ -395,7 +396,6 @@ bool LearnPatternByBoundaryPointPairs(
     const int y1 = std::clamp(learn_y + std::max(1, learn_h), 0, gray.rows - 1);
     if (x1 <= x0 || y1 <= y0)
     {
-        out_a_count = -913;
         return false;
     }
 
@@ -421,11 +421,6 @@ bool LearnPatternByBoundaryPointPairs(
     bottom_points.doublepattern(compare_gap, 12, out_pattern);
     left_points.doublepattern(compare_gap, 3, out_pattern);
     right_points.doublepattern(compare_gap, 9, out_pattern);
-
-    if (out_a_count + out_b_count + out_a2_count + out_b2_count <= 0)
-    {
-        out_a_count = -914;
-    }
 
     return out_pattern.ABsize() > 0;
 }
@@ -1264,7 +1259,8 @@ void FastMatch::Learn(Image& image)
         std::to_string(static_cast<int>(rect().TopLeft().Y())) + "," +
         std::to_string(static_cast<int>(rect().Width())) + "," +
         std::to_string(static_cast<int>(rect().Height())));
-    m_fastmatch_learn_a_count = -900;
+    m_fastmatch_learn_status_code = 1;
+    m_fastmatch_learn_a_count = 0;
     m_fastmatch_learn_b_count = 0;
     m_fastmatch_learn_a2_count = 0;
     m_fastmatch_learn_b2_count = 0;
@@ -1284,6 +1280,7 @@ void FastMatch::Learn(Image& image)
         && FindLine::getpatternpathB().ElementCount() > 0
         && initial_collected_count > 0)
     {
+        m_fastmatch_learn_status_code = 10;
         return;
     }
 
@@ -1332,6 +1329,7 @@ void FastMatch::Learn(Image& image)
         FindLine::getpatternpathB().ElementCount() <= 0 ||
         retry_collected_count <= 0)
     {
+        m_fastmatch_learn_status_code = 20;
         const int learn_x = saved_rect_x;
         const int learn_y = saved_rect_y;
         const int learn_w = std::max(1, saved_rect_w);
@@ -1353,6 +1351,7 @@ void FastMatch::Learn(Image& image)
             m_fastmatch_learn_b2_count))
         {
             FindLine::setpattern(rect_findline_pattern);
+            m_fastmatch_learn_status_code = 30;
             modelzeroposition();
             gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
             m_imodelwith = static_cast<int>(learned_rect.Width());
@@ -1373,6 +1372,7 @@ void FastMatch::Learn(Image& image)
             m_fastmatch_learn_b2_count))
         {
             FindLine::setpattern(rect_findline_pattern);
+            m_fastmatch_learn_status_code = 31;
             modelzeroposition();
             gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
             m_imodelwith = static_cast<int>(learned_rect.Width());
@@ -1392,6 +1392,7 @@ void FastMatch::Learn(Image& image)
             m_fastmatch_learn_b2_count))
         {
             FindLine::setpattern(rect_findline_pattern);
+            m_fastmatch_learn_status_code = 32;
             modelzeroposition();
             gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
             m_imodelwith = static_cast<int>(learned_rect.Width());
@@ -1414,9 +1415,7 @@ void FastMatch::Learn(Image& image)
         m_fastmatch_learn_b_count +
         m_fastmatch_learn_a2_count +
         m_fastmatch_learn_b2_count <= 0)
-    {
-        m_fastmatch_learn_a_count = -920;
-    }
+        m_fastmatch_learn_status_code = -20;
 
     setrect(saved_rect_x, saved_rect_y, saved_rect_w, saved_rect_h);
     SetWHgap(saved_wgap, saved_hgap);
@@ -1588,6 +1587,7 @@ void FastMatch::learn(void* pimage)
         m_modelpoints_sample1.clear();
         m_modelpoints_sample2.clear();
         m_modelpoints_sample3.clear();
+        m_fastmatch_learn_status_code = -10;
         m_fastmatch_learn_a_count = 0;
         m_fastmatch_learn_b_count = 0;
         m_fastmatch_learn_a2_count = 0;

@@ -15,7 +15,7 @@ int hgap = 15;
 int compare_gap = 20;
 int objfilter = 0;
 
-m_match.setrect(learn_x, learn_y, learn_w, learn_h);
+m_match.setrect(learn_h, learn_w, learn_y, learn_x);
 m_match.setobjfilter(objfilter);
 m_match.setwhgap(wgap, hgap);
 m_match.setthre(threshold);

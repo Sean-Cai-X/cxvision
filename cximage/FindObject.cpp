@@ -12,6 +12,8 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
 
+#include <queue>
+
 /*
 #define  PUSH_SCANOR(ix,iy) \
 {ncurscan++; \
@@ -211,6 +213,12 @@ FindObject::FindObject() :
     m_imagecomparegap(2),
     m_imagefindBorW(0),
     m_imageedge_5o7(5),
+    m_debug_component_count(0),
+    m_debug_accepted_count(0),
+    m_debug_rejected_count(0),
+    m_debug_max_component_area(0),
+    m_debug_max_component_w(0),
+    m_debug_max_component_h(0),
     m_irelationrect(gp_Pnt(0,0,0), gp_Pnt(0, 0, 0))
 { 
     string strname = string("fobject%1");
@@ -346,6 +354,68 @@ int FindObject::getresultobjsnum()
 {
     return m_rectresults.size();
 }
+int FindObject::getdebugcomponentcount()
+{
+    return m_debug_component_count;
+}
+int FindObject::getdebugacceptedcount()
+{
+    return m_debug_accepted_count;
+}
+int FindObject::getdebugrejectedcount()
+{
+    return m_debug_rejected_count;
+}
+int FindObject::getdebugmaxcomponentarea()
+{
+    return m_debug_max_component_area;
+}
+int FindObject::getdebugmaxcomponentw()
+{
+    return m_debug_max_component_w;
+}
+int FindObject::getdebugmaxcomponenth()
+{
+    return m_debug_max_component_h;
+}
+bool FindObject::RefreshAlgorithmRuntimeResources(int image_width, int image_height)
+{
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(image_width, image_height))
+        return false;
+
+    const int icurmodule = ImageManager::GetCurMode();
+    g_pbackobjectimage = ImageManager::GetBackObjectImage(icurmodule);
+    g_pmapimage = ImageManager::GetMapImage(icurmodule);
+    m_objlistscanorA = ImageManager::GetListScan(icurmodule);
+    m_objlistcollectorA = ImageManager::GetListCollect(icurmodule);
+
+    return g_pmapimage != nullptr &&
+        m_objlistscanorA != nullptr &&
+        m_objlistcollectorA != nullptr;
+}
+void FindObject::FinalizeRegionGrowthDebugCounters()
+{
+    m_debug_accepted_count = m_rectresults.size();
+    m_debug_rejected_count =
+        (m_debug_component_count > m_debug_accepted_count)
+        ? (m_debug_component_count - m_debug_accepted_count)
+        : 0;
+}
+void FindObject::ObserveDebugComponent(int area, int width, int height)
+{
+    if (area > m_debug_max_component_area)
+    {
+        m_debug_max_component_area = area;
+        m_debug_max_component_w = width;
+        m_debug_max_component_h = height;
+    }
+}
+bool FindObject::IsSamePixel(const cv::Vec3b& lhs, const cv::Vec3b& rhs) const
+{
+    return lhs[0] == rhs[0] &&
+        lhs[1] == rhs[1] &&
+        lhs[2] == rhs[2];
+}
 void FindObject::setdistance(int idist)
 {
     switch (m_searchtype)
@@ -474,6 +544,8 @@ void FindObject::Measure(Image& image)
     m_pgetimage = &image;
     if (image.getmat().empty())
         return;
+    if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
+        return;
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
@@ -563,6 +635,12 @@ void FindObject::Measure(Image& image)
 
     m_icurobj = 0;
     m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
 
     m_scanid.clear();
     m_vborw.clear();
@@ -664,8 +742,11 @@ void FindObject::Measure(Image& image)
             icurScanerNUM++;
         }
     CURSCANEREND:
+        if (nscansize > 0)
+            m_debug_component_count++;
         int iobjw = (imaxx - iminx <= 0) ? 1 : imaxx - iminx;
         int iobjh = (imaxy - iminy <= 0) ? 1 : imaxy - iminy;
+        ObserveDebugComponent(nscansize, iobjw, iobjh);
         if ((m_ifilterNedge > 0
             && (iminx > m_ifilterNedge
                 && imaxx<iw - m_ifilterNedge
@@ -1085,11 +1166,1242 @@ void FindObject::Measure(Image& image)
     break;
     }
 
-
+    FinalizeRegionGrowthDebugCounters();
     CLEAR_SCANOR();
     CLEAR_SEARCHSEEK();
 
 }
+
+void FindObject::MeasureFast(Image& image)
+{
+    m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
+    if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
+        return;
+    if (image.getWidth() < rect().TopLeft().X() + rect().Width()
+        || image.getHeight() < rect().TopLeft().Y() + rect().Height())
+        return;//error process
+    int iw = rect().Width();
+    int ih = rect().Height();
+    int ix = rect().TopLeft().X();
+    int iy = rect().TopLeft().Y();
+    if (iw <= 0 || ih <= 0 || ix < 0 || iy < 0)
+        return;
+    if (g_pmapimage == nullptr ||
+        m_objlistscanorA == nullptr ||
+        m_objlistcollectorA == nullptr)
+        return;
+    if (g_pmapimage->getWidth() < ix + iw ||
+        g_pmapimage->getHeight() < iy + ih)
+        return;
+    int ix1 = ix + iw;
+    int iy1 = iy + ih;
+
+    int m_isearchfirstx = rect().TopLeft().X();
+    int m_isearchfirsty = rect().TopLeft().Y();
+
+    int nx0 = 0;
+    int ny0 = 0;
+    int nx = 0;
+    int ny = 0;
+    int nservice = 0;
+    cv::Vec3b abyte, bytenext;
+
+    int nScanerID = 1;
+    int icurScanerNUM = 0;
+    bool boverflow = false;
+
+    ncurscan = -1;
+    nscansize = 0;
+
+    ncursearchseek = -1;
+    nsearchseeksize = 0;
+
+    int ishowfont = 0;
+    int mapservice = 0;
+    int mapanalysis = 0;
+    int mapedge = 0;
+
+    int iminx = 9999;
+    int iminy = 9999;
+    int imaxx = 0;
+    int imaxy = 0;
+
+    int iborw = 0;
+
+    switch (m_iborw)
+    {
+    case 901:
+    {
+        int isize = m_cent_h_bw_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_h_bw_points_v[i].clear();
+        m_cent_h_bw_points_v.clear();
+    }
+    break;
+    case 902:
+    {
+        int isize = m_cent_v_bw_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_v_bw_points_v[i].clear();
+        m_cent_v_bw_points_v.clear();
+    }
+    break;
+    case 903:
+    {
+        int isize = m_cent_h_wb_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_h_wb_points_v[i].clear();
+        m_cent_h_wb_points_v.clear();
+    }
+    break;
+    case 904:
+    {
+        int isize = m_cent_v_wb_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_v_wb_points_v[i].clear();
+        m_cent_v_wb_points_v.clear();
+    }
+    break;
+    }
+
+    m_icurobj = 0;
+    m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
+
+    m_scanid.clear();
+    m_vborw.clear();
+    m_vrow.clear();
+    m_vobjnum.clear();
+    m_rectresults.clear();
+    m_keypoint.clear();
+    m_fitwh.clear();;
+    MAPCLEAR();
+
+    CLEAR_SEARCHSEEK();
+    PUSH_SEARCHSEEK(m_isearchfirstx, m_isearchfirsty);
+
+    for (int icurSeekNum = 0; icurSeekNum < nsearchseeksize;)//searchseek.size();)
+    {
+    FORBEGIN:
+        if (icurSeekNum < 0 || icurSeekNum >= nsearchseeksize)
+            break;
+        const int seekx = m_objlistcollectorA[icurSeekNum].X();
+        const int seeky = m_objlistcollectorA[icurSeekNum].Y();
+        mapservice = GetServiceValue(MAP(seekx, seeky));
+
+        if (mapservice > 0)
+        {
+            icurSeekNum++;
+
+            if (icurSeekNum >= nsearchseeksize)
+                break;
+            else
+                goto FORBEGIN;
+        }
+        iminx = 9999;
+        iminy = 9999;
+        imaxx = 0;
+        imaxy = 0;
+
+        CLEAR_SCANOR();
+        PUSH_SCANOR(seekx, seeky);
+        if (nscansize <= 0)
+            break;
+        iminx = static_cast<int>(seekx);
+        iminy = static_cast<int>(seeky);
+        imaxx = iminx;
+        imaxy = iminy;
+        SetMAP_service(seekx, seeky, nScanerID);
+        icurScanerNUM = 0;
+
+    CURSCANERBEGIN:
+        while (icurScanerNUM != nscansize)
+        {
+            nx0 = m_objlistscanorA[icurScanerNUM].X();
+            ny0 = m_objlistscanorA[icurScanerNUM].Y();
+            abyte = image.pixel(nx0, ny0);
+            mapanalysis = MAP_analysis(nx0, ny0);
+
+            if (mapanalysis == FindObject::ANLAYSIS_OVER)
+                goto NEXTFINDSTEP;
+            for (int i = 0; i < m_idistance; i++)
+            {
+                nx = nx0 + m_SearchPointGroup[i].X();
+                ny = ny0 + m_SearchPointGroup[i].Y();
+                if (nx < ix
+                    || ny < iy
+                    || nx >= ix1
+                    || ny >= iy1)
+                    continue;
+                //mapanalysis = static_cast<BYTE>((MAP(nx, ny)[0] >> 4) & 0x0F);
+                const MapState map_state = DecodeMapState(MAP(nx, ny));
+                mapanalysis = map_state.analysis;
+                mapservice = map_state.service;
+                mapedge = map_state.edge;
+                if (mapanalysis == ANLAYSIS_OVER
+                    || mapservice > 0
+                    || (mapedge == mapservice && 0 != mapedge))
+                    continue;
+                bytenext = image.pixel(nx, ny);
+
+                if (IsSamePixel(abyte, bytenext))
+                {
+                    PUSH_SCANOR(nx, ny);
+                    iborw = (abyte[0] == 0) ? 0 : 1;
+                    SetMAP_service_pixel(nx, ny, nScanerID, iborw);
+                    if (iminx > nx)
+                        iminx = nx;
+                    if (iminy > ny)
+                        iminy = ny;
+                    if (imaxx < nx)
+                        imaxx = nx;
+                    if (imaxy < ny)
+                        imaxy = ny;
+                }
+                else
+                {
+                    PUSH_SEARCHSEEK(nx, ny);
+                    SetMAP_edge(nx, ny, nScanerID);
+                }
+            }
+            SetMAP_analysis(nx0, ny0, ANLAYSIS_OVER);
+        NEXTFINDSTEP:
+            icurScanerNUM++;
+        }
+    CURSCANEREND:
+        if (nscansize > 0)
+            m_debug_component_count++;
+        int iobjw = (imaxx - iminx <= 0) ? 1 : imaxx - iminx;
+        int iobjh = (imaxy - iminy <= 0) ? 1 : imaxy - iminy;
+        ObserveDebugComponent(nscansize, iobjw, iobjh);
+        if ((m_ifilterNedge > 0
+            && (iminx > m_ifilterNedge
+                && imaxx<iw - m_ifilterNedge
+                && iminy>m_ifilterNedge
+                && imaxy < ih - m_ifilterNedge))
+            || m_ifilterNedge == 0)
+        {
+            if (nscansize > m_iminarea
+                && nscansize < m_imaxarea
+                && iobjw < m_imaxobjw
+                && iobjw >= m_iminobjw
+                && iobjh < m_imaxobjh
+                && iobjh >= m_iminobjh)
+            {
+                m_vrow.push_back(nscansize);
+
+                abyte = image.pixel(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y());
+
+                m_vborw.push_back(abyte);
+
+                boverflow = false;
+                {
+                    switch (m_iborw)
+                    {
+                    case 3://any white or black
+                    {
+                        gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                        gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                        m_keypoint.addpoint(apoint);
+
+                        m_rectresults.addrect(arectresult);
+                        m_scanid.push_back(nScanerID);
+                        m_vobjnum.push_back(nscansize);
+                        m_iobjnum++;
+                    }
+                    ishowfont++;
+                    m_icurobj++;
+
+                    break;
+                    case 0:break;// no
+                    case 1://select w
+                    {
+                        {
+                            gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                            if (m_vborw[m_icurobj][0] > 0)
+                            {
+                                gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                                m_keypoint.addpoint(apoint);
+                                m_rectresults.addrect(arectresult);
+                                m_scanid.push_back(nScanerID);
+                                m_vobjnum.push_back(nscansize);
+                                m_totalarea = m_totalarea + nscansize;
+                                m_iobjnum++;
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+                    }
+                    break;
+                    case 2://select black
+                    {
+                        {
+                            gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                            if (m_vborw[m_icurobj][0] < 255)
+                            {
+                                gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                                m_keypoint.addpoint(apoint);
+
+                                m_rectresults.addrect(arectresult);
+                                m_scanid.push_back(nScanerID);
+                                m_vobjnum.push_back(nscansize);
+
+                                m_totalarea = m_totalarea + nscansize;
+                                m_iobjnum++;
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+                    }
+                    break;
+
+                    case 11://test
+                    {
+
+                        gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                            }
+                            gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                            m_keypoint.addpoint(apoint);
+                            m_rectresults.addrect(arectresult);
+                            m_scanid.push_back(nScanerID);
+                            m_vobjnum.push_back(nscansize);
+
+                            m_totalarea = m_totalarea + nscansize;
+                            m_iobjnum++;
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+
+                    }
+                    break;
+                    case 101://test
+                    {
+
+                        gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                            }
+                            gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                            m_keypoint.addpoint(apoint);
+                            m_rectresults.addrect(arectresult);
+                            m_scanid.push_back(nScanerID);
+                            m_vobjnum.push_back(nscansize);
+
+                            m_totalarea = m_totalarea + nscansize;
+                            m_iobjnum++;
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+
+                    }
+                    break;
+                    case 12://test
+                    {
+                        {
+                            gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                            if (m_vborw[m_icurobj][0] < 255)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                                }
+                                gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                                m_keypoint.addpoint(apoint);
+
+                                m_rectresults.addrect(arectresult);
+                                m_scanid.push_back(nScanerID);
+                                m_vobjnum.push_back(nscansize);
+
+                                m_totalarea = m_totalarea + nscansize;
+                                m_iobjnum++;
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+
+                    }
+                    break;
+                    case 102://test
+                    {
+                        {
+                            gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt( imaxx, imaxy,0));
+                            if (m_vborw[m_icurobj][0] < 255)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                                }
+                                gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                                m_keypoint.addpoint(apoint);
+
+                                m_rectresults.addrect(arectresult);
+                                m_scanid.push_back(nScanerID);
+                                m_vobjnum.push_back(nscansize);
+
+                                m_totalarea = m_totalarea + nscansize;
+                                m_iobjnum++;
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+                    }
+                    break;
+                    case 13://test
+                    {
+                        {
+                            if (m_vborw[m_icurobj][0] < 255)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                                }
+                            }
+                            if (m_vborw[m_icurobj][0] > 0)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 255));
+                                }
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+                    }
+                    break;
+                    case 901:
+                    {
+                        if (m_vborw[m_icurobj][0] < 255)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y());
+                            }
+                            m_cent_h_bw_points_v.push_back(atpshape);
+                        }
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y());
+                            }
+                            m_cent_h_bw_points_v.push_back(atpshape);
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+                    }
+                    break;
+                    case 902:
+                    {
+                        if (m_vborw[m_icurobj][0] < 255)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].Y(), m_objlistscanorA[ir].X());
+                            }
+                            m_cent_v_bw_points_v.push_back(atpshape);
+                        }
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].Y(), m_objlistscanorA[ir].X());
+                            }
+                            m_cent_v_bw_points_v.push_back(atpshape);
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+                    }
+                    break;
+                    case 903:
+                    {
+                        if (m_vborw[m_icurobj][0] < 255)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y());
+                            }
+                            m_cent_h_wb_points_v.push_back(atpshape);
+                        }
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y());
+                            }
+                            m_cent_h_wb_points_v.push_back(atpshape);
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+                    }
+                    break;
+                    case 904:
+                    {
+                        if (m_vborw[m_icurobj][0] < 255)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].Y(), m_objlistscanorA[ir].X());
+                            }
+                            m_cent_v_wb_points_v.push_back(atpshape);
+                        }
+                        if (m_vborw[m_icurobj][0] > 0)
+                        {
+                            TwoPointsShape atpshape;
+                            for (int ir = 0; ir < nscansize; ir++)
+                            {
+                                atpshape.addpoint(m_objlistscanorA[ir].Y(), m_objlistscanorA[ir].X());
+                            }
+                            m_cent_v_wb_points_v.push_back(atpshape);
+                        }
+                        ishowfont++;
+                        m_icurobj++;
+                    }
+                    break;
+                    }
+                }
+            }
+            else
+            {
+                //full color no selected object
+                switch (m_iborw)
+                {
+                    // no
+                case 21://select w
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                    }
+                }
+                break;
+                case 22://select black
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                    }
+                }
+                break;
+                case 23://test
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                    }
+                }
+                break;
+
+                }
+            }
+        }
+        else
+        {
+            //full color no selected object
+            switch (m_iborw)
+            {
+                // no
+            case 21://select w
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                }
+            }
+            break;
+            case 22://select black
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                }
+            }
+            break;
+            case 23://test
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                }
+            }
+            break;
+            }
+        }
+
+        iminx = 9999;
+        iminy = 9999;
+        imaxx = 0;
+        imaxy = 0;
+
+        nScanerID++;
+        icurSeekNum++;
+    FOREND:
+        ;
+    }
+
+
+    switch (m_iborw)
+    {
+    case 901:
+    {
+        int isize = m_cent_h_bw_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_h_bw_points_v[i].makepath(0);
+
+    }
+    break;
+    case 902:
+    {
+        int isize = m_cent_v_bw_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_v_bw_points_v[i].makepath(1);
+    }
+    break;
+    case 903:
+    {
+        int isize = m_cent_h_wb_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_h_wb_points_v[i].makepath(0);
+
+    }
+    break;
+    case 904:
+    {
+        int isize = m_cent_v_wb_points_v.size();
+        for (int i = 0; i < isize; i++)
+            m_cent_v_wb_points_v[i].makepath(1);
+    }
+    break;
+    }
+
+    FinalizeRegionGrowthDebugCounters();
+    CLEAR_SCANOR();
+    CLEAR_SEARCHSEEK();
+
+}
+
+void FindObject::MeasureConnectedComponents(Image& image)
+{
+    m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
+    if (image.getWidth() < rect().TopLeft().X() + rect().Width()
+        || image.getHeight() < rect().TopLeft().Y() + rect().Height())
+        return;
+    int iw = rect().Width();
+    int ih = rect().Height();
+    int ix = rect().TopLeft().X();
+    int iy = rect().TopLeft().Y();
+    if (iw <= 0 || ih <= 0 || ix < 0 || iy < 0)
+        return;
+    m_icurobj = 0;
+    m_iobjnum = 0;
+    m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
+    m_scanid.clear();
+    m_vborw.clear();
+    m_vrow.clear();
+    m_vobjnum.clear();
+    m_rectresults.clear();
+    m_keypoint.clear();
+    m_fitwh.clear();
+    if (g_pmapimage != nullptr &&
+        g_pmapimage->getWidth() >= ix + iw &&
+        g_pmapimage->getHeight() >= iy + ih)
+    {
+        MAPCLEAR();
+    }
+    CLEAR_SCANOR();
+    CLEAR_SEARCHSEEK();
+
+    const cv::Mat& source = image.getmat();
+    const cv::Rect roi_rect(ix, iy, iw, ih);
+    cv::Mat roi = source(roi_rect);
+    cv::Mat channel;
+    if (roi.channels() == 1)
+        channel = roi;
+    else
+        cv::extractChannel(roi, channel, 0);
+    if (channel.depth() != CV_8U)
+        channel.convertTo(channel, CV_8U);
+
+    int nScanerID = 1;
+    const auto accept_component =
+        [&](int local_x, int local_y, int comp_w, int comp_h, int area,
+            const cv::Point2d& centroid, bool is_white_region)
+    {
+        m_debug_component_count++;
+        const int iminx = ix + local_x;
+        const int iminy = iy + local_y;
+        const int imaxx = ix + local_x + comp_w - 1;
+        const int imaxy = iy + local_y + comp_h - 1;
+        const int iobjw = (comp_w <= 1) ? 1 : comp_w - 1;
+        const int iobjh = (comp_h <= 1) ? 1 : comp_h - 1;
+        ObserveDebugComponent(area, iobjw, iobjh);
+
+        const bool inside_edge_filter =
+            (m_ifilterNedge > 0
+                && local_x > m_ifilterNedge
+                && local_x + comp_w - 1 < iw - m_ifilterNedge
+                && local_y > m_ifilterNedge
+                && local_y + comp_h - 1 < ih - m_ifilterNedge)
+            || m_ifilterNedge == 0;
+        if (!inside_edge_filter)
+        {
+            m_debug_rejected_count++;
+            return;
+        }
+        if (area <= 0)
+        {
+            m_debug_rejected_count++;
+            return;
+        }
+
+        const bool accept_white = (m_iborw == 1 || m_iborw == 3);
+        const bool accept_black = (m_iborw == 2 || m_iborw == 3);
+        if ((is_white_region && !accept_white) ||
+            (!is_white_region && !accept_black))
+        {
+            m_debug_rejected_count++;
+            return;
+        }
+
+        m_vrow.push_back(area);
+        m_vborw.push_back(is_white_region
+            ? cv::Vec3b(255, 255, 255)
+            : cv::Vec3b(0, 0, 0));
+
+        gp_Rectangle arectresult(gp_Pnt(iminx, iminy, 0), gp_Pnt(imaxx, imaxy, 0));
+        gp_Pnt apoint(
+            static_cast<int>(ix + centroid.x),
+            static_cast<int>(iy + centroid.y),
+            0);
+        m_keypoint.addpoint(apoint);
+        m_rectresults.addrect(arectresult);
+        m_scanid.push_back(nScanerID);
+        m_vobjnum.push_back(area);
+        m_totalarea = m_totalarea + area;
+        m_iobjnum++;
+        m_icurobj++;
+        m_debug_accepted_count++;
+        nScanerID++;
+    };
+
+    const auto run_connected_components =
+        [&](bool is_white_region)
+    {
+        cv::Mat mask;
+        if (is_white_region)
+        {
+            cv::compare(channel, 0, mask, cv::CMP_GT);
+        }
+        else
+        {
+            if (m_iborw == 3)
+                cv::compare(channel, 0, mask, cv::CMP_EQ);
+            else
+                cv::compare(channel, 255, mask, cv::CMP_LT);
+        }
+
+        cv::Mat labels;
+        cv::Mat stats;
+        cv::Mat centroids;
+        const int component_count =
+            cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8, CV_32S);
+        for (int label = 1; label < component_count; ++label)
+        {
+            accept_component(
+                stats.at<int>(label, cv::CC_STAT_LEFT),
+                stats.at<int>(label, cv::CC_STAT_TOP),
+                stats.at<int>(label, cv::CC_STAT_WIDTH),
+                stats.at<int>(label, cv::CC_STAT_HEIGHT),
+                stats.at<int>(label, cv::CC_STAT_AREA),
+                cv::Point2d(
+                    centroids.at<double>(label, 0),
+                    centroids.at<double>(label, 1)),
+                is_white_region);
+        }
+    };
+
+    if (m_iborw == 1 || m_iborw == 3)
+        run_connected_components(true);
+    if (m_iborw == 2 || m_iborw == 3)
+        run_connected_components(false);
+}
+
+std::vector<cv::Point> FindObject::DetectPeakSeeds(
+    const cv::Mat& distance_map,
+    double min_peak_distance) const
+{
+    std::vector<cv::Point> seeds;
+    if (distance_map.empty())
+        return seeds;
+
+    double min_val = 0, max_val = 0;
+    cv::minMaxLoc(distance_map, &min_val, &max_val);
+
+    if (max_val <= 0)
+        return seeds;
+
+    double threshold = std::max(min_peak_distance, max_val * 0.3);
+
+    cv::Mat peak_mask;
+    cv::threshold(distance_map, peak_mask, threshold, 255, cv::THRESH_BINARY);
+    peak_mask.convertTo(peak_mask, CV_8U);
+
+    cv::Mat labels, stats, centroids;
+    int n_labels = cv::connectedComponentsWithStats(peak_mask, labels, stats, centroids, 8, CV_32S);
+
+    for (int i = 1; i < n_labels; ++i)
+    {
+        int area = stats.at<int>(i, cv::CC_STAT_AREA);
+        if (area >= 1)
+        {
+            double cx = centroids.at<double>(i, 0);
+            double cy = centroids.at<double>(i, 1);
+            seeds.emplace_back(static_cast<int>(cx), static_cast<int>(cy));
+        }
+    }
+
+    if (seeds.empty())
+    {
+        int rows = distance_map.rows;
+        int cols = distance_map.cols;
+        for (int y = 0; y < rows && seeds.size() < 10; ++y)
+        {
+            for (int x = 0; x < cols && seeds.size() < 10; ++x)
+            {
+                if (distance_map.at<float>(y, x) >= min_peak_distance)
+                {
+                    seeds.emplace_back(x, y);
+                }
+            }
+        }
+    }
+
+    if (seeds.empty())
+    {
+        cv::Point max_loc;
+        cv::minMaxLoc(distance_map, &min_val, &max_val, &max_loc);
+        if (max_val > min_peak_distance)
+        {
+            seeds.push_back(max_loc);
+        }
+    }
+
+    std::sort(seeds.begin(), seeds.end(),
+        [](const cv::Point& a, const cv::Point& b) {
+            if (a.x != b.x) return a.x < b.x;
+            return a.y < b.y;
+        });
+
+    return seeds;
+}
+
+cv::Rect FindObject::ComputeLocalSearchROI(
+    const cv::Point& peak,
+    const cv::Mat& distance_map,
+    int max_edge_width) const
+{
+    float max_dist = distance_map.at<float>(peak.y, peak.x);
+    int radius = std::max(5, std::min(static_cast<int>(max_dist * 3.0f), max_edge_width));
+
+    cv::Rect roi(peak.x - radius, peak.y - radius, 2 * radius, 2 * radius);
+    roi &= cv::Rect(0, 0, distance_map.cols, distance_map.rows);
+    return roi;
+}
+
+void FindObject::RunPreemptiveLocalBFS(
+    const cv::Point& peak,
+    const cv::Rect& roi,
+    const cv::Mat& binary_image,
+    cv::Mat& label_map,
+    int component_id,
+    std::vector<cv::Rect>& out_bboxes,
+    int& out_area,
+    bool is_white_region) const
+{
+    if (binary_image.empty() || label_map.empty())
+        return;
+    if (!roi.contains(peak))
+        return;
+
+    std::queue<cv::Point> q;
+    q.push(peak);
+    label_map.at<int>(peak.y, peak.x) = component_id;
+
+    int min_x = peak.x, max_x = peak.x;
+    int min_y = peak.y, max_y = peak.y;
+    int pixel_count = 0;
+
+    int dx[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+    int dy[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+
+    while (!q.empty())
+    {
+        cv::Point curr = q.front(); q.pop();
+        pixel_count++;
+
+        min_x = std::min(min_x, curr.x);
+        max_x = std::max(max_x, curr.x);
+        min_y = std::min(min_y, curr.y);
+        max_y = std::max(max_y, curr.y);
+
+        for (int i = 0; i < 8; ++i)
+        {
+            int nx = curr.x + dx[i];
+            int ny = curr.y + dy[i];
+
+            if (nx < roi.x || ny < roi.y
+                || nx >= roi.x + roi.width
+                || ny >= roi.y + roi.height)
+                continue;
+
+            uchar pixel_val = binary_image.at<uchar>(ny, nx);
+            bool is_foreground = is_white_region ? (pixel_val > 0) : (pixel_val == 0);
+            if (!is_foreground)
+                continue;
+
+            int& label = label_map.at<int>(ny, nx);
+            if (label == 0)
+            {
+                label = component_id;
+                q.push(cv::Point(nx, ny));
+            }
+        }
+    }
+
+    if (pixel_count > 0)
+    {
+        out_bboxes.push_back(cv::Rect(min_x, min_y,
+            max_x - min_x + 1, max_y - min_y + 1));
+        out_area += pixel_count;
+    }
+}
+
+void FindObject::CollectComponentFromLabels(
+    const cv::Mat& labels,
+    int component_id,
+    const cv::Rect& roi,
+    int& out_x, int& out_y,
+    int& out_w, int& out_h) const
+{
+    int min_x = roi.x + roi.width;
+    int min_y = roi.y + roi.height;
+    int max_x = roi.x;
+    int max_y = roi.y;
+    bool found = false;
+
+    for (int y = roi.y; y < roi.y + roi.height; ++y)
+    {
+        for (int x = roi.x; x < roi.x + roi.width; ++x)
+        {
+            if (labels.at<int>(y, x) == component_id)
+            {
+                found = true;
+                min_x = std::min(min_x, x);
+                min_y = std::min(min_y, y);
+                max_x = std::max(max_x, x);
+                max_y = std::max(max_y, y);
+            }
+        }
+    }
+
+    if (found)
+    {
+        out_x = min_x;
+        out_y = min_y;
+        out_w = max_x - min_x + 1;
+        out_h = max_y - min_y + 1;
+    }
+}
+
+void FindObject::AcceptPeakComponent(
+    int local_x, int local_y,
+    int comp_w, int comp_h, int area,
+    bool is_white_region)
+{
+    FILE* dbg = fopen("peak_bfs_dbg.txt", "a");
+    if (dbg)
+    {
+        fprintf(dbg, "AcceptPeakComponent ENTER: local=(%d,%d) size=(%d,%d) area=%d is_white=%d m_iborw=%d m_ifilterNedge=%d\n",
+            local_x, local_y, comp_w, comp_h, area, is_white_region, m_iborw, m_ifilterNedge);
+        fclose(dbg);
+    }
+
+    m_debug_component_count++;
+
+    int iminx = rect().TopLeft().X() + local_x;
+    int iminy = rect().TopLeft().Y() + local_y;
+    int imaxx = iminx + comp_w - 1;
+    int imaxy = iminy + comp_h - 1;
+    int iobjw = (comp_w <= 1) ? 1 : comp_w - 1;
+    int iobjh = (comp_h <= 1) ? 1 : comp_h - 1;
+
+    ObserveDebugComponent(area, iobjw, iobjh);
+
+    int iw = rect().Width();
+    int ih = rect().Height();
+    bool inside_edge_filter =
+        (m_ifilterNedge > 0
+            && local_x > m_ifilterNedge
+            && local_x + comp_w - 1 < iw - m_ifilterNedge
+            && local_y > m_ifilterNedge
+            && local_y + comp_h - 1 < ih - m_ifilterNedge)
+        || m_ifilterNedge == 0;
+
+    if (dbg)
+    {
+        dbg = fopen("peak_bfs_dbg.txt", "a");
+        if (dbg)
+        {
+            fprintf(dbg, "  edge_filter check: inside=%d iw=%d ih=%d\n", inside_edge_filter, iw, ih);
+            fclose(dbg);
+        }
+    }
+
+    if (!inside_edge_filter)
+    {
+        dbg = fopen("peak_bfs_dbg.txt", "a");
+        if (dbg) { fprintf(dbg, "  REJECTED: edge_filter\n"); fclose(dbg); }
+        m_debug_rejected_count++;
+        return;
+    }
+    if (area <= 0)
+    {
+        dbg = fopen("peak_bfs_dbg.txt", "a");
+        if (dbg) { fprintf(dbg, "  REJECTED: area<=0\n"); fclose(dbg); }
+        m_debug_rejected_count++;
+        return;
+    }
+
+    bool accept_white = (m_iborw == 1 || m_iborw == 3);
+    bool accept_black = (m_iborw == 2 || m_iborw == 3);
+
+    if (dbg)
+    {
+        dbg = fopen("peak_bfs_dbg.txt", "a");
+        if (dbg)
+        {
+            fprintf(dbg, "  borw check: accept_white=%d accept_black=%d reject_cond=%d\n",
+                accept_white, accept_black,
+                (is_white_region && !accept_white) || (!is_white_region && !accept_black));
+            fclose(dbg);
+        }
+    }
+
+    if ((is_white_region && !accept_white) ||
+        (!is_white_region && !accept_black))
+    {
+        dbg = fopen("peak_bfs_dbg.txt", "a");
+        if (dbg) { fprintf(dbg, "  REJECTED: borw mismatch\n"); fclose(dbg); }
+        m_debug_rejected_count++;
+        return;
+    }
+
+    dbg = fopen("peak_bfs_dbg.txt", "a");
+    if (dbg) { fprintf(dbg, "  ACCEPTED\n"); fclose(dbg); }
+
+    m_vrow.push_back(area);
+    m_vborw.push_back(is_white_region
+        ? cv::Vec3b(255, 255, 255)
+        : cv::Vec3b(0, 0, 0));
+
+    gp_Rectangle arectresult(
+        gp_Pnt(iminx, iminy, 0),
+        gp_Pnt(imaxx, imaxy, 0));
+
+    gp_Pnt apoint(
+        static_cast<int>(iminx + comp_w / 2),
+        static_cast<int>(iminy + comp_h / 2),
+        0);
+    m_keypoint.addpoint(apoint);
+    m_rectresults.addrect(arectresult);
+    m_scanid.push_back(m_iobjnum + 1);
+    m_vobjnum.push_back(area);
+    m_totalarea = m_totalarea + area;
+    m_iobjnum++;
+    m_icurobj++;
+    m_debug_accepted_count++;
+}
+
+void FindObject::MeasurePeakLocalBFS(Image& image)
+{
+    m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
+
+    int iw = rect().Width();
+    int ih = rect().Height();
+    int ix = rect().TopLeft().X();
+    int iy = rect().TopLeft().Y();
+    if (iw <= 0 || ih <= 0 || ix < 0 || iy < 0)
+        return;
+    if (image.getWidth() < ix + iw ||
+        image.getHeight() < iy + ih)
+        return;
+
+    m_icurobj = 0;
+    m_iobjnum = 0;
+    m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
+
+    m_scanid.clear();
+    m_vborw.clear();
+    m_vrow.clear();
+    m_vobjnum.clear();
+    m_rectresults.clear();
+    m_keypoint.clear();
+    m_fitwh.clear();
+
+    if (g_pmapimage != nullptr &&
+        g_pmapimage->getWidth() >= ix + iw &&
+        g_pmapimage->getHeight() >= iy + ih)
+    {
+        MAPCLEAR();
+    }
+
+    CLEAR_SCANOR();
+    CLEAR_SEARCHSEEK();
+
+    const cv::Mat& source = image.getmat();
+    cv::Rect roi_rect(ix, iy, iw, ih);
+    cv::Mat roi = source(roi_rect);
+
+    cv::Mat channel;
+    if (roi.channels() == 1)
+        channel = roi;
+    else
+        cv::extractChannel(roi, channel, 0);
+    if (channel.depth() != CV_8U)
+        channel.convertTo(channel, CV_8U);
+
+    const auto process_region =
+        [&](bool is_white_region)
+    {
+        cv::Mat binary;
+        if (is_white_region)
+            cv::threshold(channel, binary, 0, 255, cv::THRESH_BINARY);
+        else
+            cv::threshold(channel, binary, 254, 255, cv::THRESH_BINARY_INV);
+        binary.convertTo(binary, CV_8U);
+
+        cv::Mat labels, stats, centroids;
+        int n_labels = cv::connectedComponentsWithStats(binary, labels, stats, centroids, 8, CV_32S);
+
+        if (n_labels <= 1)
+            return;
+
+        for (int i = 1; i < n_labels; ++i)
+        {
+            int comp_area = stats.at<int>(i, cv::CC_STAT_AREA);
+            if (comp_area <= 0)
+                continue;
+
+            int bb_x = stats.at<int>(i, cv::CC_STAT_LEFT);
+            int bb_y = stats.at<int>(i, cv::CC_STAT_TOP);
+            int bb_w = stats.at<int>(i, cv::CC_STAT_WIDTH);
+            int bb_h = stats.at<int>(i, cv::CC_STAT_HEIGHT);
+
+            int filter_w = (bb_w <= 1) ? 1 : bb_w - 1;
+            int filter_h = (bb_h <= 1) ? 1 : bb_h - 1;
+
+            bool area_ok = (comp_area >= m_iminarea && comp_area <= m_imaxarea);
+            bool w_ok = (filter_w >= m_iminobjw && filter_w < m_imaxobjw);
+            bool h_ok = (filter_h >= m_iminobjh && filter_h < m_imaxobjh);
+
+            ObserveDebugComponent(comp_area, filter_w, filter_h);
+
+            FILE* dbg2 = fopen("peak_bfs_dbg.txt", "a");
+            if (dbg2)
+            {
+                fprintf(dbg2, "peak_component: area=%d min=%lld max=%lld area_ok=%d w=%d minw=%lld maxw=%lld w_ok=%d h=%d minh=%lld maxh=%lld h_ok=%d\n",
+                    comp_area, (long long)m_iminarea, (long long)m_imaxarea, area_ok,
+                    filter_w, (long long)m_iminobjw, (long long)m_imaxobjw, w_ok,
+                    filter_h, (long long)m_iminobjh, (long long)m_imaxobjh, h_ok);
+                fclose(dbg2);
+            }
+
+            if (area_ok && w_ok && h_ok)
+            {
+                int edge_filter_margin = m_ifilterNedge;
+                bool edge_ok = true;
+                if (edge_filter_margin > 0)
+                {
+                    int local_lx = bb_x;
+                    int local_ly = bb_y;
+                    int local_rx = bb_x + bb_w - 1;
+                    int local_ry = bb_y + bb_h - 1;
+                    if (local_lx <= edge_filter_margin ||
+                        local_ly <= edge_filter_margin ||
+                        local_rx >= iw - edge_filter_margin ||
+                        local_ry >= ih - edge_filter_margin)
+                        edge_ok = false;
+                }
+
+                if (edge_ok)
+                {
+                    AcceptPeakComponent(bb_x, bb_y, bb_w, bb_h,
+                        comp_area, is_white_region);
+                }
+                else
+                {
+                    m_debug_rejected_count++;
+                }
+            }
+            else
+            {
+                m_debug_rejected_count++;
+            }
+        }
+    };
+
+    bool run_white = (m_iborw == 1 || m_iborw == 3);
+    bool run_black = (m_iborw == 2 || m_iborw == 3);
+
+    if (run_white)
+        process_region(true);
+
+    if (run_black)
+        process_region(false);
+}
+
 void FindObject::MeasureGrid(Grid* pgrid)
 {
 
@@ -1174,7 +2486,7 @@ void FindObject::Object(int inum)
                 m_curobject.addpoint(qrx1, qry1);
 
             }
-        } 
+        }
         //LineShape aline;
         //aline.setline(ibeginx+ix,iy0+iy,iendx+ix,iy0+iy);
         //m_curedge.push_back(aline);
@@ -1192,6 +2504,43 @@ void FindObject::measure(void* pimage)
     Measure(*pgetimage);
 }
 
+void FindObject::measurefast(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+    MeasureFast(*pgetimage);
+}
+
+void FindObject::measurecc(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+    MeasureConnectedComponents(*pgetimage);
+}
+
+void FindObject::measurexbfs(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+    MeasurePeakLocalBFS(*pgetimage);
+}
+
+void FindObject::MeasureXPeakLocalBFS(Image& image)
+{
+    MeasurePeakLocalBFS(image);
+}
+
+void FindObject::measurexpeakbfs(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+    MeasureXPeakLocalBFS(*pgetimage);
+}
+
 void FindObject::sethsogap(int ihgap, int isgap, int iogap)
 {
     m_ihgap = ihgap;
@@ -1202,10 +2551,16 @@ void FindObject::setminmaxarea(int imin, int imax)
 {
     m_iminarea = imin;
     m_imaxarea = imax;
+    FILE* dbg = fopen("peak_bfs_dbg.txt", "a");
+    if (dbg) { fprintf(dbg, "setminmaxarea: imin=%d imax=%d -> m_iminarea=%lld m_imaxarea=%lld\n", imin, imax, (long long)m_iminarea, (long long)m_imaxarea); fclose(dbg); }
 }
 void FindObject::MeasureX(Image& image)
 {
     m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
+    if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
+        return;
     if (image.getWidth() < rect().TopLeft().X() + rect().Width()
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
         return;//error process
@@ -1251,6 +2606,12 @@ void FindObject::MeasureX(Image& image)
     m_icurobj = 0;
     m_iobjnum = 0;
     m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
 
     m_scanid.clear();
     m_vborw.clear();
@@ -1333,7 +2694,7 @@ void FindObject::MeasureX(Image& image)
                 {
                     PUSH_SEARCHSEEK(nx, ny);
                     SetMAP_edge(nx, ny, nScanerID);
-                     
+
                 }
             }
             SetMAP_analysis(nx0, ny0, ANLAYSIS_OVER);
@@ -1341,8 +2702,11 @@ void FindObject::MeasureX(Image& image)
             icurScanerNUM++;
         }
     CURSCANEREND:
+        if (nscansize > 0)
+            m_debug_component_count++;
         int iobjw = imaxx - iminx;
         int iobjh = imaxy - iminy;
+        ObserveDebugComponent(nscansize, iobjw, iobjh);
         if ((m_ifilterNedge > 0
             && (iminx > m_ifilterNedge
                 && imaxx<iw - m_ifilterNedge
@@ -1486,10 +2850,321 @@ void FindObject::MeasureX(Image& image)
         ;
     }
 
+    FinalizeRegionGrowthDebugCounters();
     CLEAR_SCANOR();
     CLEAR_SEARCHSEEK();
 
 }
+
+void FindObject::MeasureXFast(Image& image)
+{
+    m_pgetimage = &image;
+    if (image.getmat().empty())
+        return;
+    if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
+        return;
+    if (image.getWidth() < rect().TopLeft().X() + rect().Width()
+        || image.getHeight() < rect().TopLeft().Y() + rect().Height())
+        return;//error process
+    int iw = rect().Width();
+    int ih = rect().Height();
+    int ix = rect().TopLeft().X();
+    int iy = rect().TopLeft().Y();
+    int ix1 = ix + iw;
+    int iy1 = iy + ih;
+
+    int m_isearchfirstx = rect().TopLeft().X();
+    int m_isearchfirsty = rect().TopLeft().Y();
+
+    int nx0 = 0;
+    int ny0 = 0;
+    int nx = 0;
+    int ny = 0;
+    int nservice = 0;
+    cv::Vec3b abyte, bytenext;
+
+    int nScanerID = 1;
+    int icurScanerNUM = 0;
+    bool boverflow = false;
+
+    ncurscan = -1;
+    nscansize = 0;
+
+    ncursearchseek = -1;
+    nsearchseeksize = 0;
+
+    int ishowfont = 0;
+    int mapservice = 0;
+    int mapanalysis = 0;
+    int mapedge = 0;
+
+    int iminx = 9999;
+    int iminy = 9999;
+    int imaxx = 0;
+    int imaxy = 0;
+
+    int iborw = 0;
+
+    m_icurobj = 0;
+    m_iobjnum = 0;
+    m_totalarea = 0;
+    m_debug_component_count = 0;
+    m_debug_accepted_count = 0;
+    m_debug_rejected_count = 0;
+    m_debug_max_component_area = 0;
+    m_debug_max_component_w = 0;
+    m_debug_max_component_h = 0;
+
+    m_scanid.clear();
+    m_vborw.clear();
+    m_vrow.clear();
+    m_vobjnum.clear();
+    m_rectresults.clear();
+    m_keypoint.clear();
+    m_fitwh.clear();;
+    MAPCLEAR();
+
+    CLEAR_SEARCHSEEK();
+    PUSH_SEARCHSEEK(m_isearchfirstx, m_isearchfirsty);
+
+    for (int icurSeekNum = 0; icurSeekNum < nsearchseeksize;)//searchseek.size();)
+    {
+    FORBEGIN:
+        const int seekx = m_objlistcollectorA[icurSeekNum].X();
+        const int seeky = m_objlistcollectorA[icurSeekNum].Y();
+        mapservice = GetServiceValue(MAP(seekx, seeky));
+
+        if (mapservice > 0)
+        {
+            icurSeekNum++;
+
+            if (icurSeekNum >= nsearchseeksize)
+                break;
+            else
+                goto FORBEGIN;
+        }
+        CLEAR_SCANOR();
+        PUSH_SCANOR(seekx, seeky);
+        SetMAP_service(seekx, seeky, nScanerID);
+        icurScanerNUM = 0;
+
+    CURSCANERBEGIN:
+        while (icurScanerNUM != nscansize)
+        {
+            nx0 = m_objlistscanorA[icurScanerNUM].X();
+            ny0 = m_objlistscanorA[icurScanerNUM].Y();
+            abyte = image.pixel(nx0, ny0);
+
+            mapanalysis = MAP_analysis(nx0, ny0);
+
+            if (mapanalysis == FindObject::ANLAYSIS_OVER)
+                goto NEXTFINDSTEP;
+            for (int i = 0; i < m_idistance; i++)
+            {
+                nx = nx0 + m_SearchPointGroup[i].X();
+                ny = ny0 + m_SearchPointGroup[i].Y();
+                if (nx <= ix
+                    || ny <= iy
+                    || nx >= ix1
+                    || ny >= iy1)
+                    continue;
+                const MapState map_state = DecodeMapState(MAP(nx, ny));
+                mapanalysis = map_state.analysis;
+                mapservice = map_state.service;
+                mapedge = map_state.edge;
+                if (mapanalysis == ANLAYSIS_OVER
+                    || mapservice!=0
+                    ||(mapedge == mapservice &&0!= mapedge))
+                    continue;
+                bytenext = image.pixel(nx, ny);
+
+                if(abs(abyte[0] - bytenext[0])<m_ihgap &&
+                    abs(abyte[1] - bytenext[1])< m_isgap &&
+                    abs(abyte[2] - bytenext[2])< m_iogap)
+                {
+                    PUSH_SCANOR(nx, ny);
+                    iborw = (abyte[0] == 0) ? 0 : 1;
+                    SetMAP_service_pixel(nx, ny, nScanerID, iborw);
+                    if (iminx > nx)
+                        iminx = nx;
+                    if (iminy > ny)
+                        iminy = ny;
+                    if (imaxx < nx)
+                        imaxx = nx;
+                    if (imaxy < ny)
+                        imaxy = ny;
+                }
+                else
+                {
+                    PUSH_SEARCHSEEK(nx, ny);
+                    SetMAP_edge(nx, ny, nScanerID);
+
+                }
+            }
+            SetMAP_analysis(nx0, ny0, ANLAYSIS_OVER);
+        NEXTFINDSTEP:
+            icurScanerNUM++;
+        }
+    CURSCANEREND:
+        if (nscansize > 0)
+            m_debug_component_count++;
+        int iobjw = imaxx - iminx;
+        int iobjh = imaxy - iminy;
+        ObserveDebugComponent(nscansize, iobjw, iobjh);
+        if ((m_ifilterNedge > 0
+            && (iminx > m_ifilterNedge
+                && imaxx<iw - m_ifilterNedge
+                && iminy>m_ifilterNedge
+                && imaxy < ih - m_ifilterNedge))
+            || m_ifilterNedge == 0)
+        {
+            if (nscansize > m_iminarea
+                && nscansize < m_imaxarea
+                && iobjw < m_imaxobjw
+                && iobjw >= m_iminobjw
+                && iobjh < m_imaxobjh
+                && iobjh >= m_iminobjh)
+            {
+                m_vrow.push_back(nscansize);
+
+                abyte = image.pixel(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y());
+
+                m_vborw.push_back(abyte);
+
+                boverflow = false;
+                {
+                    switch (m_iborw)
+                    {
+                    case 3://any white or black
+                    {
+                        gp_Rectangle arectresult(gp_Pnt(iminx, iminy,0), gp_Pnt(imaxx, imaxy,0));
+                        gp_Pnt apoint(m_objlistscanorA[0].X(), m_objlistscanorA[0].Y(),0);
+                        m_keypoint.addpoint(apoint);
+
+                        m_rectresults.addrect(arectresult);
+                        m_scanid.push_back(nScanerID);
+                        m_iobjnum++;
+                    }
+                    ishowfont++;
+                    m_icurobj++;
+
+
+                    break;
+                    case 13://test
+                    {
+                        {
+                            if (m_vborw[m_icurobj][0] < 255)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                                }
+                            }
+                            if (m_vborw[m_icurobj][0] > 0)
+                            {
+                                for (int ir = 0; ir < nscansize; ir++)
+                                {
+                                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 255));
+                                }
+                            }
+                            ishowfont++;
+                            m_icurobj++;
+
+                        }
+                    }
+                    break;
+
+                    }
+                }
+            }
+            else
+            {
+                //full color no selected object
+                switch (m_iborw)
+                {
+                    // no
+                case 21://select w
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                    }
+                }
+                break;
+                case 22://select black
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                    }
+                }
+                break;
+                case 23://test
+                {
+                    for (int ir = 0; ir < nscansize; ir++)
+                    {
+                        image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                    }
+                }
+                break;
+
+                }
+            }
+        }
+        else
+        {
+            //full color no selected object
+            switch (m_iborw)
+            {
+                // no
+            case 21://select w
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(0, 0, 0));
+                }
+            }
+            break;
+            case 22://select black
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 255, 255));
+                }
+            }
+            break;
+            case 23://test
+            {
+                for (int ir = 0; ir < nscansize; ir++)
+                {
+                    image.setPixel(m_objlistscanorA[ir].X(), m_objlistscanorA[ir].Y(), cv::Vec3b(255, 0, 0));
+                }
+            }
+            break;
+            }
+        }
+        iminx = 9999;
+        iminy = 9999;
+        imaxx = 0;
+        imaxy = 0;
+
+        nScanerID++;
+        icurSeekNum++;
+    FOREND:
+        ;
+    }
+
+    FinalizeRegionGrowthDebugCounters();
+    CLEAR_SCANOR();
+    CLEAR_SEARCHSEEK();
+
+}
+
+void FindObject::MeasureXConnectedComponents(Image& image)
+{
+    MeasureConnectedComponents(image);
+}
+
 void FindObject::measurex(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
@@ -1497,6 +3172,24 @@ void FindObject::measurex(void* pimage)
         return;
 
     MeasureX(*pgetimage);
+}
+
+void FindObject::measurexfast(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+
+    MeasureXFast(*pgetimage);
+}
+
+void FindObject::measurexcc(void* pimage)
+{
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+        return;
+
+    MeasureXConnectedComponents(*pgetimage);
 }
 
 void FindObject::setminmaxwh(int iminw, int imaxw, int iminh, int imaxh)

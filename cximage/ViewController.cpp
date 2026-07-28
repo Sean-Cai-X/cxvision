@@ -328,6 +328,7 @@ namespace
     applied += setDoubleIfUsed("global_learn_b_count", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_learn_a2_count", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_learn_b2_count", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_learn_status_code", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_circle_ref", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_line_ref", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_ellipse_ref", 0.0) ? 1 : 0;
@@ -681,6 +682,7 @@ namespace
       result.fastmatch_learn_b_count = object.fastmatch_learn_b_count;
       result.fastmatch_learn_a2_count = object.fastmatch_learn_a2_count;
       result.fastmatch_learn_b2_count = object.fastmatch_learn_b2_count;
+      result.fastmatch_learn_status_code = object.fastmatch_learn_status_code;
       result.fastmatch_pattern_a_count = object.fastmatch_pattern_a_count;
       result.fastmatch_pattern_b_count = object.fastmatch_pattern_b_count;
       result.fastmatch_candidate_count = object.fastmatch_candidate_count;
@@ -2593,6 +2595,8 @@ bool ViewController::RunEvidenceSelfTestRuntimeExecuteStage(
             fastmatch_capture.object_learn_a2_count;
         result.fastmatch_learn_b2_count =
             fastmatch_capture.object_learn_b2_count;
+        result.fastmatch_learn_status_code =
+            fastmatch_capture.object_learn_status_code;
     }
 
     RefreshRuntimeObjectTable(

@@ -22,7 +22,7 @@ int filter_min = 1;
 int filter_max = 100000;
 m_circle.setfindsetting(findsetting);
 m_circle.setfilter(filter_borw, filter_min, filter_max);
-m_circle.setcircle(cx, cy, px, py);
+m_circle.setcircle(py, px, cy, cx);
 m_circle.measure(&m_image);
 m_circle.fitcircle();
 

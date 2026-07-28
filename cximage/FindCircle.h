@@ -76,6 +76,59 @@ struct FindCircleMeasureGeometryDebug
     int budget_max_samples = 2000000;
     int budget_max_elapsed_ms = 3000;
 };
+
+struct CircleEdgeBandCandidate
+{
+    int scan_index = -1;
+    int candidate_index = -1;
+    int start_angle = 0;
+    int end_angle = 0;
+    int center_angle = 0;
+    double x = 0.0;
+    double y = 0.0;
+    double response_strength = 0.0;
+    double polarity = 0.0;
+    double arc_length = 0.0;
+    int edge_rank = -1;
+    bool valid = false;
+    std::vector<double> profile;
+};
+
+struct CircleFitCandidateSequence
+{
+    std::vector<cv::Point2d> points;
+    double score = 0.0;
+    int node_count = 0;
+    double avg_ncc = 0.0;
+    double total_response = 0.0;
+    bool valid = false;
+};
+
+struct CircleFeatureNode
+{
+    int id = -1;
+    CircleEdgeBandCandidate candidate;
+    std::vector<int> neighbors;
+    bool visited = false;
+    int component_id = -1;
+};
+
+struct CircleFeatureEdge
+{
+    int node_a = -1;
+    int node_b = -1;
+    double ncc_score = 0.0;
+    double angular_distance = 0.0;
+    bool valid = false;
+};
+
+struct CircleFeatureGraph
+{
+    std::vector<CircleFeatureNode> nodes;
+    std::vector<CircleFeatureEdge> edges;
+    int next_component_id = 0;
+};
+
 class ICxShapeSink;
 
 class FindCircle:public Shape
@@ -154,6 +207,7 @@ public:
 
     void Measure(Image& image);
     void MeasureBalanced(Image& image);
+    void MeasureRobust(Image& image);
 
     void FitResultMeasure(void* pimage);
     void setfitmeasuregap(int igap);
@@ -300,6 +354,19 @@ private:
 
     void BuildCircleMeasureGeometryCore(
         const FindCircleMeasureGeometryRequest& request);
+
+    void ClearMeasureState();
+
+    void CollectCircleEdgeBandsRobust(Image& image);
+    void BuildCircleFeatureGraph();
+    void FindCircleComponentsInGraph();
+    void SelectBestCircleSequence();
+    void ConvertCircleSequenceToMeasurePoints(int sequence_index);
+
+    std::vector<CircleFitCandidateSequence> m_circle_fit_candidate_sequences;
+    int m_circle_best_sequence_index = -1;
+    std::vector<CircleEdgeBandCandidate> m_circle_edge_band_candidates;
+    CircleFeatureGraph m_circle_feature_graph;
 public:
     void easycluster(int igapx = 10, int igapy = 10, int iclusternum = 5);
     gp_Rectangle measurepointsboundingrect() { return m_measurepointsboundingRect; }

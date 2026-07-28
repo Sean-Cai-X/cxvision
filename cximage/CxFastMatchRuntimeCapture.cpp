@@ -74,6 +74,8 @@ bool CaptureFastMatchRuntime(
         matcher->getlearna2count();
     capture.object_learn_b2_count =
         matcher->getlearnb2count();
+    capture.object_learn_status_code =
+        matcher->getlearnstatuscode();
     capture.last_learn_argument =
         matcher->debuglastlearnargument();
 
@@ -94,6 +96,12 @@ bool CaptureFastMatchRuntime(
             bridge,
             "global_learn_b_count",
             capture.global_learn_b_count);
+
+    capture.global_learn_status_found =
+        QueryGlobalInt(
+            bridge,
+            "global_learn_status_code",
+            capture.global_learn_status_code);
 
     auto* local_image = static_cast<Image*>(
         bridge.QueryClassObject("Image", "m_image"));

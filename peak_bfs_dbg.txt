@@ -1,0 +1,646 @@
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+setminmaxarea: imin=5 imax=999999 -> m_iminarea=5 m_imaxarea=999999
+peak_component: area=1428 min=5 max=999999 area_ok=1 w=41 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(30,25) size=(42,34) area=1428 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=2365 min=5 max=999999 area_ok=1 w=54 minw=0 maxw=99999 w_ok=1 h=42 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(115,28) size=(55,43) area=2365 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED
+peak_component: area=3196 min=5 max=999999 area_ok=1 w=93 minw=0 maxw=99999 w_ok=1 h=33 minh=0 maxh=99999 h_ok=1
+AcceptPeakComponent ENTER: local=(50,98) size=(94,34) area=3196 is_white=1 m_iborw=1 m_ifilterNedge=0
+  edge_filter check: inside=1 iw=220 ih=160
+  borw check: accept_white=1 accept_black=0 reject_cond=0
+  ACCEPTED

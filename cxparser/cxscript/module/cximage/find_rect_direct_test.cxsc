@@ -13,7 +13,7 @@ int linegap = global_linegap;
 int method = global_method;
 int gauge = global_gauge;
 
-m_rect.setrect(x, y, width, height);
+m_rect.setrect(height, width, y, x);
 m_rect.setthre(threshold);
 m_rect.setlinegap(linegap);
 m_rect.setmethod(method);

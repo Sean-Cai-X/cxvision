@@ -13,7 +13,7 @@ m_seg.setbackend("libtorch_segmentation");
 m_seg.setdevice("cpu");
 m_seg.setmodel("");
 m_seg.setthreshold(threshold);
-m_seg.setpromptrect(x0, y0, x1, y1);
+m_seg.setpromptrect(y1, x1, y0, x0);
 m_seg.setmode(2);
 
 m_seg.segment(&m_image);

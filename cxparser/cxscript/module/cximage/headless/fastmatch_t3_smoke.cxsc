@@ -18,12 +18,12 @@ int linegap = global_linegap;
 double min_score = global_min_score;
 int find_num = global_find_num;
 
-m_match.setrect(learn_x, learn_y, learn_w, learn_h);
+m_match.setrect(learn_h, learn_w, learn_y, learn_x);
 m_match.setthre(threshold);
 m_match.setlinegap(linegap);
 m_match.learn(&m_image);
 
-m_match.setmatchrect(search_x, search_y, search_w, search_h);
+m_match.setmatchrect(search_h, search_w, search_y, search_x);
 m_match.setminscore(min_score);
 m_match.setfindnum(find_num);
 m_match.match(&m_image);

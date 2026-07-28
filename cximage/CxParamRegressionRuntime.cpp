@@ -1,10 +1,12 @@
 #include "CxParamRegressionRuntime.h"
 #include "CxParamRegressionRegister.h"
-#include "muParser.h"
+#include "CxParserRuntimeOwner.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 namespace
@@ -76,6 +78,173 @@ namespace
                     return a.predicted_risk < b.predicted_risk;
                 return a.candidate_id < b.candidate_id;
             });
+    }
+
+    std::string ReadTextFile(const std::string& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open())
+            return {};
+        std::ostringstream ss;
+        ss << file.rdbuf();
+        return ss.str();
+    }
+
+    std::vector<double> ParseJsonNumberArray(const std::string& text)
+    {
+        std::vector<double> values;
+        const char* cursor = text.c_str();
+        while (*cursor)
+        {
+            while (*cursor &&
+                   !((*cursor >= '0' && *cursor <= '9') ||
+                     *cursor == '-' ||
+                     *cursor == '+'))
+            {
+                ++cursor;
+            }
+            if (!*cursor)
+                break;
+
+            char* end = nullptr;
+            const double value = std::strtod(cursor, &end);
+            if (end == cursor)
+            {
+                ++cursor;
+                continue;
+            }
+            values.push_back(value);
+            cursor = end;
+        }
+        return values;
+    }
+
+    std::vector<std::pair<double, double>> ExtractMeasurePointsFromSummary(
+        const std::string& summary_path)
+    {
+        std::vector<std::pair<double, double>> points;
+        const std::string text = ReadTextFile(summary_path);
+        if (text.empty())
+            return points;
+
+        std::size_t search = 0;
+        while (true)
+        {
+            const std::size_t role =
+                text.find("\"semantic_role\": \"measure_points\"", search);
+            if (role == std::string::npos)
+                break;
+
+            const std::size_t points_key = text.find("\"points\": [", role);
+            if (points_key == std::string::npos)
+            {
+                search = role + 1;
+                continue;
+            }
+            const std::size_t array_begin = text.find('[', points_key);
+            const std::size_t array_end = text.find(']', array_begin);
+            if (array_begin == std::string::npos || array_end == std::string::npos)
+            {
+                search = role + 1;
+                continue;
+            }
+
+            const auto values = ParseJsonNumberArray(
+                text.substr(array_begin + 1, array_end - array_begin - 1));
+            for (std::size_t i = 0; i + 1 < values.size(); i += 2)
+                points.emplace_back(values[i], values[i + 1]);
+
+            search = array_end + 1;
+        }
+        return points;
+    }
+
+    struct RuntimeHitStats
+    {
+        int total_points = 0;
+        double min_x = 0.0;
+        double max_x = 0.0;
+        double min_y = 0.0;
+        double max_y = 0.0;
+        std::vector<int> bins;
+    };
+
+    RuntimeHitStats BuildRuntimeHitStats(
+        const std::vector<std::pair<double, double>>& points,
+        int bin_count)
+    {
+        RuntimeHitStats stats;
+        stats.total_points = static_cast<int>(points.size());
+        stats.bins.assign(std::max(1, bin_count), 0);
+        if (points.empty())
+            return stats;
+
+        stats.min_x = std::numeric_limits<double>::max();
+        stats.max_x = -std::numeric_limits<double>::max();
+        stats.min_y = std::numeric_limits<double>::max();
+        stats.max_y = -std::numeric_limits<double>::max();
+        for (const auto& p : points)
+        {
+            stats.min_x = std::min(stats.min_x, p.first);
+            stats.max_x = std::max(stats.max_x, p.first);
+            stats.min_y = std::min(stats.min_y, p.second);
+            stats.max_y = std::max(stats.max_y, p.second);
+        }
+
+        const double width = stats.max_x - stats.min_x;
+        for (const auto& p : points)
+        {
+            int index = 0;
+            if (width > 1e-9)
+            {
+                const double ratio = (p.first - stats.min_x) / width;
+                index = static_cast<int>(
+                    ratio * static_cast<double>(stats.bins.size()));
+                if (index >= static_cast<int>(stats.bins.size()))
+                    index = static_cast<int>(stats.bins.size()) - 1;
+                if (index < 0)
+                    index = 0;
+            }
+            stats.bins[static_cast<std::size_t>(index)]++;
+        }
+        return stats;
+    }
+
+    std::string CaseLevelFromId(const std::string& case_id)
+    {
+        if (case_id.rfind("L1_", 0) == 0)
+            return "L1";
+        if (case_id.rfind("L2_", 0) == 0)
+            return "L2";
+        if (case_id.rfind("L3_", 0) == 0)
+            return "L3";
+        if (case_id.rfind("L0_", 0) == 0)
+            return "L0";
+        return "unknown";
+    }
+
+    struct FailureClassCount
+    {
+        std::string key;
+        int count = 0;
+    };
+
+    void AddFailureClassCount(
+        std::vector<FailureClassCount>& counts,
+        const std::string& key)
+    {
+        for (auto& c : counts)
+        {
+            if (c.key == key)
+            {
+                ++c.count;
+                return;
+            }
+        }
+        FailureClassCount c;
+        c.key = key;
+        c.count = 1;
+        counts.push_back(c);
     }
 }
 
@@ -264,15 +433,20 @@ bool ExportParamRegressionReports(
             reason = "failed to write eval/hit distribution reports";
             return false;
         }
-        hitJson << "{\n  \"schema\": \"param_hit_distribution_phase1\",\n  \"records\": [\n";
-        hitCsv << "candidate,points,fit,mean_distance,support_score,failure_stage\n";
+        hitJson << "{\n  \"schema\": \"param_hit_distribution_runtime_v2\",\n"
+                << "  \"source\": \"result_summary.shapes[semantic_role=measure_points]\",\n"
+                << "  \"records\": [\n";
+        hitCsv << "candidate,total_points,bin_index,bin_start_x,bin_end_x,hit_count,fit,mean_distance,support_score,failure_stage\n";
         md << "# Hit Distribution View\n\n";
-        md << "Phase 1 placeholder: hit distribution bins will be populated from probe measure_points_xy.\n\n";
-        md << "| Candidate | Points | Fit | MeanDist | FailureStage |\n";
-        md << "|---|---:|---|---:|---|\n";
+        md << "Runtime hit distribution is extracted from `result_summary.json` shape snapshots whose `semantic_role` is `measure_points`.\n";
+        md << "If a candidate has zero points, this report records zero bins instead of fabricating hits.\n\n";
+        md << "| Candidate | RuntimePoints | Fit | MeanDist | XRange | YRange | FailureStage |\n";
+        md << "|---|---:|---|---:|---|---|---|\n";
         for (std::size_t i = 0; i < records.size(); ++i)
         {
             const auto& r = records[i];
+            const auto runtime_points = ExtractMeasurePointsFromSummary(r.result_summary_path);
+            const RuntimeHitStats hit_stats = BuildRuntimeHitStats(runtime_points, 8);
             jsonl << "{\"candidate_id\":\"" << EscapeJson(r.candidate_id)
                   << "\",\"case_id\":\"" << EscapeJson(r.case_id)
                   << "\",\"tool\":\"" << EscapeJson(r.tool)
@@ -285,18 +459,48 @@ bool ExportParamRegressionReports(
                   << ",\"fit_offset\":" << r.fit_offset
                   << ",\"failure_stage\":\"" << EscapeJson(r.failure_stage) << "\"}\n";
             hitJson << "    {\"candidate_id\":\"" << EscapeJson(r.candidate_id)
-                    << "\",\"points\":" << r.points
+                    << "\",\"summary_path\":\"" << EscapeJson(r.result_summary_path)
+                    << "\",\"record_points\":" << r.points
+                    << ",\"runtime_points\":" << hit_stats.total_points
                     << ",\"fit_available\":" << (r.fit_available ? "true" : "false")
                     << ",\"mean_distance\":" << r.mean_distance
                     << ",\"support_score\":" << r.support_score
-                    << ",\"failure_stage\":\"" << EscapeJson(r.failure_stage) << "\"}"
+                    << ",\"failure_stage\":\"" << EscapeJson(r.failure_stage)
+                    << "\",\"min_x\":" << hit_stats.min_x
+                    << ",\"max_x\":" << hit_stats.max_x
+                    << ",\"min_y\":" << hit_stats.min_y
+                    << ",\"max_y\":" << hit_stats.max_y
+                    << ",\"bins\":[";
+            for (std::size_t b = 0; b < hit_stats.bins.size(); ++b)
+            {
+                if (b)
+                    hitJson << ",";
+                hitJson << hit_stats.bins[b];
+            }
+            hitJson << "]}"
                     << (i + 1 < records.size() ? "," : "") << "\n";
-            hitCsv << r.candidate_id << "," << r.points << ","
-                   << (r.fit_available ? "true" : "false") << ","
-                   << r.mean_distance << "," << r.support_score << ","
-                   << r.failure_stage << "\n";
-            md << "| " << r.candidate_id << " | " << r.points << " | "
+            const double range = hit_stats.max_x - hit_stats.min_x;
+            for (std::size_t b = 0; b < hit_stats.bins.size(); ++b)
+            {
+                const double bin_start = hit_stats.total_points > 0
+                    ? hit_stats.min_x + range * static_cast<double>(b) /
+                        static_cast<double>(hit_stats.bins.size())
+                    : 0.0;
+                const double bin_end = hit_stats.total_points > 0
+                    ? hit_stats.min_x + range * static_cast<double>(b + 1) /
+                        static_cast<double>(hit_stats.bins.size())
+                    : 0.0;
+                hitCsv << r.candidate_id << "," << hit_stats.total_points << ","
+                       << b << "," << bin_start << "," << bin_end << ","
+                       << hit_stats.bins[b] << ","
+                       << (r.fit_available ? "true" : "false") << ","
+                       << r.mean_distance << "," << r.support_score << ","
+                       << r.failure_stage << "\n";
+            }
+            md << "| " << r.candidate_id << " | " << hit_stats.total_points << " | "
                << (r.fit_available ? "yes" : "no") << " | " << r.mean_distance
+               << " | " << hit_stats.min_x << ".." << hit_stats.max_x
+               << " | " << hit_stats.min_y << ".." << hit_stats.max_y
                << " | " << r.failure_stage << " |\n";
         }
         hitJson << "  ]\n}\n";
@@ -341,6 +545,97 @@ bool ExportParamRegressionReports(
     }
 
     {
+        bool has_l1 = false;
+        bool has_l2 = false;
+        bool has_l3 = false;
+        int executed_count = 0;
+        int fit_count = 0;
+        int timeout_count = 0;
+        std::vector<FailureClassCount> failure_counts;
+
+        for (const auto& r : records)
+        {
+            const std::string level = CaseLevelFromId(r.case_id);
+            has_l1 = has_l1 || level == "L1";
+            has_l2 = has_l2 || level == "L2";
+            has_l3 = has_l3 || level == "L3";
+            executed_count += r.executed ? 1 : 0;
+            fit_count += r.fit_available ? 1 : 0;
+            timeout_count += r.timeout ? 1 : 0;
+            const std::string failure =
+                r.fit_available ? "geometry_available" :
+                (!r.failure_stage.empty() ? r.failure_stage : "geometry_unavailable");
+            AddFailureClassCount(failure_counts, failure);
+        }
+
+        const bool coverage_complete = has_l1 && has_l2 && has_l3;
+
+        std::ofstream json(root / "candidate_case_matrix.json");
+        std::ofstream md(root / "candidate_case_matrix.md");
+        if (!json.is_open() || !md.is_open())
+        {
+            reason = "failed to write candidate case matrix";
+            return false;
+        }
+        json << "{\n";
+        json << "  \"schema\": \"candidate_case_matrix_runtime_v1\",\n";
+        json << "  \"coverage_complete\": " << (coverage_complete ? "true" : "false") << ",\n";
+        json << "  \"levels\": {\"L1\": " << (has_l1 ? "true" : "false")
+             << ", \"L2\": " << (has_l2 ? "true" : "false")
+             << ", \"L3\": " << (has_l3 ? "true" : "false") << "},\n";
+        json << "  \"records\": [\n";
+        md << "# Candidate Case Matrix\n\n";
+        md << "- schema: candidate_case_matrix_runtime_v1\n";
+        md << "- coverage_complete: " << (coverage_complete ? "true" : "false") << "\n";
+        md << "- executed_count: " << executed_count << "\n";
+        md << "- fit_count: " << fit_count << "\n";
+        md << "- timeout_count: " << timeout_count << "\n\n";
+        md << "| Level | Candidate | Case | Tool | Executed | Timeout | Points | Fit | MeanDist | FailureStage | Summary |\n";
+        md << "|---|---|---|---|---|---|---:|---|---:|---|---|\n";
+        for (std::size_t i = 0; i < records.size(); ++i)
+        {
+            const auto& r = records[i];
+            const std::string level = CaseLevelFromId(r.case_id);
+            json << "    {\"level\":\"" << EscapeJson(level)
+                 << "\",\"candidate_id\":\"" << EscapeJson(r.candidate_id)
+                 << "\",\"case_id\":\"" << EscapeJson(r.case_id)
+                 << "\",\"tool\":\"" << EscapeJson(r.tool)
+                 << "\",\"executed\":" << (r.executed ? "true" : "false")
+                 << ",\"timeout\":" << (r.timeout ? "true" : "false")
+                 << ",\"points\":" << r.points
+                 << ",\"fit_available\":" << (r.fit_available ? "true" : "false")
+                 << ",\"mean_distance\":" << r.mean_distance
+                 << ",\"support_score\":" << r.support_score
+                 << ",\"failure_stage\":\"" << EscapeJson(r.failure_stage)
+                 << "\",\"result_summary_path\":\"" << EscapeJson(r.result_summary_path)
+                 << "\"}" << (i + 1 < records.size() ? "," : "") << "\n";
+            md << "| " << level << " | " << r.candidate_id << " | "
+               << r.case_id << " | " << r.tool << " | "
+               << (r.executed ? "yes" : "no") << " | "
+               << (r.timeout ? "yes" : "no") << " | "
+               << r.points << " | " << (r.fit_available ? "yes" : "no")
+               << " | " << r.mean_distance << " | "
+               << r.failure_stage << " | " << r.result_summary_path << " |\n";
+        }
+        json << "  ]\n}\n";
+
+        std::ofstream failMd(root / "failure_classification.md");
+        if (!failMd.is_open())
+        {
+            reason = "failed to write failure classification";
+            return false;
+        }
+        failMd << "# Failure Classification\n\n";
+        failMd << "| FailureClass | Count | Suggested Next Action |\n";
+        failMd << "|---|---:|---|\n";
+        for (const auto& c : failure_counts)
+        {
+            failMd << "| " << c.key << " | " << c.count
+                   << " | inspect locked gauge, runtime summary and overlay before changing baseline parameters |\n";
+        }
+    }
+
+    {
         std::ofstream md(root / "param_candidate_distribution.md");
         if (!md.is_open())
         {
@@ -379,21 +674,59 @@ bool ExportParamRegressionReports(
     }
 
     {
+        bool has_l1 = false;
+        bool has_l2 = false;
+        bool has_l3 = false;
+        for (const auto& r : records)
+        {
+            const std::string level = CaseLevelFromId(r.case_id);
+            has_l1 = has_l1 || level == "L1";
+            has_l2 = has_l2 || level == "L2";
+            has_l3 = has_l3 || level == "L3";
+        }
+        const bool coverage_complete = has_l1 && has_l2 && has_l3;
+
+        std::ofstream json(root / "stability_matrix.json");
         std::ofstream md(root / "param_stability_report.md");
-        if (!md.is_open())
+        if (!json.is_open() || !md.is_open())
         {
             reason = "failed to write stability report";
             return false;
         }
+        json << "{\n";
+        json << "  \"schema\": \"param_stability_runtime_v1\",\n";
+        json << "  \"coverage_complete\": " << (coverage_complete ? "true" : "false") << ",\n";
+        json << "  \"levels\": {\"L1\": " << (has_l1 ? "true" : "false")
+             << ", \"L2\": " << (has_l2 ? "true" : "false")
+             << ", \"L3\": " << (has_l3 ? "true" : "false") << "},\n";
+        json << "  \"stats\": [\n";
         md << "# Parameter Stability Report\n\n";
-        md << "Phase 1 stability is single-anchor only. Mini-regression across L1/L2/L3 is required before promotion.\n\n";
-        md << "| Candidate | Stability | Risk | Note |\n";
-        md << "|---|---:|---:|---|\n";
-        for (const auto& s : stats)
+        md << "- schema: param_stability_runtime_v1\n";
+        md << "- coverage_complete: " << (coverage_complete ? "true" : "false") << "\n";
+        md << "- note: Stability is computed from real EvalRecord rows. Human acceptance is still required before promotion.\n\n";
+        md << "| Candidate | Cases | GeometryRate | EvidenceRate | TimeoutCases | Stability | Risk | Note |\n";
+        md << "|---|---:|---:|---:|---:|---:|---:|---|\n";
+        for (std::size_t i = 0; i < stats.size(); ++i)
         {
-            md << "| " << s.candidate_id << " | " << s.stability_score
-               << " | " << s.risk_score << " | pending mini-regression |\n";
+            const auto& s = stats[i];
+            json << "    {\"candidate_id\":\"" << EscapeJson(s.candidate_id)
+                 << "\",\"tool\":\"" << EscapeJson(s.tool)
+                 << "\",\"total_cases\":" << s.total_cases
+                 << ",\"executed_cases\":" << s.executed_cases
+                 << ",\"timeout_cases\":" << s.timeout_cases
+                 << ",\"geometry_pass_rate\":" << s.geometry_pass_rate
+                 << ",\"evidence_pass_rate\":" << s.evidence_pass_rate
+                 << ",\"stability_score\":" << s.stability_score
+                 << ",\"risk_score\":" << s.risk_score
+                 << "}" << (i + 1 < stats.size() ? "," : "") << "\n";
+            md << "| " << s.candidate_id << " | " << s.total_cases
+               << " | " << s.geometry_pass_rate << " | " << s.evidence_pass_rate
+               << " | " << s.timeout_cases << " | " << s.stability_score
+               << " | " << s.risk_score << " | "
+               << (coverage_complete ? "L1/L2/L3 matrix available" : "pending L1/L2/L3 coverage")
+               << " |\n";
         }
+        json << "  ]\n}\n";
     }
 
     {
@@ -472,32 +805,9 @@ bool LoadCxParamRegressionFile(
         return false;
     }
 
-    std::ifstream file(path);
-    if (!file.is_open())
-    {
-        out_reason = "Cannot open param regression file: " + script_path;
+    CxParserRuntimeOwner owner;
+    if (!owner.Initialize(out_reason))
         return false;
-    }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-
-    mu::Parser parser;
-    parser.UsingClass(true);
-    RegisterCxParamRegressionBindings(parser);
-
-    try
-    {
-        parser.SetExpr(buffer.str());
-        parser.Eval();
-    }
-    catch (const mu::Parser::exception_type& e)
-    {
-        out_reason = "Param regression parse error: " + std::string(e.GetMsg());
-        return false;
-    }
-
-    out_runtime = g_cxscript_param_regression;
-    out_reason.clear();
-    return true;
+    return owner.ParseParamRegression(script_path, out_runtime, out_reason);
 }

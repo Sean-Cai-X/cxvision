@@ -55,6 +55,24 @@ bool RunSingleParamProbe(
     options.timeout_sec = request.timeout_seconds;
     options.stage25_tool = request.task.tool;
     options.stage25_target_id = request.target_id;
+    options.target_id = request.target_id;
+
+    options.roi_x0 = request.roi_x0;
+    options.roi_y0 = request.roi_y0;
+    options.roi_x1 = request.roi_x1;
+    options.roi_y1 = request.roi_y1;
+    options.circle_cx = request.circle_cx;
+    options.circle_cy = request.circle_cy;
+    options.circle_px = request.circle_px;
+    options.circle_py = request.circle_py;
+    options.ellipse_x0 = request.ellipse_x0;
+    options.ellipse_y0 = request.ellipse_y0;
+    options.ellipse_x1 = request.ellipse_x1;
+    options.ellipse_y1 = request.ellipse_y1;
+    options.tool_half_width = request.tool_half_width;
+    options.max_elapsed_ms = request.max_elapsed_ms;
+    options.max_scan_lines = request.max_scan_lines;
+    options.max_samples = request.max_samples;
 
     InjectCandidateGlobals(options, request.candidate);
 

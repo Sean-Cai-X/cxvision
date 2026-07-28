@@ -86,6 +86,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CxScriptImagePreflight.cpp
   cximage/CircleRingGauge.cpp
   cximage/CxCoreBoundary.cpp
+  cximage/RegionPatternNet.cpp
   cximage/FormfitFitMethod.cpp
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp

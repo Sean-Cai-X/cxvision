@@ -17,7 +17,7 @@ m_circle.setlinegap(linegap);
 m_circle.setthre(threshold);
 m_circle.setmethod(method);
 m_circle.setfitmeasuregap(80);
-m_circle.setcircle(cx, cy, px, py);
+m_circle.setcircle(py, px, cy, cx);
 m_circle.measure(&m_image);
 m_circle.fitcircle();
 m_circle.FitResultMeasure(&m_image);
