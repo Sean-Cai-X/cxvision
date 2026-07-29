@@ -63,6 +63,58 @@ struct FindEllipseDisplaySnapshot
     std::string scan_geometry_policy;
 };
 
+struct EllipseEdgeBandCandidate
+{
+    int scan_index = -1;
+    int candidate_index = -1;
+    int start_param = 0;
+    int end_param = 0;
+    int center_param = 0;
+    double x = 0.0;
+    double y = 0.0;
+    double response_strength = 0.0;
+    double polarity = 0.0;
+    double arc_length = 0.0;
+    int edge_rank = -1;
+    bool valid = false;
+    std::vector<double> profile;
+};
+
+struct EllipseFitCandidateSequence
+{
+    std::vector<cv::Point2d> points;
+    double score = 0.0;
+    int node_count = 0;
+    double avg_ncc = 0.0;
+    double total_response = 0.0;
+    bool valid = false;
+};
+
+struct EllipseFeatureNode
+{
+    int id = -1;
+    EllipseEdgeBandCandidate candidate;
+    std::vector<int> neighbors;
+    bool visited = false;
+    int component_id = -1;
+};
+
+struct EllipseFeatureEdge
+{
+    int node_a = -1;
+    int node_b = -1;
+    double ncc_score = 0.0;
+    double angular_distance = 0.0;
+    bool valid = false;
+};
+
+struct EllipseFeatureGraph
+{
+    std::vector<EllipseFeatureNode> nodes;
+    std::vector<EllipseFeatureEdge> edges;
+    int next_component_id = 0;
+};
+
 class FindEllipse:public Shape
 {
 public:
@@ -102,6 +154,7 @@ public:
 
     void Setgap(int gap = 2);
     void measure(void* pimage);
+    void measureRobust(void* pimage);
     void findpattern(void* pimage);
 
     void setlinesamplerate(double dsamplerate);
@@ -116,6 +169,7 @@ public:
     void setshowlines(int ilines) { m_ishowlines = ilines; }
     PointsShape& getresultpoints();
     void Measure(Image& image);
+    void MeasureRobust(Image& image);
     void fitellipse();
     double getresultcentx();
     double getresultcenty();
@@ -229,7 +283,17 @@ private:
     double m_rejected_boundary_band_norm_max = -999.0;
     std::string m_scan_geometry_policy;
 
+    void CollectEllipseEdgeBandsRobust(Image& image);
+    void BuildEllipseFeatureGraph();
+    void FindEllipseComponentsInGraph();
+    void SelectBestEllipseSequence();
+    void ConvertEllipseSequenceToMeasurePoints(int sequence_index);
+
+    std::vector<EllipseEdgeBandCandidate> m_ellipse_edge_band_candidates;
+    std::vector<EllipseFitCandidateSequence> m_ellipse_fit_candidate_sequences;
+    int m_ellipse_best_sequence_index = -1;
+    EllipseFeatureGraph m_ellipse_feature_graph;
+
 };
 
-
-#endif //_findline_Header
+#endif

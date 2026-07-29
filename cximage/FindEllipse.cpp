@@ -122,6 +122,92 @@ bool HasSufficientEllipseAngularCoverage(
 
     return occupied_count >= 4;
 }
+
+double EllipseDotProduct(const std::vector<double>& a, const std::vector<double>& b)
+{
+    if (a.size() != b.size()) return 0.0;
+    double sum = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i) sum += a[i] * b[i];
+    return sum;
+}
+
+double EllipseMean(const std::vector<double>& v)
+{
+    if (v.empty()) return 0.0;
+    double sum = 0.0;
+    for (double x : v) sum += x;
+    return sum / static_cast<double>(v.size());
+}
+
+double EllipseCalculateNCC(const std::vector<double>& a, const std::vector<double>& b)
+{
+    if (a.empty() || b.empty()) return 0.0;
+    std::size_t n = std::min(a.size(), b.size());
+    if (n < 2) return 0.0;
+
+    std::vector<double> a_aligned(a.begin(), a.begin() + n);
+    std::vector<double> b_aligned(b.begin(), b.begin() + n);
+
+    double mean_a = EllipseMean(a_aligned);
+    double mean_b = EllipseMean(b_aligned);
+
+    std::vector<double> a_centered(n), b_centered(n);
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        a_centered[i] = a_aligned[i] - mean_a;
+        b_centered[i] = b_aligned[i] - mean_b;
+    }
+
+    double numerator = EllipseDotProduct(a_centered, b_centered);
+    double denom_a = std::sqrt(EllipseDotProduct(a_centered, a_centered));
+    double denom_b = std::sqrt(EllipseDotProduct(b_centered, b_centered));
+
+    if (denom_a < 1e-8 || denom_b < 1e-8) return 0.0;
+    double ncc = numerator / (denom_a * denom_b);
+    return std::max(-1.0, std::min(1.0, ncc));
+}
+
+std::vector<double> ExtractEllipseProfileAt(const cv::Mat& gray,
+                                             double cx, double cy,
+                                             double angle_deg,
+                                             double radius_x, double radius_y,
+                                             int half_width)
+{
+    std::vector<double> profile;
+    double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+    double tangent_x = -radius_x * std::sin(angle_rad);
+    double tangent_y = radius_y * std::cos(angle_rad);
+    double tangent_len = std::sqrt(tangent_x * tangent_x + tangent_y * tangent_y);
+    if (tangent_len < 1e-8)
+    {
+        profile.push_back(0.0);
+        return profile;
+    }
+    tangent_x /= tangent_len;
+    tangent_y /= tangent_len;
+
+    int w = gray.cols;
+    int h = gray.rows;
+
+    for (int offset = -half_width; offset <= half_width; ++offset)
+    {
+        double px = cx + tangent_x * offset;
+        double py = cy + tangent_y * offset;
+
+        int ix = static_cast<int>(std::lround(px));
+        int iy = static_cast<int>(std::lround(py));
+
+        if (ix >= 0 && ix < w && iy >= 0 && iy < h)
+        {
+            profile.push_back(static_cast<double>(gray.at<uchar>(iy, ix)));
+        }
+        else
+        {
+            profile.push_back(0.0);
+        }
+    }
+    return profile;
+}
 }
  
  
@@ -1342,6 +1428,18 @@ void FindEllipse::measure(void* pimage)
     LogFindellipseMeasureProbe("measure_wrapper", "running", "Findellipse measure received Image pointer.");
     Measure(*pgetimage);
 }
+void FindEllipse::measureRobust(void* pimage)
+{
+    SetCxCrashBreadcrumb("FindEllipse::measureRobust:void_ptr_enter");
+    Image* pgetimage = (Image*)pimage;
+    if (pgetimage == nullptr)
+    {
+        m_measure_failure_stage = "input_image_null";
+        m_measure_failure_reason = "Findellipse measureRobust received a null Image pointer.";
+        return;
+    }
+    MeasureRobust(*pgetimage);
+}
 void FindEllipse::shapesetroi(void* pshape)
 {
     if (pshape == nullptr)
@@ -1549,5 +1647,438 @@ void FindEllipse::PublishDisplayShapes(
             false,
             true,
             std::move(fitEllipse));
+    }
+}
+
+void FindEllipse::MeasureRobust(Image& image)
+{
+    // [DIAG] Log key algorithm parameters at MeasureRobust entry
+    std::cout << "[DIAG] FindEllipse::MeasureRobust entry: threshold=" << m_iThreshold
+              << " method=" << m_iMethod
+              << " linegap=" << m_iSelectPointGap
+              << " gamma=" << m_igamarate
+              << std::endl;
+
+    m_ellipse_edge_band_candidates.clear();
+    m_ellipse_fit_candidate_sequences.clear();
+    m_ellipse_best_sequence_index = -1;
+    m_ellipse_feature_graph = EllipseFeatureGraph();
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            image.getWidth(),
+            image.getHeight()))
+    {
+        LogFindellipseMeasureProbe("robust_measure", "failed", "EnsureAlgorithmRuntimeResources failed");
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
+    {
+        LogFindellipseMeasureProbe("robust_measure", "failed", "backimage unavailable");
+        return;
+    }
+
+    {
+        const int isize = ClampSizeToInt(m_lines.size());
+        if (isize <= 0)
+        {
+            return;
+        }
+
+        int ilineslen = 0;
+        if (isize > 0)
+            ilineslen = m_lines[0].getlinesize();
+
+        if (ilineslen <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < isize; i++)
+        {
+            m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
+        }
+
+        g_pbackimage->setroi(0, 0, ilineslen, isize);
+        g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+    }
+
+    CollectEllipseEdgeBandsRobust(image);
+
+    if (m_ellipse_edge_band_candidates.empty())
+    {
+        LogFindellipseMeasureProbe("robust_measure", "no_candidates", "no edge bands found");
+        return;
+    }
+
+    BuildEllipseFeatureGraph();
+
+    if (m_ellipse_feature_graph.nodes.empty())
+    {
+        LogFindellipseMeasureProbe("robust_measure", "no_graph", "feature graph empty");
+        return;
+    }
+
+    FindEllipseComponentsInGraph();
+
+    SelectBestEllipseSequence();
+
+    if (m_ellipse_best_sequence_index < 0 ||
+        m_ellipse_best_sequence_index >= static_cast<int>(m_ellipse_fit_candidate_sequences.size()))
+    {
+        LogFindellipseMeasureProbe("robust_measure", "no_sequence", "no valid sequence selected");
+        return;
+    }
+
+    ConvertEllipseSequenceToMeasurePoints(m_ellipse_best_sequence_index);
+
+    LogFindellipseMeasureProbe("robust_measure", "success",
+        "robust measurement completed with " +
+        std::to_string(m_ellipse_fit_candidate_sequences[m_ellipse_best_sequence_index].node_count) +
+        " points");
+}
+
+void FindEllipse::CollectEllipseEdgeBandsRobust(Image& image)
+{
+    m_ellipse_edge_band_candidates.clear();
+
+    if (g_pbackimage == nullptr || g_pbackimage->getmat().empty())
+        return;
+
+    cv::Mat gray;
+    cv::Mat& img_mat = image.getmat();
+    if (img_mat.channels() == 1)
+        gray = img_mat.clone();
+    else if (img_mat.channels() == 3)
+        cv::cvtColor(img_mat, gray, cv::COLOR_BGR2GRAY);
+    else
+        gray = img_mat;
+
+    cv::Mat binary = g_pbackimage->getmat();
+
+    int w = binary.cols;
+    int h = binary.rows;
+
+    if (w <= 0 || h <= 0)
+        return;
+
+    int half_width = m_igap;
+    if (half_width < 1) half_width = 3;
+
+    for (int line_idx = 0; line_idx < static_cast<int>(m_lines.size()); ++line_idx)
+    {
+        auto& line = m_lines[line_idx];
+        int candidate_index = 0;
+        int line_size = line.getlinesize();
+
+        bool in_foreground = false;
+        int seg_start = -1;
+        int seg_end = -1;
+
+        for (int pt_idx = 0; pt_idx < line_size; ++pt_idx)
+        {
+            gp_Pnt pt = line.getlinepoint(pt_idx);
+            int ix = static_cast<int>(std::lround(pt.X()));
+            int iy = static_cast<int>(std::lround(pt.Y()));
+
+            if (ix < 0 || ix >= w || iy < 0 || iy >= h)
+                continue;
+
+            bool is_foreground = binary.at<uchar>(iy, ix) > 0;
+
+            if (is_foreground && !in_foreground)
+            {
+                in_foreground = true;
+                seg_start = pt_idx;
+            }
+            else if (!is_foreground && in_foreground)
+            {
+                in_foreground = false;
+                seg_end = pt_idx;
+
+                int seg_len = seg_end - seg_start;
+                if (seg_len >= 2)
+                {
+                    int seg_center = (seg_start + seg_end) / 2;
+                    gp_Pnt center_pt = line.getlinepoint(seg_center);
+
+                    EllipseEdgeBandCandidate candidate;
+                    candidate.scan_index = line_idx;
+                    candidate.candidate_index = candidate_index++;
+                    candidate.start_param = seg_start;
+                    candidate.end_param = seg_end;
+                    candidate.center_param = seg_center;
+                    candidate.x = center_pt.X();
+                    candidate.y = center_pt.Y();
+                    candidate.arc_length = static_cast<double>(seg_len);
+                    candidate.response_strength = static_cast<double>(seg_len);
+                    candidate.polarity = 1.0;
+                    candidate.edge_rank = seg_len >= 5 ? 0 : (seg_len >= 3 ? 1 : 2);
+                    candidate.valid = true;
+
+                    int denom = line_size > 1 ? line_size : 1;
+                    double angle = static_cast<double>(seg_center) * 360.0 / static_cast<double>(denom);
+                    candidate.profile = ExtractEllipseProfileAt(
+                        gray, candidate.x, candidate.y,
+                        angle,
+                        1.0, 1.0, half_width);
+
+                    if (candidate.profile.size() >= 5)
+                    {
+                        m_ellipse_edge_band_candidates.push_back(candidate);
+                    }
+                }
+            }
+        }
+
+        if (in_foreground)
+        {
+            seg_end = line_size;
+            int seg_len = seg_end - seg_start;
+            if (seg_len >= 2)
+            {
+                int seg_center = (seg_start + seg_end) / 2;
+                gp_Pnt center_pt = line.getlinepoint(seg_center);
+
+                EllipseEdgeBandCandidate candidate;
+                candidate.scan_index = line_idx;
+                candidate.candidate_index = candidate_index++;
+                candidate.start_param = seg_start;
+                candidate.end_param = seg_end;
+                candidate.center_param = seg_center;
+                candidate.x = center_pt.X();
+                candidate.y = center_pt.Y();
+                candidate.arc_length = static_cast<double>(seg_len);
+                candidate.response_strength = static_cast<double>(seg_len);
+                candidate.polarity = 1.0;
+                candidate.edge_rank = 0;
+                candidate.valid = true;
+
+                int denom = line_size > 1 ? line_size : 1;
+                double angle = static_cast<double>(seg_center) * 360.0 / static_cast<double>(denom);
+                candidate.profile = ExtractEllipseProfileAt(
+                    gray, candidate.x, candidate.y,
+                    angle,
+                    1.0, 1.0, half_width);
+
+                if (candidate.profile.size() >= 5)
+                {
+                    m_ellipse_edge_band_candidates.push_back(candidate);
+                }
+            }
+        }
+    }
+}
+
+void FindEllipse::BuildEllipseFeatureGraph()
+{
+    m_ellipse_feature_graph = EllipseFeatureGraph();
+
+    for (std::size_t i = 0; i < m_ellipse_edge_band_candidates.size(); ++i)
+    {
+        EllipseFeatureNode node;
+        node.id = static_cast<int>(i);
+        node.candidate = m_ellipse_edge_band_candidates[i];
+        m_ellipse_feature_graph.nodes.push_back(node);
+    }
+
+    if (m_ellipse_feature_graph.nodes.size() < 2)
+        return;
+
+    double T_space = 15.0;
+    double T_width = 10.0;
+    double T_ncc = 0.75;
+
+    for (std::size_t i = 0; i < m_ellipse_feature_graph.nodes.size(); ++i)
+    {
+        for (std::size_t j = i + 1; j < m_ellipse_feature_graph.nodes.size(); ++j)
+        {
+            const auto& node_a = m_ellipse_feature_graph.nodes[i];
+            const auto& node_b = m_ellipse_feature_graph.nodes[j];
+
+            int scan_diff = std::abs(node_a.candidate.scan_index - node_b.candidate.scan_index);
+            if (scan_diff != 1)
+                continue;
+
+            double dx = node_a.candidate.x - node_b.candidate.x;
+            double dy = node_a.candidate.y - node_b.candidate.y;
+            double spatial_dist = std::sqrt(dx * dx + dy * dy);
+
+            if (spatial_dist > T_space)
+                continue;
+
+            double width_diff = std::abs(node_a.candidate.arc_length - node_b.candidate.arc_length);
+            if (width_diff > T_width)
+                continue;
+
+            if (node_a.candidate.polarity != node_b.candidate.polarity)
+                continue;
+
+            double ncc = EllipseCalculateNCC(node_a.candidate.profile, node_b.candidate.profile);
+            if (ncc <= T_ncc)
+                continue;
+
+            EllipseFeatureEdge edge;
+            edge.node_a = static_cast<int>(i);
+            edge.node_b = static_cast<int>(j);
+            edge.ncc_score = ncc;
+            edge.angular_distance = spatial_dist;
+            edge.valid = true;
+
+            m_ellipse_feature_graph.edges.push_back(edge);
+            m_ellipse_feature_graph.nodes[i].neighbors.push_back(static_cast<int>(j));
+            m_ellipse_feature_graph.nodes[j].neighbors.push_back(static_cast<int>(i));
+        }
+    }
+}
+
+void FindEllipse::FindEllipseComponentsInGraph()
+{
+    m_ellipse_feature_graph.next_component_id = 0;
+
+    for (auto& node : m_ellipse_feature_graph.nodes)
+    {
+        node.visited = false;
+        node.component_id = -1;
+    }
+
+    for (std::size_t i = 0; i < m_ellipse_feature_graph.nodes.size(); ++i)
+    {
+        if (m_ellipse_feature_graph.nodes[i].visited)
+            continue;
+
+        int component_id = m_ellipse_feature_graph.next_component_id++;
+        std::vector<int> stack;
+        stack.push_back(static_cast<int>(i));
+
+        while (!stack.empty())
+        {
+            int current = stack.back();
+            stack.pop_back();
+
+            if (m_ellipse_feature_graph.nodes[current].visited)
+                continue;
+
+            m_ellipse_feature_graph.nodes[current].visited = true;
+            m_ellipse_feature_graph.nodes[current].component_id = component_id;
+
+            for (int neighbor : m_ellipse_feature_graph.nodes[current].neighbors)
+            {
+                if (!m_ellipse_feature_graph.nodes[neighbor].visited)
+                {
+                    stack.push_back(neighbor);
+                }
+            }
+        }
+    }
+}
+
+void FindEllipse::SelectBestEllipseSequence()
+{
+    m_ellipse_fit_candidate_sequences.clear();
+
+    if (m_ellipse_feature_graph.nodes.empty())
+        return;
+
+    int max_component_id = m_ellipse_feature_graph.next_component_id;
+    if (max_component_id <= 0)
+        return;
+
+    std::vector<std::vector<int>> component_nodes(max_component_id);
+
+    for (const auto& node : m_ellipse_feature_graph.nodes)
+    {
+        if (node.component_id >= 0 && node.component_id < max_component_id)
+        {
+            component_nodes[node.component_id].push_back(node.id);
+        }
+    }
+
+    for (const auto& node_ids : component_nodes)
+    {
+        if (node_ids.size() < 2)
+            continue;
+
+        EllipseFitCandidateSequence seq;
+
+        std::vector<const EllipseFeatureNode*> sorted_nodes;
+        for (int id : node_ids)
+        {
+            sorted_nodes.push_back(&m_ellipse_feature_graph.nodes[id]);
+        }
+
+        std::sort(sorted_nodes.begin(), sorted_nodes.end(),
+            [](const EllipseFeatureNode* a, const EllipseFeatureNode* b)
+            {
+                return a->candidate.scan_index < b->candidate.scan_index;
+            });
+
+        double total_ncc = 0.0;
+        double total_response = 0.0;
+
+        for (const auto* node : sorted_nodes)
+        {
+            cv::Point2d pt(node->candidate.x, node->candidate.y);
+            seq.points.push_back(pt);
+            total_response += node->candidate.response_strength;
+        }
+
+        int edge_count = 0;
+        for (const auto& edge : m_ellipse_feature_graph.edges)
+        {
+            if (edge.valid &&
+                std::find(node_ids.begin(), node_ids.end(), edge.node_a) != node_ids.end() &&
+                std::find(node_ids.begin(), node_ids.end(), edge.node_b) != node_ids.end())
+            {
+                total_ncc += edge.ncc_score;
+                edge_count++;
+            }
+        }
+
+        seq.node_count = static_cast<int>(sorted_nodes.size());
+        seq.avg_ncc = edge_count > 0 ? total_ncc / edge_count : 0.0;
+        seq.total_response = total_response;
+        seq.score = seq.node_count * 100.0 + seq.avg_ncc * 50.0 + total_response;
+        seq.valid = true;
+
+        m_ellipse_fit_candidate_sequences.push_back(seq);
+    }
+
+    std::sort(m_ellipse_fit_candidate_sequences.begin(), m_ellipse_fit_candidate_sequences.end(),
+        [](const EllipseFitCandidateSequence& a, const EllipseFitCandidateSequence& b)
+        {
+            return a.score > b.score;
+        });
+
+    if (m_ellipse_fit_candidate_sequences.size() > 5)
+    {
+        m_ellipse_fit_candidate_sequences.resize(5);
+    }
+
+    if (!m_ellipse_fit_candidate_sequences.empty())
+    {
+        m_ellipse_best_sequence_index = 0;
+    }
+    else
+    {
+        m_ellipse_best_sequence_index = -1;
+    }
+}
+
+void FindEllipse::ConvertEllipseSequenceToMeasurePoints(int sequence_index)
+{
+    if (sequence_index < 0 ||
+        sequence_index >= static_cast<int>(m_ellipse_fit_candidate_sequences.size()))
+        return;
+
+    const auto& seq = m_ellipse_fit_candidate_sequences[sequence_index];
+    m_measurepoints.clear();
+
+    for (const auto& pt : seq.points)
+    {
+        m_measurepoints.addpoint(gp_Pnt(pt.x, pt.y, 0.0));
     }
 }

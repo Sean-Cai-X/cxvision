@@ -557,12 +557,15 @@ void SeedDefaultManualGlobals(
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos ||
         scriptPath.find("FindCircle") != std::string::npos;
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos ||
         scriptPath.find("FindLine") != std::string::npos;
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos ||
         scriptPath.find("FindEllipse") != std::string::npos;
     const bool isRectScript =
         scriptPath.find("find_rect") != std::string::npos ||
@@ -707,7 +710,7 @@ void ViewController::initManualStateTestConsole()
     m_manualTest.runtime_current_status = "PENDING";
     m_manualTest.show_image = true;
     m_manualTest.case_directory = ResolveCaseDirectory().string();
-    m_manualTest.catalog_path = "cxparser/cxscript/module/cximage/cxscript_catalog.cxsc";
+    m_manualTest.catalog_path = "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
     m_manualTest.manifest_path = "cxparser/cxscript/module/cximage/image_manifest.cxsc";
 }
 

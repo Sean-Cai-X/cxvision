@@ -75,9 +75,25 @@ public:
     void setfilteredge(int iw);
     void setbrow(int iborw);
     void setdistance(int idist);
+    void setrect_script(int ih, int iw, int iy, int ix)
+    {
+        setrect(ix, iy, iw, ih);
+    }
     void sethsogap(int ihgap, int isgap, int iogap);
+    void sethsogap_script(int iogap, int isgap, int ihgap)
+    {
+        sethsogap(ihgap, isgap, iogap);
+    }
     void setminmaxarea(int imin, int imax);
+    void setminmaxarea_script(int imax, int imin)
+    {
+        setminmaxarea(imin, imax);
+    }
     void setminmaxwh(int iminw, int imaxw, int iminh, int imaxh);
+    void setminmaxwh_script(int imaxh, int iminh, int imaxw, int iminw)
+    {
+        setminmaxwh(iminw, imaxw, iminh, imaxh);
+    }
     int getresultcentx(int inum);
     int getresultcenty(int inum);
     int getresultx(int inum);
@@ -92,6 +108,7 @@ public:
     int getdebugmaxcomponentarea();
     int getdebugmaxcomponentw();
     int getdebugmaxcomponenth();
+    const std::string& getdebugalgorithmbranch() const;
     void setsearchtype(int itype);
     void setoffset(int ix0, int ix1, int iy0, int iy1);
     RectsShape& getresultrects() { return m_rectresults; }
@@ -193,6 +210,7 @@ private:
     int m_debug_max_component_area;
     int m_debug_max_component_w;
     int m_debug_max_component_h;
+    std::string m_debug_algorithm_branch;
     bool RefreshAlgorithmRuntimeResources(int image_width, int image_height);
     void FinalizeRegionGrowthDebugCounters();
     void ObserveDebugComponent(int area, int width, int height);

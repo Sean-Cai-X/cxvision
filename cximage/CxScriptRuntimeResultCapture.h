@@ -31,6 +31,20 @@ struct CxScriptToolResultCapture
     int elapsed_ms = 0;
     int scan_line_count = 0;
     int sample_count = 0;
+    int tool_method = 0;
+    int tool_threshold = 0;
+    int tool_wgap = 0;
+    int tool_hgap = 0;
+    int tool_linegap = 0;
+
+    int scan_rows_examined = 0;
+    int scan_rows_with_foreground = 0;
+    int scan_runs_total = 0;
+    int scan_runs_within_length_limit = 0;
+    int scan_runs_over_length_limit = 0;
+    int scan_runs_rejected_by_selection = 0;
+    int scan_runs_rejected_near_endpoint = 0;
+    int scan_points_emitted = 0;
 
     int valid_points_count = 0;
     bool has_fit_line = false;
@@ -127,6 +141,21 @@ struct CxScriptToolResultCapture
     int object_filter_borw = 0;
     int object_filter_min = 0;
     int object_filter_max = 0;
+    int object_component_count = 0;
+    int object_component_accepted_count = 0;
+    int object_component_rejected_count = 0;
+    int object_component_max_area = 0;
+    int object_component_max_width = 0;
+    int object_component_max_height = 0;
+    int object_foreground_before = 0;
+    int object_foreground_after = 0;
+    int object_white_component_count = 0;
+    int object_white_accepted_count = 0;
+    int object_white_rejected_count = 0;
+    int object_black_component_count = 0;
+    int object_black_accepted_count = 0;
+    int object_black_rejected_count = 0;
+    std::string object_algorithm_branch;
     int fit_filter_input_count = 0;
     int fit_filter_kept_count = 0;
     int fit_filter_rejected_count = 0;

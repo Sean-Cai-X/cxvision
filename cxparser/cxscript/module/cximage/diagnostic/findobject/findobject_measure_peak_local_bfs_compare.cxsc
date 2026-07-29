@@ -11,14 +11,17 @@ int y1 = global_roi_y1;
 int width = x1 - x0;
 int height = y1 - y0;
 
-m_object.setrect(height, width, y0, x0);
+m_object.setrect(x0, y0, width, height);
 m_object.setsearchtype(global_method);
 m_object.setdistance(global_gap);
-m_object.setbrow(global_filterprofile);
-m_object.setminmax(999999, global_threshold);
-m_object.setminmaxwh(99999, 0, 99999, 0);
+m_object.setfilteredge(0);
+// This diagnostic intentionally accepts both polarities and a broad size
+// range.  It measures candidate extraction, not the product filter profile.
+m_object.setbrow(3);
+m_object.setminmax(1, 999999);
+m_object.setminmaxwh(1, 999999, 1, 999999);
 
-m_object.measurexbfs(&m_image);
+m_object.measurepeakcomponents(&m_image);
 global_match_count = m_object.getresultobjsnum();
 global_candidate_count = m_object.getdebugcomponentcount();
 global_rendered_result_count = m_object.getdebugacceptedcount();

@@ -217,6 +217,18 @@ struct FindLineMeasureInputDebug
     int original_scan_h_length = 0;
     int original_process_width = 0;
 
+    // Original Measure() scan-run extraction evidence.  These counters
+    // deliberately describe the legacy scan loop as executed; they do not
+    // change its threshold, polarity, selection or fitting behaviour.
+    int scan_rows_examined = 0;
+    int scan_rows_with_foreground = 0;
+    int scan_runs_total = 0;
+    int scan_runs_within_length_limit = 0;
+    int scan_runs_over_length_limit = 0;
+    int scan_runs_rejected_by_selection = 0;
+    int scan_runs_rejected_near_endpoint = 0;
+    int scan_points_emitted = 0;
+
     bool backimage_ready = false;
     bool findobject_ready = false;
 
@@ -234,10 +246,13 @@ struct FindLineMeasureInputDebug
 
     bool findobject_measure_called = false;
     bool findobject_measure_skipped = false;
+    std::string findobject_algorithm_branch;
 
     int binary_foreground_pixels = 0;
     int binary_roi_width = 0;
     int binary_roi_height = 0;
+    int findobject_foreground_before = 0;
+    int findobject_foreground_after = 0;
 
     std::string result_empty_reason;
 
@@ -366,8 +381,17 @@ public:
     void setpattern(PointsShape& apattern) { m_modelpoints = apattern; }
 
     void SetWHgap(int wgap = 2, int hgap = 2);
+    // CxScript class callbacks receive numeric arguments in parser-stack
+    // order.  Keep the script spelling SetWHgap(wgap, hgap) stable while
+    // adapting that order at the binding boundary; native callers continue
+    // to use SetWHgap(wgap, hgap) directly.
+    void setwhgap_script(int hgap, int wgap)
+    {
+        SetWHgap(wgap, hgap);
+    }
 
     void measure(void* pimage);
+    void measureRobust(void* pimage);
     void pyrimage(void* pimage);
 
 

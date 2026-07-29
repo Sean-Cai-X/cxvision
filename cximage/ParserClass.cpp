@@ -408,6 +408,7 @@ namespace mu
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Setgap", &FindCircle::Setgap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Show", &FindCircle::setshow);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "measure", &FindCircle::measure);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "measureRobust", &FindCircle::measureRobust);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setlinegap", &FindCircle::setlinegap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setmethod", &FindCircle::setmethod);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setthre", &FindCircle::setthre);
@@ -505,6 +506,7 @@ namespace mu
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod", &FindEllipse::setmethod);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "setthre", &FindEllipse::setthre);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "measure", &FindEllipse::measure);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "measureRobust", &FindEllipse::measureRobust);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "fitellipse", &FindEllipse::fitellipse);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultcentx", &FindEllipse::getresultcentx);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "getresultcenty", &FindEllipse::getresultcenty);
@@ -550,9 +552,10 @@ namespace mu
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "translate", &FindLine::translate);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "Show", &FindLine::setshow);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "clear", &FindLine::clear);
-            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setwhgap", &FindLine::SetWHgap);
-            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "SetWHgap", &FindLine::SetWHgap);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setwhgap", &FindLine::setwhgap_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "SetWHgap", &FindLine::setwhgap_script);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "measure", &FindLine::measure);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "measureRobust", &FindLine::measureRobust);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinesample", &FindLine::setlinesamplerate);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap", &FindLine::setlinegap);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod", &FindLine::setmethod);
@@ -585,24 +588,29 @@ namespace mu
 
             FindObject* pfobj = nullptr;
             m_parser.DefineClass("FindObject", pfobj);
-            m_parser.DefineClassFun("FindObject", pfobj, "setrect", &FindObject::setrect);
+            m_parser.DefineClassFun("FindObject", pfobj, "setrect", &FindObject::setrect_script);
             m_parser.DefineClassFun("FindObject", pfobj, "measure", &FindObject::measure);
             m_parser.DefineClassFun("FindObject", pfobj, "measurefast", &FindObject::measurefast);
             m_parser.DefineClassFun("FindObject", pfobj, "measurecc", &FindObject::measurecc);
             m_parser.DefineClassFun("FindObject", pfobj, "measurexbfs", &FindObject::measurexbfs);
+            // Truthful public name for the current diagnostic implementation:
+            // it evaluates peak-oriented component candidates, but does not
+            // yet partition peaks and execute a local BFS.
+            m_parser.DefineClassFun("FindObject", pfobj, "measurepeakcomponents", &FindObject::measurexbfs);
             m_parser.DefineClassFun("FindObject", pfobj, "Show", &FindObject::setshow);
             m_parser.DefineClassFun("FindObject", pfobj, "measurex", &FindObject::measurex);
             m_parser.DefineClassFun("FindObject", pfobj, "measurexfast", &FindObject::measurexfast);
             m_parser.DefineClassFun("FindObject", pfobj, "measurexcc", &FindObject::measurexcc);
             m_parser.DefineClassFun("FindObject", pfobj, "measurexpeakbfs", &FindObject::measurexpeakbfs);
-            m_parser.DefineClassFun("FindObject", pfobj, "sethsogap", &FindObject::sethsogap);
-            m_parser.DefineClassFun("FindObject", pfobj, "setminmax", &FindObject::setminmaxarea);
-            m_parser.DefineClassFun("FindObject", pfobj, "setminmaxwh", &FindObject::setminmaxwh);
+            m_parser.DefineClassFun("FindObject", pfobj, "sethsogap", &FindObject::sethsogap_script);
+            m_parser.DefineClassFun("FindObject", pfobj, "setminmax", &FindObject::setminmaxarea_script);
+            m_parser.DefineClassFun("FindObject", pfobj, "setminmaxwh", &FindObject::setminmaxwh_script);
             m_parser.DefineClassFun("FindObject", pfobj, "setbrow", &FindObject::setbrow);
             m_parser.DefineClassFun("FindObject", pfobj, "setdistance", &FindObject::setdistance);
             m_parser.DefineClassFun("FindObject", pfobj, "setsearchtype", &FindObject::setsearchtype);
             m_parser.DefineClassFun("FindObject", pfobj, "edgeimage", &FindObject::edgeimage);
             m_parser.DefineClassFun("FindObject", pfobj, "setedgeoi", &FindObject::setedgeoi);
+            m_parser.DefineClassFun("FindObject", pfobj, "setfilteredge", &FindObject::setfilteredge);
             m_parser.DefineClassFun("FindObject", pfobj, "setoffset", &FindObject::setoffset);
             m_parser.DefineClassFun("FindObject", pfobj, "getresultcentx", &FindObject::getresultcentx);
             m_parser.DefineClassFun("FindObject", pfobj, "getresultcenty", &FindObject::getresultcenty);

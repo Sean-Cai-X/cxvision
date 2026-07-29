@@ -228,6 +228,8 @@ bool RenderCxShapeOverlay(
                 DrawRoiEllipse(output, shape, result_color);
             else if (shape.shape_kind == "LineShape")
                 DrawFitLine(output, shape, result_color);
+            else if (shape.shape_kind == "RectShape")
+                DrawRoiRectangle(output, shape, result_color);
         }
         else if (shape.semantic_role == "learn_roi" || shape.semantic_role == "search_roi")
         {

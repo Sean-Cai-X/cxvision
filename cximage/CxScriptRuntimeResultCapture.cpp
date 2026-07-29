@@ -146,11 +146,46 @@ bool CaptureFindLineResult(
     output.has_fit_line = tool.hasfitresult();
     output.avgdist = tool.getavgdist();
     const FindLineMeasureInputDebug& debug = tool.lastmeasureinputdebug();
+    output.tool_method = debug.method;
+    output.tool_threshold = debug.threshold;
+    output.tool_wgap = debug.wgap;
+    output.tool_hgap = debug.hgap;
+    output.tool_linegap = debug.linegap;
+    output.scan_rows_examined = debug.scan_rows_examined;
+    output.scan_rows_with_foreground = debug.scan_rows_with_foreground;
+    output.scan_runs_total = debug.scan_runs_total;
+    output.scan_runs_within_length_limit = debug.scan_runs_within_length_limit;
+    output.scan_runs_over_length_limit = debug.scan_runs_over_length_limit;
+    output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
+    output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
+    output.scan_points_emitted = debug.scan_points_emitted;
     output.object_prefilter_requested = (debug.objfilterset & 0x01) != 0;
     output.object_prefilter_applied = debug.findobject_measure_called;
     output.object_filter_borw = debug.effective_filter_borw;
     output.object_filter_min = debug.effective_filter_min;
     output.object_filter_max = debug.effective_filter_max;
+    output.object_component_count = debug.findobject_component_total;
+    output.object_component_accepted_count = debug.findobject_component_accepted;
+    output.object_component_rejected_count =
+        debug.findobject_component_rejected_by_min +
+        debug.findobject_component_rejected_by_max +
+        debug.findobject_component_rejected_by_borw;
+    output.object_component_max_area = debug.findobject_area_max_observed;
+    // FindLine currently records component-area distribution only.  Keep
+    // unavailable width/height explicit as zero rather than inventing values.
+    output.object_component_max_width = 0;
+    output.object_component_max_height = 0;
+    output.object_foreground_before = debug.findobject_foreground_before;
+    output.object_foreground_after = debug.findobject_foreground_after;
+    output.object_white_component_count = debug.cc_white.component_total;
+    output.object_white_accepted_count = debug.cc_white.accepted_by_area;
+    output.object_white_rejected_count =
+        debug.cc_white.rejected_by_min + debug.cc_white.rejected_by_max;
+    output.object_black_component_count = debug.cc_black.component_total;
+    output.object_black_accepted_count = debug.cc_black.accepted_by_area;
+    output.object_black_rejected_count =
+        debug.cc_black.rejected_by_min + debug.cc_black.rejected_by_max;
+    output.object_algorithm_branch = debug.findobject_algorithm_branch;
     output.budget_exceeded = tool.budgetexceeded();
     output.failure_stage = output.has_fit_line
         ? std::string()
@@ -360,6 +395,13 @@ bool CaptureFindObjectResult(
     output.result_rect_count = tool.getresultobjsnum();
     output.has_result_rect = output.result_rect_count > 0;
     output.valid_points_count = output.result_rect_count;
+    output.object_component_count = tool.getdebugcomponentcount();
+    output.object_component_accepted_count = tool.getdebugacceptedcount();
+    output.object_component_rejected_count = tool.getdebugrejectedcount();
+    output.object_component_max_area = tool.getdebugmaxcomponentarea();
+    output.object_component_max_width = tool.getdebugmaxcomponentw();
+    output.object_component_max_height = tool.getdebugmaxcomponenth();
+    output.object_algorithm_branch = tool.getdebugalgorithmbranch();
     output.failure_stage = output.has_result_rect ? std::string() : "result_rect";
     if (!output.has_result_rect)
         output.reason = "FindObject result unavailable";
@@ -372,6 +414,32 @@ bool CaptureFindObjectResult(
         output.top1_rect_w = static_cast<int>(first_rect.Width());
         output.top1_rect_h = static_cast<int>(first_rect.Height());
     }
+    {
+        CxShapeElementSnapshot roi_shape;
+        roi_shape.stable_ref = object_name + ".roi";
+        roi_shape.owner_type = "FindObject";
+        roi_shape.owner_ref = object_name;
+        roi_shape.semantic_role = "roi";
+        roi_shape.shape_kind = "RectShape";
+        roi_shape.editable = false;
+        roi_shape.result_element = false;
+
+        gp_Rectangle roi = tool.rect();
+        const int x = static_cast<int>(roi.TopLeft().X());
+        const int y = static_cast<int>(roi.TopLeft().Y());
+        const int w = static_cast<int>(roi.Width());
+        const int h = static_cast<int>(roi.Height());
+        roi_shape.center_x = x + w * 0.5;
+        roi_shape.center_y = y + h * 0.5;
+        roi_shape.points = {
+            static_cast<double>(x), static_cast<double>(y),
+            static_cast<double>(x + w), static_cast<double>(y),
+            static_cast<double>(x + w), static_cast<double>(y + h),
+            static_cast<double>(x), static_cast<double>(y + h)
+        };
+        roi_shape.closed = true;
+        output.shapes.push_back(roi_shape);
+    }
 
     for (int i = 0; i < output.result_rect_count; ++i)
     {
@@ -380,7 +448,7 @@ bool CaptureFindObjectResult(
         shape.owner_type = "FindObject";
         shape.owner_ref = object_name;
         shape.semantic_role = "result";
-        shape.shape_kind = "rect";
+        shape.shape_kind = "RectShape";
         shape.editable = false;
         shape.result_element = true;
 
@@ -521,6 +589,19 @@ static void MergeToolCapture(
     CxScriptExecutionCapture& capture)
 {
     capture.valid_points_count += tool.valid_points_count;
+    capture.tool_method = tool.tool_method;
+    capture.tool_threshold = tool.tool_threshold;
+    capture.tool_wgap = tool.tool_wgap;
+    capture.tool_hgap = tool.tool_hgap;
+    capture.tool_linegap = tool.tool_linegap;
+    capture.scan_rows_examined = tool.scan_rows_examined;
+    capture.scan_rows_with_foreground = tool.scan_rows_with_foreground;
+    capture.scan_runs_total = tool.scan_runs_total;
+    capture.scan_runs_within_length_limit = tool.scan_runs_within_length_limit;
+    capture.scan_runs_over_length_limit = tool.scan_runs_over_length_limit;
+    capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
+    capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
+    capture.scan_points_emitted = tool.scan_points_emitted;
     capture.has_fit_line = capture.has_fit_line || tool.has_fit_line;
     capture.has_fit_circle = capture.has_fit_circle || tool.has_fit_circle;
     capture.has_fit_ellipse = capture.has_fit_ellipse || tool.has_fit_ellipse;
@@ -616,6 +697,21 @@ static void MergeToolCapture(
     capture.object_filter_borw = tool.object_filter_borw;
     capture.object_filter_min = tool.object_filter_min;
     capture.object_filter_max = tool.object_filter_max;
+    capture.object_component_count = tool.object_component_count;
+    capture.object_component_accepted_count = tool.object_component_accepted_count;
+    capture.object_component_rejected_count = tool.object_component_rejected_count;
+    capture.object_component_max_area = tool.object_component_max_area;
+    capture.object_component_max_width = tool.object_component_max_width;
+    capture.object_component_max_height = tool.object_component_max_height;
+    capture.object_foreground_before = tool.object_foreground_before;
+    capture.object_foreground_after = tool.object_foreground_after;
+    capture.object_white_component_count = tool.object_white_component_count;
+    capture.object_white_accepted_count = tool.object_white_accepted_count;
+    capture.object_white_rejected_count = tool.object_white_rejected_count;
+    capture.object_black_component_count = tool.object_black_component_count;
+    capture.object_black_accepted_count = tool.object_black_accepted_count;
+    capture.object_black_rejected_count = tool.object_black_rejected_count;
+    capture.object_algorithm_branch = tool.object_algorithm_branch;
     capture.fit_filter_input_count = tool.fit_filter_input_count;
     capture.fit_filter_kept_count = tool.fit_filter_kept_count;
     capture.fit_filter_rejected_count = tool.fit_filter_rejected_count;

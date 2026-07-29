@@ -18,7 +18,14 @@ m_line.setline(
 
 m_line.setmethod(global_method);
 m_line.setthre(global_threshold);
-m_line.setfilterprofile(global_filterprofile);
 
-m_line.measure(&m_image);
+global_selected_method = global_method;
+global_selected_threshold = global_threshold;
+global_selected_wgap = global_wgap;
+global_selected_hgap = global_hgap;
+global_selected_linegap = global_linegap;
+
+m_line.measureRobust(&m_image);
 m_line.fitline();
+
+global_result_valid = 1;

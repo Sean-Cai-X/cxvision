@@ -62,6 +62,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <initializer_list>
 
 #include <string>
 
@@ -117,24 +118,74 @@ namespace
     return value.empty() ? "(none)" : value.c_str();
   }
 
+  bool evidencePathHasAny(
+      const std::string& scriptPath,
+      std::initializer_list<const char*> tokens)
+  {
+    for (const char* token : tokens)
+    {
+      if (token != nullptr &&
+          scriptPath.find(token) != std::string::npos)
+        return true;
+    }
+    return false;
+  }
+
+  bool evidencePathIsFindCircle(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"find_circle", "findcircle", "FindCircle"});
+  }
+
+  bool evidencePathIsFindLine(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"find_line", "findline", "FindLine"});
+  }
+
+  bool evidencePathIsFindEllipse(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"find_ellipse", "findellipse", "FindEllipse"});
+  }
+
+  bool evidencePathIsFindRect(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"find_rect", "findrect", "FindRect"});
+  }
+
+  bool evidencePathIsFastMatch(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"fastmatch", "FastMatch"});
+  }
+
+  bool evidencePathIsFindSegmentation(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"find_segmentation", "findsegmentation", "FindSegmentation"});
+  }
+
   std::string inferEvidenceToolFromScriptPath(const std::string& scriptPath)
   {
-    if (scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("FindCircle") != std::string::npos)
+    if (evidencePathIsFindCircle(scriptPath))
       return "FindCircle";
-    if (scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("FindLine") != std::string::npos)
+    if (evidencePathIsFindLine(scriptPath))
       return "FindLine";
-    if (scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("FindEllipse") != std::string::npos)
+    if (evidencePathIsFindEllipse(scriptPath))
       return "FindEllipse";
-    if (scriptPath.find("find_rect") != std::string::npos ||
-        scriptPath.find("findrect") != std::string::npos)
+    if (evidencePathIsFindRect(scriptPath))
       return "FindRect";
-    if (scriptPath.find("FastMatch") != std::string::npos)
+    if (evidencePathIsFastMatch(scriptPath))
       return "FastMatch";
-    if (scriptPath.find("find_segmentation") != std::string::npos ||
-        scriptPath.find("findsegmentation") != std::string::npos)
+    if (evidencePathIsFindSegmentation(scriptPath))
       return "FindSegmentation";
     return "";
   }
@@ -361,15 +412,9 @@ namespace
       return it == context.runtime_int_vars.end() ? fallback : it->second;
     };
 
-    const bool isCircleScript =
-        scriptPath.find("find_circle") != std::string::npos ||
-        scriptPath.find("FindCircle") != std::string::npos;
-    const bool isLineScript =
-        scriptPath.find("find_line") != std::string::npos ||
-        scriptPath.find("FindLine") != std::string::npos;
-    const bool isEllipseScript =
-        scriptPath.find("find_ellipse") != std::string::npos ||
-        scriptPath.find("FindEllipse") != std::string::npos;
+    const bool isCircleScript = evidencePathIsFindCircle(scriptPath);
+    const bool isLineScript = evidencePathIsFindLine(scriptPath);
+    const bool isEllipseScript = evidencePathIsFindEllipse(scriptPath);
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -1822,8 +1867,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
                m_manualTest.runtime_int_vars.end();
     };
 
-    if (snapshot.script_path.find("find_circle") != std::string::npos ||
-        snapshot.script_path.find("FindCircle") != std::string::npos)
+    if (evidencePathIsFindCircle(snapshot.script_path))
     {
         if (!hasInt("global_circle_cx") ||
             !hasInt("global_circle_cy") ||
@@ -1842,8 +1886,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("find_line") != std::string::npos ||
-        snapshot.script_path.find("FindLine") != std::string::npos)
+    if (evidencePathIsFindLine(snapshot.script_path))
     {
         if (!hasInt("global_roi_x0") ||
             !hasInt("global_roi_y0") ||
@@ -1864,8 +1907,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
-        snapshot.script_path.find("FindEllipse") != std::string::npos)
+    if (evidencePathIsFindEllipse(snapshot.script_path))
     {
         if (!hasInt("global_ellipse_x0") ||
             !hasInt("global_ellipse_y0") ||
@@ -1884,8 +1926,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("find_rect") != std::string::npos ||
-        snapshot.script_path.find("findrect") != std::string::npos)
+    if (evidencePathIsFindRect(snapshot.script_path))
     {
         if (!hasInt("global_roi_x") ||
             !hasInt("global_roi_y") ||
@@ -1904,8 +1945,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("find_segmentation") != std::string::npos ||
-        snapshot.script_path.find("findsegmentation") != std::string::npos)
+    if (evidencePathIsFindSegmentation(snapshot.script_path))
     {
         if (!hasInt("global_roi_x0") ||
             !hasInt("global_roi_y0") ||
@@ -1920,7 +1960,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
-    if (snapshot.script_path.find("FastMatch") != std::string::npos)
+    if (evidencePathIsFastMatch(snapshot.script_path))
     {
         if (!hasInt("global_learn_roi_x") ||
             !hasInt("global_learn_roi_y") ||
@@ -2424,8 +2464,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
 
     std::vector<std::string> required;
 
-    if (snapshot.script_path.find("find_circle") != std::string::npos ||
-        snapshot.script_path.find("FindCircle") != std::string::npos)
+    if (evidencePathIsFindCircle(snapshot.script_path))
     {
         required = {
             "global_circle_cx",
@@ -2438,8 +2477,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
-    else if (snapshot.script_path.find("find_line") != std::string::npos ||
-             snapshot.script_path.find("FindLine") != std::string::npos)
+    else if (evidencePathIsFindLine(snapshot.script_path))
     {
         required = {
             "global_roi_x0",
@@ -2454,8 +2492,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
-    else if (snapshot.script_path.find("find_ellipse") != std::string::npos ||
-             snapshot.script_path.find("FindEllipse") != std::string::npos)
+    else if (evidencePathIsFindEllipse(snapshot.script_path))
     {
         required = {
             "global_ellipse_x0",
@@ -2468,8 +2505,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
-    else if (snapshot.script_path.find("find_rect") != std::string::npos ||
-             snapshot.script_path.find("findrect") != std::string::npos)
+    else if (evidencePathIsFindRect(snapshot.script_path))
     {
         required = {
             "global_roi_x",
@@ -2482,7 +2518,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
-    else if (snapshot.script_path.find("FastMatch") != std::string::npos)
+    else if (evidencePathIsFastMatch(snapshot.script_path))
     {
         required = {
             "global_learn_roi_x",
@@ -2623,23 +2659,18 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
         return false;
     }
 
-    auto scriptHas = [&](const char* token) -> bool
-    {
-        return snapshot.script_path.find(token) != std::string::npos;
-    };
-
     std::string expectedType;
-    if (scriptHas("find_circle") || scriptHas("FindCircle"))
+    if (evidencePathIsFindCircle(snapshot.script_path))
         expectedType = "FindCircle";
-    else if (scriptHas("find_line") || scriptHas("FindLine"))
+    else if (evidencePathIsFindLine(snapshot.script_path))
         expectedType = "FindLine";
-    else if (scriptHas("find_ellipse") || scriptHas("FindEllipse"))
+    else if (evidencePathIsFindEllipse(snapshot.script_path))
         expectedType = "FindEllipse";
-    else if (scriptHas("find_rect") || scriptHas("findrect"))
+    else if (evidencePathIsFindRect(snapshot.script_path))
         expectedType = "FindRect";
-    else if (scriptHas("FastMatch"))
+    else if (evidencePathIsFastMatch(snapshot.script_path))
         expectedType = "FastMatch";
-    else if (scriptHas("find_segmentation") || scriptHas("findsegmentation"))
+    else if (evidencePathIsFindSegmentation(snapshot.script_path))
         expectedType = "FindSegmentation";
 
     if (expectedType.empty())
@@ -2755,23 +2786,13 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
 {
     reason.clear();
 
-    auto scriptHas = [&](const char* token) -> bool
-    {
-        return snapshot.script_path.find(token) != std::string::npos;
-    };
-
     bool requiresResult =
-        scriptHas("find_circle") ||
-        scriptHas("FindCircle") ||
-        scriptHas("find_line") ||
-        scriptHas("FindLine") ||
-        scriptHas("find_ellipse") ||
-        scriptHas("FindEllipse") ||
-        scriptHas("find_rect") ||
-        scriptHas("findrect") ||
-        scriptHas("find_segmentation") ||
-        scriptHas("findsegmentation") ||
-        scriptHas("FastMatch");
+        evidencePathIsFindCircle(snapshot.script_path) ||
+        evidencePathIsFindLine(snapshot.script_path) ||
+        evidencePathIsFindEllipse(snapshot.script_path) ||
+        evidencePathIsFindRect(snapshot.script_path) ||
+        evidencePathIsFindSegmentation(snapshot.script_path) ||
+        evidencePathIsFastMatch(snapshot.script_path);
 
     if (!requiresResult)
     {
@@ -2835,17 +2856,12 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
                 continue;
 
             const bool isCximageToolScript =
-                thumb.script_path.find("find_line") != std::string::npos ||
-                thumb.script_path.find("FindLine") != std::string::npos ||
-                thumb.script_path.find("find_circle") != std::string::npos ||
-                thumb.script_path.find("FindCircle") != std::string::npos ||
-                thumb.script_path.find("find_ellipse") != std::string::npos ||
-                thumb.script_path.find("FindEllipse") != std::string::npos ||
-                thumb.script_path.find("find_rect") != std::string::npos ||
-                thumb.script_path.find("findrect") != std::string::npos ||
-                thumb.script_path.find("FastMatch") != std::string::npos ||
-                thumb.script_path.find("find_segmentation") != std::string::npos ||
-                thumb.script_path.find("findsegmentation") != std::string::npos;
+                evidencePathIsFindLine(thumb.script_path) ||
+                evidencePathIsFindCircle(thumb.script_path) ||
+                evidencePathIsFindEllipse(thumb.script_path) ||
+                evidencePathIsFindRect(thumb.script_path) ||
+                evidencePathIsFastMatch(thumb.script_path) ||
+                evidencePathIsFindSegmentation(thumb.script_path);
 
             if (!request.include_generic_scripts && !isCximageToolScript)
                 continue;

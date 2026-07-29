@@ -242,6 +242,10 @@ void FindObject::setbrow(int iborw)
 {
     m_iborw = iborw;
 }
+void FindObject::setfilteredge(int iw)
+{
+    m_ifilterNedge = iw < 0 ? 0 : iw;
+}
 void FindObject::setcolor(int ir, int ig, int ib)
 {
     m_rectresults.setcolor(ir, ig, ib);
@@ -377,6 +381,10 @@ int FindObject::getdebugmaxcomponentw()
 int FindObject::getdebugmaxcomponenth()
 {
     return m_debug_max_component_h;
+}
+const std::string& FindObject::getdebugalgorithmbranch() const
+{
+    return m_debug_algorithm_branch;
 }
 bool FindObject::RefreshAlgorithmRuntimeResources(int image_width, int image_height)
 {
@@ -541,6 +549,9 @@ void FindObject::setsearchtype(int itype)
 }
 void FindObject::Measure(Image& image)
 {
+    // This is the legacy region-growth implementation used by FindLine.
+    // It is deliberately distinct from MeasurePeakLocalBFS().
+    m_debug_algorithm_branch = "region_growth";
     m_pgetimage = &image;
     if (image.getmat().empty())
         return;
@@ -1808,6 +1819,13 @@ void FindObject::MeasureFast(Image& image)
 
 void FindObject::MeasureConnectedComponents(Image& image)
 {
+    // 21/22 are FindLine pre-filter modes: retain only accepted white/black
+    // components in the working mask.  They are not result-rectangle modes.
+    const bool selection_mask_mode = (m_iborw == 21 || m_iborw == 22);
+    const bool select_white_mask = (m_iborw == 21);
+    m_debug_algorithm_branch = selection_mask_mode
+        ? "connected_components_selection_mask"
+        : "connected_components";
     m_pgetimage = &image;
     if (image.getmat().empty())
         return;
@@ -1857,9 +1875,19 @@ void FindObject::MeasureConnectedComponents(Image& image)
         channel.convertTo(channel, CV_8U);
 
     int nScanerID = 1;
+    cv::Mat selection_mask;
+    if (selection_mask_mode)
+    {
+        selection_mask = cv::Mat(
+            roi.rows,
+            roi.cols,
+            CV_8UC1,
+            cv::Scalar(0));
+    }
+
     const auto accept_component =
         [&](int local_x, int local_y, int comp_w, int comp_h, int area,
-            const cv::Point2d& centroid, bool is_white_region)
+            const cv::Point2d& centroid, bool is_white_region) -> bool
     {
         m_debug_component_count++;
         const int iminx = ix + local_x;
@@ -1880,21 +1908,25 @@ void FindObject::MeasureConnectedComponents(Image& image)
         if (!inside_edge_filter)
         {
             m_debug_rejected_count++;
-            return;
+            return false;
         }
-        if (area <= 0)
+        if (area <= m_iminarea || area >= m_imaxarea)
         {
             m_debug_rejected_count++;
-            return;
+            return false;
         }
 
-        const bool accept_white = (m_iborw == 1 || m_iborw == 3);
-        const bool accept_black = (m_iborw == 2 || m_iborw == 3);
+        const bool accept_white = selection_mask_mode
+            ? select_white_mask
+            : (m_iborw == 1 || m_iborw == 3);
+        const bool accept_black = selection_mask_mode
+            ? !select_white_mask
+            : (m_iborw == 2 || m_iborw == 3);
         if ((is_white_region && !accept_white) ||
             (!is_white_region && !accept_black))
         {
             m_debug_rejected_count++;
-            return;
+            return false;
         }
 
         m_vrow.push_back(area);
@@ -1916,6 +1948,7 @@ void FindObject::MeasureConnectedComponents(Image& image)
         m_icurobj++;
         m_debug_accepted_count++;
         nScanerID++;
+        return true;
     };
 
     const auto run_connected_components =
@@ -1941,7 +1974,7 @@ void FindObject::MeasureConnectedComponents(Image& image)
             cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8, CV_32S);
         for (int label = 1; label < component_count; ++label)
         {
-            accept_component(
+            if (accept_component(
                 stats.at<int>(label, cv::CC_STAT_LEFT),
                 stats.at<int>(label, cv::CC_STAT_TOP),
                 stats.at<int>(label, cv::CC_STAT_WIDTH),
@@ -1950,14 +1983,36 @@ void FindObject::MeasureConnectedComponents(Image& image)
                 cv::Point2d(
                     centroids.at<double>(label, 0),
                     centroids.at<double>(label, 1)),
-                is_white_region);
+                is_white_region))
+            {
+                if (selection_mask_mode)
+                {
+                    selection_mask.setTo(
+                        cv::Scalar(255),
+                        labels == label);
+                }
+            }
         }
     };
 
-    if (m_iborw == 1 || m_iborw == 3)
+    if (m_iborw == 1 || m_iborw == 3 || select_white_mask)
         run_connected_components(true);
-    if (m_iborw == 2 || m_iborw == 3)
+    if (m_iborw == 2 || m_iborw == 3 || (selection_mask_mode && !select_white_mask))
         run_connected_components(false);
+
+    if (selection_mask_mode)
+    {
+        // Preserve Image ownership and write the selected binary mask back
+        // to the existing FindLine working image; no UI-side copy is made.
+        for (int y = 0; y < selection_mask.rows; ++y)
+        {
+            for (int x = 0; x < selection_mask.cols; ++x)
+            {
+                const uchar value = selection_mask.at<uchar>(y, x);
+                image.setPixel(ix + x, iy + y, cv::Vec3b(value, value, value));
+            }
+        }
+    }
 }
 
 std::vector<cv::Point> FindObject::DetectPeakSeeds(
@@ -2152,14 +2207,6 @@ void FindObject::AcceptPeakComponent(
     int comp_w, int comp_h, int area,
     bool is_white_region)
 {
-    FILE* dbg = fopen("peak_bfs_dbg.txt", "a");
-    if (dbg)
-    {
-        fprintf(dbg, "AcceptPeakComponent ENTER: local=(%d,%d) size=(%d,%d) area=%d is_white=%d m_iborw=%d m_ifilterNedge=%d\n",
-            local_x, local_y, comp_w, comp_h, area, is_white_region, m_iborw, m_ifilterNedge);
-        fclose(dbg);
-    }
-
     m_debug_component_count++;
 
     int iminx = rect().TopLeft().X() + local_x;
@@ -2181,27 +2228,13 @@ void FindObject::AcceptPeakComponent(
             && local_y + comp_h - 1 < ih - m_ifilterNedge)
         || m_ifilterNedge == 0;
 
-    if (dbg)
-    {
-        dbg = fopen("peak_bfs_dbg.txt", "a");
-        if (dbg)
-        {
-            fprintf(dbg, "  edge_filter check: inside=%d iw=%d ih=%d\n", inside_edge_filter, iw, ih);
-            fclose(dbg);
-        }
-    }
-
     if (!inside_edge_filter)
     {
-        dbg = fopen("peak_bfs_dbg.txt", "a");
-        if (dbg) { fprintf(dbg, "  REJECTED: edge_filter\n"); fclose(dbg); }
         m_debug_rejected_count++;
         return;
     }
     if (area <= 0)
     {
-        dbg = fopen("peak_bfs_dbg.txt", "a");
-        if (dbg) { fprintf(dbg, "  REJECTED: area<=0\n"); fclose(dbg); }
         m_debug_rejected_count++;
         return;
     }
@@ -2209,29 +2242,12 @@ void FindObject::AcceptPeakComponent(
     bool accept_white = (m_iborw == 1 || m_iborw == 3);
     bool accept_black = (m_iborw == 2 || m_iborw == 3);
 
-    if (dbg)
-    {
-        dbg = fopen("peak_bfs_dbg.txt", "a");
-        if (dbg)
-        {
-            fprintf(dbg, "  borw check: accept_white=%d accept_black=%d reject_cond=%d\n",
-                accept_white, accept_black,
-                (is_white_region && !accept_white) || (!is_white_region && !accept_black));
-            fclose(dbg);
-        }
-    }
-
     if ((is_white_region && !accept_white) ||
         (!is_white_region && !accept_black))
     {
-        dbg = fopen("peak_bfs_dbg.txt", "a");
-        if (dbg) { fprintf(dbg, "  REJECTED: borw mismatch\n"); fclose(dbg); }
         m_debug_rejected_count++;
         return;
     }
-
-    dbg = fopen("peak_bfs_dbg.txt", "a");
-    if (dbg) { fprintf(dbg, "  ACCEPTED\n"); fclose(dbg); }
 
     m_vrow.push_back(area);
     m_vborw.push_back(is_white_region
@@ -2258,6 +2274,10 @@ void FindObject::AcceptPeakComponent(
 
 void FindObject::MeasurePeakLocalBFS(Image& image)
 {
+    // Current implementation uses connected-component candidates inside the
+    // requested ROI.  Keep the branch name factual until peak partition plus
+    // local BFS is actually implemented.
+    m_debug_algorithm_branch = "peak_local_bfs_component_candidates";
     m_pgetimage = &image;
     if (image.getmat().empty())
         return;
@@ -2347,16 +2367,6 @@ void FindObject::MeasurePeakLocalBFS(Image& image)
             bool h_ok = (filter_h >= m_iminobjh && filter_h < m_imaxobjh);
 
             ObserveDebugComponent(comp_area, filter_w, filter_h);
-
-            FILE* dbg2 = fopen("peak_bfs_dbg.txt", "a");
-            if (dbg2)
-            {
-                fprintf(dbg2, "peak_component: area=%d min=%lld max=%lld area_ok=%d w=%d minw=%lld maxw=%lld w_ok=%d h=%d minh=%lld maxh=%lld h_ok=%d\n",
-                    comp_area, (long long)m_iminarea, (long long)m_imaxarea, area_ok,
-                    filter_w, (long long)m_iminobjw, (long long)m_imaxobjw, w_ok,
-                    filter_h, (long long)m_iminobjh, (long long)m_imaxobjh, h_ok);
-                fclose(dbg2);
-            }
 
             if (area_ok && w_ok && h_ok)
             {
@@ -2551,8 +2561,6 @@ void FindObject::setminmaxarea(int imin, int imax)
 {
     m_iminarea = imin;
     m_imaxarea = imax;
-    FILE* dbg = fopen("peak_bfs_dbg.txt", "a");
-    if (dbg) { fprintf(dbg, "setminmaxarea: imin=%d imax=%d -> m_iminarea=%lld m_imaxarea=%lld\n", imin, imax, (long long)m_iminarea, (long long)m_imaxarea); fclose(dbg); }
 }
 void FindObject::MeasureX(Image& image)
 {

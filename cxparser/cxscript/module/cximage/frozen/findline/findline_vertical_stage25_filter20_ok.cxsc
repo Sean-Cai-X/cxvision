@@ -29,5 +29,3 @@ m_line.setfilterprofile(filterprofile);
 
 m_line.measure(&m_image);
 m_line.fitline();
-
-global_line_ref = m_line.get_result();

@@ -2058,6 +2058,61 @@ void FindCircle::measure(void* pimage)
         "measure_points=" + std::to_string(m_measurepoints.size()) +
             ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
+void FindCircle::measureRobust(void* pimage)
+{
+    if (pimage == nullptr)
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        m_lastMeasureGeometryDebug.failure_stage = "circle_input_image_null";
+        return;
+    }
+
+    Image* pgetimage = static_cast<Image*>(pimage);
+
+    if (pgetimage->getmat().empty())
+    {
+        m_measurepoints.clear();
+        m_dresultcentx = 0.0;
+        m_dresultcenty = 0.0;
+        m_dradius = 0.0;
+        m_avgdist = 0.0;
+        m_lastMeasureGeometryDebug.failure_stage = "circle_input_image_empty";
+        return;
+    }
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            pgetimage->getWidth(),
+            pgetimage->getHeight()))
+    {
+        m_measurepoints.clear();
+        m_lastMeasureGeometryDebug.failure_stage = "circle_scan_workspace_unavailable";
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == pgetimage ||
+        g_pbackimage->getmat().empty())
+    {
+        m_measurepoints.clear();
+        m_lastMeasureGeometryDebug.failure_stage = "circle_scan_workspace_unavailable";
+        return;
+    }
+
+    if (!EnsureCircleMeasureGeometryReady())
+    {
+        m_measurepoints.clear();
+        m_lastMeasureGeometryDebug.failure_stage = "circle_measure_geometry_not_ready";
+        return;
+    }
+
+    MeasureRobust(*pgetimage);
+}
 void FindCircle::automeasure(void* pimage)
 {
     (void)pimage;
@@ -2579,6 +2634,15 @@ std::vector<double> ExtractCircleProfileAt(const cv::Mat& gray,
 
 void FindCircle::MeasureRobust(Image& image)
 {
+    // [DIAG] Log key algorithm parameters at MeasureRobust entry
+    std::cout << "[DIAG] FindCircle::MeasureRobust entry: threshold=" << m_iThreshold
+              << " method=" << m_iMethod
+              << " linegap=" << m_iSelectPointGap
+              << " gamma=" << m_igamarate
+              << " center=(" << m_icentx << "," << m_icenty
+              << ")" << " radius=" << m_dradius
+              << std::endl;
+
     ClearMeasureState();
     m_circle_fit_candidate_sequences.clear();
     m_circle_best_sequence_index = -1;
@@ -2589,6 +2653,48 @@ void FindCircle::MeasureRobust(Image& image)
     {
         LogFindCircleMeasureProbe("robust_measure", "skipped", "geometry not ready");
         return;
+    }
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            image.getWidth(),
+            image.getHeight()))
+    {
+        LogFindCircleMeasureProbe("robust_measure", "failed", "EnsureAlgorithmRuntimeResources failed");
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
+    {
+        LogFindCircleMeasureProbe("robust_measure", "failed", "backimage unavailable");
+        return;
+    }
+
+    {
+        const int isize = ClampSizeToInt(m_lines.size());
+        if (isize <= 0)
+        {
+            return;
+        }
+
+        int ilineslen = 0;
+        if (isize > 0)
+            ilineslen = m_lines[0].getlinesize();
+
+        if (ilineslen <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < isize; i++)
+        {
+            m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
+        }
+
+        g_pbackimage->setroi(0, 0, ilineslen, isize);
+        g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
     }
 
     CollectCircleEdgeBandsRobust(image);
@@ -2630,24 +2736,27 @@ void FindCircle::CollectCircleEdgeBandsRobust(Image& image)
 {
     m_circle_edge_band_candidates.clear();
 
-    if (g_pbackimage == nullptr || g_pbackimage->mat().empty())
+    if (g_pbackimage == nullptr || g_pbackimage->getmat().empty())
     {
-        g_pbackfindobject->Measure(*g_pbackimage);
-        if (!g_pbackfindobject->hasresult())
+        if (g_pbackfindobject != nullptr)
+        {
+            g_pbackfindobject->Measure(*g_pbackimage);
+        }
+        if (g_pbackimage == nullptr || g_pbackimage->getmat().empty())
         {
             return;
         }
     }
 
     cv::Mat gray;
-    if (image.channels() == 1)
-        gray = image.mat().clone();
-    else if (image.channels() == 3)
-        cv::cvtColor(image.mat(), gray, cv::COLOR_BGR2GRAY);
+    if (image.getmat().channels() == 1)
+        gray = image.getmat().clone();
+    else if (image.getmat().channels() == 3)
+        cv::cvtColor(image.getmat(), gray, cv::COLOR_BGR2GRAY);
     else
-        gray = image.mat();
+        gray = image.getmat();
 
-    cv::Mat binary = g_pbackimage->mat();
+    cv::Mat binary = g_pbackimage->getmat();
 
     int w = binary.cols;
     int h = binary.rows;
@@ -2662,16 +2771,17 @@ void FindCircle::CollectCircleEdgeBandsRobust(Image& image)
 
     for (int line_idx = 0; line_idx < static_cast<int>(m_lines.size()); ++line_idx)
     {
-        const auto& line = m_lines[line_idx];
+        auto& line = m_lines[line_idx];
         int candidate_index = 0;
+        int line_size = line.getlinesize();
 
         bool in_foreground = false;
         int seg_start = -1;
         int seg_end = -1;
 
-        for (int pt_idx = 0; pt_idx < static_cast<int>(line.size()); ++pt_idx)
+        for (int pt_idx = 0; pt_idx < line_size; ++pt_idx)
         {
-            const auto& pt = line[pt_idx];
+            gp_Pnt pt = line.getlinepoint(pt_idx);
             int ix = static_cast<int>(std::lround(pt.X()));
             int iy = static_cast<int>(std::lround(pt.Y()));
 
@@ -2694,7 +2804,7 @@ void FindCircle::CollectCircleEdgeBandsRobust(Image& image)
                 if (seg_len >= 2)
                 {
                     int seg_center = (seg_start + seg_end) / 2;
-                    const auto& center_pt = line[seg_center];
+                    gp_Pnt center_pt = line.getlinepoint(seg_center);
 
                     CircleEdgeBandCandidate candidate;
                     candidate.scan_index = line_idx;
@@ -2730,12 +2840,12 @@ void FindCircle::CollectCircleEdgeBandsRobust(Image& image)
 
         if (in_foreground)
         {
-            seg_end = static_cast<int>(line.size());
+            seg_end = line_size;
             int seg_len = seg_end - seg_start;
             if (seg_len >= 2)
             {
                 int seg_center = (seg_start + seg_end) / 2;
-                const auto& center_pt = line[seg_center];
+                gp_Pnt center_pt = line.getlinepoint(seg_center);
 
                 CircleEdgeBandCandidate candidate;
                 candidate.scan_index = line_idx;

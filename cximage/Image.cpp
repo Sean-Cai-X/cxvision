@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "Image.h"
 #include "Shape.h"
@@ -1072,6 +1072,9 @@ void Image::roi_5blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifi
 }
 void Image::roi_7blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifindBorW)
 {
+    std::cout << "[DIAG] roi_7blur_gap_mud_thre_bw enter: threshold=" << ithre
+              << " reserve=" << ireserve << " gap=" << igap << " method=" << ifindBorW << std::endl;
+
     if (getWidth() < m_ix0 + m_iw)
     {
         m_ix0 = getWidth() - m_iw - 1;
@@ -1084,6 +1087,33 @@ void Image::roi_7blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifi
         m_ix0 = 0;
     if (m_iy0 < 0)
         m_iy0 = 0;
+
+    // [DIAG] Record input stats
+    {
+        const cv::Mat& mat = getmat();
+        int roi_x0 = m_ix0, roi_y0 = m_iy0, roi_w = m_iw, roi_h = m_ih;
+        double min_val = 255, max_val = 0, sum_val = 0;
+        int count = 0;
+        int sample_step = std::max(1, (roi_w * roi_h) / 5000);
+        for (int y = roi_y0; y < roi_y0 + roi_h && y < mat.rows; y += sample_step)
+        {
+            for (int x = roi_x0; x < roi_x0 + roi_w && x < mat.cols; x += sample_step)
+            {
+                if (mat.type() == CV_8UC3)
+                {
+                    cv::Vec3b p = mat.at<cv::Vec3b>(y, x);
+                    double gray = 0.299 * p[2] + 0.587 * p[1] + 0.114 * p[0];
+                    min_val = std::min(min_val, gray);
+                    max_val = std::max(max_val, gray);
+                    sum_val += gray;
+                    count++;
+                }
+            }
+        }
+        double mean_val = count > 0 ? sum_val / count : 0;
+        std::cout << "[DIAG] input ROI=(" << roi_x0 << "," << roi_y0 << "," << roi_w << "," << roi_h << ")"
+                  << " min=" << min_val << " max=" << max_val << " mean=" << mean_val << " samples=" << count << std::endl;
+    }
 
 
     cv::Vec3b pixelCur, pixel_1, pixel_2, pixel1, pixel2;
@@ -1125,6 +1155,29 @@ void Image::roi_7blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifi
         }
     }
 
+    // [DIAG] Record blurred stats
+    {
+        const cv::Mat& mat = getmat();
+        double min_val = 255, max_val = 0;
+        int count = 0;
+        int sample_step = std::max(1, (m_iw * m_ih) / 5000);
+        for (int y = m_iy0; y < m_iy0 + m_ih && y < mat.rows; y += sample_step)
+        {
+            for (int x = m_ix0; x < m_ix0 + m_iw && x < mat.cols; x += sample_step)
+            {
+                if (mat.type() == CV_8UC3)
+                {
+                    cv::Vec3b p = mat.at<cv::Vec3b>(y, x);
+                    double gray = 0.299 * p[2] + 0.587 * p[1] + 0.114 * p[0];
+                    min_val = std::min(min_val, gray);
+                    max_val = std::max(max_val, gray);
+                    count++;
+                }
+            }
+        }
+        std::cout << "[DIAG] after blur: min=" << min_val << " max=" << max_val << " samples=" << count << std::endl;
+    }
+
     cv::Vec3b pixelx;
 
     cv::Vec3b pixelx0;
@@ -1142,6 +1195,36 @@ void Image::roi_7blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifi
     //GAP MUD THRE
     if (0 == ifindBorW)
     {
+        // [DIAG] Record gap diff stats before threshold (method=0, bright edge)
+        {
+            int tmpx0 = m_ix0 > 0 ? m_ix0 : 0;
+            int tmpx1 = m_ix0 + m_iw + igap < getWidth() ? m_ix0 + m_iw + igap : getWidth() - igap - 1;
+            double diff_min = 255, diff_max = 0;
+            int diff_count = 0;
+            int max_diff_r = 0, max_diff_g = 0, max_diff_b = 0;
+            int sample_step = std::max(1, (m_iw * m_ih) / 5000);
+            for (int y = m_iy0 + m_ih; y > m_iy0; y -= sample_step)
+            {
+                for (int x = tmpx0; x < tmpx1; x += sample_step)
+                {
+                    cv::Vec3b p1 = pixel(x, y);
+                    cv::Vec3b p2 = pixel(x + igap, y);
+                    int dr = Red(p2) - Red(p1);
+                    int dg = Green(p2) - Green(p1);
+                    int db = Blue(p2) - Blue(p1);
+                    int max_diff = std::max({std::abs(dr), std::abs(dg), std::abs(db)});
+                    diff_min = std::min(diff_min, (double)max_diff);
+                    diff_max = std::max(diff_max, (double)max_diff);
+                    max_diff_r = std::max(max_diff_r, std::abs(dr));
+                    max_diff_g = std::max(max_diff_g, std::abs(dg));
+                    max_diff_b = std::max(max_diff_b, std::abs(db));
+                    diff_count++;
+                }
+            }
+            std::cout << "[DIAG] gap diff (method=0): max_diff=" << diff_max
+                      << " max_r=" << max_diff_r << " max_g=" << max_diff_g << " max_b=" << max_diff_b
+                      << " threshold=" << ithre << " samples=" << diff_count << std::endl;
+        }
 
         int tmpx0 = m_ix0 > 0 ? m_ix0 : 0;
         int tmpx1 = m_ix0 + m_iw + igap < getWidth() ? m_ix0 + m_iw + igap : getWidth() - igap - 1;
@@ -1196,7 +1279,34 @@ void Image::roi_7blur_gap_mud_thre_bw(int ithre, int ireserve, int igap, int ifi
 
     }
 
-
+    // [DIAG] Record final thresholded output stats for roi_7blur_gap_mud_thre_bw
+    {
+        const cv::Mat& mat = getmat();
+        int nonzero_count = 0;
+        int total_sampled = 0;
+        int edge_count = 0;
+        int sample_step = std::max(1, (m_iw * m_ih) / 5000);
+        for (int y = m_iy0; y < m_iy0 + m_ih && y < mat.rows; y += sample_step)
+        {
+            for (int x = m_ix0; x < m_ix0 + m_iw && x < mat.cols; x += sample_step)
+            {
+                if (mat.type() == CV_8UC3)
+                {
+                    cv::Vec3b p = mat.at<cv::Vec3b>(y, x);
+                    if (p[0] > 0 || p[1] > 0 || p[2] > 0)
+                    {
+                        nonzero_count++;
+                        edge_count++;
+                    }
+                    total_sampled++;
+                }
+            }
+        }
+        std::cout << "[DIAG] after threshold: nonzero=" << nonzero_count
+                  << " edge_count=" << edge_count
+                  << " total_sampled=" << total_sampled << std::endl;
+    }
+    std::cout << "[DIAG] roi_7blur_gap_mud_thre_bw exit" << std::endl;
 }
 void Image::roi_5blur_gap_mud_thre_bw_h(int ithre, int ireserve, int igap, int ifindBorW)
 {

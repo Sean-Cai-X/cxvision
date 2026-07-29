@@ -173,6 +173,7 @@ public:
 
     void Setgap(int gap = 2);
     void measure(void* pimage);
+    void measureRobust(void* pimage);
     void automeasure(void* pimage);
 
     void findpattern(void* pimage);

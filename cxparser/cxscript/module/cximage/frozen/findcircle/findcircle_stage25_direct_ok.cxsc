@@ -25,5 +25,3 @@ m_circle.setmethod(method);
 
 m_circle.measure(&m_image);
 m_circle.fitcircle();
-
-global_circle_ref = m_circle.get_result();

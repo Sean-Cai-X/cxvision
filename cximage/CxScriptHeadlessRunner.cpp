@@ -488,6 +488,19 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["max_samples"] = capture.max_samples;
     pkg.metrics["scan_line_count"] = capture.scan_line_count;
     pkg.metrics["sample_count"] = capture.sample_count;
+    pkg.metrics["tool_effective_method"] = capture.tool_method;
+    pkg.metrics["tool_effective_threshold"] = capture.tool_threshold;
+    pkg.metrics["tool_effective_wgap"] = capture.tool_wgap;
+    pkg.metrics["tool_effective_hgap"] = capture.tool_hgap;
+    pkg.metrics["tool_effective_linegap"] = capture.tool_linegap;
+    pkg.metrics["scan_rows_examined"] = capture.scan_rows_examined;
+    pkg.metrics["scan_rows_with_foreground"] = capture.scan_rows_with_foreground;
+    pkg.metrics["scan_runs_total"] = capture.scan_runs_total;
+    pkg.metrics["scan_runs_within_length_limit"] = capture.scan_runs_within_length_limit;
+    pkg.metrics["scan_runs_over_length_limit"] = capture.scan_runs_over_length_limit;
+    pkg.metrics["scan_runs_rejected_by_selection"] = capture.scan_runs_rejected_by_selection;
+    pkg.metrics["scan_runs_rejected_near_endpoint"] = capture.scan_runs_rejected_near_endpoint;
+    pkg.metrics["scan_points_emitted"] = capture.scan_points_emitted;
     pkg.metrics["strategy_id"] = capture.strategy_id;
     pkg.metrics["selected_method"] = capture.selected_method;
     pkg.metrics["selected_threshold"] = capture.selected_threshold;
@@ -495,6 +508,21 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["selected_hgap"] = capture.selected_hgap;
     pkg.metrics["selected_linegap"] = capture.selected_linegap;
     pkg.metrics["selected_filterprofile"] = capture.selected_filterprofile;
+    // Keep injection and script echo separate.  A missing script echo must
+    // never be reported as if the CLI/manifest failed to inject its value.
+    const auto readRuntimeGlobal = [&capture](const char* name) -> double
+    {
+        const auto it = capture.runtime_globals.find(name);
+        return it == capture.runtime_globals.end() ? 0.0 : it->second;
+    };
+    pkg.metrics["injected_threshold"] = readRuntimeGlobal("global_threshold");
+    pkg.metrics["injected_method"] = readRuntimeGlobal("global_method");
+    pkg.metrics["injected_wgap"] = readRuntimeGlobal("global_wgap");
+    pkg.metrics["injected_hgap"] = readRuntimeGlobal("global_hgap");
+    pkg.metrics["injected_linegap"] = readRuntimeGlobal("global_linegap");
+    pkg.metrics["injected_filterprofile"] = readRuntimeGlobal("global_filterprofile");
+    pkg.metrics["script_selected_threshold"] = capture.selected_threshold;
+    pkg.metrics["script_selected_method"] = capture.selected_method;
     pkg.metrics["valid_points_count"] = capture.valid_points_count;
     pkg.metrics["circle_radius"] = capture.circle_radius;
     pkg.metrics["avgdist"] = capture.avgdist;
@@ -575,6 +603,20 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["object_filter_borw"] = capture.object_filter_borw;
     pkg.metrics["object_filter_min"] = capture.object_filter_min;
     pkg.metrics["object_filter_max"] = capture.object_filter_max;
+    pkg.metrics["findobject_component_count"] = capture.object_component_count;
+    pkg.metrics["findobject_component_accepted_count"] = capture.object_component_accepted_count;
+    pkg.metrics["findobject_component_rejected_count"] = capture.object_component_rejected_count;
+    pkg.metrics["findobject_component_max_area"] = capture.object_component_max_area;
+    pkg.metrics["findobject_component_max_width"] = capture.object_component_max_width;
+    pkg.metrics["findobject_component_max_height"] = capture.object_component_max_height;
+    pkg.metrics["findobject_foreground_before"] = capture.object_foreground_before;
+    pkg.metrics["findobject_foreground_after"] = capture.object_foreground_after;
+    pkg.metrics["findobject_white_component_count"] = capture.object_white_component_count;
+    pkg.metrics["findobject_white_accepted_count"] = capture.object_white_accepted_count;
+    pkg.metrics["findobject_white_rejected_count"] = capture.object_white_rejected_count;
+    pkg.metrics["findobject_black_component_count"] = capture.object_black_component_count;
+    pkg.metrics["findobject_black_accepted_count"] = capture.object_black_accepted_count;
+    pkg.metrics["findobject_black_rejected_count"] = capture.object_black_rejected_count;
     pkg.metrics["fit_filter_input_count"] = capture.fit_filter_input_count;
     pkg.metrics["fit_filter_kept_count"] = capture.fit_filter_kept_count;
     pkg.metrics["fit_filter_rejected_count"] = capture.fit_filter_rejected_count;
@@ -611,6 +653,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["ellipse_scan_geometry_policy"] = capture.ellipse_scan_geometry_policy;
     pkg.facts["object_prefilter_requested"] = capture.object_prefilter_requested ? "true" : "false";
     pkg.facts["object_prefilter_applied"] = capture.object_prefilter_applied ? "true" : "false";
+    pkg.facts["findobject_algorithm_branch"] = capture.object_algorithm_branch;
+    pkg.facts["script_selected_threshold_matches_injected"] =
+        capture.selected_threshold == static_cast<int>(readRuntimeGlobal("global_threshold"))
+            ? "true" : "false";
     pkg.facts["findrect_seed_valid"] = capture.findrect_seed_valid ? "true" : "false";
     pkg.facts["findrect_top_valid"] = capture.findrect_top_valid ? "true" : "false";
     pkg.facts["findrect_bottom_valid"] = capture.findrect_bottom_valid ? "true" : "false";
@@ -1120,6 +1166,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
         object_state_file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
         object_state_file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
+        object_state_file << "  \"tool_effective_method\": " << capture.tool_method << ",\n";
+        object_state_file << "  \"tool_effective_threshold\": " << capture.tool_threshold << ",\n";
+        object_state_file << "  \"scan_rows_examined\": " << capture.scan_rows_examined << ",\n";
+        object_state_file << "  \"scan_rows_with_foreground\": " << capture.scan_rows_with_foreground << ",\n";
+        object_state_file << "  \"scan_runs_total\": " << capture.scan_runs_total << ",\n";
+        object_state_file << "  \"scan_runs_within_length_limit\": " << capture.scan_runs_within_length_limit << ",\n";
+        object_state_file << "  \"scan_runs_over_length_limit\": " << capture.scan_runs_over_length_limit << ",\n";
+        object_state_file << "  \"scan_runs_rejected_by_selection\": " << capture.scan_runs_rejected_by_selection << ",\n";
+        object_state_file << "  \"scan_runs_rejected_near_endpoint\": " << capture.scan_runs_rejected_near_endpoint << ",\n";
+        object_state_file << "  \"scan_points_emitted\": " << capture.scan_points_emitted << ",\n";
+        object_state_file << "  \"findobject_foreground_before\": " << capture.object_foreground_before << ",\n";
+        object_state_file << "  \"findobject_foreground_after\": " << capture.object_foreground_after << ",\n";
         object_state_file << "  \"fit_filter_input_count\": " << capture.fit_filter_input_count << ",\n";
         object_state_file << "  \"fit_filter_kept_count\": " << capture.fit_filter_kept_count << ",\n";
         object_state_file << "  \"fit_filter_rejected_count\": " << capture.fit_filter_rejected_count << ",\n";
@@ -1186,7 +1244,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             capture.rendered_result_count > 0;
         const bool point_geometry_matches_overlay =
             capture.valid_points_count <= 0 ||
-            capture.rendered_measure_points_count > 0;
+            capture.rendered_measure_points_count > 0 ||
+            (capture.has_result_rect && capture.rendered_result_count > 0);
         const bool summary_geometry_matches_overlay =
             fit_geometry_matches_overlay && point_geometry_matches_overlay;
 
@@ -1215,6 +1274,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "execution_mode: sequential\n";
         log_file << "elapsed_ms: " << capture.elapsed_ms << "\n";
         log_file << "budget_exceeded: " << (capture.budget_exceeded ? "true" : "false") << "\n";
+        log_file << "tool_effective_method: " << capture.tool_method << "\n";
+        log_file << "tool_effective_threshold: " << capture.tool_threshold << "\n";
+        log_file << "scan_rows_examined: " << capture.scan_rows_examined << "\n";
+        log_file << "scan_rows_with_foreground: " << capture.scan_rows_with_foreground << "\n";
+        log_file << "scan_runs_total: " << capture.scan_runs_total << "\n";
+        log_file << "scan_runs_within_length_limit: " << capture.scan_runs_within_length_limit << "\n";
+        log_file << "scan_runs_over_length_limit: " << capture.scan_runs_over_length_limit << "\n";
+        log_file << "scan_runs_rejected_by_selection: " << capture.scan_runs_rejected_by_selection << "\n";
+        log_file << "scan_runs_rejected_near_endpoint: " << capture.scan_runs_rejected_near_endpoint << "\n";
+        log_file << "scan_points_emitted: " << capture.scan_points_emitted << "\n";
+        log_file << "findobject_foreground_before: " << capture.object_foreground_before << "\n";
+        log_file << "findobject_foreground_after: " << capture.object_foreground_after << "\n";
         log_file << "valid_points_count: " << capture.valid_points_count << "\n";
         log_file << "has_fit_line: " << (capture.has_fit_line ? "true" : "false") << "\n";
         log_file << "has_fit_circle: " << (capture.has_fit_circle ? "true" : "false") << "\n";

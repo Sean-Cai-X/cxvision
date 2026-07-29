@@ -1620,6 +1620,50 @@ void FindLine::Measure(Image& image)
     if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
         m_lastMeasureInputDebug.findobject_measure_called = true;
+        const auto countScanRowsWithForeground = [&]() -> int
+        {
+            int rowsWithForeground = 0;
+            const int fix = 3;
+            for (int y = fix; y < iwsize - fix; ++y)
+            {
+                bool rowHasForeground = false;
+                for (int x = 0; x < ilineslen1; ++x)
+                {
+                    if (g_pbackimage->pixel(x, y)[0] > 0)
+                    {
+                        rowHasForeground = true;
+                        break;
+                    }
+                }
+                if (rowHasForeground)
+                    ++rowsWithForeground;
+            }
+            for (int y = iwsize + fix; y < iwsize + ihsize - fix; ++y)
+            {
+                bool rowHasForeground = false;
+                for (int x = 0; x < ilineslen2; ++x)
+                {
+                    if (g_pbackimage->pixel(x, y)[0] > 0)
+                    {
+                        rowHasForeground = true;
+                        break;
+                    }
+                }
+                if (rowHasForeground)
+                    ++rowsWithForeground;
+            }
+            return rowsWithForeground;
+        };
+
+        const int scanRowsWithForegroundBeforeFilter = countScanRowsWithForeground();
+        cv::Mat binaryBeforeFindObject;
+        g_pbackimage->getmat().copyTo(binaryBeforeFindObject);
+
+        // Evidence only: Measure() mutates the shared back-image mask in
+        // modes 21/22.  Preserve foreground counts on both sides so that a
+        // later empty scan can be attributed to the mutation, not guessed.
+        m_lastMeasureInputDebug.findobject_foreground_before =
+            m_lastMeasureInputDebug.binary_foreground_pixels;
 
         g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
 
@@ -1643,7 +1687,50 @@ void FindLine::Measure(Image& image)
                 std::to_string(m_effective_filter_borw) + ", min=" +
                 std::to_string(m_effective_filter_min) + ", max=" +
                 std::to_string(m_effective_filter_max));
-        g_pbackfindobject->Measure(*g_pbackimage);
+        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
+            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
+        else
+            g_pbackfindobject->Measure(*g_pbackimage);
+        m_lastMeasureInputDebug.findobject_algorithm_branch =
+            g_pbackfindobject->getdebugalgorithmbranch();
+
+        const cv::Mat& afterFindObject = g_pbackimage->getmat();
+        cv::Mat foreground_gray;
+        if (afterFindObject.channels() > 1)
+            cv::cvtColor(afterFindObject, foreground_gray, cv::COLOR_BGR2GRAY);
+        else
+            foreground_gray = afterFindObject;
+        m_lastMeasureInputDebug.findobject_foreground_after =
+            cv::countNonZero(foreground_gray);
+        const int scanRowsWithForegroundAfterFilter = countScanRowsWithForeground();
+        if (scanRowsWithForegroundBeforeFilter > 0 &&
+            scanRowsWithForegroundAfterFilter == 0 &&
+            !binaryBeforeFindObject.empty())
+        {
+            binaryBeforeFindObject.copyTo(g_pbackimage->getmat());
+            m_lastMeasureInputDebug.findobject_algorithm_branch +=
+                ":restored_original_scan_rows";
+            m_lastMeasureInputDebug.findobject_foreground_after =
+                m_lastMeasureInputDebug.findobject_foreground_before;
+        }
+        
+        {
+            int comp_count = g_pbackfindobject->getdebugcomponentcount();
+            int accepted = g_pbackfindobject->getdebugacceptedcount();
+            int rejected = g_pbackfindobject->getdebugrejectedcount();
+            int max_area = g_pbackfindobject->getdebugmaxcomponentarea();
+            int max_w = g_pbackfindobject->getdebugmaxcomponentw();
+            int max_h = g_pbackfindobject->getdebugmaxcomponenth();
+            // The pre-filter diagnosis must describe the branch actually
+            // called above, rather than the similarly named diagnostic APIs.
+            m_lastMeasureInputDebug.findobject_component_total = comp_count;
+            m_lastMeasureInputDebug.findobject_component_accepted = accepted;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_min = rejected;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_max = 0;
+            m_lastMeasureInputDebug.findobject_component_rejected_by_borw = 0;
+            m_lastMeasureInputDebug.findobject_area_max_observed = max_area;
+        }
+        
         LogFindlineMeasureProbe(
             "measure_after_findobject_measure",
             "running",
@@ -1678,6 +1765,8 @@ void FindLine::Measure(Image& image)
     cv::Vec3b icolor = 0;
     for (int inumy = 0 + ifixvalue; inumy < iwsize - ifixvalue; inumy++)
     {
+        ++m_lastMeasureInputDebug.scan_rows_examined;
+        bool rowHasForeground = false;
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -1688,6 +1777,7 @@ void FindLine::Measure(Image& image)
             icolor = g_pbackimage->pixel(inumx, inumy);
             if ((icolor[0]) > 0)
             {
+                rowHasForeground = true;
                 if (irecordnum < 100)
                 {
                     irecordpoint[irecordnum] = inumx;
@@ -1706,6 +1796,8 @@ void FindLine::Measure(Image& image)
                     && irecordnum > 0
                     && irecordnum <= 70)
                 {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
@@ -1718,11 +1810,25 @@ void FindLine::Measure(Image& image)
                         {
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                             m_measurepoints_w.addpoint(apoint);
+                            ++m_lastMeasureInputDebug.scan_points_emitted;
                             //m_l_measure_w[icurlineposition].addpoint(apoint);
                             if (icurlinenum == m_iselectedgenum)
                                 break;
                         }
+                        else
+                        {
+                            ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                        }
                     }
+                    else
+                    {
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                    }
+                }
+                else if (true == bcollectBegin && irecordnum > 70)
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
                 }
                 irecordnum = 0;
                 bcollectBegin = false;
@@ -1731,6 +1837,11 @@ void FindLine::Measure(Image& image)
         if (true == bcollectBegin
             && irecordnum > 0)
         {
+            ++m_lastMeasureInputDebug.scan_runs_total;
+            if (irecordnum <= 70)
+                ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
+            else
+                ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
             //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
             icurlinenum++;
@@ -1742,20 +1853,34 @@ void FindLine::Measure(Image& image)
                 {
                     gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                     m_measurepoints_w.addpoint(apoint);
+                    ++m_lastMeasureInputDebug.scan_points_emitted;
                     //m_l_measure_w[icurlineposition].addpoint(apoint);
                     if (icurlinenum == m_iselectedgenum)
                         break;
                 }
+                else
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                }
+            }
+            else
+            {
+                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
             }
             irecordnum = 0;
             bcollectBegin = false;
         }
+
+        if (rowHasForeground)
+            ++m_lastMeasureInputDebug.scan_rows_with_foreground;
 
     }
 
     bcollectBegin = false;
     for (int inumy = iwsize + ifixvalue; inumy < iwsize + ihsize - ifixvalue; inumy++)
     {
+        ++m_lastMeasureInputDebug.scan_rows_examined;
+        bool rowHasForeground = false;
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -1767,6 +1892,7 @@ void FindLine::Measure(Image& image)
             icolor = g_pbackimage->pixel(inumx, inumy);
             if ((icolor[0]) > 0)
             {
+                rowHasForeground = true;
                 if (irecordnum < 100)
                 {
                     irecordpoint[irecordnum] = inumx;
@@ -1785,6 +1911,8 @@ void FindLine::Measure(Image& image)
                     && irecordnum > 0
                     && irecordnum <= 70)
                 {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
                     icurlinenum++;
@@ -1796,12 +1924,26 @@ void FindLine::Measure(Image& image)
                         {
                             gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                             m_measurepoints_h.addpoint(apoint);
+                            ++m_lastMeasureInputDebug.scan_points_emitted;
                             //m_l_measure_h[icurlineposition].addpoint(apoint);
 
                             if (icurlinenum == m_iselectedgenum)
                                 break;
                         }
+                        else
+                        {
+                            ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                        }
                     }
+                    else
+                    {
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                    }
+                }
+                else if (true == bcollectBegin && irecordnum > 70)
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
                 }
                 irecordnum = 0;
                 bcollectBegin = false;
@@ -1810,6 +1952,11 @@ void FindLine::Measure(Image& image)
         if (true == bcollectBegin
             && irecordnum > 0)
         {
+            ++m_lastMeasureInputDebug.scan_runs_total;
+            if (irecordnum <= 70)
+                ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
+            else
+                ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
             // icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
 
@@ -1822,15 +1969,27 @@ void FindLine::Measure(Image& image)
                 {
                     gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                     m_measurepoints_h.addpoint(apoint);
+                    ++m_lastMeasureInputDebug.scan_points_emitted;
                    //m_l_measure_h[icurlineposition].addpoint(apoint);
 
                     if (icurlinenum == m_iselectedgenum)
                         break;
                 }
+                else
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                }
+            }
+            else
+            {
+                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
             }
             irecordnum = 0;
             bcollectBegin = false;
         }
+
+        if (rowHasForeground)
+            ++m_lastMeasureInputDebug.scan_rows_with_foreground;
     }
 
     const int resultPointCount =
@@ -1892,13 +2051,27 @@ void FindLine::Measure(Image& image)
             m_lastMeasureInputDebug.detail =
                 "Findline scan image has gradient, but thresholded binary image has no foreground. Check threshold, method, and gamma.";
         }
-        else if (m_lastMeasureInputDebug.findobject_measure_called)
+        else if (m_lastMeasureInputDebug.findobject_measure_called &&
+                 m_lastMeasureInputDebug.cc_selected.accepted_by_area == 0)
         {
             m_lastMeasureInputDebug.failure_stage =
-                "findobject_filter_result_empty";
+                "findobject_filter_no_accepted_components";
 
             m_lastMeasureInputDebug.detail =
-                "Findline FindObject Measure was called, but no result points were accepted. Check filter_min/filter_max/filter_borw and method polarity.";
+                "Findline prefilter ran but rejected every selected-polarity component. "
+                "Check filter_min/filter_max/filter_borw and method polarity.";
+        }
+        else if (m_lastMeasureInputDebug.findobject_measure_called)
+        {
+            // Filter modes 21/22 are mask-transform modes.  Their result
+            // rectangle list is intentionally empty, so that list cannot be
+            // used as proof that the prefilter failed.
+            m_lastMeasureInputDebug.failure_stage =
+                "findline_scan_no_measure_points_after_prefilter";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline prefilter accepted selected-polarity components, "
+                "but scan-line run extraction produced no measure points.";
         }
         else
         {
@@ -2039,6 +2212,7 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     if (g_pbackimage == nullptr)
     {
+        LogFindlineMeasureProbe("build_scan_profiles", "skipped", "g_pbackimage is null");
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
     }
@@ -2048,6 +2222,7 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         || rect().TopLeft().X() < 0
         || rect().TopLeft().Y() < 0)
     {
+        LogFindlineMeasureProbe("build_scan_profiles", "skipped", "roi out of bounds");
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
     }
@@ -2057,6 +2232,7 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
 
     if (iwsize <= 0 && ihsize <= 0)
     {
+        LogFindlineMeasureProbe("build_scan_profiles", "skipped", "scan lines empty");
         m_lastMeasureInputDebug.failure_stage = "scan_lines_empty";
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
@@ -2072,6 +2248,7 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
     const int iprocessw = ilineslen1 > ilineslen2 ? ilineslen1 : ilineslen2;
     if (iprocessw <= 0)
     {
+        LogFindlineMeasureProbe("build_scan_profiles", "skipped", "process width zero");
         m_lastMeasureInputDebug.failure_stage = "process_width_zero";
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
@@ -2080,6 +2257,14 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
     if (iwsize + ihsize > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
     {
+        LogFindlineMeasureProbe(
+            "build_scan_profiles",
+            "skipped",
+            "scan_workspace_capacity_exceeded: w=" +
+                std::to_string(iprocessw) +
+                " h=" + std::to_string(iwsize + ihsize) +
+                " backimage=" + std::to_string(g_pbackimage->getWidth()) +
+                "x" + std::to_string(g_pbackimage->getHeight()));
         m_lastMeasureInputDebug.failure_stage = "scan_workspace_capacity_exceeded";
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
@@ -2154,7 +2339,10 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         g_pbackfindobject->setbrow(m_effective_filter_borw);
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
-        g_pbackfindobject->Measure(*g_pbackimage);
+        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
+            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
+        else
+            g_pbackfindobject->Measure(*g_pbackimage);
     }
 
     m_lastMeasureInputDebug.profile_count = iwsize + ihsize;
@@ -3297,6 +3485,61 @@ bool FindLine::MeasureSimpleRoiGradientPoints(Image& image,
     return stats.point_count >= 2;
 }
 
+void FindLine::measureRobust(void* pimage)
+{
+    if (pimage == nullptr)
+    {
+        m_lastMeasureInputDebug.failure_stage = "image_pointer_null";
+        m_lastMeasureInputDebug.detail = "Findline.measureRobust received null image pointer";
+        ClearMeasureState();
+
+        return;
+    }
+
+    Image* image = static_cast<Image*>(pimage);
+    cv::Mat mat = image->getmat();
+
+    if (mat.empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "image_mat_empty";
+        ClearMeasureState();
+
+        return;
+    }
+
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(mat.cols, mat.rows))
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
+        ClearMeasureState();
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+    g_pbackfindobject = ImageManager::Getbackfindobject(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
+        ClearMeasureState();
+        return;
+    }
+
+    FindLineDisplaySnapshot displaySnapshot;
+    if (getdisplaysnapshot(displaySnapshot))
+    {
+        m_lastMeasureInputDebug.has_line_roi = true;
+        m_lastMeasureInputDebug.roi_x0 = displaySnapshot.x0;
+        m_lastMeasureInputDebug.roi_y0 = displaySnapshot.y0;
+        m_lastMeasureInputDebug.roi_x1 = displaySnapshot.x1;
+        m_lastMeasureInputDebug.roi_y1 = displaySnapshot.y1;
+    }
+
+    MarkMeasureGeometryDirty();
+    EnsureOriginalMeasureGeometryReady();
+    MeasureRobust(*image);
+}
+
 void FindLine::pyrimage(void* pimage)
 {
     Image* pgetimage = (Image*)pimage;
@@ -4159,6 +4402,7 @@ void FindLine::MeasureRobust(Image& image)
     MarkMeasureGeometryDirty();
     if (!EnsureOriginalMeasureGeometryReady())
     {
+
         m_lastMeasureProfile = FindLineMeasureProfileStats();
         return;
     }
@@ -4169,22 +4413,42 @@ void FindLine::MeasureRobust(Image& image)
     m_best_sequence_index = -1;
     g_robust_ctx = RobustFeatureGraphContext();
 
+    if (!ImageManager::EnsureAlgorithmRuntimeResources(
+            image.getWidth(),
+            image.getHeight()))
+    {
+
+        m_lastMeasureProfile = FindLineMeasureProfileStats();
+        return;
+    }
+
+    g_pbackimage = ImageManager::GetBackImage(1);
+
+    if (g_pbackimage == nullptr || g_pbackimage == &image ||
+        g_pbackimage->getmat().empty())
+    {
+        m_lastMeasureProfile = FindLineMeasureProfileStats();
+        return;
+    }
+
     ProbeDisplayRoiGrayStats(image);
 
     FindLineMeasureProfileStats stats;
 
-    BuildScanProfiles(image, stats, total_begin);
 
+    BuildScanProfiles(image, stats, total_begin);
     if (m_budget_state.exceeded)
     {
+
         m_lastMeasureProfile = stats;
         return;
     }
 
-    CollectEdgeBandsRobust(image, stats);
 
+    CollectEdgeBandsRobust(image, stats);
     if (m_scanEdgeBands.empty())
     {
+
         m_lastMeasureProfile = stats;
         return;
     }
@@ -4297,7 +4561,10 @@ void FindLine::BuildScanProfilesRobust(Image& image,
         g_pbackfindobject->setminmaxarea(
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
-        g_pbackfindobject->Measure(*g_pbackimage);
+        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
+            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
+        else
+            g_pbackfindobject->Measure(*g_pbackimage);
     }
 
     stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());

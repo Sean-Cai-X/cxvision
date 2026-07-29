@@ -2,6 +2,7 @@
 #include "ManualConsoleEvidenceChain.h"
 #include "ManualConsoleUtils.h"
 #include "ManualStateTestConsole.h"
+#include "CxScriptCatalogRuntime.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,12 +48,15 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
+        scriptPath.find("findcircle") != std::string::npos ||
         scriptPath.find("FindCircle") != std::string::npos;
     const bool isLineScript =
         scriptPath.find("find_line") != std::string::npos ||
+        scriptPath.find("findline") != std::string::npos ||
         scriptPath.find("FindLine") != std::string::npos;
     const bool isEllipseScript =
         scriptPath.find("find_ellipse") != std::string::npos ||
+        scriptPath.find("findellipse") != std::string::npos ||
         scriptPath.find("FindEllipse") != std::string::npos;
 
     ManualGaugeState gauge;
@@ -190,10 +194,89 @@ static void AssignFallbackImageToThumb(
         thumb.reason = "fallback image bound for evidence placeholder";
 }
 
+static std::string BuildDefaultEvidenceParamSummaryForScript(
+    const std::string& scriptPath)
+{
+    ManualTestContext temp;
+    SeedDefaultManualGlobals(temp, scriptPath);
+
+    auto getInt = [&](const std::string& key, int fallback) -> int
+    {
+        auto it = temp.runtime_int_vars.find(key);
+        return it == temp.runtime_int_vars.end() ? fallback : it->second;
+    };
+
+    std::ostringstream oss;
+    oss << "method=" << getInt("global_method", 0)
+        << " threshold=" << getInt("global_threshold", 20)
+        << " wgap=" << getInt("global_wgap", 0)
+        << " hgap=" << getInt("global_hgap", 0)
+        << " gap=" << getInt("global_gap", 0)
+        << " linegap=" << getInt("global_linegap", 0)
+        << " filterprofile=" << getInt("global_filterprofile", 1)
+        << " tool_half_width=" << getInt("global_tool_half_width", 0)
+        << " roi_x0=" << getInt("global_roi_x0", 0)
+        << " roi_y0=" << getInt("global_roi_y0", 0)
+        << " roi_x1=" << getInt("global_roi_x1", 0)
+        << " roi_y1=" << getInt("global_roi_y1", 0)
+        << " roi_x=" << getInt("global_roi_x", 0)
+        << " roi_y=" << getInt("global_roi_y", 0)
+        << " roi_width=" << getInt("global_roi_width", 0)
+        << " roi_height=" << getInt("global_roi_height", 0)
+        << " circle_cx=" << getInt("global_circle_cx", 0)
+        << " circle_cy=" << getInt("global_circle_cy", 0)
+        << " circle_px=" << getInt("global_circle_px", 0)
+        << " circle_py=" << getInt("global_circle_py", 0)
+        << " ellipse_x0=" << getInt("global_ellipse_x0", 0)
+        << " ellipse_y0=" << getInt("global_ellipse_y0", 0)
+        << " ellipse_x1=" << getInt("global_ellipse_x1", 0)
+        << " ellipse_y1=" << getInt("global_ellipse_y1", 0)
+        << " learn_roi_x=" << getInt("global_learn_roi_x", 120)
+        << " learn_roi_y=" << getInt("global_learn_roi_y", 120)
+        << " learn_roi_w=" << getInt("global_learn_roi_w", 120)
+        << " learn_roi_h=" << getInt("global_learn_roi_h", 90)
+        << " search_roi_x=" << getInt("global_search_roi_x", 60)
+        << " search_roi_y=" << getInt("global_search_roi_y", 60)
+        << " search_roi_w=" << getInt("global_search_roi_w", 640)
+        << " search_roi_h=" << getInt("global_search_roi_h", 480)
+        << " compare_gap=" << getInt("global_compare_gap", 0)
+        << " objfilter=" << getInt("global_objfilter", 0)
+        << " find_num=" << getInt("global_find_num", 1)
+        << " max_elapsed_ms=" << getInt("global_max_elapsed_ms", 2000)
+        << " max_scan_lines=" << getInt("global_max_scan_lines", 2000)
+        << " max_samples=" << getInt("global_max_samples", 200000);
+
+    return oss.str();
+}
+
+static void EnsureStructuredCxImageCatalogEntriesLoaded(ManualTestContext& context)
+{
+    if (!context.catalog_entries.empty())
+        return;
+
+    const char* catalogPath =
+        "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
+
+    CxScriptCatalogRuntime catalog;
+    std::string reason;
+    if (!LoadCxScriptCatalogFile(catalogPath, catalog, reason))
+    {
+        context.catalog_loaded = false;
+        context.catalog_path = catalogPath;
+        return;
+    }
+
+    context.catalog_entries = catalog.scripts;
+    context.catalog_loaded = true;
+    context.catalog_path = catalogPath;
+}
+
 void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
 {
   if (m_manualTest.script_evidence_groups_dirty == false)
     return;
+
+  EnsureStructuredCxImageCatalogEntriesLoaded(m_manualTest);
 
   m_manualTest.script_evidence_groups.clear();
 
@@ -201,6 +284,23 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       BuildEvidenceFallbackImageCandidates(m_manualTest);
 
   std::size_t fallbackImageIndex = 0;
+
+  auto hasThumbForScript = [&](const std::string& scriptId,
+                               const std::string& scriptPath) -> bool
+  {
+    for (const auto& group : m_manualTest.script_evidence_groups)
+    {
+      for (const auto& thumb : group.thumbs)
+      {
+        if (!scriptId.empty() && thumb.script_id == scriptId)
+          return true;
+        if (scriptId.empty() && !scriptPath.empty() &&
+            thumb.script_path == scriptPath)
+          return true;
+      }
+    }
+    return false;
+  };
 
   auto findOrCreateGroup = [&](const std::string& scriptId,
                                const std::string& scriptPath,
@@ -251,18 +351,18 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         }
       }
     }
+    if (thumb.parameter_summary.empty() ||
+        thumb.parameter_summary.find('=') == std::string::npos)
+    {
+      thumb.parameter_summary =
+          BuildDefaultEvidenceParamSummaryForScript(scriptPath);
+    }
     thumb.status = item.probe_status.empty() ? item.contract_status : item.probe_status;
     thumb.reason = item.review_status;
 
     AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
 
     group.thumbs.push_back(thumb);
-  }
-
-  if (!m_manualTest.script_evidence_groups.empty())
-  {
-    m_manualTest.script_evidence_groups_dirty = false;
-    return;
   }
 
   for (const auto& entry : m_manualTest.catalog_entries)
@@ -274,6 +374,9 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
     if (!isVisible) continue;
 
+    if (hasThumbForScript(entry.script_id, entry.path))
+      continue;
+
     ScriptEvidenceGroup& group =
         findOrCreateGroup(entry.script_id, entry.path, entry.tool);
 
@@ -281,7 +384,12 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     thumb.script_id = entry.script_id;
     thumb.script_path = entry.path;
     thumb.tool = entry.tool;
-    thumb.parameter_summary = entry.parameter_policy_id;
+    thumb.parameter_summary =
+        BuildDefaultEvidenceParamSummaryForScript(entry.path);
+    thumb.reason = entry.parameter_policy_id.empty()
+        ? "catalog fallback default params"
+        : "catalog fallback default params from policy " +
+          entry.parameter_policy_id;
 
     for (const auto& img : m_manualTest.image_manifest_items)
     {
@@ -297,6 +405,46 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
 
     group.thumbs.push_back(thumb);
   }
+
+  std::stable_sort(
+      m_manualTest.script_evidence_groups.begin(),
+      m_manualTest.script_evidence_groups.end(),
+      [](const ScriptEvidenceGroup& left, const ScriptEvidenceGroup& right)
+      {
+        auto priority = [](const ScriptEvidenceGroup& group) -> int
+        {
+          const std::string key = group.label + " " + group.script_id + " " + group.script_path;
+          if (key.find("Findline") != std::string::npos ||
+              key.find("findline") != std::string::npos ||
+              key.find("find_line") != std::string::npos)
+            return 0;
+          if (key.find("Findcircle") != std::string::npos ||
+              key.find("findcircle") != std::string::npos ||
+              key.find("find_circle") != std::string::npos)
+            return 1;
+          if (key.find("Findellipse") != std::string::npos ||
+              key.find("findellipse") != std::string::npos ||
+              key.find("find_ellipse") != std::string::npos)
+            return 2;
+          if (key.find("FindRect") != std::string::npos ||
+              key.find("findrect") != std::string::npos ||
+              key.find("find_rect") != std::string::npos)
+            return 3;
+          if (key.find("fastmatch") != std::string::npos ||
+              key.find("FastMatch") != std::string::npos)
+            return 4;
+          if (key.find("FindSegmentation") != std::string::npos ||
+              key.find("find_segmentation") != std::string::npos)
+            return 5;
+          return 10;
+        };
+
+        const int lp = priority(left);
+        const int rp = priority(right);
+        if (lp != rp)
+          return lp < rp;
+        return left.script_id < right.script_id;
+      });
 
   if (m_manualTest.script_evidence_groups.empty())
   {
@@ -354,6 +502,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
   }
 
   m_manualTest.script_evidence_groups_dirty = false;
+  m_manualTest.script_evidence_row_refs_dirty = true;
 }
 
 void ViewController::EnsureEvidenceChainThumbnailsLoaded()
