@@ -24,7 +24,7 @@
  
 namespace
 {
-void LogFindellipseMeasureProbe(
+void LogFindEllipseMeasureProbe(
     const char* phase,
     const char* status,
     const std::string& message)
@@ -803,8 +803,8 @@ void FindEllipse::Measure(Image& image)
     if (image.getmat().empty() || image.getWidth() <= 0 || image.getHeight() <= 0)
     {
         m_measure_failure_stage = "input_image_empty";
-        m_measure_failure_reason = "Findellipse input image is empty or has invalid dimensions.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse input image is empty or has invalid dimensions.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -821,7 +821,7 @@ void FindEllipse::Measure(Image& image)
             << " threshold=" << m_iThreshold
             << " method=" << m_iMethod
             << " existing_scan_lines=" << m_lines.size();
-        LogFindellipseMeasureProbe("measure_enter", "running", oss.str());
+        LogFindEllipseMeasureProbe("measure_enter", "running", oss.str());
     }
 
     SetCxCrashBreadcrumb("FindEllipse::Measure:ensure_resources");
@@ -831,8 +831,8 @@ void FindEllipse::Measure(Image& image)
     {
         m_measure_failure_stage = "runtime_resources";
         m_measure_failure_reason =
-            "Findellipse failed to initialize ImageManager algorithm runtime resources.";
-        LogFindellipseMeasureProbe(
+            "FindEllipse failed to initialize ImageManager algorithm runtime resources.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -846,8 +846,8 @@ void FindEllipse::Measure(Image& image)
         || image.getHeight() < rect().TopLeft().Y() + rect().Height())
     {
         m_measure_failure_stage = "roi_outside_image";
-        m_measure_failure_reason = "Findellipse ROI rectangle is outside input image.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse ROI rectangle is outside input image.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -856,8 +856,8 @@ void FindEllipse::Measure(Image& image)
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
     {
         m_measure_failure_stage = "roi_negative";
-        m_measure_failure_reason = "Findellipse ROI rectangle has negative origin.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse ROI rectangle has negative origin.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -881,8 +881,8 @@ void FindEllipse::Measure(Image& image)
     if (isize <= 0)
     {
         m_measure_failure_stage = "scan_lines_empty";
-        m_measure_failure_reason = "Findellipse has no scan lines; check setellipse/setgap order.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse has no scan lines; check setellipse/setgap order.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -891,8 +891,8 @@ void FindEllipse::Measure(Image& image)
     if (g_pbackimage == nullptr)
     {
         m_measure_failure_stage = "backimage_null";
-        m_measure_failure_reason = "Findellipse back image is null.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse back image is null.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -901,8 +901,8 @@ void FindEllipse::Measure(Image& image)
     if (g_pbackimage == &image)
     {
         m_measure_failure_stage = "backimage_alias_input";
-        m_measure_failure_reason = "Findellipse back image aliases the input image.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse back image aliases the input image.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -911,8 +911,8 @@ void FindEllipse::Measure(Image& image)
     if (g_pbackimage->getmat().empty())
     {
         m_measure_failure_stage = "backimage_empty";
-        m_measure_failure_reason = "Findellipse back image Mat is empty.";
-        LogFindellipseMeasureProbe(
+        m_measure_failure_reason = "FindEllipse back image Mat is empty.";
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -964,13 +964,13 @@ void FindEllipse::Measure(Image& image)
     {
         m_measure_failure_stage = "scan_line_invalid";
         std::ostringstream oss;
-        oss << "Findellipse generated invalid scan lines before linecopyex."
+        oss << "FindEllipse generated invalid scan lines before linecopyex."
             << " invalid_line_count=" << invalid_line_count
             << " scan_lines=" << isize
             << " min_line_len=" << min_line_len
             << " max_line_len=" << max_line_len;
         m_measure_failure_reason = oss.str();
-        LogFindellipseMeasureProbe("measure_preflight", "failed", m_measure_failure_reason);
+        LogFindEllipseMeasureProbe("measure_preflight", "failed", m_measure_failure_reason);
         return;
     }
 
@@ -982,12 +982,12 @@ void FindEllipse::Measure(Image& image)
     {
         m_measure_failure_stage = "scan_buffer_too_small";
         std::ostringstream oss;
-        oss << "Findellipse scan buffer is smaller than generated scan geometry."
+        oss << "FindEllipse scan buffer is smaller than generated scan geometry."
             << " scan_lines=" << isize
             << " process_w=" << iprocessw
             << " back=" << g_pbackimage->getWidth() << "x" << g_pbackimage->getHeight();
         m_measure_failure_reason = oss.str();
-        LogFindellipseMeasureProbe(
+        LogFindEllipseMeasureProbe(
             "measure_preflight",
             "failed",
             m_measure_failure_reason);
@@ -1002,7 +1002,7 @@ void FindEllipse::Measure(Image& image)
             << " max_line_len=" << max_line_len
             << " outside_endpoint_count=" << outside_endpoint_count
             << " back=" << g_pbackimage->getWidth() << "x" << g_pbackimage->getHeight();
-        LogFindellipseMeasureProbe("measure_scan_geometry", "ready", oss.str());
+        LogFindEllipseMeasureProbe("measure_scan_geometry", "ready", oss.str());
     }
 
     SetCxCrashBreadcrumb("FindEllipse::Measure:linecopyex");
@@ -1010,13 +1010,13 @@ void FindEllipse::Measure(Image& image)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
-    LogFindellipseMeasureProbe("measure_linecopyex", "finished", "Findellipse linecopyex completed.");
+    LogFindEllipseMeasureProbe("measure_linecopyex", "finished", "FindEllipse linecopyex completed.");
 
     SetCxCrashBreadcrumb("FindEllipse::Measure:preprocess_roi");
     g_pbackimage->setroi(0, 0, iprocessw, isize);
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
-    LogFindellipseMeasureProbe("measure_preprocess", "finished", "Findellipse preprocess completed.");
+    LogFindEllipseMeasureProbe("measure_preprocess", "finished", "FindEllipse preprocess completed.");
 
     if ((m_ifindset & 0x01) && g_pbackfindobject != nullptr)
     {
@@ -1025,7 +1025,7 @@ void FindEllipse::Measure(Image& image)
         g_pbackfindobject->setbrow(m_ifilterborw);//21 22
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_ifiltermin)), ClampLongLongToInt(static_cast<long long>(m_ifiltermax)));
         g_pbackfindobject->Measure(*g_pbackimage);
-        LogFindellipseMeasureProbe("measure_findobject", "finished", "Findellipse FindObject filter completed.");
+        LogFindEllipseMeasureProbe("measure_findobject", "finished", "FindEllipse FindObject filter completed.");
     }
 
     std::vector<int> irecordpoint;
@@ -1234,7 +1234,7 @@ void FindEllipse::Measure(Image& image)
         {
             m_measure_failure_stage = "no_boundary_band_candidate";
             m_measure_failure_reason =
-                "Findellipse found edge runs, but none are near the Gauge ellipse boundary band.";
+                "FindEllipse found edge runs, but none are near the Gauge ellipse boundary band.";
             if (m_rejected_boundary_band_candidate_count > 0)
             {
                 m_measure_failure_reason += " rejected_norm=" +
@@ -1249,7 +1249,7 @@ void FindEllipse::Measure(Image& image)
         {
             m_measure_failure_stage = "threshold_no_edge";
             m_measure_failure_reason =
-                "Findellipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
+                "FindEllipse preprocessing produced no accepted edge run; check threshold/method/linegap.";
         }
     }
 
@@ -1260,7 +1260,7 @@ void FindEllipse::Measure(Image& image)
             << " total_candidates=" << m_scan_total_candidates
             << " accepted_before_gate=" << m_scan_accepted_points_before_gate
             << " failure_stage=" << m_measure_failure_stage;
-        LogFindellipseMeasureProbe("measure_exit", "finished", oss.str());
+        LogFindEllipseMeasureProbe("measure_exit", "finished", oss.str());
     }
     
 }
@@ -1309,7 +1309,7 @@ void FindEllipse::fitellipse()
     {
         m_measure_failure_stage = "insufficient_boundary_coverage";
         m_measure_failure_reason =
-            "Findellipse rejected edge set because accepted points do not cover enough of the Gauge ellipse.";
+            "FindEllipse rejected edge set because accepted points do not cover enough of the Gauge ellipse.";
         return;
     }
 
@@ -1343,7 +1343,7 @@ void FindEllipse::fitellipse()
     {
         m_measure_failure_stage = "fit_too_small_for_gauge";
         m_measure_failure_reason =
-            "Findellipse rejected local edge cluster because fitted ellipse is too small compared with the Gauge.";
+            "FindEllipse rejected local edge cluster because fitted ellipse is too small compared with the Gauge.";
         return;
     }
 
@@ -1421,11 +1421,11 @@ void FindEllipse::measure(void* pimage)
     if (pgetimage == nullptr)
     {
         m_measure_failure_stage = "input_image_null";
-        m_measure_failure_reason = "Findellipse measure received a null Image pointer.";
-        LogFindellipseMeasureProbe("measure_wrapper", "failed", m_measure_failure_reason);
+        m_measure_failure_reason = "FindEllipse measure received a null Image pointer.";
+        LogFindEllipseMeasureProbe("measure_wrapper", "failed", m_measure_failure_reason);
         return;
     }
-    LogFindellipseMeasureProbe("measure_wrapper", "running", "Findellipse measure received Image pointer.");
+    LogFindEllipseMeasureProbe("measure_wrapper", "running", "FindEllipse measure received Image pointer.");
     Measure(*pgetimage);
 }
 void FindEllipse::measureRobust(void* pimage)
@@ -1435,7 +1435,7 @@ void FindEllipse::measureRobust(void* pimage)
     if (pgetimage == nullptr)
     {
         m_measure_failure_stage = "input_image_null";
-        m_measure_failure_reason = "Findellipse measureRobust received a null Image pointer.";
+        m_measure_failure_reason = "FindEllipse measureRobust received a null Image pointer.";
         return;
     }
     MeasureRobust(*pgetimage);
@@ -1668,7 +1668,7 @@ void FindEllipse::MeasureRobust(Image& image)
             image.getWidth(),
             image.getHeight()))
     {
-        LogFindellipseMeasureProbe("robust_measure", "failed", "EnsureAlgorithmRuntimeResources failed");
+        LogFindEllipseMeasureProbe("robust_measure", "failed", "EnsureAlgorithmRuntimeResources failed");
         return;
     }
 
@@ -1677,7 +1677,7 @@ void FindEllipse::MeasureRobust(Image& image)
     if (g_pbackimage == nullptr || g_pbackimage == &image ||
         g_pbackimage->getmat().empty())
     {
-        LogFindellipseMeasureProbe("robust_measure", "failed", "backimage unavailable");
+        LogFindEllipseMeasureProbe("robust_measure", "failed", "backimage unavailable");
         return;
     }
 
@@ -1710,7 +1710,7 @@ void FindEllipse::MeasureRobust(Image& image)
 
     if (m_ellipse_edge_band_candidates.empty())
     {
-        LogFindellipseMeasureProbe("robust_measure", "no_candidates", "no edge bands found");
+        LogFindEllipseMeasureProbe("robust_measure", "no_candidates", "no edge bands found");
         return;
     }
 
@@ -1718,7 +1718,7 @@ void FindEllipse::MeasureRobust(Image& image)
 
     if (m_ellipse_feature_graph.nodes.empty())
     {
-        LogFindellipseMeasureProbe("robust_measure", "no_graph", "feature graph empty");
+        LogFindEllipseMeasureProbe("robust_measure", "no_graph", "feature graph empty");
         return;
     }
 
@@ -1729,13 +1729,13 @@ void FindEllipse::MeasureRobust(Image& image)
     if (m_ellipse_best_sequence_index < 0 ||
         m_ellipse_best_sequence_index >= static_cast<int>(m_ellipse_fit_candidate_sequences.size()))
     {
-        LogFindellipseMeasureProbe("robust_measure", "no_sequence", "no valid sequence selected");
+        LogFindEllipseMeasureProbe("robust_measure", "no_sequence", "no valid sequence selected");
         return;
     }
 
     ConvertEllipseSequenceToMeasurePoints(m_ellipse_best_sequence_index);
 
-    LogFindellipseMeasureProbe("robust_measure", "success",
+    LogFindEllipseMeasureProbe("robust_measure", "success",
         "robust measurement completed with " +
         std::to_string(m_ellipse_fit_candidate_sequences[m_ellipse_best_sequence_index].node_count) +
         " points");

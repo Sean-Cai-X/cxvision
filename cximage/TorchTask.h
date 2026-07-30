@@ -26,14 +26,20 @@ public:
     int getmaskavailable();
 
     double getinferms();
+    double gettrainms();
+    double gettotalms();
 
     char* getstatus();
     char* getreason();
     char* getfailstage();
     char* getactualdevice();
     char* getresultref();
+    char* getevidenceref();
+    char* getprimaryvisualref();
     char* getmaskref();
     char* getoverlayref();
+    char* gettrainersummary();
+    char* getmainlinesummary();
 
     const CxInferenceResult& GetInferenceResult() const noexcept;
 

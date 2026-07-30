@@ -7,6 +7,14 @@ int x0 = global_roi_x0;
 int y0 = global_roi_y0;
 int x1 = global_roi_x1;
 int y1 = global_roi_y1;
+
+int positive_x = 320;
+int positive_y = 240;
+int negative_x = 96;
+int negative_y = 96;
+int positive_count = 1;
+int negative_count = 1;
+int prompt_points_binding_ready = 0;
 double threshold = 0.5;
 
 int prompt_x0 = 120;
@@ -30,7 +38,9 @@ m_seg.setdevice("cpu");
 m_seg.setmodel("");
 m_seg.setthreshold(threshold);
 m_seg.setpromptrect(prompt_y1, prompt_x1, prompt_y0, prompt_x0);
-m_seg.setmode(2);
+
+m_seg.setpoint(positive_x, positive_y);
+m_seg.setmode(3);
 
 m_seg.segment(&m_image);
 m_seg.extractboundary();

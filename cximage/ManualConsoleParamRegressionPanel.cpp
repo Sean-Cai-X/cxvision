@@ -605,6 +605,191 @@ void ResetKeyParameterUiDefaults(ManualTestContext& context)
   SyncKeyParameterUiToGauge(context);
 }
 
+static std::string NormalizeKeyParamToolTypeLocal(const std::string& type)
+{
+  if (type == "Findline" || type == "FindLine") return "FindLine";
+  if (type == "Findcircle" || type == "FindCircle") return "FindCircle";
+  if (type == "Findellipse" || type == "FindEllipse") return "FindEllipse";
+  if (type == "Findrect" || type == "FindRect") return "FindRect";
+  if (type == "fastmatch" || type == "FastMatch" || type == "CFastMatch") return "FastMatch";
+  return type;
+}
+
+static void ApplyPrimaryObjectToCurrentGauge(
+    ManualTestContext& context,
+    const CxEvidenceEditableObjectRef& ref,
+    const char* status)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  const std::string tool = NormalizeKeyParamToolTypeLocal(ref.type);
+
+  gauge.primary_object_type = tool;
+  gauge.primary_object_name = ref.name;
+  gauge.primary_object_status = status == nullptr ? "manual_object_selected" : status;
+  gauge.tool = tool;
+  gauge.has_line_gauge = tool == "FindLine";
+  gauge.has_circle_gauge = tool == "FindCircle";
+  gauge.has_ellipse_gauge = tool == "FindEllipse";
+  gauge.dirty = true;
+  gauge.review_status = "editing";
+
+  context.current_evidence_selection.primary_object_type = tool;
+  context.current_evidence_selection.primary_object_name = ref.name;
+  context.current_evidence_selection.primary_object_status =
+      gauge.primary_object_status;
+  context.debug_status = "PRIMARY_OBJECT_SELECTED";
+  context.debug_reason =
+      "Key Parameter Controls selected primary object: " +
+      tool + " " + ref.name;
+}
+
+static void DrawPrimaryObjectSelector(ManualTestContext& context)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  const CxEvidenceSelectionSnapshot& snapshot =
+      context.current_evidence_selection;
+
+  ImGui::Text("Primary Object: %s %s | %s",
+              gauge.primary_object_type.empty() ? "-" : gauge.primary_object_type.c_str(),
+              gauge.primary_object_name.empty() ? "-" : gauge.primary_object_name.c_str(),
+              gauge.primary_object_status.empty() ? "-" : gauge.primary_object_status.c_str());
+
+  if (!snapshot.valid || snapshot.editable_objects.empty())
+  {
+    ImGui::TextDisabled("No editable object candidates from selected Evidence row.");
+    return;
+  }
+
+  int currentIndex = -1;
+  for (int i = 0; i < static_cast<int>(snapshot.editable_objects.size()); ++i)
+  {
+    const auto& ref = snapshot.editable_objects[static_cast<std::size_t>(i)];
+    if (ref.name == gauge.primary_object_name &&
+        NormalizeKeyParamToolTypeLocal(ref.type) ==
+            NormalizeKeyParamToolTypeLocal(gauge.primary_object_type))
+    {
+      currentIndex = i;
+      break;
+    }
+  }
+
+  std::string preview = currentIndex >= 0
+      ? NormalizeKeyParamToolTypeLocal(
+            snapshot.editable_objects[static_cast<std::size_t>(currentIndex)].type) +
+            " " + snapshot.editable_objects[static_cast<std::size_t>(currentIndex)].name
+      : "Select primary editable object";
+
+  ImGui::SetNextItemWidth(320.0f);
+  if (ImGui::BeginCombo("Primary Object##evidence_primary_object", preview.c_str()))
+  {
+    for (int i = 0; i < static_cast<int>(snapshot.editable_objects.size()); ++i)
+    {
+      const auto& ref = snapshot.editable_objects[static_cast<std::size_t>(i)];
+      const std::string label =
+          NormalizeKeyParamToolTypeLocal(ref.type) + " " + ref.name +
+          "  line " + std::to_string(ref.declared_line);
+      const bool selected = i == currentIndex;
+      if (ImGui::Selectable(label.c_str(), selected))
+      {
+        ApplyPrimaryObjectToCurrentGauge(
+            context,
+            ref,
+            "manual_object_selected");
+      }
+      if (selected)
+        ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+
+  if (gauge.primary_object_status == "needs_object_selection" ||
+      gauge.primary_object_status == "needs_object_selection_no_tool_match")
+  {
+    ImGui::TextColored(ImVec4(1.0f, 0.68f, 0.25f, 1.0f),
+                       "Multiple editable objects are present. Select the object before tuning parameters.");
+  }
+}
+
+static const RuntimeObjectView* FindCurrentFindLineObject(
+    const ManualTestContext& context)
+{
+  const std::string& primary = context.current_gauge.primary_object_name;
+  if (!primary.empty())
+  {
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+      if (object.type == "FindLine" && object.name == primary)
+        return &object;
+    }
+  }
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "FindLine")
+      return &object;
+  }
+  return nullptr;
+}
+
+static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindLine" ||
+        context.current_gauge.has_line_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindLineObject(context);
+  const int linegap = std::max(1, context.current_gauge.linegap);
+  const double lineLength = object != nullptr && object->line_length > 0.0
+      ? object->line_length
+      : std::hypot(
+            static_cast<double>(context.current_gauge.line_x1 -
+                                context.current_gauge.line_x0),
+            static_cast<double>(context.current_gauge.line_y1 -
+                                context.current_gauge.line_y0));
+  const int previewTicks = lineLength > 1.0
+      ? std::max(1, static_cast<int>(std::floor(lineLength / linegap)) + 1)
+      : 0;
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Gauge Scan Semantics");
+  ImGui::TextColored(ImVec4(1.0f, 0.92f, 0.45f, 1.0f),
+                     "scan tick = sampling opportunity");
+  ImGui::SameLine();
+  ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.18f, 1.0f),
+                     "| accepted point = algorithm result");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to show accepted/rejected counters.");
+    ImGui::Text("preview_ticks=%d linegap=%d method=%d",
+                previewTicks,
+                linegap,
+                context.current_gauge.method);
+    return;
+  }
+
+  ImGui::Text("preview_ticks=%d scan_rows_examined=%d foreground_rows=%d",
+              previewTicks,
+              object->line_scan_rows_examined,
+              object->line_scan_rows_with_foreground);
+  ImGui::Text("scan_runs=%d emitted=%d accepted_points=%d valid_points=%d",
+              object->line_scan_runs_total,
+              object->line_scan_points_emitted,
+              object->line_measure_points_count,
+              object->valid_line_points_count);
+  ImGui::Text("rejected_near_endpoint=%d rejected_by_selection=%d over_length=%d",
+              object->line_scan_runs_rejected_near_endpoint,
+              object->line_scan_runs_rejected_by_selection,
+              object->line_scan_runs_over_length_limit);
+  ImGui::Text("fit_line=%s linegap=%d method=%d threshold=%d",
+              object->has_fit_line ? "true" : "false",
+              object->line_measure_linegap,
+              object->line_measure_method,
+              object->line_measure_threshold);
+}
+
 void DrawKeyParameterControlPanel(ManualTestContext& context)
 {
   ManualGaugeState& gauge = context.current_gauge;
@@ -612,6 +797,13 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
   ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "%s", gauge.tool.c_str());
+  DrawPrimaryObjectSelector(context);
+  if (gauge.tool == "FindLine" || gauge.has_line_gauge)
+  {
+      ImGui::Checkbox("Show single-line gauge scan ticks",
+                      &context.show_line_gauge_scan_lines);
+      DrawFindLineScanSemanticsPanel(context);
+  }
   ImGui::Separator();
 
   ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);

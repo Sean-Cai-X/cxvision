@@ -233,6 +233,8 @@ bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
     target.roi_crop_packet_ref = source.roi_crop_packet_ref;
     target.template_alignment_ref = source.template_alignment_ref;
     target.roi_diff_candidate_ref = source.roi_diff_candidate_ref;
+    target.trainer_lifecycle_summary = source.trainer_lifecycle_summary;
+    target.unified_mainline_summary = source.unified_mainline_summary;
 
     AttachSegmentationMaskRefs(source, task, target);
     AttachDetectionResults(source, task, target);
@@ -308,6 +310,12 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::AdaptToGuiReview(const CxInfere
     }
     if (!result.evidence_ref.empty()) {
         review.result_fields.push_back({"Evidence Ref", result.evidence_ref, ""});
+    }
+    if (!result.trainer_lifecycle_summary.empty()) {
+        review.result_fields.push_back({"Trainer Lifecycle Summary", result.trainer_lifecycle_summary, ""});
+    }
+    if (!result.unified_mainline_summary.empty()) {
+        review.result_fields.push_back({"Unified Mainline Summary", result.unified_mainline_summary, ""});
     }
     if (!result.detections.empty()) {
         review.result_fields.push_back({"Detection Count", std::to_string(result.detections.size()), ""});

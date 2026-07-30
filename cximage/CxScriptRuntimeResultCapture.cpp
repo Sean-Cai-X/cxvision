@@ -159,8 +159,39 @@ bool CaptureFindLineResult(
     output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
     output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
     output.scan_points_emitted = debug.scan_points_emitted;
+    output.findline_scan_diagnostics.clear();
+    for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
+    {
+        FindLineMeasureInputDebug::ScanDiagnostic diag;
+        CxShapePoint p0;
+        CxShapePoint p1;
+        if (!tool.getscandiagnostic(i, diag) ||
+            !tool.getscandiagnosticline(
+                diag.scan_type,
+                diag.scan_index,
+                p0,
+                p1))
+        {
+            continue;
+        }
+
+        CxFindLineScanDiagnosticSnapshot snap;
+        snap.scan_index = diag.scan_index;
+        snap.scan_type = diag.scan_type;
+        snap.x0 = p0.x;
+        snap.y0 = p0.y;
+        snap.x1 = p1.x;
+        snap.y1 = p1.y;
+        snap.candidate_count = diag.candidate_count;
+        snap.accepted = diag.accepted;
+        snap.accepted_x = diag.accepted_x;
+        snap.accepted_y = diag.accepted_y;
+        snap.reject_reason = diag.reject_reason;
+        output.findline_scan_diagnostics.push_back(snap);
+    }
     output.object_prefilter_requested = (debug.objfilterset & 0x01) != 0;
     output.object_prefilter_applied = debug.findobject_measure_called;
+    output.object_filter_strategy_id = debug.findobject_strategy_id;
     output.object_filter_borw = debug.effective_filter_borw;
     output.object_filter_min = debug.effective_filter_min;
     output.object_filter_max = debug.effective_filter_max;
@@ -187,9 +218,22 @@ bool CaptureFindLineResult(
         debug.cc_black.rejected_by_min + debug.cc_black.rejected_by_max;
     output.object_algorithm_branch = debug.findobject_algorithm_branch;
     output.budget_exceeded = tool.budgetexceeded();
-    output.failure_stage = output.has_fit_line
-        ? std::string()
-        : tool.getfailurestage();
+    if (output.has_fit_line)
+    {
+        output.failure_stage.clear();
+    }
+    else if (debug.original_point_count > 0 && output.valid_points_count <= 0)
+    {
+        output.failure_stage = "findline_measure_points_below_fit_min";
+    }
+    else if (output.valid_points_count > 0 || debug.scan_points_emitted > 0)
+    {
+        output.failure_stage = "findline_fail_fit_degenerate";
+    }
+    else
+    {
+        output.failure_stage = tool.getfailurestage();
+    }
 
     if (output.has_fit_line)
     {
@@ -232,9 +276,18 @@ bool CaptureFindCircleResult(
     output.fit_filter_sigma = tool.getfitfiltersigma();
     output.fit_filter_threshold = tool.getfitfilterthreshold();
     output.budget_exceeded = tool.budgetexceeded();
-    output.failure_stage = output.has_fit_circle
-        ? std::string()
-        : tool.getfailurestage();
+    if (output.has_fit_circle)
+    {
+        output.failure_stage.clear();
+    }
+    else if (output.valid_points_count > 0)
+    {
+        output.failure_stage = "findcircle_fit_degenerate_after_measure_points";
+    }
+    else
+    {
+        output.failure_stage = tool.getfailurestage();
+    }
 
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
@@ -297,7 +350,7 @@ bool CaptureFindEllipseResult(
         output.failure_stage = snapshot.measure_failure_stage;
 
     if (!has_snapshot)
-        output.reason = "Findellipse display snapshot is empty";
+        output.reason = "FindEllipse display snapshot is empty";
     else if (!snapshot.measure_failure_stage.empty())
     {
         output.reason = snapshot.measure_failure_reason;
@@ -333,9 +386,9 @@ bool CaptureFindEllipseResult(
         }
     }
     else if (!output.has_fit_ellipse && snapshot.measure_points_count > 0)
-        output.reason = "Findellipse produced measure points, but fitellipse result is unavailable.";
+        output.reason = "FindEllipse produced measure points, but fitellipse result is unavailable.";
     else if (!output.has_fit_ellipse)
-        output.reason = "Findellipse produced zero measure points.";
+        output.reason = "FindEllipse produced zero measure points.";
 
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
@@ -602,6 +655,10 @@ static void MergeToolCapture(
     capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
     capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
     capture.scan_points_emitted = tool.scan_points_emitted;
+    capture.findline_scan_diagnostics.insert(
+        capture.findline_scan_diagnostics.end(),
+        tool.findline_scan_diagnostics.begin(),
+        tool.findline_scan_diagnostics.end());
     capture.has_fit_line = capture.has_fit_line || tool.has_fit_line;
     capture.has_fit_circle = capture.has_fit_circle || tool.has_fit_circle;
     capture.has_fit_ellipse = capture.has_fit_ellipse || tool.has_fit_ellipse;
@@ -694,6 +751,7 @@ static void MergeToolCapture(
     capture.fastmatch_candidate_reject_count += tool.fastmatch_candidate_reject_count;
     capture.object_prefilter_requested = tool.object_prefilter_requested;
     capture.object_prefilter_applied = tool.object_prefilter_applied;
+    capture.object_filter_strategy_id = tool.object_filter_strategy_id;
     capture.object_filter_borw = tool.object_filter_borw;
     capture.object_filter_min = tool.object_filter_min;
     capture.object_filter_max = tool.object_filter_max;
@@ -748,8 +806,12 @@ static void MergeToolCapture(
         capture.torch_ok = tool.torch_ok;
     if (tool.torch_error_code != 0)
         capture.torch_error_code = tool.torch_error_code;
+    if (tool.torch_train_ms != 0.0)
+        capture.torch_train_ms = tool.torch_train_ms;
     if (tool.torch_infer_ms != 0.0)
         capture.torch_infer_ms = tool.torch_infer_ms;
+    if (tool.torch_total_ms != 0.0)
+        capture.torch_total_ms = tool.torch_total_ms;
     capture.torch_result_count += tool.torch_result_count;
     if (!tool.torch_status.empty())
         capture.torch_status = tool.torch_status;
@@ -757,6 +819,14 @@ static void MergeToolCapture(
         capture.torch_failure_stage = tool.torch_failure_stage;
     if (!tool.torch_reason.empty())
         capture.torch_reason = tool.torch_reason;
+    if (!tool.torch_evidence_ref.empty())
+        capture.torch_evidence_ref = tool.torch_evidence_ref;
+    if (!tool.torch_primary_visual_ref.empty())
+        capture.torch_primary_visual_ref = tool.torch_primary_visual_ref;
+    if (!tool.torch_trainer_lifecycle_summary.empty())
+        capture.torch_trainer_lifecycle_summary = tool.torch_trainer_lifecycle_summary;
+    if (!tool.torch_unified_mainline_summary.empty())
+        capture.torch_unified_mainline_summary = tool.torch_unified_mainline_summary;
 
     if (capture.failure_stage.empty() && !tool.failure_stage.empty())
         capture.failure_stage = tool.failure_stage;
@@ -905,7 +975,7 @@ bool CaptureRuntimeToolResults(
         {
             if (!CaptureFindEllipseResult(*tool, object_name, tool_capture))
             {
-                reason = "failed to capture Findellipse: " + object_name;
+                reason = "failed to capture FindEllipse: " + object_name;
                 return false;
             }
         }
@@ -1100,7 +1170,7 @@ bool CaptureRuntimeToolResults(
 
     if (!supported_object_found)
     {
-        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, Findellipse, FindObject, FindRect, FindSegmentation, Match, fastmatch or TorchTask";
+        reason = "no supported cximage runtime object found; expected one of Findline, FindCircle, FindEllipse, FindObject, FindRect, FindSegmentation, Match, fastmatch or TorchTask";
         return false;
     }
 
@@ -1119,11 +1189,17 @@ bool CaptureTorchTaskResult(
 
     output.torch_ok = tool.getok();
     output.torch_error_code = tool.geterrorcode();
+    output.torch_train_ms = tool.gettrainms();
     output.torch_infer_ms = tool.getinferms();
+    output.torch_total_ms = tool.gettotalms();
     output.torch_status = tool.getstatus();
     output.torch_failure_stage = tool.getfailstage();
     output.torch_reason = tool.getreason();
     output.torch_result_count = tool.getresultcount();
+    output.torch_evidence_ref = tool.getevidenceref();
+    output.torch_primary_visual_ref = tool.getprimaryvisualref();
+    output.torch_trainer_lifecycle_summary = tool.gettrainersummary();
+    output.torch_unified_mainline_summary = tool.getmainlinesummary();
 
     output.segmentation_result_ref = tool.getresultref();
     output.segmentation_mask_ref = tool.getmaskref();

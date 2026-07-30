@@ -32,6 +32,18 @@ if (global_has_fit_line == 0) {
     global_contract_conclusion = "FindLine OK requires has_fit_line == true";
 }
 
+if (global_runtime_global_valid_points_count_mismatch == 1) {
+    global_contract_pass = 0;
+    global_contract_status = "findline_runtime_global_mismatch";
+    global_contract_conclusion = "FindLine runtime capture and script global valid_points_count mismatch";
+}
+
+if (global_runtime_global_has_fit_line_mismatch == 1) {
+    global_contract_pass = 0;
+    global_contract_status = "findline_runtime_global_mismatch";
+    global_contract_conclusion = "FindLine runtime capture and script global has_fit_line mismatch";
+}
+
 if (global_rendered_measure_points_count < 1) {
     global_contract_pass = 0;
     global_contract_status = "findline_points_not_rendered";

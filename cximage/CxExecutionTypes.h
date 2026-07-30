@@ -131,6 +131,8 @@ struct CxInferenceResult
     std::string roi_crop_packet_ref;
     std::string template_alignment_ref;
     std::string roi_diff_candidate_ref;
+    std::string trainer_lifecycle_summary;
+    std::string unified_mainline_summary;
     std::string raw_result_json;
 };
 

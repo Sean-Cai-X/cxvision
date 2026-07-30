@@ -633,7 +633,7 @@ namespace
                                     {
                                         target.has_circle = seen_cx && seen_cy && seen_px && seen_py;
                                     }
-                                    else if (target.tool == "Findellipse")
+                                    else if (target.tool == "FindEllipse")
                                     {
                                         target.has_ellipse = seen_cx && seen_cy && seen_major_radius && seen_minor_radius && seen_angle_deg;
                                     }
@@ -1128,7 +1128,7 @@ namespace
             }
         }
 
-        if (target.tool == "Findellipse")
+        if (target.tool == "FindEllipse")
         {
             if (!target.has_ellipse)
             {
@@ -1137,7 +1137,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse ROI missing required fields");
+                    "FindEllipse ROI missing required fields");
                 return;
             }
 
@@ -1148,7 +1148,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse center coordinates out of reasonable range");
+                    "FindEllipse center coordinates out of reasonable range");
             }
 
             if (target.ellipse_major_radius <= 1)
@@ -1158,7 +1158,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse major radius must be > 1");
+                    "FindEllipse major radius must be > 1");
             }
 
             if (target.ellipse_minor_radius <= 1)
@@ -1168,7 +1168,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse minor radius must be > 1");
+                    "FindEllipse minor radius must be > 1");
             }
 
             if (std::abs(target.ellipse_angle_deg) > 180)
@@ -1178,7 +1178,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse angle out of valid range");
+                    "FindEllipse angle out of valid range");
             }
 
             const double bounding_radius = std::max(target.ellipse_major_radius, target.ellipse_minor_radius);
@@ -1195,7 +1195,7 @@ namespace
                     "error",
                     image.image_id,
                     target.target_id,
-                    "Findellipse ROI is completely outside image");
+                    "FindEllipse ROI is completely outside image");
             }
         }
 
@@ -1396,7 +1396,7 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
             }
             else if (target.tool != "FindLine" &&
                      target.tool != "FindCircle" &&
-                     target.tool != "Findellipse" &&
+                     target.tool != "FindEllipse" &&
                      target.tool != "FindRect")
             {
                 AddImageManifestIssue(

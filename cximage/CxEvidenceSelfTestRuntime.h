@@ -18,6 +18,10 @@ struct CxEvidenceSelfTestRequest
     std::string target_id;
     std::string tool;
     std::string parameter_summary;
+    std::string primary_object_type;
+    std::string primary_object_name;
+    std::string primary_object_status;
+    int editable_object_count = 0;
 
     std::string out_dir;
 
@@ -63,6 +67,10 @@ struct CxEvidenceSelfTestResult
     std::string target_id;
     std::string tool;
     std::string parameter_summary;
+    std::string primary_object_type;
+    std::string primary_object_name;
+    std::string primary_object_status;
+    int editable_object_count = 0;
 
     int runtime_object_count = 0;
     int shape_element_count = 0;

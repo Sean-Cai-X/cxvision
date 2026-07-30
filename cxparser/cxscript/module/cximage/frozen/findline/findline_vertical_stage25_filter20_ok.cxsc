@@ -29,3 +29,11 @@ m_line.setfilterprofile(filterprofile);
 
 m_line.measure(&m_image);
 m_line.fitline();
+
+global_selected_method = method;
+global_selected_threshold = threshold;
+global_selected_linegap = linegap;
+global_valid_points_count = m_line.getvalidpointcount();
+global_has_fit_line = m_line.hasfitresult();
+global_avgdist = m_line.getavgdist();
+global_line_ref = m_line.get_result();

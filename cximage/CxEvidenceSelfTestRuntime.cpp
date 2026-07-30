@@ -70,6 +70,10 @@ bool WriteEvidenceSelfTestSummaryJson(
     file << "  \"target_id\": \"" << JsonEscape(result.target_id) << "\",\n";
     file << "  \"tool\": \"" << JsonEscape(result.tool) << "\",\n";
     file << "  \"parameter_summary\": \"" << JsonEscape(result.parameter_summary) << "\",\n";
+    file << "  \"primary_object_type\": \"" << JsonEscape(result.primary_object_type) << "\",\n";
+    file << "  \"primary_object_name\": \"" << JsonEscape(result.primary_object_name) << "\",\n";
+    file << "  \"primary_object_status\": \"" << JsonEscape(result.primary_object_status) << "\",\n";
+    file << "  \"editable_object_count\": " << result.editable_object_count << ",\n";
 
     file << "  \"runtime_object_count\": " << result.runtime_object_count << ",\n";
     file << "  \"shape_element_count\": " << result.shape_element_count << ",\n";
@@ -162,6 +166,10 @@ bool WriteEvidenceSelfTestReportMd(
     file << "- target: " << result.target_id << "\n";
     file << "- tool: " << result.tool << "\n";
     file << "- param: " << result.parameter_summary << "\n";
+    file << "- primary_object: " << result.primary_object_type << " "
+         << result.primary_object_name << " | "
+         << result.primary_object_status << "\n";
+    file << "- editable_object_count: " << result.editable_object_count << "\n";
     file << "- final: " << result.final_code << " / " << result.final_status << "\n\n";
 
     file << "## Algorithm Diagnostics\n\n";
@@ -242,6 +250,10 @@ bool WriteEvidenceSelfTestBatchSummaryJson(
         file << "      \"image_path\": \"" << JsonEscape(caseResult.image_path) << "\",\n";
         file << "      \"target_id\": \"" << JsonEscape(caseResult.target_id) << "\",\n";
         file << "      \"tool\": \"" << JsonEscape(caseResult.tool) << "\",\n";
+        file << "      \"primary_object_type\": \"" << JsonEscape(caseResult.primary_object_type) << "\",\n";
+        file << "      \"primary_object_name\": \"" << JsonEscape(caseResult.primary_object_name) << "\",\n";
+        file << "      \"primary_object_status\": \"" << JsonEscape(caseResult.primary_object_status) << "\",\n";
+        file << "      \"editable_object_count\": " << caseResult.editable_object_count << ",\n";
         file << "      \"final_code\": \"" << JsonEscape(caseResult.final_code) << "\",\n";
         file << "      \"final_status\": \"" << JsonEscape(caseResult.final_status) << "\",\n";
         file << "      \"final_reason\": \"" << JsonEscape(caseResult.final_reason) << "\",\n";
@@ -292,8 +304,8 @@ bool WriteEvidenceSelfTestBatchReportMd(
     file << "- final: " << result.final_code << " / " << result.final_status << "\n";
     file << "- reason: " << result.final_reason << "\n\n";
 
-    file << "| Case | Script | Image | Target | Tool | RuntimeObject | GaugeShapes | ResultShapes | Points | Fit | Algorithm | Final | Reason |\n";
-    file << "|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|\n";
+    file << "| Case | Script | Image | Target | Tool | PrimaryObject | EditableObjects | RuntimeObject | GaugeShapes | ResultShapes | Points | Fit | Algorithm | Final | Reason |\n";
+    file << "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|\n";
     for (const auto& caseResult : result.case_results)
     {
         file << "| " << caseResult.case_id
@@ -301,6 +313,10 @@ bool WriteEvidenceSelfTestBatchReportMd(
              << " | " << caseResult.image_path
              << " | " << caseResult.target_id
              << " | " << caseResult.tool
+             << " | " << caseResult.primary_object_type << " "
+             << caseResult.primary_object_name << " / "
+             << caseResult.primary_object_status
+             << " | " << caseResult.editable_object_count
              << " | " << caseResult.runtime_object_count
              << " | " << caseResult.gauge_shape_count
              << " | " << caseResult.result_shape_count

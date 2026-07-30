@@ -1185,6 +1185,7 @@ void FindObject::Measure(Image& image)
 
 void FindObject::MeasureFast(Image& image)
 {
+    m_debug_algorithm_branch = "region_growth_fast";
     m_pgetimage = &image;
     if (image.getmat().empty())
         return;

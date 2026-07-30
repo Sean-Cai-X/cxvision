@@ -101,6 +101,14 @@ void FindSegmentation::segment(void* image)
     {
         input.has_rect = true;
         input.rect = cv::Rect(m_x0, m_y0, m_x1 - m_x0, m_y1 - m_y0);
+        std::cout << "[FindSegmentation] prompt_rect state="
+                  << m_x0 << "," << m_y0 << ","
+                  << m_x1 << "," << m_y1
+                  << " input_rect="
+                  << input.rect.x << "," << input.rect.y << ","
+                  << input.rect.width << "," << input.rect.height
+                  << " image=" << mat.cols << "x" << mat.rows
+                  << "\n" << std::flush;
     }
 
     if (m_has_point)
@@ -260,7 +268,7 @@ void FindSegmentation::PublishDisplayShapes(
         owner_ref,
         "boundary",
         "boundary",
-        true,
+        false,
         true,
         std::move(polyline));
 
@@ -277,7 +285,7 @@ void FindSegmentation::PublishDisplayShapes(
         owner_ref,
         "boundary_bbox",
         "boundary_bbox",
-        true,
+        false,
         true,
         std::move(rect));
 }

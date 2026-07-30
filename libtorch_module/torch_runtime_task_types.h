@@ -22,6 +22,9 @@ inline constexpr const char* DeepLabV3PlusSegmentation =
 
 inline constexpr const char* YoloV8Detection =
     "torch.infer.detection.yolov8.v1";
+
+inline constexpr const char* SegmentationTrainingLifecycle =
+    "torch.train.segmentation.lifecycle_smoke.v1";
 }
 
 enum class TorchProductionTaskKind

@@ -191,6 +191,19 @@ void RefreshFindLineMeasureSnapshot(RuntimeObjectView& object,
     object.requested_tool_half_width = input.requested_tool_half_width;
     object.effective_tool_half_width = input.effective_tool_half_width;
 
+    object.line_scan_rows_examined = input.scan_rows_examined;
+    object.line_scan_rows_with_foreground = input.scan_rows_with_foreground;
+    object.line_scan_runs_total = input.scan_runs_total;
+    object.line_scan_runs_within_length_limit =
+        input.scan_runs_within_length_limit;
+    object.line_scan_runs_over_length_limit =
+        input.scan_runs_over_length_limit;
+    object.line_scan_runs_rejected_by_selection =
+        input.scan_runs_rejected_by_selection;
+    object.line_scan_runs_rejected_near_endpoint =
+        input.scan_runs_rejected_near_endpoint;
+    object.line_scan_points_emitted = input.scan_points_emitted;
+
     object.line_measure_backimage_ready =
         input.backimage_ready;
 

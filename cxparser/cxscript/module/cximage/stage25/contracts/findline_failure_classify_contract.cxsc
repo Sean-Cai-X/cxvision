@@ -21,3 +21,13 @@ if (global_valid_points_count == 0) {
     global_contract_status = "findline_fail_no_points";
     global_contract_conclusion = "FindLine failed to produce any valid points.";
 }
+
+if (global_failure_stage == "findline_fail_prefilter_foreground_not_visible_to_scan_rows") {
+    global_contract_status = "findline_fail_prefilter_foreground_not_visible_to_scan_rows";
+    global_contract_conclusion = "FindLine prefilter produced foreground, but scan rows did not see valid segment runs.";
+}
+
+if (global_runtime_global_result_mismatch == 1) {
+    global_contract_status = "findline_runtime_global_mismatch";
+    global_contract_conclusion = "FindLine runtime capture and script global echo are inconsistent.";
+}

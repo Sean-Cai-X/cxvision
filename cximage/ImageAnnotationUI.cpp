@@ -189,7 +189,7 @@ void UpdateManualGaugeFromShapeElement(
     gauge.inner_radius = std::max(
         0, static_cast<int>(std::lround(inner_radius)));
   }
-  else if (element.owner_type == "Findellipse" &&
+  else if (element.owner_type == "FindEllipse" &&
            element.shape->kind() == CxShapeKind::Ellipse)
   {
     CxShapeGeometrySnapshot geometry;
@@ -198,7 +198,7 @@ void UpdateManualGaugeFromShapeElement(
     if (geometry.radius_x <= 0.0 || geometry.radius_y <= 0.0)
       return;
 
-    gauge.tool = "Findellipse";
+    gauge.tool = "FindEllipse";
     gauge.has_ellipse_gauge = true;
     gauge.has_line_gauge = false;
     gauge.has_circle_gauge = false;

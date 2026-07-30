@@ -141,7 +141,49 @@ void* ParserDebugBridge::QueryClassObject(const std::string& type,
                                           const std::string& name) const
 {
   if (myOwner == nullptr) return nullptr;
-  return myOwner->GetClassObj(type, name);
+  void* object = myOwner->GetClassObj(type, name);
+  if (object != nullptr)
+    return object;
+
+  auto tryType = [&](const char* alias) -> void*
+  {
+    if (type == alias)
+      return nullptr;
+    return myOwner->GetClassObj(alias, name);
+  };
+
+  if (type == "FindLine" || type == "Findline" || type == "findline")
+  {
+    if ((object = tryType("FindLine")) != nullptr) return object;
+    if ((object = tryType("Findline")) != nullptr) return object;
+    if ((object = tryType("findline")) != nullptr) return object;
+  }
+  else if (type == "FindCircle" || type == "Findcircle" || type == "findcircle")
+  {
+    if ((object = tryType("FindCircle")) != nullptr) return object;
+    if ((object = tryType("Findcircle")) != nullptr) return object;
+    if ((object = tryType("findcircle")) != nullptr) return object;
+  }
+  else if (type == "FindEllipse" || type == "Findellipse" || type == "findellipse")
+  {
+    if ((object = tryType("FindEllipse")) != nullptr) return object;
+    if ((object = tryType("Findellipse")) != nullptr) return object;
+    if ((object = tryType("findellipse")) != nullptr) return object;
+  }
+  else if (type == "FastMatch" || type == "fastmatch" || type == "CFastMatch")
+  {
+    if ((object = tryType("FastMatch")) != nullptr) return object;
+    if ((object = tryType("fastmatch")) != nullptr) return object;
+    if ((object = tryType("CFastMatch")) != nullptr) return object;
+  }
+  else if (type == "FindRect" || type == "Findrect" || type == "findrect")
+  {
+    if ((object = tryType("FindRect")) != nullptr) return object;
+    if ((object = tryType("Findrect")) != nullptr) return object;
+    if ((object = tryType("findrect")) != nullptr) return object;
+  }
+
+  return nullptr;
 }
 
 bool ParserDebugBridge::QueryObjectExists(const std::string& type,
@@ -502,11 +544,22 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
     "global_threshold",
     "global_filterprofile",
     "global_method",
+    "global_max_elapsed_ms",
+    "global_max_scan_lines",
+    "global_max_samples",
     "global_circle_cx",
     "global_circle_cy",
     "global_circle_px",
     "global_circle_py",
-    "global_gap"
+    "global_gap",
+    "global_learn_a_count",
+    "global_learn_b_count",
+    "global_learn_a2_count",
+    "global_learn_b2_count",
+    "global_learn_status_code",
+    "global_match_count",
+    "global_best_score",
+    "global_model_point_count"
   };
   std::vector<ParserDebugVariableSnapshot> snapshots;
   for (const char* name : names)

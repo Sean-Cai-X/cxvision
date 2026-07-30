@@ -274,6 +274,19 @@ static void FillRuntimeObjectFromFindLine(
     object.line_original_scan_w_length = inputDebug.original_scan_w_length;
     object.line_original_scan_h_length = inputDebug.original_scan_h_length;
     object.line_original_process_width = inputDebug.original_process_width;
+    object.line_scan_rows_examined = inputDebug.scan_rows_examined;
+    object.line_scan_rows_with_foreground =
+        inputDebug.scan_rows_with_foreground;
+    object.line_scan_runs_total = inputDebug.scan_runs_total;
+    object.line_scan_runs_within_length_limit =
+        inputDebug.scan_runs_within_length_limit;
+    object.line_scan_runs_over_length_limit =
+        inputDebug.scan_runs_over_length_limit;
+    object.line_scan_runs_rejected_by_selection =
+        inputDebug.scan_runs_rejected_by_selection;
+    object.line_scan_runs_rejected_near_endpoint =
+        inputDebug.scan_runs_rejected_near_endpoint;
+    object.line_scan_points_emitted = inputDebug.scan_points_emitted;
     object.line_measure_backimage_ready = inputDebug.backimage_ready;
     object.line_measure_findobject_ready = inputDebug.findobject_ready;
     object.line_measure_objfilterset = inputDebug.objfilterset;
@@ -554,6 +567,12 @@ void SeedDefaultManualGlobals(
     set("global_wgap", 32);
     set("global_hgap", 8);
     set("global_tool_half_width", 32);
+    // These budgets are read directly by the frozen FindCircle script.  They
+    // are explicit Manual inputs, not an algorithm fallback: without the
+    // matching external variables the parser stops before setcircle/measure.
+    set("global_max_elapsed_ms", 2000);
+    set("global_max_scan_lines", 256);
+    set("global_max_samples", 4096);
 
     const bool isCircleScript =
         scriptPath.find("find_circle") != std::string::npos ||
@@ -570,6 +589,9 @@ void SeedDefaultManualGlobals(
     const bool isRectScript =
         scriptPath.find("find_rect") != std::string::npos ||
         scriptPath.find("findrect") != std::string::npos;
+    const bool isFastMatchScript =
+        scriptPath.find("fastmatch") != std::string::npos ||
+        scriptPath.find("FastMatch") != std::string::npos;
     const bool isVerticalLineScript =
         scriptPath.find("find_line_vertical") != std::string::npos ||
         scriptPath.find("findline_vertical") != std::string::npos;
@@ -634,6 +656,22 @@ void SeedDefaultManualGlobals(
         set("global_method", 2);
         set("global_wgap", 32);
         set("global_hgap", 8);
+    }
+
+    if (isFastMatchScript)
+    {
+        // FastMatch direct scripts write these values back after learn/match.
+        // CxScript assignments require their external destinations to be
+        // registered before Compile(); Headless already does this, Manual did
+        // not, which made the script fail after a successful learn call.
+        set("global_learn_a_count", 0);
+        set("global_learn_b_count", 0);
+        set("global_learn_a2_count", 0);
+        set("global_learn_b2_count", 0);
+        set("global_learn_status_code", 0);
+        set("global_match_count", 0);
+        set("global_best_score", 0);
+        set("global_model_point_count", 0);
     }
 
     // The Script Editor and Gauge Workbench must start from the same value
@@ -879,10 +917,15 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.segmentation_has_prompt_rect = true;
         object.segmentation_has_boundary = object.segmentation_contour_count > 0;
         object.segmentation_has_libtorch_contract =
-            object.segmentation_backend_status == "libtorch_contract_ready";
+            object.segmentation_backend_status == "libtorch_contract_ready" ||
+            object.segmentation_backend_status == "libtorch_segmentation_ready";
         object.segmentation_real_mask_attach_ready =
             object.segmentation_has_libtorch_contract &&
-            object.segmentation_contour_count > 0;
+            object.segmentation_status_code != 0 &&
+            object.segmentation_contour_count > 0 &&
+            !object.segmentation_mask_ref.empty() &&
+            !object.segmentation_overlay_ref.empty() &&
+            !object.segmentation_contour_ref.empty();
         object.stale = false;
         object.visualizable = true;
         object.visual_source = object.segmentation_has_boundary ? "segmentation_boundary" : "segmentation_prompt";

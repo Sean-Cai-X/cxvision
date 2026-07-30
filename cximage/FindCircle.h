@@ -265,6 +265,7 @@ public:
 
     double get_result() const { return hasfitresult() ? 1.0 : 0.0; }
     double get_result_script() { return get_result(); }
+    double hasfitresult_script() { return hasfitresult() ? 1.0 : 0.0; }
 private:
 
     double m_dresultcentx;

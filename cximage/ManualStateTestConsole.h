@@ -73,7 +73,7 @@ struct RuntimeObjectView
     std::string visual_source = "stale_runtime";
     bool stale = true;
 
-    // Findellipse ROI / measure status.  Current Findellipse runtime exposes
+    // FindEllipse ROI / measure status.  Current FindEllipse runtime exposes
     // ROI and measurement points; fitted ellipse result is a later binding.
     bool has_ellipse_roi = false;
     float ellipse_cx = 0.0f;
@@ -219,6 +219,27 @@ struct RuntimeObjectView
     bool segmentation_has_libtorch_contract = false;
     bool segmentation_real_mask_attach_ready = false;
 
+    // TorchTask runtime / artifact evidence visibility.
+    bool is_torch_task = false;
+    int torch_ok = 0;
+    int torch_error_code = 0;
+    int torch_result_count = 0;
+    int torch_mask_available = 0;
+    double torch_infer_ms = 0.0;
+    double torch_train_ms = 0.0;
+    double torch_total_ms = 0.0;
+    std::string torch_status;
+    std::string torch_reason;
+    std::string torch_failure_stage;
+    std::string torch_actual_device;
+    std::string torch_result_ref;
+    std::string torch_evidence_ref;
+    std::string torch_primary_visual_ref;
+    std::string torch_mask_ref;
+    std::string torch_overlay_ref;
+    std::string torch_trainer_lifecycle_summary;
+    std::string torch_unified_mainline_summary;
+
     // Findline fit result.
     bool has_fit_line = false;
     float fit_line_x0 = 0.0f;
@@ -297,6 +318,15 @@ struct RuntimeObjectView
     int line_original_scan_w_length = 0;
     int line_original_scan_h_length = 0;
     int line_original_process_width = 0;
+
+    int line_scan_rows_examined = 0;
+    int line_scan_rows_with_foreground = 0;
+    int line_scan_runs_total = 0;
+    int line_scan_runs_within_length_limit = 0;
+    int line_scan_runs_over_length_limit = 0;
+    int line_scan_runs_rejected_by_selection = 0;
+    int line_scan_runs_rejected_near_endpoint = 0;
+    int line_scan_points_emitted = 0;
 
     bool line_measure_backimage_ready = false;
     bool line_measure_findobject_ready = false;
@@ -503,6 +533,9 @@ struct ManualGaugeState
   std::string image_id;
   std::string target_id;
   std::string tool = "FindLine"; // Findline / Findcircle
+  std::string primary_object_type;
+  std::string primary_object_name;
+  std::string primary_object_status = "unresolved";
 
   std::string source = "manual"; // manifest / replay / ai_suggested / manual
   std::string review_status = "editing"; // editing / accepted / rejected / promoted
@@ -581,6 +614,7 @@ struct EvidenceChainThumb
     std::string script_path;
     std::string image_id;
     std::string image_path;
+    std::string thumbnail_path;
     std::string target_id;
     std::string tool;
 
@@ -630,16 +664,27 @@ struct ScriptEvidenceThumb
     std::string script_path;
     std::string image_id;
     std::string image_path;
+    std::string thumbnail_path;
     std::string target_id;
     std::string tool;
     std::string parameter_summary;
     std::string status;
     std::string reason;
+    std::string primary_object_type;
+    std::string primary_object_name;
+    std::string primary_object_status;
     unsigned int texture_id = 0;
     int texture_w = 0;
     int texture_h = 0;
     bool texture_loaded = false;
     bool texture_failed = false;
+};
+
+struct CxEvidenceEditableObjectRef
+{
+    std::string type;
+    std::string name;
+    int declared_line = 0;
 };
 
 struct ScriptEvidenceGroup
@@ -675,6 +720,11 @@ struct CxEvidenceSelectionSnapshot
     std::string reason;
 
     std::string source;
+
+    std::string primary_object_type;
+    std::string primary_object_name;
+    std::string primary_object_status;
+    std::vector<CxEvidenceEditableObjectRef> editable_objects;
 };
 
 struct ScriptEvidenceRowRef
@@ -760,6 +810,7 @@ struct ManualTestContext
   bool attach_line = false;
   bool show_roi = false;
   bool show_result_overlay = false;
+  bool show_line_gauge_scan_lines = false;
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;

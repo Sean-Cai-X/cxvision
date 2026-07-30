@@ -5,11 +5,326 @@
 #include "CxScriptCatalogRuntime.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+
+static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
+{
+    std::string lowered = typeOrTool;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    if (lowered == "findline")
+        return "FindLine";
+    if (lowered == "findcircle")
+        return "FindCircle";
+    if (lowered == "findellipse")
+        return "FindEllipse";
+    if (lowered == "findrect")
+        return "FindRect";
+    if (lowered == "fastmatch" || lowered == "cfastmatch")
+        return "FastMatch";
+    if (typeOrTool == "FindSegmentation")
+        return "FindSegmentation";
+    return typeOrTool;
+}
+
+static bool IsEvidenceEditableToolTypeLocal(const std::string& type)
+{
+    const std::string normalized = NormalizeEvidenceToolTypeLocal(type);
+    return normalized == "FindLine" ||
+           normalized == "FindCircle" ||
+           normalized == "FindEllipse" ||
+           normalized == "FindRect" ||
+           normalized == "FastMatch" ||
+           normalized == "FindSegmentation";
+}
+
+static std::string StripCxScriptLineCommentLocal(const std::string& line)
+{
+    const std::size_t comment = line.find("//");
+    if (comment == std::string::npos)
+        return line;
+    return line.substr(0, comment);
+}
+
+static void AnalyzeEditableObjectsFromCxScriptLocal(
+    const std::string& scriptText,
+    std::vector<CxEvidenceEditableObjectRef>& outObjects)
+{
+    outObjects.clear();
+
+    std::istringstream input(scriptText);
+    std::string raw;
+    int lineNo = 1;
+    while (std::getline(input, raw))
+    {
+        const std::string statement = TrimLine(StripCxScriptLineCommentLocal(raw));
+        if (statement.empty() ||
+            statement.find('(') != std::string::npos ||
+            statement.find('=') != std::string::npos)
+        {
+            ++lineNo;
+            continue;
+        }
+
+        std::istringstream tokens(statement);
+        std::string type;
+        std::string name;
+        tokens >> type >> name;
+        if (type.empty() || name.empty())
+        {
+            ++lineNo;
+            continue;
+        }
+
+        const std::size_t suffix = name.find_first_of(";");
+        if (suffix != std::string::npos)
+            name.erase(suffix);
+
+        type = NormalizeEvidenceToolTypeLocal(type);
+        if (IsEvidenceEditableToolTypeLocal(type) && !name.empty())
+        {
+            CxEvidenceEditableObjectRef ref;
+            ref.type = type;
+            ref.name = name;
+            ref.declared_line = lineNo;
+            outObjects.push_back(ref);
+        }
+
+        ++lineNo;
+    }
+}
+
+static std::string ReadKeyValueFromEvidenceParamSummaryLocal(
+    const std::string& summary,
+    const std::string& key)
+{
+    std::istringstream tokens(summary);
+    std::string token;
+    const std::string prefix = key + "=";
+    while (tokens >> token)
+    {
+        if (token.rfind(prefix, 0) == 0)
+            return token.substr(prefix.size());
+    }
+    return {};
+}
+
+static bool ReadJsonIntFieldLocal(
+    const std::string& text,
+    const std::string& key,
+    int& outValue)
+{
+    const std::string pattern = "\"" + key + "\"";
+    const std::size_t keyPos = text.find(pattern);
+    if (keyPos == std::string::npos)
+        return false;
+    const std::size_t colon = text.find(':', keyPos + pattern.size());
+    if (colon == std::string::npos)
+        return false;
+
+    std::size_t begin = colon + 1;
+    while (begin < text.size() &&
+           std::isspace(static_cast<unsigned char>(text[begin])))
+    {
+        ++begin;
+    }
+
+    std::size_t end = begin;
+    while (end < text.size() &&
+           (std::isdigit(static_cast<unsigned char>(text[end])) ||
+            text[end] == '-' ||
+            text[end] == '+'))
+    {
+        ++end;
+    }
+
+    if (end == begin)
+        return false;
+
+    try
+    {
+        outValue = std::stoi(text.substr(begin, end - begin));
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+static std::string ReadJsonStringFieldLocal(
+    const std::string& text,
+    const std::string& key)
+{
+    const std::string pattern = "\"" + key + "\"";
+    const std::size_t keyPos = text.find(pattern);
+    if (keyPos == std::string::npos)
+        return {};
+    const std::size_t colon = text.find(':', keyPos + pattern.size());
+    if (colon == std::string::npos)
+        return {};
+
+    std::size_t begin = colon + 1;
+    while (begin < text.size() &&
+           std::isspace(static_cast<unsigned char>(text[begin])))
+    {
+        ++begin;
+    }
+    if (begin >= text.size() || text[begin] != '"')
+        return {};
+    ++begin;
+
+    std::string value;
+    bool escaped = false;
+    for (std::size_t i = begin; i < text.size(); ++i)
+    {
+        const char ch = text[i];
+        if (escaped)
+        {
+            value.push_back(ch);
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\')
+        {
+            escaped = true;
+            continue;
+        }
+        if (ch == '"')
+            return value;
+        value.push_back(ch);
+    }
+
+    return {};
+}
+
+static std::string ResolveEvidencePacketPathFromSummaryLocal(
+    const std::string& runtimeSummary)
+{
+    if (runtimeSummary.empty() || runtimeSummary == "-")
+        return {};
+
+    try
+    {
+        std::filesystem::path path(runtimeSummary);
+        path = path.parent_path() / "evidence_packet.json";
+        return path.string();
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+static std::string ResolveOriginalImagePathFromEvidencePacketLocal(
+    const std::string& runtimeSummary)
+{
+    const std::string evidencePacket =
+        ResolveEvidencePacketPathFromSummaryLocal(runtimeSummary);
+    if (evidencePacket.empty())
+        return {};
+
+    std::string text;
+    if (!ReadTextFile(evidencePacket, text))
+        return {};
+
+    return ReadJsonStringFieldLocal(text, "path");
+}
+
+static void ResolvePrimaryEditableObjectLocal(
+    const std::string& tool,
+    const std::string& targetId,
+    const std::string& parameterSummary,
+    const std::vector<CxEvidenceEditableObjectRef>& objects,
+    std::string& outType,
+    std::string& outName,
+    std::string& outStatus)
+{
+    outType.clear();
+    outName.clear();
+    outStatus = "none";
+
+    if (objects.empty())
+    {
+        outStatus = "no_editable_object_declared";
+        return;
+    }
+
+    std::string explicitName =
+        ReadKeyValueFromEvidenceParamSummaryLocal(parameterSummary, "primary_object_ref");
+    if (explicitName.empty())
+        explicitName =
+            ReadKeyValueFromEvidenceParamSummaryLocal(parameterSummary, "primary_object");
+    if (explicitName.empty())
+        explicitName =
+            ReadKeyValueFromEvidenceParamSummaryLocal(parameterSummary, "object_ref");
+
+    auto bindObject = [&](const CxEvidenceEditableObjectRef& ref,
+                          const char* status)
+    {
+        outType = ref.type;
+        outName = ref.name;
+        outStatus = status;
+    };
+
+    if (!explicitName.empty())
+    {
+        for (const auto& ref : objects)
+        {
+            if (ref.name == explicitName)
+            {
+                bindObject(ref, "explicit_object_ref");
+                return;
+            }
+        }
+        outStatus = "explicit_object_ref_not_found";
+        return;
+    }
+
+    if (!targetId.empty() && targetId != "-")
+    {
+        for (const auto& ref : objects)
+        {
+            if (targetId.find(ref.name) != std::string::npos ||
+                ref.name.find(targetId) != std::string::npos)
+            {
+                bindObject(ref, "target_id_matched_object");
+                return;
+            }
+        }
+    }
+
+    const std::string normalizedTool = NormalizeEvidenceToolTypeLocal(tool);
+    std::vector<const CxEvidenceEditableObjectRef*> toolMatches;
+    for (const auto& ref : objects)
+    {
+        if (ref.type == normalizedTool)
+            toolMatches.push_back(&ref);
+    }
+
+    if (toolMatches.size() == 1)
+    {
+        bindObject(*toolMatches.front(), "single_matching_tool_object");
+        return;
+    }
+
+    if (objects.size() == 1)
+    {
+        bindObject(objects.front(), "single_editable_object");
+        return;
+    }
+
+    outStatus = toolMatches.size() > 1
+        ? "needs_object_selection"
+        : "needs_object_selection_no_tool_match";
+}
 
 static bool EvidenceSnapshotHasLockedParamSummaryLocal(
     const CxEvidenceSelectionSnapshot& snapshot,
@@ -38,7 +353,10 @@ static bool EvidenceSnapshotHasLockedParamSummaryLocal(
 static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     ManualTestContext& context,
     const std::string& scriptPath,
-    const std::string& source)
+    const std::string& source,
+    const std::string& primaryObjectType,
+    const std::string& primaryObjectName,
+    const std::string& primaryObjectStatus)
 {
     auto getInt = [&](const std::string& key, int fallback) -> int
     {
@@ -64,6 +382,9 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     gauge.image_id = context.active_image_id;
     gauge.target_id = context.active_target_id;
     gauge.source = source;
+    gauge.primary_object_type = primaryObjectType;
+    gauge.primary_object_name = primaryObjectName;
+    gauge.primary_object_status = primaryObjectStatus;
     gauge.review_status = "editing";
     gauge.threshold = getInt("global_threshold", 20);
     gauge.method = getInt("global_method", 0);
@@ -74,7 +395,11 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     gauge.tool_half_width = getInt("global_tool_half_width", 32);
     gauge.filterprofile = getInt("global_filterprofile", 1);
 
-    if (isCircleScript)
+    const std::string primaryType =
+        NormalizeEvidenceToolTypeLocal(primaryObjectType);
+
+    if (primaryType == "FindCircle" ||
+        (primaryType.empty() && isCircleScript))
     {
         gauge.tool = "FindCircle";
         gauge.has_circle_gauge = true;
@@ -86,16 +411,18 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
             static_cast<double>(gauge.circle_px - gauge.circle_cx),
             static_cast<double>(gauge.circle_py - gauge.circle_cy))));
     }
-    else if (isEllipseScript)
+    else if (primaryType == "FindEllipse" ||
+             (primaryType.empty() && isEllipseScript))
     {
-        gauge.tool = "Findellipse";
+        gauge.tool = "FindEllipse";
         gauge.has_ellipse_gauge = true;
         gauge.ellipse_x0 = getInt("global_ellipse_x0", 0);
         gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
         gauge.ellipse_x1 = getInt("global_ellipse_x1", 0);
         gauge.ellipse_y1 = getInt("global_ellipse_y1", 0);
     }
-    else if (isLineScript)
+    else if (primaryType == "FindLine" ||
+             (primaryType.empty() && isLineScript))
     {
         gauge.tool = "FindLine";
         gauge.has_line_gauge = true;
@@ -249,6 +576,258 @@ static std::string BuildDefaultEvidenceParamSummaryForScript(
     return oss.str();
 }
 
+static void PopulateEditableObjectBindingForThumbLocal(
+    ScriptEvidenceThumb& thumb)
+{
+    thumb.primary_object_type.clear();
+    thumb.primary_object_name.clear();
+    thumb.primary_object_status.clear();
+
+    if (thumb.script_path.empty())
+    {
+        thumb.primary_object_status = "script_path_empty";
+        return;
+    }
+
+    std::string scriptText;
+    if (!ReadTextFile(thumb.script_path, scriptText))
+    {
+        thumb.primary_object_status = "script_read_failed";
+        return;
+    }
+
+    std::vector<CxEvidenceEditableObjectRef> objects;
+    AnalyzeEditableObjectsFromCxScriptLocal(scriptText, objects);
+    ResolvePrimaryEditableObjectLocal(
+        thumb.tool,
+        thumb.target_id,
+        thumb.parameter_summary,
+        objects,
+        thumb.primary_object_type,
+        thumb.primary_object_name,
+        thumb.primary_object_status);
+}
+
+static std::string StripMarkdownCellDecorLocal(std::string value)
+{
+    value = TrimLine(value);
+    if (value.size() >= 2 && value.front() == '`' && value.back() == '`')
+        value = value.substr(1, value.size() - 2);
+    return TrimLine(value);
+}
+
+static std::vector<std::string> SplitMarkdownTableRowLocal(
+    const std::string& line)
+{
+    std::vector<std::string> cells;
+    std::string current;
+    bool inBacktick = false;
+    for (char ch : line)
+    {
+        if (ch == '`')
+            inBacktick = !inBacktick;
+        if (ch == '|' && !inBacktick)
+        {
+            cells.push_back(StripMarkdownCellDecorLocal(current));
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+    cells.push_back(StripMarkdownCellDecorLocal(current));
+
+    if (!cells.empty() && cells.front().empty())
+        cells.erase(cells.begin());
+    if (!cells.empty() && cells.back().empty())
+        cells.pop_back();
+    return cells;
+}
+
+static std::string BuildManualReviewParamSummaryLocal(
+    const std::string& tool,
+    const std::string& failureClass,
+    const std::string& runtimeSummary,
+    const std::string& extraEvidence)
+{
+    auto appendInt = [](std::ostringstream& oss,
+                        const std::string& text,
+                        const std::string& summaryKey,
+                        const std::string& paramKey,
+                        std::string& missing) -> void
+    {
+        int value = 0;
+        if (ReadJsonIntFieldLocal(text, summaryKey, value))
+        {
+            oss << " " << paramKey << "=" << value;
+            return;
+        }
+
+        if (!missing.empty())
+            missing += ",";
+        missing += summaryKey;
+    };
+
+    std::string summaryText;
+    ReadTextFile(runtimeSummary, summaryText);
+
+    const std::string normalizedTool = NormalizeEvidenceToolTypeLocal(tool);
+    std::string missing;
+
+    std::ostringstream oss;
+    oss << "evidence_locked=1"
+        << " tool=" << normalizedTool;
+
+    if (normalizedTool == "FindLine")
+    {
+        appendInt(oss, summaryText, "roi_x0", "roi_x0", missing);
+        appendInt(oss, summaryText, "roi_y0", "roi_y0", missing);
+        appendInt(oss, summaryText, "roi_x1", "roi_x1", missing);
+        appendInt(oss, summaryText, "roi_y1", "roi_y1", missing);
+        appendInt(oss, summaryText, "effective_tool_half_width", "tool_half_width", missing);
+    }
+    else if (normalizedTool == "FindCircle")
+    {
+        appendInt(oss, summaryText, "circle_cx", "circle_cx", missing);
+        appendInt(oss, summaryText, "circle_cy", "circle_cy", missing);
+        appendInt(oss, summaryText, "circle_px", "circle_px", missing);
+        appendInt(oss, summaryText, "circle_py", "circle_py", missing);
+    }
+    else if (normalizedTool == "FindEllipse")
+    {
+        appendInt(oss, summaryText, "ellipse_x0", "ellipse_x0", missing);
+        appendInt(oss, summaryText, "ellipse_y0", "ellipse_y0", missing);
+        appendInt(oss, summaryText, "ellipse_x1", "ellipse_x1", missing);
+        appendInt(oss, summaryText, "ellipse_y1", "ellipse_y1", missing);
+    }
+    else if (normalizedTool == "FindRect")
+    {
+        appendInt(oss, summaryText, "roi_x", "roi_x", missing);
+        appendInt(oss, summaryText, "roi_y", "roi_y", missing);
+        appendInt(oss, summaryText, "roi_width", "roi_width", missing);
+        appendInt(oss, summaryText, "roi_height", "roi_height", missing);
+    }
+
+    appendInt(oss, summaryText, "effective_gap", "gap", missing);
+    appendInt(oss, summaryText, "effective_linegap", "linegap", missing);
+    appendInt(oss, summaryText, "effective_threshold", "threshold", missing);
+    appendInt(oss, summaryText, "effective_filterprofile", "filterprofile", missing);
+    appendInt(oss, summaryText, "effective_method", "method", missing);
+    appendInt(oss, summaryText, "effective_wgap", "wgap", missing);
+    appendInt(oss, summaryText, "effective_hgap", "hgap", missing);
+
+    oss << " max_elapsed_ms=2000"
+        << " max_scan_lines=2000"
+        << " max_samples=200000"
+        << " review_status=pending_algorithm_review"
+        << " failure_class=" << failureClass
+        << " result_summary_path=" << runtimeSummary;
+    if (!missing.empty())
+        oss << " locked_param_missing=" << missing;
+    if (!extraEvidence.empty() && extraEvidence != "-")
+        oss << " extra_evidence=" << extraEvidence;
+    return oss.str();
+}
+
+static bool IsManualReviewHandoffCaseRowLocal(
+    const std::vector<std::string>& cells)
+{
+    if (cells.size() < 11)
+        return false;
+    if (cells[0] == "Case" || cells[0].find("---") != std::string::npos)
+        return false;
+    return !cells[0].empty() &&
+           !cells[1].empty() &&
+           !cells[5].empty() &&
+           !cells[10].empty();
+}
+
+static void AppendManualAlgorithmReviewHandoffLocal(
+    ManualTestContext& context,
+    const std::string& handoffPath,
+    const std::function<std::string(const std::string&)>& resolveImagePath,
+    const std::function<ScriptEvidenceGroup&(const std::string&)>& findGroup)
+{
+    std::string text;
+    if (!ReadTextFile(handoffPath, text))
+        return;
+
+    std::istringstream input(text);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.find('|') == std::string::npos)
+            continue;
+
+        const std::vector<std::string> cells =
+            SplitMarkdownTableRowLocal(line);
+        if (!IsManualReviewHandoffCaseRowLocal(cells))
+            continue;
+
+        const std::string caseId = cells[0];
+        const std::string tool = NormalizeEvidenceToolTypeLocal(cells[1]);
+        const std::string imageId = cells[2];
+        const std::string targetId = cells[3];
+        const std::string failureClass = cells[4];
+        const std::string runtimeSummary = cells[5];
+        const std::string toolDisplay = cells[6];
+        const std::string resultOverlay = cells[7];
+        const std::string evidenceOverlay = cells[8];
+        const std::string roiPreview = cells[9];
+        const std::string scriptSnapshot = cells[10];
+        const std::string extraEvidence =
+            cells.size() > 11 ? cells[11] : std::string();
+
+        ScriptEvidenceThumb thumb;
+        thumb.case_id = caseId;
+        thumb.script_id = caseId;
+        thumb.script_path = scriptSnapshot;
+        thumb.image_id = imageId;
+        thumb.image_path =
+            ResolveOriginalImagePathFromEvidencePacketLocal(runtimeSummary);
+        if (thumb.image_path.empty())
+            thumb.image_path = resolveImagePath(imageId);
+        thumb.thumbnail_path = roiPreview.empty() ? toolDisplay : roiPreview;
+        thumb.target_id = targetId;
+        thumb.tool = tool;
+        thumb.parameter_summary =
+            BuildManualReviewParamSummaryLocal(
+                tool,
+                failureClass,
+                runtimeSummary,
+                extraEvidence);
+        thumb.status = "pending_algorithm_review";
+        thumb.reason =
+            "manual algorithm review from handoff; failure_class=" +
+            failureClass +
+            "; result_summary=" + runtimeSummary +
+            "; tool_display=" + toolDisplay +
+            "; result_overlay=" + resultOverlay +
+            "; evidence_overlay=" + evidenceOverlay +
+            "; roi_preview=" + roiPreview +
+            "; source_image=" + thumb.image_path +
+            "; handoff=" + handoffPath;
+
+        PopulateEditableObjectBindingForThumbLocal(thumb);
+
+        ScriptEvidenceGroup& group =
+            findGroup(tool + " / Review Queue");
+        bool exists = false;
+        for (const auto& existing : group.thumbs)
+        {
+            if (existing.case_id == thumb.case_id)
+            {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+            group.thumbs.push_back(thumb);
+    }
+
+    context.debug_status = "MANUAL_ALGORITHM_REVIEW_HANDOFF_LOADED";
+    context.debug_reason = handoffPath;
+}
+
 static void EnsureStructuredCxImageCatalogEntriesLoaded(ManualTestContext& context)
 {
     if (!context.catalog_entries.empty())
@@ -361,6 +940,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     thumb.reason = item.review_status;
 
     AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
+    PopulateEditableObjectBindingForThumbLocal(thumb);
 
     group.thumbs.push_back(thumb);
   }
@@ -402,9 +982,26 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     }
 
     AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
+    PopulateEditableObjectBindingForThumbLocal(thumb);
 
     group.thumbs.push_back(thumb);
   }
+
+  const std::string algorithmReviewHandoff =
+      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/suite/"
+      "run_20260730_findline_findcircle_algorithm_boundary_v13/reports/"
+      "manual_algorithm_review_handoff.md";
+  AppendManualAlgorithmReviewHandoffLocal(
+      m_manualTest,
+      algorithmReviewHandoff,
+      [this](const std::string& imageId) -> std::string
+      {
+        return ResolveImagePathFromManifest(imageId);
+      },
+      [&](const std::string& label) -> ScriptEvidenceGroup&
+      {
+        return findOrCreateGroup("", "", label);
+      });
 
   std::stable_sort(
       m_manualTest.script_evidence_groups.begin(),
@@ -422,7 +1019,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
               key.find("findcircle") != std::string::npos ||
               key.find("find_circle") != std::string::npos)
             return 1;
-          if (key.find("Findellipse") != std::string::npos ||
+          if (key.find("FindEllipse") != std::string::npos ||
               key.find("findellipse") != std::string::npos ||
               key.find("find_ellipse") != std::string::npos)
             return 2;
@@ -446,7 +1043,8 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         return left.script_id < right.script_id;
       });
 
-  if (m_manualTest.script_evidence_groups.empty())
+  // Keep baseline Catalog entries alongside Suite/review evidence.  The old
+  // empty-only condition made a review handoff hide the entire Verified list.
   {
     for (const auto& item : m_scriptCatalog)
     {
@@ -461,6 +1059,9 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
           item.path.find("\\headless\\") != std::string::npos;
 
       if (!m_showAllScripts && !isDirectLike)
+        continue;
+
+      if (hasThumbForScript(item.name, item.path))
         continue;
 
       ScriptEvidenceGroup group;
@@ -495,6 +1096,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       }
 
       AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
+      PopulateEditableObjectBindingForThumbLocal(thumb);
 
       group.thumbs.push_back(thumb);
       m_manualTest.script_evidence_groups.push_back(group);
@@ -681,7 +1283,11 @@ void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb
   if (thumb.image_path.empty() && !thumb.image_id.empty())
     thumb.image_path = ResolveImagePathFromManifest(thumb.image_id);
 
-  if (thumb.image_path.empty())
+  const std::string previewPath = thumb.thumbnail_path.empty()
+      ? thumb.image_path
+      : thumb.thumbnail_path;
+
+  if (previewPath.empty())
   {
     cv::Mat placeholder(60, 80, CV_8UC3, cv::Scalar(90, 120, 150));
     cv::putText(
@@ -704,19 +1310,19 @@ void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb
     return;
   }
 
-  if (!std::filesystem::exists(thumb.image_path))
+  if (!std::filesystem::exists(previewPath))
   {
     thumb.texture_failed = true;
-    thumb.reason = "thumbnail image not found: " + thumb.image_path;
+    thumb.reason = "thumbnail image not found: " + previewPath;
     ++m_manualTest.script_evidence_thumb_load_count_this_frame;
     return;
   }
 
-  cv::Mat image = cv::imread(thumb.image_path, cv::IMREAD_COLOR);
+  cv::Mat image = cv::imread(previewPath, cv::IMREAD_COLOR);
   if (image.empty())
   {
     thumb.texture_failed = true;
-    thumb.reason = "thumbnail image read failed: " + thumb.image_path;
+    thumb.reason = "thumbnail image read failed: " + previewPath;
     ++m_manualTest.script_evidence_thumb_load_count_this_frame;
     return;
   }
@@ -840,6 +1446,33 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
     out.status = thumb.status;
     out.reason = thumb.reason;
     out.source = "evidence_thumb";
+    out.primary_object_type = thumb.primary_object_type;
+    out.primary_object_name = thumb.primary_object_name;
+    out.primary_object_status = thumb.primary_object_status;
+
+    if (!scriptPath.empty())
+    {
+        std::string scriptText;
+        if (ReadTextFile(scriptPath, scriptText))
+        {
+            AnalyzeEditableObjectsFromCxScriptLocal(
+                scriptText,
+                out.editable_objects);
+            if (out.primary_object_status.empty() ||
+                out.primary_object_status == "script_read_failed" ||
+                out.primary_object_status == "script_path_empty")
+            {
+                ResolvePrimaryEditableObjectLocal(
+                    out.tool,
+                    out.target_id,
+                    out.parameter_summary,
+                    out.editable_objects,
+                    out.primary_object_type,
+                    out.primary_object_name,
+                    out.primary_object_status);
+            }
+        }
+    }
 
     return true;
 }
@@ -919,6 +1552,14 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         m_manualTest.editor_source = "evidence";
         m_manualTest.editor_dirty = false;
         SeedDefaultManualGlobals(m_manualTest, snapshot.script_path);
+        m_manualTest.current_gauge.primary_object_type =
+            snapshot.primary_object_type;
+        m_manualTest.current_gauge.primary_object_name =
+            snapshot.primary_object_name;
+        m_manualTest.current_gauge.primary_object_status =
+            snapshot.primary_object_status.empty()
+                ? "unresolved"
+                : snapshot.primary_object_status;
     }
 
     std::string lockedParamReason;
@@ -935,7 +1576,10 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         SyncEvidenceLockedGlobalsToManualGaugeLocal(
             m_manualTest,
             snapshot.script_path,
-            "evidence_locked");
+            "evidence_locked",
+            snapshot.primary_object_type,
+            snapshot.primary_object_name,
+            snapshot.primary_object_status);
     }
 
     m_manualTest.debug_action = "Apply Evidence Selection";
@@ -1065,61 +1709,298 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         return;
     }
 
-    if (m_manualTest.script_evidence_row_refs_dirty ||
-        m_manualTest.script_evidence_row_refs.empty())
-    {
-        RebuildScriptEvidenceRowRefs();
-    }
-
     m_manualTest.script_evidence_thumb_load_count_this_frame = 0;
 
-    const float headerHeight = 24.0f;
     const float rowHeight = 92.0f;
-    const float minVisibleRows = 4.0f;
-    const float reservedBelow = 70.0f;
-    const float availableHeight = ImGui::GetContentRegionAvail().y - reservedBelow;
-    const float listHeight = std::max(rowHeight * minVisibleRows, availableHeight);
+    const float availableHeight = ImGui::GetContentRegionAvail().y;
+    const float targetHeight = rowHeight * 4.0f + 72.0f;
+    const float listHeight = std::max(
+        220.0f,
+        std::min(availableHeight > 0.0f ? availableHeight : targetHeight,
+                 targetHeight));
+
+    struct EvidenceCategory
+    {
+        std::string label;
+        int priority = 100;
+        std::vector<ScriptEvidenceRowRef> rows;
+    };
+
+    struct EvidenceMajorCategory
+    {
+        std::string label;
+        int priority = 100;
+        std::vector<EvidenceCategory> tools;
+    };
+
+    auto toLower = [](std::string value) -> std::string
+    {
+        std::transform(value.begin(), value.end(), value.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return value;
+    };
+
+    auto classifyMajor = [&](const ScriptEvidenceThumb& thumb,
+                             const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
+    {
+        const std::string key = toLower(
+            thumb.status + " " +
+            thumb.reason + " " +
+            thumb.parameter_summary + " " +
+            thumb.script_id + " " +
+            thumb.script_path + " " +
+            group.label);
+
+        if (key.find("pending_algorithm_review") != std::string::npos ||
+            key.find("pending_human_review") != std::string::npos ||
+            key.find("primary_object_selection_pending") != std::string::npos ||
+            key.find("pending") != std::string::npos ||
+            key.find("待验证") != std::string::npos ||
+            key.find("待测试") != std::string::npos)
+            return {1, "To Verify"};
+
+        if (key.find("fail") != std::string::npos ||
+            key.find("error") != std::string::npos ||
+            key.find("defect") != std::string::npos ||
+            key.find("blocked") != std::string::npos ||
+            key.find("有缺陷") != std::string::npos)
+            return {2, "Defect"};
+
+        if (key.find("diagnostic") != std::string::npos ||
+            key.find("legacy") != std::string::npos ||
+            key.find("ng_expected") != std::string::npos ||
+            key.find("smoke") != std::string::npos ||
+            key.find("process") != std::string::npos ||
+            key.find("过程") != std::string::npos)
+            return {3, "Process Validation"};
+
+        return {0, "Verified"};
+    };
+
+    auto classifyTool = [](const ScriptEvidenceThumb& thumb,
+                           const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
+    {
+        const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
+        if (exactTool == "FindLine")
+            return {0, "FindLine"};
+        if (exactTool == "FindCircle")
+            return {1, "FindCircle"};
+        if (exactTool == "FindObject")
+            return {2, "FindObject"};
+        if (exactTool == "FindEllipse")
+            return {3, "FindEllipse"};
+        if (exactTool == "FindRect")
+            return {4, "FindRect"};
+        if (exactTool == "FastMatch")
+            return {5, "FastMatch"};
+        if (exactTool == "FindSegmentation")
+            return {6, "FindSegmentation"};
+
+        const std::string key =
+            thumb.tool + " " + thumb.script_id + " " + thumb.script_path + " " + group.label;
+
+        if (key.find("FindLine") != std::string::npos ||
+            key.find("Findline") != std::string::npos ||
+            key.find("findline") != std::string::npos ||
+            key.find("find_line") != std::string::npos)
+            return {0, "FindLine"};
+
+        if (key.find("FindCircle") != std::string::npos ||
+            key.find("Findcircle") != std::string::npos ||
+            key.find("findcircle") != std::string::npos ||
+            key.find("find_circle") != std::string::npos)
+            return {1, "FindCircle"};
+
+        if (key.find("FindObject") != std::string::npos ||
+            key.find("findobject") != std::string::npos ||
+            key.find("find_object") != std::string::npos)
+            return {2, "FindObject"};
+
+        if (key.find("FindEllipse") != std::string::npos ||
+            key.find("FindEllipse") != std::string::npos ||
+            key.find("findellipse") != std::string::npos ||
+            key.find("find_ellipse") != std::string::npos)
+            return {3, "FindEllipse"};
+
+        if (key.find("FindRect") != std::string::npos ||
+            key.find("findrect") != std::string::npos ||
+            key.find("find_rect") != std::string::npos)
+            return {4, "FindRect"};
+
+        if (key.find("FastMatch") != std::string::npos ||
+            key.find("fastmatch") != std::string::npos)
+            return {5, "FastMatch"};
+
+        if (key.find("FindSegmentation") != std::string::npos ||
+            key.find("find_segmentation") != std::string::npos ||
+            key.find("findsegmentation") != std::string::npos)
+            return {6, "FindSegmentation"};
+
+        if (key.find("integration") != std::string::npos)
+            return {20, "Integration"};
+
+        return {30, group.label.empty() ? "Other" : group.label};
+    };
+
+    // These are navigation buckets, not data-dependent labels.  Keep all four
+    // visible even when a bucket has no evidence yet, so the operator always
+    // sees the same Evidence Chain workflow.
+    std::vector<EvidenceMajorCategory> categories = {
+        { "Verified", 0, {} },
+        { "To Verify", 1, {} },
+        { "Defect", 2, {} },
+        { "Process Validation", 3, {} }
+    };
+
+    auto findOrCreateMajor =
+        [&](int priority, const std::string& label) -> EvidenceMajorCategory&
+        {
+            for (auto& category : categories)
+            {
+                if (category.priority == priority && category.label == label)
+                    return category;
+            }
+
+            EvidenceMajorCategory category;
+            category.priority = priority;
+            category.label = label;
+            categories.push_back(category);
+            return categories.back();
+        };
+
+    auto findOrCreateTool =
+        [](EvidenceMajorCategory& major,
+           int priority,
+           const std::string& label) -> EvidenceCategory&
+        {
+            for (auto& tool : major.tools)
+            {
+                if (tool.priority == priority && tool.label == label)
+                    return tool;
+            }
+
+            EvidenceCategory tool;
+            tool.priority = priority;
+            tool.label = label;
+            major.tools.push_back(tool);
+            return major.tools.back();
+        };
+
+    for (std::size_t gi = 0; gi < m_manualTest.script_evidence_groups.size(); ++gi)
+    {
+        ScriptEvidenceGroup& group = m_manualTest.script_evidence_groups[gi];
+        for (std::size_t ti = 0; ti < group.thumbs.size(); ++ti)
+        {
+            ScriptEvidenceThumb& thumb = group.thumbs[ti];
+            const auto majorClass = classifyMajor(thumb, group);
+            const auto toolClass = classifyTool(thumb, group);
+
+            ScriptEvidenceRowRef row;
+            row.group_index = static_cast<int>(gi);
+            row.thumb_index = static_cast<int>(ti);
+            row.is_group_header = false;
+            row.label = thumb.script_id;
+
+            EvidenceMajorCategory& major =
+                findOrCreateMajor(majorClass.first, majorClass.second);
+            findOrCreateTool(major, toolClass.first, toolClass.second)
+                .rows.push_back(row);
+        }
+    }
+
+    std::stable_sort(
+        categories.begin(),
+        categories.end(),
+        [](const EvidenceMajorCategory& left, const EvidenceMajorCategory& right)
+        {
+            if (left.priority != right.priority)
+                return left.priority < right.priority;
+            return left.label < right.label;
+        });
+    for (auto& major : categories)
+    {
+        std::stable_sort(
+            major.tools.begin(),
+            major.tools.end(),
+            [](const EvidenceCategory& left, const EvidenceCategory& right)
+            {
+                if (left.priority != right.priority)
+                    return left.priority < right.priority;
+                return left.label < right.label;
+            });
+    }
 
     ImGui::BeginChild("script_evidence_by_group", ImVec2(-1, listHeight), true);
 
-    ImGuiListClipper clipper;
-    clipper.Begin(static_cast<int>(m_manualTest.script_evidence_row_refs.size()), rowHeight);
-
-    while (clipper.Step())
+    for (std::size_t ci = 0; ci < categories.size(); ++ci)
     {
-        for (int rowIndex = clipper.DisplayStart; rowIndex < clipper.DisplayEnd; ++rowIndex)
+        EvidenceMajorCategory& major = categories[ci];
+
+        int majorCount = 0;
+        for (const auto& tool : major.tools)
+            majorCount += static_cast<int>(tool.rows.size());
+
+        ImGui::PushID(static_cast<int>(ci));
+
+        std::string header =
+            major.label + " (" + std::to_string(majorCount) + ")";
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_None;
+        // The category level is the primary navigation level.  Open it when
+        // the panel first appears; the user can still collapse it afterwards.
+        flags |= ImGuiTreeNodeFlags_DefaultOpen;
+
+        if (ImGui::CollapsingHeader(header.c_str(), flags))
         {
-            const ScriptEvidenceRowRef& ref = m_manualTest.script_evidence_row_refs[rowIndex];
-
-            if (ref.group_index < 0 ||
-                ref.group_index >= static_cast<int>(m_manualTest.script_evidence_groups.size()))
-                continue;
-
-            if (ref.is_group_header)
+            if (major.tools.empty())
             {
-                ImGui::Separator();
-                ImGui::TextUnformatted(ref.label.empty() ? "Evidence Group" : ref.label.c_str());
-                ImGui::Separator();
-                continue;
+                ImGui::TextDisabled("No evidence entries.");
             }
 
-            ScriptEvidenceGroup& group =
-                m_manualTest.script_evidence_groups[ref.group_index];
+            for (std::size_t ti = 0; ti < major.tools.size(); ++ti)
+            {
+                EvidenceCategory& tool = major.tools[ti];
+                if (tool.rows.empty())
+                    continue;
 
-            if (ref.thumb_index < 0 ||
-                ref.thumb_index >= static_cast<int>(group.thumbs.size()))
-                continue;
+                ImGui::PushID(static_cast<int>(ti));
+                const std::string toolHeader =
+                    tool.label + " (" + std::to_string(tool.rows.size()) + ")";
+                ImGuiTreeNodeFlags toolFlags =
+                    ImGuiTreeNodeFlags_DefaultOpen |
+                    ImGuiTreeNodeFlags_OpenOnArrow;
+                if (ImGui::TreeNodeEx(toolHeader.c_str(), toolFlags))
+                {
+                    for (const ScriptEvidenceRowRef& ref : tool.rows)
+                    {
+                        if (ref.group_index < 0 ||
+                            ref.group_index >=
+                                static_cast<int>(m_manualTest.script_evidence_groups.size()))
+                            continue;
 
-            ScriptEvidenceThumb& thumb = group.thumbs[ref.thumb_index];
+                        ScriptEvidenceGroup& group =
+                            m_manualTest.script_evidence_groups[ref.group_index];
 
-            EnsureScriptEvidenceThumbTexture(thumb);
+                        if (ref.thumb_index < 0 ||
+                            ref.thumb_index >= static_cast<int>(group.thumbs.size()))
+                            continue;
 
-            DrawOneScriptEvidenceRow(
-                ref.group_index,
-                ref.thumb_index,
-                thumb,
-                rowHeight);
+                        ScriptEvidenceThumb& thumb = group.thumbs[ref.thumb_index];
+
+                        EnsureScriptEvidenceThumbTexture(thumb);
+
+                        DrawOneScriptEvidenceRow(
+                            ref.group_index,
+                            ref.thumb_index,
+                            thumb,
+                            rowHeight);
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::PopID();
+            }
         }
+
+        ImGui::PopID();
     }
 
     ImGui::EndChild();
@@ -1231,6 +2112,10 @@ void ViewController::DrawOneScriptEvidenceRow(
                     thumb.target_id.empty() ? "-" : thumb.target_id.c_str());
         ImGui::Text("param: %s",
                     thumb.parameter_summary.empty() ? "-" : thumb.parameter_summary.c_str());
+        ImGui::Text("primary: %s %s | %s",
+                    thumb.primary_object_type.empty() ? "-" : thumb.primary_object_type.c_str(),
+                    thumb.primary_object_name.empty() ? "-" : thumb.primary_object_name.c_str(),
+                    thumb.primary_object_status.empty() ? "-" : thumb.primary_object_status.c_str());
 
         ImGui::TableSetColumnIndex(1);
 

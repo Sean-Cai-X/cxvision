@@ -79,7 +79,7 @@ CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
 CxAnnotationTool_add("findellipse_gauge");
-CxAnnotationTool_setlabel("Findellipse Gauge");
+CxAnnotationTool_setlabel("FindEllipse Gauge");
 CxAnnotationTool_setshape("EllipseShape");
 CxAnnotationTool_setrole("roi");
 CxAnnotationTool_setinteraction("ellipse_axis_radius");

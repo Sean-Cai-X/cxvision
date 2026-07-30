@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <chrono>
+#include <vector>
 
 
 class FindObject;
@@ -148,6 +149,17 @@ struct FindLineMeasureProfileStats
 
 struct FindLineMeasureInputDebug
 {
+    struct ScanDiagnostic
+    {
+        int scan_index = -1;
+        int scan_type = 0; // 0=w, 1=h
+        int candidate_count = 0;
+        bool accepted = false;
+        double accepted_x = 0.0;
+        double accepted_y = 0.0;
+        std::string reject_reason;
+    };
+
     bool image_ptr_valid = false;
     bool image_mat_ready = false;
 
@@ -228,6 +240,7 @@ struct FindLineMeasureInputDebug
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    std::vector<ScanDiagnostic> scan_diagnostics;
 
     bool backimage_ready = false;
     bool findobject_ready = false;
@@ -246,6 +259,7 @@ struct FindLineMeasureInputDebug
 
     bool findobject_measure_called = false;
     bool findobject_measure_skipped = false;
+    int findobject_strategy_id = 0;
     std::string findobject_algorithm_branch;
 
     int binary_foreground_pixels = 0;
@@ -405,6 +419,8 @@ public:
     void setobjfilter(int ifindset);
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
     void setfilterprofile(int profile);
+    void setobjectfilterstrategy(int strategy);
+    int objectfilterstrategy() const { return m_findobject_strategy_id; }
     int effectivefiltermin() const;
     int effectivefiltermax() const;
     int effectivefilterborw() const;
@@ -448,6 +464,21 @@ public:
     bool hasfitresult() const { return m_has_fit_result; }
     bool getdisplaysnapshot(FindLineDisplaySnapshot& out) const;
     void exportmeasuredebugpoints(std::vector<float>& outXY) const;
+    int getscandiagnosticcount() const;
+    bool getscandiagnostic(
+        int index,
+        FindLineMeasureInputDebug::ScanDiagnostic& out) const;
+    bool getscandiagnosticline(
+        int scan_type,
+        int scan_index,
+        CxShapePoint& p0,
+        CxShapePoint& p1) const;
+    int getscanlinecount(int scan_type) const;
+    bool getscanline(
+        int scan_type,
+        int scan_index,
+        CxShapePoint& p0,
+        CxShapePoint& p1) const;
     const FindLineMeasureInputDebug& lastmeasureinputdebug() const
     {
         return m_lastMeasureInputDebug;
@@ -470,6 +501,9 @@ public:
 
     double get_result() { return m_has_fit_result ? 1.0 : 0.0; }
     double get_result_script() { return get_result(); }
+    double getvalidpointcount_script() { return static_cast<double>(getvalidpointcount()); }
+    double hasfitresult_script() { return hasfitresult() ? 1.0 : 0.0; }
+    double getavgdist_script() { return getavgdist(); }
 private:
     int m_icomparegap;
     PointsShape m_modelpoints;    //red(white 1) gap blue(black 0) model
@@ -534,6 +568,7 @@ private:
 
     int m_filter_profile = 0;
     bool m_filter_explicit = false;
+    int m_findobject_strategy_id = 0;
     int m_effective_filter_borw = 0;
     int m_effective_filter_min = 0;
     int m_effective_filter_max = 0;
@@ -570,6 +605,7 @@ private:
     void ProbeDisplayRoiGrayStats(Image& image);
     bool MeasureSimpleRoiGradientPoints(Image& image,
                                         FindLineMeasureProfileStats& stats);
+    void RunFindObjectPrefilter(Image& process_image);
 
     void BuildScanProfilesRobust(Image& image, FindLineMeasureProfileStats& stats);
     void CollectEdgeBandsRobust(Image& image, FindLineMeasureProfileStats& stats);

@@ -9,9 +9,25 @@ int x1 = global_roi_x1;
 int y1 = global_roi_y1;
 double threshold = 0.5;
 
+int prompt_x0 = 120;
+int prompt_y0 = 120;
+int prompt_x1 = 980;
+int prompt_y1 = 820;
+
+if (x1 > x0)
+{
+if (y1 > y0)
+{
+prompt_x0 = x0;
+prompt_y0 = y0;
+prompt_x1 = x1;
+prompt_y1 = y1;
+}
+}
+
 m_seg.setbackend("opencv_smoke");
 m_seg.setthreshold(threshold);
-m_seg.setpromptrect(y1, x1, y0, x0);
+m_seg.setpromptrect(prompt_y1, prompt_x1, prompt_y0, prompt_x0);
 m_seg.setmode(2);
 
 m_seg.segment(&m_image);

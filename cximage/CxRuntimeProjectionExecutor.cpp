@@ -14,7 +14,7 @@ static const char* kFindlineProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findline_projection.cxsc";
 static const char* kFindCircleProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findcircle_projection.cxsc";
-static const char* kFindellipseProjectionScript =
+static const char* kFindEllipseProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findellipse_projection.cxsc";
 static const char* kFindRectProjectionScript =
     "cxparser/cxscript/module/cximage/headless/projection/findrect_projection.cxsc";
@@ -32,7 +32,7 @@ std::string OwnerTypeForTool(const std::string& tool_id)
 {
     if (tool_id == "findline_gauge") return "FindLine";
     if (tool_id == "findcircle_gauge") return "FindCircle";
-    if (tool_id == "findellipse_gauge") return "Findellipse";
+    if (tool_id == "findellipse_gauge") return "FindEllipse";
     if (tool_id == "findrect_gauge") return "FindRect";
     if (tool_id == "FastMatch") return "FastMatch";
     return tool_id;
@@ -42,7 +42,7 @@ const char* ProjectionScriptForTool(const std::string& tool_id)
 {
     if (tool_id == "findline_gauge") return kFindlineProjectionScript;
     if (tool_id == "findcircle_gauge") return kFindCircleProjectionScript;
-    if (tool_id == "findellipse_gauge") return kFindellipseProjectionScript;
+    if (tool_id == "findellipse_gauge") return kFindEllipseProjectionScript;
     if (tool_id == "findrect_gauge") return kFindRectProjectionScript;
     if (tool_id == "FastMatch") return kFastMatchProjectionScript;
     return nullptr;
@@ -85,13 +85,13 @@ bool ValidateProjectionRequest(const CxRuntimeProjectionRequest& request,
     else if (request.tool_id == "findellipse_gauge")
     {
         if (!request.has_ellipse_roi)
-            return Fail(result, "request_validation", "Findellipse requires has_ellipse_roi");
+            return Fail(result, "request_validation", "FindEllipse requires has_ellipse_roi");
         if (request.ellipse_rx <= 1.0 || request.ellipse_ry <= 1.0)
-            return Fail(result, "request_validation", "Findellipse radius is too small");
+            return Fail(result, "request_validation", "FindEllipse radius is too small");
         if (std::abs(request.ellipse_angle_deg) > 0.001)
             return Fail(result,
                         "unsupported_rotated_ellipse_roi",
-                        "Findellipse rotated ROI is not bound yet");
+                        "FindEllipse rotated ROI is not bound yet");
     }
     else if (request.tool_id == "findrect_gauge")
     {

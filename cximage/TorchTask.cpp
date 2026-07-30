@@ -133,6 +133,16 @@ double TorchTask::getinferms()
     return result_.infer_runtime_ms;
 }
 
+double TorchTask::gettrainms()
+{
+    return result_.train_runtime_ms;
+}
+
+double TorchTask::gettotalms()
+{
+    return result_.total_runtime_ms;
+}
+
 char* TorchTask::getstatus()
 {
     return const_cast<char*>(status_.c_str());
@@ -158,6 +168,16 @@ char* TorchTask::getresultref()
     return const_cast<char*>(result_.result_ref.c_str());
 }
 
+char* TorchTask::getevidenceref()
+{
+    return const_cast<char*>(result_.evidence_ref.c_str());
+}
+
+char* TorchTask::getprimaryvisualref()
+{
+    return const_cast<char*>(result_.primary_visual_ref.c_str());
+}
+
 char* TorchTask::getmaskref()
 {
     if (result_.mask.has_value()) {
@@ -172,6 +192,16 @@ char* TorchTask::getoverlayref()
         return const_cast<char*>(result_.mask->overlay_ref.c_str());
     }
     return const_cast<char*>("");
+}
+
+char* TorchTask::gettrainersummary()
+{
+    return const_cast<char*>(result_.trainer_lifecycle_summary.c_str());
+}
+
+char* TorchTask::getmainlinesummary()
+{
+    return const_cast<char*>(result_.unified_mainline_summary.c_str());
 }
 
 const CxInferenceResult& TorchTask::GetInferenceResult() const noexcept

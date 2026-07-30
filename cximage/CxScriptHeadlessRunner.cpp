@@ -303,6 +303,13 @@ bool InjectCxScriptGlobals(
             { "global_valid_points_count", static_cast<double>(options.valid_points_count) },
             { "global_has_fit_line", static_cast<double>(options.has_fit_line) },
             { "global_has_fit_circle", static_cast<double>(options.has_fit_circle) },
+            { "global_runtime_valid_points_count", static_cast<double>(options.runtime_valid_points_count) },
+            { "global_runtime_has_fit_line", static_cast<double>(options.runtime_has_fit_line) },
+            { "global_runtime_has_fit_circle", static_cast<double>(options.runtime_has_fit_circle) },
+            { "global_runtime_global_valid_points_count_mismatch", static_cast<double>(options.runtime_global_valid_points_count_mismatch) },
+            { "global_runtime_global_has_fit_line_mismatch", static_cast<double>(options.runtime_global_has_fit_line_mismatch) },
+            { "global_runtime_global_has_fit_circle_mismatch", static_cast<double>(options.runtime_global_has_fit_circle_mismatch) },
+            { "global_runtime_global_result_mismatch", static_cast<double>(options.runtime_global_result_mismatch) },
             { "global_rendered_measure_points_count", static_cast<double>(options.contract_rendered_measure_points_count) },
             { "global_rendered_result_count", static_cast<double>(options.contract_rendered_result_count) },
             { "global_result_overlay_changed_pixels", static_cast<double>(options.contract_result_overlay_changed_pixels) },
@@ -515,6 +522,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
         const auto it = capture.runtime_globals.find(name);
         return it == capture.runtime_globals.end() ? 0.0 : it->second;
     };
+    const auto hasRuntimeGlobal = [&capture](const char* name) -> bool
+    {
+        return capture.runtime_globals.find(name) != capture.runtime_globals.end();
+    };
     pkg.metrics["injected_threshold"] = readRuntimeGlobal("global_threshold");
     pkg.metrics["injected_method"] = readRuntimeGlobal("global_method");
     pkg.metrics["injected_wgap"] = readRuntimeGlobal("global_wgap");
@@ -524,6 +535,24 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["script_selected_threshold"] = capture.selected_threshold;
     pkg.metrics["script_selected_method"] = capture.selected_method;
     pkg.metrics["valid_points_count"] = capture.valid_points_count;
+    pkg.metrics["runtime_valid_points_count"] = capture.valid_points_count;
+    pkg.metrics["global_valid_points_count"] = readRuntimeGlobal("global_valid_points_count");
+    pkg.metrics["runtime_has_fit_line"] = capture.has_fit_line ? 1.0 : 0.0;
+    pkg.metrics["global_has_fit_line"] = readRuntimeGlobal("global_has_fit_line");
+    pkg.metrics["runtime_has_fit_circle"] = capture.has_fit_circle ? 1.0 : 0.0;
+    pkg.metrics["global_has_fit_circle"] = readRuntimeGlobal("global_has_fit_circle");
+    pkg.metrics["runtime_global_valid_points_count_mismatch"] =
+        hasRuntimeGlobal("global_valid_points_count") &&
+        static_cast<int>(readRuntimeGlobal("global_valid_points_count")) != capture.valid_points_count
+            ? 1.0 : 0.0;
+    pkg.metrics["runtime_global_has_fit_line_mismatch"] =
+        hasRuntimeGlobal("global_has_fit_line") &&
+        ((readRuntimeGlobal("global_has_fit_line") != 0.0) != capture.has_fit_line)
+            ? 1.0 : 0.0;
+    pkg.metrics["runtime_global_has_fit_circle_mismatch"] =
+        hasRuntimeGlobal("global_has_fit_circle") &&
+        ((readRuntimeGlobal("global_has_fit_circle") != 0.0) != capture.has_fit_circle)
+            ? 1.0 : 0.0;
     pkg.metrics["circle_radius"] = capture.circle_radius;
     pkg.metrics["avgdist"] = capture.avgdist;
     pkg.metrics["result_rect_count"] = capture.result_rect_count;
@@ -601,6 +630,7 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["fastmatch_candidate_reject_count"] = capture.fastmatch_candidate_reject_count;
 
     pkg.metrics["object_filter_borw"] = capture.object_filter_borw;
+    pkg.metrics["findobject_strategy_id"] = capture.object_filter_strategy_id;
     pkg.metrics["object_filter_min"] = capture.object_filter_min;
     pkg.metrics["object_filter_max"] = capture.object_filter_max;
     pkg.metrics["findobject_component_count"] = capture.object_component_count;
@@ -634,7 +664,9 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["segmentation_primary_area"] = capture.segmentation_primary_area;
     pkg.metrics["torch_ok"] = capture.torch_ok;
     pkg.metrics["torch_error_code"] = capture.torch_error_code;
+    pkg.metrics["torch_train_ms"] = capture.torch_train_ms;
     pkg.metrics["torch_infer_ms"] = capture.torch_infer_ms;
+    pkg.metrics["torch_total_ms"] = capture.torch_total_ms;
     pkg.metrics["torch_result_count"] = capture.torch_result_count;
 
     pkg.facts["execution_mode"] = "sequential";
@@ -648,12 +680,25 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["has_best_result"] = capture.has_best_result ? "true" : "false";
     pkg.facts["failure_stage"] = capture.failure_stage;
     pkg.facts["reason"] = capture.reason;
+    pkg.facts["runtime_result_source"] = "runtime_capture";
+    pkg.facts["global_result_echo_available"] =
+        (hasRuntimeGlobal("global_valid_points_count") ||
+         hasRuntimeGlobal("global_has_fit_line") ||
+         hasRuntimeGlobal("global_has_fit_circle"))
+            ? "true" : "false";
+    pkg.facts["runtime_global_result_mismatch"] =
+        (pkg.metrics["runtime_global_valid_points_count_mismatch"] != 0.0 ||
+         pkg.metrics["runtime_global_has_fit_line_mismatch"] != 0.0 ||
+         pkg.metrics["runtime_global_has_fit_circle_mismatch"] != 0.0)
+            ? "true" : "false";
 
     pkg.facts["ellipse_candidate_policy"] = capture.ellipse_candidate_policy;
     pkg.facts["ellipse_scan_geometry_policy"] = capture.ellipse_scan_geometry_policy;
     pkg.facts["object_prefilter_requested"] = capture.object_prefilter_requested ? "true" : "false";
     pkg.facts["object_prefilter_applied"] = capture.object_prefilter_applied ? "true" : "false";
     pkg.facts["findobject_algorithm_branch"] = capture.object_algorithm_branch;
+    pkg.facts["findobject_strategy_semantics"] =
+        "0=auto_by_filter,1=measure_region_growth,2=measure_fast_region_growth,3=connected_components,4=peak_local_bfs_diagnostic";
     pkg.facts["script_selected_threshold_matches_injected"] =
         capture.selected_threshold == static_cast<int>(readRuntimeGlobal("global_threshold"))
             ? "true" : "false";
@@ -670,6 +715,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["torch_status"] = capture.torch_status;
     pkg.facts["torch_failure_stage"] = capture.torch_failure_stage;
     pkg.facts["torch_reason"] = capture.torch_reason;
+    pkg.facts["torch_evidence_ref"] = capture.torch_evidence_ref;
+    pkg.facts["torch_primary_visual_ref"] = capture.torch_primary_visual_ref;
+    pkg.facts["torch_trainer_lifecycle_summary"] = capture.torch_trainer_lifecycle_summary;
+    pkg.facts["torch_unified_mainline_summary"] = capture.torch_unified_mainline_summary;
 
     if (capture.contract_context)
     {
@@ -679,6 +728,162 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     }
 
     return pkg;
+}
+
+std::string FindObjectStrategyName(int strategy_id)
+{
+    switch (strategy_id)
+    {
+    case 0:
+        return "auto_by_filter";
+    case 1:
+        return "measure_region_growth";
+    case 2:
+        return "measure_fast_region_growth";
+    case 3:
+        return "connected_components";
+    case 4:
+        return "peak_local_bfs_diagnostic";
+    default:
+        return "unknown";
+    }
+}
+
+std::string ClassifyFindLineFindObjectBoundary(
+    const CxScriptExecutionCapture& capture)
+{
+    if (capture.has_fit_line)
+        return "findline_fit_available";
+
+    if (capture.object_prefilter_applied &&
+        capture.object_foreground_after > 0 &&
+        capture.scan_rows_with_foreground == 0 &&
+        capture.scan_runs_total == 0 &&
+        capture.valid_points_count == 0)
+    {
+        return "findline_fail_prefilter_foreground_not_visible_to_scan_rows";
+    }
+
+    if (capture.scan_rows_with_foreground > 0 &&
+        capture.scan_runs_total == 0 &&
+        capture.valid_points_count == 0)
+    {
+        return "findline_fail_binary_saturated_or_no_segment_boundary";
+    }
+
+    if (capture.object_prefilter_requested && !capture.object_prefilter_applied)
+        return "findline_fail_findobject_prefilter_not_applied";
+
+    if (capture.object_prefilter_applied &&
+        capture.object_component_count > 0 &&
+        capture.object_component_accepted_count == 0)
+    {
+        return "findline_fail_findobject_component_rejected";
+    }
+
+    if (capture.scan_runs_total > 0 &&
+        capture.scan_points_emitted == 0)
+    {
+        return "findline_fail_scan_runs_rejected";
+    }
+
+    if (capture.valid_points_count > 0 && !capture.has_fit_line)
+        return "findline_fail_fit_degenerate";
+
+    if (!capture.failure_stage.empty())
+        return capture.failure_stage;
+
+    return "findline_fail_unknown";
+}
+
+bool SaveFindObjectBranchEvidenceJson(
+    const CxScriptExecutionCapture& capture,
+    const CxScriptHeadlessOptions& options,
+    const std::filesystem::path& outputPath,
+    std::string& outReason)
+{
+    std::error_code ec;
+    std::filesystem::create_directories(outputPath.parent_path(), ec);
+    if (ec)
+    {
+        outReason = "failed to create findobject branch evidence directory: " + ec.message();
+        return false;
+    }
+
+    std::ofstream file(outputPath, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+    {
+        outReason = "failed to open findobject branch evidence json";
+        return false;
+    }
+
+    const std::string boundary = ClassifyFindLineFindObjectBoundary(capture);
+
+    file << "{\n";
+    file << "  \"case_id\": \"" << JsonEscape(options.case_name) << "\",\n";
+    file << "  \"script\": \"" << JsonEscape(options.script_path) << "\",\n";
+    file << "  \"image\": \"" << JsonEscape(options.image_path) << "\",\n";
+    file << "  \"runtime_result_source\": \"runtime_capture\",\n";
+    file << "  \"strategy\": {\n";
+    file << "    \"id\": " << capture.object_filter_strategy_id << ",\n";
+    file << "    \"name\": \"" << JsonEscape(FindObjectStrategyName(capture.object_filter_strategy_id)) << "\",\n";
+    file << "    \"algorithm_branch\": \"" << JsonEscape(capture.object_algorithm_branch) << "\",\n";
+    file << "    \"semantics\": \"0=auto_by_filter,1=measure_region_growth,2=measure_fast_region_growth,3=connected_components,4=peak_local_bfs_diagnostic\"\n";
+    file << "  },\n";
+    file << "  \"input\": {\n";
+    file << "    \"method\": " << capture.tool_method << ",\n";
+    file << "    \"threshold\": " << capture.tool_threshold << ",\n";
+    file << "    \"wgap\": " << capture.tool_wgap << ",\n";
+    file << "    \"hgap\": " << capture.tool_hgap << ",\n";
+    file << "    \"linegap\": " << capture.tool_linegap << "\n";
+    file << "  },\n";
+    file << "  \"findobject\": {\n";
+    file << "    \"requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
+    file << "    \"applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
+    file << "    \"borw\": " << capture.object_filter_borw << ",\n";
+    file << "    \"filter_min\": " << capture.object_filter_min << ",\n";
+    file << "    \"filter_max\": " << capture.object_filter_max << ",\n";
+    file << "    \"foreground_before\": " << capture.object_foreground_before << ",\n";
+    file << "    \"foreground_after\": " << capture.object_foreground_after << ",\n";
+    file << "    \"component_count\": " << capture.object_component_count << ",\n";
+    file << "    \"accepted_count\": " << capture.object_component_accepted_count << ",\n";
+    file << "    \"rejected_count\": " << capture.object_component_rejected_count << ",\n";
+    file << "    \"max_area\": " << capture.object_component_max_area << ",\n";
+    file << "    \"white_component_count\": " << capture.object_white_component_count << ",\n";
+    file << "    \"white_accepted_count\": " << capture.object_white_accepted_count << ",\n";
+    file << "    \"black_component_count\": " << capture.object_black_component_count << ",\n";
+    file << "    \"black_accepted_count\": " << capture.object_black_accepted_count << "\n";
+    file << "  },\n";
+    file << "  \"findline_scan\": {\n";
+    file << "    \"rows_examined\": " << capture.scan_rows_examined << ",\n";
+    file << "    \"rows_with_foreground\": " << capture.scan_rows_with_foreground << ",\n";
+    file << "    \"runs_total\": " << capture.scan_runs_total << ",\n";
+    file << "    \"runs_within_length_limit\": " << capture.scan_runs_within_length_limit << ",\n";
+    file << "    \"runs_over_length_limit\": " << capture.scan_runs_over_length_limit << ",\n";
+    file << "    \"runs_rejected_by_selection\": " << capture.scan_runs_rejected_by_selection << ",\n";
+    file << "    \"runs_rejected_near_endpoint\": " << capture.scan_runs_rejected_near_endpoint << ",\n";
+    file << "    \"points_emitted\": " << capture.scan_points_emitted << "\n";
+    file << "  },\n";
+    file << "  \"result\": {\n";
+    file << "    \"has_fit_line\": " << (capture.has_fit_line ? "true" : "false") << ",\n";
+    file << "    \"valid_points_count\": " << capture.valid_points_count << ",\n";
+    file << "    \"avgdist\": " << capture.avgdist << ",\n";
+    file << "    \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
+    file << "    \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
+    file << "    \"failure_stage\": \"" << JsonEscape(capture.failure_stage) << "\",\n";
+    file << "    \"boundary_classification\": \"" << JsonEscape(boundary) << "\"\n";
+    file << "  }\n";
+    file << "}\n";
+
+    file.flush();
+    if (!file.good())
+    {
+        outReason = "failed while writing findobject branch evidence json";
+        return false;
+    }
+
+    outReason.clear();
+    return true;
 }
 
 void WriteJsonNumberMap(
@@ -763,6 +968,42 @@ void WriteJsonShapeSnapshots(
     file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
 }
 
+void WriteJsonFindLineScanDiagnostics(
+    std::ofstream& file,
+    const std::vector<CxFindLineScanDiagnosticSnapshot>& diagnostics,
+    bool trailing_comma)
+{
+    file << "  \"findline_scan_diagnostics\": [";
+    if (diagnostics.empty())
+    {
+        file << "]" << (trailing_comma ? "," : "") << "\n";
+        return;
+    }
+
+    for (auto it = diagnostics.begin(); it != diagnostics.end(); ++it)
+    {
+        const auto next = std::next(it);
+        const CxFindLineScanDiagnosticSnapshot& d = *it;
+        file << "\n    {\n";
+        file << "      \"scan_index\": " << d.scan_index << ",\n";
+        file << "      \"scan_type\": " << d.scan_type << ",\n";
+        file << "      \"scan_line\": {"
+             << "\"x0\": " << d.x0 << ", "
+             << "\"y0\": " << d.y0 << ", "
+             << "\"x1\": " << d.x1 << ", "
+             << "\"y1\": " << d.y1 << "},\n";
+        file << "      \"candidate_count\": " << d.candidate_count << ",\n";
+        file << "      \"accepted\": " << (d.accepted ? "true" : "false") << ",\n";
+        file << "      \"accepted_point\": {"
+             << "\"x\": " << d.accepted_x << ", "
+             << "\"y\": " << d.accepted_y << "},\n";
+        file << "      \"reject_reason\": \""
+             << JsonEscape(d.reject_reason) << "\"\n";
+        file << "    }" << (next == diagnostics.end() ? "" : ",");
+    }
+    file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
+}
+
 bool SaveCxScriptHeadlessSummaryJson(
     const CxScriptExecutionCapture& capture,
     const std::filesystem::path& outputPath,
@@ -792,7 +1033,11 @@ bool SaveCxScriptHeadlessSummaryJson(
     WriteJsonStringMap(file, "facts", pkg.facts, true);
     WriteJsonNumberMap(file, "metrics", pkg.metrics, true);
     WriteJsonNumberMap(file, "runtime_globals", capture.runtime_globals, true);
-    WriteJsonShapeSnapshots(file, pkg.shapes, false);
+    WriteJsonShapeSnapshots(file, pkg.shapes, true);
+    WriteJsonFindLineScanDiagnostics(
+        file,
+        capture.findline_scan_diagnostics,
+        false);
 
     file << "}\n";
 
@@ -1006,6 +1251,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     std::filesystem::path line_trace_path = output_dir / "line_trace.json";
     std::filesystem::path variable_snapshot_path = output_dir / "variable_snapshot.json";
     std::filesystem::path object_state_path = output_dir / "object_state.json";
+    std::filesystem::path findobject_branch_evidence_path = output_dir / "findobject_branch_evidence.json";
     std::filesystem::path overlay_validation_path = output_dir / "overlay_validation.json";
     std::filesystem::path log_path = output_dir / "log.txt";
 
@@ -1066,6 +1312,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     {
         result.failure_stage = "summary_export";
         result.reason = reason;
+    }
+
+    std::string branch_evidence_reason;
+    if (!SaveFindObjectBranchEvidenceJson(
+            capture,
+            options,
+            findobject_branch_evidence_path,
+            branch_evidence_reason))
+    {
+        if (result.reason.empty())
+            result.reason = branch_evidence_reason;
     }
 
     std::ofstream line_trace_file(line_trace_path);
@@ -1163,6 +1420,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
         object_state_file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
         object_state_file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
+        object_state_file << "  \"findobject_strategy_id\": " << capture.object_filter_strategy_id << ",\n";
         object_state_file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
         object_state_file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
         object_state_file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
@@ -1203,9 +1461,15 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
         object_state_file << "  \"torch_ok\": " << capture.torch_ok << ",\n";
         object_state_file << "  \"torch_error_code\": " << capture.torch_error_code << ",\n";
+        object_state_file << "  \"torch_train_ms\": " << capture.torch_train_ms << ",\n";
         object_state_file << "  \"torch_infer_ms\": " << capture.torch_infer_ms << ",\n";
+        object_state_file << "  \"torch_total_ms\": " << capture.torch_total_ms << ",\n";
         object_state_file << "  \"torch_result_count\": " << capture.torch_result_count << ",\n";
         object_state_file << "  \"torch_status\": \"" << JsonEscape(capture.torch_status) << "\",\n";
+        object_state_file << "  \"torch_evidence_ref\": \"" << JsonEscape(capture.torch_evidence_ref) << "\",\n";
+        object_state_file << "  \"torch_primary_visual_ref\": \"" << JsonEscape(capture.torch_primary_visual_ref) << "\",\n";
+        object_state_file << "  \"torch_trainer_lifecycle_summary\": \"" << JsonEscape(capture.torch_trainer_lifecycle_summary) << "\",\n";
+        object_state_file << "  \"torch_unified_mainline_summary\": \"" << JsonEscape(capture.torch_unified_mainline_summary) << "\",\n";
         object_state_file << "  \"budget_exceeded\": " << (capture.budget_exceeded ? "true" : "false") << "\n";
         object_state_file << "}\n";
         object_state_file.close();
@@ -1301,7 +1565,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "best_score: " << capture.best_score << "\n";
         log_file << "torch_ok: " << capture.torch_ok << "\n";
         log_file << "torch_status: " << capture.torch_status << "\n";
+        log_file << "torch_train_ms: " << capture.torch_train_ms << "\n";
         log_file << "torch_infer_ms: " << capture.torch_infer_ms << "\n";
+        log_file << "torch_total_ms: " << capture.torch_total_ms << "\n";
+        log_file << "torch_trainer_lifecycle_summary: " << capture.torch_trainer_lifecycle_summary << "\n";
+        log_file << "torch_unified_mainline_summary: " << capture.torch_unified_mainline_summary << "\n";
         log_file << "case_end\n";
         log_file << "run_end\n";
         log_file.close();
@@ -1310,8 +1578,15 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     bool snapshot_ok = !result.snapshot_path.empty();
     bool summary_ok = !result.summary_path.empty();
     const bool torch_task_ok = capture.torch_ok != 0;
+    const bool segmentation_result_ok =
+        capture.segmentation_status_code != 0 ||
+        capture.segmentation_contour_count > 0 ||
+        capture.rendered_result_count > 0;
     bool evidence_ok = options.contract_context_enabled ||
-        (!result.evidence_overlay_path.empty() && (capture.rendered_roi_count > 0 || torch_task_ok));
+        (!result.evidence_overlay_path.empty() &&
+            (capture.rendered_roi_count > 0 ||
+             torch_task_ok ||
+             segmentation_result_ok));
     bool result_ok = !result.result_overlay_path.empty();
     bool tool_display_ok = !result.tool_display_path.empty();
 

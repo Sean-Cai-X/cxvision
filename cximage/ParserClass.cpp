@@ -426,6 +426,8 @@ namespace mu
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getresultcenty", &FindCircle::getresultcenty);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getradius", &FindCircle::getradius);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getavgdist", &FindCircle::getavgdist);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getvalidpointcount", &FindCircle::getvalidpointcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasfitresult", &FindCircle::hasfitresult_script);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setfitmeasuregap", &FindCircle::setfitmeasuregap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitmeasure", &FindCircle::FitResultMeasure);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "FitResultMeasure", &FindCircle::FitResultMeasure);
@@ -563,6 +565,8 @@ namespace mu
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setgama", &FindLine::setgamarate);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setobjfilter", &FindLine::setobjfilter);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfilter", &FindLine::setfilter);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setobjectfilterstrategy", &FindLine::setobjectfilterstrategy);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfindobjectstrategy", &FindLine::setobjectfilterstrategy);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "findpattern", &FindLine::findpattern);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setcompgap", &FindLine::setcomparegap);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "shapesetroi", &FindLine::shapesetroi);
@@ -582,6 +586,9 @@ namespace mu
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmaxsamples", &FindLine::setmaxsamples);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfilterprofile", &FindLine::setfilterprofile);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "get_result", &FindLine::get_result_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "getvalidpointcount", &FindLine::getvalidpointcount_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "hasfitresult", &FindLine::hasfitresult_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "getavgdist", &FindLine::getavgdist_script);
 
            // m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinesegment", &Findline::setlinesegment);
 
@@ -664,12 +671,18 @@ namespace mu
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getresultcount", &TorchTask::getresultcount);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getmaskavailable", &TorchTask::getmaskavailable);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getinferms", &TorchTask::getinferms);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "gettrainms", &TorchTask::gettrainms);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "gettotalms", &TorchTask::gettotalms);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getstatus", &TorchTask::getstatus);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getreason", &TorchTask::getreason);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getactualdevice", &TorchTask::getactualdevice);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getresultref", &TorchTask::getresultref);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getevidenceref", &TorchTask::getevidenceref);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getprimaryvisualref", &TorchTask::getprimaryvisualref);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getmaskref", &TorchTask::getmaskref);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getoverlayref", &TorchTask::getoverlayref);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "gettrainersummary", &TorchTask::gettrainersummary);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "getmainlinesummary", &TorchTask::getmainlinesummary);
 
             m_parser.DefineClassFun("FindObject", pfobj, "edge", &FindObject::Edge);
             m_parser.DefineClassFun("FindObject", pfobj, "setrelresultnum", &FindObject::setrelationrectfromresultnum);

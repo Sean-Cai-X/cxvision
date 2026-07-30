@@ -1,12 +1,18 @@
-global_torch_task = "torch.train.mobilevit.mainline";
-global_torch_device = "cpu";
-global_torch_input_image = "";
-global_torch_dataset_root = "";
+Image m_image;
+TorchTask m_task;
 
-global_current_status = "torch_train_start";
+m_image.copyFromMat(global_matInput);
 
-if (global_torch_input_image != "") {
-    global_current_status = "torch_train_input_available";
-}
+int timeout_ms = 30000;
 
-global_current_status = "torch_train_completed";
+m_task.settask("torch.train.segmentation.lifecycle_smoke.v1");
+m_task.setcase("N1_torch_train_lifecycle_smoke");
+m_task.setinputpath("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_001.jpg");
+m_task.setoutputdir("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/N1_torch_train_lifecycle_smoke");
+m_task.setdevice("cpu");
+m_task.settimeout(timeout_ms);
+
+m_task.run(m_image);
+
+global_headless_ok = m_task.getok();
+global_torch_ok = m_task.getok();

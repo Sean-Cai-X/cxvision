@@ -37,7 +37,9 @@
           "x1": 1210,
           "y1": 183,
           "wgap": 8,
-          "hgap": 32
+          "hgap": 32,
+          "method": 1,
+          "comment": "Manual evidence review on 2026-07-30 confirmed polarity must use method=1 for this target."
         }
       ]
     },

@@ -138,7 +138,7 @@ bool ValidateManualGaugeGeometryForEditing(
             reason.clear();
         return reason.empty();
     }
-    if (gauge.tool == "Findellipse")
+    if (gauge.tool == "FindEllipse")
     {
         if (!gauge.has_ellipse_gauge)
             reason = "ellipse gauge is unavailable";
@@ -224,7 +224,7 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
     }
-    else if (gauge.tool == "Findellipse")
+    else if (gauge.tool == "FindEllipse")
     {
         InjectManualGaugeInt(context, "global_ellipse_x0", gauge.ellipse_x0);
         InjectManualGaugeInt(context, "global_ellipse_y0", gauge.ellipse_y0);
@@ -413,7 +413,7 @@ bool LoadManualGaugeAnnotation(
         outReason = "gauge annotation schema is incomplete";
         return false;
     }
-    // Backward compatible for annotations saved before Findellipse gauge fields.
+    // Backward compatible for annotations saved before FindEllipse gauge fields.
     ExtractJsonBool(source, "has_ellipse_gauge", loaded.has_ellipse_gauge);
     const char* integer_keys[] = {
         "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
@@ -499,7 +499,7 @@ bool ExportManualGaugeManifestCandidate(
         file << "m.image_addfindcircletarget(\"" << GaugeJsonEscape(gauge.target_id) << "\", "
              << gauge.circle_cx << ", " << gauge.circle_cy << ", " << gauge.circle_px << ", "
              << gauge.circle_py << ", " << gauge.gap << ", " << gauge.linegap << ");\n";
-    else if (gauge.tool == "Findellipse")
+    else if (gauge.tool == "FindEllipse")
     {
         const int cx = (gauge.ellipse_x0 + gauge.ellipse_x1) / 2;
         const int cy = (gauge.ellipse_y0 + gauge.ellipse_y1) / 2;

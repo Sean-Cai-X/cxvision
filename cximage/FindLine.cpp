@@ -268,7 +268,9 @@ void FindLine::setshow(int ishow)
         m_measurepoints_w.setshow(1); 
         m_measurepoints_h.setshow(1); 
     }
-    if (0x04 == ishow)
+    // `show` is a bit mask.  The Gauge scan overlay must therefore be
+    // independently switchable without clearing the result/point bits.
+    if (ishow & 0x04)
     {    
         for (int i = 0; i < m_lines_w.size(); i++)
         {
@@ -294,7 +296,7 @@ void FindLine::setshow(int ishow)
         for (int i = 0; i < m_lines_h.size(); i++)
             m_lines_h[i].setshow(false); 
     }
-    if (8 == ishow)
+    if (ishow & 0x08)
     {
         /*
         m_measurepointsA.setshow(1);
@@ -314,7 +316,7 @@ void FindLine::setshow(int ishow)
         m_modelpoints.setshow(2);
          
     }
-    if (16 == ishow)
+    if (ishow & 0x10)
     {
         m_measurepointsA.setcolor(0, 0, 100);
         m_measurepointsA.setshow(1);
@@ -325,7 +327,7 @@ void FindLine::setshow(int ishow)
         m_measurepointsB_.setcolor(200, 0, 250);
         m_measurepointsB_.setshow(1);
     }
-    if (32 == ishow)
+    if (ishow & 0x20)
     {
         int isize0 = ClampSizeToInt(m_l_measure_w_seek.size());
         int isize1 = ClampSizeToInt(m_l_measure_h_seek.size());
@@ -1058,6 +1060,15 @@ void FindLine::setfilterprofile(int profile)
     m_filter_profile = profile;
 }
 
+void FindLine::setobjectfilterstrategy(int strategy)
+{
+    if (strategy < 0)
+        strategy = 0;
+    if (strategy > 4)
+        strategy = 4;
+    m_findobject_strategy_id = strategy;
+}
+
 int FindLine::effectivefiltermin() const
 {
     if (m_filter_explicit)
@@ -1075,6 +1086,45 @@ int FindLine::effectivefiltermax() const
 int FindLine::effectivefilterborw() const
 {
     return m_ifilterborw;
+}
+
+void FindLine::RunFindObjectPrefilter(Image& process_image)
+{
+    if (g_pbackfindobject == nullptr)
+        return;
+
+    m_lastMeasureInputDebug.findobject_strategy_id = m_findobject_strategy_id;
+
+    switch (m_findobject_strategy_id)
+    {
+    case 1:
+        g_pbackfindobject->Measure(process_image);
+        break;
+    case 2:
+        g_pbackfindobject->MeasureFast(process_image);
+        break;
+    case 3:
+        g_pbackfindobject->MeasureConnectedComponents(process_image);
+        break;
+    case 4:
+        g_pbackfindobject->MeasurePeakLocalBFS(process_image);
+        break;
+    default:
+        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
+            g_pbackfindobject->MeasureConnectedComponents(process_image);
+        else
+            g_pbackfindobject->Measure(process_image);
+        break;
+    }
+
+    m_lastMeasureInputDebug.findobject_algorithm_branch =
+        g_pbackfindobject->getdebugalgorithmbranch();
+    if (m_findobject_strategy_id == 0 &&
+        !m_lastMeasureInputDebug.findobject_algorithm_branch.empty())
+    {
+        m_lastMeasureInputDebug.findobject_algorithm_branch =
+            "auto_by_filter:" + m_lastMeasureInputDebug.findobject_algorithm_branch;
+    }
 }
 void FindLine::MeasureT(void *pimage)
 {
@@ -1687,12 +1737,7 @@ void FindLine::Measure(Image& image)
                 std::to_string(m_effective_filter_borw) + ", min=" +
                 std::to_string(m_effective_filter_min) + ", max=" +
                 std::to_string(m_effective_filter_max));
-        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
-            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
-        else
-            g_pbackfindobject->Measure(*g_pbackimage);
-        m_lastMeasureInputDebug.findobject_algorithm_branch =
-            g_pbackfindobject->getdebugalgorithmbranch();
+        RunFindObjectPrefilter(*g_pbackimage);
 
         const cv::Mat& afterFindObject = g_pbackimage->getmat();
         cv::Mat foreground_gray;
@@ -1763,10 +1808,23 @@ void FindLine::Measure(Image& image)
     int ifixvalue = 3;
 
     cv::Vec3b icolor = 0;
+    const bool selectedComponentsRejected =
+        m_lastMeasureInputDebug.findobject_measure_called &&
+        m_lastMeasureInputDebug.findobject_component_total > 0 &&
+        m_lastMeasureInputDebug.findobject_component_accepted <= 0;
     for (int inumy = 0 + ifixvalue; inumy < iwsize - ifixvalue; inumy++)
     {
         ++m_lastMeasureInputDebug.scan_rows_examined;
         bool rowHasForeground = false;
+        FindLineMeasureInputDebug::ScanDiagnostic diag;
+        diag.scan_index = inumy;
+        diag.scan_type = 0;
+        diag.reject_reason = selectedComponentsRejected
+            ? "component_rejected"
+            : "no_threshold_crossing";
+        m_lastMeasureInputDebug.scan_diagnostics.push_back(diag);
+        const std::size_t diagIndex =
+            m_lastMeasureInputDebug.scan_diagnostics.size() - 1;
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -1798,6 +1856,7 @@ void FindLine::Measure(Image& image)
                 {
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
@@ -1811,6 +1870,12 @@ void FindLine::Measure(Image& image)
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                             m_measurepoints_w.addpoint(apoint);
                             ++m_lastMeasureInputDebug.scan_points_emitted;
+                            auto& currentDiag =
+                                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+                            currentDiag.accepted = true;
+                            currentDiag.accepted_x = apoint.X();
+                            currentDiag.accepted_y = apoint.Y();
+                            currentDiag.reject_reason.clear();
                             //m_l_measure_w[icurlineposition].addpoint(apoint);
                             if (icurlinenum == m_iselectedgenum)
                                 break;
@@ -1818,17 +1883,27 @@ void FindLine::Measure(Image& image)
                         else
                         {
                             ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                            if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                                m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                                    "endpoint_rejected";
                         }
                     }
                     else
                     {
                         ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                            m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                                "scan_run_selection_rejected";
                     }
                 }
                 else if (true == bcollectBegin && irecordnum > 70)
                 {
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "scan_run_over_length";
                 }
                 irecordnum = 0;
                 bcollectBegin = false;
@@ -1838,6 +1913,7 @@ void FindLine::Measure(Image& image)
             && irecordnum > 0)
         {
             ++m_lastMeasureInputDebug.scan_runs_total;
+            ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
             if (irecordnum <= 70)
                 ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
             else
@@ -1854,6 +1930,12 @@ void FindLine::Measure(Image& image)
                     gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                     m_measurepoints_w.addpoint(apoint);
                     ++m_lastMeasureInputDebug.scan_points_emitted;
+                    auto& currentDiag =
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+                    currentDiag.accepted = true;
+                    currentDiag.accepted_x = apoint.X();
+                    currentDiag.accepted_y = apoint.Y();
+                    currentDiag.reject_reason.clear();
                     //m_l_measure_w[icurlineposition].addpoint(apoint);
                     if (icurlinenum == m_iselectedgenum)
                         break;
@@ -1861,18 +1943,34 @@ void FindLine::Measure(Image& image)
                 else
                 {
                     ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "endpoint_rejected";
                 }
             }
             else
             {
                 ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                        "scan_run_selection_rejected";
             }
             irecordnum = 0;
             bcollectBegin = false;
         }
 
         if (rowHasForeground)
+        {
             ++m_lastMeasureInputDebug.scan_rows_with_foreground;
+            auto& currentDiag =
+                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+            if (!currentDiag.accepted &&
+                currentDiag.candidate_count == 0 &&
+                !selectedComponentsRejected)
+            {
+                currentDiag.reject_reason = "polarity_mismatch";
+            }
+        }
 
     }
 
@@ -1881,6 +1979,15 @@ void FindLine::Measure(Image& image)
     {
         ++m_lastMeasureInputDebug.scan_rows_examined;
         bool rowHasForeground = false;
+        FindLineMeasureInputDebug::ScanDiagnostic diag;
+        diag.scan_index = inumy - iwsize;
+        diag.scan_type = 1;
+        diag.reject_reason = selectedComponentsRejected
+            ? "component_rejected"
+            : "no_threshold_crossing";
+        m_lastMeasureInputDebug.scan_diagnostics.push_back(diag);
+        const std::size_t diagIndex =
+            m_lastMeasureInputDebug.scan_diagnostics.size() - 1;
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -1913,6 +2020,7 @@ void FindLine::Measure(Image& image)
                 {
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
                     icurlinenum++;
@@ -1925,6 +2033,12 @@ void FindLine::Measure(Image& image)
                             gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                             m_measurepoints_h.addpoint(apoint);
                             ++m_lastMeasureInputDebug.scan_points_emitted;
+                            auto& currentDiag =
+                                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+                            currentDiag.accepted = true;
+                            currentDiag.accepted_x = apoint.X();
+                            currentDiag.accepted_y = apoint.Y();
+                            currentDiag.reject_reason.clear();
                             //m_l_measure_h[icurlineposition].addpoint(apoint);
 
                             if (icurlinenum == m_iselectedgenum)
@@ -1933,17 +2047,27 @@ void FindLine::Measure(Image& image)
                         else
                         {
                             ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                            if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                                m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                                    "endpoint_rejected";
                         }
                     }
                     else
                     {
                         ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                            m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                                "scan_run_selection_rejected";
                     }
                 }
                 else if (true == bcollectBegin && irecordnum > 70)
                 {
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "scan_run_over_length";
                 }
                 irecordnum = 0;
                 bcollectBegin = false;
@@ -1953,6 +2077,7 @@ void FindLine::Measure(Image& image)
             && irecordnum > 0)
         {
             ++m_lastMeasureInputDebug.scan_runs_total;
+            ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
             if (irecordnum <= 70)
                 ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
             else
@@ -1970,6 +2095,12 @@ void FindLine::Measure(Image& image)
                     gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                     m_measurepoints_h.addpoint(apoint);
                     ++m_lastMeasureInputDebug.scan_points_emitted;
+                    auto& currentDiag =
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+                    currentDiag.accepted = true;
+                    currentDiag.accepted_x = apoint.X();
+                    currentDiag.accepted_y = apoint.Y();
+                    currentDiag.reject_reason.clear();
                    //m_l_measure_h[icurlineposition].addpoint(apoint);
 
                     if (icurlinenum == m_iselectedgenum)
@@ -1978,18 +2109,34 @@ void FindLine::Measure(Image& image)
                 else
                 {
                     ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "endpoint_rejected";
                 }
             }
             else
             {
                 ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                        "scan_run_selection_rejected";
             }
             irecordnum = 0;
             bcollectBegin = false;
         }
 
         if (rowHasForeground)
+        {
             ++m_lastMeasureInputDebug.scan_rows_with_foreground;
+            auto& currentDiag =
+                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+            if (!currentDiag.accepted &&
+                currentDiag.candidate_count == 0 &&
+                !selectedComponentsRejected)
+            {
+                currentDiag.reject_reason = "polarity_mismatch";
+            }
+        }
     }
 
     const int resultPointCount =
@@ -2060,6 +2207,17 @@ void FindLine::Measure(Image& image)
             m_lastMeasureInputDebug.detail =
                 "Findline prefilter ran but rejected every selected-polarity component. "
                 "Check filter_min/filter_max/filter_borw and method polarity.";
+        }
+        else if (m_lastMeasureInputDebug.findobject_measure_called &&
+                 m_lastMeasureInputDebug.scan_rows_with_foreground > 0 &&
+                 m_lastMeasureInputDebug.scan_runs_total == 0)
+        {
+            m_lastMeasureInputDebug.failure_stage =
+                "findline_fail_binary_saturated_or_no_segment_boundary";
+
+            m_lastMeasureInputDebug.detail =
+                "Findline binary foreground exists, but scan run extraction produced no acceptable segment boundary. "
+                "Check method, polarity, and filterprofile before changing fitting.";
         }
         else if (m_lastMeasureInputDebug.findobject_measure_called)
         {
@@ -2339,10 +2497,7 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         g_pbackfindobject->setbrow(m_effective_filter_borw);
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
-        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
-            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
-        else
-            g_pbackfindobject->Measure(*g_pbackimage);
+        RunFindObjectPrefilter(*g_pbackimage);
     }
 
     m_lastMeasureInputDebug.profile_count = iwsize + ihsize;
@@ -3691,6 +3846,74 @@ void FindLine::exportmeasuredebugpoints(std::vector<float>& outXY) const
     }
 }
 
+int FindLine::getscandiagnosticcount() const
+{
+    return static_cast<int>(m_lastMeasureInputDebug.scan_diagnostics.size());
+}
+
+bool FindLine::getscandiagnostic(
+    int index,
+    FindLineMeasureInputDebug::ScanDiagnostic& out) const
+{
+    if (index < 0 ||
+        index >= static_cast<int>(m_lastMeasureInputDebug.scan_diagnostics.size()))
+    {
+        return false;
+    }
+    out = m_lastMeasureInputDebug.scan_diagnostics[static_cast<std::size_t>(index)];
+    return true;
+}
+
+bool FindLine::getscandiagnosticline(
+    int scan_type,
+    int scan_index,
+    CxShapePoint& p0,
+    CxShapePoint& p1) const
+{
+    return getscanline(scan_type, scan_index, p0, p1);
+}
+
+int FindLine::getscanlinecount(int scan_type) const
+{
+    if (scan_type == 0)
+        return static_cast<int>(m_lines_w.size());
+    if (scan_type == 1)
+        return static_cast<int>(m_lines_h.size());
+    return 0;
+}
+
+bool FindLine::getscanline(
+    int scan_type,
+    int scan_index,
+    CxShapePoint& p0,
+    CxShapePoint& p1) const
+{
+    const LineShape* line = nullptr;
+    if (scan_type == 0)
+    {
+        if (scan_index < 0 ||
+            scan_index >= static_cast<int>(m_lines_w.size()))
+        {
+            return false;
+        }
+        line = &m_lines_w[static_cast<std::size_t>(scan_index)];
+    }
+    else if (scan_type == 1)
+    {
+        if (scan_index < 0 ||
+            scan_index >= static_cast<int>(m_lines_h.size()))
+        {
+            return false;
+        }
+        line = &m_lines_h[static_cast<std::size_t>(scan_index)];
+    }
+    else
+    {
+        return false;
+    }
+    return line != nullptr && line->exportLine(p0, p1);
+}
+
 void FindLine::setmaxelapsedms(int value)
 {
     m_budget.max_elapsed_ms = value;
@@ -4561,10 +4784,7 @@ void FindLine::BuildScanProfilesRobust(Image& image,
         g_pbackfindobject->setminmaxarea(
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
-        if (m_effective_filter_borw == 21 || m_effective_filter_borw == 22)
-            g_pbackfindobject->MeasureConnectedComponents(*g_pbackimage);
-        else
-            g_pbackfindobject->Measure(*g_pbackimage);
+        RunFindObjectPrefilter(*g_pbackimage);
     }
 
     stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());

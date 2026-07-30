@@ -445,7 +445,7 @@ namespace
     }
     else if (isEllipseScript)
     {
-      gauge.tool = "Findellipse";
+      gauge.tool = "FindEllipse";
       gauge.has_ellipse_gauge = true;
       gauge.ellipse_x0 = getInt("global_ellipse_x0", 0);
       gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
@@ -1178,13 +1178,13 @@ bool ViewController::InitEvidenceSelfTestEnvironment(std::string& reason)
   reason.clear();
 
   std::string init_reason;
+  m_parserOwner.ConfigureStreams(&m_os, &m_createcodeos);
+  m_parserDebugBridge.Bind(&m_parserOwner);
   if (!m_parserOwner.Initialize(init_reason))
   {
     reason = "parser initialization failed: " + init_reason;
     return false;
   }
-  m_parserOwner.ConfigureStreams(&m_os, &m_createcodeos);
-  m_parserDebugBridge.Bind(&m_parserOwner);
 
   initScriptCatalog();
   initManualStateTestConsole();
@@ -1320,6 +1320,245 @@ static SemanticEvidenceBinding MakeSemanticEvidenceBinding(
     return binding;
 }
 
+static std::string NormalizeSemanticEvidenceObjectTypeLocal(
+    const std::string& typeOrTool)
+{
+    std::string lowered = typeOrTool;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    if (lowered == "findline")
+        return "FindLine";
+    if (lowered == "findcircle")
+        return "FindCircle";
+    if (lowered == "findellipse")
+        return "FindEllipse";
+    if (lowered == "findrect")
+        return "FindRect";
+    if (lowered == "fastmatch" || lowered == "cfastmatch")
+        return "FastMatch";
+    if (lowered == "findsegmentation")
+        return "FindSegmentation";
+    return typeOrTool;
+}
+
+static bool IsSemanticEvidenceEditableObjectTypeLocal(const std::string& type)
+{
+    const std::string normalized =
+        NormalizeSemanticEvidenceObjectTypeLocal(type);
+    return normalized == "FindLine" ||
+           normalized == "FindCircle" ||
+           normalized == "FindEllipse" ||
+           normalized == "FindRect" ||
+           normalized == "FastMatch" ||
+           normalized == "FindSegmentation";
+}
+
+static std::string StripSemanticEvidenceLineCommentLocal(
+    const std::string& line)
+{
+    const std::size_t comment = line.find("//");
+    if (comment == std::string::npos)
+        return line;
+    return line.substr(0, comment);
+}
+
+static void AnalyzeSemanticEvidenceEditableObjectsLocal(
+    const std::string& scriptText,
+    std::vector<CxEvidenceEditableObjectRef>& outObjects)
+{
+    outObjects.clear();
+
+    std::istringstream input(scriptText);
+    std::string raw;
+    int lineNo = 1;
+    while (std::getline(input, raw))
+    {
+        const std::string statement =
+            TrimLine(StripSemanticEvidenceLineCommentLocal(raw));
+        if (statement.empty() ||
+            statement.find('(') != std::string::npos ||
+            statement.find('=') != std::string::npos)
+        {
+            ++lineNo;
+            continue;
+        }
+
+        std::istringstream tokens(statement);
+        std::string type;
+        std::string name;
+        tokens >> type >> name;
+        if (type.empty() || name.empty())
+        {
+            ++lineNo;
+            continue;
+        }
+
+        const std::size_t suffix = name.find_first_of(";");
+        if (suffix != std::string::npos)
+            name.erase(suffix);
+
+        if (!name.empty() &&
+            IsSemanticEvidenceEditableObjectTypeLocal(type))
+        {
+            CxEvidenceEditableObjectRef ref;
+            ref.type = NormalizeSemanticEvidenceObjectTypeLocal(type);
+            ref.name = name;
+            ref.declared_line = lineNo;
+            outObjects.push_back(ref);
+        }
+
+        ++lineNo;
+    }
+}
+
+static std::string ReadSemanticEvidenceParamValueLocal(
+    const std::string& summary,
+    const std::string& key)
+{
+    std::istringstream input(summary);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        line = TrimLine(line);
+        const std::string prefix = key + "=";
+        if (line.rfind(prefix, 0) == 0)
+            return TrimLine(line.substr(prefix.size()));
+    }
+    return {};
+}
+
+static void ResolveSemanticEvidencePrimaryObjectLocal(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    std::string& outType,
+    std::string& outName,
+    std::string& outStatus)
+{
+    outType.clear();
+    outName.clear();
+    outStatus.clear();
+
+    if (snapshot.editable_objects.empty())
+    {
+        outStatus = snapshot.script_path.empty()
+            ? "script_path_empty"
+            : "no_editable_object";
+        return;
+    }
+
+    std::string requested =
+        ReadSemanticEvidenceParamValueLocal(
+            snapshot.parameter_summary,
+            "primary_object_ref");
+    if (requested.empty())
+    {
+        requested =
+            ReadSemanticEvidenceParamValueLocal(
+                snapshot.parameter_summary,
+                "primary_object");
+    }
+    if (requested.empty())
+    {
+        requested =
+            ReadSemanticEvidenceParamValueLocal(
+                snapshot.parameter_summary,
+                "object_ref");
+    }
+
+    if (!requested.empty())
+    {
+        for (const auto& ref : snapshot.editable_objects)
+        {
+            if (ref.name == requested)
+            {
+                outType = ref.type;
+                outName = ref.name;
+                outStatus = "parameter_primary_object";
+                return;
+            }
+        }
+        outStatus = "parameter_primary_object_not_found";
+        return;
+    }
+
+    if (!snapshot.target_id.empty())
+    {
+        for (const auto& ref : snapshot.editable_objects)
+        {
+            if (ref.name == snapshot.target_id)
+            {
+                outType = ref.type;
+                outName = ref.name;
+                outStatus = "target_object_match";
+                return;
+            }
+        }
+    }
+
+    const std::string expectedTool =
+        NormalizeSemanticEvidenceObjectTypeLocal(snapshot.tool);
+    std::vector<CxEvidenceEditableObjectRef> toolMatches;
+    for (const auto& ref : snapshot.editable_objects)
+    {
+        if (NormalizeSemanticEvidenceObjectTypeLocal(ref.type) ==
+            expectedTool)
+        {
+            toolMatches.push_back(ref);
+        }
+    }
+
+    if (toolMatches.size() == 1)
+    {
+        outType = toolMatches.front().type;
+        outName = toolMatches.front().name;
+        outStatus = "single_matching_tool_object";
+        return;
+    }
+
+    if (snapshot.editable_objects.size() == 1)
+    {
+        outType = snapshot.editable_objects.front().type;
+        outName = snapshot.editable_objects.front().name;
+        outStatus = "single_editable_object";
+        return;
+    }
+
+    outStatus = toolMatches.empty()
+        ? "needs_object_selection_no_tool_match"
+        : "needs_object_selection";
+}
+
+static void EnrichSemanticEvidenceSnapshotEditableObjectsLocal(
+    CxEvidenceSelectionSnapshot& snapshot)
+{
+    snapshot.editable_objects.clear();
+    snapshot.primary_object_type.clear();
+    snapshot.primary_object_name.clear();
+    snapshot.primary_object_status.clear();
+
+    if (snapshot.script_path.empty())
+    {
+        snapshot.primary_object_status = "script_path_empty";
+        return;
+    }
+
+    std::string scriptText;
+    if (!ReadTextFile(snapshot.script_path, scriptText))
+    {
+        snapshot.primary_object_status = "script_read_failed";
+        return;
+    }
+
+    AnalyzeSemanticEvidenceEditableObjectsLocal(
+        scriptText,
+        snapshot.editable_objects);
+    ResolveSemanticEvidencePrimaryObjectLocal(
+        snapshot,
+        snapshot.primary_object_type,
+        snapshot.primary_object_name,
+        snapshot.primary_object_status);
+}
+
 static CxEvidenceSelectionSnapshot MakeEvidenceSelectionSnapshot(
     const SemanticEvidenceBinding& binding)
 {
@@ -1348,6 +1587,8 @@ static CxEvidenceSelectionSnapshot MakeEvidenceSelectionSnapshot(
     snapshot.source = binding.source.empty()
         ? "semantic_node_evidence"
         : binding.source;
+
+    EnrichSemanticEvidenceSnapshotEditableObjectsLocal(snapshot);
 
     return snapshot;
 }
@@ -1918,11 +2159,11 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
             !hasInt("global_threshold") ||
             !hasInt("global_method"))
         {
-            reason = "missing required Findellipse global_* bindings";
+            reason = "missing required FindEllipse global_* bindings";
             return false;
         }
 
-        reason = "Findellipse parameter globals available";
+        reason = "FindEllipse parameter globals available";
         return true;
     }
 
@@ -2069,6 +2310,11 @@ bool ViewController::RunEvidenceChainSelfTest(
     result.image_path = snapshot.image_path;
     result.target_id = snapshot.target_id;
     result.tool = snapshot.tool;
+    result.primary_object_type = snapshot.primary_object_type;
+    result.primary_object_name = snapshot.primary_object_name;
+    result.primary_object_status = snapshot.primary_object_status;
+    result.editable_object_count =
+        static_cast<int>(snapshot.editable_objects.size());
     const std::string inferredTool = inferEvidenceToolFromScriptPath(snapshot.script_path);
     if (!inferredTool.empty() &&
         (result.tool.empty() || result.tool == "module" || result.tool == "integration"))
@@ -2297,6 +2543,22 @@ bool ViewController::RunEvidenceChainSelfTest(
             result,
             stepReason))
     {
+        if (result.runtime_status == "primary_object_selection_required")
+        {
+            AddEvidenceSelfTestStep(
+                result,
+                "PRIMARY_OBJECT_SELECTION_PENDING",
+                "PENDING",
+                stepReason);
+
+            result.final_code = "PRIMARY_OBJECT_SELECTION_PENDING";
+            result.final_status = "PENDING_HUMAN_REVIEW";
+            result.final_reason = stepReason;
+            result.passed_to_human_review = true;
+            reason = stepReason;
+            return true;
+        }
+
         AddEvidenceSelfTestStep(
             result,
             "RUNTIME_OBJECT_FAIL",
@@ -2680,6 +2942,45 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
         return true;
     }
 
+    if (snapshot.primary_object_status == "needs_object_selection" ||
+        snapshot.primary_object_status == "needs_object_selection_no_tool_match")
+    {
+        result.runtime_object_ok = false;
+        result.runtime_object_type = expectedType;
+        result.runtime_object_name.clear();
+        result.runtime_status = "primary_object_selection_required";
+        reason =
+            "runtime object check pending: multiple editable objects require primary object selection";
+        return false;
+    }
+
+    if (!snapshot.primary_object_name.empty())
+    {
+        const std::string primaryType = snapshot.primary_object_type.empty()
+            ? expectedType
+            : snapshot.primary_object_type;
+        for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+        {
+            if (object.name == snapshot.primary_object_name &&
+                object.type == primaryType)
+            {
+                result.runtime_object_ok = true;
+                result.runtime_object_type = object.type;
+                result.runtime_object_name = object.name;
+                result.runtime_status = object.runtime_state;
+                reason = "primary runtime object available: " +
+                         object.type + " " + object.name +
+                         " status=" + snapshot.primary_object_status;
+                return true;
+            }
+        }
+
+        reason = "runtime object check failed: primary object " +
+                 primaryType + " " + snapshot.primary_object_name +
+                 " not found";
+        return false;
+    }
+
     for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
         if (object.type == expectedType)
@@ -2703,7 +3004,6 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
     CxEvidenceSelfTestResult& result,
     std::string& reason)
 {
-    (void)snapshot;
     reason.clear();
 
     result.shape_element_count_before =
@@ -2762,6 +3062,18 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
 
     if (!hasEditableGauge)
     {
+        if (evidencePathIsFindSegmentation(snapshot.script_path) &&
+            visibleCount > 0)
+        {
+            result.gauge_projection_ok = true;
+            result.shape_projection_ok = true;
+            reason =
+                "segmentation shape projection available; editable prompt gauge pending";
+            result.projection_reason = reason;
+            result.gauge_status = "segmentation_editable_prompt_pending";
+            return true;
+        }
+
         reason = "projection failed: no editable gauge/ROI shape found";
         return false;
     }
@@ -3170,7 +3482,7 @@ void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
     {
         m_manualTest.debug_status = "SEMANTIC_RUN_NO_RUNTIME_OBJECTS";
         m_manualTest.debug_reason =
-            "script executed but no Findline/FindCircle/Findellipse runtime object was queried";
+            "script executed but no Findline/FindCircle/FindEllipse runtime object was queried";
     }
     else if (m_manualTest.current_result_ref.source_object.empty())
     {
@@ -3866,6 +4178,185 @@ void ViewController::drawScriptAcceptancePanels()
                 if (element != nullptr)
                     DrawShapeElementOnImageView(*element, drawList);
             }
+        }
+
+        // Layer 3.5: FindLine runtime scan debug overlay.
+        //
+        // This intentionally does not create ShapeElements.  It is a read-only
+        // debug projection of the native FindLine scan geometry (m_lines_w/h)
+        // and scan diagnostics.  Keeping it here avoids the previous fragile
+        // dependency on whether the .roi_axis ShapeElement happened to be
+        // visible or drawn through the LineGauge branch.
+        if (m_manualTest.show_line_gauge_scan_lines)
+        {
+            std::string ownerRef = m_manualTest.current_gauge.primary_object_name;
+            if (ownerRef.empty())
+                ownerRef = m_manualTest.current_result_ref.source_object;
+            if (ownerRef.empty())
+            {
+                for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+                {
+                    if (object.type == "FindLine")
+                    {
+                        ownerRef = object.name;
+                        break;
+                    }
+                }
+            }
+
+            FindLine* lineTool = ownerRef.empty()
+                ? nullptr
+                : static_cast<FindLine*>(
+                      m_parserDebugBridge.QueryClassObject("FindLine", ownerRef));
+
+            const int displayMethod = m_manualTest.current_gauge.method;
+            const bool reverseArrow = (displayMethod & 1) != 0;
+            auto ImageToScreenD = [&](double x, double y) -> ImVec2
+            {
+                return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                              imagePos.y + static_cast<float>(y) * sy);
+            };
+
+            auto drawArrowHead = [&](CxShapePoint from, CxShapePoint to)
+            {
+                if (reverseArrow)
+                    std::swap(from, to);
+
+                const ImVec2 pFrom = ImageToScreenD(from.x, from.y);
+                const ImVec2 pTo = ImageToScreenD(to.x, to.y);
+                const float vx = pTo.x - pFrom.x;
+                const float vy = pTo.y - pFrom.y;
+                const float vlen = std::sqrt(vx * vx + vy * vy);
+                if (vlen < 1.0f)
+                    return;
+
+                const float ux = vx / vlen;
+                const float uy = vy / vlen;
+                const float arrowLen = 7.0f;
+                const float arrowHalf = 4.0f;
+                const ImVec2 base(pTo.x - ux * arrowLen, pTo.y - uy * arrowLen);
+                const ImVec2 left(base.x - uy * arrowHalf, base.y + ux * arrowHalf);
+                const ImVec2 right(base.x + uy * arrowHalf, base.y - ux * arrowHalf);
+                const ImU32 arrowColor = reverseArrow
+                    ? IM_COL32(80, 190, 255, 235)
+                    : IM_COL32(255, 160, 48, 235);
+
+                drawList->AddLine(pTo, left, arrowColor, 1.8f);
+                drawList->AddLine(pTo, right, arrowColor, 1.8f);
+            };
+
+            int scanCountW = 0;
+            int scanCountH = 0;
+            int diagnosticCount = 0;
+            // The checkbox is an object display command, not a second UI-only
+            // visibility state.  Bit 0x04 is FindLine's native scan-line show
+            // bit; preserve all other object display bits.
+            if (lineTool != nullptr)
+            {
+                const int currentShowMask = lineTool->show();
+                const int requestedShowMask = currentShowMask | 0x04;
+                if (requestedShowMask != currentShowMask)
+                    lineTool->setshow(requestedShowMask);
+            }
+            if (lineTool != nullptr && (lineTool->show() & 0x04) != 0)
+            {
+                scanCountW = lineTool->getscanlinecount(0);
+                scanCountH = lineTool->getscanlinecount(1);
+                diagnosticCount = lineTool->getscandiagnosticcount();
+                const int totalScanCount = scanCountW + scanCountH;
+                const int arrowSourceCount =
+                    diagnosticCount > 0 ? diagnosticCount : totalScanCount;
+                const int arrowStride = std::max(1, arrowSourceCount / 48);
+
+                // Draw the native FindLine scan segments themselves.  This
+                // mirrors FindLine::drawshape() for the ImGui Image View;
+                // it neither reconstructs a Gauge grid nor makes a copied
+                // scan-line list in ViewController.
+                auto drawActualScanLine = [&](const CxShapePoint& a,
+                                               const CxShapePoint& b,
+                                               ImU32 color,
+                                               float thickness,
+                                               int ordinal)
+                {
+                    drawList->AddLine(
+                        ImageToScreenD(a.x, a.y),
+                        ImageToScreenD(b.x, b.y),
+                        color,
+                        thickness);
+                    if ((ordinal % arrowStride) == 0)
+                        drawArrowHead(a, b);
+                    return true;
+                };
+
+                int ordinal = 0;
+                for (int scanType = 0; scanType <= 1; ++scanType)
+                {
+                    const int scanCount = lineTool->getscanlinecount(scanType);
+                    for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
+                    {
+                        CxShapePoint a, b;
+                        if (!lineTool->getscanline(scanType, scanIndex, a, b))
+                            continue;
+
+                        drawActualScanLine(
+                            a,
+                            b,
+                            IM_COL32(140, 230, 255, 145),
+                            1.0f,
+                            ordinal++);
+                    }
+                }
+
+                if (diagnosticCount > 0)
+                {
+                    for (int i = 0; i < diagnosticCount; ++i)
+                    {
+                        FindLineMeasureInputDebug::ScanDiagnostic diag;
+                        CxShapePoint a, b;
+                        if (!lineTool->getscandiagnostic(i, diag) ||
+                            !lineTool->getscandiagnosticline(
+                                diag.scan_type,
+                                diag.scan_index,
+                                a,
+                                b))
+                        {
+                            continue;
+                        }
+
+                        ImU32 lineColor = IM_COL32(255, 230, 120, 115);
+                        float lineThickness = 1.0f;
+                        if (diag.accepted)
+                        {
+                            lineColor = IM_COL32(255, 235, 64, 240);
+                            lineThickness = 1.6f;
+                        }
+                        else if (!diag.reject_reason.empty() &&
+                                 diag.reject_reason != "no_threshold_crossing")
+                        {
+                            lineColor = IM_COL32(255, 96, 96, 170);
+                        }
+
+                        drawActualScanLine(a, b, lineColor, lineThickness, ordinal++);
+
+                        if (diag.accepted)
+                        {
+                            const ImVec2 ap =
+                                ImageToScreenD(diag.accepted_x, diag.accepted_y);
+                            drawList->AddCircleFilled(
+                                ap,
+                                3.5f,
+                                IM_COL32(255, 235, 64, 255));
+                            drawList->AddCircle(
+                                ap,
+                                4.5f,
+                                IM_COL32(80, 40, 0, 220),
+                                12,
+                                1.0f);
+                        }
+                    }
+                }
+            }
+
         }
 
     if (m_showTestPoints)
@@ -6694,6 +7185,8 @@ static ImU32 ShapeHandleColor(CxShapeHandleRole role, const CxShapeElement& elem
 {
     if (element.result_element)
         return IM_COL32(255, 180, 64, 255);
+    if (element.semantic_role == "measure_points")
+        return IM_COL32(255, 235, 64, 255);
     if (element.editable && element.selected)
         return IM_COL32(80, 255, 170, 255);
     return IM_COL32(160, 160, 200, 255);
@@ -6751,6 +7244,11 @@ static bool IsRenderableShapeGeometry(const CxShapeElement& element)
     default:
         return true;
     }
+}
+
+static bool ShouldReverseFindLineScanDirection(int method)
+{
+    return (method & 1) != 0;
 }
 
 void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, ImDrawList* drawList)
@@ -6817,6 +7315,171 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
                                 ImageToScreen(corners[next].x, corners[next].y),
                                 element.selected ? selectedColor : color,
                                 thickness);
+                        }
+
+                        if (false && m_manualTest.show_line_gauge_scan_lines)
+                        {
+                            const std::string ownerRef = !element.owner_ref.empty()
+                                ? element.owner_ref
+                                : m_manualTest.current_gauge.primary_object_name;
+                            FindLine* lineTool = ownerRef.empty()
+                                ? nullptr
+                                : static_cast<FindLine*>(
+                                      m_parserDebugBridge.QueryClassObject(
+                                          "FindLine",
+                                          ownerRef));
+                            if (lineTool != nullptr)
+                            {
+                                const int displayMethod =
+                                    m_manualTest.current_gauge.method;
+                                const bool reverseArrow =
+                                    ShouldReverseFindLineScanDirection(displayMethod);
+                                const int scanCountW = lineTool->getscanlinecount(0);
+                                const int scanCountH = lineTool->getscanlinecount(1);
+                                const int totalScanCount = scanCountW + scanCountH;
+                                const int diagnosticCount =
+                                    lineTool->getscandiagnosticcount();
+                                const int arrowSourceCount =
+                                    diagnosticCount > 0 ? diagnosticCount : totalScanCount;
+                                const int arrowStride =
+                                    std::max(1, arrowSourceCount / 48);
+                                const ImU32 arrowColor =
+                                    reverseArrow
+                                        ? IM_COL32(80, 190, 255, 230)
+                                        : IM_COL32(255, 160, 48, 230);
+
+                                auto drawArrowHead = [&](CxShapePoint from,
+                                                         CxShapePoint to)
+                                {
+                                    if (reverseArrow)
+                                        std::swap(from, to);
+
+                                    const ImVec2 pFrom = ImageToScreen(from.x, from.y);
+                                    const ImVec2 pTo = ImageToScreen(to.x, to.y);
+                                    const float vx = pTo.x - pFrom.x;
+                                    const float vy = pTo.y - pFrom.y;
+                                    const float vlen = std::sqrt(vx * vx + vy * vy);
+                                    if (vlen < 1.0f)
+                                        return;
+
+                                    const float ux = vx / vlen;
+                                    const float uy = vy / vlen;
+                                    const float arrowLen = 7.0f;
+                                    const float arrowHalf = 4.0f;
+                                    const ImVec2 base(
+                                        pTo.x - ux * arrowLen,
+                                        pTo.y - uy * arrowLen);
+                                    const ImVec2 left(
+                                        base.x - uy * arrowHalf,
+                                        base.y + ux * arrowHalf);
+                                    const ImVec2 right(
+                                        base.x + uy * arrowHalf,
+                                        base.y - ux * arrowHalf);
+
+                                    drawList->AddLine(pTo, left, arrowColor, 1.5f);
+                                    drawList->AddLine(pTo, right, arrowColor, 1.5f);
+                                };
+
+                                auto drawActualScanLine = [&](const CxShapePoint& a,
+                                                              const CxShapePoint& b,
+                                                              ImU32 scanColor,
+                                                              float scanThickness,
+                                                              int ordinal)
+                                {
+                                    drawList->AddLine(
+                                        ImageToScreen(a.x, a.y),
+                                        ImageToScreen(b.x, b.y),
+                                        scanColor,
+                                        scanThickness);
+
+                                    if ((ordinal % arrowStride) == 0)
+                                        drawArrowHead(a, b);
+                                };
+
+                                int ordinal = 0;
+                                if (diagnosticCount <= 0)
+                                {
+                                    for (int scanType = 0; scanType <= 1; ++scanType)
+                                    {
+                                        const int scanCount =
+                                            lineTool->getscanlinecount(scanType);
+                                        for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
+                                        {
+                                            CxShapePoint a, b;
+                                            if (!lineTool->getscanline(
+                                                    scanType,
+                                                    scanIndex,
+                                                    a,
+                                                    b))
+                                            {
+                                                continue;
+                                            }
+
+                                            drawActualScanLine(
+                                                a,
+                                                b,
+                                                IM_COL32(255, 230, 120, 95),
+                                                1.0f,
+                                                ordinal++);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    for (int i = 0; i < diagnosticCount; ++i)
+                                    {
+                                        FindLineMeasureInputDebug::ScanDiagnostic diag;
+                                        CxShapePoint a, b;
+                                        if (!lineTool->getscandiagnostic(i, diag) ||
+                                            !lineTool->getscandiagnosticline(
+                                                diag.scan_type,
+                                                diag.scan_index,
+                                                a,
+                                                b))
+                                        {
+                                            continue;
+                                        }
+
+                                        ImU32 actualColor =
+                                            IM_COL32(255, 230, 120, 85);
+                                        float actualThickness = 1.0f;
+                                        if (diag.accepted)
+                                        {
+                                            actualColor = IM_COL32(255, 235, 64, 230);
+                                            actualThickness = 1.5f;
+                                        }
+                                        else if (!diag.reject_reason.empty() &&
+                                                 diag.reject_reason != "no_threshold_crossing")
+                                        {
+                                            actualColor = IM_COL32(255, 96, 96, 150);
+                                        }
+
+                                        drawActualScanLine(
+                                            a,
+                                            b,
+                                            actualColor,
+                                            actualThickness,
+                                            ordinal++);
+
+                                        if (diag.accepted)
+                                        {
+                                            const ImVec2 ap =
+                                                ImageToScreen(diag.accepted_x,
+                                                              diag.accepted_y);
+                                            drawList->AddCircleFilled(
+                                                ap,
+                                                3.5f,
+                                                IM_COL32(255, 235, 64, 255));
+                                            drawList->AddCircle(
+                                                ap,
+                                                4.5f,
+                                                IM_COL32(80, 40, 0, 220),
+                                                12,
+                                                1.0f);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

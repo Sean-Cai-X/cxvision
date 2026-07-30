@@ -238,7 +238,13 @@ void TorchRuntimeBridge::Unload()
 
 #ifdef _WIN32
     if (dll_) {
-        FreeLibrary(dll_);
+        // libtorch keeps process-wide runtime/autograd state behind the runtime
+        // DLL.  Training lifecycle smoke can finish successfully and still
+        // fault during an eager FreeLibrary() on Windows while those static
+        // resources are unwinding.  Keep the module loaded until process exit;
+        // still destroy the runtime handle above and clear function pointers so
+        // callers cannot use stale state.  This preserves the single Parser
+        // owner model and avoids a detached worker/timeout workaround.
         dll_ = nullptr;
     }
 #else

@@ -259,7 +259,7 @@ std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object
     return ss.str();
 }
 
-std::string BuildFindellipseGeometrySummary(const RuntimeObjectView& object)
+std::string BuildFindEllipseGeometrySummary(const RuntimeObjectView& object)
 {
     std::ostringstream ss;
 
@@ -304,7 +304,7 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
     if (object.type == "FindLine")
         return BuildFindLineGeometrySummary(object);
     if (object.type == "FindEllipse")
-        return BuildFindellipseGeometrySummary(object);
+        return BuildFindEllipseGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
     if (object.type == "FastMatch")
@@ -392,7 +392,7 @@ std::string BuildFindSegmentationOverlaySummary(const ManualTestContext& context
     return ss.str();
 }
 
-std::string BuildFindellipseOverlaySummary(const ManualTestContext& context,
+std::string BuildFindEllipseOverlaySummary(const ManualTestContext& context,
     const RuntimeObjectView& object)
 {
     std::ostringstream ss;
@@ -416,7 +416,7 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
     if (object.type == "FindLine")
         return BuildFindLineOverlaySummary(context, object);
     if (object.type == "FindEllipse")
-        return BuildFindellipseOverlaySummary(context, object);
+        return BuildFindEllipseOverlaySummary(context, object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationOverlaySummary(context, object);
     if (object.type == "FastMatch")

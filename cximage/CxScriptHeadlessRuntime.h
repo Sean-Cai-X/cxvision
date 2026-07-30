@@ -6,6 +6,21 @@
 #include <map>
 #include "CxRuntimeProjectionTypes.h"
 
+struct CxFindLineScanDiagnosticSnapshot
+{
+    int scan_index = -1;
+    int scan_type = 0;
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    int candidate_count = 0;
+    bool accepted = false;
+    double accepted_x = 0.0;
+    double accepted_y = 0.0;
+    std::string reject_reason;
+};
+
 struct CxScriptExecutionCapture
 {
     bool script_compiled = false;
@@ -124,6 +139,7 @@ struct CxScriptExecutionCapture
 
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
+    int object_filter_strategy_id = 0;
     int object_filter_borw = 0;
     int object_filter_min = 0;
     int object_filter_max = 0;
@@ -169,11 +185,17 @@ struct CxScriptExecutionCapture
 
     int torch_ok = 0;
     int torch_error_code = 0;
+    double torch_train_ms = 0.0;
     double torch_infer_ms = 0.0;
+    double torch_total_ms = 0.0;
     int torch_result_count = 0;
     std::string torch_status;
     std::string torch_failure_stage;
     std::string torch_reason;
+    std::string torch_evidence_ref;
+    std::string torch_primary_visual_ref;
+    std::string torch_trainer_lifecycle_summary;
+    std::string torch_unified_mainline_summary;
 
     bool budget_exceeded = false;
 
@@ -193,6 +215,7 @@ struct CxScriptExecutionCapture
     std::map<std::string, double> runtime_globals;
 
     std::vector<CxShapeElementSnapshot> shapes;
+    std::vector<CxFindLineScanDiagnosticSnapshot> findline_scan_diagnostics;
 
     bool smoke_pass = false;
     std::string smoke_findline_object_name;
@@ -265,7 +288,7 @@ struct CxScriptHeadlessOptions
     int gap = 5;
     int linegap = 6;
     int threshold = 20;
-    int method = 2;
+    int method = 0;
     int filterprofile = 0;
     int samplerate = 1;
     double min_score = 0.0;
@@ -303,6 +326,16 @@ struct CxScriptHeadlessOptions
     int valid_points_count = 0;
     int has_fit_line = 0;
     int has_fit_circle = 0;
+    int runtime_valid_points_count = 0;
+    int global_valid_points_count = 0;
+    int runtime_has_fit_line = 0;
+    int global_has_fit_line = 0;
+    int runtime_has_fit_circle = 0;
+    int global_has_fit_circle = 0;
+    int runtime_global_valid_points_count_mismatch = 0;
+    int runtime_global_has_fit_line_mismatch = 0;
+    int runtime_global_has_fit_circle_mismatch = 0;
+    int runtime_global_result_mismatch = 0;
     double local_support = 0.0;
     double local_mean_distance = 0.0;
     double fit_offset = 0.0;

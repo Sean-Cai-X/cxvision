@@ -19,6 +19,7 @@ m_line.setline(
 m_line.setmethod(global_method);
 m_line.setthre(global_threshold);
 m_line.setfilterprofile(global_filterprofile);
+m_line.setobjectfilterstrategy(global_strategy_id);
 
 global_selected_method = global_method;
 global_selected_threshold = global_threshold;
@@ -30,3 +31,7 @@ global_selected_filterprofile = global_filterprofile;
 m_line.measure(&m_image);
 
 m_line.fitline();
+
+global_valid_points_count = m_line.getvalidpointcount();
+global_has_fit_line = m_line.hasfitresult();
+global_avgdist = m_line.getavgdist();

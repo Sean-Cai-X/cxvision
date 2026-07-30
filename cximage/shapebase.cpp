@@ -534,8 +534,18 @@ void LineShape::setline(int ix0,int iy0,int ix1,int iy1)
 
  void LineShape::Move(int ix, int iy)
 {
-    // 平移路径
-    gp_Vec translationVector(ix, iy, 0); // 沿X轴平移5，沿Y轴平移3，沿Z轴平移2
+    // Keep the line segment and its sampling path in the same coordinate
+    // frame.  FindLine builds m_lines_w/m_lines_h by copy()+Move(); the
+    // algorithm samples m_path while Image View exports m_line.  Updating
+    // only m_path makes every exported scan segment collapse onto its source
+    // line even though the algorithm is scanning distinct positions.
+    const gp_Pnt start = m_line.StartPoint();
+    const gp_Pnt end = m_line.EndPoint();
+    m_line.setLine(
+        gp_Pnt(start.X() + ix, start.Y() + iy, start.Z()),
+        gp_Pnt(end.X() + ix, end.Y() + iy, end.Z()));
+
+    gp_Vec translationVector(ix, iy, 0);
     m_path.Translate(translationVector);
 
 }

@@ -138,6 +138,7 @@ struct CxScriptToolResultCapture
 
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
+    int object_filter_strategy_id = 0;
     int object_filter_borw = 0;
     int object_filter_min = 0;
     int object_filter_max = 0;
@@ -184,16 +185,23 @@ struct CxScriptToolResultCapture
 
     int torch_ok = 0;
     int torch_error_code = 0;
+    double torch_train_ms = 0.0;
     double torch_infer_ms = 0.0;
+    double torch_total_ms = 0.0;
     std::string torch_status;
     std::string torch_failure_stage;
     std::string torch_reason;
     int torch_result_count = 0;
+    std::string torch_evidence_ref;
+    std::string torch_primary_visual_ref;
+    std::string torch_trainer_lifecycle_summary;
+    std::string torch_unified_mainline_summary;
 
     std::string failure_stage;
     std::string reason;
 
     std::vector<CxShapeElementSnapshot> shapes;
+    std::vector<CxFindLineScanDiagnosticSnapshot> findline_scan_diagnostics;
 };
 
 bool CaptureRuntimeToolResults(

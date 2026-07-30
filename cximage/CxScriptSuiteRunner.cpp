@@ -413,7 +413,53 @@ namespace
         std::istringstream contentStream(jsonContent);
         while (std::getline(contentStream, line))
         {
-            if (JsonLineHasAnyKey(line, {"valid_points_count", "valid_line_points_count", "valid_circle_points_count"}))
+            if (JsonLineHasKey(line, "runtime_valid_points_count"))
+            {
+                try { out.runtime_valid_points_count = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "global_valid_points_count"))
+            {
+                try { out.global_valid_points_count = std::stoi(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "runtime_has_fit_line"))
+            {
+                out.runtime_has_fit_line = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "global_has_fit_line"))
+            {
+                out.global_has_fit_line = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "runtime_has_fit_circle"))
+            {
+                out.runtime_has_fit_circle = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "global_has_fit_circle"))
+            {
+                out.global_has_fit_circle = ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "runtime_global_valid_points_count_mismatch"))
+            {
+                out.runtime_global_valid_points_count_mismatch =
+                    ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "runtime_global_has_fit_line_mismatch"))
+            {
+                out.runtime_global_has_fit_line_mismatch =
+                    ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "runtime_global_has_fit_circle_mismatch"))
+            {
+                out.runtime_global_has_fit_circle_mismatch =
+                    ParseJsonBoolValue(JsonLineValue(line));
+            }
+            else if (JsonLineHasKey(line, "runtime_global_result_mismatch"))
+            {
+                out.runtime_global_result_mismatch =
+                    JsonLineValue(line) == "true" || JsonLineValue(line) == "1";
+            }
+            else if (JsonLineHasAnyKey(line, {"valid_points_count", "valid_line_points_count", "valid_circle_points_count"}))
             {
                 try { out.valid_points_count = std::stoi(JsonLineValue(line)); }
                 catch (...) {}
@@ -437,6 +483,78 @@ namespace
             else if (JsonLineHasKey(line, "result_overlay_changed_pixels"))
             {
                 try { out.result_overlay_changed_pixels = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_rows_examined"))
+            {
+                try { out.scan_rows_examined = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_rows_with_foreground"))
+            {
+                try { out.scan_rows_with_foreground = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_runs_total"))
+            {
+                try { out.scan_runs_total = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_runs_within_length_limit"))
+            {
+                try { out.scan_runs_within_length_limit = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_runs_over_length_limit"))
+            {
+                try { out.scan_runs_over_length_limit = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_runs_rejected_by_selection"))
+            {
+                try { out.scan_runs_rejected_by_selection = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_runs_rejected_near_endpoint"))
+            {
+                try { out.scan_runs_rejected_near_endpoint = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "scan_points_emitted"))
+            {
+                try { out.scan_points_emitted = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_strategy_id"))
+            {
+                try { out.findobject_strategy_id = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_component_count"))
+            {
+                try { out.findobject_component_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_component_accepted_count"))
+            {
+                try { out.findobject_component_accepted_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_component_rejected_count"))
+            {
+                try { out.findobject_component_rejected_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_foreground_before"))
+            {
+                try { out.findobject_foreground_before = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_foreground_after"))
+            {
+                try { out.findobject_foreground_after = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "findobject_algorithm_branch"))
+            {
+                out.findobject_algorithm_branch = JsonLineValue(line);
+            }
+            else if (JsonLineHasKey(line, "fit_filter_input_count"))
+            {
+                try { out.fit_filter_input_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_filter_kept_count"))
+            {
+                try { out.fit_filter_kept_count = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "fit_filter_rejected_count"))
+            {
+                try { out.fit_filter_rejected_count = std::stoi(JsonLineValue(line)); } catch (...) {}
             }
             else if (JsonLineHasAnyKey(line, {"points_count", "measure_points_count", "line_measure_points_count", "circle_measure_points_count"}))
             {
@@ -996,8 +1114,36 @@ namespace
         file << "  \"valid_points_count\": " << r.valid_points_count << ",\n";
         file << "  \"has_fit_line\": " << (r.has_fit_line ? "true" : "false") << ",\n";
         file << "  \"has_fit_circle\": " << (r.has_fit_circle ? "true" : "false") << ",\n";
+        file << "  \"runtime_valid_points_count\": " << r.runtime_valid_points_count << ",\n";
+        file << "  \"global_valid_points_count\": " << r.global_valid_points_count << ",\n";
+        file << "  \"runtime_has_fit_line\": " << (r.runtime_has_fit_line ? "true" : "false") << ",\n";
+        file << "  \"global_has_fit_line\": " << (r.global_has_fit_line ? "true" : "false") << ",\n";
+        file << "  \"runtime_has_fit_circle\": " << (r.runtime_has_fit_circle ? "true" : "false") << ",\n";
+        file << "  \"global_has_fit_circle\": " << (r.global_has_fit_circle ? "true" : "false") << ",\n";
+        file << "  \"runtime_global_valid_points_count_mismatch\": " << (r.runtime_global_valid_points_count_mismatch ? "true" : "false") << ",\n";
+        file << "  \"runtime_global_has_fit_line_mismatch\": " << (r.runtime_global_has_fit_line_mismatch ? "true" : "false") << ",\n";
+        file << "  \"runtime_global_has_fit_circle_mismatch\": " << (r.runtime_global_has_fit_circle_mismatch ? "true" : "false") << ",\n";
+        file << "  \"runtime_global_result_mismatch\": " << (r.runtime_global_result_mismatch ? "true" : "false") << ",\n";
         file << "  \"circle_radius\": " << r.circle_radius << ",\n";
         file << "  \"avgdist\": " << r.avgdist << ",\n";
+        file << "  \"scan_rows_examined\": " << r.scan_rows_examined << ",\n";
+        file << "  \"scan_rows_with_foreground\": " << r.scan_rows_with_foreground << ",\n";
+        file << "  \"scan_runs_total\": " << r.scan_runs_total << ",\n";
+        file << "  \"scan_runs_within_length_limit\": " << r.scan_runs_within_length_limit << ",\n";
+        file << "  \"scan_runs_over_length_limit\": " << r.scan_runs_over_length_limit << ",\n";
+        file << "  \"scan_runs_rejected_by_selection\": " << r.scan_runs_rejected_by_selection << ",\n";
+        file << "  \"scan_runs_rejected_near_endpoint\": " << r.scan_runs_rejected_near_endpoint << ",\n";
+        file << "  \"scan_points_emitted\": " << r.scan_points_emitted << ",\n";
+        file << "  \"findobject_strategy_id\": " << r.findobject_strategy_id << ",\n";
+        file << "  \"findobject_algorithm_branch\": \"" << JsonEscape(r.findobject_algorithm_branch) << "\",\n";
+        file << "  \"findobject_component_count\": " << r.findobject_component_count << ",\n";
+        file << "  \"findobject_component_accepted_count\": " << r.findobject_component_accepted_count << ",\n";
+        file << "  \"findobject_component_rejected_count\": " << r.findobject_component_rejected_count << ",\n";
+        file << "  \"findobject_foreground_before\": " << r.findobject_foreground_before << ",\n";
+        file << "  \"findobject_foreground_after\": " << r.findobject_foreground_after << ",\n";
+        file << "  \"fit_filter_input_count\": " << r.fit_filter_input_count << ",\n";
+        file << "  \"fit_filter_kept_count\": " << r.fit_filter_kept_count << ",\n";
+        file << "  \"fit_filter_rejected_count\": " << r.fit_filter_rejected_count << ",\n";
         file << "\n";
         file << "  \"policy_guard\": \"" << JsonEscape(r.policy_guard) << "\",\n";
         file << "  \"gauge_source\": \"" << JsonEscape(r.gauge_source) << "\",\n";
@@ -1272,6 +1418,20 @@ namespace
         contractHeadless.valid_points_count = r.valid_points_count;
         contractHeadless.has_fit_line = r.has_fit_line ? 1 : 0;
         contractHeadless.has_fit_circle = r.has_fit_circle ? 1 : 0;
+        contractHeadless.runtime_valid_points_count = r.runtime_valid_points_count;
+        contractHeadless.global_valid_points_count = r.global_valid_points_count;
+        contractHeadless.runtime_has_fit_line = r.runtime_has_fit_line ? 1 : 0;
+        contractHeadless.global_has_fit_line = r.global_has_fit_line ? 1 : 0;
+        contractHeadless.runtime_has_fit_circle = r.runtime_has_fit_circle ? 1 : 0;
+        contractHeadless.global_has_fit_circle = r.global_has_fit_circle ? 1 : 0;
+        contractHeadless.runtime_global_valid_points_count_mismatch =
+            r.runtime_global_valid_points_count_mismatch ? 1 : 0;
+        contractHeadless.runtime_global_has_fit_line_mismatch =
+            r.runtime_global_has_fit_line_mismatch ? 1 : 0;
+        contractHeadless.runtime_global_has_fit_circle_mismatch =
+            r.runtime_global_has_fit_circle_mismatch ? 1 : 0;
+        contractHeadless.runtime_global_result_mismatch =
+            r.runtime_global_result_mismatch ? 1 : 0;
         contractHeadless.local_support = r.local_support;
         contractHeadless.local_mean_distance = r.local_mean_distance;
         contractHeadless.fit_offset = r.fit_offset;
