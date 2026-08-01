@@ -509,6 +509,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["scan_runs_rejected_by_selection"] = capture.scan_runs_rejected_by_selection;
     pkg.metrics["scan_runs_rejected_near_endpoint"] = capture.scan_runs_rejected_near_endpoint;
     pkg.metrics["scan_points_emitted"] = capture.scan_points_emitted;
+    pkg.metrics["findline_selected_edge_index"] = capture.findline_selected_edge_index;
+    pkg.metrics["findline_evaluated_edge_count"] = capture.findline_evaluated_edge_count;
+    pkg.metrics["findline_best_edge_index"] = capture.findline_best_edge_index;
+    pkg.metrics["findline_best_edge_score"] = capture.findline_best_edge_score;
     pkg.metrics["strategy_id"] = capture.strategy_id;
     pkg.metrics["selected_method"] = capture.selected_method;
     pkg.metrics["selected_threshold"] = capture.selected_threshold;
@@ -1005,6 +1009,38 @@ void WriteJsonFindLineScanDiagnostics(
     file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
 }
 
+void WriteJsonFindLineEdgeEvaluations(
+    std::ofstream& file,
+    const std::vector<CxFindLineEdgeEvaluationSnapshot>& evaluations,
+    bool trailing_comma)
+{
+    file << "  \"findline_edge_evaluations\": [";
+    if (evaluations.empty())
+    {
+        file << "]" << (trailing_comma ? "," : "") << "\n";
+        return;
+    }
+
+    for (auto it = evaluations.begin(); it != evaluations.end(); ++it)
+    {
+        const auto next = std::next(it);
+        const CxFindLineEdgeEvaluationSnapshot& e = *it;
+        file << "\n    {\n";
+        file << "      \"edge_index\": " << e.edge_index << ",\n";
+        file << "      \"candidate_scan_rows\": " << e.candidate_scan_rows << ",\n";
+        file << "      \"accepted_points\": " << e.accepted_points << ",\n";
+        file << "      \"rejected_by_selection\": " << e.rejected_by_selection << ",\n";
+        file << "      \"rejected_near_endpoint\": " << e.rejected_near_endpoint << ",\n";
+        file << "      \"over_length_runs\": " << e.over_length_runs << ",\n";
+        file << "      \"coverage\": " << e.coverage << ",\n";
+        file << "      \"score\": " << e.score << ",\n";
+        file << "      \"selected\": " << (e.selected ? "true" : "false") << ",\n";
+        file << "      \"fit_possible\": " << (e.fit_possible ? "true" : "false") << "\n";
+        file << "    }" << (next == evaluations.end() ? "" : ",");
+    }
+    file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
+}
+
 bool SaveCxScriptHeadlessSummaryJson(
     const CxScriptExecutionCapture& capture,
     const std::filesystem::path& outputPath,
@@ -1035,6 +1071,10 @@ bool SaveCxScriptHeadlessSummaryJson(
     WriteJsonNumberMap(file, "metrics", pkg.metrics, true);
     WriteJsonNumberMap(file, "runtime_globals", capture.runtime_globals, true);
     WriteJsonShapeSnapshots(file, pkg.shapes, true);
+    WriteJsonFindLineEdgeEvaluations(
+        file,
+        capture.findline_edge_evaluations,
+        true);
     WriteJsonFindLineScanDiagnostics(
         file,
         capture.findline_scan_diagnostics,

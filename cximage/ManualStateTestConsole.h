@@ -327,6 +327,11 @@ struct RuntimeObjectView
     int line_scan_runs_rejected_by_selection = 0;
     int line_scan_runs_rejected_near_endpoint = 0;
     int line_scan_points_emitted = 0;
+    int line_selected_edge_index = 0;
+    int line_evaluated_edge_count = 0;
+    int line_best_edge_index = 0;
+    double line_best_edge_score = 0.0;
+    std::vector<CxFindLineEdgeEvaluationSnapshot> line_edge_evaluations;
 
     bool line_measure_backimage_ready = false;
     bool line_measure_findobject_ready = false;
@@ -689,6 +694,7 @@ struct ScriptEvidenceThumb
     int texture_h = 0;
     bool texture_loaded = false;
     bool texture_failed = false;
+    bool texture_placeholder = false;
 };
 
 struct CxEvidenceEditableObjectRef

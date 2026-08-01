@@ -149,6 +149,20 @@ struct FindLineMeasureProfileStats
 
 struct FindLineMeasureInputDebug
 {
+    struct EdgeEvaluation
+    {
+        int edge_index = 0;
+        int candidate_scan_rows = 0;
+        int accepted_points = 0;
+        int rejected_by_selection = 0;
+        int rejected_near_endpoint = 0;
+        int over_length_runs = 0;
+        double coverage = 0.0;
+        double score = 0.0;
+        bool selected = false;
+        bool fit_possible = false;
+    };
+
     struct ScanDiagnostic
     {
         int scan_index = -1;
@@ -240,6 +254,11 @@ struct FindLineMeasureInputDebug
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int selected_edge_index = 0;
+    int evaluated_edge_count = 0;
+    int best_edge_index = 0;
+    double best_edge_score = 0.0;
+    std::vector<EdgeEvaluation> edge_evaluations;
     std::vector<ScanDiagnostic> scan_diagnostics;
 
     bool backimage_ready = false;

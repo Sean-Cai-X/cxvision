@@ -91,6 +91,80 @@ int ClampLongLongToInt(long long value)
     return static_cast<int>(std::min(std::max(value, min_value), max_value));
 }
 
+FindLineMeasureInputDebug::EdgeEvaluation& EnsureFindLineEdgeEvaluation(
+    FindLineMeasureInputDebug& debug,
+    int edge_index)
+{
+    if (edge_index < 1)
+        edge_index = 1;
+
+    const std::size_t required =
+        static_cast<std::size_t>(edge_index + 1);
+    if (debug.edge_evaluations.size() < required)
+        debug.edge_evaluations.resize(required);
+
+    auto& eval = debug.edge_evaluations[static_cast<std::size_t>(edge_index)];
+    eval.edge_index = edge_index;
+    return eval;
+}
+
+void RecordFindLineEdgeCandidate(
+    FindLineMeasureInputDebug& debug,
+    int edge_index,
+    bool accepted,
+    bool rejected_by_selection,
+    bool rejected_near_endpoint,
+    bool over_length)
+{
+    auto& eval = EnsureFindLineEdgeEvaluation(debug, edge_index);
+    ++eval.candidate_scan_rows;
+    if (accepted)
+        ++eval.accepted_points;
+    if (rejected_by_selection)
+        ++eval.rejected_by_selection;
+    if (rejected_near_endpoint)
+        ++eval.rejected_near_endpoint;
+    if (over_length)
+        ++eval.over_length_runs;
+}
+
+void FinalizeFindLineEdgeEvaluations(FindLineMeasureInputDebug& debug)
+{
+    debug.evaluated_edge_count = 0;
+    debug.best_edge_index = 0;
+    debug.best_edge_score = 0.0;
+
+    const int denominator =
+        debug.scan_rows_examined > 0 ? debug.scan_rows_examined : 1;
+    for (std::size_t i = 1; i < debug.edge_evaluations.size(); ++i)
+    {
+        auto& eval = debug.edge_evaluations[i];
+        if (eval.edge_index <= 0 || eval.candidate_scan_rows <= 0)
+            continue;
+
+        ++debug.evaluated_edge_count;
+        eval.selected =
+            debug.selected_edge_index == 0 ||
+            debug.selected_edge_index == eval.edge_index;
+        eval.fit_possible = eval.accepted_points >= 2;
+        eval.coverage =
+            static_cast<double>(eval.accepted_points) /
+            static_cast<double>(denominator);
+        eval.score =
+            static_cast<double>(eval.accepted_points) * 10.0 +
+            eval.coverage * 100.0 -
+            static_cast<double>(eval.rejected_near_endpoint) * 2.0 -
+            static_cast<double>(eval.over_length_runs) * 1.0;
+
+        if (debug.best_edge_index == 0 ||
+            eval.score > debug.best_edge_score)
+        {
+            debug.best_edge_index = eval.edge_index;
+            debug.best_edge_score = eval.score;
+        }
+    }
+}
+
 int PositiveGap(int gap)
 {
     return std::max(1, gap);
@@ -1861,6 +1935,7 @@ void FindLine::Measure(Image& image)
                     //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
                     icurlinenum++;
+                    bool edgeCandidateRecorded = false;
                     if (icurlinenum == m_iselectedgenum
                         || m_iselectedgenum == 0)//0 any
                     {
@@ -1877,6 +1952,14 @@ void FindLine::Measure(Image& image)
                             currentDiag.accepted_y = apoint.Y();
                             currentDiag.reject_reason.clear();
                             //m_l_measure_w[icurlineposition].addpoint(apoint);
+                            RecordFindLineEdgeCandidate(
+                                m_lastMeasureInputDebug,
+                                icurlinenum,
+                                true,
+                                false,
+                                false,
+                                false);
+                            edgeCandidateRecorded = true;
                             if (icurlinenum == m_iselectedgenum)
                                 break;
                         }
@@ -1886,6 +1969,14 @@ void FindLine::Measure(Image& image)
                             if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                                     "endpoint_rejected";
+                            RecordFindLineEdgeCandidate(
+                                m_lastMeasureInputDebug,
+                                icurlinenum,
+                                false,
+                                false,
+                                true,
+                                false);
+                            edgeCandidateRecorded = true;
                         }
                     }
                     else
@@ -1894,6 +1985,24 @@ void FindLine::Measure(Image& image)
                         if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                             m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                                 "scan_run_selection_rejected";
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            true,
+                            false,
+                            false);
+                        edgeCandidateRecorded = true;
+                    }
+                    if (!edgeCandidateRecorded)
+                    {
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            false,
+                            false,
+                            false);
                     }
                 }
                 else if (true == bcollectBegin && irecordnum > 70)
@@ -1901,6 +2010,13 @@ void FindLine::Measure(Image& image)
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
                     ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                        false,
+                        false,
+                        false,
+                        true);
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                             "scan_run_over_length";
@@ -1921,6 +2037,7 @@ void FindLine::Measure(Image& image)
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
             //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
             icurlinenum++;
+            bool edgeCandidateRecorded = false;
             if (icurlinenum == m_iselectedgenum
                 || m_iselectedgenum == 0)
             {
@@ -1937,6 +2054,14 @@ void FindLine::Measure(Image& image)
                     currentDiag.accepted_y = apoint.Y();
                     currentDiag.reject_reason.clear();
                     //m_l_measure_w[icurlineposition].addpoint(apoint);
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        icurlinenum,
+                        true,
+                        false,
+                        false,
+                        false);
+                    edgeCandidateRecorded = true;
                     if (icurlinenum == m_iselectedgenum)
                         break;
                 }
@@ -1946,6 +2071,14 @@ void FindLine::Measure(Image& image)
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                             "endpoint_rejected";
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        icurlinenum,
+                        false,
+                        false,
+                        true,
+                        false);
+                    edgeCandidateRecorded = true;
                 }
             }
             else
@@ -1954,6 +2087,24 @@ void FindLine::Measure(Image& image)
                 if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                     m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                         "scan_run_selection_rejected";
+                RecordFindLineEdgeCandidate(
+                    m_lastMeasureInputDebug,
+                    icurlinenum,
+                    false,
+                    true,
+                    false,
+                    false);
+                edgeCandidateRecorded = true;
+            }
+            if (!edgeCandidateRecorded)
+            {
+                RecordFindLineEdgeCandidate(
+                    m_lastMeasureInputDebug,
+                    icurlinenum,
+                    false,
+                    false,
+                    false,
+                    false);
             }
             irecordnum = 0;
             bcollectBegin = false;
@@ -2024,6 +2175,7 @@ void FindLine::Measure(Image& image)
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
                     icurlinenum++;
+                    bool edgeCandidateRecorded = false;
                     if (icurlinenum == m_iselectedgenum
                         || m_iselectedgenum == 0)
                     {
@@ -2040,6 +2192,14 @@ void FindLine::Measure(Image& image)
                             currentDiag.accepted_y = apoint.Y();
                             currentDiag.reject_reason.clear();
                             //m_l_measure_h[icurlineposition].addpoint(apoint);
+                            RecordFindLineEdgeCandidate(
+                                m_lastMeasureInputDebug,
+                                icurlinenum,
+                                true,
+                                false,
+                                false,
+                                false);
+                            edgeCandidateRecorded = true;
 
                             if (icurlinenum == m_iselectedgenum)
                                 break;
@@ -2050,6 +2210,14 @@ void FindLine::Measure(Image& image)
                             if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                                     "endpoint_rejected";
+                            RecordFindLineEdgeCandidate(
+                                m_lastMeasureInputDebug,
+                                icurlinenum,
+                                false,
+                                false,
+                                true,
+                                false);
+                            edgeCandidateRecorded = true;
                         }
                     }
                     else
@@ -2058,6 +2226,24 @@ void FindLine::Measure(Image& image)
                         if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                             m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                                 "scan_run_selection_rejected";
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            true,
+                            false,
+                            false);
+                        edgeCandidateRecorded = true;
+                    }
+                    if (!edgeCandidateRecorded)
+                    {
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            false,
+                            false,
+                            false);
                     }
                 }
                 else if (true == bcollectBegin && irecordnum > 70)
@@ -2065,6 +2251,13 @@ void FindLine::Measure(Image& image)
                     ++m_lastMeasureInputDebug.scan_runs_total;
                     ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
                     ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                        false,
+                        false,
+                        false,
+                        true);
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                             "scan_run_over_length";
@@ -2086,6 +2279,7 @@ void FindLine::Measure(Image& image)
             // icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
 
             icurlinenum++;
+            bool edgeCandidateRecorded = false;
             if (icurlinenum == m_iselectedgenum
                 || m_iselectedgenum == 0)
             {
@@ -2102,6 +2296,14 @@ void FindLine::Measure(Image& image)
                     currentDiag.accepted_y = apoint.Y();
                     currentDiag.reject_reason.clear();
                    //m_l_measure_h[icurlineposition].addpoint(apoint);
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        icurlinenum,
+                        true,
+                        false,
+                        false,
+                        false);
+                    edgeCandidateRecorded = true;
 
                     if (icurlinenum == m_iselectedgenum)
                         break;
@@ -2112,6 +2314,14 @@ void FindLine::Measure(Image& image)
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                             "endpoint_rejected";
+                    RecordFindLineEdgeCandidate(
+                        m_lastMeasureInputDebug,
+                        icurlinenum,
+                        false,
+                        false,
+                        true,
+                        false);
+                    edgeCandidateRecorded = true;
                 }
             }
             else
@@ -2120,6 +2330,24 @@ void FindLine::Measure(Image& image)
                 if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                     m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
                         "scan_run_selection_rejected";
+                RecordFindLineEdgeCandidate(
+                    m_lastMeasureInputDebug,
+                    icurlinenum,
+                    false,
+                    true,
+                    false,
+                    false);
+                edgeCandidateRecorded = true;
+            }
+            if (!edgeCandidateRecorded)
+            {
+                RecordFindLineEdgeCandidate(
+                    m_lastMeasureInputDebug,
+                    icurlinenum,
+                    false,
+                    false,
+                    false,
+                    false);
             }
             irecordnum = 0;
             bcollectBegin = false;
@@ -2138,6 +2366,8 @@ void FindLine::Measure(Image& image)
             }
         }
     }
+
+    FinalizeFindLineEdgeEvaluations(m_lastMeasureInputDebug);
 
     const int resultPointCount =
         ClampSizeToInt(m_measurepoints_w.size()) +
@@ -3029,6 +3259,7 @@ void FindLine::measure(void* pimage)
     m_lastMeasureInputDebug.linegap = m_iSelectPointGap;
     m_lastMeasureInputDebug.wgap = m_iwgap;
     m_lastMeasureInputDebug.hgap = m_ihgap;
+    m_lastMeasureInputDebug.selected_edge_index = m_iselectedgenum;
 
     m_lastMeasureInputDebug.measure_geometry_request_valid =
         m_measure_geometry_request.valid;

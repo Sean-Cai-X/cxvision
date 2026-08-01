@@ -45,6 +45,10 @@ struct CxScriptToolResultCapture
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int findline_selected_edge_index = 0;
+    int findline_evaluated_edge_count = 0;
+    int findline_best_edge_index = 0;
+    double findline_best_edge_score = 0.0;
 
     int valid_points_count = 0;
     bool has_fit_line = false;
@@ -202,6 +206,7 @@ struct CxScriptToolResultCapture
 
     std::vector<CxShapeElementSnapshot> shapes;
     std::vector<CxFindLineScanDiagnosticSnapshot> findline_scan_diagnostics;
+    std::vector<CxFindLineEdgeEvaluationSnapshot> findline_edge_evaluations;
 };
 
 bool CaptureRuntimeToolResults(

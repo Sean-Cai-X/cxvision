@@ -19,6 +19,7 @@ m_line.setline(
 m_line.setmethod(global_method);
 m_line.setthre(global_threshold);
 m_line.setfilterprofile(global_filterprofile);
+m_line.setselectedgenum(global_findline_selected_edge);
 m_line.setobjectfilterstrategy(global_strategy_id);
 
 global_selected_method = global_method;

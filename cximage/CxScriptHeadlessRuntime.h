@@ -21,6 +21,20 @@ struct CxFindLineScanDiagnosticSnapshot
     std::string reject_reason;
 };
 
+struct CxFindLineEdgeEvaluationSnapshot
+{
+    int edge_index = 0;
+    int candidate_scan_rows = 0;
+    int accepted_points = 0;
+    int rejected_by_selection = 0;
+    int rejected_near_endpoint = 0;
+    int over_length_runs = 0;
+    double coverage = 0.0;
+    double score = 0.0;
+    bool selected = false;
+    bool fit_possible = false;
+};
+
 struct CxScriptExecutionCapture
 {
     bool script_compiled = false;
@@ -47,6 +61,10 @@ struct CxScriptExecutionCapture
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int findline_selected_edge_index = 0;
+    int findline_evaluated_edge_count = 0;
+    int findline_best_edge_index = 0;
+    double findline_best_edge_score = 0.0;
 
     int strategy_id = 0;
     int selected_method = 0;
@@ -216,6 +234,7 @@ struct CxScriptExecutionCapture
 
     std::vector<CxShapeElementSnapshot> shapes;
     std::vector<CxFindLineScanDiagnosticSnapshot> findline_scan_diagnostics;
+    std::vector<CxFindLineEdgeEvaluationSnapshot> findline_edge_evaluations;
 
     bool smoke_pass = false;
     std::string smoke_findline_object_name;

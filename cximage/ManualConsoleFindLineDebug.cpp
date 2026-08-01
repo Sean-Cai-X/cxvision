@@ -203,6 +203,27 @@ void RefreshFindLineMeasureSnapshot(RuntimeObjectView& object,
     object.line_scan_runs_rejected_near_endpoint =
         input.scan_runs_rejected_near_endpoint;
     object.line_scan_points_emitted = input.scan_points_emitted;
+    object.line_selected_edge_index = input.selected_edge_index;
+    object.line_evaluated_edge_count = input.evaluated_edge_count;
+    object.line_best_edge_index = input.best_edge_index;
+    object.line_best_edge_score = input.best_edge_score;
+    object.line_edge_evaluations.clear();
+    object.line_edge_evaluations.reserve(input.edge_evaluations.size());
+    for (const auto& edge : input.edge_evaluations)
+    {
+        CxFindLineEdgeEvaluationSnapshot snapshot;
+        snapshot.edge_index = edge.edge_index;
+        snapshot.candidate_scan_rows = edge.candidate_scan_rows;
+        snapshot.accepted_points = edge.accepted_points;
+        snapshot.rejected_by_selection = edge.rejected_by_selection;
+        snapshot.rejected_near_endpoint = edge.rejected_near_endpoint;
+        snapshot.over_length_runs = edge.over_length_runs;
+        snapshot.coverage = edge.coverage;
+        snapshot.score = edge.score;
+        snapshot.selected = edge.selected;
+        snapshot.fit_possible = edge.fit_possible;
+        object.line_edge_evaluations.push_back(snapshot);
+    }
 
     object.line_measure_backimage_ready =
         input.backimage_ready;

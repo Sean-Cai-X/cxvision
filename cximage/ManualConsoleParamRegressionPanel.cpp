@@ -1223,6 +1223,91 @@ static bool DrawFindLineEdgeSelectorPanel(ManualTestContext& context)
   return edited;
 }
 
+static void DrawFindLineEdgeEvaluationPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindLine" ||
+        context.current_gauge.has_line_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindLineObject(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Edge Result Evaluation");
+  ImGui::TextDisabled(
+      "Runtime evidence for Edge 1 / Edge 2 / ... .  Best edge is a basic score from accepted points and coverage; it does not replace human review.");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to collect per-edge result evidence.");
+    return;
+  }
+
+  ImGui::Text("selected_edge=%d evaluated_edges=%d best_edge=%d best_score=%.2f",
+              object->line_selected_edge_index,
+              object->line_evaluated_edge_count,
+              object->line_best_edge_index,
+              object->line_best_edge_score);
+
+  if (object->line_edge_evaluations.empty())
+  {
+    ImGui::TextDisabled(
+        "No edge evaluation captured. Re-run a FindLine script that calls measure().");
+    return;
+  }
+
+  const ImGuiTableFlags flags =
+      ImGuiTableFlags_Borders |
+      ImGuiTableFlags_RowBg |
+      ImGuiTableFlags_Resizable |
+      ImGuiTableFlags_SizingStretchProp;
+
+  if (ImGui::BeginTable("findline_edge_evaluation_table", 9, flags))
+  {
+    ImGui::TableSetupColumn("Edge");
+    ImGui::TableSetupColumn("Sel");
+    ImGui::TableSetupColumn("Best");
+    ImGui::TableSetupColumn("Rows");
+    ImGui::TableSetupColumn("Accepted");
+    ImGui::TableSetupColumn("Coverage");
+    ImGui::TableSetupColumn("Score");
+    ImGui::TableSetupColumn("Reject");
+    ImGui::TableSetupColumn("Fit?");
+    ImGui::TableHeadersRow();
+
+    for (const CxFindLineEdgeEvaluationSnapshot& edge :
+         object->line_edge_evaluations)
+    {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("Edge %d", edge.edge_index);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextUnformatted(edge.selected ? "*" : "");
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextUnformatted(
+          edge.edge_index == object->line_best_edge_index ? "best" : "");
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%d", edge.candidate_scan_rows);
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%d", edge.accepted_points);
+      ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%.3f", edge.coverage);
+      ImGui::TableSetColumnIndex(6);
+      ImGui::Text("%.1f", edge.score);
+      ImGui::TableSetColumnIndex(7);
+      ImGui::Text("sel=%d end=%d len=%d",
+                  edge.rejected_by_selection,
+                  edge.rejected_near_endpoint,
+                  edge.over_length_runs);
+      ImGui::TableSetColumnIndex(8);
+      ImGui::TextUnformatted(edge.fit_possible ? "yes" : "no");
+    }
+
+    ImGui::EndTable();
+  }
+}
+
 static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
 {
   if (!(context.current_gauge.tool == "FindLine" ||
@@ -1296,6 +1381,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::Checkbox("Show single-line gauge scan ticks",
                       &context.show_line_gauge_scan_lines);
       gaugeEdited |= DrawFindLineEdgeSelectorPanel(context);
+      DrawFindLineEdgeEvaluationPanel(context);
       DrawFindLineScanSemanticsPanel(context);
   }
   ImGui::Separator();

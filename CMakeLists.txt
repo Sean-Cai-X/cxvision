@@ -265,6 +265,7 @@ endif()
 target_link_libraries(cxvision_imgui_acceptance PRIVATE
   glfw
   opengl32
+  comdlg32
   TKernel
   TKMath
   TKG2d

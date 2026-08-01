@@ -245,6 +245,59 @@ static std::string InferEvidenceChainToolBucketLocal(
     return normalizedTool.empty() ? (label.empty() ? "Other" : label) : normalizedTool;
 }
 
+static std::string ResolveEvidenceImagePathByIdFromDiskLocal(
+    const std::string& imageId)
+{
+    if (imageId.empty() || imageId.rfind("fallback_image_", 0) == 0)
+        return {};
+
+    const std::filesystem::path root =
+        ResolveCxVisionRunPath("test_images");
+    std::error_code ec;
+    if (!std::filesystem::is_directory(root, ec))
+        return {};
+
+    static const char* exts[] = {
+        ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"
+    };
+
+    std::filesystem::recursive_directory_iterator it(
+        root,
+        std::filesystem::directory_options::skip_permission_denied,
+        ec);
+    const std::filesystem::recursive_directory_iterator end;
+    for (; !ec && it != end; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+            continue;
+        const std::filesystem::path path = it->path();
+        const std::string stem = path.stem().string();
+        if (stem != imageId)
+            continue;
+        const std::string ext = path.extension().string();
+        std::string lowerExt = ext;
+        std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        for (const char* allowed : exts)
+        {
+            if (lowerExt == allowed)
+                return path.string();
+        }
+    }
+    return {};
+}
+
+static bool SelectEvidenceImageFileFromDialogLocal(
+    std::string& outPath,
+    std::string& reason)
+{
+    outPath.clear();
+    reason =
+        "file dialog is disabled in this build; use Bind Current Image View "
+        "or Use First Manifest Image";
+    return false;
+}
+
 static bool IsEvidenceEditableToolTypeLocal(const std::string& type)
 {
     const std::string normalized = NormalizeEvidenceToolTypeLocal(type);
@@ -310,6 +363,38 @@ static void AnalyzeEditableObjectsFromCxScriptLocal(
 
         ++lineNo;
     }
+}
+
+static std::string EnsureFindLineSelectedEdgeStatementLocal(
+    const std::string& tool,
+    const std::string& scriptText)
+{
+    if (NormalizeEvidenceToolTypeLocal(tool) != "FindLine")
+        return scriptText;
+    if (scriptText.find("setselectedgenum") != std::string::npos)
+        return scriptText;
+    if (scriptText.find("FindLine") == std::string::npos &&
+        scriptText.find("Findline") == std::string::npos)
+    {
+        return scriptText;
+    }
+
+    const std::string statement =
+        "m_line.setselectedgenum(global_findline_selected_edge);\n";
+    std::string migrated = scriptText;
+    std::size_t insertAt = migrated.find("m_line.measure");
+    if (insertAt == std::string::npos)
+        insertAt = migrated.find("m_line.measureRobust");
+    if (insertAt == std::string::npos)
+    {
+        if (!migrated.empty() && migrated.back() != '\n')
+            migrated += "\n";
+        migrated += statement;
+        return migrated;
+    }
+
+    migrated.insert(insertAt, statement);
+    return migrated;
 }
 
 static std::string ReadKeyValueFromEvidenceParamSummaryLocal(
@@ -2041,7 +2126,8 @@ std::string ViewController::ResolveCatalogScriptLabelById(const std::string& scr
 
 void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb)
 {
-  if (thumb.texture_loaded || thumb.texture_failed)
+  if ((thumb.texture_loaded && !thumb.texture_placeholder) ||
+      thumb.texture_failed)
     return;
 
   if (m_manualTest.script_evidence_thumb_load_count_this_frame >=
@@ -2052,12 +2138,28 @@ void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb
 
   if (thumb.image_path.empty() && !thumb.image_id.empty())
     thumb.image_path = ResolveImagePathFromManifest(thumb.image_id);
+  if (thumb.image_path.empty() && !thumb.image_id.empty())
+    thumb.image_path = ResolveEvidenceImagePathByIdFromDiskLocal(thumb.image_id);
 
-  const std::string previewPath = thumb.thumbnail_path.empty()
-      ? thumb.image_path
-      : thumb.thumbnail_path;
+  std::vector<std::string> previewCandidates;
+  auto addPreviewCandidate = [&](const std::string& path)
+  {
+    if (path.empty())
+      return;
+    if (std::find(previewCandidates.begin(), previewCandidates.end(), path) ==
+        previewCandidates.end())
+    {
+      previewCandidates.push_back(path);
+    }
+  };
+  addPreviewCandidate(thumb.thumbnail_path);
+  addPreviewCandidate(thumb.image_path);
+  if (!thumb.image_id.empty())
+    addPreviewCandidate(ResolveImagePathFromManifest(thumb.image_id));
+  if (!thumb.image_id.empty())
+    addPreviewCandidate(ResolveEvidenceImagePathByIdFromDiskLocal(thumb.image_id));
 
-  if (previewPath.empty())
+  if (previewCandidates.empty())
   {
     cv::Mat placeholder(60, 80, CV_8UC3, cv::Scalar(90, 120, 150));
     cv::putText(
@@ -2075,24 +2177,54 @@ void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb
     thumb.texture_h = placeholder.rows;
     thumb.texture_loaded = thumb.texture_id != 0;
     thumb.texture_failed = !thumb.texture_loaded;
+    thumb.texture_placeholder = thumb.texture_loaded;
     thumb.reason = "placeholder thumbnail generated; image path is empty";
     ++m_manualTest.script_evidence_thumb_load_count_this_frame;
     return;
   }
 
-  if (!std::filesystem::exists(previewPath))
+  cv::Mat image;
+  std::string loadedPreviewPath;
+  std::string lastFailure;
+  for (const std::string& previewPath : previewCandidates)
   {
-    thumb.texture_failed = true;
-    thumb.reason = "thumbnail image not found: " + previewPath;
-    ++m_manualTest.script_evidence_thumb_load_count_this_frame;
-    return;
+    if (!std::filesystem::exists(previewPath))
+    {
+      lastFailure = "thumbnail image not found: " + previewPath;
+      continue;
+    }
+
+    image = cv::imread(previewPath, cv::IMREAD_COLOR);
+    if (!image.empty())
+    {
+      loadedPreviewPath = previewPath;
+      break;
+    }
+    lastFailure = "thumbnail image read failed: " + previewPath;
   }
 
-  cv::Mat image = cv::imread(previewPath, cv::IMREAD_COLOR);
   if (image.empty())
   {
-    thumb.texture_failed = true;
-    thumb.reason = "thumbnail image read failed: " + previewPath;
+    cv::Mat placeholder(60, 80, CV_8UC3, cv::Scalar(90, 120, 150));
+    cv::putText(
+        placeholder,
+        "NO IMG",
+        cv::Point(12, 36),
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.4,
+        cv::Scalar(255, 255, 255),
+        1,
+        cv::LINE_AA);
+
+    thumb.texture_id = CreateTextureFromMat0(placeholder);
+    thumb.texture_w = placeholder.cols;
+    thumb.texture_h = placeholder.rows;
+    thumb.texture_loaded = thumb.texture_id != 0;
+    thumb.texture_failed = !thumb.texture_loaded;
+    thumb.texture_placeholder = thumb.texture_loaded;
+    thumb.reason = lastFailure.empty()
+        ? "thumbnail image unavailable"
+        : lastFailure;
     ++m_manualTest.script_evidence_thumb_load_count_this_frame;
     return;
   }
@@ -2113,8 +2245,11 @@ void ViewController::EnsureScriptEvidenceThumbTexture(ScriptEvidenceThumb& thumb
   thumb.texture_h = preview.rows;
   thumb.texture_loaded = thumb.texture_id != 0;
   thumb.texture_failed = !thumb.texture_loaded;
+  thumb.texture_placeholder = false;
   if (thumb.texture_failed)
     thumb.reason = "failed to create thumbnail texture";
+  else if (thumb.thumbnail_path != loadedPreviewPath)
+    thumb.reason = "thumbnail loaded from image fallback: " + loadedPreviewPath;
   ++m_manualTest.script_evidence_thumb_load_count_this_frame;
 }
 
@@ -2367,6 +2502,10 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                     resolvedScriptPath.string());
         }
 
+        scriptText = EnsureFindLineSelectedEdgeStatementLocal(
+            resolved.tool,
+            scriptText);
+
         // The candidate/working script is the authoritative source for its
         // object declarations.  Do not reuse the baseline Evidence object's
         // declaration list after loading a saved script snapshot.
@@ -2397,14 +2536,22 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     std::filesystem::path resolvedImagePath;
     if (loadImageToView)
     {
-        if (snapshot.image_path.empty())
+        std::string imagePathForLoad = snapshot.image_path;
+        if (imagePathForLoad.empty() && !snapshot.image_id.empty())
+            imagePathForLoad = ResolveImagePathFromManifest(snapshot.image_id);
+        if (imagePathForLoad.empty() && !snapshot.image_id.empty())
+            imagePathForLoad =
+                ResolveEvidenceImagePathByIdFromDiskLocal(snapshot.image_id);
+
+        if (imagePathForLoad.empty())
         {
             return abortSelection(
                 "image_path",
                 "selected evidence has empty image_path");
         }
 
-        resolvedImagePath = ResolveWorkspaceFile(snapshot.image_path);
+        resolved.image_path = imagePathForLoad;
+        resolvedImagePath = ResolveWorkspaceFile(imagePathForLoad);
         if (!std::filesystem::is_regular_file(resolvedImagePath))
         {
             return abortSelection(
@@ -2627,6 +2774,7 @@ void ViewController::ResetEvidenceThumbTexture(ScriptEvidenceThumb& thumb)
     thumb.texture_h = 0;
     thumb.texture_loaded = false;
     thumb.texture_failed = false;
+    thumb.texture_placeholder = false;
 }
 
 bool ViewController::RefreshEvidenceSelectionFromThumb(
@@ -3121,6 +3269,14 @@ void ViewController::DrawOneScriptEvidenceRow(
         true,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
+    auto finishRow = [&]()
+    {
+        ImGui::EndChild();
+        if (selected)
+            ImGui::PopStyleColor();
+        ImGui::PopID();
+    };
+
     const ImVec2 rowMin = ImGui::GetCursorScreenPos();
     const ImVec2 rowSize(ImGui::GetContentRegionAvail().x, rowHeight - 6.0f);
 
@@ -3138,6 +3294,15 @@ void ViewController::DrawOneScriptEvidenceRow(
     ImGui::SetCursorScreenPos(rowMin);
 
     const float imageColWidth = 96.0f;
+    auto textEllipsized = [](const char* label,
+                             const std::string& value,
+                             int maxChars)
+    {
+        std::string shown = value.empty() ? "-" : value;
+        if (maxChars > 3 && static_cast<int>(shown.size()) > maxChars)
+            shown = shown.substr(0, static_cast<std::size_t>(maxChars - 3)) + "...";
+        ImGui::Text("%s%s", label, shown.c_str());
+    };
 
     if (ImGui::BeginTable(
             "evidence_row_table",
@@ -3152,15 +3317,14 @@ void ViewController::DrawOneScriptEvidenceRow(
         ImGui::TableSetColumnIndex(0);
 
         ImGui::TextUnformatted(thumb.script_id.empty() ? "(no script)" : thumb.script_id.c_str());
-        ImGui::TextDisabled("path: %.90s", thumb.script_path.empty() ? "-" : thumb.script_path.c_str());
+        textEllipsized("path: ", thumb.script_path, 82);
         ImGui::Text("tool: %s | status: %s",
                     thumb.tool.empty() ? "-" : thumb.tool.c_str(),
                     thumb.status.empty() ? "-" : thumb.status.c_str());
         ImGui::Text("image: %s | target: %s",
                     thumb.image_id.empty() ? "-" : thumb.image_id.c_str(),
                     thumb.target_id.empty() ? "-" : thumb.target_id.c_str());
-        ImGui::Text("param: %s",
-                    thumb.parameter_summary.empty() ? "-" : thumb.parameter_summary.c_str());
+        textEllipsized("param: ", thumb.parameter_summary, 82);
         ImGui::Text("primary: %s %s | %s",
                     thumb.primary_object_type.empty() ? "-" : thumb.primary_object_type.c_str(),
                     thumb.primary_object_name.empty() ? "-" : thumb.primary_object_name.c_str(),
@@ -3201,6 +3365,8 @@ void ViewController::DrawOneScriptEvidenceRow(
             m_manualTest.debug_status = "LOAD_IMAGE_FAIL";
             m_manualTest.debug_reason = reason;
         }
+        finishRow();
+        return;
     }
     else if (rowClicked)
     {
@@ -3214,6 +3380,8 @@ void ViewController::DrawOneScriptEvidenceRow(
             m_manualTest.debug_status = "EVIDENCE_SELECT_FAIL";
             m_manualTest.debug_reason = reason;
         }
+        finishRow();
+        return;
     }
 
     if (rowRightClicked)
@@ -3221,6 +3389,7 @@ void ViewController::DrawOneScriptEvidenceRow(
         ImGui::OpenPopup("evidence_row_context");
     }
 
+    bool rowStateReplaced = false;
     if (ImGui::BeginPopup("evidence_row_context"))
     {
         ImGui::TextUnformatted(thumb.script_id.c_str());
@@ -3271,6 +3440,7 @@ void ViewController::DrawOneScriptEvidenceRow(
 
         if (ImGui::MenuItem("Load This Image To Image View"))
         {
+            const std::string thumbImagePathBeforeLoad = thumb.image_path;
             std::string reason;
             if (!RefreshEvidenceSelectionFromThumb(
                     groupIndex,
@@ -3285,8 +3455,9 @@ void ViewController::DrawOneScriptEvidenceRow(
             {
                 m_manualTest.debug_status = "IMAGE_VIEW_LOADED";
                 m_manualTest.debug_reason =
-                    "loaded from evidence row: " + thumb.image_path;
+                    "loaded from evidence row: " + thumbImagePathBeforeLoad;
             }
+            rowStateReplaced = true;
         }
 
         if (ImGui::MenuItem("Bind Current Image View"))
@@ -3306,6 +3477,8 @@ void ViewController::DrawOneScriptEvidenceRow(
                 ResetEvidenceThumbTexture(thumb);
 
                 thumb.reason = "bound from current Image View";
+                const std::string boundScriptId = thumb.script_id;
+                const std::string boundImagePath = thumb.image_path;
 
                 std::string reason;
                 if (!RefreshEvidenceSelectionFromThumb(
@@ -3321,8 +3494,48 @@ void ViewController::DrawOneScriptEvidenceRow(
                 {
                     m_manualTest.debug_status = "EVIDENCE_IMAGE_BOUND";
                     m_manualTest.debug_reason =
-                        thumb.script_id + " -> " + thumb.image_path;
+                        boundScriptId + " -> " + boundImagePath;
                 }
+                rowStateReplaced = true;
+            }
+        }
+
+        if (ImGui::MenuItem("Select Image File..."))
+        {
+            std::string selectedPath;
+            std::string dialogReason;
+            if (!SelectEvidenceImageFileFromDialogLocal(selectedPath, dialogReason))
+            {
+                m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECT_CANCEL";
+                m_manualTest.debug_reason = dialogReason;
+            }
+            else
+            {
+                const std::string selectedScriptId = thumb.script_id;
+                thumb.image_path = selectedPath;
+                thumb.thumbnail_path = selectedPath;
+                const std::filesystem::path selectedFs(selectedPath);
+                thumb.image_id = selectedFs.stem().string();
+                ResetEvidenceThumbTexture(thumb);
+                thumb.reason = "bound from selected image file";
+
+                std::string reason;
+                if (!RefreshEvidenceSelectionFromThumb(
+                        groupIndex,
+                        thumbIndex,
+                        true,
+                        reason))
+                {
+                    m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECT_FAIL";
+                    m_manualTest.debug_reason = reason;
+                }
+                else
+                {
+                    m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECTED";
+                    m_manualTest.debug_reason =
+                        selectedScriptId + " -> " + selectedPath;
+                }
+                rowStateReplaced = true;
             }
         }
 
@@ -3350,6 +3563,7 @@ void ViewController::DrawOneScriptEvidenceRow(
             }
             else
             {
+                const std::string boundImagePath = thumb.image_path;
                 std::string reason;
                 if (!RefreshEvidenceSelectionFromThumb(
                         groupIndex,
@@ -3364,8 +3578,9 @@ void ViewController::DrawOneScriptEvidenceRow(
                 {
                     m_manualTest.debug_status = "EVIDENCE_IMAGE_BOUND";
                     m_manualTest.debug_reason =
-                        "bound first manifest image: " + thumb.image_path;
+                        "bound first manifest image: " + boundImagePath;
                 }
+                rowStateReplaced = true;
             }
         }
 
@@ -3373,6 +3588,7 @@ void ViewController::DrawOneScriptEvidenceRow(
         {
             thumb.parameter_summary = BuildCurrentRuntimeParamSummary(m_manualTest);
             thumb.reason = "parameter summary bound from runtime globals";
+            const std::string boundParameterSummary = thumb.parameter_summary;
 
             std::string reason;
             if (!RefreshEvidenceSelectionFromThumb(
@@ -3387,12 +3603,14 @@ void ViewController::DrawOneScriptEvidenceRow(
             else
             {
                 m_manualTest.debug_status = "EVIDENCE_PARAM_BOUND";
-                m_manualTest.debug_reason = thumb.parameter_summary;
+                m_manualTest.debug_reason = boundParameterSummary;
             }
+            rowStateReplaced = true;
         }
 
         if (ImGui::MenuItem("Clear Image Binding"))
         {
+            const std::string clearedScriptId = thumb.script_id;
             thumb.image_path.clear();
             thumb.image_id.clear();
             ResetEvidenceThumbTexture(thumb);
@@ -3411,11 +3629,18 @@ void ViewController::DrawOneScriptEvidenceRow(
             else
             {
                 m_manualTest.debug_status = "EVIDENCE_IMAGE_CLEARED";
-                m_manualTest.debug_reason = "image binding cleared for " + thumb.script_id;
+                m_manualTest.debug_reason = "image binding cleared for " + clearedScriptId;
             }
+            rowStateReplaced = true;
         }
 
         ImGui::EndPopup();
+    }
+
+    if (rowStateReplaced)
+    {
+        finishRow();
+        return;
     }
 
     if (rowHovered)
@@ -3429,10 +3654,5 @@ void ViewController::DrawOneScriptEvidenceRow(
             thumb.reason.c_str());
     }
 
-    ImGui::EndChild();
-
-    if (selected)
-        ImGui::PopStyleColor();
-
-    ImGui::PopID();
+    finishRow();
 }

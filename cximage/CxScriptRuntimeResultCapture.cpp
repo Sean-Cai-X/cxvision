@@ -159,6 +159,29 @@ bool CaptureFindLineResult(
     output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
     output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
     output.scan_points_emitted = debug.scan_points_emitted;
+    output.findline_selected_edge_index = debug.selected_edge_index;
+    output.findline_evaluated_edge_count = debug.evaluated_edge_count;
+    output.findline_best_edge_index = debug.best_edge_index;
+    output.findline_best_edge_score = debug.best_edge_score;
+    output.findline_edge_evaluations.clear();
+    for (const auto& eval : debug.edge_evaluations)
+    {
+        if (eval.edge_index <= 0 || eval.candidate_scan_rows <= 0)
+            continue;
+
+        CxFindLineEdgeEvaluationSnapshot snap;
+        snap.edge_index = eval.edge_index;
+        snap.candidate_scan_rows = eval.candidate_scan_rows;
+        snap.accepted_points = eval.accepted_points;
+        snap.rejected_by_selection = eval.rejected_by_selection;
+        snap.rejected_near_endpoint = eval.rejected_near_endpoint;
+        snap.over_length_runs = eval.over_length_runs;
+        snap.coverage = eval.coverage;
+        snap.score = eval.score;
+        snap.selected = eval.selected;
+        snap.fit_possible = eval.fit_possible;
+        output.findline_edge_evaluations.push_back(snap);
+    }
     output.findline_scan_diagnostics.clear();
     for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
     {
@@ -655,6 +678,14 @@ static void MergeToolCapture(
     capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
     capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
     capture.scan_points_emitted = tool.scan_points_emitted;
+    capture.findline_selected_edge_index = tool.findline_selected_edge_index;
+    capture.findline_evaluated_edge_count = tool.findline_evaluated_edge_count;
+    capture.findline_best_edge_index = tool.findline_best_edge_index;
+    capture.findline_best_edge_score = tool.findline_best_edge_score;
+    capture.findline_edge_evaluations.insert(
+        capture.findline_edge_evaluations.end(),
+        tool.findline_edge_evaluations.begin(),
+        tool.findline_edge_evaluations.end());
     capture.findline_scan_diagnostics.insert(
         capture.findline_scan_diagnostics.end(),
         tool.findline_scan_diagnostics.begin(),

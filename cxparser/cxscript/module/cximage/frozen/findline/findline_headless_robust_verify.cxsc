@@ -18,6 +18,7 @@ m_line.setline(
 
 m_line.setmethod(global_method);
 m_line.setthre(global_threshold);
+m_line.setselectedgenum(global_findline_selected_edge);
 
 global_selected_method = global_method;
 global_selected_threshold = global_threshold;

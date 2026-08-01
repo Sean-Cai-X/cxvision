@@ -19,6 +19,7 @@ int linegap = global_linegap;
 int threshold = global_threshold;
 int method = global_method;
 int filterprofile = global_filterprofile;
+int selected_edge = global_findline_selected_edge;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setlinegap(linegap);
@@ -27,6 +28,7 @@ m_line.setmethod(method);
 m_line.setthre(threshold);
 
 m_line.setfilterprofile(filterprofile);
+m_line.setselectedgenum(selected_edge);
 
 m_line.measure(&m_image);
 m_line.fitline();
@@ -34,6 +36,7 @@ m_line.fitline();
 global_selected_method = method;
 global_selected_threshold = threshold;
 global_selected_linegap = linegap;
+global_findline_selected_edge = selected_edge;
 global_valid_points_count = m_line.getvalidpointcount();
 global_has_fit_line = m_line.hasfitresult();
 global_avgdist = m_line.getavgdist();
