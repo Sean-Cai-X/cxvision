@@ -1,8 +1,11 @@
 #include "pch.h"
 #include "ManualConsoleEvidenceChain.h"
 #include "ManualConsoleUtils.h"
+#include "ManualConsoleGauge.h"
 #include "ManualStateTestConsole.h"
 #include "CxScriptCatalogRuntime.h"
+#include "CxScriptCasePackageWriter.h"
+#include "CxUnifiedLog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -10,6 +13,7 @@
 #include <filesystem>
 #include <functional>
 #include <sstream>
+#include <vector>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -29,9 +33,216 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
         return "FindRect";
     if (lowered == "fastmatch" || lowered == "cfastmatch")
         return "FastMatch";
-    if (typeOrTool == "FindSegmentation")
+    if (lowered == "findsegmentation")
         return "FindSegmentation";
+    if (lowered == "torchtask" || lowered == "torch")
+        return "TorchTask";
     return typeOrTool;
+}
+
+static std::string BuildEvidenceClassificationKeyLocal(
+    const std::string& tool,
+    const std::string& scriptId,
+    const std::string& scriptPath,
+    const std::string& label,
+    const std::string& status,
+    const std::string& reason,
+    const std::string& parameterSummary)
+{
+    std::string key =
+        tool + " " + scriptId + " " + scriptPath + " " + label + " " +
+        status + " " + reason + " " + parameterSummary;
+    std::transform(key.begin(), key.end(), key.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return key;
+}
+
+static std::string BuildEvidenceCategoryOverrideKeyLocal(
+    const ScriptEvidenceThumb& thumb)
+{
+    std::ostringstream oss;
+    oss << "case=" << thumb.case_id
+        << "|script_id=" << thumb.script_id
+        << "|script_path=" << thumb.script_path
+        << "|source_script=" << thumb.source_evidence_script_path
+        << "|image=" << thumb.image_id
+        << "|target=" << thumb.target_id
+        << "|candidate=" << thumb.candidate_id;
+    return oss.str();
+}
+
+static std::filesystem::path EvidenceCategoryOverridesPathLocal()
+{
+    return ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/evidence_category_overrides.tsv");
+}
+
+static std::string EscapeEvidenceOverrideFieldLocal(const std::string& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (char ch : text)
+    {
+        switch (ch)
+        {
+        case '\\': out += "\\\\"; break;
+        case '\t': out += "\\t"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': break;
+        default: out += ch; break;
+        }
+    }
+    return out;
+}
+
+static std::string UnescapeEvidenceOverrideFieldLocal(const std::string& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    bool escaped = false;
+    for (char ch : text)
+    {
+        if (escaped)
+        {
+            if (ch == 't')
+                out += '\t';
+            else if (ch == 'n')
+                out += '\n';
+            else
+                out += ch;
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\')
+        {
+            escaped = true;
+            continue;
+        }
+        out += ch;
+    }
+    if (escaped)
+        out += '\\';
+    return out;
+}
+
+static bool LoadEvidenceCategoryOverridesLocal(ManualTestContext& context)
+{
+    std::string text;
+    const std::filesystem::path path = EvidenceCategoryOverridesPathLocal();
+    if (!ReadTextFile(path.string(), text))
+        return false;
+
+    std::istringstream input(text);
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+        const std::size_t tab = line.find('\t');
+        if (tab == std::string::npos)
+            continue;
+        const std::string key =
+            UnescapeEvidenceOverrideFieldLocal(line.substr(0, tab));
+        const std::string category =
+            UnescapeEvidenceOverrideFieldLocal(line.substr(tab + 1));
+        if (!key.empty() && !category.empty())
+            context.evidence_category_overrides[key] = category;
+    }
+    return true;
+}
+
+static bool SaveEvidenceCategoryOverridesLocal(
+    const ManualTestContext& context,
+    std::string& reason)
+{
+    const std::filesystem::path path = EvidenceCategoryOverridesPathLocal();
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec)
+    {
+        reason = "failed to create Evidence category override directory: " +
+            path.parent_path().string() + " reason=" + ec.message();
+        return false;
+    }
+
+    std::vector<std::pair<std::string, std::string>> entries(
+        context.evidence_category_overrides.begin(),
+        context.evidence_category_overrides.end());
+    std::stable_sort(
+        entries.begin(),
+        entries.end(),
+        [](const auto& left, const auto& right)
+        {
+            return left.first < right.first;
+        });
+
+    std::ostringstream out;
+    out << "# Evidence Chain manual category overrides\n";
+    out << "# key<TAB>category\n";
+    for (const auto& entry : entries)
+    {
+        out << EscapeEvidenceOverrideFieldLocal(entry.first)
+            << '\t'
+            << EscapeEvidenceOverrideFieldLocal(entry.second)
+            << '\n';
+    }
+
+    if (!WriteTextFile(path, out.str()))
+    {
+        reason = "failed to write Evidence category overrides: " + path.string();
+        return false;
+    }
+    reason = "Evidence category overrides saved: " + path.string();
+    return true;
+}
+
+static std::string InferEvidenceChainToolBucketLocal(
+    const std::string& tool,
+    const std::string& scriptId,
+    const std::string& scriptPath,
+    const std::string& label,
+    const std::string& status = {},
+    const std::string& reason = {},
+    const std::string& parameterSummary = {})
+{
+    const std::string normalizedTool = NormalizeEvidenceToolTypeLocal(tool);
+    const std::string key = BuildEvidenceClassificationKeyLocal(
+        tool,
+        scriptId,
+        scriptPath,
+        label,
+        status,
+        reason,
+        parameterSummary);
+
+    if (normalizedTool == "FindSegmentation" ||
+        key.find("find_segmentation") != std::string::npos ||
+        key.find("findsegmentation") != std::string::npos ||
+        key.find("edgesam") != std::string::npos)
+    {
+        return "FindSegmentation Prompt / EdgeSam";
+    }
+
+    if (normalizedTool == "TorchTask" ||
+        key.find("torch") != std::string::npos ||
+        key.find("deeplab") != std::string::npos ||
+        key.find("yolo") != std::string::npos)
+    {
+        if (key.find("detect") != std::string::npos ||
+            key.find("yolo") != std::string::npos)
+        {
+            return "Torch Detection - Model Unverified";
+        }
+        if (key.find("segment") != std::string::npos ||
+            key.find("mask") != std::string::npos ||
+            key.find("deeplab") != std::string::npos)
+        {
+            return "Torch Segmentation - Runtime Smoke";
+        }
+        return "Torch / Model Validation";
+    }
+
+    return normalizedTool.empty() ? (label.empty() ? "Other" : label) : normalizedTool;
 }
 
 static bool IsEvidenceEditableToolTypeLocal(const std::string& type)
@@ -203,6 +414,118 @@ static std::string ReadJsonStringFieldLocal(
     }
 
     return {};
+}
+
+static bool ApplyCandidateRuntimeGlobalsLocal(
+    ManualTestContext& context,
+    const std::string& runtimeGlobalsPath,
+    std::string& reason)
+{
+    reason.clear();
+    std::string text;
+    if (!ReadTextFile(runtimeGlobalsPath, text))
+    {
+        reason = "failed to read candidate runtime globals: " + runtimeGlobalsPath;
+        return false;
+    }
+
+    const std::size_t globalsKey = text.find("\"globals\"");
+    const std::size_t objectBegin =
+        globalsKey == std::string::npos ? std::string::npos : text.find('{', globalsKey);
+    const std::size_t objectEnd =
+        objectBegin == std::string::npos ? std::string::npos : text.find('}', objectBegin);
+    if (objectBegin == std::string::npos || objectEnd == std::string::npos)
+    {
+        reason = "candidate runtime_globals.json has no globals object";
+        return false;
+    }
+
+    std::size_t pos = objectBegin + 1;
+    int applied = 0;
+    while (pos < objectEnd)
+    {
+        const std::size_t keyBegin = text.find('"', pos);
+        if (keyBegin == std::string::npos || keyBegin >= objectEnd)
+            break;
+        const std::size_t keyEnd = text.find('"', keyBegin + 1);
+        if (keyEnd == std::string::npos || keyEnd >= objectEnd)
+            break;
+        const std::string key = text.substr(keyBegin + 1, keyEnd - keyBegin - 1);
+        const std::size_t colon = text.find(':', keyEnd + 1);
+        if (colon == std::string::npos || colon >= objectEnd)
+            break;
+
+        std::size_t valueBegin = colon + 1;
+        while (valueBegin < objectEnd &&
+               std::isspace(static_cast<unsigned char>(text[valueBegin])))
+            ++valueBegin;
+        std::size_t valueEnd = valueBegin;
+        if (valueEnd < objectEnd && (text[valueEnd] == '-' || text[valueEnd] == '+'))
+            ++valueEnd;
+        while (valueEnd < objectEnd &&
+               std::isdigit(static_cast<unsigned char>(text[valueEnd])))
+            ++valueEnd;
+
+        if (key.rfind("global_", 0) == 0 && valueEnd > valueBegin)
+        {
+            try
+            {
+                context.runtime_int_vars[key] =
+                    std::stoi(text.substr(valueBegin, valueEnd - valueBegin));
+                ++applied;
+            }
+            catch (...)
+            {
+                reason = "invalid candidate runtime global: " + key;
+                return false;
+            }
+        }
+        pos = valueEnd > valueBegin ? valueEnd : colon + 1;
+    }
+
+    if (applied == 0)
+    {
+        reason = "candidate runtime_globals.json contains no global_* values";
+        return false;
+    }
+
+    auto getRuntimeInt = [&](const std::string& key, int fallback) -> int
+    {
+        const auto found = context.runtime_int_vars.find(key);
+        return found == context.runtime_int_vars.end() ? fallback : found->second;
+    };
+
+    context.findline_scan_edge_count =
+        std::max(1, std::min(16, getRuntimeInt("global_findline_edge_count", 4)));
+    context.findline_selected_scan_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findline_selected_edge", 0),
+                     context.findline_scan_edge_count));
+    context.findline_edge_params.resize(
+        static_cast<std::size_t>(context.findline_scan_edge_count + 1));
+    for (int edge = 1; edge <= context.findline_scan_edge_count; ++edge)
+    {
+        ManualFindLineEdgeParamState& params =
+            context.findline_edge_params[static_cast<std::size_t>(edge)];
+        const std::string prefix =
+            "global_findline_edge" + std::to_string(edge) + "_";
+        params.initialized = true;
+        params.threshold = getRuntimeInt(prefix + "threshold",
+                                         getRuntimeInt("global_threshold", 20));
+        params.method = getRuntimeInt(prefix + "method",
+                                      getRuntimeInt("global_method", 0));
+        params.linegap = getRuntimeInt(prefix + "linegap",
+                                       getRuntimeInt("global_linegap", 6));
+        params.wgap = getRuntimeInt(prefix + "wgap",
+                                    getRuntimeInt("global_wgap", 8));
+        params.hgap = getRuntimeInt(prefix + "hgap",
+                                    getRuntimeInt("global_hgap", 32));
+        params.filterprofile =
+            getRuntimeInt(prefix + "filterprofile",
+                          getRuntimeInt("global_filterprofile", 0));
+    }
+    return true;
 }
 
 static std::string ResolveEvidencePacketPathFromSummaryLocal(
@@ -850,10 +1173,208 @@ static void EnsureStructuredCxImageCatalogEntriesLoaded(ManualTestContext& conte
     context.catalog_path = catalogPath;
 }
 
+static void AppendSavedEvidenceCandidatesLocal(
+    ManualTestContext& context,
+    const std::function<ScriptEvidenceGroup&(const std::string&)>& findGroup)
+{
+    // New writes use the stable project run root.  Do not read the process
+    // working-directory root here: when the GUI is started from build/Release
+    // it pulls stale build-local candidate packages into the manual review
+    // list and can re-trigger old parser/image binding states.
+    std::vector<std::filesystem::path> roots;
+    roots.push_back(ResolveCxVisionRunPath("cxscript_runs/evidence_candidates"));
+    // Builds prior to the stable project run-root change wrote GUI candidates
+    // below <repo>/cxscript_runs.  Resolve that location independently of the
+    // process working directory so an upgraded binary can still restore the
+    // user's latest saved working revision.
+    const std::filesystem::path repoLocalRoot =
+        (ResolveCaseDirectory(".") / "cxscript_runs/evidence_candidates")
+            .lexically_normal();
+    if (repoLocalRoot != roots.front().lexically_normal())
+        roots.push_back(repoLocalRoot);
+    std::error_code ec;
+
+    std::vector<std::filesystem::path> bindings;
+    for (const auto& root : roots)
+    {
+        ec.clear();
+        if (!std::filesystem::is_directory(root, ec))
+            continue;
+
+        std::filesystem::recursive_directory_iterator it(
+            root,
+            std::filesystem::directory_options::skip_permission_denied,
+            ec);
+        const std::filesystem::recursive_directory_iterator end;
+        for (; !ec && it != end; it.increment(ec))
+        {
+            if (it->is_regular_file(ec) &&
+                it->path().filename() == "evidence_binding.json")
+                bindings.push_back(it->path());
+        }
+    }
+
+    std::stable_sort(
+        bindings.begin(),
+        bindings.end(),
+        [](const std::filesystem::path& left,
+           const std::filesystem::path& right)
+        {
+            std::error_code leftEc;
+            std::error_code rightEc;
+            const auto leftTime = std::filesystem::last_write_time(left, leftEc);
+            const auto rightTime = std::filesystem::last_write_time(right, rightEc);
+            if (!leftEc && !rightEc && leftTime != rightTime)
+                return leftTime < rightTime;
+            return left.string() < right.string();
+        });
+
+    auto bindWorkingRevisionToOriginal =
+        [&](const ScriptEvidenceThumb& candidate)
+    {
+        const std::filesystem::path resolvedSource =
+            ResolveWorkspaceFile(candidate.source_evidence_script_path)
+                .lexically_normal();
+        for (auto& group : context.script_evidence_groups)
+        {
+            for (auto& original : group.thumbs)
+            {
+                if (original.is_candidate)
+                    continue;
+                const bool sameCase = !candidate.case_id.empty() &&
+                    original.case_id == candidate.case_id;
+                const bool sameScript =
+                    !candidate.source_evidence_script_path.empty() &&
+                    ResolveWorkspaceFile(original.script_path).lexically_normal() ==
+                        resolvedSource;
+                const bool identityMatches = !candidate.case_id.empty()
+                    ? (sameCase &&
+                       (candidate.source_evidence_script_path.empty() || sameScript))
+                    : sameScript;
+                if (!identityMatches)
+                    continue;
+
+                original.candidate_id = candidate.candidate_id;
+                original.candidate_dir = candidate.candidate_dir;
+                original.evidence_binding_path =
+                    candidate.evidence_binding_path;
+                original.parameter_snapshot_path =
+                    candidate.parameter_snapshot_path;
+                original.runtime_globals_path =
+                    candidate.runtime_globals_path;
+                original.gauge_annotation_path =
+                    candidate.gauge_annotation_path;
+                original.working_script_snapshot_path =
+                    candidate.script_path;
+                original.has_saved_state = true;
+                original.source_evidence_script_path =
+                    candidate.source_evidence_script_path;
+                original.parameter_summary = candidate.parameter_summary;
+                original.status = "pending_human_review";
+                original.reason =
+                    "active working revision=" + candidate.candidate_id +
+                    "; restored from candidate binding";
+                return;
+            }
+        }
+    };
+
+    for (const auto& bindingPath : bindings)
+    {
+
+        std::string binding;
+        if (!ReadTextFile(bindingPath.string(), binding))
+            continue;
+
+        const std::string candidateId =
+            ReadJsonStringFieldLocal(binding, "candidate_id");
+        const std::string caseId = ReadJsonStringFieldLocal(binding, "case_id");
+        const std::string originalScriptId =
+            ReadJsonStringFieldLocal(binding, "script_id");
+        const std::string scriptSnapshot =
+            ReadJsonStringFieldLocal(binding, "script_snapshot_path");
+        const std::string imagePath =
+            ReadJsonStringFieldLocal(binding, "image_path");
+        if (candidateId.empty() || caseId.empty() || scriptSnapshot.empty() ||
+            imagePath.empty())
+            continue;
+
+        ScriptEvidenceThumb thumb;
+        thumb.is_candidate = true;
+        thumb.candidate_id = candidateId;
+        thumb.candidate_dir = bindingPath.parent_path().string();
+        thumb.evidence_binding_path = bindingPath.string();
+        thumb.parameter_snapshot_path =
+            ReadJsonStringFieldLocal(binding, "parameter_snapshot_path");
+        thumb.runtime_globals_path =
+            ReadJsonStringFieldLocal(binding, "runtime_globals_path");
+        thumb.gauge_annotation_path =
+            ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
+        thumb.working_script_snapshot_path = scriptSnapshot;
+        thumb.has_saved_state = true;
+        thumb.source_evidence_script_path =
+            ReadJsonStringFieldLocal(binding, "source_evidence_script_path");
+        if (thumb.source_evidence_script_path.empty())
+            thumb.source_evidence_script_path =
+                ReadJsonStringFieldLocal(binding, "script_path");
+        thumb.case_id = caseId;
+        thumb.script_id =
+            (originalScriptId.empty() ? std::string("candidate") : originalScriptId) +
+            " [" + candidateId + "]";
+        thumb.script_path = scriptSnapshot;
+        thumb.image_id = ReadJsonStringFieldLocal(binding, "image_id");
+        thumb.image_path = imagePath;
+        thumb.thumbnail_path = imagePath;
+        thumb.target_id = ReadJsonStringFieldLocal(binding, "target_id");
+        thumb.tool = ReadJsonStringFieldLocal(binding, "tool");
+        thumb.parameter_summary =
+            ReadJsonStringFieldLocal(binding, "parameter_summary");
+        thumb.status = "pending_human_review";
+        thumb.reason =
+            "saved evidence candidate; candidate_id=" + candidateId +
+            "; candidate_dir=" + thumb.candidate_dir;
+
+        std::string analysis;
+        const std::filesystem::path analysisPath =
+            bindingPath.parent_path() / "analysis_state.json";
+        if (ReadTextFile(analysisPath.string(), analysis))
+        {
+            thumb.primary_object_type =
+                ReadJsonStringFieldLocal(analysis, "primary_object_type");
+            thumb.primary_object_name =
+                ReadJsonStringFieldLocal(analysis, "primary_object_name");
+            thumb.primary_object_status =
+                ReadJsonStringFieldLocal(analysis, "primary_object_status");
+        }
+        PopulateEditableObjectBindingForThumbLocal(thumb);
+        bindWorkingRevisionToOriginal(thumb);
+
+        const std::string candidateTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
+        ScriptEvidenceGroup& group = findGroup(
+            (candidateTool.empty() ? std::string("Unknown") : candidateTool) +
+            " / Saved Candidates");
+        bool exists = false;
+        for (const auto& existing : group.thumbs)
+        {
+            if (existing.is_candidate &&
+                existing.candidate_id == thumb.candidate_id &&
+                existing.case_id == thumb.case_id)
+            {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+            group.thumbs.push_back(std::move(thumb));
+    }
+}
+
 void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
 {
   if (m_manualTest.script_evidence_groups_dirty == false)
     return;
+
+  LoadEvidenceCategoryOverridesLocal(m_manualTest);
 
   EnsureStructuredCxImageCatalogEntriesLoaded(m_manualTest);
 
@@ -896,7 +1417,11 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     ScriptEvidenceGroup group;
     group.script_id = scriptId;
     group.script_path = scriptPath;
-    group.label = tool.empty() ? (scriptId.empty() ? "unknown" : scriptId) : tool;
+    group.label = InferEvidenceChainToolBucketLocal(
+        tool,
+        scriptId,
+        scriptPath,
+        tool.empty() ? (scriptId.empty() ? "unknown" : scriptId) : tool);
     m_manualTest.script_evidence_groups.push_back(group);
     return m_manualTest.script_evidence_groups.back();
   };
@@ -907,8 +1432,16 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       continue;
 
     const std::string scriptPath = ResolveCatalogScriptPathById(item.script_id);
+    const std::string groupLabel = InferEvidenceChainToolBucketLocal(
+        item.tool,
+        item.script_id,
+        scriptPath,
+        item.tool,
+        item.probe_status.empty() ? item.contract_status : item.probe_status,
+        item.review_status,
+        item.parameter_profile_id);
     ScriptEvidenceGroup& group =
-        findOrCreateGroup(item.script_id, scriptPath, item.tool);
+        findOrCreateGroup(item.script_id, scriptPath, groupLabel);
 
     ScriptEvidenceThumb thumb;
     thumb.case_id = item.case_id;
@@ -950,15 +1483,32 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     if (!IsAllowedEvidenceFallbackScript(entry.path))
       continue;
 
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(entry.tool);
+    const bool isSmokeEvidence =
+        entry.expected_result == "smoke" &&
+        (normalizedTool == "TorchTask" ||
+         entry.path.find("/torch/") != std::string::npos ||
+         entry.path.find("\\torch\\") != std::string::npos);
     bool isVisible = entry.manual_visible && entry.frozen &&
-        (entry.expected_result == "ok" || entry.expected_result == "ng_expected");
+        (entry.expected_result == "ok" ||
+         entry.expected_result == "ng_expected" ||
+         isSmokeEvidence);
     if (!isVisible) continue;
 
     if (hasThumbForScript(entry.script_id, entry.path))
       continue;
 
+    const std::string groupLabel = InferEvidenceChainToolBucketLocal(
+        entry.tool,
+        entry.script_id,
+        entry.path,
+        entry.label,
+        entry.expected_status,
+        entry.expected_policy_guard,
+        entry.parameter_policy_id);
     ScriptEvidenceGroup& group =
-        findOrCreateGroup(entry.script_id, entry.path, entry.tool);
+        findOrCreateGroup(entry.script_id, entry.path, groupLabel);
 
     ScriptEvidenceThumb thumb;
     thumb.script_id = entry.script_id;
@@ -998,6 +1548,13 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       {
         return ResolveImagePathFromManifest(imageId);
       },
+      [&](const std::string& label) -> ScriptEvidenceGroup&
+      {
+        return findOrCreateGroup("", "", label);
+       });
+
+  AppendSavedEvidenceCandidatesLocal(
+      m_manualTest,
       [&](const std::string& label) -> ScriptEvidenceGroup&
       {
         return findOrCreateGroup("", "", label);
@@ -1067,12 +1624,19 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       ScriptEvidenceGroup group;
       group.script_id = item.name;
       group.script_path = item.path;
-      group.label = item.type.empty() ? "script" : item.type;
+      group.label = InferEvidenceChainToolBucketLocal(
+          item.type,
+          item.name,
+          item.path,
+          item.type.empty() ? "script" : item.type,
+          item.status,
+          item.description,
+          "");
 
       ScriptEvidenceThumb thumb;
       thumb.script_id = item.name;
       thumb.script_path = item.path;
-      thumb.tool = item.type;
+      thumb.tool = group.label;
       thumb.status = item.status;
       thumb.reason = item.description;
 
@@ -1095,6 +1659,13 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         thumb.image_path = m_manualTest.image_file_path;
       }
 
+      if (thumb.parameter_summary.empty() ||
+          thumb.parameter_summary.find('=') == std::string::npos)
+      {
+        thumb.parameter_summary =
+            BuildDefaultEvidenceParamSummaryForScript(item.path);
+      }
+
       AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
       PopulateEditableObjectBindingForThumbLocal(thumb);
 
@@ -1105,6 +1676,205 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
 
   m_manualTest.script_evidence_groups_dirty = false;
   m_manualTest.script_evidence_row_refs_dirty = true;
+}
+
+bool ViewController::WriteEvidenceChainCatalogSemanticSelfTest(
+    const std::string& outDir,
+    std::string& reason)
+{
+  reason.clear();
+
+  EnsureCxScriptWorkbenchAssetsLoaded();
+
+  struct ExpectedBucket
+  {
+    const char* label;
+    const char* semantic_status;
+  };
+
+  const ExpectedBucket expected[] = {
+      {"Torch / Model Validation", "FLOW_SMOKE_ONLY"},
+      {"Torch Detection - Model Unverified", "DETECTION_NON_EMPTY_RESULT_UNVERIFIED"},
+      {"Torch Segmentation - Runtime Smoke", "RUNTIME_SMOKE_ONLY"},
+      {"FindSegmentation Prompt / EdgeSam", "PROMPT_EDGESAM_PENDING_BINDING"}};
+
+  struct BucketSummary
+  {
+    std::string label;
+    std::string semantic_status;
+    int group_count = 0;
+    int script_count = 0;
+    std::vector<std::string> scripts;
+  };
+
+  std::vector<BucketSummary> summaries;
+  for (const ExpectedBucket& e : expected)
+  {
+    BucketSummary s;
+    s.label = e.label;
+    s.semantic_status = e.semantic_status;
+    summaries.push_back(s);
+  }
+
+  auto findSummary = [&](const std::string& label) -> BucketSummary*
+  {
+    for (auto& summary : summaries)
+    {
+      if (summary.label == label)
+        return &summary;
+    }
+    return nullptr;
+  };
+
+  for (const ScriptEvidenceGroup& group : m_manualTest.script_evidence_groups)
+  {
+    BucketSummary* summary = findSummary(group.label);
+    if (summary == nullptr)
+      continue;
+
+    ++summary->group_count;
+    summary->script_count += static_cast<int>(group.thumbs.size());
+    for (const ScriptEvidenceThumb& thumb : group.thumbs)
+    {
+      std::string script = thumb.script_id.empty()
+          ? thumb.script_path
+          : thumb.script_id;
+      if (script.empty())
+        script = "(unnamed)";
+      if (std::find(summary->scripts.begin(), summary->scripts.end(), script) ==
+          summary->scripts.end())
+      {
+        summary->scripts.push_back(script);
+      }
+    }
+  }
+
+  bool allPresent = true;
+  for (const BucketSummary& summary : summaries)
+  {
+    if (summary.script_count <= 0)
+      allPresent = false;
+  }
+
+  const std::filesystem::path root(outDir.empty()
+      ? "cxscript_runs/evidence_selftest/catalog_semantics"
+      : outDir);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path jsonPath =
+      root / "evidence_chain_catalog_semantics.json";
+  const std::filesystem::path mdPath =
+      root / "evidence_chain_catalog_semantics.md";
+
+  auto escapeJson = [](const std::string& text) -> std::string
+  {
+    std::string out;
+    for (char ch : text)
+    {
+      switch (ch)
+      {
+      case '\\': out += "\\\\"; break;
+      case '"': out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': break;
+      case '\t': out += "\\t"; break;
+      default: out += ch; break;
+      }
+    }
+    return out;
+  };
+
+  {
+    std::ofstream file(jsonPath, std::ios::binary);
+    if (!file.is_open())
+    {
+      reason = "failed to write evidence chain catalog semantics json";
+      return false;
+    }
+
+    file << "{\n";
+    file << "  \"final_code\": \""
+         << (allPresent ? "ASSET_PREFLIGHT_PASS" : "ASSET_PREFLIGHT_FAIL")
+         << "\",\n";
+    file << "  \"final_status\": \""
+         << (allPresent ? "PASS" : "FAIL")
+         << "\",\n";
+    file << "  \"reason\": \"Torch evidence chain classification semantic check\",\n";
+    file << "  \"manual_ui_panel_scope\": \"handled_by_other_thread\",\n";
+    file << "  \"model_semantic_quality\": \"NOT_CLAIMED\",\n";
+    file << "  \"detection_non_empty_result\": \"UNVERIFIED\",\n";
+    file << "  \"findsegmentation_prompt_edgesam\": \"PENDING_BINDING\",\n";
+    file << "  \"buckets\": [\n";
+    for (std::size_t i = 0; i < summaries.size(); ++i)
+    {
+      const BucketSummary& summary = summaries[i];
+      file << "    {\n";
+      file << "      \"label\": \"" << escapeJson(summary.label) << "\",\n";
+      file << "      \"semantic_status\": \"" << escapeJson(summary.semantic_status) << "\",\n";
+      file << "      \"group_count\": " << summary.group_count << ",\n";
+      file << "      \"script_count\": " << summary.script_count << ",\n";
+      file << "      \"present\": " << (summary.script_count > 0 ? "true" : "false") << ",\n";
+      file << "      \"scripts\": [";
+      for (std::size_t si = 0; si < summary.scripts.size(); ++si)
+      {
+        if (si > 0)
+          file << ", ";
+        file << "\"" << escapeJson(summary.scripts[si]) << "\"";
+      }
+      file << "]\n";
+      file << "    }";
+      if (i + 1 < summaries.size())
+        file << ",";
+      file << "\n";
+    }
+    file << "  ]\n";
+    file << "}\n";
+  }
+
+  {
+    std::ofstream file(mdPath, std::ios::binary);
+    if (!file.is_open())
+    {
+      reason = "failed to write evidence chain catalog semantics md";
+      return false;
+    }
+
+    file << "# Evidence Chain Catalog Semantic Self Test\n\n";
+    file << "- conclusion: `"
+         << (allPresent ? "ASSET_PREFLIGHT_PASS" : "ASSET_PREFLIGHT_FAIL")
+         << "`\n";
+    file << "- manual_ui_panel_scope: `handled_by_other_thread`\n";
+    file << "- model_semantic_quality: `NOT_CLAIMED`\n";
+    file << "- detection_non_empty_result: `UNVERIFIED`\n";
+    file << "- findsegmentation_prompt_edgesam: `PENDING_BINDING`\n\n";
+
+    file << "| Bucket | Scripts | Semantic Status | Example Scripts |\n";
+    file << "|---|---:|---|---|\n";
+    for (const BucketSummary& summary : summaries)
+    {
+      file << "| " << summary.label
+           << " | " << summary.script_count
+           << " | " << summary.semantic_status
+           << " | ";
+      for (std::size_t i = 0; i < summary.scripts.size() && i < 4; ++i)
+      {
+        if (i > 0)
+          file << "<br>";
+        file << "`" << summary.scripts[i] << "`";
+      }
+      if (summary.scripts.empty())
+        file << "`MISSING`";
+      file << " |\n";
+    }
+  }
+
+  reason = allPresent
+      ? "evidence chain catalog semantic buckets are present: " +
+        jsonPath.string()
+      : "one or more Torch/FindSegmentation evidence chain buckets are missing: " +
+        jsonPath.string();
+
+  return allPresent;
 }
 
 void ViewController::EnsureEvidenceChainThumbnailsLoaded()
@@ -1412,12 +2182,7 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
     if (scriptPath.empty())
         scriptPath = ResolveCatalogScriptPathById(thumb.script_id);
 
-    if (IsDeprecatedCxScriptPath(scriptPath))
-    {
-        reason = "deprecated cxscript cannot be used as Evidence binding: " +
-                 scriptPath;
-        return false;
-    }
+    const bool isDeprecatedScript = IsDeprecatedCxScriptPath(scriptPath);
 
     if (thumb.script_id.empty() && scriptPath.empty())
     {
@@ -1430,6 +2195,19 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
     out.thumb_index = thumbIndex;
 
     out.case_id = thumb.case_id;
+
+    out.candidate_id = thumb.candidate_id;
+    out.candidate_dir = thumb.candidate_dir;
+    out.evidence_binding_path = thumb.evidence_binding_path;
+    out.parameter_snapshot_path = thumb.parameter_snapshot_path;
+    out.runtime_globals_path = thumb.runtime_globals_path;
+    out.gauge_annotation_path = thumb.gauge_annotation_path;
+    out.working_script_snapshot_path = thumb.working_script_snapshot_path;
+    out.is_candidate = thumb.is_candidate;
+    out.has_saved_state = thumb.has_saved_state;
+    out.source_evidence_script_path = thumb.source_evidence_script_path.empty()
+        ? scriptPath
+        : thumb.source_evidence_script_path;
 
     out.script_id = thumb.script_id.empty() ? scriptPath : thumb.script_id;
     out.script_path = scriptPath;
@@ -1445,6 +2223,17 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
 
     out.status = thumb.status;
     out.reason = thumb.reason;
+    if (isDeprecatedScript)
+    {
+        if (out.status.empty())
+            out.status = "legacy_script";
+        if (out.reason.empty())
+        {
+            out.reason =
+                "deprecated cxscript selected for viewing only; run/bind gates may reject it: " +
+                scriptPath;
+        }
+    }
     out.source = "evidence_thumb";
     out.primary_object_type = thumb.primary_object_type;
     out.primary_object_name = thumb.primary_object_name;
@@ -1525,90 +2314,309 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         return false;
     }
 
-    m_manualTest.current_evidence_selection = snapshot;
+    CXLOG_INFO(
+        "EvidenceChain",
+        "evidence_selection_begin",
+        "staging",
+        "script_id=" + snapshot.script_id +
+        " case_id=" + snapshot.case_id +
+        " image_id=" + snapshot.image_id +
+        " candidate=" + (snapshot.is_candidate ? "true" : "false") +
+        " has_saved_state=" +
+        (snapshot.has_saved_state ? "true" : "false") +
+        " working_script=" + snapshot.working_script_snapshot_path +
+        " load_image=" + (loadImageToView ? "true" : "false"));
 
-    m_manualTest.selected_evidence_group = snapshot.group_index;
-    m_manualTest.selected_evidence_thumb = snapshot.thumb_index;
-
-    m_manualTest.active_case_id = snapshot.case_id;
-    m_manualTest.active_image_id = snapshot.image_id;
-    m_manualTest.active_target_id = snapshot.target_id;
-
-    if (!snapshot.image_path.empty())
-        m_manualTest.image_file_path = snapshot.image_path;
-
-    if (!snapshot.script_path.empty())
+    auto abortSelection = [&](const std::string& stage,
+                              const std::string& message) -> bool
     {
-        std::string text;
-        if (!ReadTextFile(snapshot.script_path, text))
+        reason = message;
+        CXLOG_ERROR(
+            "EvidenceChain",
+            "evidence_selection_abort",
+            stage,
+            "script_id=" + snapshot.script_id +
+            " case_id=" + snapshot.case_id +
+            " candidate_id=" + snapshot.candidate_id +
+            " reason=" + message);
+        return false;
+    };
+
+    CxEvidenceSelectionSnapshot resolved = snapshot;
+    const bool loadWorkingRevision =
+        !resolved.is_candidate && resolved.has_saved_state;
+    if (loadWorkingRevision && resolved.working_script_snapshot_path.empty())
+    {
+        return abortSelection(
+            "working_script_missing",
+            "Evidence working revision is missing script_snapshot_path");
+    }
+    const std::string effectiveScriptPath = loadWorkingRevision
+        ? resolved.working_script_snapshot_path
+        : resolved.script_path;
+    std::string scriptText;
+    std::filesystem::path resolvedScriptPath;
+    if (!effectiveScriptPath.empty())
+    {
+        resolvedScriptPath = ResolveWorkspaceFile(effectiveScriptPath);
+        if (!ReadTextFile(resolvedScriptPath.string(), scriptText))
         {
-            reason = "failed to read evidence script: " + snapshot.script_path;
-            return false;
+            return abortSelection(
+                "script_read",
+                "failed to read evidence script: " +
+                    resolvedScriptPath.string());
         }
 
-        m_manualTest.editor_text = text;
-        m_manualTest.loaded_script_path = snapshot.script_path;
-        m_manualTest.script_file_path = snapshot.script_path;
-        m_manualTest.editor_source = "evidence";
-        m_manualTest.editor_dirty = false;
-        SeedDefaultManualGlobals(m_manualTest, snapshot.script_path);
-        m_manualTest.current_gauge.primary_object_type =
-            snapshot.primary_object_type;
-        m_manualTest.current_gauge.primary_object_name =
-            snapshot.primary_object_name;
-        m_manualTest.current_gauge.primary_object_status =
-            snapshot.primary_object_status.empty()
-                ? "unresolved"
-                : snapshot.primary_object_status;
-    }
+        // The candidate/working script is the authoritative source for its
+        // object declarations.  Do not reuse the baseline Evidence object's
+        // declaration list after loading a saved script snapshot.
+        if (resolved.is_candidate || loadWorkingRevision)
+            resolved.editable_objects.clear();
+        if (resolved.editable_objects.empty())
+            AnalyzeEditableObjectsFromCxScriptLocal(
+                scriptText,
+                resolved.editable_objects);
 
-    std::string lockedParamReason;
-    if (EvidenceSnapshotHasLockedParamSummaryLocal(snapshot, lockedParamReason))
-    {
-        if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
-                snapshot.parameter_summary,
-                lockedParamReason))
+        if (resolved.primary_object_name.empty() ||
+            resolved.primary_object_status.empty() ||
+            resolved.primary_object_status == "none" ||
+            resolved.primary_object_status == "unresolved")
         {
-            reason = "failed to apply evidence locked parameters: " +
-                     lockedParamReason;
-            return false;
+            ResolvePrimaryEditableObjectLocal(
+                resolved.tool,
+                resolved.target_id,
+                resolved.parameter_summary,
+                resolved.editable_objects,
+                resolved.primary_object_type,
+                resolved.primary_object_name,
+                resolved.primary_object_status);
         }
-        SyncEvidenceLockedGlobalsToManualGaugeLocal(
-            m_manualTest,
-            snapshot.script_path,
-            "evidence_locked",
-            snapshot.primary_object_type,
-            snapshot.primary_object_name,
-            snapshot.primary_object_status);
     }
 
-    m_manualTest.debug_action = "Apply Evidence Selection";
-    m_manualTest.debug_status = "PENDING";
-    m_manualTest.debug_reason =
-        "script=" + snapshot.script_id +
-        " image=" + snapshot.image_id +
-        " target=" + snapshot.target_id +
-        " param=" + snapshot.parameter_summary +
-        (lockedParamReason.empty()
-            ? " | evidence params locked"
-            : " | evidence params not locked: " + lockedParamReason);
-
+    cv::Mat stagedImage;
+    std::filesystem::path resolvedImagePath;
     if (loadImageToView)
     {
         if (snapshot.image_path.empty())
         {
-            reason = "selected evidence has empty image_path";
-            return false;
+            return abortSelection(
+                "image_path",
+                "selected evidence has empty image_path");
         }
 
-        if (!LoadImageIntoImageView(snapshot.image_path, reason))
-            return false;
+        resolvedImagePath = ResolveWorkspaceFile(snapshot.image_path);
+        if (!std::filesystem::is_regular_file(resolvedImagePath))
+        {
+            return abortSelection(
+                "image_file",
+                "image file not found: " + resolvedImagePath.string());
+        }
 
-        m_manualTest.debug_status = "IMAGE_VIEW_LOADED";
-        m_manualTest.debug_reason =
-            "loaded image from evidence snapshot: " + snapshot.image_path;
+        stagedImage = cv::imread(resolvedImagePath.string(), cv::IMREAD_COLOR);
+        if (stagedImage.empty())
+        {
+            return abortSelection(
+                "image_decode",
+                "failed to read image: " + resolvedImagePath.string());
+        }
     }
 
+    // Evidence selection is a transaction.  Build the complete Workbench
+    // state in a value copy and publish it only after script, parameters,
+    // gauge and optional image have all passed validation.
+    ManualTestContext staged = m_manualTest;
+    staged.current_evidence_selection = resolved;
+    staged.selected_evidence_group = resolved.group_index;
+    staged.selected_evidence_thumb = resolved.thumb_index;
+    staged.active_case_id = resolved.case_id;
+    staged.active_image_id = resolved.image_id;
+    staged.active_target_id = resolved.target_id;
+    staged.key_parameter_edit_revision = 0;
+    staged.last_key_parameter_edit_summary =
+        "evidence selection baseline: " + resolved.script_id;
+
+    if (!resolved.image_path.empty())
+        staged.image_file_path = resolved.image_path;
+
+    if (!effectiveScriptPath.empty())
+    {
+        staged.editor_text = scriptText;
+        staged.loaded_script_path = resolvedScriptPath.string();
+        staged.script_file_path = resolvedScriptPath.string();
+        staged.editor_source = resolved.is_candidate
+            ? "evidence_candidate"
+            : (loadWorkingRevision
+                ? "evidence_working_revision"
+                : "evidence");
+        staged.editor_dirty = false;
+
+        SeedDefaultManualGlobals(staged, effectiveScriptPath);
+        staged.current_gauge.case_id = resolved.case_id;
+        staged.current_gauge.image_id = resolved.image_id;
+        staged.current_gauge.target_id = resolved.target_id;
+        if (!resolved.tool.empty() && staged.current_gauge.tool.empty())
+            staged.current_gauge.tool =
+                NormalizeEvidenceToolTypeLocal(resolved.tool);
+        staged.current_gauge.primary_object_type =
+            resolved.primary_object_type;
+        staged.current_gauge.primary_object_name =
+            resolved.primary_object_name;
+        staged.current_gauge.primary_object_status =
+            resolved.primary_object_status.empty()
+                ? "unresolved"
+                : resolved.primary_object_status;
+    }
+
+    std::string parameterSource = "tool_defaults";
+    if (resolved.is_candidate || loadWorkingRevision)
+    {
+        if (resolved.runtime_globals_path.empty() ||
+            resolved.gauge_annotation_path.empty())
+        {
+            return abortSelection(
+                "working_assets",
+                "candidate is missing runtime_globals_path or gauge_annotation_path");
+        }
+
+        std::string restoreReason;
+        if (!ApplyCandidateRuntimeGlobalsLocal(
+                staged,
+                resolved.runtime_globals_path,
+                restoreReason))
+        {
+            return abortSelection("runtime_globals_restore", restoreReason);
+        }
+        if (!LoadManualGaugeWorkingCopyFromPath(
+                staged,
+                resolved.gauge_annotation_path,
+                restoreReason))
+        {
+            return abortSelection(
+                "gauge_restore",
+                "failed to restore candidate gauge: " + restoreReason);
+        }
+
+        staged.current_gauge.source = resolved.is_candidate
+            ? "evidence_candidate"
+            : "evidence_working_revision";
+        staged.current_gauge.case_id = resolved.case_id;
+        staged.current_gauge.image_id = resolved.image_id;
+        staged.current_gauge.target_id = resolved.target_id;
+        if (staged.current_gauge.primary_object_type.empty())
+            staged.current_gauge.primary_object_type =
+                resolved.primary_object_type;
+        if (staged.current_gauge.primary_object_name.empty())
+            staged.current_gauge.primary_object_name =
+                resolved.primary_object_name;
+        if (staged.current_gauge.primary_object_status.empty() ||
+            staged.current_gauge.primary_object_status == "unresolved")
+        {
+            staged.current_gauge.primary_object_status =
+                resolved.primary_object_status.empty()
+                    ? "restored_from_candidate"
+                    : resolved.primary_object_status;
+        }
+        staged.current_gauge.dirty = false;
+        staged.current_evidence_selection.primary_object_type =
+            staged.current_gauge.primary_object_type;
+        staged.current_evidence_selection.primary_object_name =
+            staged.current_gauge.primary_object_name;
+        staged.current_evidence_selection.primary_object_status =
+            staged.current_gauge.primary_object_status;
+        parameterSource = resolved.is_candidate
+            ? "candidate_snapshot"
+            : "active_working_revision";
+    }
+    else
+    {
+        std::string lockedParamReason;
+        if (EvidenceSnapshotHasLockedParamSummaryLocal(
+                resolved,
+                lockedParamReason))
+        {
+            if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
+                    staged,
+                    resolved.parameter_summary,
+                    lockedParamReason))
+            {
+                reason = "failed to apply evidence locked parameters: " +
+                    lockedParamReason;
+                return false;
+            }
+            SyncEvidenceLockedGlobalsToManualGaugeLocal(
+                staged,
+                resolved.script_path,
+                "evidence_locked",
+                resolved.primary_object_type,
+                resolved.primary_object_name,
+                resolved.primary_object_status);
+            staged.current_evidence_selection.primary_object_type =
+                staged.current_gauge.primary_object_type;
+            staged.current_evidence_selection.primary_object_name =
+                staged.current_gauge.primary_object_name;
+            staged.current_evidence_selection.primary_object_status =
+                staged.current_gauge.primary_object_status;
+            parameterSource = "evidence_parameter_snapshot";
+        }
+    }
+
+    staged.debug_action = "Apply Evidence Selection";
+    staged.debug_status = loadImageToView
+        ? "EVIDENCE_SELECTION_READY_WITH_IMAGE"
+        : "EVIDENCE_SELECTION_READY";
+    staged.debug_reason =
+        "script=" + resolved.script_id +
+        " image=" + resolved.image_id +
+        " target=" + resolved.target_id +
+        " parameter_source=" + parameterSource +
+        ((resolved.is_candidate || loadWorkingRevision)
+            ? " candidate_id=" + resolved.candidate_id
+            : " baseline_evidence=true");
+
+    m_manualTest = std::move(staged);
+
+    if (loadImageToView)
+    {
+        UpdateImageViewImage(stagedImage);
+        m_manualTest.image_file_path = resolvedImagePath.string();
+        m_scriptResult.image_ref = resolvedImagePath.string();
+        m_scriptResult.reason = "image loaded from evidence selection transaction";
+        m_annotationStatus = "image loaded from evidence selection transaction";
+        m_imageViewZoom = 1.0f;
+        m_imageViewPanX = 0.0f;
+        m_imageViewPanY = 0.0f;
+    }
+
+    if (resolved.is_candidate || loadWorkingRevision)
+    {
+        AppendEvidenceCandidateStateProbe(
+            m_manualTest,
+            resolved.candidate_dir,
+            resolved.candidate_id,
+            resolved.is_candidate
+                ? "candidate_reload_complete"
+                : "working_revision_reload_complete",
+            "ready",
+            m_manualTest.debug_reason);
+    }
+
+    reason = m_manualTest.debug_reason;
+    CXLOG_INFO(
+        "EvidenceChain",
+        "evidence_selection_commit",
+        "ready",
+        m_manualTest.debug_reason +
+        " primary_object=" +
+        m_manualTest.current_evidence_selection.primary_object_type + " " +
+        m_manualTest.current_evidence_selection.primary_object_name +
+        " gauge={threshold=" +
+        std::to_string(m_manualTest.current_gauge.threshold) +
+        ",method=" + std::to_string(m_manualTest.current_gauge.method) +
+        ",linegap=" + std::to_string(m_manualTest.current_gauge.linegap) +
+        ",wgap=" + std::to_string(m_manualTest.current_gauge.wgap) +
+        ",hgap=" + std::to_string(m_manualTest.current_gauge.hgap) +
+        ",filterprofile=" +
+        std::to_string(m_manualTest.current_gauge.filterprofile) + "}");
     return true;
 }
 
@@ -1711,7 +2719,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
 
     m_manualTest.script_evidence_thumb_load_count_this_frame = 0;
 
-    const float rowHeight = 92.0f;
+    const float rowHeight = 128.0f;
     const float availableHeight = ImGui::GetContentRegionAvail().y;
     const float targetHeight = rowHeight * 4.0f + 72.0f;
     const float listHeight = std::max(
@@ -1743,6 +2751,25 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
     auto classifyMajor = [&](const ScriptEvidenceThumb& thumb,
                              const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
     {
+        std::string categoryOverride = thumb.evidence_category_override;
+        const std::string overrideKey =
+            BuildEvidenceCategoryOverrideKeyLocal(thumb);
+        auto overrideIt =
+            m_manualTest.evidence_category_overrides.find(overrideKey);
+        if (overrideIt != m_manualTest.evidence_category_overrides.end())
+            categoryOverride = overrideIt->second;
+
+        if (categoryOverride == "Verified")
+            return {0, "Verified"};
+        if (categoryOverride == "To Verify")
+            return {1, "To Verify"};
+        if (categoryOverride == "Defect")
+            return {2, "Defect"};
+        if (categoryOverride == "Process Validation")
+            return {3, "Process Validation"};
+        if (categoryOverride == "Torch / Model Validation")
+            return {4, "Torch / Model Validation"};
+
         const std::string key = toLower(
             thumb.status + " " +
             thumb.reason + " " +
@@ -1750,6 +2777,18 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
             thumb.script_id + " " +
             thumb.script_path + " " +
             group.label);
+
+        const bool isTorchLayer =
+            key.find("torch") != std::string::npos ||
+            key.find("find_segmentation") != std::string::npos ||
+            key.find("findsegmentation") != std::string::npos ||
+            key.find("edgesam") != std::string::npos ||
+            key.find("segmentation") != std::string::npos ||
+            key.find("detection") != std::string::npos ||
+            key.find("model") != std::string::npos;
+
+        if (isTorchLayer)
+            return {4, "Torch / Model Validation"};
 
         if (key.find("pending_algorithm_review") != std::string::npos ||
             key.find("pending_human_review") != std::string::npos ||
@@ -1777,9 +2816,33 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         return {0, "Verified"};
     };
 
-    auto classifyTool = [](const ScriptEvidenceThumb& thumb,
-                           const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
+    auto classifyTool = [&](const ScriptEvidenceThumb& thumb,
+                            const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
     {
+        const std::string key = toLower(
+            thumb.tool + " " + thumb.script_id + " " + thumb.script_path + " " +
+            thumb.status + " " + thumb.reason + " " + thumb.parameter_summary + " " +
+            group.label);
+
+        if (key.find("find_segmentation") != std::string::npos ||
+            key.find("findsegmentation") != std::string::npos ||
+            key.find("edgesam") != std::string::npos)
+            return {6, "FindSegmentation Prompt / EdgeSam"};
+
+        if (key.find("torch") != std::string::npos ||
+            key.find("deeplab") != std::string::npos ||
+            key.find("yolo") != std::string::npos)
+        {
+            if (key.find("detect") != std::string::npos ||
+                key.find("yolo") != std::string::npos)
+                return {7, "Torch Detection - Model Unverified"};
+            if (key.find("segment") != std::string::npos ||
+                key.find("mask") != std::string::npos ||
+                key.find("deeplab") != std::string::npos)
+                return {8, "Torch Segmentation - Runtime Smoke"};
+            return {9, "Torch / Model Validation"};
+        }
+
         const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
         if (exactTool == "FindLine")
             return {0, "FindLine"};
@@ -1794,47 +2857,32 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         if (exactTool == "FastMatch")
             return {5, "FastMatch"};
         if (exactTool == "FindSegmentation")
-            return {6, "FindSegmentation"};
+            return {6, "FindSegmentation Prompt / EdgeSam"};
+        if (exactTool == "TorchTask")
+            return {9, "Torch / Model Validation"};
 
-        const std::string key =
-            thumb.tool + " " + thumb.script_id + " " + thumb.script_path + " " + group.label;
-
-        if (key.find("FindLine") != std::string::npos ||
-            key.find("Findline") != std::string::npos ||
-            key.find("findline") != std::string::npos ||
+        if (key.find("findline") != std::string::npos ||
             key.find("find_line") != std::string::npos)
             return {0, "FindLine"};
 
-        if (key.find("FindCircle") != std::string::npos ||
-            key.find("Findcircle") != std::string::npos ||
-            key.find("findcircle") != std::string::npos ||
+        if (key.find("findcircle") != std::string::npos ||
             key.find("find_circle") != std::string::npos)
             return {1, "FindCircle"};
 
-        if (key.find("FindObject") != std::string::npos ||
-            key.find("findobject") != std::string::npos ||
+        if (key.find("findobject") != std::string::npos ||
             key.find("find_object") != std::string::npos)
             return {2, "FindObject"};
 
-        if (key.find("FindEllipse") != std::string::npos ||
-            key.find("FindEllipse") != std::string::npos ||
-            key.find("findellipse") != std::string::npos ||
+        if (key.find("findellipse") != std::string::npos ||
             key.find("find_ellipse") != std::string::npos)
             return {3, "FindEllipse"};
 
-        if (key.find("FindRect") != std::string::npos ||
-            key.find("findrect") != std::string::npos ||
+        if (key.find("findrect") != std::string::npos ||
             key.find("find_rect") != std::string::npos)
             return {4, "FindRect"};
 
-        if (key.find("FastMatch") != std::string::npos ||
-            key.find("fastmatch") != std::string::npos)
+        if (key.find("fastmatch") != std::string::npos)
             return {5, "FastMatch"};
-
-        if (key.find("FindSegmentation") != std::string::npos ||
-            key.find("find_segmentation") != std::string::npos ||
-            key.find("findsegmentation") != std::string::npos)
-            return {6, "FindSegmentation"};
 
         if (key.find("integration") != std::string::npos)
             return {20, "Integration"};
@@ -1849,7 +2897,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         { "Verified", 0, {} },
         { "To Verify", 1, {} },
         { "Defect", 2, {} },
-        { "Process Validation", 3, {} }
+        { "Process Validation", 3, {} },
+        { "Torch / Model Validation", 4, {} }
     };
 
     auto findOrCreateMajor =
@@ -2140,20 +3189,6 @@ void ViewController::DrawOneScriptEvidenceRow(
         ImGui::EndTable();
     }
 
-    if (rowClicked)
-    {
-        std::string reason;
-        if (!RefreshEvidenceSelectionFromThumb(
-                groupIndex,
-                thumbIndex,
-                false,
-                reason))
-        {
-            m_manualTest.debug_status = "EVIDENCE_SELECT_FAIL";
-            m_manualTest.debug_reason = reason;
-        }
-    }
-
     if (rowDoubleClicked)
     {
         std::string reason;
@@ -2167,6 +3202,19 @@ void ViewController::DrawOneScriptEvidenceRow(
             m_manualTest.debug_reason = reason;
         }
     }
+    else if (rowClicked)
+    {
+        std::string reason;
+        if (!RefreshEvidenceSelectionFromThumb(
+                groupIndex,
+                thumbIndex,
+                false,
+                reason))
+        {
+            m_manualTest.debug_status = "EVIDENCE_SELECT_FAIL";
+            m_manualTest.debug_reason = reason;
+        }
+    }
 
     if (rowRightClicked)
     {
@@ -2176,6 +3224,49 @@ void ViewController::DrawOneScriptEvidenceRow(
     if (ImGui::BeginPopup("evidence_row_context"))
     {
         ImGui::TextUnformatted(thumb.script_id.c_str());
+        ImGui::Separator();
+
+        if (ImGui::BeginMenu("Move To Category"))
+        {
+            auto moveToCategory = [&](const char* category,
+                                      const char* status,
+                                      const char* reason)
+            {
+                thumb.evidence_category_override = category;
+                m_manualTest.evidence_category_overrides[
+                    BuildEvidenceCategoryOverrideKeyLocal(thumb)] = category;
+                thumb.status = status;
+                thumb.reason = reason;
+                m_manualTest.script_evidence_row_refs_dirty = true;
+                std::string saveReason;
+                if (SaveEvidenceCategoryOverridesLocal(m_manualTest, saveReason))
+                {
+                    m_manualTest.debug_status = "EVIDENCE_CATEGORY_SAVED";
+                    m_manualTest.debug_reason =
+                        thumb.script_id + " -> " +
+                        thumb.evidence_category_override + "; " + saveReason;
+                }
+                else
+                {
+                    m_manualTest.debug_status = "EVIDENCE_CATEGORY_SAVE_FAIL";
+                    m_manualTest.debug_reason = saveReason;
+                }
+            };
+
+            if (ImGui::MenuItem("Verified"))
+                moveToCategory("Verified", "verified", "manual category: verified");
+            if (ImGui::MenuItem("To Verify"))
+                moveToCategory("To Verify", "pending_human_review", "manual category: to verify");
+            if (ImGui::MenuItem("Defect"))
+                moveToCategory("Defect", "defect", "manual category: defect");
+            if (ImGui::MenuItem("Process Validation"))
+                moveToCategory("Process Validation", "process_validation", "manual category: process validation");
+            if (ImGui::MenuItem("Torch / Model Validation"))
+                moveToCategory("Torch / Model Validation", "model_validation", "manual category: model validation");
+
+            ImGui::EndMenu();
+        }
+
         ImGui::Separator();
 
         if (ImGui::MenuItem("Load This Image To Image View"))

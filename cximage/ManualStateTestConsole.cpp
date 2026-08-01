@@ -6,6 +6,7 @@
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
+#include "TorchTask.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
 #include "imagemanager.h"
@@ -33,6 +34,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -940,6 +942,57 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:TorchTask:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("TorchTask"))
+    {
+        SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:TorchTask:query:" + name);
+        TorchTask* task = static_cast<TorchTask*>(
+            m_parserDebugBridge.QueryClassObject("TorchTask", name));
+        if (task == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "TorchTask";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = task->getstatus();
+        object.is_torch_task = true;
+        object.torch_ok = task->getok();
+        object.torch_error_code = task->geterrorcode();
+        object.torch_result_count = task->getresultcount();
+        object.torch_mask_available = task->getmaskavailable();
+        object.torch_infer_ms = task->getinferms();
+        object.torch_train_ms = task->gettrainms();
+        object.torch_total_ms = task->gettotalms();
+        object.torch_status = task->getstatus();
+        object.torch_reason = task->getreason();
+        object.torch_failure_stage = task->getfailstage();
+        object.torch_actual_device = task->getactualdevice();
+        object.torch_result_ref = task->getresultref();
+        object.torch_evidence_ref = task->getevidenceref();
+        object.torch_primary_visual_ref = task->getprimaryvisualref();
+        object.torch_mask_ref = task->getmaskref();
+        object.torch_overlay_ref = task->getoverlayref();
+        object.torch_trainer_lifecycle_summary = task->gettrainersummary();
+        object.torch_unified_mainline_summary = task->getmainlinesummary();
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source =
+            object.torch_mask_available != 0 ? "torch_mask_overlay" : "torch_runtime_evidence";
+        object.measure_points_count = object.torch_result_count;
+        object.valid_points_count = object.torch_result_count;
+        object.display_summary =
+            "TorchTask " + name +
+            " status=" + object.torch_status +
+            " device=" + object.torch_actual_device +
+            " results=" + std::to_string(object.torch_result_count) +
+            " mask=" + std::to_string(object.torch_mask_available);
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FastMatch:list");
     for (const std::string& name : m_parserDebugBridge.ListClassObjectNames("FastMatch"))
     {
@@ -1092,6 +1145,22 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             m_manualTest.current_result_ref.points_count = object.segmentation_contour_count;
             m_manualTest.current_result_ref.valid_points_count = object.segmentation_contour_count;
         }
+        else if (object.type == "TorchTask")
+        {
+            m_manualTest.current_result_ref.name = "global_torch_ref";
+            m_manualTest.current_result_ref.result_type = "TorchTaskResult";
+            m_manualTest.current_result_ref.value = object.torch_result_ref.empty()
+                ? ("runtime_object:" + object.name)
+                : object.torch_result_ref;
+            m_manualTest.current_result_ref.status = object.torch_status.empty()
+                ? object.runtime_state
+                : object.torch_status;
+            m_manualTest.current_result_ref.reason = object.torch_reason.empty()
+                ? object.torch_failure_stage
+                : object.torch_reason;
+            m_manualTest.current_result_ref.points_count = object.torch_result_count;
+            m_manualTest.current_result_ref.valid_points_count = object.torch_result_count;
+        }
 
         m_scriptResult.result_ref = m_manualTest.current_result_ref.value;
         m_scriptResult.overlay_ref = "shape_owner:" + object.type + ":" + object.name;
@@ -1238,6 +1307,28 @@ void ViewController::drawKeyParameterControlsWindow()
     ImGui::End();
 }
 
+void ViewController::drawTorchRuntimeEvidenceWindow()
+{
+    ImGui::SetNextWindowPos(ImVec2(1380, 8), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(620, 720), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Torch Runtime / Evidence", nullptr, ImGuiWindowFlags_NoCollapse))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextWrapped(
+        "Torch layer is separated from geometry key parameters. "
+        "Use this window for model/runtime/artifact/prompt/review visibility.");
+    ImGui::Separator();
+
+    DrawTorchKeyStatusPanel(m_manualTest);
+    ImGui::Separator();
+    DrawTorchEvidenceAndReviewPanel(m_manualTest);
+
+    ImGui::End();
+}
+
 void ViewController::drawParameterTuningAndConclusionWindow()
 {
     ImGui::SetNextWindowPos(ImVec2(840, 540), ImGuiCond_FirstUseEver);
@@ -1304,9 +1395,79 @@ void ViewController::drawAnnotationToolWindow()
     }
 
     ImGui::Separator();
-    ImGui::Text("Tool Palette");
-    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Annotation UI v2 manifest button palette");
+    ImGui::Text("Tool enabled: %s | mode: %s",
+                m_imageToolEnabled ? "YES" : "NO",
+                ImageToolModeName(m_imageToolMode));
+    const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
+    if (activeTool != nullptr)
+    {
+        ImGui::TextWrapped("Active: %s | shape=%s | role=%s",
+                           activeTool->label.empty()
+                               ? activeTool->name.c_str()
+                               : activeTool->label.c_str(),
+                           activeTool->shape_type.c_str(),
+                           activeTool->role.c_str());
+    }
+    else
+    {
+        ImGui::TextDisabled("Active tool id: (none)");
+    }
+    ImGui::Text("ShapeElements: %d",
+                static_cast<int>(m_annotationLayer.ShapeElements().size()));
+    ImGui::TextWrapped("Last pointer: %s | %s | %s",
+                       m_lastPointerResult.phase.c_str(),
+                       m_lastPointerResult.status.c_str(),
+                       m_lastPointerResult.reason.c_str());
 
+    if (ImGui::CollapsingHeader("Tool Palette Buttons", 0))
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                           "Main palette is now docked above Image View.");
+        DrawAnnotationToolButtonStrip(false);
+    }
+
+    if (ImGui::CollapsingHeader("Element List (ShapeElements)", 0))
+    {
+        ImGui::BeginChild("annotation_elements", ImVec2(-1, 150), true);
+        int elemIndex = 0;
+        for (const auto& elem : m_annotationLayer.ShapeElements())
+        {
+            ImGui::PushID(elemIndex++);
+            ImGui::Text("%s | id=%d | tool=%s | role=%s",
+                        elem.stable_ref.c_str(),
+                        elem.id,
+                        elem.tool_id.c_str(),
+                        elem.semantic_role.c_str());
+            ImGui::PopID();
+        }
+        if (m_annotationLayer.ShapeElements().empty())
+            ImGui::TextDisabled("No shape elements");
+        ImGui::EndChild();
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Session path");
+    ImGui::SetNextItemWidth(280.0f);
+    InputTextString("##session_path", m_annotationSessionPath);
+
+    if (ImGui::Button("Save Elements"))
+        m_annotationStatus = "saving...";
+    ImGui::SameLine();
+    if (ImGui::Button("Load Elements"))
+        m_annotationStatus = "loading...";
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Elements"))
+    {
+        m_annotationLayer.Clear();
+        m_annotationStatus = "cleared";
+    }
+
+    ImGui::Text("Status: %s", m_annotationStatus.c_str());
+    ImGui::End();
+}
+
+void ViewController::DrawAnnotationToolButtonStrip(bool horizontal)
+{
     auto toolModeFromDefinition = [](const AnnotationToolDefinition& tool)
     {
         if (tool.kind == OverlayKind::Point)
@@ -1328,139 +1489,98 @@ void ViewController::drawAnnotationToolWindow()
         return ImageToolMode::PointerPan;
     };
 
-    auto drawPointerPanButton = [this]()
+    auto drawButton = [&](const char* id,
+                          const std::string& label,
+                          bool active,
+                          const ImVec2& size,
+                          const std::function<void()>& onClick)
     {
-        ImGui::PushID("Pointer / Pan");
-        const bool active = !m_imageToolEnabled ||
-                            m_imageToolMode == ImageToolMode::PointerPan ||
-                            m_annotationLayer.ActiveToolIndex() < 0;
+        ImGui::PushID(id);
         if (active)
         {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.50f, 0.85f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.40f, 0.75f, 1.0f));
         }
-
-        if (ImGui::Button("Pointer / Pan", ImVec2(-1.0f, 26.0f)))
-        {
-            m_imageToolEnabled = false;
-            m_imageToolMode = ImageToolMode::PointerPan;
-            CancelAnnotationCreate();
-            m_annotationLayer.SetActiveToolIndex(-1);
-            m_annotationStatus = "Pointer / Pan active";
-        }
-
-        if (active) ImGui::PopStyleColor(3);
-        ImGui::PopID();
-    };
-
-    auto drawManifestToolButton = [this, &toolModeFromDefinition](int toolIndex, const AnnotationToolDefinition& tool)
-    {
-        ImGui::PushID(tool.name.c_str());
-        const bool active = m_imageToolEnabled &&
-                            m_annotationLayer.ActiveToolIndex() == toolIndex;
+        if (ImGui::Button(label.c_str(), size))
+            onClick();
         if (active)
-        {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.50f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.60f, 0.95f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.40f, 0.75f, 1.0f));
-        }
-
-        const std::string label = tool.label.empty() ? tool.name : tool.label;
-        if (ImGui::Button(label.c_str(), ImVec2(-1.0f, 26.0f)))
-        {
-            if (active)
-            {
-                m_imageToolEnabled = false;
-                m_imageToolMode = ImageToolMode::PointerPan;
-                CancelAnnotationCreate();
-                m_annotationLayer.SetActiveToolIndex(-1);
-                m_annotationStatus = label + " disabled";
-            }
-            else
-            {
-                m_imageToolEnabled = true;
-                m_imageToolMode = toolModeFromDefinition(tool);
-                CancelAnnotationCreate();
-                m_annotationLayer.SetActiveToolIndex(toolIndex);
-                m_annotationStatus =
-                    "enabled tool_id=" + tool.name +
-                    " shape=" + tool.shape_type +
-                    " role=" + tool.role +
-                    " action=" + tool.action;
-            }
-        }
-
-        if (active) ImGui::PopStyleColor(3);
+            ImGui::PopStyleColor(3);
         ImGui::PopID();
     };
 
-    drawPointerPanButton();
+    const float width = horizontal ? 112.0f : -1.0f;
+    const ImVec2 buttonSize(width, 26.0f);
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    float usedWidth = 0.0f;
+
+    auto nextSameLine = [&](float itemWidth)
+    {
+        if (!horizontal)
+            return;
+        usedWidth += itemWidth + ImGui::GetStyle().ItemSpacing.x;
+        if (usedWidth + itemWidth <= availableWidth)
+            ImGui::SameLine();
+        else
+            usedWidth = 0.0f;
+    };
+
+    const bool pointerActive = !m_imageToolEnabled ||
+                               m_imageToolMode == ImageToolMode::PointerPan ||
+                               m_annotationLayer.ActiveToolIndex() < 0;
+    drawButton("Pointer / Pan",
+               "Pointer / Pan",
+               pointerActive,
+               buttonSize,
+               [this]()
+               {
+                   m_imageToolEnabled = false;
+                   m_imageToolMode = ImageToolMode::PointerPan;
+                   CancelAnnotationCreate();
+                   m_annotationLayer.SetActiveToolIndex(-1);
+                   m_annotationStatus = "Pointer / Pan active";
+               });
+    nextSameLine(width);
+
     for (int i = 0; i < static_cast<int>(m_annotationLayer.Tools().size()); ++i)
     {
         const AnnotationToolDefinition& tool = m_annotationLayer.Tools()[i];
-        if (!tool.manual_visible) continue;
-        drawManifestToolButton(i, tool);
+        if (!tool.manual_visible)
+            continue;
+
+        const bool active = m_imageToolEnabled &&
+                            m_annotationLayer.ActiveToolIndex() == i;
+        const std::string label = tool.label.empty() ? tool.name : tool.label;
+        drawButton(tool.name.c_str(),
+                   label,
+                   active,
+                   buttonSize,
+                   [this, i, active, label, tool, &toolModeFromDefinition]()
+                   {
+                       if (active)
+                       {
+                           m_imageToolEnabled = false;
+                           m_imageToolMode = ImageToolMode::PointerPan;
+                           CancelAnnotationCreate();
+                           m_annotationLayer.SetActiveToolIndex(-1);
+                           m_annotationStatus = label + " disabled";
+                       }
+                       else
+                       {
+                           m_imageToolEnabled = true;
+                           m_imageToolMode = toolModeFromDefinition(tool);
+                           CancelAnnotationCreate();
+                           m_annotationLayer.SetActiveToolIndex(i);
+                           m_annotationStatus =
+                               "enabled tool_id=" + tool.name +
+                               " shape=" + tool.shape_type +
+                               " role=" + tool.role +
+                               " action=" + tool.action;
+                       }
+                   });
+        nextSameLine(width);
     }
 
-    ImGui::Separator();
-    ImGui::Text("Tool enabled: %s", m_imageToolEnabled ? "YES" : "NO");
-    ImGui::Text("Active mode: %s", ImageToolModeName(m_imageToolMode));
-    const AnnotationToolDefinition* activeTool = m_annotationLayer.ActiveTool();
-    if (activeTool != nullptr)
-    {
-        ImGui::TextWrapped("Active tool id: %s | shape=%s | role=%s | action=%s",
-                           activeTool->name.c_str(),
-                           activeTool->shape_type.c_str(),
-                           activeTool->role.c_str(),
-                           activeTool->action.c_str());
-    }
-    else
-    {
-        ImGui::TextDisabled("Active tool id: (none)");
-    }
-    ImGui::Text("ShapeElements: %d",
-                static_cast<int>(m_annotationLayer.ShapeElements().size()));
-    ImGui::TextWrapped("Last pointer: %s | %s | %s",
-                       m_lastPointerResult.phase.c_str(),
-                       m_lastPointerResult.status.c_str(),
-                       m_lastPointerResult.reason.c_str());
-
-    ImGui::Separator();
-    ImGui::Text("Element List (ShapeElements)");
-    ImGui::BeginChild("annotation_elements", ImVec2(-1, 150), true);
-    int elemIndex = 0;
-    for (const auto& elem : m_annotationLayer.ShapeElements())
-    {
-        ImGui::PushID(elemIndex++);
-        ImGui::Text("%s | id=%d | tool=%s | role=%s",
-                    elem.stable_ref.c_str(),
-                    elem.id,
-                    elem.tool_id.c_str(),
-                    elem.semantic_role.c_str());
-        ImGui::PopID();
-    }
-    if (m_annotationLayer.ShapeElements().empty())
-        ImGui::TextDisabled("No shape elements");
-    ImGui::EndChild();
-
-    ImGui::Separator();
-    ImGui::Text("Session path");
-    ImGui::SetNextItemWidth(280.0f);
-    InputTextString("##session_path", m_annotationSessionPath);
-
-    if (ImGui::Button("Save Elements"))
-        m_annotationStatus = "saving...";
-    ImGui::SameLine();
-    if (ImGui::Button("Load Elements"))
-        m_annotationStatus = "loading...";
-    ImGui::SameLine();
-    if (ImGui::Button("Clear Elements"))
-    {
-        m_annotationLayer.Clear();
-        m_annotationStatus = "cleared";
-    }
-
-    ImGui::Text("Status: %s", m_annotationStatus.c_str());
-    ImGui::End();
+    if (horizontal)
+        ImGui::NewLine();
 }

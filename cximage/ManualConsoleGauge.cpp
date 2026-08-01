@@ -8,6 +8,7 @@
 #include <fstream>
 #include <cmath>
 #include <regex>
+#include <algorithm>
 
 namespace
 {
@@ -182,13 +183,13 @@ void NormalizeManualGaugeGeometry(ManualGaugeState& gauge)
     gauge.radius = static_cast<int>(std::lround(std::sqrt(dx * dx + dy * dy)));
 }
 
-void ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName)
+bool ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName)
 {
     (void)objectName;
-    ApplyManualGaugeToGlobals(context);
+    return ApplyManualGaugeToGlobals(context);
 }
 
-void ApplyManualGaugeToGlobals(ManualTestContext& context)
+bool ApplyManualGaugeToGlobals(ManualTestContext& context)
 {
     ManualGaugeState& gauge = context.current_gauge;
     std::string reason;
@@ -196,7 +197,7 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
     {
         context.debug_status = "gauge_apply_failed";
         context.debug_reason = reason;
-        return;
+        return false;
     }
     if (gauge.tool == "FindLine")
     {
@@ -211,6 +212,64 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+
+        context.findline_scan_edge_count =
+            std::max(1, std::min(16, context.findline_scan_edge_count));
+        context.findline_selected_scan_edge =
+            std::max(0, std::min(context.findline_selected_scan_edge,
+                                 context.findline_scan_edge_count));
+        if (context.findline_edge_params.size() <
+            static_cast<std::size_t>(context.findline_scan_edge_count + 1))
+        {
+            context.findline_edge_params.resize(
+                static_cast<std::size_t>(context.findline_scan_edge_count + 1));
+        }
+
+        InjectManualGaugeInt(
+            context,
+            "global_findline_edge_count",
+            context.findline_scan_edge_count);
+        InjectManualGaugeInt(
+            context,
+            "global_findline_selected_edge",
+            context.findline_selected_scan_edge);
+
+        for (int edge = 1; edge <= context.findline_scan_edge_count; ++edge)
+        {
+            ManualFindLineEdgeParamState& params =
+                context.findline_edge_params[static_cast<std::size_t>(edge)];
+            if (!params.initialized)
+            {
+                params.initialized = true;
+                params.threshold = gauge.threshold;
+                params.method = gauge.method;
+                params.linegap = gauge.linegap;
+                params.wgap = gauge.wgap;
+                params.hgap = gauge.hgap;
+                params.filterprofile = gauge.filterprofile;
+            }
+            const std::string prefix =
+                "global_findline_edge" + std::to_string(edge) + "_";
+            InjectManualGaugeInt(context, prefix + "threshold", params.threshold);
+            InjectManualGaugeInt(context, prefix + "method", params.method);
+            InjectManualGaugeInt(context, prefix + "linegap", params.linegap);
+            InjectManualGaugeInt(context, prefix + "wgap", params.wgap);
+            InjectManualGaugeInt(context, prefix + "hgap", params.hgap);
+            InjectManualGaugeInt(context, prefix + "filterprofile", params.filterprofile);
+        }
+
+        if (context.findline_selected_scan_edge > 0)
+        {
+            const ManualFindLineEdgeParamState& selected =
+                context.findline_edge_params[
+                    static_cast<std::size_t>(context.findline_selected_scan_edge)];
+            InjectManualGaugeInt(context, "global_findline_selected_threshold", selected.threshold);
+            InjectManualGaugeInt(context, "global_findline_selected_method", selected.method);
+            InjectManualGaugeInt(context, "global_findline_selected_linegap", selected.linegap);
+            InjectManualGaugeInt(context, "global_findline_selected_wgap", selected.wgap);
+            InjectManualGaugeInt(context, "global_findline_selected_hgap", selected.hgap);
+            InjectManualGaugeInt(context, "global_findline_selected_filterprofile", selected.filterprofile);
+        }
     }
     else if (gauge.tool == "FindCircle")
     {
@@ -235,10 +294,17 @@ void ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
     }
+    else
+    {
+        context.debug_status = "gauge_apply_failed";
+        context.debug_reason = "unsupported gauge tool: " + gauge.tool;
+        return false;
+    }
     gauge.review_status = "applied_to_globals";
     gauge.accepted = false;
     context.debug_status = "gauge_applied";
     context.debug_reason.clear();
+    return true;
 }
 
 std::filesystem::path ManualGaugeCaseDir(const ManualTestContext& context)
@@ -388,6 +454,18 @@ bool LoadManualGaugeAnnotation(
     if (!ResolveManualGaugeCaseDir(context, dir, outReason))
         return false;
     const std::filesystem::path source_path = dir / "gauge_annotation.json";
+    if (!LoadManualGaugeAnnotationFromPath(context, source_path, outReason))
+        return false;
+    outPath = source_path.string();
+    return true;
+}
+
+static bool LoadManualGaugeAnnotationFromPathImpl(
+    ManualTestContext& context,
+    const std::filesystem::path& source_path,
+    bool requireManualAcceptance,
+    std::string& outReason)
+{
     std::ifstream file(source_path, std::ios::binary);
     if (!file.is_open())
     {
@@ -446,12 +524,38 @@ bool LoadManualGaugeAnnotation(
     }
     loaded.dirty = false;
     NormalizeManualGaugeGeometry(loaded);
-    if (!ValidateManualGaugeGeometry(loaded, outReason))
+    const bool valid = requireManualAcceptance
+        ? ValidateManualGaugeGeometry(loaded, outReason)
+        : ValidateManualGaugeGeometryForEditing(loaded, outReason);
+    if (!valid)
         return false;
     context.current_gauge = loaded;
-    outPath = source_path.string();
     outReason.clear();
     return true;
+}
+
+bool LoadManualGaugeAnnotationFromPath(
+    ManualTestContext& context,
+    const std::filesystem::path& source_path,
+    std::string& outReason)
+{
+    return LoadManualGaugeAnnotationFromPathImpl(
+        context,
+        source_path,
+        true,
+        outReason);
+}
+
+bool LoadManualGaugeWorkingCopyFromPath(
+    ManualTestContext& context,
+    const std::filesystem::path& source_path,
+    std::string& outReason)
+{
+    return LoadManualGaugeAnnotationFromPathImpl(
+        context,
+        source_path,
+        false,
+        outReason);
 }
 
 bool ExportManualGaugeManifestCandidate(

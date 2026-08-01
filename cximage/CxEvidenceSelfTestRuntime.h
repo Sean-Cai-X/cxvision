@@ -119,6 +119,30 @@ struct CxEvidenceSelfTestResult
     int fastmatch_candidate_count = 0;
     double fastmatch_best_score = 0.0;
 
+    std::string torch_result_ref;
+    std::string torch_evidence_ref;
+    std::string torch_primary_visual_ref;
+    std::string torch_mask_ref;
+    std::string torch_overlay_ref;
+    std::string torch_actual_device;
+    std::string torch_trainer_lifecycle_summary;
+    std::string torch_unified_mainline_summary;
+    int torch_ok = 0;
+    int torch_error_code = 0;
+    int torch_result_count = 0;
+    int torch_mask_available = 0;
+    double torch_infer_ms = 0.0;
+    double torch_train_ms = 0.0;
+    double torch_total_ms = 0.0;
+
+    std::string segmentation_backend_status;
+    std::string segmentation_result_ref;
+    std::string segmentation_mask_ref;
+    std::string segmentation_contour_ref;
+    std::string segmentation_overlay_ref;
+    int segmentation_contour_count = 0;
+    double segmentation_primary_area = 0.0;
+
     std::vector<CxEvidenceSelfTestStepResult> steps;
 };
 
@@ -147,6 +171,7 @@ struct CxEvidenceSelfTestBatchRequest
 
     bool include_pending_result = true;
     bool include_generic_scripts = false;
+    std::string tool_filter;
 
     std::vector<CxEvidenceSelfTestRequest> cases;
 };
@@ -177,4 +202,9 @@ bool WriteEvidenceSelfTestBatchSummaryJson(
 bool WriteEvidenceSelfTestBatchReportMd(
     const CxEvidenceSelfTestBatchResult& result,
     const std::string& outPath,
+    std::string& reason);
+
+bool WriteTorchArtifactAuditReport(
+    const CxEvidenceSelfTestBatchResult& result,
+    const std::string& outDir,
     std::string& reason);

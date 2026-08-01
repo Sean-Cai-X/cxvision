@@ -368,6 +368,10 @@ struct CxScriptHeadlessOptions
     std::string stage25_level;
     std::string stage25_target_id;
     std::string stage25_tool;
+
+    bool save_evidence_candidate = false;
+    std::string evidence_candidate_root;
+    std::string evidence_candidate_id;
 };
 
 struct CxScriptHeadlessResult

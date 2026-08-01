@@ -39,6 +39,8 @@ void ExportParamRegressionManualAcceptanceChecklist(
 
 bool IsFindLineFindCircleContext(ManualTestContext& context);
 
+bool IsTorchContext(const ManualTestContext& context);
+
 void DrawKeyParameterUnavailableNotice(const ManualTestContext& context);
 
 void DrawCxScriptWorkbenchOverview(const ManualTestContext& context);
@@ -58,5 +60,9 @@ void ResetKeyParameterUiDefaults(ManualTestContext& context);
 void DrawKeyParameterControlPanel(ManualTestContext& context);
 
 void DrawParamTuningScatterPanel(ManualTestContext& context);
+
+void DrawTorchKeyStatusPanel(const ManualTestContext& context);
+
+void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context);
 
 #endif

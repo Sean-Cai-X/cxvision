@@ -8,6 +8,7 @@
 #include "CxShapeOverlayRenderer.h"
 #include "CxScriptRuntimeCaptureSmoke.h"
 #include "CxScriptGlobalValueSet.h"
+#include "CxScriptCasePackageWriter.h"
 
 #include <sstream>
 #include <fstream>
@@ -1157,6 +1158,12 @@ bool ParseCxScriptHeadlessArgs(
             options.max_samples = std::stoi(argv[++i]);
         else if (arg == "--runtime-capture-smoke")
             options.runtime_capture_smoke = true;
+        else if (arg == "--save-evidence-candidate")
+            options.save_evidence_candidate = true;
+        else if (arg == "--evidence-candidate-root" && i + 1 < argc)
+            options.evidence_candidate_root = argv[++i];
+        else if (arg == "--evidence-candidate-id" && i + 1 < argc)
+            options.evidence_candidate_id = argv[++i];
     }
     return options.enabled && !options.image_path.empty() && !options.script_path.empty() && !options.output_dir.empty();
 }
@@ -1237,6 +1244,87 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     {
         result.reason = reason;
         result.failure_stage = capture.failure_stage.empty() ? "script_execution" : capture.failure_stage;
+        if (options.save_evidence_candidate)
+        {
+            ManualTestContext candidateContext;
+            candidateContext.active_case_id =
+                options.case_name.empty() ? options.case_id : options.case_name;
+            candidateContext.active_image_id =
+                options.image_id.empty() ? options.stage25_image_id : options.image_id;
+            candidateContext.active_target_id =
+                options.target_id.empty() ? options.stage25_target_id : options.target_id;
+            candidateContext.image_file_path = options.image_path;
+            candidateContext.loaded_script_path = options.script_path;
+            candidateContext.script_file_path = options.script_path;
+            candidateContext.editor_source = "headless";
+            ReadTextFile(options.script_path, candidateContext.editor_text);
+            candidateContext.debug_status = "HEADLESS_EXECUTION_FAIL";
+            candidateContext.debug_reason = result.reason;
+            candidateContext.current_result_ref.status = "runtime_result_failed";
+            candidateContext.current_result_ref.reason = result.reason;
+
+            auto setGlobal = [&](const std::string& name, int value)
+            {
+                candidateContext.runtime_int_vars[name] = value;
+            };
+            setGlobal("global_roi_x0", options.roi_x0);
+            setGlobal("global_roi_y0", options.roi_y0);
+            setGlobal("global_roi_x1", options.roi_x1);
+            setGlobal("global_roi_y1", options.roi_y1);
+            setGlobal("global_circle_cx", options.circle_cx);
+            setGlobal("global_circle_cy", options.circle_cy);
+            setGlobal("global_circle_px", options.circle_px);
+            setGlobal("global_circle_py", options.circle_py);
+            setGlobal("global_ellipse_x0", options.ellipse_x0);
+            setGlobal("global_ellipse_y0", options.ellipse_y0);
+            setGlobal("global_ellipse_x1", options.ellipse_x1);
+            setGlobal("global_ellipse_y1", options.ellipse_y1);
+            setGlobal("global_tool_half_width", options.tool_half_width);
+            setGlobal("global_wgap", options.wgap);
+            setGlobal("global_hgap", options.hgap);
+            setGlobal("global_gap", options.gap);
+            setGlobal("global_linegap", options.linegap);
+            setGlobal("global_threshold", options.threshold);
+            setGlobal("global_method", options.method);
+            setGlobal("global_filterprofile", options.filterprofile);
+            setGlobal("global_max_elapsed_ms", options.max_elapsed_ms);
+            setGlobal("global_max_scan_lines", options.max_scan_lines);
+            setGlobal("global_max_samples", options.max_samples);
+
+            ManualGaugeState& gauge = candidateContext.current_gauge;
+            gauge.case_id = candidateContext.active_case_id;
+            gauge.image_id = candidateContext.active_image_id;
+            gauge.target_id = candidateContext.active_target_id;
+            gauge.source = "headless";
+            gauge.review_status = "pending_human_review";
+            gauge.tool = options.stage25_tool.empty() ? "FindLine" : options.stage25_tool;
+            gauge.has_line_gauge = true;
+            gauge.line_x0 = options.roi_x0;
+            gauge.line_y0 = options.roi_y0;
+            gauge.line_x1 = options.roi_x1;
+            gauge.line_y1 = options.roi_y1;
+            gauge.tool_half_width = options.tool_half_width;
+            gauge.threshold = options.threshold;
+            gauge.method = options.method;
+            gauge.linegap = options.linegap;
+            gauge.wgap = options.wgap;
+            gauge.hgap = options.hgap;
+            gauge.gap = options.gap;
+            gauge.filterprofile = options.filterprofile;
+
+            CxEvidenceCandidateSaveOptions candidateOptions;
+            candidateOptions.root_dir = options.evidence_candidate_root.empty()
+                ? "cxscript_runs/evidence_candidates"
+                : options.evidence_candidate_root;
+            candidateOptions.candidate_id = options.evidence_candidate_id;
+            candidateOptions.mode = "headless_failed";
+            candidateOptions.add_to_evidence_chain = false;
+            CxEvidenceCandidateSaveResult candidateResult;
+            SaveEvidenceCandidatePackage(
+                candidateContext,
+                candidateOptions,
+                candidateResult);
+        }
         return false;
     }
 
@@ -1613,6 +1701,132 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     result.has_best_result = capture.has_best_result;
     result.circle_radius = capture.circle_radius;
     result.avgdist = capture.avgdist;
+
+    if (options.save_evidence_candidate)
+    {
+        ManualTestContext candidateContext;
+        candidateContext.active_case_id =
+            options.case_name.empty() ? options.case_id : options.case_name;
+        candidateContext.active_image_id =
+            options.image_id.empty() ? options.stage25_image_id : options.image_id;
+        candidateContext.active_target_id =
+            options.target_id.empty() ? options.stage25_target_id : options.target_id;
+        candidateContext.image_file_path = options.image_path;
+        candidateContext.loaded_script_path = options.script_path;
+        candidateContext.script_file_path = options.script_path;
+        candidateContext.editor_source = "headless";
+        ReadTextFile(options.script_path, candidateContext.editor_text);
+        candidateContext.debug_status =
+            result.ok ? "HEADLESS_EXECUTION_PASS" : "HEADLESS_EXECUTION_PARTIAL";
+        candidateContext.debug_reason = result.reason;
+        candidateContext.current_result_ref.status =
+            result.ok ? "runtime_result_available" : "runtime_result_incomplete";
+        candidateContext.current_result_ref.reason = result.reason;
+
+        auto setGlobal = [&](const std::string& name, int value)
+        {
+            candidateContext.runtime_int_vars[name] = value;
+        };
+        setGlobal("global_roi_x0", options.roi_x0);
+        setGlobal("global_roi_y0", options.roi_y0);
+        setGlobal("global_roi_x1", options.roi_x1);
+        setGlobal("global_roi_y1", options.roi_y1);
+        setGlobal("global_circle_cx", options.circle_cx);
+        setGlobal("global_circle_cy", options.circle_cy);
+        setGlobal("global_circle_px", options.circle_px);
+        setGlobal("global_circle_py", options.circle_py);
+        setGlobal("global_ellipse_x0", options.ellipse_x0);
+        setGlobal("global_ellipse_y0", options.ellipse_y0);
+        setGlobal("global_ellipse_x1", options.ellipse_x1);
+        setGlobal("global_ellipse_y1", options.ellipse_y1);
+        setGlobal("global_tool_half_width", options.tool_half_width);
+        setGlobal("global_wgap", options.wgap);
+        setGlobal("global_hgap", options.hgap);
+        setGlobal("global_gap", options.gap);
+        setGlobal("global_linegap", options.linegap);
+        setGlobal("global_threshold", options.threshold);
+        setGlobal("global_method", options.method);
+        setGlobal("global_filterprofile", options.filterprofile);
+        setGlobal("global_find_num", options.find_num);
+        setGlobal("global_compare_gap", options.compare_gap);
+        setGlobal("global_max_elapsed_ms", options.max_elapsed_ms);
+        setGlobal("global_max_scan_lines", options.max_scan_lines);
+        setGlobal("global_max_samples", options.max_samples);
+
+        ManualGaugeState& gauge = candidateContext.current_gauge;
+        gauge.case_id = candidateContext.active_case_id;
+        gauge.image_id = candidateContext.active_image_id;
+        gauge.target_id = candidateContext.active_target_id;
+        gauge.source = "headless";
+        gauge.review_status = "pending_human_review";
+        gauge.threshold = options.threshold;
+        gauge.method = options.method;
+        gauge.linegap = options.linegap;
+        gauge.wgap = options.wgap;
+        gauge.hgap = options.hgap;
+        gauge.gap = options.gap;
+        gauge.tool_half_width = options.tool_half_width;
+        gauge.filterprofile = options.filterprofile;
+
+        std::string lowerScript = options.script_path;
+        std::transform(lowerScript.begin(), lowerScript.end(), lowerScript.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        const std::string tool = !options.stage25_tool.empty()
+            ? options.stage25_tool
+            : (lowerScript.find("circle") != std::string::npos ? "FindCircle" :
+               lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
+               lowerScript.find("rect") != std::string::npos ? "FindRect" :
+               lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
+               "FindLine");
+        gauge.tool = tool;
+        if (tool == "FindCircle")
+        {
+            gauge.has_circle_gauge = true;
+            gauge.circle_cx = options.circle_cx;
+            gauge.circle_cy = options.circle_cy;
+            gauge.circle_px = options.circle_px;
+            gauge.circle_py = options.circle_py;
+        }
+        else if (tool == "FindEllipse")
+        {
+            gauge.has_ellipse_gauge = true;
+            gauge.ellipse_x0 = options.ellipse_x0;
+            gauge.ellipse_y0 = options.ellipse_y0;
+            gauge.ellipse_x1 = options.ellipse_x1;
+            gauge.ellipse_y1 = options.ellipse_y1;
+        }
+        else
+        {
+            gauge.has_line_gauge = true;
+            gauge.line_x0 = options.roi_x0;
+            gauge.line_y0 = options.roi_y0;
+            gauge.line_x1 = options.roi_x1;
+            gauge.line_y1 = options.roi_y1;
+        }
+
+        CxEvidenceCandidateSaveOptions candidateOptions;
+        candidateOptions.root_dir = options.evidence_candidate_root.empty()
+            ? "cxscript_runs/evidence_candidates"
+            : options.evidence_candidate_root;
+        candidateOptions.candidate_id = options.evidence_candidate_id;
+        candidateOptions.mode = "headless_result";
+        candidateOptions.request_run = false;
+        candidateOptions.add_to_evidence_chain = false;
+        candidateOptions.linked_result_summary_path = result.summary_path;
+        candidateOptions.linked_result_overlay_path = result.result_overlay_path;
+        candidateOptions.linked_evidence_overlay_path = result.evidence_overlay_path;
+        candidateOptions.linked_tool_display_path = result.tool_display_path;
+
+        CxEvidenceCandidateSaveResult candidateResult;
+        if (!SaveEvidenceCandidatePackage(
+                candidateContext,
+                candidateOptions,
+                candidateResult) &&
+            result.reason.empty())
+        {
+            result.reason = candidateResult.reason;
+        }
+    }
 
     return result.ok;
 }

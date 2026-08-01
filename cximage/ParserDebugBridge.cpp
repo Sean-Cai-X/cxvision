@@ -16,6 +16,7 @@
 
 #include <sstream>
 #include <utility>
+#include <exception>
 
 namespace
 {
@@ -311,32 +312,98 @@ std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) cons
 
 bool ParserDebugBridge::StageGlobalMatInput(const cv::Mat& image)
 {
-  if (image.empty()) return false;
+  if (image.empty())
+  {
+    myLastError = "cannot stage empty global_matInput image";
+    return false;
+  }
   myGlobalMatInput = image.clone();
+  myGlobalMatInputBoundSerial = 0;
   return !myGlobalMatInput.empty();
 }
 
 bool ParserDebugBridge::SetGlobalMatInput(const cv::Mat& image)
 {
   if (!StageGlobalMatInput(image)) return false;
+  ResetRuntime();
   return BindStagedGlobalMatInput();
 }
 
 bool ParserDebugBridge::BindStagedGlobalMatInput()
 {
-  if (myGlobalMatInput.empty()) return false;
-  if (myOwner == nullptr) return false;
-  SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:query");
-  if (QueryImage("global_matInput") == nullptr)
+  if (myGlobalMatInput.empty())
   {
-    SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:declare");
-    if (!myOwner->Compile("Image global_matInput;")) return false;
+    myLastError = "global_matInput image is empty";
+    return false;
   }
+  if (myOwner == nullptr)
+  {
+    myLastError = "parser owner is not bound";
+    return false;
+  }
+
+  Image* runtimeImage = nullptr;
+  const bool mustDeclareAfterReset =
+      myGlobalMatInputBoundSerial != myRuntimeResetSerial;
+
+  if (mustDeclareAfterReset)
+  {
+    SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:declare_after_reset");
+    if (!myOwner->Compile("Image global_matInput;"))
+    {
+      SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:declare_failed_query_existing");
+      runtimeImage = QueryImage("global_matInput");
+      if (runtimeImage == nullptr)
+      {
+        myLastError = "failed to declare global_matInput after parser reset";
+        return false;
+      }
+    }
+  }
+  else
+  {
+    SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:query");
+    runtimeImage = QueryImage("global_matInput");
+    if (runtimeImage == nullptr)
+    {
+      SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:declare_missing");
+      if (!myOwner->Compile("Image global_matInput;"))
+      {
+        myLastError = "failed to declare missing global_matInput";
+        return false;
+      }
+    }
+  }
+
   SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:get_image");
-  Image* runtimeImage = QueryImage("global_matInput");
-  if (runtimeImage == nullptr) return false;
+  runtimeImage = QueryImage("global_matInput");
+  if (runtimeImage == nullptr)
+  {
+    myLastError = "global_matInput object is unavailable after declaration";
+    return false;
+  }
+  if (myGlobalMatInput.cols <= 0 || myGlobalMatInput.rows <= 0)
+  {
+    myLastError = "staged global_matInput has invalid size";
+    return false;
+  }
+
   SetCxCrashBreadcrumb("ParserDebugBridge::BindStagedGlobalMatInput:copy");
-  runtimeImage->copyFromMat(myGlobalMatInput);
+  try
+  {
+    runtimeImage->copyFromMat(myGlobalMatInput);
+  }
+  catch (const cv::Exception& error)
+  {
+    myLastError = std::string("copy global_matInput failed: ") + error.what();
+    return false;
+  }
+  catch (const std::exception& error)
+  {
+    myLastError = std::string("copy global_matInput failed: ") + error.what();
+    return false;
+  }
+  myGlobalMatInputBoundSerial = myRuntimeResetSerial;
   return true;
 }
 
@@ -392,7 +459,8 @@ bool ParserDebugBridge::RebindGlobalInputs()
     return true;
   if (!BindStagedGlobalMatInput())
   {
-    myLastError = "failed to bind global_matInput image";
+    if (myLastError.empty())
+      myLastError = "failed to bind global_matInput image";
     return false;
   }
   return true;
@@ -402,6 +470,7 @@ void ParserDebugBridge::ClearGlobalInputs()
 {
   myGlobalMatInput.release();
   myGlobalNumericInputs.clear();
+  myGlobalMatInputBoundSerial = 0;
 }
 
 std::vector<ParserDebugObjectSnapshot> ParserDebugBridge::SnapshotRuntimeObjects(
@@ -658,5 +727,7 @@ void ParserDebugBridge::Stop()
 
 void ParserDebugBridge::ResetRuntime()
 {
+  ++myRuntimeResetSerial;
+  myGlobalMatInputBoundSerial = 0;
   if (myOwner != nullptr) myOwner->ClearAll();
 }

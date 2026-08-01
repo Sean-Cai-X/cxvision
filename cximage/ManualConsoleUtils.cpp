@@ -99,6 +99,29 @@ std::filesystem::path ResolveCaseDirectory(const std::string& path)
     return requested;
 }
 
+std::filesystem::path ResolveCxVisionRunPath(const std::string& path)
+{
+    const fs::path requested(path);
+    if (requested.is_absolute())
+        return requested.lexically_normal();
+
+    const fs::path repoRoot = ResolveCaseDirectory(".");
+    if (fs::exists(repoRoot / "CMakeLists.txt") &&
+        fs::exists(repoRoot / "cximage") &&
+        fs::exists(repoRoot / "cxparser"))
+    {
+        const fs::path projectRoot =
+            repoRoot.filename() == "cxvision_repo"
+                ? repoRoot.parent_path()
+                : repoRoot;
+        return (projectRoot / requested).lexically_normal();
+    }
+
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(requested, ec);
+    return ec ? requested.lexically_normal() : absolute.lexically_normal();
+}
+
 std::string TrimLine(const std::string& text)
 {
     const std::size_t first = text.find_first_not_of(" \t\r");
@@ -133,12 +156,25 @@ std::vector<std::string> SplitParameters(const std::string& text)
 std::vector<std::string> ExtractGlobalNames(const std::string& text)
 {
     std::vector<std::string> names;
-    const std::string prefix = "global.";
+    // CxScript external inputs/outputs are flat global_* names.  Do not
+    // recognize the retired global.xxx pseudo-object syntax here: doing so
+    // hides missing bindings and makes the manual path differ from Headless.
+    const std::string prefix = "global_";
     std::size_t position = 0;
     while ((position = text.find(prefix, position)) != std::string::npos)
     {
-        const std::size_t begin = position + prefix.size();
-        std::size_t end = begin;
+        const bool identifierBoundary =
+            position == 0 ||
+            !(std::isalnum(static_cast<unsigned char>(text[position - 1])) ||
+              text[position - 1] == '_');
+        if (!identifierBoundary)
+        {
+            position += prefix.size();
+            continue;
+        }
+
+        const std::size_t begin = position;
+        std::size_t end = position + prefix.size();
         while (end < text.size() &&
                (std::isalnum(static_cast<unsigned char>(text[end])) ||
                 text[end] == '_')) ++end;
@@ -147,8 +183,6 @@ std::vector<std::string> ExtractGlobalNames(const std::string& text)
             names.push_back(name);
         position = end;
     }
-    if (std::find(names.begin(), names.end(), "matInput") == names.end())
-        names.insert(names.begin(), "matInput");
     return names;
 }
 

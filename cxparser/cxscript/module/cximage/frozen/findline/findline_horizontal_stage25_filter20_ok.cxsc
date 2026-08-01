@@ -18,6 +18,7 @@ int hgap = global_hgap;
 int linegap = global_linegap;
 int threshold = global_threshold;
 int method = global_method;
+int filterprofile = global_filterprofile;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setlinegap(linegap);
@@ -25,7 +26,7 @@ m_line.setline(x0, y0, x1, y1, tool_half_width);
 m_line.setmethod(method);
 m_line.setthre(threshold);
 
-m_line.setfilterprofile(1);
+m_line.setfilterprofile(filterprofile);
 
 m_line.measure(&m_image);
 m_line.fitline();

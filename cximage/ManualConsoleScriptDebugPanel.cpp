@@ -5,7 +5,9 @@
 #include "ManualConsoleUtils.h"
 #include "ManualStateTestConsole.h"
 #include "CxCrashLogHandler.h"
+#include "CxScriptCasePackageWriter.h"
 
+#include <filesystem>
 #include <unordered_set>
 
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
@@ -48,7 +50,23 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
     context.editor_dirty = false;
     context.debug_action = "Save Script";
     context.debug_status = "PENDING";
-    context.debug_reason = "Script saved";
+    context.debug_reason =
+        "Editor text marked clean; use Save As Candidate for Evidence persistence";
+  }
+
+  ImGui::SameLine();
+  if (ImGui::Button("Save As Candidate"))
+  {
+    CxEvidenceCandidateSaveOptions options;
+    options.mode = "script_editor_draft";
+    options.request_run = false;
+    CxEvidenceCandidateSaveResult result;
+    if (!SaveEvidenceCandidatePackage(context, options, result))
+    {
+      context.debug_action = "Save Script Candidate";
+      context.debug_status = "EVIDENCE_CANDIDATE_SAVE_FAILED";
+      context.debug_reason = result.reason;
+    }
   }
 
   ImGui::SameLine();
@@ -116,7 +134,19 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
   ImGui::SameLine();
   SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:run_button");
-  if (ImGui::Button("Run", ImVec2(btnWidth, 0)))
+  const bool runRequestedByCandidateSave =
+      !context.pending_execution_candidate_id.empty() &&
+      context.pending_execution_candidate_id ==
+          context.last_evidence_candidate_id;
+  const bool runRequestedByKeyParameterControls =
+      context.debug_action == "Key Parameter Controls Run Script" &&
+      context.debug_status == "MANUAL_RUN_REQUESTED";
+  const bool usePendingExecutionSnapshot =
+      (runRequestedByCandidateSave || runRequestedByKeyParameterControls) &&
+      context.has_pending_execution_snapshot;
+  if (ImGui::Button("Run", ImVec2(btnWidth, 0)) ||
+      runRequestedByCandidateSave ||
+      runRequestedByKeyParameterControls)
   {
     SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
     context.debug_action = "Run";
@@ -128,11 +158,26 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     }
     else
     {
+      // A candidate run must use the values captured by the Save/Run action.
+      // Do not let an Evidence refresh or runtime-object refresh replace them
+      // between the button click and this deferred compiler pass.
+      const ManualGaugeState frozenGauge = context.pending_execution_gauge;
+      const std::unordered_map<std::string, int> frozenGlobals =
+          context.pending_execution_globals;
+
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:analyze");
       AnalyzeScript(context);
-      if (context.current_gauge.has_line_gauge ||
-          context.current_gauge.has_circle_gauge ||
-          context.current_gauge.has_ellipse_gauge)
+      if (usePendingExecutionSnapshot)
+      {
+        context.current_gauge = frozenGauge;
+        context.runtime_int_vars = frozenGlobals;
+        context.debug_reason =
+            "candidate input snapshot restored before execution: candidate_id=" +
+            context.pending_execution_candidate_id;
+      }
+      else if (context.current_gauge.has_line_gauge ||
+               context.current_gauge.has_circle_gauge ||
+               context.current_gauge.has_ellipse_gauge)
       {
         SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:apply_gauge");
         ApplyManualGaugeToGlobals(context);
@@ -142,6 +187,25 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       {
         if (input.first.rfind("global_", 0) == 0)
           m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+      }
+      // CxScript result statements (for example
+      // global_valid_points_count = m_line.getvalidpointcount();) are external
+      // numeric destinations too.  They are discovered by AnalyzeScript but
+      // were never registered with the parser, so a successful tool call could
+      // still fail at its first result write.  Bind only missing global_* names;
+      // global_matInput is an Image object and must never enter this numeric
+      // external-variable path.
+      for (const ScriptVariableView& observed : context.global_variable_views)
+      {
+        if (observed.name == "global_matInput" ||
+            observed.name.rfind("global_", 0) != 0)
+          continue;
+        if (context.runtime_int_vars.find(observed.name) ==
+            context.runtime_int_vars.end())
+        {
+          context.runtime_int_vars.emplace(observed.name, 0);
+          m_parserDebugBridge.SetGlobalInt(observed.name, 0);
+        }
       }
 
       std::stringstream ss;
@@ -202,6 +266,16 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       RefreshRuntimeObjectTable(
         "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
 
+      // Runtime projection is allowed to update result objects, but it must
+      // not visually roll the candidate editor back to values from the
+      // selected Evidence row.  Preserve the input snapshot until the run has
+      // been fully packaged.
+      if (usePendingExecutionSnapshot)
+      {
+        context.current_gauge = frozenGauge;
+        context.runtime_int_vars = frozenGlobals;
+      }
+
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:save_snapshot");
       std::string snapshotPath;
       std::string snapshotReason;
@@ -209,7 +283,48 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       {
         context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
       }
+      if (runRequestedByCandidateSave &&
+          !context.last_evidence_candidate_id.empty() &&
+          !context.last_evidence_candidate_dir.empty())
+      {
+        std::filesystem::path candidateDir(context.last_evidence_candidate_dir);
+        CxEvidenceCandidateSaveOptions options;
+        if (candidateDir.has_parent_path() &&
+            candidateDir.parent_path().has_parent_path())
+        {
+          options.root_dir = candidateDir.parent_path().parent_path().string();
+        }
+        options.candidate_id = context.last_evidence_candidate_id;
+        options.case_id_override =
+            candidateDir.has_parent_path()
+                ? candidateDir.parent_path().filename().string()
+                : std::string();
+        options.mode = ran ? "runtime_finished" : "runtime_failed";
+        options.request_run = false;
+        options.add_to_evidence_chain = false;
+        options.preserve_input_snapshots = true;
+        CxEvidenceCandidateSaveResult candidateResult;
+        if (!SaveEvidenceCandidatePackage(context, options, candidateResult))
+        {
+          context.debug_reason +=
+              " | evidence candidate post-run update failed: " +
+              candidateResult.reason;
+        }
+        else
+        {
+          context.last_evidence_candidate_dir = candidateResult.candidate_dir;
+        }
+      }
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:end");
+      if (usePendingExecutionSnapshot)
+      {
+        context.has_pending_execution_snapshot = false;
+        context.pending_execution_globals.clear();
+        context.pending_execution_candidate_id.clear();
+        context.last_evidence_candidate_id.clear();
+        context.last_evidence_candidate_dir.clear();
+        context.last_evidence_candidate_reason.clear();
+      }
     }
   }
 

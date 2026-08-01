@@ -4,7 +4,11 @@
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleScriptDebugPanel.h"
 #include "CxParameterProfileRuntime.h"
+#include "CxScriptCasePackageWriter.h"
+#include "CxUnifiedLog.h"
 
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <fstream>
 
@@ -257,6 +261,320 @@ bool IsFindLineFindCircleContext(ManualTestContext& context)
     const ManualGaugeState& g = context.current_gauge;
     return (g.tool == "FindLine" || g.tool == "FindCircle") ||
            g.has_line_gauge || g.has_circle_gauge;
+}
+
+static std::string ToLowerAsciiLocal(std::string text)
+{
+  std::transform(text.begin(), text.end(), text.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  return text;
+}
+
+static bool ContainsNoCaseLocal(const std::string& text, const std::string& needle)
+{
+  return ToLowerAsciiLocal(text).find(ToLowerAsciiLocal(needle)) != std::string::npos;
+}
+
+static const RuntimeObjectView* FindPrimaryTorchRuntimeObjectLocal(
+    const ManualTestContext& context)
+{
+  const std::string& primary = context.current_gauge.primary_object_name;
+  if (!primary.empty())
+  {
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+      if ((object.type == "TorchTask" || object.type == "FindSegmentation") &&
+          object.name == primary)
+      {
+        return &object;
+      }
+    }
+  }
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "TorchTask")
+      return &object;
+  }
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "FindSegmentation")
+      return &object;
+  }
+  return nullptr;
+}
+
+bool IsTorchContext(const ManualTestContext& context)
+{
+  const std::string tool = ToLowerAsciiLocal(context.current_gauge.tool);
+  if (tool == "findsegmentation" || tool == "torchtask" ||
+      tool == "torch" || tool == "segmentation")
+    return true;
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "TorchTask" || object.type == "FindSegmentation")
+      return true;
+  }
+
+  return ContainsNoCaseLocal(context.loaded_script_path, "torch") ||
+         ContainsNoCaseLocal(context.loaded_script_path, "find_segmentation") ||
+         ContainsNoCaseLocal(context.editor_text, "TorchTask") ||
+         ContainsNoCaseLocal(context.editor_text, "FindSegmentation") ||
+         ContainsNoCaseLocal(context.editor_text, "torch.");
+}
+
+static void DrawReadonlyFieldLocal(const char* label, const std::string& value)
+{
+  ImGui::Text("%s: %s", label, value.empty() ? "-" : value.c_str());
+}
+
+static void DrawReadonlyFieldLocal(const char* label, int value)
+{
+  ImGui::Text("%s: %d", label, value);
+}
+
+static void DrawReadonlyFieldLocal(const char* label, double value)
+{
+  ImGui::Text("%s: %.3f", label, value);
+}
+
+static void DrawPendingBindingLineLocal(const char* label, const char* reason)
+{
+  ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.25f, 1.0f),
+                     "%s: pending_binding", label);
+  if (reason != nullptr && reason[0] != '\0')
+    ImGui::SameLine(), ImGui::TextDisabled("(%s)", reason);
+}
+
+void DrawTorchKeyStatusPanel(const ManualTestContext& context)
+{
+  const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
+
+  if (!ImGui::CollapsingHeader("Torch Inference Status", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    // Keep the following Torch sections independent.  Collapsing inference
+    // must not hide training/prompt status from the operator.
+  }
+  else
+  {
+    ImGui::TextWrapped(
+        "Read-only bridge for TorchTask / FindSegmentation runtime fields. "
+        "This panel displays existing headless/runtime refs; it does not claim detection acceptance.");
+
+    if (object == nullptr)
+    {
+      ImGui::TextColored(ImVec4(1.0f, 0.68f, 0.25f, 1.0f),
+                         "No TorchTask or FindSegmentation runtime object is available.");
+      ImGui::Text("script: %s", UiTextOrDash(context.loaded_script_path));
+    }
+    else
+    {
+      ImGui::Separator();
+      ImGui::Text("Primary Object: %s %s", object->type.c_str(), object->name.c_str());
+
+      if (object->type == "TorchTask")
+      {
+        DrawReadonlyFieldLocal("status", object->torch_status);
+        DrawReadonlyFieldLocal("reason", object->torch_reason);
+        DrawReadonlyFieldLocal("failure_stage", object->torch_failure_stage);
+        DrawReadonlyFieldLocal("ok", object->torch_ok);
+        DrawReadonlyFieldLocal("error_code", object->torch_error_code);
+        DrawReadonlyFieldLocal("actual_device", object->torch_actual_device);
+        DrawReadonlyFieldLocal("runtime infer_ms", object->torch_infer_ms);
+        DrawReadonlyFieldLocal("runtime total_ms", object->torch_total_ms);
+        DrawReadonlyFieldLocal("result_count", object->torch_result_count);
+        DrawReadonlyFieldLocal("mask_available", object->torch_mask_available);
+        DrawReadonlyFieldLocal("result_ref", object->torch_result_ref);
+        DrawReadonlyFieldLocal("evidence_ref", object->torch_evidence_ref);
+        DrawReadonlyFieldLocal("primary_visual_ref", object->torch_primary_visual_ref);
+        DrawReadonlyFieldLocal("mask_ref", object->torch_mask_ref);
+        DrawReadonlyFieldLocal("overlay_ref", object->torch_overlay_ref);
+        if (object->torch_result_count <= 0)
+        {
+          ImGui::TextColored(ImVec4(1.0f, 0.68f, 0.25f, 1.0f),
+                             "detection rectangle projection: PENDING_DATA");
+        }
+        ImGui::TextColored(ImVec4(0.60f, 0.82f, 1.0f, 1.0f),
+                           "semantic_quality: NOT_CLAIMED (runtime smoke / model unverified)");
+      }
+      else if (object->type == "FindSegmentation")
+      {
+        DrawReadonlyFieldLocal("backend", object->segmentation_backend);
+        DrawReadonlyFieldLocal("backend_status", object->segmentation_backend_status);
+        DrawReadonlyFieldLocal("device", object->segmentation_device);
+        DrawReadonlyFieldLocal("model_path", object->segmentation_model_path);
+        DrawReadonlyFieldLocal("status_code", object->segmentation_status_code);
+        DrawReadonlyFieldLocal("reason", object->segmentation_reason);
+        DrawReadonlyFieldLocal("result_ref", object->segmentation_result_ref);
+        DrawReadonlyFieldLocal("mask_ref", object->segmentation_mask_ref);
+        DrawReadonlyFieldLocal("overlay_ref", object->segmentation_overlay_ref);
+        DrawReadonlyFieldLocal("contour_ref", object->segmentation_contour_ref);
+        DrawReadonlyFieldLocal("contour_count", object->segmentation_contour_count);
+        DrawReadonlyFieldLocal("primary_area", object->segmentation_primary_area);
+        ImGui::TextColored(ImVec4(0.60f, 0.82f, 1.0f, 1.0f),
+                           "semantic_quality: NOT_CLAIMED (prompt/backend smoke)");
+      }
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Prompt / ROI", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (object == nullptr)
+    {
+      DrawPendingBindingLineLocal("prompt_rect", "run or select a TorchTask/FindSegmentation script first");
+      DrawPendingBindingLineLocal("positive_points", "pending runtime object");
+      DrawPendingBindingLineLocal("negative_points", "pending runtime object");
+    }
+    else if (object->type == "FindSegmentation")
+    {
+      ImGui::Text("prompt_rect: %s",
+                  object->segmentation_has_prompt_rect ? "available" : "pending_binding");
+      ImGui::Text("backend: %s", object->segmentation_backend.empty() ? "-" : object->segmentation_backend.c_str());
+      DrawPendingBindingLineLocal("positive_points", "UI edit/save binding not enabled yet");
+      DrawPendingBindingLineLocal("negative_points", "UI edit/save binding not enabled yet");
+    }
+    else
+    {
+      DrawPendingBindingLineLocal("prompt_rect", "TorchTask does not own manual prompt geometry");
+      DrawPendingBindingLineLocal("positive_points", "use FindSegmentation prompt tool");
+      DrawPendingBindingLineLocal("negative_points", "use FindSegmentation prompt tool");
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Torch Training Status", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (object == nullptr)
+    {
+      DrawPendingBindingLineLocal("training lifecycle", "run torch_train_lifecycle_direct_test.cxsc");
+    }
+    else if (object->type == "TorchTask")
+    {
+      DrawReadonlyFieldLocal("epoch", std::string("tiny smoke exposes lifecycle summary, not full epoch table"));
+      DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
+      DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
+      DrawReadonlyFieldLocal("train_ms", object->torch_train_ms);
+      DrawReadonlyFieldLocal("total_ms", object->torch_total_ms);
+      if (object->torch_trainer_lifecycle_summary.empty())
+        DrawPendingBindingLineLocal("epoch-loss detail", "not produced by this runtime object");
+    }
+    else
+    {
+      DrawPendingBindingLineLocal("training lifecycle", "FindSegmentation is inference/prompt object");
+    }
+  }
+}
+
+void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
+{
+  const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
+
+  if (ImGui::CollapsingHeader("Torch Artifact Evidence", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (object == nullptr)
+    {
+      ImGui::TextDisabled("No torch runtime object selected.");
+    }
+    else if (object->type == "TorchTask")
+    {
+      DrawReadonlyFieldLocal("mask_binary", object->torch_mask_ref);
+      DrawReadonlyFieldLocal("mask_overlay", object->torch_overlay_ref);
+      DrawReadonlyFieldLocal("contours", object->torch_primary_visual_ref);
+      DrawReadonlyFieldLocal("result_json", object->torch_result_ref);
+      DrawReadonlyFieldLocal("evidence_json", object->torch_evidence_ref);
+    }
+    else
+    {
+      DrawReadonlyFieldLocal("mask_binary", object->segmentation_mask_ref);
+      DrawReadonlyFieldLocal("mask_overlay", object->segmentation_overlay_ref);
+      DrawReadonlyFieldLocal("contours", object->segmentation_contour_ref);
+      DrawReadonlyFieldLocal("result_json", object->segmentation_result_ref);
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Shape Attach", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (object == nullptr)
+    {
+      ImGui::TextDisabled("No shape attach state.");
+    }
+    else if (object->type == "FindSegmentation")
+    {
+      ImGui::Text("boundary_polyline: %s",
+                  object->segmentation_has_boundary ? "available" : "pending");
+      ImGui::Text("boundary_bbox: %s",
+                  object->segmentation_has_boundary ? "available_from_contour" : "pending");
+      ImGui::Text("mask shape state: %s",
+                  object->segmentation_real_mask_attach_ready ? "attach_ready" : "pending_binding");
+      DrawReadonlyFieldLocal("contour_ref", object->segmentation_contour_ref);
+    }
+    else
+    {
+      ImGui::Text("boundary_polyline: %s",
+                  object->torch_primary_visual_ref.empty() ? "pending" : object->torch_primary_visual_ref.c_str());
+      ImGui::Text("boundary_bbox: %s",
+                  object->torch_result_count > 0 ? "available_if_projected" : "PENDING_DATA");
+      ImGui::Text("mask shape state: %s",
+                  object->torch_mask_available != 0 ? "mask_available" : "pending");
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Contract / Review", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    DrawReadonlyFieldLocal("contract_status", context.current_evidence_selection.status);
+    DrawReadonlyFieldLocal("contract_reason", context.current_evidence_selection.reason);
+    DrawReadonlyFieldLocal("human_review_status", context.current_gauge.review_status);
+    const bool promotionAllowed =
+        context.current_gauge.review_status == "accepted" &&
+        object != nullptr &&
+        ((object->type == "TorchTask" && object->torch_ok != 0) ||
+         (object->type == "FindSegmentation" && object->segmentation_real_mask_attach_ready));
+    ImGui::Text("promotion_allowed: %s", promotionAllowed ? "candidate_ready_for_gate" : "false");
+  }
+
+  if (ImGui::CollapsingHeader("Training Curve / Param Map", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    const ImVec2 plotSize(520.0f, 180.0f);
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImVec2 p1(p0.x + plotSize.x, p0.y + plotSize.y);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(p0, p1, IM_COL32(18, 18, 18, 255));
+    draw->AddRect(p0, p1, IM_COL32(230, 230, 230, 255));
+    for (int gx = 0; gx <= 8; ++gx)
+    {
+      const float x = p0.x + plotSize.x * gx / 8.0f;
+      draw->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), IM_COL32(75, 75, 75, 180));
+    }
+    for (int gy = 0; gy <= 4; ++gy)
+    {
+      const float y = p0.y + plotSize.y * gy / 4.0f;
+      draw->AddLine(ImVec2(p0.x, y), ImVec2(p1.x, y), IM_COL32(75, 75, 75, 180));
+    }
+    draw->AddText(ImVec2(p0.x + 8.0f, p0.y + 6.0f),
+                  IM_COL32(240, 240, 240, 255),
+                  "epoch-loss / IoU curve");
+    draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
+                  IM_COL32(255, 210, 80, 255),
+                  "pending real curve samples");
+    if (object != nullptr && object->type == "TorchTask" &&
+        !object->torch_trainer_lifecycle_summary.empty())
+    {
+      draw->AddCircleFilled(ImVec2(p0.x + plotSize.x * 0.85f, p0.y + plotSize.y * 0.35f),
+                            5.0f,
+                            IM_COL32(120, 255, 160, 255));
+      draw->AddText(ImVec2(p0.x + plotSize.x * 0.85f + 8.0f, p0.y + plotSize.y * 0.35f - 8.0f),
+                    IM_COL32(220, 255, 220, 255),
+                    "best checkpoint marker");
+    }
+    ImGui::Dummy(plotSize);
+    if (object != nullptr && object->type == "TorchTask")
+    {
+      DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
+      DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
+    }
+  }
 }
 
 void DrawKeyParameterUnavailableNotice(const ManualTestContext& context)
@@ -731,6 +1049,180 @@ static const RuntimeObjectView* FindCurrentFindLineObject(
   return nullptr;
 }
 
+static ManualFindLineEdgeParamState MakeFindLineEdgeParamsFromGauge(
+    const ManualGaugeState& gauge)
+{
+  ManualFindLineEdgeParamState params;
+  params.initialized = true;
+  params.threshold = gauge.threshold;
+  params.method = gauge.method;
+  params.linegap = gauge.linegap;
+  params.wgap = gauge.wgap;
+  params.hgap = gauge.hgap;
+  params.filterprofile = gauge.filterprofile;
+  return params;
+}
+
+static void ApplyFindLineEdgeParamsToGauge(
+    const ManualFindLineEdgeParamState& params,
+    ManualGaugeState& gauge)
+{
+  gauge.threshold = params.threshold;
+  gauge.method = params.method;
+  gauge.linegap = params.linegap;
+  gauge.wgap = params.wgap;
+  gauge.hgap = params.hgap;
+  gauge.filterprofile = params.filterprofile;
+}
+
+static void EnsureFindLineEdgeParamStorage(ManualTestContext& context)
+{
+  context.findline_scan_edge_count =
+      std::max(1, std::min(16, context.findline_scan_edge_count));
+  context.findline_selected_scan_edge =
+      std::max(0, std::min(context.findline_selected_scan_edge,
+                           context.findline_scan_edge_count));
+
+  const std::size_t required =
+      static_cast<std::size_t>(context.findline_scan_edge_count + 1);
+  if (context.findline_edge_params.size() < required)
+    context.findline_edge_params.resize(required);
+
+  for (int i = 1; i <= context.findline_scan_edge_count; ++i)
+  {
+    ManualFindLineEdgeParamState& params =
+        context.findline_edge_params[static_cast<std::size_t>(i)];
+    if (!params.initialized)
+      params = MakeFindLineEdgeParamsFromGauge(context.current_gauge);
+  }
+}
+
+static bool DrawFindLineEdgeSelectorPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindLine" ||
+        context.current_gauge.has_line_gauge))
+  {
+    return false;
+  }
+
+  bool edited = false;
+  EnsureFindLineEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Detection Edge / Point Column");
+  ImGui::TextDisabled(
+      "Select which gauge side/point column is being tuned.  Edge-specific values are saved to globals for evidence replay.");
+
+  ImGui::SetNextItemWidth(100.0f);
+  int edgeCount = context.findline_scan_edge_count;
+  if (ImGui::InputInt("edge count", &edgeCount))
+  {
+    context.findline_scan_edge_count = std::max(1, std::min(16, edgeCount));
+    if (context.findline_selected_scan_edge >
+        context.findline_scan_edge_count)
+    {
+      context.findline_selected_scan_edge =
+          context.findline_scan_edge_count;
+    }
+    EnsureFindLineEdgeParamStorage(context);
+    edited = true;
+  }
+
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(190.0f);
+  std::string currentLabel = context.findline_selected_scan_edge == 0
+      ? "All edges"
+      : ("Edge " + std::to_string(context.findline_selected_scan_edge));
+  if (ImGui::BeginCombo("selected edge", currentLabel.c_str()))
+  {
+    const bool selectedAll = context.findline_selected_scan_edge == 0;
+    if (ImGui::Selectable("All edges", selectedAll))
+    {
+      context.findline_selected_scan_edge = 0;
+      edited = true;
+    }
+    for (int i = 1; i <= context.findline_scan_edge_count; ++i)
+    {
+      const std::string label = "Edge " + std::to_string(i);
+      const bool selected = context.findline_selected_scan_edge == i;
+      if (ImGui::Selectable(label.c_str(), selected))
+      {
+        context.findline_selected_scan_edge = i;
+        EnsureFindLineEdgeParamStorage(context);
+        ApplyFindLineEdgeParamsToGauge(
+            context.findline_edge_params[static_cast<std::size_t>(i)],
+            context.current_gauge);
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+
+  if (context.findline_selected_scan_edge > 0)
+  {
+    ManualFindLineEdgeParamState& params =
+        context.findline_edge_params[
+            static_cast<std::size_t>(context.findline_selected_scan_edge)];
+    params.initialized = true;
+
+    ImGui::Text("Current: Edge %d / %d",
+                context.findline_selected_scan_edge,
+                context.findline_scan_edge_count);
+
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge threshold", &params.threshold);
+    params.threshold = std::max(0, std::min(255, params.threshold));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge method", &params.method);
+    params.method = std::max(0, std::min(3, params.method));
+
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge linegap", &params.linegap);
+    params.linegap = std::max(0, std::min(50, params.linegap));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge wgap", &params.wgap);
+    params.wgap = std::max(0, std::min(50, params.wgap));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge hgap", &params.hgap);
+    params.hgap = std::max(0, std::min(50, params.hgap));
+
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("edge filterprofile", &params.filterprofile);
+    params.filterprofile = std::max(0, std::min(10, params.filterprofile));
+
+    if (edited)
+      ApplyFindLineEdgeParamsToGauge(params, context.current_gauge);
+
+    if (ImGui::Button("Copy Current Edge Params To All"))
+    {
+      for (int i = 1; i <= context.findline_scan_edge_count; ++i)
+      {
+        context.findline_edge_params[static_cast<std::size_t>(i)] = params;
+        context.findline_edge_params[static_cast<std::size_t>(i)].initialized = true;
+      }
+      edited = true;
+    }
+  }
+  else
+  {
+    ImGui::TextDisabled(
+        "All edges selected: Geometry/Edge Params below edit the shared baseline.");
+    if (ImGui::Button("Copy Shared Params To All Edges"))
+    {
+      const ManualFindLineEdgeParamState params =
+          MakeFindLineEdgeParamsFromGauge(context.current_gauge);
+      for (int i = 1; i <= context.findline_scan_edge_count; ++i)
+        context.findline_edge_params[static_cast<std::size_t>(i)] = params;
+      edited = true;
+    }
+  }
+
+  return edited;
+}
+
 static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
 {
   if (!(context.current_gauge.tool == "FindLine" ||
@@ -793,6 +1285,7 @@ static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
 void DrawKeyParameterControlPanel(ManualTestContext& context)
 {
   ManualGaugeState& gauge = context.current_gauge;
+  bool gaugeEdited = false;
 
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
@@ -802,6 +1295,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   {
       ImGui::Checkbox("Show single-line gauge scan ticks",
                       &context.show_line_gauge_scan_lines);
+      gaugeEdited |= DrawFindLineEdgeSelectorPanel(context);
       DrawFindLineScanSemanticsPanel(context);
   }
   ImGui::Separator();
@@ -812,22 +1306,22 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::PushID("geometry");
       if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
       {
-          ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("cx", &gauge.circle_cx);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("cy", &gauge.circle_cy);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("radius", &gauge.radius);
+          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("cx", &gauge.circle_cx);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("cy", &gauge.circle_cy);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("radius", &gauge.radius);
 
-          ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("inner_radius", &gauge.inner_radius);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("outer_radius", &gauge.outer_radius);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("gap", &gauge.gap);
+          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("inner_radius", &gauge.inner_radius);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("outer_radius", &gauge.outer_radius);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("gap", &gauge.gap);
       }
       else
       {
-          ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("x0", &gauge.line_x0);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("y0", &gauge.line_y0);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("half_width", &gauge.tool_half_width);
+          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("x0", &gauge.line_x0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("y0", &gauge.line_y0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("half_width", &gauge.tool_half_width);
 
-          ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("x1", &gauge.line_x1);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ImGui::InputInt("y1", &gauge.line_y1);
+          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("x1", &gauge.line_x1);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("y1", &gauge.line_y1);
       }
       ImGui::PopID();
   }
@@ -839,50 +1333,77 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
 
       ImGui::TextUnformatted("threshold");
       ImGui::SameLine(80.0f);
-      ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##threshold", &gauge.threshold, 0, 255);
-      ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##t_val", &gauge.threshold);
+      ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##threshold", &gauge.threshold, 0, 255);
+      ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##t_val", &gauge.threshold);
       gauge.threshold = std::max(0, std::min(255, gauge.threshold));
 
       ImGui::TextUnformatted("method");
       ImGui::SameLine(80.0f);
       const char* methods[] = {"0", "1", "2", "3"};
-      ImGui::SetNextItemWidth(100.0f); ImGui::Combo("##method", &gauge.method, methods, IM_ARRAYSIZE(methods));
+      ImGui::SetNextItemWidth(100.0f); gaugeEdited |= ImGui::Combo("##method", &gauge.method, methods, IM_ARRAYSIZE(methods));
 
       ImGui::TextUnformatted("linegap");
       ImGui::SameLine(80.0f);
-      ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##linegap", &gauge.linegap, 0, 50);
-      ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##lg_val", &gauge.linegap);
+      ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##linegap", &gauge.linegap, 0, 50);
+      ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##lg_val", &gauge.linegap);
       gauge.linegap = std::max(0, std::min(50, gauge.linegap));
 
       if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
       {
           ImGui::TextUnformatted("gap");
           ImGui::SameLine(80.0f);
-          ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##gap", &gauge.gap, 0, 200);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##gap_val", &gauge.gap);
+          ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##gap", &gauge.gap, 0, 200);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##gap_val", &gauge.gap);
           gauge.gap = std::max(0, std::min(200, gauge.gap));
       }
       else
       {
           ImGui::TextUnformatted("wgap");
           ImGui::SameLine(80.0f);
-          ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##wgap", &gauge.wgap, 0, 50);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##wg_val", &gauge.wgap);
+          ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##wgap", &gauge.wgap, 0, 50);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##wg_val", &gauge.wgap);
           gauge.wgap = std::max(0, std::min(50, gauge.wgap));
 
           ImGui::TextUnformatted("hgap");
           ImGui::SameLine(80.0f);
-          ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##hgap", &gauge.hgap, 0, 50);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##hg_val", &gauge.hgap);
+          ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##hgap", &gauge.hgap, 0, 50);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##hg_val", &gauge.hgap);
           gauge.hgap = std::max(0, std::min(50, gauge.hgap));
 
           ImGui::TextUnformatted("filterprofile");
           ImGui::SameLine(80.0f);
-          ImGui::SetNextItemWidth(180.0f); ImGui::SliderInt("##fp", &gauge.filterprofile, 0, 10);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); ImGui::InputInt("##fp_val", &gauge.filterprofile);
+          ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##fp", &gauge.filterprofile, 0, 10);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##fp_val", &gauge.filterprofile);
           gauge.filterprofile = std::max(0, std::min(10, gauge.filterprofile));
       }
       ImGui::PopID();
+  }
+
+  if (gaugeEdited)
+  {
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+    ++context.key_parameter_edit_revision;
+    context.last_key_parameter_edit_summary =
+        "threshold=" + std::to_string(gauge.threshold) +
+        " method=" + std::to_string(gauge.method) +
+        " linegap=" + std::to_string(gauge.linegap) +
+        " wgap=" + std::to_string(gauge.wgap) +
+        " hgap=" + std::to_string(gauge.hgap) +
+        " filterprofile=" + std::to_string(gauge.filterprofile) +
+        " selected_edge=" +
+        std::to_string(context.findline_selected_scan_edge) +
+        "/" + std::to_string(context.findline_scan_edge_count) +
+        " roi=(" + std::to_string(gauge.line_x0) + "," +
+        std::to_string(gauge.line_y0) + "," +
+        std::to_string(gauge.line_x1) + "," +
+        std::to_string(gauge.line_y1) + ")";
+    CXLOG_INFO(
+        "KeyParameterControls",
+        "key_parameter_ui_edit",
+        "edited",
+        "revision=" + std::to_string(context.key_parameter_edit_revision) +
+        " " + context.last_key_parameter_edit_summary);
   }
 
   ImGui::Separator();
@@ -893,7 +1414,6 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   ImGui::PushID("actions");
   if (ImGui::Button("Apply To Gauge", ImVec2(btnWidth, 0)))
   {
-    SyncKeyParameterUiToGauge(context);
     gauge.dirty = true;
     gauge.review_status = "editing";
   }
@@ -905,14 +1425,70 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   ImGui::SameLine();
   if (ImGui::Button("Run Script", ImVec2(btnWidth, 0)))
   {
-    context.run_state = "running";
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+    context.debug_action = "Key Parameter Controls Run Script";
+    if (ApplyManualGaugeToGlobals(context))
+    {
+      context.pending_execution_gauge = context.current_gauge;
+      context.pending_execution_globals = context.runtime_int_vars;
+      context.has_pending_execution_snapshot = true;
+      context.debug_status = "MANUAL_RUN_REQUESTED";
+      context.debug_reason =
+          "Run requested from Key Parameter Controls; Debug Compiler will execute exact Script Editor text";
+      context.run_state = "running";
+    }
   }
 
-  if (ImGui::Button("Save Candidate", ImVec2(btnWidth, 0)))
+  if (ImGui::Button("Save Draft Candidate", ImVec2(btnWidth, 0)))
   {
-    SyncKeyParameterUiToGauge(context);
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+    context.debug_action = "Save Evidence Candidate";
+    if (ApplyManualGaugeToGlobals(context))
+    {
+      CxEvidenceCandidateSaveOptions options;
+      options.mode = "draft";
+      options.request_run = false;
+      CxEvidenceCandidateSaveResult result;
+      if (!SaveEvidenceCandidatePackage(context, options, result))
+      {
+        context.debug_status = "EVIDENCE_CANDIDATE_SAVE_FAILED";
+        context.debug_reason = result.reason;
+      }
+    }
   }
   ImGui::SameLine();
+  if (ImGui::Button("Save And Run Candidate", ImVec2(btnWidth, 0)))
+  {
+    gauge.dirty = true;
+    gauge.review_status = "editing";
+    context.debug_action = "Save And Run Evidence Candidate";
+    if (ApplyManualGaugeToGlobals(context))
+    {
+      // Freeze exactly what was saved.  The Debug Compiler executes on a
+      // later UI pass, after Evidence rows and runtime results may refresh.
+      context.pending_execution_gauge = context.current_gauge;
+      context.pending_execution_globals = context.runtime_int_vars;
+      context.has_pending_execution_snapshot = true;
+      CxEvidenceCandidateSaveOptions options;
+      options.mode = "run_requested";
+      options.request_run = true;
+      CxEvidenceCandidateSaveResult result;
+      if (!SaveEvidenceCandidatePackage(context, options, result))
+      {
+        context.debug_status = "EVIDENCE_CANDIDATE_SAVE_FAILED";
+        context.debug_reason = result.reason;
+      }
+      else
+      {
+        // This identifier is the durable run request.  Do not use the mutable
+        // Debug UI status as the only trigger for a deferred candidate run.
+        context.pending_execution_candidate_id = result.candidate_id;
+      }
+    }
+  }
+
   if (ImGui::Button("Reset", ImVec2(btnWidth, 0)))
   {
     ResetKeyParameterUiDefaults(context);

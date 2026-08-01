@@ -2489,3 +2489,229 @@ headless_globals.cxsc 声明变量
 globals value 文件 / manifest / suite / CLI override 提供值
 C++ 循环绑定变量
 cxscript 直接读取 global_xxx
+
+
+##算法原子化与观测基础面约束
+
+后续算子和底层算法允许渐进式优化、拆分、原子化，但必须遵守一条主线：
+已验证算法、已验证参数、已验证流程不得被新调试显示、GUI 工具层、Headless 包装层或新优化分支隐式改写。
+它们必须长期作为观测基础面和回归基准存在。
+
+核心约束：
+原有已验证函数必须保持语义冻结，
+例如 FindLine::Measure、既定 ROI、threshold、method、gap、linegap、tool_half_width、调用顺序和结果读取字段。
+新优化只能新增函数或新增显式分支，例如 MeasureRobust、MeasureFast、MeasureConnectedComponents、MeasurePeakLocalBFS，不得复写原函数语义。
+新分支不得修改原链路共享状态的默认行为，包括中间图、backimage、ROI、threshold 极性、扫描线生成、结果过滤、结果 gate。
+GUI、Headless、CxScript、Suite、Report 只能观察和调用算法，不得在显示层自动修正参数、切换算法分支、改 ROI、改阈值、补 fallback 后宣称原算法通过。
+已验证链路必须固定为 baseline：同图、同 ROI、同参数、同脚本、同调用顺序、同结果字段、同证据输出。
+每个新算法分支必须有独立 case 名、独立 result 字段、独立 evidence ref，并和 baseline 做对照，不允许混用结果。
+任何优化结果必须同时报告三类结论：baseline 是否保持、新分支是否成立、两者差异是什么。
+如果 baseline 因新代码失败，优先视为集成回归，不允许先通过调参、换图、换 ROI、换入口解释掉。
+调试日志、overlay、GUI 元素、HTML 报告只能作为证据层，不能反向改变算法输入和运行流程。
+所有显示层和工具层只能读取统一结果对象，不得直接读取或持有算法对象裸指针、共享 Image、Shape 内部状态。
+#
+已验证算法链路是观测基础面，不是调试对象；新优化只能旁路新增、显式切换、独立验收，不能隐式污染 baseline。
+#
+Baseline Regression：证明旧算法旧参数旧流程仍然输出原结果。
+Branch Validation：证明新分支在同一输入下输出可解释结果。
+Compare Evidence：证明速度、精度、稳定性差异来自算法分支，而不是入口、参数、ROI、显示层或结果捕获差异。
+Promotion Gate：只有 baseline 未回归、新分支证据完整、人工确认后，才允许把新分支提升为默认链路。
+ 
+
+
+# Evidence Chain 标准约束
+
+Evidence Chain 是脚本、图片、Gauge、参数、结果和人工复核的唯一追溯主线。
+
+## 1. 唯一保存入口
+
+参数修改、脚本修改、Gauge 拖拽后，禁止只停留在 UI 内存状态。
+
+必须通过统一入口保存：
+
+```text
+Save Evidence Candidate
+Save And Run Evidence Candidate
+```
+
+保存后必须生成 Candidate Evidence Package。
+
+禁止把以下操作当成证据链保存：
+
+```text
+Apply To Gauge
+Apply To Globals
+Script Editor Save
+Run Script
+```
+
+## 2. Candidate 包要求
+
+Candidate 必须写入：
+
+```text
+cxscript_runs/evidence_candidates/<case_id>/<candidate_id>/
+```
+
+至少包含：
+
+```text
+evidence_binding.json
+script_snapshot.cxsc
+parameter_snapshot.cxsc
+gauge_annotation.json
+analysis_state.json
+runtime_globals.json
+result_summary.json
+line_trace.json
+log.txt
+```
+
+缺少结果图或运行资产时，必须在 `result_summary.json` 中标记：
+
+```text
+asset_missing = true
+```
+
+不得伪造完整结果。
+
+## 3. Evidence Row 必须可恢复
+
+每条 Evidence row 必须能恢复：
+
+```text
+case_id
+image_id / image_path
+target_id
+tool
+script_id / script_path
+parameter_summary
+gauge_snapshot
+primary_object
+runtime_result
+review_status
+evidence_status
+```
+
+双击或选择 Evidence row 后，必须恢复：
+
+```text
+Image View
+Script Editor
+Key Parameter Controls
+Gauge
+Primary Object
+```
+
+## 4. 状态分类
+
+Evidence Chain 第一层按状态分类：
+
+```text
+Verified
+To Verify
+Defect
+Process Validation
+```
+
+第二层按工具分类：
+
+```text
+FindLine
+FindCircle
+FindEllipse
+FindRect
+FindObject
+FastMatch
+FindSegmentation
+Integration
+Module
+```
+
+禁止只按工具分类而丢失状态分类。
+
+## 5. 修改流转
+
+标准流转：
+
+```text
+Select Evidence
+Edit Gauge / Params / Script
+Save Evidence Candidate
+Run Candidate
+Review Result
+Human Confirm
+Promote To Verified
+```
+
+自动运行只能进入：
+
+```text
+To Verify
+Defect
+Process Validation
+```
+
+禁止自动写入：
+
+```text
+Verified
+ACCEPTED
+MANUAL_GUI_PASS
+```
+
+## 6. 脚本保护
+
+禁止直接覆盖 catalog / frozen / baseline 脚本。
+
+脚本修改必须保存为：
+
+```text
+script_snapshot.cxsc
+```
+
+并作为 Candidate 进入 `To Verify`。
+
+## 7. 运行结果要求
+
+运行后必须回收真实 runtime result。
+
+无真实结果时只能标记：
+
+```text
+runtime_result = pending / failed / unavailable
+asset_missing = true
+```
+
+禁止伪造 PASS。
+
+## 8. Primary Object
+
+脚本中存在多个工具对象时，必须选择 Primary Object。
+
+未解析时显示：
+
+```text
+Primary Object: unresolved
+```
+
+此时不得 Promote。
+
+## 9. 人工确认
+
+只有人工明确确认后，Candidate 才能进入：
+
+```text
+Verified
+```
+
+人工确认前，最多只能是：
+
+```text
+To Verify
+```
+```
+
+```text
+所有人工/AI/Headless 对脚本、参数、Gauge 的修改，都必须保存为 Evidence Candidate；Verified 只能由人工确认后的 Candidate 晋升产生。
+```

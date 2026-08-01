@@ -118,6 +118,20 @@ namespace
     return value.empty() ? "(none)" : value.c_str();
   }
 
+  void DrawCxImGuiFrameBackground()
+  {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (viewport == nullptr) return;
+
+    ImDrawList* background = ImGui::GetBackgroundDrawList();
+    if (background == nullptr) return;
+
+    const ImVec2 min = viewport->Pos;
+    const ImVec2 max(viewport->Pos.x + viewport->Size.x,
+                     viewport->Pos.y + viewport->Size.y);
+    background->AddRectFilled(min, max, IM_COL32(55, 55, 55, 255));
+  }
+
   bool evidencePathHasAny(
       const std::string& scriptPath,
       std::initializer_list<const char*> tokens)
@@ -173,6 +187,13 @@ namespace
         {"find_segmentation", "findsegmentation", "FindSegmentation"});
   }
 
+  bool evidencePathIsTorchTask(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"torch", "TorchTask", "deeplab", "yolo"});
+  }
+
   std::string inferEvidenceToolFromScriptPath(const std::string& scriptPath)
   {
     if (evidencePathIsFindCircle(scriptPath))
@@ -187,6 +208,8 @@ namespace
       return "FastMatch";
     if (evidencePathIsFindSegmentation(scriptPath))
       return "FindSegmentation";
+    if (evidencePathIsTorchTask(scriptPath))
+      return "TorchTask";
     return "";
   }
 
@@ -747,6 +770,83 @@ namespace
       result.valid_points_count = object.valid_points_count;
       result.has_measure_points = object.has_measure_points;
       result.has_fit_result = object.segmentation_has_boundary;
+      result.result_ref = object.segmentation_result_ref;
+      result.evidence_ref = object.segmentation_contour_ref;
+      result.segmentation_backend_status = object.segmentation_backend_status;
+      result.segmentation_result_ref = object.segmentation_result_ref;
+      result.segmentation_mask_ref = object.segmentation_mask_ref;
+      result.segmentation_contour_ref = object.segmentation_contour_ref;
+      result.segmentation_overlay_ref = object.segmentation_overlay_ref;
+      result.segmentation_contour_count = object.segmentation_contour_count;
+      result.segmentation_primary_area = object.segmentation_primary_area;
+    }
+    else if (object.type == "TorchTask")
+    {
+      result.algorithm_status = object.torch_status.empty()
+          ? object.runtime_state
+          : object.torch_status;
+      result.algorithm_reason =
+          "TorchTask status=" + result.algorithm_status +
+          " device=" + object.torch_actual_device +
+          " ok=" + std::to_string(object.torch_ok) +
+          " error_code=" + std::to_string(object.torch_error_code) +
+          " result_ref=" + object.torch_result_ref +
+          " evidence_ref=" + object.torch_evidence_ref +
+          " primary_visual_ref=" + object.torch_primary_visual_ref +
+          " mask_ref=" + object.torch_mask_ref +
+          " overlay_ref=" + object.torch_overlay_ref +
+          " result_count=" + std::to_string(object.torch_result_count) +
+          " mask_available=" + std::to_string(object.torch_mask_available) +
+          " semantic_quality=NOT_CLAIMED";
+      if (!object.torch_failure_stage.empty())
+      {
+        result.algorithm_reason +=
+            " failure_stage=" + object.torch_failure_stage;
+      }
+      if (!object.torch_reason.empty())
+      {
+        result.algorithm_reason +=
+            " reason=" + object.torch_reason;
+      }
+      if (!object.torch_trainer_lifecycle_summary.empty())
+      {
+        result.algorithm_reason +=
+            " trainer_lifecycle_summary=" +
+            object.torch_trainer_lifecycle_summary;
+      }
+      if (!object.torch_unified_mainline_summary.empty())
+      {
+        result.algorithm_reason +=
+            " unified_mainline_summary=" +
+            object.torch_unified_mainline_summary;
+      }
+      result.measure_points_count = object.torch_result_count;
+      result.valid_points_count = object.torch_result_count;
+      result.has_measure_points =
+          object.torch_result_count > 0 ||
+          object.torch_mask_available != 0 ||
+          !object.torch_mask_ref.empty() ||
+          !object.torch_overlay_ref.empty();
+      result.has_fit_result = object.torch_ok != 0;
+      result.result_ref = object.torch_result_ref;
+      result.evidence_ref = object.torch_evidence_ref;
+      result.torch_result_ref = object.torch_result_ref;
+      result.torch_evidence_ref = object.torch_evidence_ref;
+      result.torch_primary_visual_ref = object.torch_primary_visual_ref;
+      result.torch_mask_ref = object.torch_mask_ref;
+      result.torch_overlay_ref = object.torch_overlay_ref;
+      result.torch_actual_device = object.torch_actual_device;
+      result.torch_trainer_lifecycle_summary =
+          object.torch_trainer_lifecycle_summary;
+      result.torch_unified_mainline_summary =
+          object.torch_unified_mainline_summary;
+      result.torch_ok = object.torch_ok;
+      result.torch_error_code = object.torch_error_code;
+      result.torch_result_count = object.torch_result_count;
+      result.torch_mask_available = object.torch_mask_available;
+      result.torch_infer_ms = object.torch_infer_ms;
+      result.torch_train_ms = object.torch_train_ms;
+      result.torch_total_ms = object.torch_total_ms;
     }
   }
 
@@ -1828,6 +1928,17 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     const std::string& parameterSummary,
     std::string& reason)
 {
+    return ApplyEvidenceParameterSummaryToRuntimeGlobals(
+        m_manualTest,
+        parameterSummary,
+        reason);
+}
+
+bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
+    ManualTestContext& context,
+    const std::string& parameterSummary,
+    std::string& reason)
+{
     reason.clear();
 
     if (parameterSummary.empty() || parameterSummary == "-")
@@ -1867,7 +1978,7 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
             return false;
         }
 
-        m_manualTest.runtime_int_vars[globalName] = value;
+        context.runtime_int_vars[globalName] = value;
         return true;
     };
 
@@ -1953,47 +2064,6 @@ bool ViewController::ResolveEvidenceSelfTestSnapshot(
 
     EnsureCxScriptWorkbenchAssetsLoaded();
 
-    if (!request.script_path.empty() || !request.image_path.empty() ||
-        !request.parameter_summary.empty())
-    {
-        std::string scriptPath = request.script_path;
-        if (scriptPath.empty() && !request.script_id.empty())
-            scriptPath = ResolveCatalogScriptPathById(request.script_id);
-
-        if (scriptPath.empty())
-        {
-            reason = "synthetic evidence request has empty script_path";
-            return false;
-        }
-
-        const bool isDeprecatedScript =
-            scriptPath.find("/deprecated/") != std::string::npos ||
-            scriptPath.find("\\deprecated\\") != std::string::npos ||
-            scriptPath.find("deprecated/") == 0 ||
-            scriptPath.find("deprecated\\") == 0;
-        if (isDeprecatedScript)
-        {
-            reason = "deprecated cxscript cannot be used as Evidence binding: " +
-                     scriptPath;
-            return false;
-        }
-
-        snapshot.valid = true;
-        snapshot.case_id = request.case_id;
-        snapshot.script_id = request.script_id.empty() ? scriptPath : request.script_id;
-        snapshot.script_path = scriptPath;
-        snapshot.image_id = request.image_id;
-        snapshot.image_path = request.image_path;
-        snapshot.target_id = request.target_id;
-        snapshot.tool = request.tool;
-        snapshot.parameter_summary = request.parameter_summary;
-        snapshot.parameter_profile_id = request.parameter_summary;
-        snapshot.status = "synthetic";
-        snapshot.reason = "synthetic evidence lock pipeline case";
-        snapshot.source = "evidence_lock_pipeline";
-        return true;
-    }
-
     if (request.group_index >= 0 && request.thumb_index >= 0)
     {
         if (request.group_index >=
@@ -2018,6 +2088,36 @@ bool ViewController::ResolveEvidenceSelfTestSnapshot(
             group.thumbs[request.thumb_index],
             snapshot,
             reason);
+    }
+
+    if (!request.script_path.empty() || !request.image_path.empty() ||
+        !request.parameter_summary.empty())
+    {
+        std::string scriptPath = request.script_path;
+        if (scriptPath.empty() && !request.script_id.empty())
+            scriptPath = ResolveCatalogScriptPathById(request.script_id);
+
+        if (scriptPath.empty())
+        {
+            reason = "synthetic evidence request has empty script_path";
+            return false;
+        }
+
+        snapshot.valid = true;
+        snapshot.case_id = request.case_id;
+        snapshot.script_id = request.script_id.empty() ? scriptPath : request.script_id;
+        snapshot.script_path = scriptPath;
+        snapshot.image_id = request.image_id;
+        snapshot.image_path = request.image_path;
+        snapshot.target_id = request.target_id;
+        snapshot.tool = request.tool;
+        snapshot.parameter_summary = request.parameter_summary;
+        snapshot.parameter_profile_id = request.parameter_summary;
+        snapshot.status = "synthetic";
+        snapshot.reason = "synthetic evidence lock pipeline case";
+        snapshot.source = "evidence_lock_pipeline";
+        EnrichSemanticEvidenceSnapshotEditableObjectsLocal(snapshot);
+        return true;
     }
 
     if (!request.script_id.empty())
@@ -2455,6 +2555,33 @@ bool ViewController::RunEvidenceChainSelfTest(
         {
             paramApplyReason += " | " + scriptGlobalReason;
         }
+
+        auto stageTorchOutputInt = [&](const char* name)
+        {
+            if (scriptContainsIdentifier(scriptTextForGlobals, name) &&
+                m_manualTest.runtime_int_vars.find(name) ==
+                    m_manualTest.runtime_int_vars.end())
+            {
+                m_manualTest.runtime_int_vars[name] = 0;
+            }
+        };
+
+        auto stageTorchOutputDouble = [&](const char* name)
+        {
+            if (scriptContainsIdentifier(scriptTextForGlobals, name))
+            {
+                m_parserDebugBridge.SetGlobalDouble(name, 0.0);
+            }
+        };
+
+        stageTorchOutputInt("global_headless_ok");
+        stageTorchOutputInt("global_torch_ok");
+        stageTorchOutputInt("global_torch_mask_available");
+        stageTorchOutputInt("global_torch_result_count");
+        stageTorchOutputInt("global_torch_error_code");
+        stageTorchOutputDouble("global_torch_infer_ms");
+        stageTorchOutputDouble("global_torch_train_ms");
+        stageTorchOutputDouble("global_torch_total_ms");
     }
     else
     {
@@ -2934,6 +3061,9 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
         expectedType = "FastMatch";
     else if (evidencePathIsFindSegmentation(snapshot.script_path))
         expectedType = "FindSegmentation";
+    else if (snapshot.tool == "TorchTask" ||
+             evidencePathIsTorchTask(snapshot.script_path))
+        expectedType = "TorchTask";
 
     if (expectedType.empty())
     {
@@ -3025,12 +3155,30 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
 
     if (result.shape_element_count_after <= 0)
     {
+        if ((snapshot.tool == "TorchTask" ||
+             evidencePathIsTorchTask(snapshot.script_path)) &&
+            result.runtime_object_type == "TorchTask")
+        {
+            result.gauge_projection_ok = true;
+            result.shape_projection_ok = true;
+            result.shape_element_count = 0;
+            result.gauge_shape_count = 0;
+            result.result_shape_count = 0;
+            result.projection_reason =
+                "TorchTask artifact evidence projection available; no editable geometry gauge is required";
+            result.gauge_status = "torch_artifact_only";
+            reason = result.projection_reason;
+            return true;
+        }
+
         reason = "projection failed: annotation layer has no shape elements";
         return false;
     }
 
     bool hasEditableGauge = false;
     bool hasResultElement = false;
+    const bool isFindSegmentationScript =
+        evidencePathIsFindSegmentation(snapshot.script_path);
     int visibleCount = 0;
     int gaugeCount = 0;
     int resultCount = 0;
@@ -3048,8 +3196,16 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
             ++gaugeCount;
         }
 
-        if (element.result_element &&
-            element.semantic_role == "result")
+        const bool isStandardResult =
+            element.result_element &&
+            element.semantic_role == "result";
+        const bool isSegmentationAttachResult =
+            isFindSegmentationScript &&
+            element.result_element &&
+            (element.semantic_role == "boundary" ||
+             element.semantic_role == "boundary_bbox");
+
+        if (isStandardResult || isSegmentationAttachResult)
         {
             hasResultElement = true;
             ++resultCount;
@@ -3104,6 +3260,8 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
         evidencePathIsFindEllipse(snapshot.script_path) ||
         evidencePathIsFindRect(snapshot.script_path) ||
         evidencePathIsFindSegmentation(snapshot.script_path) ||
+        snapshot.tool == "TorchTask" ||
+        evidencePathIsTorchTask(snapshot.script_path) ||
         evidencePathIsFastMatch(snapshot.script_path);
 
     if (!requiresResult)
@@ -3115,6 +3273,52 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
 
     if (result.result_shape_count <= 0)
     {
+        if ((snapshot.tool == "TorchTask" ||
+             evidencePathIsTorchTask(snapshot.script_path)) &&
+            result.runtime_object_type == "TorchTask")
+        {
+            bool hasTorchArtifactEvidence = false;
+            std::string artifactReason;
+
+            for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+            {
+                if (object.name == result.runtime_object_name &&
+                    object.type == "TorchTask")
+                {
+                    hasTorchArtifactEvidence =
+                        object.torch_ok != 0 &&
+                        (!object.torch_result_ref.empty() ||
+                         !object.torch_evidence_ref.empty() ||
+                         !object.torch_primary_visual_ref.empty() ||
+                         !object.torch_mask_ref.empty() ||
+                         !object.torch_overlay_ref.empty() ||
+                         !object.torch_trainer_lifecycle_summary.empty() ||
+                         !object.torch_unified_mainline_summary.empty());
+
+                    artifactReason =
+                        "TorchTask artifact evidence: status=" +
+                        object.torch_status +
+                        " device=" + object.torch_actual_device +
+                        " result_ref=" + object.torch_result_ref +
+                        " evidence_ref=" + object.torch_evidence_ref +
+                        " primary_visual_ref=" + object.torch_primary_visual_ref +
+                        " mask_ref=" + object.torch_mask_ref +
+                        " overlay_ref=" + object.torch_overlay_ref +
+                        " semantic_quality=NOT_CLAIMED";
+                    break;
+                }
+            }
+
+            if (hasTorchArtifactEvidence)
+            {
+                result.result_ref = m_manualTest.current_result_ref.value;
+                result.evidence_ref = m_scriptResult.evidence_ref;
+                result.result_projection_ok = true;
+                reason = artifactReason;
+                return true;
+            }
+        }
+
         reason = "result projection pending: runtime object and gauge shape exist, but no result shape was published";
         return false;
     }
@@ -3149,6 +3353,14 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
     request.cases.clear();
 
     int count = 0;
+    auto toLower = [](std::string value) -> std::string
+    {
+        std::transform(value.begin(), value.end(), value.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return value;
+    };
+
+    const std::string filter = toLower(request.tool_filter);
 
     for (std::size_t gi = 0; gi < m_manualTest.script_evidence_groups.size(); ++gi)
     {
@@ -3167,13 +3379,43 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
             if (thumb.image_path.empty())
                 continue;
 
+            if (!filter.empty())
+            {
+                const std::string key = toLower(
+                    group.label + " " +
+                    thumb.tool + " " +
+                    thumb.script_id + " " +
+                    thumb.script_path + " " +
+                    thumb.status + " " +
+                    thumb.reason + " " +
+                    thumb.parameter_summary);
+                if (key.find(filter) == std::string::npos)
+                    continue;
+            }
+
+            const bool isTorchTaskCatalogScript =
+                thumb.tool == "TorchTask";
+            const bool isFindSegmentationTorchScript =
+                evidencePathIsFindSegmentation(thumb.script_path) &&
+                (thumb.script_path.find("libtorch") != std::string::npos ||
+                 thumb.script_path.find("edgesam") != std::string::npos);
+
             const bool isCximageToolScript =
                 evidencePathIsFindLine(thumb.script_path) ||
                 evidencePathIsFindCircle(thumb.script_path) ||
                 evidencePathIsFindEllipse(thumb.script_path) ||
                 evidencePathIsFindRect(thumb.script_path) ||
                 evidencePathIsFastMatch(thumb.script_path) ||
-                evidencePathIsFindSegmentation(thumb.script_path);
+                evidencePathIsFindSegmentation(thumb.script_path) ||
+                isTorchTaskCatalogScript;
+
+            if (!filter.empty() &&
+                filter.find("torch") != std::string::npos &&
+                !isTorchTaskCatalogScript &&
+                !isFindSegmentationTorchScript)
+            {
+                continue;
+            }
 
             if (!request.include_generic_scripts && !isCximageToolScript)
                 continue;
@@ -3186,8 +3428,17 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
             item.group_index = static_cast<int>(gi);
             item.thumb_index = static_cast<int>(ti);
             item.script_id = thumb.script_id;
+            item.script_path = thumb.script_path;
             item.image_id = thumb.image_id;
+            item.image_path = thumb.image_path;
             item.target_id = thumb.target_id;
+            item.tool = thumb.tool;
+            item.parameter_summary = thumb.parameter_summary;
+            item.primary_object_type = thumb.primary_object_type;
+            item.primary_object_name = thumb.primary_object_name;
+            item.primary_object_status = thumb.primary_object_status;
+            item.editable_object_count =
+                thumb.primary_object_name.empty() ? 0 : 1;
             item.out_dir =
                 request.out_dir + "/cases/" + item.case_id;
 
@@ -3275,6 +3526,11 @@ bool ViewController::RunEvidenceSelfTestBatch(
     WriteEvidenceSelfTestBatchReportMd(
         result,
         request.out_dir + "/evidence_selftest_batch_report.md",
+        writeReason);
+
+    WriteTorchArtifactAuditReport(
+        result,
+        request.out_dir,
         writeReason);
 
     reason = result.final_reason;
@@ -4024,6 +4280,8 @@ void ViewController::drawScriptAcceptancePanels()
   }
   ImGui::SameLine();
   ImGui::Text("Zoom: %.0f%%  Move: middle-drag  Zoom: wheel", m_imageViewZoom * 100.0f);
+  DrawAnnotationToolButtonStrip(true);
+  ImGui::Separator();
 
   const ImVec2 canvasSize(
     std::max(120.0f, ImGui::GetContentRegionAvail().x),
@@ -4775,11 +5033,11 @@ void ViewController::UpdateImageViewImage(const cv::Mat& image)
         m_annotationStatus = "image size changed; annotation refs cleared";
     }
     image.copyTo(m_imageViewImage);
-    if (!m_parserDebugBridge.SetGlobalMatInput(m_imageViewImage))
+    if (!m_parserDebugBridge.StageGlobalMatInput(m_imageViewImage))
     {
         m_manualTest.debug_status = "image_bind_failed";
         m_manualTest.debug_reason =
-            "Image View loaded, but global_matInput binding failed";
+            "Image View loaded, but global_matInput staging failed";
     }
     if (m_imageViewTexture != 0)
     {
@@ -4801,7 +5059,7 @@ bool ViewController::LoadImageIntoImageView(
         return false;
     }
 
-    std::filesystem::path path(imagePath);
+    std::filesystem::path path = ResolveWorkspaceFile(imagePath);
     if (!std::filesystem::exists(path))
     {
         reason = "image file not found: " + imagePath;
@@ -4840,7 +5098,7 @@ bool ViewController::LoadImageForEvidenceSelfTest(
         return false;
     }
 
-    std::filesystem::path path(imagePath);
+    std::filesystem::path path = ResolveWorkspaceFile(imagePath);
     if (!std::filesystem::exists(path))
     {
         reason = "image file not found: " + imagePath;
@@ -5319,6 +5577,7 @@ void ViewController::mainloop()
              ImGui_ImplOpenGL3_NewFrame();
              ImGui_ImplGlfw_NewFrame();
              ImGui::NewFrame();
+             DrawCxImGuiFrameBackground();
 
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=process_deferred_sync");
@@ -5713,6 +5972,10 @@ void ViewController::mainloop()
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawKeyParameterControlsWindow");
              drawKeyParameterControlsWindow();
+             SetCxCrashBreadcrumb("mainloop:drawTorchRuntimeEvidenceWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawTorchRuntimeEvidenceWindow");
+             drawTorchRuntimeEvidenceWindow();
              SetCxCrashBreadcrumb("mainloop:drawParameterTuningAndConclusionWindow");
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawParameterTuningAndConclusionWindow");
@@ -5771,6 +6034,14 @@ void ViewController::mainloop()
              SetCxCrashBreadcrumb("mainloop:RenderDrawData");
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=RenderDrawData");
+             int framebufferWidth = 0;
+             int framebufferHeight = 0;
+             glfwGetFramebufferSize(myOcctWindow->getGlfwWindow(),
+                                    &framebufferWidth,
+                                    &framebufferHeight);
+             glViewport(0, 0, framebufferWidth, framebufferHeight);
+             glClearColor(0.215f, 0.215f, 0.215f, 1.0f);
+             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
              ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
              SetCxCrashBreadcrumb("mainloop:glfwSwapBuffers");

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cstdint>
 
 class Image;
 
@@ -157,6 +158,8 @@ private:
   cv::Mat myGlobalMatInput;
   std::map<std::string, double> myGlobalNumericInputs;
   std::string myLastError;
+  std::uint64_t myRuntimeResetSerial = 0;
+  std::uint64_t myGlobalMatInputBoundSerial = 0;
 };
 
 #endif

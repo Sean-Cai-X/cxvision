@@ -19,6 +19,11 @@ std::filesystem::path ResolveWorkspaceFile(const std::string& path);
 
 std::filesystem::path ResolveCaseDirectory(const std::string& path);
 
+// Resolve generated run assets below the cxvisionai project root, independent
+// of whether the GUI was started from the repository, a build directory, VS,
+// or Explorer.  Relative run paths must not follow the process CWD.
+std::filesystem::path ResolveCxVisionRunPath(const std::string& path);
+
 std::string TrimLine(const std::string& text);
 
 std::string CurrentTimestamp();

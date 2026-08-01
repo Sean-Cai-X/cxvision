@@ -659,6 +659,16 @@ struct ManifestImageItem
 
 struct ScriptEvidenceThumb
 {
+    std::string candidate_id;
+    std::string candidate_dir;
+    std::string evidence_binding_path;
+    std::string parameter_snapshot_path;
+    std::string runtime_globals_path;
+    std::string gauge_annotation_path;
+    std::string working_script_snapshot_path;
+    bool is_candidate = false;
+    bool has_saved_state = false;
+    std::string source_evidence_script_path;
     std::string case_id;
     std::string script_id;
     std::string script_path;
@@ -668,6 +678,7 @@ struct ScriptEvidenceThumb
     std::string target_id;
     std::string tool;
     std::string parameter_summary;
+    std::string evidence_category_override;
     std::string status;
     std::string reason;
     std::string primary_object_type;
@@ -704,6 +715,17 @@ struct CxEvidenceSelectionSnapshot
 
     std::string case_id;
 
+    std::string candidate_id;
+    std::string candidate_dir;
+    std::string evidence_binding_path;
+    std::string parameter_snapshot_path;
+    std::string runtime_globals_path;
+    std::string gauge_annotation_path;
+    std::string working_script_snapshot_path;
+    bool is_candidate = false;
+    bool has_saved_state = false;
+    std::string source_evidence_script_path;
+
     std::string script_id;
     std::string script_path;
 
@@ -733,6 +755,17 @@ struct ScriptEvidenceRowRef
     int thumb_index = -1;
     bool is_group_header = false;
     std::string label;
+};
+
+struct ManualFindLineEdgeParamState
+{
+  bool initialized = false;
+  int threshold = 20;
+  int method = 0;
+  int linegap = 6;
+  int wgap = 8;
+  int hgap = 32;
+  int filterprofile = 0;
 };
 
 struct ManualTestContext
@@ -811,6 +844,9 @@ struct ManualTestContext
   bool show_roi = false;
   bool show_result_overlay = false;
   bool show_line_gauge_scan_lines = false;
+  int findline_selected_scan_edge = 0; // 0 = all edges, 1..N = selected edge.
+  int findline_scan_edge_count = 4;
+  std::vector<ManualFindLineEdgeParamState> findline_edge_params;
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
@@ -842,8 +878,24 @@ struct ManualTestContext
 
   int script_evidence_thumb_load_budget_per_frame = 2;
   int script_evidence_thumb_load_count_this_frame = 0;
+  std::unordered_map<std::string, std::string> evidence_category_overrides;
 
   CxEvidenceSelectionSnapshot current_evidence_selection;
+  std::string last_evidence_candidate_id;
+  std::string last_evidence_candidate_dir;
+  std::string last_evidence_candidate_reason;
+
+  // A Save-And-Run request is a value snapshot, not a reference to the live
+  // UI state.  The next ImGui frame may rebuild Evidence/Runtime views, so the
+  // execution path must consume this frozen copy rather than re-reading a
+  // possibly reseeded current_gauge/runtime_int_vars pair.
+  bool has_pending_execution_snapshot = false;
+  ManualGaugeState pending_execution_gauge;
+  std::unordered_map<std::string, int> pending_execution_globals;
+  std::string pending_execution_candidate_id;
+
+  unsigned long long key_parameter_edit_revision = 0;
+  std::string last_key_parameter_edit_summary;
 
   CxEvidenceSelfTestResult last_evidence_selftest_result;
 };

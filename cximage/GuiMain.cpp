@@ -486,6 +486,7 @@ struct EvidenceChainSelfTestCliOptions
     std::string param_regression_script;
     std::string param_regression_tool;
     std::string out_dir;
+    std::string evidence_tool_filter;
     int max_cases = 0;
 };
 
@@ -570,6 +571,14 @@ bool ParseEvidenceChainSelfTestArgs(int argc, char** argv, EvidenceChainSelfTest
             if (i + 1 >= argc)
                 continue;
             options.out_dir = argv[++i];
+            continue;
+        }
+
+        if (arg == "--evidence-tool-filter")
+        {
+            if (i + 1 >= argc)
+                continue;
+            options.evidence_tool_filter = argv[++i];
             continue;
         }
 
@@ -2146,10 +2155,23 @@ int RunCxVisionApplication(int argc, char** argv)
             ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/evidence_selftest/run_" + run_id
             : evidenceOptions.out_dir;
 
+        std::string semanticReason;
+        if (!controller.WriteEvidenceChainCatalogSemanticSelfTest(
+                out_dir,
+                semanticReason))
+        {
+            std::cout << "[MAIN] evidence chain catalog semantic selftest failed: "
+                      << semanticReason << "\n";
+            return 2;
+        }
+        std::cout << "[MAIN] evidence chain catalog semantic selftest: "
+                  << semanticReason << "\n";
+
         CxEvidenceSelfTestBatchRequest request;
         request.run_id = run_id;
         request.out_dir = out_dir;
         request.max_cases = evidenceOptions.max_cases;
+        request.tool_filter = evidenceOptions.evidence_tool_filter;
 
         std::string reason;
         if (!controller.BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(request, reason))

@@ -20,8 +20,8 @@ bool ValidateParamRegressionPrerequisites(
     const ManualTestContext& context,
     std::string& reason);
 
-void ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName);
-void ApplyManualGaugeToGlobals(ManualTestContext& context);
+bool ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName);
+bool ApplyManualGaugeToGlobals(ManualTestContext& context);
 
 std::filesystem::path ManualGaugeCaseDir(const ManualTestContext& context);
 
@@ -42,6 +42,18 @@ bool LoadManualGaugeAnnotation(
     const std::string& objectName,
     const std::string& gaugeName,
     std::string& outPath,
+    std::string& outReason);
+
+bool LoadManualGaugeAnnotationFromPath(
+    ManualTestContext& context,
+    const std::filesystem::path& sourcePath,
+    std::string& outReason);
+
+// Candidate/working revisions are intentionally editable and therefore are
+// not required to carry the manual_accepted promotion state.
+bool LoadManualGaugeWorkingCopyFromPath(
+    ManualTestContext& context,
+    const std::filesystem::path& sourcePath,
     std::string& outReason);
 
 bool ExportManualGaugeManifestCandidate(

@@ -108,6 +108,11 @@ public:
         const std::string& parameterSummary,
         std::string& reason);
 
+    bool ApplyEvidenceParameterSummaryToRuntimeGlobals(
+        ManualTestContext& context,
+        const std::string& parameterSummary,
+        std::string& reason);
+
     bool RunEvidenceChainSelfTest(
         const CxEvidenceSelfTestRequest& request,
         CxEvidenceSelfTestResult& result,
@@ -165,6 +170,10 @@ public:
         std::string& reason);
 
     bool InitEvidenceSelfTestEnvironment(std::string& reason);
+
+    bool WriteEvidenceChainCatalogSemanticSelfTest(
+        const std::string& outDir,
+        std::string& reason);
 
 private:
   void initImGui();
@@ -233,8 +242,10 @@ private:
   void drawImageEvidencePanels();
   void drawKeyParameterControlsWindow();
   void drawParameterTuningAndConclusionWindow();
+  void drawTorchRuntimeEvidenceWindow();
   void drawEvidenceAlbumWindow();
   void drawAnnotationToolWindow();
+  void DrawAnnotationToolButtonStrip(bool horizontal);
   void drawImageEvidenceOnCanvas(bool canvasHovered, bool canvasActive,
                                  ImDrawList* drawList);
   void DrawImguiBackgroundBackplate();
