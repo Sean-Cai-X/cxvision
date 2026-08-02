@@ -275,6 +275,21 @@ public:
 
   CxShapeElement* FindShapeByStableRef(const std::string& stable_ref);
 
+  // Value-only update of the repository-owned FindCircle annulus.  The View
+  // forwards a Key Parameter Controls request here; it never owns a second
+  // circle or retains a parser/tool pointer.
+  bool ApplyFindCircleAnnulusGauge(
+      const std::string& owner_ref,
+      double cx,
+      double cy,
+      double inner_radius,
+      double outer_radius,
+      std::string& reason);
+
+  // A subsequent CxScript execution becomes the next runtime truth source.
+  // Clear edit preservation just before that execution publishes fresh shapes.
+  void ConfirmAllRuntimeWritebacks();
+
   CxShapeHitResult HitTest(double image_x, double image_y, double tolerance);
 
   bool BeginDrag(const CxShapeHitResult& hit, double image_x, double image_y);

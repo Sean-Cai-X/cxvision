@@ -241,6 +241,7 @@ private:
   void initImageEvidenceLayer();
   void drawImageEvidencePanels();
   void drawKeyParameterControlsWindow();
+  bool ApplyCurrentGaugeToEditableShape(std::string& reason);
   void drawParameterTuningAndConclusionWindow();
   void drawTorchRuntimeEvidenceWindow();
   void drawEvidenceAlbumWindow();

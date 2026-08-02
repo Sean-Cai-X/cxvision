@@ -147,6 +147,10 @@ public:
     virtual void setrect(int ix, int iy, int iw, int ih) { (void)ix; (void)iy; (void)iw; (void)ih; }
     void setcircle(int icentx, int icenty, int ipax, int ipay);
     void setcircle2(int icentx, int icenty, int ipax, int ipay, int idis);
+    // Script/UI annulus contract: both radii are absolute image-space radii.
+    // The implementation converts them once to the legacy setcircle2()
+    // centre/pass/band-width representation used by the measure algorithm.
+    void setannulus(int icentx, int icenty, int iinnerRadius, int iouterRadius);
     virtual void drawshape();
     void drawshapex( double dmovx, double dmovy,
         double dangle, double dzoomx, double dzoomy);
@@ -239,6 +243,10 @@ public:
     int getcirclecenty() const { return m_icenty; }
     int getcirclepax() const { return m_ipax; }
     int getcirclepay() const { return m_ipay; }
+    int getannulusinner();
+    int getannulusouter();
+    int getannuluswidth();
+    int hasannulus();
     int getdebugprefilterused() const { return m_last_prefilter_used; }
     int getdebugcompactpathused() const { return m_last_compact_path_used; }
     int getfindsetting() const { return m_ifindset; }
@@ -260,6 +268,7 @@ public:
     bool budgetexceeded() const;
     int getelapsedms() const;
     int getscanlinecount() const;
+    bool getscanline(int scan_index, CxShapePoint& p0, CxShapePoint& p1) const;
     int getsamplecount() const;
     const std::string& getfailurestage() const;
 
@@ -334,6 +343,7 @@ private:
     double m_fitfilter_threshold = 0.0;
 
     FindCircleMeasureGeometryRequest m_measure_geometry_request;
+    FindCircleMeasureGeometryRequest m_last_measure_input_request;
     FindCircleMeasureGeometryDebug m_lastMeasureGeometryDebug;
 
     bool m_measure_geometry_dirty = true;

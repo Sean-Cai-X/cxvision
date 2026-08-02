@@ -110,6 +110,10 @@ void AppendEvidenceCandidateStateProbeImpl(
          << ",\"global_filterprofile\":" << globalValue("global_filterprofile")
          << ",\"global_findline_edge_count\":" << globalValue("global_findline_edge_count")
          << ",\"global_findline_selected_edge\":" << globalValue("global_findline_selected_edge")
+         << ",\"global_findline_best_edge\":" << globalValue("global_findline_best_edge")
+         << ",\"global_findline_recommended_edge\":" << globalValue("global_findline_recommended_edge")
+         << ",\"global_findline_relation_edge\":" << globalValue("global_findline_relation_edge")
+         << ",\"global_findline_attach_edge\":" << globalValue("global_findline_attach_edge")
          << "}}\n";
 
     const std::filesystem::path path =
@@ -137,6 +141,10 @@ void AppendEvidenceCandidateStateProbeImpl(
         ",filterprofile=" + std::to_string(globalValue("global_filterprofile")) +
         ",edge_count=" + std::to_string(globalValue("global_findline_edge_count")) +
         ",selected_edge=" + std::to_string(globalValue("global_findline_selected_edge")) +
+        ",best_edge=" + std::to_string(globalValue("global_findline_best_edge")) +
+        ",recommended_edge=" + std::to_string(globalValue("global_findline_recommended_edge")) +
+        ",relation_edge=" + std::to_string(globalValue("global_findline_relation_edge")) +
+        ",attach_edge=" + std::to_string(globalValue("global_findline_attach_edge")) +
         "} reason=" + reason);
 }
 

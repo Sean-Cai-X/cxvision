@@ -128,6 +128,168 @@ void RecordFindLineEdgeCandidate(
         ++eval.over_length_runs;
 }
 
+int CountFindLineBinaryForegroundInRow(
+    Image* image,
+    int row,
+    int line_length)
+{
+    if (image == nullptr || line_length <= 0 ||
+        row < 0 || row >= image->getHeight())
+    {
+        return 0;
+    }
+
+    const int max_x = std::min(line_length, image->getWidth());
+    int count = 0;
+    for (int x = 0; x < max_x; ++x)
+    {
+        if (image->pixel(x, row)[0] > 0)
+            ++count;
+    }
+    return count;
+}
+
+int ResolveFindLineBinarySampleRow(
+    Image* image,
+    int logical_row,
+    int scan_index,
+    int scan_count,
+    int line_length)
+{
+    if (image == nullptr || image->getHeight() <= 0)
+        return 0;
+
+    const auto clamp_row = [&](int row) -> int
+    {
+        return std::min(std::max(row, 0), image->getHeight() - 1);
+    };
+
+    /*
+     * Image::roi_7blur_gap_mud_thre_bw writes the binary result to y + 1.
+     * This is correct for middle scan rows.  At the first/last gauge ticks,
+     * however, linecopyex plus blur/gap can contract the signal to the
+     * neighbouring row.  Resolve only terminal scan rows by foreground
+     * evidence so that the last visual tick is not silently dropped.
+     */
+    int best_row = clamp_row(logical_row + 1);
+    int best_count =
+        CountFindLineBinaryForegroundInRow(image, best_row, line_length);
+
+    const bool terminal_scan =
+        scan_count > 0 &&
+        (scan_index <= 1 || scan_index >= scan_count - 2);
+    if (!terminal_scan)
+        return best_row;
+
+    const int candidates[] = {
+        logical_row,
+        logical_row + 1,
+        logical_row + 2
+    };
+    for (int candidate : candidates)
+    {
+        const int row = clamp_row(candidate);
+        const int count =
+            CountFindLineBinaryForegroundInRow(image, row, line_length);
+        if (count > best_count)
+        {
+            best_count = count;
+            best_row = row;
+        }
+    }
+    return best_row;
+}
+
+bool ReadFindLineGraySample(
+    Image& image,
+    LineShape& line,
+    int sample_index,
+    double& gray)
+{
+    if (sample_index < 0)
+        return false;
+
+    const gp_Pnt p = line.getlinepoint(sample_index);
+    const int x = static_cast<int>(std::lround(p.X()));
+    const int y = static_cast<int>(std::lround(p.Y()));
+    if (x < 0 || y < 0 ||
+        x >= image.getWidth() || y >= image.getHeight())
+    {
+        return false;
+    }
+
+    const cv::Vec3b c = image.pixel(x, y);
+    gray = 0.299 * static_cast<double>(c[2]) +
+        0.587 * static_cast<double>(c[1]) +
+        0.114 * static_cast<double>(c[0]);
+    return true;
+}
+
+double FindLineGradientResponse(
+    int method,
+    double gray0,
+    double gray1)
+{
+    if (method == 0)
+        return gray1 - gray0;
+    if (method == 1)
+        return gray0 - gray1;
+    return std::abs(gray1 - gray0);
+}
+
+bool FindBestTerminalGradientPoint(
+    Image& image,
+    LineShape& line,
+    int line_length,
+    int gap,
+    int threshold,
+    int method,
+    int need_fix,
+    int& out_position,
+    double& out_response)
+{
+    out_position = -1;
+    out_response = 0.0;
+    if (line_length <= 0)
+        return false;
+
+    const int safe_gap = std::max(1, gap);
+    const int start = std::max(safe_gap + 3, 1);
+    const int end = std::max(start, line_length - safe_gap - 3);
+    double best_response = -1.0e100;
+    int best_position = -1;
+
+    for (int x = start; x < end; ++x)
+    {
+        double gray0 = 0.0;
+        double gray1 = 0.0;
+        if (!ReadFindLineGraySample(image, line, x, gray0) ||
+            !ReadFindLineGraySample(image, line, x + safe_gap, gray1))
+        {
+            continue;
+        }
+
+        const double response = FindLineGradientResponse(method, gray0, gray1);
+        if (response > best_response)
+        {
+            best_response = response;
+            best_position = x;
+        }
+    }
+
+    if (best_position < 0 ||
+        best_response < static_cast<double>(threshold))
+    {
+        return false;
+    }
+
+    out_position = std::min(
+        std::max(need_fix + best_position, 1),
+        std::max(1, line_length - 1));
+    out_response = best_response;
+    return true;
+}
+
 void FinalizeFindLineEdgeEvaluations(FindLineMeasureInputDebug& debug)
 {
     debug.evaluated_edge_count = 0;
@@ -562,14 +724,18 @@ void FindLine::setlinesegment(double ix0, double iy0,
         BuildLineScanMeta(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(), m_iwgap, roi_width_hint, roi_height_hint);
     const cxgeom::CxSetLineBuildMeta line_b_meta =
         BuildLineScanMeta(ptRect[1].X(), ptRect[1].Y(), ptRect[2].X(), ptRect[2].Y(), m_ihgap, roi_width_hint, roi_height_hint);
-    const int dplinewsize = ComputeLineScanCount(ilinesizeA, m_iwgap, line_a_meta);
-    const int dplinehsize = ComputeLineScanCount(ilinesizeB, m_ihgap, line_b_meta);
+    const int dplinewbase = ComputeLineScanCount(ilinesizeA, m_iwgap, line_a_meta);
+    const int dplinehbase = ComputeLineScanCount(ilinesizeB, m_ihgap, line_b_meta);
+    const int dplinewsize = dplinewbase > 1 ? dplinewbase + 1 : dplinewbase;
+    const int dplinehsize = dplinehbase > 1 ? dplinehbase + 1 : dplinehbase;
+    const int dplinewdenom = std::max(1, dplinewsize - 1);
+    const int dplinehdenom = std::max(1, dplinehsize - 1);
 
-    double dlineax = (ptRect[1].X() - ptRect[0].X()) / dplinewsize;
-    double dlineay = (ptRect[1].Y() - ptRect[0].Y()) / dplinewsize;
+    double dlineax = (ptRect[1].X() - ptRect[0].X()) / dplinewdenom;
+    double dlineay = (ptRect[1].Y() - ptRect[0].Y()) / dplinewdenom;
 
-    double dlinebx = (ptRect[2].X() - ptRect[1].X()) / dplinehsize;
-    double dlineby = (ptRect[2].Y() - ptRect[1].Y()) / dplinehsize;
+    double dlinebx = (ptRect[2].X() - ptRect[1].X()) / dplinehdenom;
+    double dlineby = (ptRect[2].Y() - ptRect[1].Y()) / dplinehdenom;
 
 
     LineShape aline1, aline2;
@@ -1227,9 +1393,33 @@ void FindLine::MeasureT(void *pimage)
     if (iprocessw <= 0)
         return;
 
-    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+    const int binaryPaddingRows = 2;
+    const int binaryRoiHeight = iwsize + ihsize + binaryPaddingRows;
+
+    if (binaryRoiHeight > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
         return;
+
+    /*
+     * The line scan image is a rectangular workspace where each gauge scan
+     * line is copied to one BackImage row.  roi_7blur_gap_mud_thre_bw writes
+     * its binary result to y + 1, so the workspace needs a small zero padding
+     * tail and must be cleared before each run.  Otherwise stale data or a
+     * one-row readback mismatch can hide the first/last gauge ticks.
+     */
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        if (!backMat.empty())
+        {
+            const int clearWidth = std::min(iprocessw + 3, backMat.cols);
+            const int clearHeight = std::min(binaryRoiHeight, backMat.rows);
+            if (clearWidth > 0 && clearHeight > 0)
+            {
+                backMat(cv::Rect(0, 0, clearWidth, clearHeight))
+                    .setTo(cv::Scalar(0, 0, 0));
+            }
+        }
+    }
 
     for (int i = 0; i < iwsize; i++)
     {
@@ -1240,7 +1430,7 @@ void FindLine::MeasureT(void *pimage)
         m_lines_h[i].linecopyex(*image, *g_pbackimage, 0, i + iwsize);
     }
 
-    g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
+    g_pbackimage->setroi(0, 0, iprocessw, binaryRoiHeight);
 
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
@@ -1519,7 +1709,10 @@ void FindLine::Measure(Image& image)
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
 
-    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+    const int binaryPaddingRows = 2;
+    const int binaryRoiHeight = iwsize + ihsize + binaryPaddingRows;
+
+    if (binaryRoiHeight > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
     {
         m_lastMeasureInputDebug.measure_source =
@@ -1571,6 +1764,26 @@ void FindLine::Measure(Image& image)
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
 
+    /*
+     * Clear the BackImage scan workspace before writing the current line
+     * profiles.  The UI path may run measure repeatedly after gauge drags; if
+     * stale binary rows remain, FindObject and the point collector can see
+     * old edge fragments near the gauge border.
+     */
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        if (!backMat.empty())
+        {
+            const int clearWidth = std::min(iprocessw + 3, backMat.cols);
+            const int clearHeight = std::min(binaryRoiHeight, backMat.rows);
+            if (clearWidth > 0 && clearHeight > 0)
+            {
+                backMat(cv::Rect(0, 0, clearWidth, clearHeight))
+                    .setTo(cv::Scalar(0, 0, 0));
+            }
+        }
+    }
+
     for (int i = 0; i < iwsize; i++)
     {
         m_lines_w[i].linecopyex(image, *g_pbackimage, 0, i);
@@ -1589,8 +1802,8 @@ void FindLine::Measure(Image& image)
         "measure_before_backimage_roi",
         "running",
         "setroi=(0,0," + std::to_string(iprocessw) + "," +
-            std::to_string(iwsize + ihsize) + ")");
-    g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
+            std::to_string(binaryRoiHeight) + ")");
+    g_pbackimage->setroi(0, 0, iprocessw, binaryRoiHeight);
 
     LogFindlineMeasureProbe(
         "measure_before_blur_threshold",
@@ -1606,7 +1819,7 @@ void FindLine::Measure(Image& image)
         "blur/threshold complete");
 
     m_lastMeasureInputDebug.binary_roi_width = iprocessw;
-    m_lastMeasureInputDebug.binary_roi_height = iwsize + ihsize;
+    m_lastMeasureInputDebug.binary_roi_height = binaryRoiHeight;
 
     try
     {
@@ -1747,13 +1960,14 @@ void FindLine::Measure(Image& image)
         const auto countScanRowsWithForeground = [&]() -> int
         {
             int rowsWithForeground = 0;
-            const int fix = 3;
-            for (int y = fix; y < iwsize - fix; ++y)
+            for (int y = 0; y < iwsize; ++y)
             {
                 bool rowHasForeground = false;
+                const int sampleY = ResolveFindLineBinarySampleRow(
+                    g_pbackimage, y, y, iwsize, ilineslen1);
                 for (int x = 0; x < ilineslen1; ++x)
                 {
-                    if (g_pbackimage->pixel(x, y)[0] > 0)
+                    if (g_pbackimage->pixel(x, sampleY)[0] > 0)
                     {
                         rowHasForeground = true;
                         break;
@@ -1762,12 +1976,15 @@ void FindLine::Measure(Image& image)
                 if (rowHasForeground)
                     ++rowsWithForeground;
             }
-            for (int y = iwsize + fix; y < iwsize + ihsize - fix; ++y)
+            for (int y = iwsize; y < iwsize + ihsize; ++y)
             {
                 bool rowHasForeground = false;
+                const int scanIndex = y - iwsize;
+                const int sampleY = ResolveFindLineBinarySampleRow(
+                    g_pbackimage, y, scanIndex, ihsize, ilineslen2);
                 for (int x = 0; x < ilineslen2; ++x)
                 {
-                    if (g_pbackimage->pixel(x, y)[0] > 0)
+                    if (g_pbackimage->pixel(x, sampleY)[0] > 0)
                     {
                         rowHasForeground = true;
                         break;
@@ -1789,7 +2006,7 @@ void FindLine::Measure(Image& image)
         m_lastMeasureInputDebug.findobject_foreground_before =
             m_lastMeasureInputDebug.binary_foreground_pixels;
 
-        g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
+        g_pbackfindobject->setrect(0, 0, iprocessw, binaryRoiHeight);
 
         m_effective_filter_borw = effectivefilterborw();
         m_effective_filter_min = effectivefiltermin();
@@ -1807,7 +2024,7 @@ void FindLine::Measure(Image& image)
             "measure_before_findobject_measure",
             "running",
             "findobject_roi=(0,0," + std::to_string(iprocessw) + "," +
-                std::to_string(iwsize + ihsize) + "), borw=" +
+                std::to_string(binaryRoiHeight) + "), borw=" +
                 std::to_string(m_effective_filter_borw) + ", min=" +
                 std::to_string(m_effective_filter_min) + ", max=" +
                 std::to_string(m_effective_filter_max));
@@ -1879,14 +2096,83 @@ void FindLine::Measure(Image& image)
     int icurlinenum = 0;
     int icurlineposition = 0;
 
-    int ifixvalue = 3;
-
     cv::Vec3b icolor = 0;
     const bool selectedComponentsRejected =
         m_lastMeasureInputDebug.findobject_measure_called &&
         m_lastMeasureInputDebug.findobject_component_total > 0 &&
         m_lastMeasureInputDebug.findobject_component_accepted <= 0;
-    for (int inumy = 0 + ifixvalue; inumy < iwsize - ifixvalue; inumy++)
+    auto tryTerminalGradientFallback = [&](
+        int scan_type,
+        int line_index,
+        int line_length,
+        std::size_t diagIndex) -> bool
+    {
+        if (diagIndex >= m_lastMeasureInputDebug.scan_diagnostics.size())
+            return false;
+
+        auto& diag = m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+        if (diag.accepted)
+            return false;
+
+        const int scan_count = scan_type == 0 ? iwsize : ihsize;
+        if (scan_count <= 0 ||
+            !(line_index <= 1 || line_index >= scan_count - 2))
+        {
+            return false;
+        }
+
+        /*
+         * The fallback creates one boundary candidate for the terminal scan.
+         * If the user explicitly selected a different edge rank, do not
+         * silently emit a point for that unrelated edge.
+         */
+        if (m_iselectedgenum != 0 && m_iselectedgenum != 1)
+            return false;
+
+        LineShape& scan_line = scan_type == 0
+            ? m_lines_w[line_index]
+            : m_lines_h[line_index];
+        int position = -1;
+        double response = 0.0;
+        if (!FindBestTerminalGradientPoint(
+                image,
+                scan_line,
+                line_length,
+                m_iSelectPointGap,
+                m_iThreshold,
+                m_iMethod,
+                m_ineedfixs,
+                position,
+                response))
+        {
+            return false;
+        }
+
+        gp_Pnt point = scan_line.getlinepoint(position);
+        if (scan_type == 0)
+            m_measurepoints_w.addpoint(point);
+        else
+            m_measurepoints_h.addpoint(point);
+
+        ++m_lastMeasureInputDebug.scan_runs_total;
+        ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
+        ++m_lastMeasureInputDebug.scan_points_emitted;
+        ++diag.candidate_count;
+        diag.accepted = true;
+        diag.accepted_x = point.X();
+        diag.accepted_y = point.Y();
+        diag.reject_reason.clear();
+        RecordFindLineEdgeCandidate(
+            m_lastMeasureInputDebug,
+            1,
+            true,
+            false,
+            false,
+            false);
+        return true;
+    };
+
+    for (int inumy = 0; inumy < iwsize; inumy++)
     {
         ++m_lastMeasureInputDebug.scan_rows_examined;
         bool rowHasForeground = false;
@@ -1906,7 +2192,9 @@ void FindLine::Measure(Image& image)
 
         for (int inumx = 0; inumx < ilineslen1; inumx++)
         {
-            icolor = g_pbackimage->pixel(inumx, inumy);
+            const int sample_y = ResolveFindLineBinarySampleRow(
+                g_pbackimage, inumy, inumy, iwsize, ilineslen1);
+            icolor = g_pbackimage->pixel(inumx, sample_y);
             if ((icolor[0]) > 0)
             {
                 rowHasForeground = true;
@@ -1934,13 +2222,15 @@ void FindLine::Measure(Image& image)
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
-                    icurlinenum++;
+                    const bool endpointOk =
+                        icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
+                        icurlineposition > (m_iSelectPointGap + 3);
                     bool edgeCandidateRecorded = false;
-                    if (icurlinenum == m_iselectedgenum
-                        || m_iselectedgenum == 0)//0 any
+                    if (endpointOk)
                     {
-                        if (icurlineposition<(ilineslen1 - m_iSelectPointGap - 3)
-                            && icurlineposition>m_iSelectPointGap + 3)
+                        ++icurlinenum;
+                        if (icurlinenum == m_iselectedgenum
+                            || m_iselectedgenum == 0)//0 any
                         {
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                             m_measurepoints_w.addpoint(apoint);
@@ -1965,32 +2255,32 @@ void FindLine::Measure(Image& image)
                         }
                         else
                         {
-                            ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                            ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
                             if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                                    "endpoint_rejected";
+                                    "scan_run_selection_rejected";
                             RecordFindLineEdgeCandidate(
                                 m_lastMeasureInputDebug,
                                 icurlinenum,
                                 false,
-                                false,
                                 true,
+                                false,
                                 false);
                             edgeCandidateRecorded = true;
                         }
                     }
                     else
                     {
-                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
                         if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                             m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                                "scan_run_selection_rejected";
+                                "endpoint_rejected";
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
-                            icurlinenum,
+                            m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                            false,
                             false,
                             true,
-                            false,
                             false);
                         edgeCandidateRecorded = true;
                     }
@@ -2036,13 +2326,15 @@ void FindLine::Measure(Image& image)
                 ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
             //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
-            icurlinenum++;
+            const bool endpointOk =
+                icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
+                icurlineposition > (m_iSelectPointGap + 3);
             bool edgeCandidateRecorded = false;
-            if (icurlinenum == m_iselectedgenum
-                || m_iselectedgenum == 0)
+            if (endpointOk)
             {
-                if (icurlineposition<(ilineslen1 - m_iSelectPointGap - 3)
-                    && icurlineposition>m_iSelectPointGap + 3)
+                ++icurlinenum;
+                if (icurlinenum == m_iselectedgenum
+                    || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                     m_measurepoints_w.addpoint(apoint);
@@ -2067,32 +2359,32 @@ void FindLine::Measure(Image& image)
                 }
                 else
                 {
-                    ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                            "endpoint_rejected";
+                            "scan_run_selection_rejected";
                     RecordFindLineEdgeCandidate(
                         m_lastMeasureInputDebug,
                         icurlinenum,
                         false,
-                        false,
                         true,
+                        false,
                         false);
                     edgeCandidateRecorded = true;
                 }
             }
             else
             {
-                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
                 if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                     m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                        "scan_run_selection_rejected";
+                        "endpoint_rejected";
                 RecordFindLineEdgeCandidate(
                     m_lastMeasureInputDebug,
-                    icurlinenum,
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                    false,
                     false,
                     true,
-                    false,
                     false);
                 edgeCandidateRecorded = true;
             }
@@ -2110,6 +2402,11 @@ void FindLine::Measure(Image& image)
             bcollectBegin = false;
         }
 
+        const bool terminalFallbackAccepted =
+            tryTerminalGradientFallback(0, inumy, ilineslen1, diagIndex);
+        if (terminalFallbackAccepted)
+            rowHasForeground = true;
+
         if (rowHasForeground)
         {
             ++m_lastMeasureInputDebug.scan_rows_with_foreground;
@@ -2126,7 +2423,7 @@ void FindLine::Measure(Image& image)
     }
 
     bcollectBegin = false;
-    for (int inumy = iwsize + ifixvalue; inumy < iwsize + ihsize - ifixvalue; inumy++)
+    for (int inumy = iwsize; inumy < iwsize + ihsize; inumy++)
     {
         ++m_lastMeasureInputDebug.scan_rows_examined;
         bool rowHasForeground = false;
@@ -2147,7 +2444,10 @@ void FindLine::Measure(Image& image)
 
         for (int inumx = 0; inumx < ilineslen2; inumx++)
         {
-            icolor = g_pbackimage->pixel(inumx, inumy);
+            const int scanIndex = inumy - iwsize;
+            const int sample_y = ResolveFindLineBinarySampleRow(
+                g_pbackimage, inumy, scanIndex, ihsize, ilineslen2);
+            icolor = g_pbackimage->pixel(inumx, sample_y);
             if ((icolor[0]) > 0)
             {
                 rowHasForeground = true;
@@ -2174,13 +2474,15 @@ void FindLine::Measure(Image& image)
                     ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
                     //icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
-                    icurlinenum++;
+                    const bool endpointOk =
+                        icurlineposition < (ilineslen2 - m_iSelectPointGap - 3) &&
+                        icurlineposition > (m_iSelectPointGap + 3);
                     bool edgeCandidateRecorded = false;
-                    if (icurlinenum == m_iselectedgenum
-                        || m_iselectedgenum == 0)
+                    if (endpointOk)
                     {
-                        if (icurlineposition<(ilineslen2 - m_iSelectPointGap - 3)
-                            && icurlineposition>m_iSelectPointGap + 3)
+                        ++icurlinenum;
+                        if (icurlinenum == m_iselectedgenum
+                            || m_iselectedgenum == 0)
                         {
                             gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                             m_measurepoints_h.addpoint(apoint);
@@ -2206,32 +2508,32 @@ void FindLine::Measure(Image& image)
                         }
                         else
                         {
-                            ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                            ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
                             if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                                    "endpoint_rejected";
+                                    "scan_run_selection_rejected";
                             RecordFindLineEdgeCandidate(
                                 m_lastMeasureInputDebug,
                                 icurlinenum,
                                 false,
-                                false,
                                 true,
+                                false,
                                 false);
                             edgeCandidateRecorded = true;
                         }
                     }
                     else
                     {
-                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
                         if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                             m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                                "scan_run_selection_rejected";
+                                "endpoint_rejected";
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
-                            icurlinenum,
+                            m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                            false,
                             false,
                             true,
-                            false,
                             false);
                         edgeCandidateRecorded = true;
                     }
@@ -2278,13 +2580,15 @@ void FindLine::Measure(Image& image)
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
             // icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
 
-            icurlinenum++;
+            const bool endpointOk =
+                icurlineposition < (ilineslen2 - m_iSelectPointGap - 3) &&
+                icurlineposition > (m_iSelectPointGap + 3);
             bool edgeCandidateRecorded = false;
-            if (icurlinenum == m_iselectedgenum
-                || m_iselectedgenum == 0)
+            if (endpointOk)
             {
-                if (icurlineposition<(ilineslen2 - m_iSelectPointGap - 3)
-                    && icurlineposition>m_iSelectPointGap + 3)
+                ++icurlinenum;
+                if (icurlinenum == m_iselectedgenum
+                    || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
                     m_measurepoints_h.addpoint(apoint);
@@ -2310,32 +2614,32 @@ void FindLine::Measure(Image& image)
                 }
                 else
                 {
-                    ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
                     if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                            "endpoint_rejected";
+                            "scan_run_selection_rejected";
                     RecordFindLineEdgeCandidate(
                         m_lastMeasureInputDebug,
                         icurlinenum,
                         false,
-                        false,
                         true,
+                        false,
                         false);
                     edgeCandidateRecorded = true;
                 }
             }
             else
             {
-                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
                 if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
                     m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
-                        "scan_run_selection_rejected";
+                        "endpoint_rejected";
                 RecordFindLineEdgeCandidate(
                     m_lastMeasureInputDebug,
-                    icurlinenum,
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count,
+                    false,
                     false,
                     true,
-                    false,
                     false);
                 edgeCandidateRecorded = true;
             }
@@ -2352,6 +2656,11 @@ void FindLine::Measure(Image& image)
             irecordnum = 0;
             bcollectBegin = false;
         }
+
+        const bool terminalFallbackAccepted =
+            tryTerminalGradientFallback(1, inumy - iwsize, ilineslen2, diagIndex);
+        if (terminalFallbackAccepted)
+            rowHasForeground = true;
 
         if (rowHasForeground)
         {
@@ -2642,7 +2951,10 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         return;
     }
 
-    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+    const int binaryPaddingRows = 2;
+    const int binaryRoiHeight = iwsize + ihsize + binaryPaddingRows;
+
+    if (binaryRoiHeight > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
     {
         LogFindlineMeasureProbe(
@@ -2656,6 +2968,20 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         m_lastMeasureInputDebug.failure_stage = "scan_workspace_capacity_exceeded";
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
+    }
+
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        if (!backMat.empty())
+        {
+            const int clearWidth = std::min(iprocessw + 3, backMat.cols);
+            const int clearHeight = std::min(binaryRoiHeight, backMat.rows);
+            if (clearWidth > 0 && clearHeight > 0)
+            {
+                backMat(cv::Rect(0, 0, clearWidth, clearHeight))
+                    .setTo(cv::Scalar(0, 0, 0));
+            }
+        }
     }
 
     for (int i = 0; i < iwsize; ++i)
@@ -2709,12 +3035,12 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
-    g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
+    g_pbackimage->setroi(0, 0, iprocessw, binaryRoiHeight);
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
     if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
-        g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
+        g_pbackfindobject->setrect(0, 0, iprocessw, binaryRoiHeight);
 
         m_effective_filter_borw = effectivefilterborw();
         m_effective_filter_min = effectivefiltermin();
@@ -2744,7 +3070,6 @@ void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& st
         return;
     }
 
-    const int ifixvalue = 3;
     const int max_band_width = 70;
     const int iwsize = ClampSizeToInt(m_lines_w.size());
     const int ihsize = ClampSizeToInt(m_lines_h.size());
@@ -2800,7 +3125,11 @@ void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& st
 
         for (int col_index = 0; col_index < line_length; ++col_index)
         {
-            const cv::Vec3b color = g_pbackimage->pixel(col_index, row_index);
+            const int sample_row = ResolveFindLineBinarySampleRow(
+                g_pbackimage, row_index, line_index,
+                scan_type == 0 ? iwsize : ihsize,
+                line_length);
+            const cv::Vec3b color = g_pbackimage->pixel(col_index, sample_row);
             const bool active = color[0] > 0;
             if (active && !collecting)
             {
@@ -2820,10 +3149,10 @@ void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& st
             m_scanEdgeBands.push_back(scan_bands);
     };
 
-    for (int line_index = ifixvalue; line_index < iwsize - ifixvalue; ++line_index)
+    for (int line_index = 0; line_index < iwsize; ++line_index)
         append_scan_band(0, line_index, line_index, ilineslen1);
 
-    for (int line_index = ifixvalue; line_index < ihsize - ifixvalue; ++line_index)
+    for (int line_index = 0; line_index < ihsize; ++line_index)
         append_scan_band(1, line_index, iwsize + line_index, ilineslen2);
 
     stats.edgeband_count = 0;
@@ -4530,14 +4859,18 @@ void FindLine::BuildOriginalMeasureGeometryCore(double ix0,
         BuildLineScanMeta(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(), m_iwgap, roi_width_hint, roi_height_hint);
     const cxgeom::CxSetLineBuildMeta line_b_meta =
         BuildLineScanMeta(ptRect[1].X(), ptRect[1].Y(), ptRect[2].X(), ptRect[2].Y(), m_ihgap, roi_width_hint, roi_height_hint);
-    const int dplinewsize = ComputeLineScanCount(ilinesizeA, m_iwgap, line_a_meta);
-    const int dplinehsize = ComputeLineScanCount(ilinesizeB, m_ihgap, line_b_meta);
+    const int dplinewbase = ComputeLineScanCount(ilinesizeA, m_iwgap, line_a_meta);
+    const int dplinehbase = ComputeLineScanCount(ilinesizeB, m_ihgap, line_b_meta);
+    const int dplinewsize = dplinewbase > 1 ? dplinewbase + 1 : dplinewbase;
+    const int dplinehsize = dplinehbase > 1 ? dplinehbase + 1 : dplinehbase;
+    const int dplinewdenom = std::max(1, dplinewsize - 1);
+    const int dplinehdenom = std::max(1, dplinehsize - 1);
 
-    double dlineax = (ptRect[1].X() - ptRect[0].X()) / dplinewsize;
-    double dlineay = (ptRect[1].Y() - ptRect[0].Y()) / dplinewsize;
+    double dlineax = (ptRect[1].X() - ptRect[0].X()) / dplinewdenom;
+    double dlineay = (ptRect[1].Y() - ptRect[0].Y()) / dplinewdenom;
 
-    double dlinebx = (ptRect[2].X() - ptRect[1].X()) / dplinehsize;
-    double dlineby = (ptRect[2].Y() - ptRect[1].Y()) / dplinehsize;
+    double dlinebx = (ptRect[2].X() - ptRect[1].X()) / dplinehdenom;
+    double dlineby = (ptRect[2].Y() - ptRect[1].Y()) / dplinehdenom;
 
 
     LineShape aline1, aline2;
@@ -4984,11 +5317,28 @@ void FindLine::BuildScanProfilesRobust(Image& image,
         return;
     }
 
-    if (iwsize + ihsize > g_pbackimage->getHeight() ||
+    const int binaryPaddingRows = 2;
+    const int binaryRoiHeight = iwsize + ihsize + binaryPaddingRows;
+
+    if (binaryRoiHeight > g_pbackimage->getHeight() ||
         iprocessw > g_pbackimage->getWidth())
     {
         stats.profile_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
         return;
+    }
+
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        if (!backMat.empty())
+        {
+            const int clearWidth = std::min(iprocessw + 3, backMat.cols);
+            const int clearHeight = std::min(binaryRoiHeight, backMat.rows);
+            if (clearWidth > 0 && clearHeight > 0)
+            {
+                backMat(cv::Rect(0, 0, clearWidth, clearHeight))
+                    .setTo(cv::Scalar(0, 0, 0));
+            }
+        }
     }
 
     for (int i = 0; i < iwsize; ++i)
@@ -5000,12 +5350,12 @@ void FindLine::BuildScanProfilesRobust(Image& image,
         m_lines_h[i].linecopyex(image, *g_pbackimage, 0, i + iwsize);
     }
 
-    g_pbackimage->setroi(0, 0, iprocessw, iwsize + ihsize);
+    g_pbackimage->setroi(0, 0, iprocessw, binaryRoiHeight);
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
 
     if ((m_iobjfilterset & 0x01) && g_pbackfindobject != nullptr)
     {
-        g_pbackfindobject->setrect(0, 0, iprocessw, iwsize + ihsize);
+        g_pbackfindobject->setrect(0, 0, iprocessw, binaryRoiHeight);
 
         m_effective_filter_borw = effectivefilterborw();
         m_effective_filter_min = effectivefiltermin();
@@ -5042,7 +5392,6 @@ void FindLine::CollectEdgeBandsRobust(Image& image,
             cv::cvtColor(src_mat, gray_src, cv::COLOR_BGR2GRAY);
     }
 
-    const int ifixvalue = 3;
     const int max_band_width = 70;
     const int profile_half_width = 5;
 
@@ -5113,7 +5462,11 @@ void FindLine::CollectEdgeBandsRobust(Image& image,
 
         for (int col_index = 0; col_index < line_length; ++col_index)
         {
-            const cv::Vec3b color = g_pbackimage->pixel(col_index, row_index);
+            const int sample_row = ResolveFindLineBinarySampleRow(
+                g_pbackimage, row_index, line_index,
+                scan_type == 0 ? iwsize : ihsize,
+                line_length);
+            const cv::Vec3b color = g_pbackimage->pixel(col_index, sample_row);
             const bool active = color[0] > 0;
             if (active && !collecting)
             {
@@ -5133,10 +5486,10 @@ void FindLine::CollectEdgeBandsRobust(Image& image,
             m_scanEdgeBands.push_back(scan_bands);
     };
 
-    for (int line_index = ifixvalue; line_index < iwsize - ifixvalue; ++line_index)
+    for (int line_index = 0; line_index < iwsize; ++line_index)
         append_scan_band_robust(0, line_index, line_index, ilineslen1);
 
-    for (int line_index = ifixvalue; line_index < ihsize - ifixvalue; ++line_index)
+    for (int line_index = 0; line_index < ihsize; ++line_index)
         append_scan_band_robust(1, line_index, iwsize + line_index, ilineslen2);
 
     stats.edgeband_count = 0;

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <sstream>
 #include <fstream>
 
@@ -1049,6 +1050,27 @@ static const RuntimeObjectView* FindCurrentFindLineObject(
   return nullptr;
 }
 
+static const RuntimeObjectView* FindCurrentFindCircleObject(
+    const ManualTestContext& context)
+{
+  const std::string& primary = context.current_gauge.primary_object_name;
+  if (!primary.empty())
+  {
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+      if (object.type == "FindCircle" && object.name == primary)
+        return &object;
+    }
+  }
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "FindCircle")
+      return &object;
+  }
+  return nullptr;
+}
+
 static ManualFindLineEdgeParamState MakeFindLineEdgeParamsFromGauge(
     const ManualGaugeState& gauge)
 {
@@ -1082,6 +1104,18 @@ static void EnsureFindLineEdgeParamStorage(ManualTestContext& context)
   context.findline_selected_scan_edge =
       std::max(0, std::min(context.findline_selected_scan_edge,
                            context.findline_scan_edge_count));
+  context.findline_best_fit_edge =
+      std::max(0, std::min(context.findline_best_fit_edge,
+                           context.findline_scan_edge_count));
+  context.findline_recommended_fit_edge =
+      std::max(0, std::min(context.findline_recommended_fit_edge,
+                           context.findline_scan_edge_count));
+  context.findline_relation_edge =
+      std::max(0, std::min(context.findline_relation_edge,
+                           context.findline_scan_edge_count));
+  context.findline_attach_edge =
+      std::max(0, std::min(context.findline_attach_edge,
+                           context.findline_scan_edge_count));
 
   const std::size_t required =
       static_cast<std::size_t>(context.findline_scan_edge_count + 1);
@@ -1095,6 +1129,509 @@ static void EnsureFindLineEdgeParamStorage(ManualTestContext& context)
     if (!params.initialized)
       params = MakeFindLineEdgeParamsFromGauge(context.current_gauge);
   }
+}
+
+static std::string FindLineEdgeLabel(int edge)
+{
+  return edge == 0 ? "All edges" : ("Edge " + std::to_string(edge));
+}
+
+static ManualFindCircleEdgeParamState MakeFindCircleEdgeParamsFromGauge(
+    const ManualGaugeState& gauge)
+{
+  ManualFindCircleEdgeParamState params;
+  params.initialized = true;
+  params.threshold = gauge.threshold;
+  params.method = gauge.method;
+  params.linegap = gauge.linegap;
+  params.gap = gauge.gap;
+  return params;
+}
+
+static void ApplyFindCircleEdgeParamsToGauge(
+    const ManualFindCircleEdgeParamState& params,
+    ManualGaugeState& gauge)
+{
+  gauge.threshold = params.threshold;
+  gauge.method = params.method;
+  gauge.linegap = params.linegap;
+  gauge.gap = params.gap;
+}
+
+static void EnsureFindCircleEdgeParamStorage(ManualTestContext& context)
+{
+  context.findcircle_scan_edge_count =
+      std::max(1, std::min(32, context.findcircle_scan_edge_count));
+  context.findcircle_selected_scan_edge =
+      std::max(0, std::min(context.findcircle_selected_scan_edge,
+                           context.findcircle_scan_edge_count));
+  context.findcircle_best_fit_edge =
+      std::max(0, std::min(context.findcircle_best_fit_edge,
+                           context.findcircle_scan_edge_count));
+  context.findcircle_recommended_fit_edge =
+      std::max(0, std::min(context.findcircle_recommended_fit_edge,
+                           context.findcircle_scan_edge_count));
+  context.findcircle_relation_edge =
+      std::max(0, std::min(context.findcircle_relation_edge,
+                           context.findcircle_scan_edge_count));
+  context.findcircle_attach_edge =
+      std::max(0, std::min(context.findcircle_attach_edge,
+                           context.findcircle_scan_edge_count));
+
+  const std::size_t required =
+      static_cast<std::size_t>(context.findcircle_scan_edge_count + 1);
+  if (context.findcircle_edge_params.size() < required)
+    context.findcircle_edge_params.resize(required);
+
+  for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
+  {
+    ManualFindCircleEdgeParamState& params =
+        context.findcircle_edge_params[static_cast<std::size_t>(i)];
+    if (!params.initialized)
+      params = MakeFindCircleEdgeParamsFromGauge(context.current_gauge);
+  }
+}
+
+static std::string FindCircleEdgeLabel(int edge)
+{
+  return edge == 0 ? "Full circle" : ("Arc " + std::to_string(edge));
+}
+
+static bool DrawFindCircleEdgeRoleCombo(
+    const char* label,
+    int& edge,
+    int edgeCount)
+{
+  bool edited = false;
+  edge = std::max(0, std::min(edge, edgeCount));
+  const std::string currentLabel = FindCircleEdgeLabel(edge);
+  ImGui::SetNextItemWidth(150.0f);
+  if (ImGui::BeginCombo(label, currentLabel.c_str()))
+  {
+    if (ImGui::Selectable("Full circle", edge == 0))
+    {
+      edge = 0;
+      edited = true;
+    }
+    for (int i = 1; i <= edgeCount; ++i)
+    {
+      const std::string item = FindCircleEdgeLabel(i);
+      if (ImGui::Selectable(item.c_str(), edge == i))
+      {
+        edge = i;
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  return edited;
+}
+
+static bool DrawFindLineEdgeRoleCombo(
+    const char* label,
+    int& edge,
+    int edgeCount)
+{
+  bool edited = false;
+  edge = std::max(0, std::min(edge, edgeCount));
+  const std::string currentLabel = FindLineEdgeLabel(edge);
+  ImGui::SetNextItemWidth(150.0f);
+  if (ImGui::BeginCombo(label, currentLabel.c_str()))
+  {
+    if (ImGui::Selectable("All edges", edge == 0))
+    {
+      edge = 0;
+      edited = true;
+    }
+    for (int i = 1; i <= edgeCount; ++i)
+    {
+      const std::string item = FindLineEdgeLabel(i);
+      if (ImGui::Selectable(item.c_str(), edge == i))
+      {
+        edge = i;
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  return edited;
+}
+
+static bool DrawFindCircleEdgeSelectorPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindCircle" ||
+        context.current_gauge.has_circle_gauge))
+  {
+    return false;
+  }
+
+  bool edited = false;
+  EnsureFindCircleEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Detection Arc / Point Column");
+  ImGui::TextDisabled(
+      "Select which circle arc/point column is being tuned.  Arc-specific values are saved to globals for evidence replay.");
+
+  ImGui::SetNextItemWidth(100.0f);
+  int edgeCount = context.findcircle_scan_edge_count;
+  if (ImGui::InputInt("arc count", &edgeCount))
+  {
+    context.findcircle_scan_edge_count = std::max(1, std::min(32, edgeCount));
+    if (context.findcircle_selected_scan_edge >
+        context.findcircle_scan_edge_count)
+    {
+      context.findcircle_selected_scan_edge =
+          context.findcircle_scan_edge_count;
+    }
+    EnsureFindCircleEdgeParamStorage(context);
+    edited = true;
+  }
+
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(190.0f);
+  const std::string currentLabel =
+      FindCircleEdgeLabel(context.findcircle_selected_scan_edge);
+  if (ImGui::BeginCombo("selected arc", currentLabel.c_str()))
+  {
+    if (ImGui::Selectable("Full circle", context.findcircle_selected_scan_edge == 0))
+    {
+      context.findcircle_selected_scan_edge = 0;
+      edited = true;
+    }
+    for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
+    {
+      const std::string label = "Arc " + std::to_string(i);
+      if (ImGui::Selectable(label.c_str(),
+                            context.findcircle_selected_scan_edge == i))
+      {
+        context.findcircle_selected_scan_edge = i;
+        EnsureFindCircleEdgeParamStorage(context);
+        ApplyFindCircleEdgeParamsToGauge(
+            context.findcircle_edge_params[static_cast<std::size_t>(i)],
+            context.current_gauge);
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+
+  if (context.findcircle_selected_scan_edge > 0)
+  {
+    ManualFindCircleEdgeParamState& params =
+        context.findcircle_edge_params[
+            static_cast<std::size_t>(context.findcircle_selected_scan_edge)];
+    params.initialized = true;
+
+    ImGui::Text("Current: Arc %d / %d",
+                context.findcircle_selected_scan_edge,
+                context.findcircle_scan_edge_count);
+
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("arc threshold", &params.threshold);
+    params.threshold = std::max(0, std::min(255, params.threshold));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("arc method", &params.method);
+    params.method = std::max(0, std::min(3, params.method));
+
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("arc linegap", &params.linegap);
+    params.linegap = std::max(0, std::min(50, params.linegap));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("arc gap", &params.gap);
+    params.gap = std::max(0, std::min(200, params.gap));
+
+    if (edited)
+      ApplyFindCircleEdgeParamsToGauge(params, context.current_gauge);
+
+    if (ImGui::Button("Copy Current Arc Params To All"))
+    {
+      for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
+      {
+        context.findcircle_edge_params[static_cast<std::size_t>(i)] = params;
+        context.findcircle_edge_params[static_cast<std::size_t>(i)].initialized = true;
+      }
+      edited = true;
+    }
+  }
+  else
+  {
+    ImGui::TextDisabled(
+        "Full circle selected: Geometry/Edge Params below edit the shared baseline.");
+    if (ImGui::Button("Copy Shared Params To All Arcs"))
+    {
+      const ManualFindCircleEdgeParamState params =
+          MakeFindCircleEdgeParamsFromGauge(context.current_gauge);
+      for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
+        context.findcircle_edge_params[static_cast<std::size_t>(i)] = params;
+      edited = true;
+    }
+  }
+
+  return edited;
+}
+
+static bool DrawFindCircleEdgeRolePanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindCircle" ||
+        context.current_gauge.has_circle_gauge))
+  {
+    return false;
+  }
+
+  bool edited = false;
+  EnsureFindCircleEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Arc Role Binding / 接入点");
+  ImGui::TextDisabled(
+      "Placeholders for annotation/evidence relation. selected=arc used now; best=manual/runtime best; recommended=future advisor; relation=combined arc point-set; attach=shape binding.");
+
+  ImGui::PushID("findcircle_arc_roles");
+  edited |= DrawFindCircleEdgeRoleCombo(
+      "best arc", context.findcircle_best_fit_edge,
+      context.findcircle_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Use Full Circle"))
+  {
+    context.findcircle_best_fit_edge = 0;
+    edited = true;
+  }
+
+  edited |= DrawFindCircleEdgeRoleCombo(
+      "recommended arc", context.findcircle_recommended_fit_edge,
+      context.findcircle_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Recommend = Best"))
+  {
+    context.findcircle_recommended_fit_edge = context.findcircle_best_fit_edge;
+    edited = true;
+  }
+
+  edited |= DrawFindCircleEdgeRoleCombo(
+      "relation arc", context.findcircle_relation_edge,
+      context.findcircle_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: related/combined arc point-set");
+
+  edited |= DrawFindCircleEdgeRoleCombo(
+      "attach arc", context.findcircle_attach_edge,
+      context.findcircle_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: shape attach/binding");
+  ImGui::PopID();
+
+  ImGui::Text("globals: selected=%d best=%d recommended=%d relation=%d attach=%d",
+              context.findcircle_selected_scan_edge,
+              context.findcircle_best_fit_edge,
+              context.findcircle_recommended_fit_edge,
+              context.findcircle_relation_edge,
+              context.findcircle_attach_edge);
+
+  return edited;
+}
+
+static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindCircle" ||
+        context.current_gauge.has_circle_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindCircleObject(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Arc Result Evaluation");
+  ImGui::TextDisabled(
+      "Runtime evidence for the current circle.  Per-arc scoring is reserved for the next algorithm capture step; this table reports current full-circle evidence.");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to collect circle result evidence.");
+    return;
+  }
+
+  const int accepted = object->valid_points_count > 0
+      ? object->valid_points_count
+      : object->measure_points_count;
+  const double score = object->has_fit_result
+      ? std::max(0.0, 100.0 - static_cast<double>(object->fit_avgdist) * 10.0)
+      : 0.0;
+
+  ImGui::Text("selected_arc=%d arc_count=%d fit_circle=%s score=%.2f",
+              context.findcircle_selected_scan_edge,
+              context.findcircle_scan_edge_count,
+              object->has_fit_result ? "true" : "false",
+              score);
+
+  const ImGuiTableFlags flags =
+      ImGuiTableFlags_Borders |
+      ImGuiTableFlags_RowBg |
+      ImGuiTableFlags_Resizable |
+      ImGuiTableFlags_SizingStretchProp;
+
+  if (ImGui::BeginTable("findcircle_arc_evaluation_table", 8, flags))
+  {
+    ImGui::TableSetupColumn("Arc");
+    ImGui::TableSetupColumn("Sel");
+    ImGui::TableSetupColumn("Lines");
+    ImGui::TableSetupColumn("Len");
+    ImGui::TableSetupColumn("Points");
+    ImGui::TableSetupColumn("Fit?");
+    ImGui::TableSetupColumn("AvgDist");
+    ImGui::TableSetupColumn("Stage");
+    ImGui::TableHeadersRow();
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted("Full");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::TextUnformatted(context.findcircle_selected_scan_edge == 0 ? "*" : "");
+    ImGui::TableSetColumnIndex(2);
+    ImGui::Text("%d", object->circle_scan_line_count);
+    ImGui::TableSetColumnIndex(3);
+    ImGui::Text("%d", object->circle_scan_line_length);
+    ImGui::TableSetColumnIndex(4);
+    ImGui::Text("%d", accepted);
+    ImGui::TableSetColumnIndex(5);
+    ImGui::TextUnformatted(object->has_fit_result ? "yes" : "no");
+    ImGui::TableSetColumnIndex(6);
+    ImGui::Text("%.3f", object->fit_avgdist);
+    ImGui::TableSetColumnIndex(7);
+    ImGui::TextUnformatted(object->circle_measure_failure_stage.empty()
+        ? "-"
+        : object->circle_measure_failure_stage.c_str());
+
+    ImGui::EndTable();
+  }
+}
+
+static void DrawFindCircleScanSemanticsPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindCircle" ||
+        context.current_gauge.has_circle_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindCircleObject(context);
+  const int linegap = std::max(1, context.current_gauge.linegap);
+  const double circumference =
+      std::max(0, context.current_gauge.radius) * 2.0 * 3.14159265358979323846;
+  const int previewTicks = circumference > 1.0
+      ? std::max(1, static_cast<int>(std::floor(circumference / linegap)))
+      : 0;
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Gauge Scan Semantics");
+  ImGui::TextColored(ImVec4(1.0f, 0.92f, 0.45f, 1.0f),
+                     "arc tick = sampling opportunity");
+  ImGui::SameLine();
+  ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.18f, 1.0f),
+                     "| accepted point = algorithm result");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to show accepted/rejected counters.");
+    ImGui::Text("preview_ticks=%d linegap=%d method=%d gap=%d",
+                previewTicks,
+                linegap,
+                context.current_gauge.method,
+                context.current_gauge.gap);
+    return;
+  }
+
+  ImGui::Text("preview_ticks=%d scan_lines=%d scan_len=%d process_w=%d",
+              previewTicks,
+              object->circle_scan_line_count,
+              object->circle_scan_line_length,
+              object->circle_process_width);
+  ImGui::Text("measure_points=%d valid_points=%d fit_circle=%s avgdist=%.3f",
+              object->measure_points_count,
+              object->valid_points_count,
+              object->has_fit_result ? "true" : "false",
+              object->fit_avgdist);
+  ImGui::Text("image_ready=%s backimage_ready=%s findobject_ready=%s",
+              object->circle_measure_image_ready ? "true" : "false",
+              object->circle_measure_backimage_ready ? "true" : "false",
+              object->circle_measure_findobject_ready ? "true" : "false");
+  ImGui::Text("source=%s failure=%s",
+              object->circle_measure_source.c_str(),
+              object->circle_measure_failure_stage.empty()
+                  ? "-"
+                  : object->circle_measure_failure_stage.c_str());
+}
+
+static bool DrawFindLineEdgeRolePanel(
+    ManualTestContext& context,
+    const RuntimeObjectView* object)
+{
+  bool edited = false;
+  EnsureFindLineEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Edge Role Binding / 接入点");
+  ImGui::TextDisabled(
+      "Placeholders for annotation/evidence relation. selected=edge used now; best=runtime/manual best; recommended=future advisor; relation=combined point-set; attach=shape binding.");
+
+  if (object != nullptr &&
+      object->line_best_edge_index > 0 &&
+      object->line_best_edge_index <= context.findline_scan_edge_count &&
+      context.findline_best_fit_edge == 0)
+  {
+    context.findline_best_fit_edge = object->line_best_edge_index;
+  }
+
+  ImGui::PushID("findline_edge_roles");
+  edited |= DrawFindLineEdgeRoleCombo(
+      "best edge", context.findline_best_fit_edge,
+      context.findline_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Use Runtime Best"))
+  {
+    if (object != nullptr &&
+        object->line_best_edge_index > 0 &&
+        object->line_best_edge_index <= context.findline_scan_edge_count)
+    {
+      context.findline_best_fit_edge = object->line_best_edge_index;
+      edited = true;
+    }
+  }
+
+  edited |= DrawFindLineEdgeRoleCombo(
+      "recommended edge", context.findline_recommended_fit_edge,
+      context.findline_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Recommend = Best"))
+  {
+    context.findline_recommended_fit_edge = context.findline_best_fit_edge;
+    edited = true;
+  }
+
+  edited |= DrawFindLineEdgeRoleCombo(
+      "relation edge", context.findline_relation_edge,
+      context.findline_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: related/combined point-set");
+
+  edited |= DrawFindLineEdgeRoleCombo(
+      "attach edge", context.findline_attach_edge,
+      context.findline_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: shape attach/binding");
+  ImGui::PopID();
+
+  ImGui::Text("globals: selected=%d best=%d recommended=%d relation=%d attach=%d",
+              context.findline_selected_scan_edge,
+              context.findline_best_fit_edge,
+              context.findline_recommended_fit_edge,
+              context.findline_relation_edge,
+              context.findline_attach_edge);
+
+  return edited;
 }
 
 static bool DrawFindLineEdgeSelectorPanel(ManualTestContext& context)
@@ -1130,9 +1667,7 @@ static bool DrawFindLineEdgeSelectorPanel(ManualTestContext& context)
 
   ImGui::SameLine();
   ImGui::SetNextItemWidth(190.0f);
-  std::string currentLabel = context.findline_selected_scan_edge == 0
-      ? "All edges"
-      : ("Edge " + std::to_string(context.findline_selected_scan_edge));
+  std::string currentLabel = FindLineEdgeLabel(context.findline_selected_scan_edge);
   if (ImGui::BeginCombo("selected edge", currentLabel.c_str()))
   {
     const bool selectedAll = context.findline_selected_scan_edge == 0;
@@ -1381,8 +1916,20 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::Checkbox("Show single-line gauge scan ticks",
                       &context.show_line_gauge_scan_lines);
       gaugeEdited |= DrawFindLineEdgeSelectorPanel(context);
+      gaugeEdited |= DrawFindLineEdgeRolePanel(
+          context,
+          FindCurrentFindLineObject(context));
       DrawFindLineEdgeEvaluationPanel(context);
       DrawFindLineScanSemanticsPanel(context);
+  }
+  if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
+  {
+      ImGui::Checkbox("Show circle gauge scan ticks",
+                      &context.show_circle_gauge_scan_lines);
+      gaugeEdited |= DrawFindCircleEdgeSelectorPanel(context);
+      gaugeEdited |= DrawFindCircleEdgeRolePanel(context);
+      DrawFindCircleEdgeEvaluationPanel(context);
+      DrawFindCircleScanSemanticsPanel(context);
   }
   ImGui::Separator();
 
@@ -1392,13 +1939,31 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::PushID("geometry");
       if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
       {
-          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("cx", &gauge.circle_cx);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("cy", &gauge.circle_cy);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("radius", &gauge.radius);
+          bool circleGeometryEdited = false;
+          ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("cx", &gauge.circle_cx);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("cy", &gauge.circle_cy);
+          ImGui::SameLine(); ImGui::TextDisabled("annulus gauge");
 
-          ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("inner_radius", &gauge.inner_radius);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("outer_radius", &gauge.outer_radius);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("gap", &gauge.gap);
+          ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("inner_radius (Rin)", &gauge.inner_radius);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("outer_radius (Rout)", &gauge.outer_radius);
+          ImGui::SameLine(); ImGui::Text("band_width: %d", std::max(0, gauge.outer_radius - gauge.inner_radius));
+
+          // radius is a legacy alias for outer_radius.  Keep it synchronized
+          // here so the UI never presents two independently editable radii.
+          gauge.outer_radius = std::max(1, gauge.outer_radius);
+          gauge.inner_radius = std::max(0, std::min(gauge.inner_radius, gauge.outer_radius - 1));
+          gauge.radius = gauge.outer_radius;
+          gauge.circle_px = gauge.circle_cx + gauge.outer_radius;
+          gauge.circle_py = gauge.circle_cy;
+          gaugeEdited |= circleGeometryEdited;
+          if (circleGeometryEdited)
+          {
+              // Keep the editable repository CircleShape in lockstep with the
+              // controls.  The explicit Apply To Gauge button remains a
+              // visible confirmation, but changing Rin/Rout must not leave a
+              // stale single-circle drawing on the canvas.
+              context.apply_gauge_to_shape_requested = true;
+          }
       }
       else
       {
@@ -1473,17 +2038,41 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     context.last_key_parameter_edit_summary =
         "threshold=" + std::to_string(gauge.threshold) +
         " method=" + std::to_string(gauge.method) +
-        " linegap=" + std::to_string(gauge.linegap) +
-        " wgap=" + std::to_string(gauge.wgap) +
-        " hgap=" + std::to_string(gauge.hgap) +
-        " filterprofile=" + std::to_string(gauge.filterprofile) +
-        " selected_edge=" +
-        std::to_string(context.findline_selected_scan_edge) +
-        "/" + std::to_string(context.findline_scan_edge_count) +
-        " roi=(" + std::to_string(gauge.line_x0) + "," +
-        std::to_string(gauge.line_y0) + "," +
-        std::to_string(gauge.line_x1) + "," +
-        std::to_string(gauge.line_y1) + ")";
+        " linegap=" + std::to_string(gauge.linegap);
+    if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
+    {
+      context.last_key_parameter_edit_summary +=
+          " gap=" + std::to_string(gauge.gap) +
+          " selected_arc=" +
+          std::to_string(context.findcircle_selected_scan_edge) +
+          "/" + std::to_string(context.findcircle_scan_edge_count) +
+          " best_arc=" + std::to_string(context.findcircle_best_fit_edge) +
+          " recommended_arc=" + std::to_string(context.findcircle_recommended_fit_edge) +
+          " relation_arc=" + std::to_string(context.findcircle_relation_edge) +
+          " attach_arc=" + std::to_string(context.findcircle_attach_edge) +
+          " circle=(" + std::to_string(gauge.circle_cx) + "," +
+          std::to_string(gauge.circle_cy) + "," +
+          std::to_string(gauge.circle_px) + "," +
+          std::to_string(gauge.circle_py) + ")";
+    }
+    else
+    {
+      context.last_key_parameter_edit_summary +=
+          " wgap=" + std::to_string(gauge.wgap) +
+          " hgap=" + std::to_string(gauge.hgap) +
+          " filterprofile=" + std::to_string(gauge.filterprofile) +
+          " selected_edge=" +
+          std::to_string(context.findline_selected_scan_edge) +
+          "/" + std::to_string(context.findline_scan_edge_count) +
+          " best_edge=" + std::to_string(context.findline_best_fit_edge) +
+          " recommended_edge=" + std::to_string(context.findline_recommended_fit_edge) +
+          " relation_edge=" + std::to_string(context.findline_relation_edge) +
+          " attach_edge=" + std::to_string(context.findline_attach_edge) +
+          " roi=(" + std::to_string(gauge.line_x0) + "," +
+          std::to_string(gauge.line_y0) + "," +
+          std::to_string(gauge.line_x1) + "," +
+          std::to_string(gauge.line_y1) + ")";
+    }
     CXLOG_INFO(
         "KeyParameterControls",
         "key_parameter_ui_edit",
@@ -1502,6 +2091,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   {
     gauge.dirty = true;
     gauge.review_status = "editing";
+    context.apply_gauge_to_shape_requested = true;
   }
   ImGui::SameLine();
   if (ImGui::Button("Apply To Globals", ImVec2(btnWidth, 0)))

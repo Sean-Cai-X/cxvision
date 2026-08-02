@@ -188,6 +188,9 @@ void UpdateManualGaugeFromShapeElement(
     gauge.circle_py = gauge.circle_cy;
     gauge.inner_radius = std::max(
         0, static_cast<int>(std::lround(inner_radius)));
+    gauge.outer_radius = gauge.radius;
+    if (gauge.inner_radius >= gauge.outer_radius)
+        gauge.inner_radius = std::max(0, gauge.outer_radius - 1);
   }
   else if (element.owner_type == "FindEllipse" &&
            element.shape->kind() == CxShapeKind::Ellipse)
@@ -249,6 +252,9 @@ bool ExportShapeElementToRuntimeGlobals(
     setInt("global_circle_cy", center.y);
     setInt("global_circle_px", center.x + radius);
     setInt("global_circle_py", center.y);
+    setInt("global_circle_inner_radius", inner_radius);
+    setInt("global_circle_outer_radius", radius);
+    setInt("global_circle_ring_width", std::max(0.0, radius - inner_radius));
     setInt("global_seed_x", center.x);
     setInt("global_seed_y", center.y);
     UpdateManualGaugeFromShapeElement(context, element);
@@ -409,6 +415,84 @@ bool ViewController::HasEditableFindCircleGauge() const
            m_manualTest.current_gauge.circle_cx > 0 &&
            m_manualTest.current_gauge.circle_cy > 0 &&
            m_manualTest.current_gauge.radius > 0;
+}
+
+bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
+{
+    ManualGaugeState& gauge = m_manualTest.current_gauge;
+    if (gauge.tool != "FindCircle" || !gauge.has_circle_gauge)
+    {
+        reason = "Apply To Gauge currently requires an active FindCircle gauge";
+        return false;
+    }
+
+    const int outer = std::max(1, gauge.outer_radius > 0
+        ? gauge.outer_radius : gauge.radius);
+    const int inner = std::max(0, std::min(gauge.inner_radius, outer - 1));
+    gauge.outer_radius = outer;
+    gauge.inner_radius = inner;
+    gauge.radius = outer;
+    gauge.circle_px = gauge.circle_cx + outer;
+    gauge.circle_py = gauge.circle_cy;
+
+    if (!m_annotationLayer.ApplyFindCircleAnnulusGauge(
+            gauge.primary_object_name,
+            static_cast<double>(gauge.circle_cx),
+            static_cast<double>(gauge.circle_cy),
+            static_cast<double>(inner),
+            static_cast<double>(outer),
+            reason))
+    {
+        return false;
+    }
+
+    // Keep the live Parser-owned FindCircle geometry in sync with the
+    // repository shape immediately.  The Image View scan preview reads the
+    // native object's m_lines (the same source consumed by Measure), so only
+    // changing the editable Shape would leave the old centre-to-outer lines
+    // visible until a later script run.  The pointer is used only during this
+    // call and is never stored outside the current Parser session.
+    if (!gauge.primary_object_name.empty())
+    {
+        FindCircle* runtime_circle = static_cast<FindCircle*>(
+            m_parserDebugBridge.QueryClassObject(
+                "FindCircle",
+                gauge.primary_object_name));
+        if (runtime_circle != nullptr)
+        {
+            const int ring_width = std::max(0, outer - inner);
+            runtime_circle->Setgap(gauge.gap);
+            runtime_circle->setlinegap(gauge.linegap);
+            runtime_circle->setthre(gauge.threshold);
+            runtime_circle->setmethod(gauge.method);
+            if (ring_width > 0)
+            {
+                runtime_circle->setcircle2(
+                    gauge.circle_cx,
+                    gauge.circle_cy,
+                    gauge.circle_cx + outer,
+                    gauge.circle_cy,
+                    ring_width);
+            }
+            else
+            {
+                runtime_circle->setcircle(
+                    gauge.circle_cx,
+                    gauge.circle_cy,
+                    gauge.circle_cx + outer,
+                    gauge.circle_cy);
+            }
+        }
+    }
+
+    // Persist the same value snapshot that is now visible in Image View.  The
+    // next Run clears the pending repository edit and lets CxScript recreate
+    // the native FindCircle geometry from these exact global_* values.
+    ApplyManualGaugeToGlobals(m_manualTest);
+    gauge.source = "key_parameter_controls";
+    gauge.dirty = true;
+    gauge.accepted = false;
+    return true;
 }
 
 const char* ViewController::ImageToolModeName(ImageToolMode mode)

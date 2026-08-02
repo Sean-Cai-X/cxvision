@@ -462,6 +462,67 @@ void FindCircle::setcircle2(int icentx, int icenty, int ipax, int ipay, int idis
         m_measure_geometry_built_version = m_measure_geometry_request.version;
     }
 }
+
+void FindCircle::setannulus(
+    int icentx,
+    int icenty,
+    int iinnerRadius,
+    int iouterRadius)
+{
+    const int outerRadius = std::max(1, iouterRadius);
+    const int innerRadius = std::max(0, std::min(iinnerRadius, outerRadius - 1));
+
+    if (innerRadius > 0)
+    {
+        setcircle2(
+            icentx,
+            icenty,
+            icentx + outerRadius,
+            icenty,
+            outerRadius - innerRadius);
+        return;
+    }
+
+    setcircle(icentx, icenty, icentx + outerRadius, icenty);
+}
+
+int FindCircle::getannulusouter()
+{
+    if (!m_measure_geometry_request.valid)
+        return 0;
+
+    const double dx = static_cast<double>(
+        m_measure_geometry_request.pass_x - m_measure_geometry_request.center_x);
+    const double dy = static_cast<double>(
+        m_measure_geometry_request.pass_y - m_measure_geometry_request.center_y);
+    return std::max(0, RoundToInt(std::sqrt(dx * dx + dy * dy)));
+}
+
+int FindCircle::getannulusinner()
+{
+    if (!m_measure_geometry_request.valid ||
+        !m_measure_geometry_request.has_inner_gap)
+        return 0;
+
+    return std::max(
+        0,
+        getannulusouter() - std::max(0, m_measure_geometry_request.inner_gap));
+}
+
+int FindCircle::getannuluswidth()
+{
+    return std::max(0, getannulusouter() - getannulusinner());
+}
+
+int FindCircle::hasannulus()
+{
+    return m_measure_geometry_request.valid &&
+           m_measure_geometry_request.has_inner_gap &&
+           m_measure_geometry_request.inner_gap > 0 &&
+           getannulusouter() > getannulusinner()
+        ? 1
+        : 0;
+}
 void FindCircle::translate(int ix,int iy)
 {
     Translate(gp_Vec(ix, iy, 0)); 
@@ -772,6 +833,7 @@ void FindCircle::Measure(Image& image)
     const int isize = ClampSizeToInt(m_lines.size());
 
     m_lastMeasureGeometryDebug.scan_line_count = isize;
+    m_last_measure_input_request = m_measure_geometry_request;
 
     if (isize <= 0)
     {
@@ -917,14 +979,71 @@ void FindCircle::Measure(Image& image)
             iprocessw,
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
+
+    /*
+     * The circle scan image is a rectangular workspace representation of a
+     * closed angular domain.  Clear the full workspace ROI before writing the
+     * current scan rows; otherwise stale rows from a previous run can leak into
+     * the tail padding used by blur/gap/FindObject.
+     */
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        if (!backMat.empty())
+        {
+            const int clearWidth =
+                std::min(iprocessw + 3, backMat.cols);
+            const int clearHeight =
+                std::min(isize + 5, backMat.rows);
+            if (clearWidth > 0 && clearHeight > 0)
+            {
+                backMat(cv::Rect(0, 0, clearWidth, clearHeight))
+                    .setTo(cv::Scalar(0, 0, 0));
+            }
+        }
+    }
+
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
+
+    /*
+     * Closed-circle padding for the BackImage / FindObject path.
+     *
+     * linecopyex writes rows [0, isize).  The subsequent ROI is [0, isize+5),
+     * and Image::roi_7blur_gap_mud_thre_bw treats that ROI as an ordinary
+     * rectangle.  Leaving rows [isize, isize+5) empty turns the circular seam
+     * into a hard image border, so the last angular side can lose candidates.
+     * Copy the first scan rows into the tail padding to preserve angular
+     * continuity for blur/gap thresholding and optional FindObject filtering.
+     */
+    {
+        cv::Mat& backMat = g_pbackimage->getmat();
+        const int wrapRows = std::min(5, isize);
+        const int copyWidth =
+            std::min(iprocessw, backMat.empty() ? 0 : backMat.cols);
+        if (!backMat.empty() && copyWidth > 0)
+        {
+            for (int pad = 0; pad < wrapRows; ++pad)
+            {
+                const int dstRow = isize + pad;
+                const int srcRow = pad;
+                if (srcRow < 0 || srcRow >= backMat.rows ||
+                    dstRow < 0 || dstRow >= backMat.rows)
+                {
+                    continue;
+                }
+                backMat(cv::Rect(0, srcRow, copyWidth, 1))
+                    .copyTo(backMat(cv::Rect(0, dstRow, copyWidth, 1)));
+            }
+        }
+    }
+
     LogFindCircleMeasureProbe(
         "measure_after_linecopyex",
         "running",
-        "linecopyex complete");
+        "linecopyex complete; circular tail padding rows=" +
+            std::to_string(std::min(5, isize)));
     if (stage_limit == 3)
         return;
 
@@ -1017,19 +1136,32 @@ void FindCircle::Measure(Image& image)
 
       m_budget_state = CxAlgorithmBudgetState();
 
-      int ifixvalue = ComputeCircleScanTrim(isize);
-      int iscanlines = isize - ifixvalue;
-      iscanlines = std::max(iscanlines, ComputeCircleMinScanLines(isize));
+      /*
+       * Circle gauge is a closed sampling domain.  The old fixed trim removed
+       * the tail scan columns (for example 57 scan lines -> 54 processed),
+       * which makes the visible start/end arc lose result points even when the
+       * geometry itself is valid.  Process every generated scan line here; if a
+       * future geometry builder emits a real duplicate close point, that should
+       * be detected by geometry identity instead of a hard-coded tail cut.
+       */
+      int iscanlines = isize;
       if (iscanlines < 0)
           iscanlines = 0;
       const int left_margin = ComputeCircleEdgeMargin(ilineslen1, m_iSelectPointGap);
       const int right_margin = ComputeCircleEdgeMargin(ilineslen1, m_iSelectPointGap);
+      const int endpoint_guard = std::max(
+          right_margin,
+          std::min(std::max(6, m_iSelectPointGap * 2),
+                   std::max(1, ilineslen1 / 12)));
       const int max_edge_width = ComputeCircleMaxEdgeWidth(ilineslen1);
 
       const auto begin_time = std::chrono::steady_clock::now();
       int scan_lines_processed = 0;
       int total_samples = 0;
       int valid_points_count = 0;
+      std::vector<int> accepted_line_positions(
+          static_cast<std::size_t>(std::max(0, iscanlines)),
+          -1);
 
       auto now = std::chrono::steady_clock::now();
       int elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count());
@@ -1108,6 +1240,42 @@ void FindCircle::Measure(Image& image)
               bcollectBegin = false;
               idarkgapnum = 0;
               int best_line_position = -1;
+              int best_line_score = std::numeric_limits<int>::max();
+
+              auto consider_default_candidate = [&](int candidate_position) {
+                  if (candidate_position < left_margin ||
+                      candidate_position > (ilineslen1 - 1 - right_margin))
+                  {
+                      return;
+                  }
+
+                  /*
+                   * Default "any edge" used to mean "take max line position",
+                   * so the outermost/endpoint-adjacent response always won.
+                   * That is unsafe on circular gauges: cap/image border texture
+                   * can become a false edge.  Keep the old outer-side tendency,
+                   * but prefer the outer band just inside the scan endpoint.
+                   */
+                  const int target_outer_position =
+                      std::max(left_margin, ilineslen1 - 1 - endpoint_guard);
+                  const int endpoint_distance =
+                      (ilineslen1 - 1) - candidate_position;
+                  int score = std::abs(candidate_position - target_outer_position);
+                  if (endpoint_distance < endpoint_guard)
+                  {
+                      score += (endpoint_guard - endpoint_distance + 1) * 1000;
+                  }
+                  if (compact_domain)
+                  {
+                      score = candidate_position;
+                  }
+
+                  if (best_line_position < 0 || score < best_line_score)
+                  {
+                      best_line_position = candidate_position;
+                      best_line_score = score;
+                  }
+              };
              
             for (int inumx = 0; inumx < ilineslen1; inumx++)
             { 
@@ -1144,7 +1312,17 @@ void FindCircle::Measure(Image& image)
                     });
                 }
 
-                icolor = g_pbackimage->pixel(inumx, inumy);
+                /*
+                 * Image::roi_7blur_gap_mud_thre_bw writes threshold output to
+                 * y + 1.  The source scan line at row N therefore produces its
+                 * binary edge response at row N+1.  Reading row N loses the
+                 * last scan line response entirely (it lands at row isize),
+                 * which is visible as the missing final circle gauge side.
+                 */
+                const int sample_y = std::min(
+                    inumy + 1,
+                    g_pbackimage->getHeight() - 1);
+                icolor = g_pbackimage->pixel(inumx, sample_y);
                   if ((icolor[0]) > 0)
                   {
                       if (irecordnum < 100)
@@ -1191,13 +1369,15 @@ void FindCircle::Measure(Image& image)
                                       }
                                       else
                                       {
-                                          best_line_position = std::max(best_line_position, icurlineposition);
+                                          consider_default_candidate(icurlineposition);
                                       }
                                   }
                                 else
                                 {
                                     gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
                                     m_measurepoints.addpoint(apoint);
+                                    if (inumy >= 0 && inumy < iscanlines)
+                                        accepted_line_positions[static_cast<std::size_t>(inumy)] = icurlineposition;
                                     valid_points_count = m_measurepoints.size();
                                     break;
                                 }
@@ -1231,13 +1411,15 @@ void FindCircle::Measure(Image& image)
                               }
                               else
                               {
-                                  best_line_position = std::max(best_line_position, icurlineposition);
+                                  consider_default_candidate(icurlineposition);
                               }
                           }
                         else
                         {
                             gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
                             m_measurepoints.addpoint(apoint);
+                            if (inumy >= 0 && inumy < iscanlines)
+                                accepted_line_positions[static_cast<std::size_t>(inumy)] = icurlineposition;
                             valid_points_count = m_measurepoints.size();
                             break;
                         }
@@ -1252,9 +1434,104 @@ void FindCircle::Measure(Image& image)
             {
                 gp_Pnt apoint = m_lines[inumy].getlinepoint(best_line_position);
                 m_measurepoints.addpoint(apoint);
+                if (inumy >= 0 && inumy < iscanlines)
+                    accepted_line_positions[static_cast<std::size_t>(inumy)] = best_line_position;
                 valid_points_count = m_measurepoints.size();
             }
 
+        }
+
+        /*
+         * Closed-circle seam repair.
+         *
+         * The generated scan lines are circular, but this loop is linear.
+         * Scan line 0 and the last scan line are neighbors in angle; treating
+         * them as unrelated endpoints leaves visible missing points exactly at
+         * the gauge start/end seam.  The visual seam can cover a few generated
+         * scan lines, not only the exact first/last line, so repair only a
+         * small circular seam window using the nearest accepted neighboring
+         * radial position.  Middle scan lines are not synthesized here, so
+         * normal rejection semantics stay intact.
+         */
+        if (!compact_domain &&
+            m_iselectedgenum == 0 &&
+            iscanlines >= 4 &&
+            static_cast<int>(accepted_line_positions.size()) == iscanlines)
+        {
+            int seam_repaired = 0;
+            auto wrapIndex = [&](int index) -> int {
+                int wrapped = index % iscanlines;
+                if (wrapped < 0)
+                    wrapped += iscanlines;
+                return wrapped;
+            };
+            auto acceptedAt = [&](int index) -> int {
+                return accepted_line_positions[
+                    static_cast<std::size_t>(wrapIndex(index))];
+            };
+            auto repairSeamScan = [&](int scan_index) {
+                if (scan_index < 0 || scan_index >= iscanlines)
+                    return;
+                if (accepted_line_positions[static_cast<std::size_t>(scan_index)] >= 0)
+                    return;
+
+                int sum = 0;
+                int count = 0;
+                const int max_search = std::min(8, std::max(2, iscanlines / 12));
+                for (int offset = 1; offset <= max_search && count < 2; ++offset)
+                {
+                    const int p = acceptedAt(scan_index - offset);
+                    if (p >= 0)
+                    {
+                        sum += p;
+                        ++count;
+                        break;
+                    }
+                }
+                for (int offset = 1; offset <= max_search && count < 2; ++offset)
+                {
+                    const int p = acceptedAt(scan_index + offset);
+                    if (p >= 0)
+                    {
+                        sum += p;
+                        ++count;
+                        break;
+                    }
+                }
+                if (count <= 0)
+                    return;
+
+                const int repaired_position =
+                    ClampCircleEdgePosition(sum / count, ilineslen1, right_margin);
+                gp_Pnt apoint = m_lines[static_cast<std::size_t>(scan_index)].getlinepoint(repaired_position);
+                m_measurepoints.addpoint(apoint);
+                accepted_line_positions[static_cast<std::size_t>(scan_index)] = repaired_position;
+                ++seam_repaired;
+            };
+
+            const int seam_window =
+                std::min(4, std::max(1, iscanlines / 32));
+            for (int offset = 0; offset < seam_window; ++offset)
+            {
+                repairSeamScan(offset);
+                repairSeamScan(iscanlines - 1 - offset);
+            }
+
+            if (seam_repaired > 0)
+            {
+                valid_points_count = m_measurepoints.size();
+                CxAlgorithmTraceScope::Emit({
+                    "FindCircle",
+                    "measure",
+                    "seam_repair",
+                    "closed circle seam repaired points=" + std::to_string(seam_repaired),
+                    scan_lines_processed,
+                    total_samples,
+                    valid_points_count,
+                    static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - begin_time).count())
+                });
+            }
         }
 
     }
@@ -1375,6 +1652,13 @@ void FindCircle::MeasureBalanced(Image& image)
     const int saved_centy = m_icenty;
     const int saved_pax = m_ipax;
     const int saved_pay = m_ipay;
+    const bool saved_has_inner_gap =
+        m_measure_geometry_request.valid &&
+        m_measure_geometry_request.has_inner_gap &&
+        m_measure_geometry_request.inner_gap > 0;
+    const int saved_inner_gap = saved_has_inner_gap
+        ? std::max(1, m_measure_geometry_request.inner_gap)
+        : 0;
     const int radius_hint = std::max(1, static_cast<int>(
         std::sqrt(static_cast<double>((saved_pax - saved_centx) * (saved_pax - saved_centx) +
                                       (saved_pay - saved_centy) * (saved_pay - saved_centy)))));
@@ -1467,6 +1751,17 @@ void FindCircle::MeasureBalanced(Image& image)
                 static_cast<int>(best_candidate.center_x + best_candidate.radius),
                 static_cast<int>(best_candidate.center_y));
         }
+        // Candidate fitting may temporarily use an ordinary circle, but the
+        // original annulus is the UI/runtime geometry contract.  Restore it
+        // before PublishDisplayShapes() so Rin/Rout remain available.
+        if (saved_has_inner_gap)
+            setcircle2(saved_centx, saved_centy, saved_pax, saved_pay, saved_inner_gap);
+        else
+            setcircle(saved_centx, saved_centy, saved_pax, saved_pay);
+        // The candidate loop temporarily uses ordinary-circle geometry.  The
+        // request visible to the display/evidence layer must be the restored
+        // request, not the last candidate's snapshot.
+        m_last_measure_input_request = m_measure_geometry_request;
         return;
     }
 
@@ -1518,7 +1813,15 @@ void FindCircle::MeasureBalanced(Image& image)
     }
 
     Setgap(saved_gap);
-    setcircle(saved_centx, saved_centy, saved_pax, saved_pay);
+    if (saved_has_inner_gap)
+        setcircle2(saved_centx, saved_centy, saved_pax, saved_pay, saved_inner_gap);
+    else
+        setcircle(saved_centx, saved_centy, saved_pax, saved_pay);
+    // Keep the native scan geometry and the published request in lockstep
+    // after candidate evaluation.  Otherwise PublishDisplayShapes() can
+    // describe an annulus while getscanline() still exposes the last ordinary
+    // circle candidate.
+    m_last_measure_input_request = m_measure_geometry_request;
     setmethod(saved_method);
     setthre(saved_threshold);
     setlinegap(saved_linegap);
@@ -2265,6 +2568,7 @@ bool FindCircle::BuildCircleMeasureGeometryFromRequest(
     m_lastMeasureGeometryDebug.center_y = request.center_y;
     m_lastMeasureGeometryDebug.pass_x = request.pass_x;
     m_lastMeasureGeometryDebug.pass_y = request.pass_y;
+    m_lastMeasureGeometryDebug.has_inner_gap = request.has_inner_gap;
     m_lastMeasureGeometryDebug.inner_gap = request.inner_gap;
     m_lastMeasureGeometryDebug.gap_degrees = request.gap_degrees;
     m_lastMeasureGeometryDebug.linegap = request.linegap;
@@ -2350,28 +2654,37 @@ void FindCircle::BuildCircleMeasureGeometryCore(
     {
         int iadd = 0;
 
+        // An annulus scan is defined by the two radii, not by a best-effort
+        // path intersection.  Construct both endpoints from the same radial
+        // direction so every native scan line starts on Rin and ends on Rout.
+        // This also keeps the first/last angular samples valid and avoids an
+        // OCC intersection returning the centre path or no point at the seam.
+        const double dx = static_cast<double>(request.pass_x - request.center_x);
+        const double dy = static_cast<double>(request.pass_y - request.center_y);
+        const double outer_radius = std::sqrt(dx * dx + dy * dy);
+        const double inner_radius =
+            outer_radius - static_cast<double>(request.inner_gap);
+
         for (int i = 0; i < isize; )
         {
-            LineShape ray;
             const gp_Pnt apoint = getpath().ElementAt(i);
+            const double ux = apoint.X() - static_cast<double>(request.center_x);
+            const double uy = apoint.Y() - static_cast<double>(request.center_y);
+            const double direction_length = std::sqrt(ux * ux + uy * uy);
 
-            ray.setline(
-                request.center_x,
-                request.center_y,
-                RoundToInt(apoint.X()),
-                RoundToInt(apoint.Y()));
-
-            std::vector<gp_Pnt> acrosspoints =
-                ray.getpath().IntersectPaths(getpath2());
-
-            if (!acrosspoints.empty())
+            if (direction_length > 1e-6 &&
+                outer_radius > 1.0 &&
+                inner_radius > 0.0 &&
+                inner_radius < outer_radius)
             {
                 LineShape scanLine;
+                const double nx = ux / direction_length;
+                const double ny = uy / direction_length;
                 scanLine.setline(
-                    RoundToInt(acrosspoints[0].X()),
-                    RoundToInt(acrosspoints[0].Y()),
-                    RoundToInt(apoint.X()),
-                    RoundToInt(apoint.Y()));
+                    RoundToInt(request.center_x + nx * inner_radius),
+                    RoundToInt(request.center_y + ny * inner_radius),
+                    RoundToInt(request.center_x + nx * outer_radius),
+                    RoundToInt(request.center_y + ny * outer_radius));
 
                 scanLine.setPercent(request.sample_rate);
                 m_lines.push_back(scanLine);
@@ -2407,19 +2720,69 @@ void FindCircle::BuildCircleMeasureGeometryCore(
 
 void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const
 {
-    const int cx = getcirclecentx();
-    const int cy = getcirclecenty();
-    const int px = getcirclepax();
-    const int py = getcirclepay();
+    const FindCircleMeasureGeometryRequest& publish_request =
+        (m_measure_geometry_request.valid &&
+         m_measure_geometry_request.has_inner_gap &&
+         m_measure_geometry_request.inner_gap > 0)
+            ? m_measure_geometry_request
+            : (m_last_measure_input_request.valid
+                ? m_last_measure_input_request
+                : m_measure_geometry_request);
+    const int cx = publish_request.valid
+        ? publish_request.center_x
+        : getcirclecentx();
+    const int cy = publish_request.valid
+        ? publish_request.center_y
+        : getcirclecenty();
+    const int px = publish_request.valid
+        ? publish_request.pass_x
+        : getcirclepax();
+    const int py = publish_request.valid
+        ? publish_request.pass_y
+        : getcirclepay();
 
     const double roi_radius = std::hypot(
         static_cast<double>(px - cx),
         static_cast<double>(py - cy));
 
+    const int linegap = m_iSelectPointGap;
+    const bool has_annulus_scan =
+        publish_request.valid &&
+        publish_request.has_inner_gap &&
+        publish_request.inner_gap > 0 &&
+        roi_radius > static_cast<double>(publish_request.inner_gap);
+
+    /*
+     * Display semantics must match the sampling semantics:
+     *
+     * - setcircle(): scan domain is the ordinary narrow gauge band around the
+     *   ROI circle, so display roi +/- linegap.
+     * - setcircle2(): the ROI circle is already the outer sampling boundary
+     *   and inner_gap is the annulus width, so display [outer=roi_radius,
+     *   inner=roi_radius-inner_gap].  Do not add linegap again here, otherwise
+     *   UI/evidence shows a narrow band near the outer edge while the script
+     *   requested a true inner-to-outer annulus.
+     */
+    const double outer_radius = has_annulus_scan
+        ? roi_radius
+        : roi_radius + static_cast<double>(linegap);
+    const int inner_gap = (has_annulus_scan)
+        ? publish_request.inner_gap
+        : linegap;
+    const double inner_radius =
+        std::max(1.0, roi_radius - static_cast<double>(inner_gap));
+
+    /*
+     * The editable FindCircle ROI must carry the whole annulus geometry.
+     * Image View only draws handles for editable shapes, so storing only the
+     * outer circle here leaves the inner-radius handle disconnected from
+     * Key Parameter Controls and global_* export.
+     */
     auto roi_circle = std::make_unique<CircleShape>(
         static_cast<double>(cx),
         static_cast<double>(cy),
-        roi_radius);
+        has_annulus_scan ? outer_radius : roi_radius,
+        has_annulus_scan ? inner_radius : 0.0);
     sink.UpsertShape(
         owner_ref + ".roi_circle",
         "FindCircle",
@@ -2430,8 +2793,6 @@ void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         false,
         std::move(roi_circle));
 
-    const int linegap = m_iSelectPointGap;
-    const double outer_radius = roi_radius + static_cast<double>(linegap);
     auto outer_scan = std::make_unique<CircleShape>(
         static_cast<double>(cx),
         static_cast<double>(cy),
@@ -2446,10 +2807,8 @@ void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         false,
         std::move(outer_scan));
 
-    const FindCircleMeasureGeometryDebug& debug = lastmeasuregeometrydebug();
-    if (debug.has_inner_gap && debug.inner_gap > 0)
+    if (has_annulus_scan)
     {
-        const double inner_radius = std::max(1.0, roi_radius - static_cast<double>(debug.inner_gap));
         auto inner_scan = std::make_unique<CircleShape>(
             static_cast<double>(cx),
             static_cast<double>(cy),
@@ -2530,6 +2889,20 @@ int FindCircle::getelapsedms() const
 int FindCircle::getscanlinecount() const
 {
     return m_budget_state.scan_line_count;
+}
+
+bool FindCircle::getscanline(
+    int scan_index,
+    CxShapePoint& p0,
+    CxShapePoint& p1) const
+{
+    if (scan_index < 0 ||
+        scan_index >= static_cast<int>(m_lines.size()))
+    {
+        return false;
+    }
+
+    return m_lines[static_cast<std::size_t>(scan_index)].exportLine(p0, p1);
 }
 
 int FindCircle::getsamplecount() const

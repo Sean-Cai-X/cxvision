@@ -105,7 +105,20 @@ std::filesystem::path ResolveCxVisionRunPath(const std::string& path)
     if (requested.is_absolute())
         return requested.lexically_normal();
 
-    const fs::path repoRoot = ResolveCaseDirectory(".");
+    // ResolveCaseDirectory(".") may return either "." or a path ending in a
+    // lexical ".".  lexically_normal() can still leave an empty filename on
+    // Windows, so canonicalize the existing directory before inspecting its
+    // name.  Otherwise a cxvision_repo checkout is mistaken for the project
+    // run root and the GUI reads <repo>/cxscript_runs while automated runs and
+    // manual guidance assets live in <project>/cxscript_runs.
+    std::error_code repoEc;
+    fs::path repoRoot = fs::weakly_canonical(
+        ResolveCaseDirectory("."),
+        repoEc);
+    if (repoEc)
+        repoRoot = fs::absolute(ResolveCaseDirectory(".")).lexically_normal();
+    if (repoRoot.filename().empty())
+        repoRoot = repoRoot.parent_path();
     if (fs::exists(repoRoot / "CMakeLists.txt") &&
         fs::exists(repoRoot / "cximage") &&
         fs::exists(repoRoot / "cxparser"))

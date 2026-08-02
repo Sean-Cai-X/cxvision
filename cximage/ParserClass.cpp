@@ -404,6 +404,7 @@ namespace mu
             m_parser.DefineClass(findcircle_type_name.data(), pfindcircle);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle2", &FindCircle::setcircle2);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle", &FindCircle::setcircle);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setannulus", &FindCircle::setannulus);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setgap", &FindCircle::Setgap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Setgap", &FindCircle::Setgap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Show", &FindCircle::setshow);
@@ -425,6 +426,10 @@ namespace mu
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getresultcentx", &FindCircle::getresultcentx);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getresultcenty", &FindCircle::getresultcenty);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getradius", &FindCircle::getradius);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getannulusinner", &FindCircle::getannulusinner);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getannulusouter", &FindCircle::getannulusouter);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getannuluswidth", &FindCircle::getannuluswidth);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasannulus", &FindCircle::hasannulus);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getavgdist", &FindCircle::getavgdist);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getvalidpointcount", &FindCircle::getvalidpointcount);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasfitresult", &FindCircle::hasfitresult_script);

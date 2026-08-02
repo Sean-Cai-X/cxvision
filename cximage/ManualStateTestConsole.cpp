@@ -152,6 +152,20 @@ static void FillRuntimeObjectFromFindCircle(
     object.has_fit_result = circle.hasfitresult();
     const FindCircleMeasureGeometryDebug& debug =
         circle.lastmeasuregeometrydebug();
+    // Publish the runtime annulus as absolute radii.  circle_px/circle_py are
+    // a boundary point, not an inner/outer pair; using them as legacy radius
+    // fields was the source of a Key Parameter Controls mismatch after a
+    // FindCircle script had run.
+    const double runtime_outer_radius = std::hypot(
+        static_cast<double>(object.circle_px - object.circle_cx),
+        static_cast<double>(object.circle_py - object.circle_cy));
+    object.ring_outer_radius = runtime_outer_radius;
+    object.ring_inner_radius =
+        debug.has_inner_gap
+            ? std::max(0.0, runtime_outer_radius - static_cast<double>(debug.inner_gap))
+            : 0.0;
+    object.ring_thickness = std::max(
+        0.0, object.ring_outer_radius - object.ring_inner_radius);
     object.circle_measure_image_ready = debug.image_ready;
     object.circle_measure_image_width = debug.image_width;
     object.circle_measure_image_height = debug.image_height;
@@ -625,6 +639,9 @@ void SeedDefaultManualGlobals(
         set("global_circle_cy", 690);
         set("global_circle_px", 0);
         set("global_circle_py", 690);
+        set("global_circle_inner_radius", 0);
+        set("global_circle_outer_radius", 0);
+        set("global_circle_ring_width", 0);
         set("global_gap", 5);
         set("global_linegap", 3);
     }
@@ -698,6 +715,18 @@ void SeedDefaultManualGlobals(
         gauge.radius = static_cast<int>(std::lround(std::hypot(
             static_cast<double>(gauge.circle_px - gauge.circle_cx),
             static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+        // inner_radius / outer_radius are absolute radii.  Do not reseed them
+        // as a cosmetic band: the same values are consumed by setcircle2().
+        gauge.inner_radius = std::max(
+            0, context.runtime_int_vars["global_circle_inner_radius"]);
+        gauge.outer_radius = context.runtime_int_vars["global_circle_outer_radius"];
+        if (gauge.outer_radius <= 0)
+            gauge.outer_radius = gauge.radius;
+        if (gauge.inner_radius >= gauge.outer_radius)
+            gauge.inner_radius = std::max(0, gauge.outer_radius - 1);
+        gauge.radius = gauge.outer_radius;
+        gauge.circle_px = gauge.circle_cx + gauge.outer_radius;
+        gauge.circle_py = gauge.circle_cy;
     }
     else if (isEllipseScript)
     {
@@ -1298,6 +1327,21 @@ void ViewController::drawKeyParameterControlsWindow()
     if (IsFindLineFindCircleContext(m_manualTest))
     {
         DrawKeyParameterControlPanel(m_manualTest);
+        if (m_manualTest.apply_gauge_to_shape_requested)
+        {
+            m_manualTest.apply_gauge_to_shape_requested = false;
+            std::string reason;
+            if (ApplyCurrentGaugeToEditableShape(reason))
+            {
+                m_manualTest.debug_status = "GAUGE_SHAPE_APPLIED";
+                m_manualTest.debug_reason = reason;
+            }
+            else
+            {
+                m_manualTest.debug_status = "GAUGE_SHAPE_APPLY_FAILED";
+                m_manualTest.debug_reason = reason;
+            }
+        }
     }
     else
     {

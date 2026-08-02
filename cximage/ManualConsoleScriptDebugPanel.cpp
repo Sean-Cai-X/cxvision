@@ -225,6 +225,14 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << context.runtime_int_vars["global_roi_y0"] << ","
          << context.runtime_int_vars["global_roi_x1"] << ","
          << context.runtime_int_vars["global_roi_y1"] << ")";
+      ss << "\ncircle=(" << context.runtime_int_vars["global_circle_cx"] << ","
+         << context.runtime_int_vars["global_circle_cy"] << ")";
+      ss << "\ncircle_inner_radius="
+         << context.runtime_int_vars["global_circle_inner_radius"];
+      ss << "\ncircle_outer_radius="
+         << context.runtime_int_vars["global_circle_outer_radius"];
+      ss << "\ncircle_ring_width="
+         << context.runtime_int_vars["global_circle_ring_width"];
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];

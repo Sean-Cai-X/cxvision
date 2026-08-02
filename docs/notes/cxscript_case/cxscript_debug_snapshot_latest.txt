@@ -1,12 +1,22 @@
 CxScript Debug Snapshot
 =======================
-time: 2026-07-21T10:37:17
+time: 2026-08-02T16:00:45
 flow_block: cximage_find_circle_explore.N0
-script_path: 
-run_state: idle
+script_path: D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\suite\run_20260730_findline_findcircle_algorithm_boundary_v13\cases\L2_low_contrast_illumination\L2_circle_low_contrast_001_cap_outer_boundary_ok\script_snapshot.cxsc
+run_state: runtime_finished
 runtime_current_status: PENDING
-debug_status: PENDING
-debug_reason: not started
+debug_status: runtime_executed
+debug_reason: exact Script Editor text executed through ParserDebugBridge
+Manual effective globals:
+image=m_imageViewImage size=1280x1024
+script=D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\suite\run_20260730_findline_findcircle_algorithm_boundary_v13\cases\L2_low_contrast_illumination\L2_circle_low_contrast_001_cap_outer_boundary_ok\script_snapshot.cxsc
+editor_source=evidence
+ellipse_roi=(0,0,0,0)
+roi=(120,240,980,240)
+gap=6
+linegap=3
+threshold=20
+method=0
 cxparser_ext_debug_ok: false
 cxparser_ext_debug_status: 
 cxparser_ext_debug_reason: 
@@ -22,26 +32,97 @@ object_assignments: 0
 
 Current Result Ref
 ------------------
-name: 
-value: 
-source_object: 
-result_type: 
-status: uninitialized
+name: global_circle_ref
+value: runtime_object:m_circle
+source_object: m_circle
+result_type: FindCircleResult
+status: runtime_object_available
 reason: 
-fit: (0, 0, r=0)
-avgdist: 0
-points_count: 0
-valid_points_count: 0
+fit: (685.442, 556.496, r=272.77)
+avgdist: 28.7416
+points_count: 52
+valid_points_count: 52
 
 Geometry Summary
 ----------------
+geometry: object=m_circle | roi_circle=(634,488, inner=999, r=488) | measure_points_count=52 | valid_points_count=52 | fit_circle=(685.442,556.496, r=272.77) | avgdist=28.7416 | has_result_measure=false | roi_outer_polyline=false | roi_inner_polyline=false | roi_segments=0 | fit_circle_polyline=false | fit_segments=0 | display_version=0 | circle_geometry_ready=false | circle_dirty=false | circle_scan_lines=57 | circle_scan_len=250 | circle_process_w=250 | circle_measure_source=original_circle_measure_pipeline | circle_failure_stage=result_points_available
 
 
 Image Overlay Summary
 ---------------------
+image overlay: green_roi_circle=true | green_roi_polyline=false | red_measure_points=52 | yellow_fit_circle=true | yellow_fit_polyline=false | source_preview_enabled=false | manual_elements_count=0
 
 
 Runtime Objects
 ---------------
+* FindCircle m_circle
+  declared_line: 0
+  exists_in_parser: true
+  runtime_state: geometry_result_available
+  last_runtime_status: runtime_executed
+  last_method: Manual Console Run
+  last_update_line: 0
+  display_summary: geometry: object=m_circle | roi_circle=(634,488, inner=999, r=488) | measure_points_count=52 | valid_points_count=52 | fit_circle=(685.442,556.496, r=272.77) | avgdist=28.7416 | has_result_measure=false | roi_outer_polyline=false | roi_inner_polyline=false | roi_segments=0 | fit_circle_polyline=false | fit_segments=0 | display_version=0 | circle_geometry_ready=false | circle_dirty=false | circle_scan_lines=57 | circle_scan_len=250 | circle_process_w=250 | circle_measure_source=original_circle_measure_pipeline | circle_failure_stage=result_points_available
+  visualizable: true
+  stale: false
+  roi_circle: 634, 488, 999, 488
+  measure_points_count: 52
+  valid_points_count: 52
+  fit_circle: 685.442, 556.496, r=272.77
+  avgdist: 28.7416
+  display_version: 0
+  circle_roi_outer_polyline: false
+  circle_roi_inner_polyline: false
+  circle_roi_segment_count: 0
+  fit_circle_polyline: false
+  fit_circle_segment_count: 0
+  circle_measure_geometry_request_valid: false
+  circle_measure_geometry_dirty: false
+  circle_measure_geometry_ready: false
+  circle_measure_geometry_version: 0
+  circle_measure_geometry_built_version: 0
+  circle_scan_line_count: 57
+  circle_scan_line_length: 250
+  circle_process_width: 250
+  circle_measure_image_ready: true
+  circle_measure_image_size: 1280x1024x3
+  circle_measure_backimage_ready: true
+  circle_measure_findobject_ready: true
+  circle_measure_source: original_circle_measure_pipeline
+  circle_measure_failure_stage: result_points_available
+  circle_measure_detail: FindCircle original Measure produced result points.
+
 Line Trace
 ----------
+1 [source_analyzed] Image m_image; | object=m_image | method= | params= | reason=not_executed
+2 [source_analyzed] FindCircle m_circle; | object=m_circle | method= | params= | reason=not_executed
+3 [source_analyzed]  | object= | method= | params= | reason=not_executed
+4 [source_analyzed] m_image.copyFromMat(global_matInput); | object=m_image | method=copyFromMat | params=global_matInput | reason=not_executed
+5 [source_analyzed]  | object= | method= | params= | reason=not_executed
+6 [source_analyzed] m_circle.setmaxelapsedms(global_max_elapsed_ms); | object=m_circle | method=setmaxelapsedms | params=global_max_elapsed_ms | reason=not_executed
+7 [source_analyzed] m_circle.setmaxscanlines(global_max_scan_lines); | object=m_circle | method=setmaxscanlines | params=global_max_scan_lines | reason=not_executed
+8 [source_analyzed] m_circle.setmaxsamples(global_max_samples); | object=m_circle | method=setmaxsamples | params=global_max_samples | reason=not_executed
+9 [source_analyzed]  | object= | method= | params= | reason=not_executed
+10 [source_analyzed] int cx = global_circle_cx; | object=cx | method= | params= | reason=not_executed
+11 [source_analyzed] int cy = global_circle_cy; | object=cy | method= | params= | reason=not_executed
+12 [source_analyzed] int px = global_circle_px; | object=px | method= | params= | reason=not_executed
+13 [source_analyzed] int py = global_circle_py; | object=py | method= | params= | reason=not_executed
+14 [source_analyzed]  | object= | method= | params= | reason=not_executed
+15 [source_analyzed] int method = global_method; | object=method | method= | params= | reason=not_executed
+16 [source_analyzed] int threshold = global_threshold; | object=threshold | method= | params= | reason=not_executed
+17 [source_analyzed] int gap = global_gap; | object=gap | method= | params= | reason=not_executed
+18 [source_analyzed] int linegap = global_linegap; | object=linegap | method= | params= | reason=not_executed
+19 [source_analyzed]  | object= | method= | params= | reason=not_executed
+20 [source_analyzed] m_circle.setcircle(py, px, cy, cx); | object=m_circle | method=setcircle | params=py, px, cy, cx | reason=not_executed
+21 [source_analyzed] m_circle.Setgap(gap); | object=m_circle | method=Setgap | params=gap | reason=not_executed
+22 [source_analyzed] m_circle.setlinegap(linegap); | object=m_circle | method=setlinegap | params=linegap | reason=not_executed
+23 [source_analyzed] m_circle.setthre(threshold); | object=m_circle | method=setthre | params=threshold | reason=not_executed
+24 [source_analyzed] m_circle.setmethod(method); | object=m_circle | method=setmethod | params=method | reason=not_executed
+25 [source_analyzed]  | object= | method= | params= | reason=not_executed
+26 [source_analyzed] m_circle.measure(&m_image); | object=m_circle | method=measure | params=&m_image | reason=not_executed
+27 [source_analyzed] m_circle.fitcircle(); | object=m_circle | method=fitcircle | params= | reason=not_executed
+28 [source_analyzed]  | object= | method= | params= | reason=not_executed
+29 [source_analyzed] global_valid_points_count = m_circle.getvalidpointcount(); | object=m_circle | method=getvalidpointcount | params= | reason=not_executed
+30 [source_analyzed] global_has_fit_circle = m_circle.hasfitresult(); | object=m_circle | method=hasfitresult | params= | reason=not_executed
+31 [source_analyzed] global_circle_radius = m_circle.getradius(); | object=m_circle | method=getradius | params= | reason=not_executed
+32 [source_analyzed] global_avgdist = m_circle.getavgdist(); | object=m_circle | method=getavgdist | params= | reason=not_executed

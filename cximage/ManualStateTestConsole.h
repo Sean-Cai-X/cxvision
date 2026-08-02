@@ -572,6 +572,9 @@ struct ManualGaugeState
   int ellipse_y1 = 0;
 
   int radius = 0;
+  // For FindCircle, these are absolute display radii for the auxiliary
+  // inner/outer Gauge rings.  They are visual/editing aids and must not be
+  // confused with algorithm gap/linegap.
   int inner_radius = 0;
   int outer_radius = 0;
 
@@ -774,6 +777,15 @@ struct ManualFindLineEdgeParamState
   int filterprofile = 0;
 };
 
+struct ManualFindCircleEdgeParamState
+{
+  bool initialized = false;
+  int threshold = 20;
+  int method = 0;
+  int linegap = 3;
+  int gap = 6;
+};
+
 struct ManualTestContext
 {
   std::string script_file_path;
@@ -850,9 +862,21 @@ struct ManualTestContext
   bool show_roi = false;
   bool show_result_overlay = false;
   bool show_line_gauge_scan_lines = false;
+  bool show_circle_gauge_scan_lines = false;
   int findline_selected_scan_edge = 0; // 0 = all edges, 1..N = selected edge.
   int findline_scan_edge_count = 4;
+  int findline_best_fit_edge = 0; // Runtime/manual best fitting point-set edge.
+  int findline_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
+  int findline_relation_edge = 0; // Future combined/related point-set edge.
+  int findline_attach_edge = 0; // Future annotation attach/binding edge.
   std::vector<ManualFindLineEdgeParamState> findline_edge_params;
+  int findcircle_selected_scan_edge = 0; // 0 = full circle, 1..N = arc segment.
+  int findcircle_scan_edge_count = 4;
+  int findcircle_best_fit_edge = 0; // Runtime/manual best fitting arc.
+  int findcircle_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
+  int findcircle_relation_edge = 0; // Future combined/related arc point-set.
+  int findcircle_attach_edge = 0; // Future annotation attach/binding arc.
+  std::vector<ManualFindCircleEdgeParamState> findcircle_edge_params;
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
@@ -902,6 +926,7 @@ struct ManualTestContext
 
   unsigned long long key_parameter_edit_revision = 0;
   std::string last_key_parameter_edit_summary;
+  bool apply_gauge_to_shape_requested = false;
 
   CxEvidenceSelfTestResult last_evidence_selftest_result;
 };
@@ -1050,21 +1075,16 @@ inline CircleGaugeGeometry BuildCircleGaugeGeometry(const ManualGaugeState& gaug
 
     geo.radius = (float)std::max(1, gauge.radius);
 
-    if (gauge.inner_radius > 0)
-        geo.innerRadius = (float)gauge.inner_radius;
-    else
-        geo.innerRadius = std::max(1.0f, geo.radius - (float)std::max(1, gauge.gap));
+    const float fallbackBand = (float)std::max(1, gauge.linegap);
+    geo.innerRadius = gauge.inner_radius > 0
+        ? (float)gauge.inner_radius
+        : std::max(1.0f, geo.radius - fallbackBand);
+    geo.outerRadius = gauge.outer_radius > 0
+        ? (float)gauge.outer_radius
+        : geo.radius + fallbackBand;
 
-    if (gauge.outer_radius > 0)
-        geo.outerRadius = (float)gauge.outer_radius;
-    else
-        geo.outerRadius = geo.radius + (float)std::max(1, gauge.gap);
-
-    if (geo.innerRadius >= geo.radius)
-        geo.innerRadius = std::max(1.0f, geo.radius - 5.0f);
-
-    if (geo.outerRadius <= geo.radius)
-        geo.outerRadius = geo.radius + 5.0f;
+    if (geo.outerRadius <= geo.innerRadius)
+        geo.outerRadius = geo.innerRadius + 1.0f;
 
     geo.radiusHandle = ImVec2(geo.center.x + geo.radius, geo.center.y);
     geo.innerHandle = ImVec2(geo.center.x + geo.innerRadius, geo.center.y);
@@ -1137,33 +1157,29 @@ inline GaugeHandleType HitTestGaugeHandle(
             return GaugeHandleType::CircleCenter;
         }
 
-        int effective_radius = gauge.radius;
-        if (effective_radius <= 0)
-            effective_radius = gauge.gap > 0 ? gauge.gap : 50;
+        const CircleGaugeGeometry geom = BuildCircleGaugeGeometry(gauge);
 
         if (ManualGaugeDistanceSquared(
-                (float)gauge.circle_cx + (float)effective_radius,
-                (float)gauge.circle_cy,
+                geom.radiusHandle.x,
+                geom.radiusHandle.y,
                 mouse_x,
                 mouse_y) <= r2)
         {
             return GaugeHandleType::CircleRadius;
         }
 
-        if (gauge.inner_radius > 0 &&
-            ManualGaugeDistanceSquared(
-                (float)gauge.circle_cx + (float)gauge.inner_radius,
-                (float)gauge.circle_cy,
+        if (ManualGaugeDistanceSquared(
+                geom.innerHandle.x,
+                geom.innerHandle.y,
                 mouse_x,
                 mouse_y) <= r2)
         {
             return GaugeHandleType::CircleInner;
         }
 
-        if (gauge.outer_radius > 0 &&
-            ManualGaugeDistanceSquared(
-                (float)gauge.circle_cx + (float)gauge.outer_radius,
-                (float)gauge.circle_cy,
+        if (ManualGaugeDistanceSquared(
+                geom.outerHandle.x,
+                geom.outerHandle.y,
                 mouse_x,
                 mouse_y) <= r2)
         {
@@ -1248,15 +1264,8 @@ inline void DragGaugeHandle(
                 r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
 
             gauge.radius = r;
-            gauge.gap = r;
             gauge.circle_px = drag_start_gauge.circle_cx + r;
             gauge.circle_py = drag_start_gauge.circle_cy;
-
-            if (gauge.inner_radius >= gauge.radius)
-                gauge.inner_radius = std::max(1, gauge.radius - std::max(1, gauge.gap));
-
-            if (gauge.outer_radius <= gauge.radius)
-                gauge.outer_radius = gauge.radius + std::max(1, gauge.gap);
 
             break;
         }
@@ -1269,9 +1278,11 @@ inline void DragGaugeHandle(
             if (imageW > 0 && imageH > 0)
                 r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
 
-            r = std::min(r, drag_start_gauge.radius - 1);
-            r = std::min(r, drag_start_gauge.outer_radius - 1);
-
+            const CircleGaugeGeometry startGeom =
+                BuildCircleGaugeGeometry(drag_start_gauge);
+            r = std::min(
+                r,
+                std::max(1, static_cast<int>(std::round(startGeom.outerRadius)) - 1));
             gauge.inner_radius = std::max(1, r);
             break;
         }
@@ -1284,10 +1295,12 @@ inline void DragGaugeHandle(
             if (imageW > 0 && imageH > 0)
                 r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
 
-            r = std::max(r, drag_start_gauge.radius + 1);
-            r = std::max(r, drag_start_gauge.inner_radius + 1);
-
-            gauge.outer_radius = r;
+            const CircleGaugeGeometry startGeom =
+                BuildCircleGaugeGeometry(drag_start_gauge);
+            r = std::max(
+                r,
+                static_cast<int>(std::round(startGeom.innerRadius)) + 1);
+            gauge.outer_radius = std::max(1, r);
             break;
         }
         default:

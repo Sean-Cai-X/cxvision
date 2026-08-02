@@ -233,6 +233,34 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
             context,
             "global_findline_selected_edge",
             context.findline_selected_scan_edge);
+        context.findline_best_fit_edge =
+            std::max(0, std::min(context.findline_best_fit_edge,
+                                 context.findline_scan_edge_count));
+        context.findline_recommended_fit_edge =
+            std::max(0, std::min(context.findline_recommended_fit_edge,
+                                 context.findline_scan_edge_count));
+        context.findline_relation_edge =
+            std::max(0, std::min(context.findline_relation_edge,
+                                 context.findline_scan_edge_count));
+        context.findline_attach_edge =
+            std::max(0, std::min(context.findline_attach_edge,
+                                 context.findline_scan_edge_count));
+        InjectManualGaugeInt(
+            context,
+            "global_findline_best_edge",
+            context.findline_best_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findline_recommended_edge",
+            context.findline_recommended_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findline_relation_edge",
+            context.findline_relation_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findline_attach_edge",
+            context.findline_attach_edge);
 
         for (int edge = 1; edge <= context.findline_scan_edge_count; ++edge)
         {
@@ -274,14 +302,127 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
     else if (gauge.tool == "FindCircle")
     {
         NormalizeManualGaugeGeometry(gauge);
+        int effectiveOuterRadius = gauge.outer_radius > 0
+            ? gauge.outer_radius
+            : gauge.radius;
+        if (effectiveOuterRadius <= 0)
+            effectiveOuterRadius = gauge.radius;
+        if (effectiveOuterRadius <= 0)
+            effectiveOuterRadius = 1;
+
+        int effectiveInnerRadius = gauge.inner_radius > 0
+            ? gauge.inner_radius
+            : 0;
+        if (effectiveInnerRadius >= effectiveOuterRadius)
+            effectiveInnerRadius = std::max(0, effectiveOuterRadius - 1);
+
+        const double dx = static_cast<double>(gauge.circle_px - gauge.circle_cx);
+        const double dy = static_cast<double>(gauge.circle_py - gauge.circle_cy);
+        const double len = std::sqrt(dx * dx + dy * dy);
+        const double ux = len > 1.0 ? dx / len : 1.0;
+        const double uy = len > 1.0 ? dy / len : 0.0;
+        gauge.radius = effectiveOuterRadius;
+        gauge.circle_px = gauge.circle_cx +
+            static_cast<int>(std::lround(ux * effectiveOuterRadius));
+        gauge.circle_py = gauge.circle_cy +
+            static_cast<int>(std::lround(uy * effectiveOuterRadius));
+        gauge.inner_radius = effectiveInnerRadius;
+        gauge.outer_radius = effectiveOuterRadius;
+
         InjectManualGaugeInt(context, "global_circle_cx", gauge.circle_cx);
         InjectManualGaugeInt(context, "global_circle_cy", gauge.circle_cy);
         InjectManualGaugeInt(context, "global_circle_px", gauge.circle_px);
         InjectManualGaugeInt(context, "global_circle_py", gauge.circle_py);
+        InjectManualGaugeInt(context, "global_circle_inner_radius", gauge.inner_radius);
+        InjectManualGaugeInt(context, "global_circle_outer_radius", gauge.outer_radius);
+        InjectManualGaugeInt(
+            context,
+            "global_circle_ring_width",
+            std::max(0, gauge.outer_radius - gauge.inner_radius));
         InjectManualGaugeInt(context, "global_gap", gauge.gap);
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+
+        context.findcircle_scan_edge_count =
+            std::max(1, std::min(32, context.findcircle_scan_edge_count));
+        context.findcircle_selected_scan_edge =
+            std::max(0, std::min(context.findcircle_selected_scan_edge,
+                                 context.findcircle_scan_edge_count));
+        if (context.findcircle_edge_params.size() <
+            static_cast<std::size_t>(context.findcircle_scan_edge_count + 1))
+        {
+            context.findcircle_edge_params.resize(
+                static_cast<std::size_t>(context.findcircle_scan_edge_count + 1));
+        }
+
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_edge_count",
+            context.findcircle_scan_edge_count);
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_selected_edge",
+            context.findcircle_selected_scan_edge);
+        context.findcircle_best_fit_edge =
+            std::max(0, std::min(context.findcircle_best_fit_edge,
+                                 context.findcircle_scan_edge_count));
+        context.findcircle_recommended_fit_edge =
+            std::max(0, std::min(context.findcircle_recommended_fit_edge,
+                                 context.findcircle_scan_edge_count));
+        context.findcircle_relation_edge =
+            std::max(0, std::min(context.findcircle_relation_edge,
+                                 context.findcircle_scan_edge_count));
+        context.findcircle_attach_edge =
+            std::max(0, std::min(context.findcircle_attach_edge,
+                                 context.findcircle_scan_edge_count));
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_best_edge",
+            context.findcircle_best_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_recommended_edge",
+            context.findcircle_recommended_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_relation_edge",
+            context.findcircle_relation_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_attach_edge",
+            context.findcircle_attach_edge);
+
+        for (int edge = 1; edge <= context.findcircle_scan_edge_count; ++edge)
+        {
+            ManualFindCircleEdgeParamState& params =
+                context.findcircle_edge_params[static_cast<std::size_t>(edge)];
+            if (!params.initialized)
+            {
+                params.initialized = true;
+                params.threshold = gauge.threshold;
+                params.method = gauge.method;
+                params.linegap = gauge.linegap;
+                params.gap = gauge.gap;
+            }
+            const std::string prefix =
+                "global_findcircle_edge" + std::to_string(edge) + "_";
+            InjectManualGaugeInt(context, prefix + "threshold", params.threshold);
+            InjectManualGaugeInt(context, prefix + "method", params.method);
+            InjectManualGaugeInt(context, prefix + "linegap", params.linegap);
+            InjectManualGaugeInt(context, prefix + "gap", params.gap);
+        }
+
+        if (context.findcircle_selected_scan_edge > 0)
+        {
+            const ManualFindCircleEdgeParamState& selected =
+                context.findcircle_edge_params[
+                    static_cast<std::size_t>(context.findcircle_selected_scan_edge)];
+            InjectManualGaugeInt(context, "global_findcircle_selected_threshold", selected.threshold);
+            InjectManualGaugeInt(context, "global_findcircle_selected_method", selected.method);
+            InjectManualGaugeInt(context, "global_findcircle_selected_linegap", selected.linegap);
+            InjectManualGaugeInt(context, "global_findcircle_selected_gap", selected.gap);
+        }
     }
     else if (gauge.tool == "FindEllipse")
     {

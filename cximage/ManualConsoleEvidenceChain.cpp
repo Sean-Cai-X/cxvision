@@ -71,6 +71,218 @@ static std::string BuildEvidenceCategoryOverrideKeyLocal(
     return oss.str();
 }
 
+static std::vector<std::string> BuildEvidenceCategoryOverrideLookupKeysLocal(
+    const ScriptEvidenceThumb& thumb)
+{
+    std::vector<std::string> keys;
+    keys.push_back(BuildEvidenceCategoryOverrideKeyLocal(thumb));
+
+    if (!thumb.case_id.empty() && !thumb.candidate_id.empty())
+    {
+        std::ostringstream oss;
+        oss << "case=" << thumb.case_id
+            << "|candidate=" << thumb.candidate_id;
+        keys.push_back(oss.str());
+    }
+
+    if (!thumb.case_id.empty())
+    {
+        std::ostringstream oss;
+        oss << "case=" << thumb.case_id;
+        keys.push_back(oss.str());
+    }
+
+    if (!thumb.image_id.empty() && !thumb.target_id.empty())
+    {
+        std::ostringstream oss;
+        oss << "image=" << thumb.image_id
+            << "|target=" << thumb.target_id;
+        keys.push_back(oss.str());
+    }
+
+    return keys;
+}
+
+static std::string ResolveEvidenceCategoryOverrideLocal(
+    const ManualTestContext& context,
+    const ScriptEvidenceThumb& thumb)
+{
+    for (const std::string& key :
+         BuildEvidenceCategoryOverrideLookupKeysLocal(thumb))
+    {
+        const auto it = context.evidence_category_overrides.find(key);
+        if (it != context.evidence_category_overrides.end())
+            return it->second;
+    }
+
+    /*
+     * Evidence rows come from several sources: locked suite handoff,
+     * saved candidates, catalog rows and working revisions.  Not every row
+     * carries the same stable key, so after exact lookup we allow a curated
+     * case-level/image-target override to match rows whose script/reason/path
+     * still contains the locked evidence identity.  This keeps To Verify from
+     * being polluted by stale candidate rows after an automatic propagation
+     * pass has already moved the case to Process Validation.
+     */
+    const std::string haystack =
+        thumb.case_id + " " +
+        thumb.script_id + " " +
+        thumb.script_path + " " +
+        thumb.source_evidence_script_path + " " +
+        thumb.image_id + " " +
+        thumb.target_id + " " +
+        thumb.reason + " " +
+        thumb.parameter_summary;
+
+    for (const auto& entry : context.evidence_category_overrides)
+    {
+        const std::string& key = entry.first;
+        if (key.rfind("case=", 0) == 0)
+        {
+            const std::string caseId = key.substr(5);
+            if (!caseId.empty() &&
+                (thumb.case_id == caseId ||
+                 haystack.find(caseId) != std::string::npos))
+            {
+                return entry.second;
+            }
+            continue;
+        }
+
+        if (key.rfind("image=", 0) == 0)
+        {
+            const std::size_t targetPos = key.find("|target=");
+            if (targetPos == std::string::npos)
+                continue;
+            const std::string imageId = key.substr(6, targetPos - 6);
+            const std::string targetId = key.substr(targetPos + 8);
+            if (!imageId.empty() && !targetId.empty() &&
+                thumb.image_id == imageId &&
+                thumb.target_id == targetId)
+            {
+                return entry.second;
+            }
+        }
+    }
+
+    return thumb.evidence_category_override;
+}
+
+static bool HasCuratedFindGeometryCategoryOverridesLocal(
+    const ManualTestContext& context)
+{
+    for (const auto& entry : context.evidence_category_overrides)
+    {
+        if (entry.first.rfind("case=", 0) == 0 ||
+            entry.first.rfind("image=", 0) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
+    const ManualTestContext& context,
+    const ScriptEvidenceThumb& thumb,
+    const std::string& groupLabel)
+{
+    const std::string categoryOverride =
+        ResolveEvidenceCategoryOverrideLocal(context, thumb);
+    const bool hasCuratedFindGeometry =
+        HasCuratedFindGeometryCategoryOverridesLocal(context);
+    const bool isManualGuidanceRow =
+        thumb.status == "pending_human_guidance" ||
+        groupLabel.find("Needs Human Setting") != std::string::npos ||
+        groupLabel.find("needs human setting") != std::string::npos;
+
+    /*
+     * To Verify is an operator work queue.  Once a curated propagation pass
+     * exists, only the explicit manual guidance queue rows may occupy this
+     * bucket; duplicate handoff/catalog/candidate rows for the same case are
+     * evidence context and belong to Process Validation.  This makes the UI
+     * count traceable to manual_guidance_queue.tsv instead of incidental
+     * duplicate rows.
+     */
+    if (categoryOverride == "To Verify" &&
+        hasCuratedFindGeometry &&
+        !isManualGuidanceRow)
+    {
+        return {3, "Process Validation"};
+    }
+
+    if (categoryOverride == "Verified")
+        return {0, "Verified"};
+    if (categoryOverride == "To Verify")
+        return {1, "To Verify"};
+    if (categoryOverride == "Defect")
+        return {2, "Defect"};
+    if (categoryOverride == "Process Validation")
+        return {3, "Process Validation"};
+    if (categoryOverride == "Torch / Model Validation")
+        return {4, "Torch / Model Validation"};
+
+    const std::string key = BuildEvidenceClassificationKeyLocal(
+        thumb.tool,
+        thumb.script_id,
+        thumb.script_path,
+        groupLabel,
+        thumb.status,
+        thumb.reason,
+        thumb.parameter_summary);
+
+    const bool isTorchLayer =
+        key.find("torch") != std::string::npos ||
+        key.find("find_segmentation") != std::string::npos ||
+        key.find("findsegmentation") != std::string::npos ||
+        key.find("edgesam") != std::string::npos ||
+        key.find("segmentation") != std::string::npos ||
+        key.find("detection") != std::string::npos ||
+        key.find("model") != std::string::npos;
+
+    if (isTorchLayer)
+        return {4, "Torch / Model Validation"};
+
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(thumb.tool);
+    const bool isCuratedFindGeometryTool =
+        normalizedTool == "FindLine" || normalizedTool == "FindCircle" ||
+        key.find("findline") != std::string::npos ||
+        key.find("find_line") != std::string::npos ||
+        key.find("findcircle") != std::string::npos ||
+        key.find("find_circle") != std::string::npos;
+
+    if (isCuratedFindGeometryTool && hasCuratedFindGeometry)
+    {
+        return {3, "Process Validation"};
+    }
+
+    if (key.find("pending_algorithm_review") != std::string::npos ||
+        key.find("pending_human_review") != std::string::npos ||
+        key.find("primary_object_selection_pending") != std::string::npos ||
+        key.find("pending") != std::string::npos ||
+        key.find("待验证") != std::string::npos ||
+        key.find("待测试") != std::string::npos)
+        return {1, "To Verify"};
+
+    if (key.find("fail") != std::string::npos ||
+        key.find("error") != std::string::npos ||
+        key.find("defect") != std::string::npos ||
+        key.find("blocked") != std::string::npos ||
+        key.find("有缺陷") != std::string::npos)
+        return {2, "Defect"};
+
+    if (key.find("diagnostic") != std::string::npos ||
+        key.find("legacy") != std::string::npos ||
+        key.find("ng_expected") != std::string::npos ||
+        key.find("smoke") != std::string::npos ||
+        key.find("process") != std::string::npos ||
+        key.find("过程") != std::string::npos)
+        return {3, "Process Validation"};
+
+    return {0, "Verified"};
+}
+
 static std::filesystem::path EvidenceCategoryOverridesPathLocal()
 {
     return ResolveCxVisionRunPath(
@@ -141,10 +353,14 @@ static bool LoadEvidenceCategoryOverridesLocal(ManualTestContext& context)
         const std::size_t tab = line.find('\t');
         if (tab == std::string::npos)
             continue;
-        const std::string key =
-            UnescapeEvidenceOverrideFieldLocal(line.substr(0, tab));
-        const std::string category =
-            UnescapeEvidenceOverrideFieldLocal(line.substr(tab + 1));
+        // std::getline removes '\n' but preserves the '\r' in CRLF files.
+        // Trim both fields so exact category comparisons do not receive
+        // "To Verify\r" / "Process Validation\r" and silently miss every
+        // curated override on Windows.
+        const std::string key = TrimLine(
+            UnescapeEvidenceOverrideFieldLocal(line.substr(0, tab)));
+        const std::string category = TrimLine(
+            UnescapeEvidenceOverrideFieldLocal(line.substr(tab + 1)));
         if (!key.empty() && !category.empty())
             context.evidence_category_overrides[key] = category;
     }
@@ -453,6 +669,39 @@ static bool ReadJsonIntFieldLocal(
     {
         return false;
     }
+}
+
+static bool ReadJsonBoolFieldLocal(
+    const std::string& text,
+    const std::string& key,
+    bool& outValue)
+{
+    const std::string pattern = "\"" + key + "\"";
+    const std::size_t keyPos = text.find(pattern);
+    if (keyPos == std::string::npos)
+        return false;
+    const std::size_t colon = text.find(':', keyPos + pattern.size());
+    if (colon == std::string::npos)
+        return false;
+
+    std::size_t begin = colon + 1;
+    while (begin < text.size() &&
+           std::isspace(static_cast<unsigned char>(text[begin])))
+    {
+        ++begin;
+    }
+
+    if (text.compare(begin, 4, "true") == 0)
+    {
+        outValue = true;
+        return true;
+    }
+    if (text.compare(begin, 5, "false") == 0)
+    {
+        outValue = false;
+        return true;
+    }
+    return false;
 }
 
 static std::string ReadJsonStringFieldLocal(
@@ -818,6 +1067,10 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         gauge.radius = static_cast<int>(std::lround(std::hypot(
             static_cast<double>(gauge.circle_px - gauge.circle_cx),
             static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+        gauge.inner_radius = getInt("global_circle_inner_radius", 0);
+        gauge.outer_radius = getInt("global_circle_outer_radius", gauge.radius);
+        if (gauge.outer_radius <= 0)
+            gauge.outer_radius = gauge.radius;
     }
     else if (primaryType == "FindEllipse" ||
              (primaryType.empty() && isEllipseScript))
@@ -962,6 +1215,9 @@ static std::string BuildDefaultEvidenceParamSummaryForScript(
         << " circle_cy=" << getInt("global_circle_cy", 0)
         << " circle_px=" << getInt("global_circle_px", 0)
         << " circle_py=" << getInt("global_circle_py", 0)
+        << " circle_inner_radius=" << getInt("global_circle_inner_radius", 0)
+        << " circle_outer_radius=" << getInt("global_circle_outer_radius", 0)
+        << " circle_ring_width=" << getInt("global_circle_ring_width", 0)
         << " ellipse_x0=" << getInt("global_ellipse_x0", 0)
         << " ellipse_y0=" << getInt("global_ellipse_y0", 0)
         << " ellipse_x1=" << getInt("global_ellipse_x1", 0)
@@ -1218,7 +1474,7 @@ static void AppendManualAlgorithmReviewHandoffLocal(
         PopulateEditableObjectBindingForThumbLocal(thumb);
 
         ScriptEvidenceGroup& group =
-            findGroup(tool + " / Review Queue");
+            findGroup(tool + " / Needs Human Setting");
         bool exists = false;
         for (const auto& existing : group.thumbs)
         {
@@ -1234,6 +1490,289 @@ static void AppendManualAlgorithmReviewHandoffLocal(
 
     context.debug_status = "MANUAL_ALGORITHM_REVIEW_HANDOFF_LOADED";
     context.debug_reason = handoffPath;
+}
+
+static std::filesystem::path ManualGuidanceQueuePathLocal()
+{
+    return ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/manual_guidance_queue.tsv");
+}
+
+static std::vector<std::string> SplitEvidenceTsvRowLocal(
+    const std::string& line)
+{
+    std::vector<std::string> cells;
+    std::string current;
+    for (char ch : line)
+    {
+        if (ch == '\t')
+        {
+            cells.push_back(current);
+            current.clear();
+            continue;
+        }
+        if (ch != '\r')
+            current += ch;
+    }
+    cells.push_back(current);
+    return cells;
+}
+
+static std::string BuildManualGuidanceGlobalsSummaryLocal(
+    const std::string& candidateDir)
+{
+    if (candidateDir.empty())
+        return {};
+
+    std::string text;
+    const std::filesystem::path globalsPath =
+        std::filesystem::path(candidateDir) / "globals.txt";
+    if (!ReadTextFile(globalsPath.string(), text))
+        return {};
+
+    std::ostringstream summary;
+    std::istringstream input(text);
+    std::string line;
+    bool first = true;
+    while (std::getline(input, line))
+    {
+        line = TrimLine(line);
+        if (line.rfind("global_", 0) != 0 ||
+            line.find('=') == std::string::npos)
+        {
+            continue;
+        }
+        if (!first)
+            summary << ' ';
+        summary << line;
+        first = false;
+    }
+    return summary.str();
+}
+
+static void AppendManualGuidanceQueueLocal(
+    ManualTestContext& context,
+    const std::function<std::string(const std::string&)>& resolveImagePath,
+    const std::function<ScriptEvidenceGroup&(const std::string&)>& findGroup)
+{
+    const std::filesystem::path queuePath = ManualGuidanceQueuePathLocal();
+    std::string text;
+    if (!ReadTextFile(queuePath.string(), text))
+        return;
+
+    std::istringstream input(text);
+    std::string line;
+    bool headerSeen = false;
+    while (std::getline(input, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        const std::vector<std::string> cells = SplitEvidenceTsvRowLocal(line);
+        if (!headerSeen)
+        {
+            headerSeen = true;
+            if (!cells.empty() && cells[0] == "case_id")
+                continue;
+        }
+
+        if (cells.size() < 9)
+            continue;
+
+        ScriptEvidenceThumb thumb;
+        thumb.case_id = cells[0];
+        thumb.tool = NormalizeEvidenceToolTypeLocal(cells[1]);
+        thumb.image_id = cells[2];
+        thumb.target_id = cells[3];
+        thumb.candidate_id = cells[4];
+        thumb.status = "pending_human_guidance";
+        thumb.reason = cells[5];
+        thumb.parameter_summary = cells[6];
+        thumb.script_path = cells[7];
+        thumb.script_id = thumb.case_id;
+        thumb.image_path = resolveImagePath(thumb.image_id);
+        thumb.thumbnail_path = cells[8];
+        thumb.evidence_category_override = "To Verify";
+        if (cells.size() > 10)
+            thumb.candidate_dir = cells[10];
+
+        // A manual-guidance algorithm package is evidence, not automatically
+        // a restorable GUI working revision.  Only advertise saved state when
+        // the complete transactional restore package exists.  The current
+        // propagation cases contain globals.txt/result assets but no working
+        // script/gauge snapshot, so they must open the declared frozen script
+        // and restore its locked parameters instead of aborting on a missing
+        // script_snapshot_path.
+        if (!thumb.candidate_dir.empty())
+        {
+            const std::filesystem::path candidateRoot(thumb.candidate_dir);
+            const std::filesystem::path scriptSnapshot =
+                candidateRoot / "script_snapshot.cxsc";
+            const std::filesystem::path runtimeGlobals =
+                candidateRoot / "runtime_globals.json";
+            const std::filesystem::path gaugeAnnotation =
+                candidateRoot / "gauge_annotation.json";
+            if (std::filesystem::is_regular_file(scriptSnapshot) &&
+                std::filesystem::is_regular_file(runtimeGlobals) &&
+                std::filesystem::is_regular_file(gaugeAnnotation))
+            {
+                thumb.working_script_snapshot_path = scriptSnapshot.string();
+                thumb.runtime_globals_path = runtimeGlobals.string();
+                thumb.gauge_annotation_path = gaugeAnnotation.string();
+                thumb.has_saved_state = true;
+            }
+
+            const std::string lockedGlobals =
+                BuildManualGuidanceGlobalsSummaryLocal(thumb.candidate_dir);
+            if (!lockedGlobals.empty())
+            {
+                if (!thumb.parameter_summary.empty())
+                    thumb.parameter_summary += "; ";
+                thumb.parameter_summary += lockedGlobals;
+            }
+        }
+
+        // The queue's historical source_script column contains the runtime
+        // result summary for these generated cases.  The editable source is
+        // the explicit cxscript path above; keep that identity traceable.
+        thumb.source_evidence_script_path = thumb.script_path;
+
+        if (thumb.image_path.empty())
+            thumb.image_path = ResolveOriginalImagePathFromEvidencePacketLocal(
+                thumb.parameter_summary);
+
+        PopulateEditableObjectBindingForThumbLocal(thumb);
+
+        ScriptEvidenceGroup& group =
+            findGroup(thumb.tool + " / Needs Human Setting");
+        bool exists = false;
+        for (auto& existing : group.thumbs)
+        {
+            if (existing.case_id == thumb.case_id &&
+                existing.target_id == thumb.target_id)
+            {
+                /*
+                 * The algorithm-review handoff is loaded before the manual
+                 * guidance queue and may already have inserted the same case
+                 * as pending_algorithm_review.  The queue is the curated
+                 * operator work list, so it must replace the earlier row
+                 * instead of being dropped by de-duplication; otherwise the
+                 * To Verify bucket becomes 0 even though the queue contains
+                 * the three expected human-guided cases.
+                 */
+                existing = thumb;
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+            group.thumbs.push_back(std::move(thumb));
+    }
+}
+
+static void WriteEvidenceChainLoadedElementsDebugLocal(
+    const ManualTestContext& context)
+{
+    auto escapeTsv = [](std::string value) -> std::string
+    {
+        for (char& ch : value)
+        {
+            if (ch == '\t' || ch == '\r' || ch == '\n')
+                ch = ' ';
+        }
+        return value;
+    };
+
+    int totalThumbs = 0;
+    int guidanceThumbs = 0;
+    int toVerifyOverrideThumbs = 0;
+    int processOverrideThumbs = 0;
+    int displayToVerifyThumbs = 0;
+    int displayProcessThumbs = 0;
+
+    std::ostringstream rows;
+    rows << "group_label\tcase_id\timage_id\ttarget_id\ttool\tcandidate_id\t"
+         << "status\toverride\tdisplay_major\tdisplay_priority\tis_candidate\t"
+         << "has_saved_state\tscript_id\tscript_path\tthumbnail_path\treason\n";
+
+    for (const auto& group : context.script_evidence_groups)
+    {
+        for (const auto& thumb : group.thumbs)
+        {
+            ++totalThumbs;
+            const std::string resolvedOverride =
+                ResolveEvidenceCategoryOverrideLocal(context, thumb);
+            if (thumb.status == "pending_human_guidance")
+                ++guidanceThumbs;
+            if (resolvedOverride == "To Verify")
+                ++toVerifyOverrideThumbs;
+            if (resolvedOverride == "Process Validation")
+                ++processOverrideThumbs;
+            const auto displayMajor =
+                ClassifyEvidenceMajorBucketLocal(context, thumb, group.label);
+            if (displayMajor.second == "To Verify")
+                ++displayToVerifyThumbs;
+            if (displayMajor.second == "Process Validation")
+                ++displayProcessThumbs;
+
+            rows << escapeTsv(group.label) << '\t'
+                 << escapeTsv(thumb.case_id) << '\t'
+                 << escapeTsv(thumb.image_id) << '\t'
+                 << escapeTsv(thumb.target_id) << '\t'
+                 << escapeTsv(thumb.tool) << '\t'
+                 << escapeTsv(thumb.candidate_id) << '\t'
+                 << escapeTsv(thumb.status) << '\t'
+                 << escapeTsv(resolvedOverride) << '\t'
+                 << escapeTsv(displayMajor.second) << '\t'
+                 << displayMajor.first << '\t'
+                 << (thumb.is_candidate ? "1" : "0") << '\t'
+                 << (thumb.has_saved_state ? "1" : "0") << '\t'
+                 << escapeTsv(thumb.script_id) << '\t'
+                 << escapeTsv(thumb.script_path) << '\t'
+                 << escapeTsv(thumb.thumbnail_path) << '\t'
+                 << escapeTsv(thumb.reason) << '\n';
+        }
+    }
+
+    const std::filesystem::path detailPath = ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/"
+        "evidence_chain_loaded_elements_debug.tsv");
+    WriteTextFile(detailPath, rows.str());
+
+    std::ostringstream summary;
+    summary << "{\n"
+            << "  \"groups\": " << context.script_evidence_groups.size() << ",\n"
+            << "  \"thumbs\": " << totalThumbs << ",\n"
+            << "  \"pending_human_guidance\": " << guidanceThumbs << ",\n"
+            << "  \"to_verify_override\": " << toVerifyOverrideThumbs << ",\n"
+            << "  \"process_validation_override\": " << processOverrideThumbs << ",\n"
+            << "  \"display_to_verify\": " << displayToVerifyThumbs << ",\n"
+            << "  \"display_process_validation\": " << displayProcessThumbs << ",\n"
+            << "  \"manual_guidance_queue\": \""
+            << ManualGuidanceQueuePathLocal().string() << "\",\n"
+            << "  \"category_overrides\": \""
+            << EvidenceCategoryOverridesPathLocal().string() << "\"\n"
+            << "}\n";
+    const std::filesystem::path summaryPath = ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/"
+        "evidence_chain_loaded_summary_debug.json");
+    WriteTextFile(summaryPath, summary.str());
+
+    CXLOG_INFO(
+        "EvidenceChain",
+        "evidence_chain_ui_loaded_elements",
+        "snapshot_written",
+        "groups=" + std::to_string(context.script_evidence_groups.size()) +
+        " thumbs=" + std::to_string(totalThumbs) +
+        " pending_human_guidance=" + std::to_string(guidanceThumbs) +
+        " to_verify_override=" + std::to_string(toVerifyOverrideThumbs) +
+        " process_validation_override=" +
+        std::to_string(processOverrideThumbs) +
+        " display_to_verify=" + std::to_string(displayToVerifyThumbs) +
+        " display_process_validation=" +
+        std::to_string(displayProcessThumbs) +
+        " detail=" + detailPath.string() +
+        " summary=" + summaryPath.string());
 }
 
 static void EnsureStructuredCxImageCatalogEntriesLoaded(ManualTestContext& context)
@@ -1355,10 +1894,11 @@ static void AppendSavedEvidenceCandidatesLocal(
                 original.source_evidence_script_path =
                     candidate.source_evidence_script_path;
                 original.parameter_summary = candidate.parameter_summary;
-                original.status = "pending_human_review";
+                original.status = candidate.status;
                 original.reason =
                     "active working revision=" + candidate.candidate_id +
-                    "; restored from candidate binding";
+                    "; restored from candidate binding; " +
+                    candidate.reason;
                 return;
             }
         }
@@ -1383,6 +1923,22 @@ static void AppendSavedEvidenceCandidatesLocal(
         if (candidateId.empty() || caseId.empty() || scriptSnapshot.empty() ||
             imagePath.empty())
             continue;
+
+        bool gaugeAccepted = false;
+        std::string gaugeReviewStatus;
+        {
+            const std::string gaugePath =
+                ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
+            std::string gaugeText;
+            if (!gaugePath.empty() && ReadTextFile(gaugePath, gaugeText))
+            {
+                ReadJsonBoolFieldLocal(gaugeText, "accepted", gaugeAccepted);
+                gaugeReviewStatus =
+                    ReadJsonStringFieldLocal(gaugeText, "review_status");
+            }
+        }
+        const bool humanConfirmed =
+            gaugeAccepted && gaugeReviewStatus == "manual_accepted";
 
         ScriptEvidenceThumb thumb;
         thumb.is_candidate = true;
@@ -1414,10 +1970,17 @@ static void AppendSavedEvidenceCandidatesLocal(
         thumb.tool = ReadJsonStringFieldLocal(binding, "tool");
         thumb.parameter_summary =
             ReadJsonStringFieldLocal(binding, "parameter_summary");
-        thumb.status = "pending_human_review";
+        thumb.status = humanConfirmed
+            ? "manual_confirmed_candidate"
+            : "pending_human_review";
         thumb.reason =
-            "saved evidence candidate; candidate_id=" + candidateId +
-            "; candidate_dir=" + thumb.candidate_dir;
+            std::string(humanConfirmed
+                ? "manual accepted evidence candidate"
+                : "saved evidence candidate pending manual acceptance") +
+            "; candidate_id=" + candidateId +
+            "; candidate_dir=" + thumb.candidate_dir +
+            "; gauge_accepted=" + (gaugeAccepted ? "true" : "false") +
+            "; gauge_review_status=" + gaugeReviewStatus;
 
         std::string analysis;
         const std::filesystem::path analysisPath =
@@ -1437,7 +2000,9 @@ static void AppendSavedEvidenceCandidatesLocal(
         const std::string candidateTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
         ScriptEvidenceGroup& group = findGroup(
             (candidateTool.empty() ? std::string("Unknown") : candidateTool) +
-            " / Saved Candidates");
+            (humanConfirmed
+                ? " / Human Confirmed Candidates"
+                : " / Saved Pending Candidates"));
         bool exists = false;
         for (const auto& existing : group.thumbs)
         {
@@ -1635,8 +2200,19 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       },
       [&](const std::string& label) -> ScriptEvidenceGroup&
       {
+         return findOrCreateGroup("", "", label);
+        });
+
+  AppendManualGuidanceQueueLocal(
+      m_manualTest,
+      [this](const std::string& imageId) -> std::string
+      {
+        return ResolveImagePathFromManifest(imageId);
+      },
+      [&](const std::string& label) -> ScriptEvidenceGroup&
+      {
         return findOrCreateGroup("", "", label);
-       });
+      });
 
   AppendSavedEvidenceCandidatesLocal(
       m_manualTest,
@@ -1758,6 +2334,8 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       m_manualTest.script_evidence_groups.push_back(group);
     }
   }
+
+  WriteEvidenceChainLoadedElementsDebugLocal(m_manualTest);
 
   m_manualTest.script_evidence_groups_dirty = false;
   m_manualTest.script_evidence_row_refs_dirty = true;
@@ -2899,69 +3477,10 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
     auto classifyMajor = [&](const ScriptEvidenceThumb& thumb,
                              const ScriptEvidenceGroup& group) -> std::pair<int, std::string>
     {
-        std::string categoryOverride = thumb.evidence_category_override;
-        const std::string overrideKey =
-            BuildEvidenceCategoryOverrideKeyLocal(thumb);
-        auto overrideIt =
-            m_manualTest.evidence_category_overrides.find(overrideKey);
-        if (overrideIt != m_manualTest.evidence_category_overrides.end())
-            categoryOverride = overrideIt->second;
-
-        if (categoryOverride == "Verified")
-            return {0, "Verified"};
-        if (categoryOverride == "To Verify")
-            return {1, "To Verify"};
-        if (categoryOverride == "Defect")
-            return {2, "Defect"};
-        if (categoryOverride == "Process Validation")
-            return {3, "Process Validation"};
-        if (categoryOverride == "Torch / Model Validation")
-            return {4, "Torch / Model Validation"};
-
-        const std::string key = toLower(
-            thumb.status + " " +
-            thumb.reason + " " +
-            thumb.parameter_summary + " " +
-            thumb.script_id + " " +
-            thumb.script_path + " " +
+        return ClassifyEvidenceMajorBucketLocal(
+            m_manualTest,
+            thumb,
             group.label);
-
-        const bool isTorchLayer =
-            key.find("torch") != std::string::npos ||
-            key.find("find_segmentation") != std::string::npos ||
-            key.find("findsegmentation") != std::string::npos ||
-            key.find("edgesam") != std::string::npos ||
-            key.find("segmentation") != std::string::npos ||
-            key.find("detection") != std::string::npos ||
-            key.find("model") != std::string::npos;
-
-        if (isTorchLayer)
-            return {4, "Torch / Model Validation"};
-
-        if (key.find("pending_algorithm_review") != std::string::npos ||
-            key.find("pending_human_review") != std::string::npos ||
-            key.find("primary_object_selection_pending") != std::string::npos ||
-            key.find("pending") != std::string::npos ||
-            key.find("待验证") != std::string::npos ||
-            key.find("待测试") != std::string::npos)
-            return {1, "To Verify"};
-
-        if (key.find("fail") != std::string::npos ||
-            key.find("error") != std::string::npos ||
-            key.find("defect") != std::string::npos ||
-            key.find("blocked") != std::string::npos ||
-            key.find("有缺陷") != std::string::npos)
-            return {2, "Defect"};
-
-        if (key.find("diagnostic") != std::string::npos ||
-            key.find("legacy") != std::string::npos ||
-            key.find("ng_expected") != std::string::npos ||
-            key.find("smoke") != std::string::npos ||
-            key.find("process") != std::string::npos ||
-            key.find("过程") != std::string::npos)
-            return {3, "Process Validation"};
-
-        return {0, "Verified"};
     };
 
     auto classifyTool = [&](const ScriptEvidenceThumb& thumb,
@@ -3105,6 +3624,66 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         }
     }
 
+    static int classificationDebugDumpBudget = 3;
+    if (classificationDebugDumpBudget > 0)
+    {
+        --classificationDebugDumpBudget;
+
+        auto escapeTsv = [](std::string value) -> std::string
+        {
+            for (char& ch : value)
+            {
+                if (ch == '\t' || ch == '\r' || ch == '\n')
+                    ch = ' ';
+            }
+            return value;
+        };
+
+        std::ostringstream debug;
+        debug << "major\ttool\tgroup_label\tcase_id\timage_id\ttarget_id\t"
+              << "candidate_id\tstatus\toverride\tscript_id\treason\n";
+
+        for (const auto& major : categories)
+        {
+            for (const auto& tool : major.tools)
+            {
+                for (const ScriptEvidenceRowRef& ref : tool.rows)
+                {
+                    if (ref.group_index < 0 ||
+                        ref.group_index >=
+                            static_cast<int>(m_manualTest.script_evidence_groups.size()))
+                        continue;
+                    const ScriptEvidenceGroup& group =
+                        m_manualTest.script_evidence_groups[ref.group_index];
+                    if (ref.thumb_index < 0 ||
+                        ref.thumb_index >= static_cast<int>(group.thumbs.size()))
+                        continue;
+                    const ScriptEvidenceThumb& thumb =
+                        group.thumbs[ref.thumb_index];
+                    debug << escapeTsv(major.label) << '\t'
+                          << escapeTsv(tool.label) << '\t'
+                          << escapeTsv(group.label) << '\t'
+                          << escapeTsv(thumb.case_id) << '\t'
+                          << escapeTsv(thumb.image_id) << '\t'
+                          << escapeTsv(thumb.target_id) << '\t'
+                          << escapeTsv(thumb.candidate_id) << '\t'
+                          << escapeTsv(thumb.status) << '\t'
+                          << escapeTsv(ResolveEvidenceCategoryOverrideLocal(
+                                 m_manualTest,
+                                 thumb)) << '\t'
+                          << escapeTsv(thumb.script_id) << '\t'
+                          << escapeTsv(thumb.reason) << '\n';
+                }
+            }
+        }
+
+        WriteTextFile(
+            ResolveCxVisionRunPath(
+                "cxscript_runs/evidence_chain/"
+                "evidence_chain_ui_classification_debug.tsv"),
+            debug.str());
+    }
+
     std::stable_sort(
         categories.begin(),
         categories.end(),
@@ -3232,6 +3811,9 @@ static std::string BuildCurrentRuntimeParamSummary(
         << " circle_cy=" << getInt("global_circle_cy", 0)
         << " circle_px=" << getInt("global_circle_px", 0)
         << " circle_py=" << getInt("global_circle_py", 0)
+        << " circle_inner_radius=" << getInt("global_circle_inner_radius", 0)
+        << " circle_outer_radius=" << getInt("global_circle_outer_radius", 0)
+        << " circle_ring_width=" << getInt("global_circle_ring_width", 0)
         << " ellipse_x0=" << getInt("global_ellipse_x0", 0)
         << " ellipse_y0=" << getInt("global_ellipse_y0", 0)
         << " ellipse_x1=" << getInt("global_ellipse_x1", 0)

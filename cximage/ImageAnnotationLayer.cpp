@@ -496,6 +496,73 @@ CxShapeElement* ImageAnnotationLayer::FindShapeByStableRef(const std::string& st
     return nullptr;
 }
 
+bool ImageAnnotationLayer::ApplyFindCircleAnnulusGauge(
+    const std::string& owner_ref,
+    double cx,
+    double cy,
+    double inner_radius,
+    double outer_radius,
+    std::string& reason)
+{
+    if (!std::isfinite(cx) || !std::isfinite(cy) ||
+        !std::isfinite(inner_radius) || !std::isfinite(outer_radius))
+    {
+        reason = "FindCircle annulus contains non-finite geometry";
+        return false;
+    }
+
+    const double outer = std::max(1.0, outer_radius);
+    const double inner = std::max(0.0, std::min(inner_radius, outer - 1.0));
+
+    CxShapeElement* target = nullptr;
+    for (auto& element : myShapeElements)
+    {
+        if (element.owner_type != "FindCircle" ||
+            !element.editable ||
+            element.semantic_role != "roi" ||
+            element.shape == nullptr ||
+            element.shape->kind() != CxShapeKind::Circle)
+        {
+            continue;
+        }
+        if (!owner_ref.empty() && element.owner_ref != owner_ref)
+            continue;
+        target = &element;
+        break;
+    }
+
+    if (target == nullptr)
+    {
+        reason = "editable FindCircle annulus ROI is unavailable";
+        return false;
+    }
+
+    auto* circle = dynamic_cast<CircleShape*>(target->shape.get());
+    if (circle == nullptr)
+    {
+        reason = "FindCircle ROI is not a CircleShape";
+        return false;
+    }
+
+    circle->setCenter(cx, cy);
+    circle->setRadius(outer);
+    circle->setInnerRadius(inner);
+    target->stale = true;
+    target->runtime_edit_pending = true;
+    MarkOwnerResultStale(target->owner_type, target->owner_ref);
+
+    reason = "FindCircle annulus applied to repository ROI: Rin=" +
+        std::to_string(static_cast<int>(std::lround(inner))) +
+        ", Rout=" + std::to_string(static_cast<int>(std::lround(outer)));
+    return true;
+}
+
+void ImageAnnotationLayer::ConfirmAllRuntimeWritebacks()
+{
+    for (auto& element : myShapeElements)
+        element.runtime_edit_pending = false;
+}
+
 CxShapeHitResult ImageAnnotationLayer::HitTest(double image_x, double image_y, double tolerance)
 {
     CxShapeHitResult result;

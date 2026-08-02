@@ -17,8 +17,10 @@
 #include <cctype>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <vector>
+#include <cmath>
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -477,6 +479,99 @@ bool ExecuteCxScriptSequential(
     return true;
 }
 
+struct CxCircleMeasurePointRadiusStats
+{
+    int count = 0;
+    int inside_inner_count = 0;
+    int outside_outer_count = 0;
+    double min_radius = 0.0;
+    double avg_radius = 0.0;
+    double max_radius = 0.0;
+};
+
+CxCircleMeasurePointRadiusStats ComputeCircleMeasurePointRadiusStats(
+    const std::vector<CxShapeElementSnapshot>& shapes,
+    double cx,
+    double cy,
+    double inner_radius,
+    double outer_radius)
+{
+    CxCircleMeasurePointRadiusStats stats;
+    bool has_shape_center = false;
+    bool has_shape_inner = false;
+    bool has_shape_outer = false;
+
+    for (const auto& shape : shapes)
+    {
+        if (shape.owner_type != "FindCircle")
+            continue;
+
+        if (shape.stable_ref.find(".roi_circle") != std::string::npos &&
+            shape.radius > 0.0)
+        {
+            cx = shape.center_x;
+            cy = shape.center_y;
+            if (!has_shape_outer && outer_radius <= 0.0)
+                outer_radius = shape.radius;
+            has_shape_center = true;
+        }
+        else if (shape.stable_ref.find(".inner_scan_circle") != std::string::npos &&
+                 shape.radius > 0.0)
+        {
+            inner_radius = shape.radius;
+            has_shape_inner = true;
+        }
+        else if (shape.stable_ref.find(".outer_scan_circle") != std::string::npos &&
+                 shape.radius > 0.0)
+        {
+            outer_radius = shape.radius;
+            has_shape_outer = true;
+        }
+    }
+
+    if (!has_shape_center && (cx == 0.0 && cy == 0.0))
+        return stats;
+
+    double min_radius = std::numeric_limits<double>::max();
+    double max_radius = 0.0;
+    double sum_radius = 0.0;
+
+    for (const auto& shape : shapes)
+    {
+        if (shape.owner_type != "FindCircle" ||
+            shape.semantic_role != "measure_points")
+        {
+            continue;
+        }
+
+        for (size_t i = 0; i + 1 < shape.points.size(); i += 2)
+        {
+            const double dx = shape.points[i] - cx;
+            const double dy = shape.points[i + 1] - cy;
+            const double radius = std::sqrt(dx * dx + dy * dy);
+
+            min_radius = std::min(min_radius, radius);
+            max_radius = std::max(max_radius, radius);
+            sum_radius += radius;
+            ++stats.count;
+
+            if (inner_radius > 0.0 && radius < inner_radius - 0.5)
+                ++stats.inside_inner_count;
+            if (outer_radius > 0.0 && radius > outer_radius + 0.5)
+                ++stats.outside_outer_count;
+        }
+    }
+
+    if (stats.count > 0)
+    {
+        stats.min_radius = min_radius;
+        stats.avg_radius = sum_radius / static_cast<double>(stats.count);
+        stats.max_radius = max_radius;
+    }
+
+    return stats;
+}
+
 CxScriptResultPackage BuildCxScriptResultPackage(
     const CxScriptExecutionCapture& capture)
 {
@@ -560,6 +655,29 @@ CxScriptResultPackage BuildCxScriptResultPackage(
             ? 1.0 : 0.0;
     pkg.metrics["circle_radius"] = capture.circle_radius;
     pkg.metrics["avgdist"] = capture.avgdist;
+    const double circle_gauge_cx = readRuntimeGlobal("global_circle_cx");
+    const double circle_gauge_cy = readRuntimeGlobal("global_circle_cy");
+    const double circle_inner_radius = readRuntimeGlobal("global_circle_inner_radius");
+    const double circle_outer_radius = readRuntimeGlobal("global_circle_outer_radius");
+    const CxCircleMeasurePointRadiusStats circle_radius_stats =
+        ComputeCircleMeasurePointRadiusStats(
+            capture.shapes,
+            circle_gauge_cx,
+            circle_gauge_cy,
+            circle_inner_radius,
+            circle_outer_radius);
+    pkg.metrics["circle_measure_point_count_for_radius_check"] =
+        circle_radius_stats.count;
+    pkg.metrics["circle_measure_point_radius_min"] =
+        circle_radius_stats.min_radius;
+    pkg.metrics["circle_measure_point_radius_avg"] =
+        circle_radius_stats.avg_radius;
+    pkg.metrics["circle_measure_point_radius_max"] =
+        circle_radius_stats.max_radius;
+    pkg.metrics["circle_measure_points_inside_inner_count"] =
+        circle_radius_stats.inside_inner_count;
+    pkg.metrics["circle_measure_points_outside_outer_count"] =
+        circle_radius_stats.outside_outer_count;
     pkg.metrics["result_rect_count"] = capture.result_rect_count;
     pkg.metrics["top1_rect_x"] = capture.top1_rect_x;
     pkg.metrics["top1_rect_y"] = capture.top1_rect_y;
@@ -1315,6 +1433,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_circle_cy", options.circle_cy);
             setGlobal("global_circle_px", options.circle_px);
             setGlobal("global_circle_py", options.circle_py);
+            setGlobal("global_circle_inner_radius", 0);
+            setGlobal("global_circle_outer_radius", 0);
+            setGlobal("global_circle_ring_width", 0);
             setGlobal("global_ellipse_x0", options.ellipse_x0);
             setGlobal("global_ellipse_y0", options.ellipse_y0);
             setGlobal("global_ellipse_x1", options.ellipse_x1);
@@ -1775,6 +1896,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_circle_cy", options.circle_cy);
         setGlobal("global_circle_px", options.circle_px);
         setGlobal("global_circle_py", options.circle_py);
+        setGlobal("global_circle_inner_radius", 0);
+        setGlobal("global_circle_outer_radius", 0);
+        setGlobal("global_circle_ring_width", 0);
         setGlobal("global_ellipse_x0", options.ellipse_x0);
         setGlobal("global_ellipse_y0", options.ellipse_y0);
         setGlobal("global_ellipse_x1", options.ellipse_x1);

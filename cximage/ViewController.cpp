@@ -5,6 +5,7 @@
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
+#include "FindCircle.h"
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
 #include <glad/glad.h>
@@ -373,6 +374,9 @@ namespace
     applied += setRequiredIntIfUsed("global_circle_cy", existingOr("global_circle_cy", safeHeight / 2)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_circle_px", existingOr("global_circle_px", (safeWidth * 3) / 4)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_circle_py", existingOr("global_circle_py", safeHeight / 2)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_inner_radius", existingOr("global_circle_inner_radius", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_outer_radius", existingOr("global_circle_outer_radius", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_circle_ring_width", existingOr("global_circle_ring_width", 0)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_ellipse_x0", existingOr("global_ellipse_x0", roiX0)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_ellipse_y0", existingOr("global_ellipse_y0", roiY0)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_ellipse_x1", existingOr("global_ellipse_x1", roiX1)) ? 1 : 0;
@@ -393,6 +397,54 @@ namespace
     applied += setRequiredIntIfUsed("global_max_elapsed_ms", existingOr("global_max_elapsed_ms", 2000)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_scan_lines", existingOr("global_max_scan_lines", 256)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_samples", existingOr("global_max_samples", 4096)) ? 1 : 0;
+
+    /*
+     * Evidence self-test may replay older script snapshots before a candidate
+     * has saved edge-role globals.  These are execution controls, not locked
+     * evidence parameters: missing selected_edge must mean "All edges" instead
+     * of rejecting every scan run.
+     */
+    applied += setIntIfUsed("global_findline_selected_edge", existingOr("global_findline_selected_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_edge_count", existingOr("global_findline_edge_count", 1)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_best_edge", existingOr("global_findline_best_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_recommended_edge", existingOr("global_findline_recommended_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_relation_edge", existingOr("global_findline_relation_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_attach_edge", existingOr("global_findline_attach_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_selected_edge", existingOr("global_findcircle_selected_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_edge_count", existingOr("global_findcircle_edge_count", 1)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_best_edge", existingOr("global_findcircle_best_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_recommended_edge", existingOr("global_findcircle_recommended_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_relation_edge", existingOr("global_findcircle_relation_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_attach_edge", existingOr("global_findcircle_attach_edge", 0)) ? 1 : 0;
+
+    /*
+     * These globals are result echo/output variables used by older frozen,
+     * suite snapshot, and contract scripts.  They must exist before script
+     * execution, but their initial zero value must not be interpreted as a
+     * runtime result.  Runtime capture remains the fact source after execution.
+     */
+    applied += setIntIfUsed("global_algorithm_executed", existingOr("global_algorithm_executed", 1)) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_method", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_threshold", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_wgap", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_hgap", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_linegap", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_selected_filterprofile", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_result_valid", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_valid_points_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_has_fit_line", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_has_fit_circle", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_has_fit_ellipse", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_valid_points_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_has_fit_line", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_has_fit_circle", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_global_valid_points_count_mismatch", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_global_has_fit_line_mismatch", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_global_has_fit_circle_mismatch", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_runtime_global_result_mismatch", 0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_avgdist", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_circle_radius", 0.0) ? 1 : 0;
+    applied += setDoubleIfUsed("global_local_support", 1.0) ? 1 : 0;
 
     applied += setRequiredDoubleIfUsed("global_min_score", "min_score", 0.5) ? 1 : 0;
     applied += setDoubleIfUsed("global_match_count", 0.0) ? 1 : 0;
@@ -2027,6 +2079,11 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     applied += applyIntToken("cy", "global_circle_cy") ? 1 : 0;
     applied += applyIntToken("px", "global_circle_px") ? 1 : 0;
     applied += applyIntToken("py", "global_circle_py") ? 1 : 0;
+    applied += applyIntToken("circle_inner_radius", "global_circle_inner_radius") ? 1 : 0;
+    applied += applyIntToken("circle_outer_radius", "global_circle_outer_radius") ? 1 : 0;
+    applied += applyIntToken("circle_ring_width", "global_circle_ring_width") ? 1 : 0;
+    applied += applyIntToken("inner_radius", "global_circle_inner_radius") ? 1 : 0;
+    applied += applyIntToken("outer_radius", "global_circle_outer_radius") ? 1 : 0;
 
     applied += applyIntToken("ellipse_x0", "global_ellipse_x0") ? 1 : 0;
     applied += applyIntToken("ellipse_y0", "global_ellipse_y0") ? 1 : 0;
@@ -3821,6 +3878,10 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
   {
     ApplyManualGaugeToGlobals(m_manualTest);
   }
+  // A pending ROI edit intentionally survives repaint, but a real CxScript
+  // Run is the boundary where the parser-owned tool becomes authoritative
+  // again.  Clear the preservation flag before publishing this run's shapes.
+  m_annotationLayer.ConfirmAllRuntimeWritebacks();
   for (const auto& input : m_manualTest.runtime_int_vars)
   {
     if (input.first.rfind("global_", 0) == 0)
@@ -3907,9 +3968,19 @@ static bool SyncRuntimeObjectToManualGaugeState(
         if (radius <= 0)
             radius = 50;
 
-        gauge.radius = radius;
-        gauge.circle_px = px;
-        gauge.circle_py = py;
+        const int runtimeOuterRadius = object.ring_outer_radius > 0.0
+            ? static_cast<int>(std::lround(object.ring_outer_radius))
+            : radius;
+        const int runtimeInnerRadius = object.ring_inner_radius > 0.0
+            ? static_cast<int>(std::lround(object.ring_inner_radius))
+            : 0;
+
+        gauge.radius = std::max(1, runtimeOuterRadius);
+        gauge.outer_radius = gauge.radius;
+        gauge.inner_radius = std::max(0, std::min(
+            runtimeInnerRadius, gauge.outer_radius - 1));
+        gauge.circle_px = gauge.circle_cx + gauge.outer_radius;
+        gauge.circle_py = gauge.circle_cy;
 
         gauge.dirty = false;
         gauge.accepted = false;
@@ -4412,13 +4483,41 @@ void ViewController::drawScriptAcceptancePanels()
             }
         }
 
-        // Layer 3: Shape Elements from ImageAnnotationLayer
+        // Layer 3: Shape Elements from ImageAnnotationLayer.
+        //
+        // Draw immutable runtime evidence first, then editable ROI shapes.
+        // A FindCircle annulus is one editable CircleShape (outer radius plus
+        // inner radius).  Its Rin/Rout handles must remain above the read-only
+        // scan circles published by the same tool; otherwise the inner ring is
+        // visible but its real handle is visually obscured.
         {
             std::vector<std::string> visibleShapeRefs;
             visibleShapeRefs.reserve(m_annotationLayer.ShapeElements().size());
             for (const CxShapeElement& element : m_annotationLayer.ShapeElements())
             {
-                if (element.visible && element.shape)
+                if (element.visible && element.shape && !element.editable)
+                    visibleShapeRefs.push_back(element.stable_ref);
+            }
+
+            for (const std::string& ref : visibleShapeRefs)
+            {
+                const CxShapeElement* element = nullptr;
+                for (const CxShapeElement& candidate : m_annotationLayer.ShapeElements())
+                {
+                    if (candidate.stable_ref == ref)
+                    {
+                        element = &candidate;
+                        break;
+                    }
+                }
+                if (element != nullptr)
+                    DrawShapeElementOnImageView(*element, drawList);
+            }
+
+            visibleShapeRefs.clear();
+            for (const CxShapeElement& element : m_annotationLayer.ShapeElements())
+            {
+                if (element.visible && element.shape && element.editable)
                     visibleShapeRefs.push_back(element.stable_ref);
             }
 
@@ -4615,6 +4714,115 @@ void ViewController::drawScriptAcceptancePanels()
                 }
             }
 
+        }
+
+        // Layer 3.6: FindCircle runtime scan debug overlay.
+        //
+        // This mirrors the FindLine scan-tick overlay: read native scan lines
+        // from the live runtime object and draw them as a temporary debug
+        // projection.  It does not create ShapeElements or copied geometry.
+        if (m_manualTest.show_circle_gauge_scan_lines)
+        {
+            std::string ownerRef = m_manualTest.current_gauge.primary_object_name;
+            if (ownerRef.empty())
+                ownerRef = m_manualTest.current_result_ref.source_object;
+            if (ownerRef.empty())
+            {
+                for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
+                {
+                    if (object.type == "FindCircle")
+                    {
+                        ownerRef = object.name;
+                        break;
+                    }
+                }
+            }
+
+            FindCircle* circleTool = ownerRef.empty()
+                ? nullptr
+                : static_cast<FindCircle*>(
+                      m_parserDebugBridge.QueryClassObject("FindCircle", ownerRef));
+
+            auto ImageToScreenD = [&](double x, double y) -> ImVec2
+            {
+                return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                              imagePos.y + static_cast<float>(y) * sy);
+            };
+
+            auto drawArrowHead = [&](CxShapePoint from, CxShapePoint to, ImU32 arrowColor)
+            {
+                const ImVec2 pFrom = ImageToScreenD(from.x, from.y);
+                const ImVec2 pTo = ImageToScreenD(to.x, to.y);
+                const float vx = pTo.x - pFrom.x;
+                const float vy = pTo.y - pFrom.y;
+                const float vlen = std::sqrt(vx * vx + vy * vy);
+                if (vlen < 1.0f)
+                    return;
+
+                const float ux = vx / vlen;
+                const float uy = vy / vlen;
+                const float arrowLen = 7.0f;
+                const float arrowHalf = 4.0f;
+                const ImVec2 base(pTo.x - ux * arrowLen, pTo.y - uy * arrowLen);
+                const ImVec2 left(base.x - uy * arrowHalf, base.y + ux * arrowHalf);
+                const ImVec2 right(base.x + uy * arrowHalf, base.y - ux * arrowHalf);
+
+                drawList->AddLine(pTo, left, arrowColor, 1.8f);
+                drawList->AddLine(pTo, right, arrowColor, 1.8f);
+            };
+
+            if (circleTool != nullptr)
+            {
+                const FindCircleMeasureGeometryDebug& debug =
+                    circleTool->lastmeasuregeometrydebug();
+                const int scanCount = std::max(
+                    debug.scan_line_count,
+                    circleTool->getscanlinecount());
+                const int arrowStride = std::max(2, scanCount / 32);
+                const int selectedArcStride = std::max(2, scanCount / 24);
+
+                for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
+                {
+                    CxShapePoint a, b;
+                    if (!circleTool->getscanline(scanIndex, a, b))
+                        continue;
+
+                    const bool selectedArc =
+                        m_manualTest.findcircle_selected_scan_edge > 0 &&
+                        m_manualTest.findcircle_scan_edge_count > 0 &&
+                        ((scanIndex * m_manualTest.findcircle_scan_edge_count) /
+                         std::max(1, scanCount)) + 1 ==
+                            m_manualTest.findcircle_selected_scan_edge;
+
+                    drawList->AddLine(
+                        ImageToScreenD(a.x, a.y),
+                        ImageToScreenD(b.x, b.y),
+                        IM_COL32(140, 230, 255, 105),
+                        1.0f);
+
+                    /*
+                     * Do not paint every selected-arc scan line in yellow.
+                     * For a normal circle without inner radius all scan lines
+                     * start at the center, and dense yellow selected lines look
+                     * like algorithm result geometry.  Keep selected-arc
+                     * visibility as sparse outer-band markers only.
+                     */
+                    if (selectedArc && (scanIndex % selectedArcStride) == 0)
+                    {
+                        CxShapePoint markerStart;
+                        markerStart.x = a.x + (b.x - a.x) * 0.72;
+                        markerStart.y = a.y + (b.y - a.y) * 0.72;
+                        drawList->AddLine(
+                            ImageToScreenD(markerStart.x, markerStart.y),
+                            ImageToScreenD(b.x, b.y),
+                            IM_COL32(255, 235, 64, 220),
+                            1.6f);
+                    }
+
+                    if ((scanIndex % arrowStride) == 0)
+                        drawArrowHead(a, b, IM_COL32(255, 160, 48, 210));
+                }
+            }
         }
 
     if (m_showTestPoints)
