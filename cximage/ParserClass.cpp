@@ -402,9 +402,10 @@ namespace mu
             const std::string_view findcircle_type_name =
                 CxScriptTypeName(CxScriptTypeTraits<FindCircle>::id);
             m_parser.DefineClass(findcircle_type_name.data(), pfindcircle);
-            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle2", &FindCircle::setcircle2);
-            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle", &FindCircle::setcircle);
-            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setannulus", &FindCircle::setannulus);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle2", &FindCircle::cxscript_setcircle2);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcircle", &FindCircle::cxscript_setcircle);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setannulus", &FindCircle::cxscript_setannulus);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setscanarc", &FindCircle::cxscript_setscanarc);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setgap", &FindCircle::Setgap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Setgap", &FindCircle::Setgap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "Show", &FindCircle::setshow);
@@ -430,6 +431,9 @@ namespace mu
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getannulusouter", &FindCircle::getannulusouter);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getannuluswidth", &FindCircle::getannuluswidth);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasannulus", &FindCircle::hasannulus);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getscanarcstart", &FindCircle::getscanarcstart);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getscanarcend", &FindCircle::getscanarcend);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasscanarc", &FindCircle::hasscanarc);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getavgdist", &FindCircle::getavgdist);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getvalidpointcount", &FindCircle::getvalidpointcount);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "hasfitresult", &FindCircle::hasfitresult_script);

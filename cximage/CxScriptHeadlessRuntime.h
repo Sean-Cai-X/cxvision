@@ -295,6 +295,9 @@ struct CxScriptHeadlessOptions
     int circle_cy = 0;
     int circle_px = 0;
     int circle_py = 0;
+    int findcircle_arc_enabled = 0;
+    int findcircle_arc_start_deg = 0;
+    int findcircle_arc_end_deg = 360;
 
     int ellipse_x0 = 0;
     int ellipse_y0 = 0;

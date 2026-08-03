@@ -1,8 +1,10 @@
 #include "CxEvidenceSelfTestRuntime.h"
 
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -172,6 +174,191 @@ bool IsArtifactOkForSmoke(const CxArtifactAuditItem& item)
     if (LooksLikeImagePath(item.ref) && !item.image_read_ok)
         return false;
     return true;
+}
+
+bool ReadTextFileForArtifactAudit(
+    const std::string& path,
+    std::string& text)
+{
+    text.clear();
+    if (path.empty() || LooksLikeNonFileArtifactRef(path))
+        return false;
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open())
+        return false;
+
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    text = buffer.str();
+    return true;
+}
+
+bool ExtractJsonNumberForArtifactAudit(
+    const std::string& json,
+    const std::string& key,
+    double& value)
+{
+    const std::string needle = "\"" + key + "\"";
+    std::size_t pos = json.find(needle);
+    if (pos == std::string::npos)
+        return false;
+    pos = json.find(':', pos + needle.size());
+    if (pos == std::string::npos)
+        return false;
+    ++pos;
+    while (pos < json.size() &&
+           std::isspace(static_cast<unsigned char>(json[pos])))
+    {
+        ++pos;
+    }
+    const char* begin = json.c_str() + pos;
+    char* end = nullptr;
+    const double parsed = std::strtod(begin, &end);
+    if (begin == end || !std::isfinite(parsed))
+        return false;
+    value = parsed;
+    return true;
+}
+
+bool ExtractJsonBoolForArtifactAudit(
+    const std::string& json,
+    const std::string& key,
+    bool& value)
+{
+    const std::string needle = "\"" + key + "\"";
+    std::size_t pos = json.find(needle);
+    if (pos == std::string::npos)
+        return false;
+    pos = json.find(':', pos + needle.size());
+    if (pos == std::string::npos)
+        return false;
+    ++pos;
+    while (pos < json.size() &&
+           std::isspace(static_cast<unsigned char>(json[pos])))
+    {
+        ++pos;
+    }
+    if (json.compare(pos, 4, "true") == 0)
+    {
+        value = true;
+        return true;
+    }
+    if (json.compare(pos, 5, "false") == 0)
+    {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+int CountTorchCurveSamplesForArtifactAudit(
+    const CxEvidenceSelfTestResult& result)
+{
+    int samples = 0;
+    std::string json;
+    double number = 0.0;
+    bool flag = false;
+
+    if (ReadTextFileForArtifactAudit(result.torch_result_ref.empty()
+            ? result.result_ref
+            : result.torch_result_ref,
+            json))
+    {
+        if (ExtractJsonNumberForArtifactAudit(json, "smoke_loss", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "grad_mean", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "foreground_ratio", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "infer_runtime_ms", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "train_runtime_ms", number))
+            ++samples;
+    }
+
+    if (ReadTextFileForArtifactAudit(result.segmentation_result_ref, json))
+    {
+        if (ExtractJsonNumberForArtifactAudit(json, "foreground_ratio", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "contour_count", number))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "changed_pixels", number))
+            ++samples;
+    }
+
+    if (ReadTextFileForArtifactAudit(result.torch_evidence_ref.empty()
+            ? result.evidence_ref
+            : result.torch_evidence_ref,
+            json))
+    {
+        if (ExtractJsonNumberForArtifactAudit(json, "epochs", number))
+            ++samples;
+        if (ExtractJsonBoolForArtifactAudit(json, "finite_loss", flag))
+            ++samples;
+        if (ExtractJsonNumberForArtifactAudit(json, "grad_mean", number))
+            ++samples;
+    }
+
+    if (result.segmentation_contour_count > 0)
+        ++samples;
+    if (result.segmentation_primary_area > 0.0)
+        ++samples;
+
+    return samples;
+}
+
+int ExtractDetectionCountForArtifactAudit(
+    const CxEvidenceSelfTestResult& result)
+{
+    if (result.torch_result_count > 0)
+        return result.torch_result_count;
+
+    const std::string resultRef = result.torch_result_ref.empty()
+        ? result.result_ref
+        : result.torch_result_ref;
+    if (resultRef.empty() || LooksLikeNonFileArtifactRef(resultRef))
+        return 0;
+
+    const std::filesystem::path resultPath(resultRef);
+    const std::filesystem::path resultDir = resultPath.parent_path();
+    const std::filesystem::path detectionsPath = resultDir / "detections.json";
+
+    std::string json;
+    double count = 0.0;
+    if (ReadTextFileForArtifactAudit(detectionsPath.string(), json) &&
+        ExtractJsonNumberForArtifactAudit(json, "num_detections", count))
+    {
+        return static_cast<int>(count);
+    }
+
+    return 0;
+}
+
+std::string InferTorchModelSemanticGateForArtifactAudit(
+    const CxEvidenceSelfTestResult& result)
+{
+    if (result.runtime_object_type == "FindSegmentation" ||
+        result.tool.find("FindSegmentation") != std::string::npos)
+    {
+        return result.segmentation_contour_count > 0 &&
+               result.segmentation_primary_area > 0.0
+            ? "SMOKE_ARTIFACT_ONLY_NOT_SEMANTIC_ACCEPTED"
+            : "NOT_EVALUATED";
+    }
+
+    std::string json;
+    double foregroundRatio = 0.0;
+    if (ReadTextFileForArtifactAudit(result.torch_result_ref.empty()
+            ? result.result_ref
+            : result.torch_result_ref,
+            json) &&
+        ExtractJsonNumberForArtifactAudit(json, "foreground_ratio", foregroundRatio))
+    {
+        return "SMOKE_ARTIFACT_ONLY_NOT_SEMANTIC_ACCEPTED";
+    }
+
+    return "NOT_CLAIMED";
 }
 }
 
@@ -569,13 +756,24 @@ bool WriteTorchArtifactAuditReport(
         (std::filesystem::path(outDir) / "torch_artifact_audit.json").string();
     const std::string mdPath =
         (std::filesystem::path(outDir) / "torch_artifact_audit.md").string();
+    const std::string checklistJsonPath =
+        (std::filesystem::path(outDir) / "torch_to_verify_checklist.json").string();
+    const std::string checklistMdPath =
+        (std::filesystem::path(outDir) / "torch_to_verify_checklist.md").string();
 
     struct CaseAudit
     {
         const CxEvidenceSelfTestResult* result = nullptr;
         std::vector<CxArtifactAuditItem> artifacts;
+        std::vector<std::string> auto_verified;
+        std::vector<std::string> to_verify;
         bool smoke_ok = false;
+        int training_curve_sample_count = 0;
         std::string detection_non_empty_result;
+        std::string training_curve_status;
+        std::string parameter_ui_sync_status;
+        std::string model_semantic_gate;
+        std::string detection_non_empty_gate;
         std::string mask_artifact_available;
         std::string segmentation_attach_available;
         std::string reason;
@@ -593,6 +791,25 @@ bool WriteTorchArtifactAuditReport(
             caseResult.torch_result_count > 0
                 ? "OBSERVED_NOT_SEMANTIC_ACCEPTED"
                 : "UNVERIFIED_EMPTY";
+        audit.training_curve_sample_count =
+            CountTorchCurveSamplesForArtifactAudit(caseResult);
+        audit.training_curve_status =
+            audit.training_curve_sample_count > 0
+                ? "CURVE_SAMPLES_AVAILABLE"
+                : "CURVE_SAMPLES_MISSING";
+        audit.parameter_ui_sync_status =
+            !caseResult.parameter_summary.empty() &&
+            caseResult.runtime_object_ok
+                ? "PARAMETER_BINDING_OBSERVED"
+                : "PARAMETER_BINDING_TO_VERIFY";
+        audit.model_semantic_gate =
+            InferTorchModelSemanticGateForArtifactAudit(caseResult);
+        const int detectedCount =
+            ExtractDetectionCountForArtifactAudit(caseResult);
+        audit.detection_non_empty_gate =
+            detectedCount > 0
+                ? "DETECTION_NON_EMPTY_OBSERVED_NOT_SEMANTIC_ACCEPTED"
+                : "DETECTION_NON_EMPTY_FAIL_OR_NOT_APPLICABLE";
         audit.mask_artifact_available =
             (caseResult.torch_mask_available != 0 ||
              !caseResult.torch_mask_ref.empty() ||
@@ -643,6 +860,62 @@ bool WriteTorchArtifactAuditReport(
             audit.reason = audit.smoke_ok
                 ? "TorchTask runtime artifact chain is readable; model semantic quality is NOT_CLAIMED."
                 : "TorchTask runtime artifact chain has missing or unreadable required artifacts.";
+
+            if (audit.smoke_ok)
+            {
+                audit.auto_verified.push_back(
+                    "TorchTask runtime returned ok and required artifact refs are readable.");
+                audit.auto_verified.push_back(
+                    "result_ref/evidence_ref can be used as evidence-chain files.");
+            }
+            if (IsArtifactOkForSmoke(audit.artifacts[2]))
+            {
+                audit.auto_verified.push_back(
+                    "primary visual artifact can be opened and has readable dimensions.");
+            }
+            if (caseResult.torch_mask_available != 0 &&
+                IsArtifactOkForSmoke(audit.artifacts[3]))
+            {
+                audit.auto_verified.push_back(
+                    "mask artifact can be opened and has readable dimensions.");
+            }
+            if (!caseResult.torch_trainer_lifecycle_summary.empty() ||
+                !caseResult.torch_unified_mainline_summary.empty())
+            {
+                audit.auto_verified.push_back(
+                    "training lifecycle/mainline summary is present as text evidence.");
+            }
+            if (audit.training_curve_sample_count > 0)
+            {
+                audit.auto_verified.push_back(
+                    "training/inference curve samples were extracted from result/evidence JSON.");
+            }
+            if (audit.parameter_ui_sync_status == "PARAMETER_BINDING_OBSERVED")
+            {
+                audit.auto_verified.push_back(
+                    "parameter summary and runtime object binding are present for UI/runtime sync inspection.");
+            }
+
+            audit.to_verify.push_back(
+                "Model semantic quality requires human/model-validation review; current status is NOT_CLAIMED.");
+            if (caseResult.torch_result_count <= 0)
+            {
+                audit.to_verify.push_back(
+                    "Detection/non-empty result is UNVERIFIED_EMPTY; do not treat as detection semantic PASS.");
+            }
+            if (audit.detection_non_empty_gate ==
+                "DETECTION_NON_EMPTY_FAIL_OR_NOT_APPLICABLE" &&
+                caseResult.script_path.find("detection") != std::string::npos)
+            {
+                audit.to_verify.push_back(
+                    "Detection non-empty gate did not observe boxes; provide real detection weights/data before semantic acceptance.");
+            }
+            if (!caseResult.torch_trainer_lifecycle_summary.empty() ||
+                !caseResult.torch_unified_mainline_summary.empty())
+            {
+                audit.to_verify.push_back(
+                    "Training curve quality, epoch progression and convergence require a dedicated training review.");
+            }
         }
         else if (caseResult.runtime_object_type == "FindSegmentation" ||
                  caseResult.tool.find("FindSegmentation") != std::string::npos)
@@ -674,21 +947,64 @@ bool WriteTorchArtifactAuditReport(
             audit.reason = audit.smoke_ok
                 ? "FindSegmentation libtorch/smoke attach chain is readable; boundary attach is available."
                 : "FindSegmentation attach chain has missing artifacts or no contour/area evidence.";
+
+            if (audit.smoke_ok)
+            {
+                audit.auto_verified.push_back(
+                    "FindSegmentation backend reached a ready state and published readable result/mask/contour artifacts.");
+                audit.auto_verified.push_back(
+                    "boundary attach has contour_count > 0 and primary_area > 0.");
+            }
+            if (IsArtifactOkForSmoke(audit.artifacts[1]))
+            {
+                audit.auto_verified.push_back(
+                    "segmentation mask artifact can be opened and has readable dimensions.");
+            }
+            if (IsArtifactOkForSmoke(audit.artifacts[2]))
+            {
+                audit.auto_verified.push_back(
+                    "segmentation contour json exists and is non-empty.");
+            }
+            if (audit.training_curve_sample_count > 0)
+            {
+                audit.auto_verified.push_back(
+                    "segmentation runtime metric samples were extracted for curve/param-map display.");
+            }
+            if (audit.parameter_ui_sync_status == "PARAMETER_BINDING_OBSERVED")
+            {
+                audit.auto_verified.push_back(
+                    "prompt ROI parameters and runtime object binding are present for UI/runtime sync inspection.");
+            }
+
+            audit.to_verify.push_back(
+                "EdgeSam/libtorch segmentation semantic quality requires human/model-validation review; current status is smoke only.");
+            if (caseResult.segmentation_overlay_ref.empty() ||
+                LooksLikeNonFileArtifactRef(caseResult.segmentation_overlay_ref))
+            {
+                audit.to_verify.push_back(
+                    "segmentation overlay_ref is not a standalone image file; UI display/render path must be manually verified.");
+            }
+            audit.to_verify.push_back(
+                "Prompt positive/negative point behavior remains pending_binding unless a prompt-specific UI test confirms it.");
         }
         else
         {
             audit.smoke_ok = false;
             audit.reason = "Torch-related case type is not covered by artifact audit.";
+            audit.to_verify.push_back(
+                "Torch-related case type is not covered by the current artifact audit adapter.");
         }
 
         audits.push_back(audit);
     }
 
     int smokePass = 0;
+    int toVerifyCount = 0;
     for (const CaseAudit& audit : audits)
     {
         if (audit.smoke_ok)
             ++smokePass;
+        toVerifyCount += static_cast<int>(audit.to_verify.size());
     }
 
     std::ofstream json(jsonPath, std::ios::binary);
@@ -705,6 +1021,7 @@ bool WriteTorchArtifactAuditReport(
     json << "  \"total_cases\": " << audits.size() << ",\n";
     json << "  \"smoke_artifact_pass_count\": " << smokePass << ",\n";
     json << "  \"smoke_artifact_fail_count\": " << (audits.size() - smokePass) << ",\n";
+    json << "  \"to_verify_count\": " << toVerifyCount << ",\n";
     json << "  \"conclusion\": \""
          << (smokePass == static_cast<int>(audits.size())
                  ? "TORCH_ARTIFACT_AUDIT_PASS"
@@ -724,6 +1041,16 @@ bool WriteTorchArtifactAuditReport(
         json << "      \"smoke_artifact_ok\": " << (audit.smoke_ok ? "true" : "false") << ",\n";
         json << "      \"reason\": \"" << JsonEscape(audit.reason) << "\",\n";
         json << "      \"model_semantic_quality\": \"NOT_CLAIMED\",\n";
+        json << "      \"model_semantic_gate\": \""
+             << JsonEscape(audit.model_semantic_gate) << "\",\n";
+        json << "      \"training_curve_status\": \""
+             << JsonEscape(audit.training_curve_status) << "\",\n";
+        json << "      \"training_curve_sample_count\": "
+             << audit.training_curve_sample_count << ",\n";
+        json << "      \"parameter_ui_sync_status\": \""
+             << JsonEscape(audit.parameter_ui_sync_status) << "\",\n";
+        json << "      \"detection_non_empty_gate\": \""
+             << JsonEscape(audit.detection_non_empty_gate) << "\",\n";
         json << "      \"detection_non_empty_result\": \""
              << JsonEscape(audit.detection_non_empty_result) << "\",\n";
         json << "      \"mask_artifact_available\": \""
@@ -736,6 +1063,24 @@ bool WriteTorchArtifactAuditReport(
         json << "      \"torch_mask_available\": " << caseResult.torch_mask_available << ",\n";
         json << "      \"segmentation_contour_count\": " << caseResult.segmentation_contour_count << ",\n";
         json << "      \"segmentation_primary_area\": " << caseResult.segmentation_primary_area << ",\n";
+        json << "      \"auto_verified\": [\n";
+        for (std::size_t j = 0; j < audit.auto_verified.size(); ++j)
+        {
+            json << "        \"" << JsonEscape(audit.auto_verified[j]) << "\"";
+            if (j + 1 < audit.auto_verified.size())
+                json << ",";
+            json << "\n";
+        }
+        json << "      ],\n";
+        json << "      \"to_verify\": [\n";
+        for (std::size_t j = 0; j < audit.to_verify.size(); ++j)
+        {
+            json << "        \"" << JsonEscape(audit.to_verify[j]) << "\"";
+            if (j + 1 < audit.to_verify.size())
+                json << ",";
+            json << "\n";
+        }
+        json << "      ],\n";
         json << "      \"artifacts\": [\n";
         for (std::size_t j = 0; j < audit.artifacts.size(); ++j)
         {
@@ -781,9 +1126,10 @@ bool WriteTorchArtifactAuditReport(
     md << "- total_cases: " << audits.size() << "\n";
     md << "- smoke_artifact_pass_count: " << smokePass << "\n";
     md << "- smoke_artifact_fail_count: " << (audits.size() - smokePass) << "\n\n";
+    md << "- to_verify_count: " << toVerifyCount << "\n\n";
 
-    md << "| Case | Tool | Runtime | Status | ArtifactSmoke | Detection | Mask | Attach | Reason |\n";
-    md << "|---|---|---|---|---|---|---|---|---|\n";
+    md << "| Case | Tool | Runtime | Status | ArtifactSmoke | Curve | ParamSync | SemanticGate | DetectionGate | Mask | Attach | AutoVerified | ToVerify | Reason |\n";
+    md << "|---|---|---|---|---|---|---|---|---|---|---|---:|---:|---|\n";
     for (const CaseAudit& audit : audits)
     {
         const CxEvidenceSelfTestResult& caseResult = *audit.result;
@@ -792,11 +1138,46 @@ bool WriteTorchArtifactAuditReport(
            << " | " << caseResult.runtime_object_type
            << " | " << caseResult.algorithm_status
            << " | " << (audit.smoke_ok ? "PASS" : "FAIL")
-           << " | " << audit.detection_non_empty_result
+           << " | " << audit.training_curve_status
+           << " | " << audit.parameter_ui_sync_status
+           << " | " << audit.model_semantic_gate
+           << " | " << audit.detection_non_empty_gate
            << " | " << audit.mask_artifact_available
            << " | " << audit.segmentation_attach_available
+           << " | " << audit.auto_verified.size()
+           << " | " << audit.to_verify.size()
            << " | " << audit.reason
            << " |\n";
+    }
+
+    md << "\n## Auto Verified\n\n";
+    for (const CaseAudit& audit : audits)
+    {
+        const CxEvidenceSelfTestResult& caseResult = *audit.result;
+        md << "### " << caseResult.case_id << "\n\n";
+        if (audit.auto_verified.empty())
+        {
+            md << "- none\n\n";
+            continue;
+        }
+        for (const std::string& item : audit.auto_verified)
+            md << "- " << item << "\n";
+        md << "\n";
+    }
+
+    md << "\n## To Verify\n\n";
+    for (const CaseAudit& audit : audits)
+    {
+        const CxEvidenceSelfTestResult& caseResult = *audit.result;
+        md << "### " << caseResult.case_id << "\n\n";
+        if (audit.to_verify.empty())
+        {
+            md << "- none\n\n";
+            continue;
+        }
+        for (const std::string& item : audit.to_verify)
+            md << "- " << item << "\n";
+        md << "\n";
     }
 
     md << "\n## Artifact Details\n\n";
@@ -819,6 +1200,75 @@ bool WriteTorchArtifactAuditReport(
                << " |\n";
         }
     }
+
+    std::ofstream checklistJson(checklistJsonPath, std::ios::binary);
+    if (!checklistJson.is_open())
+    {
+        reason = "failed to open torch to_verify checklist json: " + checklistJsonPath;
+        return false;
+    }
+
+    checklistJson << "{\n";
+    checklistJson << "  \"run_id\": \"" << JsonEscape(result.run_id) << "\",\n";
+    checklistJson << "  \"review_scope\": \"torch_manual_review_gate\",\n";
+    checklistJson << "  \"status\": \"PENDING_HUMAN_REVIEW\",\n";
+    checklistJson << "  \"to_verify_count\": " << toVerifyCount << ",\n";
+    checklistJson << "  \"items\": [\n";
+    int writtenItems = 0;
+    for (const CaseAudit& audit : audits)
+    {
+        const CxEvidenceSelfTestResult& caseResult = *audit.result;
+        for (const std::string& item : audit.to_verify)
+        {
+            if (writtenItems > 0)
+                checklistJson << ",\n";
+            checklistJson << "    {\n";
+            checklistJson << "      \"case_id\": \"" << JsonEscape(caseResult.case_id) << "\",\n";
+            checklistJson << "      \"script_path\": \"" << JsonEscape(caseResult.script_path) << "\",\n";
+            checklistJson << "      \"tool\": \"" << JsonEscape(caseResult.tool) << "\",\n";
+            checklistJson << "      \"runtime_object_type\": \"" << JsonEscape(caseResult.runtime_object_type) << "\",\n";
+            checklistJson << "      \"review_item\": \"" << JsonEscape(item) << "\",\n";
+            checklistJson << "      \"human_status\": \"PENDING\",\n";
+            checklistJson << "      \"human_decision\": \"\",\n";
+            checklistJson << "      \"human_reason\": \"\"\n";
+            checklistJson << "    }";
+            ++writtenItems;
+        }
+    }
+    checklistJson << "\n  ]\n";
+    checklistJson << "}\n";
+
+    std::ofstream checklistMd(checklistMdPath, std::ios::binary);
+    if (!checklistMd.is_open())
+    {
+        reason = "failed to open torch to_verify checklist md: " + checklistMdPath;
+        return false;
+    }
+
+    checklistMd << "# Torch To Verify Checklist\n\n";
+    checklistMd << "- run_id: " << result.run_id << "\n";
+    checklistMd << "- review_scope: torch_manual_review_gate\n";
+    checklistMd << "- status: PENDING_HUMAN_REVIEW\n";
+    checklistMd << "- to_verify_count: " << toVerifyCount << "\n\n";
+    checklistMd << "| Done | Case | Tool | Review Item | Human Decision | Reason |\n";
+    checklistMd << "|---|---|---|---|---|---|\n";
+    for (const CaseAudit& audit : audits)
+    {
+        const CxEvidenceSelfTestResult& caseResult = *audit.result;
+        for (const std::string& item : audit.to_verify)
+        {
+            checklistMd << "| [ ] | " << caseResult.case_id
+                        << " | " << caseResult.tool
+                        << " | " << item
+                        << " |  |  |\n";
+        }
+    }
+
+    checklistMd << "\n## Review Rule\n\n";
+    checklistMd << "- ArtifactSmoke PASS only means files/refs are readable.\n";
+    checklistMd << "- Model semantic quality remains NOT_CLAIMED until human/model-validation review finishes.\n";
+    checklistMd << "- Detection with result_count=0 must remain UNVERIFIED_EMPTY.\n";
+    checklistMd << "- Training lifecycle text is evidence only; convergence needs a dedicated review.\n";
 
     reason = "torch artifact audit written";
     return true;

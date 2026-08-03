@@ -150,6 +150,12 @@ void FindSegmentation::buildoverlay(void* image)
     if (image == nullptr)
         return;
 
+    if (!m_result.overlay_ref.empty())
+    {
+        m_overlay_ref = m_result.overlay_ref;
+        return;
+    }
+
     if (!m_result.overlay.empty())
     {
         m_overlay_ref = "overlay:" + m_backend + ":generated";

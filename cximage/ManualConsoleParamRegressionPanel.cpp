@@ -9,9 +9,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cmath>
 #include <sstream>
 #include <fstream>
+#include <vector>
 
 CxParamRegressionTask BuildParamRegressionTaskFromManualGauge(
     const ManualTestContext& context)
@@ -350,6 +352,144 @@ static void DrawPendingBindingLineLocal(const char* label, const char* reason)
     ImGui::SameLine(), ImGui::TextDisabled("(%s)", reason);
 }
 
+struct TorchCurveSampleLocal
+{
+  std::string label;
+  double value = 0.0;
+};
+
+static bool ReadTorchTextFileLocal(const std::string& path, std::string& text)
+{
+  text.clear();
+  if (path.empty())
+    return false;
+  std::ifstream input(path, std::ios::binary);
+  if (!input.is_open())
+    return false;
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  text = buffer.str();
+  return true;
+}
+
+static bool ExtractTorchJsonNumberLocal(
+    const std::string& json,
+    const std::string& key,
+    double& value)
+{
+  const std::string needle = "\"" + key + "\"";
+  std::size_t pos = json.find(needle);
+  if (pos == std::string::npos)
+    return false;
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos)
+    return false;
+  ++pos;
+  while (pos < json.size() &&
+         std::isspace(static_cast<unsigned char>(json[pos])))
+  {
+    ++pos;
+  }
+  const char* begin = json.c_str() + pos;
+  char* end = nullptr;
+  const double parsed = std::strtod(begin, &end);
+  if (begin == end || !std::isfinite(parsed))
+    return false;
+  value = parsed;
+  return true;
+}
+
+static bool ExtractTorchJsonBoolLocal(
+    const std::string& json,
+    const std::string& key,
+    bool& value)
+{
+  const std::string needle = "\"" + key + "\"";
+  std::size_t pos = json.find(needle);
+  if (pos == std::string::npos)
+    return false;
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos)
+    return false;
+  ++pos;
+  while (pos < json.size() &&
+         std::isspace(static_cast<unsigned char>(json[pos])))
+  {
+    ++pos;
+  }
+  if (json.compare(pos, 4, "true") == 0)
+  {
+    value = true;
+    return true;
+  }
+  if (json.compare(pos, 5, "false") == 0)
+  {
+    value = false;
+    return true;
+  }
+  return false;
+}
+
+static std::vector<TorchCurveSampleLocal> BuildTorchCurveSamplesLocal(
+    const RuntimeObjectView& object)
+{
+  std::vector<TorchCurveSampleLocal> samples;
+  std::string json;
+  double number = 0.0;
+  bool flag = false;
+
+  if (ReadTorchTextFileLocal(object.torch_result_ref, json))
+  {
+    if (ExtractTorchJsonNumberLocal(json, "smoke_loss", number))
+      samples.push_back({"loss", number});
+    if (ExtractTorchJsonNumberLocal(json, "grad_mean", number))
+      samples.push_back({"grad", number});
+    if (ExtractTorchJsonNumberLocal(json, "foreground_ratio", number))
+      samples.push_back({"fg", number});
+    if (ExtractTorchJsonNumberLocal(json, "infer_runtime_ms", number))
+      samples.push_back({"infer_ms", number});
+    if (ExtractTorchJsonNumberLocal(json, "train_runtime_ms", number))
+      samples.push_back({"train_ms", number});
+  }
+
+  if (ReadTorchTextFileLocal(object.torch_evidence_ref, json))
+  {
+    if (ExtractTorchJsonNumberLocal(json, "epochs", number))
+      samples.push_back({"epochs", number});
+    if (ExtractTorchJsonBoolLocal(json, "finite_loss", flag))
+      samples.push_back({"finite_loss", flag ? 1.0 : 0.0});
+    if (ExtractTorchJsonNumberLocal(json, "grad_mean", number))
+      samples.push_back({"grad_evidence", number});
+  }
+
+  return samples;
+}
+
+static std::vector<TorchCurveSampleLocal> BuildFindSegmentationCurveSamplesLocal(
+    const RuntimeObjectView& object)
+{
+  std::vector<TorchCurveSampleLocal> samples;
+  std::string json;
+  double number = 0.0;
+
+  if (ReadTorchTextFileLocal(object.segmentation_result_ref, json))
+  {
+    if (ExtractTorchJsonNumberLocal(json, "foreground_ratio", number))
+      samples.push_back({"fg", number});
+    if (ExtractTorchJsonNumberLocal(json, "contour_count", number))
+      samples.push_back({"contours", number});
+    if (ExtractTorchJsonNumberLocal(json, "changed_pixels", number))
+      samples.push_back({"changed", number});
+  }
+
+  if (object.segmentation_contour_count > 0)
+    samples.push_back({"contours_live", static_cast<double>(object.segmentation_contour_count)});
+  if (object.segmentation_primary_area > 0.0)
+    samples.push_back({"area", object.segmentation_primary_area});
+
+  return samples;
+}
+
 void DrawTorchKeyStatusPanel(const ManualTestContext& context)
 {
   const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
@@ -537,6 +677,12 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
 
   if (ImGui::CollapsingHeader("Training Curve / Param Map", ImGuiTreeNodeFlags_DefaultOpen))
   {
+    std::vector<TorchCurveSampleLocal> samples;
+    if (object != nullptr && object->type == "TorchTask")
+      samples = BuildTorchCurveSamplesLocal(*object);
+    else if (object != nullptr && object->type == "FindSegmentation")
+      samples = BuildFindSegmentationCurveSamplesLocal(*object);
+
     const ImVec2 plotSize(520.0f, 180.0f);
     ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 p1(p0.x + plotSize.x, p0.y + plotSize.y);
@@ -555,25 +701,58 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
     }
     draw->AddText(ImVec2(p0.x + 8.0f, p0.y + 6.0f),
                   IM_COL32(240, 240, 240, 255),
-                  "epoch-loss / IoU curve");
-    draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
-                  IM_COL32(255, 210, 80, 255),
-                  "pending real curve samples");
-    if (object != nullptr && object->type == "TorchTask" &&
-        !object->torch_trainer_lifecycle_summary.empty())
+                  "torch runtime metric curve");
+    if (samples.empty())
     {
-      draw->AddCircleFilled(ImVec2(p0.x + plotSize.x * 0.85f, p0.y + plotSize.y * 0.35f),
-                            5.0f,
-                            IM_COL32(120, 255, 160, 255));
-      draw->AddText(ImVec2(p0.x + plotSize.x * 0.85f + 8.0f, p0.y + plotSize.y * 0.35f - 8.0f),
-                    IM_COL32(220, 255, 220, 255),
-                    "best checkpoint marker");
+      draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
+                    IM_COL32(255, 210, 80, 255),
+                    "pending real curve samples");
+    }
+    else
+    {
+      double maxAbs = 0.0;
+      for (const TorchCurveSampleLocal& sample : samples)
+        maxAbs = std::max(maxAbs, std::abs(sample.value));
+      if (maxAbs <= 0.0)
+        maxAbs = 1.0;
+
+      ImVec2 prev;
+      bool hasPrev = false;
+      for (std::size_t i = 0; i < samples.size(); ++i)
+      {
+        const float t = samples.size() <= 1
+            ? 0.5f
+            : static_cast<float>(i) / static_cast<float>(samples.size() - 1);
+        const double normalized = std::max(-1.0, std::min(1.0, samples[i].value / maxAbs));
+        const float x = p0.x + 36.0f + (plotSize.x - 72.0f) * t;
+        const float y = p1.y - 30.0f -
+            static_cast<float>((normalized + 1.0) * 0.5) * (plotSize.y - 60.0f);
+        const ImVec2 pt(x, y);
+        if (hasPrev)
+          draw->AddLine(prev, pt, IM_COL32(120, 255, 160, 255), 2.0f);
+        draw->AddCircleFilled(pt, 4.5f, IM_COL32(120, 255, 160, 255));
+        draw->AddText(ImVec2(pt.x + 5.0f, pt.y - 12.0f),
+                      IM_COL32(220, 255, 220, 255),
+                      samples[i].label.c_str());
+        prev = pt;
+        hasPrev = true;
+      }
+      draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
+                    IM_COL32(120, 255, 160, 255),
+                    "real samples from torch result/evidence json");
     }
     ImGui::Dummy(plotSize);
     if (object != nullptr && object->type == "TorchTask")
     {
+      DrawReadonlyFieldLocal("curve_samples_count", static_cast<int>(samples.size()));
       DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
       DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
+    }
+    else if (object != nullptr && object->type == "FindSegmentation")
+    {
+      DrawReadonlyFieldLocal("curve_samples_count", static_cast<int>(samples.size()));
+      DrawReadonlyFieldLocal("segmentation_result_ref", object->segmentation_result_ref);
+      DrawReadonlyFieldLocal("segmentation_overlay_ref", object->segmentation_overlay_ref);
     }
   }
 }
@@ -1194,7 +1373,9 @@ static void EnsureFindCircleEdgeParamStorage(ManualTestContext& context)
 
 static std::string FindCircleEdgeLabel(int edge)
 {
-  return edge == 0 ? "Full circle" : ("Arc " + std::to_string(edge));
+  // This is the candidate-edge ordinal on every radial scan line.  It is not
+  // an angular sector; the CircleShape A0/A1 controls own that geometry.
+  return edge == 0 ? "All edges" : ("Edge " + std::to_string(edge));
 }
 
 static bool DrawFindCircleEdgeRoleCombo(
@@ -1208,7 +1389,7 @@ static bool DrawFindCircleEdgeRoleCombo(
   ImGui::SetNextItemWidth(150.0f);
   if (ImGui::BeginCombo(label, currentLabel.c_str()))
   {
-    if (ImGui::Selectable("Full circle", edge == 0))
+    if (ImGui::Selectable("All edges", edge == 0))
     {
       edge = 0;
       edited = true;
@@ -1269,13 +1450,18 @@ static bool DrawFindCircleEdgeSelectorPanel(ManualTestContext& context)
   EnsureFindCircleEdgeParamStorage(context);
 
   ImGui::Separator();
-  ImGui::TextUnformatted("Detection Arc / Point Column");
+  ImGui::Text("Algorithm scan sector: %s", context.current_gauge.circle_arc_enabled
+      ? ("A0=" + std::to_string(context.current_gauge.circle_arc_start_deg) +
+         " deg, A1=" + std::to_string(context.current_gauge.circle_arc_end_deg) + " deg").c_str()
+      : "full 360 deg");
+  ImGui::TextDisabled("A0/A1 controls the angular scan domain. Edit it in Geometry; Edge selection below does not change it.");
+  ImGui::TextUnformatted("Detection Edge / Point Column");
   ImGui::TextDisabled(
-      "Select which circle arc/point column is being tuned.  Arc-specific values are saved to globals for evidence replay.");
+      "Edge N is the Nth eligible boundary crossing on every radial Gauge line. It is not an angular sector.");
 
   ImGui::SetNextItemWidth(100.0f);
   int edgeCount = context.findcircle_scan_edge_count;
-  if (ImGui::InputInt("arc count", &edgeCount))
+  if (ImGui::InputInt("edge count", &edgeCount))
   {
     context.findcircle_scan_edge_count = std::max(1, std::min(32, edgeCount));
     if (context.findcircle_selected_scan_edge >
@@ -1292,16 +1478,16 @@ static bool DrawFindCircleEdgeSelectorPanel(ManualTestContext& context)
   ImGui::SetNextItemWidth(190.0f);
   const std::string currentLabel =
       FindCircleEdgeLabel(context.findcircle_selected_scan_edge);
-  if (ImGui::BeginCombo("selected arc", currentLabel.c_str()))
+  if (ImGui::BeginCombo("selected edge", currentLabel.c_str()))
   {
-    if (ImGui::Selectable("Full circle", context.findcircle_selected_scan_edge == 0))
+    if (ImGui::Selectable("All edges", context.findcircle_selected_scan_edge == 0))
     {
       context.findcircle_selected_scan_edge = 0;
       edited = true;
     }
     for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
     {
-      const std::string label = "Arc " + std::to_string(i);
+      const std::string label = "Edge " + std::to_string(i);
       if (ImGui::Selectable(label.c_str(),
                             context.findcircle_selected_scan_edge == i))
       {
@@ -1323,30 +1509,30 @@ static bool DrawFindCircleEdgeSelectorPanel(ManualTestContext& context)
             static_cast<std::size_t>(context.findcircle_selected_scan_edge)];
     params.initialized = true;
 
-    ImGui::Text("Current: Arc %d / %d",
+    ImGui::Text("Current: Edge %d / %d",
                 context.findcircle_selected_scan_edge,
                 context.findcircle_scan_edge_count);
 
     ImGui::SetNextItemWidth(100.0f);
-    edited |= ImGui::InputInt("arc threshold", &params.threshold);
+    edited |= ImGui::InputInt("edge threshold", &params.threshold);
     params.threshold = std::max(0, std::min(255, params.threshold));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100.0f);
-    edited |= ImGui::InputInt("arc method", &params.method);
+    edited |= ImGui::InputInt("edge method", &params.method);
     params.method = std::max(0, std::min(3, params.method));
 
     ImGui::SetNextItemWidth(100.0f);
-    edited |= ImGui::InputInt("arc linegap", &params.linegap);
+    edited |= ImGui::InputInt("edge linegap", &params.linegap);
     params.linegap = std::max(0, std::min(50, params.linegap));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100.0f);
-    edited |= ImGui::InputInt("arc gap", &params.gap);
+    edited |= ImGui::InputInt("edge gap", &params.gap);
     params.gap = std::max(0, std::min(200, params.gap));
 
     if (edited)
       ApplyFindCircleEdgeParamsToGauge(params, context.current_gauge);
 
-    if (ImGui::Button("Copy Current Arc Params To All"))
+    if (ImGui::Button("Copy Current Edge Params To All"))
     {
       for (int i = 1; i <= context.findcircle_scan_edge_count; ++i)
       {
@@ -1359,8 +1545,8 @@ static bool DrawFindCircleEdgeSelectorPanel(ManualTestContext& context)
   else
   {
     ImGui::TextDisabled(
-        "Full circle selected: Geometry/Edge Params below edit the shared baseline.");
-    if (ImGui::Button("Copy Shared Params To All Arcs"))
+        "All edges selected: Geometry/Edge Params below edit the shared baseline.");
+    if (ImGui::Button("Copy Shared Params To All Edges"))
     {
       const ManualFindCircleEdgeParamState params =
           MakeFindCircleEdgeParamsFromGauge(context.current_gauge);
@@ -1385,23 +1571,23 @@ static bool DrawFindCircleEdgeRolePanel(ManualTestContext& context)
   EnsureFindCircleEdgeParamStorage(context);
 
   ImGui::Separator();
-  ImGui::TextUnformatted("Arc Role Binding / 接入点");
+  ImGui::TextUnformatted("Edge Role Binding / 接入点");
   ImGui::TextDisabled(
-      "Placeholders for annotation/evidence relation. selected=arc used now; best=manual/runtime best; recommended=future advisor; relation=combined arc point-set; attach=shape binding.");
+      "Selection is an edge ordinal. Best/recommended/relation/attach are evidence metadata; none changes the scan sector.");
 
   ImGui::PushID("findcircle_arc_roles");
   edited |= DrawFindCircleEdgeRoleCombo(
-      "best arc", context.findcircle_best_fit_edge,
+      "best edge", context.findcircle_best_fit_edge,
       context.findcircle_scan_edge_count);
   ImGui::SameLine();
-  if (ImGui::Button("Use Full Circle"))
+  if (ImGui::Button("Use All Edges"))
   {
     context.findcircle_best_fit_edge = 0;
     edited = true;
   }
 
   edited |= DrawFindCircleEdgeRoleCombo(
-      "recommended arc", context.findcircle_recommended_fit_edge,
+      "recommended edge", context.findcircle_recommended_fit_edge,
       context.findcircle_scan_edge_count);
   ImGui::SameLine();
   if (ImGui::Button("Recommend = Best"))
@@ -1411,19 +1597,19 @@ static bool DrawFindCircleEdgeRolePanel(ManualTestContext& context)
   }
 
   edited |= DrawFindCircleEdgeRoleCombo(
-      "relation arc", context.findcircle_relation_edge,
+      "relation edge", context.findcircle_relation_edge,
       context.findcircle_scan_edge_count);
   ImGui::SameLine();
   ImGui::TextDisabled("future: related/combined arc point-set");
 
   edited |= DrawFindCircleEdgeRoleCombo(
-      "attach arc", context.findcircle_attach_edge,
+      "attach edge", context.findcircle_attach_edge,
       context.findcircle_scan_edge_count);
   ImGui::SameLine();
   ImGui::TextDisabled("future: shape attach/binding");
   ImGui::PopID();
 
-  ImGui::Text("globals: selected=%d best=%d recommended=%d relation=%d attach=%d",
+  ImGui::Text("edges: selected=%d best=%d recommended=%d relation=%d attach=%d",
               context.findcircle_selected_scan_edge,
               context.findcircle_best_fit_edge,
               context.findcircle_recommended_fit_edge,
@@ -1444,9 +1630,9 @@ static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
   const RuntimeObjectView* object = FindCurrentFindCircleObject(context);
 
   ImGui::Separator();
-  ImGui::TextUnformatted("Arc Result Evaluation");
+  ImGui::TextUnformatted("Edge Result Evaluation");
   ImGui::TextDisabled(
-      "Runtime evidence for the current circle.  Per-arc scoring is reserved for the next algorithm capture step; this table reports current full-circle evidence.");
+      "The current runtime reports one selected-edge run. Per-edge scores require explicit runtime capture and are not inferred here.");
 
   if (object == nullptr)
   {
@@ -1461,7 +1647,7 @@ static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
       ? std::max(0.0, 100.0 - static_cast<double>(object->fit_avgdist) * 10.0)
       : 0.0;
 
-  ImGui::Text("selected_arc=%d arc_count=%d fit_circle=%s score=%.2f",
+  ImGui::Text("selected_edge=%d edge_count=%d fit_circle=%s score=%.2f",
               context.findcircle_selected_scan_edge,
               context.findcircle_scan_edge_count,
               object->has_fit_result ? "true" : "false",
@@ -1475,7 +1661,7 @@ static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
 
   if (ImGui::BeginTable("findcircle_arc_evaluation_table", 8, flags))
   {
-    ImGui::TableSetupColumn("Arc");
+    ImGui::TableSetupColumn("Run");
     ImGui::TableSetupColumn("Sel");
     ImGui::TableSetupColumn("Lines");
     ImGui::TableSetupColumn("Len");
@@ -1487,9 +1673,10 @@ static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
 
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
-    ImGui::TextUnformatted("Full");
+    ImGui::TextUnformatted(
+        FindCircleEdgeLabel(context.findcircle_selected_scan_edge).c_str());
     ImGui::TableSetColumnIndex(1);
-    ImGui::TextUnformatted(context.findcircle_selected_scan_edge == 0 ? "*" : "");
+    ImGui::TextUnformatted("*");
     ImGui::TableSetColumnIndex(2);
     ImGui::Text("%d", object->circle_scan_line_count);
     ImGui::TableSetColumnIndex(3);
@@ -1527,11 +1714,13 @@ static void DrawFindCircleScanSemanticsPanel(ManualTestContext& context)
 
   ImGui::Separator();
   ImGui::TextUnformatted("Gauge Scan Semantics");
-  ImGui::TextColored(ImVec4(1.0f, 0.92f, 0.45f, 1.0f),
-                     "arc tick = sampling opportunity");
+  ImGui::TextColored(ImVec4(0.55f, 0.90f, 1.0f, 1.0f),
+                     "cyan radial line = sampling opportunity");
   ImGui::SameLine();
   ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.18f, 1.0f),
-                     "| accepted point = algorithm result");
+                     "| yellow point = accepted algorithm result");
+  ImGui::TextDisabled(
+      "Selected Edge is a candidate rank on each radial line; A0/A1 is the independent angular scan sector.");
 
   if (object == nullptr)
   {
@@ -1948,10 +2137,31 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
           ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("outer_radius (Rout)", &gauge.outer_radius);
           ImGui::SameLine(); ImGui::Text("band_width: %d", std::max(0, gauge.outer_radius - gauge.inner_radius));
 
+          const bool scanSectorToggled =
+              ImGui::Checkbox("use scan sector", &gauge.circle_arc_enabled);
+          circleGeometryEdited |= scanSectorToggled;
+          // A0=0/A1=360 is the canonical full circle.  When the user enables
+          // a sector from that state, create a real editable default rather
+          // than immediately feeding the full-turn values back through Apply
+          // and making the checkbox appear to bounce off.
+          if (scanSectorToggled && gauge.circle_arc_enabled &&
+              std::abs(gauge.circle_arc_end_deg - gauge.circle_arc_start_deg) >= 360)
+          {
+              gauge.circle_arc_end_deg = gauge.circle_arc_start_deg + 45;
+          }
+          if (gauge.circle_arc_enabled)
+          {
+              ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("arc_start_deg (A0)", &gauge.circle_arc_start_deg);
+              ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); circleGeometryEdited |= ImGui::InputInt("arc_end_deg (A1)", &gauge.circle_arc_end_deg);
+              ImGui::SameLine(); ImGui::TextDisabled("signed degrees allowed");
+          }
+
           // radius is a legacy alias for outer_radius.  Keep it synchronized
           // here so the UI never presents two independently editable radii.
           gauge.outer_radius = std::max(1, gauge.outer_radius);
           gauge.inner_radius = std::max(0, std::min(gauge.inner_radius, gauge.outer_radius - 1));
+          gauge.circle_arc_start_deg = std::max(-359, std::min(360, gauge.circle_arc_start_deg));
+          gauge.circle_arc_end_deg = std::max(-359, std::min(360, gauge.circle_arc_end_deg));
           gauge.radius = gauge.outer_radius;
           gauge.circle_px = gauge.circle_cx + gauge.outer_radius;
           gauge.circle_py = gauge.circle_cy;
@@ -2043,13 +2253,13 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     {
       context.last_key_parameter_edit_summary +=
           " gap=" + std::to_string(gauge.gap) +
-          " selected_arc=" +
+          " selected_edge=" +
           std::to_string(context.findcircle_selected_scan_edge) +
           "/" + std::to_string(context.findcircle_scan_edge_count) +
-          " best_arc=" + std::to_string(context.findcircle_best_fit_edge) +
-          " recommended_arc=" + std::to_string(context.findcircle_recommended_fit_edge) +
-          " relation_arc=" + std::to_string(context.findcircle_relation_edge) +
-          " attach_arc=" + std::to_string(context.findcircle_attach_edge) +
+          " best_edge=" + std::to_string(context.findcircle_best_fit_edge) +
+          " recommended_edge=" + std::to_string(context.findcircle_recommended_fit_edge) +
+          " relation_edge=" + std::to_string(context.findcircle_relation_edge) +
+          " attach_edge=" + std::to_string(context.findcircle_attach_edge) +
           " circle=(" + std::to_string(gauge.circle_cx) + "," +
           std::to_string(gauge.circle_cy) + "," +
           std::to_string(gauge.circle_px) + "," +

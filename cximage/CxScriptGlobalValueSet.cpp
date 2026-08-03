@@ -143,6 +143,9 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_circle_cy"] = static_cast<double>(options.circle_cy);
     overrides["global_circle_px"] = static_cast<double>(options.circle_px);
     overrides["global_circle_py"] = static_cast<double>(options.circle_py);
+    overrides["global_findcircle_arc_enabled"] = static_cast<double>(options.findcircle_arc_enabled);
+    overrides["global_findcircle_arc_start_deg"] = static_cast<double>(options.findcircle_arc_start_deg);
+    overrides["global_findcircle_arc_end_deg"] = static_cast<double>(options.findcircle_arc_end_deg);
 
     overrides["global_ellipse_x0"] = static_cast<double>(options.ellipse_x0);
     overrides["global_ellipse_y0"] = static_cast<double>(options.ellipse_y0);

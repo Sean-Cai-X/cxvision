@@ -502,6 +502,9 @@ bool ImageAnnotationLayer::ApplyFindCircleAnnulusGauge(
     double cy,
     double inner_radius,
     double outer_radius,
+    bool scan_sector_enabled,
+    double scan_sector_start_degrees,
+    double scan_sector_end_degrees,
     std::string& reason)
 {
     if (!std::isfinite(cx) || !std::isfinite(cy) ||
@@ -547,6 +550,10 @@ bool ImageAnnotationLayer::ApplyFindCircleAnnulusGauge(
     circle->setCenter(cx, cy);
     circle->setRadius(outer);
     circle->setInnerRadius(inner);
+    circle->setScanSector(
+        scan_sector_enabled,
+        scan_sector_start_degrees,
+        scan_sector_end_degrees);
     target->stale = true;
     target->runtime_edit_pending = true;
     MarkOwnerResultStale(target->owner_type, target->owner_ref);

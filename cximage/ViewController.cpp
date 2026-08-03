@@ -5,6 +5,7 @@
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "LineGaugeShape.h"
+#include "CircleShape.h"
 #include "FindCircle.h"
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
@@ -4779,7 +4780,6 @@ void ViewController::drawScriptAcceptancePanels()
                     debug.scan_line_count,
                     circleTool->getscanlinecount());
                 const int arrowStride = std::max(2, scanCount / 32);
-                const int selectedArcStride = std::max(2, scanCount / 24);
 
                 for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
                 {
@@ -4787,40 +4787,14 @@ void ViewController::drawScriptAcceptancePanels()
                     if (!circleTool->getscanline(scanIndex, a, b))
                         continue;
 
-                    const bool selectedArc =
-                        m_manualTest.findcircle_selected_scan_edge > 0 &&
-                        m_manualTest.findcircle_scan_edge_count > 0 &&
-                        ((scanIndex * m_manualTest.findcircle_scan_edge_count) /
-                         std::max(1, scanCount)) + 1 ==
-                            m_manualTest.findcircle_selected_scan_edge;
-
                     drawList->AddLine(
                         ImageToScreenD(a.x, a.y),
                         ImageToScreenD(b.x, b.y),
                         IM_COL32(140, 230, 255, 105),
                         1.0f);
 
-                    /*
-                     * Do not paint every selected-arc scan line in yellow.
-                     * For a normal circle without inner radius all scan lines
-                     * start at the center, and dense yellow selected lines look
-                     * like algorithm result geometry.  Keep selected-arc
-                     * visibility as sparse outer-band markers only.
-                     */
-                    if (selectedArc && (scanIndex % selectedArcStride) == 0)
-                    {
-                        CxShapePoint markerStart;
-                        markerStart.x = a.x + (b.x - a.x) * 0.72;
-                        markerStart.y = a.y + (b.y - a.y) * 0.72;
-                        drawList->AddLine(
-                            ImageToScreenD(markerStart.x, markerStart.y),
-                            ImageToScreenD(b.x, b.y),
-                            IM_COL32(255, 235, 64, 220),
-                            1.6f);
-                    }
-
                     if ((scanIndex % arrowStride) == 0)
-                        drawArrowHead(a, b, IM_COL32(255, 160, 48, 210));
+                        drawArrowHead(a, b, IM_COL32(140, 230, 255, 175));
                 }
             }
         }
@@ -7666,6 +7640,10 @@ static ImU32 ShapeHandleColor(CxShapeHandleRole role, const CxShapeElement& elem
         return IM_COL32(255, 180, 64, 255);
     if (element.semantic_role == "measure_points")
         return IM_COL32(255, 235, 64, 255);
+    // A0/A1 are angle handles of the same FindCircle ROI.  Make them blue so
+    // they remain distinct from center/radius controls and accepted points.
+    if (role == CxShapeHandleRole::Vertex && element.owner_type == "FindCircle")
+        return IM_COL32(80, 190, 255, 255);
     if (element.editable && element.selected)
         return IM_COL32(80, 255, 170, 255);
     return IM_COL32(160, 160, 200, 255);
@@ -7992,12 +7970,35 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
             const ImVec2 c = ImageToScreen(center.x, center.y);
             const float r = (float)radius * sx;
             
-            drawList->AddCircle(c, r, element.selected ? selectedColor : color, 32, thickness);
+            const ImU32 circleColor = element.owner_type == "FindCircle"
+                ? color
+                : (element.selected ? selectedColor : color);
+            drawList->AddCircle(c, r, circleColor, 32, thickness);
 
             if (inner_radius > 0)
             {
                 const float ir = (float)inner_radius * sx;
                 drawList->AddCircle(c, ir, IM_COL32(255, 180, 64, 200), 32, thickness);
+            }
+
+            // Draw the two real annulus-sector boundaries from Rin to Rout.
+            // A0/A1 are the Rout endpoints of this same CircleShape.
+            const CircleShape* circle = dynamic_cast<const CircleShape*>(element.shape.get());
+            if (circle != nullptr && circle->hasScanSector() && element.editable)
+            {
+                const ImU32 sectorColor = IM_COL32(80, 190, 255, 235);
+                for (int endpoint = 0; endpoint < 2; ++endpoint)
+                {
+                    const CxShapePoint inner =
+                        circle->scanSectorInnerPoint(endpoint);
+                    const CxShapePoint outer =
+                        circle->scanSectorBoundaryPoint(endpoint);
+                    drawList->AddLine(
+                        ImageToScreen(inner.x, inner.y),
+                        ImageToScreen(outer.x, outer.y),
+                        sectorColor,
+                        1.75f);
+                }
             }
         }
         break;

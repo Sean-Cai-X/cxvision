@@ -191,6 +191,15 @@ void UpdateManualGaugeFromShapeElement(
     gauge.outer_radius = gauge.radius;
     if (gauge.inner_radius >= gauge.outer_radius)
         gauge.inner_radius = std::max(0, gauge.outer_radius - 1);
+    const auto* circle = dynamic_cast<const CircleShape*>(element.shape.get());
+    if (circle != nullptr)
+    {
+      gauge.circle_arc_enabled = circle->hasScanSector() ? 1 : 0;
+      gauge.circle_arc_start_deg = static_cast<int>(std::lround(
+          circle->scanSectorStartDegrees()));
+      gauge.circle_arc_end_deg = static_cast<int>(std::lround(
+          circle->scanSectorEndDegrees()));
+    }
   }
   else if (element.owner_type == "FindEllipse" &&
            element.shape->kind() == CxShapeKind::Ellipse)
@@ -255,6 +264,13 @@ bool ExportShapeElementToRuntimeGlobals(
     setInt("global_circle_inner_radius", inner_radius);
     setInt("global_circle_outer_radius", radius);
     setInt("global_circle_ring_width", std::max(0.0, radius - inner_radius));
+    const auto* circle = dynamic_cast<const CircleShape*>(element.shape.get());
+    if (circle != nullptr)
+    {
+      setInt("global_findcircle_arc_enabled", circle->hasScanSector() ? 1 : 0);
+      setInt("global_findcircle_arc_start_deg", circle->scanSectorStartDegrees());
+      setInt("global_findcircle_arc_end_deg", circle->scanSectorEndDegrees());
+    }
     setInt("global_seed_x", center.x);
     setInt("global_seed_y", center.y);
     UpdateManualGaugeFromShapeElement(context, element);
@@ -434,6 +450,16 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
     gauge.radius = outer;
     gauge.circle_px = gauge.circle_cx + outer;
     gauge.circle_py = gauge.circle_cy;
+    // Canonical full-circle state.  A0=0/A1=360 has no angular boundary, so
+    // keep the panel, Shape and runtime in the same non-sector mode instead
+    // of allowing a phantom 1-degree sector at Rout.
+    if (gauge.circle_arc_enabled != 0 &&
+        std::abs(gauge.circle_arc_end_deg - gauge.circle_arc_start_deg) >= 360)
+    {
+        gauge.circle_arc_enabled = 0;
+        gauge.circle_arc_start_deg = 0;
+        gauge.circle_arc_end_deg = 360;
+    }
 
     if (!m_annotationLayer.ApplyFindCircleAnnulusGauge(
             gauge.primary_object_name,
@@ -441,6 +467,9 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
             static_cast<double>(gauge.circle_cy),
             static_cast<double>(inner),
             static_cast<double>(outer),
+            gauge.circle_arc_enabled != 0,
+            static_cast<double>(gauge.circle_arc_start_deg),
+            static_cast<double>(gauge.circle_arc_end_deg),
             reason))
     {
         return false;
@@ -482,6 +511,10 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
                     gauge.circle_cx + outer,
                     gauge.circle_cy);
             }
+            runtime_circle->setscanarc(
+                gauge.circle_arc_start_deg,
+                gauge.circle_arc_end_deg,
+                gauge.circle_arc_enabled);
         }
     }
 
@@ -743,7 +776,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 //   setline/setcircle/setellipse/setrect from cxscript.
                 // This keeps refresh/runtime projection as a separate message
                 // and avoids stale Parser object pointers during repaint.
-                m_annotationLayer.ConfirmRuntimeWriteback(commit.stable_ref);
+                // Keep runtime_edit_pending set here.  UpsertShape() uses it
+                // to preserve the just-edited repository geometry while the
+                // current Parser object still has its pre-drag coordinates.
+                // It is cleared only at the next real script-run boundary by
+                // ConfirmAllRuntimeWritebacks().  Clearing it on mouse-up
+                // lets a repaint overwrite the Shape before Key Parameters
+                // and global_* can observe the edit.
                 commit.runtime_writeback = false;
                 out.reason = commit.owner_type +
                     " ROI edit accepted; exported to globals; runtime object update deferred until next Run";
@@ -794,9 +833,29 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                         "ref=" + commit.stable_ref + ", owner=" + commit.owner_type);
                     UpdateManualGaugeFromShapeElement(m_manualTest, *edited);
                     std::string exportReason;
-                    ExportShapeElementToRuntimeGlobals(m_manualTest, *edited, exportReason);
+                    const bool globalsExported =
+                        ExportShapeElementToRuntimeGlobals(
+                            m_manualTest, *edited, exportReason);
+                    // ExportShapeElementToRuntimeGlobals writes the directly
+                    // derived geometry.  ApplyManualGaugeToGlobals is the
+                    // single normalizing commit for Key Parameter Controls,
+                    // global_* and the next CxScript Run.
+                    const bool gaugeApplied = globalsExported &&
+                        ApplyManualGaugeToGlobals(m_manualTest);
+                    if (!gaugeApplied)
+                    {
+                        exportReason += "; gauge/global normalization failed: " +
+                            m_manualTest.debug_reason;
+                    }
+                    else
+                    {
+                        m_manualTest.debug_status = "shape_drag_exported";
+                        m_manualTest.debug_reason = exportReason;
+                    }
                     CXLOG_INFO("ImageAnnotationUI", "annotation_drag_export", "finished",
-                        "ref=" + commit.stable_ref + ", reason=" + exportReason);
+                        "ref=" + commit.stable_ref +
+                        ", globals=" + (gaugeApplied ? "applied" : "failed") +
+                        ", reason=" + exportReason);
                 }
             }
 

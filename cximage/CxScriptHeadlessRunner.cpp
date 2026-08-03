@@ -1274,6 +1274,12 @@ bool ParseCxScriptHeadlessArgs(
             options.circle_px = std::stoi(argv[++i]);
         else if (arg == "--circle-py" && i + 1 < argc)
             options.circle_py = std::stoi(argv[++i]);
+        else if (arg == "--findcircle-arc-enabled" && i + 1 < argc)
+            options.findcircle_arc_enabled = std::stoi(argv[++i]);
+        else if (arg == "--findcircle-arc-start-deg" && i + 1 < argc)
+            options.findcircle_arc_start_deg = std::stoi(argv[++i]);
+        else if (arg == "--findcircle-arc-end-deg" && i + 1 < argc)
+            options.findcircle_arc_end_deg = std::stoi(argv[++i]);
         else if (arg == "--ellipse-x0" && i + 1 < argc)
             options.ellipse_x0 = std::stoi(argv[++i]);
         else if (arg == "--ellipse-y0" && i + 1 < argc)
@@ -1436,6 +1442,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_circle_inner_radius", 0);
             setGlobal("global_circle_outer_radius", 0);
             setGlobal("global_circle_ring_width", 0);
+            setGlobal("global_findcircle_arc_enabled", options.findcircle_arc_enabled);
+            setGlobal("global_findcircle_arc_start_deg", options.findcircle_arc_start_deg);
+            setGlobal("global_findcircle_arc_end_deg", options.findcircle_arc_end_deg);
             setGlobal("global_ellipse_x0", options.ellipse_x0);
             setGlobal("global_ellipse_y0", options.ellipse_y0);
             setGlobal("global_ellipse_x1", options.ellipse_x1);
@@ -1899,6 +1908,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_circle_inner_radius", 0);
         setGlobal("global_circle_outer_radius", 0);
         setGlobal("global_circle_ring_width", 0);
+        setGlobal("global_findcircle_arc_enabled", options.findcircle_arc_enabled);
+        setGlobal("global_findcircle_arc_start_deg", options.findcircle_arc_start_deg);
+        setGlobal("global_findcircle_arc_end_deg", options.findcircle_arc_end_deg);
         setGlobal("global_ellipse_x0", options.ellipse_x0);
         setGlobal("global_ellipse_y0", options.ellipse_y0);
         setGlobal("global_ellipse_x1", options.ellipse_x1);

@@ -642,6 +642,9 @@ void SeedDefaultManualGlobals(
         set("global_circle_inner_radius", 0);
         set("global_circle_outer_radius", 0);
         set("global_circle_ring_width", 0);
+        set("global_findcircle_arc_enabled", 0);
+        set("global_findcircle_arc_start_deg", 0);
+        set("global_findcircle_arc_end_deg", 360);
         set("global_gap", 5);
         set("global_linegap", 3);
     }
@@ -727,6 +730,9 @@ void SeedDefaultManualGlobals(
         gauge.radius = gauge.outer_radius;
         gauge.circle_px = gauge.circle_cx + gauge.outer_radius;
         gauge.circle_py = gauge.circle_cy;
+        gauge.circle_arc_enabled = context.runtime_int_vars["global_findcircle_arc_enabled"] != 0;
+        gauge.circle_arc_start_deg = context.runtime_int_vars["global_findcircle_arc_start_deg"];
+        gauge.circle_arc_end_deg = context.runtime_int_vars["global_findcircle_arc_end_deg"];
     }
     else if (isEllipseScript)
     {

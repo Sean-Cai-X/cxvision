@@ -356,14 +356,13 @@ void FindCircle::setshow(int ishow)
         m_measurepoints.setshow(1); 
         m_resultcircle.setshow(1);
     }
-    if (0x04 == ishow)
-    {     
+    if ((ishow & 0x04) != 0)
+    {
         for (std::size_t i = 0; i < m_lines.size(); ++i)
         {
-            if (i == 0)
-                m_lines[i].setcolor(255, 255, 0);
-            if (i == m_lines.size() - 1)
-                m_lines[i].setcolor(255, 0, 0);
+            // A scan line represents only an opportunity.  Detected points
+            // and fitted geometry are published as separate result evidence.
+            m_lines[i].setcolor(140, 230, 255);
             m_lines[i].setshow(true);
         }
     }
@@ -485,6 +484,72 @@ void FindCircle::setannulus(
 
     setcircle(icentx, icenty, icentx + outerRadius, icenty);
 }
+
+void FindCircle::setscanarc(int startDegrees, int endDegrees, int enabled)
+{
+    const auto normalize = [](int degrees) {
+        int result = degrees % 360;
+        return result < 0 ? result + 360 : result;
+    };
+
+    // A range spanning a whole revolution means no angular crop.  Evaluate
+    // this from the caller values before modulo normalization; otherwise
+    // 0..360 becomes 0..0 and the legacy one-degree fallback loses the
+    // intended full-circle scan.
+    const bool full_turn = std::abs(endDegrees - startDegrees) >= 360;
+    if (enabled == 0 || full_turn)
+    {
+        m_scan_arc_start_degrees = 0;
+        m_scan_arc_end_degrees = 360;
+        m_has_scan_arc_window = false;
+    }
+    else
+    {
+        m_scan_arc_start_degrees = normalize(startDegrees);
+        m_scan_arc_end_degrees = normalize(endDegrees);
+        if (m_scan_arc_start_degrees == m_scan_arc_end_degrees)
+            m_scan_arc_end_degrees = normalize(m_scan_arc_start_degrees + 1);
+        m_has_scan_arc_window = true;
+    }
+
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.arc_start_degrees = m_scan_arc_start_degrees;
+        m_measure_geometry_request.arc_end_degrees = m_scan_arc_end_degrees;
+        m_measure_geometry_request.has_arc_window = m_has_scan_arc_window;
+        MarkCircleMeasureGeometryDirty();
+        m_measure_geometry_request.version = m_measure_geometry_version;
+        BuildCircleMeasureGeometryFromRequest(m_measure_geometry_request);
+        m_measure_geometry_ready = !m_lines.empty();
+        m_measure_geometry_dirty = !m_measure_geometry_ready;
+        if (m_measure_geometry_ready)
+            m_measure_geometry_built_version = m_measure_geometry_request.version;
+    }
+}
+
+void FindCircle::cxscript_setcircle(int ipay, int ipax, int icenty, int icentx)
+{
+    setcircle(icentx, icenty, ipax, ipay);
+}
+
+void FindCircle::cxscript_setcircle2(int idis, int ipay, int ipax, int icenty, int icentx)
+{
+    setcircle2(icentx, icenty, ipax, ipay, idis);
+}
+
+void FindCircle::cxscript_setannulus(int iouterRadius, int iinnerRadius, int icenty, int icentx)
+{
+    setannulus(icentx, icenty, iinnerRadius, iouterRadius);
+}
+
+void FindCircle::cxscript_setscanarc(int enabled, int endDegrees, int startDegrees)
+{
+    setscanarc(startDegrees, endDegrees, enabled);
+}
+
+int FindCircle::getscanarcstart() { return m_scan_arc_start_degrees; }
+int FindCircle::getscanarcend() { return m_scan_arc_end_degrees; }
+int FindCircle::hasscanarc() { return m_has_scan_arc_window ? 1 : 0; }
 
 int FindCircle::getannulusouter()
 {
@@ -2494,6 +2559,9 @@ void FindCircle::UpdateCircleMeasureGeometryRequest(bool hasInnerGap)
         hasInnerGap ? std::max(0, m_idisgap) : 0;
 
     m_measure_geometry_request.gap_degrees = m_igap;
+    m_measure_geometry_request.arc_start_degrees = m_scan_arc_start_degrees;
+    m_measure_geometry_request.arc_end_degrees = m_scan_arc_end_degrees;
+    m_measure_geometry_request.has_arc_window = m_has_scan_arc_window;
     m_measure_geometry_request.linegap = m_iSelectPointGap;
     m_measure_geometry_request.sample_rate = m_dsamplerate;
 
@@ -2650,6 +2718,20 @@ void FindCircle::BuildCircleMeasureGeometryCore(
             request.gap_degrees,
             scan_meta);
 
+    const auto normalize_angle = [](double degrees) {
+        double result = std::fmod(degrees, 360.0);
+        return result < 0.0 ? result + 360.0 : result;
+    };
+    const auto is_in_scan_arc = [&request, &normalize_angle](double degrees) {
+        if (!request.has_arc_window)
+            return true;
+        const double angle = normalize_angle(degrees);
+        const double start = normalize_angle(request.arc_start_degrees);
+        const double end = normalize_angle(request.arc_end_degrees);
+        return start <= end ? (angle >= start && angle <= end)
+                            : (angle >= start || angle <= end);
+    };
+
     if (request.has_inner_gap)
     {
         int iadd = 0;
@@ -2673,6 +2755,7 @@ void FindCircle::BuildCircleMeasureGeometryCore(
             const double direction_length = std::sqrt(ux * ux + uy * uy);
 
             if (direction_length > 1e-6 &&
+                is_in_scan_arc(std::atan2(uy, ux) * 180.0 / CV_PI) &&
                 outer_radius > 1.0 &&
                 inner_radius > 0.0 &&
                 inner_radius < outer_radius)
@@ -2702,6 +2785,15 @@ void FindCircle::BuildCircleMeasureGeometryCore(
         {
             LineShape scanLine;
             const gp_Pnt apoint = getpath().ElementAt(i);
+
+            const double ux = apoint.X() - static_cast<double>(request.center_x);
+            const double uy = apoint.Y() - static_cast<double>(request.center_y);
+            if (!is_in_scan_arc(std::atan2(uy, ux) * 180.0 / CV_PI))
+            {
+                ++iadd;
+                i += igapadd;
+                continue;
+            }
 
             scanLine.setline(
                 request.center_x,
@@ -2783,6 +2875,10 @@ void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
         static_cast<double>(cy),
         has_annulus_scan ? outer_radius : roi_radius,
         has_annulus_scan ? inner_radius : 0.0);
+    roi_circle->setScanSector(
+        publish_request.has_arc_window,
+        publish_request.arc_start_degrees,
+        publish_request.arc_end_degrees);
     sink.UpsertShape(
         owner_ref + ".roi_circle",
         "FindCircle",

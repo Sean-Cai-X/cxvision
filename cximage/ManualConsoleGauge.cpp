@@ -339,6 +339,11 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
             context,
             "global_circle_ring_width",
             std::max(0, gauge.outer_radius - gauge.inner_radius));
+        gauge.circle_arc_start_deg = std::max(-359, std::min(360, gauge.circle_arc_start_deg));
+        gauge.circle_arc_end_deg = std::max(-359, std::min(360, gauge.circle_arc_end_deg));
+        InjectManualGaugeInt(context, "global_findcircle_arc_enabled", gauge.circle_arc_enabled ? 1 : 0);
+        InjectManualGaugeInt(context, "global_findcircle_arc_start_deg", gauge.circle_arc_start_deg);
+        InjectManualGaugeInt(context, "global_findcircle_arc_end_deg", gauge.circle_arc_end_deg);
         InjectManualGaugeInt(context, "global_gap", gauge.gap);
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
@@ -550,6 +555,9 @@ bool SaveManualGaugeAnnotation(
          << "  \"radius\": " << gauge.radius << ",\n"
          << "  \"inner_radius\": " << gauge.inner_radius << ",\n"
          << "  \"outer_radius\": " << gauge.outer_radius << ",\n"
+         << "  \"circle_arc_enabled\": " << (gauge.circle_arc_enabled ? "true" : "false") << ",\n"
+         << "  \"circle_arc_start_deg\": " << gauge.circle_arc_start_deg << ",\n"
+         << "  \"circle_arc_end_deg\": " << gauge.circle_arc_end_deg << ",\n"
          << "  \"has_ellipse_gauge\": " << (gauge.has_ellipse_gauge ? "true" : "false") << ",\n"
          << "  \"ellipse_x0\": " << gauge.ellipse_x0 << ",\n"
          << "  \"ellipse_y0\": " << gauge.ellipse_y0 << ",\n"
@@ -634,10 +642,11 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
     }
     // Backward compatible for annotations saved before FindEllipse gauge fields.
     ExtractJsonBool(source, "has_ellipse_gauge", loaded.has_ellipse_gauge);
+    ExtractJsonBool(source, "circle_arc_enabled", loaded.circle_arc_enabled);
     const char* integer_keys[] = {
         "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
         "circle_cx", "circle_cy", "circle_px", "circle_py", "radius",
-        "inner_radius", "outer_radius", "ellipse_x0", "ellipse_y0",
+        "inner_radius", "outer_radius", "circle_arc_start_deg", "circle_arc_end_deg", "ellipse_x0", "ellipse_y0",
         "ellipse_x1", "ellipse_y1", "wgap", "hgap", "gap", "linegap",
         "threshold", "filterprofile", "method"
     };
@@ -645,7 +654,7 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         &loaded.line_x0, &loaded.line_y0, &loaded.line_x1, &loaded.line_y1,
         &loaded.tool_half_width, &loaded.circle_cx, &loaded.circle_cy,
         &loaded.circle_px, &loaded.circle_py, &loaded.radius,
-        &loaded.inner_radius, &loaded.outer_radius, &loaded.ellipse_x0,
+        &loaded.inner_radius, &loaded.outer_radius, &loaded.circle_arc_start_deg, &loaded.circle_arc_end_deg, &loaded.ellipse_x0,
         &loaded.ellipse_y0, &loaded.ellipse_x1, &loaded.ellipse_y1,
         &loaded.wgap, &loaded.hgap, &loaded.gap, &loaded.linegap,
         &loaded.threshold, &loaded.filterprofile, &loaded.method
@@ -657,6 +666,12 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
             if (std::string(integer_keys[i]).find("ellipse_") == 0 &&
                 !loaded.has_ellipse_gauge)
             {
+                continue;
+            }
+            if (std::string(integer_keys[i]).find("circle_arc_") == 0)
+            {
+                // Saved annotations from before the sector contract are full
+                // circle by definition; retain the struct defaults.
                 continue;
             }
             outReason = std::string("missing gauge field: ") + integer_keys[i];

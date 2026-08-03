@@ -577,6 +577,9 @@ struct ManualGaugeState
   // confused with algorithm gap/linegap.
   int inner_radius = 0;
   int outer_radius = 0;
+  bool circle_arc_enabled = false;
+  int circle_arc_start_deg = 0;
+  int circle_arc_end_deg = 360;
 
   bool dirty = false;
   bool accepted = false;
@@ -870,7 +873,9 @@ struct ManualTestContext
   int findline_relation_edge = 0; // Future combined/related point-set edge.
   int findline_attach_edge = 0; // Future annotation attach/binding edge.
   std::vector<ManualFindLineEdgeParamState> findline_edge_params;
-  int findcircle_selected_scan_edge = 0; // 0 = full circle, 1..N = arc segment.
+  // 0 = accept all eligible crossings; 1..N = Nth candidate crossing on each
+  // radial scan line.  This is not the angular A0/A1 scan-sector selection.
+  int findcircle_selected_scan_edge = 0;
   int findcircle_scan_edge_count = 4;
   int findcircle_best_fit_edge = 0; // Runtime/manual best fitting arc.
   int findcircle_recommended_fit_edge = 0; // Future advisor/param regression recommendation.

@@ -13,6 +13,9 @@ int threshold = global_threshold;
 int method = global_method;
 int inner_radius = global_circle_inner_radius;
 int outer_radius = global_circle_outer_radius;
+int arc_enabled = global_findcircle_arc_enabled;
+int arc_start_deg = global_findcircle_arc_start_deg;
+int arc_end_deg = global_findcircle_arc_end_deg;
 int ring_width = 0;
 
 ring_width = outer_radius - inner_radius;
@@ -24,15 +27,16 @@ if (outer_radius <= inner_radius) {
 }
 
 if (ring_width > 0) {
-    m_circle.setannulus(outer_radius, inner_radius, cy, cx);
+    m_circle.setannulus(cx, cy, inner_radius, outer_radius);
 }
 if (ring_width == 0) {
-    m_circle.setcircle(py, px, cy, cx);
+    m_circle.setcircle(cx, cy, px, py);
 }
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
 m_circle.setthre(threshold);
 m_circle.setmethod(method);
+m_circle.setscanarc(arc_start_deg, arc_end_deg, arc_enabled);
 
 if (global_algorithm_executed == 1)
 {

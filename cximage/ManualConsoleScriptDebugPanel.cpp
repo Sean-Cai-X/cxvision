@@ -6,9 +6,151 @@
 #include "ManualStateTestConsole.h"
 #include "CxCrashLogHandler.h"
 #include "CxScriptCasePackageWriter.h"
+#include "CxUnifiedLog.h"
 
+#include <cctype>
 #include <filesystem>
+#include <cstring>
 #include <unordered_set>
+
+namespace
+{
+// A catalog/flow script is a file-backed asset.  When the editor has not been
+// changed by the operator, execute the current file content rather than a
+// stale copy retained from an earlier catalog load.  This is especially
+// important after a CxScript calling-convention migration: otherwise Run can
+// recreate geometry using the old method argument order and then appear to
+// "undo" the Key Parameter Controls values.
+bool RefreshCleanEditorFromSource(ManualTestContext& context,
+                                  std::string& reason)
+{
+  reason.clear();
+  if (context.editor_dirty || context.loaded_script_path.empty())
+    return true;
+
+  const std::filesystem::path sourcePath =
+      ResolveWorkspaceFile(context.loaded_script_path);
+  std::string diskText;
+  if (!ReadTextFile(sourcePath.string(), diskText))
+  {
+    reason = "cannot refresh clean Script Editor from " +
+             sourcePath.string();
+    return false;
+  }
+
+  if (diskText != context.editor_text)
+  {
+    context.editor_text = diskText;
+    context.analyzed_text.clear();
+    reason = "clean Script Editor refreshed from current file before Run";
+  }
+  return true;
+}
+
+// These snapshots were produced before the public CxScript FindCircle
+// convention was normalized to (cx, cy, innerRadius, outerRadius) and
+// (cx, cy, px, py), and before scan-sector globals were part of the direct
+// script contract.  Preserve the historical file as evidence, but do not run
+// it with a different parser convention.  Migration is deliberately narrow:
+// rewrite the two known generated statements and, when absent, add the one
+// public setscanarc() call immediately before measure().
+bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
+                                        std::string& reason)
+{
+  reason.clear();
+  if (context.editor_text.find("FindCircle") == std::string::npos)
+    return false;
+
+  struct Replacement
+  {
+    const char* legacy;
+    const char* canonical;
+  };
+  static const Replacement replacements[] = {
+      {"m_circle.setannulus(outer_radius, inner_radius, cy, cx);",
+       "m_circle.setannulus(cx, cy, inner_radius, outer_radius);"},
+      {"m_circle.setcircle(py, px, cy, cx);",
+       "m_circle.setcircle(cx, cy, px, py);"},
+  };
+
+  bool changed = false;
+  bool callOrderChanged = false;
+  bool scanArcAdded = false;
+  for (const Replacement& replacement : replacements)
+  {
+    std::size_t pos = 0;
+    while ((pos = context.editor_text.find(replacement.legacy, pos)) !=
+           std::string::npos)
+    {
+      context.editor_text.replace(
+          pos,
+          std::strlen(replacement.legacy),
+          replacement.canonical);
+      pos += std::strlen(replacement.canonical);
+      changed = true;
+      callOrderChanged = true;
+    }
+  }
+
+  // Historical Evidence snapshots do not know about the scan-sector input.
+  // Running such a snapshot creates a fresh full-circle runtime object, which
+  // then replaces the correctly edited sector in Image View.  Resolve the
+  // declared FindCircle object name and make the missing public method call
+  // explicit in the in-memory working revision.  Do not modify the immutable
+  // evidence snapshot on disk.
+  if (context.editor_text.find(".setscanarc(") == std::string::npos)
+  {
+    const std::size_t typePos = context.editor_text.find("FindCircle");
+    std::size_t nameBegin = typePos + std::strlen("FindCircle");
+    while (nameBegin < context.editor_text.size() &&
+           std::isspace(static_cast<unsigned char>(context.editor_text[nameBegin])))
+      ++nameBegin;
+
+    std::size_t nameEnd = nameBegin;
+    while (nameEnd < context.editor_text.size())
+    {
+      const unsigned char ch =
+          static_cast<unsigned char>(context.editor_text[nameEnd]);
+      if (!std::isalnum(ch) && ch != '_')
+        break;
+      ++nameEnd;
+    }
+
+    if (nameEnd > nameBegin)
+    {
+      const std::string objectName =
+          context.editor_text.substr(nameBegin, nameEnd - nameBegin);
+      const std::string measureCall = objectName + ".measure(";
+      const std::size_t measurePos = context.editor_text.find(measureCall);
+      if (measurePos != std::string::npos)
+      {
+        const std::string scanArcCall =
+            objectName +
+            ".setscanarc(global_findcircle_arc_start_deg, "
+            "global_findcircle_arc_end_deg, "
+            "global_findcircle_arc_enabled);\n\n";
+        context.editor_text.insert(measurePos, scanArcCall);
+        changed = true;
+        scanArcAdded = true;
+      }
+    }
+  }
+
+  if (!changed)
+    return false;
+
+  // This text now differs from the immutable evidence snapshot.  It must not
+  // be silently treated as a saved/verified script.  Save As Candidate creates
+  // a new evidence package if the operator wants to retain it.
+  context.editor_dirty = true;
+  context.analyzed_text.clear();
+  reason = "legacy FindCircle working revision migrated in memory (call_order=" +
+           std::string(callOrderChanged ? "yes" : "no") +
+           ", scan_arc_call=" + std::string(scanArcAdded ? "added" : "present") +
+           "); historical script_snapshot.cxsc was not modified";
+  return true;
+}
+} // namespace
 
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 {
@@ -47,11 +189,14 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
   ImGui::SameLine();
   if (ImGui::Button("Save"))
   {
-    context.editor_dirty = false;
+    // There is no direct file write here.  Do not mark an unsaved in-memory
+    // edit as clean, otherwise a later Run would legitimately reload the
+    // catalog source and silently discard that edit.
     context.debug_action = "Save Script";
-    context.debug_status = "PENDING";
+    context.debug_status = "EDITOR_SAVE_NOT_PERSISTED";
     context.debug_reason =
-        "Editor text marked clean; use Save As Candidate for Evidence persistence";
+        "Script Editor has no direct source-file save; use Save As Candidate "
+        "to preserve this edited text.";
   }
 
   ImGui::SameLine();
@@ -158,6 +303,30 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
     }
     else
     {
+      std::string sourceRefreshReason;
+      if (!RefreshCleanEditorFromSource(context, sourceRefreshReason))
+      {
+        context.run_state = "failed";
+        context.debug_status = "run_failed";
+        context.debug_reason = sourceRefreshReason;
+        ImGui::PopID();
+        SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:source_refresh_failed");
+        return;
+      }
+
+      std::string legacyMigrationReason;
+      const bool legacyFindCircleMigrated =
+          MigrateLegacyFindCircleCallsForRun(context, legacyMigrationReason);
+      if (legacyFindCircleMigrated)
+      {
+        CXLOG_WARN(
+            "ManualConsole",
+            "legacy_findcircle_script_migrated",
+            "MIGRATED_IN_MEMORY",
+            std::string("script=") + context.loaded_script_path +
+                ", reason=" + legacyMigrationReason);
+      }
+
       // A candidate run must use the values captured by the Save/Run action.
       // Do not let an Evidence refresh or runtime-object refresh replace them
       // between the button click and this deferred compiler pass.
@@ -227,17 +396,35 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << context.runtime_int_vars["global_roi_y1"] << ")";
       ss << "\ncircle=(" << context.runtime_int_vars["global_circle_cx"] << ","
          << context.runtime_int_vars["global_circle_cy"] << ")";
+      ss << "\ncircle_point=(" << context.runtime_int_vars["global_circle_px"] << ","
+         << context.runtime_int_vars["global_circle_py"] << ")";
       ss << "\ncircle_inner_radius="
          << context.runtime_int_vars["global_circle_inner_radius"];
       ss << "\ncircle_outer_radius="
          << context.runtime_int_vars["global_circle_outer_radius"];
       ss << "\ncircle_ring_width="
          << context.runtime_int_vars["global_circle_ring_width"];
+      ss << "\nfindcircle_arc=(enabled="
+         << context.runtime_int_vars["global_findcircle_arc_enabled"]
+         << ", start=" << context.runtime_int_vars["global_findcircle_arc_start_deg"]
+         << ", end=" << context.runtime_int_vars["global_findcircle_arc_end_deg"]
+         << ")";
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
       ss << "\nmethod=" << context.runtime_int_vars["global_method"];
       const std::string effectiveGlobals = ss.str();
+
+      CXLOG_INFO(
+          "ManualConsole",
+          "manual_run_input_snapshot",
+          "READY",
+          std::string("source=") +
+              (sourceRefreshReason.empty() ? "editor" : "disk_refresh") +
+              effectiveGlobals);
+
+      if (legacyFindCircleMigrated)
+        context.debug_reason = legacyMigrationReason;
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:bind_image");
       bool imageBound = true;

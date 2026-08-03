@@ -284,6 +284,9 @@ public:
       double cy,
       double inner_radius,
       double outer_radius,
+      bool scan_sector_enabled,
+      double scan_sector_start_degrees,
+      double scan_sector_end_degrees,
       std::string& reason);
 
   // A subsequent CxScript execution becomes the next runtime truth source.

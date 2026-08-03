@@ -23,6 +23,13 @@ struct FindCircleMeasureGeometryRequest
 
     int gap_degrees = 0;
 
+    // Optional angular scan sector.  Angles are normalized internally to
+    // [0, 359], while callers may provide signed degrees (for example
+    // -29..18) to describe a sector that crosses the zero-degree axis.
+    int arc_start_degrees = 0;
+    int arc_end_degrees = 360;
+    bool has_arc_window = false;
+
     int linegap = 0;
 
     double sample_rate = 1.0;
@@ -151,6 +158,19 @@ public:
     // The implementation converts them once to the legacy setcircle2()
     // centre/pass/band-width representation used by the measure algorithm.
     void setannulus(int icentx, int icenty, int iinnerRadius, int iouterRadius);
+    void setscanarc(int startDegrees, int endDegrees, int enabled);
+
+    // CxScript adapters for the legacy fixed-int DefineClassFun dispatcher.
+    // It calls multi-argument methods in reverse order.  The adapters keep
+    // the public .cxsc form natural: setcircle(cx,cy,px,py),
+    // setannulus(cx,cy,inner,outer), setscanarc(start,end,enabled).
+    void cxscript_setcircle(int ipay, int ipax, int icenty, int icentx);
+    void cxscript_setcircle2(int idis, int ipay, int ipax, int icenty, int icentx);
+    void cxscript_setannulus(int iouterRadius, int iinnerRadius, int icenty, int icentx);
+    void cxscript_setscanarc(int enabled, int endDegrees, int startDegrees);
+    int getscanarcstart();
+    int getscanarcend();
+    int hasscanarc();
     virtual void drawshape();
     void drawshapex( double dmovx, double dmovy,
         double dangle, double dzoomx, double dzoomy);
@@ -324,6 +344,10 @@ private:
 
     int m_iselectedgenum;
     int m_ineedfixs;
+
+    int m_scan_arc_start_degrees = 0;
+    int m_scan_arc_end_degrees = 360;
+    bool m_has_scan_arc_window = false;
 
     int m_ncurscan;
     int m_nscansize;
