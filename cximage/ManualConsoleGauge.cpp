@@ -135,6 +135,11 @@ bool IsGridPatternGaugeTool(const std::string& tool)
     return tool == "GridPatternClassTool";
 }
 
+bool IsRegionPatternGaugeTool(const std::string& tool)
+{
+    return tool == "RegionPatternTool";
+}
+
 bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
@@ -172,7 +177,9 @@ bool ValidateManualGaugeGeometryForEditing(
             reason.clear();
         return reason.empty();
     }
-    if (IsFastMatchGaugeTool(gauge.tool) || IsGridPatternGaugeTool(gauge.tool))
+    if (IsFastMatchGaugeTool(gauge.tool) ||
+        IsGridPatternGaugeTool(gauge.tool) ||
+        IsRegionPatternGaugeTool(gauge.tool))
     {
         reason.clear();
         return true;
@@ -466,6 +473,57 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+    }
+    else if (IsRegionPatternGaugeTool(gauge.tool))
+    {
+        InjectManualGaugeInt(
+            context,
+            "global_region_roi_x",
+            std::max(0, ReadManualGaugeInt(context, "global_region_roi_x", 120)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_roi_y",
+            std::max(0, ReadManualGaugeInt(context, "global_region_roi_y", 120)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_roi_w",
+            std::max(1, ReadManualGaugeInt(context, "global_region_roi_w", 120)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_roi_h",
+            std::max(1, ReadManualGaugeInt(context, "global_region_roi_h", 90)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_normalized_width",
+            std::max(8, ReadManualGaugeInt(context, "global_region_normalized_width", 32)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_normalized_height",
+            std::max(8, ReadManualGaugeInt(context, "global_region_normalized_height", 32)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_pooling_rows",
+            std::max(1, ReadManualGaugeInt(context, "global_region_pooling_rows", 4)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_pooling_cols",
+            std::max(1, ReadManualGaugeInt(context, "global_region_pooling_cols", 4)));
+        InjectManualGaugeInt(
+            context,
+            "global_region_use_binary",
+            std::max(0, std::min(1, ReadManualGaugeInt(context, "global_region_use_binary", 0))));
+        InjectManualGaugeInt(
+            context,
+            "global_region_threshold",
+            std::max(0, std::min(255, ReadManualGaugeInt(context, "global_region_threshold", 128))));
+        InjectManualGaugeInt(
+            context,
+            "global_region_foreground_dark",
+            std::max(0, std::min(1, ReadManualGaugeInt(context, "global_region_foreground_dark", 1))));
+        InjectManualGaugeInt(
+            context,
+            "global_region_max_overlays",
+            std::max(1, ReadManualGaugeInt(context, "global_region_max_overlays", 64)));
     }
     else if (IsFastMatchGaugeTool(gauge.tool) || IsGridPatternGaugeTool(gauge.tool))
     {

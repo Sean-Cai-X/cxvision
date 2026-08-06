@@ -48,6 +48,9 @@ bool LoadCxScriptEvidenceChainFile(
     buffer << file.rdbuf();
     std::string script = buffer.str();
 
+    g_cxscript_evidence_chain.Clear();
+    g_current_evidence_case = nullptr;
+
     mu::Parser parser;
     parser.UsingClass(true);
     RegisterCxScriptEvidenceChainBindings(parser);

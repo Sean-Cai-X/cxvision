@@ -14,6 +14,7 @@
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
 #include "GridPatternClassTool.h"
+#include "RegionPatternTool.h"
 #include "CxScriptDirectBindings.h"
 #include "CxScriptTypeTraitsDefs.h"
 #include "CircleRingGauge.h"
@@ -792,6 +793,29 @@ namespace mu
             m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getoverlaycount", &GridPatternClassTool::getoverlaycount);
             m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getoverlaytruncated", &GridPatternClassTool::getoverlaytruncated);
             m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getelapsedms", &GridPatternClassTool::getelapsedms);
+
+            RegionPatternTool* pregion_pattern = nullptr;
+            const std::string_view region_pattern_type_name =
+                CxScriptTypeName(CxScriptTypeTraits<RegionPatternTool>::id);
+            m_parser.DefineClass(region_pattern_type_name.data(), pregion_pattern);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setrect", &RegionPatternTool::setrect);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setnormalized", &RegionPatternTool::setnormalized);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setpooling", &RegionPatternTool::setpooling);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setbinary", &RegionPatternTool::setbinary);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setthreshold", &RegionPatternTool::setthreshold);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setforegrounddark", &RegionPatternTool::setforegrounddark);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "setmaxoverlays", &RegionPatternTool::setmaxoverlays);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "analyze", &RegionPatternTool::analyze);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getstatuscode", &RegionPatternTool::getstatuscode);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getdescriptordim", &RegionPatternTool::getdescriptordim);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getforegroundpermille", &RegionPatternTool::getforegroundpermille);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getmeanpermille", &RegionPatternTool::getmeanpermille);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getstdpermille", &RegionPatternTool::getstdpermille);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getpoolingrows", &RegionPatternTool::getpoolingrows);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getpoolingcols", &RegionPatternTool::getpoolingcols);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getoverlaycount", &RegionPatternTool::getoverlaycount);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getoverlaytruncated", &RegionPatternTool::getoverlaytruncated);
+            m_parser.DefineClassFun(region_pattern_type_name.data(), pregion_pattern, "getelapsedms", &RegionPatternTool::getelapsedms);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savematchroi", &FastMatch::savematchroi);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadmapmodel", &FastMatch::loadfastimagemodel);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemapmodel", &FastMatch::savefastimagemodel);

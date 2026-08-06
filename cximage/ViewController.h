@@ -224,6 +224,12 @@ private:
   void EnsureTorchTrainingImageTexture(TorchTrainingImageItem& item);
   void SyncTorchTrainingImageSetFromEvidenceSelection();
   int AddHDReferenceImageSetForCurrentSelection();
+  void CaptureCurrentTorchTrainingAnnotationState();
+  void RestoreTorchTrainingAnnotationState(
+      const TorchTrainingImageItem& item);
+  bool LoadTorchTrainingImageIntoAnnotationView(
+      int itemIndex,
+      std::string& reason);
   void AddTorchTrainingImageFromPath(
       const std::string& imagePath,
       const std::string& imageId,

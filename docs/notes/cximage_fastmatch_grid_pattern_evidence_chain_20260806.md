@@ -2,20 +2,23 @@
 
 ## Scope
 
-This change adds one explicit experimental CASE. It does not replace or mutate
-the frozen FastMatch structural/edge-network baseline.
+This change keeps the frozen FastMatch structural/edge-network baseline and
+adds two explicit experimental CASEs: GridPattern for local direction/grid
+features, and RegionPattern for region-content descriptors. Neither CASE
+replaces or mutates the FastMatch baseline.
 
 Evidence chain:
 
 ```text
 fastmatch_structural_baseline_reference
   -> fastmatch_grid_pattern_class_evidence
+  -> region_pattern_content_evidence
 ```
 
-The new branch analyzes region content using normalized grid cells and a
-3-to-5-level pooled hierarchy. A classifier model is not bound in this CASE,
-so the only valid conclusion is `grid_feature_available` or a factual failure
-stage. Classification accuracy remains `model_not_bound`.
+The GridPattern branch analyzes local grid cells and a 3-to-5-level pooled
+hierarchy. The RegionPattern branch analyzes normalized gray/binary region
+content. A classifier model is not bound in either CASE, so classification
+accuracy remains `model_not_bound`.
 
 ## Assets
 
@@ -24,6 +27,10 @@ stage. Classification accuracy remains `model_not_bound`.
 - Headless values: `cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_grid_pattern_class_globals.values`
 - Catalog id: `fastmatch_grid_pattern_class_evidence`
 - Runtime object: `GridPatternClassTool`
+- RegionPattern direct CASE: `cxparser/cxscript/module/cximage/diagnostic/region_pattern/region_pattern_content_evidence.cxsc`
+- RegionPattern values: `cxparser/cxscript/module/cximage/diagnostic/region_pattern/region_pattern_content_globals.values`
+- RegionPattern catalog id: `region_pattern_content_evidence`
+- RegionPattern runtime object: `RegionPatternTool`
 
 ## Key Parameter Controls
 
@@ -45,6 +52,55 @@ stage. Classification accuracy remains `model_not_bound`.
 Fusion mode is evidence metadata in this CASE. It does not execute candidate
 fusion and must not be reported as FastMatch accuracy improvement.
 
+## RegionPattern CASE
+
+`region_pattern_content_evidence` is a separate CASE for the original
+RegionPattern direction: region-content recognition from normalized gray or
+binary pooled blocks. It is not a FastMatch edge network and it is not the
+GridPattern direction feature hierarchy.
+
+Valid output claims:
+
+```text
+REGION_PATTERN_DESCRIPTOR_AVAILABLE
+PENDING_CLASS_MODEL_BINDING
+PENDING_HUMAN_TEXTURE_REVIEW
+```
+
+Not allowed from this CASE alone:
+
+```text
+FASTMATCH_RESULT_PASS
+REGION_PATTERN_CLASSIFICATION_ACCURACY_PASS
+TEXTURE_DEFECT_DECISION_PASS
+```
+
+## RegionPattern Key Parameter Controls
+
+| Control | Global | Meaning |
+|---|---|---|
+| Region ROI | `global_region_roi_x/y/w/h` | Region-content descriptor ROI; independent from FastMatch learn/search ROI |
+| Normalized size | `global_region_normalized_width/height` | Canonical descriptor patch size |
+| Pooling shape | `global_region_pooling_rows/cols` | Pooled block grid used for content descriptor |
+| Binary mode | `global_region_use_binary` | `0` gray pooling, `1` binary foreground pooling |
+| Threshold | `global_region_threshold` | 0-255 foreground split threshold |
+| Foreground polarity | `global_region_foreground_dark` | `1` means dark foreground |
+| Overlay cap | `global_region_max_overlays` | Maximum pooled blocks pushed to Image View |
+
+Runtime facts exposed:
+
+```text
+global_region_status
+global_region_descriptor_dim
+global_region_foreground_permille
+global_region_mean_permille
+global_region_std_permille
+global_region_pooling_rows_out
+global_region_pooling_cols_out
+global_region_overlay_count
+global_region_overlay_truncated
+```
+
 ## View Chain
 
 ```text
@@ -64,9 +120,19 @@ Published elements:
 | Active cell rectangle | `active_grid_cell` | no | High-response region-content cell |
 | Cell direction line | `cell_orientation` | no | Dominant local gradient direction |
 
+RegionPattern published elements:
+
+| Element | Semantic role | Editable | Meaning |
+|---|---|---:|---|
+| Region ROI | `region_analysis_roi` | yes | Region passed to RegionPattern descriptor extraction |
+| Pooled block rectangle | `pooled_region_block` | no | Highest-response descriptor blocks, capped by `global_region_max_overlays` |
+
 Dragging the analysis ROI only updates `global_learn_roi_*`. The Parser-owned
 tool is not mutated during the GUI frame; the next Run applies the updated ROI
 through the same CxScript execution core.
+
+Dragging the RegionPattern ROI updates `global_region_roi_*` only. The next Run
+rebuilds the descriptor and overlays from the same execution core.
 
 Runtime facts exposed to the view:
 

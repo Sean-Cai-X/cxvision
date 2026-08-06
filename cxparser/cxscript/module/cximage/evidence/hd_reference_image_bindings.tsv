@@ -1,0 +1,8 @@
+script_id	image_id	image_path
+hd_fruit_classification_reference_direct	apple_braeburn_001	D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn/apple_braeburn_001.png
+hd_juice_bottle_anomaly_reference_direct	juice_bottle_good_001	D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good/juice_bottle_good_001.png
+hd_dongle_ocr_reference_direct	dongle_01	D:/Codex-WorkDir/Sean_WorkDir/images/dongle/dongle_01.png
+hd_pill_semantic_segmentation_reference_direct	pill_ginseng_contamination_001	D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination/pill_ginseng_contamination_001.png
+hd_pill_bag_instance_segmentation_reference_direct	pill_bag_001	D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag/pill_bag_001.png
+hd_pill_bag_detection_reference_direct	pill_bag_001	D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag/pill_bag_001.png
+hd_screws_oriented_detection_reference_direct	screws_001	D:/Codex-WorkDir/Sean_WorkDir/images/screws/screws_001.png

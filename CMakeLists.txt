@@ -81,6 +81,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FastMatchPolicy.cpp
   cximage/FastMatchGridClassAdapter.cpp
   cximage/GridPatternClassTool.cpp
+  cximage/RegionPatternTool.cpp
   cximage/FastMatchDiagnostic.cpp
   cximage/CxFastMatchRuntimeCapture.cpp
   cximage/Run.cpp

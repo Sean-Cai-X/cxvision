@@ -466,6 +466,19 @@ struct RuntimeObjectView
     double grid_pattern_elapsed_ms = 0.0;
     std::string grid_pattern_summary;
 
+    bool has_region_pattern = false;
+    int region_pattern_status_code = 0;
+    int region_pattern_descriptor_dim = 0;
+    int region_pattern_foreground_permille = 0;
+    int region_pattern_mean_permille = 0;
+    int region_pattern_std_permille = 0;
+    int region_pattern_pooling_rows = 0;
+    int region_pattern_pooling_cols = 0;
+    int region_pattern_overlay_count = 0;
+    bool region_pattern_overlay_truncated = false;
+    double region_pattern_elapsed_ms = 0.0;
+    std::string region_pattern_summary;
+
 };
 
 struct DebugStepSnapshot
@@ -687,6 +700,31 @@ struct ManifestImageItem
     std::string status;
 };
 
+struct TorchTrainingAnnotationShapeSnapshot
+{
+    std::string stable_ref;
+    std::string tool_id;
+    std::string owner_type;
+    std::string owner_ref;
+    std::string owner_binding;
+    std::string semantic_role;
+    std::string shape_kind;
+    std::string status = "editing";
+    std::vector<double> points_xy;
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double radius = 0.0;
+    double inner_radius = 0.0;
+    double radius_x = 0.0;
+    double radius_y = 0.0;
+    double angle = 0.0;
+    double half_width = 0.0;
+    bool closed = false;
+    bool editable = true;
+    bool visible = true;
+    bool result_element = false;
+};
+
 struct TorchTrainingImageItem
 {
     std::string image_id;
@@ -704,6 +742,12 @@ struct TorchTrainingImageItem
     bool texture_loaded = false;
     bool texture_failed = false;
     bool texture_placeholder = false;
+
+    std::string annotation_status = "unlabeled"; // unlabeled / editing / reviewed
+    std::string annotation_reason;
+    int annotation_shape_count = 0;
+    int annotation_overlay_count = 0;
+    std::vector<TorchTrainingAnnotationShapeSnapshot> annotation_shapes;
 };
 
 struct ScriptEvidenceThumb
@@ -955,8 +999,11 @@ struct ManualTestContext
   std::vector<ScriptEvidenceRowRef> script_evidence_row_refs;
   bool script_evidence_row_refs_dirty = true;
 
-  int script_evidence_thumb_load_budget_per_frame = 2;
+  int script_evidence_thumb_load_budget_per_frame = 4;
   int script_evidence_thumb_load_count_this_frame = 0;
+  int last_evidence_click_group = -1;
+  int last_evidence_click_thumb = -1;
+  double last_evidence_click_time = -1.0;
   std::unordered_map<std::string, std::string> evidence_category_overrides;
 
   CxEvidenceSelectionSnapshot current_evidence_selection;

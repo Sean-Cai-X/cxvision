@@ -28,7 +28,8 @@ enum class CxScriptTypeId : std::uint16_t
 
     SmartDouble,
 
-    GridPatternClassTool
+    GridPatternClassTool,
+    RegionPatternTool
 };
 
 std::string_view CxScriptTypeName(

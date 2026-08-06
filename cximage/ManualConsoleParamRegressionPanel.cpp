@@ -265,7 +265,8 @@ bool IsFindLineFindCircleContext(ManualTestContext& context)
     const ManualGaugeState& g = context.current_gauge;
     return (g.tool == "FindLine" || g.tool == "FindCircle" ||
             g.tool == "FastMatch" || g.tool == "fastmatch" ||
-            g.tool == "CFastMatch" || g.tool == "GridPatternClassTool") ||
+            g.tool == "CFastMatch" || g.tool == "GridPatternClassTool" ||
+            g.tool == "RegionPatternTool") ||
            g.has_line_gauge || g.has_circle_gauge;
 }
 
@@ -1156,6 +1157,7 @@ static std::string NormalizeKeyParamToolTypeLocal(const std::string& type)
   if (type == "Findrect" || type == "FindRect") return "FindRect";
   if (type == "fastmatch" || type == "FastMatch" || type == "CFastMatch") return "FastMatch";
   if (type == "gridpatternclasstool" || type == "GridPatternClassTool") return "GridPatternClassTool";
+  if (type == "regionpatterntool" || type == "RegionPatternTool") return "RegionPatternTool";
   return type;
 }
 
@@ -1363,6 +1365,44 @@ static bool DrawGridPatternRoiControls(ManualTestContext& context)
   edited |= DrawRuntimeIntRow(context, "analysis y", "global_learn_roi_y", 120, 0, 10000, 130.0f);
   edited |= DrawRuntimeIntRow(context, "analysis width", "global_learn_roi_w", 120, 1, 10000, 130.0f);
   edited |= DrawRuntimeIntRow(context, "analysis height", "global_learn_roi_h", 90, 1, 10000, 130.0f);
+  return edited;
+}
+
+static bool DrawRegionPatternRoiControls(ManualTestContext& context)
+{
+  bool edited = false;
+  ImGui::TextColored(
+      ImVec4(0.9f, 0.72f, 0.32f, 1.0f),
+      "RegionPattern Analysis ROI");
+  ImGui::TextDisabled(
+      "This ROI feeds the region-content descriptor. It is independent from FastMatch learn/search ROI.");
+  edited |= DrawRuntimeIntRow(context, "region x", "global_region_roi_x", 120, 0, 10000, 130.0f);
+  edited |= DrawRuntimeIntRow(context, "region y", "global_region_roi_y", 120, 0, 10000, 130.0f);
+  edited |= DrawRuntimeIntRow(context, "region width", "global_region_roi_w", 120, 1, 10000, 130.0f);
+  edited |= DrawRuntimeIntRow(context, "region height", "global_region_roi_h", 90, 1, 10000, 130.0f);
+  return edited;
+}
+
+static bool DrawRegionPatternParameterControls(ManualTestContext& context)
+{
+  bool edited = false;
+  ImGui::TextColored(
+      ImVec4(0.9f, 0.72f, 0.32f, 1.0f),
+      "Region Pattern Content Descriptor");
+  ImGui::TextDisabled(
+      "Region-content direction: normalized gray/binary pooling. Classifier binding and semantic accuracy are not claimed here.");
+
+  edited |= DrawRuntimeIntRow(context, "normalized width", "global_region_normalized_width", 32, 8, 512, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "normalized height", "global_region_normalized_height", 32, 8, 512, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "pooling rows", "global_region_pooling_rows", 4, 1, 64, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "pooling cols", "global_region_pooling_cols", 4, 1, 64, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "use binary", "global_region_use_binary", 0, 0, 1, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "threshold", "global_region_threshold", 128, 0, 255, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "foreground dark", "global_region_foreground_dark", 1, 0, 1, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "max overlay blocks", "global_region_max_overlays", 64, 1, 512, 160.0f);
+
+  ImGui::TextDisabled(
+      "View chain: ROI -> pooled_region_block overlays -> descriptor metrics -> manual texture review.");
   return edited;
 }
 
@@ -2549,6 +2589,9 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   const bool isGridPattern =
       gauge.tool == "GridPatternClassTool" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "GridPatternClassTool";
+  const bool isRegionPattern =
+      gauge.tool == "RegionPatternTool" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "RegionPatternTool";
   if (gauge.tool == "FindLine" || gauge.has_line_gauge)
   {
       ImGui::Checkbox("Show single-line gauge scan ticks",
@@ -2580,6 +2623,12 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::TextColored(
           ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
           "GridPattern: ROI -> grid cells -> pooled hierarchy -> evidence overlay");
+  }
+  if (isRegionPattern)
+  {
+      ImGui::TextColored(
+          ImVec4(0.9f, 0.72f, 0.32f, 1.0f),
+          "RegionPattern: ROI -> gray/binary pooled descriptor -> texture review signal");
   }
   ImGui::Separator();
 
@@ -2640,6 +2689,10 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       {
           gaugeEdited |= DrawGridPatternRoiControls(context);
       }
+      else if (isRegionPattern)
+      {
+          gaugeEdited |= DrawRegionPatternRoiControls(context);
+      }
       else if (isFastMatch)
       {
           gaugeEdited |= DrawFastMatchRoiControls(context);
@@ -2664,6 +2717,10 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       if (isGridPattern)
       {
           gaugeEdited |= DrawGridPatternParameterControls(context);
+      }
+      else if (isRegionPattern)
+      {
+          gaugeEdited |= DrawRegionPatternParameterControls(context);
       }
       else if (isFastMatch)
       {
@@ -2766,24 +2823,40 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
           std::to_string(gauge.circle_px) + "," +
           std::to_string(gauge.circle_py) + ")";
     }
-    else if (isFastMatch || isGridPattern)
+    else if (isFastMatch || isGridPattern || isRegionPattern)
     {
-      context.last_key_parameter_edit_summary +=
-          " learn_roi=(" +
-          std::to_string(RuntimeIntOr(context, "global_learn_roi_x", 120)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_learn_roi_y", 120)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_learn_roi_w", 120)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_learn_roi_h", 90)) + ")" +
-          " search_roi=(" +
-          std::to_string(RuntimeIntOr(context, "global_search_roi_x", 0)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_search_roi_y", 0)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_search_roi_w", 640)) + "," +
-          std::to_string(RuntimeIntOr(context, "global_search_roi_h", 480)) + ")" +
-          " wgap=" + std::to_string(gauge.wgap) +
-          " hgap=" + std::to_string(gauge.hgap) +
-          " filterprofile=" + std::to_string(gauge.filterprofile) +
-          " find_num=" +
-          std::to_string(RuntimeIntOr(context, "global_find_num", 1));
+      if (isRegionPattern)
+      {
+        context.last_key_parameter_edit_summary +=
+            " region_roi=(" +
+            std::to_string(RuntimeIntOr(context, "global_region_roi_x", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_region_roi_y", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_region_roi_w", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_region_roi_h", 90)) + ")" +
+            " pooling=" + std::to_string(RuntimeIntOr(context, "global_region_pooling_rows", 4)) +
+            "x" + std::to_string(RuntimeIntOr(context, "global_region_pooling_cols", 4)) +
+            " binary=" + std::to_string(RuntimeIntOr(context, "global_region_use_binary", 0)) +
+            " threshold=" + std::to_string(RuntimeIntOr(context, "global_region_threshold", 128));
+      }
+      else
+      {
+        context.last_key_parameter_edit_summary +=
+            " learn_roi=(" +
+            std::to_string(RuntimeIntOr(context, "global_learn_roi_x", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_learn_roi_y", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_learn_roi_w", 120)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_learn_roi_h", 90)) + ")" +
+            " search_roi=(" +
+            std::to_string(RuntimeIntOr(context, "global_search_roi_x", 0)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_search_roi_y", 0)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_search_roi_w", 640)) + "," +
+            std::to_string(RuntimeIntOr(context, "global_search_roi_h", 480)) + ")" +
+            " wgap=" + std::to_string(gauge.wgap) +
+            " hgap=" + std::to_string(gauge.hgap) +
+            " filterprofile=" + std::to_string(gauge.filterprofile) +
+            " find_num=" +
+            std::to_string(RuntimeIntOr(context, "global_find_num", 1));
+      }
       if (isGridPattern)
       {
         context.last_key_parameter_edit_summary +=

@@ -38,6 +38,9 @@ std::string_view CxScriptTypeName(
     case CxScriptTypeId::GridPatternClassTool:
         return "GridPatternClassTool";
 
+    case CxScriptTypeId::RegionPatternTool:
+        return "RegionPatternTool";
+
     case CxScriptTypeId::Shape:
         return "Shape";
 
@@ -94,6 +97,9 @@ ParseCanonicalCxScriptTypeName(
 
     if (name == "GridPatternClassTool")
         return CxScriptTypeId::GridPatternClassTool;
+
+    if (name == "RegionPatternTool")
+        return CxScriptTypeId::RegionPatternTool;
 
     if (name == "Shape")
         return CxScriptTypeId::Shape;

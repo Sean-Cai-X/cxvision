@@ -361,6 +361,26 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
            << " | summary=" << object.grid_pattern_summary;
         return ss.str();
     }
+    if (object.type == "RegionPatternTool")
+    {
+        std::ostringstream ss;
+        ss << "geometry: object=" << object.name
+           << " | tool=region_pattern"
+           << " | status_code=" << object.region_pattern_status_code
+           << " | descriptor_dim=" << object.region_pattern_descriptor_dim
+           << " | foreground_permille=" << object.region_pattern_foreground_permille
+           << " | mean_permille=" << object.region_pattern_mean_permille
+           << " | std_permille=" << object.region_pattern_std_permille
+           << " | pooling=" << object.region_pattern_pooling_rows
+           << "x" << object.region_pattern_pooling_cols
+           << " | overlay_blocks=" << object.region_pattern_overlay_count
+           << " | overlay_truncated="
+           << (object.region_pattern_overlay_truncated ? "true" : "false")
+           << " | elapsed_ms=" << object.region_pattern_elapsed_ms
+           << " | classification=model_not_bound"
+           << " | summary=" << object.region_pattern_summary;
+        return ss.str();
+    }
 
     return BuildFindCircleGeometrySummary(object);
 }
@@ -487,6 +507,19 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
            << (context.source_preview_enabled ? "true" : "false");
         return ss.str();
     }
+    if (object.type == "RegionPatternTool")
+    {
+        std::ostringstream ss;
+        ss << "image overlay:"
+           << " region_analysis_roi=true"
+           << " | pooled_region_blocks=" << object.region_pattern_overlay_count
+           << " | descriptor_dim=" << object.region_pattern_descriptor_dim
+           << " | focus_subset="
+           << (object.region_pattern_overlay_truncated ? "true" : "false")
+           << " | source_preview_enabled="
+           << (context.source_preview_enabled ? "true" : "false");
+        return ss.str();
+    }
 
     return BuildFindCircleOverlaySummary(context, object);
 }
@@ -592,7 +625,8 @@ std::string ModuleForType(const std::string& type)
     if (type.rfind("Mlpack", 0) == 0) return "mlpack";
     if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
     if (type == "Image" || type.rfind("Find", 0) == 0 || type == "FastMatch" ||
-        type == "GridPatternClassTool" || type == "FormfitGauge" ||
+        type == "GridPatternClassTool" || type == "RegionPatternTool" ||
+        type == "FormfitGauge" ||
         type == "CxOverlay" || type == "CircleRingGauge") return "cximage";
     return "cxscript";
 }
@@ -609,6 +643,7 @@ std::string ModuleForStatement(const std::string& statement)
     if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
     if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
         statement.find("Find") != std::string::npos || statement.find("FastMatch") != std::string::npos ||
-        statement.find("GridPattern") != std::string::npos) return "cximage";
+        statement.find("GridPattern") != std::string::npos ||
+        statement.find("RegionPattern") != std::string::npos) return "cximage";
     return "cxscript";
 }

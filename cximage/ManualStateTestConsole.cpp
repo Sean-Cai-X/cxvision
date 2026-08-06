@@ -7,6 +7,7 @@
 #include "FindSegmentation.h"
 #include "FastMatch.h"
 #include "GridPatternClassTool.h"
+#include "RegionPatternTool.h"
 #include "TorchTask.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
@@ -624,6 +625,9 @@ void SeedDefaultManualGlobals(
     const bool isGridPatternScript =
         scriptPath.find("grid_pattern") != std::string::npos ||
         scriptPath.find("GridPatternClassTool") != std::string::npos;
+    const bool isRegionPatternScript =
+        scriptPath.find("region_pattern") != std::string::npos ||
+        scriptPath.find("RegionPatternTool") != std::string::npos;
     const bool isVerticalLineScript =
         scriptPath.find("find_line_vertical") != std::string::npos ||
         scriptPath.find("findline_vertical") != std::string::npos;
@@ -743,6 +747,31 @@ void SeedDefaultManualGlobals(
         set("global_grid_overlay_truncated", 0);
     }
 
+    if (isRegionPatternScript)
+    {
+        set("global_region_roi_x", 120);
+        set("global_region_roi_y", 120);
+        set("global_region_roi_w", 120);
+        set("global_region_roi_h", 90);
+        set("global_region_normalized_width", 32);
+        set("global_region_normalized_height", 32);
+        set("global_region_pooling_rows", 4);
+        set("global_region_pooling_cols", 4);
+        set("global_region_use_binary", 0);
+        set("global_region_threshold", 128);
+        set("global_region_foreground_dark", 1);
+        set("global_region_max_overlays", 64);
+        set("global_region_status", 0);
+        set("global_region_descriptor_dim", 0);
+        set("global_region_foreground_permille", 0);
+        set("global_region_mean_permille", 0);
+        set("global_region_std_permille", 0);
+        set("global_region_pooling_rows_out", 0);
+        set("global_region_pooling_cols_out", 0);
+        set("global_region_overlay_count", 0);
+        set("global_region_overlay_truncated", 0);
+    }
+
     // The Script Editor and Gauge Workbench must start from the same value
     // snapshot.  Previously only runtime_int_vars were seeded, leaving the
     // visible/editable gauge at its zero-initialized geometry.
@@ -813,9 +842,19 @@ void SeedDefaultManualGlobals(
         gauge.line_x1 = gauge.line_x0 + context.runtime_int_vars["global_learn_roi_w"];
         gauge.line_y1 = gauge.line_y0 + context.runtime_int_vars["global_learn_roi_h"];
     }
+    else if (isRegionPatternScript)
+    {
+        gauge.tool = "RegionPatternTool";
+        gauge.primary_object_type = "RegionPatternTool";
+        gauge.line_x0 = context.runtime_int_vars["global_region_roi_x"];
+        gauge.line_y0 = context.runtime_int_vars["global_region_roi_y"];
+        gauge.line_x1 = gauge.line_x0 + context.runtime_int_vars["global_region_roi_w"];
+        gauge.line_y1 = gauge.line_y0 + context.runtime_int_vars["global_region_roi_h"];
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge || isGridPatternScript)
+        gauge.has_ellipse_gauge || isGridPatternScript ||
+        isRegionPatternScript)
         context.current_gauge = gauge;
 }
 
@@ -1170,6 +1209,47 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:RegionPatternTool:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("RegionPatternTool"))
+    {
+        RegionPatternTool* region_tool = static_cast<RegionPatternTool*>(
+            m_parserDebugBridge.QueryClassObject("RegionPatternTool", name));
+        if (region_tool == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "RegionPatternTool";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = region_tool->getstatuscode() == 1
+            ? "region_descriptor_available"
+            : "region_descriptor_unavailable";
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.has_region_pattern = true;
+        object.region_pattern_status_code = region_tool->getstatuscode();
+        object.region_pattern_descriptor_dim = region_tool->getdescriptordim();
+        object.region_pattern_foreground_permille =
+            region_tool->getforegroundpermille();
+        object.region_pattern_mean_permille = region_tool->getmeanpermille();
+        object.region_pattern_std_permille = region_tool->getstdpermille();
+        object.region_pattern_pooling_rows = region_tool->getpoolingrows();
+        object.region_pattern_pooling_cols = region_tool->getpoolingcols();
+        object.region_pattern_overlay_count = region_tool->getoverlaycount();
+        object.region_pattern_overlay_truncated =
+            region_tool->getoverlaytruncated() != 0;
+        object.region_pattern_elapsed_ms = region_tool->getelapsedms();
+        object.region_pattern_summary = region_tool->getsummary();
+        object.measure_points_count = object.region_pattern_overlay_count;
+        object.valid_points_count = object.region_pattern_overlay_count;
+        object.display_summary = object.region_pattern_summary;
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:summary");
     for (RuntimeObjectView& object : m_manualTest.runtime_objects)
     {
@@ -1259,6 +1339,28 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                 object.measure_points_count;
             m_manualTest.current_result_ref.valid_points_count =
                 object.valid_points_count;
+        }
+        else if (object.type == "GridPatternClassTool")
+        {
+            m_manualTest.current_result_ref.name = "global_grid_ref";
+            m_manualTest.current_result_ref.result_type = "GridPatternFeatureResult";
+            m_manualTest.current_result_ref.status = object.runtime_state;
+            m_manualTest.current_result_ref.reason = object.grid_pattern_summary;
+            m_manualTest.current_result_ref.points_count =
+                object.grid_pattern_active_cell_count;
+            m_manualTest.current_result_ref.valid_points_count =
+                object.grid_pattern_overlay_count;
+        }
+        else if (object.type == "RegionPatternTool")
+        {
+            m_manualTest.current_result_ref.name = "global_region_ref";
+            m_manualTest.current_result_ref.result_type = "RegionPatternDescriptorResult";
+            m_manualTest.current_result_ref.status = object.runtime_state;
+            m_manualTest.current_result_ref.reason = object.region_pattern_summary;
+            m_manualTest.current_result_ref.points_count =
+                object.region_pattern_descriptor_dim;
+            m_manualTest.current_result_ref.valid_points_count =
+                object.region_pattern_overlay_count;
         }
         else if (object.type == "FindSegmentation")
         {
@@ -1667,6 +1769,94 @@ void ViewController::DrawAnnotationToolButtonStrip(bool horizontal)
         else
             usedWidth = 0.0f;
     };
+
+    const bool hasSelectedTorchTrainingImage =
+        m_manualTest.selected_torch_training_image >= 0 &&
+        m_manualTest.selected_torch_training_image <
+            static_cast<int>(m_manualTest.torch_training_images.size());
+
+    drawButton("annotation_session_toggle",
+               m_imageToolEnabled ? "Annot ON" : "Annot OFF",
+               m_imageToolEnabled,
+               buttonSize,
+               [this]()
+               {
+                   m_imageToolEnabled = !m_imageToolEnabled;
+                   if (!m_imageToolEnabled)
+                   {
+                       m_imageToolMode = ImageToolMode::PointerPan;
+                       CancelAnnotationCreate();
+                       m_annotationLayer.SetActiveToolIndex(-1);
+                       m_annotationStatus = "annotation session disabled";
+                   }
+                   else
+                   {
+                       m_imageToolMode = ImageToolMode::PointerPan;
+                       CancelAnnotationCreate();
+                       m_annotationLayer.SetActiveToolIndex(-1);
+                       m_annotationStatus =
+                           "annotation session enabled; choose a tool or edit existing shapes";
+                   }
+               });
+    nextSameLine(width);
+
+    drawButton("annotation_edit_existing",
+               "Edit Existing",
+               m_imageToolEnabled &&
+                   m_imageToolMode == ImageToolMode::PointerPan &&
+                   m_annotationLayer.ActiveToolIndex() < 0,
+               buttonSize,
+               [this]()
+               {
+                   m_imageToolEnabled = true;
+                   m_imageToolMode = ImageToolMode::PointerPan;
+                   CancelAnnotationCreate();
+                   m_annotationLayer.SetActiveToolIndex(-1);
+                   m_annotationStatus =
+                       "annotation edit mode active; click a shape handle to drag";
+               });
+    nextSameLine(width);
+
+    if (hasSelectedTorchTrainingImage)
+    {
+        TorchTrainingImageItem& selected =
+            m_manualTest.torch_training_images[
+                m_manualTest.selected_torch_training_image];
+
+        auto drawLabelButton = [&](const char* id, const char* label)
+        {
+            const bool active = selected.label == label;
+            drawButton(id,
+                       std::string("Label ") + label,
+                       active,
+                       buttonSize,
+                       [this, &selected, label]()
+                       {
+                           selected.label = label;
+                           m_manualTest.torch_training_image_status =
+                               "ANNOTATION_LABEL_UPDATED";
+                           m_manualTest.torch_training_image_reason =
+                               "selected image label=" + selected.label +
+                               " path=" + selected.image_path;
+                       });
+            nextSameLine(width);
+        };
+
+        drawLabelButton("annotation_label_good", "good");
+        drawLabelButton("annotation_label_anomaly", "anomaly");
+        drawLabelButton("annotation_label_unlabeled", "unlabeled");
+        drawLabelButton("annotation_label_pending", "pending");
+    }
+
+    ImGui::Text("Annotation: %s | mode: %s | tool: %s | status: %s",
+                m_imageToolEnabled ? "enabled" : "disabled",
+                ImageToolModeName(m_imageToolMode),
+                m_annotationLayer.ActiveTool()
+                    ? (m_annotationLayer.ActiveTool()->label.empty()
+                        ? m_annotationLayer.ActiveTool()->name.c_str()
+                        : m_annotationLayer.ActiveTool()->label.c_str())
+                    : "Pointer / Pan",
+                m_annotationStatus.c_str());
 
     const bool pointerActive = !m_imageToolEnabled ||
                                m_imageToolMode == ImageToolMode::PointerPan ||

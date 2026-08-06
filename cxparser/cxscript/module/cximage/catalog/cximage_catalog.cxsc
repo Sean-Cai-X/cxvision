@@ -191,6 +191,21 @@ CxScriptCatalog_script_setmanualvisible(1);
 CxScriptCatalog_script_setregressionvisible(1);
 CxScriptCatalog_script_setadvancedvisible(1);
 
+CxScriptCatalog_addscript("region_pattern_content_evidence");
+CxScriptCatalog_script_setlabel("[Diagnostic] RegionPattern Content Evidence");
+CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/diagnostic/region_pattern/region_pattern_content_evidence.cxsc");
+CxScriptCatalog_script_settool("RegionPatternTool");
+CxScriptCatalog_script_setorientation("region_content");
+CxScriptCatalog_script_setparameterpolicy("region_pattern_content_descriptor");
+CxScriptCatalog_script_setparameterrole("REGION_CONTENT_DESCRIPTOR_EVIDENCE");
+CxScriptCatalog_script_setexpected("descriptor_available");
+CxScriptCatalog_script_setexpectedstatus("region_descriptor_available");
+CxScriptCatalog_script_setexpectedpolicyguard("region_pattern_explicit_case_only_no_fastmatch_default_change");
+CxScriptCatalog_script_setfrozen(1);
+CxScriptCatalog_script_setmanualvisible(1);
+CxScriptCatalog_script_setregressionvisible(1);
+CxScriptCatalog_script_setadvancedvisible(1);
+
 CxScriptCatalog_addscript("fastmatch_grid_pattern_class_evidence");
 CxScriptCatalog_script_setlabel("[EXPERIMENT] FastMatch Grid Pattern Class Evidence");
 CxScriptCatalog_script_setpath("cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_grid_pattern_class_evidence.cxsc");

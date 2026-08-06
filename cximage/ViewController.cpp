@@ -1,5 +1,6 @@
 #include "ManualStateTestConsole.h"
 #include "viewcontroller.h"
+#include "RegionPatternTool.h"
 #include "ManualConsoleUtils.h"
 #include "CxFastMatchRuntimeCapture.h"
 #include "ManualConsoleGauge.h"
@@ -189,6 +190,13 @@ namespace
         {"grid_pattern_class", "GridPatternClassTool"});
   }
 
+  bool evidencePathIsRegionPattern(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"region_pattern", "RegionPatternTool"});
+  }
+
   bool evidencePathIsFindSegmentation(const std::string& scriptPath)
   {
     return evidencePathHasAny(
@@ -207,6 +215,8 @@ namespace
   {
     if (evidencePathIsGridPatternClass(scriptPath))
       return "GridPatternClassTool";
+    if (evidencePathIsRegionPattern(scriptPath))
+      return "RegionPatternTool";
     if (evidencePathIsFindCircle(scriptPath))
       return "FindCircle";
     if (evidencePathIsFindLine(scriptPath))
@@ -420,6 +430,18 @@ namespace
     applied += setRequiredIntIfUsed("global_grid_active_edge_percent", existingOr("global_grid_active_edge_percent", 3)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_grid_max_overlays", existingOr("global_grid_max_overlays", 96)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_grid_fusion_mode", existingOr("global_grid_fusion_mode", 2)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_roi_x", existingOr("global_region_roi_x", roiX0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_roi_y", existingOr("global_region_roi_y", roiY0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_roi_w", existingOr("global_region_roi_w", roiW)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_roi_h", existingOr("global_region_roi_h", roiH)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_normalized_width", existingOr("global_region_normalized_width", 32)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_normalized_height", existingOr("global_region_normalized_height", 32)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_pooling_rows", existingOr("global_region_pooling_rows", 4)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_pooling_cols", existingOr("global_region_pooling_cols", 4)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_use_binary", existingOr("global_region_use_binary", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_threshold", existingOr("global_region_threshold", 128)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_foreground_dark", existingOr("global_region_foreground_dark", 1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_region_max_overlays", existingOr("global_region_max_overlays", 64)) ? 1 : 0;
 
     /*
      * Evidence self-test may replay older script snapshots before a candidate
@@ -472,6 +494,15 @@ namespace
     applied += setIntIfUsed("global_grid_level_count", 0) ? 1 : 0;
     applied += setIntIfUsed("global_grid_overlay_count", 0) ? 1 : 0;
     applied += setIntIfUsed("global_grid_overlay_truncated", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_status", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_descriptor_dim", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_foreground_permille", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_mean_permille", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_std_permille", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_pooling_rows_out", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_pooling_cols_out", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_overlay_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_region_overlay_truncated", 0) ? 1 : 0;
     applied += setDoubleIfUsed("global_avgdist", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_circle_radius", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_local_support", 1.0) ? 1 : 0;
@@ -1521,6 +1552,8 @@ static std::string NormalizeSemanticEvidenceObjectTypeLocal(
         return "FastMatch";
     if (lowered == "gridpatternclasstool" || lowered == "gridpatternclass")
         return "GridPatternClassTool";
+    if (lowered == "regionpatterntool" || lowered == "regionpattern")
+        return "RegionPatternTool";
     if (lowered == "findsegmentation")
         return "FindSegmentation";
     return typeOrTool;
@@ -1536,6 +1569,7 @@ static bool IsSemanticEvidenceEditableObjectTypeLocal(const std::string& type)
            normalized == "FindRect" ||
            normalized == "FastMatch" ||
            normalized == "GridPatternClassTool" ||
+           normalized == "RegionPatternTool" ||
            normalized == "FindSegmentation";
 }
 
@@ -2420,6 +2454,34 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
+    if (evidencePathIsRegionPattern(snapshot.script_path))
+    {
+        const std::vector<std::string> required = {
+            "global_region_roi_x", "global_region_roi_y",
+            "global_region_roi_w", "global_region_roi_h",
+            "global_region_normalized_width", "global_region_normalized_height",
+            "global_region_pooling_rows", "global_region_pooling_cols",
+            "global_region_use_binary", "global_region_threshold",
+            "global_region_foreground_dark", "global_region_max_overlays"
+        };
+        for (const std::string& key : required)
+        {
+            if (!hasInt(key.c_str()))
+            {
+                reason = "missing required RegionPattern global: " + key;
+                return false;
+            }
+        }
+        if (m_manualTest.runtime_int_vars.at("global_region_pooling_rows") <= 0 ||
+            m_manualTest.runtime_int_vars.at("global_region_pooling_cols") <= 0)
+        {
+            reason = "RegionPattern pooling rows/cols must be positive";
+            return false;
+        }
+        reason = "RegionPattern parameter globals available";
+        return true;
+    }
+
     if (evidencePathIsFastMatch(snapshot.script_path))
     {
         if (!hasInt("global_learn_roi_x") ||
@@ -3042,6 +3104,22 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_grid_overlay_count", "global_grid_overlay_truncated"
         };
     }
+    else if (evidencePathIsRegionPattern(snapshot.script_path))
+    {
+        required = {
+            "global_region_roi_x", "global_region_roi_y",
+            "global_region_roi_w", "global_region_roi_h",
+            "global_region_normalized_width", "global_region_normalized_height",
+            "global_region_pooling_rows", "global_region_pooling_cols",
+            "global_region_use_binary", "global_region_threshold",
+            "global_region_foreground_dark", "global_region_max_overlays",
+            "global_region_status", "global_region_descriptor_dim",
+            "global_region_foreground_permille", "global_region_mean_permille",
+            "global_region_std_permille", "global_region_pooling_rows_out",
+            "global_region_pooling_cols_out", "global_region_overlay_count",
+            "global_region_overlay_truncated"
+        };
+    }
     else if (evidencePathIsFastMatch(snapshot.script_path))
     {
         required = {
@@ -3194,6 +3272,8 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
         expectedType = "FindRect";
     else if (evidencePathIsGridPatternClass(snapshot.script_path))
         expectedType = "GridPatternClassTool";
+    else if (evidencePathIsRegionPattern(snapshot.script_path))
+        expectedType = "RegionPatternTool";
     else if (evidencePathIsFastMatch(snapshot.script_path))
         expectedType = "FastMatch";
     else if (evidencePathIsFindSegmentation(snapshot.script_path))
@@ -3318,6 +3398,8 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
         evidencePathIsFindSegmentation(snapshot.script_path);
     const bool isGridPatternScript =
         evidencePathIsGridPatternClass(snapshot.script_path);
+    const bool isRegionPatternScript =
+        evidencePathIsRegionPattern(snapshot.script_path);
     int visibleCount = 0;
     int gaugeCount = 0;
     int resultCount = 0;
@@ -3348,8 +3430,13 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
             element.result_element &&
             (element.semantic_role == "active_grid_cell" ||
              element.semantic_role == "cell_orientation");
+        const bool isRegionPatternResult =
+            isRegionPatternScript &&
+            element.result_element &&
+            element.semantic_role == "pooled_region_block";
 
-        if (isStandardResult || isSegmentationAttachResult || isGridPatternResult)
+        if (isStandardResult || isSegmentationAttachResult ||
+            isGridPatternResult || isRegionPatternResult)
         {
             hasResultElement = true;
             ++resultCount;
@@ -7397,6 +7484,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 #include "FindSegmentation.h"
 #include "FastMatch.h"
 #include "GridPatternClassTool.h"
+#include "RegionPatternTool.h"
 
 #include <sstream>
 #include <iomanip>
@@ -7643,6 +7731,19 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
                 m_annotationLayer.EndRuntimeOwnerPublish(
                     "GridPatternClassTool", object.name, generation);
+            }
+        }
+        else if (object.type == "RegionPatternTool")
+        {
+            RegionPatternTool* tool = static_cast<RegionPatternTool*>(
+                m_parserDebugBridge.QueryClassObject("RegionPatternTool", object.name));
+            if (tool != nullptr)
+            {
+                const uint64_t generation = m_annotationLayer.BeginRuntimeOwnerPublish(
+                    "RegionPatternTool", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish(
+                    "RegionPatternTool", object.name, generation);
             }
         }
         else if (object.type == "FindSegmentation")

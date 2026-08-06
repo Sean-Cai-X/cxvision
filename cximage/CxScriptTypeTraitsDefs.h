@@ -13,6 +13,7 @@ class FastMatch;
 class FastMatchDiagnostic;
 class CircleRingGauge;
 class GridPatternClassTool;
+class RegionPatternTool;
 
 CXSCRIPT_TYPE_TRAITS(Image, Image)
 CXSCRIPT_TYPE_TRAITS(FindLine, FindLine)
@@ -25,3 +26,4 @@ CXSCRIPT_TYPE_TRAITS(FastMatch, FastMatch)
 CXSCRIPT_TYPE_TRAITS(FastMatchDiagnostic, FastMatchDiagnostic)
 CXSCRIPT_TYPE_TRAITS(CircleRingGauge, CircleRingGauge)
 CXSCRIPT_TYPE_TRAITS(GridPatternClassTool, GridPatternClassTool)
+CXSCRIPT_TYPE_TRAITS(RegionPatternTool, RegionPatternTool)
