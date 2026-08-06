@@ -4812,8 +4812,6 @@ void ViewController::DrawTorchTrainingImageRail(const char* split, const char* l
             clicked = ImGui::Button("NO IMG", thumbSize);
         }
         const bool itemHovered = ImGui::IsItemHovered();
-        const bool itemDoubleClicked =
-            itemHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 p1(p0.x + thumbSize.x, p0.y + thumbSize.y);
@@ -4844,11 +4842,11 @@ void ViewController::DrawTorchTrainingImageRail(const char* split, const char* l
                 shapeBadge.c_str());
         }
 
-        if (itemDoubleClicked)
+        if (clicked)
         {
             CXLOG_INFO(
                 "TorchTrainingImageSet",
-                "training_thumb_double_click",
+                "training_thumb_click",
                 "ui_event",
                 "index=" + std::to_string(i) +
                 " split=" + item.split +
@@ -4868,19 +4866,6 @@ void ViewController::DrawTorchTrainingImageRail(const char* split, const char* l
                 m_manualTest.debug_status = "TORCH_DATASET_IMAGE_LOADED";
                 m_manualTest.debug_reason = item.image_path;
             }
-        }
-        else if (clicked)
-        {
-            m_manualTest.selected_torch_training_image = static_cast<int>(i);
-            CXLOG_INFO(
-                "TorchTrainingImageSet",
-                "training_thumb_click",
-                "ui_event",
-                "index=" + std::to_string(i) +
-                " split=" + item.split +
-                " label=" + item.label +
-                " image_id=" + item.image_id +
-                " image_path=" + item.image_path);
         }
         if (itemHovered)
         {
@@ -4922,7 +4907,7 @@ void ViewController::drawTorchTrainingImageSetWindow()
 
     ImGui::TextWrapped(
         "Training/validation/test image rails for Torch evidence review. "
-        "Double-click a thumbnail to load it into Image View. Labels are operator evidence, not model quality PASS.");
+        "Click a thumbnail to load it into Image View. Labels are operator evidence, not model quality PASS.");
     ImGui::Separator();
 
     ImGui::Text("active_case: %s", m_manualTest.active_case_id.empty() ? "-" : m_manualTest.active_case_id.c_str());
