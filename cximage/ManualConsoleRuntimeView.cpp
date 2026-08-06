@@ -127,6 +127,22 @@ std::string BuildFindCircleGeometrySummary(const RuntimeObjectView& object)
        << object.circle_scan_line_length
        << " | circle_process_w="
        << object.circle_process_width
+       << " | circle_selected_edge="
+       << object.circle_selected_edge_index
+       << " | circle_candidate_runs_total="
+       << object.circle_candidate_runs_total
+       << " | circle_candidate_runs_max_per_line="
+       << object.circle_candidate_runs_max_per_line
+       << " | circle_selected_edge_hits="
+       << object.circle_selected_edge_hits
+       << " | circle_selected_edge_misses="
+       << object.circle_selected_edge_misses
+       << " | circle_selected_radius_avg="
+       << object.circle_selected_edge_radius_avg
+       << " | circle_selected_radius_min="
+       << object.circle_selected_edge_radius_min
+       << " | circle_selected_radius_max="
+       << object.circle_selected_edge_radius_max
        << " | circle_measure_source="
        << object.circle_measure_source
        << " | circle_failure_stage="
@@ -328,6 +344,23 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
            << (object.fastmatch_status.empty() ? "(none)" : object.fastmatch_status);
         return ss.str();
     }
+    if (object.type == "GridPatternClassTool")
+    {
+        std::ostringstream ss;
+        ss << "geometry: object=" << object.name
+           << " | tool=grid_pattern_class"
+           << " | status_code=" << object.grid_pattern_status_code
+           << " | active_cells=" << object.grid_pattern_active_cell_count
+           << " | descriptor_dim=" << object.grid_pattern_descriptor_dim
+           << " | levels=" << object.grid_pattern_level_count
+           << " | overlay_cells=" << object.grid_pattern_overlay_count
+           << " | overlay_truncated="
+           << (object.grid_pattern_overlay_truncated ? "true" : "false")
+           << " | elapsed_ms=" << object.grid_pattern_elapsed_ms
+           << " | classification=model_not_bound"
+           << " | summary=" << object.grid_pattern_summary;
+        return ss.str();
+    }
 
     return BuildFindCircleGeometrySummary(object);
 }
@@ -440,6 +473,20 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
            << " | manual_elements_count=" << context.manual_elements_count;
         return ss.str();
     }
+    if (object.type == "GridPatternClassTool")
+    {
+        std::ostringstream ss;
+        ss << "image overlay:"
+           << " analysis_roi=true"
+           << " | active_grid_cells=" << object.grid_pattern_overlay_count
+           << " | cell_orientation_lines=" << object.grid_pattern_overlay_count
+           << " | full_active_cells=" << object.grid_pattern_active_cell_count
+           << " | focus_subset="
+           << (object.grid_pattern_overlay_truncated ? "true" : "false")
+           << " | source_preview_enabled="
+           << (context.source_preview_enabled ? "true" : "false");
+        return ss.str();
+    }
 
     return BuildFindCircleOverlaySummary(context, object);
 }
@@ -545,7 +592,8 @@ std::string ModuleForType(const std::string& type)
     if (type.rfind("Mlpack", 0) == 0) return "mlpack";
     if (type.rfind("Ensmallen", 0) == 0) return "ensmallen";
     if (type == "Image" || type.rfind("Find", 0) == 0 || type == "FastMatch" ||
-        type == "FormfitGauge" || type == "CxOverlay" || type == "CircleRingGauge") return "cximage";
+        type == "GridPatternClassTool" || type == "FormfitGauge" ||
+        type == "CxOverlay" || type == "CircleRingGauge") return "cximage";
     return "cxscript";
 }
 
@@ -560,6 +608,7 @@ std::string ModuleForStatement(const std::string& statement)
     if (statement.find("mlpack.") != std::string::npos || statement.find("Mlpack") != std::string::npos) return "mlpack";
     if (statement.find("ensmallen.") != std::string::npos || statement.find("Ensmallen") != std::string::npos) return "ensmallen";
     if (statement.find("cximage.") != std::string::npos || statement.find("Image") != std::string::npos ||
-        statement.find("Find") != std::string::npos || statement.find("FastMatch") != std::string::npos) return "cximage";
+        statement.find("Find") != std::string::npos || statement.find("FastMatch") != std::string::npos ||
+        statement.find("GridPattern") != std::string::npos) return "cximage";
     return "cxscript";
 }

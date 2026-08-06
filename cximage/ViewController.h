@@ -1,4 +1,4 @@
-﻿#ifndef _ViewController_Header
+#ifndef _ViewController_Header
 #define _ViewController_Header
 
 #include "Window.h"
@@ -221,6 +221,16 @@ private:
       ScriptEvidenceThumb& thumb,
       float rowHeight);
   void DrawScriptEvidenceThumbnailRailByGroup();
+  void EnsureTorchTrainingImageTexture(TorchTrainingImageItem& item);
+  void SyncTorchTrainingImageSetFromEvidenceSelection();
+  int AddHDReferenceImageSetForCurrentSelection();
+  void AddTorchTrainingImageFromPath(
+      const std::string& imagePath,
+      const std::string& imageId,
+      const std::string& split,
+      const std::string& label,
+      const std::string& source);
+  void DrawTorchTrainingImageRail(const char* split, const char* label);
   bool LoadImageIntoImageView(const std::string& imagePath,
                               std::string& reason);
   bool LoadImageForEvidenceSelfTest(const std::string& imagePath,
@@ -244,6 +254,7 @@ private:
   bool ApplyCurrentGaugeToEditableShape(std::string& reason);
   void drawParameterTuningAndConclusionWindow();
   void drawTorchRuntimeEvidenceWindow();
+  void drawTorchTrainingImageSetWindow();
   void drawEvidenceAlbumWindow();
   void drawAnnotationToolWindow();
   void DrawAnnotationToolButtonStrip(bool horizontal);

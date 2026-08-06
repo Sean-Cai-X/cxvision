@@ -1856,6 +1856,30 @@ bool SaveCxDebugSnapshotText(ManualTestContext& context,
                 file << "  circle_process_width: "
                      << object.circle_process_width << "\n";
 
+                file << "  circle_selected_edge_index: "
+                     << object.circle_selected_edge_index << "\n";
+
+                file << "  circle_candidate_runs_total: "
+                     << object.circle_candidate_runs_total << "\n";
+
+                file << "  circle_candidate_runs_max_per_line: "
+                     << object.circle_candidate_runs_max_per_line << "\n";
+
+                file << "  circle_selected_edge_hits: "
+                     << object.circle_selected_edge_hits << "\n";
+
+                file << "  circle_selected_edge_misses: "
+                     << object.circle_selected_edge_misses << "\n";
+
+                file << "  circle_selected_edge_radius_avg: "
+                     << object.circle_selected_edge_radius_avg << "\n";
+
+                file << "  circle_selected_edge_radius_min: "
+                     << object.circle_selected_edge_radius_min << "\n";
+
+                file << "  circle_selected_edge_radius_max: "
+                     << object.circle_selected_edge_radius_max << "\n";
+
                 file << "  circle_measure_image_ready: "
                      << (object.circle_measure_image_ready ? "true" : "false")
                      << "\n";

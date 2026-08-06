@@ -79,6 +79,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FindObject.cpp
   cximage/FastMatch.cpp
   cximage/FastMatchPolicy.cpp
+  cximage/FastMatchGridClassAdapter.cpp
+  cximage/GridPatternClassTool.cpp
   cximage/FastMatchDiagnostic.cpp
   cximage/CxFastMatchRuntimeCapture.cpp
   cximage/Run.cpp
@@ -87,6 +89,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CircleRingGauge.cpp
   cximage/CxCoreBoundary.cpp
   cximage/RegionPatternNet.cpp
+  cximage/GridPatternClassNet.cpp
   cximage/FormfitFitMethod.cpp
   cximage/FormfitGauge.cpp
   cximage/FormfitPrototype.cpp
@@ -403,6 +406,28 @@ if(BUILD_TESTING AND
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS torch_segmentation_cpp_state_dict_weight_export
     ENVIRONMENT "PATH=${_cxvision_torch_ctest_path};LIBTORCH_MODULE_USE_CUDA=0")
+endif()
+
+if(BUILD_TESTING)
+  add_executable(cximage_grid_pattern_class_net_test
+    cximage/GridPatternClassNetTest.cpp
+    cximage/GridPatternClassNet.cpp
+    cximage/FastMatchGridClassAdapter.cpp
+  )
+  target_include_directories(cximage_grid_pattern_class_net_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/cximage"
+    ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(cximage_grid_pattern_class_net_test PRIVATE
+    ${OpenCV_LIBS}
+  )
+  if(MSVC)
+    target_compile_options(cximage_grid_pattern_class_net_test PRIVATE /EHsc /W3)
+  endif()
+  add_test(
+    NAME cximage_grid_pattern_class_net_test
+    COMMAND $<TARGET_FILE:cximage_grid_pattern_class_net_test>
+  )
 endif()
 
 

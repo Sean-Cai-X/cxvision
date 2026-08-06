@@ -1196,9 +1196,6 @@ void FindCircle::Measure(Image& image)
       bool bcollectBegin = false;
       int idarkgapnum = 0;
 
-    int icurlinenum = 0;
-    int icurlineposition = 0;
-
       m_budget_state = CxAlgorithmBudgetState();
 
       /*
@@ -1224,9 +1221,27 @@ void FindCircle::Measure(Image& image)
       int scan_lines_processed = 0;
       int total_samples = 0;
       int valid_points_count = 0;
+      int candidate_runs_total = 0;
+      int candidate_runs_max_per_line = 0;
+      int selected_edge_hits = 0;
+      int selected_edge_misses = 0;
+      double selected_edge_radius_sum = 0.0;
+      double selected_edge_radius_min = std::numeric_limits<double>::infinity();
+      double selected_edge_radius_max = 0.0;
       std::vector<int> accepted_line_positions(
           static_cast<std::size_t>(std::max(0, iscanlines)),
           -1);
+
+      auto record_selected_radius = [&](const gp_Pnt& point) {
+          const double dx = point.X() - static_cast<double>(m_icentx);
+          const double dy = point.Y() - static_cast<double>(m_icenty);
+          const double radius = std::sqrt(dx * dx + dy * dy);
+          if (!std::isfinite(radius))
+              return;
+          selected_edge_radius_sum += radius;
+          selected_edge_radius_min = std::min(selected_edge_radius_min, radius);
+          selected_edge_radius_max = std::max(selected_edge_radius_max, radius);
+      };
 
       auto now = std::chrono::steady_clock::now();
       int elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time).count());
@@ -1301,19 +1316,19 @@ void FindCircle::Measure(Image& image)
               }
 
               irecordnum = 0;
-              icurlinenum = 0;
               bcollectBegin = false;
               idarkgapnum = 0;
-              int best_line_position = -1;
-              int best_line_score = std::numeric_limits<int>::max();
 
-              auto consider_default_candidate = [&](int candidate_position) {
-                  if (candidate_position < left_margin ||
-                      candidate_position > (ilineslen1 - 1 - right_margin))
-                  {
-                      return;
-                  }
+              struct CircleLineCandidate
+              {
+                  int ordinal = 0;
+                  int position = -1;
+                  int score = std::numeric_limits<int>::max();
+                  double radius_from_center = 0.0;
+              };
+              std::vector<CircleLineCandidate> line_candidates;
 
+              auto score_candidate = [&](int candidate_position) -> int {
                   /*
                    * Default "any edge" used to mean "take max line position",
                    * so the outermost/endpoint-adjacent response always won.
@@ -1334,14 +1349,52 @@ void FindCircle::Measure(Image& image)
                   {
                       score = candidate_position;
                   }
-
-                  if (best_line_position < 0 || score < best_line_score)
-                  {
-                      best_line_position = candidate_position;
-                      best_line_score = score;
-                  }
+                  return score;
               };
-             
+
+              auto append_line_candidate = [&](int record_count) {
+                  if (record_count <= 0 || record_count > max_edge_width)
+                  {
+                      return;
+                  }
+
+                  int candidate_position =
+                      ComputeCircleEdgeOffset(record_count, m_ineedfixs) +
+                      irecordpoint[(record_count >> 1)];
+                  candidate_position =
+                      ClampCircleEdgePosition(candidate_position, ilineslen1, right_margin);
+
+                  if (candidate_position < left_margin ||
+                      candidate_position > (ilineslen1 - 1 - right_margin))
+                  {
+                      return;
+                  }
+
+                  CircleLineCandidate candidate;
+                  candidate.ordinal =
+                      static_cast<int>(line_candidates.size()) + 1;
+                  candidate.position = candidate_position;
+                  candidate.score = score_candidate(candidate_position);
+                  const gp_Pnt candidate_point =
+                      m_lines[inumy].getlinepoint(candidate_position);
+                  const double dx =
+                      candidate_point.X() - static_cast<double>(m_icentx);
+                  const double dy =
+                      candidate_point.Y() - static_cast<double>(m_icenty);
+                  candidate.radius_from_center = std::sqrt(dx * dx + dy * dy);
+                  line_candidates.push_back(candidate);
+              };
+
+              auto flush_line_candidate = [&]() {
+                  if (bcollectBegin)
+                  {
+                      append_line_candidate(irecordnum);
+                  }
+                  irecordnum = 0;
+                  bcollectBegin = false;
+                  idarkgapnum = 0;
+              };
+
             for (int inumx = 0; inumx < ilineslen1; inumx++)
             { 
                 ++total_samples;
@@ -1415,39 +1468,7 @@ void FindCircle::Measure(Image& image)
                           && irecordnum > 0
                           && irecordnum <= max_edge_width)
                       {
-                        icurlineposition = ComputeCircleEdgeOffset(irecordnum, m_ineedfixs) + irecordpoint[(irecordnum >> 1)];
-                        icurlineposition = ClampCircleEdgePosition(icurlineposition, ilineslen1, right_margin);
-
-                        icurlinenum++;
-                        if (icurlinenum == m_iselectedgenum
-                            || m_iselectedgenum == 0)//0 any
-                        {
-                            if (icurlineposition <= (ilineslen1 - 1 - right_margin)
-                                && icurlineposition >= left_margin)
-                            {
-                                  if (m_iselectedgenum == 0)
-                                  {
-                                      if (compact_domain)
-                                      {
-                                          if (best_line_position < 0)
-                                              best_line_position = icurlineposition;
-                                      }
-                                      else
-                                      {
-                                          consider_default_candidate(icurlineposition);
-                                      }
-                                  }
-                                else
-                                {
-                                    gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
-                                    m_measurepoints.addpoint(apoint);
-                                    if (inumy >= 0 && inumy < iscanlines)
-                                        accepted_line_positions[static_cast<std::size_t>(inumy)] = icurlineposition;
-                                    valid_points_count = m_measurepoints.size();
-                                    break;
-                                }
-                            }
-                        }
+                        append_line_candidate(irecordnum);
                       }
                       irecordnum = 0;
                       bcollectBegin = false;
@@ -1458,49 +1479,110 @@ void FindCircle::Measure(Image& image)
                 && irecordnum > 0
                 && irecordnum <= max_edge_width)
             {
-                icurlineposition = ComputeCircleEdgeOffset(irecordnum, m_ineedfixs) + irecordpoint[(irecordnum >> 1)];
-                icurlineposition = ClampCircleEdgePosition(icurlineposition, ilineslen1, right_margin);
-                icurlinenum++;
-                if (icurlinenum == m_iselectedgenum
-                    || m_iselectedgenum == 0)
-                {
-                    if (icurlineposition <= (ilineslen1 - 1 - right_margin)
-                        && icurlineposition >= left_margin)
-                    {
-                          if (m_iselectedgenum == 0)
-                          {
-                              if (compact_domain)
-                              {
-                                  if (best_line_position < 0)
-                                      best_line_position = icurlineposition;
-                              }
-                              else
-                              {
-                                  consider_default_candidate(icurlineposition);
-                              }
-                          }
-                        else
-                        {
-                            gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
-                            m_measurepoints.addpoint(apoint);
-                            if (inumy >= 0 && inumy < iscanlines)
-                                accepted_line_positions[static_cast<std::size_t>(inumy)] = icurlineposition;
-                            valid_points_count = m_measurepoints.size();
-                            break;
-                        }
-                    }
-                  }
-                  irecordnum = 0;
-                  bcollectBegin = false;
-                  idarkgapnum = 0;
+                flush_line_candidate();
               }
 
-            if (m_iselectedgenum == 0 && best_line_position >= 0)
+            candidate_runs_total += static_cast<int>(line_candidates.size());
+            candidate_runs_max_per_line =
+                std::max(candidate_runs_max_per_line,
+                         static_cast<int>(line_candidates.size()));
+
+            /*
+             * Edge selection must be independent from the internal scan-line
+             * direction.  A circle gauge line may be built from Rout->Rin or
+             * Rin->Rout depending on geometry/arc construction.  Sort by
+             * actual radial distance so Edge 1/2/3 means the 1st/2nd/3rd
+             * candidate from the center outward, matching FindLine's stable
+             * "candidate column" semantics.
+             */
+            std::sort(
+                line_candidates.begin(),
+                line_candidates.end(),
+                [](const CircleLineCandidate& lhs,
+                   const CircleLineCandidate& rhs) {
+                    if (lhs.radius_from_center != rhs.radius_from_center)
+                        return lhs.radius_from_center < rhs.radius_from_center;
+                    return lhs.position < rhs.position;
+                });
+            for (std::size_t i = 0; i < line_candidates.size(); ++i)
             {
-                gp_Pnt apoint = m_lines[inumy].getlinepoint(best_line_position);
+                line_candidates[i].ordinal = static_cast<int>(i) + 1;
+            }
+
+            if (m_iselectedgenum == 0)
+            {
+                /*
+                 * All edges must mirror FindLine's "All edges" semantics:
+                 * every eligible boundary crossing on each radial Gauge line
+                 * is an accepted/displayed result point.  The previous code
+                 * picked a single best-scored candidate per radial line, which
+                 * made FindCircle look like a selected-edge run even when the
+                 * UI was set to All edges.
+                 */
+                if (line_candidates.empty())
+                {
+                    ++selected_edge_misses;
+                }
+                else
+                {
+                    int representative_position = -1;
+                    for (const CircleLineCandidate& candidate : line_candidates)
+                    {
+                        gp_Pnt apoint =
+                            m_lines[inumy].getlinepoint(candidate.position);
+                        m_measurepoints.addpoint(apoint);
+                        record_selected_radius(apoint);
+                        ++selected_edge_hits;
+                        if (representative_position < 0)
+                            representative_position = candidate.position;
+                    }
+                    if (inumy >= 0 && inumy < iscanlines)
+                    {
+                        accepted_line_positions[
+                            static_cast<std::size_t>(inumy)] =
+                            representative_position;
+                    }
+                    valid_points_count = m_measurepoints.size();
+                }
+                continue;
+            }
+
+            int selected_line_position = -1;
+            if (m_iselectedgenum == -1)
+            {
+                // -1 is the true terminal boundary on this radial Gauge
+                // line. Candidate counts may differ from one angle to the
+                // next, so it cannot be represented by a fixed Edge N.
+                if (!line_candidates.empty())
+                {
+                    selected_line_position = line_candidates.back().position;
+                    ++selected_edge_hits;
+                }
+                else
+                {
+                    ++selected_edge_misses;
+                }
+            }
+            else if (m_iselectedgenum > 0)
+            {
+                if (m_iselectedgenum <= static_cast<int>(line_candidates.size()))
+                {
+                    selected_line_position =
+                        line_candidates[static_cast<std::size_t>(m_iselectedgenum - 1)].position;
+                    ++selected_edge_hits;
+                }
+                else
+                {
+                    ++selected_edge_misses;
+                }
+            }
+            if (selected_line_position >= 0)
+            {
+                gp_Pnt apoint = m_lines[inumy].getlinepoint(selected_line_position);
                 m_measurepoints.addpoint(apoint);
+                record_selected_radius(apoint);
                 if (inumy >= 0 && inumy < iscanlines)
-                    accepted_line_positions[static_cast<std::size_t>(inumy)] = best_line_position;
+                    accepted_line_positions[static_cast<std::size_t>(inumy)] = selected_line_position;
                 valid_points_count = m_measurepoints.size();
             }
 
@@ -1517,9 +1599,8 @@ void FindCircle::Measure(Image& image)
          * small circular seam window using the nearest accepted neighboring
          * radial position.  Middle scan lines are not synthesized here, so
          * normal rejection semantics stay intact.
-         */
+        */
         if (!compact_domain &&
-            m_iselectedgenum == 0 &&
             iscanlines >= 4 &&
             static_cast<int>(accepted_line_positions.size()) == iscanlines)
         {
@@ -1570,7 +1651,14 @@ void FindCircle::Measure(Image& image)
                     ClampCircleEdgePosition(sum / count, ilineslen1, right_margin);
                 gp_Pnt apoint = m_lines[static_cast<std::size_t>(scan_index)].getlinepoint(repaired_position);
                 m_measurepoints.addpoint(apoint);
+                record_selected_radius(apoint);
                 accepted_line_positions[static_cast<std::size_t>(scan_index)] = repaired_position;
+                if (m_iselectedgenum != 0)
+                {
+                    ++selected_edge_hits;
+                    if (selected_edge_misses > 0)
+                        --selected_edge_misses;
+                }
                 ++seam_repaired;
             };
 
@@ -1607,13 +1695,49 @@ void FindCircle::Measure(Image& image)
     m_lastMeasureGeometryDebug.valid_points_count =
         m_measurepoints.size();
 
+    m_lastMeasureGeometryDebug.selected_edge_index = m_iselectedgenum;
+    m_lastMeasureGeometryDebug.candidate_runs_total = candidate_runs_total;
+    m_lastMeasureGeometryDebug.candidate_runs_max_per_line =
+        candidate_runs_max_per_line;
+    m_lastMeasureGeometryDebug.selected_edge_hits = selected_edge_hits;
+    m_lastMeasureGeometryDebug.selected_edge_misses = selected_edge_misses;
+    if (m_measurepoints.size() > 0 &&
+        std::isfinite(selected_edge_radius_min))
+    {
+        m_lastMeasureGeometryDebug.selected_edge_radius_avg =
+            selected_edge_radius_sum /
+            static_cast<double>(std::max(1, m_measurepoints.size()));
+        m_lastMeasureGeometryDebug.selected_edge_radius_min =
+            selected_edge_radius_min;
+        m_lastMeasureGeometryDebug.selected_edge_radius_max =
+            selected_edge_radius_max;
+    }
+    else
+    {
+        m_lastMeasureGeometryDebug.selected_edge_radius_avg = 0.0;
+        m_lastMeasureGeometryDebug.selected_edge_radius_min = 0.0;
+        m_lastMeasureGeometryDebug.selected_edge_radius_max = 0.0;
+    }
+
     if (m_measurepoints.size() > 0)
     {
         m_lastMeasureGeometryDebug.failure_stage =
             "result_points_available";
 
         m_lastMeasureGeometryDebug.detail =
-            "FindCircle original Measure produced result points.";
+            "FindCircle original Measure produced result points; selected_edge=" +
+            std::to_string(m_iselectedgenum) +
+            ", candidate_runs_total=" + std::to_string(candidate_runs_total) +
+            ", candidate_runs_max_per_line=" +
+            std::to_string(candidate_runs_max_per_line) +
+            ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
+            ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", selected_edge_radius_avg=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
+            ", selected_edge_radius_min=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_min) +
+            ", selected_edge_radius_max=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_max);
     }
     else
     {
@@ -1621,7 +1745,19 @@ void FindCircle::Measure(Image& image)
             "circle_measure_no_result_points";
 
         m_lastMeasureGeometryDebug.detail =
-            "FindCircle original Measure completed, but produced zero result points.";
+            "FindCircle original Measure completed, but produced zero result points; selected_edge=" +
+            std::to_string(m_iselectedgenum) +
+            ", candidate_runs_total=" + std::to_string(candidate_runs_total) +
+            ", candidate_runs_max_per_line=" +
+            std::to_string(candidate_runs_max_per_line) +
+            ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
+            ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", selected_edge_radius_avg=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
+            ", selected_edge_radius_min=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_min) +
+            ", selected_edge_radius_max=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_max);
     }
 
     m_lastMeasureGeometryDebug.scan_lines_processed = scan_lines_processed;
@@ -1651,6 +1787,17 @@ void FindCircle::Measure(Image& image)
         "scan_lines_processed=" + std::to_string(scan_lines_processed) +
             ", total_samples=" + std::to_string(total_samples) +
             ", measure_points=" + std::to_string(m_measurepoints.size()) +
+            ", selected_edge=" + std::to_string(m_iselectedgenum) +
+            ", candidate_runs_total=" + std::to_string(candidate_runs_total) +
+            ", candidate_runs_max_per_line=" + std::to_string(candidate_runs_max_per_line) +
+            ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
+            ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", selected_edge_radius_avg=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
+            ", selected_edge_radius_min=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_min) +
+            ", selected_edge_radius_max=" +
+            std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_max) +
             ", failure_stage=" + m_lastMeasureGeometryDebug.failure_stage);
 }
 

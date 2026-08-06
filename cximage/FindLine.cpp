@@ -307,7 +307,8 @@ void FinalizeFindLineEdgeEvaluations(FindLineMeasureInputDebug& debug)
         ++debug.evaluated_edge_count;
         eval.selected =
             debug.selected_edge_index == 0 ||
-            debug.selected_edge_index == eval.edge_index;
+            debug.selected_edge_index == eval.edge_index ||
+            (debug.selected_edge_index == -1 && eval.accepted_points > 0);
         eval.fit_possible = eval.accepted_points >= 2;
         eval.coverage =
             static_cast<double>(eval.accepted_points) /
@@ -444,6 +445,7 @@ int FindLine::m_curfindlinenum = 0;
 FindLine::FindLine() :Shape(),
 m_ihgap(6),
 m_iwgap(6),
+m_scan_direction(0),
 m_iSelectPointGap(3),
 m_iMethod(1),
 m_iThreshold(8),
@@ -1300,6 +1302,17 @@ void FindLine::setfilterprofile(int profile)
     m_filter_profile = profile;
 }
 
+void FindLine::setscandirection(int direction)
+{
+    const int normalized = direction == 1 ? 1 : (direction == 2 ? 2 : 0);
+    if (m_scan_direction == normalized)
+        return;
+    m_scan_direction = normalized;
+    m_measurepoints_w.clear();
+    m_measurepoints_h.clear();
+    InvalidateMeasureAndFitAfterParamChange("scan_direction_changed");
+}
+
 void FindLine::setobjectfilterstrategy(int strategy)
 {
     if (strategy < 0)
@@ -1376,8 +1389,8 @@ void FindLine::MeasureT(void *pimage)
         return;//error process
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
-    int iwsize = ClampSizeToInt(m_lines_w.size());
-    int ihsize = ClampSizeToInt(m_lines_h.size());
+    int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
     if (iwsize <= 0 && ihsize <= 0)
         return;
 
@@ -1586,8 +1599,8 @@ void FindLine::Measure(Image& image)
         return;//error process
     }
 
-    int iwsize = ClampSizeToInt(m_lines_w.size());
-    int ihsize = ClampSizeToInt(m_lines_h.size());
+    int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
 
     m_lastMeasureInputDebug.original_scan_w_count = iwsize;
     m_lastMeasureInputDebug.original_scan_h_count = ihsize;
@@ -2126,7 +2139,9 @@ void FindLine::Measure(Image& image)
          * If the user explicitly selected a different edge rank, do not
          * silently emit a point for that unrelated edge.
          */
-        if (m_iselectedgenum != 0 && m_iselectedgenum != 1)
+        if (m_iselectedgenum != -1 &&
+            m_iselectedgenum != 0 &&
+            m_iselectedgenum != 1)
             return false;
 
         LineShape& scan_line = scan_type == 0
@@ -2188,6 +2203,8 @@ void FindLine::Measure(Image& image)
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
+        int lastEdgePosition = -1;
+        int lastEdgeOrdinal = 0;
 
 
         for (int inumx = 0; inumx < ilineslen1; inumx++)
@@ -2229,7 +2246,16 @@ void FindLine::Measure(Image& image)
                     if (endpointOk)
                     {
                         ++icurlinenum;
-                        if (icurlinenum == m_iselectedgenum
+                        if (m_iselectedgenum == -1)
+                        {
+                            // Last edge is resolved after the complete Gauge
+                            // search line has been scanned.  Candidate counts
+                            // are allowed to differ between scan lines.
+                            lastEdgePosition = icurlineposition;
+                            lastEdgeOrdinal = icurlinenum;
+                            edgeCandidateRecorded = true;
+                        }
+                        else if (icurlinenum == m_iselectedgenum
                             || m_iselectedgenum == 0)//0 any
                         {
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
@@ -2333,7 +2359,13 @@ void FindLine::Measure(Image& image)
             if (endpointOk)
             {
                 ++icurlinenum;
-                if (icurlinenum == m_iselectedgenum
+                if (m_iselectedgenum == -1)
+                {
+                    lastEdgePosition = icurlineposition;
+                    lastEdgeOrdinal = icurlinenum;
+                    edgeCandidateRecorded = true;
+                }
+                else if (icurlinenum == m_iselectedgenum
                     || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
@@ -2402,6 +2434,27 @@ void FindLine::Measure(Image& image)
             bcollectBegin = false;
         }
 
+        if (m_iselectedgenum == -1 && lastEdgePosition >= 0)
+        {
+            gp_Pnt apoint =
+                m_lines_w[inumy].getlinepoint(lastEdgePosition);
+            m_measurepoints_w.addpoint(apoint);
+            ++m_lastMeasureInputDebug.scan_points_emitted;
+            auto& currentDiag =
+                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+            currentDiag.accepted = true;
+            currentDiag.accepted_x = apoint.X();
+            currentDiag.accepted_y = apoint.Y();
+            currentDiag.reject_reason.clear();
+            RecordFindLineEdgeCandidate(
+                m_lastMeasureInputDebug,
+                lastEdgeOrdinal,
+                true,
+                false,
+                false,
+                false);
+        }
+
         const bool terminalFallbackAccepted =
             tryTerminalGradientFallback(0, inumy, ilineslen1, diagIndex);
         if (terminalFallbackAccepted)
@@ -2439,6 +2492,8 @@ void FindLine::Measure(Image& image)
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
+        int lastEdgePosition = -1;
+        int lastEdgeOrdinal = 0;
 
 
 
@@ -2481,7 +2536,13 @@ void FindLine::Measure(Image& image)
                     if (endpointOk)
                     {
                         ++icurlinenum;
-                        if (icurlinenum == m_iselectedgenum
+                        if (m_iselectedgenum == -1)
+                        {
+                            lastEdgePosition = icurlineposition;
+                            lastEdgeOrdinal = icurlinenum;
+                            edgeCandidateRecorded = true;
+                        }
+                        else if (icurlinenum == m_iselectedgenum
                             || m_iselectedgenum == 0)
                         {
                             gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
@@ -2587,7 +2648,13 @@ void FindLine::Measure(Image& image)
             if (endpointOk)
             {
                 ++icurlinenum;
-                if (icurlinenum == m_iselectedgenum
+                if (m_iselectedgenum == -1)
+                {
+                    lastEdgePosition = icurlineposition;
+                    lastEdgeOrdinal = icurlinenum;
+                    edgeCandidateRecorded = true;
+                }
+                else if (icurlinenum == m_iselectedgenum
                     || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
@@ -2655,6 +2722,27 @@ void FindLine::Measure(Image& image)
             }
             irecordnum = 0;
             bcollectBegin = false;
+        }
+
+        if (m_iselectedgenum == -1 && lastEdgePosition >= 0)
+        {
+            gp_Pnt apoint =
+                m_lines_h[inumy - iwsize].getlinepoint(lastEdgePosition);
+            m_measurepoints_h.addpoint(apoint);
+            ++m_lastMeasureInputDebug.scan_points_emitted;
+            auto& currentDiag =
+                m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+            currentDiag.accepted = true;
+            currentDiag.accepted_x = apoint.X();
+            currentDiag.accepted_y = apoint.Y();
+            currentDiag.reject_reason.clear();
+            RecordFindLineEdgeCandidate(
+                m_lastMeasureInputDebug,
+                lastEdgeOrdinal,
+                true,
+                false,
+                false,
+                false);
         }
 
         const bool terminalFallbackAccepted =
@@ -2924,8 +3012,8 @@ void FindLine::BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stat
         return;
     }
 
-    const int iwsize = ClampSizeToInt(m_lines_w.size());
-    const int ihsize = ClampSizeToInt(m_lines_h.size());
+    const int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    const int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
 
     if (iwsize <= 0 && ihsize <= 0)
     {
@@ -3071,8 +3159,8 @@ void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& st
     }
 
     const int max_band_width = 70;
-    const int iwsize = ClampSizeToInt(m_lines_w.size());
-    const int ihsize = ClampSizeToInt(m_lines_h.size());
+    const int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    const int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
     const int ilineslen1 = iwsize > 0 ? m_lines_w[0].getlinesize() : 0;
     const int ilineslen2 = ihsize > 0 ? m_lines_h[0].getlinesize() : 0;
 
@@ -3144,6 +3232,13 @@ void FindLine::CollectAllEdgeBands(Image& image, FindLineMeasureProfileStats& st
 
         if (collecting)
             finalize_band(line_length - 1);
+
+        if (m_iselectedgenum == -1 && !scan_bands.bands.empty())
+        {
+            for (auto& candidate : scan_bands.bands)
+                candidate.valid = false;
+            scan_bands.bands.back().valid = true;
+        }
 
         if (!scan_bands.bands.empty())
             m_scanEdgeBands.push_back(scan_bands);
@@ -3840,13 +3935,16 @@ void FindLine::measure(void* pimage)
         return;
     }
 
-    const int scanCount = ClampSizeToInt(m_lines_w.size()) +
-        ClampSizeToInt(m_lines_h.size());
+    const int scanCount =
+        (wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0) +
+        (hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0);
     int maxScanLength = 0;
-    for (LineShape& scan : m_lines_w)
-        maxScanLength = std::max(maxScanLength, scan.getlinesize());
-    for (LineShape& scan : m_lines_h)
-        maxScanLength = std::max(maxScanLength, scan.getlinesize());
+    if (wscanenabled())
+        for (LineShape& scan : m_lines_w)
+            maxScanLength = std::max(maxScanLength, scan.getlinesize());
+    if (hscanenabled())
+        for (LineShape& scan : m_lines_h)
+            maxScanLength = std::max(maxScanLength, scan.getlinesize());
 
     if (scanCount <= 0 || maxScanLength <= 0 ||
         scanCount > g_pbackimage->getHeight() ||
@@ -4436,9 +4534,9 @@ bool FindLine::getscandiagnosticline(
 int FindLine::getscanlinecount(int scan_type) const
 {
     if (scan_type == 0)
-        return static_cast<int>(m_lines_w.size());
+        return wscanenabled() ? static_cast<int>(m_lines_w.size()) : 0;
     if (scan_type == 1)
-        return static_cast<int>(m_lines_h.size());
+        return hscanenabled() ? static_cast<int>(m_lines_h.size()) : 0;
     return 0;
 }
 
@@ -4451,6 +4549,8 @@ bool FindLine::getscanline(
     const LineShape* line = nullptr;
     if (scan_type == 0)
     {
+        if (!wscanenabled())
+            return false;
         if (scan_index < 0 ||
             scan_index >= static_cast<int>(m_lines_w.size()))
         {
@@ -4460,6 +4560,8 @@ bool FindLine::getscanline(
     }
     else if (scan_type == 1)
     {
+        if (!hscanenabled())
+            return false;
         if (scan_index < 0 ||
             scan_index >= static_cast<int>(m_lines_h.size()))
         {
@@ -5017,7 +5119,7 @@ void FindLine::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
     }
 
     const PointsShape& w_points = getresultpointsw();
-    if (w_points.size() > 0)
+    if (wscanenabled() && w_points.size() > 0)
     {
         auto pts_shape = std::make_unique<PointsShape>();
         for (int i = 0; i < w_points.size(); ++i)
@@ -5036,7 +5138,7 @@ void FindLine::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
     }
 
     const PointsShape& h_points = getresultpointsh();
-    if (h_points.size() > 0)
+    if (hscanenabled() && h_points.size() > 0)
     {
         auto pts_shape = std::make_unique<PointsShape>();
         for (int i = 0; i < h_points.size(); ++i)
@@ -5294,8 +5396,8 @@ void FindLine::BuildScanProfilesRobust(Image& image,
         return;
     }
 
-    const int iwsize = ClampSizeToInt(m_lines_w.size());
-    const int ihsize = ClampSizeToInt(m_lines_h.size());
+    const int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    const int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
 
     if (iwsize <= 0 && ihsize <= 0)
     {
@@ -5395,8 +5497,8 @@ void FindLine::CollectEdgeBandsRobust(Image& image,
     const int max_band_width = 70;
     const int profile_half_width = 5;
 
-    const int iwsize = ClampSizeToInt(m_lines_w.size());
-    const int ihsize = ClampSizeToInt(m_lines_h.size());
+    const int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
+    const int ihsize = hscanenabled() ? ClampSizeToInt(m_lines_h.size()) : 0;
     const int ilineslen1 = iwsize > 0 ? m_lines_w[0].getlinesize() : 0;
     const int ilineslen2 = ihsize > 0 ? m_lines_h[0].getlinesize() : 0;
 
@@ -5481,6 +5583,13 @@ void FindLine::CollectEdgeBandsRobust(Image& image,
 
         if (collecting)
             finalize_band(line_length - 1);
+
+        if (m_iselectedgenum == -1 && !scan_bands.bands.empty())
+        {
+            for (auto& candidate : scan_bands.bands)
+                candidate.valid = false;
+            scan_bands.bands.back().valid = true;
+        }
 
         if (!scan_bands.bands.empty())
             m_scanEdgeBands.push_back(scan_bands);

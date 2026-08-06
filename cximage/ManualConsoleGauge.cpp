@@ -113,6 +113,28 @@ void InjectManualGaugeInt(ManualTestContext& context, const std::string& key, in
         "manual_gauge_applied");
 }
 
+int ReadManualGaugeInt(
+    const ManualTestContext& context,
+    const std::string& key,
+    int fallback)
+{
+    const auto it = context.runtime_int_vars.find(key);
+    if (it == context.runtime_int_vars.end())
+        return fallback;
+    return it->second;
+}
+
+bool IsFastMatchGaugeTool(const std::string& tool)
+{
+    return tool == "FastMatch" || tool == "fastmatch" ||
+           tool == "CFastMatch";
+}
+
+bool IsGridPatternGaugeTool(const std::string& tool)
+{
+    return tool == "GridPatternClassTool";
+}
+
 bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
@@ -149,6 +171,11 @@ bool ValidateManualGaugeGeometryForEditing(
         else
             reason.clear();
         return reason.empty();
+    }
+    if (IsFastMatchGaugeTool(gauge.tool) || IsGridPatternGaugeTool(gauge.tool))
+    {
+        reason.clear();
+        return true;
     }
     reason = "unsupported gauge tool";
     return false;
@@ -208,6 +235,9 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_tool_half_width", gauge.tool_half_width);
         InjectManualGaugeInt(context, "global_wgap", gauge.wgap);
         InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
+        gauge.scan_direction = gauge.scan_direction == 1 ? 1 : 2;
+        InjectManualGaugeInt(
+            context, "global_findline_scan_direction", gauge.scan_direction);
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
@@ -216,7 +246,7 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         context.findline_scan_edge_count =
             std::max(1, std::min(16, context.findline_scan_edge_count));
         context.findline_selected_scan_edge =
-            std::max(0, std::min(context.findline_selected_scan_edge,
+            std::max(-1, std::min(context.findline_selected_scan_edge,
                                  context.findline_scan_edge_count));
         if (context.findline_edge_params.size() <
             static_cast<std::size_t>(context.findline_scan_edge_count + 1))
@@ -352,7 +382,7 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         context.findcircle_scan_edge_count =
             std::max(1, std::min(32, context.findcircle_scan_edge_count));
         context.findcircle_selected_scan_edge =
-            std::max(0, std::min(context.findcircle_selected_scan_edge,
+            std::max(-1, std::min(context.findcircle_selected_scan_edge,
                                  context.findcircle_scan_edge_count));
         if (context.findcircle_edge_params.size() <
             static_cast<std::size_t>(context.findcircle_scan_edge_count + 1))
@@ -402,14 +432,14 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         {
             ManualFindCircleEdgeParamState& params =
                 context.findcircle_edge_params[static_cast<std::size_t>(edge)];
-            if (!params.initialized)
-            {
-                params.initialized = true;
-                params.threshold = gauge.threshold;
-                params.method = gauge.method;
-                params.linegap = gauge.linegap;
-                params.gap = gauge.gap;
-            }
+            // One FindCircle object owns one parameter set. Edge N is only a
+            // boundary-candidate ordinal, so legacy edge globals mirror the
+            // shared parameters instead of retaining divergent profiles.
+            params.initialized = true;
+            params.threshold = gauge.threshold;
+            params.method = gauge.method;
+            params.linegap = gauge.linegap;
+            params.gap = gauge.gap;
             const std::string prefix =
                 "global_findcircle_edge" + std::to_string(edge) + "_";
             InjectManualGaugeInt(context, prefix + "threshold", params.threshold);
@@ -420,13 +450,10 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
 
         if (context.findcircle_selected_scan_edge > 0)
         {
-            const ManualFindCircleEdgeParamState& selected =
-                context.findcircle_edge_params[
-                    static_cast<std::size_t>(context.findcircle_selected_scan_edge)];
-            InjectManualGaugeInt(context, "global_findcircle_selected_threshold", selected.threshold);
-            InjectManualGaugeInt(context, "global_findcircle_selected_method", selected.method);
-            InjectManualGaugeInt(context, "global_findcircle_selected_linegap", selected.linegap);
-            InjectManualGaugeInt(context, "global_findcircle_selected_gap", selected.gap);
+            InjectManualGaugeInt(context, "global_findcircle_selected_threshold", gauge.threshold);
+            InjectManualGaugeInt(context, "global_findcircle_selected_method", gauge.method);
+            InjectManualGaugeInt(context, "global_findcircle_selected_linegap", gauge.linegap);
+            InjectManualGaugeInt(context, "global_findcircle_selected_gap", gauge.gap);
         }
     }
     else if (gauge.tool == "FindEllipse")
@@ -439,6 +466,79 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+    }
+    else if (IsFastMatchGaugeTool(gauge.tool) || IsGridPatternGaugeTool(gauge.tool))
+    {
+        const int learnX =
+            std::max(0, ReadManualGaugeInt(context, "global_learn_roi_x", 120));
+        const int learnY =
+            std::max(0, ReadManualGaugeInt(context, "global_learn_roi_y", 120));
+        const int learnW =
+            std::max(1, ReadManualGaugeInt(context, "global_learn_roi_w", 120));
+        const int learnH =
+            std::max(1, ReadManualGaugeInt(context, "global_learn_roi_h", 90));
+        const int searchX =
+            std::max(0, ReadManualGaugeInt(context, "global_search_roi_x", 0));
+        const int searchY =
+            std::max(0, ReadManualGaugeInt(context, "global_search_roi_y", 0));
+        const int searchW =
+            std::max(1, ReadManualGaugeInt(context, "global_search_roi_w", 640));
+        const int searchH =
+            std::max(1, ReadManualGaugeInt(context, "global_search_roi_h", 480));
+
+        if (IsFastMatchGaugeTool(gauge.tool) &&
+            (searchW < learnW || searchH < learnH))
+        {
+            context.debug_status = "gauge_apply_failed";
+            context.debug_reason =
+                "FastMatch search ROI must be larger than or equal to learn ROI";
+            return false;
+        }
+
+        InjectManualGaugeInt(context, "global_learn_roi_x", learnX);
+        InjectManualGaugeInt(context, "global_learn_roi_y", learnY);
+        InjectManualGaugeInt(context, "global_learn_roi_w", learnW);
+        InjectManualGaugeInt(context, "global_learn_roi_h", learnH);
+        InjectManualGaugeInt(context, "global_search_roi_x", searchX);
+        InjectManualGaugeInt(context, "global_search_roi_y", searchY);
+        InjectManualGaugeInt(context, "global_search_roi_w", searchW);
+        InjectManualGaugeInt(context, "global_search_roi_h", searchH);
+
+        InjectManualGaugeInt(context, "global_wgap", gauge.wgap);
+        InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
+        InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
+        InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
+        InjectManualGaugeInt(context, "global_method", gauge.method);
+        InjectManualGaugeInt(
+            context,
+            "global_compare_gap",
+            std::max(1, ReadManualGaugeInt(context, "global_compare_gap", 20)));
+        InjectManualGaugeInt(
+            context,
+            "global_objfilter",
+            std::max(0, ReadManualGaugeInt(context, "global_objfilter", 1)));
+        InjectManualGaugeInt(
+            context,
+            "global_find_num",
+            std::max(1, ReadManualGaugeInt(context, "global_find_num", 1)));
+        InjectManualGaugeInt(
+            context,
+            "global_match_step_x",
+            std::max(1, ReadManualGaugeInt(context, "global_match_step_x", 10)));
+        InjectManualGaugeInt(
+            context,
+            "global_match_step_y",
+            std::max(1, ReadManualGaugeInt(context, "global_match_step_y", 10)));
+        InjectManualGaugeInt(
+            context,
+            "global_match_thre",
+            std::max(0, ReadManualGaugeInt(context, "global_match_thre", 10)));
+        InjectManualGaugeInt(
+            context,
+            "global_min_score_percent",
+            std::max(0, std::min(100, ReadManualGaugeInt(
+                context, "global_min_score_percent", 65))));
     }
     else
     {
@@ -565,6 +665,7 @@ bool SaveManualGaugeAnnotation(
          << "  \"ellipse_y1\": " << gauge.ellipse_y1 << ",\n"
          << "  \"wgap\": " << gauge.wgap << ",\n"
          << "  \"hgap\": " << gauge.hgap << ",\n"
+         << "  \"scan_direction\": " << gauge.scan_direction << ",\n"
          << "  \"gap\": " << gauge.gap << ",\n"
          << "  \"linegap\": " << gauge.linegap << ",\n"
          << "  \"threshold\": " << gauge.threshold << ",\n"
@@ -642,12 +743,20 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
     }
     // Backward compatible for annotations saved before FindEllipse gauge fields.
     ExtractJsonBool(source, "has_ellipse_gauge", loaded.has_ellipse_gauge);
-    ExtractJsonBool(source, "circle_arc_enabled", loaded.circle_arc_enabled);
+    const bool hasCircleArcEnabled =
+        ExtractJsonBool(source, "circle_arc_enabled", loaded.circle_arc_enabled);
+    if (!hasCircleArcEnabled)
+    {
+        const auto it = context.runtime_int_vars.find(
+            "global_findcircle_arc_enabled");
+        if (it != context.runtime_int_vars.end())
+            loaded.circle_arc_enabled = it->second != 0;
+    }
     const char* integer_keys[] = {
         "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
         "circle_cx", "circle_cy", "circle_px", "circle_py", "radius",
         "inner_radius", "outer_radius", "circle_arc_start_deg", "circle_arc_end_deg", "ellipse_x0", "ellipse_y0",
-        "ellipse_x1", "ellipse_y1", "wgap", "hgap", "gap", "linegap",
+        "ellipse_x1", "ellipse_y1", "wgap", "hgap", "scan_direction", "gap", "linegap",
         "threshold", "filterprofile", "method"
     };
     int* integer_values[] = {
@@ -656,13 +765,19 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         &loaded.circle_px, &loaded.circle_py, &loaded.radius,
         &loaded.inner_radius, &loaded.outer_radius, &loaded.circle_arc_start_deg, &loaded.circle_arc_end_deg, &loaded.ellipse_x0,
         &loaded.ellipse_y0, &loaded.ellipse_x1, &loaded.ellipse_y1,
-        &loaded.wgap, &loaded.hgap, &loaded.gap, &loaded.linegap,
+        &loaded.wgap, &loaded.hgap, &loaded.scan_direction, &loaded.gap, &loaded.linegap,
         &loaded.threshold, &loaded.filterprofile, &loaded.method
     };
     for (std::size_t i = 0; i < std::size(integer_keys); ++i)
     {
         if (!ExtractJsonInt(source, integer_keys[i], *integer_values[i]))
         {
+            if (std::string(integer_keys[i]) == "scan_direction")
+            {
+                // Older accepted annotations predate the exclusive W/H
+                // selector.  Keep ManualGaugeState's H-only default.
+                continue;
+            }
             if (std::string(integer_keys[i]).find("ellipse_") == 0 &&
                 !loaded.has_ellipse_gauge)
             {
@@ -670,14 +785,24 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
             }
             if (std::string(integer_keys[i]).find("circle_arc_") == 0)
             {
-                // Saved annotations from before the sector contract are full
-                // circle by definition; retain the struct defaults.
+                // Candidate packages written before the sector fields were
+                // added still contain the exact values in runtime_globals.
+                // Restore from that already-loaded value instead of replacing
+                // it with the full-circle struct defaults.
+                const std::string globalName =
+                    std::string(integer_keys[i]) == "circle_arc_start_deg"
+                        ? "global_findcircle_arc_start_deg"
+                        : "global_findcircle_arc_end_deg";
+                const auto it = context.runtime_int_vars.find(globalName);
+                if (it != context.runtime_int_vars.end())
+                    *integer_values[i] = it->second;
                 continue;
             }
             outReason = std::string("missing gauge field: ") + integer_keys[i];
             return false;
         }
     }
+    loaded.scan_direction = loaded.scan_direction == 1 ? 1 : 2;
     loaded.dirty = false;
     NormalizeManualGaugeGeometry(loaded);
     const bool valid = requireManualAcceptance

@@ -21,6 +21,7 @@ int filterprofile = global_filterprofile;
 int selected_edge = global_findline_selected_edge;
 
 m_line.SetWHgap(wgap, hgap);
+m_line.setscandirection(global_findline_scan_direction);
 m_line.setlinegap(linegap);
 m_line.setline(x0, y0, x1, y1, half_width);
 m_line.setmethod(method);

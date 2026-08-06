@@ -414,6 +414,14 @@ struct RuntimeObjectView
     int circle_scan_line_count = 0;
     int circle_scan_line_length = 0;
     int circle_process_width = 0;
+    int circle_selected_edge_index = 0;
+    int circle_candidate_runs_total = 0;
+    int circle_candidate_runs_max_per_line = 0;
+    int circle_selected_edge_hits = 0;
+    int circle_selected_edge_misses = 0;
+    double circle_selected_edge_radius_avg = 0.0;
+    double circle_selected_edge_radius_min = 0.0;
+    double circle_selected_edge_radius_max = 0.0;
 
     bool circle_measure_image_ready = false;
     int circle_measure_image_width = 0;
@@ -447,6 +455,16 @@ struct RuntimeObjectView
     int fastmatch_pattern_b_count = 0;
     int fastmatch_candidate_count = 0;
     double fastmatch_best_score = 0.0;
+
+    bool has_grid_pattern = false;
+    int grid_pattern_status_code = 0;
+    int grid_pattern_active_cell_count = 0;
+    int grid_pattern_descriptor_dim = 0;
+    int grid_pattern_level_count = 0;
+    int grid_pattern_overlay_count = 0;
+    bool grid_pattern_overlay_truncated = false;
+    double grid_pattern_elapsed_ms = 0.0;
+    std::string grid_pattern_summary;
 
 };
 
@@ -553,6 +571,7 @@ struct ManualGaugeState
   int tool_half_width = 20;
   int wgap = 32;
   int hgap = 8;
+  int scan_direction = 2; // 1=W-only, 2=H-only; Manual UI is exclusive.
   int linegap = 6;
   int threshold = 20;
   int filterprofile = 1;
@@ -666,6 +685,25 @@ struct ManifestImageItem
     std::string image_path;
     std::string level;
     std::string status;
+};
+
+struct TorchTrainingImageItem
+{
+    std::string image_id;
+    std::string image_path;
+    std::string case_id;
+    std::string target_id;
+    std::string source = "manual"; // evidence / manifest / manual
+    std::string split = "train";   // train / val / test
+    std::string label = "unlabeled"; // good / anomaly / unlabeled / pending
+    std::string status = "pending";
+
+    unsigned int texture_id = 0;
+    int texture_w = 0;
+    int texture_h = 0;
+    bool texture_loaded = false;
+    bool texture_failed = false;
+    bool texture_placeholder = false;
 };
 
 struct ScriptEvidenceThumb
@@ -900,6 +938,12 @@ struct ManualTestContext
   std::string manifest_load_reason;
   std::vector<std::string> image_manifest_entries;
   std::vector<ManifestImageItem> image_manifest_items;
+
+  std::vector<TorchTrainingImageItem> torch_training_images;
+  int selected_torch_training_image = -1;
+  std::string torch_training_new_image_path;
+  std::string torch_training_image_status = "PENDING";
+  std::string torch_training_image_reason = "training image set not initialized";
 
   std::vector<EvidenceChainThumb> evidence_chain_thumbs;
   int selected_evidence_thumb = -1;

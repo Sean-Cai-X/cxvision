@@ -26,7 +26,9 @@ enum class CxScriptTypeId : std::uint16_t
     PointsShape,
     LineShape,
 
-    SmartDouble
+    SmartDouble,
+
+    GridPatternClassTool
 };
 
 std::string_view CxScriptTypeName(

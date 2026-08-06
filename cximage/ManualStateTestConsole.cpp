@@ -6,6 +6,7 @@
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
+#include "GridPatternClassTool.h"
 #include "TorchTask.h"
 #include "CircleRingGauge.h"
 #include "CxImageRuntimeOverlay.h"
@@ -178,6 +179,18 @@ static void FillRuntimeObjectFromFindCircle(
     object.circle_scan_line_count = debug.scan_line_count;
     object.circle_scan_line_length = debug.scan_line_length;
     object.circle_process_width = debug.process_width;
+    object.circle_selected_edge_index = debug.selected_edge_index;
+    object.circle_candidate_runs_total = debug.candidate_runs_total;
+    object.circle_candidate_runs_max_per_line =
+        debug.candidate_runs_max_per_line;
+    object.circle_selected_edge_hits = debug.selected_edge_hits;
+    object.circle_selected_edge_misses = debug.selected_edge_misses;
+    object.circle_selected_edge_radius_avg =
+        debug.selected_edge_radius_avg;
+    object.circle_selected_edge_radius_min =
+        debug.selected_edge_radius_min;
+    object.circle_selected_edge_radius_max =
+        debug.selected_edge_radius_max;
     object.circle_scan_lines_processed = debug.scan_lines_processed;
     object.circle_total_samples = debug.total_samples;
     object.circle_elapsed_ms = debug.elapsed_ms;
@@ -608,6 +621,9 @@ void SeedDefaultManualGlobals(
     const bool isFastMatchScript =
         scriptPath.find("fastmatch") != std::string::npos ||
         scriptPath.find("FastMatch") != std::string::npos;
+    const bool isGridPatternScript =
+        scriptPath.find("grid_pattern") != std::string::npos ||
+        scriptPath.find("GridPatternClassTool") != std::string::npos;
     const bool isVerticalLineScript =
         scriptPath.find("find_line_vertical") != std::string::npos ||
         scriptPath.find("findline_vertical") != std::string::npos;
@@ -696,6 +712,37 @@ void SeedDefaultManualGlobals(
         set("global_model_point_count", 0);
     }
 
+    if (isGridPatternScript)
+    {
+        set("global_learn_roi_x", 120);
+        set("global_learn_roi_y", 120);
+        set("global_learn_roi_w", 120);
+        set("global_learn_roi_h", 90);
+        set("global_search_roi_x", 0);
+        set("global_search_roi_y", 0);
+        set("global_search_roi_w", 640);
+        set("global_search_roi_h", 480);
+        set("global_grid_normalized_width", 48);
+        set("global_grid_normalized_height", 48);
+        set("global_grid_rows", 12);
+        set("global_grid_cols", 12);
+        set("global_grid_levels", 3);
+        set("global_grid_orientation_bins", 8);
+        set("global_grid_foreground_threshold", -1);
+        set("global_grid_foreground_dark", 1);
+        set("global_grid_equalize_contrast", 0);
+        set("global_grid_active_foreground_percent", 5);
+        set("global_grid_active_edge_percent", 3);
+        set("global_grid_max_overlays", 96);
+        set("global_grid_fusion_mode", 2);
+        set("global_grid_status", 0);
+        set("global_grid_active_cell_count", 0);
+        set("global_grid_descriptor_dim", 0);
+        set("global_grid_level_count", 0);
+        set("global_grid_overlay_count", 0);
+        set("global_grid_overlay_truncated", 0);
+    }
+
     // The Script Editor and Gauge Workbench must start from the same value
     // snapshot.  Previously only runtime_int_vars were seeded, leaving the
     // visible/editable gauge at its zero-initialized geometry.
@@ -757,9 +804,18 @@ void SeedDefaultManualGlobals(
         gauge.wgap = context.runtime_int_vars["global_wgap"];
         gauge.hgap = context.runtime_int_vars["global_hgap"];
     }
+    else if (isGridPatternScript)
+    {
+        gauge.tool = "GridPatternClassTool";
+        gauge.primary_object_type = "GridPatternClassTool";
+        gauge.line_x0 = context.runtime_int_vars["global_learn_roi_x"];
+        gauge.line_y0 = context.runtime_int_vars["global_learn_roi_y"];
+        gauge.line_x1 = gauge.line_x0 + context.runtime_int_vars["global_learn_roi_w"];
+        gauge.line_y1 = gauge.line_y0 + context.runtime_int_vars["global_learn_roi_h"];
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge)
+        gauge.has_ellipse_gauge || isGridPatternScript)
         context.current_gauge = gauge;
 }
 
@@ -1074,6 +1130,43 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
             " patternB=" + std::to_string(object.fastmatch_pattern_b_count) +
             " candidates=" + std::to_string(object.fastmatch_candidate_count) +
             " best_score=" + std::to_string(object.fastmatch_best_score);
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:GridPatternClassTool:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("GridPatternClassTool"))
+    {
+        GridPatternClassTool* grid_tool = static_cast<GridPatternClassTool*>(
+            m_parserDebugBridge.QueryClassObject("GridPatternClassTool", name));
+        if (grid_tool == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "GridPatternClassTool";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = grid_tool->getstatuscode() == 1
+            ? "grid_feature_available"
+            : "grid_feature_unavailable";
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source = "runtime_object";
+        object.has_grid_pattern = true;
+        object.grid_pattern_status_code = grid_tool->getstatuscode();
+        object.grid_pattern_active_cell_count = grid_tool->getactivecellcount();
+        object.grid_pattern_descriptor_dim = grid_tool->getdescriptordim();
+        object.grid_pattern_level_count = grid_tool->getlevelcount();
+        object.grid_pattern_overlay_count = grid_tool->getoverlaycount();
+        object.grid_pattern_overlay_truncated =
+            grid_tool->getoverlaytruncated() != 0;
+        object.grid_pattern_elapsed_ms = grid_tool->getelapsedms();
+        object.grid_pattern_summary = grid_tool->getsummary();
+        object.measure_points_count = object.grid_pattern_active_cell_count;
+        object.valid_points_count = object.grid_pattern_active_cell_count;
+        object.display_summary = object.grid_pattern_summary;
         m_manualTest.runtime_objects.push_back(object);
     }
 

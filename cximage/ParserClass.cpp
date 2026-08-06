@@ -13,6 +13,7 @@
 #include "FindObject.h"
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
+#include "GridPatternClassTool.h"
 #include "CxScriptDirectBindings.h"
 #include "CxScriptTypeTraitsDefs.h"
 #include "CircleRingGauge.h"
@@ -565,6 +566,7 @@ namespace mu
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "clear", &FindLine::clear);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setwhgap", &FindLine::setwhgap_script);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "SetWHgap", &FindLine::setwhgap_script);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setscandirection", &FindLine::setscandirection);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "measure", &FindLine::measure);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "measureRobust", &FindLine::measureRobust);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinesample", &FindLine::setlinesamplerate);
@@ -765,6 +767,31 @@ namespace mu
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagelearn", &FastMatch::imagelearn);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagematch", &FastMatch::imagematch);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "imagemodelcompareshow", &FastMatch::imagemodelcompareshow);
+
+            GridPatternClassTool* pgrid_pattern = nullptr;
+            const std::string_view grid_pattern_type_name =
+                CxScriptTypeName(CxScriptTypeTraits<GridPatternClassTool>::id);
+            m_parser.DefineClass(grid_pattern_type_name.data(), pgrid_pattern);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setrect", &GridPatternClassTool::setrect);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setnormalized", &GridPatternClassTool::setnormalized);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setgrid", &GridPatternClassTool::setgrid);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setlevels", &GridPatternClassTool::setlevels);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setorientationbins", &GridPatternClassTool::setorientationbins);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setforegroundthreshold", &GridPatternClassTool::setforegroundthreshold);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setforegrounddark", &GridPatternClassTool::setforegrounddark);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setequalizecontrast", &GridPatternClassTool::setequalizecontrast);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setactiveforegroundpercent", &GridPatternClassTool::setactiveforegroundpercent);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setactiveedgepercent", &GridPatternClassTool::setactiveedgepercent);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setmaxoverlays", &GridPatternClassTool::setmaxoverlays);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "setfusionmode", &GridPatternClassTool::setfusionmode);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "analyze", &GridPatternClassTool::analyze);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getstatuscode", &GridPatternClassTool::getstatuscode);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getactivecellcount", &GridPatternClassTool::getactivecellcount);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getdescriptordim", &GridPatternClassTool::getdescriptordim);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getlevelcount", &GridPatternClassTool::getlevelcount);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getoverlaycount", &GridPatternClassTool::getoverlaycount);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getoverlaytruncated", &GridPatternClassTool::getoverlaytruncated);
+            m_parser.DefineClassFun(grid_pattern_type_name.data(), pgrid_pattern, "getelapsedms", &GridPatternClassTool::getelapsedms);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savematchroi", &FastMatch::savematchroi);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "loadmapmodel", &FastMatch::loadfastimagemodel);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemapmodel", &FastMatch::savefastimagemodel);

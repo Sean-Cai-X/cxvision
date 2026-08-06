@@ -28,6 +28,7 @@ m_line.setthre(threshold);
 m_line.setobjfilter(1);
 
 m_line.setfilterprofile(filterprofile);
+m_line.setscandirection(global_findline_scan_direction);
 m_line.setselectedgenum(global_findline_selected_edge);
 
 m_line.measure(&m_image);

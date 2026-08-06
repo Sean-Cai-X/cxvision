@@ -33,6 +33,8 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
         return "FindRect";
     if (lowered == "fastmatch" || lowered == "cfastmatch")
         return "FastMatch";
+    if (lowered == "gridpatternclasstool" || lowered == "gridpatternclass")
+        return "GridPatternClassTool";
     if (lowered == "findsegmentation")
         return "FindSegmentation";
     if (lowered == "torchtask" || lowered == "torch")
@@ -503,6 +505,110 @@ static std::string ResolveEvidenceImagePathByIdFromDiskLocal(
     return {};
 }
 
+struct HDReferenceImageBindingLocal
+{
+    const char* script_id;
+    const char* image_id;
+    const char* image_path;
+};
+
+static bool ResolveHDReferenceImageBindingLocal(
+    const std::string& scriptId,
+    HDReferenceImageBindingLocal& out)
+{
+    static const HDReferenceImageBindingLocal kBindings[] = {
+        {
+            "hd_fruit_classification_reference_direct",
+            "apple_braeburn_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn/apple_braeburn_001.png"
+        },
+        {
+            "hd_juice_bottle_anomaly_reference_direct",
+            "juice_bottle_good_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good/juice_bottle_good_001.png"
+        },
+        {
+            "hd_dongle_ocr_reference_direct",
+            "dongle_01",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/dongle/dongle_01.png"
+        },
+        {
+            "hd_pill_semantic_segmentation_reference_direct",
+            "pill_ginseng_contamination_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination/pill_ginseng_contamination_001.png"
+        },
+        {
+            "hd_pill_bag_instance_segmentation_reference_direct",
+            "pill_bag_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag/pill_bag_001.png"
+        },
+        {
+            "hd_pill_bag_detection_reference_direct",
+            "pill_bag_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag/pill_bag_001.png"
+        },
+        {
+            "hd_screws_oriented_detection_reference_direct",
+            "screws_001",
+            "D:/Codex-WorkDir/Sean_WorkDir/images/screws/screws_001.png"
+        }
+    };
+
+    auto normalizeKey = [](const std::string& value) -> std::string
+    {
+        if (value.empty())
+            return {};
+        std::string normalized = value;
+        std::replace(normalized.begin(), normalized.end(), '\\', '/');
+        const std::size_t slash = normalized.find_last_of('/');
+        if (slash != std::string::npos)
+            normalized = normalized.substr(slash + 1);
+        const std::string suffix = ".cxsc";
+        if (normalized.size() > suffix.size() &&
+            normalized.compare(normalized.size() - suffix.size(),
+                               suffix.size(),
+                               suffix) == 0)
+        {
+            normalized.resize(normalized.size() - suffix.size());
+        }
+        return normalized;
+    };
+
+    const std::string key = normalizeKey(scriptId);
+    for (const auto& binding : kBindings)
+    {
+        if (key == binding.script_id)
+        {
+            out = binding;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ApplyHDReferenceImageBindingLocal(
+    ScriptEvidenceThumb& thumb)
+{
+    HDReferenceImageBindingLocal binding{};
+    if (!ResolveHDReferenceImageBindingLocal(thumb.script_id, binding) &&
+        !ResolveHDReferenceImageBindingLocal(thumb.script_path, binding))
+    {
+        return;
+    }
+
+    thumb.image_id = binding.image_id;
+    thumb.image_path = binding.image_path;
+    thumb.thumbnail_path = binding.image_path;
+    if (thumb.case_id.empty())
+        thumb.case_id = binding.script_id;
+    if (thumb.status.empty())
+        thumb.status = "hd_reference_ready";
+    if (thumb.reason.empty())
+        thumb.reason = "HD reference image binding";
+    else
+        thumb.reason += "; HD reference image binding";
+}
+
 static bool SelectEvidenceImageFileFromDialogLocal(
     std::string& outPath,
     std::string& reason)
@@ -522,6 +628,7 @@ static bool IsEvidenceEditableToolTypeLocal(const std::string& type)
            normalized == "FindEllipse" ||
            normalized == "FindRect" ||
            normalized == "FastMatch" ||
+           normalized == "GridPatternClassTool" ||
            normalized == "FindSegmentation";
 }
 
@@ -832,9 +939,29 @@ static bool ApplyCandidateRuntimeGlobalsLocal(
     context.findline_scan_edge_count =
         std::max(1, std::min(16, getRuntimeInt("global_findline_edge_count", 4)));
     context.findline_selected_scan_edge =
-        std::max(0,
+        std::max(-1,
                  std::min(
                      getRuntimeInt("global_findline_selected_edge", 0),
+                     context.findline_scan_edge_count));
+    context.findline_best_fit_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findline_best_edge", 0),
+                     context.findline_scan_edge_count));
+    context.findline_recommended_fit_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findline_recommended_edge", 0),
+                     context.findline_scan_edge_count));
+    context.findline_relation_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findline_relation_edge", 0),
+                     context.findline_scan_edge_count));
+    context.findline_attach_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findline_attach_edge", 0),
                      context.findline_scan_edge_count));
     context.findline_edge_params.resize(
         static_cast<std::size_t>(context.findline_scan_edge_count + 1));
@@ -858,6 +985,53 @@ static bool ApplyCandidateRuntimeGlobalsLocal(
         params.filterprofile =
             getRuntimeInt(prefix + "filterprofile",
                           getRuntimeInt("global_filterprofile", 0));
+    }
+
+    context.findcircle_scan_edge_count =
+        std::max(1, std::min(32, getRuntimeInt("global_findcircle_edge_count", 4)));
+    context.findcircle_selected_scan_edge =
+        std::max(-1,
+                 std::min(
+                     getRuntimeInt("global_findcircle_selected_edge", 0),
+                     context.findcircle_scan_edge_count));
+    context.findcircle_best_fit_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findcircle_best_edge", 0),
+                     context.findcircle_scan_edge_count));
+    context.findcircle_recommended_fit_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findcircle_recommended_edge", 0),
+                     context.findcircle_scan_edge_count));
+    context.findcircle_relation_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findcircle_relation_edge", 0),
+                     context.findcircle_scan_edge_count));
+    context.findcircle_attach_edge =
+        std::max(0,
+                 std::min(
+                     getRuntimeInt("global_findcircle_attach_edge", 0),
+                     context.findcircle_scan_edge_count));
+    context.findcircle_edge_params.resize(
+        static_cast<std::size_t>(context.findcircle_scan_edge_count + 1));
+    const int sharedCircleThreshold = getRuntimeInt("global_threshold", 20);
+    const int sharedCircleMethod = getRuntimeInt("global_method", 0);
+    const int sharedCircleLinegap = getRuntimeInt("global_linegap", 3);
+    const int sharedCircleGap = getRuntimeInt("global_gap", 6);
+    for (int edge = 1; edge <= context.findcircle_scan_edge_count; ++edge)
+    {
+        ManualFindCircleEdgeParamState& params =
+            context.findcircle_edge_params[static_cast<std::size_t>(edge)];
+        // Old candidate packages may contain divergent edgeN_* values from a
+        // superseded UI interpretation. The main FindCircle globals are the
+        // authoritative single parameter set; Edge N only selects a crossing.
+        params.initialized = true;
+        params.threshold = sharedCircleThreshold;
+        params.method = sharedCircleMethod;
+        params.linegap = sharedCircleLinegap;
+        params.gap = sharedCircleGap;
     }
     return true;
 }
@@ -1033,6 +1207,10 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         scriptPath.find("find_ellipse") != std::string::npos ||
         scriptPath.find("findellipse") != std::string::npos ||
         scriptPath.find("FindEllipse") != std::string::npos;
+    const bool isFastMatchScript =
+        scriptPath.find("fastmatch") != std::string::npos ||
+        scriptPath.find("FastMatch") != std::string::npos ||
+        scriptPath.find("CFastMatch") != std::string::npos;
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -1092,9 +1270,19 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         gauge.line_x1 = getInt("global_roi_x1", 0);
         gauge.line_y1 = getInt("global_roi_y1", 0);
     }
+    else if (primaryType == "FastMatch" ||
+             (primaryType.empty() && isFastMatchScript))
+    {
+        gauge.tool = "FastMatch";
+        gauge.primary_object_type = "FastMatch";
+        if (gauge.primary_object_name.empty())
+            gauge.primary_object_name = "m_match";
+        if (gauge.primary_object_status.empty())
+            gauge.primary_object_status = "evidence_fastmatch_selected";
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge)
+        gauge.has_ellipse_gauge || gauge.tool == "FastMatch")
     {
         context.current_gauge = gauge;
     }
@@ -1233,6 +1421,17 @@ static std::string BuildDefaultEvidenceParamSummaryForScript(
         << " compare_gap=" << getInt("global_compare_gap", 0)
         << " objfilter=" << getInt("global_objfilter", 0)
         << " find_num=" << getInt("global_find_num", 1)
+        << " grid_normalized_width=" << getInt("global_grid_normalized_width", 48)
+        << " grid_normalized_height=" << getInt("global_grid_normalized_height", 48)
+        << " grid_rows=" << getInt("global_grid_rows", 12)
+        << " grid_cols=" << getInt("global_grid_cols", 12)
+        << " grid_levels=" << getInt("global_grid_levels", 3)
+        << " grid_orientation_bins=" << getInt("global_grid_orientation_bins", 8)
+        << " grid_foreground_threshold=" << getInt("global_grid_foreground_threshold", -1)
+        << " grid_active_foreground_percent=" << getInt("global_grid_active_foreground_percent", 5)
+        << " grid_active_edge_percent=" << getInt("global_grid_active_edge_percent", 3)
+        << " grid_max_overlays=" << getInt("global_grid_max_overlays", 96)
+        << " grid_fusion_mode=" << getInt("global_grid_fusion_mode", 2)
         << " max_elapsed_ms=" << getInt("global_max_elapsed_ms", 2000)
         << " max_scan_lines=" << getInt("global_max_scan_lines", 2000)
         << " max_samples=" << getInt("global_max_samples", 200000);
@@ -2181,6 +2380,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       }
     }
 
+    ApplyHDReferenceImageBindingLocal(thumb);
     AssignFallbackImageToThumb(thumb, fallbackImages, fallbackImageIndex++);
     PopulateEditableObjectBindingForThumbLocal(thumb);
 
@@ -2273,6 +2473,8 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
           item.name.find("direct_test") != std::string::npos ||
           item.name.find("_direct") != std::string::npos ||
           item.name.find("_smoke") != std::string::npos ||
+          item.type == "GridPatternClassTool" ||
+          item.path.find("grid_pattern_class_evidence") != std::string::npos ||
           item.path.find("/headless/") != std::string::npos ||
           item.path.find("\\headless\\") != std::string::npos;
 
@@ -2319,6 +2521,8 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
             : m_manualTest.active_image_id;
         thumb.image_path = m_manualTest.image_file_path;
       }
+
+      ApplyHDReferenceImageBindingLocal(thumb);
 
       if (thumb.parameter_summary.empty() ||
           thumb.parameter_summary.find('=') == std::string::npos)
@@ -3221,6 +3425,27 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                 "failed to restore candidate gauge: " + restoreReason);
         }
 
+        CXLOG_INFO(
+            "EvidenceChain",
+            "candidate_parameter_state_restored",
+            "RESTORED",
+            "case_id=" + resolved.case_id +
+                " candidate_id=" + resolved.candidate_id +
+                " circle_arc_enabled=" +
+                std::to_string(staged.current_gauge.circle_arc_enabled ? 1 : 0) +
+                " circle_arc_start_deg=" +
+                std::to_string(staged.current_gauge.circle_arc_start_deg) +
+                " circle_arc_end_deg=" +
+                std::to_string(staged.current_gauge.circle_arc_end_deg) +
+                " findcircle_selected_edge=" +
+                std::to_string(staged.findcircle_selected_scan_edge) +
+                " findcircle_edge_count=" +
+                std::to_string(staged.findcircle_scan_edge_count) +
+                " findline_selected_edge=" +
+                std::to_string(staged.findline_selected_scan_edge) +
+                " findline_edge_count=" +
+                std::to_string(staged.findline_scan_edge_count));
+
         staged.current_gauge.source = resolved.is_candidate
             ? "evidence_candidate"
             : "evidence_working_revision";
@@ -3299,6 +3524,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
             : " baseline_evidence=true");
 
     m_manualTest = std::move(staged);
+    SyncTorchTrainingImageSetFromEvidenceSelection();
 
     if (loadImageToView)
     {
@@ -3353,6 +3579,513 @@ void ViewController::ResetEvidenceThumbTexture(ScriptEvidenceThumb& thumb)
     thumb.texture_loaded = false;
     thumb.texture_failed = false;
     thumb.texture_placeholder = false;
+}
+
+void ViewController::EnsureTorchTrainingImageTexture(TorchTrainingImageItem& item)
+{
+    if ((item.texture_loaded && !item.texture_placeholder) ||
+        item.texture_failed)
+    {
+        return;
+    }
+
+    if (m_manualTest.script_evidence_thumb_load_count_this_frame >=
+        m_manualTest.script_evidence_thumb_load_budget_per_frame)
+    {
+        return;
+    }
+
+    cv::Mat image;
+    std::filesystem::path resolved;
+    if (!item.image_path.empty())
+    {
+        resolved = ResolveWorkspaceFile(item.image_path);
+        if (std::filesystem::is_regular_file(resolved))
+            image = cv::imread(resolved.string(), cv::IMREAD_COLOR);
+    }
+
+    if (image.empty())
+    {
+        cv::Mat placeholder(72, 72, CV_8UC3, cv::Scalar(70, 105, 135));
+        cv::putText(
+            placeholder,
+            "NO",
+            cv::Point(17, 32),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.5,
+            cv::Scalar(255, 255, 255),
+            1,
+            cv::LINE_AA);
+        cv::putText(
+            placeholder,
+            "IMG",
+            cv::Point(12, 52),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.45,
+            cv::Scalar(255, 255, 255),
+            1,
+            cv::LINE_AA);
+        item.texture_id = CreateTextureFromMat0(placeholder);
+        item.texture_w = placeholder.cols;
+        item.texture_h = placeholder.rows;
+        item.texture_loaded = item.texture_id != 0;
+        item.texture_failed = !item.texture_loaded;
+        item.texture_placeholder = item.texture_loaded;
+        item.status = "image_unavailable";
+        ++m_manualTest.script_evidence_thumb_load_count_this_frame;
+        return;
+    }
+
+    cv::Mat preview;
+    const int maxSide = 96;
+    const int srcMaxSide = std::max(image.cols, image.rows);
+    const double scale = srcMaxSide > 0
+        ? static_cast<double>(maxSide) / static_cast<double>(srcMaxSide)
+        : 1.0;
+    if (scale > 0.0 && scale < 1.0)
+        cv::resize(image, preview, cv::Size(), scale, scale, cv::INTER_AREA);
+    else
+        preview = image;
+
+    item.texture_id = CreateTextureFromMat0(preview);
+    item.texture_w = preview.cols;
+    item.texture_h = preview.rows;
+    item.texture_loaded = item.texture_id != 0;
+    item.texture_failed = !item.texture_loaded;
+    item.texture_placeholder = false;
+    item.status = item.texture_loaded ? "ready" : "texture_failed";
+    ++m_manualTest.script_evidence_thumb_load_count_this_frame;
+}
+
+void ViewController::AddTorchTrainingImageFromPath(
+    const std::string& imagePath,
+    const std::string& imageId,
+    const std::string& split,
+    const std::string& label,
+    const std::string& source)
+{
+    if (imagePath.empty())
+    {
+        m_manualTest.torch_training_image_status = "ADD_IMAGE_FAIL";
+        m_manualTest.torch_training_image_reason = "image path is empty";
+        return;
+    }
+
+    std::filesystem::path resolved = ResolveWorkspaceFile(imagePath);
+    const std::string normalized = resolved.lexically_normal().string();
+
+    for (std::size_t i = 0; i < m_manualTest.torch_training_images.size(); ++i)
+    {
+        TorchTrainingImageItem& existing = m_manualTest.torch_training_images[i];
+        const std::string existingPath =
+            ResolveWorkspaceFile(existing.image_path).lexically_normal().string();
+        if (existingPath == normalized && existing.split == split)
+        {
+            existing.image_id = imageId.empty() ? existing.image_id : imageId;
+            existing.case_id = m_manualTest.active_case_id;
+            existing.target_id = m_manualTest.active_target_id;
+            existing.label = label.empty() ? existing.label : label;
+            existing.source = source.empty() ? existing.source : source;
+            existing.status = std::filesystem::is_regular_file(resolved)
+                ? "ready"
+                : "image_unavailable";
+            m_manualTest.selected_torch_training_image = static_cast<int>(i);
+            m_manualTest.torch_training_image_status = "IMAGE_SET_UPDATED";
+            m_manualTest.torch_training_image_reason =
+                "updated existing " + split + " image: " + normalized;
+            return;
+        }
+    }
+
+    TorchTrainingImageItem item;
+    item.image_id = imageId;
+    item.image_path = normalized;
+    item.case_id = m_manualTest.active_case_id;
+    item.target_id = m_manualTest.active_target_id;
+    item.split = split.empty() ? "train" : split;
+    item.label = label.empty() ? "unlabeled" : label;
+    item.source = source.empty() ? "manual" : source;
+    item.status = std::filesystem::is_regular_file(resolved)
+        ? "ready"
+        : "image_unavailable";
+
+    m_manualTest.torch_training_images.push_back(item);
+    m_manualTest.selected_torch_training_image =
+        static_cast<int>(m_manualTest.torch_training_images.size() - 1);
+    m_manualTest.torch_training_image_status = "IMAGE_SET_ADDED";
+    m_manualTest.torch_training_image_reason =
+        "added " + item.split + " image: " + normalized;
+}
+
+void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection()
+{
+    const CxEvidenceSelectionSnapshot& sel =
+        m_manualTest.current_evidence_selection;
+    if (!sel.valid)
+        return;
+
+    std::string imagePath = sel.image_path;
+    if (imagePath.empty() && !sel.image_id.empty())
+        imagePath = ResolveImagePathFromManifest(sel.image_id);
+    if (imagePath.empty() && !sel.image_id.empty())
+        imagePath = ResolveEvidenceImagePathByIdFromDiskLocal(sel.image_id);
+    if (imagePath.empty())
+        return;
+
+    std::string label = "unlabeled";
+    std::string key = sel.status + " " + sel.reason + " " +
+        sel.parameter_summary + " " + sel.tool + " " + sel.script_id;
+    std::transform(key.begin(), key.end(), key.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (key.find("anomaly") != std::string::npos ||
+        key.find("defect") != std::string::npos ||
+        key.find("fail") != std::string::npos ||
+        key.find("error") != std::string::npos)
+    {
+        label = "anomaly";
+    }
+    else if (key.find("good") != std::string::npos ||
+             key.find("ok") != std::string::npos ||
+             key.find("success") != std::string::npos ||
+             key.find("pass") != std::string::npos)
+    {
+        label = "good";
+    }
+
+    AddTorchTrainingImageFromPath(
+        imagePath,
+        sel.image_id,
+        "train",
+        label,
+        "evidence");
+    const int referenceSetCount =
+        AddHDReferenceImageSetForCurrentSelection();
+    if (referenceSetCount <= 0)
+    {
+        m_manualTest.torch_training_image_reason =
+            "synced from evidence case: " + sel.case_id;
+    }
+}
+
+static ImU32 TorchDatasetLabelColorLocal(const std::string& label)
+{
+    if (label == "good")
+        return IM_COL32(45, 190, 95, 245);
+    if (label == "anomaly")
+        return IM_COL32(235, 85, 75, 245);
+    if (label == "pending")
+        return IM_COL32(235, 180, 55, 245);
+    return IM_COL32(95, 135, 180, 245);
+}
+
+int ViewController::AddHDReferenceImageSetForCurrentSelection()
+{
+    const CxEvidenceSelectionSnapshot& sel =
+        m_manualTest.current_evidence_selection;
+    std::string key = sel.script_id;
+    if (key.empty())
+        key = sel.case_id;
+    std::replace(key.begin(), key.end(), '\\', '/');
+    const std::size_t slash = key.find_last_of('/');
+    if (slash != std::string::npos)
+        key = key.substr(slash + 1);
+    const std::string suffix = ".cxsc";
+    if (key.size() > suffix.size() &&
+        key.compare(key.size() - suffix.size(), suffix.size(), suffix) == 0)
+    {
+        key.resize(key.size() - suffix.size());
+    }
+
+    struct DirBinding
+    {
+        const char* script_id;
+        const char* split;
+        const char* label;
+        const char* dir;
+        int max_count;
+    };
+
+    static const DirBinding kDirs[] = {
+        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn", 16},
+        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_golden_delicious", 16},
+        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_topaz", 16},
+        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/peach", 16},
+        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/pear", 16},
+
+        {"hd_juice_bottle_anomaly_reference_direct", "train", "good", "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good", 64},
+        {"hd_juice_bottle_anomaly_reference_direct", "test", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/logical_anomaly", 64},
+        {"hd_juice_bottle_anomaly_reference_direct", "test", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/structural_anomaly", 64},
+
+        {"hd_dongle_ocr_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/dongle", 64},
+
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", 32},
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack", 32},
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination", 32},
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack", 32},
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination", 32},
+        {"hd_pill_semantic_segmentation_reference_direct", "train", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack", 32},
+
+        {"hd_pill_bag_instance_segmentation_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", 64},
+        {"hd_pill_bag_detection_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", 64},
+        {"hd_screws_oriented_detection_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/screws", 64}
+    };
+
+    auto isImageFile = [](const std::filesystem::path& path) -> bool
+    {
+        std::string ext = path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+               ext == ".bmp" || ext == ".tif" || ext == ".tiff";
+    };
+
+    int added = 0;
+    std::error_code ec;
+    for (const DirBinding& binding : kDirs)
+    {
+        if (key != binding.script_id)
+            continue;
+
+        const std::filesystem::path dir =
+            ResolveWorkspaceFile(binding.dir).lexically_normal();
+        if (!std::filesystem::is_directory(dir, ec))
+            continue;
+
+        std::vector<std::filesystem::path> files;
+        for (std::filesystem::directory_iterator it(dir, ec), end;
+             !ec && it != end;
+             it.increment(ec))
+        {
+            if (it->is_regular_file(ec) && isImageFile(it->path()))
+                files.push_back(it->path());
+        }
+        std::sort(files.begin(), files.end());
+
+        int count = 0;
+        for (const auto& path : files)
+        {
+            if (count >= binding.max_count)
+                break;
+            AddTorchTrainingImageFromPath(
+                path.string(),
+                path.stem().string(),
+                binding.split,
+                binding.label,
+                "hd_reference_set");
+            ++count;
+            ++added;
+        }
+    }
+
+    if (added > 0)
+    {
+        m_manualTest.torch_training_image_status =
+            "HD_REFERENCE_IMAGE_SET_LOADED";
+        m_manualTest.torch_training_image_reason =
+            "loaded reference image set for " + key +
+            " count=" + std::to_string(added);
+    }
+
+    return added;
+}
+
+void ViewController::DrawTorchTrainingImageRail(const char* split, const char* label)
+{
+    ImGui::Text("%s", label);
+    ImGui::BeginChild(
+        (std::string("torch_dataset_rail_") + split).c_str(),
+        ImVec2(-1, 112.0f),
+        true,
+        ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImGui::TextUnformatted("<");
+    ImGui::SameLine();
+
+    bool any = false;
+    const ImVec2 thumbSize(76.0f, 76.0f);
+    for (std::size_t i = 0; i < m_manualTest.torch_training_images.size(); ++i)
+    {
+        TorchTrainingImageItem& item = m_manualTest.torch_training_images[i];
+        if (item.split != split)
+            continue;
+        any = true;
+        EnsureTorchTrainingImageTexture(item);
+
+        ImGui::PushID(static_cast<int>(i));
+        const bool selected =
+            m_manualTest.selected_torch_training_image == static_cast<int>(i);
+        if (selected)
+            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(30, 140, 210, 255));
+
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        bool clicked = false;
+        if (item.texture_id != 0)
+        {
+            clicked = ImGui::ImageButton(
+                "torch_dataset_thumb",
+                static_cast<ImU64>(item.texture_id),
+                thumbSize);
+        }
+        else
+        {
+            clicked = ImGui::Button("NO IMG", thumbSize);
+        }
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImVec2 p1(p0.x + thumbSize.x, p0.y + thumbSize.y);
+        draw->AddRect(p0, p1,
+                      selected ? IM_COL32(0, 190, 255, 255) : IM_COL32(0, 120, 180, 180),
+                      6.0f,
+                      0,
+                      selected ? 3.0f : 1.5f);
+        const std::string badge = item.label.empty() ? "unlabeled" : item.label;
+        const ImVec2 badgeMin(p0.x + 3.0f, p1.y - 20.0f);
+        const ImVec2 badgeMax(p1.x - 3.0f, p1.y - 3.0f);
+        draw->AddRectFilled(badgeMin, badgeMax, TorchDatasetLabelColorLocal(badge), 4.0f);
+        draw->AddText(ImVec2(badgeMin.x + 4.0f, badgeMin.y + 2.0f),
+                      IM_COL32(255, 255, 255, 255),
+                      badge.c_str());
+
+        if (clicked)
+        {
+            m_manualTest.selected_torch_training_image = static_cast<int>(i);
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                std::string reason;
+                if (!LoadImageIntoImageView(item.image_path, reason))
+                {
+                    m_manualTest.debug_status = "TORCH_DATASET_IMAGE_LOAD_FAIL";
+                    m_manualTest.debug_reason = reason;
+                }
+                else
+                {
+                    m_manualTest.debug_status = "TORCH_DATASET_IMAGE_LOADED";
+                    m_manualTest.debug_reason = item.image_path;
+                }
+            }
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "%s\nsplit=%s label=%s\ncase=%s\nsource=%s",
+                item.image_path.c_str(),
+                item.split.c_str(),
+                item.label.c_str(),
+                item.case_id.c_str(),
+                item.source.c_str());
+        }
+
+        if (selected)
+            ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::PopID();
+    }
+
+    if (!any)
+    {
+        ImGui::TextDisabled("No %s images yet.", split);
+        ImGui::SameLine();
+    }
+    ImGui::TextUnformatted(">");
+    ImGui::EndChild();
+}
+
+void ViewController::drawTorchTrainingImageSetWindow()
+{
+    ImGui::SetNextWindowPos(ImVec2(1380, 740), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(620, 420), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Torch Training Image Set", nullptr, ImGuiWindowFlags_NoCollapse))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextWrapped(
+        "Training/validation/test image rails for Torch evidence review. "
+        "Double-click a thumbnail to load it into Image View. Labels are operator evidence, not model quality PASS.");
+    ImGui::Separator();
+
+    ImGui::Text("active_case: %s", m_manualTest.active_case_id.empty() ? "-" : m_manualTest.active_case_id.c_str());
+    ImGui::Text("selected_evidence: %s", m_manualTest.current_evidence_selection.case_id.empty()
+        ? "-"
+        : m_manualTest.current_evidence_selection.case_id.c_str());
+    ImGui::Text("status: %s", m_manualTest.torch_training_image_status.c_str());
+    ImGui::TextWrapped("reason: %s", m_manualTest.torch_training_image_reason.c_str());
+
+    if (ImGui::Button("Sync Selected Evidence Case"))
+        SyncTorchTrainingImageSetFromEvidenceSelection();
+    ImGui::SameLine();
+    if (ImGui::Button("Add Current As Train"))
+        AddTorchTrainingImageFromPath(m_manualTest.image_file_path, m_manualTest.active_image_id, "train", "unlabeled", "current_image");
+    ImGui::SameLine();
+    if (ImGui::Button("Add Current As Val"))
+        AddTorchTrainingImageFromPath(m_manualTest.image_file_path, m_manualTest.active_image_id, "val", "unlabeled", "current_image");
+    ImGui::SameLine();
+    if (ImGui::Button("Add Current As Test"))
+        AddTorchTrainingImageFromPath(m_manualTest.image_file_path, m_manualTest.active_image_id, "test", "unlabeled", "current_image");
+
+    ImGui::SetNextItemWidth(-1.0f);
+    InputTextString("Incremental image path", m_manualTest.torch_training_new_image_path);
+    if (ImGui::Button("Add Path As Train"))
+        AddTorchTrainingImageFromPath(m_manualTest.torch_training_new_image_path, "", "train", "unlabeled", "manual_path");
+    ImGui::SameLine();
+    if (ImGui::Button("Add Manifest Images"))
+    {
+        int count = AddHDReferenceImageSetForCurrentSelection();
+        if (count == 0)
+        {
+            for (const ManifestImageItem& item : m_manualTest.image_manifest_items)
+            {
+                if (!item.image_path.empty())
+                {
+                    AddTorchTrainingImageFromPath(item.image_path, item.image_id, "train", "unlabeled", "manifest");
+                    ++count;
+                }
+            }
+            m_manualTest.torch_training_image_status = "MANIFEST_IMAGES_ADDED";
+            m_manualTest.torch_training_image_reason =
+                "incrementally added manifest images: " + std::to_string(count);
+        }
+    }
+
+    if (m_manualTest.selected_torch_training_image >= 0 &&
+        m_manualTest.selected_torch_training_image <
+            static_cast<int>(m_manualTest.torch_training_images.size()))
+    {
+        TorchTrainingImageItem& item =
+            m_manualTest.torch_training_images[m_manualTest.selected_torch_training_image];
+        ImGui::Separator();
+        ImGui::Text("Selected image: %s", item.image_id.empty() ? "-" : item.image_id.c_str());
+        ImGui::TextWrapped("%s", item.image_path.c_str());
+
+        if (ImGui::Button("label: good"))
+            item.label = "good";
+        ImGui::SameLine();
+        if (ImGui::Button("label: anomaly"))
+            item.label = "anomaly";
+        ImGui::SameLine();
+        if (ImGui::Button("label: unlabeled"))
+            item.label = "unlabeled";
+        ImGui::SameLine();
+        if (ImGui::Button("label: pending"))
+            item.label = "pending";
+
+        if (ImGui::Button("move train"))
+            item.split = "train";
+        ImGui::SameLine();
+        if (ImGui::Button("move val"))
+            item.split = "val";
+        ImGui::SameLine();
+        if (ImGui::Button("move test"))
+            item.split = "test";
+    }
+
+    m_manualTest.script_evidence_thumb_load_count_this_frame = 0;
+    DrawTorchTrainingImageRail("train", "Training Set / 训练集");
+    DrawTorchTrainingImageRail("val", "Validation Set / 验证集");
+    DrawTorchTrainingImageRail("test", "Test Set / 测试集");
+
+    ImGui::End();
 }
 
 bool ViewController::RefreshEvidenceSelectionFromThumb(

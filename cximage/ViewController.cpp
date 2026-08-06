@@ -182,6 +182,13 @@ namespace
         {"fastmatch", "FastMatch"});
   }
 
+  bool evidencePathIsGridPatternClass(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(
+        scriptPath,
+        {"grid_pattern_class", "GridPatternClassTool"});
+  }
+
   bool evidencePathIsFindSegmentation(const std::string& scriptPath)
   {
     return evidencePathHasAny(
@@ -198,6 +205,8 @@ namespace
 
   std::string inferEvidenceToolFromScriptPath(const std::string& scriptPath)
   {
+    if (evidencePathIsGridPatternClass(scriptPath))
+      return "GridPatternClassTool";
     if (evidencePathIsFindCircle(scriptPath))
       return "FindCircle";
     if (evidencePathIsFindLine(scriptPath))
@@ -398,6 +407,19 @@ namespace
     applied += setRequiredIntIfUsed("global_max_elapsed_ms", existingOr("global_max_elapsed_ms", 2000)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_scan_lines", existingOr("global_max_scan_lines", 256)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_samples", existingOr("global_max_samples", 4096)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_normalized_width", existingOr("global_grid_normalized_width", 48)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_normalized_height", existingOr("global_grid_normalized_height", 48)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_rows", existingOr("global_grid_rows", 12)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_cols", existingOr("global_grid_cols", 12)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_levels", existingOr("global_grid_levels", 3)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_orientation_bins", existingOr("global_grid_orientation_bins", 8)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_foreground_threshold", existingOr("global_grid_foreground_threshold", -1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_foreground_dark", existingOr("global_grid_foreground_dark", 1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_equalize_contrast", existingOr("global_grid_equalize_contrast", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_active_foreground_percent", existingOr("global_grid_active_foreground_percent", 5)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_active_edge_percent", existingOr("global_grid_active_edge_percent", 3)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_max_overlays", existingOr("global_grid_max_overlays", 96)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_grid_fusion_mode", existingOr("global_grid_fusion_mode", 2)) ? 1 : 0;
 
     /*
      * Evidence self-test may replay older script snapshots before a candidate
@@ -407,6 +429,7 @@ namespace
      */
     applied += setIntIfUsed("global_findline_selected_edge", existingOr("global_findline_selected_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_edge_count", existingOr("global_findline_edge_count", 1)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_scan_direction", existingOr("global_findline_scan_direction", 2)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_best_edge", existingOr("global_findline_best_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_recommended_edge", existingOr("global_findline_recommended_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_relation_edge", existingOr("global_findline_relation_edge", 0)) ? 1 : 0;
@@ -443,6 +466,12 @@ namespace
     applied += setIntIfUsed("global_runtime_global_has_fit_line_mismatch", 0) ? 1 : 0;
     applied += setIntIfUsed("global_runtime_global_has_fit_circle_mismatch", 0) ? 1 : 0;
     applied += setIntIfUsed("global_runtime_global_result_mismatch", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_status", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_active_cell_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_descriptor_dim", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_level_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_overlay_count", 0) ? 1 : 0;
+    applied += setIntIfUsed("global_grid_overlay_truncated", 0) ? 1 : 0;
     applied += setDoubleIfUsed("global_avgdist", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_circle_radius", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_local_support", 1.0) ? 1 : 0;
@@ -1490,6 +1519,8 @@ static std::string NormalizeSemanticEvidenceObjectTypeLocal(
         return "FindRect";
     if (lowered == "fastmatch" || lowered == "cfastmatch")
         return "FastMatch";
+    if (lowered == "gridpatternclasstool" || lowered == "gridpatternclass")
+        return "GridPatternClassTool";
     if (lowered == "findsegmentation")
         return "FindSegmentation";
     return typeOrTool;
@@ -1504,6 +1535,7 @@ static bool IsSemanticEvidenceEditableObjectTypeLocal(const std::string& type)
            normalized == "FindEllipse" ||
            normalized == "FindRect" ||
            normalized == "FastMatch" ||
+           normalized == "GridPatternClassTool" ||
            normalized == "FindSegmentation";
 }
 
@@ -2359,6 +2391,35 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         return true;
     }
 
+    if (evidencePathIsGridPatternClass(snapshot.script_path))
+    {
+        const std::vector<std::string> required = {
+            "global_learn_roi_x", "global_learn_roi_y",
+            "global_learn_roi_w", "global_learn_roi_h",
+            "global_grid_normalized_width", "global_grid_normalized_height",
+            "global_grid_rows", "global_grid_cols", "global_grid_levels",
+            "global_grid_orientation_bins", "global_grid_foreground_threshold",
+            "global_grid_active_foreground_percent", "global_grid_active_edge_percent",
+            "global_grid_max_overlays", "global_grid_fusion_mode"
+        };
+        for (const std::string& key : required)
+        {
+            if (!hasInt(key.c_str()))
+            {
+                reason = "missing required GridPattern global: " + key;
+                return false;
+            }
+        }
+        if (m_manualTest.runtime_int_vars.at("global_grid_levels") < 3 ||
+            m_manualTest.runtime_int_vars.at("global_grid_levels") > 5)
+        {
+            reason = "GridPattern pooled levels must be in [3,5]";
+            return false;
+        }
+        reason = "GridPattern parameter globals available";
+        return true;
+    }
+
     if (evidencePathIsFastMatch(snapshot.script_path))
     {
         if (!hasInt("global_learn_roi_x") ||
@@ -2965,6 +3026,22 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_method"
         };
     }
+    else if (evidencePathIsGridPatternClass(snapshot.script_path))
+    {
+        required = {
+            "global_learn_roi_x", "global_learn_roi_y",
+            "global_learn_roi_w", "global_learn_roi_h",
+            "global_grid_normalized_width", "global_grid_normalized_height",
+            "global_grid_rows", "global_grid_cols", "global_grid_levels",
+            "global_grid_orientation_bins", "global_grid_foreground_threshold",
+            "global_grid_foreground_dark", "global_grid_equalize_contrast",
+            "global_grid_active_foreground_percent", "global_grid_active_edge_percent",
+            "global_grid_max_overlays", "global_grid_fusion_mode",
+            "global_grid_status", "global_grid_active_cell_count",
+            "global_grid_descriptor_dim", "global_grid_level_count",
+            "global_grid_overlay_count", "global_grid_overlay_truncated"
+        };
+    }
     else if (evidencePathIsFastMatch(snapshot.script_path))
     {
         required = {
@@ -3115,6 +3192,8 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
         expectedType = "FindEllipse";
     else if (evidencePathIsFindRect(snapshot.script_path))
         expectedType = "FindRect";
+    else if (evidencePathIsGridPatternClass(snapshot.script_path))
+        expectedType = "GridPatternClassTool";
     else if (evidencePathIsFastMatch(snapshot.script_path))
         expectedType = "FastMatch";
     else if (evidencePathIsFindSegmentation(snapshot.script_path))
@@ -3237,6 +3316,8 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
     bool hasResultElement = false;
     const bool isFindSegmentationScript =
         evidencePathIsFindSegmentation(snapshot.script_path);
+    const bool isGridPatternScript =
+        evidencePathIsGridPatternClass(snapshot.script_path);
     int visibleCount = 0;
     int gaugeCount = 0;
     int resultCount = 0;
@@ -3262,8 +3343,13 @@ bool ViewController::RunEvidenceSelfTestProjectionStage(
             element.result_element &&
             (element.semantic_role == "boundary" ||
              element.semantic_role == "boundary_bbox");
+        const bool isGridPatternResult =
+            isGridPatternScript &&
+            element.result_element &&
+            (element.semantic_role == "active_grid_cell" ||
+             element.semantic_role == "cell_orientation");
 
-        if (isStandardResult || isSegmentationAttachResult)
+        if (isStandardResult || isSegmentationAttachResult || isGridPatternResult)
         {
             hasResultElement = true;
             ++resultCount;
@@ -6158,6 +6244,10 @@ void ViewController::mainloop()
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawTorchRuntimeEvidenceWindow");
              drawTorchRuntimeEvidenceWindow();
+             SetCxCrashBreadcrumb("mainloop:drawTorchTrainingImageSetWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawTorchTrainingImageSetWindow");
+             drawTorchTrainingImageSetWindow();
              SetCxCrashBreadcrumb("mainloop:drawParameterTuningAndConclusionWindow");
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawParameterTuningAndConclusionWindow");
@@ -7306,6 +7396,7 @@ void ViewController::onMouseMove(int thePosX, int thePosY)
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
+#include "GridPatternClassTool.h"
 
 #include <sstream>
 #include <iomanip>
@@ -7539,6 +7630,19 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                     m_annotationLayer.BeginRuntimeOwnerPublish("FastMatch", object.name);
                 tool->PublishDisplayShapes(m_annotationLayer, object.name);
                 m_annotationLayer.EndRuntimeOwnerPublish("FastMatch", object.name, generation);
+            }
+        }
+        else if (object.type == "GridPatternClassTool")
+        {
+            GridPatternClassTool* tool = static_cast<GridPatternClassTool*>(
+                m_parserDebugBridge.QueryClassObject("GridPatternClassTool", object.name));
+            if (tool != nullptr)
+            {
+                const uint64_t generation = m_annotationLayer.BeginRuntimeOwnerPublish(
+                    "GridPatternClassTool", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish(
+                    "GridPatternClassTool", object.name, generation);
             }
         }
         else if (object.type == "FindSegmentation")

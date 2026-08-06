@@ -20,7 +20,40 @@ int hgap = global_hgap;
 int compare_gap = global_compare_gap;
 int objfilter = global_objfilter;
 double min_score = global_min_score;
+int min_score_percent = global_min_score_percent;
 int find_num = global_find_num;
+int match_step_x = global_match_step_x;
+int match_step_y = global_match_step_y;
+int match_threshold = global_match_thre;
+
+if (min_score_percent > 0)
+{
+    min_score = min_score_percent / 100.0;
+}
+if (find_num <= 0)
+{
+    find_num = 1;
+}
+if (compare_gap <= 0)
+{
+    compare_gap = 20;
+}
+if (objfilter <= 0)
+{
+    objfilter = 1;
+}
+if (match_step_x <= 0)
+{
+    match_step_x = 10;
+}
+if (match_step_y <= 0)
+{
+    match_step_y = 10;
+}
+if (match_threshold <= 0)
+{
+    match_threshold = 10;
+}
 
 m_match.setrect(learn_h, learn_w, learn_y, learn_x);
 m_match.setobjfilter(objfilter);
@@ -34,8 +67,8 @@ m_match.pattern2org();
 m_match.samplemodel(100);
 
 m_match.setmatchrect(search_h, search_w, search_y, search_x);
-m_match.matchstepgap(10, 10);
-m_match.setmatchthre(10);
+m_match.matchstepgap(match_step_x, match_step_y);
+m_match.setmatchthre(match_threshold);
 m_match.setminscore(min_score);
 m_match.setfindnum(find_num);
 m_match.match(&m_image);

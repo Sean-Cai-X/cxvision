@@ -71,6 +71,19 @@ struct FindCircleMeasureGeometryDebug
     int measure_points_count = 0;
     int valid_points_count = 0;
 
+    // Selected-edge diagnostics.  selected_edge_index is the actual value
+    // consumed by FindCircle::Measure(): 0 means every eligible candidate on
+    // each radial scan line, N means the N-th candidate, and -1 means the last
+    // candidate on each radial scan line.
+    int selected_edge_index = 0;
+    int candidate_runs_total = 0;
+    int candidate_runs_max_per_line = 0;
+    int selected_edge_hits = 0;
+    int selected_edge_misses = 0;
+    double selected_edge_radius_avg = 0.0;
+    double selected_edge_radius_min = 0.0;
+    double selected_edge_radius_max = 0.0;
+
     std::string measure_source;
     std::string failure_stage;
     std::string detail;

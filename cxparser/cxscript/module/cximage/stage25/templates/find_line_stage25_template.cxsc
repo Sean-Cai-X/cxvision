@@ -35,6 +35,7 @@ int script_scale = {{script_scale}};
 int tool_half_width = {{tool_half_width}};
 
 int filter_profile = {{filter_profile}};
+int scan_direction = global_findline_scan_direction;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setline(x0, y0, x1, y1, tool_half_width);
@@ -43,6 +44,7 @@ m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
 m_line.setfitmode(fitmode);
+m_line.setscandirection(scan_direction);
 
 {{optional_findline_filter}}
 

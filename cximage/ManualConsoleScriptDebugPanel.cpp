@@ -52,8 +52,8 @@ bool RefreshCleanEditorFromSource(ManualTestContext& context,
 // (cx, cy, px, py), and before scan-sector globals were part of the direct
 // script contract.  Preserve the historical file as evidence, but do not run
 // it with a different parser convention.  Migration is deliberately narrow:
-// rewrite the two known generated statements and, when absent, add the one
-// public setscanarc() call immediately before measure().
+// rewrite the two known generated statements and, when absent, add the public
+// execution-control calls immediately before measure().
 bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
                                         std::string& reason)
 {
@@ -76,6 +76,7 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   bool changed = false;
   bool callOrderChanged = false;
   bool scanArcAdded = false;
+  bool selectedEdgeAdded = false;
   for (const Replacement& replacement : replacements)
   {
     std::size_t pos = 0;
@@ -92,21 +93,25 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
     }
   }
 
-  // Historical Evidence snapshots do not know about the scan-sector input.
-  // Running such a snapshot creates a fresh full-circle runtime object, which
-  // then replaces the correctly edited sector in Image View.  Resolve the
-  // declared FindCircle object name and make the missing public method call
-  // explicit in the in-memory working revision.  Do not modify the immutable
-  // evidence snapshot on disk.
-  if (context.editor_text.find(".setscanarc(") == std::string::npos)
+  // Historical Evidence snapshots may not know about the selected candidate
+  // edge or scan-sector inputs.  Running such a snapshot otherwise leaves
+  // FindCircle::m_iselectedgenum at its default zero (All edges), even though
+  // Key Parameter Controls and runtime globals contain Edge 1/2/3/....
+  // Resolve the declared object once and add only the missing public calls.
+  const std::size_t typePos = context.editor_text.find("FindCircle");
+  std::size_t nameBegin = typePos == std::string::npos
+      ? std::string::npos
+      : typePos + std::strlen("FindCircle");
+  if (nameBegin != std::string::npos)
   {
-    const std::size_t typePos = context.editor_text.find("FindCircle");
-    std::size_t nameBegin = typePos + std::strlen("FindCircle");
     while (nameBegin < context.editor_text.size() &&
            std::isspace(static_cast<unsigned char>(context.editor_text[nameBegin])))
       ++nameBegin;
+  }
 
-    std::size_t nameEnd = nameBegin;
+  std::size_t nameEnd = nameBegin;
+  if (nameEnd != std::string::npos)
+  {
     while (nameEnd < context.editor_text.size())
     {
       const unsigned char ch =
@@ -115,12 +120,41 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
         break;
       ++nameEnd;
     }
+  }
 
-    if (nameEnd > nameBegin)
+  const std::string objectName =
+      nameBegin != std::string::npos && nameEnd > nameBegin
+          ? context.editor_text.substr(nameBegin, nameEnd - nameBegin)
+          : std::string();
+  const std::string measureCall = objectName.empty()
+      ? std::string()
+      : objectName + ".measure(";
+
+  if (!objectName.empty() &&
+      context.editor_text.find(".setselectedgenum(") == std::string::npos)
+  {
+    const std::size_t measurePos = context.editor_text.find(measureCall);
+    if (measurePos != std::string::npos)
     {
-      const std::string objectName =
-          context.editor_text.substr(nameBegin, nameEnd - nameBegin);
-      const std::string measureCall = objectName + ".measure(";
+      const std::string selectedEdgeCall =
+          objectName +
+          ".setselectedgenum(global_findcircle_selected_edge);\n";
+      context.editor_text.insert(measurePos, selectedEdgeCall);
+      changed = true;
+      selectedEdgeAdded = true;
+    }
+  }
+
+  // Historical Evidence snapshots do not know about the scan-sector input.
+  // Running such a snapshot creates a fresh full-circle runtime object, which
+  // then replaces the correctly edited sector in Image View.  Resolve the
+  // declared FindCircle object name and make the missing public method call
+  // explicit in the in-memory working revision.  Do not modify the immutable
+  // evidence snapshot on disk.
+  if (context.editor_text.find(".setscanarc(") == std::string::npos)
+  {
+    if (!objectName.empty())
+    {
       const std::size_t measurePos = context.editor_text.find(measureCall);
       if (measurePos != std::string::npos)
       {
@@ -146,7 +180,99 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   context.analyzed_text.clear();
   reason = "legacy FindCircle working revision migrated in memory (call_order=" +
            std::string(callOrderChanged ? "yes" : "no") +
+           ", selected_edge_call=" +
+           std::string(selectedEdgeAdded ? "added" : "present") +
            ", scan_arc_call=" + std::string(scanArcAdded ? "added" : "present") +
+           "); historical script_snapshot.cxsc was not modified";
+  return true;
+}
+
+bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
+                                      std::string& reason)
+{
+  reason.clear();
+
+  const std::size_t typePosUpper = context.editor_text.find("FindLine");
+  const std::size_t typePosLower = context.editor_text.find("Findline");
+  if (typePosUpper == std::string::npos && typePosLower == std::string::npos)
+    return false;
+
+  const bool useUpper =
+      typePosUpper != std::string::npos &&
+      (typePosLower == std::string::npos || typePosUpper < typePosLower);
+  const std::size_t typePos = useUpper ? typePosUpper : typePosLower;
+  const char* typeName = useUpper ? "FindLine" : "Findline";
+  const std::size_t typeNameLen = std::strlen(typeName);
+
+  std::size_t nameBegin = typePos + typeNameLen;
+  while (nameBegin < context.editor_text.size() &&
+         std::isspace(static_cast<unsigned char>(context.editor_text[nameBegin])))
+  {
+    ++nameBegin;
+  }
+
+  std::size_t nameEnd = nameBegin;
+  while (nameEnd < context.editor_text.size())
+  {
+    const unsigned char ch =
+        static_cast<unsigned char>(context.editor_text[nameEnd]);
+    if (!std::isalnum(ch) && ch != '_')
+      break;
+    ++nameEnd;
+  }
+
+  const std::string objectName =
+      nameEnd > nameBegin
+          ? context.editor_text.substr(nameBegin, nameEnd - nameBegin)
+          : std::string();
+  if (objectName.empty())
+    return false;
+
+  const std::string measureCall = objectName + ".measure(";
+  const std::string robustMeasureCall = objectName + ".measureRobust(";
+  std::size_t insertPos = context.editor_text.find(measureCall);
+  if (insertPos == std::string::npos)
+    insertPos = context.editor_text.find(robustMeasureCall);
+  if (insertPos == std::string::npos)
+    return false;
+
+  bool changed = false;
+  bool scanDirectionAdded = false;
+  bool selectedEdgeAdded = false;
+
+  const auto insertBeforeMeasure = [&](const std::string& statement)
+  {
+    context.editor_text.insert(insertPos, statement);
+    insertPos += statement.size();
+    changed = true;
+  };
+
+  if (context.editor_text.find(objectName + ".setscandirection(") ==
+      std::string::npos)
+  {
+    insertBeforeMeasure(objectName +
+                        ".setscandirection(global_findline_scan_direction);\n");
+    scanDirectionAdded = true;
+  }
+
+  if (context.editor_text.find(objectName + ".setselectedgenum(") ==
+      std::string::npos)
+  {
+    insertBeforeMeasure(objectName +
+                        ".setselectedgenum(global_findline_selected_edge);\n");
+    selectedEdgeAdded = true;
+  }
+
+  if (!changed)
+    return false;
+
+  context.editor_dirty = true;
+  context.analyzed_text.clear();
+  reason = "legacy FindLine working revision migrated in memory "
+           "(scan_direction_call=" +
+           std::string(scanDirectionAdded ? "added" : "present") +
+           ", selected_edge_call=" +
+           std::string(selectedEdgeAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -294,9 +420,9 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       runRequestedByKeyParameterControls)
   {
     SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
-    context.debug_action = "Run";
     if (context.editor_text.empty())
     {
+      context.debug_action = "Run";
       context.run_state = "failed";
       context.debug_status = "run_failed";
       context.debug_reason = "Script Editor is empty";
@@ -306,6 +432,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       std::string sourceRefreshReason;
       if (!RefreshCleanEditorFromSource(context, sourceRefreshReason))
       {
+        context.debug_action = "Run";
         context.run_state = "failed";
         context.debug_status = "run_failed";
         context.debug_reason = sourceRefreshReason;
@@ -327,6 +454,19 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
                 ", reason=" + legacyMigrationReason);
       }
 
+      std::string legacyFindLineMigrationReason;
+      const bool legacyFindLineMigrated =
+          MigrateLegacyFindLineCallsForRun(context, legacyFindLineMigrationReason);
+      if (legacyFindLineMigrated)
+      {
+        CXLOG_WARN(
+            "ManualConsole",
+            "legacy_findline_script_migrated",
+            "MIGRATED_IN_MEMORY",
+            std::string("script=") + context.loaded_script_path +
+                ", reason=" + legacyFindLineMigrationReason);
+      }
+
       // A candidate run must use the values captured by the Save/Run action.
       // Do not let an Evidence refresh or runtime-object refresh replace them
       // between the button click and this deferred compiler pass.
@@ -340,9 +480,17 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       {
         context.current_gauge = frozenGauge;
         context.runtime_int_vars = frozenGlobals;
-        context.debug_reason =
-            "candidate input snapshot restored before execution: candidate_id=" +
-            context.pending_execution_candidate_id;
+        if (runRequestedByKeyParameterControls)
+        {
+          context.debug_reason =
+              "Key Parameter Controls input snapshot restored before execution.";
+        }
+        else
+        {
+          context.debug_reason =
+              "candidate input snapshot restored before execution: candidate_id=" +
+              context.pending_execution_candidate_id;
+        }
       }
       else if (context.current_gauge.has_line_gauge ||
                context.current_gauge.has_circle_gauge ||
@@ -351,6 +499,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
         SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:apply_gauge");
         ApplyManualGaugeToGlobals(context);
       }
+      context.debug_action = "Run";
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:set_globals");
       for (const auto& input : context.runtime_int_vars)
       {
@@ -409,6 +558,16 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << ", start=" << context.runtime_int_vars["global_findcircle_arc_start_deg"]
          << ", end=" << context.runtime_int_vars["global_findcircle_arc_end_deg"]
          << ")";
+      ss << "\nfindcircle_selected_edge="
+         << context.runtime_int_vars["global_findcircle_selected_edge"];
+      ss << "\nfindcircle_edge_count="
+         << context.runtime_int_vars["global_findcircle_edge_count"];
+      ss << "\nfindline_scan_direction="
+         << context.runtime_int_vars["global_findline_scan_direction"];
+      ss << "\nfindline_selected_edge="
+         << context.runtime_int_vars["global_findline_selected_edge"];
+      ss << "\nfindline_edge_count="
+         << context.runtime_int_vars["global_findline_edge_count"];
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
@@ -425,6 +584,8 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
       if (legacyFindCircleMigrated)
         context.debug_reason = legacyMigrationReason;
+      if (legacyFindLineMigrated)
+        context.debug_reason = legacyFindLineMigrationReason;
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:bind_image");
       bool imageBound = true;

@@ -246,6 +246,28 @@ bool ExportShapeElementToRuntimeGlobals(
     context.runtime_int_vars[name] = static_cast<int>(std::lround(value));
   };
 
+  if (element.owner_type == "GridPatternClassTool" &&
+      element.owner_binding == "analysis_roi" &&
+      element.shape->kind() == CxShapeKind::Rect)
+  {
+    const RectShape* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+    {
+      reason = "GridPattern analysis ROI is not a rectangle";
+      return false;
+    }
+    const double x0 = std::min(rect->x0(), rect->x1());
+    const double y0 = std::min(rect->y0(), rect->y1());
+    const double x1 = std::max(rect->x0(), rect->x1());
+    const double y1 = std::max(rect->y0(), rect->y1());
+    setInt("global_learn_roi_x", x0);
+    setInt("global_learn_roi_y", y0);
+    setInt("global_learn_roi_w", std::max(1.0, x1 - x0));
+    setInt("global_learn_roi_h", std::max(1.0, y1 - y0));
+    reason = "GridPattern analysis ROI exported to global_learn_roi_*";
+    return true;
+  }
+
   if (element.shape->kind() == CxShapeKind::Circle)
   {
     CxShapePoint center;
@@ -766,7 +788,8 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                 (commit.owner_type == "FindLine" ||
                  commit.owner_type == "FindCircle" ||
                  commit.owner_type == "FindEllipse" ||
-                 commit.owner_type == "FindRect");
+                 commit.owner_type == "FindRect" ||
+                 commit.owner_type == "GridPatternClassTool");
 
             if (deferRuntimeToolWriteback)
             {

@@ -346,6 +346,10 @@ public:
     void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
     int wgap() { return m_iwgap; }
     int hgap() { return m_ihgap; }
+    int scandirection() const { return m_scan_direction; }
+    void setscandirection(int direction);
+    bool wscanenabled() const { return m_scan_direction != 2; }
+    bool hscanenabled() const { return m_scan_direction != 1; }
     int thre();
     int linegap() { return m_iSelectPointGap; }
     int objfilter() const { return m_iobjfilterset; }
@@ -570,6 +574,9 @@ private:
 
     int m_ihgap;
     int m_iwgap;
+    // 0 keeps legacy two-axis behavior for old assets; Manual UI uses the
+    // mutually exclusive modes 1=W-only and 2=H-only.
+    int m_scan_direction;
 
     gp_Pnt* m_listscanorA;
     gp_Pnt* m_listcollectorA;

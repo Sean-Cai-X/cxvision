@@ -8,6 +8,7 @@
 
 #include "CxCoreBoundary.h"
 #include "CxCoreGeometryAttach.h"
+#include "GridPatternClassNet.h"
 #include "RegionPatternNet.h"
 
 namespace cxcore {
@@ -133,6 +134,11 @@ inline const char* RegionPatternFeatureVectorName()
     return "region_pattern_descriptor";
 }
 
+inline const char* GridPatternHierarchyFeatureVectorName()
+{
+    return "grid_pattern_hierarchy_descriptor";
+}
+
 inline const char* BaselineFeatureVectorName()
 {
     return "baseline_feature_v1";
@@ -168,6 +174,11 @@ inline const char* RegionPatternFeatureRole()
     return "content_aux";
 }
 
+inline const char* GridPatternHierarchyFeatureRole()
+{
+    return "class_hierarchy_primary";
+}
+
 inline const char* BaselineFeatureRole()
 {
     return "baseline_summary";
@@ -201,6 +212,11 @@ inline const char* GeometryTopologyBundleFeatureRole()
 inline const char* RegionPatternFeatureSource()
 {
     return "region_pattern_net";
+}
+
+inline const char* GridPatternHierarchyFeatureSource()
+{
+    return "GridPatternClassNet";
 }
 
 inline const char* BaselineFeatureSource()
@@ -513,6 +529,22 @@ inline FeatureVectorInput MakeRegionPatternFeatureVector(
     return input;
 }
 
+inline FeatureVectorInput MakeGridPatternHierarchyFeatureVector(
+    const GridPatternHierarchy& hierarchy,
+    const std::string& name = GridPatternHierarchyFeatureVectorName())
+{
+    FeatureVectorInput input;
+    input.name = name;
+    input.role = GridPatternHierarchyFeatureRole();
+    input.source = GridPatternHierarchyFeatureSource();
+    input.values.reserve(hierarchy.descriptor.size());
+    for (const double value : hierarchy.descriptor)
+    {
+        input.values.push_back(static_cast<float>(value));
+    }
+    return input;
+}
+
 inline FeatureVectorInput MakeBaselineFeatureVector(
     const BaselineFeatureSampleV1& sample,
     const std::string& name = BaselineFeatureVectorName())
@@ -716,6 +748,24 @@ inline AiTaskEnvelope MakeFastMatchEnvelope(
     envelope.mode = AiExecutionMode::Infer;
     envelope.requires_classical_explainability = requires_classical_explainability;
     envelope.descriptors.push_back(MakeFastMatchFeatureVector(match));
+    envelope.geometry.match = match;
+    envelope.geometry.has_match = true;
+    envelope.topk = 1;
+    return envelope;
+}
+
+inline AiTaskEnvelope MakeFastMatchGridClassEnvelope(
+    AiTaskKind task,
+    const MatchOutput& match,
+    const GridPatternHierarchy& hierarchy,
+    bool requires_classical_explainability = true)
+{
+    AiTaskEnvelope envelope;
+    envelope.task = task;
+    envelope.mode = AiExecutionMode::Infer;
+    envelope.requires_classical_explainability = requires_classical_explainability;
+    envelope.descriptors.push_back(MakeFastMatchFeatureVector(match));
+    envelope.descriptors.push_back(MakeGridPatternHierarchyFeatureVector(hierarchy));
     envelope.geometry.match = match;
     envelope.geometry.has_match = true;
     envelope.topk = 1;

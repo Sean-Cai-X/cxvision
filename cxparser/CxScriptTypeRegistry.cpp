@@ -35,6 +35,9 @@ std::string_view CxScriptTypeName(
     case CxScriptTypeId::CircleRingGauge:
         return "CircleRingGauge";
 
+    case CxScriptTypeId::GridPatternClassTool:
+        return "GridPatternClassTool";
+
     case CxScriptTypeId::Shape:
         return "Shape";
 
@@ -88,6 +91,9 @@ ParseCanonicalCxScriptTypeName(
 
     if (name == "CircleRingGauge")
         return CxScriptTypeId::CircleRingGauge;
+
+    if (name == "GridPatternClassTool")
+        return CxScriptTypeId::GridPatternClassTool;
 
     if (name == "Shape")
         return CxScriptTypeId::Shape;

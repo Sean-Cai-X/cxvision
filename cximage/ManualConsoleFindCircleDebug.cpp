@@ -103,6 +103,30 @@ void RefreshFindCircleMeasureGeometrySnapshot(
     object.circle_process_width =
         dbg.process_width;
 
+    object.circle_selected_edge_index =
+        dbg.selected_edge_index;
+
+    object.circle_candidate_runs_total =
+        dbg.candidate_runs_total;
+
+    object.circle_candidate_runs_max_per_line =
+        dbg.candidate_runs_max_per_line;
+
+    object.circle_selected_edge_hits =
+        dbg.selected_edge_hits;
+
+    object.circle_selected_edge_misses =
+        dbg.selected_edge_misses;
+
+    object.circle_selected_edge_radius_avg =
+        dbg.selected_edge_radius_avg;
+
+    object.circle_selected_edge_radius_min =
+        dbg.selected_edge_radius_min;
+
+    object.circle_selected_edge_radius_max =
+        dbg.selected_edge_radius_max;
+
     object.circle_measure_image_ready =
         dbg.image_ready;
 

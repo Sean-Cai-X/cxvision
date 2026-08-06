@@ -8,6 +8,7 @@ m_line.setmaxscanlines(global_max_scan_lines);
 m_line.setmaxsamples(global_max_samples);
 
 m_line.SetWHgap(global_wgap, global_hgap);
+m_line.setscandirection(global_findline_scan_direction);
 m_line.setlinegap(global_linegap);
 m_line.setline(
     global_roi_x0,
