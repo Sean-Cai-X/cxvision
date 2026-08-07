@@ -604,6 +604,16 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["scan_runs_rejected_by_selection"] = capture.scan_runs_rejected_by_selection;
     pkg.metrics["scan_runs_rejected_near_endpoint"] = capture.scan_runs_rejected_near_endpoint;
     pkg.metrics["scan_points_emitted"] = capture.scan_points_emitted;
+    pkg.metrics["findline_point_consistency_enabled"] = capture.findline_point_consistency_enabled;
+    pkg.metrics["findline_point_consistency_range"] = capture.findline_point_consistency_range;
+    pkg.metrics["findline_point_consistency_input_points"] = capture.findline_point_consistency_input_points;
+    pkg.metrics["findline_point_consistency_output_points"] = capture.findline_point_consistency_output_points;
+    pkg.metrics["findline_point_consistency_removed_points"] = capture.findline_point_consistency_removed_points;
+    pkg.metrics["findcircle_point_consistency_enabled"] = capture.circle_point_consistency_enabled;
+    pkg.metrics["findcircle_point_consistency_range"] = capture.circle_point_consistency_range;
+    pkg.metrics["findcircle_point_consistency_input_points"] = capture.circle_point_consistency_input_points;
+    pkg.metrics["findcircle_point_consistency_output_points"] = capture.circle_point_consistency_output_points;
+    pkg.metrics["findcircle_point_consistency_removed_points"] = capture.circle_point_consistency_removed_points;
     pkg.metrics["findline_selected_edge_index"] = capture.findline_selected_edge_index;
     pkg.metrics["findline_evaluated_edge_count"] = capture.findline_evaluated_edge_count;
     pkg.metrics["findline_best_edge_index"] = capture.findline_best_edge_index;
@@ -700,6 +710,7 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["ellipse_radius_x"] = capture.ellipse_radius_x;
     pkg.metrics["ellipse_radius_y"] = capture.ellipse_radius_y;
     pkg.metrics["ellipse_angle_deg"] = capture.ellipse_angle_deg;
+    pkg.metrics["ellipse_selected_edge_index"] = capture.ellipse_selected_edge_index;
     pkg.metrics["ellipse_scan_candidate_lines"] = capture.ellipse_scan_candidate_lines;
     pkg.metrics["ellipse_scan_total_candidates"] = capture.ellipse_scan_total_candidates;
     pkg.metrics["ellipse_scan_accepted_points_before_gate"] = capture.ellipse_scan_accepted_points_before_gate;
@@ -722,6 +733,16 @@ CxScriptResultPackage BuildCxScriptResultPackage(
         capture.ellipse_rejected_boundary_band_norm_avg;
     pkg.metrics["ellipse_rejected_boundary_band_norm_max"] =
         capture.ellipse_rejected_boundary_band_norm_max;
+    pkg.metrics["ellipse_point_consistency_enabled"] =
+        capture.ellipse_point_consistency_enabled;
+    pkg.metrics["ellipse_point_consistency_range"] =
+        capture.ellipse_point_consistency_range;
+    pkg.metrics["ellipse_point_consistency_input_points"] =
+        capture.ellipse_point_consistency_input_points;
+    pkg.metrics["ellipse_point_consistency_output_points"] =
+        capture.ellipse_point_consistency_output_points;
+    pkg.metrics["ellipse_point_consistency_removed_points"] =
+        capture.ellipse_point_consistency_removed_points;
 
     pkg.metrics["fastmatch_model_width"] = capture.fastmatch_model_width;
     pkg.metrics["fastmatch_model_height"] = capture.fastmatch_model_height;
@@ -741,6 +762,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["fastmatch_match_last_stage"] = capture.fastmatch_match_last_stage;
     pkg.metrics["fastmatch_match_image_width"] = capture.fastmatch_match_image_width;
     pkg.metrics["fastmatch_match_image_height"] = capture.fastmatch_match_image_height;
+    pkg.metrics["fastmatch_learn_rect_x0"] = capture.fastmatch_learn_rect_x0;
+    pkg.metrics["fastmatch_learn_rect_y0"] = capture.fastmatch_learn_rect_y0;
+    pkg.metrics["fastmatch_learn_rect_x1"] = capture.fastmatch_learn_rect_x1;
+    pkg.metrics["fastmatch_learn_rect_y1"] = capture.fastmatch_learn_rect_y1;
     pkg.metrics["fastmatch_match_rect_x0"] = capture.fastmatch_match_rect_x0;
     pkg.metrics["fastmatch_match_rect_y0"] = capture.fastmatch_match_rect_y0;
     pkg.metrics["fastmatch_match_rect_x1"] = capture.fastmatch_match_rect_x1;
@@ -1632,6 +1657,12 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"ellipse_radius_x\": " << capture.ellipse_radius_x << ",\n";
         object_state_file << "  \"ellipse_radius_y\": " << capture.ellipse_radius_y << ",\n";
         object_state_file << "  \"ellipse_angle_deg\": " << capture.ellipse_angle_deg << ",\n";
+        object_state_file << "  \"ellipse_selected_edge_index\": " << capture.ellipse_selected_edge_index << ",\n";
+        object_state_file << "  \"ellipse_point_consistency_enabled\": " << capture.ellipse_point_consistency_enabled << ",\n";
+        object_state_file << "  \"ellipse_point_consistency_range\": " << capture.ellipse_point_consistency_range << ",\n";
+        object_state_file << "  \"ellipse_point_consistency_input_points\": " << capture.ellipse_point_consistency_input_points << ",\n";
+        object_state_file << "  \"ellipse_point_consistency_output_points\": " << capture.ellipse_point_consistency_output_points << ",\n";
+        object_state_file << "  \"ellipse_point_consistency_removed_points\": " << capture.ellipse_point_consistency_removed_points << ",\n";
         object_state_file << "  \"avgdist\": " << capture.avgdist << ",\n";
         object_state_file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
         object_state_file << "  \"top1_rect_x\": " << capture.top1_rect_x << ",\n";
@@ -1666,6 +1697,10 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fastmatch_match_last_stage\": " << capture.fastmatch_match_last_stage << ",\n";
         object_state_file << "  \"fastmatch_match_image_width\": " << capture.fastmatch_match_image_width << ",\n";
         object_state_file << "  \"fastmatch_match_image_height\": " << capture.fastmatch_match_image_height << ",\n";
+        object_state_file << "  \"fastmatch_learn_rect_x0\": " << capture.fastmatch_learn_rect_x0 << ",\n";
+        object_state_file << "  \"fastmatch_learn_rect_y0\": " << capture.fastmatch_learn_rect_y0 << ",\n";
+        object_state_file << "  \"fastmatch_learn_rect_x1\": " << capture.fastmatch_learn_rect_x1 << ",\n";
+        object_state_file << "  \"fastmatch_learn_rect_y1\": " << capture.fastmatch_learn_rect_y1 << ",\n";
         object_state_file << "  \"fastmatch_match_rect_x0\": " << capture.fastmatch_match_rect_x0 << ",\n";
         object_state_file << "  \"fastmatch_match_rect_y0\": " << capture.fastmatch_match_rect_y0 << ",\n";
         object_state_file << "  \"fastmatch_match_rect_x1\": " << capture.fastmatch_match_rect_x1 << ",\n";
@@ -1692,6 +1727,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"scan_runs_rejected_by_selection\": " << capture.scan_runs_rejected_by_selection << ",\n";
         object_state_file << "  \"scan_runs_rejected_near_endpoint\": " << capture.scan_runs_rejected_near_endpoint << ",\n";
         object_state_file << "  \"scan_points_emitted\": " << capture.scan_points_emitted << ",\n";
+        object_state_file << "  \"findline_point_consistency_enabled\": " << capture.findline_point_consistency_enabled << ",\n";
+        object_state_file << "  \"findline_point_consistency_range\": " << capture.findline_point_consistency_range << ",\n";
+        object_state_file << "  \"findline_point_consistency_input_points\": " << capture.findline_point_consistency_input_points << ",\n";
+        object_state_file << "  \"findline_point_consistency_output_points\": " << capture.findline_point_consistency_output_points << ",\n";
+        object_state_file << "  \"findline_point_consistency_removed_points\": " << capture.findline_point_consistency_removed_points << ",\n";
+        object_state_file << "  \"findcircle_point_consistency_enabled\": " << capture.circle_point_consistency_enabled << ",\n";
+        object_state_file << "  \"findcircle_point_consistency_range\": " << capture.circle_point_consistency_range << ",\n";
+        object_state_file << "  \"findcircle_point_consistency_input_points\": " << capture.circle_point_consistency_input_points << ",\n";
+        object_state_file << "  \"findcircle_point_consistency_output_points\": " << capture.circle_point_consistency_output_points << ",\n";
+        object_state_file << "  \"findcircle_point_consistency_removed_points\": " << capture.circle_point_consistency_removed_points << ",\n";
         object_state_file << "  \"findobject_foreground_before\": " << capture.object_foreground_before << ",\n";
         object_state_file << "  \"findobject_foreground_after\": " << capture.object_foreground_after << ",\n";
         object_state_file << "  \"fit_filter_input_count\": " << capture.fit_filter_input_count << ",\n";
@@ -1806,6 +1851,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "scan_runs_rejected_by_selection: " << capture.scan_runs_rejected_by_selection << "\n";
         log_file << "scan_runs_rejected_near_endpoint: " << capture.scan_runs_rejected_near_endpoint << "\n";
         log_file << "scan_points_emitted: " << capture.scan_points_emitted << "\n";
+        log_file << "findline_point_consistency_enabled: " << capture.findline_point_consistency_enabled << "\n";
+        log_file << "findline_point_consistency_range: " << capture.findline_point_consistency_range << "\n";
+        log_file << "findline_point_consistency_input_points: " << capture.findline_point_consistency_input_points << "\n";
+        log_file << "findline_point_consistency_output_points: " << capture.findline_point_consistency_output_points << "\n";
+        log_file << "findline_point_consistency_removed_points: " << capture.findline_point_consistency_removed_points << "\n";
+        log_file << "findcircle_point_consistency_enabled: " << capture.circle_point_consistency_enabled << "\n";
+        log_file << "findcircle_point_consistency_range: " << capture.circle_point_consistency_range << "\n";
+        log_file << "findcircle_point_consistency_input_points: " << capture.circle_point_consistency_input_points << "\n";
+        log_file << "findcircle_point_consistency_output_points: " << capture.circle_point_consistency_output_points << "\n";
+        log_file << "findcircle_point_consistency_removed_points: " << capture.circle_point_consistency_removed_points << "\n";
         log_file << "findobject_foreground_before: " << capture.object_foreground_before << "\n";
         log_file << "findobject_foreground_after: " << capture.object_foreground_after << "\n";
         log_file << "valid_points_count: " << capture.valid_points_count << "\n";
@@ -1819,6 +1874,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "fastmatch_learn_a2_count: " << capture.fastmatch_learn_a2_count << "\n";
         log_file << "fastmatch_learn_b2_count: " << capture.fastmatch_learn_b2_count << "\n";
         log_file << "fastmatch_learn_status_code: " << capture.fastmatch_learn_status_code << "\n";
+        log_file << "fastmatch_learn_rect: "
+                 << capture.fastmatch_learn_rect_x0 << ","
+                 << capture.fastmatch_learn_rect_y0 << ","
+                 << capture.fastmatch_learn_rect_x1 << ","
+                 << capture.fastmatch_learn_rect_y1 << "\n";
+        log_file << "fastmatch_match_rect: "
+                 << capture.fastmatch_match_rect_x0 << ","
+                 << capture.fastmatch_match_rect_y0 << ","
+                 << capture.fastmatch_match_rect_x1 << ","
+                 << capture.fastmatch_match_rect_y1 << "\n";
         log_file << "candidate_count: " << capture.candidate_count << "\n";
         log_file << "best_score: " << capture.best_score << "\n";
         log_file << "torch_ok: " << capture.torch_ok << "\n";

@@ -25,10 +25,15 @@ int find_num = global_find_num;
 int match_step_x = global_match_step_x;
 int match_step_y = global_match_step_y;
 int match_threshold = global_match_thre;
+int fastmatch_action = global_fastmatch_action;
 
 if (min_score_percent > 0)
 {
     min_score = min_score_percent / 100.0;
+}
+if (fastmatch_action <= 0)
+{
+    fastmatch_action = 3;
 }
 if (find_num <= 0)
 {
@@ -55,7 +60,7 @@ if (match_threshold <= 0)
     match_threshold = 10;
 }
 
-m_match.setrect(learn_h, learn_w, learn_y, learn_x);
+m_match.setrectxywh(learn_x, learn_y, learn_w, learn_h);
 m_match.setobjfilter(objfilter);
 m_match.setwhgap(wgap, hgap);
 m_match.setthre(threshold);
@@ -66,18 +71,28 @@ m_match.modelzero();
 m_match.pattern2org();
 m_match.samplemodel(100);
 
-m_match.setmatchrect(search_h, search_w, search_y, search_x);
+global_learn_a_count = m_match.getlearnacount();
+global_learn_b_count = m_match.getlearnbcount();
+global_learn_a2_count = m_match.getlearna2count();
+global_learn_b2_count = m_match.getlearnb2count();
+global_learn_status_code = m_match.getlearnstatuscode();
+global_model_point_count = m_match.getmodelpointcount();
+global_match_count = 0;
+global_candidate_count = 0;
+global_best_score = 0;
+
+if (fastmatch_action == 1)
+{
+    return;
+}
+
+m_match.setmatchrectxywh(search_x, search_y, search_w, search_h);
 m_match.matchstepgap(match_step_x, match_step_y);
 m_match.setmatchthre(match_threshold);
 m_match.setminscore(min_score);
 m_match.setfindnum(find_num);
 m_match.match(&m_image);
 
-global_learn_a_count = m_match.getlearnacount();
-global_learn_b_count = m_match.getlearnbcount();
-global_learn_a2_count = m_match.getlearna2count();
-global_learn_b2_count = m_match.getlearnb2count();
-global_learn_status_code = m_match.getlearnstatuscode();
 global_match_count = m_match.getresultcandidatecount();
+global_candidate_count = global_match_count;
 global_best_score = m_match.getresultbestscore();
-global_model_point_count = m_match.getmodelpointcount();

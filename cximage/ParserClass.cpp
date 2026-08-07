@@ -23,6 +23,8 @@
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
 
+#include <algorithm>
+
 //#include "gridobject.h"
 //#include "imageroi.h"
 
@@ -165,6 +167,138 @@ public:
     }
 
 };
+
+class ArgOrderProbe
+{
+public:
+    ArgOrderProbe()
+    {
+        reset();
+    }
+
+    void reset()
+    {
+        for (double& value : m_int4)
+            value = 0.0;
+        for (double& value : m_double4)
+            value = 0.0;
+        for (double& value : m_any4)
+            value = 0.0;
+        for (double& value : m_probe_values)
+            value = 0.0;
+    }
+
+    void setint4(int a, int b, int c, int d)
+    {
+        m_int4[0] = static_cast<double>(a);
+        m_int4[1] = static_cast<double>(b);
+        m_int4[2] = static_cast<double>(c);
+        m_int4[3] = static_cast<double>(d);
+    }
+
+    void setdouble4(double a, double b, double c, double d)
+    {
+        m_double4[0] = a;
+        m_double4[1] = b;
+        m_double4[2] = c;
+        m_double4[3] = d;
+    }
+
+    void setany4(vectordouble& values)
+    {
+        for (double& value : m_any4)
+            value = 0.0;
+        const size_t limit = std::min(values.size(), static_cast<size_t>(4));
+        for (size_t i = 0; i < limit; ++i)
+            m_any4[i] = values[i];
+    }
+
+    // Direct parser-dispatch probe. Each slot records the order received by C++.
+    void setdouble1(double a) { m_probe_values[0] = a; }
+    void setdouble2(double a, double b) { m_probe_values[1] = Encode2(a, b); }
+    void setdouble3(double a, double b, double c) { m_probe_values[2] = Encode3(a, b, c); }
+    void setdouble4full(double a, double b, double c, double d) { m_probe_values[3] = Encode4(a, b, c, d); }
+
+    void setint1(int a) { m_probe_values[4] = a; }
+    void setint2(int a, int b) { m_probe_values[5] = Encode2(a, b); }
+    void setint3(int a, int b, int c) { m_probe_values[6] = Encode3(a, b, c); }
+    void setint4full(int a, int b, int c, int d) { m_probe_values[7] = Encode4(a, b, c, d); }
+    void setint5(int a, int b, int c, int d, int e) { m_probe_values[8] = Encode5(a, b, c, d, e); }
+    void setint6(int a, int b, int c, int d, int e, int f) { m_probe_values[9] = Encode6(a, b, c, d, e, f); }
+    void setint7(int a, int b, int c, int d, int e, int f, int g) { m_probe_values[10] = Encode7(a, b, c, d, e, f, g); }
+
+    void setintdouble2(int a, double b) { m_probe_values[11] = Encode2(a, b); }
+    void setdoubleint2(double a, int b) { m_probe_values[12] = Encode2(a, b); }
+    void setcharp1(const char* value) { m_probe_values[13] = CharCode(value); }
+    void setdoublecharp2(double value, const char* text) { m_probe_values[14] = Encode2(value, CharCode(text)); }
+    void setcharpany(std::vector<std::string>& values) { m_probe_values[15] = EncodeCharVector(values); }
+    void setanyfull(vectordouble& values) { m_probe_values[16] = EncodeNumericVector(values); }
+    void setvoidp(void* value) { m_probe_values[17] = value != nullptr ? 1.0 : 0.0; }
+
+    double returnvoidp(void* value) { return value != nullptr ? 1.0 : 0.0; }
+    int returnint1int(int a) { return static_cast<int>(a); }
+    int returnint2int(int a, int b) { return static_cast<int>(Encode2(a, b)); }
+    double returnint1double(int a) { return a; }
+    double returnint2double(int a, int b) { return Encode2(a, b); }
+    double returnint3double(int a, int b, int c) { return Encode3(a, b, c); }
+    int returnintdouble2int(int a, double b) { return static_cast<int>(Encode2(a, b)); }
+    int returndoubleint2int(double a, int b) { return static_cast<int>(Encode2(a, b)); }
+    double returnintdouble2double(int a, double b) { return Encode2(a, b); }
+    double returndoubleint2double(double a, int b) { return Encode2(a, b); }
+    int returncharpanyint(std::vector<std::string>& values) { return static_cast<int>(EncodeCharVector(values)); }
+    double returncharpanydouble(std::vector<std::string>& values) { return EncodeCharVector(values); }
+    int returnanyint(vectordouble& values) { return static_cast<int>(EncodeNumericVector(values)); }
+    double returnanydouble(vectordouble& values) { return EncodeNumericVector(values); }
+    double returndoublecharp2(double value, const char* text) { return Encode2(value, CharCode(text)); }
+
+    double probevalue(int slot)
+    {
+        return slot >= 0 && slot < 18 ? m_probe_values[slot] : -1.0;
+    }
+
+    double int4a() { return m_int4[0]; }
+    double int4b() { return m_int4[1]; }
+    double int4c() { return m_int4[2]; }
+    double int4d() { return m_int4[3]; }
+
+    double double4a() { return m_double4[0]; }
+    double double4b() { return m_double4[1]; }
+    double double4c() { return m_double4[2]; }
+    double double4d() { return m_double4[3]; }
+
+    double any4a() { return m_any4[0]; }
+    double any4b() { return m_any4[1]; }
+    double any4c() { return m_any4[2]; }
+    double any4d() { return m_any4[3]; }
+
+private:
+    static double Encode2(double a, double b) { return a * 100.0 + b; }
+    static double Encode3(double a, double b, double c) { return a * 10000.0 + b * 100.0 + c; }
+    static double Encode4(double a, double b, double c, double d) { return a * 1000000.0 + b * 10000.0 + c * 100.0 + d; }
+    static double Encode5(double a, double b, double c, double d, double e) { return a * 100000000.0 + b * 1000000.0 + c * 10000.0 + d * 100.0 + e; }
+    static double Encode6(double a, double b, double c, double d, double e, double f) { return a * 10000000000.0 + b * 100000000.0 + c * 1000000.0 + d * 10000.0 + e * 100.0 + f; }
+    static double Encode7(double a, double b, double c, double d, double e, double f, double g) { return a * 1000000000000.0 + b * 10000000000.0 + c * 100000000.0 + d * 1000000.0 + e * 10000.0 + f * 100.0 + g; }
+    static double CharCode(const char* value) { return value != nullptr && value[0] != '\0' ? static_cast<double>(value[0] - 'A' + 1) : 0.0; }
+    static double EncodeCharVector(std::vector<std::string>& values)
+    {
+        double encoded = 0.0;
+        for (const std::string& value : values)
+            encoded = encoded * 100.0 + CharCode(value.c_str());
+        return encoded;
+    }
+    static double EncodeNumericVector(vectordouble& values)
+    {
+        double encoded = 0.0;
+        for (double value : values)
+            encoded = encoded * 100.0 + value;
+        return encoded;
+    }
+
+    double m_int4[4];
+    double m_double4[4];
+    double m_any4[4];
+    double m_probe_values[18];
+};
 class SmartTable
 {
     map<int, double> m_tabmap0;
@@ -267,6 +401,59 @@ namespace mu
             m_parser.DefineClassFun("SmartDouble", psmartd, "save", &SmartDouble::save);
             m_parser.DefineClassFun("SmartDouble", psmartd, "load", &SmartDouble::load);
             m_parser.DefineClassFun("SmartDouble", psmartd, "getvalue", &SmartDouble::getvalue);
+
+            ArgOrderProbe* pargorderprobe = 0;
+            m_parser.DefineClass("ArgOrderProbe", pargorderprobe);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "reset", &ArgOrderProbe::reset);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint4", &ArgOrderProbe::setint4);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdouble4", &ArgOrderProbe::setdouble4);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setany4", &ArgOrderProbe::setany4);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "int4a", &ArgOrderProbe::int4a);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "int4b", &ArgOrderProbe::int4b);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "int4c", &ArgOrderProbe::int4c);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "int4d", &ArgOrderProbe::int4d);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "double4a", &ArgOrderProbe::double4a);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "double4b", &ArgOrderProbe::double4b);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "double4c", &ArgOrderProbe::double4c);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "double4d", &ArgOrderProbe::double4d);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "any4a", &ArgOrderProbe::any4a);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "any4b", &ArgOrderProbe::any4b);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "any4c", &ArgOrderProbe::any4c);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "any4d", &ArgOrderProbe::any4d);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdouble1", &ArgOrderProbe::setdouble1);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdouble2", &ArgOrderProbe::setdouble2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdouble3", &ArgOrderProbe::setdouble3);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdouble4full", &ArgOrderProbe::setdouble4full);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint1", &ArgOrderProbe::setint1);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint2", &ArgOrderProbe::setint2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint3", &ArgOrderProbe::setint3);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint4full", &ArgOrderProbe::setint4full);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint5", &ArgOrderProbe::setint5);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint6", &ArgOrderProbe::setint6);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setint7", &ArgOrderProbe::setint7);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setintdouble2", &ArgOrderProbe::setintdouble2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdoubleint2", &ArgOrderProbe::setdoubleint2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setcharp1", &ArgOrderProbe::setcharp1);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setdoublecharp2", &ArgOrderProbe::setdoublecharp2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setcharpany", &ArgOrderProbe::setcharpany);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setanyfull", &ArgOrderProbe::setanyfull);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "setvoidp", &ArgOrderProbe::setvoidp);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnvoidp", &ArgOrderProbe::returnvoidp);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnint1int", &ArgOrderProbe::returnint1int);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnint2int", &ArgOrderProbe::returnint2int);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnint1double", &ArgOrderProbe::returnint1double);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnint2double", &ArgOrderProbe::returnint2double);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnint3double", &ArgOrderProbe::returnint3double);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnintdouble2int", &ArgOrderProbe::returnintdouble2int);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returndoubleint2int", &ArgOrderProbe::returndoubleint2int);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnintdouble2double", &ArgOrderProbe::returnintdouble2double);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returndoubleint2double", &ArgOrderProbe::returndoubleint2double);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returncharpanyint", &ArgOrderProbe::returncharpanyint);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returncharpanydouble", &ArgOrderProbe::returncharpanydouble);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnanyint", &ArgOrderProbe::returnanyint);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returnanydouble", &ArgOrderProbe::returnanydouble);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "returndoublecharp2", &ArgOrderProbe::returndoublecharp2);
+            m_parser.DefineClassFun("ArgOrderProbe", pargorderprobe, "probevalue", &ArgOrderProbe::probevalue);
 
             SmartTable* psmart = 0;
             m_parser.DefineClass("SmartTable", psmart);
@@ -420,6 +607,12 @@ namespace mu
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setcirclegap", &FindCircle::setcirclegap);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitcircle", &FindCircle::fitcircle);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "fitcirclefiltered", &FindCircle::fitcirclefiltered);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setpointconsistency", &FindCircle::setpointconsistency);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getpointconsistencyenabled", &FindCircle::getpointconsistencyenabled);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getpointconsistencyrange", &FindCircle::getpointconsistencyrange);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getpointconsistencyinputcount", &FindCircle::getpointconsistencyinputcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getpointconsistencyoutputcount", &FindCircle::getpointconsistencyoutputcount);
+            m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getpointconsistencyremovedcount", &FindCircle::getpointconsistencyremovedcount);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterinputcount", &FindCircle::getfitfilterinputcount);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterkeptcount", &FindCircle::getfitfilterkeptcount);
             m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "getfitfilterrejectedcount", &FindCircle::getfitfilterrejectedcount);
@@ -517,6 +710,9 @@ namespace mu
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "Show", &FindEllipse::setshow);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "setlinegap", &FindEllipse::setlinegap);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod", &FindEllipse::setmethod);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setfindsetting", &FindEllipse::setfindsetting);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setselectedgenum", &FindEllipse::setselectedgenum);
+            m_parser.DefineClassFun("FindEllipse", pfindellipse, "setpointconsistency", &FindEllipse::setpointconsistency);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "setthre", &FindEllipse::setthre);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "measure", &FindEllipse::measure);
             m_parser.DefineClassFun("FindEllipse", pfindellipse, "measureRobust", &FindEllipse::measureRobust);
@@ -579,6 +775,7 @@ namespace mu
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfilter", &FindLine::setfilter);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setobjectfilterstrategy", &FindLine::setobjectfilterstrategy);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setfindobjectstrategy", &FindLine::setobjectfilterstrategy);
+            m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setpointconsistency", &FindLine::setpointconsistency);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "findpattern", &FindLine::findpattern);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setcompgap", &FindLine::setcomparegap);
             m_parser.DefineClassFun(findline_type_name.data(), pfindline, "shapesetroi", &FindLine::shapesetroi);
@@ -718,8 +915,8 @@ namespace mu
             const std::string_view fastmatch_type_name =
                 CxScriptTypeName(CxScriptTypeTraits<FastMatch>::id);
             m_parser.DefineClass(fastmatch_type_name.data(), pfastmatch);
-            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrect", &FastMatch::setrect);
-            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrectxywh", &FastMatch::setrectxywh);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrect", &FastMatch::setrectxywh_script);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setrectxywh", &FastMatch::setrectxywh_script);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "Show", &FastMatch::setshow);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "learn", &FastMatch::learn);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setcompgap", &FastMatch::setcomparegap);
@@ -738,8 +935,8 @@ namespace mu
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "modelzeroposition", &FastMatch::modelzeroposition);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "match", &FastMatch::match);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchmore", &FastMatch::matchmore);
-            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrect", &FastMatch::setmatchrect);
-            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrectxywh", &FastMatch::setmatchrectxywh);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrect", &FastMatch::setmatchrectxywh_script);
+            m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setmatchrectxywh", &FastMatch::setmatchrectxywh_script);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setminscore", &FastMatch::setminscore);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchstepgap", &FastMatch::matchstepgap);
             m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "patternrootgrid", &FastMatch::patternrootgrid);

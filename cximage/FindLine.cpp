@@ -1322,6 +1322,23 @@ void FindLine::setobjectfilterstrategy(int strategy)
     m_findobject_strategy_id = strategy;
 }
 
+void FindLine::setpointconsistency(int enabled, int range)
+{
+    const int normalizedEnabled = enabled != 0 ? 1 : 0;
+    const int normalizedRange = std::max(0, range);
+    if (m_point_consistency_enabled == normalizedEnabled &&
+        m_point_consistency_range == normalizedRange)
+    {
+        return;
+    }
+
+    m_point_consistency_enabled = normalizedEnabled;
+    m_point_consistency_range = normalizedRange;
+    m_point_consistency_removed_points = 0;
+    InvalidateMeasureAndFitAfterParamChange(
+        "point_consistency_changed");
+}
+
 int FindLine::effectivefiltermin() const
 {
     if (m_filter_explicit)
@@ -3470,6 +3487,137 @@ void FindLine::FilterMeasurePoints(FindLineMeasureProfileStats& stats)
     ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
+int FindLine::ApplyPointConsistencyConstraintToPoints(
+    PointsShape& points,
+    double ux,
+    double uy,
+    double nx,
+    double ny,
+    double range)
+{
+    const int count = points.size();
+    if (count < 3 || range <= 0.0)
+        return 0;
+
+    std::vector<double> normalOffsets;
+    normalOffsets.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+    {
+        const double x = points.getx(i);
+        const double y = points.gety(i);
+        if (!std::isfinite(x) || !std::isfinite(y) || x < -90000.0 || y < -90000.0)
+            continue;
+        normalOffsets.push_back(x * nx + y * ny);
+    }
+    if (normalOffsets.size() < 3)
+        return 0;
+
+    std::nth_element(
+        normalOffsets.begin(),
+        normalOffsets.begin() + normalOffsets.size() / 2,
+        normalOffsets.end());
+    const double medianNormal =
+        normalOffsets[normalOffsets.size() / 2];
+
+    PointsShape kept;
+    int removed = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        double x = points.getx(i);
+        double y = points.gety(i);
+        if (!std::isfinite(x) || !std::isfinite(y) || x < -90000.0 || y < -90000.0)
+        {
+            ++removed;
+            continue;
+        }
+
+        const double normalDelta =
+            std::abs((x * nx + y * ny) - medianNormal);
+        // Chebyshev-style consistency gate.  The tangential delta is anchored
+        // to the already scanned point order, so the useful rejection axis for
+        // FindLine interference is the search direction (normal to the gauge
+        // axis).  Keep the `max` form explicit to preserve the intended
+        // Chebyshev semantics when tangential gating is added later.
+        const double chebyshevDelta =
+            std::max(0.0 * std::abs(x * ux + y * uy), normalDelta);
+        if (chebyshevDelta <= range)
+        {
+            Standard_Real sx = static_cast<Standard_Real>(x);
+            Standard_Real sy = static_cast<Standard_Real>(y);
+            kept.addpoint(sx, sy);
+        }
+        else
+        {
+            ++removed;
+        }
+    }
+
+    if (removed > 0)
+    {
+        points.clear();
+        points.addpoints(kept);
+    }
+    return removed;
+}
+
+void FindLine::ApplyPointConsistencyConstraint()
+{
+    m_point_consistency_removed_points = 0;
+    m_lastMeasureInputDebug.point_consistency_enabled =
+        m_point_consistency_enabled != 0 ? 1 : 0;
+    m_lastMeasureInputDebug.point_consistency_range =
+        static_cast<double>(m_point_consistency_range);
+    m_lastMeasureInputDebug.point_consistency_input_points =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+
+    if (m_point_consistency_enabled == 0)
+    {
+        m_lastMeasureInputDebug.point_consistency_output_points =
+            m_lastMeasureInputDebug.point_consistency_input_points;
+        return;
+    }
+
+    if (!m_measure_geometry_request.valid)
+    {
+        m_lastMeasureInputDebug.point_consistency_output_points =
+            m_lastMeasureInputDebug.point_consistency_input_points;
+        return;
+    }
+
+    const double dx =
+        m_measure_geometry_request.x1 - m_measure_geometry_request.x0;
+    const double dy =
+        m_measure_geometry_request.y1 - m_measure_geometry_request.y0;
+    const double length = std::sqrt(dx * dx + dy * dy);
+    if (length <= 1e-6)
+    {
+        m_lastMeasureInputDebug.point_consistency_output_points =
+            m_lastMeasureInputDebug.point_consistency_input_points;
+        return;
+    }
+
+    const double ux = dx / length;
+    const double uy = dy / length;
+    const double nx = -uy;
+    const double ny = ux;
+    const double range = m_point_consistency_range > 0
+        ? static_cast<double>(m_point_consistency_range)
+        : std::max(1.0, m_measure_geometry_request.measure_half_width * 0.5);
+
+    m_lastMeasureInputDebug.point_consistency_range = range;
+    m_point_consistency_removed_points +=
+        ApplyPointConsistencyConstraintToPoints(m_measurepoints_w, ux, uy, nx, ny, range);
+    m_point_consistency_removed_points +=
+        ApplyPointConsistencyConstraintToPoints(m_measurepoints_h, ux, uy, nx, ny, range);
+
+    m_lastMeasureInputDebug.point_consistency_removed_points =
+        m_point_consistency_removed_points;
+    m_lastMeasureInputDebug.point_consistency_output_points =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+}
+
 void FindLine::FitWeightedLeastSquares(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -3684,6 +3832,10 @@ void FindLine::measure(void* pimage)
     m_lastMeasureInputDebug.wgap = m_iwgap;
     m_lastMeasureInputDebug.hgap = m_ihgap;
     m_lastMeasureInputDebug.selected_edge_index = m_iselectedgenum;
+    m_lastMeasureInputDebug.point_consistency_enabled =
+        m_point_consistency_enabled != 0 ? 1 : 0;
+    m_lastMeasureInputDebug.point_consistency_range =
+        static_cast<double>(m_point_consistency_range);
 
     m_lastMeasureInputDebug.measure_geometry_request_valid =
         m_measure_geometry_request.valid;
@@ -4713,6 +4865,67 @@ LineFitResult FitRansac(const std::vector<LineFitSample>& points)
     return FitWeightedTls(inliers);
 }
 
+LineFitResult FitRansacWithThreshold(
+    const std::vector<LineFitSample>& points,
+    double threshold)
+{
+    if (points.size() < 2)
+        return {};
+    const double inlierThreshold = std::max(1.0, threshold);
+    std::vector<std::size_t> best;
+    double bestSpan = -1.0;
+    const int pointCount = static_cast<int>(points.size());
+    const int trials = std::min(512, pointCount * pointCount);
+    for (int trial = 0; trial < trials; ++trial)
+    {
+        const std::size_t a =
+            static_cast<std::size_t>((trial * 37 + 3) % points.size());
+        const std::size_t b =
+            static_cast<std::size_t>((trial * 91 + 17) % points.size());
+        if (a == b)
+            continue;
+        const double dx = points[b].x - points[a].x;
+        const double dy = points[b].y - points[a].y;
+        const double len = std::hypot(dx, dy);
+        if (!(len > 1e-6))
+            continue;
+
+        const double ux = dx / len;
+        const double uy = dy / len;
+        std::vector<std::size_t> inliers;
+        double minT = std::numeric_limits<double>::infinity();
+        double maxT = -std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < points.size(); ++i)
+        {
+            const double dist =
+                std::abs((points[i].x - points[a].x) * dy -
+                         (points[i].y - points[a].y) * dx) / len;
+            if (dist > inlierThreshold)
+                continue;
+            inliers.push_back(i);
+            const double t = points[i].x * ux + points[i].y * uy;
+            minT = std::min(minT, t);
+            maxT = std::max(maxT, t);
+        }
+
+        const double span =
+            std::isfinite(minT) && std::isfinite(maxT) ? maxT - minT : 0.0;
+        if (inliers.size() > best.size() ||
+            (inliers.size() == best.size() && span > bestSpan))
+        {
+            best.swap(inliers);
+            bestSpan = span;
+        }
+    }
+    if (best.size() < 2)
+        return {};
+    std::vector<LineFitSample> inliers;
+    inliers.reserve(best.size());
+    for (std::size_t i : best)
+        inliers.push_back(points[i]);
+    return FitWeightedTls(inliers);
+}
+
 LineFitResult FitAxisPriority(const std::vector<LineFitSample>& points)
 {
     LineFitResult seed=FitWeightedTls(points); if(!seed.valid) return seed;
@@ -4754,28 +4967,160 @@ void FindLine::fitline(FitlineMode mode)
     clearfitresult();
     if (mode == FitlineMode::Unspecified) mode = FitlineMode::LeastSquares;
     m_fitline_mode = mode;
-    std::vector<LineFitSample> w, h;
-    auto append=[&](PointsShape& src,std::vector<LineFitSample>& dst)
-    { for(int i=0;i<src.size();++i) { const double x=src.getx(i),y=src.gety(i); if(std::isfinite(x)&&std::isfinite(y)) dst.push_back({x,y,1.0}); } };
-    append(getresultpointsw(),w); append(getresultpointsh(),h);
-    std::vector<LineFitSample> points;
-    if (mode == FitlineMode::SingleEdge) points = w.size() >= 2 ? w : h;
-    else if (mode == FitlineMode::EdgePairCenter)
+
+    m_point_consistency_removed_points = 0;
+    m_lastMeasureInputDebug.point_consistency_enabled =
+        m_point_consistency_enabled != 0 ? 1 : 0;
+    m_lastMeasureInputDebug.point_consistency_range =
+        static_cast<double>(m_point_consistency_range);
+    m_lastMeasureInputDebug.point_consistency_input_points =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+    m_lastMeasureInputDebug.point_consistency_output_points =
+        m_lastMeasureInputDebug.point_consistency_input_points;
+    m_lastMeasureInputDebug.point_consistency_removed_points = 0;
+
+    auto append = [&](PointsShape& src, std::vector<LineFitSample>& dst)
     {
-        const std::size_t count=std::min(w.size(),h.size()); points.reserve(count);
-        for(std::size_t i=0;i<count;++i) points.push_back({(w[i].x+h[i].x)*0.5,(w[i].y+h[i].y)*0.5,1.0});
-    }
-    else { points=w; points.insert(points.end(),h.begin(),h.end()); }
+        for (int i = 0; i < src.size(); ++i)
+        {
+            const double x = src.getx(i);
+            const double y = src.gety(i);
+            if (std::isfinite(x) && std::isfinite(y))
+                dst.push_back({ x, y, 1.0 });
+        }
+    };
+    auto buildPointsForMode = [&]()
+    {
+        std::vector<LineFitSample> w;
+        std::vector<LineFitSample> h;
+        append(getresultpointsw(), w);
+        append(getresultpointsh(), h);
+        std::vector<LineFitSample> points;
+        if (mode == FitlineMode::SingleEdge)
+        {
+            points = w.size() >= 2 ? w : h;
+        }
+        else if (mode == FitlineMode::EdgePairCenter)
+        {
+            const std::size_t count = std::min(w.size(), h.size());
+            points.reserve(count);
+            for (std::size_t i = 0; i < count; ++i)
+                points.push_back({ (w[i].x + h[i].x) * 0.5,
+                                   (w[i].y + h[i].y) * 0.5,
+                                   1.0 });
+        }
+        else
+        {
+            points = w;
+            points.insert(points.end(), h.begin(), h.end());
+        }
+        return points;
+    };
+    auto fitPointsForMode = [&](std::vector<LineFitSample> points)
+    {
     if (mode == FitlineMode::WeightedMeasurementPoints)
-        for(std::size_t i=0;i<points.size();++i) points[i].weight=i<m_fit_point_weights.size()?m_fit_point_weights[i]:1.0;
-    LineFitResult result;
-    switch(mode)
+            for (std::size_t i = 0; i < points.size(); ++i)
+                points[i].weight = i < m_fit_point_weights.size() ? m_fit_point_weights[i] : 1.0;
+        switch (mode)
+        {
+        case FitlineMode::MinimumZone: return FitMinimumZone(points);
+        case FitlineMode::Ransac: return FitRansac(points);
+        case FitlineMode::HorizontalVerticalPriority: return FitAxisPriority(points);
+        default: return FitWeightedTls(points);
+        }
+    };
+    auto filterPointsByFitLineDistance = [&](PointsShape& src,
+                                             const LineFitResult& seed,
+                                             double range)
     {
-    case FitlineMode::MinimumZone: result=FitMinimumZone(points); break;
-    case FitlineMode::Ransac: result=FitRansac(points); break;
-    case FitlineMode::HorizontalVerticalPriority: result=FitAxisPriority(points); break;
-    default: result=FitWeightedTls(points); break;
-    }
+        const double dx = seed.x1 - seed.x0;
+        const double dy = seed.y1 - seed.y0;
+        const double length = std::sqrt(dx * dx + dy * dy);
+        if (!(length > 1e-6) || range <= 0.0)
+            return 0;
+        const double ux = dx / length;
+        const double uy = dy / length;
+        const double nx = -dy / length;
+        const double ny = dx / length;
+        struct CandidatePoint
+        {
+            double x = 0.0;
+            double y = 0.0;
+            double t = 0.0;
+            bool normal_pass = false;
+        };
+        std::vector<CandidatePoint> candidates;
+        candidates.reserve(static_cast<std::size_t>(src.size()));
+        for (int i = 0; i < src.size(); ++i)
+        {
+            const double x = src.getx(i);
+            const double y = src.gety(i);
+            if (!std::isfinite(x) || !std::isfinite(y) || x < -90000.0 || y < -90000.0)
+            {
+                candidates.push_back({ x, y, 0.0, false });
+                continue;
+            }
+            const double distance =
+                std::abs((x - seed.x0) * nx + (y - seed.y0) * ny);
+            candidates.push_back({ x, y, (x - seed.x0) * ux + (y - seed.y0) * uy, distance <= range });
+        }
+
+        int normalPassCount = 0;
+        for (const CandidatePoint& candidate : candidates)
+            if (candidate.normal_pass)
+                ++normalPassCount;
+        const bool requireLocalSupport = normalPassCount >= 5;
+        const double localSupportGap =
+            std::max(range * 3.0, static_cast<double>(std::max(1, m_iSelectPointGap)) * 3.0);
+
+        PointsShape kept;
+        int removed = 0;
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            const CandidatePoint& candidate = candidates[i];
+            if (!candidate.normal_pass)
+            {
+                ++removed;
+                continue;
+            }
+
+            bool hasLocalSupport = !requireLocalSupport;
+            if (requireLocalSupport)
+            {
+                for (std::size_t j = 0; j < candidates.size(); ++j)
+                {
+                    if (i == j || !candidates[j].normal_pass)
+                        continue;
+                    if (std::abs(candidates[j].t - candidate.t) <= localSupportGap)
+                    {
+                        hasLocalSupport = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasLocalSupport)
+            {
+                Standard_Real sx = static_cast<Standard_Real>(candidate.x);
+                Standard_Real sy = static_cast<Standard_Real>(candidate.y);
+                kept.addpoint(sx, sy);
+            }
+            else
+            {
+                ++removed;
+            }
+        }
+        if (removed > 0)
+        {
+            src.clear();
+            src.addpoints(kept);
+        }
+        return removed;
+    };
+
+    std::vector<LineFitSample> points = buildPointsForMode();
+    LineFitResult result = fitPointsForMode(points);
     static const char* names[]={"Unspecified","LeastSquares","MinimumZone","Ransac","SingleEdge","EdgePairCenter","HorizontalVerticalPriority","WeightedMeasurementPoints"};
     const int mode_index=static_cast<int>(mode);
     if (!result.valid)
@@ -4783,6 +5128,69 @@ void FindLine::fitline(FitlineMode mode)
         m_fitline_status=std::string("PENDING_BINDING: ")+names[mode_index]+" requires at least two non-degenerate valid points";
         return;
     }
+
+    if (m_point_consistency_enabled != 0)
+    {
+        const double range = m_point_consistency_range > 0
+            ? static_cast<double>(m_point_consistency_range)
+            : std::max(1.0, m_measure_geometry_request.measure_half_width * 0.5);
+        m_lastMeasureInputDebug.point_consistency_range = range;
+        LineFitResult consistencySeed =
+            FitRansacWithThreshold(points, range);
+        if (!consistencySeed.valid)
+            consistencySeed = result;
+        PointsShape originalW;
+        PointsShape originalH;
+        originalW.addpoints(m_measurepoints_w);
+        originalH.addpoints(m_measurepoints_h);
+        const int inputPointCount =
+            ClampSizeToInt(m_measurepoints_w.size()) +
+            ClampSizeToInt(m_measurepoints_h.size());
+        m_point_consistency_removed_points +=
+            filterPointsByFitLineDistance(m_measurepoints_w, consistencySeed, range);
+        m_point_consistency_removed_points +=
+            filterPointsByFitLineDistance(m_measurepoints_h, consistencySeed, range);
+        const int outputPointCount =
+            ClampSizeToInt(m_measurepoints_w.size()) +
+            ClampSizeToInt(m_measurepoints_h.size());
+        const int minReasonableKept =
+            std::max(2, (inputPointCount + 1) / 2);
+        if (m_point_consistency_removed_points > 0 &&
+            outputPointCount < minReasonableKept)
+        {
+            m_measurepoints_w.clear();
+            m_measurepoints_w.addpoints(originalW);
+            m_measurepoints_h.clear();
+            m_measurepoints_h.addpoints(originalH);
+            m_point_consistency_removed_points = 0;
+            m_lastMeasureInputDebug.point_consistency_removed_points = 0;
+            m_lastMeasureInputDebug.point_consistency_output_points =
+                inputPointCount;
+            m_lastMeasureInputDebug.detail +=
+                " point_consistency skipped because robust seed kept too few points;";
+        }
+        else
+        {
+        m_lastMeasureInputDebug.point_consistency_removed_points =
+            m_point_consistency_removed_points;
+        m_lastMeasureInputDebug.point_consistency_output_points =
+            outputPointCount;
+        }
+
+        if (m_point_consistency_removed_points > 0)
+        {
+            points = buildPointsForMode();
+            result = fitPointsForMode(points);
+            if (!result.valid)
+            {
+                m_fitline_status =
+                    std::string("PENDING_BINDING: ") + names[mode_index] +
+                    " point consistency removed too many points";
+                return;
+            }
+        }
+    }
+
     m_result_x0=result.x0; m_result_y0=result.y0; m_result_x1=result.x1; m_result_y1=result.y1;
     m_result_avgdist=result.avgdist; m_result_valid_points=result.valid_points; m_has_fit_result=true;
     m_fitline_status=std::string("geometry_result_available: ")+names[mode_index];

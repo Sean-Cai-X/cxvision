@@ -15,6 +15,7 @@ int fitmode = 1;
 int wgap = global_wgap;
 int hgap = global_hgap;
 int tool_half_width = global_tool_half_width;
+int objfilter = global_findline_objfilter;
 int measure_fallback = 0;
 
 m_line.setmeasurefallback(measure_fallback);
@@ -24,6 +25,7 @@ m_line.setline(x0, y0, x1, y1, tool_half_width);
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setlinegap(linegap);
+m_line.setobjfilter(objfilter);
 m_line.setfitmode(fitmode);
 m_line.measure(&m_image);
 m_line.fitline();

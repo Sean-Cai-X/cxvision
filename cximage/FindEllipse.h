@@ -31,6 +31,7 @@ struct FindEllipseDisplaySnapshot
     int linegap = 0;
     int threshold = 0;
     int method = 0;
+    int selected_edge_index = 0;
     int scan_line_count = 0;
     int scan_line_length = 0;
     std::string measure_failure_stage;
@@ -59,6 +60,12 @@ struct FindEllipseDisplaySnapshot
     double rejected_boundary_band_norm_min = 0.0;
     double rejected_boundary_band_norm_avg = 0.0;
     double rejected_boundary_band_norm_max = 0.0;
+
+    int point_consistency_enabled = 0;
+    double point_consistency_range = 0.0;
+    int point_consistency_input_points = 0;
+    int point_consistency_output_points = 0;
+    int point_consistency_removed_points = 0;
 
     std::string scan_geometry_policy;
 };
@@ -165,6 +172,7 @@ public:
     void setfindsetting(int ifindset);
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
     void setselectedgenum(int iedgenum);
+    void setpointconsistency(int enabled, int range);
 
     void setshowlines(int ilines) { m_ishowlines = ilines; }
     PointsShape& getresultpoints();
@@ -281,6 +289,11 @@ private:
     double m_rejected_boundary_band_norm_sum = 0.0;
     double m_rejected_boundary_band_norm_min = 999.0;
     double m_rejected_boundary_band_norm_max = -999.0;
+    int m_point_consistency_enabled = 0;
+    double m_point_consistency_range = 0.0;
+    int m_point_consistency_input_points = 0;
+    int m_point_consistency_output_points = 0;
+    int m_point_consistency_removed_points = 0;
     std::string m_scan_geometry_policy;
 
     void CollectEllipseEdgeBandsRobust(Image& image);

@@ -264,10 +264,12 @@ bool IsFindLineFindCircleContext(ManualTestContext& context)
 {
     const ManualGaugeState& g = context.current_gauge;
     return (g.tool == "FindLine" || g.tool == "FindCircle" ||
+            g.tool == "FindEllipse" || g.tool == "FindRect" ||
+            g.tool == "FindSegmentation" ||
             g.tool == "FastMatch" || g.tool == "fastmatch" ||
             g.tool == "CFastMatch" || g.tool == "GridPatternClassTool" ||
             g.tool == "RegionPatternTool") ||
-           g.has_line_gauge || g.has_circle_gauge;
+           g.has_line_gauge || g.has_circle_gauge || g.has_ellipse_gauge;
 }
 
 static std::string ToLowerAsciiLocal(std::string text)
@@ -912,11 +914,18 @@ void DrawEvidenceCaseListPanel(ManualTestContext& context)
 
   ImGui::TextWrapped("Evidence cases organized by case/image/target/tool/gauge_status/probe_status/contract_status/review_status");
 
-  if (context.evidence_items.empty())
+  const std::size_t catalogSeedCount = context.catalog_entries.size();
+  const bool shouldSeedEvidenceItems =
+      context.evidence_items.empty() &&
+      (!context.evidence_items_seed_attempted ||
+       context.evidence_items_seed_catalog_count != catalogSeedCount);
+
+  if (shouldSeedEvidenceItems)
   {
     ImGui::TextDisabled("No evidence cases loaded.");
     ImGui::Text("Loading from catalog entries...");
 
+    const std::size_t beforeCount = context.evidence_items.size();
     for (const auto& entry : context.catalog_entries)
     {
       bool isVisible = entry.manual_visible && entry.frozen &&
@@ -933,8 +942,17 @@ void DrawEvidenceCaseListPanel(ManualTestContext& context)
       item.review_status = "unreviewed";
       context.evidence_items.push_back(item);
     }
-    context.script_evidence_groups_dirty = true;
-    context.workbench_assets_loaded = false;
+    context.evidence_items_seed_attempted = true;
+    context.evidence_items_seed_catalog_count = catalogSeedCount;
+    if (context.evidence_items.size() != beforeCount)
+    {
+      context.script_evidence_groups_dirty = true;
+      context.workbench_assets_loaded = false;
+    }
+  }
+  else if (context.evidence_items.empty())
+  {
+    ImGui::TextDisabled("No evidence cases loaded.");
   }
 
   if (!context.evidence_items.empty())
@@ -1155,6 +1173,9 @@ static std::string NormalizeKeyParamToolTypeLocal(const std::string& type)
   if (type == "Findcircle" || type == "FindCircle") return "FindCircle";
   if (type == "Findellipse" || type == "FindEllipse") return "FindEllipse";
   if (type == "Findrect" || type == "FindRect") return "FindRect";
+  if (type == "FindSegmentation" || type == "findsegmentation" ||
+      type == "Findsegmentation" || type == "segmentation")
+    return "FindSegmentation";
   if (type == "fastmatch" || type == "FastMatch" || type == "CFastMatch") return "FastMatch";
   if (type == "gridpatternclasstool" || type == "GridPatternClassTool") return "GridPatternClassTool";
   if (type == "regionpatterntool" || type == "RegionPatternTool") return "RegionPatternTool";
@@ -1275,6 +1296,98 @@ static bool DrawFastMatchRoiControls(ManualTestContext& context)
                0, 0, 640, 480);
     ImGui::EndTable();
   }
+  return edited;
+}
+
+static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  bool edited = false;
+
+  if (!gauge.has_segmentation_prompt_rect)
+  {
+    gauge.segmentation_prompt_x0 =
+        RuntimeIntOr(context, "global_roi_x0", gauge.segmentation_prompt_x0);
+    gauge.segmentation_prompt_y0 =
+        RuntimeIntOr(context, "global_roi_y0", gauge.segmentation_prompt_y0);
+    gauge.segmentation_prompt_x1 =
+        RuntimeIntOr(context, "global_roi_x1", gauge.segmentation_prompt_x1);
+    gauge.segmentation_prompt_y1 =
+        RuntimeIntOr(context, "global_roi_y1", gauge.segmentation_prompt_y1);
+    gauge.segmentation_mode =
+        RuntimeIntOr(context, "global_segmentation_mode", gauge.segmentation_mode);
+    gauge.has_segmentation_prompt_rect = true;
+  }
+
+  ImGui::TextColored(
+      ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
+      "FindSegmentation Prompt ROI");
+  ImGui::TextDisabled(
+      "Prompt rect is the editable region shown in Image View and exported to global_roi_*.");
+
+  if (ImGui::BeginTable("findsegmentation_prompt_rect_table", 5,
+                        ImGuiTableFlags_Borders |
+                            ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp))
+  {
+    ImGui::TableSetupColumn("Prompt");
+    ImGui::TableSetupColumn("x0");
+    ImGui::TableSetupColumn("y0");
+    ImGui::TableSetupColumn("x1");
+    ImGui::TableSetupColumn("y1");
+    ImGui::TableHeadersRow();
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted("Prompt ROI");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##seg_prompt_x0", &gauge.segmentation_prompt_x0);
+    ImGui::TableSetColumnIndex(2);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##seg_prompt_y0", &gauge.segmentation_prompt_y0);
+    ImGui::TableSetColumnIndex(3);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##seg_prompt_x1", &gauge.segmentation_prompt_x1);
+    ImGui::TableSetColumnIndex(4);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##seg_prompt_y1", &gauge.segmentation_prompt_y1);
+    ImGui::EndTable();
+  }
+
+  gauge.segmentation_prompt_x0 = std::max(0, gauge.segmentation_prompt_x0);
+  gauge.segmentation_prompt_y0 = std::max(0, gauge.segmentation_prompt_y0);
+  gauge.segmentation_prompt_x1 =
+      std::max(gauge.segmentation_prompt_x0 + 1,
+               gauge.segmentation_prompt_x1);
+  gauge.segmentation_prompt_y1 =
+      std::max(gauge.segmentation_prompt_y0 + 1,
+               gauge.segmentation_prompt_y1);
+
+  ImGui::TextUnformatted("mode");
+  ImGui::SameLine(80.0f);
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt("##segmentation_mode", &gauge.segmentation_mode);
+  gauge.segmentation_mode = std::max(0, std::min(16, gauge.segmentation_mode));
+
+  InjectManualGaugeInt(context, "global_roi_x0", gauge.segmentation_prompt_x0);
+  InjectManualGaugeInt(context, "global_roi_y0", gauge.segmentation_prompt_y0);
+  InjectManualGaugeInt(context, "global_roi_x1", gauge.segmentation_prompt_x1);
+  InjectManualGaugeInt(context, "global_roi_y1", gauge.segmentation_prompt_y1);
+  InjectManualGaugeInt(context, "global_roi_x", gauge.segmentation_prompt_x0);
+  InjectManualGaugeInt(context, "global_roi_y", gauge.segmentation_prompt_y0);
+  InjectManualGaugeInt(
+      context,
+      "global_roi_width",
+      gauge.segmentation_prompt_x1 - gauge.segmentation_prompt_x0);
+  InjectManualGaugeInt(
+      context,
+      "global_roi_height",
+      gauge.segmentation_prompt_y1 - gauge.segmentation_prompt_y0);
+  InjectManualGaugeInt(
+      context,
+      "global_segmentation_mode",
+      gauge.segmentation_mode);
+
   return edited;
 }
 
@@ -1495,6 +1608,20 @@ static void ApplyPrimaryObjectToCurrentGauge(
   gauge.has_line_gauge = tool == "FindLine";
   gauge.has_circle_gauge = tool == "FindCircle";
   gauge.has_ellipse_gauge = tool == "FindEllipse";
+  gauge.has_segmentation_prompt_rect = tool == "FindSegmentation";
+  if (tool == "FindSegmentation")
+  {
+    gauge.segmentation_prompt_x0 =
+        RuntimeIntOr(context, "global_roi_x0", gauge.segmentation_prompt_x0);
+    gauge.segmentation_prompt_y0 =
+        RuntimeIntOr(context, "global_roi_y0", gauge.segmentation_prompt_y0);
+    gauge.segmentation_prompt_x1 =
+        RuntimeIntOr(context, "global_roi_x1", gauge.segmentation_prompt_x1);
+    gauge.segmentation_prompt_y1 =
+        RuntimeIntOr(context, "global_roi_y1", gauge.segmentation_prompt_y1);
+    gauge.segmentation_mode =
+        RuntimeIntOr(context, "global_segmentation_mode", gauge.segmentation_mode);
+  }
   gauge.dirty = true;
   gauge.review_status = "editing";
 
@@ -1615,6 +1742,133 @@ static const RuntimeObjectView* FindCurrentFindCircleObject(
       return &object;
   }
   return nullptr;
+}
+
+static const RuntimeObjectView* FindCurrentFindEllipseObject(
+    const ManualTestContext& context)
+{
+  const std::string& primary = context.current_gauge.primary_object_name;
+  if (!primary.empty())
+  {
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+      if (object.type == "FindEllipse" && object.name == primary)
+        return &object;
+    }
+  }
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "FindEllipse")
+      return &object;
+  }
+  return nullptr;
+}
+
+static const RuntimeObjectView* FindCurrentFastMatchObject(
+    const ManualTestContext& context)
+{
+  const std::string& primary = context.current_gauge.primary_object_name;
+  if (!primary.empty())
+  {
+    for (const RuntimeObjectView& object : context.runtime_objects)
+    {
+      if (object.type == "FastMatch" && object.name == primary)
+        return &object;
+    }
+  }
+
+  for (const RuntimeObjectView& object : context.runtime_objects)
+  {
+    if (object.type == "FastMatch")
+      return &object;
+  }
+  return nullptr;
+}
+
+static void DrawFastMatchTemplateStatusPanel(
+    const ManualTestContext& context)
+{
+  const RuntimeObjectView* object = FindCurrentFastMatchObject(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("FastMatch Template / Match Evidence");
+  ImGui::TextDisabled(
+      "Learn must publish model points and template evidence; Match must publish candidate/result evidence.");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled(
+        "No FastMatch runtime object is available. Run a FastMatch learn/match script first.");
+    return;
+  }
+
+  ImGui::Text("model_points=%d learn_status=%d",
+              object->fastmatch_model_point_count,
+              object->fastmatch_learn_status_code);
+  ImGui::Text("learn sets: A=%d B=%d A2=%d B2=%d",
+              object->fastmatch_learn_a_count,
+              object->fastmatch_learn_b_count,
+              object->fastmatch_learn_a2_count,
+              object->fastmatch_learn_b2_count);
+  ImGui::Text("template patterns: A=%d B=%d",
+              object->fastmatch_pattern_a_count,
+              object->fastmatch_pattern_b_count);
+  ImGui::Text("match candidates=%d best_score=%.3f",
+              object->fastmatch_candidate_count,
+              object->fastmatch_best_score);
+  ImGui::Text("learn ROI=(%d,%d)-(%d,%d)",
+              object->fastmatch_learn_rect_x0,
+              object->fastmatch_learn_rect_y0,
+              object->fastmatch_learn_rect_x1,
+              object->fastmatch_learn_rect_y1);
+  ImGui::Text("match ROI=(%d,%d)-(%d,%d)",
+              object->fastmatch_match_rect_x0,
+              object->fastmatch_match_rect_y0,
+              object->fastmatch_match_rect_x1,
+              object->fastmatch_match_rect_y1);
+
+  const ImGuiTableFlags flags =
+      ImGuiTableFlags_Borders |
+      ImGuiTableFlags_RowBg |
+      ImGuiTableFlags_Resizable |
+      ImGuiTableFlags_SizingStretchProp;
+  if (ImGui::BeginTable("fastmatch_template_status_table", 4, flags))
+  {
+    ImGui::TableSetupColumn("Asset");
+    ImGui::TableSetupColumn("Count");
+    ImGui::TableSetupColumn("State");
+    ImGui::TableSetupColumn("Meaning");
+    ImGui::TableHeadersRow();
+
+    auto row = [](const char* asset, int count, const char* state, const char* meaning)
+    {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(asset);
+      ImGui::TableSetColumnIndex(1); ImGui::Text("%d", count);
+      ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(state);
+      ImGui::TableSetColumnIndex(3); ImGui::TextUnformatted(meaning);
+    };
+
+    row("Learn points",
+        object->fastmatch_model_point_count,
+        object->fastmatch_model_point_count > 0 ? "available" : "pending",
+        "Image View should show learn ROI and model point evidence.");
+    row("Template A",
+        object->fastmatch_pattern_a_count,
+        object->fastmatch_pattern_a_count > 0 ? "available" : "pending",
+        "Template list source A.");
+    row("Template B",
+        object->fastmatch_pattern_b_count,
+        object->fastmatch_pattern_b_count > 0 ? "available" : "pending",
+        "Template list source B.");
+    row("Match candidates",
+        object->fastmatch_candidate_count,
+        object->fastmatch_candidate_count > 0 ? "available" : "pending",
+        "Image View should show search ROI and match result boxes.");
+
+    ImGui::EndTable();
+  }
 }
 
 static ManualFindLineEdgeParamState MakeFindLineEdgeParamsFromGauge(
@@ -2083,6 +2337,11 @@ static void DrawFindCircleEdgeEvaluationPanel(ManualTestContext& context)
       object->circle_selected_edge_radius_avg,
       object->circle_selected_edge_radius_min,
       object->circle_selected_edge_radius_max);
+  ImGui::Text(
+      "source boundary: clipped_lines=%d extended_samples=%d candidate_reject=%d",
+      object->circle_scan_boundary_clipped_lines,
+      object->circle_scan_boundary_extended_samples,
+      object->circle_candidate_boundary_reject_count);
 
   const ImGuiTableFlags flags =
       ImGuiTableFlags_Borders |
@@ -2195,6 +2454,453 @@ static void DrawFindCircleScanSemanticsPanel(ManualTestContext& context)
               object->circle_measure_failure_stage.empty()
                   ? "-"
                   : object->circle_measure_failure_stage.c_str());
+  ImGui::Text("consistency=%s range=%.1f in/out/removed=%d/%d/%d",
+              object->circle_point_consistency_enabled ? "on" : "off",
+              object->circle_point_consistency_range,
+              object->circle_point_consistency_input_points,
+              object->circle_point_consistency_output_points,
+              object->circle_point_consistency_removed_points);
+  ImGui::Text("source boundary clipped=%d extended=%d candidate_reject=%d",
+              object->circle_scan_boundary_clipped_lines,
+              object->circle_scan_boundary_extended_samples,
+              object->circle_candidate_boundary_reject_count);
+}
+
+static ManualFindCircleEdgeParamState MakeFindEllipseEdgeParamsFromGauge(
+    const ManualGaugeState& gauge)
+{
+  ManualFindCircleEdgeParamState params;
+  params.initialized = true;
+  params.threshold = gauge.threshold;
+  params.method = gauge.method;
+  params.linegap = gauge.linegap;
+  params.gap = gauge.gap;
+  return params;
+}
+
+static void EnsureFindEllipseEdgeParamStorage(ManualTestContext& context)
+{
+  context.findellipse_scan_edge_count =
+      std::max(1, std::min(32, context.findellipse_scan_edge_count));
+  context.findellipse_selected_scan_edge =
+      std::max(-1, std::min(context.findellipse_selected_scan_edge,
+                           context.findellipse_scan_edge_count));
+  context.findellipse_best_fit_edge =
+      std::max(0, std::min(context.findellipse_best_fit_edge,
+                           context.findellipse_scan_edge_count));
+  context.findellipse_recommended_fit_edge =
+      std::max(0, std::min(context.findellipse_recommended_fit_edge,
+                           context.findellipse_scan_edge_count));
+  context.findellipse_relation_edge =
+      std::max(0, std::min(context.findellipse_relation_edge,
+                           context.findellipse_scan_edge_count));
+  context.findellipse_attach_edge =
+      std::max(0, std::min(context.findellipse_attach_edge,
+                           context.findellipse_scan_edge_count));
+
+  const std::size_t required =
+      static_cast<std::size_t>(context.findellipse_scan_edge_count + 1);
+  if (context.findellipse_edge_params.size() < required)
+    context.findellipse_edge_params.resize(required);
+
+  for (int i = 1; i <= context.findellipse_scan_edge_count; ++i)
+  {
+    ManualFindCircleEdgeParamState& params =
+        context.findellipse_edge_params[static_cast<std::size_t>(i)];
+    params = MakeFindEllipseEdgeParamsFromGauge(context.current_gauge);
+  }
+}
+
+static std::string FindEllipseEdgeLabel(int edge)
+{
+  if (edge == -1)
+    return "Last edge";
+  return edge == 0 ? "All edges" : ("Edge " + std::to_string(edge));
+}
+
+static void SyncFindEllipseEdgeSelectionToGlobals(
+    ManualTestContext& context,
+    const char* reason)
+{
+  EnsureFindEllipseEdgeParamStorage(context);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_edge_count",
+      context.findellipse_scan_edge_count);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_selected_edge",
+      context.findellipse_selected_scan_edge);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_best_edge",
+      context.findellipse_best_fit_edge);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_recommended_edge",
+      context.findellipse_recommended_fit_edge);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_relation_edge",
+      context.findellipse_relation_edge);
+  InjectManualGaugeInt(
+      context,
+      "global_findellipse_attach_edge",
+      context.findellipse_attach_edge);
+
+  context.current_gauge.dirty = true;
+  context.current_gauge.review_status = "editing";
+  context.debug_status = "FINDELLIPSE_EDGE_SELECTION_CHANGED";
+  context.debug_reason =
+      std::string(reason == nullptr ? "FindEllipse edge selection changed" : reason) +
+      "; globals updated, run script to refresh result points";
+}
+
+static bool DrawFindEllipseEdgeRoleCombo(
+    const char* label,
+    int& edge,
+    int edgeCount)
+{
+  bool edited = false;
+  edge = std::max(0, std::min(edge, edgeCount));
+  const std::string currentLabel = FindEllipseEdgeLabel(edge);
+  ImGui::SetNextItemWidth(150.0f);
+  if (ImGui::BeginCombo(label, currentLabel.c_str()))
+  {
+    if (ImGui::Selectable("All edges", edge == 0))
+    {
+      edge = 0;
+      edited = true;
+    }
+    for (int i = 1; i <= edgeCount; ++i)
+    {
+      const std::string item = FindEllipseEdgeLabel(i);
+      if (ImGui::Selectable(item.c_str(), edge == i))
+      {
+        edge = i;
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  return edited;
+}
+
+static bool DrawFindEllipseEdgeSelectorPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindEllipse" ||
+        context.current_gauge.has_ellipse_gauge))
+  {
+    return false;
+  }
+
+  bool edited = false;
+  EnsureFindEllipseEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Algorithm scan sector: full ellipse gauge");
+  ImGui::TextDisabled("FindEllipse currently scans the full ellipse. Edge selection below is candidate ordinal, not an angular sector.");
+  ImGui::TextUnformatted("Detection Edge / Point Column");
+  ImGui::TextDisabled(
+      "Edge N is the Nth eligible boundary crossing on every ellipse Gauge line. It mirrors FindCircle selected-edge semantics.");
+
+  ImGui::SetNextItemWidth(100.0f);
+  int edgeCount = context.findellipse_scan_edge_count;
+  if (ImGui::InputInt("edge count", &edgeCount))
+  {
+    context.findellipse_scan_edge_count = std::max(1, std::min(32, edgeCount));
+    if (context.findellipse_selected_scan_edge >
+        context.findellipse_scan_edge_count)
+    {
+      context.findellipse_selected_scan_edge =
+          context.findellipse_scan_edge_count;
+    }
+    EnsureFindEllipseEdgeParamStorage(context);
+    SyncFindEllipseEdgeSelectionToGlobals(
+        context,
+        "FindEllipse edge count changed");
+    edited = true;
+  }
+
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(190.0f);
+  const std::string currentLabel =
+      FindEllipseEdgeLabel(context.findellipse_selected_scan_edge);
+  if (ImGui::BeginCombo("selected edge", currentLabel.c_str()))
+  {
+    if (ImGui::Selectable("All edges", context.findellipse_selected_scan_edge == 0))
+    {
+      context.findellipse_selected_scan_edge = 0;
+      SyncFindEllipseEdgeSelectionToGlobals(
+          context,
+          "FindEllipse selected All edges");
+      edited = true;
+    }
+    for (int i = 1; i <= context.findellipse_scan_edge_count; ++i)
+    {
+      const std::string label = "Edge " + std::to_string(i);
+      if (ImGui::Selectable(label.c_str(),
+                            context.findellipse_selected_scan_edge == i))
+      {
+        context.findellipse_selected_scan_edge = i;
+        const std::string reason = "FindEllipse selected " + label;
+        SyncFindEllipseEdgeSelectionToGlobals(context, reason.c_str());
+        edited = true;
+      }
+    }
+    ImGui::Separator();
+    if (ImGui::Selectable("Last edge",
+                          context.findellipse_selected_scan_edge == -1))
+    {
+      context.findellipse_selected_scan_edge = -1;
+      SyncFindEllipseEdgeSelectionToGlobals(
+          context,
+          "FindEllipse selected Last edge");
+      edited = true;
+    }
+    ImGui::EndCombo();
+  }
+
+  if (context.findellipse_selected_scan_edge == -1)
+    ImGui::Text("Current: Last edge on every ellipse Gauge line");
+  else if (context.findellipse_selected_scan_edge > 0)
+    ImGui::Text("Current: Edge %d / %d",
+                context.findellipse_selected_scan_edge,
+                context.findellipse_scan_edge_count);
+  else
+    ImGui::TextDisabled("All edges selected: shared Geometry/Edge Params remain unchanged.");
+
+  return edited;
+}
+
+static bool DrawFindEllipseEdgeRolePanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindEllipse" ||
+        context.current_gauge.has_ellipse_gauge))
+  {
+    return false;
+  }
+
+  bool edited = false;
+  EnsureFindEllipseEdgeParamStorage(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Edge Role Binding / 接入点");
+  ImGui::TextDisabled(
+      "Selection is an edge ordinal. Best/recommended/relation/attach are evidence metadata and future attach points.");
+
+  ImGui::PushID("findellipse_edge_roles");
+  edited |= DrawFindEllipseEdgeRoleCombo(
+      "best edge", context.findellipse_best_fit_edge,
+      context.findellipse_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Use All Edges"))
+  {
+    context.findellipse_best_fit_edge = 0;
+    edited = true;
+  }
+
+  edited |= DrawFindEllipseEdgeRoleCombo(
+      "recommended edge", context.findellipse_recommended_fit_edge,
+      context.findellipse_scan_edge_count);
+  ImGui::SameLine();
+  if (ImGui::Button("Recommend = Best"))
+  {
+    context.findellipse_recommended_fit_edge = context.findellipse_best_fit_edge;
+    edited = true;
+  }
+
+  edited |= DrawFindEllipseEdgeRoleCombo(
+      "relation edge", context.findellipse_relation_edge,
+      context.findellipse_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: related/combined edge point-set");
+
+  edited |= DrawFindEllipseEdgeRoleCombo(
+      "attach edge", context.findellipse_attach_edge,
+      context.findellipse_scan_edge_count);
+  ImGui::SameLine();
+  ImGui::TextDisabled("future: shape attach/binding");
+  ImGui::PopID();
+
+  ImGui::Text("edges: selected=%d best=%d recommended=%d relation=%d attach=%d",
+              context.findellipse_selected_scan_edge,
+              context.findellipse_best_fit_edge,
+              context.findellipse_recommended_fit_edge,
+              context.findellipse_relation_edge,
+              context.findellipse_attach_edge);
+
+  if (edited)
+  {
+    SyncFindEllipseEdgeSelectionToGlobals(
+        context,
+        "FindEllipse edge role binding changed");
+  }
+
+  return edited;
+}
+
+static void DrawFindEllipseEdgeEvaluationPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindEllipse" ||
+        context.current_gauge.has_ellipse_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindEllipseObject(context);
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Edge Result Evaluation");
+  ImGui::TextDisabled(
+      "Runtime reports the current selected-edge run. Per-edge ranking can be added later from captured evidence.");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to collect ellipse result evidence.");
+    return;
+  }
+
+  const int accepted = object->valid_points_count > 0
+      ? object->valid_points_count
+      : object->measure_points_count;
+  const double score = object->has_fit_ellipse
+      ? std::max(0.0, 100.0 - static_cast<double>(object->fit_ellipse_avgdist) * 10.0)
+      : 0.0;
+
+  ImGui::Text("ui_selected_edge=%d runtime_selected_edge=%d edge_count=%d fit_ellipse=%s score=%.2f",
+              context.findellipse_selected_scan_edge,
+              object->ellipse_selected_edge_index,
+              context.findellipse_scan_edge_count,
+              object->has_fit_ellipse ? "true" : "false",
+              score);
+  if (object->ellipse_selected_edge_index !=
+      context.findellipse_selected_scan_edge)
+  {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
+        "Runtime selected edge mismatch. Click Apply To Globals / Run Script again.");
+  }
+
+  const ImGuiTableFlags flags =
+      ImGuiTableFlags_Borders |
+      ImGuiTableFlags_RowBg |
+      ImGuiTableFlags_Resizable |
+      ImGuiTableFlags_SizingStretchProp;
+  if (ImGui::BeginTable("findellipse_edge_evaluation_table", 8, flags))
+  {
+    ImGui::TableSetupColumn("Run");
+    ImGui::TableSetupColumn("Sel");
+    ImGui::TableSetupColumn("Lines");
+    ImGui::TableSetupColumn("Len");
+    ImGui::TableSetupColumn("Points");
+    ImGui::TableSetupColumn("Fit?");
+    ImGui::TableSetupColumn("AvgDist");
+    ImGui::TableSetupColumn("Stage");
+    ImGui::TableHeadersRow();
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(
+        FindEllipseEdgeLabel(context.findellipse_selected_scan_edge).c_str());
+    ImGui::TableSetColumnIndex(1);
+    ImGui::TextUnformatted("*");
+    ImGui::TableSetColumnIndex(2);
+    ImGui::Text("%d", object->ellipse_scan_line_count);
+    ImGui::TableSetColumnIndex(3);
+    ImGui::Text("%d", object->ellipse_scan_line_length);
+    ImGui::TableSetColumnIndex(4);
+    ImGui::Text("%d", accepted);
+    ImGui::TableSetColumnIndex(5);
+    ImGui::TextUnformatted(object->has_fit_ellipse ? "yes" : "no");
+    ImGui::TableSetColumnIndex(6);
+    ImGui::Text("%.3f", object->fit_ellipse_avgdist);
+    ImGui::TableSetColumnIndex(7);
+    ImGui::TextUnformatted(object->ellipse_result_status.empty()
+        ? "-"
+        : object->ellipse_result_status.c_str());
+    ImGui::EndTable();
+  }
+}
+
+static void DrawFindEllipseScanSemanticsPanel(ManualTestContext& context)
+{
+  if (!(context.current_gauge.tool == "FindEllipse" ||
+        context.current_gauge.has_ellipse_gauge))
+  {
+    return;
+  }
+
+  const RuntimeObjectView* object = FindCurrentFindEllipseObject(context);
+  const int linegap = std::max(1, context.current_gauge.linegap);
+  const double rx = std::abs(static_cast<double>(
+      context.current_gauge.ellipse_x1 - context.current_gauge.ellipse_x0)) * 0.5;
+  const double ry = std::abs(static_cast<double>(
+      context.current_gauge.ellipse_y1 - context.current_gauge.ellipse_y0)) * 0.5;
+  double circumference = 0.0;
+  if (rx > 1.0 && ry > 1.0)
+  {
+    const double h = ((rx - ry) * (rx - ry)) / ((rx + ry) * (rx + ry));
+    circumference =
+        3.14159265358979323846 * (rx + ry) *
+        (1.0 + (3.0 * h) / (10.0 + std::sqrt(std::max(0.0, 4.0 - 3.0 * h))));
+  }
+  const int previewTicks = circumference > 1.0
+      ? std::max(1, static_cast<int>(std::floor(circumference / linegap)))
+      : 0;
+
+  ImGui::Separator();
+  ImGui::TextUnformatted("Gauge Scan Semantics");
+  ImGui::TextColored(ImVec4(0.55f, 0.90f, 1.0f, 1.0f),
+                     "cyan ellipse line = sampling opportunity");
+  ImGui::SameLine();
+  ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.18f, 1.0f),
+                     "| yellow point = accepted algorithm result");
+
+  if (object == nullptr)
+  {
+    ImGui::TextDisabled("Run script to show accepted/rejected counters.");
+    ImGui::Text("preview_ticks=%d linegap=%d method=%d gap=%d",
+                previewTicks,
+                linegap,
+                context.current_gauge.method,
+                context.current_gauge.gap);
+    return;
+  }
+
+  ImGui::Text("preview_ticks=%d scan_lines=%d scan_len=%d selected_edge=%d",
+              previewTicks,
+              object->ellipse_scan_line_count,
+              object->ellipse_scan_line_length,
+              object->ellipse_selected_edge_index);
+  ImGui::Text("measure_points=%d valid_points=%d fit_ellipse=%s avgdist=%.3f",
+              object->measure_points_count,
+              object->valid_points_count,
+              object->has_fit_ellipse ? "true" : "false",
+              object->fit_ellipse_avgdist);
+  ImGui::Text("accepted_outside=%d accepted_norm=%.3f/%.3f/%.3f",
+              object->ellipse_accepted_points_outside_ellipse_count,
+              object->ellipse_accepted_point_norm_min,
+              object->ellipse_accepted_point_norm_avg,
+              object->ellipse_accepted_point_norm_max);
+  ImGui::Text("rejected_boundary_band=%d rejected_norm=%.3f/%.3f/%.3f",
+              object->ellipse_rejected_boundary_band_candidate_count,
+              object->ellipse_rejected_boundary_band_norm_min,
+              object->ellipse_rejected_boundary_band_norm_avg,
+              object->ellipse_rejected_boundary_band_norm_max);
+  ImGui::Text("consistency=%s range=%.1f in/out/removed=%d/%d/%d",
+              object->ellipse_point_consistency_enabled ? "on" : "off",
+              object->ellipse_point_consistency_range,
+              object->ellipse_point_consistency_input_points,
+              object->ellipse_point_consistency_output_points,
+              object->ellipse_point_consistency_removed_points);
+  ImGui::Text("scan_policy=%s candidate_policy=%s",
+              object->ellipse_scan_geometry_policy.empty()
+                  ? "-"
+                  : object->ellipse_scan_geometry_policy.c_str(),
+              object->ellipse_candidate_policy.empty()
+                  ? "-"
+                  : object->ellipse_candidate_policy.c_str());
 }
 
 static bool DrawFindLineEdgeRolePanel(
@@ -2567,6 +3273,12 @@ static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
               object->line_scan_runs_rejected_near_endpoint,
               object->line_scan_runs_rejected_by_selection,
               object->line_scan_runs_over_length_limit);
+  ImGui::Text("consistency=%s range=%.1f in/out/removed=%d/%d/%d",
+              object->line_point_consistency_enabled ? "on" : "off",
+              object->line_point_consistency_range,
+              object->line_point_consistency_input_points,
+              object->line_point_consistency_output_points,
+              object->line_point_consistency_removed_points);
   ImGui::Text("fit_line=%s linegap=%d method=%d threshold=%d",
               object->has_fit_line ? "true" : "false",
               object->line_measure_linegap,
@@ -2586,12 +3298,25 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   const bool isFastMatch =
       gauge.tool == "FastMatch" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FastMatch";
+  const bool isFindEllipse =
+      gauge.tool == "FindEllipse" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindEllipse" ||
+      gauge.has_ellipse_gauge;
+  const bool isFindRect =
+      gauge.tool == "FindRect" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindRect";
+  const bool isFindCircle =
+      gauge.tool == "FindCircle" || gauge.has_circle_gauge ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindCircle";
   const bool isGridPattern =
       gauge.tool == "GridPatternClassTool" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "GridPatternClassTool";
   const bool isRegionPattern =
       gauge.tool == "RegionPatternTool" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "RegionPatternTool";
+  const bool isFindSegmentation =
+      gauge.tool == "FindSegmentation" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindSegmentation";
   if (gauge.tool == "FindLine" || gauge.has_line_gauge)
   {
       ImGui::Checkbox("Show single-line gauge scan ticks",
@@ -2612,11 +3337,27 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       DrawFindCircleEdgeEvaluationPanel(context);
       DrawFindCircleScanSemanticsPanel(context);
   }
+  if (isFindEllipse)
+  {
+      ImGui::Checkbox("Show ellipse gauge scan ticks",
+                      &context.show_ellipse_gauge_scan_lines);
+      gaugeEdited |= DrawFindEllipseEdgeSelectorPanel(context);
+      gaugeEdited |= DrawFindEllipseEdgeRolePanel(context);
+      DrawFindEllipseEdgeEvaluationPanel(context);
+      DrawFindEllipseScanSemanticsPanel(context);
+  }
   if (isFastMatch)
   {
       ImGui::TextColored(
           ImVec4(1.0f, 0.86f, 0.35f, 1.0f),
           "FastMatch: learn ROI + search ROI + matching params");
+      DrawFastMatchTemplateStatusPanel(context);
+  }
+  if (isFindSegmentation)
+  {
+      ImGui::TextColored(
+          ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
+          "FindSegmentation: prompt ROI -> segment -> boundary/overlay");
   }
   if (isGridPattern)
   {
@@ -2685,6 +3426,44 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               context.apply_gauge_to_shape_requested = true;
           }
       }
+      else if (isFindEllipse)
+      {
+          bool ellipseGeometryEdited = false;
+          ImGui::TextDisabled(
+              "FindEllipse uses the same direct gauge-editing model as FindCircle: geometry first, then edge params.");
+          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("x0", &gauge.ellipse_x0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("y0", &gauge.ellipse_y0);
+          ImGui::SameLine(); ImGui::TextDisabled("ellipse center / first radius point");
+
+          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("x1", &gauge.ellipse_x1);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("y1", &gauge.ellipse_y1);
+          ImGui::SameLine(); ImGui::TextDisabled("ellipse second radius point");
+
+          gaugeEdited |= ellipseGeometryEdited;
+          if (ellipseGeometryEdited)
+          {
+              context.apply_gauge_to_shape_requested = true;
+          }
+      }
+      else if (isFindRect)
+      {
+          bool rectGeometryEdited = false;
+          ImGui::TextDisabled(
+              "FindRect extends FindLine controls: editable seed line/box with line-like scan params.");
+          ImGui::SetNextItemWidth(120.0f); rectGeometryEdited |= ImGui::InputInt("x0", &gauge.line_x0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); rectGeometryEdited |= ImGui::InputInt("y0", &gauge.line_y0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); rectGeometryEdited |= ImGui::InputInt("half_width", &gauge.tool_half_width);
+
+          ImGui::SetNextItemWidth(120.0f); rectGeometryEdited |= ImGui::InputInt("x1", &gauge.line_x1);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); rectGeometryEdited |= ImGui::InputInt("y1", &gauge.line_y1);
+          gauge.tool_half_width = std::max(1, gauge.tool_half_width);
+
+          gaugeEdited |= rectGeometryEdited;
+          if (rectGeometryEdited)
+          {
+              context.apply_gauge_to_shape_requested = true;
+          }
+      }
       else if (isGridPattern)
       {
           gaugeEdited |= DrawGridPatternRoiControls(context);
@@ -2695,7 +3474,21 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       }
       else if (isFastMatch)
       {
-          gaugeEdited |= DrawFastMatchRoiControls(context);
+          const bool fastMatchRoiEdited = DrawFastMatchRoiControls(context);
+          gaugeEdited |= fastMatchRoiEdited;
+          if (fastMatchRoiEdited)
+          {
+              context.apply_gauge_to_shape_requested = true;
+          }
+      }
+      else if (isFindSegmentation)
+      {
+          const bool segPromptEdited = DrawFindSegmentationPromptControls(context);
+          gaugeEdited |= segPromptEdited;
+          if (segPromptEdited)
+          {
+              context.apply_gauge_to_shape_requested = true;
+          }
       }
       else
       {
@@ -2747,13 +3540,142 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##lg_val", &gauge.linegap);
       gauge.linegap = std::max(0, std::min(50, gauge.linegap));
 
-      if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
+      const int findsettingDefault =
+          (gauge.tool == "FindLine" || gauge.has_line_gauge || isFindEllipse)
+              ? 1
+              : 0;
+      if (gauge.findsetting < 0)
+      {
+          gauge.findsetting = findsettingDefault;
+      }
+      gauge.findsetting = std::max(0, std::min(255, gauge.findsetting));
+      bool objectPrefilter = (gauge.findsetting & 0x01) != 0;
+      const char* findsettingMethodName =
+          (gauge.tool == "FindLine" || gauge.has_line_gauge)
+              ? "setobjfilter"
+              : "setfindsetting";
+      ImGui::TextUnformatted("findsetting");
+      ImGui::SameLine(110.0f);
+      if (ImGui::Checkbox("object prefilter##findsetting_prefilter",
+                          &objectPrefilter))
+      {
+          if (objectPrefilter)
+              gauge.findsetting |= 0x01;
+          else
+              gauge.findsetting &= ~0x01;
+          gaugeEdited = true;
+      }
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(70.0f);
+      gaugeEdited |= ImGui::InputInt("##findsetting_value", &gauge.findsetting);
+      gauge.findsetting = std::max(0, std::min(255, gauge.findsetting));
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s bit0, default=%d",
+                          findsettingMethodName,
+                          findsettingDefault);
+
+      if (isFindCircle || isFindEllipse)
       {
           ImGui::TextUnformatted("gap");
           ImGui::SameLine(80.0f);
           ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##gap", &gauge.gap, 0, 200);
           ImGui::SameLine(); ImGui::SetNextItemWidth(70.0f); gaugeEdited |= ImGui::InputInt("##gap_val", &gauge.gap);
           gauge.gap = std::max(0, std::min(200, gauge.gap));
+
+          if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
+          {
+              const int annulusWidth =
+                  std::max(1, gauge.outer_radius - gauge.inner_radius);
+              const int circleConsistencyDefaultRange =
+                  std::max(1, annulusWidth / 2);
+              if (context.findcircle_point_consistency_range <= 0)
+              {
+                  context.findcircle_point_consistency_range =
+                      circleConsistencyDefaultRange;
+              }
+
+              bool circleConsistencyEnabled =
+                  context.findcircle_point_consistency_enabled;
+              if (ImGui::Checkbox(
+                      "enable point consistency##findcircle_consistency",
+                      &circleConsistencyEnabled))
+              {
+                  context.findcircle_point_consistency_enabled =
+                      circleConsistencyEnabled;
+                  if (context.findcircle_point_consistency_range <= 0)
+                  {
+                      context.findcircle_point_consistency_range =
+                          circleConsistencyDefaultRange;
+                  }
+                  gaugeEdited = true;
+              }
+              ImGui::TextUnformatted("consistency");
+              ImGui::SameLine(110.0f);
+              ImGui::SetNextItemWidth(180.0f);
+              gaugeEdited |= ImGui::SliderInt(
+                  "##findcircle_consistency_range",
+                  &context.findcircle_point_consistency_range,
+                  1,
+                  std::max(1, annulusWidth));
+              ImGui::SameLine();
+              ImGui::SetNextItemWidth(70.0f);
+              gaugeEdited |= ImGui::InputInt(
+                  "##findcircle_consistency_range_val",
+                  &context.findcircle_point_consistency_range);
+              context.findcircle_point_consistency_range =
+                  std::max(1, std::min(10000,
+                                       context.findcircle_point_consistency_range));
+              ImGui::SameLine();
+              ImGui::TextDisabled("default=%d", circleConsistencyDefaultRange);
+          }
+          else if (isFindEllipse)
+          {
+              const int ellipseRx = std::abs(gauge.ellipse_x1 - gauge.ellipse_x0) / 2;
+              const int ellipseRy = std::abs(gauge.ellipse_y1 - gauge.ellipse_y0) / 2;
+              const int ellipseConsistencyMax =
+                  std::max(1, std::max(ellipseRx, ellipseRy));
+              const int ellipseConsistencyDefaultRange =
+                  std::max(1, std::max(1, gauge.gap) / 2);
+              if (context.findellipse_point_consistency_range <= 0)
+              {
+                  context.findellipse_point_consistency_range =
+                      ellipseConsistencyDefaultRange;
+              }
+
+              bool ellipseConsistencyEnabled =
+                  context.findellipse_point_consistency_enabled;
+              if (ImGui::Checkbox(
+                      "enable point consistency##findellipse_consistency",
+                      &ellipseConsistencyEnabled))
+              {
+                  context.findellipse_point_consistency_enabled =
+                      ellipseConsistencyEnabled;
+                  if (context.findellipse_point_consistency_range <= 0)
+                  {
+                      context.findellipse_point_consistency_range =
+                          ellipseConsistencyDefaultRange;
+                  }
+                  gaugeEdited = true;
+              }
+              ImGui::TextUnformatted("consistency");
+              ImGui::SameLine(110.0f);
+              ImGui::SetNextItemWidth(180.0f);
+              gaugeEdited |= ImGui::SliderInt(
+                  "##findellipse_consistency_range",
+                  &context.findellipse_point_consistency_range,
+                  1,
+                  ellipseConsistencyMax);
+              ImGui::SameLine();
+              ImGui::SetNextItemWidth(70.0f);
+              gaugeEdited |= ImGui::InputInt(
+                  "##findellipse_consistency_range_val",
+                  &context.findellipse_point_consistency_range);
+              context.findellipse_point_consistency_range =
+                  std::max(1, std::min(10000,
+                                       context.findellipse_point_consistency_range));
+              ImGui::SameLine();
+              ImGui::TextDisabled("default=%d", ellipseConsistencyDefaultRange);
+          }
       }
       else
       {
@@ -2788,6 +3710,47 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
           gauge.hgap = std::max(0, std::min(50, gauge.hgap));
           ImGui::EndDisabled();
 
+          const int consistencyDefaultRange =
+              std::max(1, gauge.tool_half_width / 2);
+          if (context.findline_point_consistency_range <= 0)
+          {
+              context.findline_point_consistency_range =
+                  consistencyDefaultRange;
+          }
+
+          bool consistencyEnabled =
+              context.findline_point_consistency_enabled;
+          if (ImGui::Checkbox("enable point consistency##findline_consistency",
+                              &consistencyEnabled))
+          {
+              context.findline_point_consistency_enabled =
+                  consistencyEnabled;
+              if (context.findline_point_consistency_range <= 0)
+              {
+                  context.findline_point_consistency_range =
+                      consistencyDefaultRange;
+              }
+              gaugeEdited = true;
+          }
+          ImGui::TextUnformatted("consistency");
+          ImGui::SameLine(110.0f);
+          ImGui::SetNextItemWidth(180.0f);
+          gaugeEdited |= ImGui::SliderInt(
+              "##findline_consistency_range",
+              &context.findline_point_consistency_range,
+              1,
+              std::max(1, gauge.tool_half_width));
+          ImGui::SameLine();
+          ImGui::SetNextItemWidth(70.0f);
+          gaugeEdited |= ImGui::InputInt(
+              "##findline_consistency_range_val",
+              &context.findline_point_consistency_range);
+          context.findline_point_consistency_range =
+              std::max(1, std::min(10000,
+                                   context.findline_point_consistency_range));
+          ImGui::SameLine();
+          ImGui::TextDisabled("default=%d", consistencyDefaultRange);
+
           ImGui::TextUnformatted("filterprofile");
           ImGui::SameLine(80.0f);
           ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##fp", &gauge.filterprofile, 0, 10);
@@ -2806,11 +3769,15 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     context.last_key_parameter_edit_summary =
         "threshold=" + std::to_string(gauge.threshold) +
         " method=" + std::to_string(gauge.method) +
-        " linegap=" + std::to_string(gauge.linegap);
+        " linegap=" + std::to_string(gauge.linegap) +
+        " findsetting=" + std::to_string(gauge.findsetting);
     if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
     {
       context.last_key_parameter_edit_summary +=
           " gap=" + std::to_string(gauge.gap) +
+          " consistency=" +
+          std::to_string(context.findcircle_point_consistency_enabled ? 1 : 0) +
+          "/" + std::to_string(context.findcircle_point_consistency_range) +
           " selected_edge=" +
           std::to_string(context.findcircle_selected_scan_edge) +
           "/" + std::to_string(context.findcircle_scan_edge_count) +
@@ -2822,6 +3789,25 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
           std::to_string(gauge.circle_cy) + "," +
           std::to_string(gauge.circle_px) + "," +
           std::to_string(gauge.circle_py) + ")";
+    }
+    else if (isFindEllipse)
+    {
+      context.last_key_parameter_edit_summary +=
+          " gap=" + std::to_string(gauge.gap) +
+          " consistency=" +
+          std::to_string(context.findellipse_point_consistency_enabled ? 1 : 0) +
+          "/" + std::to_string(context.findellipse_point_consistency_range) +
+          " selected_edge=" +
+          std::to_string(context.findellipse_selected_scan_edge) +
+          "/" + std::to_string(context.findellipse_scan_edge_count) +
+          " best_edge=" + std::to_string(context.findellipse_best_fit_edge) +
+          " recommended_edge=" + std::to_string(context.findellipse_recommended_fit_edge) +
+          " relation_edge=" + std::to_string(context.findellipse_relation_edge) +
+          " attach_edge=" + std::to_string(context.findellipse_attach_edge) +
+          " ellipse=(" + std::to_string(gauge.ellipse_x0) + "," +
+          std::to_string(gauge.ellipse_y0) + "," +
+          std::to_string(gauge.ellipse_x1) + "," +
+          std::to_string(gauge.ellipse_y1) + ")";
     }
     else if (isFastMatch || isGridPattern || isRegionPattern)
     {
@@ -2876,6 +3862,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
           " hgap=" + std::to_string(gauge.hgap) +
           " scan_direction=" + std::to_string(gauge.scan_direction) +
           " filterprofile=" + std::to_string(gauge.filterprofile) +
+          " findsetting=" + std::to_string(gauge.findsetting) +
           " selected_edge=" +
           std::to_string(context.findline_selected_scan_edge) +
           "/" + std::to_string(context.findline_scan_edge_count) +

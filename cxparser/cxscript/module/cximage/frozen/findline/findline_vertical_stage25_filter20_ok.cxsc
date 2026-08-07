@@ -20,6 +20,7 @@ int threshold = global_threshold;
 int method = global_method;
 int filterprofile = global_filterprofile;
 int selected_edge = global_findline_selected_edge;
+int objfilter = global_findline_objfilter;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setscandirection(global_findline_scan_direction);
@@ -28,7 +29,9 @@ m_line.setline(x0, y0, x1, y1, tool_half_width);
 m_line.setmethod(method);
 m_line.setthre(threshold);
 m_line.setfilterprofile(filterprofile);
+m_line.setobjfilter(objfilter);
 m_line.setselectedgenum(selected_edge);
+m_line.setpointconsistency(global_findline_point_consistency_enabled, global_findline_point_consistency_range);
 
 m_line.measure(&m_image);
 m_line.fitline();

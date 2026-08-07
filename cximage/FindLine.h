@@ -254,6 +254,11 @@ struct FindLineMeasureInputDebug
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int point_consistency_enabled = 0;
+    double point_consistency_range = 0.0;
+    int point_consistency_input_points = 0;
+    int point_consistency_output_points = 0;
+    int point_consistency_removed_points = 0;
     int selected_edge_index = 0;
     int evaluated_edge_count = 0;
     int best_edge_index = 0;
@@ -444,6 +449,10 @@ public:
     void setfilterprofile(int profile);
     void setobjectfilterstrategy(int strategy);
     int objectfilterstrategy() const { return m_findobject_strategy_id; }
+    void setpointconsistency(int enabled, int range);
+    int pointconsistencyenabled() const { return m_point_consistency_enabled; }
+    int pointconsistencyrange() const { return m_point_consistency_range; }
+    int pointconsistencyremoved() const { return m_point_consistency_removed_points; }
     int effectivefiltermin() const;
     int effectivefiltermax() const;
     int effectivefilterborw() const;
@@ -595,6 +604,9 @@ private:
     int m_filter_profile = 0;
     bool m_filter_explicit = false;
     int m_findobject_strategy_id = 0;
+    int m_point_consistency_enabled = 0;
+    int m_point_consistency_range = 0;
+    int m_point_consistency_removed_points = 0;
     int m_effective_filter_borw = 0;
     int m_effective_filter_min = 0;
     int m_effective_filter_max = 0;
@@ -632,6 +644,14 @@ private:
     bool MeasureSimpleRoiGradientPoints(Image& image,
                                         FindLineMeasureProfileStats& stats);
     void RunFindObjectPrefilter(Image& process_image);
+    void ApplyPointConsistencyConstraint();
+    int ApplyPointConsistencyConstraintToPoints(
+        PointsShape& points,
+        double ux,
+        double uy,
+        double nx,
+        double ny,
+        double range);
 
     void BuildScanProfilesRobust(Image& image, FindLineMeasureProfileStats& stats);
     void CollectEdgeBandsRobust(Image& image, FindLineMeasureProfileStats& stats);

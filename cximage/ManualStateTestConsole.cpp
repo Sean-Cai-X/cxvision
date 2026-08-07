@@ -161,10 +161,16 @@ static void FillRuntimeObjectFromFindCircle(
     const double runtime_outer_radius = std::hypot(
         static_cast<double>(object.circle_px - object.circle_cx),
         static_cast<double>(object.circle_py - object.circle_cy));
-    object.ring_outer_radius = runtime_outer_radius;
+    const double annulus_outer_radius =
+        static_cast<double>(circle.getannulusouter());
+    const double annulus_inner_radius =
+        static_cast<double>(circle.getannulusinner());
+    object.ring_outer_radius =
+        annulus_outer_radius > 0.0 ? annulus_outer_radius : runtime_outer_radius;
     object.ring_inner_radius =
-        debug.has_inner_gap
-            ? std::max(0.0, runtime_outer_radius - static_cast<double>(debug.inner_gap))
+        (annulus_inner_radius > 0.0 &&
+         annulus_inner_radius < object.ring_outer_radius)
+            ? annulus_inner_radius
             : 0.0;
     object.ring_thickness = std::max(
         0.0, object.ring_outer_radius - object.ring_inner_radius);
@@ -186,12 +192,28 @@ static void FillRuntimeObjectFromFindCircle(
         debug.candidate_runs_max_per_line;
     object.circle_selected_edge_hits = debug.selected_edge_hits;
     object.circle_selected_edge_misses = debug.selected_edge_misses;
+    object.circle_scan_boundary_clipped_lines =
+        debug.scan_boundary_clipped_lines;
+    object.circle_scan_boundary_extended_samples =
+        debug.scan_boundary_extended_samples;
+    object.circle_candidate_boundary_reject_count =
+        debug.candidate_boundary_reject_count;
     object.circle_selected_edge_radius_avg =
         debug.selected_edge_radius_avg;
     object.circle_selected_edge_radius_min =
         debug.selected_edge_radius_min;
     object.circle_selected_edge_radius_max =
         debug.selected_edge_radius_max;
+    object.circle_point_consistency_enabled =
+        circle.getpointconsistencyenabled();
+    object.circle_point_consistency_range =
+        circle.getpointconsistencyrange();
+    object.circle_point_consistency_input_points =
+        circle.getpointconsistencyinputcount();
+    object.circle_point_consistency_output_points =
+        circle.getpointconsistencyoutputcount();
+    object.circle_point_consistency_removed_points =
+        circle.getpointconsistencyremovedcount();
     object.circle_scan_lines_processed = debug.scan_lines_processed;
     object.circle_total_samples = debug.total_samples;
     object.circle_elapsed_ms = debug.elapsed_ms;
@@ -317,6 +339,16 @@ static void FillRuntimeObjectFromFindLine(
     object.line_scan_runs_rejected_near_endpoint =
         inputDebug.scan_runs_rejected_near_endpoint;
     object.line_scan_points_emitted = inputDebug.scan_points_emitted;
+    object.line_point_consistency_enabled =
+        inputDebug.point_consistency_enabled;
+    object.line_point_consistency_range =
+        inputDebug.point_consistency_range;
+    object.line_point_consistency_input_points =
+        inputDebug.point_consistency_input_points;
+    object.line_point_consistency_output_points =
+        inputDebug.point_consistency_output_points;
+    object.line_point_consistency_removed_points =
+        inputDebug.point_consistency_removed_points;
     object.line_measure_backimage_ready = inputDebug.backimage_ready;
     object.line_measure_findobject_ready = inputDebug.findobject_ready;
     object.line_measure_objfilterset = inputDebug.objfilterset;
@@ -426,6 +458,7 @@ static void FillRuntimeObjectFromFindEllipse(
 
         object.ellipse_scan_line_count = snapshot.scan_line_count;
         object.ellipse_scan_line_length = snapshot.scan_line_length;
+        object.ellipse_selected_edge_index = snapshot.selected_edge_index;
         object.ellipse_scan_lines_cross_outside_ellipse_count = snapshot.scan_lines_cross_outside_ellipse_count;
         object.ellipse_accepted_points_outside_ellipse_count = snapshot.accepted_points_outside_ellipse_count;
         object.ellipse_accepted_point_norm_min = snapshot.accepted_point_norm_min;
@@ -439,6 +472,16 @@ static void FillRuntimeObjectFromFindEllipse(
             snapshot.rejected_boundary_band_norm_avg;
         object.ellipse_rejected_boundary_band_norm_max =
             snapshot.rejected_boundary_band_norm_max;
+        object.ellipse_point_consistency_enabled =
+            snapshot.point_consistency_enabled;
+        object.ellipse_point_consistency_range =
+            snapshot.point_consistency_range;
+        object.ellipse_point_consistency_input_points =
+            snapshot.point_consistency_input_points;
+        object.ellipse_point_consistency_output_points =
+            snapshot.point_consistency_output_points;
+        object.ellipse_point_consistency_removed_points =
+            snapshot.point_consistency_removed_points;
         object.ellipse_scan_geometry_policy = snapshot.scan_geometry_policy;
         object.ellipse_candidate_policy = snapshot.candidate_policy;
 
@@ -451,8 +494,14 @@ static void FillRuntimeObjectFromFindEllipse(
                 ", linegap=" + std::to_string(snapshot.linegap) +
                 ", threshold=" + std::to_string(snapshot.threshold) +
                 ", method=" + std::to_string(snapshot.method) +
+                ", selected_edge=" + std::to_string(snapshot.selected_edge_index) +
                 ", scan_lines=" + std::to_string(snapshot.scan_line_count) +
                 ", scan_len=" + std::to_string(snapshot.scan_line_length) +
+                ", consistency=" +
+                std::to_string(snapshot.point_consistency_enabled) + "/" +
+                std::to_string(snapshot.point_consistency_range) +
+                ", consistency_removed=" +
+                std::to_string(snapshot.point_consistency_removed_points) +
                 ", accepted_outside=" + std::to_string(snapshot.accepted_points_outside_ellipse_count) +
                 ", accepted_norm=" + std::to_string(snapshot.accepted_point_norm_min) + "/" +
                 std::to_string(snapshot.accepted_point_norm_avg) + "/" +
@@ -702,6 +751,23 @@ void SeedDefaultManualGlobals(
 
     if (isFastMatchScript)
     {
+        set("global_learn_roi_x", 120);
+        set("global_learn_roi_y", 120);
+        set("global_learn_roi_w", 120);
+        set("global_learn_roi_h", 90);
+        set("global_search_roi_x", 0);
+        set("global_search_roi_y", 0);
+        set("global_search_roi_w", 640);
+        set("global_search_roi_h", 480);
+        set("global_compare_gap", 20);
+        set("global_objfilter", 1);
+        set("global_find_num", 1);
+        set("global_match_step_x", 10);
+        set("global_match_step_y", 10);
+        set("global_match_thre", 10);
+        set("global_min_score_percent", 65);
+        set("global_fastmatch_action", 3);
+
         // FastMatch direct scripts write these values back after learn/match.
         // CxScript assignments require their external destinations to be
         // registered before Compile(); Headless already does this, Manual did
@@ -1155,10 +1221,28 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.fastmatch_pattern_b_count = matcher->getpatternbpointcount();
         object.fastmatch_candidate_count = matcher->getresultcandidatecount();
         object.fastmatch_best_score = matcher->getresultbestscore();
+        object.fastmatch_learn_rect_x0 = matcher->getlearnrectx0();
+        object.fastmatch_learn_rect_y0 = matcher->getlearnrecty0();
+        object.fastmatch_learn_rect_x1 = matcher->getlearnrectx1();
+        object.fastmatch_learn_rect_y1 = matcher->getlearnrecty1();
+        object.fastmatch_match_rect_x0 = matcher->getmatchrectx0();
+        object.fastmatch_match_rect_y0 = matcher->getmatchrecty0();
+        object.fastmatch_match_rect_x1 = matcher->getmatchrectx1();
+        object.fastmatch_match_rect_y1 = matcher->getmatchrecty1();
         object.measure_points_count = object.fastmatch_model_point_count;
         object.valid_points_count = object.fastmatch_candidate_count;
         object.display_summary =
             "FastMatch " + name +
+            " learn_rect=(" +
+            std::to_string(object.fastmatch_learn_rect_x0) + "," +
+            std::to_string(object.fastmatch_learn_rect_y0) + "," +
+            std::to_string(object.fastmatch_learn_rect_x1) + "," +
+            std::to_string(object.fastmatch_learn_rect_y1) + ")" +
+            " match_rect=(" +
+            std::to_string(object.fastmatch_match_rect_x0) + "," +
+            std::to_string(object.fastmatch_match_rect_y0) + "," +
+            std::to_string(object.fastmatch_match_rect_x1) + "," +
+            std::to_string(object.fastmatch_match_rect_y1) + ")" +
             " model_points=" + std::to_string(object.fastmatch_model_point_count) +
             " learnA=" + std::to_string(object.fastmatch_learn_a_count) +
             " learnB=" + std::to_string(object.fastmatch_learn_b_count) +

@@ -751,6 +751,12 @@ void FindCircle::setthre(int ithre)
 {
     m_iThreshold = ithre;
 }
+
+void FindCircle::setpointconsistency(int enabled, int range)
+{
+    m_point_consistency_enabled = enabled != 0;
+    m_point_consistency_range = static_cast<double>(std::max(0, range));
+}
 int FindCircle::thre()
 {
     return m_iThreshold;
@@ -835,6 +841,9 @@ void FindCircle::Measure(Image& image)
 
     m_lastMeasureGeometryDebug.measure_source =
         "original_circle_measure_pipeline";
+    m_lastMeasureGeometryDebug.scan_boundary_clipped_lines = 0;
+    m_lastMeasureGeometryDebug.scan_boundary_extended_samples = 0;
+    m_lastMeasureGeometryDebug.candidate_boundary_reject_count = 0;
 
     if (image.getmat().empty())
     {
@@ -1067,9 +1076,138 @@ void FindCircle::Measure(Image& image)
         }
     }
 
+    std::vector<int> source_valid_begin(
+        static_cast<std::size_t>(std::max(0, isize)),
+        -1);
+    std::vector<int> source_valid_end(
+        static_cast<std::size_t>(std::max(0, isize)),
+        -1);
+
+    auto isSourceSampleInsideImage = [&](int line_index, int sample_index) -> bool {
+        if (line_index < 0 || line_index >= isize ||
+            sample_index < 0 || sample_index >= ilineslen1 ||
+            image.getWidth() <= 0 || image.getHeight() <= 0)
+        {
+            return false;
+        }
+
+        /*
+         * LineShape::getlinepoint(0) historically returns (0,0).  Candidate
+         * selection already uses margins and never accepts sample 0 for normal
+         * circle gauges, so source-domain validation starts from sample 1.
+         */
+        if (sample_index == 0 && ilineslen1 > 1)
+            return false;
+
+        const gp_Pnt source_point =
+            m_lines[static_cast<std::size_t>(line_index)]
+                .getlinepoint(sample_index);
+        const int source_x = RoundToInt(source_point.X());
+        const int source_y = RoundToInt(source_point.Y());
+        const int border_guard =
+            (image.getWidth() > 2 && image.getHeight() > 2) ? 1 : 0;
+        return source_x >= border_guard &&
+            source_y >= border_guard &&
+            source_x < image.getWidth() - border_guard &&
+            source_y < image.getHeight() - border_guard;
+    };
+
     for (int i = 0; i < isize; i++)
     {
         m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
+    }
+
+    /*
+     * Source-boundary extension for circular scan rows.
+     *
+     * linecopyex writes black pixels when a radial Gauge sample falls outside
+     * the source image.  That black run is not image evidence; if left in the
+     * scan workspace it becomes a strong artificial edge for blur/gap
+     * thresholding and for FindObject.  Replicate the nearest valid source
+     * sample into the invalid head/tail of each scan row before thresholding,
+     * then keep the same valid interval for candidate rejection below.
+     */
+    {
+        int clipped_lines = 0;
+        int extended_samples = 0;
+        for (int row = 0; row < isize; ++row)
+        {
+            int first_valid = -1;
+            int last_valid = -1;
+            for (int x = 0; x < ilineslen1; ++x)
+            {
+                if (!isSourceSampleInsideImage(row, x))
+                    continue;
+                if (first_valid < 0)
+                    first_valid = x;
+                last_valid = x;
+            }
+
+            if (row >= 0 &&
+                row < static_cast<int>(source_valid_begin.size()))
+            {
+                source_valid_begin[static_cast<std::size_t>(row)] = first_valid;
+                source_valid_end[static_cast<std::size_t>(row)] = last_valid;
+            }
+
+            if (first_valid < 0 || last_valid < first_valid)
+            {
+                for (int x = 0; x < ilineslen1; ++x)
+                {
+                    if (x >= 0 && x < g_pbackimage->getWidth() &&
+                        row >= 0 && row < g_pbackimage->getHeight())
+                    {
+                        g_pbackimage->setPixel(x, row, cv::Vec3b(0, 0, 0));
+                    }
+                }
+                ++clipped_lines;
+                extended_samples += std::max(0, ilineslen1);
+                continue;
+            }
+
+            if (first_valid > 0 || last_valid < ilineslen1 - 1)
+            {
+                ++clipped_lines;
+            }
+
+            const cv::Vec3b left_value =
+                g_pbackimage->pixel(first_valid, row);
+            for (int x = 0; x < first_valid; ++x)
+            {
+                if (x >= 0 && x < g_pbackimage->getWidth() &&
+                    row >= 0 && row < g_pbackimage->getHeight())
+                {
+                    g_pbackimage->setPixel(x, row, left_value);
+                    ++extended_samples;
+                }
+            }
+
+            const cv::Vec3b right_value =
+                g_pbackimage->pixel(last_valid, row);
+            for (int x = last_valid + 1; x < ilineslen1; ++x)
+            {
+                if (x >= 0 && x < g_pbackimage->getWidth() &&
+                    row >= 0 && row < g_pbackimage->getHeight())
+                {
+                    g_pbackimage->setPixel(x, row, right_value);
+                    ++extended_samples;
+                }
+            }
+        }
+
+        m_lastMeasureGeometryDebug.scan_boundary_clipped_lines =
+            clipped_lines;
+        m_lastMeasureGeometryDebug.scan_boundary_extended_samples =
+            extended_samples;
+        if (clipped_lines > 0 || extended_samples > 0)
+        {
+            LogFindCircleMeasureProbe(
+                "measure_source_boundary_extension",
+                "running",
+                "clipped_lines=" + std::to_string(clipped_lines) +
+                    ", extended_samples=" +
+                    std::to_string(extended_samples));
+        }
     }
 
     /*
@@ -1225,6 +1363,7 @@ void FindCircle::Measure(Image& image)
       int candidate_runs_max_per_line = 0;
       int selected_edge_hits = 0;
       int selected_edge_misses = 0;
+      int candidate_boundary_reject_count = 0;
       double selected_edge_radius_sum = 0.0;
       double selected_edge_radius_min = std::numeric_limits<double>::infinity();
       double selected_edge_radius_max = 0.0;
@@ -1367,6 +1506,32 @@ void FindCircle::Measure(Image& image)
                   if (candidate_position < left_margin ||
                       candidate_position > (ilineslen1 - 1 - right_margin))
                   {
+                      return;
+                  }
+
+                  if (inumy < 0 ||
+                      inumy >= static_cast<int>(source_valid_begin.size()))
+                  {
+                      ++candidate_boundary_reject_count;
+                      return;
+                  }
+                  const int valid_begin =
+                      source_valid_begin[static_cast<std::size_t>(inumy)];
+                  const int valid_end =
+                      source_valid_end[static_cast<std::size_t>(inumy)];
+                  if (valid_begin < 0 || valid_end < valid_begin)
+                  {
+                      ++candidate_boundary_reject_count;
+                      return;
+                  }
+                  const int valid_length = valid_end - valid_begin + 1;
+                  const int source_boundary_guard =
+                      std::min(endpoint_guard,
+                               std::max(1, valid_length / 10));
+                  if (candidate_position < valid_begin + source_boundary_guard ||
+                      candidate_position > valid_end - source_boundary_guard)
+                  {
+                      ++candidate_boundary_reject_count;
                       return;
                   }
 
@@ -1701,6 +1866,8 @@ void FindCircle::Measure(Image& image)
         candidate_runs_max_per_line;
     m_lastMeasureGeometryDebug.selected_edge_hits = selected_edge_hits;
     m_lastMeasureGeometryDebug.selected_edge_misses = selected_edge_misses;
+    m_lastMeasureGeometryDebug.candidate_boundary_reject_count =
+        candidate_boundary_reject_count;
     if (m_measurepoints.size() > 0 &&
         std::isfinite(selected_edge_radius_min))
     {
@@ -1732,6 +1899,12 @@ void FindCircle::Measure(Image& image)
             std::to_string(candidate_runs_max_per_line) +
             ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
             ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", boundary_clipped_lines=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_clipped_lines) +
+            ", boundary_extended_samples=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
+            ", candidate_boundary_reject_count=" +
+            std::to_string(candidate_boundary_reject_count) +
             ", selected_edge_radius_avg=" +
             std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
             ", selected_edge_radius_min=" +
@@ -1752,6 +1925,12 @@ void FindCircle::Measure(Image& image)
             std::to_string(candidate_runs_max_per_line) +
             ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
             ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", boundary_clipped_lines=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_clipped_lines) +
+            ", boundary_extended_samples=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
+            ", candidate_boundary_reject_count=" +
+            std::to_string(candidate_boundary_reject_count) +
             ", selected_edge_radius_avg=" +
             std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
             ", selected_edge_radius_min=" +
@@ -1792,6 +1971,12 @@ void FindCircle::Measure(Image& image)
             ", candidate_runs_max_per_line=" + std::to_string(candidate_runs_max_per_line) +
             ", selected_edge_hits=" + std::to_string(selected_edge_hits) +
             ", selected_edge_misses=" + std::to_string(selected_edge_misses) +
+            ", boundary_clipped_lines=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_clipped_lines) +
+            ", boundary_extended_samples=" +
+            std::to_string(m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
+            ", candidate_boundary_reject_count=" +
+            std::to_string(candidate_boundary_reject_count) +
             ", selected_edge_radius_avg=" +
             std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
             ", selected_edge_radius_min=" +
@@ -2126,7 +2311,7 @@ void FindCircle::fitcircle()
     auto [center, radius] = Image::CircleFit_(vecResult);
     double dOut_x = center.x;
     double dOut_y = center.y;
-    double dradiusOut = radius; 
+    double dradiusOut = radius;
     if (!std::isfinite(dOut_x) || !std::isfinite(dOut_y) || !std::isfinite(dradiusOut) || dradiusOut <= 0.0)
     {
         m_dresultcentx = 0.0;
@@ -2147,6 +2332,63 @@ void FindCircle::fitcircle()
         });
         return;
     }
+
+    m_point_consistency_input_count = static_cast<int>(vecResult.size());
+    m_point_consistency_output_count = m_point_consistency_input_count;
+    m_point_consistency_removed_count = 0;
+    if (m_point_consistency_enabled &&
+        m_point_consistency_range > 0.0 &&
+        vecResult.size() >= static_cast<size_t>(min_fit_points))
+    {
+        std::vector<cv::Point2f> filtered;
+        filtered.reserve(vecResult.size());
+        for (const cv::Point2f& pt : vecResult)
+        {
+            const double dx = static_cast<double>(pt.x) - dOut_x;
+            const double dy = static_cast<double>(pt.y) - dOut_y;
+            const double radial = std::sqrt(dx * dx + dy * dy);
+            const double residual = std::abs(radial - dradiusOut);
+            if (residual <= m_point_consistency_range)
+                filtered.push_back(pt);
+        }
+
+        /*
+         * The consistency gate is a fit-quality gate, not a replacement for
+         * the edge detector.  If it would remove too much evidence, keep the
+         * original point set and expose the attempted counts for diagnosis.
+         */
+        if (filtered.size() >= static_cast<size_t>(min_fit_points) &&
+            filtered.size() * 2 >= vecResult.size())
+        {
+            auto [filtered_center, filtered_radius] =
+                Image::CircleFit_(filtered);
+            if (std::isfinite(filtered_center.x) &&
+                std::isfinite(filtered_center.y) &&
+                std::isfinite(filtered_radius) &&
+                filtered_radius > 0.0)
+            {
+                vecResult.swap(filtered);
+                dOut_x = filtered_center.x;
+                dOut_y = filtered_center.y;
+                dradiusOut = filtered_radius;
+                center = filtered_center;
+                radius = filtered_radius;
+
+                m_measurepoints.clear();
+                for (const cv::Point2f& pt : vecResult)
+                    m_measurepoints.addpoint(
+                        static_cast<int>(std::lround(pt.x)),
+                        static_cast<int>(std::lround(pt.y)));
+            }
+        }
+
+        m_point_consistency_output_count = static_cast<int>(vecResult.size());
+        m_point_consistency_removed_count =
+            std::max(0, m_point_consistency_input_count -
+                         m_point_consistency_output_count);
+        isize = ClampSizeToInt(m_measurepoints.size());
+    }
+
     int icentx = RoundToInt(dOut_x);
     int icenty = RoundToInt(dOut_y);
     int ipax = RoundToInt(dOut_x + radius);
@@ -3065,6 +3307,45 @@ void FindCircle::PublishDisplayShapes(ICxShapeSink& sink, const std::string& own
             false,
             false,
             std::move(inner_scan));
+    }
+
+    /*
+     * Publish the exact radial scan lines used by Measure().
+     *
+     * Image View must not regenerate FindCircle gauge ticks from center/radius
+     * UI state.  The accepted points are selected on m_lines, so the visible
+     * gauge lines must be the same m_lines.  Otherwise Run Script can display
+     * a recomputed preview while the yellow result points come from another
+     * sampling geometry, which makes points appear off the visible Gauge line.
+     */
+    for (std::size_t i = 0; i < m_lines.size(); ++i)
+    {
+        CxShapePoint p0;
+        CxShapePoint p1;
+        if (!m_lines[i].exportLine(p0, p1))
+            continue;
+
+        if (!std::isfinite(p0.x) || !std::isfinite(p0.y) ||
+            !std::isfinite(p1.x) || !std::isfinite(p1.y))
+        {
+            continue;
+        }
+
+        auto scan_line = std::make_unique<LineShape>();
+        scan_line->setline(
+            RoundToInt(p0.x),
+            RoundToInt(p0.y),
+            RoundToInt(p1.x),
+            RoundToInt(p1.y));
+        sink.UpsertShape(
+            owner_ref + ".scan_tick_" + std::to_string(i),
+            "FindCircle",
+            owner_ref,
+            "",
+            "scan_tick",
+            false,
+            false,
+            std::move(scan_line));
     }
 
     const PointsShape& measure_points = getresultpoints();

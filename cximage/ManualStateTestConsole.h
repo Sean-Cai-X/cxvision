@@ -92,6 +92,7 @@ struct RuntimeObjectView
 
     int ellipse_scan_line_count = 0;
     int ellipse_scan_line_length = 0;
+    int ellipse_selected_edge_index = 0;
     int ellipse_scan_lines_cross_outside_ellipse_count = 0;
     int ellipse_accepted_points_outside_ellipse_count = 0;
     double ellipse_accepted_point_norm_min = 0.0;
@@ -101,6 +102,11 @@ struct RuntimeObjectView
     double ellipse_rejected_boundary_band_norm_min = 0.0;
     double ellipse_rejected_boundary_band_norm_avg = 0.0;
     double ellipse_rejected_boundary_band_norm_max = 0.0;
+    int ellipse_point_consistency_enabled = 0;
+    double ellipse_point_consistency_range = 0.0;
+    int ellipse_point_consistency_input_points = 0;
+    int ellipse_point_consistency_output_points = 0;
+    int ellipse_point_consistency_removed_points = 0;
     std::string ellipse_scan_geometry_policy;
     std::string ellipse_candidate_policy;
 
@@ -327,6 +333,11 @@ struct RuntimeObjectView
     int line_scan_runs_rejected_by_selection = 0;
     int line_scan_runs_rejected_near_endpoint = 0;
     int line_scan_points_emitted = 0;
+    int line_point_consistency_enabled = 0;
+    double line_point_consistency_range = 0.0;
+    int line_point_consistency_input_points = 0;
+    int line_point_consistency_output_points = 0;
+    int line_point_consistency_removed_points = 0;
     int line_selected_edge_index = 0;
     int line_evaluated_edge_count = 0;
     int line_best_edge_index = 0;
@@ -419,9 +430,17 @@ struct RuntimeObjectView
     int circle_candidate_runs_max_per_line = 0;
     int circle_selected_edge_hits = 0;
     int circle_selected_edge_misses = 0;
+    int circle_scan_boundary_clipped_lines = 0;
+    int circle_scan_boundary_extended_samples = 0;
+    int circle_candidate_boundary_reject_count = 0;
     double circle_selected_edge_radius_avg = 0.0;
     double circle_selected_edge_radius_min = 0.0;
     double circle_selected_edge_radius_max = 0.0;
+    int circle_point_consistency_enabled = 0;
+    double circle_point_consistency_range = 0.0;
+    int circle_point_consistency_input_points = 0;
+    int circle_point_consistency_output_points = 0;
+    int circle_point_consistency_removed_points = 0;
 
     bool circle_measure_image_ready = false;
     int circle_measure_image_width = 0;
@@ -455,6 +474,14 @@ struct RuntimeObjectView
     int fastmatch_pattern_b_count = 0;
     int fastmatch_candidate_count = 0;
     double fastmatch_best_score = 0.0;
+    int fastmatch_learn_rect_x0 = 0;
+    int fastmatch_learn_rect_y0 = 0;
+    int fastmatch_learn_rect_x1 = 0;
+    int fastmatch_learn_rect_y1 = 0;
+    int fastmatch_match_rect_x0 = 0;
+    int fastmatch_match_rect_y0 = 0;
+    int fastmatch_match_rect_x1 = 0;
+    int fastmatch_match_rect_y1 = 0;
 
     bool has_grid_pattern = false;
     int grid_pattern_status_code = 0;
@@ -589,6 +616,10 @@ struct ManualGaugeState
   int threshold = 20;
   int filterprofile = 1;
   int method = 2;
+  // Unified UI setting for the object prefilter switch.
+  // FindLine maps this to setobjfilter(); FindCircle/FindEllipse/FindRect
+  // map it to setfindsetting().  -1 means "use the tool's native default".
+  int findsetting = -1;
 
   bool has_circle_gauge = false;
   int circle_cx = 0;
@@ -602,6 +633,13 @@ struct ManualGaugeState
   int ellipse_y0 = 0;
   int ellipse_x1 = 0;
   int ellipse_y1 = 0;
+
+  bool has_segmentation_prompt_rect = false;
+  int segmentation_prompt_x0 = 120;
+  int segmentation_prompt_y0 = 120;
+  int segmentation_prompt_x1 = 980;
+  int segmentation_prompt_y1 = 820;
+  int segmentation_mode = 2;
 
   int radius = 0;
   // For FindCircle, these are absolute display radii for the auxiliary
@@ -948,12 +986,15 @@ struct ManualTestContext
   bool show_result_overlay = false;
   bool show_line_gauge_scan_lines = false;
   bool show_circle_gauge_scan_lines = false;
+  bool show_ellipse_gauge_scan_lines = false;
   int findline_selected_scan_edge = 0; // 0 = all edges, 1..N = selected edge.
   int findline_scan_edge_count = 4;
   int findline_best_fit_edge = 0; // Runtime/manual best fitting point-set edge.
   int findline_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
   int findline_relation_edge = 0; // Future combined/related point-set edge.
   int findline_attach_edge = 0; // Future annotation attach/binding edge.
+  bool findline_point_consistency_enabled = false;
+  int findline_point_consistency_range = 0; // UI materializes default to half of search half-width.
   std::vector<ManualFindLineEdgeParamState> findline_edge_params;
   // 0 = accept all eligible crossings; 1..N = Nth candidate crossing on each
   // radial scan line.  This is not the angular A0/A1 scan-sector selection.
@@ -963,7 +1004,18 @@ struct ManualTestContext
   int findcircle_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
   int findcircle_relation_edge = 0; // Future combined/related arc point-set.
   int findcircle_attach_edge = 0; // Future annotation attach/binding arc.
+  bool findcircle_point_consistency_enabled = false;
+  int findcircle_point_consistency_range = 0;
   std::vector<ManualFindCircleEdgeParamState> findcircle_edge_params;
+  int findellipse_selected_scan_edge = 0;
+  int findellipse_scan_edge_count = 4;
+  int findellipse_best_fit_edge = 0;
+  int findellipse_recommended_fit_edge = 0;
+  int findellipse_relation_edge = 0;
+  int findellipse_attach_edge = 0;
+  bool findellipse_point_consistency_enabled = false;
+  int findellipse_point_consistency_range = 0;
+  std::vector<ManualFindCircleEdgeParamState> findellipse_edge_params;
   bool source_preview_enabled = false;
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
@@ -975,6 +1027,8 @@ struct ManualTestContext
   ManualGaugeState drag_start_gauge;
 
   std::vector<ManualEvidenceItem> evidence_items;
+  bool evidence_items_seed_attempted = false;
+  std::size_t evidence_items_seed_catalog_count = 0;
 
   bool workbench_assets_loaded = false;
   std::string manifest_path;
@@ -995,6 +1049,8 @@ struct ManualTestContext
   std::vector<ScriptEvidenceGroup> script_evidence_groups;
   int selected_evidence_group = -1;
   bool script_evidence_groups_dirty = true;
+  unsigned long long script_evidence_groups_revision = 0;
+  unsigned long long script_evidence_groups_debug_revision = 0;
 
   std::vector<ScriptEvidenceRowRef> script_evidence_row_refs;
   bool script_evidence_row_refs_dirty = true;

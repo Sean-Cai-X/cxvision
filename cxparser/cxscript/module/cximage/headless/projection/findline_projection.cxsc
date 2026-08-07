@@ -14,12 +14,14 @@ int linegap = global_linegap;
 int threshold = global_threshold;
 int method = global_method;
 int filterprofile = global_filterprofile;
+int objfilter = global_findline_objfilter;
 
 m_line.SetWHgap(wgap, hgap);
 m_line.setlinegap(linegap);
 m_line.setline(x0, y0, x1, y1, half_width);
 m_line.setmethod(method);
 m_line.setthre(threshold);
+m_line.setobjfilter(objfilter);
 m_line.setselectedgenum(global_findline_selected_edge);
 
 if (filterprofile > 0)

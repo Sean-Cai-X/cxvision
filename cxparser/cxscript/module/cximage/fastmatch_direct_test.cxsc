@@ -9,12 +9,12 @@ int roi_w = 1100;
 int roi_h = 1100;
 int threshold = 35;
 
-m_match.setrect(roi_h, roi_w, roi_y, roi_x);
+m_match.setrectxywh(roi_x, roi_y, roi_w, roi_h);
 m_match.setthre(threshold);
 m_match.setlinegap(3);
 m_match.learn(&m_occtimage);
 
-m_match.setmatchrect(1900, 2200, 50, 50);
+m_match.setmatchrectxywh(50, 50, 2200, 1900);
 m_match.match(&m_occtimage);
 
 1+1;

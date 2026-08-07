@@ -74,6 +74,22 @@ bool ExtractJsonBool(const std::string& source, const char* key, bool& value)
     return true;
 }
 
+int DefaultFindSettingForTool(const std::string& tool)
+{
+    if (tool == "FindLine" || tool == "FindEllipse")
+        return 1;
+    if (tool == "FindCircle" || tool == "FindRect")
+        return 0;
+    return 1;
+}
+
+int ResolveManualGaugeFindSetting(const ManualGaugeState& gauge)
+{
+    return std::max(0, gauge.findsetting >= 0
+                           ? gauge.findsetting
+                           : DefaultFindSettingForTool(gauge.tool));
+}
+
 bool AtomicReplaceFile(
     const std::filesystem::path& temporary,
     const std::filesystem::path& destination,
@@ -140,11 +156,18 @@ bool IsRegionPatternGaugeTool(const std::string& tool)
     return tool == "RegionPatternTool";
 }
 
+bool IsFindSegmentationGaugeTool(const std::string& tool)
+{
+    return tool == "FindSegmentation" ||
+           tool == "findsegmentation" ||
+           tool == "FindSegmentationTool";
+}
+
 bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
 {
-    if (gauge.tool == "FindLine")
+    if (gauge.tool == "FindLine" || gauge.tool == "FindRect")
     {
         if (!gauge.has_line_gauge)
             reason = "line gauge is unavailable";
@@ -183,6 +206,17 @@ bool ValidateManualGaugeGeometryForEditing(
     {
         reason.clear();
         return true;
+    }
+    if (IsFindSegmentationGaugeTool(gauge.tool))
+    {
+        if (!gauge.has_segmentation_prompt_rect)
+            reason = "FindSegmentation prompt ROI is unavailable";
+        else if (gauge.segmentation_prompt_x1 <= gauge.segmentation_prompt_x0 ||
+                 gauge.segmentation_prompt_y1 <= gauge.segmentation_prompt_y0)
+            reason = "FindSegmentation prompt ROI must have positive width and height";
+        else
+            reason.clear();
+        return reason.empty();
     }
     reason = "unsupported gauge tool";
     return false;
@@ -233,15 +267,21 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         context.debug_reason = reason;
         return false;
     }
-    if (gauge.tool == "FindLine")
+    if (gauge.tool == "FindLine" || gauge.tool == "FindRect")
     {
         InjectManualGaugeInt(context, "global_roi_x0", gauge.line_x0);
         InjectManualGaugeInt(context, "global_roi_y0", gauge.line_y0);
         InjectManualGaugeInt(context, "global_roi_x1", gauge.line_x1);
         InjectManualGaugeInt(context, "global_roi_y1", gauge.line_y1);
+        InjectManualGaugeInt(context, "global_roi_x", std::min(gauge.line_x0, gauge.line_x1));
+        InjectManualGaugeInt(context, "global_roi_y", std::min(gauge.line_y0, gauge.line_y1));
+        InjectManualGaugeInt(context, "global_roi_width", std::abs(gauge.line_x1 - gauge.line_x0));
+        InjectManualGaugeInt(context, "global_roi_height", std::abs(gauge.line_y1 - gauge.line_y0));
         InjectManualGaugeInt(context, "global_tool_half_width", gauge.tool_half_width);
         InjectManualGaugeInt(context, "global_wgap", gauge.wgap);
         InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
+        InjectManualGaugeInt(context, "global_compare_gap", gauge.gap > 0 ? gauge.gap : gauge.linegap);
+        InjectManualGaugeInt(context, "global_gauge", gauge.tool_half_width);
         gauge.scan_direction = gauge.scan_direction == 1 ? 1 : 2;
         InjectManualGaugeInt(
             context, "global_findline_scan_direction", gauge.scan_direction);
@@ -249,6 +289,28 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+        const int findsetting = ResolveManualGaugeFindSetting(gauge);
+        InjectManualGaugeInt(context, "global_findsetting", findsetting);
+        InjectManualGaugeInt(context, "global_objfilter", findsetting);
+        if (gauge.tool == "FindRect")
+            InjectManualGaugeInt(context, "global_findrect_findsetting", findsetting);
+        else
+            InjectManualGaugeInt(context, "global_findline_objfilter", findsetting);
+        InjectManualGaugeInt(
+            context,
+            "global_findline_point_consistency_enabled",
+            context.findline_point_consistency_enabled ? 1 : 0);
+        const int pointConsistencyDefaultRange =
+            std::max(1, gauge.tool_half_width / 2);
+        const int pointConsistencyRange =
+            context.findline_point_consistency_range > 0
+                ? context.findline_point_consistency_range
+                : pointConsistencyDefaultRange;
+        context.findline_point_consistency_range = pointConsistencyRange;
+        InjectManualGaugeInt(
+            context,
+            "global_findline_point_consistency_range",
+            pointConsistencyRange);
 
         context.findline_scan_edge_count =
             std::max(1, std::min(16, context.findline_scan_edge_count));
@@ -385,6 +447,24 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+        const int findsetting = ResolveManualGaugeFindSetting(gauge);
+        InjectManualGaugeInt(context, "global_findsetting", findsetting);
+        InjectManualGaugeInt(context, "global_findcircle_findsetting", findsetting);
+        const int circleConsistencyDefaultRange =
+            std::max(1, std::max(1, gauge.outer_radius - gauge.inner_radius) / 2);
+        const int circleConsistencyRange =
+            context.findcircle_point_consistency_range > 0
+                ? context.findcircle_point_consistency_range
+                : circleConsistencyDefaultRange;
+        context.findcircle_point_consistency_range = circleConsistencyRange;
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_point_consistency_enabled",
+            context.findcircle_point_consistency_enabled ? 1 : 0);
+        InjectManualGaugeInt(
+            context,
+            "global_findcircle_point_consistency_range",
+            circleConsistencyRange);
 
         context.findcircle_scan_edge_count =
             std::max(1, std::min(32, context.findcircle_scan_edge_count));
@@ -473,6 +553,99 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
         InjectManualGaugeInt(context, "global_method", gauge.method);
+        const int findsetting = ResolveManualGaugeFindSetting(gauge);
+        InjectManualGaugeInt(context, "global_findsetting", findsetting);
+        InjectManualGaugeInt(context, "global_findellipse_findsetting", findsetting);
+
+        const int ellipseConsistencyDefaultRange =
+            std::max(1, std::max(1, gauge.gap) / 2);
+        const int ellipseConsistencyRange =
+            context.findellipse_point_consistency_range > 0
+                ? context.findellipse_point_consistency_range
+                : ellipseConsistencyDefaultRange;
+        context.findellipse_point_consistency_range = ellipseConsistencyRange;
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_point_consistency_enabled",
+            context.findellipse_point_consistency_enabled ? 1 : 0);
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_point_consistency_range",
+            ellipseConsistencyRange);
+
+        context.findellipse_scan_edge_count =
+            std::max(1, std::min(32, context.findellipse_scan_edge_count));
+        context.findellipse_selected_scan_edge =
+            std::max(-1, std::min(context.findellipse_selected_scan_edge,
+                                 context.findellipse_scan_edge_count));
+        if (context.findellipse_edge_params.size() <
+            static_cast<std::size_t>(context.findellipse_scan_edge_count + 1))
+        {
+            context.findellipse_edge_params.resize(
+                static_cast<std::size_t>(context.findellipse_scan_edge_count + 1));
+        }
+
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_edge_count",
+            context.findellipse_scan_edge_count);
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_selected_edge",
+            context.findellipse_selected_scan_edge);
+        context.findellipse_best_fit_edge =
+            std::max(0, std::min(context.findellipse_best_fit_edge,
+                                 context.findellipse_scan_edge_count));
+        context.findellipse_recommended_fit_edge =
+            std::max(0, std::min(context.findellipse_recommended_fit_edge,
+                                 context.findellipse_scan_edge_count));
+        context.findellipse_relation_edge =
+            std::max(0, std::min(context.findellipse_relation_edge,
+                                 context.findellipse_scan_edge_count));
+        context.findellipse_attach_edge =
+            std::max(0, std::min(context.findellipse_attach_edge,
+                                 context.findellipse_scan_edge_count));
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_best_edge",
+            context.findellipse_best_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_recommended_edge",
+            context.findellipse_recommended_fit_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_relation_edge",
+            context.findellipse_relation_edge);
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_attach_edge",
+            context.findellipse_attach_edge);
+
+        for (int edge = 1; edge <= context.findellipse_scan_edge_count; ++edge)
+        {
+            ManualFindCircleEdgeParamState& params =
+                context.findellipse_edge_params[static_cast<std::size_t>(edge)];
+            params.initialized = true;
+            params.threshold = gauge.threshold;
+            params.method = gauge.method;
+            params.linegap = gauge.linegap;
+            params.gap = gauge.gap;
+            const std::string prefix =
+                "global_findellipse_edge" + std::to_string(edge) + "_";
+            InjectManualGaugeInt(context, prefix + "threshold", params.threshold);
+            InjectManualGaugeInt(context, prefix + "method", params.method);
+            InjectManualGaugeInt(context, prefix + "linegap", params.linegap);
+            InjectManualGaugeInt(context, prefix + "gap", params.gap);
+        }
+
+        if (context.findellipse_selected_scan_edge > 0)
+        {
+            InjectManualGaugeInt(context, "global_findellipse_selected_threshold", gauge.threshold);
+            InjectManualGaugeInt(context, "global_findellipse_selected_method", gauge.method);
+            InjectManualGaugeInt(context, "global_findellipse_selected_linegap", gauge.linegap);
+            InjectManualGaugeInt(context, "global_findellipse_selected_gap", gauge.gap);
+        }
     }
     else if (IsRegionPatternGaugeTool(gauge.tool))
     {
@@ -598,6 +771,29 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
             std::max(0, std::min(100, ReadManualGaugeInt(
                 context, "global_min_score_percent", 65))));
     }
+    else if (IsFindSegmentationGaugeTool(gauge.tool))
+    {
+        int x0 = std::max(0, gauge.segmentation_prompt_x0);
+        int y0 = std::max(0, gauge.segmentation_prompt_y0);
+        int x1 = std::max(x0 + 1, gauge.segmentation_prompt_x1);
+        int y1 = std::max(y0 + 1, gauge.segmentation_prompt_y1);
+        gauge.segmentation_prompt_x0 = x0;
+        gauge.segmentation_prompt_y0 = y0;
+        gauge.segmentation_prompt_x1 = x1;
+        gauge.segmentation_prompt_y1 = y1;
+        gauge.has_segmentation_prompt_rect = true;
+
+        InjectManualGaugeInt(context, "global_roi_x0", x0);
+        InjectManualGaugeInt(context, "global_roi_y0", y0);
+        InjectManualGaugeInt(context, "global_roi_x1", x1);
+        InjectManualGaugeInt(context, "global_roi_y1", y1);
+        InjectManualGaugeInt(context, "global_roi_x", x0);
+        InjectManualGaugeInt(context, "global_roi_y", y0);
+        InjectManualGaugeInt(context, "global_roi_width", x1 - x0);
+        InjectManualGaugeInt(context, "global_roi_height", y1 - y0);
+        InjectManualGaugeInt(context, "global_segmentation_mode", gauge.segmentation_mode);
+        InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
+    }
     else
     {
         context.debug_status = "gauge_apply_failed";
@@ -721,6 +917,12 @@ bool SaveManualGaugeAnnotation(
          << "  \"ellipse_y0\": " << gauge.ellipse_y0 << ",\n"
          << "  \"ellipse_x1\": " << gauge.ellipse_x1 << ",\n"
          << "  \"ellipse_y1\": " << gauge.ellipse_y1 << ",\n"
+         << "  \"has_segmentation_prompt_rect\": " << (gauge.has_segmentation_prompt_rect ? "true" : "false") << ",\n"
+         << "  \"segmentation_prompt_x0\": " << gauge.segmentation_prompt_x0 << ",\n"
+         << "  \"segmentation_prompt_y0\": " << gauge.segmentation_prompt_y0 << ",\n"
+         << "  \"segmentation_prompt_x1\": " << gauge.segmentation_prompt_x1 << ",\n"
+         << "  \"segmentation_prompt_y1\": " << gauge.segmentation_prompt_y1 << ",\n"
+         << "  \"segmentation_mode\": " << gauge.segmentation_mode << ",\n"
          << "  \"wgap\": " << gauge.wgap << ",\n"
          << "  \"hgap\": " << gauge.hgap << ",\n"
          << "  \"scan_direction\": " << gauge.scan_direction << ",\n"
@@ -728,7 +930,8 @@ bool SaveManualGaugeAnnotation(
          << "  \"linegap\": " << gauge.linegap << ",\n"
          << "  \"threshold\": " << gauge.threshold << ",\n"
          << "  \"filterprofile\": " << gauge.filterprofile << ",\n"
-         << "  \"method\": " << gauge.method << "\n"
+         << "  \"method\": " << gauge.method << ",\n"
+         << "  \"findsetting\": " << ResolveManualGaugeFindSetting(gauge) << "\n"
          << "}\n";
     file.flush();
     const bool write_ok = file.good();
@@ -801,6 +1004,11 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
     }
     // Backward compatible for annotations saved before FindEllipse gauge fields.
     ExtractJsonBool(source, "has_ellipse_gauge", loaded.has_ellipse_gauge);
+    // Backward compatible for annotations saved before FindSegmentation
+    // prompt ROI fields.  These are optional unless the loaded tool is
+    // FindSegmentation.
+    ExtractJsonBool(source, "has_segmentation_prompt_rect",
+                    loaded.has_segmentation_prompt_rect);
     const bool hasCircleArcEnabled =
         ExtractJsonBool(source, "circle_arc_enabled", loaded.circle_arc_enabled);
     if (!hasCircleArcEnabled)
@@ -814,8 +1022,10 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
         "circle_cx", "circle_cy", "circle_px", "circle_py", "radius",
         "inner_radius", "outer_radius", "circle_arc_start_deg", "circle_arc_end_deg", "ellipse_x0", "ellipse_y0",
-        "ellipse_x1", "ellipse_y1", "wgap", "hgap", "scan_direction", "gap", "linegap",
-        "threshold", "filterprofile", "method"
+        "ellipse_x1", "ellipse_y1", "segmentation_prompt_x0", "segmentation_prompt_y0",
+        "segmentation_prompt_x1", "segmentation_prompt_y1", "segmentation_mode",
+        "wgap", "hgap", "scan_direction", "gap", "linegap",
+        "threshold", "filterprofile", "method", "findsetting"
     };
     int* integer_values[] = {
         &loaded.line_x0, &loaded.line_y0, &loaded.line_x1, &loaded.line_y1,
@@ -823,8 +1033,11 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         &loaded.circle_px, &loaded.circle_py, &loaded.radius,
         &loaded.inner_radius, &loaded.outer_radius, &loaded.circle_arc_start_deg, &loaded.circle_arc_end_deg, &loaded.ellipse_x0,
         &loaded.ellipse_y0, &loaded.ellipse_x1, &loaded.ellipse_y1,
+        &loaded.segmentation_prompt_x0, &loaded.segmentation_prompt_y0,
+        &loaded.segmentation_prompt_x1, &loaded.segmentation_prompt_y1,
+        &loaded.segmentation_mode,
         &loaded.wgap, &loaded.hgap, &loaded.scan_direction, &loaded.gap, &loaded.linegap,
-        &loaded.threshold, &loaded.filterprofile, &loaded.method
+        &loaded.threshold, &loaded.filterprofile, &loaded.method, &loaded.findsetting
     };
     for (std::size_t i = 0; i < std::size(integer_keys); ++i)
     {
@@ -836,8 +1049,19 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
                 // selector.  Keep ManualGaugeState's H-only default.
                 continue;
             }
+            if (std::string(integer_keys[i]) == "findsetting")
+            {
+                loaded.findsetting = DefaultFindSettingForTool(loaded.tool);
+                continue;
+            }
             if (std::string(integer_keys[i]).find("ellipse_") == 0 &&
                 !loaded.has_ellipse_gauge)
+            {
+                continue;
+            }
+            if (std::string(integer_keys[i]).find("segmentation_") == 0 &&
+                !loaded.has_segmentation_prompt_rect &&
+                loaded.tool != "FindSegmentation")
             {
                 continue;
             }

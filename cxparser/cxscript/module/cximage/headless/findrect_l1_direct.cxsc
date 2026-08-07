@@ -16,6 +16,7 @@ int linegap = global_linegap;
 int method = global_method;
 int compare_gap = global_compare_gap;
 int filter_min = global_gap;
+int findsetting = global_findrect_findsetting;
 
 if (compare_gap <= 0)
 {
@@ -33,7 +34,7 @@ m_rect.setcompgap(compare_gap);
 m_rect.setlinegap(linegap);
 m_rect.setmethod(method);
 m_rect.setgauge(0);
-m_rect.setfindsetting(1);
+m_rect.setfindsetting(findsetting);
 m_rect.setfilter(21, filter_min, 1000000);
 m_rect.setminmaxarea(16, 1000000);
 m_rect.setminmaxwh(1000000, 3, 1000000, 3);

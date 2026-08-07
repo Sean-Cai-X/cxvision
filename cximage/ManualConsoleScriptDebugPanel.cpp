@@ -77,6 +77,7 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   bool callOrderChanged = false;
   bool scanArcAdded = false;
   bool selectedEdgeAdded = false;
+  bool pointConsistencyAdded = false;
   for (const Replacement& replacement : replacements)
   {
     std::size_t pos = 0;
@@ -170,6 +171,24 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
     }
   }
 
+  if (!objectName.empty() &&
+      context.editor_text.find(objectName + ".setpointconsistency(") ==
+          std::string::npos)
+  {
+    const std::size_t measurePos = context.editor_text.find(measureCall);
+    if (measurePos != std::string::npos)
+    {
+      const std::string consistencyCall =
+          objectName +
+          ".setpointconsistency("
+          "global_findcircle_point_consistency_enabled, "
+          "global_findcircle_point_consistency_range);\n";
+      context.editor_text.insert(measurePos, consistencyCall);
+      changed = true;
+      pointConsistencyAdded = true;
+    }
+  }
+
   if (!changed)
     return false;
 
@@ -183,6 +202,8 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
            ", selected_edge_call=" +
            std::string(selectedEdgeAdded ? "added" : "present") +
            ", scan_arc_call=" + std::string(scanArcAdded ? "added" : "present") +
+           ", point_consistency_call=" +
+           std::string(pointConsistencyAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -239,6 +260,7 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
   bool changed = false;
   bool scanDirectionAdded = false;
   bool selectedEdgeAdded = false;
+  bool pointConsistencyAdded = false;
 
   const auto insertBeforeMeasure = [&](const std::string& statement)
   {
@@ -263,6 +285,15 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
     selectedEdgeAdded = true;
   }
 
+  if (context.editor_text.find(objectName + ".setpointconsistency(") ==
+      std::string::npos)
+  {
+    insertBeforeMeasure(
+        objectName +
+        ".setpointconsistency(global_findline_point_consistency_enabled, global_findline_point_consistency_range);\n");
+    pointConsistencyAdded = true;
+  }
+
   if (!changed)
     return false;
 
@@ -273,6 +304,8 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
            std::string(scanDirectionAdded ? "added" : "present") +
            ", selected_edge_call=" +
            std::string(selectedEdgeAdded ? "added" : "present") +
+           ", point_consistency_call=" +
+           std::string(pointConsistencyAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -568,6 +601,11 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << context.runtime_int_vars["global_findline_selected_edge"];
       ss << "\nfindline_edge_count="
          << context.runtime_int_vars["global_findline_edge_count"];
+      ss << "\nfindline_point_consistency=("
+         << context.runtime_int_vars["global_findline_point_consistency_enabled"]
+         << ", range="
+         << context.runtime_int_vars["global_findline_point_consistency_range"]
+         << ")";
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];

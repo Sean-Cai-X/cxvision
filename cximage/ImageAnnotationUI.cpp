@@ -219,6 +219,27 @@ void UpdateManualGaugeFromShapeElement(
     gauge.ellipse_x1 = static_cast<int>(std::lround(geometry.center.x + geometry.radius_x));
     gauge.ellipse_y1 = static_cast<int>(std::lround(geometry.center.y + geometry.radius_y));
   }
+  else if (element.owner_type == "FindSegmentation" &&
+           element.shape->kind() == CxShapeKind::Rect)
+  {
+    const auto* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+      return;
+
+    gauge.tool = "FindSegmentation";
+    gauge.has_segmentation_prompt_rect = true;
+    gauge.has_line_gauge = false;
+    gauge.has_circle_gauge = false;
+    gauge.has_ellipse_gauge = false;
+    gauge.segmentation_prompt_x0 =
+        static_cast<int>(std::lround(std::min(rect->x0(), rect->x1())));
+    gauge.segmentation_prompt_y0 =
+        static_cast<int>(std::lround(std::min(rect->y0(), rect->y1())));
+    gauge.segmentation_prompt_x1 =
+        static_cast<int>(std::lround(std::max(rect->x0(), rect->x1())));
+    gauge.segmentation_prompt_y1 =
+        static_cast<int>(std::lround(std::max(rect->y0(), rect->y1())));
+  }
   else
   {
     return;
@@ -245,6 +266,50 @@ bool ExportShapeElementToRuntimeGlobals(
   {
     context.runtime_int_vars[name] = static_cast<int>(std::lround(value));
   };
+
+  if (element.owner_type == "FastMatch" &&
+      (element.owner_binding == "learn_roi" ||
+       element.owner_binding == "search_roi") &&
+      element.shape->kind() == CxShapeKind::Rect)
+  {
+    const RectShape* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+    {
+      reason = "FastMatch ROI is not a rectangle";
+      return false;
+    }
+
+    const double x0 = std::min(rect->x0(), rect->x1());
+    const double y0 = std::min(rect->y0(), rect->y1());
+    const double x1 = std::max(rect->x0(), rect->x1());
+    const double y1 = std::max(rect->y0(), rect->y1());
+    const double w = std::max(1.0, x1 - x0);
+    const double h = std::max(1.0, y1 - y0);
+
+    if (element.owner_binding == "learn_roi")
+    {
+      setInt("global_learn_roi_x", x0);
+      setInt("global_learn_roi_y", y0);
+      setInt("global_learn_roi_w", w);
+      setInt("global_learn_roi_h", h);
+      reason = "FastMatch learn ROI exported to global_learn_roi_*";
+    }
+    else
+    {
+      setInt("global_search_roi_x", x0);
+      setInt("global_search_roi_y", y0);
+      setInt("global_search_roi_w", w);
+      setInt("global_search_roi_h", h);
+      reason = "FastMatch search ROI exported to global_search_roi_*";
+    }
+
+    context.current_gauge.tool = "FastMatch";
+    context.current_gauge.source = "shape_drag";
+    context.current_gauge.review_status = "editing";
+    context.current_gauge.accepted = false;
+    context.current_gauge.dirty = true;
+    return true;
+  }
 
   if (element.owner_type == "GridPatternClassTool" &&
       element.owner_binding == "analysis_roi" &&
@@ -287,6 +352,44 @@ bool ExportShapeElementToRuntimeGlobals(
     setInt("global_region_roi_w", std::max(1.0, x1 - x0));
     setInt("global_region_roi_h", std::max(1.0, y1 - y0));
     reason = "RegionPattern analysis ROI exported to global_region_roi_*";
+    return true;
+  }
+
+  if (element.owner_type == "FindSegmentation" &&
+      (element.owner_binding == "setpromptrect" ||
+       element.owner_binding == "prompt_rect") &&
+      element.shape->kind() == CxShapeKind::Rect)
+  {
+    const RectShape* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+    {
+      reason = "FindSegmentation prompt ROI is not a rectangle";
+      return false;
+    }
+    const double x0 = std::min(rect->x0(), rect->x1());
+    const double y0 = std::min(rect->y0(), rect->y1());
+    const double x1 = std::max(rect->x0(), rect->x1());
+    const double y1 = std::max(rect->y0(), rect->y1());
+    if (x1 <= x0 || y1 <= y0)
+    {
+      reason = "FindSegmentation prompt ROI is empty";
+      return false;
+    }
+
+    setInt("global_roi_x0", x0);
+    setInt("global_roi_y0", y0);
+    setInt("global_roi_x1", x1);
+    setInt("global_roi_y1", y1);
+    setInt("global_roi_x", x0);
+    setInt("global_roi_y", y0);
+    setInt("global_roi_width", x1 - x0);
+    setInt("global_roi_height", y1 - y0);
+    setInt("global_seed_x", (x0 + x1) * 0.5);
+    setInt("global_seed_y", (y0 + y1) * 0.5);
+
+    UpdateManualGaugeFromShapeElement(context, element);
+    ApplyManualGaugeToGlobals(context);
+    reason = "FindSegmentation prompt ROI exported to global_roi_*";
     return true;
   }
 
@@ -480,6 +583,135 @@ bool ViewController::HasEditableFindCircleGauge() const
 bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
 {
     ManualGaugeState& gauge = m_manualTest.current_gauge;
+    if (gauge.tool == "FindSegmentation")
+    {
+        auto readInt = [this](const std::string& key, int fallback)
+        {
+            auto it = m_manualTest.runtime_int_vars.find(key);
+            return it == m_manualTest.runtime_int_vars.end()
+                ? fallback
+                : it->second;
+        };
+        if (!gauge.has_segmentation_prompt_rect)
+        {
+            gauge.segmentation_prompt_x0 = std::max(
+                0, readInt("global_roi_x0", 120));
+            gauge.segmentation_prompt_y0 = std::max(
+                0, readInt("global_roi_y0", 120));
+            gauge.segmentation_prompt_x1 = std::max(
+                gauge.segmentation_prompt_x0 + 1,
+                readInt("global_roi_x1", 980));
+            gauge.segmentation_prompt_y1 = std::max(
+                gauge.segmentation_prompt_y0 + 1,
+                readInt("global_roi_y1", 820));
+            gauge.has_segmentation_prompt_rect = true;
+        }
+
+        auto shape = std::make_unique<RectShape>();
+        shape->setRect(
+            static_cast<double>(gauge.segmentation_prompt_x0),
+            static_cast<double>(gauge.segmentation_prompt_y0),
+            static_cast<double>(gauge.segmentation_prompt_x1),
+            static_cast<double>(gauge.segmentation_prompt_y1));
+
+        const std::string ownerRef =
+            gauge.primary_object_name.empty() ? "m_seg" : gauge.primary_object_name;
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".prompt_rect",
+            std::move(shape));
+        element.tool_id = "FindSegmentation";
+        element.owner_type = "FindSegmentation";
+        element.owner_ref = ownerRef;
+        element.owner_binding = "setpromptrect";
+        element.semantic_role = "prompt_rect";
+        element.editable = true;
+        element.visible = true;
+        element.runtime_bound = true;
+        element.result_element = false;
+        element.stale = true;
+        element.runtime_edit_pending = true;
+        m_annotationLayer.MarkOwnerResultStale("FindSegmentation", ownerRef);
+
+        ApplyManualGaugeToGlobals(m_manualTest);
+        gauge.source = "key_parameter_controls";
+        gauge.dirty = true;
+        gauge.accepted = false;
+        reason = "FindSegmentation prompt ROI preview applied to Image View";
+        return true;
+    }
+
+    if (gauge.tool == "FastMatch" || gauge.tool == "fastmatch" ||
+        gauge.tool == "CFastMatch")
+    {
+        auto readInt = [this](const std::string& key, int fallback)
+        {
+            auto it = m_manualTest.runtime_int_vars.find(key);
+            return it == m_manualTest.runtime_int_vars.end()
+                ? fallback
+                : it->second;
+        };
+
+        const int learnX = std::max(0, readInt("global_learn_roi_x", 120));
+        const int learnY = std::max(0, readInt("global_learn_roi_y", 120));
+        const int learnW = std::max(1, readInt("global_learn_roi_w", 120));
+        const int learnH = std::max(1, readInt("global_learn_roi_h", 90));
+        const int searchX = std::max(0, readInt("global_search_roi_x", 0));
+        const int searchY = std::max(0, readInt("global_search_roi_y", 0));
+        const int searchW = std::max(1, readInt("global_search_roi_w", 640));
+        const int searchH = std::max(1, readInt("global_search_roi_h", 480));
+
+        if (searchW <= learnW || searchH <= learnH)
+        {
+            reason =
+                "FastMatch search ROI must be larger than learn ROI before preview/apply";
+            return false;
+        }
+
+        const std::string ownerRef =
+            gauge.primary_object_name.empty() ? "m_match" : gauge.primary_object_name;
+
+        auto upsertFastMatchRect =
+            [this, &ownerRef](const std::string& binding,
+                              int x,
+                              int y,
+                              int w,
+                              int h)
+        {
+            auto shape = std::make_unique<RectShape>();
+            shape->setRect(
+                static_cast<double>(x),
+                static_cast<double>(y),
+                static_cast<double>(x + w),
+                static_cast<double>(y + h));
+            CxShapeElement& element = m_annotationLayer.UpsertShape(
+                ownerRef + "." + binding,
+                std::move(shape));
+            element.tool_id = "FastMatch";
+            element.owner_type = "FastMatch";
+            element.owner_ref = ownerRef;
+            element.owner_binding = binding;
+            element.semantic_role = binding;
+            element.editable = true;
+            element.visible = true;
+            element.runtime_bound = true;
+            element.result_element = false;
+            element.stale = true;
+            element.runtime_edit_pending = true;
+        };
+
+        upsertFastMatchRect("learn_roi", learnX, learnY, learnW, learnH);
+        upsertFastMatchRect("search_roi", searchX, searchY, searchW, searchH);
+        m_annotationLayer.MarkOwnerResultStale("FastMatch", ownerRef);
+
+        ApplyManualGaugeToGlobals(m_manualTest);
+        gauge.source = "key_parameter_controls";
+        gauge.dirty = true;
+        gauge.accepted = false;
+        reason =
+            "FastMatch Learn/Search ROI preview applied from global_* xywh values";
+        return true;
+    }
+
     if (gauge.tool != "FindCircle" || !gauge.has_circle_gauge)
     {
         reason = "Apply To Gauge currently requires an active FindCircle gauge";

@@ -80,6 +80,9 @@ struct FindCircleMeasureGeometryDebug
     int candidate_runs_max_per_line = 0;
     int selected_edge_hits = 0;
     int selected_edge_misses = 0;
+    int scan_boundary_clipped_lines = 0;
+    int scan_boundary_extended_samples = 0;
+    int candidate_boundary_reject_count = 0;
     double selected_edge_radius_avg = 0.0;
     double selected_edge_radius_min = 0.0;
     double selected_edge_radius_max = 0.0;
@@ -236,6 +239,12 @@ public:
 
     void fitcircle();
     void fitcirclefiltered();
+    void setpointconsistency(int enabled, int range);
+    int getpointconsistencyenabled() { return m_point_consistency_enabled ? 1 : 0; }
+    double getpointconsistencyrange() { return m_point_consistency_range; }
+    int getpointconsistencyinputcount() { return m_point_consistency_input_count; }
+    int getpointconsistencyoutputcount() { return m_point_consistency_output_count; }
+    int getpointconsistencyremovedcount() { return m_point_consistency_removed_count; }
 
     int getfitfilterinputcount() { return m_fitfilter_input_count; }
     int getfitfilterkeptcount() { return m_fitfilter_kept_count; }
@@ -378,6 +387,12 @@ private:
     int m_fitfilter_rejected_count = 0;
     double m_fitfilter_sigma = 0.0;
     double m_fitfilter_threshold = 0.0;
+
+    bool m_point_consistency_enabled = false;
+    double m_point_consistency_range = 0.0;
+    int m_point_consistency_input_count = 0;
+    int m_point_consistency_output_count = 0;
+    int m_point_consistency_removed_count = 0;
 
     FindCircleMeasureGeometryRequest m_measure_geometry_request;
     FindCircleMeasureGeometryRequest m_last_measure_input_request;

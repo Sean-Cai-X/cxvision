@@ -45,10 +45,20 @@ struct CxScriptToolResultCapture
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int findline_point_consistency_enabled = 0;
+    double findline_point_consistency_range = 0.0;
+    int findline_point_consistency_input_points = 0;
+    int findline_point_consistency_output_points = 0;
+    int findline_point_consistency_removed_points = 0;
     int findline_selected_edge_index = 0;
     int findline_evaluated_edge_count = 0;
     int findline_best_edge_index = 0;
     double findline_best_edge_score = 0.0;
+    int circle_point_consistency_enabled = 0;
+    double circle_point_consistency_range = 0.0;
+    int circle_point_consistency_input_points = 0;
+    int circle_point_consistency_output_points = 0;
+    int circle_point_consistency_removed_points = 0;
 
     int valid_points_count = 0;
     bool has_fit_line = false;
@@ -73,6 +83,7 @@ struct CxScriptToolResultCapture
     double ellipse_radius_y = 0.0;
     double ellipse_angle_deg = 0.0;
 
+    int ellipse_selected_edge_index = 0;
     int ellipse_scan_candidate_lines = 0;
     int ellipse_scan_total_candidates = 0;
     int ellipse_scan_accepted_points_before_gate = 0;
@@ -95,6 +106,11 @@ struct CxScriptToolResultCapture
     double ellipse_rejected_boundary_band_norm_avg = 0.0;
     double ellipse_rejected_boundary_band_norm_max = 0.0;
     std::string ellipse_scan_geometry_policy;
+    int ellipse_point_consistency_enabled = 0;
+    double ellipse_point_consistency_range = 0.0;
+    int ellipse_point_consistency_input_points = 0;
+    int ellipse_point_consistency_output_points = 0;
+    int ellipse_point_consistency_removed_points = 0;
 
     int result_rect_count = 0;
     int top1_rect_x = 0;
@@ -129,6 +145,10 @@ struct CxScriptToolResultCapture
     int fastmatch_match_last_stage = 0;
     int fastmatch_match_image_width = 0;
     int fastmatch_match_image_height = 0;
+    int fastmatch_learn_rect_x0 = 0;
+    int fastmatch_learn_rect_y0 = 0;
+    int fastmatch_learn_rect_x1 = 0;
+    int fastmatch_learn_rect_y1 = 0;
     int fastmatch_match_rect_x0 = 0;
     int fastmatch_match_rect_y0 = 0;
     int fastmatch_match_rect_x1 = 0;

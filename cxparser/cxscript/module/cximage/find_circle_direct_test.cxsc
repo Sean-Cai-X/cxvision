@@ -11,12 +11,15 @@ int method = global_method;
 int threshold = global_threshold;
 int gap = global_gap;
 int linegap = global_linegap;
+int findsetting = global_findcircle_findsetting;
 int selected_edge = global_findcircle_selected_edge;
 int inner_radius = global_circle_inner_radius;
 int outer_radius = global_circle_outer_radius;
 int arc_enabled = global_findcircle_arc_enabled;
 int arc_start_deg = global_findcircle_arc_start_deg;
 int arc_end_deg = global_findcircle_arc_end_deg;
+int point_consistency_enabled = global_findcircle_point_consistency_enabled;
+int point_consistency_range = global_findcircle_point_consistency_range;
 int ring_width = 0;
 
 ring_width = outer_radius - inner_radius;
@@ -31,7 +34,9 @@ m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
 m_circle.setthre(threshold);
 m_circle.setmethod(method);
+m_circle.setfindsetting(findsetting);
 m_circle.setselectedgenum(selected_edge);
+m_circle.setpointconsistency(point_consistency_enabled, point_consistency_range);
 
 if (ring_width > 0) {
     m_circle.setannulus(cx, cy, inner_radius, outer_radius);

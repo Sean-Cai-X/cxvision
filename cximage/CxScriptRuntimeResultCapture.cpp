@@ -159,6 +159,11 @@ bool CaptureFindLineResult(
     output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
     output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
     output.scan_points_emitted = debug.scan_points_emitted;
+    output.findline_point_consistency_enabled = debug.point_consistency_enabled;
+    output.findline_point_consistency_range = debug.point_consistency_range;
+    output.findline_point_consistency_input_points = debug.point_consistency_input_points;
+    output.findline_point_consistency_output_points = debug.point_consistency_output_points;
+    output.findline_point_consistency_removed_points = debug.point_consistency_removed_points;
     output.findline_selected_edge_index = debug.selected_edge_index;
     output.findline_evaluated_edge_count = debug.evaluated_edge_count;
     output.findline_best_edge_index = debug.best_edge_index;
@@ -298,6 +303,16 @@ bool CaptureFindCircleResult(
     output.fit_filter_rejected_count = tool.getfitfilterrejectedcount();
     output.fit_filter_sigma = tool.getfitfiltersigma();
     output.fit_filter_threshold = tool.getfitfilterthreshold();
+    output.circle_point_consistency_enabled =
+        tool.getpointconsistencyenabled();
+    output.circle_point_consistency_range =
+        tool.getpointconsistencyrange();
+    output.circle_point_consistency_input_points =
+        tool.getpointconsistencyinputcount();
+    output.circle_point_consistency_output_points =
+        tool.getpointconsistencyoutputcount();
+    output.circle_point_consistency_removed_points =
+        tool.getpointconsistencyremovedcount();
     output.budget_exceeded = tool.budgetexceeded();
     if (output.has_fit_circle)
     {
@@ -342,6 +357,7 @@ bool CaptureFindEllipseResult(
         ? std::string()
         : (snapshot.measure_points_count > 0 ? "fitellipse" : "measure_points");
 
+    output.ellipse_selected_edge_index = snapshot.selected_edge_index;
     output.ellipse_scan_candidate_lines = snapshot.scan_candidate_lines;
     output.ellipse_scan_total_candidates = snapshot.scan_total_candidates;
     output.ellipse_scan_accepted_points_before_gate = snapshot.scan_accepted_points_before_gate;
@@ -368,6 +384,11 @@ bool CaptureFindEllipseResult(
     output.ellipse_rejected_boundary_band_norm_max =
         snapshot.rejected_boundary_band_norm_max;
     output.ellipse_scan_geometry_policy = snapshot.scan_geometry_policy;
+    output.ellipse_point_consistency_enabled = snapshot.point_consistency_enabled;
+    output.ellipse_point_consistency_range = snapshot.point_consistency_range;
+    output.ellipse_point_consistency_input_points = snapshot.point_consistency_input_points;
+    output.ellipse_point_consistency_output_points = snapshot.point_consistency_output_points;
+    output.ellipse_point_consistency_removed_points = snapshot.point_consistency_removed_points;
 
     if (!snapshot.measure_failure_stage.empty())
         output.failure_stage = snapshot.measure_failure_stage;
@@ -406,6 +427,17 @@ bool CaptureFindEllipseResult(
             output.reason += "/" + std::to_string(snapshot.rejected_boundary_band_norm_avg);
             output.reason += "/" + std::to_string(snapshot.rejected_boundary_band_norm_max);
             output.reason += " scan_policy=" + snapshot.scan_geometry_policy;
+            output.reason += " selected_edge=" + std::to_string(snapshot.selected_edge_index);
+            output.reason += " consistency=" +
+                std::to_string(snapshot.point_consistency_enabled);
+            output.reason += "/" +
+                std::to_string(static_cast<int>(snapshot.point_consistency_range));
+            output.reason += " consistency_in_out_removed=" +
+                std::to_string(snapshot.point_consistency_input_points);
+            output.reason += "/" +
+                std::to_string(snapshot.point_consistency_output_points);
+            output.reason += "/" +
+                std::to_string(snapshot.point_consistency_removed_points);
         }
     }
     else if (!output.has_fit_ellipse && snapshot.measure_points_count > 0)
@@ -580,12 +612,33 @@ bool CaptureFastMatchResult(
     output.has_best_result = tool.getresultbestindex() >= 0;
     output.has_result_box = tool.getresultnum(0) > 0.0;
     output.valid_points_count = output.candidate_count;
+
+    const RectsShape* result_rects = tool.getresultrects();
+    output.result_rect_count = result_rects != nullptr ? result_rects->size() : 0;
+    output.has_result_rect = output.result_rect_count > 0;
+    if (output.has_result_rect)
+    {
+        int rect_index = tool.getresultbestindex();
+        if (rect_index < 0 || rect_index >= output.result_rect_count)
+            rect_index = 0;
+
+        const gp_Rectangle top_rect = tool.getresolvedresultrect(rect_index);
+        output.top1_rect_x = static_cast<int>(top_rect.TopLeft().X());
+        output.top1_rect_y = static_cast<int>(top_rect.TopLeft().Y());
+        output.top1_rect_w = static_cast<int>(top_rect.Width());
+        output.top1_rect_h = static_cast<int>(top_rect.Height());
+    }
+
     output.fastmatch_match_call_count = tool.getmatchcallcount();
     output.fastmatch_match_ab_call_count = tool.getmatchabcallcount();
     output.fastmatch_match_sample_ab_call_count = tool.getmatchsampleabcallcount();
     output.fastmatch_match_last_stage = tool.getmatchlaststage();
     output.fastmatch_match_image_width = tool.getmatchimagewidth();
     output.fastmatch_match_image_height = tool.getmatchimageheight();
+    output.fastmatch_learn_rect_x0 = tool.getlearnrectx0();
+    output.fastmatch_learn_rect_y0 = tool.getlearnrecty0();
+    output.fastmatch_learn_rect_x1 = tool.getlearnrectx1();
+    output.fastmatch_learn_rect_y1 = tool.getlearnrecty1();
     output.fastmatch_match_rect_x0 = tool.getmatchrectx0();
     output.fastmatch_match_rect_y0 = tool.getmatchrecty0();
     output.fastmatch_match_rect_x1 = tool.getmatchrectx1();
@@ -607,7 +660,7 @@ bool CaptureFastMatchResult(
         output.failure_stage = "learn_points";
     else if (output.model_point_count <= 0)
         output.failure_stage = "model_points";
-    else if (output.candidate_count <= 0)
+    else if (output.fastmatch_match_call_count > 0 && output.candidate_count <= 0)
         output.failure_stage = "match_candidates";
 
     if (!output.failure_stage.empty())
@@ -678,6 +731,11 @@ static void MergeToolCapture(
     capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
     capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
     capture.scan_points_emitted = tool.scan_points_emitted;
+    capture.findline_point_consistency_enabled = tool.findline_point_consistency_enabled;
+    capture.findline_point_consistency_range = tool.findline_point_consistency_range;
+    capture.findline_point_consistency_input_points = tool.findline_point_consistency_input_points;
+    capture.findline_point_consistency_output_points = tool.findline_point_consistency_output_points;
+    capture.findline_point_consistency_removed_points = tool.findline_point_consistency_removed_points;
     capture.findline_selected_edge_index = tool.findline_selected_edge_index;
     capture.findline_evaluated_edge_count = tool.findline_evaluated_edge_count;
     capture.findline_best_edge_index = tool.findline_best_edge_index;
@@ -686,6 +744,16 @@ static void MergeToolCapture(
         capture.findline_edge_evaluations.end(),
         tool.findline_edge_evaluations.begin(),
         tool.findline_edge_evaluations.end());
+    capture.circle_point_consistency_enabled =
+        tool.circle_point_consistency_enabled;
+    capture.circle_point_consistency_range =
+        tool.circle_point_consistency_range;
+    capture.circle_point_consistency_input_points =
+        tool.circle_point_consistency_input_points;
+    capture.circle_point_consistency_output_points =
+        tool.circle_point_consistency_output_points;
+    capture.circle_point_consistency_removed_points =
+        tool.circle_point_consistency_removed_points;
     capture.findline_scan_diagnostics.insert(
         capture.findline_scan_diagnostics.end(),
         tool.findline_scan_diagnostics.begin(),
@@ -704,6 +772,7 @@ static void MergeToolCapture(
         capture.ellipse_radius_y = tool.ellipse_radius_y;
         capture.ellipse_angle_deg = tool.ellipse_angle_deg;
     }
+    capture.ellipse_selected_edge_index = tool.ellipse_selected_edge_index;
     capture.ellipse_scan_candidate_lines = tool.ellipse_scan_candidate_lines;
     capture.ellipse_scan_total_candidates = tool.ellipse_scan_total_candidates;
     capture.ellipse_scan_accepted_points_before_gate = tool.ellipse_scan_accepted_points_before_gate;
@@ -728,6 +797,16 @@ static void MergeToolCapture(
     capture.ellipse_rejected_boundary_band_norm_max =
         tool.ellipse_rejected_boundary_band_norm_max;
     capture.ellipse_scan_geometry_policy = tool.ellipse_scan_geometry_policy;
+    capture.ellipse_point_consistency_enabled =
+        tool.ellipse_point_consistency_enabled;
+    capture.ellipse_point_consistency_range =
+        tool.ellipse_point_consistency_range;
+    capture.ellipse_point_consistency_input_points =
+        tool.ellipse_point_consistency_input_points;
+    capture.ellipse_point_consistency_output_points =
+        tool.ellipse_point_consistency_output_points;
+    capture.ellipse_point_consistency_removed_points =
+        tool.ellipse_point_consistency_removed_points;
 
     capture.result_rect_count += tool.result_rect_count;
     if (tool.has_result_rect && capture.top1_rect_w == 0 && capture.top1_rect_h == 0)
@@ -770,6 +849,10 @@ static void MergeToolCapture(
         capture.fastmatch_match_last_stage = tool.fastmatch_match_last_stage;
     capture.fastmatch_match_image_width = tool.fastmatch_match_image_width;
     capture.fastmatch_match_image_height = tool.fastmatch_match_image_height;
+    capture.fastmatch_learn_rect_x0 = tool.fastmatch_learn_rect_x0;
+    capture.fastmatch_learn_rect_y0 = tool.fastmatch_learn_rect_y0;
+    capture.fastmatch_learn_rect_x1 = tool.fastmatch_learn_rect_x1;
+    capture.fastmatch_learn_rect_y1 = tool.fastmatch_learn_rect_y1;
     capture.fastmatch_match_rect_x0 = tool.fastmatch_match_rect_x0;
     capture.fastmatch_match_rect_y0 = tool.fastmatch_match_rect_y0;
     capture.fastmatch_match_rect_x1 = tool.fastmatch_match_rect_x1;

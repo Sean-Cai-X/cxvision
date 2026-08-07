@@ -170,8 +170,10 @@ public:
 
     void setmatchrectnum(int inum);
     void setmatchrect(int ix, int iy, int iw, int ih);
-    void setrectxywh(int ih, int iw, int iy, int ix);
-    void setmatchrectxywh(int ih, int iw, int iy, int ix);
+    void setrectxywh(int ix, int iy, int iw, int ih);
+    void setmatchrectxywh(int ix, int iy, int iw, int ih);
+    void setrectxywh_script(int ih, int iw, int iy, int ix);
+    void setmatchrectxywh_script(int ih, int iw, int iy, int ix);
     void setexpectedrect(double x0, double y0, double x1, double y1);
 
     void setmultimatchrect(int inum, int ix, int iy, int iw, int ih);
@@ -187,6 +189,10 @@ public:
     int getmatchlaststage() const;
     int getmatchimagewidth() const;
     int getmatchimageheight() const;
+    int getlearnrectx0() const;
+    int getlearnrecty0() const;
+    int getlearnrectx1() const;
+    int getlearnrecty1() const;
     int getmatchrectx0() const;
     int getmatchrecty0() const;
     int getmatchrectx1() const;
@@ -394,6 +400,14 @@ private:
     RectsShape m_matchrects;
     gp_Rectangle m_matchrect;
     gp_Rectangle m_expected_rect;
+    int m_learn_roi_x = 0;
+    int m_learn_roi_y = 0;
+    int m_learn_roi_w = 0;
+    int m_learn_roi_h = 0;
+    int m_search_roi_x = 0;
+    int m_search_roi_y = 0;
+    int m_search_roi_w = 0;
+    int m_search_roi_h = 0;
 
     int m_fastmatch_learn_a_count = 0;
     int m_fastmatch_learn_b_count = 0;

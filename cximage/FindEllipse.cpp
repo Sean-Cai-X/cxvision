@@ -123,6 +123,50 @@ bool HasSufficientEllipseAngularCoverage(
     return occupied_count >= 4;
 }
 
+int FilterEllipsePointsByGaugeBoundaryDistance(
+    PointsShape& points,
+    double center_x,
+    double center_y,
+    double radius_x,
+    double radius_y,
+    double max_distance)
+{
+    if (points.size() <= 0 ||
+        radius_x <= 1.0 ||
+        radius_y <= 1.0 ||
+        max_distance <= 0.0)
+    {
+        return 0;
+    }
+
+    const int input_count = ClampSizeToInt(points.size());
+    const double scale = std::max(1.0, (std::abs(radius_x) + std::abs(radius_y)) * 0.5);
+    PointsShape filtered;
+    int kept_count = 0;
+    for (int i = 0; i < input_count; ++i)
+    {
+        const double x = points.getx(i);
+        const double y = points.gety(i);
+        const double norm = EllipseNorm(x, y, center_x, center_y, radius_x, radius_y);
+        const double distance = std::abs(norm - 1.0) * scale;
+        if (std::isfinite(distance) && distance <= max_distance)
+        {
+            filtered.addpoint(x, y);
+            ++kept_count;
+        }
+    }
+
+    if (kept_count <= 0)
+    {
+        points.clear();
+        return input_count;
+    }
+
+    points.clear();
+    points.addpoints(filtered);
+    return std::max(0, input_count - kept_count);
+}
+
 double EllipseDotProduct(const std::vector<double>& a, const std::vector<double>& b)
 {
     if (a.size() != b.size()) return 0.0;
@@ -279,6 +323,14 @@ void FindEllipse::setshow(int ishow)
 void FindEllipse::setselectedgenum(int iedgenum)
 {
     m_iselectedgenum = iedgenum;
+}
+void FindEllipse::setpointconsistency(int enabled, int range)
+{
+    m_point_consistency_enabled = enabled != 0 ? 1 : 0;
+    m_point_consistency_range = static_cast<double>(std::max(0, range));
+    m_point_consistency_input_points = 0;
+    m_point_consistency_output_points = 0;
+    m_point_consistency_removed_points = 0;
 }
 void FindEllipse::clear()
 {
@@ -799,6 +851,9 @@ void FindEllipse::Measure(Image& image)
     m_rejected_boundary_band_norm_sum = 0.0;
     m_rejected_boundary_band_norm_min = 999.0;
     m_rejected_boundary_band_norm_max = -999.0;
+    m_point_consistency_input_points = 0;
+    m_point_consistency_output_points = 0;
+    m_point_consistency_removed_points = 0;
 
     if (image.getmat().empty() || image.getWidth() <= 0 || image.getHeight() <= 0)
     {
@@ -1228,6 +1283,27 @@ void FindEllipse::Measure(Image& image)
 
     }
 
+    m_point_consistency_input_points = ClampSizeToInt(m_measurepoints.size());
+    m_point_consistency_output_points = m_point_consistency_input_points;
+    m_point_consistency_removed_points = 0;
+    if (m_point_consistency_enabled != 0 &&
+        m_point_consistency_range > 0.0 &&
+        m_measurepoints.size() > 0)
+    {
+        const int removed = FilterEllipsePointsByGaugeBoundaryDistance(
+            m_measurepoints,
+            ellipse_cx,
+            ellipse_cy,
+            ellipse_rx,
+            ellipse_ry,
+            m_point_consistency_range);
+        if (removed > 0)
+        {
+            m_point_consistency_removed_points = removed;
+            m_point_consistency_output_points = ClampSizeToInt(m_measurepoints.size());
+        }
+    }
+
     if (m_measurepoints.size() <= 0)
     {
         if (m_scan_total_candidates > 0 && m_scan_accepted_points_before_gate <= 0)
@@ -1259,6 +1335,10 @@ void FindEllipse::Measure(Image& image)
             << " candidate_lines=" << m_scan_candidate_lines
             << " total_candidates=" << m_scan_total_candidates
             << " accepted_before_gate=" << m_scan_accepted_points_before_gate
+            << " selected_edge=" << m_iselectedgenum
+            << " consistency=" << m_point_consistency_enabled
+            << "/" << m_point_consistency_range
+            << " removed=" << m_point_consistency_removed_points
             << " failure_stage=" << m_measure_failure_stage;
         LogFindEllipseMeasureProbe("measure_exit", "finished", oss.str());
     }
@@ -1522,6 +1602,7 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot& out) const
     out.linegap = m_iSelectPointGap;
     out.threshold = m_iThreshold;
     out.method = m_iMethod;
+    out.selected_edge_index = m_iselectedgenum;
     out.scan_line_count = static_cast<int>(m_lines.size());
     out.scan_line_length = m_lines.empty()
         ? 0
@@ -1579,6 +1660,11 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot& out) const
         : 0.0;
 
     out.scan_geometry_policy = m_scan_geometry_policy;
+    out.point_consistency_enabled = m_point_consistency_enabled;
+    out.point_consistency_range = m_point_consistency_range;
+    out.point_consistency_input_points = m_point_consistency_input_points;
+    out.point_consistency_output_points = m_point_consistency_output_points;
+    out.point_consistency_removed_points = m_point_consistency_removed_points;
 
     return out.has_roi || out.has_measure_points || out.has_fit_ellipse;
 }

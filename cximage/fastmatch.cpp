@@ -13,6 +13,11 @@
 
 namespace
 {
+bool FastMatchPointInsideImage(const Image& image, int x, int y)
+{
+    return x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight();
+}
+
 #ifdef FASTMATCH_LEARN_PROBE
 void ProbeLog(const std::string& msg)
 {
@@ -515,12 +520,17 @@ int EvaluateMatchSampleABScore(
     {
         const gp_Pnt pointA = pathA.ElementAt(i);
         const gp_Pnt pointB = pathB.ElementAt(i);
-        const cv::Vec3b pixel0 = image.pixel(
-            static_cast<int>(pointA.X() + movx),
-            static_cast<int>(pointA.Y() + movy));
-        const cv::Vec3b pixel1 = image.pixel(
-            static_cast<int>(pointB.X() + movx),
-            static_cast<int>(pointB.Y() + movy));
+        const int ax = static_cast<int>(pointA.X() + movx);
+        const int ay = static_cast<int>(pointA.Y() + movy);
+        const int bx = static_cast<int>(pointB.X() + movx);
+        const int by = static_cast<int>(pointB.Y() + movy);
+        if (!FastMatchPointInsideImage(image, ax, ay) ||
+            !FastMatchPointInsideImage(image, bx, by))
+        {
+            return 0;
+        }
+        const cv::Vec3b pixel0 = image.pixel(ax, ay);
+        const cv::Vec3b pixel1 = image.pixel(bx, by);
 
         if (ib2w == 0)
         {
@@ -585,12 +595,17 @@ bool MatchSampleABAnchorPass(
 
         const gp_Pnt pointA = pathA.ElementAt(sample_index);
         const gp_Pnt pointB = pathB.ElementAt(sample_index);
-        const cv::Vec3b pixel0 = image.pixel(
-            static_cast<int>(pointA.X() + movx),
-            static_cast<int>(pointA.Y() + movy));
-        const cv::Vec3b pixel1 = image.pixel(
-            static_cast<int>(pointB.X() + movx),
-            static_cast<int>(pointB.Y() + movy));
+        const int ax = static_cast<int>(pointA.X() + movx);
+        const int ay = static_cast<int>(pointA.Y() + movy);
+        const int bx = static_cast<int>(pointB.X() + movx);
+        const int by = static_cast<int>(pointB.Y() + movy);
+        if (!FastMatchPointInsideImage(image, ax, ay) ||
+            !FastMatchPointInsideImage(image, bx, by))
+        {
+            return false;
+        }
+        const cv::Vec3b pixel0 = image.pixel(ax, ay);
+        const cv::Vec3b pixel1 = image.pixel(bx, by);
         const int dr = ib2w == 0 ? Red(pixel0) - Red(pixel1) : Red(pixel1) - Red(pixel0);
         const int dg = ib2w == 0 ? Green(pixel0) - Green(pixel1) : Green(pixel1) - Green(pixel0);
         const int db = ib2w == 0 ? Blue(pixel0) - Blue(pixel1) : Blue(pixel1) - Blue(pixel0);
@@ -997,6 +1012,14 @@ void FastMatch::getshape(void* pshape)
 }
 void FastMatch::setrect(int ix, int iy, int iw, int ih)
 {
+    ix = FastMatchNonNegativeInt(ix);
+    iy = FastMatchNonNegativeInt(iy);
+    iw = FastMatchPositiveInt(iw);
+    ih = FastMatchPositiveInt(ih);
+    m_learn_roi_x = ix;
+    m_learn_roi_y = iy;
+    m_learn_roi_w = iw;
+    m_learn_roi_h = ih;
     FindLine::setrect(ix, iy, iw, ih);
 }
 void FastMatch::setshow(int ishow)
@@ -1253,6 +1276,11 @@ void FastMatch::drawshapex(
 
 void FastMatch::Learn(Image& image)
 {
+    const int input_learn_roi_x = m_learn_roi_x;
+    const int input_learn_roi_y = m_learn_roi_y;
+    const int input_learn_roi_w = FastMatchPositiveInt(m_learn_roi_w);
+    const int input_learn_roi_h = FastMatchPositiveInt(m_learn_roi_h);
+
     CXLOG_INFO("FastMatch", "learn_image_enter", "running",
         "image=" + std::to_string(image.getWidth()) + "x" + std::to_string(image.getHeight()) +
         " rect=" + std::to_string(static_cast<int>(rect().TopLeft().X())) + "," +
@@ -1289,10 +1317,10 @@ void FastMatch::Learn(Image& image)
     const int saved_comparegap = getconparegap();
     const int saved_threshold = thre();
     const int saved_linegap = linegap();
-    const int saved_rect_x = static_cast<int>(rect().TopLeft().X());
-    const int saved_rect_y = static_cast<int>(rect().TopLeft().Y());
-    const int saved_rect_w = static_cast<int>(rect().Width());
-    const int saved_rect_h = static_cast<int>(rect().Height());
+    const int saved_rect_x = input_learn_roi_x;
+    const int saved_rect_y = input_learn_roi_y;
+    const int saved_rect_w = input_learn_roi_w;
+    const int saved_rect_h = input_learn_roi_h;
 
     const int retry_wgap = saved_wgap > 1 ? 1 : saved_wgap;
     const int retry_hgap = saved_hgap > 1 ? 1 : saved_hgap;
@@ -1967,6 +1995,10 @@ void FastMatch::setmatchrect(int ix, int iy, int iw, int ih)
     iy = FastMatchNonNegativeInt(iy);
     iw = FastMatchPositiveInt(iw);
     ih = FastMatchPositiveInt(ih);
+    m_search_roi_x = ix;
+    m_search_roi_y = iy;
+    m_search_roi_w = iw;
+    m_search_roi_h = ih;
     m_matchrect = gp_Rectangle(gp_Pnt(ix, iy,0), gp_Pnt(ix + iw, iy + ih,0));
     if (m_matchrects.size() <= 0)
     {
@@ -1977,14 +2009,24 @@ void FastMatch::setmatchrect(int ix, int iy, int iw, int ih)
         m_matchrects.setrect(0,ix,iy,iw,ih);
 }
 
-void FastMatch::setrectxywh(int ih, int iw, int iy, int ix)
+void FastMatch::setrectxywh(int ix, int iy, int iw, int ih)
 {
     setrect(ix, iy, iw, ih);
 }
 
-void FastMatch::setmatchrectxywh(int ih, int iw, int iy, int ix)
+void FastMatch::setmatchrectxywh(int ix, int iy, int iw, int ih)
 {
     setmatchrect(ix, iy, iw, ih);
+}
+
+void FastMatch::setrectxywh_script(int ih, int iw, int iy, int ix)
+{
+    setrectxywh(ix, iy, iw, ih);
+}
+
+void FastMatch::setmatchrectxywh_script(int ih, int iw, int iy, int ix)
+{
+    setmatchrectxywh(ix, iy, iw, ih);
 }
 
 void FastMatch::setexpectedrect(double x0, double y0, double x1, double y1)
@@ -2029,14 +2071,29 @@ gp_Rectangle FastMatch::getresultrect(int inum) const
 
 gp_Rectangle FastMatch::getresolvedresultrect(int inum) const
 {
-    gp_Rectangle arect0 = getresultrect(inum);
-    gp_Pnt origin = rect().TopLeft();
-    const int rectw = FastMatchPositiveInt(static_cast<int>(arect0.Width()));
-    const int recth = FastMatchPositiveInt(static_cast<int>(arect0.Height()));
+    if (inum < 0 || inum >= static_cast<int>(m_resultpoints.size()))
+        return gp_Rectangle(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
+
+    int rectw = FastMatchPositiveInt(m_imodelwith);
+    int recth = FastMatchPositiveInt(m_imodelheigh);
+    if (rectw <= 0)
+    {
+        const gp_Rectangle raw_rect = getresultrect(inum);
+        rectw = FastMatchPositiveInt(static_cast<int>(raw_rect.BottomRight().X()));
+    }
+    if (recth <= 0)
+    {
+        const gp_Rectangle raw_rect = getresultrect(inum);
+        recth = FastMatchPositiveInt(static_cast<int>(raw_rect.BottomRight().Y()));
+    }
+
+    const double cx = m_resultpoints.at(inum).X() + rectw / 2.0;
+    const double cy = m_resultpoints.at(inum).Y() + recth / 2.0;
+    const double x0 = cx - rectw / 2.0;
+    const double y0 = cy - recth / 2.0;
     return gp_Rectangle(
-        gp_Pnt(arect0.TopLeft().X() + origin.X(), arect0.TopLeft().Y() + origin.Y(), 0),
-        rectw,
-        recth);
+        gp_Pnt(x0, y0, 0),
+        gp_Pnt(x0 + rectw, y0 + recth, 0));
 }
 void FastMatch::setmultimatchrect(int inum, int ix, int iy, int iw, int ih)
 {
@@ -2499,6 +2556,28 @@ void FastMatch::MatchAB(Image& image)
     m_match_last_stage = 20;
     gp_Path& pathA = FindLine::getpatternpathA();
     gp_Path& pathB = FindLine::getpatternpathB();
+
+    const int icount1 = static_cast<int>(pathA.ElementCount());
+    const int icount2 = static_cast<int>(pathB.ElementCount());
+    const int pair_count = std::min(icount1, icount2);
+    CXLOG_INFO("FastMatch", "match_ab_enter", "running",
+        "image=" + std::to_string(image.getWidth()) + "x" + std::to_string(image.getHeight()) +
+        " learn_roi=" + std::to_string(m_learn_roi_x) + "," +
+        std::to_string(m_learn_roi_y) + "," +
+        std::to_string(m_learn_roi_w) + "," +
+        std::to_string(m_learn_roi_h) +
+        " search_roi=" + std::to_string(m_search_roi_x) + "," +
+        std::to_string(m_search_roi_y) + "," +
+        std::to_string(m_search_roi_w) + "," +
+        std::to_string(m_search_roi_h) +
+        " pathA=" + std::to_string(icount1) +
+        " pathB=" + std::to_string(icount2) +
+        " pairs=" + std::to_string(pair_count));
+    if (pair_count <= 0)
+    {
+        m_match_last_stage = 32;
+        return;
+    }
 
    // Distfilter();
     MatchSampleAB(image, pathA, pathB);
@@ -4056,17 +4135,59 @@ void FastMatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
     m_match_debug_rect_y0 = iy0;
     m_match_debug_rect_x1 = ix1;
     m_match_debug_rect_y1 = iy1;
-    ZeroPOS();
-    if (image.getWidth() <= ix1
-        || image.getHeight() <= iy1)
+    const int icount1 = static_cast<int>(pathA.ElementCount());
+    const int icount2 = static_cast<int>(pathB.ElementCount());
+    const int pair_count = std::min(icount1, icount2);
+    if (pair_count <= 0)
+    {
+        m_match_last_stage = 32;
+        return;
+    }
+
+    gp_Rectangle arect1 = pathA.boundingRect();
+    gp_Rectangle arect2 = pathB.boundingRect();
+    (void)arect2;
+    const int pattern_w = static_cast<int>(std::ceil(arect1.Width()));
+    const int pattern_h = static_cast<int>(std::ceil(arect1.Height()));
+    if (pattern_w <= 0 || pattern_h <= 0)
+    {
+        m_match_last_stage = 33;
+        return;
+    }
+
+    if (ix0 < 0)
+        ix0 = 0;
+    if (iy0 < 0)
+        iy0 = 0;
+    if (ix1 > image.getWidth())
+        ix1 = image.getWidth();
+    if (iy1 > image.getHeight())
+        iy1 = image.getHeight();
+    if (image.getWidth() < ix1
+        || image.getHeight() < iy1)
     {
         m_match_last_stage = 31;
         return;//error process
     }
+    if (ix1 - ix0 <= pattern_w || iy1 - iy0 <= pattern_h)
+    {
+        m_match_last_stage = 34;
+        return;
+    }
+
+    CXLOG_INFO("FastMatch", "match_sample_enter", "running",
+        "search=" + std::to_string(ix0) + "," +
+        std::to_string(iy0) + "," +
+        std::to_string(ix1) + "," +
+        std::to_string(iy1) +
+        " pattern=" + std::to_string(pattern_w) + "x" + std::to_string(pattern_h) +
+        " pairs=" + std::to_string(pair_count));
+
+    // The direct cxscript path calls modelzero() immediately after learn().
+    // Re-zeroing here can mutate the learned A/B paths again and has caused
+    // access violations when the learned model is already normalized. Match
+    // should consume the current learned model, not rebuild it.
     m_iminfindnum = -1;
-    const int icount1 = static_cast<int>(pathA.ElementCount());
-    const int icount2 = static_cast<int>(pathB.ElementCount());
-    (void)icount2;
 
     cv::Vec3b pixel0, pixel1;
     int icalnum = 0;
@@ -4074,17 +4195,20 @@ void FastMatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
 
     gp_Pnt aele;
 
-    int igapx = m_stepgapx;
-    int igapy = m_stepgapy;
-    gp_Rectangle arect1 = pathA.boundingRect();
-    gp_Rectangle arect2 = pathB.boundingRect();
-    iy1 = iy1 - static_cast<int>(arect1.Height());
-    ix1 = ix1 - static_cast<int>(arect1.Width());
+    int igapx = FastMatchPositiveInt(m_stepgapx);
+    int igapy = FastMatchPositiveInt(m_stepgapy);
+    iy1 = iy1 - pattern_h;
+    ix1 = ix1 - pattern_w;
+    if (ix1 <= ix0 || iy1 <= iy0)
+    {
+        m_match_last_stage = 35;
+        return;
+    }
     int ix = 0;
     int iy = 0;
-    int iw = static_cast<int>(pathA.boundingRect().Width());
-    int ih = static_cast<int>(pathA.boundingRect().Height());
-    int itotalsize = static_cast<int>(pathA.ElementCount());
+    int iw = pattern_w;
+    int ih = pattern_h;
+    int itotalsize = pair_count;
 
     m_dminscore = FastMatchUnitScore(m_dminscore, 0.4);
     const int iminfindngnum = static_cast<int>((1 - m_dminscore) * itotalsize / 2);
@@ -4112,17 +4236,23 @@ void FastMatch::MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB)
                 ix += igapx;
                 continue;
             }
-            for (int i = 0; i < icount1 - 1; i++)
+            for (int i = 0; i < pair_count; i++)
             {
                 aele = pathA.ElementAt(i);
-                pixel0 = image.pixel(
-                    static_cast<int>(aele.X() + imovx),
-                    static_cast<int>(aele.Y() + imovy));
+                const int ax = static_cast<int>(aele.X() + imovx);
+                const int ay = static_cast<int>(aele.Y() + imovy);
                 //i++;
                 aele = pathB.ElementAt(i);
-                pixel1 = image.pixel(
-                    static_cast<int>(aele.X() + imovx),
-                    static_cast<int>(aele.Y() + imovy));
+                const int bx = static_cast<int>(aele.X() + imovx);
+                const int by = static_cast<int>(aele.Y() + imovy);
+                if (!FastMatchPointInsideImage(image, ax, ay) ||
+                    !FastMatchPointInsideImage(image, bx, by))
+                {
+                    icalng = iminfindngnum + 1;
+                    goto NextStep_1;
+                }
+                pixel0 = image.pixel(ax, ay);
+                pixel1 = image.pixel(bx, by);
 
                 if (0 == m_iB2W)
                 {
@@ -4403,24 +4533,44 @@ int FastMatch::getmatchimageheight() const
     return m_match_debug_image_height;
 }
 
+int FastMatch::getlearnrectx0() const
+{
+    return m_learn_roi_x;
+}
+
+int FastMatch::getlearnrecty0() const
+{
+    return m_learn_roi_y;
+}
+
+int FastMatch::getlearnrectx1() const
+{
+    return m_learn_roi_x + FastMatchPositiveInt(m_learn_roi_w);
+}
+
+int FastMatch::getlearnrecty1() const
+{
+    return m_learn_roi_y + FastMatchPositiveInt(m_learn_roi_h);
+}
+
 int FastMatch::getmatchrectx0() const
 {
-    return m_match_debug_rect_x0;
+    return m_search_roi_x;
 }
 
 int FastMatch::getmatchrecty0() const
 {
-    return m_match_debug_rect_y0;
+    return m_search_roi_y;
 }
 
 int FastMatch::getmatchrectx1() const
 {
-    return m_match_debug_rect_x1;
+    return m_search_roi_x + FastMatchPositiveInt(m_search_roi_w);
 }
 
 int FastMatch::getmatchrecty1() const
 {
-    return m_match_debug_rect_y1;
+    return m_search_roi_y + FastMatchPositiveInt(m_search_roi_h);
 }
 
 int FastMatch::getresulttolistcallcount() const
@@ -5566,7 +5716,9 @@ double FastMatch::getresultnum(int inum)
 }
 double FastMatch::getresultcentx(int inum)
 {
-    const int iw = static_cast<int>(FindLine::patternboundingrectAB().Width());
+    int iw = FastMatchPositiveInt(m_imodelwith);
+    if (iw <= 0)
+        iw = FastMatchPositiveInt(static_cast<int>(FindLine::patternboundingrectAB().Width()));
     if (inum >= 0 && inum < static_cast<int>(m_resultpoints.size()))
     {
         return m_resultpoints.at(inum).X() + (iw / 2);
@@ -5579,7 +5731,9 @@ double FastMatch::getresultcentx(int inum)
 }
 double FastMatch::getresultcenty(int inum)
 {
-    const int ih = static_cast<int>(FindLine::patternboundingrectAB().Height());
+    int ih = FastMatchPositiveInt(m_imodelheigh);
+    if (ih <= 0)
+        ih = FastMatchPositiveInt(static_cast<int>(FindLine::patternboundingrectAB().Height()));
     if (inum >= 0 && inum < static_cast<int>(m_resultpoints.size()))
     {
         return m_resultpoints.at(inum).Y() + (ih / 2);
@@ -5593,7 +5747,7 @@ double FastMatch::getresultcenty(int inum)
 
 double FastMatch::getresolvedresultcentx(int inum)
 {
-    return getresultcentx(inum) + rect().TopLeft().X();
+    return getresultcentx(inum);
 }
 
 double FastMatch::getresolvedresultcenty(int inum)
@@ -5601,7 +5755,7 @@ double FastMatch::getresolvedresultcenty(int inum)
     if ((inum >= 0 && inum < static_cast<int>(m_resultpoints.size())) ||
         (inum == -1 && !m_resultpoints.empty()))
     {
-        return getresultcenty(inum) + rect().TopLeft().Y();
+        return getresultcenty(inum);
     }
     return 0.0;
 }
@@ -5882,11 +6036,10 @@ double FastMatch::getpatternbheight() const
 
 void FastMatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref)
 {
-    const gp_Rectangle learn_rect = rect();
-    const double learn_x = learn_rect.TopLeft().X();
-    const double learn_y = learn_rect.TopLeft().Y();
-    const double learn_w = learn_rect.Width();
-    const double learn_h = learn_rect.Height();
+    const double learn_x = static_cast<double>(m_learn_roi_x);
+    const double learn_y = static_cast<double>(m_learn_roi_y);
+    const double learn_w = static_cast<double>(m_learn_roi_w);
+    const double learn_h = static_cast<double>(m_learn_roi_h);
 
     if (learn_w > 0 && learn_h > 0)
     {
@@ -5903,11 +6056,10 @@ void FastMatch::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owne
             std::move(learn_roi_shape));
     }
 
-    const gp_Rectangle search_rect = m_matchrect;
-    const double search_x = search_rect.TopLeft().X();
-    const double search_y = search_rect.TopLeft().Y();
-    const double search_w = search_rect.Width();
-    const double search_h = search_rect.Height();
+    const double search_x = static_cast<double>(m_search_roi_x);
+    const double search_y = static_cast<double>(m_search_roi_y);
+    const double search_w = static_cast<double>(m_search_roi_w);
+    const double search_h = static_cast<double>(m_search_roi_h);
 
     if (search_w > 0 && search_h > 0)
     {
@@ -6038,8 +6190,8 @@ bool FastMatch::ApplyDisplayShapeEdit(const std::string& owner_binding, const st
             return false;
         }
 
-        setrect(static_cast<int>(x), static_cast<int>(y),
-                static_cast<int>(w), static_cast<int>(h));
+        setrectxywh(static_cast<int>(x), static_cast<int>(y),
+                    static_cast<int>(w), static_cast<int>(h));
         reason = "learn ROI updated";
         return true;
     }
@@ -6056,8 +6208,8 @@ bool FastMatch::ApplyDisplayShapeEdit(const std::string& owner_binding, const st
             return false;
         }
 
-        setmatchrect(static_cast<int>(x), static_cast<int>(y),
-                     static_cast<int>(w), static_cast<int>(h));
+        setmatchrectxywh(static_cast<int>(x), static_cast<int>(y),
+                         static_cast<int>(w), static_cast<int>(h));
         reason = "search ROI updated";
         return true;
     }

@@ -452,6 +452,8 @@ namespace
     applied += setIntIfUsed("global_findline_selected_edge", existingOr("global_findline_selected_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_edge_count", existingOr("global_findline_edge_count", 1)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_scan_direction", existingOr("global_findline_scan_direction", 2)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_point_consistency_enabled", existingOr("global_findline_point_consistency_enabled", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findline_point_consistency_range", existingOr("global_findline_point_consistency_range", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_best_edge", existingOr("global_findline_best_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_recommended_edge", existingOr("global_findline_recommended_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findline_relation_edge", existingOr("global_findline_relation_edge", 0)) ? 1 : 0;
@@ -462,6 +464,16 @@ namespace
     applied += setIntIfUsed("global_findcircle_recommended_edge", existingOr("global_findcircle_recommended_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findcircle_relation_edge", existingOr("global_findcircle_relation_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findcircle_attach_edge", existingOr("global_findcircle_attach_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_point_consistency_enabled", existingOr("global_findcircle_point_consistency_enabled", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findcircle_point_consistency_range", existingOr("global_findcircle_point_consistency_range", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_selected_edge", existingOr("global_findellipse_selected_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_edge_count", existingOr("global_findellipse_edge_count", 1)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_best_edge", existingOr("global_findellipse_best_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_recommended_edge", existingOr("global_findellipse_recommended_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_relation_edge", existingOr("global_findellipse_relation_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_attach_edge", existingOr("global_findellipse_attach_edge", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_point_consistency_enabled", existingOr("global_findellipse_point_consistency_enabled", 0)) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_point_consistency_range", existingOr("global_findellipse_point_consistency_range", 0)) ? 1 : 0;
 
     /*
      * These globals are result echo/output variables used by older frozen,
@@ -551,6 +563,7 @@ namespace
     const bool isCircleScript = evidencePathIsFindCircle(scriptPath);
     const bool isLineScript = evidencePathIsFindLine(scriptPath);
     const bool isEllipseScript = evidencePathIsFindEllipse(scriptPath);
+    const bool isFindSegmentationScript = evidencePathIsFindSegmentation(scriptPath);
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -597,9 +610,19 @@ namespace
       gauge.line_x1 = getInt("global_roi_x1", 0);
       gauge.line_y1 = getInt("global_roi_y1", 0);
     }
+    else if (isFindSegmentationScript)
+    {
+      gauge.tool = "FindSegmentation";
+      gauge.has_segmentation_prompt_rect = true;
+      gauge.segmentation_prompt_x0 = getInt("global_roi_x0", 120);
+      gauge.segmentation_prompt_y0 = getInt("global_roi_y0", 120);
+      gauge.segmentation_prompt_x1 = getInt("global_roi_x1", 980);
+      gauge.segmentation_prompt_y1 = getInt("global_roi_y1", 820);
+      gauge.segmentation_mode = getInt("global_segmentation_mode", 2);
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge)
+        gauge.has_ellipse_gauge || gauge.has_segmentation_prompt_rect)
     {
       context.current_gauge = gauge;
     }
@@ -4892,10 +4915,12 @@ void ViewController::drawScriptAcceptancePanels()
 
         // Layer 3.6: FindCircle runtime scan debug overlay.
         //
-        // This mirrors the FindLine scan-tick overlay: read native scan lines
-        // from the live runtime object and draw them as a temporary debug
-        // projection.  It does not create ShapeElements or copied geometry.
-        if (m_manualTest.show_circle_gauge_scan_lines)
+        // Disabled: FindCircle scan ticks are now published by
+        // FindCircle::PublishDisplayShapes() as ShapeElements with
+        // semantic_role="scan_tick".  Keeping this live-object debug path
+        // would draw a second, non-ShapeElement projection and can make
+        // visible Gauge lines diverge from accepted result points.
+        if (false && m_manualTest.show_circle_gauge_scan_lines)
         {
             std::string ownerRef = m_manualTest.current_gauge.primary_object_name;
             if (ownerRef.empty())
@@ -7858,6 +7883,8 @@ static ImU32 ShapeElementStrokeColor(const CxShapeElement& element)
 {
     if (element.result_element)
         return IM_COL32(255, 180, 64, 255);
+    if (element.semantic_role == "scan_tick")
+        return IM_COL32(140, 230, 255, 105);
     if (element.editable)
         return IM_COL32(80, 255, 170, 200);
     return IM_COL32(160, 160, 200, 200);
@@ -7917,6 +7944,19 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
 {
     if (!element.shape || !element.visible)
         return;
+
+    if (element.owner_type == "FindCircle" &&
+        element.semantic_role == "scan_tick" &&
+        !m_manualTest.show_circle_gauge_scan_lines)
+    {
+        return;
+    }
+    if (element.owner_type == "FindEllipse" &&
+        element.semantic_role == "scan_tick" &&
+        !m_manualTest.show_ellipse_gauge_scan_lines)
+    {
+        return;
+    }
 
     if (m_annotationImageWidth <= 1.0f ||
         m_annotationImageHeight <= 1.0f ||

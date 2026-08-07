@@ -3033,7 +3033,14 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     }
   }
 
-  WriteEvidenceChainLoadedElementsDebugLocal(m_manualTest);
+  ++m_manualTest.script_evidence_groups_revision;
+  if (m_manualTest.script_evidence_groups_debug_revision !=
+      m_manualTest.script_evidence_groups_revision)
+  {
+    WriteEvidenceChainLoadedElementsDebugLocal(m_manualTest);
+    m_manualTest.script_evidence_groups_debug_revision =
+        m_manualTest.script_evidence_groups_revision;
+  }
 
   m_manualTest.script_evidence_groups_dirty = false;
   m_manualTest.script_evidence_row_refs_dirty = true;
@@ -3866,10 +3873,74 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         }
     }
 
-    // Evidence selection is a transaction.  Build the complete Workbench
-    // state in a value copy and publish it only after script, parameters,
-    // gauge and optional image have all passed validation.
-    ManualTestContext staged = m_manualTest;
+    // Evidence selection is a transaction, but it must not copy the whole
+    // ManualTestContext: the context owns large Evidence/thumbnail caches.
+    // Stage only the fields that this operation is allowed to touch.
+    const CxEvidenceSelectionSnapshot backupSelection =
+        m_manualTest.current_evidence_selection;
+    const int backupSelectedGroup = m_manualTest.selected_evidence_group;
+    const int backupSelectedThumb = m_manualTest.selected_evidence_thumb;
+    const std::string backupActiveCaseId = m_manualTest.active_case_id;
+    const std::string backupActiveImageId = m_manualTest.active_image_id;
+    const std::string backupActiveTargetId = m_manualTest.active_target_id;
+    const unsigned long long backupKeyParamRevision =
+        m_manualTest.key_parameter_edit_revision;
+    const std::string backupKeyParamSummary =
+        m_manualTest.last_key_parameter_edit_summary;
+    const std::string backupImageFilePath = m_manualTest.image_file_path;
+    const std::string backupEditorText = m_manualTest.editor_text;
+    const std::string backupLoadedScriptPath = m_manualTest.loaded_script_path;
+    const std::string backupScriptFilePath = m_manualTest.script_file_path;
+    const std::string backupEditorSource = m_manualTest.editor_source;
+    const bool backupEditorDirty = m_manualTest.editor_dirty;
+    const std::unordered_map<std::string, int> backupRuntimeGlobals =
+        m_manualTest.runtime_int_vars;
+    const ManualGaugeState backupGauge = m_manualTest.current_gauge;
+    const std::string backupDebugAction = m_manualTest.debug_action;
+    const std::string backupDebugStatus = m_manualTest.debug_status;
+    const std::string backupDebugReason = m_manualTest.debug_reason;
+    const int backupFindlineSelectedEdge =
+        m_manualTest.findline_selected_scan_edge;
+    const int backupFindlineEdgeCount = m_manualTest.findline_scan_edge_count;
+    const int backupFindcircleSelectedEdge =
+        m_manualTest.findcircle_selected_scan_edge;
+    const int backupFindcircleEdgeCount =
+        m_manualTest.findcircle_scan_edge_count;
+    const std::vector<ManualFindLineEdgeParamState> backupFindlineEdgeParams =
+        m_manualTest.findline_edge_params;
+    const std::vector<ManualFindCircleEdgeParamState> backupFindcircleEdgeParams =
+        m_manualTest.findcircle_edge_params;
+
+    auto rollbackSelection = [&]()
+    {
+        m_manualTest.current_evidence_selection = backupSelection;
+        m_manualTest.selected_evidence_group = backupSelectedGroup;
+        m_manualTest.selected_evidence_thumb = backupSelectedThumb;
+        m_manualTest.active_case_id = backupActiveCaseId;
+        m_manualTest.active_image_id = backupActiveImageId;
+        m_manualTest.active_target_id = backupActiveTargetId;
+        m_manualTest.key_parameter_edit_revision = backupKeyParamRevision;
+        m_manualTest.last_key_parameter_edit_summary = backupKeyParamSummary;
+        m_manualTest.image_file_path = backupImageFilePath;
+        m_manualTest.editor_text = backupEditorText;
+        m_manualTest.loaded_script_path = backupLoadedScriptPath;
+        m_manualTest.script_file_path = backupScriptFilePath;
+        m_manualTest.editor_source = backupEditorSource;
+        m_manualTest.editor_dirty = backupEditorDirty;
+        m_manualTest.runtime_int_vars = backupRuntimeGlobals;
+        m_manualTest.current_gauge = backupGauge;
+        m_manualTest.debug_action = backupDebugAction;
+        m_manualTest.debug_status = backupDebugStatus;
+        m_manualTest.debug_reason = backupDebugReason;
+        m_manualTest.findline_selected_scan_edge = backupFindlineSelectedEdge;
+        m_manualTest.findline_scan_edge_count = backupFindlineEdgeCount;
+        m_manualTest.findcircle_selected_scan_edge = backupFindcircleSelectedEdge;
+        m_manualTest.findcircle_scan_edge_count = backupFindcircleEdgeCount;
+        m_manualTest.findline_edge_params = backupFindlineEdgeParams;
+        m_manualTest.findcircle_edge_params = backupFindcircleEdgeParams;
+    };
+
+    ManualTestContext& staged = m_manualTest;
     staged.current_evidence_selection = resolved;
     staged.selected_evidence_group = resolved.group_index;
     staged.selected_evidence_thumb = resolved.thumb_index;
@@ -3918,6 +3989,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         if (resolved.runtime_globals_path.empty() ||
             resolved.gauge_annotation_path.empty())
         {
+            rollbackSelection();
             return abortSelection(
                 "working_assets",
                 "candidate is missing runtime_globals_path or gauge_annotation_path");
@@ -3929,6 +4001,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                 resolved.runtime_globals_path,
                 restoreReason))
         {
+            rollbackSelection();
             return abortSelection("runtime_globals_restore", restoreReason);
         }
         if (!LoadManualGaugeWorkingCopyFromPath(
@@ -3936,6 +4009,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                 resolved.gauge_annotation_path,
                 restoreReason))
         {
+            rollbackSelection();
             return abortSelection(
                 "gauge_restore",
                 "failed to restore candidate gauge: " + restoreReason);
@@ -4005,6 +4079,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                     resolved.parameter_summary,
                     lockedParamReason))
             {
+                rollbackSelection();
                 reason = "failed to apply evidence locked parameters: " +
                     lockedParamReason;
                 return false;
@@ -4043,7 +4118,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     const bool shouldSyncTrainingImageSet =
         IsEvidenceSelectionImageSetLocal(resolved);
 
-    m_manualTest = std::move(staged);
     if (shouldSyncTrainingImageSet)
     {
         CXLOG_INFO(
@@ -5782,10 +5856,10 @@ void ViewController::DrawOneScriptEvidenceRow(
         if (!RefreshEvidenceSelectionFromThumb(
                 groupIndex,
                 thumbIndex,
-                false,
+                true,
                 reason))
         {
-            m_manualTest.debug_status = "EVIDENCE_SELECT_FAIL";
+            m_manualTest.debug_status = "EVIDENCE_SELECT_LOAD_FAIL";
             m_manualTest.debug_reason = reason;
         }
         finishRow();
@@ -6054,7 +6128,7 @@ void ViewController::DrawOneScriptEvidenceRow(
     if (rowHovered)
     {
         ImGui::SetTooltip(
-            "Click: select | Double-click: load image | Right-click: menu\n"
+            "Click: select and load image | Right-click: menu\n"
             "script: %s\nimage: %s\npath: %s\nreason: %s",
             thumb.script_id.c_str(),
             thumb.image_id.c_str(),

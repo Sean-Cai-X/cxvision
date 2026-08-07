@@ -160,10 +160,25 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_threshold"] = static_cast<double>(options.threshold);
     overrides["global_method"] = static_cast<double>(options.method);
     overrides["global_filterprofile"] = static_cast<double>(options.filterprofile);
+    overrides["global_findsetting"] = 0.0;
+    overrides["global_objfilter"] = 1.0;
+    overrides["global_findline_objfilter"] = 1.0;
+    overrides["global_findcircle_findsetting"] = 0.0;
+    overrides["global_findellipse_findsetting"] = 1.0;
+    overrides["global_findrect_findsetting"] = 0.0;
+    overrides["global_findline_point_consistency_enabled"] = 0.0;
+    overrides["global_findline_point_consistency_range"] = 0.0;
+    overrides["global_findcircle_point_consistency_enabled"] = 0.0;
+    overrides["global_findcircle_point_consistency_range"] = 0.0;
     overrides["global_samplerate"] = static_cast<double>(options.samplerate);
     overrides["global_min_score"] = options.min_score;
+    overrides["global_min_score_percent"] = 0.0;
     overrides["global_find_num"] = static_cast<double>(options.find_num);
     overrides["global_compare_gap"] = static_cast<double>(options.compare_gap);
+    overrides["global_match_step_x"] = 10.0;
+    overrides["global_match_step_y"] = 10.0;
+    overrides["global_match_thre"] = 10.0;
+    overrides["global_fastmatch_action"] = 3.0;
     overrides["global_strategy_id"] = static_cast<double>(options.strategy_id);
     overrides["global_algorithm_executed"] = static_cast<double>(options.algorithm_executed);
 
@@ -179,6 +194,14 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_expected_rect_y"] = static_cast<double>(options.expected_rect_y);
     overrides["global_expected_rect_w"] = static_cast<double>(options.expected_rect_w);
     overrides["global_expected_rect_h"] = static_cast<double>(options.expected_rect_h);
+    overrides["global_learn_a_count"] = 0.0;
+    overrides["global_learn_b_count"] = 0.0;
+    overrides["global_learn_a2_count"] = 0.0;
+    overrides["global_learn_b2_count"] = 0.0;
+    overrides["global_learn_status_code"] = 0.0;
+    overrides["global_match_count"] = 0.0;
+    overrides["global_best_score"] = 0.0;
+    overrides["global_model_point_count"] = 0.0;
 
     overrides["global_max_elapsed_ms"] = static_cast<double>(options.max_elapsed_ms);
     overrides["global_max_scan_lines"] = static_cast<double>(options.max_scan_lines);

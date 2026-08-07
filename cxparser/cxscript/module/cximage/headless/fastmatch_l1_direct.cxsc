@@ -20,6 +20,7 @@ int hgap = global_hgap;
 int compare_gap = global_compare_gap;
 double min_score = global_min_score;
 int find_num = global_find_num;
+int fastmatch_action = global_fastmatch_action;
 
 if (wgap <= 0)
 {
@@ -35,6 +36,10 @@ if (compare_gap <= 0)
 {
     compare_gap = 20;
 }
+if (fastmatch_action <= 0)
+{
+    fastmatch_action = 3;
+}
 
 m_match.setrectxywh(learn_x, learn_y, learn_w, learn_h);
 m_match.setobjfilter(1);
@@ -48,9 +53,28 @@ m_match.pattern2org();
 m_match.patternsample(3);
 m_match.samplemodel(100);
 
+global_learn_a_count = m_match.getlearnacount();
+global_learn_b_count = m_match.getlearnbcount();
+global_learn_a2_count = m_match.getlearna2count();
+global_learn_b2_count = m_match.getlearnb2count();
+global_learn_status_code = m_match.getlearnstatuscode();
+global_model_point_count = m_match.getmodelpointcount();
+global_match_count = 0;
+global_candidate_count = 0;
+global_best_score = 0;
+
+if (fastmatch_action == 1)
+{
+    return;
+}
+
 m_match.setmatchrectxywh(search_x, search_y, search_w, search_h);
 m_match.matchstepgap(10, 10);
 m_match.setmatchthre(10);
 m_match.setminscore(min_score);
 m_match.setfindnum(find_num);
 m_match.match(&m_image);
+
+global_match_count = m_match.getresultcandidatecount();
+global_candidate_count = global_match_count;
+global_best_score = m_match.getresultbestscore();
