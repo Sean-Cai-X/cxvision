@@ -33,6 +33,10 @@ namespace mu
 
         void DefineVar(const string & str,double *dvalue);
 
+        void DefineStringConstant(
+            const string& name,
+            const string& value);
+
         static double* AddVariable(const char *a_szName,void *pClass);
 
         void SetVarFactory();

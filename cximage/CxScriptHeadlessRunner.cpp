@@ -352,6 +352,41 @@ bool InjectCxScriptInputImage(
     return true;
 }
 
+bool InjectCxScriptRuntimeStrings(
+    mu::CxParserRuntime& runtime,
+    const CxScriptHeadlessOptions& options,
+    std::string& reason)
+{
+    try
+    {
+        const std::string case_id = options.case_name.empty()
+            ? options.case_id
+            : options.case_name;
+
+        // Read-only values owned by the current serial Headless request.
+        // TorchTask therefore uses the same image, case, and artifact root as
+        // the surrounding Headless evidence package.
+        const char separator = '|';
+        const std::string request_context = case_id + separator +
+            options.image_path + separator + options.output_dir;
+        runtime.DefineStringConstant("global_torch_request_context", request_context);
+    }
+    catch (const std::exception& e)
+    {
+        reason = "cannot inject headless torch runtime strings: " +
+            std::string(e.what());
+        return false;
+    }
+    catch (...)
+    {
+        reason = "cannot inject headless torch runtime strings";
+        return false;
+    }
+
+    reason.clear();
+    return true;
+}
+
 bool ExecuteCxScriptSequential(
     const CxScriptHeadlessOptions& options,
     const cv::Mat& source_image,
@@ -377,6 +412,9 @@ bool ExecuteCxScriptSequential(
 
     CxScriptGlobalStorage global_values;
     if (!InjectCxScriptGlobals(runtime, options, global_values, reason))
+        return false;
+
+    if (!InjectCxScriptRuntimeStrings(runtime, options, reason))
         return false;
 
     if (!InjectCxScriptInputImage(runtime, source_image, "global_matInput", reason))

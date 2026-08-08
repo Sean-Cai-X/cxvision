@@ -11,8 +11,9 @@ Current project root:
 D:\Codex-WorkDir\Sean_WorkDir\cxvisionai
 ```
 
-Remote writeback is not used in this step. Images, case metadata, and Evidence
-Chain rows are landed locally only.
+Remote writeback is not used in this step. Images are landed locally outside
+the git repository. Evidence CASE definitions are file-driven through the
+shared cximage evidence chain.
 
 ## Image Storage Rule
 
@@ -74,24 +75,24 @@ G1.semantic_handoff:
 
 ## Landed Evidence Chain Cases
 
-Case manifest:
+Primary Evidence CASE source:
 
 ```text
-D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxscript_runs\evidence_chain\mlpack_elpv_evidence_cases_20260807.tsv
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxparser\cxscript\module\cximage\evidence\mlpack_baseline_evidence_chain.cxsc
 ```
 
-Evidence candidate root:
+Case count:
 
 ```text
-D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxscript_runs\evidence_candidates
+24 ELPV Evidence Chain cases
 ```
 
-Each sample is materialized as:
+Legacy/debug candidate records may exist under `cxscript_runs`, but they are
+not the UI CASE source and must not be scanned by C++ as a private mlpack entry.
+Any future mlpack CASE must be added to:
 
 ```text
-<case_id>\candidate_20260807_local_evidence_chain\
-  script_snapshot.cxsc
-  mlpack_case_metadata.json
+cxparser\cxscript\module\cximage\evidence\mlpack_*.cxsc
 ```
 
 Current case naming:
@@ -108,20 +109,19 @@ MLPACK_ELPV_G1.semantic_handoff_cell2137_defect_semantic_refs
 
 ## UI Evidence Chain Registration
 
-The following local Evidence Chain files were extended with mlpack rows:
+Expected category:
 
 ```text
-D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxscript_runs\evidence_chain\evidence_chain_loaded_elements_debug.tsv
-D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxscript_runs\evidence_chain\evidence_chain_ui_classification_debug.tsv
+Mlpack / Baseline Validation
 ```
 
-Added group:
+Expected group:
 
 ```text
-Mlpack / ELPV Semantic Refs
+Saved Pending Candidates
 ```
 
-Added tool label:
+Tool label:
 
 ```text
 MlpackBaseline
@@ -133,27 +133,21 @@ Added status:
 pending_headless_module_test
 ```
 
-Added display major:
-
-```text
-Process Validation
-```
-
 ## Script Snapshot
 
-The local case snapshots currently use:
+The file-driven cases currently reference:
 
 ```text
 D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxparser\cxscript\module\mlpack\baseline_logreg_official_min_infer.cxsc
 ```
 
-This is intentional for Evidence Chain entry. The landed case is not claiming
-runtime acceptance. It is binding image evidence and mlpack semantic review
-fields to a known mlpack cxscript case snapshot.
+This is intentional for Evidence Chain entry. The landed cases do not claim
+runtime acceptance. They bind ELPV image evidence and mlpack semantic review
+fields to a known mlpack cxscript case.
 
 ## Expected Flow
 
-The metadata records this intended flow:
+The evidence chain records this intended flow:
 
 ```text
 baseline_feature_direct_test
@@ -176,12 +170,188 @@ anomaly_ref
 
 ```text
 IMAGE_LOCAL_COPY: complete for ELPV, 24/24
-EVIDENCE_CASE_LANDING: complete for ELPV, 24/24
-UI_CHAIN_ROWS: appended, 24 loaded-elements rows and 24 classification rows
-HEADLESS_EXECUTION: NOT_RUN
-COMPILE: NOT_RUN
+EVIDENCE_CASE_SOURCE: cxparser/cxscript/module/cximage/evidence/mlpack_baseline_evidence_chain.cxsc
+EVIDENCE_CASE_LANDING: complete for ELPV, 24/24 file-driven cases
+UI_CHAIN_SOURCE: shared evidence .cxsc scanning and parsing
+UI_PRIVATE_METADATA_SCAN: forbidden/not used
+UI_TARGET_BUCKET: Mlpack / Baseline Validation
+EVIDENCE_SELECTION: EVIDENCE_SELECTION_PASS
+IMAGE_BINDING: IMAGE_BINDING_PASS
+PARAM_BINDING: PARAM_BINDING_PASS with threshold=0 generic runtime token
+SCRIPT_COMPILE_ONLY: SCRIPT_COMPILE_PASS
+HEADLESS_EXECUTION: EVIDENCE_SELFTEST_L2_RUNTIME_EXECUTE_FAIL
+COMPILE: COMPILE_PASS
 MANUAL_GUI_REVIEW: NOT_RUN
 FINAL_ACCEPTANCE: NOT_ACCEPTED
+```
+
+The UI classification TSV is a debug output, not the primary UI input. The UI
+must build the visible tree from shared evidence chain files, so mlpack local
+cases are now loaded from:
+
+```text
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxparser\cxscript\module\cximage\evidence\mlpack_baseline_evidence_chain.cxsc
+```
+
+Expected UI display:
+
+```text
+Mlpack / Baseline Validation (24)
+  Saved Pending Candidates (24)
+```
+
+This requires a successfully rebuilt `cxvision_imgui_acceptance.exe`. The local
+build succeeded after the evidence classification boundary cleanup.
+
+Latest binary:
+
+```text
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\build\Release\cxvision_imgui_acceptance.exe
+```
+
+Latest minimal selftest:
+
+```text
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\evidence_selftest\run_20260808_1512_mlpack_ui_classification
+```
+
+Selftest result:
+
+```text
+EVIDENCE_SELECTION_PASS
+IMAGE_BINDING_PASS
+PARAM_BINDING_PASS
+SCRIPT_COMPILE_PASS
+GLOBAL_INJECTION_PASS
+EVIDENCE_SELFTEST_L2_RUNTIME_EXECUTE_FAIL
+```
+
+Current blocker:
+
+```text
+MLPACK_HEADLESS_STRING_STATEMENT_RUNTIME_GAP
+```
+
+Reason:
+
+```text
+baseline_logreg_official_min_infer.cxsc requires string statement execution.
+Evidence selftest can now select the case, bind the image, bind generic
+parameters, compile the script, and stage model_path from the evidence file.
+The runtime execution step still fails because RunCollectedScript rejects a
+string declaration statement.
+```
+
+Latest direct Headless check:
+
+```text
+Command:
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\build\Release\cxvision_imgui_acceptance.exe
+  --headless
+  --cxscript-headless
+  --image D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\test_images\mlpack\ELPV-Classification-Handoff\G0.baseline_manual\defect\cell2105.png
+  --script cxparser\cxscript\module\mlpack\baseline_logreg_official_min_infer.cxsc
+  --case-name MLPACK_ELPV_G0_baseline_manual_cell2105_defect_semantic_refs
+  --out D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\headless\run_20260808_1538_mlpack_direct_headless
+  --max-steps 10000
+  --unified-log D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\_shared\cxvision_imgui_acceptance.jsonl
+
+Process exit code:
+0
+
+Business result:
+cxscript_headless_ok=false
+
+Failure:
+RunCollectedScript failed near statement:
+string model_path = global_mlpack_model_path;
+```
+
+Latest Evidence selftest package:
+
+```text
+D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\evidence_selftest\run_20260808_1534_mlpack_headless_min
+```
+
+Latest Evidence selftest conclusion:
+
+```text
+EVIDENCE_SELECTION_PASS
+IMAGE_BINDING_PASS
+PARAM_BINDING_PASS
+SCRIPT_COMPILE_PASS
+GLOBAL_INJECTION_PASS
+EVIDENCE_SELFTEST_L2_RUNTIME_EXECUTE_FAIL
+```
+
+## Test Gaps And Required Manual Actions
+
+### Gap 1: Headless string statement runtime support
+
+```text
+Gap ID:
+MLPACK_HEADLESS_STRING_STATEMENT_RUNTIME_GAP
+
+Owner suggestion:
+Parser/Headless runtime thread
+
+Evidence:
+Direct Headless and Evidence selftest both fail at string declaration runtime
+execution. Compile-only already passes, so the gap is in runtime statement
+execution, not file discovery, image binding, or evidence classification.
+
+Required action:
+Decide whether RunCollectedScript should support string declarations and string
+assignments, or whether mlpack scripts should be executed by full Compile()
+without per-statement expression replay.
+
+Manual decision required:
+Yes. This changes common Headless runtime semantics and should not be decided
+inside the mlpack baseline thread alone.
+```
+
+### Gap 2: Trained baseline model artifact availability
+
+```text
+Gap ID:
+MLPACK_BASELINE_MODEL_ARTIFACT_PENDING
+
+Owner suggestion:
+mlpack baseline asset/training thread
+
+Evidence:
+The expected model path is now carried by evidence case parameter_summary:
+model_path=artifacts/baseline/logreg_all_v1.bin
+The file is not currently present under the local cxvisionai project tree.
+
+Required action:
+Provide or generate the trained logreg baseline artifact through the approved
+mlpack train flow before claiming infer/runtime acceptance.
+
+Manual decision required:
+Yes, if the model artifact should be copied from an external source. No file
+copy from outside the project should be performed silently.
+```
+
+### Gap 3: Human GUI review
+
+```text
+Gap ID:
+MLPACK_UI_HUMAN_REVIEW_PENDING
+
+Owner suggestion:
+Human reviewer / dev_analysis_gui thread
+
+Evidence:
+UI classification source is file-driven and compiled, but final visual review
+has not been manually accepted.
+
+Required action:
+Open the UI, confirm Mlpack / Baseline Validation shows Saved Pending
+Candidates, select one ELPV case, and verify the image is visible in Image View.
+
+Manual decision required:
+Yes. Automated tests cannot mark MANUAL_GUI_PASS.
 ```
 
 ## Known Gap

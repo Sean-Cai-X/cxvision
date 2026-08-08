@@ -153,6 +153,24 @@ double CxEvidenceChain_case_setlevel(const char* value)
     return 0.0;
 }
 
+double CxEvidenceChain_case_setcategory(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    g_current_evidence_case->display_category = value ? value : "";
+    return 0.0;
+}
+
+double CxEvidenceChain_case_setgroup(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    g_current_evidence_case->display_group = value ? value : "";
+    return 0.0;
+}
+
 void RegisterCxScriptEvidenceChainBindings(mu::Parser& parser)
 {
     parser.DefineFun("CxEvidenceChain_reset", (mu::fun_type1)&CxEvidenceChain_reset);
@@ -173,4 +191,6 @@ void RegisterCxScriptEvidenceChainBindings(mu::Parser& parser)
     parser.DefineFun("CxEvidenceChain_case_setsourcecase", (mu::strfun_type1)&CxEvidenceChain_case_setsourcecase);
     parser.DefineFun("CxEvidenceChain_case_settool", (mu::strfun_type1)&CxEvidenceChain_case_settool);
     parser.DefineFun("CxEvidenceChain_case_setlevel", (mu::strfun_type1)&CxEvidenceChain_case_setlevel);
+    parser.DefineFun("CxEvidenceChain_case_setcategory", (mu::strfun_type1)&CxEvidenceChain_case_setcategory);
+    parser.DefineFun("CxEvidenceChain_case_setgroup", (mu::strfun_type1)&CxEvidenceChain_case_setgroup);
 }

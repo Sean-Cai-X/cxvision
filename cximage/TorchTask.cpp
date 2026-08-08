@@ -75,6 +75,29 @@ void TorchTask::setoutputdir(const char* value)
     task_.output_dir = value;
 }
 
+void TorchTask::setrequestcontext(const char* value)
+{
+    // Copy the three values from the current serial Headless request into this
+    // task. One packed string avoids relying on several parser string constants.
+    const std::string context = value == nullptr ? std::string() : std::string(value);
+    const char separator = '|';
+    const std::size_t first = context.find(separator);
+    const std::size_t second = first == std::string::npos
+        ? std::string::npos
+        : context.find(separator, first + 1);
+
+    if (first == std::string::npos || second == std::string::npos)
+    {
+        status_ = "invalid_request_context";
+        reason_ = "TorchTask request context must contain case, input and output";
+        return;
+    }
+
+    task_.case_id = context.substr(0, first);
+    task_.input_image_path = context.substr(first + 1, second - first - 1);
+    task_.output_dir = context.substr(second + 1);
+}
+
 void TorchTask::settimeout(int value)
 {
     task_.timeout_ms = value;

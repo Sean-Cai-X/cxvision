@@ -873,6 +873,7 @@ namespace mu
             m_parser.DefineClassFun("TorchTask", ptorch_task, "setinputpath", &TorchTask::setinputpath);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "settemplatepath", &TorchTask::settemplatepath);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "setoutputdir", &TorchTask::setoutputdir);
+            m_parser.DefineClassFun("TorchTask", ptorch_task, "setrequestcontext", &TorchTask::setrequestcontext);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "settimeout", &TorchTask::settimeout);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "run", &TorchTask::run);
             m_parser.DefineClassFun("TorchTask", ptorch_task, "getok", &TorchTask::getok);
@@ -1227,6 +1228,12 @@ namespace mu
     void CxParserRuntime::DefineVar(const string & str,double *dvalue)
     {
         m_parser.DefineVar(str,dvalue);
+    }
+    void CxParserRuntime::DefineStringConstant(
+        const string& name,
+        const string& value)
+    {
+        m_parser.DefineStrConst(name, value);
     }
     //need to do
     void CxParserRuntime::SetVarFactory()

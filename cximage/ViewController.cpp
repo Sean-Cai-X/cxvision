@@ -362,6 +362,53 @@ namespace
       return true;
     };
 
+    auto parseStringToken = [&](const char* key, std::string& value) -> bool
+    {
+      const std::string pattern = std::string(key) + "=";
+      const std::size_t pos = parameterSummary.find(pattern);
+      if (pos == std::string::npos)
+        return false;
+      std::size_t begin = pos + pattern.size();
+      if (begin >= parameterSummary.size())
+        return false;
+      if (parameterSummary[begin] == '"')
+      {
+        ++begin;
+        std::size_t end = begin;
+        while (end < parameterSummary.size() && parameterSummary[end] != '"')
+          ++end;
+        if (end == begin)
+          return false;
+        value = parameterSummary.substr(begin, end - begin);
+        return true;
+      }
+      std::size_t end = begin;
+      while (end < parameterSummary.size() &&
+             !std::isspace(static_cast<unsigned char>(parameterSummary[end])))
+      {
+        ++end;
+      }
+      if (end == begin)
+        return false;
+      value = parameterSummary.substr(begin, end - begin);
+      return true;
+    };
+
+    auto setRequiredStringIfUsed = [&](const char* key,
+                                       const char* summaryKey) -> bool
+    {
+      if (!scriptContainsIdentifier(scriptText, key))
+        return false;
+      std::string value;
+      if (!parseStringToken(summaryKey, value))
+      {
+        missingLockedGlobals.push_back(key);
+        return false;
+      }
+      bridge.SetGlobalString(key, value);
+      return true;
+    };
+
     const int safeWidth = std::max(1, imageWidth);
     const int safeHeight = std::max(1, imageHeight);
     const int roiX0 = existingOr("global_roi_x0", std::max(0, safeWidth / 4));
@@ -534,6 +581,7 @@ namespace
     applied += setDoubleIfUsed("global_rect_ref", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_match_ref", 0.0) ? 1 : 0;
     applied += setDoubleIfUsed("global_segmentation_ref", 0.0) ? 1 : 0;
+    applied += setRequiredStringIfUsed("global_mlpack_model_path", "model_path") ? 1 : 0;
 
     if (!missingLockedGlobals.empty())
     {
@@ -3662,6 +3710,9 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
                 evidencePathIsFastMatch(thumb.script_path) ||
                 evidencePathIsFindSegmentation(thumb.script_path) ||
                 isTorchTaskCatalogScript;
+            const bool allowGenericForExplicitToolFilter =
+                !filter.empty() &&
+                filter.find("torch") == std::string::npos;
 
             if (!filter.empty() &&
                 filter.find("torch") != std::string::npos &&
@@ -3671,7 +3722,9 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
                 continue;
             }
 
-            if (!request.include_generic_scripts && !isCximageToolScript)
+            if (!request.include_generic_scripts &&
+                !allowGenericForExplicitToolFilter &&
+                !isCximageToolScript)
                 continue;
 
             CxEvidenceSelfTestRequest item;
@@ -4065,6 +4118,40 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
       result.log_lines.push_back("No runtime result package was produced.");
       return result;
     }
+  }
+
+  // Torch direct scripts use one value-semantic request context in both
+  // Headless and Manual UI. The image shown in Image View is therefore the
+  // same image path passed to TorchRuntime, and runtime artifacts are kept in
+  // a per-process evidence directory instead of a script hard-coded path.
+  if (scriptContainsIdentifier(scriptText, "global_torch_request_context"))
+  {
+    const fs::path inputPath = fs::path(m_manualTest.image_file_path);
+    if (inputPath.empty() || !fs::exists(inputPath))
+    {
+      result.status = "BLOCKED";
+      result.reason = "Torch UI run requires an Image View image with a valid source path";
+      result.runtime_fillback_status = "torch_ui_input_path_missing";
+      return result;
+    }
+
+    const std::string caseId = scriptPath.stem().string();
+    std::string runId = CxUnifiedLog::Instance().RunId();
+    if (runId.empty())
+      runId = "ui_session";
+    const fs::path outputPath = root.parent_path() / "cxscript_runs" /
+      "manual_torch_ui" / runId / caseId;
+    const std::string requestContext = caseId + "|" +
+      inputPath.string() + "|" + outputPath.string();
+    m_parserDebugBridge.SetGlobalString(
+      "global_torch_request_context", requestContext);
+    result.log_lines.push_back(
+      "Torch UI request context: input=" + inputPath.string() +
+      " output=" + outputPath.string());
+  }
+  else
+  {
+    m_parserDebugBridge.RemoveGlobalString("global_torch_request_context");
   }
   // Semantic Flow and Manual Console must execute with the same external
   // input snapshot.  The editor Run button already performs this binding;

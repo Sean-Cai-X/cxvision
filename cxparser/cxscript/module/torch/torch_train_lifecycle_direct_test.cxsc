@@ -6,9 +6,7 @@ m_image.copyFromMat(global_matInput);
 int timeout_ms = 30000;
 
 m_task.settask("torch.train.segmentation.lifecycle_smoke.v1");
-m_task.setcase("N1_torch_train_lifecycle_smoke");
-m_task.setinputpath("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast/line_high_contrast_001.jpg");
-m_task.setoutputdir("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/N1_torch_train_lifecycle_smoke");
+m_task.setrequestcontext(global_torch_request_context);
 m_task.setdevice("cpu");
 m_task.settimeout(timeout_ms);
 

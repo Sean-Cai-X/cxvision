@@ -16,6 +16,7 @@ public:
     void setinputpath(const char* value);
     void settemplatepath(const char* value);
     void setoutputdir(const char* value);
+    void setrequestcontext(const char* value);
     void settimeout(int value);
 
     void run(void* image_object);

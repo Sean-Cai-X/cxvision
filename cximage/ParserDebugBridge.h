@@ -130,6 +130,7 @@ public:
   bool SetGlobalInt(const std::string& name, int value);
   bool SetGlobalDouble(const std::string& name, double value);
   bool SetGlobalString(const std::string& name, const std::string& value);
+  void RemoveGlobalString(const std::string& name);
   bool ApplyStatement(const std::string& statement);
   bool StageGlobalMatInput(const cv::Mat& image);
   bool SetGlobalMatInput(const cv::Mat& image);
@@ -157,6 +158,7 @@ private:
   CxParserRuntimeOwner* myOwner = nullptr;
   cv::Mat myGlobalMatInput;
   std::map<std::string, double> myGlobalNumericInputs;
+  std::map<std::string, std::string> myGlobalStringInputs;
   std::string myLastError;
   std::uint64_t myRuntimeResetSerial = 0;
   std::uint64_t myGlobalMatInputBoundSerial = 0;

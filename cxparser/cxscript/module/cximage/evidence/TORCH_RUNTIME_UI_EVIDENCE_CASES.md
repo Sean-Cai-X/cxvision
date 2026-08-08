@@ -16,6 +16,8 @@ This local Evidence Chain package gives the UI torch thread a stable image and c
 - output_root: `cxscript_runs/evidence/torch_runtime_ui`
 - owner: `testing UI torch thread`
 - scope: small local UI Evidence Chain validation only
+- UI category: declared by each case through `CxEvidenceChain_case_setcategory("Torch Evidence Candidates")`
+- UI group: declared by each case through `CxEvidenceChain_case_setgroup(...)`
 
 ## Cases
 
@@ -30,6 +32,7 @@ This local Evidence Chain package gives the UI torch thread a stable image and c
 ## Guardrails
 
 - These cases are local Evidence Chain cases; do not write remote code or remote evidence for this package.
+- New torch cases must be added in `torch_*.cxsc`; C++ must not hard-code concrete torch case names, model paths, objectives, or OK/NG rules.
 - The segmentation smoke case validates runtime/artifact plumbing, not semantic segmentation accuracy.
 - The detection case remains a CPU smoke route until the model/thread resolves the known weights/class compatibility issue.
 - The train lifecycle case is a tiny CPU route check only; it is not a full training quality acceptance case.

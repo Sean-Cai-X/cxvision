@@ -249,19 +249,14 @@ bool ParserDebugBridge::SetGlobalString(
   const std::string& name,
   const std::string& value)
 {
-  auto escape = [](const std::string& text) {
-    std::string out;
-    for (char ch : text)
-    {
-      if (ch == '\\') out += "\\\\";
-      else if (ch == '"') out += "\\\"";
-      else out.push_back(ch);
-    }
-    return out;
-  };
   const std::string fullName = CanonicalGlobalName(name);
-  const std::string quoted = "\"" + escape(value) + "\"";
-  return ApplyStatement(fullName + "=" + quoted + ";");
+  myGlobalStringInputs[fullName] = value;
+  return true;
+}
+
+void ParserDebugBridge::RemoveGlobalString(const std::string& name)
+{
+  myGlobalStringInputs.erase(CanonicalGlobalName(name));
 }
 
 bool ParserDebugBridge::ApplyStatement(const std::string& statement)
@@ -273,6 +268,28 @@ bool ParserDebugBridge::ApplyStatement(const std::string& statement)
 std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) const
 {
   std::string prepared = scriptText;
+
+  if (!myGlobalStringInputs.empty())
+  {
+    auto escape = [](const std::string& text) {
+      std::string out;
+      for (char ch : text)
+      {
+        if (ch == '\\') out += "\\\\";
+        else if (ch == '"') out += "\\\"";
+        else out.push_back(ch);
+      }
+      return out;
+    };
+
+    std::ostringstream prefix;
+    for (const auto& input : myGlobalStringInputs)
+    {
+      prefix << "string " << input.first << " = \""
+             << escape(input.second) << "\";\n";
+    }
+    prepared = prefix.str() + prepared;
+  }
 
   const std::string source = "global_matInput";
   const std::string runtimeName = "global_matInput";
@@ -470,6 +487,7 @@ void ParserDebugBridge::ClearGlobalInputs()
 {
   myGlobalMatInput.release();
   myGlobalNumericInputs.clear();
+  myGlobalStringInputs.clear();
   myGlobalMatInputBoundSerial = 0;
 }
 

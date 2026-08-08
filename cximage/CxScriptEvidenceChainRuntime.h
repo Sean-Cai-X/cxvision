@@ -17,6 +17,8 @@ struct CxScriptEvidenceCase
     std::string level;
     std::string case_role;
     std::string source_case_id;
+    std::string display_category;
+    std::string display_group;
     bool manual_review_required = true;
     bool promotion_candidate = false;
 };

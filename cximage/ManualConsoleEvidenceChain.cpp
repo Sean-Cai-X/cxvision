@@ -195,6 +195,17 @@ static bool HasCuratedFindGeometryCategoryOverridesLocal(
     return false;
 }
 
+static bool IsTorchEvidenceCandidateRowLocal(
+    const ScriptEvidenceThumb& thumb,
+    const std::string& groupLabel)
+{
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(thumb.tool);
+
+    return normalizedTool == "TorchTask" &&
+           thumb.evidence_category_override == "Torch Evidence Candidates";
+}
+
 static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
     const ManualTestContext& context,
     const ScriptEvidenceThumb& thumb,
@@ -232,8 +243,12 @@ static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
         return {2, "Defect"};
     if (categoryOverride == "Process Validation")
         return {3, "Process Validation"};
+    if (categoryOverride == "Torch Evidence Candidates")
+        return {5, "Torch Evidence Candidates"};
     if (categoryOverride == "Torch / Model Validation")
-        return {4, "Torch / Model Validation"};
+        return {6, "Torch / Model Validation"};
+    if (!categoryOverride.empty())
+        return {4, categoryOverride};
 
     const std::string key = BuildEvidenceClassificationKeyLocal(
         thumb.tool,
@@ -244,6 +259,11 @@ static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
         thumb.reason,
         thumb.parameter_summary);
 
+    if (IsTorchEvidenceCandidateRowLocal(thumb, groupLabel))
+        return {5, "Torch Evidence Candidates"};
+
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(thumb.tool);
     const bool isTorchLayer =
         key.find("torch") != std::string::npos ||
         key.find("find_segmentation") != std::string::npos ||
@@ -254,10 +274,11 @@ static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
         key.find("model") != std::string::npos;
 
     if (isTorchLayer)
-        return {4, "Torch / Model Validation"};
+        return {6, "Torch / Model Validation"};
 
-    const std::string normalizedTool =
-        NormalizeEvidenceToolTypeLocal(thumb.tool);
+    if (normalizedTool == "TorchTask")
+        return {6, "Torch / Model Validation"};
+
     const bool isCuratedFindGeometryTool =
         normalizedTool == "FindLine" || normalizedTool == "FindCircle" ||
         key.find("findline") != std::string::npos ||
@@ -2631,6 +2652,7 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             thumb.target_id = c.target_id;
             thumb.tool = NormalizeEvidenceToolTypeLocal(c.tool);
             thumb.parameter_summary = c.parameter_profile_id;
+            thumb.evidence_category_override = c.display_category;
             thumb.status = c.manual_review_required
                 ? "pending_human_review"
                 : "ready";
@@ -2657,14 +2679,16 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             if (HasEvidenceChainThumbIdentityLocal(context, thumb))
                 continue;
 
-            const std::string groupLabel = InferEvidenceChainToolBucketLocal(
-                thumb.tool,
-                thumb.script_id,
-                thumb.script_path,
-                thumb.tool.empty() ? chain.chain_name : thumb.tool,
-                thumb.status,
-                thumb.reason,
-                thumb.parameter_summary);
+            const std::string groupLabel = c.display_group.empty()
+                ? InferEvidenceChainToolBucketLocal(
+                    thumb.tool,
+                    thumb.script_id,
+                    thumb.script_path,
+                    thumb.tool.empty() ? chain.chain_name : thumb.tool,
+                    thumb.status,
+                    thumb.reason,
+                    thumb.parameter_summary)
+                : c.display_group;
             findGroup(groupLabel).thumbs.push_back(std::move(thumb));
             ++appended;
         }
@@ -5328,6 +5352,17 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
             thumb.status + " " + thumb.reason + " " + thumb.parameter_summary + " " +
             group.label);
 
+        if (!thumb.evidence_category_override.empty() && !group.label.empty())
+            return {0, group.label};
+
+        if (IsTorchEvidenceCandidateRowLocal(thumb, group.label))
+        {
+            const std::string label = group.label.empty()
+                ? std::string("Torch Evidence Candidate Case")
+                : group.label;
+            return {0, label};
+        }
+
         if (key.find("find_segmentation") != std::string::npos ||
             key.find("findsegmentation") != std::string::npos ||
             key.find("edgesam") != std::string::npos)
@@ -5414,7 +5449,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
         { "To Verify", 1, {} },
         { "Defect", 2, {} },
         { "Process Validation", 3, {} },
-        { "Torch / Model Validation", 4, {} }
+        { "Torch Evidence Candidates", 5, {} },
+        { "Torch / Model Validation", 6, {} }
     };
 
     auto findOrCreateMajor =
@@ -5912,6 +5948,8 @@ void ViewController::DrawOneScriptEvidenceRow(
                 moveToCategory("Defect", "defect", "manual category: defect");
             if (ImGui::MenuItem("Process Validation"))
                 moveToCategory("Process Validation", "process_validation", "manual category: process validation");
+            if (ImGui::MenuItem("Torch Evidence Candidates"))
+                moveToCategory("Torch Evidence Candidates", "torch_evidence_candidate", "manual category: torch evidence candidate");
             if (ImGui::MenuItem("Torch / Model Validation"))
                 moveToCategory("Torch / Model Validation", "model_validation", "manual category: model validation");
 
