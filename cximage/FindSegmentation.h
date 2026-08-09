@@ -39,6 +39,8 @@ public:
     const std::string& model_path() const;
     const std::string& device() const;
     const FindSegmentationResult& result() const;
+    const FindSegmentationInputSnapshot& lastinputrequest() const;
+    const FindSegmentationBackendDiagnosticSnapshot& backenddiagnostic() const;
     void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
 
 public:
@@ -68,4 +70,6 @@ private:
     int m_py = 0;
 
     FindSegmentationResult m_result;
+    FindSegmentationInputSnapshot m_last_input_request;
+    FindSegmentationBackendDiagnosticSnapshot m_backend_diagnostic;
 };

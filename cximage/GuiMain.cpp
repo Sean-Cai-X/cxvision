@@ -16,6 +16,7 @@
 #include "CxScriptSuiteRuntime.h"
 #include "CxParamRegressionRuntime.h"
 #include "CxParamProbeRunner.h"
+#include "metrology_analytics/CxMetrologyAnalyticsSmoke.h"
 
 #if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
 #include "CxScriptStage25Runner.h"
@@ -32,6 +33,53 @@
 
 namespace
 {
+bool HasCliArg(int argc, char** argv, const std::string& name)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        if (argv[i] != nullptr && name == argv[i])
+            return true;
+    }
+    return false;
+}
+
+bool TryGetCliValue(int argc, char** argv, const std::string& name, std::string& value)
+{
+    const std::string prefix = name + "=";
+    for (int i = 1; i < argc; ++i)
+    {
+        if (argv[i] == nullptr)
+            continue;
+        const std::string arg = argv[i];
+        if (arg == name)
+        {
+            if (i + 1 < argc && argv[i + 1] != nullptr)
+            {
+                value = argv[i + 1];
+                return true;
+            }
+            value.clear();
+            return true;
+        }
+        if (arg.rfind(prefix, 0) == 0)
+        {
+            value = arg.substr(prefix.size());
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string CliValueAfter(int argc, char** argv, const std::string& name)
+{
+    for (int i = 1; i + 1 < argc; ++i)
+    {
+        if (argv[i] != nullptr && name == argv[i] && argv[i + 1] != nullptr)
+            return argv[i + 1];
+    }
+    return std::string();
+}
+
 std::string PipelineJsonEscape(const std::string& text)
 {
     std::string out;
@@ -610,6 +658,180 @@ bool RunShapeInteractionSmokeCli(
 {
     ViewController viewer;
     return viewer.RunShapeInteractionSmoke(manifest_path, suite_path, image_manifest_path, out_dir, result);
+}
+
+int RunMetrologyAnalyticsSmokeCli(int argc, char** argv)
+{
+    const std::string outArg = CliValueAfter(argc, argv, "--out");
+    const std::filesystem::path outDir = outArg.empty()
+        ? std::filesystem::path("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/metrology_analytics/smoke_default")
+        : std::filesystem::path(outArg);
+
+    cxvision::metrology_analytics::CxMetrologyAnalyticsSmokeResult result;
+    std::string reason;
+    const bool ok = cxvision::metrology_analytics::RunMetrologyAnalyticsSmoke(outDir, result, reason);
+
+    std::cout << "metrology_analytics_smoke_ok=" << ((ok && result.fail_count == 0) ? "true" : "false") << "\n";
+    std::cout << "total_cases=" << result.total_cases << "\n";
+    std::cout << "pass_count=" << result.pass_count << "\n";
+    std::cout << "fail_count=" << result.fail_count << "\n";
+    std::cout << "summary=" << result.summary_path.string() << "\n";
+    std::cout << "report=" << result.report_path.string() << "\n";
+    if (!reason.empty())
+        std::cout << "reason=" << reason << "\n";
+
+    return (ok && result.fail_count == 0) ? 0 : 1;
+}
+
+int RunMetrologyAnalyticsSelfTestCli(int argc, char** argv, const std::string& filter)
+{
+    const std::string outArg = CliValueAfter(argc, argv, "--out");
+    const std::filesystem::path outDir = outArg.empty()
+        ? std::filesystem::path("D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/metrology_analytics/selftest_default")
+        : std::filesystem::path(outArg);
+
+    cxvision::metrology_analytics::CxMetrologyAnalyticsSmokeResult smoke;
+    std::string reason;
+    const bool smokeOk = cxvision::metrology_analytics::RunMetrologyAnalyticsSmoke(outDir, smoke, reason);
+
+    const std::string prefix = "analytics.";
+    std::string selector;
+    bool namespaceSupported = false;
+    bool selectAll = false;
+    if (filter == "analytics" || filter == "analytics.*")
+    {
+        namespaceSupported = true;
+        selectAll = true;
+    }
+    else if (filter.rfind(prefix, 0) == 0)
+    {
+        namespaceSupported = true;
+        selector = filter.substr(prefix.size());
+        selectAll = selector.empty() || selector == "*";
+    }
+
+    std::vector<cxvision::metrology_analytics::CxMetrologyAnalyticsSmokeCaseResult> selected;
+    if (namespaceSupported && smokeOk)
+    {
+        for (const auto& c : smoke.cases)
+        {
+            if (selectAll || c.case_id == selector)
+                selected.push_back(c);
+        }
+    }
+
+    int selectedPass = 0;
+    int selectedFail = 0;
+    for (const auto& c : selected)
+    {
+        if (c.pass)
+            ++selectedPass;
+        else
+            ++selectedFail;
+    }
+
+    std::string finalCode;
+    if (!namespaceSupported)
+    {
+        finalCode = "SELFTEST_NAMESPACE_NOT_HANDLED";
+        if (reason.empty())
+            reason = "selftest namespace is not analytics: " + filter;
+    }
+    else if (!smokeOk)
+    {
+        finalCode = "ANALYTICS_SELFTEST_FAIL";
+        if (reason.empty())
+            reason = "analytics smoke failed";
+    }
+    else if (selected.empty())
+    {
+        finalCode = "ANALYTICS_SELFTEST_NO_MATCH";
+        reason = "no analytics selftest case matched filter: " + filter;
+    }
+    else if (selectedFail == 0)
+    {
+        finalCode = "ANALYTICS_SELFTEST_PASS";
+        reason = "analytics selftest filter passed";
+    }
+    else
+    {
+        finalCode = "ANALYTICS_SELFTEST_FAIL";
+        reason = "analytics selftest filter has failed cases";
+    }
+
+    std::filesystem::create_directories(outDir);
+    const std::filesystem::path summaryPath = outDir / "analytics_selftest_summary.json";
+    const std::filesystem::path reportPath = outDir / "analytics_selftest_report.md";
+
+    {
+        std::ofstream f(summaryPath, std::ios::binary | std::ios::trunc);
+        f << "{\n"
+          << "  \"schema\": \"cxvision.analytics_selftest.v1\",\n"
+          << "  \"filter\": \"" << PipelineJsonEscape(filter) << "\",\n"
+          << "  \"namespace_supported\": " << (namespaceSupported ? "true" : "false") << ",\n"
+          << "  \"selected_case_count\": " << selected.size() << ",\n"
+          << "  \"pass_count\": " << selectedPass << ",\n"
+          << "  \"fail_count\": " << selectedFail << ",\n"
+          << "  \"backing_smoke_summary\": \"" << PipelineJsonEscape(smoke.summary_path.string()) << "\",\n"
+          << "  \"backing_smoke_report\": \"" << PipelineJsonEscape(smoke.report_path.string()) << "\",\n"
+          << "  \"final_code\": \"" << PipelineJsonEscape(finalCode) << "\",\n"
+          << "  \"reason\": \"" << PipelineJsonEscape(reason) << "\",\n"
+          << "  \"cases\": [\n";
+        for (std::size_t i = 0; i < selected.size(); ++i)
+        {
+            const auto& c = selected[i];
+            f << "    {\"case_id\":\"" << PipelineJsonEscape(c.case_id)
+              << "\", \"category\":\"" << PipelineJsonEscape(c.category)
+              << "\", \"pass\":" << (c.pass ? "true" : "false")
+              << ", \"observed\":" << c.observed
+              << ", \"expected\":" << c.expected
+              << ", \"tolerance\":" << c.tolerance
+              << ", \"reason\":\"" << PipelineJsonEscape(c.reason) << "\"}"
+              << (i + 1 < selected.size() ? "," : "") << "\n";
+        }
+        f << "  ]\n"
+          << "}\n";
+    }
+
+    {
+        std::ofstream f(reportPath, std::ios::binary | std::ios::trunc);
+        f << "# Analytics SelfTest Report\n\n";
+        f << "- filter: " << filter << "\n";
+        f << "- selected_case_count: " << selected.size() << "\n";
+        f << "- pass_count: " << selectedPass << "\n";
+        f << "- fail_count: " << selectedFail << "\n";
+        f << "- final_code: " << finalCode << "\n";
+        f << "- reason: " << reason << "\n";
+        f << "- backing_smoke_summary: " << smoke.summary_path.string() << "\n";
+        f << "- backing_smoke_report: " << smoke.report_path.string() << "\n\n";
+        f << "| Case | Category | Pass | Observed | Expected | Tol | Reason |\n";
+        f << "|---|---|---:|---:|---:|---:|---|\n";
+        for (const auto& c : selected)
+        {
+            f << "| " << c.case_id
+              << " | " << c.category
+              << " | " << (c.pass ? 1 : 0)
+              << " | " << c.observed
+              << " | " << c.expected
+              << " | " << c.tolerance
+              << " | " << c.reason
+              << " |\n";
+        }
+    }
+
+    std::cout << "analytics_selftest_ok="
+              << (finalCode == "ANALYTICS_SELFTEST_PASS" ? "true" : "false") << "\n";
+    std::cout << "filter=" << filter << "\n";
+    std::cout << "selected_case_count=" << selected.size() << "\n";
+    std::cout << "pass_count=" << selectedPass << "\n";
+    std::cout << "fail_count=" << selectedFail << "\n";
+    std::cout << "summary=" << summaryPath.string() << "\n";
+    std::cout << "report=" << reportPath.string() << "\n";
+    std::cout << "final_code=" << finalCode << "\n";
+    if (!reason.empty())
+        std::cout << "reason=" << reason << "\n";
+
+    return finalCode == "ANALYTICS_SELFTEST_PASS" ? 0 : 2;
 }
 
 int RunEvidenceLockPipelineCli(const EvidenceChainSelfTestCliOptions& options)
@@ -2110,6 +2332,27 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions& options)
 
 int RunCxVisionApplication(int argc, char** argv)
 {
+    if (HasCliArg(argc, argv, "--metrology-analytics-smoke"))
+    {
+        return RunMetrologyAnalyticsSmokeCli(argc, argv);
+    }
+
+    std::string selftestFilter;
+    if (TryGetCliValue(argc, argv, "--selftest", selftestFilter))
+    {
+        if (selftestFilter == "analytics" ||
+            selftestFilter == "analytics.*" ||
+            selftestFilter.rfind("analytics.", 0) == 0)
+        {
+            return RunMetrologyAnalyticsSelfTestCli(argc, argv, selftestFilter);
+        }
+        std::cout << "selftest_ok=false\n";
+        std::cout << "filter=" << selftestFilter << "\n";
+        std::cout << "final_code=SELFTEST_NAMESPACE_NOT_HANDLED\n";
+        std::cout << "reason=unsupported selftest namespace; analytics runner was not invoked\n";
+        return 2;
+    }
+
     EvidenceChainSelfTestCliOptions evidenceOptions;
     ParseEvidenceChainSelfTestArgs(argc, argv, evidenceOptions);
 

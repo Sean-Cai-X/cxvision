@@ -6,6 +6,7 @@
 #include "CxParamRegressionRuntime.h"
 #include "CxScriptHeadlessRuntime.h"
 #include "CxEvidenceSelfTestRuntime.h"
+#include "metrology_analytics/tests/ManualConsoleAnalyticsSmoke.h"
 
 #include <string>
 #include <vector>
@@ -688,6 +689,66 @@ struct ManualParamRegressionState
   std::vector<std::string> exported_files;
 };
 
+struct ManualMetrologyUiState
+{
+  bool enabled = false;
+  int active_tab = 0;
+
+  // S1 behavior capture / scan profile preview.
+  bool show_scan_profile = false;
+  int scan_profile_source = 0; // 0 runtime, 1 gauge preview, 2 saved evidence
+  int scan_profile_max_lines = 256;
+  int scan_profile_sample_stride = 1;
+  int scan_profile_edge_band_index = 0;
+  int scan_profile_smoothing_radius = 1;
+
+  // Candidate and feature-map review.
+  bool show_edge_band_candidates = false;
+  int candidate_rank = 0;
+  int candidate_min_gradient = 8;
+  int candidate_max_width = 80;
+  int feature_map_mode = 0; // 0 gradient, 1 connected component, 2 confidence
+  int feature_map_normalize = 1;
+
+  // Surface field / area / statistics.
+  int surface_source = 0; // 0 image-gray, 1 segmentation-mask, 2 synthetic
+  int surface_width = 256;
+  int surface_height = 256;
+  int surface_stride = 1;
+  int surface_z_channel = 0;
+  int surface_area_method = 1; // 1 four-triangle fan
+  int histogram_bins = 256;
+  int histogram_mode = 0; // 0 ADF, 1 BCDF, 2 both
+  bool histogram_log_scale = false;
+
+  // Plane correction.
+  bool enable_plane_correction = false;
+  int plane_method = 1; // 0 three-points, 1 OLS, 2 Huber
+  int plane_reference_mode = 0; // 0 whole surface, 1 ROI, 2 mask
+  int plane_huber_delta_permille = 100;
+
+  // Physical unit conversion and Z perturbation.
+  int x_unit = 2; // 0 pixel, 1 nm, 2 um, 3 mm
+  int y_unit = 2;
+  int z_unit = 2;
+  int x_scale_permille = 1000;
+  int y_scale_permille = 1000;
+  int z_scale_permille = 1000;
+  bool enable_gaussian_z = false;
+  int gaussian_z_sigma_permille = 0;
+  int gaussian_seed = 42;
+
+  // ISO 1D roughness.
+  bool enable_iso_roughness_1d = false;
+  int roughness_profile_axis = 0; // 0 x, 1 y, 2 selected line
+  int roughness_profile_index = 0;
+  int roughness_cutoff_px = 0;
+  int roughness_bins = 1024;
+
+  unsigned long long edit_revision = 0;
+  std::string last_summary;
+};
+
 struct EvidenceChainThumb
 {
     std::string case_id;
@@ -1020,6 +1081,9 @@ struct ManualTestContext
   int manual_elements_count = 0;
   ManualGaugeState current_gauge;
   ManualParamRegressionState param_regression;
+  ManualMetrologyUiState metrology_ui;
+  cxvision::metrology_analytics::ManualConsoleAnalyticsSmokeUiState
+      analytics_smoke_ui;
 
   GaugeHandleType active_gauge_handle = GaugeHandleType::None;
   float gauge_drag_start_x = 0.0f;

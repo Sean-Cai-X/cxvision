@@ -6439,6 +6439,10 @@ void ViewController::mainloop()
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawKeyParameterControlsWindow");
              drawKeyParameterControlsWindow();
+             SetCxCrashBreadcrumb("mainloop:drawMetrologyAnalyticsSmokeWindow");
+             if (logThisFrame)
+                 CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawMetrologyAnalyticsSmokeWindow");
+             drawMetrologyAnalyticsSmokeWindow();
              SetCxCrashBreadcrumb("mainloop:drawTorchRuntimeEvidenceWindow");
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawTorchRuntimeEvidenceWindow");

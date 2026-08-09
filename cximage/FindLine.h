@@ -515,6 +515,10 @@ public:
     {
         return m_lastMeasureInputDebug;
     }
+    const FindLineMeasureGeometryRequest& measuregeometryrequest() const
+    {
+        return m_measure_geometry_request;
+    }
     void setmeasurefallback(int mode);
     int getmeasurefallback() const
     {

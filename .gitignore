@@ -36,3 +36,13 @@ AGENTS.md
 AGENTS.md.bak_*
 AGENTS.md
 AGENTS.md.bak_*
+/Next2.txt
+/Next.txt
+/Next3.txt
+/Next3_1.txt
+/build_cxcalibration_last.log
+/build_cxcalibration_verify.log
+/build_measurement_s0_s1.log
+/build_next3_1_metrology_analytics.log
+/cximage/CxCalibrationXXX.cpp
+/cximage/CxCalibrationXXX.h

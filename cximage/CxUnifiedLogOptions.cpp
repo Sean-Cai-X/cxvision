@@ -150,6 +150,17 @@ std::string DetectCxVisionRunMode(int argc, char** argv)
             return "frame_probe";
         if (arg == "--shape-interaction-smoke")
             return "shape_interaction";
+        if (arg == "--metrology-analytics-smoke")
+            return "metrology_analytics";
+        if (arg == "--selftest" && i + 1 < argc && argv[i + 1] != nullptr)
+        {
+            const std::string filter = argv[i + 1];
+            if (filter == "analytics" || filter == "analytics.*" ||
+                filter.rfind("analytics.", 0) == 0)
+                return "analytics_selftest";
+        }
+        if (arg.rfind("--selftest=analytics", 0) == 0)
+            return "analytics_selftest";
         if (arg == "--contract")
             return "contract";
         if (arg == "--tool-display")

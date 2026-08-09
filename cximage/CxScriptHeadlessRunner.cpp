@@ -9,6 +9,7 @@
 #include "CxScriptRuntimeCaptureSmoke.h"
 #include "CxScriptGlobalValueSet.h"
 #include "CxScriptCasePackageWriter.h"
+#include "measurement_semantics/CxMeasurementSemanticEvidenceWriter.h"
 
 #include <sstream>
 #include <fstream>
@@ -1633,6 +1634,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     {
         result.failure_stage = "summary_export";
         result.reason = reason;
+    }
+
+    std::string measurement_semantic_reason;
+    if (!WriteMeasurementSemanticSidecars(
+            capture,
+            effective_options,
+            output_dir,
+            measurement_semantic_reason))
+    {
+        if (result.reason.empty())
+            result.reason = measurement_semantic_reason;
     }
 
     std::string branch_evidence_reason;

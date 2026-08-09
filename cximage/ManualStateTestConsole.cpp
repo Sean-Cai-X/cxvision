@@ -1636,6 +1636,23 @@ void ViewController::drawKeyParameterControlsWindow()
     ImGui::End();
 }
 
+void ViewController::drawMetrologyAnalyticsSmokeWindow()
+{
+    ImGui::SetNextWindowPos(ImVec2(840, 1060), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(760, 520), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Analytics Smoke / Metrology Bridge", nullptr,
+                      ImGuiWindowFlags_NoCollapse))
+    {
+        ImGui::End();
+        return;
+    }
+
+    cxvision::metrology_analytics::DrawManualConsoleAnalyticsSmokePanel(
+        m_manualTest.analytics_smoke_ui);
+
+    ImGui::End();
+}
+
 void ViewController::drawTorchRuntimeEvidenceWindow()
 {
     ImGui::SetNextWindowPos(ImVec2(1380, 8), ImGuiCond_FirstUseEver);

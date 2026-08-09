@@ -299,6 +299,14 @@ public:
     {
         return m_lastMeasureGeometryDebug;
     }
+    const FindCircleMeasureGeometryRequest& measuregeometryrequest() const
+    {
+        return m_measure_geometry_request;
+    }
+    const FindCircleMeasureGeometryRequest& lastmeasureinputrequest() const
+    {
+        return m_last_measure_input_request;
+    }
     GeomAdaptor_Curve GetCurve(gp_Pnt center_p, Standard_Real radius);
 
     gp_Pnt FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint);

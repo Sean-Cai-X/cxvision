@@ -6,6 +6,7 @@
 #include "CxParameterProfileRuntime.h"
 #include "CxScriptCasePackageWriter.h"
 #include "CxUnifiedLog.h"
+#include "metrology_analytics/CxMetrologyUiGlobals.h"
 
 #include <algorithm>
 #include <cctype>
@@ -3286,6 +3287,274 @@ static void DrawFindLineScanSemanticsPanel(ManualTestContext& context)
               object->line_measure_threshold);
 }
 
+static bool DrawMetrologySliderIntLocal(
+    const char* label,
+    int& value,
+    int minValue,
+    int maxValue,
+    const char* hint = nullptr)
+{
+  bool edited = false;
+  value = std::max(minValue, std::min(maxValue, value));
+  ImGui::TextUnformatted(label);
+  ImGui::SameLine(170.0f);
+  ImGui::SetNextItemWidth(190.0f);
+  edited |= ImGui::SliderInt((std::string("##metrology_slider_") + label).c_str(),
+                             &value,
+                             minValue,
+                             maxValue);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(80.0f);
+  edited |= ImGui::InputInt((std::string("##metrology_input_") + label).c_str(),
+                            &value);
+  value = std::max(minValue, std::min(maxValue, value));
+  if (hint != nullptr && hint[0] != '\0')
+  {
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", hint);
+  }
+  return edited;
+}
+
+static bool DrawMetrologyComboLocal(
+    const char* label,
+    int& value,
+    const char* const* items,
+    int itemCount)
+{
+  bool edited = false;
+  value = std::max(0, std::min(itemCount - 1, value));
+  ImGui::TextUnformatted(label);
+  ImGui::SameLine(170.0f);
+  ImGui::SetNextItemWidth(220.0f);
+  edited |= ImGui::Combo((std::string("##metrology_combo_") + label).c_str(),
+                         &value,
+                         items,
+                         itemCount);
+  return edited;
+}
+
+static cxvision::metrology_analytics::CxMetrologyUiGlobalFields
+BuildMetrologyUiGlobalFieldsLocal(const ManualMetrologyUiState& m)
+{
+  cxvision::metrology_analytics::CxMetrologyUiGlobalFields fields;
+  fields.enabled = m.enabled;
+  fields.active_tab = m.active_tab;
+
+  fields.show_scan_profile = m.show_scan_profile;
+  fields.scan_profile_source = m.scan_profile_source;
+  fields.scan_profile_max_lines = m.scan_profile_max_lines;
+  fields.scan_profile_sample_stride = m.scan_profile_sample_stride;
+  fields.scan_profile_edge_band_index = m.scan_profile_edge_band_index;
+  fields.scan_profile_smoothing_radius = m.scan_profile_smoothing_radius;
+
+  fields.show_edge_band_candidates = m.show_edge_band_candidates;
+  fields.candidate_rank = m.candidate_rank;
+  fields.candidate_min_gradient = m.candidate_min_gradient;
+  fields.candidate_max_width = m.candidate_max_width;
+  fields.feature_map_mode = m.feature_map_mode;
+  fields.feature_map_normalize = m.feature_map_normalize;
+
+  fields.surface_source = m.surface_source;
+  fields.surface_width = m.surface_width;
+  fields.surface_height = m.surface_height;
+  fields.surface_stride = m.surface_stride;
+  fields.surface_z_channel = m.surface_z_channel;
+  fields.surface_area_method = m.surface_area_method;
+  fields.histogram_bins = m.histogram_bins;
+  fields.histogram_mode = m.histogram_mode;
+  fields.histogram_log_scale = m.histogram_log_scale;
+
+  fields.enable_plane_correction = m.enable_plane_correction;
+  fields.plane_method = m.plane_method;
+  fields.plane_reference_mode = m.plane_reference_mode;
+  fields.plane_huber_delta_permille = m.plane_huber_delta_permille;
+
+  fields.x_unit = m.x_unit;
+  fields.y_unit = m.y_unit;
+  fields.z_unit = m.z_unit;
+  fields.x_scale_permille = m.x_scale_permille;
+  fields.y_scale_permille = m.y_scale_permille;
+  fields.z_scale_permille = m.z_scale_permille;
+  fields.enable_gaussian_z = m.enable_gaussian_z;
+  fields.gaussian_z_sigma_permille = m.gaussian_z_sigma_permille;
+  fields.gaussian_seed = m.gaussian_seed;
+
+  fields.enable_iso_roughness_1d = m.enable_iso_roughness_1d;
+  fields.roughness_profile_axis = m.roughness_profile_axis;
+  fields.roughness_profile_index = m.roughness_profile_index;
+  fields.roughness_cutoff_px = m.roughness_cutoff_px;
+  fields.roughness_bins = m.roughness_bins;
+  return fields;
+}
+
+static void InjectMetrologyUiGlobals(ManualTestContext& context)
+{
+  const auto fields = BuildMetrologyUiGlobalFieldsLocal(context.metrology_ui);
+  for (const auto& item :
+       cxvision::metrology_analytics::BuildMetrologyUiGlobalSnapshot(fields))
+  {
+    InjectManualGaugeInt(context, item.name, item.value);
+  }
+}
+
+static std::string BuildMetrologyUiSummary(const ManualMetrologyUiState& m)
+{
+  return cxvision::metrology_analytics::BuildMetrologyUiGlobalSummary(
+      BuildMetrologyUiGlobalFieldsLocal(m));
+}
+
+static bool DrawMetrologyExtensionPanel(ManualTestContext& context)
+{
+  ManualMetrologyUiState& m = context.metrology_ui;
+  bool edited = false;
+
+  ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
+  if (!ImGui::CollapsingHeader("Metrology Extension / Surface Analytics"))
+    return false;
+
+  ImGui::TextWrapped(
+      "UI-only parameter surface for Next3 analytics. Values are injected as global_metrology_*; runtime binding remains pending until scripts/Headless consume them.");
+  edited |= ImGui::Checkbox("Enable metrology extension", &m.enabled);
+  ImGui::SameLine();
+  ImGui::TextDisabled("No PASS is inferred from this panel.");
+
+  if (ImGui::BeginTabBar("metrology_extension_tabs"))
+  {
+    if (ImGui::BeginTabItem("Scan Profile"))
+    {
+      m.active_tab = 0;
+      static const char* sources[] = {"runtime snapshot", "gauge preview", "saved evidence"};
+      edited |= ImGui::Checkbox("Show scan profile overlay", &m.show_scan_profile);
+      edited |= DrawMetrologyComboLocal("profile source", m.scan_profile_source, sources, IM_ARRAYSIZE(sources));
+      edited |= DrawMetrologySliderIntLocal("max scan lines", m.scan_profile_max_lines, 1, 4096);
+      edited |= DrawMetrologySliderIntLocal("sample stride", m.scan_profile_sample_stride, 1, 64);
+      edited |= DrawMetrologySliderIntLocal("edge band index", m.scan_profile_edge_band_index, 0, 32);
+      edited |= DrawMetrologySliderIntLocal("smoothing radius", m.scan_profile_smoothing_radius, 0, 32);
+      ImGui::TextDisabled("Expected source: FindLine/FindCircle actual scan diagnostics, not display-generated ticks.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Candidate / Feature"))
+    {
+      m.active_tab = 1;
+      static const char* featureModes[] = {"gradient", "component", "confidence"};
+      edited |= ImGui::Checkbox("Show EdgeBandCandidate", &m.show_edge_band_candidates);
+      edited |= DrawMetrologySliderIntLocal("candidate rank", m.candidate_rank, 0, 64);
+      edited |= DrawMetrologySliderIntLocal("min gradient", m.candidate_min_gradient, 0, 255);
+      edited |= DrawMetrologySliderIntLocal("max band width", m.candidate_max_width, 1, 1024);
+      edited |= DrawMetrologyComboLocal("feature map", m.feature_map_mode, featureModes, IM_ARRAYSIZE(featureModes));
+      bool normalize = m.feature_map_normalize != 0;
+      if (ImGui::Checkbox("normalize feature map", &normalize))
+      {
+        m.feature_map_normalize = normalize ? 1 : 0;
+        edited = true;
+      }
+      ImGui::TextDisabled("Feature map is a review surface. It must not replace algorithm result points.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Surface Data"))
+    {
+      m.active_tab = 2;
+      static const char* surfaceSources[] = {"image gray", "segmentation mask", "synthetic"};
+      edited |= DrawMetrologyComboLocal("surface source", m.surface_source, surfaceSources, IM_ARRAYSIZE(surfaceSources));
+      edited |= DrawMetrologySliderIntLocal("surface width", m.surface_width, 1, 8192);
+      edited |= DrawMetrologySliderIntLocal("surface height", m.surface_height, 1, 8192);
+      edited |= DrawMetrologySliderIntLocal("surface stride", m.surface_stride, 1, 128);
+      edited |= DrawMetrologySliderIntLocal("z channel", m.surface_z_channel, 0, 16);
+      ImGui::TextDisabled("SurfaceField is value/snapshot data. UI does not own cv::Mat or parser objects.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Area"))
+    {
+      m.active_tab = 3;
+      static const char* areaMethods[] = {"projected only", "four-triangle fan", "reserved"};
+      edited |= DrawMetrologyComboLocal("area method", m.surface_area_method, areaMethods, IM_ARRAYSIZE(areaMethods));
+      ImGui::Text("Projected area depends on x/y unit scale. Surface area uses Z scale when bound.");
+      ImGui::TextDisabled("Current analytics implementation exists under cximage/metrology_analytics.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Stats / Histogram"))
+    {
+      m.active_tab = 4;
+      static const char* histModes[] = {"ADF", "BCDF", "ADF + BCDF"};
+      edited |= DrawMetrologySliderIntLocal("histogram bins", m.histogram_bins, 8, 4096);
+      edited |= DrawMetrologyComboLocal("histogram mode", m.histogram_mode, histModes, IM_ARRAYSIZE(histModes));
+      edited |= ImGui::Checkbox("log scale", &m.histogram_log_scale);
+      ImGui::TextDisabled("Basic stats: min/max/mean/rms/Ra/skewness/kurtosis. Histogram is parameterized here only.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Plane Level"))
+    {
+      m.active_tab = 5;
+      static const char* planeMethods[] = {"three points", "OLS", "Huber WLS"};
+      static const char* referenceModes[] = {"whole surface", "ROI", "mask"};
+      edited |= ImGui::Checkbox("enable plane correction", &m.enable_plane_correction);
+      edited |= DrawMetrologyComboLocal("plane method", m.plane_method, planeMethods, IM_ARRAYSIZE(planeMethods));
+      edited |= DrawMetrologyComboLocal("reference mode", m.plane_reference_mode, referenceModes, IM_ARRAYSIZE(referenceModes));
+      edited |= DrawMetrologySliderIntLocal("Huber delta permille", m.plane_huber_delta_permille, 1, 10000);
+      ImGui::TextDisabled("Plane correction changes analytic surface interpretation, not original image pixels.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Units + Z Noise"))
+    {
+      m.active_tab = 6;
+      static const char* units[] = {"pixel", "nm", "um", "mm"};
+      edited |= DrawMetrologyComboLocal("x unit", m.x_unit, units, IM_ARRAYSIZE(units));
+      edited |= DrawMetrologyComboLocal("y unit", m.y_unit, units, IM_ARRAYSIZE(units));
+      edited |= DrawMetrologyComboLocal("z unit", m.z_unit, units, IM_ARRAYSIZE(units));
+      edited |= DrawMetrologySliderIntLocal("x scale permille", m.x_scale_permille, 1, 100000);
+      edited |= DrawMetrologySliderIntLocal("y scale permille", m.y_scale_permille, 1, 100000);
+      edited |= DrawMetrologySliderIntLocal("z scale permille", m.z_scale_permille, 1, 100000);
+      edited |= ImGui::Checkbox("enable Gaussian Z perturbation", &m.enable_gaussian_z);
+      edited |= DrawMetrologySliderIntLocal("Z sigma permille", m.gaussian_z_sigma_permille, 0, 100000);
+      edited |= DrawMetrologySliderIntLocal("Gaussian seed", m.gaussian_seed, 0, 2147483647);
+      ImGui::TextDisabled("Z perturbation is an uncertainty probe; it must be traceable by seed.");
+      ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("ISO 1D Roughness"))
+    {
+      m.active_tab = 7;
+      static const char* axes[] = {"x profile", "y profile", "selected line"};
+      edited |= ImGui::Checkbox("enable ISO 1D roughness", &m.enable_iso_roughness_1d);
+      edited |= DrawMetrologyComboLocal("profile axis", m.roughness_profile_axis, axes, IM_ARRAYSIZE(axes));
+      edited |= DrawMetrologySliderIntLocal("profile index", m.roughness_profile_index, 0, 8192);
+      edited |= DrawMetrologySliderIntLocal("cutoff px", m.roughness_cutoff_px, 0, 8192);
+      edited |= DrawMetrologySliderIntLocal("roughness bins", m.roughness_bins, 8, 4096);
+      ImGui::TextDisabled("Outputs expected later: Ra / Rq / Rsk / Rku_std + ADF/BCDF.");
+      ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+  }
+
+  if (edited)
+  {
+    ++m.edit_revision;
+    InjectMetrologyUiGlobals(context);
+    m.last_summary = BuildMetrologyUiSummary(m);
+    context.debug_status = "METROLOGY_UI_EDITED";
+    context.debug_reason = m.last_summary;
+    CXLOG_INFO(
+        "KeyParameterControls",
+        "metrology_ui_edit",
+        "edited",
+        "revision=" + std::to_string(m.edit_revision) + " " + m.last_summary);
+  }
+
+  if (!m.last_summary.empty())
+    ImGui::TextWrapped("Last: %s", m.last_summary.c_str());
+  else
+    ImGui::TextDisabled("No metrology parameter edits yet.");
+
+  return edited;
+}
+
 void DrawKeyParameterControlPanel(ManualTestContext& context)
 {
   ManualGaugeState& gauge = context.current_gauge;
@@ -3760,6 +4029,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       }
       ImGui::PopID();
   }
+
+  (void)DrawMetrologyExtensionPanel(context);
 
   if (gaugeEdited)
   {

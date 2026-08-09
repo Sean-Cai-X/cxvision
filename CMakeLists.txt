@@ -49,6 +49,19 @@ add_subdirectory("${GLFW_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/glfw")
 set(LIBTORCH_ROOT "D:/libtorch" CACHE PATH "LibTorch root")
 add_subdirectory("libtorch_module" "${CMAKE_CURRENT_BINARY_DIR}/_deps/libtorch_module")
 
+set(CXVISION_EIGEN3_INCLUDE_DIR
+  "D:/Codex-WorkDir/Sean_WorkDir/analysis_workspace/eigen-3.4.0"
+  CACHE PATH "Local Eigen 3 include directory for CxCalibration"
+)
+set(CXVISION_ALGLIB_INCLUDE_DIR
+  "D:/Codex-WorkDir/Sean_WorkDir/analysis_workspace/alglib-cpp/src"
+  CACHE PATH "Local ALGLIB include directory for CxCalibration"
+)
+option(CXVISION_ENABLE_FULL_CXCALIBRATION_LEGACY
+  "Build the legacy full CxCalibration implementation. Off by default until its external Calibration.h/global dependencies are standardized."
+  OFF
+)
+
 set(CXIMAGE_CORE_SOURCES
   cximage/GuiMain.cpp
   cximage/ManualStateTestConsole.cpp
@@ -88,7 +101,22 @@ set(CXIMAGE_CORE_SOURCES
   cximage/ParserClass.cpp
   cximage/CxScriptImagePreflight.cpp
   cximage/CircleRingGauge.cpp
+  cximage/CxCalibration.cpp
   cximage/CxCoreBoundary.cpp
+  cximage/measurement_semantics/CxMeasurementSemanticEvidenceWriter.cpp
+  cximage/metrology_analytics/CxPhysUnit.cpp
+  cximage/metrology_analytics/CxSurfaceField.cpp
+  cximage/metrology_analytics/CxSyntheticSurfaceFactory.cpp
+  cximage/metrology_analytics/CxSurfaceAreas.cpp
+  cximage/metrology_analytics/CxSurfaceBasicStats.cpp
+  cximage/metrology_analytics/CxSurfaceLevelPlane.cpp
+  cximage/metrology_analytics/CxSurfaceUnitConversion.cpp
+  cximage/metrology_analytics/CxRoughness1D.cpp
+  cximage/metrology_analytics/CxMetrologyUiGlobals.cpp
+  cximage/metrology_analytics/CxAnalyticsObservationBridgeDraft.cpp
+  cximage/metrology_analytics/CxMetrologyReferenceReplay.cpp
+  cximage/metrology_analytics/tests/ManualConsoleAnalyticsSmoke.cpp
+  cximage/metrology_analytics/CxMetrologyAnalyticsSmoke.cpp
   cximage/RegionPatternNet.cpp
   cximage/GridPatternClassNet.cpp
   cximage/FormfitFitMethod.cpp
@@ -249,6 +277,32 @@ target_include_directories(cxvision_imgui_acceptance PRIVATE
   "${OCCT_ROOT}/inc"
   ${OpenCV_INCLUDE_DIRS}
 )
+
+if(EXISTS "${CXVISION_EIGEN3_INCLUDE_DIR}/Eigen/Dense")
+  target_include_directories(cxvision_imgui_acceptance PRIVATE
+    "${CXVISION_EIGEN3_INCLUDE_DIR}"
+  )
+else()
+  message(WARNING "CXVISION_EIGEN3_INCLUDE_DIR does not contain Eigen/Dense; CxCalibration legacy implementation will use the minimal compile boundary.")
+endif()
+
+if(EXISTS "${CXVISION_ALGLIB_INCLUDE_DIR}/statistics.h")
+  target_include_directories(cxvision_imgui_acceptance PRIVATE
+    "${CXVISION_ALGLIB_INCLUDE_DIR}"
+  )
+else()
+  message(WARNING "CXVISION_ALGLIB_INCLUDE_DIR does not contain statistics.h; CxCalibration legacy implementation may not compile.")
+endif()
+
+if(CXVISION_ENABLE_FULL_CXCALIBRATION_LEGACY)
+  target_compile_definitions(cxvision_imgui_acceptance PRIVATE
+    CXVISION_ENABLE_FULL_CXCALIBRATION_LEGACY=1
+  )
+else()
+  target_compile_definitions(cxvision_imgui_acceptance PRIVATE
+    CXVISION_ENABLE_FULL_CXCALIBRATION_LEGACY=0
+  )
+endif()
 
 target_link_directories(cxvision_imgui_acceptance PRIVATE
   "${OCCT_ROOT}/win64/vc14/lib"

@@ -66,11 +66,24 @@ void FindSegmentation::segment(void* image)
 {
     std::cout << "[FindSegmentation] segment begin image=" << image << "\n" << std::flush;
 
+    m_last_input_request = FindSegmentationInputSnapshot();
+    m_backend_diagnostic = FindSegmentationBackendDiagnosticSnapshot();
+    m_last_input_request.backend = m_backend;
+    m_last_input_request.model_path = m_model_path;
+    m_last_input_request.device = m_device;
+    m_last_input_request.threshold = m_threshold;
+    m_last_input_request.mode = m_mode;
+    m_backend_diagnostic.backend = m_backend;
+    m_backend_diagnostic.prompt_rect_ready = m_has_rect;
+    m_backend_diagnostic.prompt_point_ready = m_has_point;
+
     if (image == nullptr)
     {
         m_status = "failed";
         m_reason = "segment image pointer is null";
         m_result.ok = false;
+        m_backend_diagnostic.status = m_status;
+        m_backend_diagnostic.reason = m_reason;
         std::cout << "[FindSegmentation] segment end status=" << m_status << " reason=" << m_reason << "\n" << std::flush;
         return;
     }
@@ -83,9 +96,15 @@ void FindSegmentation::segment(void* image)
         m_status = "failed";
         m_reason = "segment input mat is empty";
         m_result.ok = false;
+        m_backend_diagnostic.status = m_status;
+        m_backend_diagnostic.reason = m_reason;
         std::cout << "[FindSegmentation] segment end status=" << m_status << " reason=" << m_reason << "\n" << std::flush;
         return;
     }
+
+    m_last_input_request.image_width = mat.cols;
+    m_last_input_request.image_height = mat.rows;
+    m_backend_diagnostic.image_ready = true;
 
     std::cout << "[FindSegmentation] backend=" << m_backend << "\n" << std::flush;
 
@@ -101,6 +120,11 @@ void FindSegmentation::segment(void* image)
     {
         input.has_rect = true;
         input.rect = cv::Rect(m_x0, m_y0, m_x1 - m_x0, m_y1 - m_y0);
+        m_last_input_request.has_rect = true;
+        m_last_input_request.rect_x = input.rect.x;
+        m_last_input_request.rect_y = input.rect.y;
+        m_last_input_request.rect_width = input.rect.width;
+        m_last_input_request.rect_height = input.rect.height;
         std::cout << "[FindSegmentation] prompt_rect state="
                   << m_x0 << "," << m_y0 << ","
                   << m_x1 << "," << m_y1
@@ -115,6 +139,9 @@ void FindSegmentation::segment(void* image)
     {
         input.has_point = true;
         input.point = cv::Point(m_px, m_py);
+        m_last_input_request.has_point = true;
+        m_last_input_request.point_x = input.point.x;
+        m_last_input_request.point_y = input.point.y;
     }
 
     std::string reason;
@@ -132,6 +159,16 @@ void FindSegmentation::segment(void* image)
 
     m_status = m_result.status;
     m_reason = m_result.reason;
+    m_backend_diagnostic.backend = m_result.backend.empty() ? m_backend : m_result.backend;
+    m_backend_diagnostic.backend_status = m_result.backend_status;
+    m_backend_diagnostic.status = m_result.status;
+    m_backend_diagnostic.reason = m_result.reason;
+    m_backend_diagnostic.mask_ready = !m_result.mask.empty() || !m_result.mask_ref.empty();
+    m_backend_diagnostic.overlay_ready = !m_result.overlay.empty() || !m_result.overlay_ref.empty();
+    m_backend_diagnostic.mask_width = m_result.mask_width;
+    m_backend_diagnostic.mask_height = m_result.mask_height;
+    m_backend_diagnostic.contour_count = m_result.contour_count;
+    m_backend_diagnostic.primary_area = m_result.primary_area;
 
     m_result_ref = m_result.result_ref.empty() ? "segmentation:" + m_backend : m_result.result_ref;
     m_mask_ref = m_result.mask_ref.empty() ? "mask:" + m_backend : m_result.mask_ref;
@@ -215,6 +252,16 @@ const std::string& FindSegmentation::device() const
 const FindSegmentationResult& FindSegmentation::result() const
 {
     return m_result;
+}
+
+const FindSegmentationInputSnapshot& FindSegmentation::lastinputrequest() const
+{
+    return m_last_input_request;
+}
+
+const FindSegmentationBackendDiagnosticSnapshot& FindSegmentation::backenddiagnostic() const
+{
+    return m_backend_diagnostic;
 }
 
 void FindSegmentation::PublishDisplayShapes(
