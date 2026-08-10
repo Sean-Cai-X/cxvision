@@ -505,6 +505,34 @@ bool CxParserRuntimeOwner::DefineExternalDouble(
     }
 }
 
+bool CxParserRuntimeOwner::DefineStringConstant(
+    const std::string& name,
+    const std::string& value,
+    std::string& reason)
+{
+    if (!m_initialized || !m_runtime)
+    {
+        reason = "parser owner is not initialized";
+        return false;
+    }
+    if (name.empty())
+    {
+        reason = "external string input name is empty";
+        return false;
+    }
+    try
+    {
+        m_runtime->DefineStringConstant(name, value);
+        reason.clear();
+        return true;
+    }
+    catch (...)
+    {
+        reason = "failed to bind external string input: " + name;
+        return false;
+    }
+}
+
 bool CxParserRuntimeOwner::ParseAnnotationToolManifest(
     const std::string& path,
     CxAnnotationToolManifestSnapshot& snapshot,

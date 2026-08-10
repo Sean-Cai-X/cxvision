@@ -164,13 +164,7 @@ int ResolveFindLineBinarySampleRow(
         return std::min(std::max(row, 0), image->getHeight() - 1);
     };
 
-    /*
-     * Image::roi_7blur_gap_mud_thre_bw writes the binary result to y + 1.
-     * This is correct for middle scan rows.  At the first/last gauge ticks,
-     * however, linecopyex plus blur/gap can contract the signal to the
-     * neighbouring row.  Resolve only terminal scan rows by foreground
-     * evidence so that the last visual tick is not silently dropped.
-     */
+    
     int best_row = clamp_row(logical_row + 1);
     int best_count =
         CountFindLineBinaryForegroundInRow(image, best_row, line_length);
@@ -455,13 +449,13 @@ m_iobjfilterset(1),
 m_ifilterborw(21),
 m_ifiltermin(50),
 m_ifiltermax(100000),
-m_iselectedgenum(0),//any
+m_iselectedgenum(0),
 m_ineedfixs(2),
 m_icomparegap(2),
 m_ishowlines(1),
 m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
 { 
-    string strname = string("fline%1");// .arg(m_curfindlinenum);
+    string strname = string("fline%1");
     setname(strname.c_str());
     m_curfindlinenum = m_curfindlinenum + 1;
     int icurmodule = ImageManager::GetCurMode();
@@ -506,8 +500,6 @@ void FindLine::setshow(int ishow)
         m_measurepoints_w.setshow(1); 
         m_measurepoints_h.setshow(1); 
     }
-    // `show` is a bit mask.  The Gauge scan overlay must therefore be
-    // independently switchable without clearing the result/point bits.
     if (ishow & 0x04)
     {    
         for (int i = 0; i < m_lines_w.size(); i++)
@@ -536,21 +528,7 @@ void FindLine::setshow(int ishow)
     }
     if (ishow & 0x08)
     {
-        /*
-        m_measurepointsA.setshow(1);
-        m_measurepointsA.setcolor(180, 0, 0);
-        m_measurepointsA.MakePointShape();
-        m_measurepointsB.setshow(1);
-        m_measurepointsB.setcolor(0, 180, 0);
-        m_measurepointsB.MakePointShape();
-
-        m_measurepointsA_.setshow(1);
-        m_measurepointsA_.setcolor(180, 100, 0);
-        m_measurepointsA_.MakePointShape();
-        m_measurepointsB_.setshow(1);
-        m_measurepointsB_.setcolor(100, 180, 0);
-        m_measurepointsB_.MakePointShape();
-        */
+        
         m_modelpoints.setshow(2);
          
     }
@@ -585,12 +563,6 @@ void FindLine::setshow(int ishow)
                 m_l_measure_h_seek[i].setshow(false);
         }
     }
-    //m_LineA.setshow(false);
-    //m_LineB.setshow(false);
-    //for (int i = 0; i < iplinewsize; i++) 
-    //m_lines_w[i].setshow(false);
-    //for (int i = 0; i < iplinehsize; i++)
-    //m_lines_h[i].setshow(false);
     Shape::setshow(ishow);
 }
 void FindLine::setselectedgenum(int iedgenum)
@@ -741,7 +713,6 @@ void FindLine::setlinesegment(double ix0, double iy0,
 
 
     LineShape aline1, aline2;
-  //  PointsShape alinepoints;
     for (int i = 0; i < dplinewsize; i++)
     {
         m_lines_w.push_back(aline1);
@@ -750,7 +721,6 @@ void FindLine::setlinesegment(double ix0, double iy0,
             RoundToInt(-dlineay * static_cast<double>(i)));
         m_lines_w[i].setPercent(m_dsamplerate);
         m_lines_w[i].setshow(0);
-    //    m_l_measure_h.push_back(alinepoints);
     }
     for (int i = 0; i < dplinehsize; i++)
     {
@@ -760,7 +730,6 @@ void FindLine::setlinesegment(double ix0, double iy0,
             RoundToInt(dlineby * static_cast<double>(i)));
         m_lines_h[i].setPercent(m_dsamplerate);
         m_lines_h[i].setshow(0);
-    //    m_l_measure_w.push_back(alinepoints);
     }
 
     Shape::setrect2(ptRect[0].X(), ptRect[0].Y(), ptRect[1].X(), ptRect[1].Y(),
@@ -894,7 +863,6 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
     const int iplinewsize = ComputeLineScanCount(static_cast<double>(iw), m_iwgap, line_w_meta);
     const int iplinehsize = ComputeLineScanCount(static_cast<double>(ih), m_ihgap, line_h_meta);
     LineShape aline1, aline2;
- //   PointsShape alinepoints;
     for (int i = 0; i < iplinewsize; i++)
     { 
         m_lines_w.push_back(aline1);
@@ -902,7 +870,6 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
         m_lines_w[i].Move(RoundToInt(static_cast<double>(m_iwgap) * static_cast<double>(i)), 0);
         m_lines_w[i].setPercent(m_dsamplerate);
         m_lines_w[i].setshow(false);
- //       m_l_measure_w.push_back(alinepoints);
     }
     for (int i = 0; i < iplinehsize; i++)
     { 
@@ -911,7 +878,6 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
         m_lines_h[i].Move(0, RoundToInt(static_cast<double>(m_ihgap) * static_cast<double>(i)));
         m_lines_h[i].setPercent(m_dsamplerate);
         m_lines_h[i].setshow(false);
-  //      m_l_measure_h.push_back(alinepoints);
     }
 
     Shape::setrect(ix, iy, iw, ih);
@@ -1000,8 +966,6 @@ void FindLine::edgepattern(Image& image)
     m_measurepointsA_.addpoints(getresultpointsw());
     m_measurepointsB_.addpoints(getresultpointsh());
 
-    //m_measurepointsA.doublepattern(m_icomparegap, 12, m_modelpoints);
-    //m_measurepointsB.doublepattern(m_icomparegap, 9, m_modelpoints);
     m_measurepointsA_.doublepattern(m_icomparegap, 6, m_modelpoints);
     m_measurepointsB_.doublepattern(m_icomparegap, 3, m_modelpoints);
 
@@ -1014,12 +978,10 @@ void FindLine::patternzeroposition()
 }
 void FindLine::savepatternfile(const char* pchar)
 {
-    //m_modelpoints.save(pchar);
     saveABpatternfile(pchar);
 }
 void FindLine::loadpatternfile(const char* pchar)
 {
-    //m_modelpoints.load(pchar);
     loadABpatternfile(pchar);
 }
 void FindLine::samplemodelAB(int inum)
@@ -1137,23 +1099,16 @@ void FindLine::patternfilter(double distanceThreshold , double waveletThreshold)
     (void)distanceThreshold;
     (void)waveletThreshold;
 #if defined USE_AI___
-    //void AdaptiveDistfilter();
-    //m_modelpoints.FftWaveletTransform( distanceThreshold ,  waveletThreshold );
     gp_Path& path = m_modelpoints.getpath();
     size_t numPoints = path.getpoints().size();
     arma::mat points(2, numPoints);
     for (size_t i = 0; i < numPoints; ++i)
     {
-        points(0, i) = path.getpoints()[i].X(); //   一     x     
-        points(1, i) = path.getpoints()[i].Y(); //  诙      y     
+        points(0, i) = path.getpoints()[i].X();
+        points(1, i) = path.getpoints()[i].Y();
     }
-    //path.Clear();
-    //  缘  平  蟹   
     auto clusters = mlpackclass::ClusterPointCloud_(points, distanceThreshold);
-    //vector<PointsShape>
-    //    每            突   小        路   侄谓  
     std::cout << "        " << std::endl;
-    //m_modelsegments
     for (int i = 0; i < m_modelsegments.size(); i++)
     {
         m_modelsegments[i].clear();
@@ -1163,11 +1118,9 @@ void FindLine::patternfilter(double distanceThreshold , double waveletThreshold)
     {
         std::cout << "Cluster " << clusterId << ":" << std::endl;
 
-        //   路      小       侄 
         std::vector<std::vector<size_t>> segments = mlpackclass::SegmentPathByWaveletAnalysis(points, clusterPoints, waveletThreshold);
 
         PointsShape segmentspoints;
-        //     侄谓  
         for (size_t segIdx = 0; segIdx < segments.size(); ++segIdx)
         {
             std::cout << "   侄  " << segIdx + 1 << ": ";
@@ -1197,7 +1150,6 @@ void FindLine::drawshape()
         m_LineB.setPen(255, 0, 0);
         m_LineA.drawshape(getpath());
         m_LineB.drawshape(getpath());
-        //painter.setPen(QPen(QColor(0, 255, 0)));
         for (int i = 0; i < m_lines_w.size(); i++)
         {
             m_lines_w[i].drawshape(getpath());
@@ -1226,7 +1178,6 @@ void FindLine::drawshapex(double dmovx,double dmovy,double dangle,double dzoomx,
         m_LineB.setPen(255, 0, 0);
         m_LineA.drawshape(getpath());
         m_LineB.drawshape(getpath());
-        //painter.setPen((0, 255, 0));
         for (int i = 0; i < m_lines_w.size(); i++)
         {
             m_lines_w[i].drawshape(getpath());
@@ -1403,7 +1354,7 @@ void FindLine::MeasureT(void *pimage)
         return;
 
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
-        return;//error process
+        return;
     m_measurepoints_w.clear();
     m_measurepoints_h.clear();
     int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
@@ -1430,13 +1381,7 @@ void FindLine::MeasureT(void *pimage)
         iprocessw > g_pbackimage->getWidth())
         return;
 
-    /*
-     * The line scan image is a rectangular workspace where each gauge scan
-     * line is copied to one BackImage row.  roi_7blur_gap_mud_thre_bw writes
-     * its binary result to y + 1, so the workspace needs a small zero padding
-     * tail and must be cleared before each run.  Otherwise stale data or a
-     * one-row readback mismatch can hide the first/last gauge ticks.
-     */
+    
     {
         cv::Mat& backMat = g_pbackimage->getmat();
         if (!backMat.empty())
@@ -1605,7 +1550,7 @@ void FindLine::Measure(Image& image)
                 0,
                 g_pbackimage->getWidth(),
                 g_pbackimage->getHeight()));
-        return;//error process
+        return;
     }
     if (rect().TopLeft().X() < 0 || rect().TopLeft().Y() < 0)
     {
@@ -1613,7 +1558,7 @@ void FindLine::Measure(Image& image)
             "measure_image_fail",
             "failed",
             "failure_stage=roi_negative");
-        return;//error process
+        return;
     }
 
     int iwsize = wscanenabled() ? ClampSizeToInt(m_lines_w.size()) : 0;
@@ -1794,12 +1739,7 @@ void FindLine::Measure(Image& image)
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
 
-    /*
-     * Clear the BackImage scan workspace before writing the current line
-     * profiles.  The UI path may run measure repeatedly after gauge drags; if
-     * stale binary rows remain, FindObject and the point collector can see
-     * old edge fragments near the gauge border.
-     */
+    
     {
         cv::Mat& backMat = g_pbackimage->getmat();
         if (!backMat.empty())
@@ -2030,9 +1970,6 @@ void FindLine::Measure(Image& image)
         cv::Mat binaryBeforeFindObject;
         g_pbackimage->getmat().copyTo(binaryBeforeFindObject);
 
-        // Evidence only: Measure() mutates the shared back-image mask in
-        // modes 21/22.  Preserve foreground counts on both sides so that a
-        // later empty scan can be attributed to the mutation, not guessed.
         m_lastMeasureInputDebug.findobject_foreground_before =
             m_lastMeasureInputDebug.binary_foreground_pixels;
 
@@ -2046,7 +1983,7 @@ void FindLine::Measure(Image& image)
         m_lastMeasureInputDebug.effective_filter_min = m_effective_filter_min;
         m_lastMeasureInputDebug.effective_filter_max = m_effective_filter_max;
 
-        g_pbackfindobject->setbrow(m_effective_filter_borw);//21 22
+        g_pbackfindobject->setbrow(m_effective_filter_borw);
         g_pbackfindobject->setminmaxarea(ClampLongLongToInt(static_cast<long long>(m_effective_filter_min)),
             ClampLongLongToInt(static_cast<long long>(m_effective_filter_max)));
 
@@ -2087,8 +2024,6 @@ void FindLine::Measure(Image& image)
             int max_area = g_pbackfindobject->getdebugmaxcomponentarea();
             int max_w = g_pbackfindobject->getdebugmaxcomponentw();
             int max_h = g_pbackfindobject->getdebugmaxcomponenth();
-            // The pre-filter diagnosis must describe the branch actually
-            // called above, rather than the similarly named diagnostic APIs.
             m_lastMeasureInputDebug.findobject_component_total = comp_count;
             m_lastMeasureInputDebug.findobject_component_accepted = accepted;
             m_lastMeasureInputDebug.findobject_component_rejected_by_min = rejected;
@@ -2101,7 +2036,6 @@ void FindLine::Measure(Image& image)
             "measure_after_findobject_measure",
             "running",
             "findobject_results=" + std::to_string(g_pbackfindobject->getresultobjsnum()));
-        //mask
     }
     else
     {
@@ -2151,11 +2085,7 @@ void FindLine::Measure(Image& image)
             return false;
         }
 
-        /*
-         * The fallback creates one boundary candidate for the terminal scan.
-         * If the user explicitly selected a different edge rank, do not
-         * silently emit a point for that unrelated edge.
-         */
+        
         if (m_iselectedgenum != -1 &&
             m_iselectedgenum != 0 &&
             m_iselectedgenum != 1)
@@ -2254,7 +2184,6 @@ void FindLine::Measure(Image& image)
                     ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
                     ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
-                    //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
 
                     const bool endpointOk =
                         icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
@@ -2265,15 +2194,12 @@ void FindLine::Measure(Image& image)
                         ++icurlinenum;
                         if (m_iselectedgenum == -1)
                         {
-                            // Last edge is resolved after the complete Gauge
-                            // search line has been scanned.  Candidate counts
-                            // are allowed to differ between scan lines.
                             lastEdgePosition = icurlineposition;
                             lastEdgeOrdinal = icurlinenum;
                             edgeCandidateRecorded = true;
                         }
                         else if (icurlinenum == m_iselectedgenum
-                            || m_iselectedgenum == 0)//0 any
+                            || m_iselectedgenum == 0)
                         {
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
                             m_measurepoints_w.addpoint(apoint);
@@ -2284,7 +2210,6 @@ void FindLine::Measure(Image& image)
                             currentDiag.accepted_x = apoint.X();
                             currentDiag.accepted_y = apoint.Y();
                             currentDiag.reject_reason.clear();
-                            //m_l_measure_w[icurlineposition].addpoint(apoint);
                             RecordFindLineEdgeCandidate(
                                 m_lastMeasureInputDebug,
                                 icurlinenum,
@@ -2368,7 +2293,6 @@ void FindLine::Measure(Image& image)
             else
                 ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
-            //icurlineposition = icurlineposition>ilineslen1?ilineslen1-1:icurlineposition;
             const bool endpointOk =
                 icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
                 icurlineposition > (m_iSelectPointGap + 3);
@@ -2394,7 +2318,6 @@ void FindLine::Measure(Image& image)
                     currentDiag.accepted_x = apoint.X();
                     currentDiag.accepted_y = apoint.Y();
                     currentDiag.reject_reason.clear();
-                    //m_l_measure_w[icurlineposition].addpoint(apoint);
                     RecordFindLineEdgeCandidate(
                         m_lastMeasureInputDebug,
                         icurlinenum,
@@ -2545,7 +2468,6 @@ void FindLine::Measure(Image& image)
                     ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
                     ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
                     icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
-                    //icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
                     const bool endpointOk =
                         icurlineposition < (ilineslen2 - m_iSelectPointGap - 3) &&
                         icurlineposition > (m_iSelectPointGap + 3);
@@ -2571,7 +2493,6 @@ void FindLine::Measure(Image& image)
                             currentDiag.accepted_x = apoint.X();
                             currentDiag.accepted_y = apoint.Y();
                             currentDiag.reject_reason.clear();
-                            //m_l_measure_h[icurlineposition].addpoint(apoint);
                             RecordFindLineEdgeCandidate(
                                 m_lastMeasureInputDebug,
                                 icurlinenum,
@@ -2656,7 +2577,6 @@ void FindLine::Measure(Image& image)
             else
                 ++m_lastMeasureInputDebug.scan_runs_over_length_limit;
             icurlineposition = m_ineedfixs + irecordpoint[(irecordnum >> 1)];
-            // icurlineposition = icurlineposition>ilineslen2?ilineslen2-1:icurlineposition;
 
             const bool endpointOk =
                 icurlineposition < (ilineslen2 - m_iSelectPointGap - 3) &&
@@ -2683,7 +2603,6 @@ void FindLine::Measure(Image& image)
                     currentDiag.accepted_x = apoint.X();
                     currentDiag.accepted_y = apoint.Y();
                     currentDiag.reject_reason.clear();
-                   //m_l_measure_h[icurlineposition].addpoint(apoint);
                     RecordFindLineEdgeCandidate(
                         m_lastMeasureInputDebug,
                         icurlinenum,
@@ -2865,9 +2784,6 @@ void FindLine::Measure(Image& image)
         }
         else if (m_lastMeasureInputDebug.findobject_measure_called)
         {
-            // Filter modes 21/22 are mask-transform modes.  Their result
-            // rectangle list is intentionally empty, so that list cannot be
-            // used as proof that the prefilter failed.
             m_lastMeasureInputDebug.failure_stage =
                 "findline_scan_no_measure_points_after_prefilter";
 
@@ -2885,36 +2801,7 @@ void FindLine::Measure(Image& image)
         }
     }
 
-    /*
-    int iwpointstotal = 0;
-    int ihpointstotal = 0;
-    int imaxpointsline = 0;
-    int icurpoints = 0;
-    int iprepointsnum = 0;
-    int inextpointsnum = 0;
-    for (int i = 0; i < m_l_measure_w.size(); i++)
-    {
-        icurpoints =  m_l_measure_w[i].size();
-        iwpointstotal = iwpointstotal + icurpoints;
-        if (i+1 < m_l_measure_w.size()-1)
-        {
-            inextpointsnum = m_l_measure_w[i+1].size();
-        }
-        if (imaxpointsline < icurpoints && inextpointsnum < icurpoints)
-        {
-            
-            if(imaxpointsline < icurpoints)
-                imaxpointsline = icurpoints;
-
-        }
-        
-        iprepointsnum = icurpoints;
-    }
-    for (int i = 0; i < m_l_measure_h.size(); i++)
-    {
-        ihpointstotal = ihpointstotal + m_l_measure_w[i].size(); 
-    }
-    */
+    
 
 }
 void FindLine::MeasureBalanced(Image& image)
@@ -3533,11 +3420,6 @@ int FindLine::ApplyPointConsistencyConstraintToPoints(
 
         const double normalDelta =
             std::abs((x * nx + y * ny) - medianNormal);
-        // Chebyshev-style consistency gate.  The tangential delta is anchored
-        // to the already scanned point order, so the useful rejection axis for
-        // FindLine interference is the search direction (normal to the gauge
-        // axis).  Keep the `max` form explicit to preserve the intended
-        // Chebyshev semantics when tangential gating is added later.
         const double chebyshevDelta =
             std::max(0.0 * std::abs(x * ux + y * uy), normalDelta);
         if (chebyshevDelta <= range)
@@ -3791,9 +3673,6 @@ void FindLine::SmartFilter(double dist, double filtnum)
     }
 
 
-   // m_measurepoints_h.SortPoints(0, igapvalue_h,10,45);
-   // m_measurepoints_w.SortPoints(0, igapvalue_w,10,45);
-    //m_measurepoints_h
 }
 void FindLine::PyrImage(Image& image)
 {
@@ -3889,10 +3768,6 @@ void FindLine::measure(void* pimage)
     m_lastMeasureInputDebug.image_type = mat.type();
     m_lastMeasureInputDebug.image_source = "Findline.measure(void*) parameter";
 
-    // The input Image is read-only for this operation.  The legacy scan path
-    // writes each sampled profile into g_pbackimage and subsequently changes
-    // its ROI.  Aliasing the two images makes linecopyex() read and write the
-    // same cv::Mat while the destination ROI is being changed.
     if (!ImageManager::EnsureAlgorithmRuntimeResources(mat.cols, mat.rows))
     {
         m_lastMeasureInputDebug.failure_stage = "scan_workspace_unavailable";
@@ -4044,10 +3919,6 @@ void FindLine::measure(void* pimage)
         return;
     }
 
-    // The original Measure pipeline builds scan lines and calls setroi() on a
-    // rectangular workspace.  It cannot safely crop a partially out-of-image
-    // rotated scan box.  Reject it before profile construction instead of
-    // allowing legacy code to calculate invalid scan geometry.
     if (!m_lastMeasureInputDebug.roi_fully_inside_image)
     {
         m_lastMeasureInputDebug.failure_stage = "line_roi_partially_outside_image";
@@ -5196,33 +5067,7 @@ void FindLine::fitline(FitlineMode mode)
     m_fitline_status=std::string("geometry_result_available: ")+names[mode_index];
 }
 
-/*void FindLine::SeekPoints(PointsShape& seekpoints, gp_Pnt& point, int ivect)
-{
-    //LineMeasurePoints m_l_measure_h_seek;
-    cv::Mat binaryImage;
-    cv::threshold(image, binaryImage, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
-    vector<vector<cv::Point>>contours;
-    cv::findContours(binaryImage, contours, cv::RETR_LIST, cv::CHAIN_APPROX_NONE);
-
-    int max_num = 0;
-    std::vector<cv::Point> circle_pts;
-    for (int i = 0; i < contours.size(); i++) {
-        int pt_num = contours[i].size();
-        if (pt_num > max_num) {
-            circle_pts.clear();
-            max_num = pt_num;
-            circle_pts = contours[i];
-        }
-    }
-
-    std::vector<cv::Point2f> edge_pts;
-    for (const auto& pt : circle_pts) {
-        edge_pts.push_back(cv::Point2f(float(pt.x), float(pt.y)));
-    }
-
-   
-}*/
 
 void FindLine::MarkMeasureGeometryDirty()
 {
@@ -5584,9 +5429,6 @@ void FindLine::PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner
     }
 }
 
-// ============================================================================
-// Robust Measurement Implementation
-// ============================================================================
 
 namespace
 {

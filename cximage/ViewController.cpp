@@ -461,6 +461,13 @@ namespace
     applied += setRequiredIntIfUsed("global_find_num", existingOr("global_find_num", 5)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_compare_gap", existingOr("global_compare_gap", 20)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_objfilter", existingOr("global_objfilter", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_findline_objfilter", existingOr("global_findline_objfilter", 1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed(
+        "global_findline_findsetting",
+        existingOr("global_findline_findsetting", existingOr("global_findline_objfilter", 1))) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_findcircle_findsetting", existingOr("global_findcircle_findsetting", 0)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_findellipse_findsetting", existingOr("global_findellipse_findsetting", 1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_findrect_findsetting", existingOr("global_findrect_findsetting", 1)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_elapsed_ms", existingOr("global_max_elapsed_ms", 2000)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_scan_lines", existingOr("global_max_scan_lines", 256)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_max_samples", existingOr("global_max_samples", 4096)) ? 1 : 0;
@@ -4072,6 +4079,127 @@ void ViewController::HandleSemanticFlowAction(const SemanticFlowAction& action)
     return;
   }
 }
+bool ViewController::PrepareTorchUiRequestContext(
+    const std::string& scriptText,
+    const std::string& scriptPathText,
+    std::string& reason)
+{
+  reason.clear();
+  if (!scriptContainsIdentifier(scriptText, "global_torch_request_context"))
+  {
+    m_parserDebugBridge.RemoveGlobalString("global_torch_request_context");
+    return true;
+  }
+
+  const fs::path inputPath = fs::path(m_manualTest.image_file_path);
+  if (inputPath.empty() || !fs::exists(inputPath))
+  {
+    reason = "Torch UI run requires an Image View image with a valid source path";
+    return false;
+  }
+
+  const fs::path root = findRepositoryRoot();
+  if (root.empty())
+  {
+    reason = "Torch UI run cannot resolve repository root";
+    return false;
+  }
+
+  const fs::path scriptPath = ResolveWorkspaceFile(scriptPathText);
+  const std::string caseId = scriptPath.stem().string().empty()
+      ? std::string("torch_ui_case")
+      : scriptPath.stem().string();
+  std::string runId = CxUnifiedLog::Instance().RunId();
+  if (runId.empty())
+    runId = "ui_session";
+  const fs::path outputPath = root.parent_path() / "cxscript_runs" /
+    "manual_torch_ui" / runId / caseId;
+  auto runtimeInt = [&](const char* name, int fallback) -> int
+  {
+    const auto it = m_manualTest.runtime_int_vars.find(name);
+    return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+  };
+  const TorchTrainingImageItem* selectedTrainingImage = nullptr;
+  if (m_manualTest.selected_torch_training_image >= 0 &&
+      m_manualTest.selected_torch_training_image <
+        static_cast<int>(m_manualTest.torch_training_images.size()))
+  {
+    selectedTrainingImage = &m_manualTest.torch_training_images[
+        static_cast<std::size_t>(m_manualTest.selected_torch_training_image)];
+  }
+
+  std::ostringstream annotationContext;
+  annotationContext
+    << "{\"schema\":\"cx.torch.annotation_context.v1\""
+    << ",\"image_id\":\""
+    << jsonEscapeEvidenceReview(selectedTrainingImage == nullptr
+           ? m_manualTest.active_image_id
+           : selectedTrainingImage->image_id)
+    << "\""
+    << ",\"split\":\""
+    << jsonEscapeEvidenceReview(selectedTrainingImage == nullptr
+           ? std::string()
+           : selectedTrainingImage->split)
+    << "\""
+    << ",\"label\":\""
+    << jsonEscapeEvidenceReview(selectedTrainingImage == nullptr
+           ? std::string()
+           : selectedTrainingImage->label)
+    << "\""
+    << ",\"annotation_shape_count\":"
+    << (selectedTrainingImage == nullptr
+           ? 0
+           : selectedTrainingImage->annotation_shape_count)
+    << ",\"roi\":{\"x0\":" << runtimeInt("global_roi_x0", 0)
+    << ",\"y0\":" << runtimeInt("global_roi_y0", 0)
+    << ",\"x1\":" << runtimeInt("global_roi_x1", 0)
+    << ",\"y1\":" << runtimeInt("global_roi_y1", 0) << "}"
+    << ",\"input_width\":" << runtimeInt("global_torch_input_width", 512)
+    << ",\"input_height\":" << runtimeInt("global_torch_input_height", 512)
+    << ",\"confidence_percent\":"
+    << runtimeInt("global_torch_confidence_percent", 50)
+    << ",\"mask_threshold_percent\":"
+    << runtimeInt("global_torch_mask_threshold_percent", 50)
+    << ",\"max_detections\":"
+    << runtimeInt("global_torch_max_detections", 100)
+    << ",\"epochs\":" << runtimeInt("global_torch_epochs", 1)
+    << ",\"batch_size\":" << runtimeInt("global_torch_batch_size", 1)
+    << "}";
+
+  // Use forward-slash paths in the CxScript string literal.  The parser's
+  // char* call path preserves backslashes literally, so escaping a Windows
+  // path would otherwise reach TorchTask as D:\\\\... and create/display the
+  // wrong artifact path.
+  const std::string requestContext = caseId + "|" +
+    inputPath.generic_string() + "|" + outputPath.generic_string() + "|" +
+    annotationContext.str();
+  m_parserDebugBridge.SetGlobalString(
+    "global_torch_request_context", requestContext);
+
+  reason = "input=" + inputPath.generic_string() +
+    " output=" + outputPath.generic_string() +
+    " annotation_shapes=" +
+    std::to_string(selectedTrainingImage == nullptr
+        ? 0
+        : selectedTrainingImage->annotation_shape_count);
+  CXLOG_INFO(
+    "TorchUI",
+    "torch_annotation_request_staged",
+    "ui_event",
+    "case_id=" + caseId + " " + reason +
+    " input_size=" +
+    std::to_string(runtimeInt("global_torch_input_width", 512)) + "x" +
+    std::to_string(runtimeInt("global_torch_input_height", 512)) +
+    " epochs=" + std::to_string(runtimeInt("global_torch_epochs", 1)) +
+    " batch_size=" +
+    std::to_string(runtimeInt("global_torch_batch_size", 1)) +
+    " roi=" + std::to_string(runtimeInt("global_roi_x0", 0)) + "," +
+    std::to_string(runtimeInt("global_roi_y0", 0)) + "," +
+    std::to_string(runtimeInt("global_roi_x1", 0)) + "," +
+    std::to_string(runtimeInt("global_roi_y1", 0)));
+  return true;
+}
+
 ViewController::ScriptResult ViewController::RunCxScript(const std::string& theScriptPath)
 {
   ScriptResult result;
@@ -4120,39 +4248,17 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
     }
   }
 
-  // Torch direct scripts use one value-semantic request context in both
-  // Headless and Manual UI. The image shown in Image View is therefore the
-  // same image path passed to TorchRuntime, and runtime artifacts are kept in
-  // a per-process evidence directory instead of a script hard-coded path.
-  if (scriptContainsIdentifier(scriptText, "global_torch_request_context"))
+  std::string torchRequestReason;
+  if (!PrepareTorchUiRequestContext(
+          scriptText, scriptPath.string(), torchRequestReason))
   {
-    const fs::path inputPath = fs::path(m_manualTest.image_file_path);
-    if (inputPath.empty() || !fs::exists(inputPath))
-    {
-      result.status = "BLOCKED";
-      result.reason = "Torch UI run requires an Image View image with a valid source path";
-      result.runtime_fillback_status = "torch_ui_input_path_missing";
-      return result;
-    }
-
-    const std::string caseId = scriptPath.stem().string();
-    std::string runId = CxUnifiedLog::Instance().RunId();
-    if (runId.empty())
-      runId = "ui_session";
-    const fs::path outputPath = root.parent_path() / "cxscript_runs" /
-      "manual_torch_ui" / runId / caseId;
-    const std::string requestContext = caseId + "|" +
-      inputPath.string() + "|" + outputPath.string();
-    m_parserDebugBridge.SetGlobalString(
-      "global_torch_request_context", requestContext);
-    result.log_lines.push_back(
-      "Torch UI request context: input=" + inputPath.string() +
-      " output=" + outputPath.string());
+    result.status = "BLOCKED";
+    result.reason = torchRequestReason;
+    result.runtime_fillback_status = "torch_ui_input_path_missing";
+    return result;
   }
-  else
-  {
-    m_parserDebugBridge.RemoveGlobalString("global_torch_request_context");
-  }
+  if (!torchRequestReason.empty())
+    result.log_lines.push_back("Torch UI request context: " + torchRequestReason);
   // Semantic Flow and Manual Console must execute with the same external
   // input snapshot.  The editor Run button already performs this binding;
   // bind it here as well for "Run Bound Script".

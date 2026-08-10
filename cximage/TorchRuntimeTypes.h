@@ -13,6 +13,7 @@ struct TorchRuntimeGuiConfig
 struct TorchRuntimeGuiRequest
 {
     std::string task;
+    std::string device;
     std::string input_image;
     std::string dataset_root;
     std::string manifest_path;

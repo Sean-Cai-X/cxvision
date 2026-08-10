@@ -87,6 +87,7 @@ bool CxTorchRuntimeService::Execute(
 
     TorchRuntimeGuiRequest gui_request{};
     gui_request.task = request.task;
+    gui_request.device = request.device;
     gui_request.input_image = request.input_image;
     gui_request.dataset_root = request.dataset_root;
     gui_request.manifest_path = request.manifest_path;

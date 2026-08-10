@@ -90,6 +90,7 @@ TORCH_RUNTIME_API int torch_runtime_run_task(
 
         TorchTaskRequestCpp cpp_request;
         if (request->task) cpp_request.task = request->task;
+        if (request->device) cpp_request.device = request->device;
         if (request->input_image) cpp_request.input_image = request->input_image;
         if (request->dataset_root) cpp_request.dataset_root = request->dataset_root;
         if (request->manifest_path) cpp_request.manifest_path = request->manifest_path;

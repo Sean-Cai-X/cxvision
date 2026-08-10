@@ -269,26 +269,54 @@ std::string ParserDebugBridge::PrepareScript(const std::string& scriptText) cons
 {
   std::string prepared = scriptText;
 
-  if (!myGlobalStringInputs.empty())
-  {
-    auto escape = [](const std::string& text) {
-      std::string out;
-      for (char ch : text)
-      {
-        if (ch == '\\') out += "\\\\";
-        else if (ch == '"') out += "\\\"";
-        else out.push_back(ch);
-      }
-      return out;
-    };
-
-    std::ostringstream prefix;
-    for (const auto& input : myGlobalStringInputs)
+  // CxScript does not support declaring a general-purpose `string` local.
+  // For externally supplied string inputs, expand the identifier at the call
+  // site to a normal quoted literal.  This keeps the executed statement
+  // visible in the line trace and avoids relying on parser string-constant
+  // state across object declarations.  Headless may continue to use its
+  // already proven DefineStrConst path.
+  auto escapeStringLiteral = [](const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size() + 16);
+    for (char ch : value)
     {
-      prefix << "string " << input.first << " = \""
-             << escape(input.second) << "\";\n";
+      switch (ch)
+      {
+      case '\\': escaped += "\\\\"; break;
+      case '"': escaped += "\\\""; break;
+      case '\n': escaped += "\\n"; break;
+      case '\r': escaped += "\\r"; break;
+      case '\t': escaped += "\\t"; break;
+      default: escaped.push_back(ch); break;
+      }
     }
-    prepared = prefix.str() + prepared;
+    return escaped;
+  };
+
+  for (const auto& input : myGlobalStringInputs)
+  {
+    const std::string& identifier = input.first;
+    const std::string replacement =
+        "\"" + escapeStringLiteral(input.second) + "\"";
+    std::size_t stringPosition = 0;
+    while ((stringPosition = prepared.find(identifier, stringPosition)) !=
+           std::string::npos)
+    {
+      const bool leftBoundary = stringPosition == 0 ||
+          !(std::isalnum(static_cast<unsigned char>(prepared[stringPosition - 1])) ||
+            prepared[stringPosition - 1] == '_');
+      const std::size_t after = stringPosition + identifier.size();
+      const bool rightBoundary = after >= prepared.size() ||
+          !(std::isalnum(static_cast<unsigned char>(prepared[after])) ||
+            prepared[after] == '_');
+      if (!leftBoundary || !rightBoundary)
+      {
+        stringPosition += identifier.size();
+        continue;
+      }
+      prepared.replace(stringPosition, identifier.size(), replacement);
+      stringPosition += replacement.size();
+    }
   }
 
   const std::string source = "global_matInput";
@@ -472,14 +500,18 @@ bool ParserDebugBridge::RebindGlobalInputs()
     }
   }
 
-  if (myGlobalMatInput.empty())
-    return true;
-  if (!BindStagedGlobalMatInput())
+  // Numeric globals and the parser-owned Image use real runtime bindings.
+  // GUI string inputs are intentionally different: PrepareScript() expands
+  // them to quoted literals at their visible call sites.  Registering those
+  // same strings as parser constants here makes the second serial run fail
+  // with a duplicate-name error because ClearAll() does not remove constants.
+  if (!myGlobalMatInput.empty() && !BindStagedGlobalMatInput())
   {
     if (myLastError.empty())
       myLastError = "failed to bind global_matInput image";
     return false;
   }
+
   return true;
 }
 

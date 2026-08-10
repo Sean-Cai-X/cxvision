@@ -114,6 +114,14 @@ inline TorchRoutingDecision route_torch_task(const TorchTaskBoundary& boundary) 
         boundary.kind == TorchTaskKind::GeometryMatching ||
         boundary.kind == TorchTaskKind::GeometryClustering;
 
+    if (is_mlpack_native_task &&
+        boundary.geometry_or_descriptor_only &&
+        has_tensor_signal &&
+        (boundary.requires_gradient_training ||
+         boundary.requires_end_to_end_learning)) {
+        return {TorchBackendRoute::ManualReview, "structured geometry task with trainable tensor signal needs explicit backend selection"};
+    }
+
     if (is_visual_task && has_tensor_signal) {
         return {TorchBackendRoute::Torch, "visual tensor task with learned representation"};
     }

@@ -418,15 +418,18 @@ $Checklist = @(
     "Use only after torch_mainline_headless_report.json has ready_for_manual_ui=true.",
     "",
     "1. Open cxvision_imgui_acceptance.exe from the recorded Build Dir.",
-    "2. Select [SMOKE] TorchTask - Train Lifecycle CPU; verify epoch/loss/grad/runtime/summary and curve fields.",
-    "3. Select [SMOKE] TorchTask - Segmentation cpp_state_dict CPU; verify status/device/result_ref/mask_ref/overlay_ref/contour_ref.",
-    "4. Verify mask_overlay.png and contour Shape use the same Headless artifact package.",
-    "5. Select [SMOKE] TorchTask - YOLOv8 Detection CPU; verify detection status and zero/non-zero result is shown honestly.",
-    "6. If detections exist, verify all boxes are non-editable and mapped to original-image coordinates.",
-    "7. Select [SMOKE] FindSegmentation - LibTorch Contract; verify editable prompt ROI and non-editable boundary/bbox.",
-    "8. Change prompt ROI, rerun, and verify previous result becomes stale then is replaced.",
-    "9. Confirm failures show failure_stage/reason rather than a silent or fabricated PASS.",
-    "10. Record MANUAL_GUI_PASS, MANUAL_GUI_PARTIAL, or MANUAL_GUI_FAIL with reason."
+    "2. Select the Torch training Evidence case and one Training Image Set thumbnail; verify Key Parameter Controls shows the selected annotation geometry and Torch request parameters.",
+    "3. In Torch Runtime / Evidence click Train Tiny Smoke; verify the request runs serially and status/loss/grad/runtime/summary are populated.",
+    "4. Verify Training Curve / Param Map shows only real result/evidence values. For epochs=1 it must say tiny-smoke metric snapshot and must not fabricate a multi-epoch curve.",
+    "5. Click Infer Segmentation; verify status/device/result_ref/mask_ref/overlay_ref/contour_ref.",
+    "6. Verify mask_overlay.png and contour Shape use the same Headless artifact package.",
+    "7. Click Infer Detection; verify detection status and zero/non-zero result is shown honestly.",
+    "8. If detections exist, verify all boxes are non-editable and mapped to original-image coordinates.",
+    "9. Select [SMOKE] FindSegmentation - LibTorch Contract; verify editable prompt ROI and non-editable boundary/bbox.",
+    "10. Change prompt ROI, rerun, and verify previous result becomes stale then is replaced.",
+    "11. Confirm the unified log contains torch_ui_run_requested and torch_annotation_request_staged for each button action.",
+    "12. Confirm failures show failure_stage/reason rather than a silent or fabricated PASS.",
+    "13. Record MANUAL_GUI_PASS, MANUAL_GUI_PARTIAL, or MANUAL_GUI_FAIL with reason."
 )
 $Checklist | Set-Content -LiteralPath (Join-Path $OutputRoot "manual_review_checklist.md") -Encoding UTF8
 

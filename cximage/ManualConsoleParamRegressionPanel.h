@@ -59,9 +59,11 @@ void ResetKeyParameterUiDefaults(ManualTestContext& context);
 
 void DrawKeyParameterControlPanel(ManualTestContext& context);
 
+void DrawTorchAnnotationKeyParameterPanel(ManualTestContext& context);
+
 void DrawParamTuningScatterPanel(ManualTestContext& context);
 
-void DrawTorchKeyStatusPanel(const ManualTestContext& context);
+void DrawTorchKeyStatusPanel(ManualTestContext& context);
 
 void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context);
 

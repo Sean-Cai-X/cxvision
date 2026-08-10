@@ -96,6 +96,10 @@ public:
         const std::string& name,
         double* value,
         std::string& reason);
+    bool DefineStringConstant(
+        const std::string& name,
+        const std::string& value,
+        std::string& reason);
 
 private:
     bool ReadScript(

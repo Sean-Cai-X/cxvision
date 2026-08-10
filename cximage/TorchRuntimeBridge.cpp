@@ -288,6 +288,7 @@ TorchRuntimeGuiResult TorchRuntimeBridge::RunTask(const TorchRuntimeGuiRequest& 
 
     TorchTaskRequest c_api_request{};
     if (!request.task.empty()) c_api_request.task = request.task.c_str();
+    if (!request.device.empty()) c_api_request.device = request.device.c_str();
     if (!request.input_image.empty()) c_api_request.input_image = request.input_image.c_str();
     if (!request.dataset_root.empty()) c_api_request.dataset_root = request.dataset_root.c_str();
     if (!request.manifest_path.empty()) c_api_request.manifest_path = request.manifest_path.c_str();

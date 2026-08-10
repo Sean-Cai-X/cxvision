@@ -232,9 +232,14 @@ void test_prototype_index_invalid_entry_rejected() {
 
 void test_incremental_pipeline_contract() {
     auto device = get_test_device();
+    auto feature_head = MultiBranchFeatureHead(make_feature_cfg());
+    auto fusion_head = MultiFeatureFusionHead(make_fusion_cfg());
+    feature_head->to(device);
+    fusion_head->to(device);
+
     IncrementalFeaturePipeline pipeline{
-        MultiBranchFeatureHead(make_feature_cfg()),
-        MultiFeatureFusionHead(make_fusion_cfg())
+        feature_head,
+        fusion_head
     };
 
     RoiSample sample;
@@ -261,9 +266,14 @@ void test_incremental_pipeline_contract() {
 
 void test_incremental_pipeline_invalid_sample_rejected() {
     auto device = get_test_device();
+    auto feature_head = MultiBranchFeatureHead(make_feature_cfg());
+    auto fusion_head = MultiFeatureFusionHead(make_fusion_cfg());
+    feature_head->to(device);
+    fusion_head->to(device);
+
     IncrementalFeaturePipeline pipeline{
-        MultiBranchFeatureHead(make_feature_cfg()),
-        MultiFeatureFusionHead(make_fusion_cfg())
+        feature_head,
+        fusion_head
     };
 
     RoiSample bad_sample;

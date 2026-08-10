@@ -295,7 +295,10 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         if (gauge.tool == "FindRect")
             InjectManualGaugeInt(context, "global_findrect_findsetting", findsetting);
         else
+        {
             InjectManualGaugeInt(context, "global_findline_objfilter", findsetting);
+            InjectManualGaugeInt(context, "global_findline_findsetting", findsetting);
+        }
         InjectManualGaugeInt(
             context,
             "global_findline_point_consistency_enabled",

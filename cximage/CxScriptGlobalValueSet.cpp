@@ -163,6 +163,7 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_findsetting"] = 0.0;
     overrides["global_objfilter"] = 1.0;
     overrides["global_findline_objfilter"] = 1.0;
+    overrides["global_findline_findsetting"] = 1.0;
     overrides["global_findcircle_findsetting"] = 0.0;
     overrides["global_findellipse_findsetting"] = 1.0;
     overrides["global_findrect_findsetting"] = 0.0;

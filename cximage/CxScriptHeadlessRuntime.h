@@ -177,6 +177,7 @@ struct CxScriptExecutionCapture
 
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
+    int actual_findsetting = 0;
     int object_filter_strategy_id = 0;
     int object_filter_borw = 0;
     int object_filter_min = 0;

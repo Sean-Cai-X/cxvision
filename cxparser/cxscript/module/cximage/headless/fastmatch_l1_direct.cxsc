@@ -47,6 +47,11 @@ m_match.setwhgap(wgap, hgap);
 m_match.setthre(threshold);
 m_match.setlinegap(linegap);
 m_match.setcompgap(compare_gap);
+m_match.setmatchrectxywh(search_x, search_y, search_w, search_h);
+m_match.matchstepgap(10, 10);
+m_match.setmatchthre(10);
+m_match.setminscore(min_score);
+m_match.setfindnum(find_num);
 m_match.learn(&m_image);
 m_match.modelzero();
 m_match.pattern2org();
@@ -68,11 +73,6 @@ if (fastmatch_action == 1)
     return;
 }
 
-m_match.setmatchrectxywh(search_x, search_y, search_w, search_h);
-m_match.matchstepgap(10, 10);
-m_match.setmatchthre(10);
-m_match.setminscore(min_score);
-m_match.setfindnum(find_num);
 m_match.match(&m_image);
 
 global_match_count = m_match.getresultcandidatecount();

@@ -8,7 +8,7 @@ static void apply_requested_device_env(const std::string& requested_device) {
         _putenv_s("LIBTORCH_MODULE_USE_CUDA", "0");
         return;
     }
-    if (requested_device == "gpu") {
+    if (requested_device == "gpu" || requested_device == "cuda") {
         _putenv_s("LIBTORCH_MODULE_USE_CUDA", "1");
         return;
     }
@@ -18,7 +18,7 @@ static void apply_requested_device_env(const std::string& requested_device) {
         setenv("LIBTORCH_MODULE_USE_CUDA", "0", 1);
         return;
     }
-    if (requested_device == "gpu") {
+    if (requested_device == "gpu" || requested_device == "cuda") {
         setenv("LIBTORCH_MODULE_USE_CUDA", "1", 1);
         return;
     }
@@ -32,10 +32,15 @@ TorchTaskResultCpp RunTorchTask(
 {
     try
     {
-        const std::string& requested_device = !config.device.empty() ? config.device : "auto";
+        TorchRuntimeCoreConfig effective_config = config;
+        if (!request.device.empty()) {
+            effective_config.device = request.device;
+        }
+
+        const std::string& requested_device = !effective_config.device.empty() ? effective_config.device : "auto";
         apply_requested_device_env(requested_device);
 
-        return DispatchTorchRuntimeTask(config, request);
+        return DispatchTorchRuntimeTask(effective_config, request);
     }
     catch (const c10::Error& error)
     {

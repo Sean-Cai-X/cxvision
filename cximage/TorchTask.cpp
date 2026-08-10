@@ -19,6 +19,8 @@ void TorchTask::settask(const char* value)
         task_.kind = CxTorchTaskKind::Segmentation;
     else if (task_.task_id == "torch.infer.detection.yolov8.v1")
         task_.kind = CxTorchTaskKind::Detection;
+    else if (task_.task_id.find("train") != std::string::npos)
+        task_.kind = CxTorchTaskKind::TrainingLifecycle;
     else if (task_.task_id.find("segmentation") != std::string::npos)
         task_.kind = CxTorchTaskKind::Segmentation;
     else if (task_.task_id.find("detection") != std::string::npos || task_.task_id.find("yolo") != std::string::npos)
@@ -33,8 +35,6 @@ void TorchTask::settask(const char* value)
         task_.kind = CxTorchTaskKind::RuntimeDiagnostic;
     else if (task_.task_id.find("infer") != std::string::npos)
         task_.kind = CxTorchTaskKind::Segmentation;
-    else if (task_.task_id.find("train") != std::string::npos)
-        task_.kind = CxTorchTaskKind::TrainingLifecycle;
     else
         task_.kind = CxTorchTaskKind::Unknown;
 }
@@ -93,9 +93,19 @@ void TorchTask::setrequestcontext(const char* value)
         return;
     }
 
+    const std::size_t third = context.find(separator, second + 1);
     task_.case_id = context.substr(0, first);
     task_.input_image_path = context.substr(first + 1, second - first - 1);
-    task_.output_dir = context.substr(second + 1);
+    if (third == std::string::npos)
+    {
+        task_.output_dir = context.substr(second + 1);
+        task_.extra_json.clear();
+    }
+    else
+    {
+        task_.output_dir = context.substr(second + 1, third - second - 1);
+        task_.extra_json = context.substr(third + 1);
+    }
 }
 
 void TorchTask::settimeout(int value)

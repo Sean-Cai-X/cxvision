@@ -1609,7 +1609,12 @@ void ViewController::drawKeyParameterControlsWindow()
         return;
     }
 
-    if (IsFindLineFindCircleContext(m_manualTest))
+    if (IsTorchContext(m_manualTest) &&
+        !IsFindLineFindCircleContext(m_manualTest))
+    {
+        DrawTorchAnnotationKeyParameterPanel(m_manualTest);
+    }
+    else if (IsFindLineFindCircleContext(m_manualTest))
     {
         DrawKeyParameterControlPanel(m_manualTest);
         if (m_manualTest.apply_gauge_to_shape_requested)

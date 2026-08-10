@@ -274,6 +274,9 @@ private:
   ImVec2 ImageToScreenPoint(const OverlayImagePoint& p) const;
   ImVec2 ScreenToImagePoint(const ImVec2& p) const;
   ScriptResult RunCxScript(const std::string& theScriptPath);
+  bool PrepareTorchUiRequestContext(const std::string& scriptText,
+                                    const std::string& scriptPath,
+                                    std::string& reason);
   void RefreshRuntimeObjectTable(const std::string& lastMethod,
                                  const std::string& runtimeStatus);
   void RequestRuntimeShapeSync(const std::string& reason);

@@ -3,6 +3,30 @@
 #include <string>
 #include <vector>
 
+struct CxScriptEvidenceAnnotation
+{
+    std::string image_id;
+    std::string shape_kind = "RectShape";
+    std::string semantic_role = "bbox";
+    std::string owner_binding = "label_bbox";
+    std::string label = "anomaly";
+    int class_id = -1;
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    bool normalized = false;
+};
+
+struct CxScriptEvidenceDatasetImage
+{
+    std::string image_id;
+    std::string image_path;
+    std::string split = "train";
+    std::string label = "unlabeled";
+    std::string source = "evidence_dataset";
+};
+
 struct CxScriptEvidenceCase
 {
     std::string evidence_id;
@@ -19,6 +43,8 @@ struct CxScriptEvidenceCase
     std::string source_case_id;
     std::string display_category;
     std::string display_group;
+    std::vector<CxScriptEvidenceDatasetImage> dataset_images;
+    std::vector<CxScriptEvidenceAnnotation> annotations;
     bool manual_review_required = true;
     bool promotion_candidate = false;
 };

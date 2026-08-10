@@ -336,6 +336,284 @@ bool IsTorchContext(const ManualTestContext& context)
          ContainsNoCaseLocal(context.editor_text, "torch.");
 }
 
+static const TorchTrainingImageItem* CurrentTorchTrainingImageLocal(
+    const ManualTestContext& context)
+{
+  const int index = context.selected_torch_training_image;
+  if (index < 0 || index >= static_cast<int>(context.torch_training_images.size()))
+    return nullptr;
+  return &context.torch_training_images[static_cast<std::size_t>(index)];
+}
+
+static std::string TorchTaskFeatureLocal(const ManualTestContext& context)
+{
+  // A staged Torch action is the immediate execution source and therefore
+  // overrides the selected Evidence family until another Evidence row is
+  // loaded (which changes editor_source away from torch_runtime_action).
+  if (context.editor_source == "torch_runtime_action")
+  {
+    const std::string actionKey = ToLowerAsciiLocal(
+        context.loaded_script_path + " " + context.editor_text + " " +
+        context.active_script_case_purpose);
+    if (actionKey.find("train") != std::string::npos)
+      return "training_lifecycle";
+    if (actionKey.find("detect") != std::string::npos ||
+        actionKey.find("yolo") != std::string::npos)
+      return "object_detection";
+    if (actionKey.find("segment") != std::string::npos ||
+        actionKey.find("deeplab") != std::string::npos)
+      return "semantic_segmentation";
+  }
+
+  // The selected Evidence case is authoritative.  Only fall back to the
+  // editor when no Evidence script/tool is selected; otherwise a previously
+  // opened training script can incorrectly seed a detection case.
+  std::string source =
+      context.current_evidence_selection.script_id + " " +
+      context.current_evidence_selection.script_path + " " +
+      context.current_evidence_selection.tool;
+  if (source.find_first_not_of(" \t\r\n") == std::string::npos)
+    source = context.loaded_script_path + " " + context.editor_text;
+  const std::string key = ToLowerAsciiLocal(source);
+  // Training must win over model-family words such as "segmentation" in a
+  // training script name.
+  if (key.find("train") != std::string::npos)
+    return "training_lifecycle";
+  if (key.find("instance_seg") != std::string::npos)
+    return "instance_segmentation";
+  if (key.find("segment") != std::string::npos ||
+      key.find("deeplab") != std::string::npos ||
+      key.find("mask") != std::string::npos)
+    return "semantic_segmentation";
+  if (key.find("detect") != std::string::npos ||
+      key.find("yolo") != std::string::npos)
+    return "object_detection";
+  if (key.find("classif") != std::string::npos)
+    return "classification";
+  if (key.find("anomaly") != std::string::npos)
+    return "anomaly_detection";
+  if (key.find("ocr") != std::string::npos)
+    return "ocr";
+  return "runtime_contract";
+}
+
+static std::string TorchSelectedEvidenceFeatureLocal(
+    const ManualTestContext& context)
+{
+  std::string source =
+      context.current_evidence_selection.script_id + " " +
+      context.current_evidence_selection.script_path + " " +
+      context.current_evidence_selection.tool;
+  if (source.find_first_not_of(" \t\r\n") == std::string::npos)
+    return "runtime_contract";
+
+  const std::string key = ToLowerAsciiLocal(source);
+  if (key.find("train") != std::string::npos)
+    return "training_lifecycle";
+  if (key.find("instance_seg") != std::string::npos)
+    return "instance_segmentation";
+  if (key.find("segment") != std::string::npos ||
+      key.find("deeplab") != std::string::npos ||
+      key.find("mask") != std::string::npos)
+    return "semantic_segmentation";
+  if (key.find("detect") != std::string::npos ||
+      key.find("yolo") != std::string::npos)
+    return "object_detection";
+  if (key.find("classif") != std::string::npos)
+    return "classification";
+  if (key.find("anomaly") != std::string::npos)
+    return "anomaly_detection";
+  if (key.find("ocr") != std::string::npos)
+    return "ocr";
+  return "runtime_contract";
+}
+
+static void ApplyTorchParameterDefaultsLocal(
+    ManualTestContext& context,
+    const std::string& feature)
+{
+  const std::string profileKey =
+      context.current_evidence_selection.case_id + "|" + feature;
+  if (profileKey.empty() || context.torch_parameter_defaults_key == profileKey)
+    return;
+
+  int inputWidth = 512;
+  int inputHeight = 512;
+  int confidence = 50;
+  int maskThreshold = 50;
+  int maxDetections = 100;
+  int epochs = 20;
+  int batchSize = 4;
+
+  if (feature == "object_detection")
+  {
+    inputWidth = 640;
+    inputHeight = 640;
+    confidence = 25;
+    epochs = 50;
+    batchSize = 8;
+  }
+  else if (feature == "instance_segmentation")
+  {
+    inputWidth = 640;
+    inputHeight = 640;
+    confidence = 25;
+    maskThreshold = 50;
+    epochs = 50;
+    batchSize = 4;
+  }
+  else if (feature == "semantic_segmentation")
+  {
+    inputWidth = 512;
+    inputHeight = 512;
+    maskThreshold = 50;
+    epochs = 40;
+    batchSize = 4;
+  }
+  else if (feature == "classification")
+  {
+    inputWidth = 224;
+    inputHeight = 224;
+    epochs = 30;
+    batchSize = 16;
+  }
+  else if (feature == "anomaly_detection")
+  {
+    inputWidth = 256;
+    inputHeight = 256;
+    epochs = 30;
+    batchSize = 8;
+  }
+  else if (feature == "ocr")
+  {
+    inputWidth = 320;
+    inputHeight = 96;
+    epochs = 30;
+    batchSize = 16;
+  }
+  else if (feature == "training_lifecycle")
+  {
+    // The currently bound lifecycle task is deliberately a one-step smoke.
+    // It uses batch=2 internally and does not consume a multi-epoch request.
+    inputWidth = 128;
+    inputHeight = 128;
+    epochs = 1;
+    batchSize = 2;
+  }
+
+  InjectManualGaugeInt(context, "global_torch_input_width", inputWidth);
+  InjectManualGaugeInt(context, "global_torch_input_height", inputHeight);
+  InjectManualGaugeInt(context, "global_torch_confidence_percent", confidence);
+  InjectManualGaugeInt(context, "global_torch_mask_threshold_percent", maskThreshold);
+  InjectManualGaugeInt(context, "global_torch_max_detections", maxDetections);
+  InjectManualGaugeInt(context, "global_torch_epochs", epochs);
+  InjectManualGaugeInt(context, "global_torch_batch_size", batchSize);
+  context.torch_parameter_defaults_key = profileKey;
+  CXLOG_INFO(
+      "TorchKeyParameters",
+      "torch_parameter_defaults_applied",
+      "ui_event",
+      "profile=" + feature +
+          " epochs=" + std::to_string(epochs) +
+          " batch_size=" + std::to_string(batchSize) +
+          " input=" + std::to_string(inputWidth) + "x" +
+          std::to_string(inputHeight));
+}
+
+static bool TorchAnnotationBoundsLocal(
+    const TorchTrainingImageItem& item,
+    int& x0,
+    int& y0,
+    int& x1,
+    int& y1)
+{
+  double minX = 0.0;
+  double minY = 0.0;
+  double maxX = 0.0;
+  double maxY = 0.0;
+  bool available = false;
+  auto includePoint = [&](double x, double y)
+  {
+    if (!available)
+    {
+      minX = maxX = x;
+      minY = maxY = y;
+      available = true;
+      return;
+    }
+    minX = std::min(minX, x);
+    minY = std::min(minY, y);
+    maxX = std::max(maxX, x);
+    maxY = std::max(maxY, y);
+  };
+
+  for (const TorchTrainingAnnotationShapeSnapshot& shape : item.annotation_shapes)
+  {
+    if (!shape.visible || shape.result_element)
+      continue;
+    for (std::size_t i = 0; i + 1 < shape.points_xy.size(); i += 2)
+      includePoint(shape.points_xy[i], shape.points_xy[i + 1]);
+    if (shape.radius > 0.0)
+    {
+      includePoint(shape.center_x - shape.radius, shape.center_y - shape.radius);
+      includePoint(shape.center_x + shape.radius, shape.center_y + shape.radius);
+    }
+    if (shape.radius_x > 0.0 || shape.radius_y > 0.0)
+    {
+      includePoint(shape.center_x - shape.radius_x, shape.center_y - shape.radius_y);
+      includePoint(shape.center_x + shape.radius_x, shape.center_y + shape.radius_y);
+    }
+  }
+
+  if (!available)
+    return false;
+  x0 = std::max(0, static_cast<int>(std::floor(minX)));
+  y0 = std::max(0, static_cast<int>(std::floor(minY)));
+  x1 = std::max(x0 + 1, static_cast<int>(std::ceil(maxX)));
+  y1 = std::max(y0 + 1, static_cast<int>(std::ceil(maxY)));
+  return true;
+}
+
+static std::string TorchShapeGeometryTextLocal(
+    const TorchTrainingAnnotationShapeSnapshot& shape)
+{
+  std::ostringstream out;
+  if (!shape.points_xy.empty())
+  {
+    out << "points=" << shape.points_xy.size() / 2;
+    if (shape.points_xy.size() >= 2)
+      out << " first=(" << static_cast<int>(std::lround(shape.points_xy[0]))
+          << "," << static_cast<int>(std::lround(shape.points_xy[1])) << ")";
+  }
+  else if (shape.radius > 0.0)
+  {
+    out << "C=(" << static_cast<int>(std::lround(shape.center_x)) << ","
+        << static_cast<int>(std::lround(shape.center_y)) << ") R="
+        << static_cast<int>(std::lround(shape.radius));
+  }
+  else if (shape.radius_x > 0.0 || shape.radius_y > 0.0)
+  {
+    out << "C=(" << static_cast<int>(std::lround(shape.center_x)) << ","
+        << static_cast<int>(std::lround(shape.center_y)) << ") Rx/Ry="
+        << static_cast<int>(std::lround(shape.radius_x)) << "/"
+        << static_cast<int>(std::lround(shape.radius_y));
+  }
+  else
+  {
+    out << "geometry snapshot available";
+  }
+  return out.str();
+}
+
+static bool DrawRuntimeIntRow(
+    ManualTestContext& context,
+    const char* label,
+    const char* key,
+    int fallback,
+    int minValue,
+    int maxValue,
+    float labelWidth);
+
 static void DrawReadonlyFieldLocal(const char* label, const std::string& value)
 {
   ImGui::Text("%s: %s", label, value.empty() ? "-" : value.c_str());
@@ -377,6 +655,54 @@ static bool ReadTorchTextFileLocal(const std::string& path, std::string& text)
   buffer << input.rdbuf();
   text = buffer.str();
   return true;
+}
+
+static const RuntimeObjectView* FindTorchRuntimeForCurrentFeatureLocal(
+    const ManualTestContext& context,
+    bool& staleFromDifferentTask)
+{
+  staleFromDifferentTask = false;
+  const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
+  if (object == nullptr)
+    return nullptr;
+
+  const std::string feature = TorchTaskFeatureLocal(context);
+  if (object->type == "FindSegmentation")
+  {
+    const bool compatible = feature == "semantic_segmentation" ||
+        feature == "instance_segmentation" || feature == "runtime_contract";
+    staleFromDifferentTask = !compatible;
+    return compatible ? object : nullptr;
+  }
+
+  const bool isTrainingResult =
+      !object->torch_trainer_lifecycle_summary.empty();
+  if (isTrainingResult)
+  {
+    const bool compatible = feature == "training_lifecycle" ||
+        feature == "semantic_segmentation";
+    staleFromDifferentTask = !compatible;
+    return compatible ? object : nullptr;
+  }
+
+  std::string resultText;
+  ReadTorchTextFileLocal(object->torch_result_ref, resultText);
+  const std::string resultKey = ToLowerAsciiLocal(
+      object->torch_result_ref + " " + object->torch_evidence_ref + " " +
+      resultText);
+  bool compatible = true;
+  if (feature == "object_detection")
+    compatible = resultKey.find("detect") != std::string::npos ||
+        object->torch_result_count > 0;
+  else if (feature == "semantic_segmentation" ||
+           feature == "instance_segmentation")
+    compatible = resultKey.find("segment") != std::string::npos ||
+        object->torch_mask_available != 0;
+  else if (feature == "training_lifecycle")
+    compatible = false;
+
+  staleFromDifferentTask = !compatible;
+  return compatible ? object : nullptr;
 }
 
 static bool ExtractTorchJsonNumberLocal(
@@ -449,8 +775,18 @@ static std::vector<TorchCurveSampleLocal> BuildTorchCurveSamplesLocal(
   {
     if (ExtractTorchJsonNumberLocal(json, "smoke_loss", number))
       samples.push_back({"loss", number});
+    if (ExtractTorchJsonNumberLocal(json, "eval_loss", number))
+      samples.push_back({"eval_loss", number});
     if (ExtractTorchJsonNumberLocal(json, "grad_mean", number))
       samples.push_back({"grad", number});
+    if (ExtractTorchJsonNumberLocal(json, "foreground_iou", number))
+      samples.push_back({"IoU", number});
+    if (ExtractTorchJsonNumberLocal(json, "avg_confidence", number))
+      samples.push_back({"confidence", number});
+    if (ExtractTorchJsonNumberLocal(json, "effective_batch_size", number))
+      samples.push_back({"batch_size", number});
+    if (ExtractTorchJsonNumberLocal(json, "input_size", number))
+      samples.push_back({"input_size", number});
     if (ExtractTorchJsonNumberLocal(json, "foreground_ratio", number))
       samples.push_back({"fg", number});
     if (ExtractTorchJsonNumberLocal(json, "infer_runtime_ms", number))
@@ -497,9 +833,187 @@ static std::vector<TorchCurveSampleLocal> BuildFindSegmentationCurveSamplesLocal
   return samples;
 }
 
-void DrawTorchKeyStatusPanel(const ManualTestContext& context)
+static bool StageTorchUiRunLocal(
+    ManualTestContext& context,
+    const std::string& relativeScriptPath,
+    const std::string& action,
+    std::string& reason)
 {
-  const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
+  const std::filesystem::path scriptPath =
+      ResolveWorkspaceFile(relativeScriptPath);
+  std::string scriptText;
+  if (scriptPath.empty() || !std::filesystem::exists(scriptPath) ||
+      !ReadTextFile(scriptPath.string(), scriptText))
+  {
+    reason = "Torch action script is unavailable: " + relativeScriptPath;
+    return false;
+  }
+  if (scriptText.empty())
+  {
+    reason = "Torch action script is empty: " + scriptPath.string();
+    return false;
+  }
+
+  context.editor_text = scriptText;
+  context.loaded_script_path = scriptPath.string();
+  context.script_file_path = scriptPath.string();
+  context.editor_source = "torch_runtime_action";
+  context.editor_dirty = false;
+  context.active_script_case_name = scriptPath.stem().string();
+  context.active_script_case_path = scriptPath.string();
+  context.active_script_case_purpose = action;
+  context.current_gauge.tool = "TorchTask";
+  context.current_gauge.has_line_gauge = false;
+  context.current_gauge.has_circle_gauge = false;
+  context.current_gauge.has_ellipse_gauge = false;
+  context.current_gauge.dirty = true;
+  context.current_gauge.review_status = "editing";
+  if (action == "torch_train_tiny_smoke")
+    ApplyTorchParameterDefaultsLocal(context, "training_lifecycle");
+  else if (action == "torch_infer_detection")
+    ApplyTorchParameterDefaultsLocal(context, "object_detection");
+  else if (action == "torch_infer_segmentation")
+    ApplyTorchParameterDefaultsLocal(context, "semantic_segmentation");
+  // Freeze only after the action-specific profile has been applied.  The
+  // deferred Debug Compiler restores this snapshot before execution.
+  context.pending_execution_gauge = context.current_gauge;
+  context.pending_execution_globals = context.runtime_int_vars;
+  context.has_pending_execution_snapshot = true;
+  context.debug_action = "Torch Action Staged";
+  context.debug_status = "TORCH_ACTION_STAGED";
+  context.debug_reason = action +
+      " staged; use Run Staged Action to execute serially";
+  context.run_state = "ready";
+  reason = context.debug_reason;
+  CXLOG_INFO(
+      "TorchUI",
+      "torch_ui_action_staged",
+      "ui_event",
+      "action=" + action + " script=" + scriptPath.string());
+  return true;
+}
+
+void DrawTorchKeyStatusPanel(ManualTestContext& context)
+{
+  bool staleFromDifferentTask = false;
+  const RuntimeObjectView* object =
+      FindTorchRuntimeForCurrentFeatureLocal(context, staleFromDifferentTask);
+  const std::string selectedFeature = TorchTaskFeatureLocal(context);
+  const std::string evidenceFeature = TorchSelectedEvidenceFeatureLocal(context);
+
+  if (ImGui::CollapsingHeader("Torch Actions", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    ImGui::TextWrapped(
+        "All actions load a canonical cxscript into Script Editor and use the "
+        "existing single Parser owner. No background worker or parallel Parser is used.");
+    const bool runBusy =
+        context.run_state == "running" || context.run_state == "runtime_step";
+    if (runBusy)
+      ImGui::BeginDisabled();
+
+    std::string actionReason;
+    const std::string actionFeature =
+        evidenceFeature == "runtime_contract" ? selectedFeature : evidenceFeature;
+    // Tiny Smoke always loads its canonical segmentation lifecycle script.
+    // It is therefore valid from any selected Torch evidence case with an
+    // image, including a detection case.  The selected case is evidence
+    // context only; it must not silently become a segmentation-quality claim.
+    const bool torchActionAvailable = IsTorchContext(context) &&
+        (!context.image_file_path.empty() ||
+         !context.current_evidence_selection.image_path.empty());
+    if (!torchActionAvailable)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Train Segmentation Tiny Smoke"))
+    {
+      if (!StageTorchUiRunLocal(
+              context,
+              "cxparser/cxscript/module/torch/torch_train_lifecycle_direct_test.cxsc",
+              "torch_train_tiny_smoke",
+              actionReason))
+      {
+        context.run_state = "failed";
+        context.debug_status = "TORCH_UI_ACTION_BLOCKED";
+        context.debug_reason = actionReason;
+      }
+    }
+    if (!torchActionAvailable)
+      ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Infer Segmentation"))
+    {
+      if (!StageTorchUiRunLocal(
+              context,
+              "cxparser/cxscript/module/torch/torch_segmentation_cpp_state_dict_cpu_direct.cxsc",
+              "torch_infer_segmentation",
+              actionReason))
+      {
+        context.run_state = "failed";
+        context.debug_status = "TORCH_UI_ACTION_BLOCKED";
+        context.debug_reason = actionReason;
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Infer Detection"))
+    {
+      if (!StageTorchUiRunLocal(
+              context,
+              "cxparser/cxscript/module/torch/torch_detection_yolov8_cpu_smoke_direct.cxsc",
+              "torch_infer_detection",
+              actionReason))
+      {
+        context.run_state = "failed";
+        context.debug_status = "TORCH_UI_ACTION_BLOCKED";
+        context.debug_reason = actionReason;
+      }
+    }
+
+    if (runBusy)
+      ImGui::EndDisabled();
+    DrawReadonlyFieldLocal("run_state", context.run_state);
+    DrawReadonlyFieldLocal("debug_status", context.debug_status);
+    DrawReadonlyFieldLocal("reason", context.debug_reason);
+    if (!torchActionAvailable)
+    {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+          "Load a Torch evidence image before staging Tiny Smoke. selected=%s",
+          actionFeature.c_str());
+    }
+    DrawReadonlyFieldLocal("evidence_feature", evidenceFeature);
+    DrawReadonlyFieldLocal("selected_feature", selectedFeature);
+    DrawReadonlyFieldLocal("action_feature", actionFeature);
+    if (context.debug_status == "TORCH_ACTION_STAGED")
+    {
+      ImGui::TextColored(
+          ImVec4(0.52f, 0.82f, 1.0f, 1.0f),
+          "Action staged: requested epochs=%d, batch=%d. It has not run yet.",
+          context.runtime_int_vars["global_torch_epochs"],
+          context.runtime_int_vars["global_torch_batch_size"]);
+      if (ImGui::Button("Run Staged Action (serial)"))
+      {
+        context.debug_action = "Torch Action Run Requested";
+        context.debug_status = "TORCH_ACTION_RUN_REQUESTED";
+        context.debug_reason =
+            "operator requested staged Torch action through the single serial Parser owner";
+        context.run_state = "queued";
+        CXLOG_INFO(
+            "TorchUI",
+            "torch_ui_action_run_requested",
+            "ui_event",
+            "action=" + context.active_script_case_purpose +
+                " script=" + context.loaded_script_path);
+      }
+    }
+    if (staleFromDifferentTask)
+    {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.62f, 0.32f, 1.0f),
+          "Previous Torch result belongs to a different task and is hidden.");
+    }
+    ImGui::TextDisabled(
+        "Tiny smoke validates lifecycle and artifacts only. Detection and "
+        "segmentation model semantics still require evidence review.");
+  }
 
   if (!ImGui::CollapsingHeader("Torch Inference Status", ImGuiTreeNodeFlags_DefaultOpen))
   {
@@ -596,11 +1110,34 @@ void DrawTorchKeyStatusPanel(const ManualTestContext& context)
   {
     if (object == nullptr)
     {
-      DrawPendingBindingLineLocal("training lifecycle", "run torch_train_lifecycle_direct_test.cxsc");
+      DrawReadonlyFieldLocal("requested_feature", selectedFeature);
+      DrawReadonlyFieldLocal("requested_epochs", context.runtime_int_vars["global_torch_epochs"]);
+      DrawReadonlyFieldLocal("requested_batch_size", context.runtime_int_vars["global_torch_batch_size"]);
+      DrawReadonlyFieldLocal("execution_state", context.debug_status);
+      if (context.debug_status == "TORCH_ACTION_STAGED")
+      {
+        ImGui::TextColored(
+            ImVec4(0.52f, 0.82f, 1.0f, 1.0f),
+            "Training request is staged. Click Run Staged Action; no result exists yet.");
+      }
+      else if (context.debug_status == "TORCH_ACTION_RUN_REQUESTED" ||
+               context.run_state == "queued")
+      {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.82f, 0.25f, 1.0f),
+            "Training request is queued for the serial Parser owner.");
+      }
+      else
+      {
+        DrawPendingBindingLineLocal(
+            "training lifecycle", "stage and run torch_train_lifecycle_direct_test.cxsc");
+      }
     }
     else if (object->type == "TorchTask")
     {
       DrawReadonlyFieldLocal("epoch", std::string("tiny smoke exposes lifecycle summary, not full epoch table"));
+      DrawReadonlyFieldLocal("completed_epochs", 1);
+      DrawReadonlyFieldLocal("curve_state", "ONE_SMOKE_STEP_NO_MULTI_EPOCH_SERIES");
       DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
       DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
       DrawReadonlyFieldLocal("train_ms", object->torch_train_ms);
@@ -615,9 +1152,283 @@ void DrawTorchKeyStatusPanel(const ManualTestContext& context)
   }
 }
 
+void DrawTorchAnnotationKeyParameterPanel(ManualTestContext& context)
+{
+  const CxEvidenceSelectionSnapshot& evidence =
+      context.current_evidence_selection;
+  const TorchTrainingImageItem* image =
+      CurrentTorchTrainingImageLocal(context);
+  const RuntimeObjectView* runtime =
+      FindPrimaryTorchRuntimeObjectLocal(context);
+  const std::string feature = TorchTaskFeatureLocal(context);
+  ApplyTorchParameterDefaultsLocal(context, feature);
+
+  ImGui::TextColored(
+      ImVec4(0.42f, 0.78f, 1.0f, 1.0f),
+      "Torch Annotation / Feature Parameters");
+  ImGui::TextWrapped(
+      "Single debug chain: Evidence case -> Training Image Set item -> "
+      "ImageAnnotationLayer shapes -> staged global_* values -> TorchTask run.");
+  ImGui::Separator();
+
+  if (ImGui::CollapsingHeader(
+          "Current Evidence Binding",
+          ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    DrawReadonlyFieldLocal("case_id", evidence.case_id);
+    DrawReadonlyFieldLocal("script", evidence.script_id.empty()
+        ? evidence.script_path : evidence.script_id);
+    DrawReadonlyFieldLocal("task_feature", feature);
+    DrawReadonlyFieldLocal("image_id", image == nullptr
+        ? evidence.image_id : image->image_id);
+    DrawReadonlyFieldLocal("image_path", image == nullptr
+        ? context.image_file_path : image->image_path);
+    DrawReadonlyFieldLocal("split", image == nullptr ? "-" : image->split);
+    DrawReadonlyFieldLocal("label", image == nullptr ? "-" : image->label);
+    DrawReadonlyFieldLocal("annotation_status", image == nullptr
+        ? "no_training_image_selected" : image->annotation_status);
+    DrawReadonlyFieldLocal(
+        "evidence_dataset_images",
+        std::to_string(evidence.dataset_images.size()));
+    DrawReadonlyFieldLocal(
+        "evidence_annotations",
+        std::to_string(evidence.annotations.size()));
+  }
+
+  if (ImGui::CollapsingHeader(
+          "Annotated Regions / Features",
+          ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (image == nullptr)
+    {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.68f, 0.25f, 1.0f),
+          "No Torch Training Image Set item is selected.");
+      ImGui::TextWrapped(
+          "Select the Evidence case and click a training thumbnail. The "
+          "thumbnail must be loaded into Image View before annotations can "
+          "be reflected here.");
+    }
+    else
+    {
+      int editableCount = 0;
+      int resultCount = 0;
+      int pointCount = 0;
+      int rectCount = 0;
+      int circleCount = 0;
+      int contourCount = 0;
+      int positivePromptCount = 0;
+      int negativePromptCount = 0;
+      for (const TorchTrainingAnnotationShapeSnapshot& shape : image->annotation_shapes)
+      {
+        editableCount += shape.editable ? 1 : 0;
+        resultCount += shape.result_element ? 1 : 0;
+        const std::string kind = ToLowerAsciiLocal(shape.shape_kind);
+        const std::string role = ToLowerAsciiLocal(
+            shape.semantic_role + " " + shape.tool_id + " " + shape.owner_binding);
+        if (kind.find("point") != std::string::npos)
+          ++pointCount;
+        if (kind.find("rect") != std::string::npos)
+          ++rectCount;
+        if (kind.find("circle") != std::string::npos ||
+            kind.find("ellipse") != std::string::npos)
+          ++circleCount;
+        if (kind.find("polyline") != std::string::npos ||
+            role.find("boundary") != std::string::npos ||
+            role.find("contour") != std::string::npos)
+          ++contourCount;
+        if (role.find("positive") != std::string::npos)
+          ++positivePromptCount;
+        if (role.find("negative") != std::string::npos)
+          ++negativePromptCount;
+      }
+
+      ImGui::Text(
+          "shapes=%d editable=%d results=%d points=%d rects=%d circles/ellipses=%d contours=%d",
+          static_cast<int>(image->annotation_shapes.size()),
+          editableCount,
+          resultCount,
+          pointCount,
+          rectCount,
+          circleCount,
+          contourCount);
+      ImGui::Text(
+          "prompt labels: positive=%d negative=%d",
+          positivePromptCount,
+          negativePromptCount);
+
+      int roiX0 = 0;
+      int roiY0 = 0;
+      int roiX1 = 0;
+      int roiY1 = 0;
+      const bool hasBounds = TorchAnnotationBoundsLocal(
+          *image, roiX0, roiY0, roiX1, roiY1);
+      if (hasBounds)
+      {
+        ImGui::Text(
+            "annotation_bounds: (%d,%d)-(%d,%d) size=%dx%d",
+            roiX0, roiY0, roiX1, roiY1,
+            roiX1 - roiX0, roiY1 - roiY0);
+        if (ImGui::Button("Stage Annotation Bounds As Torch ROI"))
+        {
+          InjectManualGaugeInt(context, "global_roi_x0", roiX0);
+          InjectManualGaugeInt(context, "global_roi_y0", roiY0);
+          InjectManualGaugeInt(context, "global_roi_x1", roiX1);
+          InjectManualGaugeInt(context, "global_roi_y1", roiY1);
+          InjectManualGaugeInt(context, "global_roi_x", roiX0);
+          InjectManualGaugeInt(context, "global_roi_y", roiY0);
+          InjectManualGaugeInt(context, "global_roi_width", roiX1 - roiX0);
+          InjectManualGaugeInt(context, "global_roi_height", roiY1 - roiY0);
+          context.current_gauge.dirty = true;
+          context.current_gauge.review_status = "editing";
+          context.debug_action = "Stage Torch Annotation ROI";
+          context.debug_status = "TORCH_ANNOTATION_ROI_STAGED";
+          context.debug_reason =
+              "annotation bounds staged to global_roi_* for case=" +
+              evidence.case_id + " image=" + image->image_id;
+          CXLOG_INFO(
+              "TorchKeyParameters",
+              "annotation_roi_staged",
+              "ui_event",
+              context.debug_reason +
+                  " roi=" + std::to_string(roiX0) + "," +
+                  std::to_string(roiY0) + "," +
+                  std::to_string(roiX1) + "," +
+                  std::to_string(roiY1));
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled(
+            "stages values only; the selected cxscript must declare the matching global_* inputs");
+      }
+      else
+      {
+        ImGui::TextDisabled(
+            "No editable annotation geometry is available for an ROI snapshot.");
+      }
+
+      if (ImGui::BeginTable(
+              "torch_annotation_shapes",
+              5,
+              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                  ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
+              ImVec2(0.0f, 155.0f)))
+      {
+        ImGui::TableSetupColumn("Ref");
+        ImGui::TableSetupColumn("Role");
+        ImGui::TableSetupColumn("Kind");
+        ImGui::TableSetupColumn("Geometry");
+        ImGui::TableSetupColumn("State");
+        ImGui::TableHeadersRow();
+        for (const TorchTrainingAnnotationShapeSnapshot& shape : image->annotation_shapes)
+        {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(shape.stable_ref.empty()
+              ? "-" : shape.stable_ref.c_str());
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextUnformatted(shape.semantic_role.empty()
+              ? "annotation" : shape.semantic_role.c_str());
+          ImGui::TableSetColumnIndex(2);
+          ImGui::TextUnformatted(shape.shape_kind.empty()
+              ? "-" : shape.shape_kind.c_str());
+          ImGui::TableSetColumnIndex(3);
+          const std::string geometry = TorchShapeGeometryTextLocal(shape);
+          ImGui::TextUnformatted(geometry.c_str());
+          ImGui::TableSetColumnIndex(4);
+          ImGui::Text("%s%s",
+              shape.editable ? "editable" : "read-only",
+              shape.result_element ? "/result" : "");
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+
+  if (ImGui::CollapsingHeader(
+          "Torch Runtime Parameters",
+          ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    ImGui::TextDisabled(
+        "Values marked request-bound enter CxTorchTaskSpec.extra_json through "
+        "the selected script's request context. Backend consumption remains "
+        "task/manifest-specific and is not implied by request binding.");
+    ImGui::TextDisabled("ROI (image coordinates)");
+    DrawRuntimeIntRow(context, "roi x0", "global_roi_x0",
+                      0, 0, 100000, 175.0f);
+    DrawRuntimeIntRow(context, "roi y0", "global_roi_y0",
+                      0, 0, 100000, 175.0f);
+    DrawRuntimeIntRow(context, "roi x1", "global_roi_x1",
+                      639, 0, 100000, 175.0f);
+    DrawRuntimeIntRow(context, "roi y1", "global_roi_y1",
+                      639, 0, 100000, 175.0f);
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Model input and thresholds");
+    DrawRuntimeIntRow(context, "input width", "global_torch_input_width",
+                      512, 16, 4096, 175.0f);
+    DrawRuntimeIntRow(context, "input height", "global_torch_input_height",
+                      512, 16, 4096, 175.0f);
+    DrawRuntimeIntRow(context, "confidence threshold %",
+                      "global_torch_confidence_percent",
+                      50, 0, 100, 175.0f);
+    DrawRuntimeIntRow(context, "mask threshold %",
+                      "global_torch_mask_threshold_percent",
+                      50, 0, 100, 175.0f);
+    DrawRuntimeIntRow(context, "max detections", "global_torch_max_detections",
+                      100, 1, 1000, 175.0f);
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Training request");
+    DrawRuntimeIntRow(context, "epochs", "global_torch_epochs",
+                      1, 1, 10000, 175.0f);
+    DrawRuntimeIntRow(context, "batch size", "global_torch_batch_size",
+                      1, 1, 1024, 175.0f);
+    if (feature == "training_lifecycle")
+    {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.78f, 0.25f, 1.0f),
+          "Tiny Smoke effective profile: epochs=1, batch_size=2, input=128x128.");
+      ImGui::TextDisabled(
+          "This validates forward/backward and gradients only; optimizer-step "
+          "multi-epoch training is not bound to the runtime task yet.");
+    }
+    ImGui::TextDisabled(
+        "All values above are staged into the next Torch request. The active "
+        "task/manifest decides which fields it consumes.");
+
+    ImGui::Separator();
+    if (runtime == nullptr)
+    {
+      ImGui::TextDisabled(
+          "Runtime result: not executed. Run the selected cxscript to populate TorchTask status/artifacts.");
+    }
+    else
+    {
+      DrawReadonlyFieldLocal("runtime object", runtime->type + " " + runtime->name);
+      DrawReadonlyFieldLocal("status", runtime->type == "TorchTask"
+          ? runtime->torch_status : runtime->segmentation_backend_status);
+      DrawReadonlyFieldLocal("result_ref", runtime->type == "TorchTask"
+          ? runtime->torch_result_ref : runtime->segmentation_result_ref);
+      DrawReadonlyFieldLocal("overlay_ref", runtime->type == "TorchTask"
+          ? runtime->torch_overlay_ref : runtime->segmentation_overlay_ref);
+    }
+  }
+}
+
 void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
 {
-  const RuntimeObjectView* object = FindPrimaryTorchRuntimeObjectLocal(context);
+  bool staleFromDifferentTask = false;
+  const RuntimeObjectView* object =
+      FindTorchRuntimeForCurrentFeatureLocal(context, staleFromDifferentTask);
+
+  if (staleFromDifferentTask)
+  {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.62f, 0.32f, 1.0f),
+        "Previous Torch runtime result is not part of the selected Evidence task.");
+    ImGui::TextDisabled(
+        "Artifacts, shape attach and metric snapshots remain hidden until the selected cxscript is run.");
+  }
 
   if (ImGui::CollapsingHeader("Training Image Set", ImGuiTreeNodeFlags_DefaultOpen))
   {
@@ -729,6 +1540,29 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
     else if (object != nullptr && object->type == "FindSegmentation")
       samples = BuildFindSegmentationCurveSamplesLocal(*object);
 
+    double epochs = 0.0;
+    for (const TorchCurveSampleLocal& sample : samples)
+    {
+      if (sample.label == "epochs")
+        epochs = sample.value;
+    }
+    const bool isTrainingSnapshot =
+        object != nullptr && object->type == "TorchTask" && epochs <= 1.0 &&
+        std::any_of(samples.begin(), samples.end(), [](const TorchCurveSampleLocal& sample) {
+          return sample.label == "loss";
+        });
+
+    if (isTrainingSnapshot)
+    {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.82f, 0.25f, 1.0f),
+          "PENDING_MULTI_EPOCH_SERIES");
+      ImGui::TextDisabled(
+          "Tiny Smoke produced one lifecycle sample only. No learning curve is plotted.");
+      ImGui::Separator();
+    }
+    else
+    {
     const ImVec2 plotSize(520.0f, 180.0f);
     ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 p1(p0.x + plotSize.x, p0.y + plotSize.y);
@@ -747,8 +1581,22 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
     }
     draw->AddText(ImVec2(p0.x + 8.0f, p0.y + 6.0f),
                   IM_COL32(240, 240, 240, 255),
-                  "torch runtime metric curve");
-    if (samples.empty())
+                  isTrainingSnapshot
+                      ? "tiny-smoke metric snapshot (not a learning curve)"
+                      : "torch runtime metrics");
+    if (isTrainingSnapshot)
+    {
+      draw->AddText(ImVec2(p0.x + 18.0f, p0.y + 58.0f),
+                    IM_COL32(255, 210, 80, 255),
+                    "PENDING_MULTI_EPOCH_SERIES");
+      draw->AddText(ImVec2(p0.x + 18.0f, p0.y + 88.0f),
+                    IM_COL32(205, 205, 205, 255),
+                    "Runtime produced one smoke step only.");
+      draw->AddText(ImVec2(p0.x + 18.0f, p0.y + 112.0f),
+                    IM_COL32(205, 205, 205, 255),
+                    "Loss/grad/runtime are listed below as separate metrics.");
+    }
+    else if (samples.empty())
     {
       draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
                     IM_COL32(255, 210, 80, 255),
@@ -762,8 +1610,6 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
       if (maxAbs <= 0.0)
         maxAbs = 1.0;
 
-      ImVec2 prev;
-      bool hasPrev = false;
       for (std::size_t i = 0; i < samples.size(); ++i)
       {
         const float t = samples.size() <= 1
@@ -774,20 +1620,35 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
         const float y = p1.y - 30.0f -
             static_cast<float>((normalized + 1.0) * 0.5) * (plotSize.y - 60.0f);
         const ImVec2 pt(x, y);
-        if (hasPrev)
-          draw->AddLine(prev, pt, IM_COL32(120, 255, 160, 255), 2.0f);
+        draw->AddLine(
+            ImVec2(x, p1.y - 30.0f),
+            pt,
+            IM_COL32(90, 190, 255, 220),
+            3.0f);
         draw->AddCircleFilled(pt, 4.5f, IM_COL32(120, 255, 160, 255));
         draw->AddText(ImVec2(pt.x + 5.0f, pt.y - 12.0f),
                       IM_COL32(220, 255, 220, 255),
                       samples[i].label.c_str());
-        prev = pt;
-        hasPrev = true;
       }
       draw->AddText(ImVec2(p0.x + 8.0f, p1.y - 22.0f),
                     IM_COL32(120, 255, 160, 255),
-                    "real samples from torch result/evidence json");
+                    "real values from torch result/evidence json");
     }
     ImGui::Dummy(plotSize);
+    }
+    if (!samples.empty())
+    {
+      for (const TorchCurveSampleLocal& sample : samples)
+      {
+        ImGui::Text("%s: %.6g", sample.label.c_str(), sample.value);
+      }
+      if (epochs <= 1.0)
+      {
+        ImGui::TextDisabled(
+            "Tiny-smoke metric snapshot (one epoch). A multi-epoch training "
+            "curve is pending a runtime-produced epoch series.");
+      }
+    }
     if (object != nullptr && object->type == "TorchTask")
     {
       DrawReadonlyFieldLocal("curve_samples_count", static_cast<int>(samples.size()));
@@ -1578,6 +2439,7 @@ static void RequestFastMatchRunAction(
   InjectManualGaugeInt(context, "global_fastmatch_action", actionCode);
   context.current_gauge.dirty = true;
   context.current_gauge.review_status = "editing";
+  context.apply_gauge_to_shape_requested = true;
   context.debug_action = actionLabel == nullptr
       ? "FastMatch Action"
       : actionLabel;
@@ -1591,6 +2453,30 @@ static void RequestFastMatchRunAction(
         std::string(actionLabel == nullptr ? "FastMatch action" : actionLabel) +
         " requested; cxscript may use global_fastmatch_action to branch learn/match.";
     context.run_state = "running";
+    const int learnX = RuntimeIntOr(context, "global_learn_roi_x", 120);
+    const int learnY = RuntimeIntOr(context, "global_learn_roi_y", 120);
+    const int learnW = RuntimeIntOr(context, "global_learn_roi_w", 120);
+    const int learnH = RuntimeIntOr(context, "global_learn_roi_h", 90);
+    const int searchX = RuntimeIntOr(context, "global_search_roi_x", 0);
+    const int searchY = RuntimeIntOr(context, "global_search_roi_y", 0);
+    const int searchW = RuntimeIntOr(context, "global_search_roi_w", 640);
+    const int searchH = RuntimeIntOr(context, "global_search_roi_h", 480);
+    const std::string runMessage =
+        "action=" + std::to_string(actionCode) +
+        " script=" + context.loaded_script_path +
+        " learn_roi=(" + std::to_string(learnX) + "," +
+        std::to_string(learnY) + "," +
+        std::to_string(learnW) + "," +
+        std::to_string(learnH) + ")" +
+        " search_roi=(" + std::to_string(searchX) + "," +
+        std::to_string(searchY) + "," +
+        std::to_string(searchW) + "," +
+        std::to_string(searchH) + ")";
+    CXLOG_INFO(
+        "KeyParameterControls",
+        "fastmatch_action_run_requested",
+        "MANUAL_RUN_REQUESTED",
+        runMessage);
   }
 }
 
@@ -3821,7 +4707,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       bool objectPrefilter = (gauge.findsetting & 0x01) != 0;
       const char* findsettingMethodName =
           (gauge.tool == "FindLine" || gauge.has_line_gauge)
-              ? "setobjfilter"
+              ? "setfindsetting/setobjfilter"
               : "setfindsetting";
       ImGui::TextUnformatted("findsetting");
       ImGui::SameLine(110.0f);

@@ -46,9 +46,11 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
         return "GridPatternClassTool";
     if (lowered == "regionpatterntool" || lowered == "regionpattern")
         return "RegionPatternTool";
-    if (lowered == "findsegmentation")
+    if (lowered == "findsegmentation" ||
+        lowered.find("find_segmentation") != std::string::npos)
         return "FindSegmentation";
-    if (lowered == "torchtask" || lowered == "torch")
+    if (lowered == "torchtask" || lowered == "torch" ||
+        lowered.find("torch") != std::string::npos)
         return "TorchTask";
     return typeOrTool;
 }
@@ -2169,7 +2171,7 @@ static void WriteEvidenceChainLoadedElementsDebugLocal(
     rows << "group_label\tcase_id\timage_id\ttarget_id\ttool\tcandidate_id\t"
          << "status\toverride\tdisplay_major\tdisplay_priority\tis_candidate\t"
          << "has_saved_state\tscript_id\tscript_path\timage_path\t"
-         << "thumbnail_path\treason\n";
+         << "thumbnail_path\tdataset_images\tannotations\treason\n";
 
     for (const auto& group : context.script_evidence_groups)
     {
@@ -2207,6 +2209,8 @@ static void WriteEvidenceChainLoadedElementsDebugLocal(
                  << escapeTsv(thumb.script_path) << '\t'
                  << escapeTsv(thumb.image_path) << '\t'
                  << escapeTsv(thumb.thumbnail_path) << '\t'
+                 << thumb.dataset_images.size() << '\t'
+                 << thumb.annotations.size() << '\t'
                  << escapeTsv(thumb.reason) << '\n';
         }
     }
@@ -2661,6 +2665,34 @@ static int AppendCxScriptEvidenceChainFilesLocal(
                 "; role=" + c.case_role +
                 "; expected=" + c.expected_result +
                 "; policy=" + c.expected_policy_guard;
+
+            for (const CxScriptEvidenceDatasetImage& image : c.dataset_images)
+            {
+                CxEvidenceDatasetImageBinding binding;
+                binding.image_id = image.image_id;
+                binding.image_path = image.image_path;
+                binding.split = image.split;
+                binding.label = image.label;
+                binding.source = image.source;
+                thumb.dataset_images.push_back(std::move(binding));
+            }
+
+            for (const CxScriptEvidenceAnnotation& annotation : c.annotations)
+            {
+                CxEvidenceAnnotationBinding binding;
+                binding.image_id = annotation.image_id;
+                binding.shape_kind = annotation.shape_kind;
+                binding.semantic_role = annotation.semantic_role;
+                binding.owner_binding = annotation.owner_binding;
+                binding.label = annotation.label;
+                binding.class_id = annotation.class_id;
+                binding.x0 = annotation.x0;
+                binding.y0 = annotation.y0;
+                binding.x1 = annotation.x1;
+                binding.y1 = annotation.y1;
+                binding.normalized = annotation.normalized;
+                thumb.annotations.push_back(std::move(binding));
+            }
 
             if (thumb.parameter_summary.empty() ||
                 thumb.parameter_summary.find('=') == std::string::npos)
@@ -3696,6 +3728,8 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
     out.primary_object_type = thumb.primary_object_type;
     out.primary_object_name = thumb.primary_object_name;
     out.primary_object_status = thumb.primary_object_status;
+    out.dataset_images = thumb.dataset_images;
+    out.annotations = thumb.annotations;
 
     if (!scriptPath.empty())
     {
@@ -3786,6 +3820,10 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         " candidate=" + (snapshot.is_candidate ? "true" : "false") +
         " has_saved_state=" +
         (snapshot.has_saved_state ? "true" : "false") +
+        " dataset_images=" +
+        std::to_string(snapshot.dataset_images.size()) +
+        " annotations=" +
+        std::to_string(snapshot.annotations.size()) +
         " working_script=" + snapshot.working_script_snapshot_path +
         " load_image=" + (loadImageToView ? "true" : "false"));
 
@@ -3994,9 +4032,30 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         staged.current_gauge.case_id = resolved.case_id;
         staged.current_gauge.image_id = resolved.image_id;
         staged.current_gauge.target_id = resolved.target_id;
-        if (!resolved.tool.empty() && staged.current_gauge.tool.empty())
-            staged.current_gauge.tool =
+        if (!resolved.tool.empty())
+        {
+            const std::string normalizedEvidenceTool =
                 NormalizeEvidenceToolTypeLocal(resolved.tool);
+            if (normalizedEvidenceTool == "TorchTask")
+            {
+                // A Torch evidence row does not own a legacy line/circle
+                // gauge.  Reset the previous geometry context so Key
+                // Parameter Controls follows the selected Torch case instead
+                // of silently retaining the last FindLine selection.
+                ManualGaugeState torchContext;
+                torchContext.case_id = resolved.case_id;
+                torchContext.image_id = resolved.image_id;
+                torchContext.target_id = resolved.target_id;
+                torchContext.tool = "TorchTask";
+                torchContext.source = "evidence";
+                torchContext.review_status = "editing";
+                staged.current_gauge = torchContext;
+            }
+            else
+            {
+                staged.current_gauge.tool = normalizedEvidenceTool;
+            }
+        }
         staged.current_gauge.primary_object_type =
             resolved.primary_object_type;
         staged.current_gauge.primary_object_name =
@@ -4140,7 +4199,8 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
             : " baseline_evidence=true");
 
     const bool shouldSyncTrainingImageSet =
-        IsEvidenceSelectionImageSetLocal(resolved);
+        IsEvidenceSelectionImageSetLocal(resolved) ||
+        !resolved.dataset_images.empty();
 
     if (shouldSyncTrainingImageSet)
     {
@@ -4383,6 +4443,87 @@ static void ClearTorchTrainingImageSetForEvidenceSyncLocal(
     context.torch_training_image_reason = reason;
 }
 
+static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
+    TorchTrainingImageItem& item,
+    const std::vector<CxEvidenceAnnotationBinding>& annotations)
+{
+    item.annotation_shapes.clear();
+
+    int imageW = 0;
+    int imageH = 0;
+    cv::Mat image = cv::imread(item.image_path, cv::IMREAD_UNCHANGED);
+    if (!image.empty())
+    {
+        imageW = image.cols;
+        imageH = image.rows;
+    }
+
+    int shapeIndex = 0;
+    for (const CxEvidenceAnnotationBinding& annotation : annotations)
+    {
+        if (!annotation.image_id.empty() &&
+            !item.image_id.empty() &&
+            annotation.image_id != item.image_id)
+        {
+            continue;
+        }
+
+        double x0 = annotation.x0;
+        double y0 = annotation.y0;
+        double x1 = annotation.x1;
+        double y1 = annotation.y1;
+        if (annotation.normalized && imageW > 0 && imageH > 0)
+        {
+            x0 *= static_cast<double>(imageW);
+            x1 *= static_cast<double>(imageW);
+            y0 *= static_cast<double>(imageH);
+            y1 *= static_cast<double>(imageH);
+        }
+
+        if (x1 < x0)
+            std::swap(x0, x1);
+        if (y1 < y0)
+            std::swap(y0, y1);
+
+        TorchTrainingAnnotationShapeSnapshot snap;
+        snap.stable_ref =
+            item.image_id + "_bbox_" + std::to_string(shapeIndex + 1);
+        snap.tool_id = "TorchTask";
+        snap.owner_type = "TorchDataset";
+        snap.owner_ref = item.image_id;
+        snap.owner_binding = annotation.owner_binding.empty()
+            ? "label_bbox"
+            : annotation.owner_binding;
+        snap.semantic_role =
+            annotation.semantic_role +
+            "_class_" + std::to_string(annotation.class_id);
+        snap.shape_kind = annotation.shape_kind.empty()
+            ? "RectShape"
+            : annotation.shape_kind;
+        snap.center_x = (x0 + x1) * 0.5;
+        snap.center_y = (y0 + y1) * 0.5;
+        snap.radius_x = std::max(0.0, (x1 - x0) * 0.5);
+        snap.radius_y = std::max(0.0, (y1 - y0) * 0.5);
+        snap.points_xy = { x0, y0, x1, y0, x1, y1, x0, y1 };
+        snap.closed = true;
+        snap.editable = true;
+        snap.visible = true;
+        snap.result_element = false;
+        item.annotation_shapes.push_back(std::move(snap));
+        ++shapeIndex;
+    }
+
+    item.annotation_shape_count =
+        static_cast<int>(item.annotation_shapes.size());
+    item.annotation_overlay_count = item.annotation_shape_count;
+    item.annotation_status =
+        item.annotation_shape_count > 0 ? "reviewed" : "unlabeled";
+    item.annotation_reason =
+        item.annotation_shape_count > 0
+            ? "loaded from evidence dataset annotations"
+            : "no evidence annotation bound for image";
+}
+
 static std::unique_ptr<ShapeBase> CreateTorchTrainingShapeFromSnapshotLocal(
     const TorchTrainingAnnotationShapeSnapshot& snap)
 {
@@ -4535,8 +4676,22 @@ void ViewController::CaptureCurrentTorchTrainingAnnotationState()
 
     TorchTrainingImageItem& item =
         m_manualTest.torch_training_images[static_cast<std::size_t>(selected)];
-    item.annotation_shapes.clear();
-    item.annotation_overlay_count =
+    if (m_manualTest.image_file_path.empty() || item.image_path.empty())
+        return;
+
+    const std::string currentImage =
+        ResolveWorkspaceFile(m_manualTest.image_file_path)
+            .lexically_normal()
+            .string();
+    const std::string selectedImage =
+        ResolveWorkspaceFile(item.image_path)
+            .lexically_normal()
+            .string();
+    if (currentImage != selectedImage)
+        return;
+
+    std::vector<TorchTrainingAnnotationShapeSnapshot> capturedShapes;
+    const int capturedOverlayCount =
         static_cast<int>(m_annotationLayer.Elements().size());
 
     for (const auto& element : m_annotationLayer.ShapeElements())
@@ -4575,11 +4730,47 @@ void ViewController::CaptureCurrentTorchTrainingAnnotationState()
             snap.points_xy.push_back(p.y);
         }
 
-        item.annotation_shapes.push_back(std::move(snap));
+        capturedShapes.push_back(std::move(snap));
     }
 
-    item.annotation_shape_count =
-        static_cast<int>(item.annotation_shapes.size());
+    auto sameShape = [](
+        const TorchTrainingAnnotationShapeSnapshot& a,
+        const TorchTrainingAnnotationShapeSnapshot& b) -> bool
+    {
+        return a.stable_ref == b.stable_ref &&
+            a.tool_id == b.tool_id &&
+            a.owner_type == b.owner_type &&
+            a.owner_ref == b.owner_ref &&
+            a.owner_binding == b.owner_binding &&
+            a.semantic_role == b.semantic_role &&
+            a.shape_kind == b.shape_kind &&
+            a.center_x == b.center_x && a.center_y == b.center_y &&
+            a.radius == b.radius && a.inner_radius == b.inner_radius &&
+            a.radius_x == b.radius_x && a.radius_y == b.radius_y &&
+            a.angle == b.angle && a.half_width == b.half_width &&
+            a.closed == b.closed && a.editable == b.editable &&
+            a.visible == b.visible && a.result_element == b.result_element &&
+            a.points_xy == b.points_xy;
+    };
+    bool changed = item.annotation_overlay_count != capturedOverlayCount ||
+        item.annotation_shapes.size() != capturedShapes.size();
+    if (!changed)
+    {
+        for (std::size_t i = 0; i < capturedShapes.size(); ++i)
+        {
+            if (!sameShape(item.annotation_shapes[i], capturedShapes[i]))
+            {
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (!changed)
+        return;
+
+    item.annotation_shapes = std::move(capturedShapes);
+    item.annotation_overlay_count = capturedOverlayCount;
+    item.annotation_shape_count = static_cast<int>(item.annotation_shapes.size());
     item.annotation_status =
         item.annotation_shape_count > 0 ? "editing" : "unlabeled";
     CXLOG_INFO(
@@ -4692,15 +4883,131 @@ bool ViewController::LoadTorchTrainingImageIntoAnnotationView(
 
 void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection()
 {
-    const CxEvidenceSelectionSnapshot& sel =
+    CxEvidenceSelectionSnapshot sel =
         m_manualTest.current_evidence_selection;
     if (!sel.valid)
         return;
+
+    if (sel.dataset_images.empty())
+    {
+        for (const ScriptEvidenceGroup& group : m_manualTest.script_evidence_groups)
+        {
+            for (const ScriptEvidenceThumb& thumb : group.thumbs)
+            {
+                if (thumb.dataset_images.empty())
+                    continue;
+
+                const bool sameCase =
+                    !sel.case_id.empty() && thumb.case_id == sel.case_id;
+                const bool sameScript =
+                    !sel.script_id.empty() && thumb.script_id == sel.script_id;
+                const bool sameImageAndTool =
+                    !sel.image_id.empty() &&
+                    !sel.tool.empty() &&
+                    thumb.image_id == sel.image_id &&
+                    NormalizeEvidenceToolTypeLocal(thumb.tool) ==
+                        NormalizeEvidenceToolTypeLocal(sel.tool);
+
+                if (!sameCase && !sameScript && !sameImageAndTool)
+                    continue;
+
+                sel.dataset_images = thumb.dataset_images;
+                sel.annotations = thumb.annotations;
+                CXLOG_INFO(
+                    "TorchTrainingImageSet",
+                    "evidence_dataset_resolved_from_loaded_thumb",
+                    "resolved",
+                    "case_id=" + sel.case_id +
+                    " script_id=" + sel.script_id +
+                    " matched_case=" + thumb.case_id +
+                    " matched_script=" + thumb.script_id +
+                    " dataset_images=" +
+                    std::to_string(sel.dataset_images.size()) +
+                    " annotations=" + std::to_string(sel.annotations.size()));
+                break;
+            }
+            if (!sel.dataset_images.empty())
+                break;
+        }
+    }
 
     ClearTorchTrainingImageSetForEvidenceSyncLocal(
         m_manualTest,
         "rebuild image set from evidence case: " +
             (sel.case_id.empty() ? sel.script_id : sel.case_id));
+
+    if (!sel.dataset_images.empty())
+    {
+        int added = 0;
+        int preferredImageIndex = -1;
+        for (const CxEvidenceDatasetImageBinding& binding : sel.dataset_images)
+        {
+            std::string imagePath = binding.image_path;
+            if (imagePath.empty() && !binding.image_id.empty())
+                imagePath = ResolveImagePathFromManifest(binding.image_id);
+            if (imagePath.empty() && !binding.image_id.empty())
+                imagePath =
+                    ResolveEvidenceImagePathFromContextLocal(
+                        m_manualTest,
+                        binding.image_id);
+            if (imagePath.empty())
+                continue;
+
+            AddTorchTrainingImageFromPath(
+                imagePath,
+                binding.image_id,
+                binding.split,
+                binding.label,
+                binding.source.empty() ? "evidence_dataset" : binding.source);
+
+            const int selected = m_manualTest.selected_torch_training_image;
+            if (selected >= 0 &&
+                selected <
+                    static_cast<int>(m_manualTest.torch_training_images.size()))
+            {
+                TorchTrainingImageItem& item =
+                    m_manualTest.torch_training_images[
+                        static_cast<std::size_t>(selected)];
+                item.case_id = sel.case_id;
+                item.target_id = sel.target_id;
+                ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
+                    item,
+                    sel.annotations);
+                const std::string itemPath =
+                    ResolveWorkspaceFile(item.image_path)
+                        .lexically_normal()
+                        .string();
+                const std::string evidencePath =
+                    ResolveWorkspaceFile(sel.image_path)
+                        .lexically_normal()
+                        .string();
+                if ((!sel.image_id.empty() && item.image_id == sel.image_id) ||
+                    (!evidencePath.empty() && itemPath == evidencePath))
+                {
+                    preferredImageIndex = selected;
+                }
+            }
+            ++added;
+        }
+
+        if (preferredImageIndex >= 0)
+            m_manualTest.selected_torch_training_image = preferredImageIndex;
+        else if (!m_manualTest.torch_training_images.empty())
+            m_manualTest.selected_torch_training_image = 0;
+
+        m_manualTest.torch_training_image_status =
+            added > 0 ? "EVIDENCE_DATASET_BOUND" : "EVIDENCE_DATASET_EMPTY";
+        m_manualTest.torch_training_image_reason =
+            "synced evidence dataset images for " + sel.case_id +
+            " count=" + std::to_string(added) +
+            " annotations=" + std::to_string(sel.annotations.size());
+        CXLOG_INFO(
+            "TorchTrainingImageSet",
+            "evidence_dataset_sync_complete",
+            m_manualTest.torch_training_image_status,
+            m_manualTest.torch_training_image_reason);
+        return;
+    }
 
     std::string imagePath = sel.image_path;
     if (imagePath.empty() && !sel.image_id.empty())
@@ -4744,6 +5051,14 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection()
         m_manualTest.torch_training_image_reason =
             "synced from evidence case: " + sel.case_id;
     }
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "evidence_dataset_sync_fallback_single_image",
+        m_manualTest.torch_training_image_status,
+        "case_id=" + sel.case_id +
+        " script_id=" + sel.script_id +
+        " dataset_images=0 annotations=0 reason=" +
+        m_manualTest.torch_training_image_reason);
 }
 
 static ImU32 TorchDatasetLabelColorLocal(const std::string& label)

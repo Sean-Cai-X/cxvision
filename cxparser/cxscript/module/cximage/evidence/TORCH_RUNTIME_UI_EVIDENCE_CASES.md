@@ -16,8 +16,30 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 - source: copied from `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_assets/ensmallen/ENS_L1_deeppcb_template_match_phase1_opt/candidate_20260807_ensmallen_phase1/deeppcb_g0_00041008_input.jpg`
 - label_source: `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_assets/ensmallen/ENS_L1_deeppcb_template_match_phase1_opt/candidate_20260807_ensmallen_phase1/deeppcb_g0_00041008_label.txt`
 
+- image_id: `torch_deeppcb_g1_00041000_template`
+- image_path: `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_images/torch_deeppcb_g1_00041000_template.jpg`
+- source: copied from `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_assets/ensmallen/ENS_L1_deeppcb_template_match_phase1_opt/candidate_20260807_ensmallen_phase1/deeppcb_g1_00041000_template.jpg`
+- label_source: none; reference/template image only.
+
+- image_id: `torch_deeppcb_g0_00041008_template`
+- image_path: `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_images/torch_deeppcb_g0_00041008_template.jpg`
+- source: copied from `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/evidence_assets/ensmallen/ENS_L1_deeppcb_template_match_phase1_opt/candidate_20260807_ensmallen_phase1/deeppcb_g0_00041008_template.jpg`
+- label_source: none; reference/template image only.
+
 - storage rule: images stay under `D:/Codex-WorkDir/Sean_WorkDir/cxvisionai` and must not be placed under `cxvision_repo` or committed to Git.
 - migration note: the earlier `torch_l1_line_high_contrast_001` binding was only a temporary UI plumbing image; torch candidate cases now use DeepPCB board evidence images.
+- dataset note: the current torch dataset binding is `torch_deeppcb_dataset_smoke_v1`; it exists to validate UI image-set and annotation flow before a full training dataset is promoted.
+- dataset limitation: only `torch_deeppcb_g1_00041000_input` and `torch_deeppcb_g0_00041008_input` currently have label-backed bbox annotations. Template images are reference/unlabeled context and must not be counted as accepted supervised training labels.
+
+## Manual UI Dataset Binding
+
+- train: `torch_deeppcb_g1_00041000_input`, `torch_deeppcb_g0_00041008_input`, `torch_deeppcb_g1_00041000_template`, `torch_deeppcb_g0_00041008_template`
+- validation: `torch_deeppcb_g0_00041008_input`, `torch_deeppcb_g1_00041000_template`
+- test: `torch_deeppcb_g1_00041000_input`, `torch_deeppcb_g0_00041008_template`
+- annotations: YOLO-style normalized `class_id cx cy w h` records from the DeepPCB label files are converted to editable `RectShape` overlays when the image is loaded into Image View.
+- expected UI count: train 4, validation 2, test 2.
+- label-backed count: 2 unique input images with 15 bbox annotations total.
+- scope: this split is only for manual UI chain verification; it is not a final statistical train/validation/test split and must not be used as model quality acceptance.
 
 ## Evidence Chain
 
@@ -27,6 +49,7 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 - scope: small local UI Evidence Chain validation only
 - UI category: declared by each case through `CxEvidenceChain_case_setcategory("Torch Evidence Candidates")`
 - UI group: declared by each case through `CxEvidenceChain_case_setgroup(...)`
+- UI dataset: declared by `CxEvidenceChain_case_adddatasetimage(...)`, `CxEvidenceChain_case_addbbox_xywh_norm(...)`, and reused with `CxEvidenceChain_case_clone_dataset_from(...)`.
 
 ## Cases
 
@@ -43,7 +66,17 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 - These cases are local Evidence Chain cases; do not write remote code or remote evidence for this package.
 - New torch cases must be added in `torch_*.cxsc`; C++ must not hard-code concrete torch case names, model paths, objectives, or OK/NG rules.
 - The UI category and group are file-driven by this evidence chain; `ManualConsoleEvidenceChain.cpp` must remain a generic scanner/parser/display layer.
+- The training/validation/test rails must be populated from evidence file declarations, not from hard-coded torch case names.
 - The segmentation smoke case validates runtime/artifact plumbing, not semantic segmentation accuracy.
 - The detection case remains a CPU smoke route until the model/thread resolves the known weights/class compatibility issue.
 - The train lifecycle case is a tiny CPU route check only; it is not a full training quality acceptance case.
 - The UI pass condition is evidence visibility and artifact binding, not final model quality acceptance.
+
+## Manual Test Steps
+
+1. Open the UI Evidence Chain panel and select any `Torch Evidence Candidates` case.
+2. In `Torch Training Image Set`, click `Sync Selected Evidence Case`.
+3. Confirm the train, validation, and test rails are no longer empty.
+4. Click a training/validation/test thumbnail and confirm Image View loads the DeepPCB image.
+5. Confirm `Annotated Regions / Features` reports non-zero rect count and the image overlay shows editable bbox regions.
+6. Keep the final state as `PENDING_HUMAN_REVIEW` until a human accepts the dataset split and model task semantics.

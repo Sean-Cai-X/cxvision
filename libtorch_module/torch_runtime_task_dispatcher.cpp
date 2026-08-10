@@ -89,11 +89,14 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
 {
     TorchTaskResultCpp result;
     result.requested_device = config.device.empty() ? "cpu" : config.device;
+    constexpr uint64_t deterministic_seed = 1023;
 
     const auto start = std::chrono::steady_clock::now();
 
     try
     {
+        torch::manual_seed(deterministic_seed);
+
         auto runner_config =
             make_segmentation_mainline_runner_config(
                 "deeplabv3plus",
@@ -180,9 +183,16 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         result_json << "\"status\":\"success\",";
         result_json << "\"requested_device\":" << QuoteRuntimeTaskJsonString(result.requested_device) << ",";
         result_json << "\"actual_device\":" << QuoteRuntimeTaskJsonString(result.actual_device) << ",";
+        result_json << "\"deterministic_seed\":" << deterministic_seed << ",";
         result_json << "\"train_runtime_ms\":" << result.train_runtime_ms << ",";
+        result_json << "\"effective_epochs\":1,";
+        result_json << "\"effective_batch_size\":" << runner_config.batch_size << ",";
+        result_json << "\"input_size\":" << runner_config.input_size << ",";
         result_json << "\"smoke_loss\":" << smoke.loss << ",";
         result_json << "\"grad_mean\":" << smoke.grad_mean << ",";
+        result_json << "\"eval_loss\":" << session.session.eval.loss << ",";
+        result_json << "\"foreground_iou\":" << session.session.eval.foreground_iou << ",";
+        result_json << "\"avg_confidence\":" << session.session.eval.avg_confidence << ",";
         result_json << "\"trainer_lifecycle_summary\":"
                     << QuoteRuntimeTaskJsonString(result.trainer_lifecycle_summary) << ",";
         result_json << "\"unified_mainline_summary\":"
@@ -208,7 +218,10 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             evidence << "\"schema\":\"cxvision.torch.training_lifecycle_evidence.v1\",";
             evidence << "\"task\":" << QuoteRuntimeTaskJsonString(request.task) << ",";
             evidence << "\"training_stage\":\"tiny_smoke\",";
+            evidence << "\"deterministic_seed\":" << deterministic_seed << ",";
             evidence << "\"epochs\":1,";
+            evidence << "\"batch_size\":" << runner_config.batch_size << ",";
+            evidence << "\"input_size\":" << runner_config.input_size << ",";
             evidence << "\"finite_loss\":true,";
             evidence << "\"grad_mean\":" << smoke.grad_mean << ",";
             evidence << "\"semantic_quality\":\"not_evaluated\"";

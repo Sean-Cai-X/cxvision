@@ -369,7 +369,8 @@ bool InjectCxScriptRuntimeStrings(
         // the surrounding Headless evidence package.
         const char separator = '|';
         const std::string request_context = case_id + separator +
-            options.image_path + separator + options.output_dir;
+            options.image_path + separator + options.output_dir + separator +
+            "{\"schema\":\"cx.torch.annotation_context.v1\",\"source\":\"headless\"}";
         runtime.DefineStringConstant("global_torch_request_context", request_context);
     }
     catch (const std::exception& e)
@@ -816,6 +817,7 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["fastmatch_candidate_replace_count"] = capture.fastmatch_candidate_replace_count;
     pkg.metrics["fastmatch_candidate_reject_count"] = capture.fastmatch_candidate_reject_count;
 
+    pkg.metrics["actual_findsetting"] = capture.actual_findsetting;
     pkg.metrics["object_filter_borw"] = capture.object_filter_borw;
     pkg.metrics["findobject_strategy_id"] = capture.object_filter_strategy_id;
     pkg.metrics["object_filter_min"] = capture.object_filter_min;
@@ -881,6 +883,7 @@ CxScriptResultPackage BuildCxScriptResultPackage(
 
     pkg.facts["ellipse_candidate_policy"] = capture.ellipse_candidate_policy;
     pkg.facts["ellipse_scan_geometry_policy"] = capture.ellipse_scan_geometry_policy;
+    pkg.facts["actual_findsetting"] = std::to_string(capture.actual_findsetting);
     pkg.facts["object_prefilter_requested"] = capture.object_prefilter_requested ? "true" : "false";
     pkg.facts["object_prefilter_applied"] = capture.object_prefilter_applied ? "true" : "false";
     pkg.facts["findobject_algorithm_branch"] = capture.object_algorithm_branch;
@@ -1763,6 +1766,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
         object_state_file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
         object_state_file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
+        object_state_file << "  \"actual_findsetting\": " << capture.actual_findsetting << ",\n";
         object_state_file << "  \"findobject_strategy_id\": " << capture.object_filter_strategy_id << ",\n";
         object_state_file << "  \"object_filter_borw\": " << capture.object_filter_borw << ",\n";
         object_state_file << "  \"object_filter_min\": " << capture.object_filter_min << ",\n";
@@ -1913,6 +1917,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "findcircle_point_consistency_removed_points: " << capture.circle_point_consistency_removed_points << "\n";
         log_file << "findobject_foreground_before: " << capture.object_foreground_before << "\n";
         log_file << "findobject_foreground_after: " << capture.object_foreground_after << "\n";
+        log_file << "actual_findsetting: " << capture.actual_findsetting << "\n";
+        log_file << "object_prefilter_requested: " << (capture.object_prefilter_requested ? "true" : "false") << "\n";
+        log_file << "object_prefilter_applied: " << (capture.object_prefilter_applied ? "true" : "false") << "\n";
         log_file << "valid_points_count: " << capture.valid_points_count << "\n";
         log_file << "has_fit_line: " << (capture.has_fit_line ? "true" : "false") << "\n";
         log_file << "has_fit_circle: " << (capture.has_fit_circle ? "true" : "false") << "\n";

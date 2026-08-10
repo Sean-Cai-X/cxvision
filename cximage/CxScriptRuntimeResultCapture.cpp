@@ -217,6 +217,7 @@ bool CaptureFindLineResult(
         snap.reject_reason = diag.reject_reason;
         output.findline_scan_diagnostics.push_back(snap);
     }
+    output.actual_findsetting = debug.objfilterset;
     output.object_prefilter_requested = (debug.objfilterset & 0x01) != 0;
     output.object_prefilter_applied = debug.findobject_measure_called;
     output.object_filter_strategy_id = debug.findobject_strategy_id;
@@ -293,6 +294,7 @@ bool CaptureFindCircleResult(
     output.circle_cy = tool.getresultcenty();
     output.circle_radius = tool.getradius();
     output.avgdist = tool.getavgdist();
+    output.actual_findsetting = tool.getfindsetting();
     output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
     output.object_prefilter_applied = tool.getdebugprefilterused() != 0;
     output.object_filter_borw = tool.getfilterborw();
@@ -353,6 +355,8 @@ bool CaptureFindEllipseResult(
     output.ellipse_radius_y = tool.getresultradiusy();
     output.ellipse_angle_deg = tool.getresultangle();
     output.avgdist = tool.getavgdist();
+    output.actual_findsetting = tool.getfindsetting();
+    output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
     output.failure_stage = output.has_fit_ellipse
         ? std::string()
         : (snapshot.measure_points_count > 0 ? "fitellipse" : "measure_points");
@@ -865,6 +869,7 @@ static void MergeToolCapture(
     capture.fastmatch_candidate_reject_count += tool.fastmatch_candidate_reject_count;
     capture.object_prefilter_requested = tool.object_prefilter_requested;
     capture.object_prefilter_applied = tool.object_prefilter_applied;
+    capture.actual_findsetting = tool.actual_findsetting;
     capture.object_filter_strategy_id = tool.object_filter_strategy_id;
     capture.object_filter_borw = tool.object_filter_borw;
     capture.object_filter_min = tool.object_filter_min;

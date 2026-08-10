@@ -170,6 +170,7 @@ public:
     void setthre(int ithre);
     void setgamarate(int igama);
     void setfindsetting(int ifindset);
+    int getfindsetting() const { return m_ifindset; }
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
     void setselectedgenum(int iedgenum);
     void setpointconsistency(int enabled, int range);

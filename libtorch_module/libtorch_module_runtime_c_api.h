@@ -27,6 +27,7 @@ typedef struct TorchRuntimeConfig
 typedef struct TorchTaskRequest
 {
   const char* task;
+  const char* device;
   const char* input_image;
   const char* dataset_root;
   const char* manifest_path;

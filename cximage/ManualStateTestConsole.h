@@ -849,6 +849,30 @@ struct TorchTrainingImageItem
     std::vector<TorchTrainingAnnotationShapeSnapshot> annotation_shapes;
 };
 
+struct CxEvidenceDatasetImageBinding
+{
+    std::string image_id;
+    std::string image_path;
+    std::string split = "train";
+    std::string label = "unlabeled";
+    std::string source = "evidence_dataset";
+};
+
+struct CxEvidenceAnnotationBinding
+{
+    std::string image_id;
+    std::string shape_kind = "RectShape";
+    std::string semantic_role = "bbox";
+    std::string owner_binding = "label_bbox";
+    std::string label = "anomaly";
+    int class_id = -1;
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    bool normalized = false;
+};
+
 struct ScriptEvidenceThumb
 {
     std::string candidate_id;
@@ -882,6 +906,8 @@ struct ScriptEvidenceThumb
     bool texture_loaded = false;
     bool texture_failed = false;
     bool texture_placeholder = false;
+    std::vector<CxEvidenceDatasetImageBinding> dataset_images;
+    std::vector<CxEvidenceAnnotationBinding> annotations;
 };
 
 struct CxEvidenceEditableObjectRef
@@ -940,6 +966,8 @@ struct CxEvidenceSelectionSnapshot
     std::string primary_object_name;
     std::string primary_object_status;
     std::vector<CxEvidenceEditableObjectRef> editable_objects;
+    std::vector<CxEvidenceDatasetImageBinding> dataset_images;
+    std::vector<CxEvidenceAnnotationBinding> annotations;
 };
 
 struct ScriptEvidenceRowRef
@@ -1018,6 +1046,9 @@ struct ManualTestContext
   std::vector<DebugStepSnapshot> debug_snapshots;
   DebugStepSnapshot current_debug_snapshot;
   std::unordered_map<std::string, int> runtime_int_vars;
+  // Identifies the Evidence/task profile that seeded the current Torch
+  // request defaults.  User edits are preserved while the key is unchanged.
+  std::string torch_parameter_defaults_key;
   ResultRefView current_result_ref;
 
   std::string geometry_summary;

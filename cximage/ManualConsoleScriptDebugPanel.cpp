@@ -445,12 +445,29 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   const bool runRequestedByKeyParameterControls =
       context.debug_action == "Key Parameter Controls Run Script" &&
       context.debug_status == "MANUAL_RUN_REQUESTED";
+  const bool runRequestedByFastMatchAction =
+      context.debug_status == "FASTMATCH_RUN_REQUESTED";
+  const bool runRequestedByTorchAction =
+      context.editor_source == "torch_runtime_action" &&
+      context.debug_status == "TORCH_ACTION_RUN_REQUESTED";
   const bool usePendingExecutionSnapshot =
-      (runRequestedByCandidateSave || runRequestedByKeyParameterControls) &&
+      (runRequestedByCandidateSave || runRequestedByKeyParameterControls ||
+       runRequestedByFastMatchAction) &&
       context.has_pending_execution_snapshot;
-  if (ImGui::Button("Run", ImVec2(btnWidth, 0)) ||
+  const bool runButtonClicked = ImGui::Button("Run", ImVec2(btnWidth, 0));
+  const bool runClickedForStagedTorchAction =
+      runButtonClicked &&
+      context.editor_source == "torch_runtime_action" &&
+      context.debug_status == "TORCH_ACTION_STAGED";
+  const bool useStagedTorchSnapshot =
+      (runClickedForStagedTorchAction || runRequestedByTorchAction) &&
+      context.has_pending_execution_snapshot;
+
+  if (runButtonClicked ||
       runRequestedByCandidateSave ||
-      runRequestedByKeyParameterControls)
+      runRequestedByKeyParameterControls ||
+      runRequestedByFastMatchAction ||
+      runRequestedByTorchAction)
   {
     SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
     if (context.editor_text.empty())
@@ -509,14 +526,30 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:analyze");
       AnalyzeScript(context);
-      if (usePendingExecutionSnapshot)
+      if (usePendingExecutionSnapshot || useStagedTorchSnapshot)
       {
         context.current_gauge = frozenGauge;
         context.runtime_int_vars = frozenGlobals;
-        if (runRequestedByKeyParameterControls)
+        if (useStagedTorchSnapshot)
+        {
+          context.debug_reason =
+              "Torch action input snapshot restored before execution.";
+          CXLOG_INFO(
+              "TorchUI",
+              "torch_ui_action_execute_begin",
+              "serial_parser",
+              "action=" + context.active_script_case_purpose +
+                  " script=" + context.loaded_script_path);
+        }
+        else if (runRequestedByKeyParameterControls)
         {
           context.debug_reason =
               "Key Parameter Controls input snapshot restored before execution.";
+        }
+        else if (runRequestedByFastMatchAction)
+        {
+          context.debug_reason =
+              "FastMatch Learn/Match input snapshot restored before execution.";
         }
         else
         {
@@ -632,21 +665,64 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       else if (!s_img0.empty())
         imageBound = m_parserDebugBridge.StageGlobalMatInput(s_img0);
 
+      // The Debug Compiler and RunCxScript must stage the same Torch request
+      // context.  Keep this in the existing serial Parser-owner chain: the UI
+      // action only requests a run, and this compiler block performs it.
+      std::string torchRequestReason;
+      const bool torchRequestReady = PrepareTorchUiRequestContext(
+          context.editor_text,
+          context.loaded_script_path,
+          torchRequestReason);
+      if (!torchRequestReady)
+      {
+        CXLOG_ERROR(
+            "TorchUI",
+            "torch_ui_request_blocked",
+            "BLOCKED",
+            torchRequestReason);
+      }
+
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:clear_old_runtime_shapes");
-      m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
+      if (torchRequestReady)
+        m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:run_script");
       context.run_state = "running";
-      const bool ran = imageBound && m_parserDebugBridge.RunScript(context.editor_text);
+      const bool ran = imageBound && torchRequestReady &&
+          m_parserDebugBridge.RunScript(context.editor_text);
       context.run_state = ran ? "runtime_finished" : "failed";
       context.debug_status = ran ? "runtime_executed" : "run_failed";
       context.debug_reason = ran
-        ? "exact Script Editor text executed through ParserDebugBridge"
-        : (imageBound
+        ? ("exact Script Editor text executed through ParserDebugBridge" +
+           (torchRequestReason.empty()
+               ? std::string()
+               : " | " + torchRequestReason))
+        : (!torchRequestReady
+          ? torchRequestReason
+          : (imageBound
           ? ("ParserDebugBridge rejected the Script Editor text: " +
              m_parserDebugBridge.LastError())
-          : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput");
+          : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput"));
       context.debug_reason += effectiveGlobals;
+
+      if (ran)
+      {
+        CXLOG_INFO(
+            "ManualConsole",
+            "manual_run_finished",
+            "runtime_executed",
+            "script=" + context.loaded_script_path +
+                " reason=" + context.debug_reason);
+      }
+      else
+      {
+        CXLOG_ERROR(
+            "ManualConsole",
+            "manual_run_finished",
+            "run_failed",
+            "script=" + context.loaded_script_path +
+                " reason=" + context.debug_reason);
+      }
 
       m_scriptResult.source = "manual_console_editor";
       m_scriptResult.script_path = context.loaded_script_path;
@@ -664,7 +740,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       // not visually roll the candidate editor back to values from the
       // selected Evidence row.  Preserve the input snapshot until the run has
       // been fully packaged.
-      if (usePendingExecutionSnapshot)
+      if (usePendingExecutionSnapshot || useStagedTorchSnapshot)
       {
         context.current_gauge = frozenGauge;
         context.runtime_int_vars = frozenGlobals;
@@ -710,7 +786,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
         }
       }
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:end");
-      if (usePendingExecutionSnapshot)
+      if (usePendingExecutionSnapshot || useStagedTorchSnapshot)
       {
         context.has_pending_execution_snapshot = false;
         context.pending_execution_globals.clear();
