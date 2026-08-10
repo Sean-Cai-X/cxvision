@@ -1135,15 +1135,25 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
     }
     else if (object->type == "TorchTask")
     {
-      DrawReadonlyFieldLocal("epoch", std::string("tiny smoke exposes lifecycle summary, not full epoch table"));
-      DrawReadonlyFieldLocal("completed_epochs", 1);
-      DrawReadonlyFieldLocal("curve_state", "ONE_SMOKE_STEP_NO_MULTI_EPOCH_SERIES");
-      DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
-      DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
-      DrawReadonlyFieldLocal("train_ms", object->torch_train_ms);
-      DrawReadonlyFieldLocal("total_ms", object->torch_total_ms);
-      if (object->torch_trainer_lifecycle_summary.empty())
-        DrawPendingBindingLineLocal("epoch-loss detail", "not produced by this runtime object");
+      if (selectedFeature == "training_lifecycle")
+      {
+        DrawReadonlyFieldLocal("epoch", std::string("tiny smoke exposes lifecycle summary, not full epoch table"));
+        DrawReadonlyFieldLocal("completed_epochs", 1);
+        DrawReadonlyFieldLocal("curve_state", "ONE_SMOKE_STEP_NO_MULTI_EPOCH_SERIES");
+        DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
+        DrawReadonlyFieldLocal("mainline_summary", object->torch_unified_mainline_summary);
+        DrawReadonlyFieldLocal("train_ms", object->torch_train_ms);
+        DrawReadonlyFieldLocal("total_ms", object->torch_total_ms);
+        if (object->torch_trainer_lifecycle_summary.empty())
+          DrawPendingBindingLineLocal("epoch-loss detail", "not produced by this runtime object");
+      }
+      else
+      {
+        DrawReadonlyFieldLocal("training_state", "NOT_REQUESTED_FOR_CURRENT_TORCH_CASE");
+        DrawReadonlyFieldLocal("current_feature", selectedFeature);
+        ImGui::TextDisabled(
+            "This runtime object belongs to inference/evidence. It is not a training result.");
+      }
     }
     else
     {
