@@ -1,7 +1,4 @@
-/*
-  File: muParserBase.cpp
-  Role: Core parser runtime and execution entry points.
-*/
+
 
 #include "muParser.h"
 
@@ -198,9 +195,7 @@ namespace
 namespace mu
 {
 
-/*
-  Role: Initialize parser runtime state and reader objects.
-*/
+
 ParserBase::ParserBase()
   :m_pParseFormula(&ParserBase::ParseString)
   ,m_pCmdCode(0)
@@ -1290,10 +1285,7 @@ value_type ParserBase::ParseValue() const
   return *(value_type*)(&m_pCmdCode[2]);
 }
 
-/*
-  Role: Interpret the current expression string and execute control flow,
-  assignments, class calls, and value-producing expressions.
-*/
+
 value_type ParserBase::ParseString() const
 {
 	#if defined(_MSC_VER)

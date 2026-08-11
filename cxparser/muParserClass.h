@@ -1,7 +1,4 @@
-/*
-  File: muParserClass.h
-  Role: Parser-visible class binding runtime and scripted class support.
-*/
+
 
 #ifndef MU_PARSER_CLASS_H
 #define MU_PARSER_CLASS_H
@@ -13,19 +10,13 @@ using namespace std;
 
 namespace mu
 {
-        /* Forward declaration for the parser core that owns class registries. */
         class ParserBase;
 
         typedef std::vector<double> paramvect;
         typedef std::vector<void *> voidparamvect;
         typedef std::vector<string> charpvect;
 
-        /*
-          Role: Minimal generic signature abstraction for parser-visible
-          class-function registration. Existing DefineClassFun overloads still
-          exist, but they should map into one of these shapes instead of
-          proliferating new registration entry points.
-        */
+        
         enum ClassFunReturnKind
         {
                 ClassFunReturnVoid = 0,
@@ -122,7 +113,6 @@ namespace mu
                 }
         }
 
-        /* Common callback wrapper interface for parser-visible member functions. */
         class classbasefunc
         {
         public:
@@ -135,7 +125,6 @@ namespace mu
                         return 0;
                 }
 
-                /* Executes the stored callback without using a return value. */
                 virtual void UseFUNC()
                 {
                 };
@@ -174,7 +163,6 @@ namespace mu
 
         };
 
-        /* Adapts concrete member-function pointer signatures into classbasefunc. */
         template<class ACLASS>
         class classfuncstorage: public classbasefunc
         {
@@ -844,7 +832,6 @@ namespace mu
         };
         typedef std::vector<classbasefunc*> basefuncvector;
 
-        /* Abstract runtime container for one parser-visible class family. */
         class classbase
         {
         public:
@@ -1067,7 +1054,6 @@ namespace mu
 
         };
 
-        /* Stores parser-visible primitive/object values without member dispatch. */
         template<class TCLASS>
         class OrgClass:public classbase
         {
@@ -1247,7 +1233,6 @@ namespace mu
 
         };
 
-        /* Owns bound C++ objects and registered member-function wrappers for one type. */
         template<class TCLASS>
         class ParserClass :public classbase
         {
@@ -1488,12 +1473,7 @@ namespace mu
 
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf)(void ))
                 {
-                        /*
-                          Role: Generic runtime member-registration mainline.
-                          All DefineClassFun overloads should converge to one of
-                          these AddClassFun storage points instead of adding new
-                          side-channel registries.
-                        */
+                        
                         StoreRuntimeClassFun(strname, pdf);
                 }
                 void AddClassFun(const string_type & strname,void (TCLASS::*pdf1)(double ))
@@ -1675,7 +1655,6 @@ namespace mu
                         return DescribeClassFunSignature(GetFuncArgType(a_strName));
                 }
 
-                /* Dispatches a member function by parser-visible function name. */
                 virtual double ApplyClassFunc(void *pobj,const string_type &strname,paramvect& parm)
                 {
                         classfunmap_type::iterator item = m_FunCmap.find(strname);
@@ -1885,7 +1864,6 @@ namespace mu
                 void *m_pFun;
         };
 
-        /* Stores parser-declared class definitions and scripted member bodies. */
         class CreateClass :public classbase
         {
         private:
@@ -1968,7 +1946,6 @@ namespace mu
                         }
                 }
 
-                /* Updates the parser used when scripted members are executed. */
                 void GetRunParser(ParserBase* pParser)
                 {
                         m_pCurParser = pParser;
@@ -2026,14 +2003,9 @@ namespace mu
                         return GetFuncDef("create");
                 }
 
-                /* Stores a scripted member-function body by name. */
                 bool AddClassFun(const string_type &a_strName, const string_type &a_strFun)
                 {
-                        /*
-                          Role: Scripted class-function registration for
-                          parser-declared classes. This is the string-backed
-                          sibling of the runtime callback AddClassFun path.
-                        */
+                        
                         funcodemap_type:: iterator pIter;
                         fucstruct *pfucstruct;
                         for ( pIter = m_codemap.begin( ) ; pIter != m_codemap.end( ) ; pIter++ )
@@ -2217,7 +2189,6 @@ namespace mu
                 }
         };
 
-        /* Shared registry type used by ParserBase for parser-visible class definitions. */
         typedef std::map<string_type, mu::classbase*> classbasemap_type;
 
 }

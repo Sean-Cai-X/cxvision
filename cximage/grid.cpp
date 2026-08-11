@@ -9,7 +9,7 @@
 Grid::Grid() :
     m_imapmodelw(0),
     m_imapmodelh(0),
-    m_iunitw(12),//10
+    m_iunitw(12),
     m_iunith(12),
     m_iorgx(0),
     m_iorgy(0)
@@ -200,7 +200,7 @@ void Grid::ROIImagetoModel_gray(Image& aimage)
     }
 }
 
-void Grid::ModelGridMethod_Gauss()//gauss space
+void Grid::ModelGridMethod_Gauss()
 {
     vector<int> oldmodel = m_fastmodel;
 
@@ -457,7 +457,7 @@ void Grid::ModelGridMethod_Gauss()//gauss space
     }
 
 }
-void Grid::ModelGridMethod_Object()//
+void Grid::ModelGridMethod_Object()
 {
     vector<int> oldmodel = m_fastmodel;
     vector<int> mapmodel = oldmodel;
@@ -1508,7 +1508,7 @@ int Grid::getobject_totalvalue_max()
     return 0;
 }
 
-easyobj Grid::ModelGridMethod_ObjectA()//
+easyobj Grid::ModelGridMethod_ObjectA()
 {
 
     easyobj eobj;
@@ -1707,8 +1707,6 @@ easyobj Grid::ModelGridMethod_ObjectA()//
     eobj.s_iwobjnum = i1sum;
 
     return eobj;
-    //    m_fastmodel.clear();
-    //    m_fastmodel = oldmodel;
 
 }
 void Grid::ZeroModel()
@@ -1805,7 +1803,6 @@ void Grid::ReSetModelGrid()
         }
     }
 }
-//using 0 1 grid move first 1 to (0,0)
 void Grid::UnitGrid()
 {
     int inum = 0;
@@ -1905,7 +1902,6 @@ void Grid::UnitGrid()
 
     CentGrid(m_iunitw, m_iunith);
 }
-//using gray grid find edge and move fist point to  (0,0)
 void Grid::EdgeGrid()
 {
     int inum = 0;
@@ -2034,7 +2030,6 @@ void Grid::GridZoom(int iw, int ih)
                 if (0 == newfastmodel[inewnum]
                     && 0 != itype)
                     newfastmodel[inewnum] = itype;
-                //inum ++;
             }
         }
         m_fastmodel.clear();
@@ -2050,11 +2045,7 @@ void Grid::GridZoom(int iw, int ih)
 
 }
 void Grid::Grid2PattenModel_org(int icompgap)
-{//red(white 1) gap blue(black 0) model
-    //              up points
-    //  right points          left points
-    //               down points
-    //m_modelpoints
+{
     PointsShape pointsup;
     PointsShape pointsdown;
     PointsShape pointsright;
@@ -2115,7 +2106,6 @@ void Grid::Grid2PattenModel_org(int icompgap)
             }
         }
     }
-    //int icompgap = 2;
 
     m_modelpoints.clear();
     pointsup.onepattern(icompgap, 12, m_modelpoints);
@@ -2124,17 +2114,11 @@ void Grid::Grid2PattenModel_org(int icompgap)
     pointsright.onepattern(icompgap, 9, m_modelpoints);
     pointsleft.onepattern(icompgap, 3, m_modelpoints);
 
-    //QRectF arect1 = m_modelpoints.boundingRect();
-    //m_modelpoints.Move(-arect1.x(),-arect1.y());
 
 }
 
 void Grid::Grid2PattenModel(int icompgap)
-{//red(white 1) gap blue(black 0) model
-    //              up points
-    //  right points          left points
-    //               down points
-    //m_modelpoints
+{
     PointsShape pointsup;
     PointsShape pointsdown;
     PointsShape pointsright;
@@ -2195,7 +2179,6 @@ void Grid::Grid2PattenModel(int icompgap)
             }
         }
     }
-    //int icompgap = 2;
 
     m_modelpoints.clear();
     pointsup.onepattern(icompgap, 12, m_modelpoints);
@@ -2348,8 +2331,6 @@ void Grid::savemapmodel(const char* pchar)
         {
             if (isw != 0)
                 fprintf(rf, ",");
-            //char chnum[25];
-            //sprintf(chnum, "%d,%d" ,isw,ish);
             fprintf(rf, "%d", m_fastmodel[inum]);
 
             inum++;
@@ -2361,30 +2342,7 @@ void Grid::savemapmodel(const char* pchar)
 }
 void Grid::loadmapmodel(const char* pchar)
 {
-    /*
-    File file(pchar);
-    int ix = 0;
-    int iy = 0;
-    if (file.open(IODevice::ReadOnly))
-    {
-        m_fastmodel.clear();
-        string line;
-        Stream in(&file);
-        while (!in.atEnd())
-        {
-            string line = in.readLine();
-            stringList strlist = line.split(",");
-            for (ix = 0; ix < strlist.size(); ix++)
-            {
-                settype(ix, iy, strlist[ix].toInt());
-                m_fastmodel.push_back(strlist[ix].toInt());
-            }
-            iy = iy + 1;
-        }
-    }
-    m_imapmodelw = ix;
-    m_imapmodelh = iy;
-    */
+    
 }
 void Grid::ReGrid(int iw, int ih)
 {

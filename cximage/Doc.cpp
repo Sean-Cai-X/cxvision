@@ -2,7 +2,6 @@
 
  
 
-// Doc 构造/析构
 Doc::Doc() 
 {
 	Handle(Aspect_DisplayConnection) aDisplayConnection;
@@ -23,8 +22,6 @@ Doc::Doc()
 	Handle(AIS_InteractiveContext) myAISContext_OCC = new AIS_InteractiveContext(myViewer_OCC);
 	Handle(AIS_InteractiveContext) myAISContext_Sub = new AIS_InteractiveContext(myViewer_Sub);
 	Handle(AIS_InteractiveContext) myAISContext_Solut = new AIS_InteractiveContext(myViewer_Solut);
-	//BoundBox();
-	//myAISContext->SetDisplayMode(AIS_Shaded, true);   //实体显示模式
 	InitShowStyle(myAISContext_OCC,0);
 	InitShowStyle(myAISContext_Sub,1);
 	InitShowStyle(myAISContext_Solut,2);
@@ -38,28 +35,26 @@ Doc::Doc()
 
 void Doc::InitShowStyle(Handle(AIS_InteractiveContext)& myAISContext,int index)
 {
-	myAISContext->SetDisplayMode(AIS_WireFrame, true);  //线框显示模式
+	myAISContext->SetDisplayMode(AIS_WireFrame, true);
 	myAISContext->SetAutomaticHilight(Standard_True);
 
 
-	//设置高亮模型
-	Handle(Prs3d_Drawer) aHighlightStyle = myAISContext->HighlightStyle(); // 获取高亮风格
+	Handle(Prs3d_Drawer) aHighlightStyle = myAISContext->HighlightStyle();
 	Handle(Prs3d_LineAspect) highlightStyle = aHighlightStyle->LineAspect();
 	highlightStyle->SetWidth(3.0);
-	aHighlightStyle->SetMethod(Aspect_TOHM_COLOR);                      // 颜色显示方式              
-	aHighlightStyle->SetColor(Quantity_NOC_DEEPPINK);         // 设置高亮颜色  
-	aHighlightStyle->SetDisplayMode(1); // 1整体高亮 2包围盒
+	aHighlightStyle->SetMethod(Aspect_TOHM_COLOR);
+	aHighlightStyle->SetColor(Quantity_NOC_DEEPPINK);
+	aHighlightStyle->SetDisplayMode(1);
 	myAISContext->SetHighlightStyle(aHighlightStyle);
-	//选择时高亮模型
-	Handle(Prs3d_Drawer) aSelectionStyle = myAISContext->SelectionStyle();  // 获取选择风格
+	Handle(Prs3d_Drawer) aSelectionStyle = myAISContext->SelectionStyle();
 	Handle(Prs3d_LineAspect) lineStyle = aSelectionStyle->LineAspect();
 	lineStyle->SetWidth(3.0);
-	aSelectionStyle->SetMethod(Aspect_TOHM_COLOR);  // 颜色显示方式
+	aSelectionStyle->SetMethod(Aspect_TOHM_COLOR);
 	if(index == 2)
 		aSelectionStyle->SetColor(Quantity_NOC_SLATEBLUE);
 	else
-		aSelectionStyle->SetColor(Quantity_NOC_WHITE);   // 设置选择后颜色
-	aSelectionStyle->SetDisplayMode(1); // 整体高亮
+		aSelectionStyle->SetColor(Quantity_NOC_WHITE);
+	aSelectionStyle->SetDisplayMode(1);
 	myAISContext->SetSelectionStyle(aSelectionStyle);
 
 }
@@ -75,7 +70,6 @@ Handle(V3d_Viewer) Doc::GetViewer(std::string name)
 	return myViewerMap[name];
 }
 
-// Doc 构造/析构
 void Doc::ShowShape(const Handle(AIS_InteractiveObject)& AShapes, std::string name, Standard_Boolean isShow)
 {
 	myAISContextMap[name]->Display(AShapes, isShow);

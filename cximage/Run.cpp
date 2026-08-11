@@ -17,23 +17,11 @@
 void RunClass::Run()
 { 
 #if 0
-    ImageManager m_amodule;//
+    ImageManager m_amodule;
 #endif
     Image m_occtimage;
     FastMatch m_Match;
-	/*
-	              "if(1){aimage1.load(\"1.bmp\");}\n"
-                 "aimage1.Show(1);\n" 
-                 "amatch0.getshape(ashape0);\n"  
-                 "amatch0.setobjfilter(1);\n"
-                 "amatch0.setwhgap(5, 5); \n"
-                 "amatch0.setthre(35);\n"
-                 "amatch0.setlinegap(3);\n"
-                 "amatch0.setcompgap(20);\n"
-                 "amatch0.learn(aimage1);\n"
-                 "amatch0.Show(8);\n"
-                 "amatch0.savemodel(\"D:\\test.pat\");\n"
-	*/
+	
     m_occtimage.load("1.bmp");
     m_Match.setrect(550, 500, 1100, 1100);
     m_Match.setobjfilter(1);
@@ -81,7 +69,7 @@ ImageManager* RunClass::newmodule()
 double RunClass::fitcircle_(cv::Mat matInput, cv::Point2f& ptOut, double& radiusOut)
 {
 #if 0
-    ImageManager m_amodule;//
+    ImageManager m_amodule;
 #endif
     Image m_occtimage; 
     FindCircle afindcircle0;
@@ -165,7 +153,6 @@ double RunClass::testrun()
    cv::Mat matImage = cv::imread("1.bmp");
    cv::Point2f apoint;
    double radiusOut;
-   //runfunction(matImage, apoint, radiusOut);
    return apoint.x;
 }
  
@@ -174,19 +161,12 @@ double RunClass::ProcessIdentifyCoordPattern(cv::Mat matInput, std::vector<cv::P
     cv::Rect& scanrect, cv::Rect& outrect)
 {
 #if 0
-    newmodule();//
+    newmodule();
 #endif
     Image m_occtimage;
     FastMatch m_Match;
 
     m_occtimage.copyFromMat(matInput);
-    //   log_alg << "copy ok" << endl;
-   //    m_Match.loadmodelfile("D:\\testrun001.pat");
-    //   log_alg << "load ok" << endl;
-    //   m_Match.pattern2org();
-   //    log_alg << "pattern ok" << endl;
-    //   double dpatternsize = m_Match.ABpatternsize();
-    //   if (dpatternsize <= 0)
     {
         int ix = scanrect.x;
         int iy = scanrect.y;
@@ -242,8 +222,6 @@ double RunClass::ProcessIdentifyCoordPattern(cv::Mat matInput, std::vector<cv::P
     double dvalue1 = m_Match.getmaxresult();
     double dvaluex = m_Match.getresolvedresultcentx(-1);
     double dvaluey = m_Match.getresolvedresultcenty(-1);
-    //  ptOut.x = dvaluex;
-    //  ptOut.y = dvaluey;
 
     return 0;
 }
@@ -252,7 +230,7 @@ double RunClass::ProcessIdentifyCoordMatch(cv::Mat matInput, std::vector<cv::Poi
     cv::Rect& scanrect, cv::Rect& outrect)
 {
 #if 0
-    newmodule();//
+    newmodule();
 #endif
     Image m_occtimage;
     FastMatch m_Match;
