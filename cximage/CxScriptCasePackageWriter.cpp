@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CxScriptCasePackageWriter.h"
 #include "CxUnifiedLog.h"
+#include "ManualConsoleGauge.h"
 #include "ManualConsoleUtils.h"
 
 #include <algorithm>
@@ -669,6 +670,22 @@ bool SaveEvidenceCandidatePackage(
     const std::string targetId = EffectiveTargetId(context);
     const std::string tool = EffectiveTool(context);
     const std::string parameterSummary = EffectiveParameterSummary(context);
+
+    NormalizeManualGaugeGeometry(context.current_gauge);
+    std::string gaugeReason;
+    if (!ValidateManualGaugeGeometryForEditing(context.current_gauge, gaugeReason))
+    {
+        result.reason = "invalid evidence candidate gauge: " + gaugeReason;
+        CXLOG_WARN(
+            "EvidenceCandidate",
+            "candidate_save_blocked",
+            "invalid_gauge",
+            "case_id=" + caseId +
+                " candidate_id=" + candidateId +
+                " tool=" + tool +
+                " reason=" + result.reason);
+        return false;
+    }
 
     std::error_code ec;
     bool rootCanonicalized = false;

@@ -1,28 +1,4 @@
-/*
-  File: cxparser_rag_script_smoke.cpp
-  Role: Builds and validates a file-driven cxparser pseudo-code catalog for RAG-facing test usage.
 
-  RAG Protocol V1:
-  - module: owning isolated module domain
-  - class: primary bound class or native_expr for parser-only samples
-  - entry: main callable entry or eval for native parser samples
-  - mode: execute or index_only
-  - file: stored pseudo-code file name
-
-  Naming rules:
-  - module directories use lower_snake_case
-  - cxut files are reserved for native parser/control-flow samples
-  - cxsc files are reserved for class/module-oriented pseudo-code samples
-
-  Output contract:
-  - [GROUP] marks a top-level section
-  - [MODULE] marks an isolated module domain
-  - [CLASS] marks an indexed external class
-  - [METHOD] marks an indexed callable member
-  - [SCRIPT] marks the stored pseudo-code file metadata
-  - [CASE] marks a generated pseudo-code sample and its runtime result
-  - [INDEX-ONLY] marks a generated pseudo-code sample that is cataloged but not executed here
- */
 
 #include "muParser.h"
 
@@ -44,15 +20,7 @@
 
 namespace
 {
-/*
-  Role: One pseudo-code sample used by RAG and runtime validation.
-  Contract:
-  - module_name decides the isolation directory under rag_script_cases/
-  - category is a retrieval hint for later RAG classification
-  - file_name is the physical pseudo-code file name
-  - script is the generated source content written to disk
-  - expected_result is the runtime check after parser evaluation
-*/
+
 struct RagScriptCase
 {
   const char *name;
@@ -65,18 +33,14 @@ struct RagScriptCase
   double expected_result;
 };
 
-/*
-  Role: One externally visible method signature for module/class indexing.
-*/
+
 struct ExternalMethodIndex
 {
   const char *method_name;
   const char *signature;
 };
 
-/*
-  Role: One indexed external class exposed to pseudo-code generation and retrieval.
-*/
+
 struct ExternalClassIndex
 {
   const char *source;
@@ -87,9 +51,7 @@ struct ExternalClassIndex
   size_t method_count;
 };
 
-/*
-  Role: One top-level isolation unit used to separate domains such as cxcore and torch_module.
-*/
+
 struct ExternalModuleIndex
 {
   const char *module_name;
@@ -172,9 +134,7 @@ bool NearlyEqual(double lhs, double rhs, double eps = 1e-9)
   return std::fabs(lhs - rhs) <= eps;
 }
 
-/*
-  Role: Emit one normalized pseudo-code file descriptor for later RAG extraction.
-*/
+
 void PrintScriptDescriptor(const RagScriptCase &script_case)
 {
   std::cout << "  [SCRIPT] module=" << script_case.module_name
@@ -185,9 +145,7 @@ void PrintScriptDescriptor(const RagScriptCase &script_case)
             << std::endl;
 }
 
-/*
-  Role: Emit a machine-friendly description of current external modules, classes, and methods.
-*/
+
 void PrintExternalClassIndex()
 {
   std::cout << "[GROUP] external_module_index" << std::endl;
@@ -221,9 +179,7 @@ std::string LoadFileString(const std::string &path)
   return buffer.str();
 }
 
-/*
-  Role: Persist a generated pseudo-code sample before runtime parsing.
-*/
+
 bool SaveFileString(const std::string &path, const std::string &content)
 {
   std::ofstream output(path.c_str(), std::ios::binary | std::ios::trunc);

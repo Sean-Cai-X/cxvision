@@ -52,9 +52,31 @@ void FindSegmentation::setpromptrectxyxy(int y1, int x1, int y0, int x0)
 
 void FindSegmentation::setpoint(int x, int y)
 {
-    m_px = x;
-    m_py = y;
-    m_has_point = true;
+    setpositivepoint(x, y);
+}
+
+void FindSegmentation::setpositivepoint(int x, int y)
+{
+    m_positive_x = x;
+    m_positive_y = y;
+    m_has_positive_point = true;
+}
+
+void FindSegmentation::setnegativepoint(int x, int y)
+{
+    m_negative_x = x;
+    m_negative_y = y;
+    m_has_negative_point = true;
+}
+
+void FindSegmentation::setpositivepointxy(int y, int x)
+{
+    setpositivepoint(x, y);
+}
+
+void FindSegmentation::setnegativepointxy(int y, int x)
+{
+    setnegativepoint(x, y);
 }
 
 void FindSegmentation::setmode(int mode)
@@ -75,7 +97,9 @@ void FindSegmentation::segment(void* image)
     m_last_input_request.mode = m_mode;
     m_backend_diagnostic.backend = m_backend;
     m_backend_diagnostic.prompt_rect_ready = m_has_rect;
-    m_backend_diagnostic.prompt_point_ready = m_has_point;
+    m_backend_diagnostic.prompt_point_ready = m_has_positive_point;
+    m_backend_diagnostic.prompt_positive_ready = m_has_positive_point;
+    m_backend_diagnostic.prompt_negative_ready = m_has_negative_point;
 
     if (image == nullptr)
     {
@@ -135,13 +159,29 @@ void FindSegmentation::segment(void* image)
                   << "\n" << std::flush;
     }
 
-    if (m_has_point)
+    if (m_has_positive_point)
     {
+        // Populate the legacy slot for old backends while preserving prompt
+        // polarity in the explicit fields below.
         input.has_point = true;
-        input.point = cv::Point(m_px, m_py);
+        input.point = cv::Point(m_positive_x, m_positive_y);
         m_last_input_request.has_point = true;
         m_last_input_request.point_x = input.point.x;
         m_last_input_request.point_y = input.point.y;
+        input.has_positive_point = true;
+        input.positive_point = input.point;
+        m_last_input_request.has_positive_point = true;
+        m_last_input_request.positive_point_x = input.point.x;
+        m_last_input_request.positive_point_y = input.point.y;
+    }
+
+    if (m_has_negative_point)
+    {
+        input.has_negative_point = true;
+        input.negative_point = cv::Point(m_negative_x, m_negative_y);
+        m_last_input_request.has_negative_point = true;
+        m_last_input_request.negative_point_x = input.negative_point.x;
+        m_last_input_request.negative_point_y = input.negative_point.y;
     }
 
     std::string reason;
@@ -276,23 +316,38 @@ void FindSegmentation::PublishDisplayShapes(
             owner_ref + ".prompt_rect",
             "FindSegmentation",
             owner_ref,
-            "setpromptrect",
+            "setpromptrectxyxy",
             "roi",
             true,
             false,
             std::move(rect));
     }
 
-    if (m_has_point)
+    if (m_has_positive_point)
     {
         auto point = std::make_unique<PointsShape>();
-        point->addpoint(gp_Pnt(m_px, m_py, 0.0));
+        point->addpoint(gp_Pnt(m_positive_x, m_positive_y, 0.0));
         sink.UpsertShape(
-            owner_ref + ".prompt_point",
+            owner_ref + ".prompt_positive",
             "FindSegmentation",
             owner_ref,
-            "setpoint",
-            "prompt_point",
+            "setpositivepointxy",
+            "prompt_positive",
+            true,
+            false,
+            std::move(point));
+    }
+
+    if (m_has_negative_point)
+    {
+        auto point = std::make_unique<PointsShape>();
+        point->addpoint(gp_Pnt(m_negative_x, m_negative_y, 0.0));
+        sink.UpsertShape(
+            owner_ref + ".prompt_negative",
+            "FindSegmentation",
+            owner_ref,
+            "setnegativepointxy",
+            "prompt_negative",
             true,
             false,
             std::move(point));

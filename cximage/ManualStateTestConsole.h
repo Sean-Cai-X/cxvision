@@ -222,6 +222,12 @@ struct RuntimeObjectView
     int segmentation_contour_count = 0;
     double segmentation_primary_area = 0.0;
     bool segmentation_has_prompt_rect = false;
+    bool segmentation_has_positive_point = false;
+    bool segmentation_has_negative_point = false;
+    int segmentation_positive_x = 0;
+    int segmentation_positive_y = 0;
+    int segmentation_negative_x = 0;
+    int segmentation_negative_y = 0;
     bool segmentation_has_boundary = false;
     bool segmentation_has_libtorch_contract = false;
     bool segmentation_real_mask_attach_ready = false;
@@ -451,6 +457,13 @@ struct RuntimeObjectView
     bool circle_measure_backimage_ready = false;
     bool circle_measure_findobject_ready = false;
 
+    int circle_object_prefilter_requested = 0;
+    int circle_object_prefilter_applied = 0;
+    int circle_object_prefilter_restored = 0;
+    int circle_object_prefilter_runs_before = 0;
+    int circle_object_prefilter_runs_after = 0;
+    int circle_object_prefilter_effective_min = 0;
+
     std::string circle_measure_source;
     std::string circle_measure_failure_stage;
     std::string circle_measure_detail;
@@ -641,6 +654,25 @@ struct ManualGaugeState
   int segmentation_prompt_x1 = 980;
   int segmentation_prompt_y1 = 820;
   int segmentation_mode = 2;
+  bool has_segmentation_positive_point = false;
+  int segmentation_positive_x = 0;
+  int segmentation_positive_y = 0;
+  bool has_segmentation_negative_point = false;
+  int segmentation_negative_x = 0;
+  int segmentation_negative_y = 0;
+  int segmentation_threshold_percent = 50;
+
+  // FindObject is a thresholded connected-components tool.  Keep its ROI and
+  // filtering values separate from line/circle gauge fields so the parameter
+  // panel, Shape repository and next CxScript invocation share one snapshot.
+  bool has_findobject_roi = false;
+  int findobject_x0 = 80;
+  int findobject_y0 = 80;
+  int findobject_x1 = 1180;
+  int findobject_y1 = 880;
+  int findobject_foreground_mode = 1;
+  int findobject_threshold = 20;
+  int findobject_min_area = 10;
 
   int radius = 0;
   // For FindCircle, these are absolute display radii for the auxiliary

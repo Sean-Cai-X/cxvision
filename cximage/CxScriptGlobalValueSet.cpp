@@ -158,6 +158,19 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_gap"] = static_cast<double>(options.gap);
     overrides["global_linegap"] = static_cast<double>(options.linegap);
     overrides["global_threshold"] = static_cast<double>(options.threshold);
+    overrides["global_segmentation_threshold_percent"] = 50.0;
+    overrides["global_segmentation_mode"] = 2.0;
+    overrides["global_segmentation_positive_enabled"] = 0.0;
+    overrides["global_segmentation_positive_x"] =
+        static_cast<double>((options.roi_x0 + options.roi_x1) / 2);
+    overrides["global_segmentation_positive_y"] =
+        static_cast<double>((options.roi_y0 + options.roi_y1) / 2);
+    overrides["global_segmentation_negative_enabled"] = 0.0;
+    overrides["global_segmentation_negative_x"] = 0.0;
+    overrides["global_segmentation_negative_y"] = 0.0;
+    overrides["global_object_foreground_mode"] = 1.0;
+    overrides["global_object_threshold"] = 20.0;
+    overrides["global_object_min_area"] = 10.0;
     overrides["global_method"] = static_cast<double>(options.method);
     overrides["global_filterprofile"] = static_cast<double>(options.filterprofile);
     overrides["global_findsetting"] = 0.0;

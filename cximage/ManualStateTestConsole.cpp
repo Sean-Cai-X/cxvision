@@ -4,6 +4,7 @@
 #include "FindLine.h"
 #include "FindEllipse.h"
 #include "FindRect.h"
+#include "FindObject.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
 #include "GridPatternClassTool.h"
@@ -180,6 +181,18 @@ static void FillRuntimeObjectFromFindCircle(
     object.circle_measure_image_channels = debug.image_channels;
     object.circle_measure_backimage_ready = debug.backimage_ready;
     object.circle_measure_findobject_ready = debug.findobject_ready;
+    object.circle_object_prefilter_requested =
+        debug.object_prefilter_requested;
+    object.circle_object_prefilter_applied =
+        debug.object_prefilter_applied;
+    object.circle_object_prefilter_restored =
+        debug.object_prefilter_restored;
+    object.circle_object_prefilter_runs_before =
+        debug.object_prefilter_runs_before;
+    object.circle_object_prefilter_runs_after =
+        debug.object_prefilter_runs_after;
+    object.circle_object_prefilter_effective_min =
+        debug.object_prefilter_effective_min;
     object.circle_measure_source = debug.measure_source;
     object.circle_measure_failure_stage = debug.failure_stage;
     object.circle_measure_detail = debug.detail;
@@ -1083,6 +1096,35 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         m_manualTest.runtime_objects.push_back(object);
     }
 
+    SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindObject:list");
+    for (const std::string& name :
+         m_parserDebugBridge.ListClassObjectNames("FindObject"))
+    {
+        FindObject* find_object = static_cast<FindObject*>(
+            m_parserDebugBridge.QueryClassObject("FindObject", name));
+        if (find_object == nullptr)
+            continue;
+
+        RuntimeObjectView object;
+        object.name = name;
+        object.type = "FindObject";
+        object.exists_in_parser = true;
+        object.last_method = lastMethod;
+        object.last_runtime_status = runtimeStatus;
+        object.runtime_state = "component_result_available";
+        object.stale = false;
+        object.visualizable = true;
+        object.visual_source = "component_rectangles";
+        object.measure_points_count = find_object->getresultobjsnum();
+        object.valid_points_count = find_object->getresultobjsnum();
+        object.display_summary =
+            "FindObject " + name +
+            " components=" + std::to_string(find_object->getdebugcomponentcount()) +
+            " accepted=" + std::to_string(find_object->getdebugacceptedcount()) +
+            " result_rects=" + std::to_string(find_object->getresultobjsnum());
+        m_manualTest.runtime_objects.push_back(object);
+    }
+
     SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindSegmentation:list");
     for (const std::string& name :
          m_parserDebugBridge.ListClassObjectNames("FindSegmentation"))
@@ -1112,7 +1154,14 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
         object.segmentation_contour_ref = seg->get_contour_ref();
         object.segmentation_overlay_ref = seg->get_overlay_ref();
         object.segmentation_reason = seg->m_reason;
-        object.segmentation_has_prompt_rect = true;
+        const FindSegmentationInputSnapshot& input = seg->lastinputrequest();
+        object.segmentation_has_prompt_rect = input.has_rect;
+        object.segmentation_has_positive_point = input.has_positive_point;
+        object.segmentation_has_negative_point = input.has_negative_point;
+        object.segmentation_positive_x = input.positive_point_x;
+        object.segmentation_positive_y = input.positive_point_y;
+        object.segmentation_negative_x = input.negative_point_x;
+        object.segmentation_negative_y = input.negative_point_y;
         object.segmentation_has_boundary = object.segmentation_contour_count > 0;
         object.segmentation_has_libtorch_contract =
             object.segmentation_backend_status == "libtorch_contract_ready" ||
@@ -1620,11 +1669,23 @@ void ViewController::drawKeyParameterControlsWindow()
         if (m_manualTest.apply_gauge_to_shape_requested)
         {
             m_manualTest.apply_gauge_to_shape_requested = false;
+            const bool preservePendingFastMatchRun =
+                m_manualTest.debug_status == "FASTMATCH_RUN_REQUESTED" &&
+                m_manualTest.has_pending_execution_snapshot;
             std::string reason;
             if (ApplyCurrentGaugeToEditableShape(reason))
             {
-                m_manualTest.debug_status = "GAUGE_SHAPE_APPLIED";
-                m_manualTest.debug_reason = reason;
+                if (preservePendingFastMatchRun)
+                {
+                    if (!m_manualTest.debug_reason.empty())
+                        m_manualTest.debug_reason += "; ";
+                    m_manualTest.debug_reason += reason;
+                }
+                else
+                {
+                    m_manualTest.debug_status = "GAUGE_SHAPE_APPLIED";
+                    m_manualTest.debug_reason = reason;
+                }
             }
             else
             {

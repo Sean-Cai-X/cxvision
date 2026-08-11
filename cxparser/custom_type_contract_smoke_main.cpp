@@ -1,8 +1,4 @@
-/*
-  File: custom_type_contract_smoke_main.cpp
-  Role: Contract-oriented smoke template for custom host onboarding without
-  changing parser-core default behavior.
-*/
+
 
 #include "muParser.h"
 #include "custom_type_template_adapter.h"

@@ -1,6 +1,8 @@
 #include "pch.h"
 
 #include "findobject.h"
+#include "ImageAnnotationLayer.h"
+#include "RectShape.h"
 #include "imagemanager.h"
 #include "occtinclude.h"
 
@@ -1602,13 +1604,16 @@ void FindObject::MeasureConnectedComponents(Image &image) {
 
   const auto run_connected_components = [&](bool is_white_region) {
     cv::Mat mask;
+    // Connected components must receive a real binary foreground mask.  A
+    // JPEG background is often non-zero, so comparing against 0 incorrectly
+    // turns the entire ROI into one white component.
+    const int foreground_threshold = std::max(0, std::min(255, m_imagethre));
     if (is_white_region) {
-      cv::compare(channel, 0, mask, cv::CMP_GT);
+      cv::threshold(channel, mask, foreground_threshold, 255,
+                    cv::THRESH_BINARY);
     } else {
-      if (m_iborw == 3)
-        cv::compare(channel, 0, mask, cv::CMP_EQ);
-      else
-        cv::compare(channel, 255, mask, cv::CMP_LT);
+      cv::threshold(channel, mask, foreground_threshold, 255,
+                    cv::THRESH_BINARY_INV);
     }
 
     cv::Mat labels;
@@ -2769,4 +2774,38 @@ void FindObject::shapesetroi(void *pshape) {
   if (pshape == nullptr)
     return;
   Shape::shapesetroi(pshape);
+}
+
+void FindObject::PublishDisplayShapes(
+    ICxShapeSink& sink,
+    const std::string& owner_ref) const
+{
+  const gp_Rectangle roi = rect();
+  const double x = roi.TopLeft().X();
+  const double y = roi.TopLeft().Y();
+  const double w = roi.Width();
+  const double h = roi.Height();
+  if (w > 0.0 && h > 0.0)
+  {
+    auto roi_shape = std::make_unique<RectShape>();
+    roi_shape->setRect(x, y, x + w, y + h);
+    sink.UpsertShape(owner_ref + ".roi", "FindObject", owner_ref,
+                     "setrect", "roi", true, false, std::move(roi_shape));
+  }
+
+  for (int i = 0; i < m_rectresults.size(); ++i)
+  {
+    const gp_Rectangle found = m_rectresults.getrect(i);
+    const double rx = found.TopLeft().X();
+    const double ry = found.TopLeft().Y();
+    const double rw = found.Width();
+    const double rh = found.Height();
+    if (rw <= 0.0 || rh <= 0.0)
+      continue;
+    auto result_shape = std::make_unique<RectShape>();
+    result_shape->setRect(rx, ry, rx + rw, ry + rh);
+    sink.UpsertShape(owner_ref + ".result_rect." + std::to_string(i),
+                     "FindObject", owner_ref, "result", "result",
+                     false, true, std::move(result_shape));
+  }
 }

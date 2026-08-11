@@ -1,7 +1,4 @@
-/*
-  File: class_binding_smoke_main.cpp
-  Role: Executable entry point for smoke or regression validation.
-*/
+
 
 #include "muParser.h"
 
@@ -11,10 +8,7 @@
 
 namespace
 {
-/*
-  Role: Minimal class object used to validate parser class binding and
-  numeric variadic dispatch.
-*/
+
 class MiniModule
 {
 public:
@@ -56,10 +50,7 @@ public:
   double flex_sum;
 };
 
-/*
-  Role: Minimal class object used to validate string and mixed-parameter
-  class bindings.
-*/
+
 class MiniStringMap
 {
 public:
@@ -135,9 +126,7 @@ bool Check(bool condition, const char *message)
   return true;
 }
 
-/*
-  Role: Register the minimal class-binding surface needed by the smoke test.
-*/
+
 void ConfigureClassParser(mu::Parser &parser)
 {
   double *org_double = 0;

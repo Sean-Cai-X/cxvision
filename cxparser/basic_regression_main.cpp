@@ -1,16 +1,11 @@
-/*
-  File: basic_regression_main.cpp
-  Role: Executable entry point for smoke or regression validation.
-*/
+
 
 #include "muParserTest.h"
 
 #include <exception>
 #include <iostream>
 
-/*
-  Role: Run the basic parser regression profile as a standalone executable.
-*/
+
 int main()
 {
   try

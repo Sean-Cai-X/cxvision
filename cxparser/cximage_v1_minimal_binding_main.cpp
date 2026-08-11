@@ -1,7 +1,4 @@
-/*
-  File: cximage_v1_minimal_binding_main.cpp
-  Role: Validates a controller-style parser flow modeled after cximage_v1 ViewController usage.
-*/
+
 
 #include "muParser.h"
 

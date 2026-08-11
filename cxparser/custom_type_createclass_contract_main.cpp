@@ -1,19 +1,4 @@
-/*
-  File: custom_type_createclass_contract_main.cpp
-  Role: Compile-time contract target for parser-declared custom types.
 
-  Current boundary:
-  - ParserBase::CompileClassDeclara now wires simple and comma-separated
-    member declarations into
-    the scripted CreateClass definition buffer.
-  - ParserBase::CompileFuncAndRunString now provides the minimal execution
-    bridge used by scripted class-member dispatch.
-  - Zero-arg ctor/factory semantics are available through:
-    "__ctor__", "__factory__", or "create".
-  - Minimal numeric parameter aliases are available through:
-    arg / p for the first parameter,
-    and arg0/arg1... plus p0/p1... as compatibility aliases.
-*/
 
 #include "muParser.h"
 

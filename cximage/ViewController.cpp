@@ -8,6 +8,7 @@
 #include "LineGaugeShape.h"
 #include "CircleShape.h"
 #include "FindCircle.h"
+#include "FindObject.h"
 #include "CxCrashLogHandler.h"
 #include "CxUnifiedLog.h"
 #include <glad/glad.h>
@@ -7980,6 +7981,18 @@ void ViewController::SyncRuntimeObjectsToShapeElements()
                 m_annotationLayer.EndRuntimeOwnerPublish("FindSegmentation", object.name, generation);
             }
         }
+        else if (object.type == "FindObject")
+        {
+            FindObject* tool = static_cast<FindObject*>(
+                m_parserDebugBridge.QueryClassObject("FindObject", object.name));
+            if (tool != nullptr)
+            {
+                const uint64_t generation =
+                    m_annotationLayer.BeginRuntimeOwnerPublish("FindObject", object.name);
+                tool->PublishDisplayShapes(m_annotationLayer, object.name);
+                m_annotationLayer.EndRuntimeOwnerPublish("FindObject", object.name, generation);
+            }
+        }
     }
 }
 
@@ -8065,6 +8078,10 @@ static ImU32 ShapeHandleColor(CxShapeHandleRole role, const CxShapeElement& elem
 {
     if (element.result_element)
         return IM_COL32(255, 180, 64, 255);
+    if (element.semantic_role == "prompt_positive")
+        return IM_COL32(92, 235, 120, 255);
+    if (element.semantic_role == "prompt_negative")
+        return IM_COL32(250, 92, 92, 255);
     if (element.semantic_role == "measure_points")
         return IM_COL32(255, 235, 64, 255);
     // A0/A1 are angle handles of the same FindCircle ROI.  Make them blue so
@@ -8080,6 +8097,10 @@ static ImU32 ShapeElementStrokeColor(const CxShapeElement& element)
 {
     if (element.result_element)
         return IM_COL32(255, 180, 64, 255);
+    if (element.semantic_role == "prompt_positive")
+        return IM_COL32(92, 235, 120, 220);
+    if (element.semantic_role == "prompt_negative")
+        return IM_COL32(250, 92, 92, 220);
     if (element.semantic_role == "scan_tick")
         return IM_COL32(140, 230, 255, 105);
     if (element.editable)

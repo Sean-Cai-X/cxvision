@@ -60,13 +60,42 @@ bool FindSegmentationOpenCvSmokeBackend::Run(
         c.area = area;
         c.perimeter = cv::arcLength(contours[i], true);
 
-        if (area > bestArea)
-        {
-            bestArea = area;
-            bestIndex = static_cast<int>(output.contours.size());
-        }
-
         output.contours.push_back(c);
+    }
+
+    // This is a deterministic OpenCV baseline, not EdgeSAM. Prompt polarity
+    // is nevertheless applied so the UI/Headless chain can be verified:
+    // a negative point excludes its component and a positive point selects
+    // its containing component.
+    for (int i = 0; i < static_cast<int>(output.contours.size()); ++i)
+    {
+        const std::vector<cv::Point>& contour = output.contours[i].points;
+        if (input.has_negative_point &&
+            cv::pointPolygonTest(contour, input.negative_point, false) >= 0.0)
+            continue;
+        if (input.has_positive_point &&
+            cv::pointPolygonTest(contour, input.positive_point, false) < 0.0)
+            continue;
+        if (output.contours[i].area > bestArea)
+        {
+            bestArea = output.contours[i].area;
+            bestIndex = i;
+        }
+    }
+
+    if (bestIndex >= 0)
+    {
+        FindSegmentationContour selected = output.contours[bestIndex];
+        output.contours.clear();
+        output.contours.push_back(std::move(selected));
+        bestIndex = 0;
+    }
+    else
+    {
+        // A rejected positive/negative prompt must not leak unrelated Canny
+        // contours into the capture/overlay result.  No selected component
+        // means no segmentation boundary is available for this request.
+        output.contours.clear();
     }
 
     if (bestIndex >= 0)
@@ -85,11 +114,15 @@ bool FindSegmentationOpenCvSmokeBackend::Run(
         cv::drawContours(output.overlay, one, 0, cv::Scalar(0, 255, 255), 2);
     }
 
-    output.ok = !output.contours.empty();
+    output.ok = bestIndex >= 0;
     output.backend = "opencv_smoke";
     output.backend_status = "smoke_ready";
     output.status = output.ok ? "boundary_available" : "no_boundary";
-    output.reason = output.ok ? "opencv smoke boundary generated" : "no contour found";
+    output.reason = output.ok
+        ? "opencv smoke boundary generated; prompt polarity applied"
+        : (input.has_positive_point
+            ? "no boundary contains the positive prompt"
+            : "no contour found");
     output.mask_width = output.mask.cols;
     output.mask_height = output.mask.rows;
     output.contour_count = static_cast<int>(output.contours.size());

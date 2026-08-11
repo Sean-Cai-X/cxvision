@@ -1137,6 +1137,18 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindSegmentation::setpromptrectxyxy);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setpoint",
                             &FindSegmentation::setpoint);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setpositivepoint",
+                            &FindSegmentation::setpositivepoint);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setpositivepointxy",
+                            &FindSegmentation::setpositivepointxy);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setnegativepoint",
+                            &FindSegmentation::setnegativepoint);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setnegativepointxy",
+                            &FindSegmentation::setnegativepointxy);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode",
                             &FindSegmentation::setmode);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "segment",

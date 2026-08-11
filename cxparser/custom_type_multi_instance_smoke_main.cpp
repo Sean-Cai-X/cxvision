@@ -1,7 +1,4 @@
-/*
-  File: custom_type_multi_instance_smoke_main.cpp
-  Role: Validates that custom host bindings keep object instances isolated.
-*/
+
 
 #include "muParser.h"
 #include "custom_type_template_adapter.h"

@@ -1001,6 +1001,23 @@ void ImageAnnotationLayer::RemoveShapeByOwner(const std::string& owner_type, con
     }
 }
 
+bool ImageAnnotationLayer::RemoveShapeByStableRef(const std::string& stable_ref)
+{
+    for (auto it = myShapeElements.begin(); it != myShapeElements.end(); ++it)
+    {
+        if (it->stable_ref != stable_ref)
+            continue;
+        const int removedIndex = static_cast<int>(std::distance(myShapeElements.begin(), it));
+        myShapeElements.erase(it);
+        if (mySelectedShapeIndex == removedIndex)
+            mySelectedShapeIndex = -1;
+        else if (mySelectedShapeIndex > removedIndex)
+            --mySelectedShapeIndex;
+        return true;
+    }
+    return false;
+}
+
 void ImageAnnotationLayer::SelectShape(int index)
 {
     mySelectedShapeIndex =

@@ -8,13 +8,43 @@ CxAnnotationTool_setinteraction("click_to_create");
 CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
+CxAnnotationTool_add("findsegmentation_positive_prompt");
+CxAnnotationTool_setlabel("Seg + Point");
+CxAnnotationTool_setshape("PointsShape");
+CxAnnotationTool_setrole("prompt_positive");
+CxAnnotationTool_setinteraction("click_to_create");
+CxAnnotationTool_setownertool("FindSegmentation");
+CxAnnotationTool_setownerbinding("setpositivepointxy");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
+CxAnnotationTool_add("findsegmentation_negative_prompt");
+CxAnnotationTool_setlabel("Seg - Point");
+CxAnnotationTool_setshape("PointsShape");
+CxAnnotationTool_setrole("prompt_negative");
+CxAnnotationTool_setinteraction("click_to_create");
+CxAnnotationTool_setownertool("FindSegmentation");
+CxAnnotationTool_setownerbinding("setnegativepointxy");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
+CxAnnotationTool_add("findobject_roi");
+CxAnnotationTool_setlabel("FindObject ROI");
+CxAnnotationTool_setshape("RectShape");
+CxAnnotationTool_setrole("roi");
+CxAnnotationTool_setinteraction("drag_to_create");
+CxAnnotationTool_setownertool("FindObject");
+CxAnnotationTool_setownerbinding("setrect");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
 CxAnnotationTool_add("auto_boundary_edgesam");
 CxAnnotationTool_setlabel("Auto Boundary / EdgeSam");
 CxAnnotationTool_setshape("AutoBoundary");
 CxAnnotationTool_setrole("auto_boundary_request");
 CxAnnotationTool_setinteraction("auto_segmentation");
 CxAnnotationTool_setownertool("FindSegmentation");
-CxAnnotationTool_setownerbinding("setpromptrect");
+CxAnnotationTool_setownerbinding("setpromptrectxyxy");
 CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 

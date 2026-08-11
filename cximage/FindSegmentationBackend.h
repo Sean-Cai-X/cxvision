@@ -22,6 +22,11 @@ struct FindSegmentationInput
 
     bool has_point = false;
     cv::Point point;
+
+    bool has_positive_point = false;
+    cv::Point positive_point;
+    bool has_negative_point = false;
+    cv::Point negative_point;
 };
 
 class IFindSegmentationBackend

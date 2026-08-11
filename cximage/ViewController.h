@@ -175,6 +175,14 @@ public:
         const std::string& outDir,
         std::string& reason);
 
+    // Serial UI-chain smoke for Torch evidence -> image set -> annotation
+    // snapshot -> label-package export.  It does not invoke model training.
+    bool RunTorchTrainingLabelPackageSmoke(
+        const std::string& preferredScriptId,
+        const std::string& outDir,
+        std::string& packagePath,
+        std::string& reason);
+
 private:
   void initImGui();
   bool GetSelectedCatalogScript(std::string& outPath,
@@ -236,6 +244,9 @@ private:
       const std::string& split,
       const std::string& label,
       const std::string& source);
+  bool ExportTorchTrainingLabelPackage(
+      std::string& packagePath,
+      std::string& reason);
   void DrawTorchTrainingImageRail(const char* split, const char* label);
   bool LoadImageIntoImageView(const std::string& imagePath,
                               std::string& reason);

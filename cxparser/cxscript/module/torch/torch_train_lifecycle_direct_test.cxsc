@@ -7,6 +7,7 @@ int timeout_ms = 30000;
 
 m_task.settask("torch.train.segmentation.lifecycle_smoke.v1");
 m_task.setrequestcontext(global_torch_request_context);
+m_task.setmanifest("cxparser/cxscript/module/cximage/evidence/torch_runtime_ui_evidence_chain.cxsc");
 m_task.setdevice("cpu");
 m_task.settimeout(timeout_ms);
 

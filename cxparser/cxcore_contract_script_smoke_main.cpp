@@ -1,8 +1,4 @@
-/*
-  File: cxcore_contract_script_smoke_main.cpp
-  Role: Proves that cxcore-style contract checks can live in cxscript without
-  depending on cxparser_ext adapters or C++ driver-side flow logic.
-*/
+
 
 #include "muParser.h"
 

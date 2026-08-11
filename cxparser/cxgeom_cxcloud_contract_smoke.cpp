@@ -1,8 +1,4 @@
-/*
-  File: cxgeom_cxcloud_contract_smoke.cpp
-  Role: Validates the pre-implementation contract for cxgeom and cxcloud as
-  cxcore-dependent capability modules.
-*/
+
 
 #include <cmath>
 #include <exception>

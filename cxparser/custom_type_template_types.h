@@ -1,7 +1,4 @@
-/*
-  File: custom_type_template_types.h
-  Role: Minimal metadata types for custom host onboarding templates.
-*/
+
 
 #ifndef CXPARSER_CUSTOM_TYPE_TEMPLATE_TYPES_H
 #define CXPARSER_CUSTOM_TYPE_TEMPLATE_TYPES_H

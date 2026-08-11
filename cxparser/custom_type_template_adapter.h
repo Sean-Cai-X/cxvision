@@ -1,7 +1,4 @@
-/*
-  File: custom_type_template_adapter.h
-  Role: Minimal adapter interface for custom host binding templates.
-*/
+
 
 #ifndef CXPARSER_CUSTOM_TYPE_TEMPLATE_ADAPTER_H
 #define CXPARSER_CUSTOM_TYPE_TEMPLATE_ADAPTER_H

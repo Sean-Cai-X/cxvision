@@ -163,10 +163,24 @@ bool IsFindSegmentationGaugeTool(const std::string& tool)
            tool == "FindSegmentationTool";
 }
 
+bool IsFindObjectGaugeTool(const std::string& tool)
+{
+    return tool == "FindObject" || tool == "findobject";
+}
+
 bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
 {
+    if (gauge.tool == "FindObject")
+    {
+        if (gauge.line_x0 == gauge.line_x1 || gauge.line_y0 == gauge.line_y1)
+            reason = "FindObject ROI must have positive width and height";
+        else
+            reason.clear();
+        return reason.empty();
+    }
+
     if (gauge.tool == "FindLine" || gauge.tool == "FindRect")
     {
         if (!gauge.has_line_gauge)
@@ -216,6 +230,15 @@ bool ValidateManualGaugeGeometryForEditing(
             reason = "FindSegmentation prompt ROI must have positive width and height";
         else
             reason.clear();
+        return reason.empty();
+    }
+    if (IsFindObjectGaugeTool(gauge.tool))
+    {
+        if (!gauge.has_findobject_roi)
+            reason = "FindObject ROI is unavailable";
+        else if (gauge.findobject_x1 <= gauge.findobject_x0 ||
+                 gauge.findobject_y1 <= gauge.findobject_y0)
+            reason = "FindObject ROI must have positive width and height";
         return reason.empty();
     }
     reason = "unsupported gauge tool";
@@ -795,7 +818,50 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
         InjectManualGaugeInt(context, "global_roi_width", x1 - x0);
         InjectManualGaugeInt(context, "global_roi_height", y1 - y0);
         InjectManualGaugeInt(context, "global_segmentation_mode", gauge.segmentation_mode);
-        InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
+        InjectManualGaugeInt(context, "global_segmentation_threshold_percent",
+                             std::max(0, std::min(100, gauge.segmentation_threshold_percent)));
+        InjectManualGaugeInt(context, "global_segmentation_positive_enabled",
+                             gauge.has_segmentation_positive_point ? 1 : 0);
+        InjectManualGaugeInt(context, "global_segmentation_positive_x",
+                             gauge.segmentation_positive_x);
+        InjectManualGaugeInt(context, "global_segmentation_positive_y",
+                             gauge.segmentation_positive_y);
+        InjectManualGaugeInt(context, "global_segmentation_negative_enabled",
+                             gauge.has_segmentation_negative_point ? 1 : 0);
+        InjectManualGaugeInt(context, "global_segmentation_negative_x",
+                             gauge.segmentation_negative_x);
+        InjectManualGaugeInt(context, "global_segmentation_negative_y",
+                             gauge.segmentation_negative_y);
+        // Existing tool code still reads global_threshold. Keep it aligned to
+        // the explicit percentage rather than silently using a line gauge.
+        InjectManualGaugeInt(context, "global_threshold",
+                             std::max(0, std::min(100, gauge.segmentation_threshold_percent)));
+    }
+    else if (IsFindObjectGaugeTool(gauge.tool))
+    {
+        const int x0 = std::max(0, gauge.findobject_x0);
+        const int y0 = std::max(0, gauge.findobject_y0);
+        const int x1 = std::max(x0 + 1, gauge.findobject_x1);
+        const int y1 = std::max(y0 + 1, gauge.findobject_y1);
+        gauge.findobject_x0 = x0;
+        gauge.findobject_y0 = y0;
+        gauge.findobject_x1 = x1;
+        gauge.findobject_y1 = y1;
+        gauge.has_findobject_roi = true;
+        InjectManualGaugeInt(context, "global_roi_x0", x0);
+        InjectManualGaugeInt(context, "global_roi_y0", y0);
+        InjectManualGaugeInt(context, "global_roi_x1", x1);
+        InjectManualGaugeInt(context, "global_roi_y1", y1);
+        InjectManualGaugeInt(context, "global_roi_x", x0);
+        InjectManualGaugeInt(context, "global_roi_y", y0);
+        InjectManualGaugeInt(context, "global_roi_width", x1 - x0);
+        InjectManualGaugeInt(context, "global_roi_height", y1 - y0);
+        InjectManualGaugeInt(context, "global_object_foreground_mode",
+                             std::max(1, std::min(3, gauge.findobject_foreground_mode)));
+        InjectManualGaugeInt(context, "global_object_threshold",
+                             std::max(0, std::min(255, gauge.findobject_threshold)));
+        InjectManualGaugeInt(context, "global_object_min_area",
+                             std::max(1, gauge.findobject_min_area));
     }
     else
     {
@@ -1054,7 +1120,21 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
             }
             if (std::string(integer_keys[i]) == "findsetting")
             {
-                loaded.findsetting = DefaultFindSettingForTool(loaded.tool);
+                // Older candidate packages may not contain object-prefilter
+                // settings.  Only then use the tool default; never overwrite
+                // an explicitly saved findsetting value.
+                const auto globalIt = context.runtime_int_vars.find(
+                    loaded.tool == "FindCircle"
+                        ? "global_findcircle_findsetting"
+                        : (loaded.tool == "FindEllipse"
+                               ? "global_findellipse_findsetting"
+                               : (loaded.tool == "FindRect"
+                                      ? "global_findrect_findsetting"
+                                      : "global_findline_objfilter")));
+                loaded.findsetting =
+                    globalIt != context.runtime_int_vars.end()
+                        ? std::max(0, globalIt->second)
+                        : DefaultFindSettingForTool(loaded.tool);
                 continue;
             }
             if (std::string(integer_keys[i]).find("ellipse_") == 0 &&

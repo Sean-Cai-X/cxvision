@@ -912,8 +912,13 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
       ImGui::BeginDisabled();
 
     std::string actionReason;
+    const bool stagedTorchAction =
+        context.editor_source == "torch_runtime_action" &&
+        !context.active_script_case_purpose.empty();
     const std::string actionFeature =
-        evidenceFeature == "runtime_contract" ? selectedFeature : evidenceFeature;
+        stagedTorchAction
+            ? selectedFeature
+            : (evidenceFeature == "runtime_contract" ? selectedFeature : evidenceFeature);
     // Tiny Smoke always loads its canonical segmentation lifecycle script.
     // It is therefore valid from any selected Torch evidence case with an
     // image, including a detection case.  The selected case is evidence
@@ -982,6 +987,12 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
     DrawReadonlyFieldLocal("evidence_feature", evidenceFeature);
     DrawReadonlyFieldLocal("selected_feature", selectedFeature);
     DrawReadonlyFieldLocal("action_feature", actionFeature);
+    if (stagedTorchAction && evidenceFeature != actionFeature)
+    {
+      ImGui::TextDisabled(
+          "Evidence image family is %s; the staged action is %s.",
+          evidenceFeature.c_str(), actionFeature.c_str());
+    }
     if (context.debug_status == "TORCH_ACTION_STAGED")
     {
       ImGui::TextColored(
@@ -1137,7 +1148,10 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
     {
       if (selectedFeature == "training_lifecycle")
       {
-        DrawReadonlyFieldLocal("epoch", std::string("tiny smoke exposes lifecycle summary, not full epoch table"));
+        DrawReadonlyFieldLocal("training_mode", "SYNTHETIC_LIFECYCLE_SMOKE");
+        DrawReadonlyFieldLocal("dataset_consumed", "false");
+        DrawReadonlyFieldLocal("optimizer_steps", 0);
+        DrawReadonlyFieldLocal("epoch", std::string("one forward/backward lifecycle validation step"));
         DrawReadonlyFieldLocal("completed_epochs", 1);
         DrawReadonlyFieldLocal("curve_state", "ONE_SMOKE_STEP_NO_MULTI_EPOCH_SERIES");
         DrawReadonlyFieldLocal("trainer_summary", object->torch_trainer_lifecycle_summary);
@@ -1146,6 +1160,11 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
         DrawReadonlyFieldLocal("total_ms", object->torch_total_ms);
         if (object->torch_trainer_lifecycle_summary.empty())
           DrawPendingBindingLineLocal("epoch-loss detail", "not produced by this runtime object");
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.76f, 0.24f, 1.0f),
+            "This smoke does not train from the Evidence image set or annotation labels.");
+        ImGui::TextDisabled(
+            "A real curve requires an image/mask label adapter, persistent model/optimizer, and runtime epoch samples.");
       }
       else
       {
@@ -1566,9 +1585,9 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
     {
       ImGui::TextColored(
           ImVec4(1.0f, 0.82f, 0.25f, 1.0f),
-          "PENDING_MULTI_EPOCH_SERIES");
+          "PENDING_REAL_MULTI_EPOCH_TRAINING");
       ImGui::TextDisabled(
-          "Tiny Smoke produced one lifecycle sample only. No learning curve is plotted.");
+          "Tiny Smoke is one synthetic forward/backward validation step. No learning curve is plotted.");
       ImGui::Separator();
     }
     else
@@ -1655,8 +1674,8 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context)
       if (epochs <= 1.0)
       {
         ImGui::TextDisabled(
-            "Tiny-smoke metric snapshot (one epoch). A multi-epoch training "
-            "curve is pending a runtime-produced epoch series.");
+            "Tiny-smoke metric snapshot only. Real training is pending dataset/label "
+            "binding, optimizer steps, and a runtime-produced epoch series.");
       }
     }
     if (object != nullptr && object->type == "TorchTask")
@@ -2048,6 +2067,7 @@ static std::string NormalizeKeyParamToolTypeLocal(const std::string& type)
   if (type == "FindSegmentation" || type == "findsegmentation" ||
       type == "Findsegmentation" || type == "segmentation")
     return "FindSegmentation";
+  if (type == "FindObject" || type == "findobject") return "FindObject";
   if (type == "fastmatch" || type == "FastMatch" || type == "CFastMatch") return "FastMatch";
   if (type == "gridpatternclasstool" || type == "GridPatternClassTool") return "GridPatternClassTool";
   if (type == "regionpatterntool" || type == "RegionPatternTool") return "RegionPatternTool";
@@ -2063,6 +2083,81 @@ static int RuntimeIntOr(
   if (it == context.runtime_int_vars.end())
     return fallback;
   return it->second;
+}
+
+static std::string ToolFindSettingGlobalKey(
+    const ManualGaugeState& gauge,
+    const std::string& normalizedTool)
+{
+  if (normalizedTool == "FindLine" || gauge.has_line_gauge)
+    return "global_findline_objfilter";
+  if (normalizedTool == "FindCircle" || gauge.has_circle_gauge)
+    return "global_findcircle_findsetting";
+  if (normalizedTool == "FindEllipse" || gauge.has_ellipse_gauge)
+    return "global_findellipse_findsetting";
+  if (normalizedTool == "FindRect")
+    return "global_findrect_findsetting";
+  if (normalizedTool == "FastMatch")
+    return "global_objfilter";
+  return "global_findsetting";
+}
+
+static void StageObjectPrefilterFindSetting(
+    ManualTestContext& context,
+    const std::string& reason)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  const std::string normalizedTool = NormalizeKeyParamToolTypeLocal(
+      !gauge.primary_object_type.empty() ? gauge.primary_object_type : gauge.tool);
+  gauge.findsetting = std::max(0, std::min(255, gauge.findsetting));
+
+  InjectManualGaugeInt(context, "global_findsetting", gauge.findsetting);
+
+  if (normalizedTool == "FindLine" || gauge.has_line_gauge)
+  {
+    InjectManualGaugeInt(context, "global_objfilter", gauge.findsetting);
+    InjectManualGaugeInt(context, "global_findline_objfilter", gauge.findsetting);
+    InjectManualGaugeInt(context, "global_findline_findsetting", gauge.findsetting);
+  }
+  else if (normalizedTool == "FindCircle" || gauge.has_circle_gauge)
+  {
+    InjectManualGaugeInt(context, "global_findcircle_findsetting", gauge.findsetting);
+  }
+  else if (normalizedTool == "FindEllipse" || gauge.has_ellipse_gauge)
+  {
+    InjectManualGaugeInt(context, "global_findellipse_findsetting", gauge.findsetting);
+  }
+  else if (normalizedTool == "FindRect")
+  {
+    InjectManualGaugeInt(context, "global_findrect_findsetting", gauge.findsetting);
+  }
+  else if (normalizedTool == "FastMatch")
+  {
+    InjectManualGaugeInt(context, "global_objfilter", gauge.findsetting);
+  }
+
+  context.debug_status = "OBJECT_PREFILTER_STAGED";
+  context.debug_reason =
+      reason + ": findsetting=" + std::to_string(gauge.findsetting) +
+      " staged for " + normalizedTool;
+}
+
+static void RestoreObjectPrefilterFindSettingFromStagedGlobals(
+    ManualTestContext& context,
+    const std::string& reason)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  const std::string normalizedTool = NormalizeKeyParamToolTypeLocal(
+      !gauge.primary_object_type.empty() ? gauge.primary_object_type : gauge.tool);
+  const std::string toolKey = ToolFindSettingGlobalKey(gauge, normalizedTool);
+
+  auto it = context.runtime_int_vars.find(toolKey);
+  if (it == context.runtime_int_vars.end())
+    it = context.runtime_int_vars.find("global_findsetting");
+  if (it != context.runtime_int_vars.end())
+    gauge.findsetting = std::max(0, std::min(255, it->second));
+
+  StageObjectPrefilterFindSetting(context, reason);
 }
 
 static bool DrawRuntimeIntRow(
@@ -2188,6 +2283,21 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
         RuntimeIntOr(context, "global_roi_y1", gauge.segmentation_prompt_y1);
     gauge.segmentation_mode =
         RuntimeIntOr(context, "global_segmentation_mode", gauge.segmentation_mode);
+    gauge.segmentation_threshold_percent = RuntimeIntOr(
+        context, "global_segmentation_threshold_percent",
+        gauge.segmentation_threshold_percent);
+    gauge.has_segmentation_positive_point = RuntimeIntOr(
+        context, "global_segmentation_positive_enabled", 0) != 0;
+    gauge.segmentation_positive_x = RuntimeIntOr(
+        context, "global_segmentation_positive_x", gauge.segmentation_positive_x);
+    gauge.segmentation_positive_y = RuntimeIntOr(
+        context, "global_segmentation_positive_y", gauge.segmentation_positive_y);
+    gauge.has_segmentation_negative_point = RuntimeIntOr(
+        context, "global_segmentation_negative_enabled", 0) != 0;
+    gauge.segmentation_negative_x = RuntimeIntOr(
+        context, "global_segmentation_negative_x", gauge.segmentation_negative_x);
+    gauge.segmentation_negative_y = RuntimeIntOr(
+        context, "global_segmentation_negative_y", gauge.segmentation_negative_y);
     gauge.has_segmentation_prompt_rect = true;
   }
 
@@ -2241,6 +2351,32 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
   edited |= ImGui::InputInt("##segmentation_mode", &gauge.segmentation_mode);
   gauge.segmentation_mode = std::max(0, std::min(16, gauge.segmentation_mode));
 
+  ImGui::SameLine();
+  ImGui::TextUnformatted("threshold %");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(100.0f);
+  edited |= ImGui::InputInt("##segmentation_threshold_percent",
+                            &gauge.segmentation_threshold_percent);
+  gauge.segmentation_threshold_percent = std::max(
+      0, std::min(100, gauge.segmentation_threshold_percent));
+
+  edited |= ImGui::Checkbox("positive prompt",
+                            &gauge.has_segmentation_positive_point);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  edited |= ImGui::InputInt("##seg_positive_x", &gauge.segmentation_positive_x);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  edited |= ImGui::InputInt("##seg_positive_y", &gauge.segmentation_positive_y);
+  edited |= ImGui::Checkbox("negative prompt",
+                            &gauge.has_segmentation_negative_point);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  edited |= ImGui::InputInt("##seg_negative_x", &gauge.segmentation_negative_x);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  edited |= ImGui::InputInt("##seg_negative_y", &gauge.segmentation_negative_y);
+
   InjectManualGaugeInt(context, "global_roi_x0", gauge.segmentation_prompt_x0);
   InjectManualGaugeInt(context, "global_roi_y0", gauge.segmentation_prompt_y0);
   InjectManualGaugeInt(context, "global_roi_x1", gauge.segmentation_prompt_x1);
@@ -2259,6 +2395,20 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
       context,
       "global_segmentation_mode",
       gauge.segmentation_mode);
+  InjectManualGaugeInt(context, "global_segmentation_threshold_percent",
+                        gauge.segmentation_threshold_percent);
+  InjectManualGaugeInt(context, "global_segmentation_positive_enabled",
+                        gauge.has_segmentation_positive_point ? 1 : 0);
+  InjectManualGaugeInt(context, "global_segmentation_positive_x",
+                        gauge.segmentation_positive_x);
+  InjectManualGaugeInt(context, "global_segmentation_positive_y",
+                        gauge.segmentation_positive_y);
+  InjectManualGaugeInt(context, "global_segmentation_negative_enabled",
+                        gauge.has_segmentation_negative_point ? 1 : 0);
+  InjectManualGaugeInt(context, "global_segmentation_negative_x",
+                        gauge.segmentation_negative_x);
+  InjectManualGaugeInt(context, "global_segmentation_negative_y",
+                        gauge.segmentation_negative_y);
 
   return edited;
 }
@@ -3346,6 +3496,21 @@ static void DrawFindCircleScanSemanticsPanel(ManualTestContext& context)
               object->circle_measure_image_ready ? "true" : "false",
               object->circle_measure_backimage_ready ? "true" : "false",
               object->circle_measure_findobject_ready ? "true" : "false");
+  ImGui::Text("object_prefilter requested=%d applied=%d restored=%d runs=%d->%d effective_min=%d",
+              object->circle_object_prefilter_requested,
+              object->circle_object_prefilter_applied,
+              object->circle_object_prefilter_restored,
+              object->circle_object_prefilter_runs_before,
+              object->circle_object_prefilter_runs_after,
+              object->circle_object_prefilter_effective_min);
+  if (object->circle_object_prefilter_requested != 0 &&
+      object->circle_object_prefilter_applied == 0 &&
+      object->circle_object_prefilter_restored != 0)
+  {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
+        "object prefilter was requested but restored because it removed every radial candidate.");
+  }
   ImGui::Text("source=%s failure=%s",
               object->circle_measure_source.c_str(),
               object->circle_measure_failure_stage.empty()
@@ -4721,6 +4886,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               : "setfindsetting";
       ImGui::TextUnformatted("findsetting");
       ImGui::SameLine(110.0f);
+      bool findsettingEdited = false;
       if (ImGui::Checkbox("object prefilter##findsetting_prefilter",
                           &objectPrefilter))
       {
@@ -4728,16 +4894,35 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               gauge.findsetting |= 0x01;
           else
               gauge.findsetting &= ~0x01;
-          gaugeEdited = true;
+          findsettingEdited = true;
       }
       ImGui::SameLine();
       ImGui::SetNextItemWidth(70.0f);
-      gaugeEdited |= ImGui::InputInt("##findsetting_value", &gauge.findsetting);
+      findsettingEdited |= ImGui::InputInt("##findsetting_value", &gauge.findsetting);
       gauge.findsetting = std::max(0, std::min(255, gauge.findsetting));
+      if (findsettingEdited)
+      {
+          StageObjectPrefilterFindSetting(context, "key parameter object prefilter edited");
+      }
+      gaugeEdited |= findsettingEdited;
       ImGui::SameLine();
       ImGui::TextDisabled("%s bit0, default=%d",
                           findsettingMethodName,
                           findsettingDefault);
+      {
+          const std::string normalizedTool = NormalizeKeyParamToolTypeLocal(
+              !gauge.primary_object_type.empty() ? gauge.primary_object_type : gauge.tool);
+          const std::string toolKey =
+              ToolFindSettingGlobalKey(gauge, normalizedTool);
+          ImGui::TextDisabled(
+              "staged globals: global_findsetting=%d | %s=%d",
+              RuntimeIntOr(context, "global_findsetting", gauge.findsetting),
+              toolKey.c_str(),
+              RuntimeIntOr(context, toolKey, gauge.findsetting));
+          ImGui::TextDisabled(
+              "script must call setfindsetting/setobjfilter before measure(); "
+              "Run Script reapplies full gauge globals.");
+      }
 
       if (isFindCircle || isFindEllipse)
       {
@@ -5082,6 +5267,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   ImGui::SameLine();
   if (ImGui::Button("Apply To Globals", ImVec2(btnWidth, 0)))
   {
+    RestoreObjectPrefilterFindSettingFromStagedGlobals(
+        context, "apply globals restored staged object prefilter");
     ApplyManualGaugeToGlobals(context);
   }
   ImGui::SameLine();
@@ -5090,6 +5277,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     gauge.dirty = true;
     gauge.review_status = "editing";
     context.debug_action = "Key Parameter Controls Run Script";
+    RestoreObjectPrefilterFindSettingFromStagedGlobals(
+        context, "run script restored staged object prefilter");
     if (ApplyManualGaugeToGlobals(context))
     {
       context.pending_execution_gauge = context.current_gauge;
@@ -5107,6 +5296,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     gauge.dirty = true;
     gauge.review_status = "editing";
     context.debug_action = "Save Evidence Candidate";
+    RestoreObjectPrefilterFindSettingFromStagedGlobals(
+        context, "save draft restored staged object prefilter");
     if (ApplyManualGaugeToGlobals(context))
     {
       CxEvidenceCandidateSaveOptions options;
@@ -5126,6 +5317,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     gauge.dirty = true;
     gauge.review_status = "editing";
     context.debug_action = "Save And Run Evidence Candidate";
+    RestoreObjectPrefilterFindSettingFromStagedGlobals(
+        context, "save and run restored staged object prefilter");
     if (ApplyManualGaugeToGlobals(context))
     {
       // Freeze exactly what was saved.  The Debug Compiler executes on a

@@ -524,6 +524,7 @@ bool ParseShapeInteractionTestArgs(int argc, char** argv, ShapeInteractionTestOp
 struct EvidenceChainSelfTestCliOptions
 {
     bool enabled = false;
+    bool torch_training_label_package_smoke = false;
     bool evidence_lock_pipeline = false;
     bool standard_chain_gate = false;
     bool baseline_lock = false;
@@ -535,6 +536,7 @@ struct EvidenceChainSelfTestCliOptions
     std::string param_regression_tool;
     std::string out_dir;
     std::string evidence_tool_filter;
+    std::string torch_training_label_script;
     int max_cases = 0;
 };
 
@@ -556,6 +558,19 @@ bool ParseEvidenceChainSelfTestArgs(int argc, char** argv, EvidenceChainSelfTest
         {
             options.enabled = true;
             options.evidence_lock_pipeline = true;
+            continue;
+        }
+
+        if (arg == "--torch-training-label-package-smoke")
+        {
+            options.enabled = true;
+            options.torch_training_label_package_smoke = true;
+            continue;
+        }
+
+        if (arg == "--torch-training-label-script" && i + 1 < argc)
+        {
+            options.torch_training_label_script = argv[++i];
             continue;
         }
 
@@ -2355,6 +2370,39 @@ int RunCxVisionApplication(int argc, char** argv)
 
     EvidenceChainSelfTestCliOptions evidenceOptions;
     ParseEvidenceChainSelfTestArgs(argc, argv, evidenceOptions);
+
+    if (evidenceOptions.torch_training_label_package_smoke)
+    {
+        std::cout << "[MAIN] Torch training label-package smoke begin\n";
+        ViewController controller;
+        std::string initReason;
+        if (!controller.InitEvidenceSelfTestEnvironment(initReason))
+        {
+            std::cout << "torch_training_label_package_smoke_ok=false\n"
+                      << "reason=environment initialization failed: " << initReason << "\n";
+            return 2;
+        }
+
+        const std::string runId = CxUnifiedLog::Instance().GenerateRunId();
+        const std::string outDir = evidenceOptions.out_dir.empty()
+            ? "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_training_label_package_smoke/run_" + runId
+            : evidenceOptions.out_dir;
+        std::string packagePath;
+        std::string reason;
+        const bool ok = controller.RunTorchTrainingLabelPackageSmoke(
+            evidenceOptions.torch_training_label_script,
+            outDir,
+            packagePath,
+            reason);
+        std::cout << "torch_training_label_package_smoke_ok=" << (ok ? "true" : "false") << "\n"
+                  << "package_path=" << packagePath << "\n"
+                  << "out_dir=" << outDir << "\n"
+                  << "conclusion=" << (ok
+                        ? "LABEL_PACKAGE_EXPORT_PASS_TO_VERIFY"
+                        : "LABEL_PACKAGE_EXPORT_FAIL") << "\n"
+                  << "reason=" << reason << "\n";
+        return ok ? 0 : 1;
+    }
 
     if (evidenceOptions.param_regression_loop)
     {

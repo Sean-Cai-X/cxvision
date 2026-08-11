@@ -145,6 +145,24 @@ void RefreshFindCircleMeasureGeometrySnapshot(
     object.circle_measure_findobject_ready =
         dbg.findobject_ready;
 
+    object.circle_object_prefilter_requested =
+        dbg.object_prefilter_requested;
+
+    object.circle_object_prefilter_applied =
+        dbg.object_prefilter_applied;
+
+    object.circle_object_prefilter_restored =
+        dbg.object_prefilter_restored;
+
+    object.circle_object_prefilter_runs_before =
+        dbg.object_prefilter_runs_before;
+
+    object.circle_object_prefilter_runs_after =
+        dbg.object_prefilter_runs_after;
+
+    object.circle_object_prefilter_effective_min =
+        dbg.object_prefilter_effective_min;
+
     object.circle_measure_source =
         dbg.measure_source;
 

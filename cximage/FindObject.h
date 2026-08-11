@@ -17,6 +17,7 @@ typedef vectorint::iterator vectintitor;
 
 class Grid;
 class Match;
+class ICxShapeSink;
 class FindObject :public Shape
 {
     enum ObjectAnalysisType
@@ -109,6 +110,7 @@ public:
     int getdebugmaxcomponentw();
     int getdebugmaxcomponenth();
     const std::string& getdebugalgorithmbranch() const;
+    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
     void setsearchtype(int itype);
     void setoffset(int ix0, int ix1, int iy0, int iy1);
     RectsShape& getresultrects() { return m_rectresults; }

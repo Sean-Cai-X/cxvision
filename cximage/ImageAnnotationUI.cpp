@@ -240,6 +240,32 @@ void UpdateManualGaugeFromShapeElement(
     gauge.segmentation_prompt_y1 =
         static_cast<int>(std::lround(std::max(rect->y0(), rect->y1())));
   }
+  else if (element.owner_type == "FindSegmentation" &&
+           element.shape->kind() == CxShapeKind::Points)
+  {
+    CxShapeGeometrySnapshot geometry;
+    if (!element.shape->snapshot(geometry) || geometry.points.empty())
+      return;
+    const int x = static_cast<int>(std::lround(geometry.points.front().x));
+    const int y = static_cast<int>(std::lround(geometry.points.front().y));
+    gauge.tool = "FindSegmentation";
+    if (element.owner_binding == "setpositivepointxy" ||
+        element.owner_binding == "setpositivepoint")
+    {
+      gauge.has_segmentation_positive_point = true;
+      gauge.segmentation_positive_x = x;
+      gauge.segmentation_positive_y = y;
+    }
+    else if (element.owner_binding == "setnegativepointxy" ||
+             element.owner_binding == "setnegativepoint")
+    {
+      gauge.has_segmentation_negative_point = true;
+      gauge.segmentation_negative_x = x;
+      gauge.segmentation_negative_y = y;
+    }
+    else
+      return;
+  }
   else
   {
     return;
@@ -356,7 +382,8 @@ bool ExportShapeElementToRuntimeGlobals(
   }
 
   if (element.owner_type == "FindSegmentation" &&
-      (element.owner_binding == "setpromptrect" ||
+      (element.owner_binding == "setpromptrectxyxy" ||
+       element.owner_binding == "setpromptrect" ||
        element.owner_binding == "prompt_rect") &&
       element.shape->kind() == CxShapeKind::Rect)
   {
@@ -390,6 +417,40 @@ bool ExportShapeElementToRuntimeGlobals(
     UpdateManualGaugeFromShapeElement(context, element);
     ApplyManualGaugeToGlobals(context);
     reason = "FindSegmentation prompt ROI exported to global_roi_*";
+    return true;
+  }
+
+  if (element.owner_type == "FindSegmentation" &&
+      (element.owner_binding == "setpositivepointxy" ||
+       element.owner_binding == "setpositivepoint" ||
+       element.owner_binding == "setnegativepointxy" ||
+       element.owner_binding == "setnegativepoint") &&
+      element.shape->kind() == CxShapeKind::Points)
+  {
+    CxShapeGeometrySnapshot geometry;
+    if (!element.shape->snapshot(geometry) || geometry.points.empty())
+    {
+      reason = "FindSegmentation prompt point has no point geometry";
+      return false;
+    }
+    const CxShapePoint& point = geometry.points.front();
+    if (element.owner_binding == "setpositivepointxy" ||
+        element.owner_binding == "setpositivepoint")
+    {
+      setInt("global_segmentation_positive_enabled", 1);
+      setInt("global_segmentation_positive_x", point.x);
+      setInt("global_segmentation_positive_y", point.y);
+      reason = "FindSegmentation positive point exported to global_segmentation_positive_*";
+    }
+    else
+    {
+      setInt("global_segmentation_negative_enabled", 1);
+      setInt("global_segmentation_negative_x", point.x);
+      setInt("global_segmentation_negative_y", point.y);
+      reason = "FindSegmentation negative point exported to global_segmentation_negative_*";
+    }
+    UpdateManualGaugeFromShapeElement(context, element);
+    ApplyManualGaugeToGlobals(context);
     return true;
   }
 
@@ -622,7 +683,7 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
         element.tool_id = "FindSegmentation";
         element.owner_type = "FindSegmentation";
         element.owner_ref = ownerRef;
-        element.owner_binding = "setpromptrect";
+        element.owner_binding = "setpromptrectxyxy";
         element.semantic_role = "prompt_rect";
         element.editable = true;
         element.visible = true;
@@ -630,13 +691,49 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
         element.result_element = false;
         element.stale = true;
         element.runtime_edit_pending = true;
+
+        auto upsert_prompt_point = [this, &ownerRef](
+            const std::string& stable_suffix,
+            const std::string& binding,
+            const std::string& role,
+            int x,
+            int y)
+        {
+            auto point_shape = std::make_unique<PointsShape>();
+            point_shape->addpoint(gp_Pnt(x, y, 0.0));
+            CxShapeElement& point = m_annotationLayer.UpsertShape(
+                ownerRef + stable_suffix, std::move(point_shape));
+            point.tool_id = "FindSegmentation";
+            point.owner_type = "FindSegmentation";
+            point.owner_ref = ownerRef;
+            point.owner_binding = binding;
+            point.semantic_role = role;
+            point.editable = true;
+            point.visible = true;
+            point.runtime_bound = true;
+            point.result_element = false;
+            point.stale = true;
+            point.runtime_edit_pending = true;
+        };
+        if (gauge.has_segmentation_positive_point)
+        {
+            upsert_prompt_point(".prompt_positive", "setpositivepointxy",
+                                "prompt_positive", gauge.segmentation_positive_x,
+                                gauge.segmentation_positive_y);
+        }
+        if (gauge.has_segmentation_negative_point)
+        {
+            upsert_prompt_point(".prompt_negative", "setnegativepointxy",
+                                "prompt_negative", gauge.segmentation_negative_x,
+                                gauge.segmentation_negative_y);
+        }
         m_annotationLayer.MarkOwnerResultStale("FindSegmentation", ownerRef);
 
         ApplyManualGaugeToGlobals(m_manualTest);
         gauge.source = "key_parameter_controls";
         gauge.dirty = true;
         gauge.accepted = false;
-        reason = "FindSegmentation prompt ROI preview applied to Image View";
+        reason = "FindSegmentation prompt ROI and typed points preview applied to Image View";
         return true;
     }
 

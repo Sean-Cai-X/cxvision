@@ -78,6 +78,7 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   bool scanArcAdded = false;
   bool selectedEdgeAdded = false;
   bool pointConsistencyAdded = false;
+  bool objectPrefilterAdded = false;
   for (const Replacement& replacement : replacements)
   {
     std::size_t pos = 0;
@@ -130,6 +131,22 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   const std::string measureCall = objectName.empty()
       ? std::string()
       : objectName + ".measure(";
+
+  if (!objectName.empty() &&
+      context.editor_text.find(objectName + ".setfindsetting(") ==
+          std::string::npos)
+  {
+    const std::size_t measurePos = context.editor_text.find(measureCall);
+    if (measurePos != std::string::npos)
+    {
+      const std::string findSettingCall =
+          objectName +
+          ".setfindsetting(global_findcircle_findsetting);\n";
+      context.editor_text.insert(measurePos, findSettingCall);
+      changed = true;
+      objectPrefilterAdded = true;
+    }
+  }
 
   if (!objectName.empty() &&
       context.editor_text.find(".setselectedgenum(") == std::string::npos)
@@ -204,6 +221,8 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
            ", scan_arc_call=" + std::string(scanArcAdded ? "added" : "present") +
            ", point_consistency_call=" +
            std::string(pointConsistencyAdded ? "added" : "present") +
+           ", object_prefilter_call=" +
+           std::string(objectPrefilterAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -261,6 +280,7 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
   bool scanDirectionAdded = false;
   bool selectedEdgeAdded = false;
   bool pointConsistencyAdded = false;
+  bool objectPrefilterAdded = false;
 
   const auto insertBeforeMeasure = [&](const std::string& statement)
   {
@@ -285,6 +305,14 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
     selectedEdgeAdded = true;
   }
 
+  if (context.editor_text.find(objectName + ".setobjfilter(") ==
+      std::string::npos)
+  {
+    insertBeforeMeasure(objectName +
+                        ".setobjfilter(global_findline_objfilter);\n");
+    objectPrefilterAdded = true;
+  }
+
   if (context.editor_text.find(objectName + ".setpointconsistency(") ==
       std::string::npos)
   {
@@ -306,6 +334,8 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
            std::string(selectedEdgeAdded ? "added" : "present") +
            ", point_consistency_call=" +
            std::string(pointConsistencyAdded ? "added" : "present") +
+           ", object_prefilter_call=" +
+           std::string(objectPrefilterAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -639,6 +669,13 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << ", range="
          << context.runtime_int_vars["global_findline_point_consistency_range"]
          << ")";
+      ss << "\nfindsetting=" << context.runtime_int_vars["global_findsetting"];
+      ss << "\nfindline_objfilter="
+         << context.runtime_int_vars["global_findline_objfilter"];
+      ss << "\nfindline_findsetting="
+         << context.runtime_int_vars["global_findline_findsetting"];
+      ss << "\nfindcircle_findsetting="
+         << context.runtime_int_vars["global_findcircle_findsetting"];
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
@@ -703,7 +740,9 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
           ? ("ParserDebugBridge rejected the Script Editor text: " +
              m_parserDebugBridge.LastError())
           : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput"));
-      context.debug_reason += effectiveGlobals;
+      // The complete input snapshot is already preserved in the unified log
+      // and debug snapshot.  Keep the operator-facing reason compact so that
+      // it does not hide Torch status and artifact panels after a run.
 
       if (ran)
       {

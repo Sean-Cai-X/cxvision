@@ -575,6 +575,14 @@ bool FindSegmentationEdgeSamBackend::Run(
         extra << ",\"height\":" << input.rect.height;
         extra << "}";
     }
+    extra << ",\"positive_prompt\":{\"enabled\":"
+          << (input.has_positive_point ? "true" : "false")
+          << ",\"x\":" << input.positive_point.x
+          << ",\"y\":" << input.positive_point.y << "}";
+    extra << ",\"negative_prompt\":{\"enabled\":"
+          << (input.has_negative_point ? "true" : "false")
+          << ",\"x\":" << input.negative_point.x
+          << ",\"y\":" << input.negative_point.y << "}";
     extra << "}";
 
     TorchRuntimeGuiRequest request;

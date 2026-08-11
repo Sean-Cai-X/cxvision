@@ -320,6 +320,7 @@ public:
       CxShapeInteractionTrace& trace);
 
   void RemoveShapeByOwner(const std::string& owner_type, const std::string& owner_ref);
+  bool RemoveShapeByStableRef(const std::string& stable_ref);
   void MarkOwnerResultStale(const std::string& owner_type, const std::string& owner_ref);
 
     void RemoveRuntimeOwnersNotIn(const std::unordered_set<std::string>& liveOwners);

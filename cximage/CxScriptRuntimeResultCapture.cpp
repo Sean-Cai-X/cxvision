@@ -526,60 +526,9 @@ bool CaptureFindObjectResult(
         output.top1_rect_w = static_cast<int>(first_rect.Width());
         output.top1_rect_h = static_cast<int>(first_rect.Height());
     }
-    {
-        CxShapeElementSnapshot roi_shape;
-        roi_shape.stable_ref = object_name + ".roi";
-        roi_shape.owner_type = "FindObject";
-        roi_shape.owner_ref = object_name;
-        roi_shape.semantic_role = "roi";
-        roi_shape.shape_kind = "RectShape";
-        roi_shape.editable = false;
-        roi_shape.result_element = false;
-
-        gp_Rectangle roi = tool.rect();
-        const int x = static_cast<int>(roi.TopLeft().X());
-        const int y = static_cast<int>(roi.TopLeft().Y());
-        const int w = static_cast<int>(roi.Width());
-        const int h = static_cast<int>(roi.Height());
-        roi_shape.center_x = x + w * 0.5;
-        roi_shape.center_y = y + h * 0.5;
-        roi_shape.points = {
-            static_cast<double>(x), static_cast<double>(y),
-            static_cast<double>(x + w), static_cast<double>(y),
-            static_cast<double>(x + w), static_cast<double>(y + h),
-            static_cast<double>(x), static_cast<double>(y + h)
-        };
-        roi_shape.closed = true;
-        output.shapes.push_back(roi_shape);
-    }
-
-    for (int i = 0; i < output.result_rect_count; ++i)
-    {
-        CxShapeElementSnapshot shape;
-        shape.stable_ref = object_name + ".result_rect." + std::to_string(i);
-        shape.owner_type = "FindObject";
-        shape.owner_ref = object_name;
-        shape.semantic_role = "result";
-        shape.shape_kind = "RectShape";
-        shape.editable = false;
-        shape.result_element = true;
-
-        gp_Rectangle rect = tool.getresultrects().getrect(i);
-        const int x = static_cast<int>(rect.TopLeft().X());
-        const int y = static_cast<int>(rect.TopLeft().Y());
-        const int w = static_cast<int>(rect.Width());
-        const int h = static_cast<int>(rect.Height());
-        shape.center_x = x + w * 0.5;
-        shape.center_y = y + h * 0.5;
-        shape.points = {
-            static_cast<double>(x), static_cast<double>(y),
-            static_cast<double>(x + w), static_cast<double>(y),
-            static_cast<double>(x + w), static_cast<double>(y + h),
-            static_cast<double>(x), static_cast<double>(y + h)
-        };
-        shape.closed = true;
-        output.shapes.push_back(shape);
-    }
+    ImageAnnotationLayer layer;
+    tool.PublishDisplayShapes(layer, output.owner_ref);
+    CopyShapeElementsToSnapshots(layer, output.shapes);
 
     return true;
 }

@@ -68,6 +68,13 @@ struct FindCircleMeasureGeometryDebug
     bool backimage_ready = false;
     bool findobject_ready = false;
 
+    int object_prefilter_requested = 0;
+    int object_prefilter_applied = 0;
+    int object_prefilter_restored = 0;
+    int object_prefilter_runs_before = 0;
+    int object_prefilter_runs_after = 0;
+    int object_prefilter_effective_min = 0;
+
     int measure_points_count = 0;
     int valid_points_count = 0;
 

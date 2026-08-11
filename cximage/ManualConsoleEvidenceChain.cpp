@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -40,6 +41,8 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
         return "FindEllipse";
     if (lowered == "findrect")
         return "FindRect";
+    if (lowered == "findobject" || lowered == "find_object")
+        return "FindObject";
     if (lowered == "fastmatch" || lowered == "cfastmatch")
         return "FastMatch";
     if (lowered == "gridpatternclasstool" || lowered == "gridpatternclass")
@@ -683,6 +686,7 @@ static bool IsEvidenceEditableToolTypeLocal(const std::string& type)
            normalized == "FindCircle" ||
            normalized == "FindEllipse" ||
            normalized == "FindRect" ||
+           normalized == "FindObject" ||
            normalized == "FastMatch" ||
            normalized == "GridPatternClassTool" ||
            normalized == "RegionPatternTool" ||
@@ -912,6 +916,135 @@ static std::string ReadJsonStringFieldLocal(
     }
 
     return {};
+}
+
+static bool ValidateCandidateGaugeAnnotationLocal(
+    const std::filesystem::path& gaugePath,
+    const std::string& bindingTool,
+    std::string& reason)
+{
+    std::string text;
+    if (gaugePath.empty() || !ReadTextFile(gaugePath.string(), text))
+    {
+        reason = "gauge_annotation.json is missing";
+        return false;
+    }
+
+    std::string tool = NormalizeEvidenceToolTypeLocal(
+        ReadJsonStringFieldLocal(text, "tool"));
+    if (tool.empty())
+        tool = NormalizeEvidenceToolTypeLocal(bindingTool);
+
+    if (tool == "FindObject")
+    {
+        int x0 = 0;
+        int y0 = 0;
+        int x1 = 0;
+        int y1 = 0;
+        if (!ReadJsonIntFieldLocal(text, "line_x0", x0) ||
+            !ReadJsonIntFieldLocal(text, "line_y0", y0) ||
+            !ReadJsonIntFieldLocal(text, "line_x1", x1) ||
+            !ReadJsonIntFieldLocal(text, "line_y1", y1))
+        {
+            reason = "FindObject ROI gauge fields are incomplete";
+            return false;
+        }
+        if (x0 == x1 || y0 == y1)
+        {
+            reason = "FindObject ROI must have positive width and height";
+            return false;
+        }
+        reason.clear();
+        return true;
+    }
+
+    if (tool == "FindLine" || tool == "FindRect")
+    {
+        bool hasLineGauge = false;
+        int x0 = 0;
+        int y0 = 0;
+        int x1 = 0;
+        int y1 = 0;
+        int halfWidth = 0;
+        if (!ReadJsonBoolFieldLocal(text, "has_line_gauge", hasLineGauge) ||
+            !hasLineGauge ||
+            !ReadJsonIntFieldLocal(text, "line_x0", x0) ||
+            !ReadJsonIntFieldLocal(text, "line_y0", y0) ||
+            !ReadJsonIntFieldLocal(text, "line_x1", x1) ||
+            !ReadJsonIntFieldLocal(text, "line_y1", y1) ||
+            !ReadJsonIntFieldLocal(text, "tool_half_width", halfWidth))
+        {
+            reason = "FindLine/FindRect gauge fields are incomplete";
+            return false;
+        }
+        if (x0 == x1 && y0 == y1)
+        {
+            reason = "line gauge length is zero";
+            return false;
+        }
+        if (halfWidth <= 0)
+        {
+            reason = "tool_half_width must be positive";
+            return false;
+        }
+        reason.clear();
+        return true;
+    }
+
+    if (tool == "FindCircle")
+    {
+        bool hasCircleGauge = false;
+        int cx = 0;
+        int cy = 0;
+        int px = 0;
+        int py = 0;
+        if (!ReadJsonBoolFieldLocal(text, "has_circle_gauge", hasCircleGauge) ||
+            !hasCircleGauge ||
+            !ReadJsonIntFieldLocal(text, "circle_cx", cx) ||
+            !ReadJsonIntFieldLocal(text, "circle_cy", cy) ||
+            !ReadJsonIntFieldLocal(text, "circle_px", px) ||
+            !ReadJsonIntFieldLocal(text, "circle_py", py))
+        {
+            reason = "FindCircle gauge fields are incomplete";
+            return false;
+        }
+        if (cx == px && cy == py)
+        {
+            reason = "circle radius is zero";
+            return false;
+        }
+        reason.clear();
+        return true;
+    }
+
+    if (tool == "FindEllipse")
+    {
+        bool hasEllipseGauge = false;
+        int x0 = 0;
+        int y0 = 0;
+        int x1 = 0;
+        int y1 = 0;
+        if (!ReadJsonBoolFieldLocal(text, "has_ellipse_gauge", hasEllipseGauge) ||
+            !hasEllipseGauge ||
+            !ReadJsonIntFieldLocal(text, "ellipse_x0", x0) ||
+            !ReadJsonIntFieldLocal(text, "ellipse_y0", y0) ||
+            !ReadJsonIntFieldLocal(text, "ellipse_x1", x1) ||
+            !ReadJsonIntFieldLocal(text, "ellipse_y1", y1))
+        {
+            reason = "FindEllipse gauge fields are incomplete";
+            return false;
+        }
+        if (x0 == x1 || y0 == y1)
+        {
+            reason = "ellipse gauge radius is zero";
+            return false;
+        }
+        reason.clear();
+        return true;
+    }
+
+    reason.clear();
+    return true;
 }
 
 static bool ApplyCandidateRuntimeGlobalsLocal(
@@ -1264,6 +1397,10 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         scriptPath.find("find_ellipse") != std::string::npos ||
         scriptPath.find("findellipse") != std::string::npos ||
         scriptPath.find("FindEllipse") != std::string::npos;
+    const bool isFindObjectScript =
+        scriptPath.find("find_object") != std::string::npos ||
+        scriptPath.find("findobject") != std::string::npos ||
+        scriptPath.find("FindObject") != std::string::npos;
     const bool isFastMatchScript =
         scriptPath.find("fastmatch") != std::string::npos ||
         scriptPath.find("FastMatch") != std::string::npos ||
@@ -1327,6 +1464,20 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         gauge.line_x1 = getInt("global_roi_x1", 0);
         gauge.line_y1 = getInt("global_roi_y1", 0);
     }
+    else if (primaryType == "FindObject" ||
+             (primaryType.empty() && isFindObjectScript))
+    {
+        gauge.tool = "FindObject";
+        gauge.primary_object_type = "FindObject";
+        if (gauge.primary_object_name.empty())
+            gauge.primary_object_name = primaryObjectName.empty() ? "m_object" : primaryObjectName;
+        gauge.line_x0 = getInt("global_roi_x0", getInt("global_roi_x", 0));
+        gauge.line_y0 = getInt("global_roi_y0", getInt("global_roi_y", 0));
+        const int roiW = getInt("global_roi_width", 0);
+        const int roiH = getInt("global_roi_height", 0);
+        gauge.line_x1 = getInt("global_roi_x1", gauge.line_x0 + roiW);
+        gauge.line_y1 = getInt("global_roi_y1", gauge.line_y0 + roiH);
+    }
     else if (primaryType == "FastMatch" ||
              (primaryType.empty() && isFastMatchScript))
     {
@@ -1339,7 +1490,8 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge || gauge.tool == "FastMatch")
+        gauge.has_ellipse_gauge || gauge.tool == "FindObject" ||
+        gauge.tool == "FastMatch")
     {
         context.current_gauge = gauge;
     }
@@ -1754,6 +1906,13 @@ static std::string BuildManualReviewParamSummaryLocal(
         appendInt(oss, summaryText, "roi_x1", "roi_x1", missing);
         appendInt(oss, summaryText, "roi_y1", "roi_y1", missing);
         appendInt(oss, summaryText, "effective_tool_half_width", "tool_half_width", missing);
+    }
+    else if (normalizedTool == "FindObject")
+    {
+        appendInt(oss, summaryText, "roi_x0", "roi_x0", missing);
+        appendInt(oss, summaryText, "roi_y0", "roi_y0", missing);
+        appendInt(oss, summaryText, "roi_x1", "roi_x1", missing);
+        appendInt(oss, summaryText, "roi_y1", "roi_y1", missing);
     }
     else if (normalizedTool == "FindCircle")
     {
@@ -2405,8 +2564,13 @@ static void AppendSavedEvidenceCandidatesLocal(
             imagePath.empty())
             continue;
 
+        const std::string bindingTool =
+            NormalizeEvidenceToolTypeLocal(ReadJsonStringFieldLocal(binding, "tool"));
+
         bool gaugeAccepted = false;
         std::string gaugeReviewStatus;
+        bool candidateGaugeValid = false;
+        std::string candidateGaugeInvalidReason;
         {
             const std::string gaugePath =
                 ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
@@ -2417,23 +2581,34 @@ static void AppendSavedEvidenceCandidatesLocal(
                 gaugeReviewStatus =
                     ReadJsonStringFieldLocal(gaugeText, "review_status");
             }
+            candidateGaugeValid = ValidateCandidateGaugeAnnotationLocal(
+                gaugePath,
+                bindingTool,
+                candidateGaugeInvalidReason);
         }
         const bool humanConfirmed =
-            gaugeAccepted && gaugeReviewStatus == "manual_accepted";
+            candidateGaugeValid &&
+            gaugeAccepted &&
+            gaugeReviewStatus == "manual_accepted";
 
         ScriptEvidenceThumb thumb;
-        thumb.is_candidate = true;
+        thumb.is_candidate = candidateGaugeValid;
         thumb.candidate_id = candidateId;
         thumb.candidate_dir = bindingPath.parent_path().string();
         thumb.evidence_binding_path = bindingPath.string();
         thumb.parameter_snapshot_path =
             ReadJsonStringFieldLocal(binding, "parameter_snapshot_path");
         thumb.runtime_globals_path =
-            ReadJsonStringFieldLocal(binding, "runtime_globals_path");
+            candidateGaugeValid
+                ? ReadJsonStringFieldLocal(binding, "runtime_globals_path")
+                : std::string();
         thumb.gauge_annotation_path =
-            ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
-        thumb.working_script_snapshot_path = scriptSnapshot;
-        thumb.has_saved_state = true;
+            candidateGaugeValid
+                ? ReadJsonStringFieldLocal(binding, "gauge_annotation_path")
+                : std::string();
+        thumb.working_script_snapshot_path =
+            candidateGaugeValid ? scriptSnapshot : std::string();
+        thumb.has_saved_state = candidateGaugeValid;
         thumb.source_evidence_script_path =
             ReadJsonStringFieldLocal(binding, "source_evidence_script_path");
         if (thumb.source_evidence_script_path.empty())
@@ -2448,20 +2623,41 @@ static void AppendSavedEvidenceCandidatesLocal(
         thumb.image_path = imagePath;
         thumb.thumbnail_path = imagePath;
         thumb.target_id = ReadJsonStringFieldLocal(binding, "target_id");
-        thumb.tool = ReadJsonStringFieldLocal(binding, "tool");
+        thumb.tool = bindingTool;
         thumb.parameter_summary =
             ReadJsonStringFieldLocal(binding, "parameter_summary");
-        thumb.status = humanConfirmed
-            ? "manual_confirmed_candidate"
-            : "pending_human_review";
-        thumb.reason =
-            std::string(humanConfirmed
-                ? "manual accepted evidence candidate"
-                : "saved evidence candidate pending manual acceptance") +
-            "; candidate_id=" + candidateId +
-            "; candidate_dir=" + thumb.candidate_dir +
-            "; gauge_accepted=" + (gaugeAccepted ? "true" : "false") +
-            "; gauge_review_status=" + gaugeReviewStatus;
+        if (!candidateGaugeValid)
+        {
+            thumb.status = "invalid_saved_candidate";
+            thumb.evidence_category_override = "Defect";
+            thumb.reason =
+                "saved evidence candidate is not restorable: " +
+                candidateGaugeInvalidReason +
+                "; candidate_id=" + candidateId +
+                "; candidate_dir=" + thumb.candidate_dir;
+            CXLOG_WARN(
+                "EvidenceChain",
+                "candidate_package_invalid",
+                "invalid_gauge",
+                "case_id=" + caseId +
+                    " candidate_id=" + candidateId +
+                    " tool=" + thumb.tool +
+                    " reason=" + candidateGaugeInvalidReason);
+        }
+        else
+        {
+            thumb.status = humanConfirmed
+                ? "manual_confirmed_candidate"
+                : "pending_human_review";
+            thumb.reason =
+                std::string(humanConfirmed
+                    ? "manual accepted evidence candidate"
+                    : "saved evidence candidate pending manual acceptance") +
+                "; candidate_id=" + candidateId +
+                "; candidate_dir=" + thumb.candidate_dir +
+                "; gauge_accepted=" + (gaugeAccepted ? "true" : "false") +
+                "; gauge_review_status=" + gaugeReviewStatus;
+        }
 
         std::string analysis;
         const std::filesystem::path analysisPath =
@@ -2476,12 +2672,15 @@ static void AppendSavedEvidenceCandidatesLocal(
                 ReadJsonStringFieldLocal(analysis, "primary_object_status");
         }
         PopulateEditableObjectBindingForThumbLocal(thumb);
-        bindWorkingRevisionToOriginal(thumb);
+        if (candidateGaugeValid)
+            bindWorkingRevisionToOriginal(thumb);
 
         const std::string candidateTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
         ScriptEvidenceGroup& group = findGroup(
             (candidateTool.empty() ? std::string("Unknown") : candidateTool) +
-            (humanConfirmed
+            (!candidateGaugeValid
+                ? " / Invalid Saved Candidates"
+                : humanConfirmed
                 ? " / Human Confirmed Candidates"
                 : " / Saved Pending Candidates"));
         bool exists = false;
@@ -5308,6 +5507,382 @@ void ViewController::DrawTorchTrainingImageRail(const char* split, const char* l
     ImGui::EndChild();
 }
 
+bool ViewController::ExportTorchTrainingLabelPackage(
+    std::string& packagePath,
+    std::string& reason)
+{
+    packagePath.clear();
+    reason.clear();
+
+    // This package is deliberately value-only.  It is evidence for the next
+    // label-adapter stage, not a claim that the current Tiny Smoke consumed a
+    // dataset or produced semantic masks.
+    std::string runId = CxUnifiedLog::Instance().RunId();
+    if (runId.empty())
+        runId = "ui_session";
+    const std::filesystem::path outputDir = ResolveCxVisionRunPath(
+        "cxscript_runs/manual_torch_dataset") / runId;
+    std::error_code ec;
+    std::filesystem::create_directories(outputDir, ec);
+    if (ec)
+    {
+        reason = "cannot create Torch training label package directory: " +
+            outputDir.string() + " reason=" + ec.message();
+        return false;
+    }
+
+    int imageCount = 0;
+    int imageMissingCount = 0;
+    int shapeCount = 0;
+    int closedRegionCount = 0;
+    int bboxCandidateCount = 0;
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"schema\": \"cxvision.torch.training_label_package.v1\",\n";
+    json << "  \"status\": \"TO_VERIFY\",\n";
+    json << "  \"training_mode\": \"label_package_export_only\",\n";
+    json << "  \"dataset_consumed_by_current_runtime\": false,\n";
+    json << "  \"segmentation_mask_export_ready\": false,\n";
+    json << "  \"segmentation_mask_export_reason\": \"shape snapshots are exported; raster mask adapter is pending\",\n";
+    json << "  \"run_id\": \"" << JsonEscape(runId) << "\",\n";
+    json << "  \"evidence_case_id\": \""
+         << JsonEscape(m_manualTest.current_evidence_selection.case_id) << "\",\n";
+    json << "  \"images\": [\n";
+
+    for (std::size_t imageIndex = 0;
+         imageIndex < m_manualTest.torch_training_images.size();
+         ++imageIndex)
+    {
+        const TorchTrainingImageItem& item =
+            m_manualTest.torch_training_images[imageIndex];
+        const bool imageExists = !item.image_path.empty() &&
+            std::filesystem::exists(std::filesystem::path(item.image_path));
+        ++imageCount;
+        if (!imageExists)
+            ++imageMissingCount;
+        if (imageIndex != 0)
+            json << ",\n";
+        json << "    {\n";
+        json << "      \"image_id\": \"" << JsonEscape(item.image_id) << "\",\n";
+        json << "      \"image_path\": \"" << JsonEscape(item.image_path) << "\",\n";
+        json << "      \"image_exists\": " << (imageExists ? "true" : "false") << ",\n";
+        json << "      \"case_id\": \"" << JsonEscape(item.case_id) << "\",\n";
+        json << "      \"target_id\": \"" << JsonEscape(item.target_id) << "\",\n";
+        json << "      \"source\": \"" << JsonEscape(item.source) << "\",\n";
+        json << "      \"split\": \"" << JsonEscape(item.split) << "\",\n";
+        json << "      \"label\": \"" << JsonEscape(item.label) << "\",\n";
+        json << "      \"annotation_status\": \"" << JsonEscape(item.annotation_status) << "\",\n";
+        json << "      \"shapes\": [";
+        for (std::size_t shapeIndex = 0;
+             shapeIndex < item.annotation_shapes.size();
+             ++shapeIndex)
+        {
+            const TorchTrainingAnnotationShapeSnapshot& shape =
+                item.annotation_shapes[shapeIndex];
+            ++shapeCount;
+            const bool closedRegion = shape.closed &&
+                (shape.shape_kind == "RectShape" ||
+                 shape.shape_kind == "CircleShape" ||
+                 shape.shape_kind == "EllipseShape" ||
+                 shape.shape_kind == "PolylineShape");
+            if (closedRegion)
+                ++closedRegionCount;
+            if (shape.shape_kind == "RectShape" ||
+                shape.semantic_role.find("bbox") != std::string::npos)
+                ++bboxCandidateCount;
+            if (shapeIndex != 0)
+                json << ",";
+            json << "\n        {\"stable_ref\":\"" << JsonEscape(shape.stable_ref)
+                 << "\",\"shape_kind\":\"" << JsonEscape(shape.shape_kind)
+                 << "\",\"semantic_role\":\"" << JsonEscape(shape.semantic_role)
+                 << "\",\"owner_binding\":\"" << JsonEscape(shape.owner_binding)
+                 << "\",\"closed\":" << (shape.closed ? "true" : "false")
+                 << ",\"center_x\":" << shape.center_x
+                 << ",\"center_y\":" << shape.center_y
+                 << ",\"radius_x\":" << shape.radius_x
+                 << ",\"radius_y\":" << shape.radius_y
+                 << ",\"radius\":" << shape.radius
+                 << ",\"angle\":" << shape.angle
+                 << ",\"points_xy\":[";
+            for (std::size_t pointIndex = 0;
+                 pointIndex < shape.points_xy.size();
+                 ++pointIndex)
+            {
+                if (pointIndex != 0)
+                    json << ",";
+                json << shape.points_xy[pointIndex];
+            }
+            json << "]}";
+        }
+        if (!item.annotation_shapes.empty())
+            json << "\n      ";
+        json << "]\n    }";
+    }
+    json << "\n  ],\n";
+    json << "  \"summary\": {\n";
+    json << "    \"image_count\": " << imageCount << ",\n";
+    json << "    \"image_missing_count\": " << imageMissingCount << ",\n";
+    json << "    \"shape_count\": " << shapeCount << ",\n";
+    json << "    \"closed_region_count\": " << closedRegionCount << ",\n";
+    json << "    \"bbox_candidate_count\": " << bboxCandidateCount << "\n";
+    json << "  }\n}";
+
+    const std::filesystem::path path = outputDir / "torch_training_label_package.json";
+    if (!WriteTextFile(path, json.str()))
+    {
+        reason = "failed to write Torch training label package: " + path.string();
+        return false;
+    }
+
+    packagePath = path.string();
+    reason = "TO_VERIFY: exported " + std::to_string(imageCount) +
+        " images and " + std::to_string(shapeCount) +
+        " shape snapshots; segmentation mask adapter remains pending";
+    m_manualTest.torch_training_image_status = "LABEL_PACKAGE_EXPORTED_TO_VERIFY";
+    m_manualTest.torch_training_image_reason = reason + " path=" + packagePath;
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "training_label_package_exported",
+        "TO_VERIFY",
+        "path=" + packagePath +
+            " images=" + std::to_string(imageCount) +
+            " shapes=" + std::to_string(shapeCount) +
+            " closed_regions=" + std::to_string(closedRegionCount) +
+            " bbox_candidates=" + std::to_string(bboxCandidateCount));
+    return true;
+}
+
+bool ViewController::RunTorchTrainingLabelPackageSmoke(
+    const std::string& preferredScriptId,
+    const std::string& requestedOutDir,
+    std::string& packagePath,
+    std::string& reason)
+{
+    packagePath.clear();
+    reason.clear();
+
+    const std::string runId = CxUnifiedLog::Instance().RunId().empty()
+        ? "ui_session"
+        : CxUnifiedLog::Instance().RunId();
+    const std::filesystem::path outDir = requestedOutDir.empty()
+        ? ResolveCxVisionRunPath("cxscript_runs/torch_training_label_package_smoke") / runId
+        : std::filesystem::path(requestedOutDir);
+    std::error_code ec;
+    std::filesystem::create_directories(outDir, ec);
+    if (ec)
+    {
+        reason = "cannot create smoke output directory: " + outDir.string() +
+            " reason=" + ec.message();
+        return false;
+    }
+
+    CxEvidenceSelfTestBatchRequest batch;
+    batch.run_id = runId;
+    batch.out_dir = outDir.string();
+    batch.tool_filter = "TorchTask";
+    std::string batchReason;
+    if (!BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(batch, batchReason))
+    {
+        reason = "cannot resolve Torch evidence rows: " + batchReason;
+        return false;
+    }
+
+    const CxEvidenceSelfTestRequest* selectedRequest = nullptr;
+    for (const CxEvidenceSelfTestRequest& item : batch.cases)
+    {
+        if (!preferredScriptId.empty() && item.script_id == preferredScriptId)
+        {
+            selectedRequest = &item;
+            break;
+        }
+    }
+    if (selectedRequest == nullptr)
+    {
+        for (const CxEvidenceSelfTestRequest& item : batch.cases)
+        {
+            std::string key = item.script_id + " " + item.script_path + " " + item.tool;
+            std::transform(key.begin(), key.end(), key.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            if (key.find("torch") != std::string::npos && !item.image_path.empty())
+            {
+                selectedRequest = &item;
+                break;
+            }
+        }
+    }
+    if (selectedRequest == nullptr)
+    {
+        reason = "no Torch evidence case with an image is available for label-package smoke";
+        return false;
+    }
+
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "training_label_package_smoke_begin",
+        "running",
+        "script_id=" + selectedRequest->script_id +
+            " case_id=" + selectedRequest->case_id);
+
+    CxEvidenceSelectionSnapshot snapshot;
+    std::string stageReason;
+    if (!ResolveEvidenceSelfTestSnapshot(*selectedRequest, snapshot, stageReason) ||
+        !ApplyEvidenceSelectionSnapshotToManualContext(snapshot, false, stageReason))
+    {
+        reason = "Torch evidence selection/load failed: " + stageReason;
+        return false;
+    }
+    // The command-line smoke intentionally has no GLFW/OpenGL Image View.
+    // Reuse the same loaded-image state path used by Evidence selftests;
+    // actual image-view drawing/pointer behavior remains covered by GUI L2.
+    if (!LoadImageForEvidenceSelfTest(snapshot.image_path, stageReason))
+    {
+        reason = "headless Image View state load failed: " + stageReason;
+        return false;
+    }
+    // ApplyEvidenceSelectionSnapshotToManualContext() already performs the
+    // dataset sync for image-set evidence.  Rebuilding it here would clear
+    // and recreate the same rail a second time, which is both redundant and
+    // inconsistent with the UI selection transaction.
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "training_label_package_smoke_dataset_reused",
+        "ready",
+        "case_id=" + snapshot.case_id +
+            " image_count=" +
+            std::to_string(m_manualTest.torch_training_images.size()));
+    if (m_manualTest.torch_training_images.empty())
+    {
+        reason = "Torch evidence selection produced no Training Image Set items";
+        return false;
+    }
+
+    int imageIndex = m_manualTest.selected_torch_training_image;
+    if (imageIndex < 0 ||
+        imageIndex >= static_cast<int>(m_manualTest.torch_training_images.size()))
+    {
+        imageIndex = 0;
+    }
+    m_manualTest.selected_torch_training_image = imageIndex;
+    RestoreTorchTrainingAnnotationState(
+        m_manualTest.torch_training_images[static_cast<std::size_t>(imageIndex)]);
+    m_manualTest.torch_training_image_status = "HEADLESS_ANNOTATION_READY";
+    m_manualTest.torch_training_image_reason =
+        "headless state simulation: selected training image and restored annotations";
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "training_label_package_smoke_image_state_loaded",
+        "HEADLESS_ANNOTATION_READY",
+        "index=" + std::to_string(imageIndex) +
+            " image_path=" +
+            m_manualTest.torch_training_images[
+                static_cast<std::size_t>(imageIndex)].image_path);
+
+    TorchTrainingImageItem& item =
+        m_manualTest.torch_training_images[static_cast<std::size_t>(imageIndex)];
+    cv::Mat image = cv::imread(item.image_path, cv::IMREAD_UNCHANGED);
+    if (image.empty())
+    {
+        reason = "selected Training Image Set image cannot be opened: " + item.image_path;
+        return false;
+    }
+
+    const double x0 = std::max(0.0, static_cast<double>(image.cols) * 0.20);
+    const double y0 = std::max(0.0, static_cast<double>(image.rows) * 0.20);
+    const double x1 = std::max(x0 + 2.0, static_cast<double>(image.cols) * 0.60);
+    const double y1 = std::max(y0 + 2.0, static_cast<double>(image.rows) * 0.60);
+    const std::string stableRef = "torch_label_package_smoke_bbox";
+    m_annotationLayer.UpsertShape(
+        stableRef,
+        "TorchDataset",
+        item.image_id,
+        "label_bbox",
+        "smoke_annotation",
+        true,
+        false,
+        std::make_unique<RectShape>(x0, y0, x1, y1));
+    item.label = "anomaly";
+    CaptureCurrentTorchTrainingAnnotationState();
+
+    bool shapeCaptured = false;
+    for (const TorchTrainingAnnotationShapeSnapshot& shape : item.annotation_shapes)
+    {
+        if (shape.stable_ref == stableRef && shape.shape_kind == "RectShape")
+        {
+            shapeCaptured = true;
+            break;
+        }
+    }
+    if (!shapeCaptured)
+    {
+        reason = "AnnotationLayer -> Training Image Set shape snapshot failed";
+        return false;
+    }
+
+    std::string exportReason;
+    if (!ExportTorchTrainingLabelPackage(packagePath, exportReason))
+    {
+        reason = "label package export failed: " + exportReason;
+        return false;
+    }
+
+    std::ifstream packageFile(packagePath, std::ios::binary);
+    const std::string packageText(
+        (std::istreambuf_iterator<char>(packageFile)),
+        std::istreambuf_iterator<char>());
+    const bool schemaOk = packageText.find(
+        "cxvision.torch.training_label_package.v1") != std::string::npos;
+    const bool toVerifyOk = packageText.find("\"status\": \"TO_VERIFY\"") !=
+        std::string::npos;
+    const bool imageOk = packageText.find(JsonEscape(item.image_path)) !=
+        std::string::npos;
+    const bool labelOk = packageText.find("\"label\": \"anomaly\"") !=
+        std::string::npos;
+    const bool shapeOk = packageText.find(stableRef) != std::string::npos &&
+        packageText.find("\"shape_kind\":\"RectShape\"") != std::string::npos;
+    const bool pass = schemaOk && toVerifyOk && imageOk && labelOk && shapeOk;
+
+    std::ostringstream report;
+    report << "{\n"
+           << "  \"schema\": \"cxvision.torch.training_label_package_smoke.v1\",\n"
+           << "  \"conclusion\": \""
+           << (pass ? "LABEL_PACKAGE_EXPORT_PASS_TO_VERIFY" : "LABEL_PACKAGE_EXPORT_FAIL")
+           << "\",\n"
+           << "  \"script_id\": \"" << JsonEscape(selectedRequest->script_id) << "\",\n"
+           << "  \"case_id\": \"" << JsonEscape(selectedRequest->case_id) << "\",\n"
+           << "  \"image_path\": \"" << JsonEscape(item.image_path) << "\",\n"
+           << "  \"label\": \"" << JsonEscape(item.label) << "\",\n"
+           << "  \"shape_ref\": \"" << stableRef << "\",\n"
+           << "  \"package_path\": \"" << JsonEscape(packagePath) << "\",\n"
+           << "  \"checks\": {\n"
+           << "    \"schema\": " << (schemaOk ? "true" : "false") << ",\n"
+           << "    \"to_verify_status\": " << (toVerifyOk ? "true" : "false") << ",\n"
+           << "    \"image\": " << (imageOk ? "true" : "false") << ",\n"
+           << "    \"label\": " << (labelOk ? "true" : "false") << ",\n"
+           << "    \"shape\": " << (shapeOk ? "true" : "false") << "\n"
+           << "  }\n"
+           << "}\n";
+    std::string writeReason;
+    const std::filesystem::path reportPath = outDir /
+        "torch_training_label_package_smoke.json";
+    if (!WriteTextFile(reportPath, report.str()))
+    {
+        reason = "cannot write smoke report: " + reportPath.string();
+        return false;
+    }
+
+    reason = std::string(pass
+        ? "LABEL_PACKAGE_EXPORT_PASS_TO_VERIFY"
+        : "LABEL_PACKAGE_EXPORT_FAIL") +
+        " package=" + packagePath +
+        " report=" + reportPath.string();
+    CXLOG_INFO(
+        "TorchTrainingImageSet",
+        "training_label_package_smoke_end",
+        pass ? "LABEL_PACKAGE_EXPORT_PASS_TO_VERIFY" : "FAIL",
+        reason);
+    return pass;
+}
+
 void ViewController::drawTorchTrainingImageSetWindow()
 {
     ImGui::SetNextWindowPos(ImVec2(1380, 740), ImGuiCond_FirstUseEver);
@@ -5438,6 +6013,28 @@ void ViewController::drawTorchTrainingImageSetWindow()
             m_manualTest.torch_training_image_status = "MANIFEST_IMAGES_ADDED";
             m_manualTest.torch_training_image_reason =
                 "incrementally added manifest images: " + std::to_string(count);
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Export Label Package (To Verify)"))
+    {
+        CaptureCurrentTorchTrainingAnnotationState();
+        std::string packagePath;
+        std::string exportReason;
+        if (!ExportTorchTrainingLabelPackage(packagePath, exportReason))
+        {
+            m_manualTest.debug_status = "TORCH_LABEL_PACKAGE_EXPORT_FAIL";
+            m_manualTest.debug_reason = exportReason;
+            CXLOG_ERROR(
+                "TorchTrainingImageSet",
+                "training_label_package_export_failed",
+                "FAIL",
+                exportReason);
+        }
+        else
+        {
+            m_manualTest.debug_status = "TORCH_LABEL_PACKAGE_TO_VERIFY";
+            m_manualTest.debug_reason = exportReason;
         }
     }
 

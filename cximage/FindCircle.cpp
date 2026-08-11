@@ -145,6 +145,47 @@ void ApplyCircleObjectPrefilter(FindObject *find_object, Image *process_image,
   find_object->Measure(*process_image);
 }
 
+int CountCircleBinaryCandidateRuns(const cv::Mat &mat, int process_width,
+                                   int line_count, int max_edge_width) {
+  if (mat.empty() || process_width <= 0 || line_count <= 0)
+    return 0;
+
+  const int width = std::min(process_width, mat.cols);
+  const int rows = std::min(line_count, std::max(0, mat.rows - 1));
+  if (width <= 0 || rows <= 0)
+    return 0;
+
+  int total_runs = 0;
+  const int accepted_max_width = std::max(1, max_edge_width);
+  for (int row = 0; row < rows; ++row) {
+    const int y = std::min(row + 1, mat.rows - 1);
+    bool collecting = false;
+    int run_width = 0;
+    for (int x = 0; x < width; ++x) {
+      int value = 0;
+      if (mat.channels() == 1)
+        value = static_cast<int>(mat.at<uchar>(y, x));
+      else
+        value = static_cast<int>(mat.at<cv::Vec3b>(y, x)[0]);
+
+      if (value > 0) {
+        collecting = true;
+        ++run_width;
+      } else {
+        if (collecting && run_width > 0 &&
+            run_width <= accepted_max_width) {
+          ++total_runs;
+        }
+        collecting = false;
+        run_width = 0;
+      }
+    }
+    if (collecting && run_width > 0 && run_width <= accepted_max_width)
+      ++total_runs;
+  }
+  return total_runs;
+}
+
 bool IsEnabledEnvironmentValue(const char *raw) {
   return raw != nullptr && (raw[0] == '1' || raw[0] == 't' || raw[0] == 'T' ||
                             raw[0] == 'y' || raw[0] == 'Y');
@@ -663,6 +704,14 @@ void FindCircle::Measure(Image &image) {
   m_lastMeasureGeometryDebug.backimage_ready = (g_pbackimage != nullptr);
 
   m_lastMeasureGeometryDebug.findobject_ready = (g_pbackfindobject != nullptr);
+  m_lastMeasureGeometryDebug.object_prefilter_requested =
+      (m_ifindset & 0x01) != 0 ? 1 : 0;
+  m_lastMeasureGeometryDebug.object_prefilter_applied = 0;
+  m_lastMeasureGeometryDebug.object_prefilter_restored = 0;
+  m_lastMeasureGeometryDebug.object_prefilter_runs_before = 0;
+  m_lastMeasureGeometryDebug.object_prefilter_runs_after = 0;
+  m_lastMeasureGeometryDebug.object_prefilter_effective_min =
+      static_cast<int>(m_ifiltermin);
 
   m_lastMeasureGeometryDebug.measure_source =
       "original_circle_measure_pipeline";
@@ -969,21 +1018,76 @@ void FindCircle::Measure(Image &image) {
   if (stage_limit == 4)
     return;
 
+  const int max_edge_width = ComputeCircleMaxEdgeWidth(ilineslen1);
   const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
   if (!compact_domain && g_pbackfindobject != nullptr &&
       ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize)) {
     LogFindCircleMeasureProbe("measure_before_object_prefilter", "running",
                               "ifindset=" + std::to_string(m_ifindset));
     m_last_prefilter_used = 1;
+    cv::Mat binary_before_prefilter;
+    int candidate_runs_before_prefilter = 0;
+    if (!g_pbackimage->getmat().empty()) {
+      g_pbackimage->getmat().copyTo(binary_before_prefilter);
+      candidate_runs_before_prefilter = CountCircleBinaryCandidateRuns(
+          binary_before_prefilter, iprocessw, isize, max_edge_width);
+    }
     const int filter_min = compact_domain
                                ? std::min(static_cast<int>(m_ifiltermin),
                                           std::max(4, iprocessw / 2))
                                : static_cast<int>(m_ifiltermin);
+    int effective_filter_min = filter_min;
     ApplyCircleObjectPrefilter(g_pbackfindobject, g_pbackimage, iprocessw,
-                               isize, m_ifilterborw, filter_min,
+                               isize, m_ifilterborw, effective_filter_min,
                                static_cast<int>(m_ifiltermax));
+    int candidate_runs_after_prefilter = CountCircleBinaryCandidateRuns(
+        g_pbackimage->getmat(), iprocessw, isize, max_edge_width);
+    if (candidate_runs_before_prefilter > 0 &&
+        candidate_runs_after_prefilter == 0 &&
+        !binary_before_prefilter.empty()) {
+      binary_before_prefilter.copyTo(g_pbackimage->getmat());
+      const int circle_safe_min =
+          std::max(1, std::min(filter_min, std::max(1, max_edge_width)));
+      if (circle_safe_min < filter_min) {
+        effective_filter_min = circle_safe_min;
+        ApplyCircleObjectPrefilter(g_pbackfindobject, g_pbackimage, iprocessw,
+                                   isize, m_ifilterborw, effective_filter_min,
+                                   static_cast<int>(m_ifiltermax));
+        candidate_runs_after_prefilter = CountCircleBinaryCandidateRuns(
+            g_pbackimage->getmat(), iprocessw, isize, max_edge_width);
+      }
+    }
+    if (candidate_runs_before_prefilter > 0 &&
+        candidate_runs_after_prefilter == 0 &&
+        !binary_before_prefilter.empty()) {
+      binary_before_prefilter.copyTo(g_pbackimage->getmat());
+      m_last_prefilter_used = 0;
+      m_lastMeasureGeometryDebug.object_prefilter_restored = 1;
+      LogFindCircleMeasureProbe(
+          "measure_object_prefilter_restored", "running",
+          "object prefilter rejected all radial scan candidates; restored "
+          "original binary scan image, runs_before=" +
+              std::to_string(candidate_runs_before_prefilter) +
+              ", runs_after=" +
+              std::to_string(candidate_runs_after_prefilter));
+    }
+    m_lastMeasureGeometryDebug.object_prefilter_applied =
+        m_last_prefilter_used != 0 ? 1 : 0;
+    m_lastMeasureGeometryDebug.object_prefilter_runs_before =
+        candidate_runs_before_prefilter;
+    m_lastMeasureGeometryDebug.object_prefilter_runs_after =
+        candidate_runs_after_prefilter;
+    m_lastMeasureGeometryDebug.object_prefilter_effective_min =
+        effective_filter_min;
     LogFindCircleMeasureProbe("measure_after_object_prefilter", "running",
-                              "object prefilter complete");
+                              "object prefilter complete, runs_before=" +
+                                  std::to_string(candidate_runs_before_prefilter) +
+                                  ", runs_after=" +
+                                  std::to_string(candidate_runs_after_prefilter) +
+                                  ", effective_min=" +
+                                  std::to_string(effective_filter_min) +
+                                  ", effective_prefilter_used=" +
+                                  std::to_string(m_last_prefilter_used));
   }
 
   if (compact_domain && ShouldBypassCircleMeasurePoints()) {
@@ -1026,7 +1130,6 @@ void FindCircle::Measure(Image &image) {
   const int endpoint_guard =
       std::max(right_margin, std::min(std::max(6, m_iSelectPointGap * 2),
                                       std::max(1, ilineslen1 / 12)));
-  const int max_edge_width = ComputeCircleMaxEdgeWidth(ilineslen1);
 
   const auto begin_time = std::chrono::steady_clock::now();
   int scan_lines_processed = 0;

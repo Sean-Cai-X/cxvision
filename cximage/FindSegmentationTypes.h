@@ -55,9 +55,18 @@ struct FindSegmentationInputSnapshot
     int rect_width = 0;
     int rect_height = 0;
 
+    // Legacy single point is retained only for replay compatibility. New
+    // scripts use explicitly typed positive/negative prompts.
     bool has_point = false;
     int point_x = 0;
     int point_y = 0;
+
+    bool has_positive_point = false;
+    int positive_point_x = 0;
+    int positive_point_y = 0;
+    bool has_negative_point = false;
+    int negative_point_x = 0;
+    int negative_point_y = 0;
 };
 
 struct FindSegmentationBackendDiagnosticSnapshot
@@ -70,6 +79,8 @@ struct FindSegmentationBackendDiagnosticSnapshot
     bool image_ready = false;
     bool prompt_rect_ready = false;
     bool prompt_point_ready = false;
+    bool prompt_positive_ready = false;
+    bool prompt_negative_ready = false;
     bool mask_ready = false;
     bool overlay_ready = false;
 
