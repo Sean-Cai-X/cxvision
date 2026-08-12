@@ -29,6 +29,11 @@ static void SyncSegmentationLegacyPointFromLists(ManualGaugeState& gauge)
     gauge.segmentation_positive_x = point.x;
     gauge.segmentation_positive_y = point.y;
   }
+  else
+  {
+    gauge.segmentation_positive_x = 0;
+    gauge.segmentation_positive_y = 0;
+  }
 
   gauge.has_segmentation_negative_point =
       !gauge.segmentation_negative_points.empty();
@@ -37,6 +42,11 @@ static void SyncSegmentationLegacyPointFromLists(ManualGaugeState& gauge)
     const auto& point = gauge.segmentation_negative_points.back();
     gauge.segmentation_negative_x = point.x;
     gauge.segmentation_negative_y = point.y;
+  }
+  else
+  {
+    gauge.segmentation_negative_x = 0;
+    gauge.segmentation_negative_y = 0;
   }
 }
 
@@ -2766,6 +2776,10 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext& context)
   ImGui::TextDisabled(
       "Maps to: setrect + setobjfilter + SetWHgap + setthre + setlinegap + setcomparegap.");
 
+  ImGui::TextUnformatted("shared learn params");
+  ImGui::TextDisabled(
+      "FastMatch learn internally uses four directional FindLine probes: Top, Bottom, Left, Right.");
+
   ImGui::TextUnformatted("learn_threshold");
   ImGui::SameLine(130.0f);
   ImGui::SetNextItemWidth(180.0f);
@@ -2828,6 +2842,168 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext& context)
   InjectManualGaugeInt(context, "global_wgap", gauge.wgap);
   InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
   InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
+
+  int shared = RuntimeIntOr(context, "global_fastmatch_learn_shared", 1);
+  shared = shared != 0 ? 1 : 0;
+  bool sharedBool = shared != 0;
+  if (ImGui::Checkbox("Use one shared learn parameter set for 4 directions",
+                      &sharedBool))
+  {
+    shared = sharedBool ? 1 : 0;
+    InjectManualGaugeInt(context, "global_fastmatch_learn_shared", shared);
+    edited = true;
+  }
+  else
+  {
+    InjectManualGaugeInt(context, "global_fastmatch_learn_shared", shared);
+  }
+
+  const int sharedObjfilter =
+      RuntimeIntOr(context, "global_objfilter", 1);
+  const int sharedCompareGap =
+      RuntimeIntOr(context, "global_compare_gap", 20);
+  const char* directionLabels[4] = {
+      "Top / A",
+      "Bottom / B",
+      "Left / A2",
+      "Right / B2"};
+
+  auto seedDirection =
+      [&](int dir,
+          int threshold,
+          int method,
+          int linegap,
+          int wgap,
+          int hgap,
+          int objfilter,
+          int compareGap)
+  {
+    const std::string suffix = "_" + std::to_string(dir);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_threshold" + suffix).c_str(),
+                         threshold);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_method" + suffix).c_str(),
+                         method);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_linegap" + suffix).c_str(),
+                         linegap);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_wgap" + suffix).c_str(),
+                         wgap);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_hgap" + suffix).c_str(),
+                         hgap);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_objfilter" + suffix).c_str(),
+                         objfilter);
+    InjectManualGaugeInt(context,
+                         ("global_fastmatch_learn_compare_gap" + suffix).c_str(),
+                         compareGap);
+  };
+
+  if (shared != 0 || ImGui::Button("Copy Shared Learn Params To 4 Directions"))
+  {
+    for (int dir = 0; dir < 4; ++dir)
+    {
+      seedDirection(dir,
+                    gauge.threshold,
+                    gauge.method,
+                    gauge.linegap,
+                    gauge.wgap,
+                    gauge.hgap,
+                    sharedObjfilter,
+                    sharedCompareGap);
+    }
+    if (shared == 0)
+      edited = true;
+  }
+
+  if (ImGui::CollapsingHeader("Directional Learn Params (Top / Bottom / Left / Right)",
+                              shared != 0 ? 0 : ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    ImGui::TextDisabled(
+        "Sparse controls are indexed by direction. Same values may stay folded as shared.");
+    if (ImGui::BeginTable("fastmatch_directional_learn_params", 8,
+                          ImGuiTableFlags_Borders |
+                              ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp))
+    {
+      ImGui::TableSetupColumn("Direction");
+      ImGui::TableSetupColumn("threshold");
+      ImGui::TableSetupColumn("method");
+      ImGui::TableSetupColumn("linegap");
+      ImGui::TableSetupColumn("wgap");
+      ImGui::TableSetupColumn("hgap");
+      ImGui::TableSetupColumn("objfilter");
+      ImGui::TableSetupColumn("compare");
+      ImGui::TableHeadersRow();
+
+      for (int dir = 0; dir < 4; ++dir)
+      {
+        const std::string suffix = "_" + std::to_string(dir);
+        std::string thresholdKey = "global_fastmatch_learn_threshold" + suffix;
+        std::string methodKey = "global_fastmatch_learn_method" + suffix;
+        std::string linegapKey = "global_fastmatch_learn_linegap" + suffix;
+        std::string wgapKey = "global_fastmatch_learn_wgap" + suffix;
+        std::string hgapKey = "global_fastmatch_learn_hgap" + suffix;
+        std::string objfilterKey = "global_fastmatch_learn_objfilter" + suffix;
+        std::string compareKey = "global_fastmatch_learn_compare_gap" + suffix;
+
+        int threshold = RuntimeIntOr(context, thresholdKey, gauge.threshold);
+        int method = RuntimeIntOr(context, methodKey, gauge.method);
+        int linegap = RuntimeIntOr(context, linegapKey, gauge.linegap);
+        int wgap = RuntimeIntOr(context, wgapKey, gauge.wgap);
+        int hgap = RuntimeIntOr(context, hgapKey, gauge.hgap);
+        int objfilter = RuntimeIntOr(context, objfilterKey, sharedObjfilter);
+        int compareGap = RuntimeIntOr(context, compareKey, sharedCompareGap);
+
+        threshold = std::max(0, std::min(255, threshold));
+        method = std::max(0, std::min(3, method));
+        linegap = std::max(1, std::min(200, linegap));
+        wgap = std::max(1, std::min(500, wgap));
+        hgap = std::max(1, std::min(500, hgap));
+        objfilter = std::max(0, std::min(10, objfilter));
+        compareGap = std::max(1, std::min(500, compareGap));
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(directionLabels[dir]);
+
+        auto drawCellInt = [&](const char* id, int& value, int minValue, int maxValue)
+        {
+          ImGui::SetNextItemWidth(-FLT_MIN);
+          bool changed = ImGui::InputInt(id, &value, 0, 0);
+          value = std::max(minValue, std::min(maxValue, value));
+          return changed;
+        };
+
+        ImGui::TableSetColumnIndex(1);
+        edited |= drawCellInt(("##" + thresholdKey).c_str(), threshold, 0, 255);
+        ImGui::TableSetColumnIndex(2);
+        edited |= drawCellInt(("##" + methodKey).c_str(), method, 0, 3);
+        ImGui::TableSetColumnIndex(3);
+        edited |= drawCellInt(("##" + linegapKey).c_str(), linegap, 1, 200);
+        ImGui::TableSetColumnIndex(4);
+        edited |= drawCellInt(("##" + wgapKey).c_str(), wgap, 1, 500);
+        ImGui::TableSetColumnIndex(5);
+        edited |= drawCellInt(("##" + hgapKey).c_str(), hgap, 1, 500);
+        ImGui::TableSetColumnIndex(6);
+        edited |= drawCellInt(("##" + objfilterKey).c_str(), objfilter, 0, 10);
+        ImGui::TableSetColumnIndex(7);
+        edited |= drawCellInt(("##" + compareKey).c_str(), compareGap, 1, 500);
+
+        InjectManualGaugeInt(context, thresholdKey.c_str(), threshold);
+        InjectManualGaugeInt(context, methodKey.c_str(), method);
+        InjectManualGaugeInt(context, linegapKey.c_str(), linegap);
+        InjectManualGaugeInt(context, wgapKey.c_str(), wgap);
+        InjectManualGaugeInt(context, hgapKey.c_str(), hgap);
+        InjectManualGaugeInt(context, objfilterKey.c_str(), objfilter);
+        InjectManualGaugeInt(context, compareKey.c_str(), compareGap);
+      }
+      ImGui::EndTable();
+    }
+  }
   return edited;
 }
 

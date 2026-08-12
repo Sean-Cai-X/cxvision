@@ -273,6 +273,7 @@ private:
   void drawMetrologyAnalyticsSmokeWindow();
   bool ApplyCurrentGaugeToEditableShape(std::string& reason);
   bool ProjectCurrentGaugeToImageViewPreview(std::string& reason);
+  bool SyncFindSegmentationPromptListsFromShapeElements(std::string& reason);
   void drawParameterTuningAndConclusionWindow();
   void drawTorchRuntimeEvidenceWindow();
   void drawTorchTrainingImageSetWindow();

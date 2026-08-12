@@ -1299,6 +1299,24 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FastMatch::setthre);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setobjfilter", &FastMatch::setobjfilter);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnwgap", &FastMatch::setlearnwgap_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnhgap", &FastMatch::setlearnhgap_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnmethod",
+                            &FastMatch::setlearnmethod_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnthre", &FastMatch::setlearnthre_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnlinegap",
+                            &FastMatch::setlearnlinegap_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnobjfilter",
+                            &FastMatch::setlearnobjfilter_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearncompgap",
+                            &FastMatch::setlearncompgap_script);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setfilter",
                             &FastMatch::setfilter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemodel",

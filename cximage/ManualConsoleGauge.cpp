@@ -395,11 +395,26 @@ bool ValidateManualGaugeGeometry(const ManualGaugeState& gauge, std::string& rea
 
 void NormalizeManualGaugeGeometry(ManualGaugeState& gauge)
 {
-    if (!gauge.has_circle_gauge)
-        return;
-    const double dx = static_cast<double>(gauge.circle_px - gauge.circle_cx);
-    const double dy = static_cast<double>(gauge.circle_py - gauge.circle_cy);
-    gauge.radius = static_cast<int>(std::lround(std::sqrt(dx * dx + dy * dy)));
+    if (gauge.has_circle_gauge)
+    {
+        const double dx = static_cast<double>(gauge.circle_px - gauge.circle_cx);
+        const double dy = static_cast<double>(gauge.circle_py - gauge.circle_cy);
+        gauge.radius = static_cast<int>(std::lround(std::sqrt(dx * dx + dy * dy)));
+    }
+
+    // FindEllipse persists an image-axis-aligned bounding box.  Normalize only
+    // the endpoint order on each axis.  Never sort width/height or exchange the
+    // X/Y axes: doing so turns a horizontal ellipse into a vertical ellipse
+    // when a candidate is saved and restored.
+    if (gauge.has_ellipse_gauge)
+    {
+        if (gauge.ellipse_x0 > gauge.ellipse_x1)
+            std::swap(gauge.ellipse_x0, gauge.ellipse_x1);
+        if (gauge.ellipse_y0 > gauge.ellipse_y1)
+            std::swap(gauge.ellipse_y0, gauge.ellipse_y1);
+        gauge.ellipse_inner_scale_percent =
+            std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+    }
 }
 
 bool ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName)
@@ -1350,6 +1365,20 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
     {
         if (!ExtractJsonInt(source, integer_keys[i], *integer_values[i]))
         {
+            if (std::string(integer_keys[i]) ==
+                "ellipse_inner_scale_percent")
+            {
+                // This field was added after the first FindEllipse candidate
+                // packages had already been persisted.  It is an optional
+                // annulus extension, not part of the outer ROI geometry, so
+                // an older package must remain selectable.  Do not inherit
+                // the currently selected row's runtime global here: that
+                // would leak one Evidence item's inner ellipse into another.
+                // Packages predating this field semantically have no inner
+                // ellipse.
+                loaded.ellipse_inner_scale_percent = 0;
+                continue;
+            }
             if (std::string(integer_keys[i]) == "scan_direction")
             {
                 // Older accepted annotations predate the exclusive W/H

@@ -315,8 +315,8 @@ void FindEllipse::Setgap(int gap) {
     const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
     const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
     const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
-    const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
-    const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+    const double rx = width0 * 0.5;
+    const double ry = height0 * 0.5;
     const double outer_ratio = 1.05;
 
     for (int i = 0; i < isize; i += igapadd) {
@@ -392,8 +392,8 @@ void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay) {
     int icy0 = (icenty + ipay) / 2;
     const double width0 = std::abs(static_cast<double>(ipax - icentx));
     const double height0 = std::abs(static_cast<double>(ipay - icenty));
-    const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
-    const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+    const double rx = width0 * 0.5;
+    const double ry = height0 * 0.5;
     const double outer_ratio = 1.05;
 
     for (int i = 0; i < isize; i += igapadd) {
@@ -441,8 +441,8 @@ void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay) {
     const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
     const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
     const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
-    const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
-    const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+    const double rx = width0 * 0.5;
+    const double ry = height0 * 0.5;
 
     for (auto &line : m_lines) {
       const int line_size = line.getlinesize();
@@ -572,8 +572,8 @@ void FindEllipse::setellipse2(int icentx, int icenty, int ipax, int ipay,
     const double cy = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
     const double width0 = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0));
     const double height0 = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0));
-    const double rx = (width0 >= height0 ? width0 : height0) * 0.5;
-    const double ry = (width0 <= height0 ? width0 : height0) * 0.5;
+    const double rx = width0 * 0.5;
+    const double ry = height0 * 0.5;
 
     for (auto &line : m_lines) {
       const int line_size = line.getlinesize();

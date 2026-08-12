@@ -13,6 +13,8 @@
 #include "PolylineShape.h"
 #include "RectShape.h"
 
+#include <glad/glad.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -57,6 +59,51 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
         lowered.find("torch") != std::string::npos)
         return "TorchTask";
     return typeOrTool;
+}
+
+// Evidence rows loaded from catalog/cxsc normally retain a relative script
+// path, while a saved candidate records the absolute source path.  Do not
+// require those two textual paths to be identical when restoring the active
+// working revision after an application restart.  The durable identity is the
+// source script file name together with image_id and target_id.
+static std::string EvidenceSourceFileNameLocal(const std::string& pathOrId)
+{
+    if (pathOrId.empty())
+        return {};
+
+    std::string fileName = std::filesystem::path(pathOrId).filename().string();
+    if (fileName.empty())
+        fileName = pathOrId;
+
+    const std::size_t candidateSuffix = fileName.find(" [");
+    if (candidateSuffix != std::string::npos)
+        fileName.erase(candidateSuffix);
+
+    std::transform(fileName.begin(), fileName.end(), fileName.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return fileName;
+}
+
+static bool SameEvidenceSourceScriptLocal(
+    const std::string& candidateSourcePath,
+    const ScriptEvidenceThumb& original)
+{
+    if (candidateSourcePath.empty())
+        return false;
+
+    const std::filesystem::path candidateSource =
+        ResolveWorkspaceFile(candidateSourcePath).lexically_normal();
+    const std::filesystem::path originalSource =
+        ResolveWorkspaceFile(original.script_path).lexically_normal();
+    if (candidateSource == originalSource)
+        return true;
+
+    const std::string candidateFile =
+        EvidenceSourceFileNameLocal(candidateSourcePath);
+    if (candidateFile.empty())
+        return false;
+    return candidateFile == EvidenceSourceFileNameLocal(original.script_path) ||
+           candidateFile == EvidenceSourceFileNameLocal(original.script_id);
 }
 
 static std::string BuildEvidenceClassificationKeyLocal(
@@ -270,14 +317,24 @@ static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
 
     const std::string normalizedTool =
         NormalizeEvidenceToolTypeLocal(thumb.tool);
+    const bool isExplicitCxImageTool =
+        normalizedTool == "FindLine" ||
+        normalizedTool == "FindCircle" ||
+        normalizedTool == "FindObject" ||
+        normalizedTool == "FindEllipse" ||
+        normalizedTool == "FindRect" ||
+        normalizedTool == "RegionPatternTool" ||
+        normalizedTool == "GridPatternClassTool" ||
+        normalizedTool == "FastMatch";
     const bool isTorchLayer =
-        key.find("torch") != std::string::npos ||
-        key.find("find_segmentation") != std::string::npos ||
-        key.find("findsegmentation") != std::string::npos ||
-        key.find("edgesam") != std::string::npos ||
-        key.find("segmentation") != std::string::npos ||
-        key.find("detection") != std::string::npos ||
-        key.find("model") != std::string::npos;
+        !isExplicitCxImageTool &&
+        (key.find("torch") != std::string::npos ||
+         key.find("find_segmentation") != std::string::npos ||
+         key.find("findsegmentation") != std::string::npos ||
+         key.find("edgesam") != std::string::npos ||
+         key.find("segmentation") != std::string::npos ||
+         key.find("detection") != std::string::npos ||
+         key.find("model") != std::string::npos);
 
     if (isTorchLayer)
         return {6, "Torch / Model Validation"};
@@ -1369,6 +1426,85 @@ static bool EvidenceSnapshotHasLockedParamSummaryLocal(
         return false;
     }
     reason.clear();
+    return true;
+}
+
+static bool EvidenceParamSummaryHasKeyLocal(
+    const std::string& summary,
+    const std::string& key)
+{
+    std::istringstream iss(summary);
+    std::string token;
+    const std::string needle = key + "=";
+    while (iss >> token)
+    {
+        if (!token.empty() && token.back() == ';')
+            token.pop_back();
+        if (token.rfind(needle, 0) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool EvidenceSnapshotLooksLikeToolLocal(
+    const CxEvidenceSelectionSnapshot& snapshot,
+    const std::string& normalizedTool)
+{
+    if (NormalizeEvidenceToolTypeLocal(snapshot.tool) == normalizedTool)
+        return true;
+
+    std::string haystack =
+        snapshot.script_id + " " + snapshot.script_path + " " +
+        snapshot.source_evidence_script_path;
+    std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    if (normalizedTool == "FindEllipse")
+    {
+        return haystack.find("findellipse") != std::string::npos ||
+            haystack.find("find_ellipse") != std::string::npos;
+    }
+    return false;
+}
+
+static bool MigrateLegacyEvidenceSelectionSnapshotLocal(
+    CxEvidenceSelectionSnapshot& snapshot)
+{
+    const bool looksLikeSavedCandidate =
+        snapshot.is_candidate || snapshot.has_saved_state ||
+        !snapshot.candidate_id.empty() || !snapshot.candidate_dir.empty() ||
+        !snapshot.runtime_globals_path.empty() ||
+        !snapshot.gauge_annotation_path.empty();
+    if (!looksLikeSavedCandidate)
+        return false;
+
+    if (!EvidenceSnapshotLooksLikeToolLocal(snapshot, "FindEllipse"))
+        return false;
+
+    if (EvidenceParamSummaryHasKeyLocal(
+            snapshot.parameter_summary,
+            "ellipse_inner_scale_percent") ||
+        EvidenceParamSummaryHasKeyLocal(
+            snapshot.parameter_summary,
+            "inner_scale_percent"))
+    {
+        return false;
+    }
+
+    if (snapshot.parameter_summary.empty() ||
+        snapshot.parameter_summary == "-")
+    {
+        snapshot.parameter_summary = "ellipse_inner_scale_percent=0";
+    }
+    else
+    {
+        snapshot.parameter_summary += "; ellipse_inner_scale_percent=0";
+    }
+    snapshot.parameter_profile_id = snapshot.parameter_summary;
+    if (!snapshot.reason.empty())
+        snapshot.reason += " | ";
+    snapshot.reason +=
+        "migrated legacy FindEllipse candidate default ellipse_inner_scale_percent=0";
     return true;
 }
 
@@ -2547,9 +2683,6 @@ static void AppendSavedEvidenceCandidatesLocal(
     auto bindWorkingRevisionToOriginal =
         [&](const ScriptEvidenceThumb& candidate)
     {
-        const std::filesystem::path resolvedSource =
-            ResolveWorkspaceFile(candidate.source_evidence_script_path)
-                .lexically_normal();
         for (auto& group : context.script_evidence_groups)
         {
             for (auto& original : group.thumbs)
@@ -2558,14 +2691,17 @@ static void AppendSavedEvidenceCandidatesLocal(
                     continue;
                 const bool sameCase = !candidate.case_id.empty() &&
                     original.case_id == candidate.case_id;
-                const bool sameScript =
-                    !candidate.source_evidence_script_path.empty() &&
-                    ResolveWorkspaceFile(original.script_path).lexically_normal() ==
-                        resolvedSource;
-                const bool identityMatches = !candidate.case_id.empty()
-                    ? (sameCase &&
-                       (candidate.source_evidence_script_path.empty() || sameScript))
-                    : sameScript;
+                const bool sameScript = SameEvidenceSourceScriptLocal(
+                    candidate.source_evidence_script_path,
+                    original);
+                const bool sameImage =
+                    candidate.image_id.empty() || original.image_id.empty() ||
+                    original.image_id == candidate.image_id;
+                const bool sameTarget =
+                    candidate.target_id.empty() || original.target_id.empty() ||
+                    original.target_id == candidate.target_id;
+                const bool identityMatches =
+                    sameCase || (sameScript && sameImage && sameTarget);
                 if (!identityMatches)
                     continue;
 
@@ -2584,12 +2720,39 @@ static void AppendSavedEvidenceCandidatesLocal(
                 original.has_saved_state = true;
                 original.source_evidence_script_path =
                     candidate.source_evidence_script_path;
+                // Legacy Catalog rows frequently expose the generic type
+                // "module" even though the script declares FindEllipse,
+                // FindLine, etc.  Once a validated candidate is rebound, its
+                // explicit tool identity is authoritative for navigation and
+                // parameter-panel routing.
+                const std::string originalTool =
+                    NormalizeEvidenceToolTypeLocal(original.tool);
+                const std::string candidateTool =
+                    NormalizeEvidenceToolTypeLocal(candidate.tool);
+                if (!candidateTool.empty() &&
+                    (originalTool.empty() ||
+                     originalTool == "module" ||
+                     originalTool == "unknown"))
+                {
+                    original.tool = candidateTool;
+                }
                 original.parameter_summary = candidate.parameter_summary;
                 original.status = candidate.status;
                 original.reason =
                     "active working revision=" + candidate.candidate_id +
                     "; restored from candidate binding; " +
                     candidate.reason;
+                CXLOG_INFO(
+                    "EvidenceChain",
+                    "working_revision_rebound",
+                    "restored",
+                    "case_id=" + candidate.case_id +
+                        " candidate_id=" + candidate.candidate_id +
+                        " match=" + (sameCase ? "case_id" : "script_image_target") +
+                        " source=" + candidate.source_evidence_script_path +
+                        " original_script=" + original.script_path +
+                        " image_id=" + original.image_id +
+                        " target_id=" + original.target_id);
                 return;
             }
         }
@@ -2994,6 +3157,11 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
 
   EnsureStructuredCxImageCatalogEntriesLoaded(m_manualTest);
 
+  for (auto& group : m_manualTest.script_evidence_groups)
+  {
+    for (auto& thumb : group.thumbs)
+      ResetEvidenceThumbTexture(thumb);
+  }
   m_manualTest.script_evidence_groups.clear();
 
   const std::vector<std::string> fallbackImages =
@@ -3224,53 +3392,6 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         return findOrCreateGroup("", "", label);
       });
 
-  AppendSavedEvidenceCandidatesLocal(
-      m_manualTest,
-      [&](const std::string& label) -> ScriptEvidenceGroup&
-      {
-        return findOrCreateGroup("", "", label);
-      });
-
-  std::stable_sort(
-      m_manualTest.script_evidence_groups.begin(),
-      m_manualTest.script_evidence_groups.end(),
-      [](const ScriptEvidenceGroup& left, const ScriptEvidenceGroup& right)
-      {
-        auto priority = [](const ScriptEvidenceGroup& group) -> int
-        {
-          const std::string key = group.label + " " + group.script_id + " " + group.script_path;
-          if (key.find("Findline") != std::string::npos ||
-              key.find("findline") != std::string::npos ||
-              key.find("find_line") != std::string::npos)
-            return 0;
-          if (key.find("Findcircle") != std::string::npos ||
-              key.find("findcircle") != std::string::npos ||
-              key.find("find_circle") != std::string::npos)
-            return 1;
-          if (key.find("FindEllipse") != std::string::npos ||
-              key.find("findellipse") != std::string::npos ||
-              key.find("find_ellipse") != std::string::npos)
-            return 2;
-          if (key.find("FindRect") != std::string::npos ||
-              key.find("findrect") != std::string::npos ||
-              key.find("find_rect") != std::string::npos)
-            return 3;
-          if (key.find("fastmatch") != std::string::npos ||
-              key.find("FastMatch") != std::string::npos)
-            return 4;
-          if (key.find("FindSegmentation") != std::string::npos ||
-              key.find("find_segmentation") != std::string::npos)
-            return 5;
-          return 10;
-        };
-
-        const int lp = priority(left);
-        const int rp = priority(right);
-        if (lp != rp)
-          return lp < rp;
-        return left.script_id < right.script_id;
-      });
-
   // Keep baseline Catalog entries alongside Suite/review evidence.  The old
   // empty-only condition made a review handoff hide the entire Verified list.
   {
@@ -3338,6 +3459,58 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       m_manualTest.script_evidence_groups.push_back(group);
     }
   }
+
+  // Restore saved candidates only after every baseline source has been added.
+  // In particular, direct scripts that are present only in the legacy Catalog
+  // block above do not exist when the Suite/structured groups are assembled.
+  // Binding candidates before this point leaves the saved package visible as a
+  // separate row but the original Evidence row still points at baseline data.
+  AppendSavedEvidenceCandidatesLocal(
+      m_manualTest,
+      [&](const std::string& label) -> ScriptEvidenceGroup&
+      {
+        return findOrCreateGroup("", "", label);
+      });
+
+  std::stable_sort(
+      m_manualTest.script_evidence_groups.begin(),
+      m_manualTest.script_evidence_groups.end(),
+      [](const ScriptEvidenceGroup& left, const ScriptEvidenceGroup& right)
+      {
+        auto priority = [](const ScriptEvidenceGroup& group) -> int
+        {
+          const std::string key = group.label + " " + group.script_id + " " + group.script_path;
+          if (key.find("Findline") != std::string::npos ||
+              key.find("findline") != std::string::npos ||
+              key.find("find_line") != std::string::npos)
+            return 0;
+          if (key.find("Findcircle") != std::string::npos ||
+              key.find("findcircle") != std::string::npos ||
+              key.find("find_circle") != std::string::npos)
+            return 1;
+          if (key.find("FindEllipse") != std::string::npos ||
+              key.find("findellipse") != std::string::npos ||
+              key.find("find_ellipse") != std::string::npos)
+            return 2;
+          if (key.find("FindRect") != std::string::npos ||
+              key.find("findrect") != std::string::npos ||
+              key.find("find_rect") != std::string::npos)
+            return 3;
+          if (key.find("fastmatch") != std::string::npos ||
+              key.find("FastMatch") != std::string::npos)
+            return 4;
+          if (key.find("FindSegmentation") != std::string::npos ||
+              key.find("find_segmentation") != std::string::npos)
+            return 5;
+          return 10;
+        };
+
+        const int lp = priority(left);
+        const int rp = priority(right);
+        if (lp != rp)
+          return lp < rp;
+        return left.script_id < right.script_id;
+      });
 
   ++m_manualTest.script_evidence_groups_revision;
   if (m_manualTest.script_evidence_groups_debug_revision !=
@@ -3642,6 +3815,11 @@ void ViewController::DrawEvidenceChainThumbnailRail()
 
 void ViewController::RebuildScriptEvidenceGroups()
 {
+  for (auto& group : m_manualTest.script_evidence_groups)
+  {
+    for (auto& thumb : group.thumbs)
+      ResetEvidenceThumbTexture(thumb);
+  }
   m_manualTest.script_evidence_groups.clear();
   m_manualTest.selected_evidence_group = -1;
   m_manualTest.selected_evidence_thumb = -1;
@@ -3980,6 +4158,18 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
     out.dataset_images = thumb.dataset_images;
     out.annotations = thumb.annotations;
 
+    if (MigrateLegacyEvidenceSelectionSnapshotLocal(out))
+    {
+        CXLOG_INFO(
+            "EvidenceChain",
+            "legacy_candidate_schema_migrated",
+            "default_parameter_added",
+            "script_id=" + out.script_id +
+                " case_id=" + out.case_id +
+                " candidate_id=" + out.candidate_id +
+                " parameter_summary=" + out.parameter_summary);
+    }
+
     if (!scriptPath.empty())
     {
         std::string scriptText;
@@ -4184,88 +4374,13 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         }
     }
 
-    // Evidence selection is a transaction, but it must not copy the whole
-    // ManualTestContext: the context owns large Evidence/thumbnail caches.
-    // Stage only the fields that this operation is allowed to touch.
-    const CxEvidenceSelectionSnapshot backupSelection =
-        m_manualTest.current_evidence_selection;
-    const int backupSelectedGroup = m_manualTest.selected_evidence_group;
-    const int backupSelectedThumb = m_manualTest.selected_evidence_thumb;
-    const std::string backupActiveCaseId = m_manualTest.active_case_id;
-    const std::string backupActiveImageId = m_manualTest.active_image_id;
-    const std::string backupActiveTargetId = m_manualTest.active_target_id;
-    const unsigned long long backupKeyParamRevision =
-        m_manualTest.key_parameter_edit_revision;
-    const std::string backupKeyParamSummary =
-        m_manualTest.last_key_parameter_edit_summary;
-    const std::string backupImageFilePath = m_manualTest.image_file_path;
-    const std::string backupEditorText = m_manualTest.editor_text;
-    const std::string backupLoadedScriptPath = m_manualTest.loaded_script_path;
-    const std::string backupScriptFilePath = m_manualTest.script_file_path;
-    const std::string backupEditorSource = m_manualTest.editor_source;
-    const bool backupEditorDirty = m_manualTest.editor_dirty;
-    const std::unordered_map<std::string, int> backupRuntimeGlobals =
-        m_manualTest.runtime_int_vars;
-    const ManualGaugeState backupGauge = m_manualTest.current_gauge;
-    const std::string backupDebugAction = m_manualTest.debug_action;
-    const std::string backupDebugStatus = m_manualTest.debug_status;
-    const std::string backupDebugReason = m_manualTest.debug_reason;
-    const int backupFindlineSelectedEdge =
-        m_manualTest.findline_selected_scan_edge;
-    const int backupFindlineEdgeCount = m_manualTest.findline_scan_edge_count;
-    const int backupFindcircleSelectedEdge =
-        m_manualTest.findcircle_selected_scan_edge;
-    const int backupFindcircleEdgeCount =
-        m_manualTest.findcircle_scan_edge_count;
-    const std::vector<ManualFindLineEdgeParamState> backupFindlineEdgeParams =
-        m_manualTest.findline_edge_params;
-    const std::vector<ManualFindCircleEdgeParamState> backupFindcircleEdgeParams =
-        m_manualTest.findcircle_edge_params;
-
-    auto rollbackSelection = [&]()
-    {
-        m_manualTest.current_evidence_selection = backupSelection;
-        m_manualTest.selected_evidence_group = backupSelectedGroup;
-        m_manualTest.selected_evidence_thumb = backupSelectedThumb;
-        m_manualTest.active_case_id = backupActiveCaseId;
-        m_manualTest.active_image_id = backupActiveImageId;
-        m_manualTest.active_target_id = backupActiveTargetId;
-        m_manualTest.key_parameter_edit_revision = backupKeyParamRevision;
-        m_manualTest.last_key_parameter_edit_summary = backupKeyParamSummary;
-        m_manualTest.image_file_path = backupImageFilePath;
-        m_manualTest.editor_text = backupEditorText;
-        m_manualTest.loaded_script_path = backupLoadedScriptPath;
-        m_manualTest.script_file_path = backupScriptFilePath;
-        m_manualTest.editor_source = backupEditorSource;
-        m_manualTest.editor_dirty = backupEditorDirty;
-        m_manualTest.runtime_int_vars = backupRuntimeGlobals;
-        m_manualTest.current_gauge = backupGauge;
-        m_manualTest.debug_action = backupDebugAction;
-        m_manualTest.debug_status = backupDebugStatus;
-        m_manualTest.debug_reason = backupDebugReason;
-        m_manualTest.findline_selected_scan_edge = backupFindlineSelectedEdge;
-        m_manualTest.findline_scan_edge_count = backupFindlineEdgeCount;
-        m_manualTest.findcircle_selected_scan_edge = backupFindcircleSelectedEdge;
-        m_manualTest.findcircle_scan_edge_count = backupFindcircleEdgeCount;
-        m_manualTest.findline_edge_params = backupFindlineEdgeParams;
-        m_manualTest.findcircle_edge_params = backupFindcircleEdgeParams;
-    };
-
-    ManualTestContext& staged = m_manualTest;
+    ManualTestContext staged = m_manualTest;
     // Selecting an Evidence row is an input-context switch, not a runtime
     // result replay.  Clear the previous parser runtime object snapshot and
     // any deferred runtime shape sync before projecting the new input Gauge;
     // otherwise the old tool (notably FastMatch) can republish stale result
     // shapes after the new FindLine/FindCircle Gauge is shown.
     staged.runtime_objects.clear();
-    m_runtimeShapeSyncPending = false;
-    m_runtimeShapeSyncReason.clear();
-    m_runtimeShapeSyncDeferCount = 0;
-    m_scriptResult.result_ref.clear();
-    m_scriptResult.overlay_ref.clear();
-    m_scriptResult.evidence_ref.clear();
-    m_scriptResult.issue_entry_ref.clear();
-    m_scriptResult.runtime_fillback_status = "evidence_selection_cleared_previous_runtime";
 
     staged.current_evidence_selection = resolved;
     staged.selected_evidence_group = resolved.group_index;
@@ -4336,7 +4451,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
         if (resolved.runtime_globals_path.empty() ||
             resolved.gauge_annotation_path.empty())
         {
-            rollbackSelection();
             return abortSelection(
                 "working_assets",
                 "candidate is missing runtime_globals_path or gauge_annotation_path");
@@ -4348,7 +4462,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                 resolved.runtime_globals_path,
                 restoreReason))
         {
-            rollbackSelection();
             return abortSelection("runtime_globals_restore", restoreReason);
         }
         if (!LoadManualGaugeWorkingCopyFromPath(
@@ -4356,7 +4469,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                 resolved.gauge_annotation_path,
                 restoreReason))
         {
-            rollbackSelection();
             return abortSelection(
                 "gauge_restore",
                 "failed to restore candidate gauge: " + restoreReason);
@@ -4426,7 +4538,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                     resolved.parameter_summary,
                     lockedParamReason))
             {
-                rollbackSelection();
                 reason = "failed to apply evidence locked parameters: " +
                     lockedParamReason;
                 return false;
@@ -4465,6 +4576,17 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     const bool shouldSyncTrainingImageSet =
         IsEvidenceSelectionImageSetLocal(resolved) ||
         !resolved.dataset_images.empty();
+
+    m_manualTest = std::move(staged);
+    m_runtimeShapeSyncPending = false;
+    m_runtimeShapeSyncReason.clear();
+    m_runtimeShapeSyncDeferCount = 0;
+    m_scriptResult.result_ref.clear();
+    m_scriptResult.overlay_ref.clear();
+    m_scriptResult.evidence_ref.clear();
+    m_scriptResult.issue_entry_ref.clear();
+    m_scriptResult.runtime_fillback_status =
+        "evidence_selection_cleared_previous_runtime";
 
     if (shouldSyncTrainingImageSet)
     {
@@ -4580,6 +4702,11 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
 
 void ViewController::ResetEvidenceThumbTexture(ScriptEvidenceThumb& thumb)
 {
+    if (thumb.texture_id != 0)
+    {
+        GLuint texture = static_cast<GLuint>(thumb.texture_id);
+        glDeleteTextures(1, &texture);
+    }
     thumb.texture_id = 0;
     thumb.texture_w = 0;
     thumb.texture_h = 0;
@@ -6368,25 +6495,6 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
             return {0, label};
         }
 
-        if (key.find("find_segmentation") != std::string::npos ||
-            key.find("findsegmentation") != std::string::npos ||
-            key.find("edgesam") != std::string::npos)
-            return {6, "FindSegmentation Prompt / EdgeSam"};
-
-        if (key.find("torch") != std::string::npos ||
-            key.find("deeplab") != std::string::npos ||
-            key.find("yolo") != std::string::npos)
-        {
-            if (key.find("detect") != std::string::npos ||
-                key.find("yolo") != std::string::npos)
-                return {7, "Torch Detection - Model Unverified"};
-            if (key.find("segment") != std::string::npos ||
-                key.find("mask") != std::string::npos ||
-                key.find("deeplab") != std::string::npos)
-                return {8, "Torch Segmentation - Runtime Smoke"};
-            return {9, "Torch / Model Validation"};
-        }
-
         const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
         if (exactTool == "FindLine")
             return {0, "FindLine"};
@@ -6408,6 +6516,29 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup()
             return {8, "FindSegmentation Prompt / EdgeSam"};
         if (exactTool == "TorchTask")
             return {9, "Torch / Model Validation"};
+
+        // Only infer Torch/model ownership from free text when the row has no
+        // explicit tool type.  Every candidate parameter snapshot contains
+        // shared global_torch_* fields, which must not move FindEllipse and
+        // other cximage tools into the Torch navigation bucket.
+        if (key.find("find_segmentation") != std::string::npos ||
+            key.find("findsegmentation") != std::string::npos ||
+            key.find("edgesam") != std::string::npos)
+            return {6, "FindSegmentation Prompt / EdgeSam"};
+
+        if (key.find("torch") != std::string::npos ||
+            key.find("deeplab") != std::string::npos ||
+            key.find("yolo") != std::string::npos)
+        {
+            if (key.find("detect") != std::string::npos ||
+                key.find("yolo") != std::string::npos)
+                return {7, "Torch Detection - Model Unverified"};
+            if (key.find("segment") != std::string::npos ||
+                key.find("mask") != std::string::npos ||
+                key.find("deeplab") != std::string::npos)
+                return {8, "Torch Segmentation - Runtime Smoke"};
+            return {9, "Torch / Model Validation"};
+        }
 
         if (key.find("findline") != std::string::npos ||
             key.find("find_line") != std::string::npos)

@@ -756,6 +756,160 @@ bool ViewController::HasEditableFindCircleGauge() const
            m_manualTest.current_gauge.radius > 0;
 }
 
+bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
+    std::string& reason)
+{
+    reason.clear();
+    ManualGaugeState& gauge = m_manualTest.current_gauge;
+    const bool isFindSegmentation =
+        gauge.tool == "FindSegmentation" ||
+        gauge.primary_object_type == "FindSegmentation" ||
+        m_manualTest.editor_text.find("FindSegmentation") != std::string::npos;
+    if (!isFindSegmentation)
+    {
+        reason = "not a FindSegmentation context";
+        return false;
+    }
+
+    std::vector<ManualSegmentationPromptPoint> positivePoints;
+    std::vector<ManualSegmentationPromptPoint> negativePoints;
+    bool foundPromptRect = false;
+
+    for (const CxShapeElement& element : m_annotationLayer.ShapeElements())
+    {
+        if (element.owner_type != "FindSegmentation" || !element.shape)
+            continue;
+        if (element.result_element ||
+            element.semantic_role == "boundary" ||
+            element.semantic_role == "boundary_bbox")
+        {
+            continue;
+        }
+
+        if ((element.semantic_role == "prompt_rect" ||
+             element.semantic_role == "roi" ||
+             element.owner_binding == "setpromptrectxyxy" ||
+             element.owner_binding == "setpromptrect") &&
+            element.shape->kind() == CxShapeKind::Rect)
+        {
+            const auto* rect = dynamic_cast<const RectShape*>(element.shape.get());
+            if (rect != nullptr)
+            {
+                gauge.segmentation_prompt_x0 =
+                    static_cast<int>(std::lround(std::min(rect->x0(), rect->x1())));
+                gauge.segmentation_prompt_y0 =
+                    static_cast<int>(std::lround(std::min(rect->y0(), rect->y1())));
+                gauge.segmentation_prompt_x1 =
+                    static_cast<int>(std::lround(std::max(rect->x0(), rect->x1())));
+                gauge.segmentation_prompt_y1 =
+                    static_cast<int>(std::lround(std::max(rect->y0(), rect->y1())));
+                gauge.has_segmentation_prompt_rect = true;
+                foundPromptRect = true;
+            }
+            continue;
+        }
+
+        if ((element.semantic_role != "prompt_positive" &&
+             element.semantic_role != "prompt_negative" &&
+             element.owner_binding != "setpositivepointxy" &&
+             element.owner_binding != "setpositivepoint" &&
+             element.owner_binding != "setnegativepointxy" &&
+             element.owner_binding != "setnegativepoint") ||
+            element.shape->kind() != CxShapeKind::Points)
+        {
+            continue;
+        }
+
+        CxShapeGeometrySnapshot geometry;
+        if (!element.shape->snapshot(geometry) || geometry.points.empty())
+            continue;
+
+        ManualSegmentationPromptPoint point;
+        point.ref = element.stable_ref.empty() ? element.ref : element.stable_ref;
+        point.x = static_cast<int>(std::lround(geometry.points.front().x));
+        point.y = static_cast<int>(std::lround(geometry.points.front().y));
+
+        if (element.semantic_role == "prompt_negative" ||
+            element.owner_binding == "setnegativepointxy" ||
+            element.owner_binding == "setnegativepoint")
+        {
+            negativePoints.push_back(point);
+        }
+        else
+        {
+            positivePoints.push_back(point);
+        }
+    }
+
+    auto sortByRef = [](const ManualSegmentationPromptPoint& a,
+                        const ManualSegmentationPromptPoint& b)
+    {
+        return a.ref < b.ref;
+    };
+    std::sort(positivePoints.begin(), positivePoints.end(), sortByRef);
+    std::sort(negativePoints.begin(), negativePoints.end(), sortByRef);
+
+    if (!foundPromptRect)
+    {
+        auto readInt = [this](const std::string& key, int fallback)
+        {
+            const auto it = m_manualTest.runtime_int_vars.find(key);
+            return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+        };
+        const int x0 = std::max(
+            0,
+            readInt("global_roi_x0", readInt("global_roi_x", gauge.segmentation_prompt_x0)));
+        const int y0 = std::max(
+            0,
+            readInt("global_roi_y0", readInt("global_roi_y", gauge.segmentation_prompt_y0)));
+        const int x1 = std::max(
+            x0 + 1,
+            readInt("global_roi_x1",
+                    x0 + readInt("global_roi_width",
+                                 std::max(1, gauge.segmentation_prompt_x1 - gauge.segmentation_prompt_x0))));
+        const int y1 = std::max(
+            y0 + 1,
+            readInt("global_roi_y1",
+                    y0 + readInt("global_roi_height",
+                                 std::max(1, gauge.segmentation_prompt_y1 - gauge.segmentation_prompt_y0))));
+        gauge.segmentation_prompt_x0 = x0;
+        gauge.segmentation_prompt_y0 = y0;
+        gauge.segmentation_prompt_x1 = x1;
+        gauge.segmentation_prompt_y1 = y1;
+        gauge.has_segmentation_prompt_rect = true;
+    }
+
+    const bool changed =
+        positivePoints.size() != gauge.segmentation_positive_points.size() ||
+        negativePoints.size() != gauge.segmentation_negative_points.size() ||
+        foundPromptRect;
+
+    gauge.tool = "FindSegmentation";
+    gauge.segmentation_positive_points = std::move(positivePoints);
+    gauge.segmentation_negative_points = std::move(negativePoints);
+    SyncSegmentationLegacyPointFromLists(gauge);
+    gauge.source = "annotation_shape_elements";
+    gauge.review_status = "editing";
+    gauge.accepted = false;
+    gauge.dirty = true;
+
+    const bool globalsApplied = ApplyManualGaugeToGlobals(m_manualTest);
+    std::ostringstream ss;
+    ss << "positive_points=" << gauge.segmentation_positive_points.size()
+       << " negative_points=" << gauge.segmentation_negative_points.size()
+       << " prompt_rect=" << (gauge.has_segmentation_prompt_rect ? 1 : 0)
+       << " globals=" << (globalsApplied ? "applied" : "failed");
+    reason = ss.str();
+    CXLOG_INFO(
+        "ImageAnnotationUI",
+        "findsegmentation_prompt_lists_synced",
+        globalsApplied ? "updated" : "failed",
+        reason);
+    return globalsApplied && (changed ||
+        !gauge.segmentation_positive_points.empty() ||
+        !gauge.segmentation_negative_points.empty());
+}
+
 bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
 {
     ManualGaugeState& gauge = m_manualTest.current_gauge;
@@ -1897,6 +2051,12 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                     const bool globalsExported =
                         ExportShapeElementToRuntimeGlobals(
                             m_manualTest, *edited, exportReason);
+                    std::string promptSyncReason;
+                    if (edited->owner_type == "FindSegmentation")
+                    {
+                        SyncFindSegmentationPromptListsFromShapeElements(
+                            promptSyncReason);
+                    }
                     // ExportShapeElementToRuntimeGlobals writes the directly
                     // derived geometry.  ApplyManualGaugeToGlobals is the
                     // single normalizing commit for Key Parameter Controls,
@@ -2082,6 +2242,12 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                     if (ExportShapeElementToRuntimeGlobals(
                             m_manualTest, element, exportReason))
                     {
+                        std::string promptSyncReason;
+                        if (element.owner_type == "FindSegmentation")
+                        {
+                            SyncFindSegmentationPromptListsFromShapeElements(
+                                promptSyncReason);
+                        }
                         const bool gaugeApplied =
                             ApplyManualGaugeToGlobals(m_manualTest);
                         if (gaugeApplied)

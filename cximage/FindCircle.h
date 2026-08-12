@@ -6,6 +6,7 @@
 #include "CxAlgorithmBudget.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 class FindObject;
 
 struct FindCircleMeasureGeometryRequest
@@ -39,6 +40,17 @@ struct FindCircleMeasureGeometryRequest
 
 struct FindCircleMeasureGeometryDebug
 {
+    struct ScanDiagnostic
+    {
+        int scan_index = -1;
+        int candidate_count = 0;
+        bool accepted = false;
+        double accepted_x = 0.0;
+        double accepted_y = 0.0;
+        int accepted_position = -1;
+        std::string reject_reason;
+    };
+
     bool request_valid = false;
     bool geometry_dirty = false;
     bool geometry_ready = false;
@@ -106,6 +118,8 @@ struct FindCircleMeasureGeometryDebug
     int budget_max_scan_lines = 2048;
     int budget_max_samples = 2000000;
     int budget_max_elapsed_ms = 3000;
+
+    std::vector<ScanDiagnostic> scan_diagnostics;
 };
 
 struct CircleEdgeBandCandidate
@@ -325,6 +339,12 @@ public:
 
     bool budgetexceeded() const;
     int getelapsedms() const;
+    int getscandiagnosticcount() const;
+    bool getscandiagnostic(int index,
+                           FindCircleMeasureGeometryDebug::ScanDiagnostic& out) const;
+    bool getscandiagnosticline(int scan_index,
+                               CxShapePoint& p0,
+                               CxShapePoint& p1) const;
     int getscanlinecount() const;
     bool getscanline(int scan_index, CxShapePoint& p0, CxShapePoint& p1) const;
     int getsamplecount() const;

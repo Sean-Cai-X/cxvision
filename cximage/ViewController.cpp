@@ -5191,16 +5191,19 @@ void ViewController::drawScriptAcceptancePanels()
 
         // Layer 3.6: FindCircle runtime scan debug overlay.
         //
-        // Disabled: FindCircle scan ticks are now published by
-        // FindCircle::PublishDisplayShapes() as ShapeElements with
-        // semantic_role="scan_tick".  Keeping this live-object debug path
-        // would draw a second, non-ShapeElement projection and can make
-        // visible Gauge lines diverge from accepted result points.
-        if (false && m_manualTest.show_circle_gauge_scan_lines)
+        // Keep FindCircle aligned with FindLine: draw Gauge scan lines from
+        // the live tool object's internal scan-line collection.  Accepted
+        // points are calculated from the same lines, so displayed lines and
+        // result points stay on the same geometry.
+        if (m_manualTest.show_circle_gauge_scan_lines)
         {
-            std::string ownerRef = m_manualTest.current_gauge.primary_object_name;
+            // For FindCircle, prefer the runtime result owner over the editable
+            // Gauge owner.  Manual editing can leave current_gauge pointing at
+            // a staged/edit object, while the accepted points shown in Image
+            // View are published from the last executed runtime object.
+            std::string ownerRef = m_manualTest.current_result_ref.source_object;
             if (ownerRef.empty())
-                ownerRef = m_manualTest.current_result_ref.source_object;
+                ownerRef = m_manualTest.current_gauge.primary_object_name;
             if (ownerRef.empty())
             {
                 for (const RuntimeObjectView& object : m_manualTest.runtime_objects)
@@ -5253,22 +5256,87 @@ void ViewController::drawScriptAcceptancePanels()
                 const int scanCount = std::max(
                     debug.scan_line_count,
                     circleTool->getscanlinecount());
+                const int diagnosticCount = circleTool->getscandiagnosticcount();
                 const int arrowStride = std::max(2, scanCount / 32);
 
-                for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
+                auto drawCircleScanLine = [&](const CxShapePoint& a,
+                                              const CxShapePoint& b,
+                                              ImU32 color,
+                                              float thickness,
+                                              int ordinal)
                 {
-                    CxShapePoint a, b;
-                    if (!circleTool->getscanline(scanIndex, a, b))
-                        continue;
-
                     drawList->AddLine(
                         ImageToScreenD(a.x, a.y),
                         ImageToScreenD(b.x, b.y),
-                        IM_COL32(140, 230, 255, 105),
-                        1.0f);
+                        color,
+                        thickness);
 
-                    if ((scanIndex % arrowStride) == 0)
+                    if ((ordinal % arrowStride) == 0)
                         drawArrowHead(a, b, IM_COL32(140, 230, 255, 175));
+                };
+
+                if (diagnosticCount > 0)
+                {
+                    for (int i = 0; i < diagnosticCount; ++i)
+                    {
+                        FindCircleMeasureGeometryDebug::ScanDiagnostic diag;
+                        CxShapePoint a, b;
+                        if (!circleTool->getscandiagnostic(i, diag) ||
+                            !circleTool->getscandiagnosticline(
+                                diag.scan_index,
+                                a,
+                                b))
+                        {
+                            continue;
+                        }
+
+                        ImU32 lineColor = IM_COL32(140, 230, 255, 105);
+                        float lineThickness = 1.0f;
+                        if (diag.accepted)
+                        {
+                            lineColor = IM_COL32(255, 235, 64, 210);
+                            lineThickness = 1.4f;
+                        }
+                        else if (!diag.reject_reason.empty() &&
+                                 diag.reject_reason != "no_candidate")
+                        {
+                            lineColor = IM_COL32(255, 96, 96, 150);
+                        }
+
+                        drawCircleScanLine(a, b, lineColor, lineThickness, i);
+
+                        if (diag.accepted)
+                        {
+                            const ImVec2 ap =
+                                ImageToScreenD(diag.accepted_x, diag.accepted_y);
+                            drawList->AddCircleFilled(
+                                ap,
+                                3.5f,
+                                IM_COL32(255, 235, 64, 255));
+                            drawList->AddCircle(
+                                ap,
+                                4.5f,
+                                IM_COL32(80, 40, 0, 220),
+                                12,
+                                1.0f);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex)
+                    {
+                        CxShapePoint a, b;
+                        if (!circleTool->getscanline(scanIndex, a, b))
+                            continue;
+
+                        drawCircleScanLine(
+                            a,
+                            b,
+                            IM_COL32(140, 230, 255, 105),
+                            1.0f,
+                            scanIndex);
+                    }
                 }
             }
         }
@@ -5476,6 +5544,8 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::Text("=== Actions ===");
   if (ImGui::Button("Apply Gauge To Globals"))
   {
+    std::string promptSyncReason;
+    SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
     ApplyManualGaugeToGlobals(m_manualTest);
   }
   ImGui::SameLine();
@@ -5501,6 +5571,8 @@ void ViewController::drawScriptAcceptancePanels()
   ImGui::SameLine();
   if (ImGui::Button("Save Gauge Annotation"))
   {
+    std::string promptSyncReason;
+    SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
     std::string path;
     std::string reason;
     if (SaveManualGaugeAnnotation(m_manualTest, "", "", path, reason))
@@ -8262,9 +8334,21 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         return;
 
     if (element.owner_type == "FindCircle" &&
-        element.semantic_role == "scan_tick" &&
-        !m_manualTest.show_circle_gauge_scan_lines)
+        element.semantic_role == "scan_tick")
     {
+        // FindCircle result points are generated from the live m_lines scan
+        // geometry.  Skip the ShapeElement copy of scan ticks here, otherwise
+        // Image View can draw a reconstructed Gauge line that does not pass
+        // through the algorithm's accepted point.
+        return;
+    }
+    if (element.owner_type == "FindCircle" &&
+        element.semantic_role == "measure_points" &&
+        m_manualTest.show_circle_gauge_scan_lines)
+    {
+        // In scan-line debug mode, FindCircle points are drawn together with
+        // their runtime ScanDiagnostic lines below, matching FindLine's display
+        // path.  Avoid mixing in a potentially stale ShapeElement point copy.
         return;
     }
     if (element.owner_type == "FindEllipse" &&

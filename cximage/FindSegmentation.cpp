@@ -308,50 +308,13 @@ void FindSegmentation::PublishDisplayShapes(
     ICxShapeSink& sink,
     const std::string& owner_ref) const
 {
-    if (m_has_rect)
-    {
-        auto rect = std::make_unique<RectShape>();
-        rect->setRect(m_x0, m_y0, m_x1, m_y1);
-        sink.UpsertShape(
-            owner_ref + ".prompt_rect",
-            "FindSegmentation",
-            owner_ref,
-            "setpromptrectxyxy",
-            "roi",
-            true,
-            false,
-            std::move(rect));
-    }
-
-    if (m_has_positive_point)
-    {
-        auto point = std::make_unique<PointsShape>();
-        point->addpoint(gp_Pnt(m_positive_x, m_positive_y, 0.0));
-        sink.UpsertShape(
-            owner_ref + ".prompt_positive",
-            "FindSegmentation",
-            owner_ref,
-            "setpositivepointxy",
-            "prompt_positive",
-            true,
-            false,
-            std::move(point));
-    }
-
-    if (m_has_negative_point)
-    {
-        auto point = std::make_unique<PointsShape>();
-        point->addpoint(gp_Pnt(m_negative_x, m_negative_y, 0.0));
-        sink.UpsertShape(
-            owner_ref + ".prompt_negative",
-            "FindSegmentation",
-            owner_ref,
-            "setnegativepointxy",
-            "prompt_negative",
-            true,
-            false,
-            std::move(point));
-    }
+    // Prompt ROI / positive points / negative points are user-owned annotation
+    // inputs. They are already created and edited by ImageAnnotationLayer from
+    // the Tool Palette. Runtime projection must not mirror them back as new
+    // ShapeElements, otherwise every script run duplicates the prompt points.
+    //
+    // This method only publishes algorithm result evidence owned by the
+    // FindSegmentation runtime object: boundary polyline and boundary bbox.
 
     if (m_result.contours.empty())
         return;

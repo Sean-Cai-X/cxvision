@@ -339,6 +339,54 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
+
+void ReplaceAllScriptTextLocal(
+    std::string& text,
+    const std::string& from,
+    const std::string& to)
+{
+  if (from.empty())
+    return;
+  std::size_t pos = 0;
+  while ((pos = text.find(from, pos)) != std::string::npos)
+  {
+    text.replace(pos, from.size(), to);
+    pos += to.size();
+  }
+}
+
+bool MigrateLegacyFindSegmentationPromptCallsForRun(
+    ManualTestContext& context,
+    std::string& reason)
+{
+  reason.clear();
+  if (context.editor_text.find("FindSegmentation") == std::string::npos)
+    return false;
+
+  const std::string oldPositive =
+      "m_seg.setpositivepointxy(global_segmentation_positive_x, global_segmentation_positive_y);";
+  const std::string newPositive =
+      "m_seg.setpositivepointxy(global_segmentation_positive_y, global_segmentation_positive_x);";
+  const std::string oldNegative =
+      "m_seg.setnegativepointxy(global_segmentation_negative_x, global_segmentation_negative_y);";
+  const std::string newNegative =
+      "m_seg.setnegativepointxy(global_segmentation_negative_y, global_segmentation_negative_x);";
+
+  const bool hasLegacyPositive =
+      context.editor_text.find(oldPositive) != std::string::npos;
+  const bool hasLegacyNegative =
+      context.editor_text.find(oldNegative) != std::string::npos;
+  if (!hasLegacyPositive && !hasLegacyNegative)
+    return false;
+
+  ReplaceAllScriptTextLocal(context.editor_text, oldPositive, newPositive);
+  ReplaceAllScriptTextLocal(context.editor_text, oldNegative, newNegative);
+  context.editor_dirty = true;
+  context.analyzed_text.clear();
+  reason =
+      "legacy FindSegmentation prompt point calls migrated in memory to set*pointxy(y,x); historical script_snapshot.cxsc was not modified";
+  return true;
+}
 } // namespace
 
 bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
@@ -449,6 +497,19 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
             ", reason=" + legacyFindLineMigrationReason);
   }
 
+  std::string legacyFindSegmentationMigrationReason;
+  const bool legacyFindSegmentationMigrated =
+      MigrateLegacyFindSegmentationPromptCallsForRun(
+          context, legacyFindSegmentationMigrationReason);
+  if (legacyFindSegmentationMigrated)
+  {
+    CXLOG_WARN(
+        "ManualConsole",
+        "legacy_findsegmentation_prompt_migrated_for_run",
+        "migrated",
+        legacyFindSegmentationMigrationReason);
+  }
+
   AnalyzeScript(context);
   context.current_gauge = frozenGauge;
   context.runtime_int_vars = frozenGlobals;
@@ -517,6 +578,20 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
      << context.runtime_int_vars["global_roi_y0"] << ","
      << context.runtime_int_vars["global_roi_x1"] << ","
      << context.runtime_int_vars["global_roi_y1"] << ")";
+  ss << "\nsegmentation_mode="
+     << context.runtime_int_vars["global_segmentation_mode"];
+  ss << "\nsegmentation_threshold_percent="
+     << context.runtime_int_vars["global_segmentation_threshold_percent"];
+  ss << "\nsegmentation_positive=(enabled="
+     << context.runtime_int_vars["global_segmentation_positive_enabled"]
+     << ", x=" << context.runtime_int_vars["global_segmentation_positive_x"]
+     << ", y=" << context.runtime_int_vars["global_segmentation_positive_y"]
+     << ")";
+  ss << "\nsegmentation_negative=(enabled="
+     << context.runtime_int_vars["global_segmentation_negative_enabled"]
+     << ", x=" << context.runtime_int_vars["global_segmentation_negative_x"]
+     << ", y=" << context.runtime_int_vars["global_segmentation_negative_y"]
+     << ")";
   ss << "\ngap=" << context.runtime_int_vars["global_gap"];
   ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
   ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
@@ -535,6 +610,8 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
     context.debug_reason = legacyMigrationReason;
   if (legacyFindLineMigrated)
     context.debug_reason = legacyFindLineMigrationReason;
+  if (legacyFindSegmentationMigrated)
+    context.debug_reason = legacyFindSegmentationMigrationReason;
 
   bool imageBound = true;
   if (!m_imageViewImage.empty())
@@ -558,6 +635,13 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
 
   if (torchRequestReady)
     m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
+
+  if (context.current_gauge.tool == "FindSegmentation" ||
+      context.current_gauge.primary_object_type == "FindSegmentation")
+  {
+    std::string promptSyncReason;
+    SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
+  }
 
   context.run_state = "running";
   const bool ran = imageBound && torchRequestReady &&
@@ -605,8 +689,16 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
   RefreshRuntimeObjectTable(
       "Manual Console Pending Run", ran ? "runtime_executed" : "BLOCKED");
 
-  context.current_gauge = frozenGauge;
-  context.runtime_int_vars = frozenGlobals;
+  // RefreshRuntimeObjectTable() projects the newly-created runtime object and
+  // may replace current_gauge.  A deferred Key Parameter/Candidate run must
+  // keep the exact input snapshot that was applied and persisted, not the
+  // runtime projection.  In particular this prevents a legacy FindEllipse
+  // runtime object from exchanging bbox X/Y extents before the next save.
+  if (usePendingExecutionSnapshot || useStagedTorchSnapshot)
+  {
+    context.current_gauge = frozenGauge;
+    context.runtime_int_vars = frozenGlobals;
+  }
 
   std::string snapshotPath;
   std::string snapshotReason;
@@ -628,9 +720,12 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
     }
     options.candidate_id = context.last_evidence_candidate_id;
     options.case_id_override =
-        candidateDir.has_parent_path()
-            ? candidateDir.parent_path().filename().string()
-            : std::string();
+        context.current_evidence_selection.valid &&
+                !context.current_evidence_selection.case_id.empty()
+            ? context.current_evidence_selection.case_id
+            : (candidateDir.has_parent_path()
+                   ? candidateDir.parent_path().filename().string()
+                   : std::string());
     options.mode = ran ? "runtime_finished" : "runtime_failed";
     options.request_run = false;
     options.add_to_evidence_chain = false;
@@ -899,6 +994,19 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
                 ", reason=" + legacyFindLineMigrationReason);
       }
 
+      std::string legacyFindSegmentationMigrationReason;
+      const bool legacyFindSegmentationMigrated =
+          MigrateLegacyFindSegmentationPromptCallsForRun(
+              context, legacyFindSegmentationMigrationReason);
+      if (legacyFindSegmentationMigrated)
+      {
+        CXLOG_WARN(
+            "ManualConsole",
+            "legacy_findsegmentation_prompt_migrated_for_run",
+            "migrated",
+            legacyFindSegmentationMigrationReason);
+      }
+
       // A candidate run must use the values captured by the Save/Run action.
       // Do not let an Evidence refresh or runtime-object refresh replace them
       // between the button click and this deferred compiler pass.
@@ -942,8 +1050,12 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       }
       else if (context.current_gauge.has_line_gauge ||
                context.current_gauge.has_circle_gauge ||
-               context.current_gauge.has_ellipse_gauge)
+               context.current_gauge.has_ellipse_gauge ||
+               context.current_gauge.tool == "FindSegmentation" ||
+               context.current_gauge.tool == "FindObject")
       {
+        std::string promptSyncReason;
+        SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
         SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:apply_gauge");
         ApplyManualGaugeToGlobals(context);
       }
@@ -1030,6 +1142,20 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << context.runtime_int_vars["global_findline_findsetting"];
       ss << "\nfindcircle_findsetting="
          << context.runtime_int_vars["global_findcircle_findsetting"];
+      ss << "\nsegmentation_mode="
+         << context.runtime_int_vars["global_segmentation_mode"];
+      ss << "\nsegmentation_threshold_percent="
+         << context.runtime_int_vars["global_segmentation_threshold_percent"];
+      ss << "\nsegmentation_positive=(enabled="
+         << context.runtime_int_vars["global_segmentation_positive_enabled"]
+         << ", x=" << context.runtime_int_vars["global_segmentation_positive_x"]
+         << ", y=" << context.runtime_int_vars["global_segmentation_positive_y"]
+         << ")";
+      ss << "\nsegmentation_negative=(enabled="
+         << context.runtime_int_vars["global_segmentation_negative_enabled"]
+         << ", x=" << context.runtime_int_vars["global_segmentation_negative_x"]
+         << ", y=" << context.runtime_int_vars["global_segmentation_negative_y"]
+         << ")";
       ss << "\ngap=" << context.runtime_int_vars["global_gap"];
       ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
       ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
@@ -1048,6 +1174,8 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
         context.debug_reason = legacyMigrationReason;
       if (legacyFindLineMigrated)
         context.debug_reason = legacyFindLineMigrationReason;
+      if (legacyFindSegmentationMigrated)
+        context.debug_reason = legacyFindSegmentationMigrationReason;
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:bind_image");
       bool imageBound = true;
@@ -1159,9 +1287,12 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
         }
         options.candidate_id = context.last_evidence_candidate_id;
         options.case_id_override =
-            candidateDir.has_parent_path()
-                ? candidateDir.parent_path().filename().string()
-                : std::string();
+            context.current_evidence_selection.valid &&
+                    !context.current_evidence_selection.case_id.empty()
+                ? context.current_evidence_selection.case_id
+                : (candidateDir.has_parent_path()
+                       ? candidateDir.parent_path().filename().string()
+                       : std::string());
         options.mode = ran ? "runtime_finished" : "runtime_failed";
         options.request_run = false;
         options.add_to_evidence_chain = false;

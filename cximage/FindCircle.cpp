@@ -890,6 +890,7 @@ void FindCircle::Measure(Image &image) {
   m_lastMeasureGeometryDebug.scan_boundary_extended_samples = 0;
   m_lastMeasureGeometryDebug.candidate_boundary_reject_count = 0;
   m_lastMeasureGeometryDebug.candidate_endpoint_reject_count = 0;
+  m_lastMeasureGeometryDebug.scan_diagnostics.clear();
 
   if (image.getmat().empty()) {
     LogFindCircleMeasureProbe("measure_image_fail", "failed",
@@ -1370,6 +1371,25 @@ void FindCircle::Measure(Image &image) {
     selected_edge_radius_max = std::max(selected_edge_radius_max, radius);
   };
 
+  auto record_scan_diagnostic = [&](int scan_index,
+                                    int candidate_count,
+                                    bool accepted,
+                                    const gp_Pnt* accepted_point,
+                                    int accepted_position,
+                                    const std::string& reject_reason) {
+    FindCircleMeasureGeometryDebug::ScanDiagnostic diag;
+    diag.scan_index = scan_index;
+    diag.candidate_count = candidate_count;
+    diag.accepted = accepted;
+    diag.accepted_position = accepted_position;
+    diag.reject_reason = reject_reason;
+    if (accepted_point != nullptr) {
+      diag.accepted_x = accepted_point->X();
+      diag.accepted_y = accepted_point->Y();
+    }
+    m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
+  };
+
   auto now = std::chrono::steady_clock::now();
   int elapsed_ms = static_cast<int>(
       std::chrono::duration_cast<std::chrono::milliseconds>(now - begin_time)
@@ -1636,6 +1656,8 @@ void FindCircle::Measure(Image &image) {
         
         if (line_candidates.empty()) {
           ++selected_edge_misses;
+          record_scan_diagnostic(inumy, 0, false, nullptr, -1,
+                                 "no_candidate");
         } else {
           int representative_position = -1;
           for (const CircleLineCandidate &candidate : line_candidates) {
@@ -1644,6 +1666,13 @@ void FindCircle::Measure(Image &image) {
                                            ilineslen1);
             m_measurepoints.addpoint(apoint);
             record_selected_radius(apoint);
+            record_scan_diagnostic(
+                inumy,
+                static_cast<int>(line_candidates.size()),
+                true,
+                &apoint,
+                candidate.position,
+                "");
             ++selected_edge_hits;
             if (representative_position < 0)
               representative_position = candidate.position;
@@ -1681,10 +1710,25 @@ void FindCircle::Measure(Image &image) {
                                        ilineslen1);
         m_measurepoints.addpoint(apoint);
         record_selected_radius(apoint);
+        record_scan_diagnostic(
+            inumy,
+            static_cast<int>(line_candidates.size()),
+            true,
+            &apoint,
+            selected_line_position,
+            "");
         if (inumy >= 0 && inumy < iscanlines)
           accepted_line_positions[static_cast<std::size_t>(inumy)] =
               selected_line_position;
         valid_points_count = m_measurepoints.size();
+      } else {
+        record_scan_diagnostic(
+            inumy,
+            static_cast<int>(line_candidates.size()),
+            false,
+            nullptr,
+            -1,
+            line_candidates.empty() ? "no_candidate" : "edge_not_selected");
       }
     }
 
@@ -1737,6 +1781,8 @@ void FindCircle::Measure(Image &image) {
             ilineslen1);
         m_measurepoints.addpoint(apoint);
         record_selected_radius(apoint);
+        record_scan_diagnostic(scan_index, 1, true, &apoint,
+                               repaired_position, "seam_repair");
         accepted_line_positions[static_cast<std::size_t>(scan_index)] =
             repaired_position;
         if (m_iselectedgenum != 0) {
@@ -3011,6 +3057,28 @@ void FindCircle::setmaxsamples(int value) { m_budget.max_samples = value; }
 bool FindCircle::budgetexceeded() const { return m_budget_state.exceeded; }
 
 int FindCircle::getelapsedms() const { return m_budget_state.elapsed_ms; }
+
+int FindCircle::getscandiagnosticcount() const {
+  return static_cast<int>(m_lastMeasureGeometryDebug.scan_diagnostics.size());
+}
+
+bool FindCircle::getscandiagnostic(
+    int index, FindCircleMeasureGeometryDebug::ScanDiagnostic &out) const {
+  if (index < 0 ||
+      index >=
+          static_cast<int>(m_lastMeasureGeometryDebug.scan_diagnostics.size())) {
+    return false;
+  }
+  out =
+      m_lastMeasureGeometryDebug.scan_diagnostics[static_cast<std::size_t>(index)];
+  return true;
+}
+
+bool FindCircle::getscandiagnosticline(int scan_index,
+                                       CxShapePoint &p0,
+                                       CxShapePoint &p1) const {
+  return getscanline(scan_index, p0, p1);
+}
 
 int FindCircle::getscanlinecount() const {
   return m_budget_state.scan_line_count;

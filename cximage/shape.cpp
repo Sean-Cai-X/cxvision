@@ -133,18 +133,27 @@ void Shape::setellipse2(Standard_Real icentx, Standard_Real icenty, Standard_Rea
     m_circlecent = gp_Pnt(icentx, icenty, 0);
     m_circlepa = gp_Pnt(ipax, ipay, 0);
 
-    double width0 = std::abs(icentx - ipax);
-    double height0 = std::abs(icenty - ipay);
-    double width = width0 >= height0 ? width0 : height0;
-    double height = width0 <= height0 ? width0 : height0;
-    //       圆        
-    double dcentx =  ((icentx + ipax) / 2.);
-    double dcenty =  ((icenty + ipay) / 2.);
+    const double x0 = std::min(icentx, ipax);
+    const double y0 = std::min(icenty, ipay);
+    const double x1 = std::max(icentx, ipax);
+    const double y1 = std::max(icenty, ipay);
+    const double cx = (x0 + x1) * 0.5;
+    const double cy = (y0 + y1) * 0.5;
+    const double radiusX = (x1 - x0) * 0.5;
+    const double radiusY = (y1 - y0) * 0.5;
+    const double innerRadiusX = radiusX - idis;
+    const double innerRadiusY = radiusY - idis;
 
-    m_circlecent2 = gp_Pnt((dcentx - width/2) + idis, (dcenty - height/2) + idis, 0);
-    m_circlepa2 = gp_Pnt((dcentx + width/2) - idis, (dcenty + height/2) - idis, 0);
-    m_path.AddRectangularEllipse(m_circlecent, m_circlepa,0.02);
-    m_path2.AddRectangularEllipse(m_circlecent2, m_circlepa2, 0.02);
+    m_circlecent = gp_Pnt(x0, y0, 0);
+    m_circlepa = gp_Pnt(x1, y1, 0);
+    m_path.AddRectangularEllipse(m_circlecent, m_circlepa, 0.02);
+
+    if (innerRadiusX > 0.0 && innerRadiusY > 0.0)
+    {
+        m_circlecent2 = gp_Pnt(cx - innerRadiusX, cy - innerRadiusY, 0);
+        m_circlepa2 = gp_Pnt(cx + innerRadiusX, cy + innerRadiusY, 0);
+        m_path2.AddRectangularEllipse(m_circlecent2, m_circlepa2, 0.02);
+    }
 }
  
 void Shape::setcolor(int ir, int ig, int ib)

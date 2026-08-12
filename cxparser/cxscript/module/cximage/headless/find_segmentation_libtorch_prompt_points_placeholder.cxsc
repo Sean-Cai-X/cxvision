@@ -34,11 +34,11 @@ m_seg.setthreshold(threshold);
 m_seg.setpromptrectxyxy(prompt_x0, prompt_y0, prompt_x1, prompt_y1);
 if (global_segmentation_positive_enabled != 0)
 {
-m_seg.setpositivepointxy(global_segmentation_positive_x, global_segmentation_positive_y);
+m_seg.setpositivepointxy(global_segmentation_positive_y, global_segmentation_positive_x);
 }
 if (global_segmentation_negative_enabled != 0)
 {
-m_seg.setnegativepointxy(global_segmentation_negative_x, global_segmentation_negative_y);
+m_seg.setnegativepointxy(global_segmentation_negative_y, global_segmentation_negative_x);
 }
 m_seg.setmode(global_segmentation_mode);
 

@@ -643,6 +643,35 @@ static std::string BuildRuntimeFeedbackReason(const RuntimeObjectView& object)
             ", candidate_policy=" + object.ellipse_candidate_policy;
     }
 
+    if (object.type == "FindSegmentation")
+    {
+        std::string reason = "FindSegmentation " + object.name +
+            " status=" + object.runtime_state +
+            ", backend=" + object.segmentation_backend +
+            ", backend_status=" + object.segmentation_backend_status +
+            ", contours=" + std::to_string(object.segmentation_contour_count) +
+            ", area=" + std::to_string(object.segmentation_primary_area);
+        if (object.segmentation_has_positive_point)
+        {
+            reason += ", positive=(" +
+                std::to_string(object.segmentation_positive_x) + "," +
+                std::to_string(object.segmentation_positive_y) + ")";
+        }
+        if (object.segmentation_has_negative_point)
+        {
+            reason += ", negative=(" +
+                std::to_string(object.segmentation_negative_x) + "," +
+                std::to_string(object.segmentation_negative_y) + ")";
+        }
+        if (!object.segmentation_reason.empty())
+            reason += ", result_reason=" + object.segmentation_reason;
+        if (object.segmentation_contour_count <= 0)
+            reason += ", conclusion=boundary_unavailable";
+        else
+            reason += ", conclusion=boundary_available_pending_human_review";
+        return reason;
+    }
+
     return object.type + " " + object.name +
         " state=" + object.runtime_state;
 }
@@ -779,6 +808,18 @@ void SeedDefaultManualGlobals(
         set("global_search_roi_h", 480);
         set("global_compare_gap", 20);
         set("global_objfilter", 1);
+        set("global_fastmatch_learn_shared", 1);
+        for (int dir = 0; dir < 4; ++dir)
+        {
+            const std::string suffix = "_" + std::to_string(dir);
+            set(("global_fastmatch_learn_wgap" + suffix).c_str(), 32);
+            set(("global_fastmatch_learn_hgap" + suffix).c_str(), 8);
+            set(("global_fastmatch_learn_method" + suffix).c_str(), 0);
+            set(("global_fastmatch_learn_threshold" + suffix).c_str(), 20);
+            set(("global_fastmatch_learn_linegap" + suffix).c_str(), 6);
+            set(("global_fastmatch_learn_objfilter" + suffix).c_str(), 1);
+            set(("global_fastmatch_learn_compare_gap" + suffix).c_str(), 20);
+        }
         set("global_find_num", 1);
         set("global_match_step_x", 10);
         set("global_match_step_y", 10);
@@ -1655,6 +1696,39 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
                 }
                 break;
             }
+
+            if (object.type == "FindSegmentation")
+            {
+                m_manualTest.debug_status =
+                    object.segmentation_contour_count > 0
+                        ? "runtime_result_available"
+                        : "runtime_executed_without_boundary";
+                m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
+                m_scriptResult.status = "PENDING_REVIEW";
+                m_scriptResult.reason = m_manualTest.debug_reason;
+                if (m_manualTest.current_result_ref.source_object.empty())
+                {
+                    m_manualTest.current_result_ref.source_object = object.name;
+                    m_manualTest.current_result_ref.name = "global_segmentation_ref";
+                    m_manualTest.current_result_ref.result_type =
+                        "FindSegmentationResult";
+                    m_manualTest.current_result_ref.value =
+                        object.segmentation_result_ref.empty()
+                            ? ("runtime_object:" + object.name)
+                            : object.segmentation_result_ref;
+                    m_manualTest.current_result_ref.status =
+                        object.segmentation_backend_status.empty()
+                            ? object.runtime_state
+                            : object.segmentation_backend_status;
+                    m_manualTest.current_result_ref.points_count =
+                        object.segmentation_contour_count;
+                    m_manualTest.current_result_ref.valid_points_count =
+                        object.segmentation_contour_count;
+                    m_manualTest.current_result_ref.reason =
+                        object.segmentation_reason;
+                }
+                break;
+            }
         }
     }
 
@@ -1707,6 +1781,8 @@ void ViewController::drawKeyParameterControlsWindow()
     if (IsTorchContext(m_manualTest) &&
         !IsFindLineFindCircleContext(m_manualTest))
     {
+        std::string promptSyncReason;
+        SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
         DrawTorchAnnotationKeyParameterPanel(m_manualTest);
     }
     else if (IsFindLineFindCircleContext(m_manualTest))

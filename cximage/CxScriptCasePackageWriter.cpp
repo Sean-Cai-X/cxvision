@@ -9,6 +9,7 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 namespace
 {
@@ -26,6 +27,30 @@ std::string SafePathComponentForCandidate(const std::string& value)
     while (out.find("..") != std::string::npos)
         out.replace(out.find(".."), 2, "__");
     return out;
+}
+
+std::string StableEvidenceCaseIdFromSelection(
+    const CxEvidenceSelectionSnapshot& selection)
+{
+    if (!selection.case_id.empty())
+        return selection.case_id;
+
+    std::string scriptKey = selection.script_id;
+    if (scriptKey.empty() && !selection.script_path.empty())
+        scriptKey = std::filesystem::path(selection.script_path).stem().string();
+    if (scriptKey.empty() && !selection.source_evidence_script_path.empty())
+        scriptKey =
+            std::filesystem::path(selection.source_evidence_script_path).stem().string();
+
+    std::ostringstream key;
+    if (!scriptKey.empty())
+        key << scriptKey;
+    if (!selection.image_id.empty())
+        key << (key.tellp() > 0 ? "__" : "") << selection.image_id;
+    if (!selection.target_id.empty())
+        key << (key.tellp() > 0 ? "__" : "") << selection.target_id;
+
+    return key.str();
 }
 
 std::filesystem::path CanonicalEvidenceCandidateRoot(
@@ -50,6 +75,45 @@ std::filesystem::path CanonicalEvidenceCandidateRoot(
     if (outCanonicalized)
         *outCanonicalized = false;
     return root;
+}
+
+void ReplaceAllLocal(
+    std::string& text,
+    const std::string& from,
+    const std::string& to)
+{
+    if (from.empty())
+        return;
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos)
+    {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+std::string NormalizeFindSegmentationPromptCallOrderForSnapshot(
+    const std::string& scriptText,
+    bool* outChanged)
+{
+    std::string normalized = scriptText;
+    const std::string oldPositive =
+        "m_seg.setpositivepointxy(global_segmentation_positive_x, global_segmentation_positive_y);";
+    const std::string newPositive =
+        "m_seg.setpositivepointxy(global_segmentation_positive_y, global_segmentation_positive_x);";
+    const std::string oldNegative =
+        "m_seg.setnegativepointxy(global_segmentation_negative_x, global_segmentation_negative_y);";
+    const std::string newNegative =
+        "m_seg.setnegativepointxy(global_segmentation_negative_y, global_segmentation_negative_x);";
+
+    const bool hadOld =
+        normalized.find(oldPositive) != std::string::npos ||
+        normalized.find(oldNegative) != std::string::npos;
+    ReplaceAllLocal(normalized, oldPositive, newPositive);
+    ReplaceAllLocal(normalized, oldNegative, newNegative);
+    if (outChanged)
+        *outChanged = hadOld && normalized != scriptText;
+    return normalized;
 }
 
 void AppendEvidenceCandidateStateProbeImpl(
@@ -115,6 +179,21 @@ void AppendEvidenceCandidateStateProbeImpl(
          << ",\"global_findline_recommended_edge\":" << globalValue("global_findline_recommended_edge")
          << ",\"global_findline_relation_edge\":" << globalValue("global_findline_relation_edge")
          << ",\"global_findline_attach_edge\":" << globalValue("global_findline_attach_edge")
+         << ",\"global_segmentation_mode\":" << globalValue("global_segmentation_mode")
+         << ",\"global_segmentation_threshold_percent\":"
+         << globalValue("global_segmentation_threshold_percent")
+         << ",\"global_segmentation_positive_enabled\":"
+         << globalValue("global_segmentation_positive_enabled")
+         << ",\"global_segmentation_positive_x\":"
+         << globalValue("global_segmentation_positive_x")
+         << ",\"global_segmentation_positive_y\":"
+         << globalValue("global_segmentation_positive_y")
+         << ",\"global_segmentation_negative_enabled\":"
+         << globalValue("global_segmentation_negative_enabled")
+         << ",\"global_segmentation_negative_x\":"
+         << globalValue("global_segmentation_negative_x")
+         << ",\"global_segmentation_negative_y\":"
+         << globalValue("global_segmentation_negative_y")
          << "}}\n";
 
     const std::filesystem::path path =
@@ -243,11 +322,19 @@ std::string EffectiveScriptId(const ManualTestContext& context)
 
 std::string EffectiveCaseId(const ManualTestContext& context)
 {
+    // Evidence Chain is the authoritative identity for candidate saves.  The
+    // Manual/Run path can temporarily clear active_case_id while preserving the
+    // selected Evidence snapshot; do not fall back to "manual_case" in that
+    // situation or the candidate becomes invisible from the original case row.
+    if (context.current_evidence_selection.valid)
+    {
+        const std::string evidenceCaseId =
+            StableEvidenceCaseIdFromSelection(context.current_evidence_selection);
+        if (!evidenceCaseId.empty())
+            return evidenceCaseId;
+    }
     if (!context.active_case_id.empty())
         return context.active_case_id;
-    if (context.current_evidence_selection.valid &&
-        !context.current_evidence_selection.case_id.empty())
-        return context.current_evidence_selection.case_id;
     if (!context.current_gauge.case_id.empty())
         return context.current_gauge.case_id;
     if (!context.active_script_case_name.empty())
@@ -507,6 +594,31 @@ void AppendCandidateToEvidenceChain(
             "; baseline source remains unchanged";
     };
 
+    auto sameEvidenceIdentity = [&](const ScriptEvidenceThumb& existing)
+    {
+        if (existing.is_candidate)
+            return false;
+
+        const std::filesystem::path resolvedSource =
+            ResolveWorkspaceFile(sourceEvidenceScriptPath).lexically_normal();
+        const bool sameCase = !caseId.empty() && existing.case_id == caseId;
+        const bool sameScript = !sourceEvidenceScriptPath.empty() &&
+            ResolveWorkspaceFile(existing.script_path).lexically_normal() ==
+                resolvedSource;
+        const bool sameImage =
+            imageId.empty() || existing.image_id.empty() ||
+            existing.image_id == imageId;
+        const bool sameTarget =
+            targetId.empty() || existing.target_id.empty() ||
+            existing.target_id == targetId;
+
+        // Some script/catalog Evidence rows intentionally do not have a case_id.
+        // Their stable working revision identity is script + image + target,
+        // otherwise saving falls back to manual_case and reopening the row
+        // restores old default parameters.
+        return sameCase || (sameScript && sameImage && sameTarget);
+    };
+
     bool workingRevisionBound = false;
     const int selectedGroup = context.selected_evidence_group;
     const int selectedThumb = context.selected_evidence_thumb;
@@ -526,24 +638,11 @@ void AppendCandidateToEvidenceChain(
 
     if (!workingRevisionBound)
     {
-        const std::filesystem::path resolvedSource =
-            ResolveWorkspaceFile(sourceEvidenceScriptPath).lexically_normal();
         for (auto& group : context.script_evidence_groups)
         {
             for (auto& existing : group.thumbs)
             {
-                if (existing.is_candidate)
-                    continue;
-                const bool sameCase = !caseId.empty() &&
-                    existing.case_id == caseId;
-                const bool sameScript = !sourceEvidenceScriptPath.empty() &&
-                    ResolveWorkspaceFile(existing.script_path).lexically_normal() ==
-                        resolvedSource;
-                const bool identityMatches = !caseId.empty()
-                    ? (sameCase &&
-                       (sourceEvidenceScriptPath.empty() || sameScript))
-                    : sameScript;
-                if (!identityMatches)
+                if (!sameEvidenceIdentity(existing))
                     continue;
                 bindWorkingRevision(existing);
                 workingRevisionBound = true;
@@ -686,7 +785,12 @@ bool SaveEvidenceCandidatePackage(
         return false;
     }
 
-    const std::string scriptText = CurrentScriptText(context);
+    const std::string originalScriptText = CurrentScriptText(context);
+    bool normalizedFindSegmentationPromptOrder = false;
+    const std::string scriptText =
+        NormalizeFindSegmentationPromptCallOrderForSnapshot(
+            originalScriptText,
+            &normalizedFindSegmentationPromptOrder);
     if (scriptText.empty())
     {
         result.reason = "script text is empty";
@@ -710,6 +814,13 @@ bool SaveEvidenceCandidatePackage(
     const std::string targetId = EffectiveTargetId(context);
     const std::string tool = EffectiveTool(context);
     const std::string parameterSummary = EffectiveParameterSummary(context);
+
+    if (context.current_gauge.case_id.empty())
+        context.current_gauge.case_id = caseId;
+    if (context.current_gauge.image_id.empty())
+        context.current_gauge.image_id = imageId;
+    if (context.current_gauge.target_id.empty())
+        context.current_gauge.target_id = targetId;
 
     NormalizeManualGaugeGeometry(context.current_gauge);
     ApplyManualGaugeToGlobals(context);
@@ -752,6 +863,26 @@ bool SaveEvidenceCandidatePackage(
     }
 
     std::string bindingProbeReason = "candidate values captured after ApplyManualGaugeToGlobals";
+    if (context.current_gauge.has_ellipse_gauge)
+    {
+        bindingProbeReason +=
+            "; ellipse_bbox=(" +
+            std::to_string(context.current_gauge.ellipse_x0) + "," +
+            std::to_string(context.current_gauge.ellipse_y0) + "," +
+            std::to_string(context.current_gauge.ellipse_x1) + "," +
+            std::to_string(context.current_gauge.ellipse_y1) + ")";
+    }
+    if (normalizedFindSegmentationPromptOrder)
+    {
+        bindingProbeReason +=
+            "; FindSegmentation prompt point calls normalized to set*pointxy(y,x)";
+        CXLOG_INFO(
+            "EvidenceCandidate",
+            "findsegmentation_prompt_call_order_normalized",
+            "normalized",
+            "candidate_id=" + candidateId +
+                " script=" + EffectiveScriptPath(context));
+    }
     const bool filterProfileBound =
         scriptText.find("global_filterprofile") != std::string::npos &&
         (scriptText.find("setfilterprofile(filterprofile)") != std::string::npos ||
@@ -961,6 +1092,38 @@ bool SaveEvidenceCandidatePackage(
         "candidate_package_written",
         "written",
         "script_snapshot, parameter_snapshot, runtime_globals, gauge_annotation and evidence_binding written");
+
+    if (context.current_evidence_selection.valid)
+    {
+        context.current_evidence_selection.case_id = caseId;
+        context.current_evidence_selection.candidate_id = result.candidate_id;
+        context.current_evidence_selection.candidate_dir = result.candidate_dir;
+        context.current_evidence_selection.evidence_binding_path =
+            result.evidence_binding_path;
+        context.current_evidence_selection.parameter_snapshot_path =
+            result.parameter_snapshot_path;
+        context.current_evidence_selection.runtime_globals_path =
+            runtimeGlobalsPath.string();
+        context.current_evidence_selection.gauge_annotation_path =
+            result.gauge_annotation_path;
+        context.current_evidence_selection.working_script_snapshot_path =
+            result.script_snapshot_path;
+        context.current_evidence_selection.has_saved_state = true;
+        context.current_evidence_selection.source_evidence_script_path =
+            ResolveWorkspaceFile(sourceEvidenceScriptPath).string();
+        context.current_evidence_selection.parameter_summary = parameterSummary;
+        context.current_evidence_selection.parameter_profile_id =
+            parameterSummary;
+        context.current_evidence_selection.primary_object_type =
+            context.current_gauge.primary_object_type;
+        context.current_evidence_selection.primary_object_name =
+            context.current_gauge.primary_object_name;
+        context.current_evidence_selection.primary_object_status =
+            context.current_gauge.primary_object_status;
+        context.current_evidence_selection.status = "pending_human_review";
+        context.current_evidence_selection.reason =
+            "active working revision=" + result.candidate_id;
+    }
 
     if (options.add_to_evidence_chain)
     {

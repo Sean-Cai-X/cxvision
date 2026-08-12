@@ -1,5 +1,6 @@
 #ifndef FASTMATCH_H
 #define FASTMATCH_H
+#include <array>
 #include <map>
 #include <vector>
 #include "Shape.h"
@@ -22,6 +23,17 @@ using namespace std;
 class FastMatch :public FindLine
 {
 public:
+    struct LearnDirectionParams
+    {
+        int wgap = -1;
+        int hgap = -1;
+        int method = -1;
+        int threshold = -1;
+        int linegap = -1;
+        int objfilter = -1;
+        int compare_gap = -1;
+    };
+
     FastMatch();
     ~FastMatch();
 
@@ -42,6 +54,22 @@ public:
     void setthre(int ithre);
     void setgamarate(int igama);
     void setobjfilter(int ifindset);
+    void setlearnwgap(int direction, int value);
+    void setlearnhgap(int direction, int value);
+    void setlearnmethod(int direction, int value);
+    void setlearnthre(int direction, int value);
+    void setlearnlinegap(int direction, int value);
+    void setlearnobjfilter(int direction, int value);
+    void setlearncompgap(int direction, int value);
+    void setlearnwgap_script(int value, int direction) { setlearnwgap(direction, value); }
+    void setlearnhgap_script(int value, int direction) { setlearnhgap(direction, value); }
+    void setlearnmethod_script(int value, int direction) { setlearnmethod(direction, value); }
+    void setlearnthre_script(int value, int direction) { setlearnthre(direction, value); }
+    void setlearnlinegap_script(int value, int direction) { setlearnlinegap(direction, value); }
+    void setlearnobjfilter_script(int value, int direction) { setlearnobjfilter(direction, value); }
+    void setlearncompgap_script(int value, int direction) { setlearncompgap(direction, value); }
+    LearnDirectionParams effectiveLearnDirectionParams(int direction);
+    bool hasExplicitLearnDirectionParams() const;
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
     void setselectedgenum(int iedgenum);
 
@@ -321,6 +349,8 @@ public:
     vector<int>& getduplicateslist_l12();
     void savelevel0_l1();
 private:
+    LearnDirectionParams& learnDirectionParams(int direction);
+
     int m_istyle;
     Image* g_pmodelimage;
     Image* m_matchimage;
@@ -414,6 +444,7 @@ private:
     int m_fastmatch_learn_a2_count = 0;
     int m_fastmatch_learn_b2_count = 0;
     int m_fastmatch_learn_status_code = 0;
+    std::array<LearnDirectionParams, 4> m_learn_direction_params;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;

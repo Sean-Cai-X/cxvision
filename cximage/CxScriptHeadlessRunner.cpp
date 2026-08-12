@@ -2049,6 +2049,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_filterprofile", options.filterprofile);
         setGlobal("global_find_num", options.find_num);
         setGlobal("global_compare_gap", options.compare_gap);
+        setGlobal("global_fastmatch_learn_shared", 1);
+        for (int dir = 0; dir < 4; ++dir)
+        {
+            const std::string suffix = "_" + std::to_string(dir);
+            setGlobal("global_fastmatch_learn_wgap" + suffix, options.wgap);
+            setGlobal("global_fastmatch_learn_hgap" + suffix, options.hgap);
+            setGlobal("global_fastmatch_learn_method" + suffix, options.method);
+            setGlobal("global_fastmatch_learn_threshold" + suffix, options.threshold);
+            setGlobal("global_fastmatch_learn_linegap" + suffix, options.linegap);
+            setGlobal("global_fastmatch_learn_objfilter" + suffix, 1);
+            setGlobal("global_fastmatch_learn_compare_gap" + suffix, options.compare_gap);
+        }
         setGlobal("global_max_elapsed_ms", options.max_elapsed_ms);
         setGlobal("global_max_scan_lines", options.max_scan_lines);
         setGlobal("global_max_samples", options.max_samples);

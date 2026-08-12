@@ -170,11 +170,14 @@ bool LearnPatternThroughRectFindline(
     int learn_h, bool use_object_filter_fallback, PointsShape &out_pattern,
     int &out_a_count, int &out_b_count, int &out_a2_count, int &out_b2_count) {
   FindLine finder;
-  finder.SetWHgap(source.wgap(), source.hgap());
-  finder.setcomparegap(source.getconparegap());
-  finder.setthre(source.thre());
-  finder.setlinegap(source.linegap());
-  finder.setobjfilter(use_object_filter_fallback ? 1 : source.objfilter());
+  const FastMatch::LearnDirectionParams p0 =
+      source.effectiveLearnDirectionParams(0);
+  finder.SetWHgap(p0.wgap, p0.hgap);
+  finder.setcomparegap(p0.compare_gap);
+  finder.setthre(p0.threshold);
+  finder.setlinegap(p0.linegap);
+  finder.setmethod(p0.method);
+  finder.setobjfilter(use_object_filter_fallback ? 1 : p0.objfilter);
   if (use_object_filter_fallback) {
     finder.setfilterprofile(1);
     finder.setfilter(21, 5, 100000);
@@ -316,8 +319,14 @@ bool LearnPatternByBoundaryPointPairs(Image &image, FastMatch &source,
     return false;
   }
 
-  const int threshold = std::max(4, source.thre());
-  const int compare_gap = std::max(1, source.getconparegap());
+  const FastMatch::LearnDirectionParams top_params =
+      source.effectiveLearnDirectionParams(0);
+  const FastMatch::LearnDirectionParams bottom_params =
+      source.effectiveLearnDirectionParams(1);
+  const FastMatch::LearnDirectionParams left_params =
+      source.effectiveLearnDirectionParams(2);
+  const FastMatch::LearnDirectionParams right_params =
+      source.effectiveLearnDirectionParams(3);
 
   PointsShape top_points;
   PointsShape bottom_points;
@@ -325,19 +334,26 @@ bool LearnPatternByBoundaryPointPairs(Image &image, FastMatch &source,
   PointsShape right_points;
 
   out_a_count = CollectVerticalBoundaryPoints(
-      gray, x0, y0, x1, y1, source.wgap(), threshold, true, top_points);
+      gray, x0, y0, x1, y1, top_params.wgap, top_params.threshold, true,
+      top_points);
   out_b_count = CollectVerticalBoundaryPoints(
-      gray, x0, y0, x1, y1, source.wgap(), threshold, false, bottom_points);
+      gray, x0, y0, x1, y1, bottom_params.wgap, bottom_params.threshold, false,
+      bottom_points);
   out_a2_count = CollectHorizontalBoundaryPoints(
-      gray, x0, y0, x1, y1, source.hgap(), threshold, true, left_points);
+      gray, x0, y0, x1, y1, left_params.hgap, left_params.threshold, true,
+      left_points);
   out_b2_count = CollectHorizontalBoundaryPoints(
-      gray, x0, y0, x1, y1, source.hgap(), threshold, false, right_points);
+      gray, x0, y0, x1, y1, right_params.hgap, right_params.threshold, false,
+      right_points);
 
   out_pattern = PointsShape();
-  top_points.doublepattern(compare_gap, 6, out_pattern);
-  bottom_points.doublepattern(compare_gap, 12, out_pattern);
-  left_points.doublepattern(compare_gap, 3, out_pattern);
-  right_points.doublepattern(compare_gap, 9, out_pattern);
+  top_points.doublepattern(std::max(1, top_params.compare_gap), 6, out_pattern);
+  bottom_points.doublepattern(std::max(1, bottom_params.compare_gap), 12,
+                              out_pattern);
+  left_points.doublepattern(std::max(1, left_params.compare_gap), 3,
+                            out_pattern);
+  right_points.doublepattern(std::max(1, right_params.compare_gap), 9,
+                             out_pattern);
 
   return out_pattern.ABsize() > 0;
 }
@@ -762,6 +778,78 @@ void FastMatch::setgrid(int iw, int igrid) {
 }
 FastMatch::~FastMatch() { delete m_pgrid; }
 void FastMatch::setcomparegap(int igap) { FindLine::setcomparegap(igap); }
+FastMatch::LearnDirectionParams &FastMatch::learnDirectionParams(
+    int direction) {
+  direction = std::max(0, std::min(3, direction));
+  return m_learn_direction_params[static_cast<std::size_t>(direction)];
+}
+
+FastMatch::LearnDirectionParams FastMatch::effectiveLearnDirectionParams(
+    int direction) {
+  LearnDirectionParams params = learnDirectionParams(direction);
+  if (params.wgap < 0)
+    params.wgap = wgap();
+  if (params.hgap < 0)
+    params.hgap = hgap();
+  if (params.method < 0)
+    params.method = 0;
+  if (params.threshold < 0)
+    params.threshold = thre();
+  if (params.linegap < 0)
+    params.linegap = linegap();
+  if (params.objfilter < 0)
+    params.objfilter = objfilter();
+  if (params.compare_gap < 0)
+    params.compare_gap = getconparegap();
+  params.wgap = std::max(1, params.wgap);
+  params.hgap = std::max(1, params.hgap);
+  params.method = std::max(0, std::min(3, params.method));
+  params.threshold = std::max(0, std::min(255, params.threshold));
+  params.linegap = std::max(1, params.linegap);
+  params.objfilter = std::max(0, params.objfilter);
+  params.compare_gap = std::max(1, params.compare_gap);
+  return params;
+}
+
+bool FastMatch::hasExplicitLearnDirectionParams() const {
+  for (const LearnDirectionParams &params : m_learn_direction_params) {
+    if (params.wgap >= 0 || params.hgap >= 0 || params.method >= 0 ||
+        params.threshold >= 0 || params.linegap >= 0 ||
+        params.objfilter >= 0 || params.compare_gap >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void FastMatch::setlearnwgap(int direction, int value) {
+  learnDirectionParams(direction).wgap = std::max(1, value);
+}
+
+void FastMatch::setlearnhgap(int direction, int value) {
+  learnDirectionParams(direction).hgap = std::max(1, value);
+}
+
+void FastMatch::setlearnmethod(int direction, int value) {
+  learnDirectionParams(direction).method = std::max(0, std::min(3, value));
+}
+
+void FastMatch::setlearnthre(int direction, int value) {
+  learnDirectionParams(direction).threshold = std::max(0, std::min(255, value));
+}
+
+void FastMatch::setlearnlinegap(int direction, int value) {
+  learnDirectionParams(direction).linegap = std::max(1, value);
+}
+
+void FastMatch::setlearnobjfilter(int direction, int value) {
+  learnDirectionParams(direction).objfilter = std::max(0, value);
+}
+
+void FastMatch::setlearncompgap(int direction, int value) {
+  learnDirectionParams(direction).compare_gap = std::max(1, value);
+}
+
 void FastMatch::setfindnum(int ifindnum) {
   m_imaxmatchnum = FastMatchPositiveInt(ifindnum);
 }
@@ -977,6 +1065,24 @@ void FastMatch::Learn(Image &image) {
   m_fastmatch_learn_a2_count = 0;
   m_fastmatch_learn_b2_count = 0;
 
+  const bool use_directional_learn = hasExplicitLearnDirectionParams();
+  if (use_directional_learn) {
+    PointsShape directional_pattern;
+    if (LearnPatternByBoundaryPointPairs(
+            image, *this, input_learn_roi_x, input_learn_roi_y,
+            input_learn_roi_w, input_learn_roi_h, directional_pattern,
+            m_fastmatch_learn_a_count, m_fastmatch_learn_b_count,
+            m_fastmatch_learn_a2_count, m_fastmatch_learn_b2_count)) {
+      FindLine::setpattern(directional_pattern);
+      m_fastmatch_learn_status_code = 32;
+      modelzeroposition();
+      gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
+      m_imodelwith = static_cast<int>(learned_rect.Width());
+      m_imodelheigh = static_cast<int>(learned_rect.Height());
+      return;
+    }
+  }
+
   edgepattern(image);
   m_fastmatch_learn_a_count = FindLine::getlearnacount();
   m_fastmatch_learn_b_count = FindLine::getlearnbcount();
@@ -1003,13 +1109,12 @@ void FastMatch::Learn(Image &image) {
   const int saved_rect_w = input_learn_roi_w;
   const int saved_rect_h = input_learn_roi_h;
 
-  const int retry_wgap = saved_wgap > 1 ? 1 : saved_wgap;
-  const int retry_hgap = saved_hgap > 1 ? 1 : saved_hgap;
-  const int retry_comparegap =
-      saved_comparegap > 5 ? 5 : (saved_comparegap < 2 ? 2 : saved_comparegap);
-  const int retry_threshold =
-      saved_threshold > 8 ? 8 : (saved_threshold < 6 ? 6 : saved_threshold);
-  const int retry_linegap = 1;
+  const LearnDirectionParams retry_params = effectiveLearnDirectionParams(0);
+  const int retry_wgap = retry_params.wgap;
+  const int retry_hgap = retry_params.hgap;
+  const int retry_comparegap = retry_params.compare_gap;
+  const int retry_threshold = retry_params.threshold;
+  const int retry_linegap = retry_params.linegap;
   const int retry_margin = 2;
   const int retry_rect_x =
       saved_rect_x > retry_margin ? saved_rect_x - retry_margin : 0;

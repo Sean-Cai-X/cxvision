@@ -357,13 +357,25 @@ void gp_Path::AddCircle(const gp_Pnt &center, double radius, double drate) {
 void gp_Path::AddRectangularEllipse(const gp_Pnt &p1, const gp_Pnt &p2,
                                     double drate) {
 
-  double width0 = std::abs(p2.X() - p1.X());
-  double height0 = std::abs(p2.Y() - p1.Y());
-  double width = width0 >= height0 ? width0 : height0;
-  double height = width0 <= height0 ? width0 : height0;
-  gp_Ax2 anAxis(gp_Pnt((p1.X() + p2.X()) / 2., (p1.Y() + p2.Y()) / 2., 0),
-                gp_Dir(0, 0, 1));
-  gp_Elips elips(anAxis, width / 2., height / 2.);
+  const double width = std::abs(p2.X() - p1.X());
+  const double height = std::abs(p2.Y() - p1.Y());
+  if (width <= 0.0 || height <= 0.0)
+    return;
+
+  // gp_Elips takes major/minor radii, while the public rectangular API is
+  // axis-bound: X extent must remain X and Y extent must remain Y.  The old
+  // implementation sorted width/height but left gp_Ax2's X direction fixed,
+  // so every vertical ellipse was silently rotated to horizontal when a
+  // CxScript replay rebuilt the path.
+  const bool horizontalMajor = width >= height;
+  const double majorRadius = (horizontalMajor ? width : height) * 0.5;
+  const double minorRadius = (horizontalMajor ? height : width) * 0.5;
+  const gp_Dir majorDirection =
+      horizontalMajor ? gp_Dir(1.0, 0.0, 0.0) : gp_Dir(0.0, 1.0, 0.0);
+  gp_Ax2 anAxis(gp_Pnt((p1.X() + p2.X()) * 0.5,
+                       (p1.Y() + p2.Y()) * 0.5, 0.0),
+                gp_Dir(0.0, 0.0, 1.0), majorDirection);
+  gp_Elips elips(anAxis, majorRadius, minorRadius);
 
   Handle(Geom_TrimmedCurve) ellipseCurve =
       new Geom_TrimmedCurve(new Geom_Ellipse(elips), 0.0, 2 * M_PI);
