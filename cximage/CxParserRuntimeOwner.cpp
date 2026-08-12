@@ -325,12 +325,10 @@ bool CxParserRuntimeOwner::ExecuteScript(
         reason = "parser runtime must be cleared before executing another script";
         return false;
     }
-    struct ScriptLocalValueCleanup
-    {
-        std::map<std::string, double>& values;
-        ~ScriptLocalValueCleanup() { values.clear(); }
-    } cleanup{m_script_local_values};
 
+    // Local numeric declarations are bound into muParser through DefineVar().
+    // Keep the backing storage alive until ClearAll(), which clears parser
+    // bindings before releasing these values.
     const std::string prepared =
         PrepareNumericLocals(source, m_script_local_values);
     for (auto& local : m_script_local_values)
@@ -369,12 +367,9 @@ bool CxParserRuntimeOwner::CompileScriptOnly(
         return false;
     }
 
-    struct ScriptLocalValueCleanup
-    {
-        std::map<std::string, double>& values;
-        ~ScriptLocalValueCleanup() { values.clear(); }
-    } cleanup{m_script_local_values};
-
+    // Local numeric declarations are bound into muParser through DefineVar().
+    // Keep the backing storage alive until ClearAll(), which clears parser
+    // bindings before releasing these values.
     const std::string prepared =
         PrepareNumericLocals(source, m_script_local_values);
 

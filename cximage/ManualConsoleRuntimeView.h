@@ -26,7 +26,11 @@ std::string BuildFindCircleGeometrySummary(const RuntimeObjectView& object);
 
 std::string BuildFindLineGeometrySummary(const RuntimeObjectView& object);
 
+std::string BuildFindRectGeometrySummary(const RuntimeObjectView& object);
+
 std::string BuildFindSegmentationGeometrySummary(const RuntimeObjectView& object);
+
+std::string BuildTorchTaskRuntimeSummary(const RuntimeObjectView& object);
 
 std::string BuildGeometrySummary(const RuntimeObjectView& object);
 

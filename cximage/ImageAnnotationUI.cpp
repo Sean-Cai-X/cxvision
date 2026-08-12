@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <iterator>
 #include <sstream>
 
 #include "CxAnnotationToolRuntime.h"
@@ -43,6 +44,55 @@ bool AnnotationInputText(const char* label, std::string& value)
   return ImGui::InputText(label, value.data(), value.capacity() + 1,
                           ImGuiInputTextFlags_CallbackResize,
                           AnnotationStringResize, &value);
+}
+
+void SyncSegmentationLegacyPointFromLists(ManualGaugeState& gauge)
+{
+  gauge.has_segmentation_positive_point =
+      !gauge.segmentation_positive_points.empty();
+  if (gauge.has_segmentation_positive_point)
+  {
+    const auto& point = gauge.segmentation_positive_points.back();
+    gauge.segmentation_positive_x = point.x;
+    gauge.segmentation_positive_y = point.y;
+  }
+
+  gauge.has_segmentation_negative_point =
+      !gauge.segmentation_negative_points.empty();
+  if (gauge.has_segmentation_negative_point)
+  {
+    const auto& point = gauge.segmentation_negative_points.back();
+    gauge.segmentation_negative_x = point.x;
+    gauge.segmentation_negative_y = point.y;
+  }
+}
+
+void UpsertSegmentationPromptListPoint(
+    std::vector<ManualSegmentationPromptPoint>& points,
+    const std::string& ref,
+    int x,
+    int y)
+{
+  auto it = std::find_if(
+      points.begin(),
+      points.end(),
+      [&ref](const ManualSegmentationPromptPoint& point)
+      {
+        return !ref.empty() && point.ref == ref;
+      });
+  if (it == points.end())
+  {
+    ManualSegmentationPromptPoint point;
+    point.ref = ref;
+    point.x = x;
+    point.y = y;
+    points.push_back(point);
+  }
+  else
+  {
+    it->x = x;
+    it->y = y;
+  }
 }
 
 OverlayImagePoint ElementCenter(const OverlayElement& element)
@@ -204,6 +254,9 @@ void UpdateManualGaugeFromShapeElement(
   else if (element.owner_type == "FindEllipse" &&
            element.shape->kind() == CxShapeKind::Ellipse)
   {
+    if (!element.editable || element.semantic_role != "roi")
+      return;
+
     CxShapeGeometrySnapshot geometry;
     if (!element.shape->snapshot(geometry))
       return;
@@ -240,6 +293,22 @@ void UpdateManualGaugeFromShapeElement(
     gauge.segmentation_prompt_y1 =
         static_cast<int>(std::lround(std::max(rect->y0(), rect->y1())));
   }
+  else if (element.owner_type == "FindObject" &&
+           element.shape->kind() == CxShapeKind::Rect)
+  {
+    const auto* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+      return;
+    gauge.tool = "FindObject";
+    gauge.has_findobject_roi = true;
+    gauge.has_line_gauge = false;
+    gauge.has_circle_gauge = false;
+    gauge.has_ellipse_gauge = false;
+    gauge.findobject_x0 = static_cast<int>(std::lround(std::min(rect->x0(), rect->x1())));
+    gauge.findobject_y0 = static_cast<int>(std::lround(std::min(rect->y0(), rect->y1())));
+    gauge.findobject_x1 = static_cast<int>(std::lround(std::max(rect->x0(), rect->x1())));
+    gauge.findobject_y1 = static_cast<int>(std::lround(std::max(rect->y0(), rect->y1())));
+  }
   else if (element.owner_type == "FindSegmentation" &&
            element.shape->kind() == CxShapeKind::Points)
   {
@@ -252,19 +321,26 @@ void UpdateManualGaugeFromShapeElement(
     if (element.owner_binding == "setpositivepointxy" ||
         element.owner_binding == "setpositivepoint")
     {
-      gauge.has_segmentation_positive_point = true;
-      gauge.segmentation_positive_x = x;
-      gauge.segmentation_positive_y = y;
+      gauge.segmentation_prompt_pick_mode = 1;
+      UpsertSegmentationPromptListPoint(
+          gauge.segmentation_positive_points,
+          element.stable_ref,
+          x,
+          y);
     }
     else if (element.owner_binding == "setnegativepointxy" ||
              element.owner_binding == "setnegativepoint")
     {
-      gauge.has_segmentation_negative_point = true;
-      gauge.segmentation_negative_x = x;
-      gauge.segmentation_negative_y = y;
+      gauge.segmentation_prompt_pick_mode = 2;
+      UpsertSegmentationPromptListPoint(
+          gauge.segmentation_negative_points,
+          element.stable_ref,
+          x,
+          y);
     }
     else
       return;
+    SyncSegmentationLegacyPointFromLists(gauge);
   }
   else
   {
@@ -420,6 +496,39 @@ bool ExportShapeElementToRuntimeGlobals(
     return true;
   }
 
+  if (element.owner_type == "FindObject" &&
+      element.owner_binding == "setrect" &&
+      element.shape->kind() == CxShapeKind::Rect)
+  {
+    const auto* rect = dynamic_cast<const RectShape*>(element.shape.get());
+    if (rect == nullptr)
+    {
+      reason = "FindObject ROI is not a rectangle";
+      return false;
+    }
+    const double x0 = std::min(rect->x0(), rect->x1());
+    const double y0 = std::min(rect->y0(), rect->y1());
+    const double x1 = std::max(rect->x0(), rect->x1());
+    const double y1 = std::max(rect->y0(), rect->y1());
+    if (x1 <= x0 || y1 <= y0)
+    {
+      reason = "FindObject ROI is empty";
+      return false;
+    }
+    setInt("global_roi_x0", x0);
+    setInt("global_roi_y0", y0);
+    setInt("global_roi_x1", x1);
+    setInt("global_roi_y1", y1);
+    setInt("global_roi_x", x0);
+    setInt("global_roi_y", y0);
+    setInt("global_roi_width", x1 - x0);
+    setInt("global_roi_height", y1 - y0);
+    UpdateManualGaugeFromShapeElement(context, element);
+    ApplyManualGaugeToGlobals(context);
+    reason = "FindObject ROI exported to global_roi_*";
+    return true;
+  }
+
   if (element.owner_type == "FindSegmentation" &&
       (element.owner_binding == "setpositivepointxy" ||
        element.owner_binding == "setpositivepoint" ||
@@ -440,14 +549,14 @@ bool ExportShapeElementToRuntimeGlobals(
       setInt("global_segmentation_positive_enabled", 1);
       setInt("global_segmentation_positive_x", point.x);
       setInt("global_segmentation_positive_y", point.y);
-      reason = "FindSegmentation positive point exported to global_segmentation_positive_*";
+      reason = "FindSegmentation positive point appended to prompt list and exported to global_segmentation_positive_*";
     }
     else
     {
       setInt("global_segmentation_negative_enabled", 1);
       setInt("global_segmentation_negative_x", point.x);
       setInt("global_segmentation_negative_y", point.y);
-      reason = "FindSegmentation negative point exported to global_segmentation_negative_*";
+      reason = "FindSegmentation negative point appended to prompt list and exported to global_segmentation_negative_*";
     }
     UpdateManualGaugeFromShapeElement(context, element);
     ApplyManualGaugeToGlobals(context);
@@ -488,6 +597,12 @@ bool ExportShapeElementToRuntimeGlobals(
 
   if (element.shape->kind() == CxShapeKind::Ellipse)
   {
+    if (!element.editable || element.semantic_role != "roi")
+    {
+      reason = "selected ellipse is a result/display element; only editable FindEllipse roi can export to global_ellipse_*";
+      return false;
+    }
+
     CxShapeGeometrySnapshot geometry;
     if (!element.shape->snapshot(geometry) ||
         geometry.radius_x <= 0.0 ||
@@ -715,17 +830,59 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
             point.stale = true;
             point.runtime_edit_pending = true;
         };
-        if (gauge.has_segmentation_positive_point)
+        m_annotationLayer.RemoveShapeByStableRef(ownerRef + ".prompt_positive");
+        m_annotationLayer.RemoveShapeByStableRef(ownerRef + ".prompt_negative");
+
+        std::vector<ManualSegmentationPromptPoint> positivePoints =
+            gauge.segmentation_positive_points;
+        if (positivePoints.empty() && gauge.has_segmentation_positive_point &&
+            gauge.segmentation_positive_x > 0 && gauge.segmentation_positive_y > 0)
         {
-            upsert_prompt_point(".prompt_positive", "setpositivepointxy",
-                                "prompt_positive", gauge.segmentation_positive_x,
-                                gauge.segmentation_positive_y);
+            ManualSegmentationPromptPoint point;
+            point.ref = ownerRef + ".prompt_positive.0";
+            point.x = gauge.segmentation_positive_x;
+            point.y = gauge.segmentation_positive_y;
+            positivePoints.push_back(point);
         }
-        if (gauge.has_segmentation_negative_point)
+        std::vector<ManualSegmentationPromptPoint> negativePoints =
+            gauge.segmentation_negative_points;
+        if (negativePoints.empty() && gauge.has_segmentation_negative_point &&
+            gauge.segmentation_negative_x > 0 && gauge.segmentation_negative_y > 0)
         {
-            upsert_prompt_point(".prompt_negative", "setnegativepointxy",
-                                "prompt_negative", gauge.segmentation_negative_x,
-                                gauge.segmentation_negative_y);
+            ManualSegmentationPromptPoint point;
+            point.ref = ownerRef + ".prompt_negative.0";
+            point.x = gauge.segmentation_negative_x;
+            point.y = gauge.segmentation_negative_y;
+            negativePoints.push_back(point);
+        }
+
+        for (int i = 0; i < static_cast<int>(positivePoints.size()); ++i)
+        {
+            upsert_prompt_point(
+                ".prompt_positive." + std::to_string(i),
+                "setpositivepointxy",
+                "prompt_positive",
+                positivePoints[i].x,
+                positivePoints[i].y);
+        }
+        for (int i = static_cast<int>(positivePoints.size()); i < 128; ++i)
+        {
+            m_annotationLayer.RemoveShapeByStableRef(
+                ownerRef + ".prompt_positive." + std::to_string(i));
+        }
+        for (int i = 0; i < static_cast<int>(negativePoints.size()); ++i)
+        {
+            upsert_prompt_point(
+                ".prompt_negative." + std::to_string(i),
+                "setnegativepointxy",
+                "prompt_negative",
+                negativePoints[i].x,
+                negativePoints[i].y);
+        }
+        for (int i = static_cast<int>(negativePoints.size()); i < 128; ++i)
+        {
+            m_annotationLayer.RemoveShapeByStableRef(
+                ownerRef + ".prompt_negative." + std::to_string(i));
         }
         m_annotationLayer.MarkOwnerResultStale("FindSegmentation", ownerRef);
 
@@ -734,6 +891,50 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
         gauge.dirty = true;
         gauge.accepted = false;
         reason = "FindSegmentation prompt ROI and typed points preview applied to Image View";
+        return true;
+    }
+
+    if (gauge.tool == "FindObject")
+    {
+        auto readInt = [this](const std::string& key, int fallback)
+        {
+            const auto it = m_manualTest.runtime_int_vars.find(key);
+            return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+        };
+        if (!gauge.has_findobject_roi)
+        {
+            gauge.findobject_x0 = std::max(0, readInt("global_roi_x0", 80));
+            gauge.findobject_y0 = std::max(0, readInt("global_roi_y0", 80));
+            gauge.findobject_x1 = std::max(gauge.findobject_x0 + 1,
+                                           readInt("global_roi_x1", 1180));
+            gauge.findobject_y1 = std::max(gauge.findobject_y0 + 1,
+                                           readInt("global_roi_y1", 880));
+            gauge.has_findobject_roi = true;
+        }
+        auto shape = std::make_unique<RectShape>();
+        shape->setRect(gauge.findobject_x0, gauge.findobject_y0,
+                       gauge.findobject_x1, gauge.findobject_y1);
+        const std::string ownerRef = gauge.primary_object_name.empty()
+            ? "m_object" : gauge.primary_object_name;
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi", std::move(shape));
+        element.tool_id = "FindObject";
+        element.owner_type = "FindObject";
+        element.owner_ref = ownerRef;
+        element.owner_binding = "setrect";
+        element.semantic_role = "roi";
+        element.editable = true;
+        element.visible = true;
+        element.runtime_bound = true;
+        element.result_element = false;
+        element.stale = true;
+        element.runtime_edit_pending = true;
+        m_annotationLayer.MarkOwnerResultStale("FindObject", ownerRef);
+        ApplyManualGaugeToGlobals(m_manualTest);
+        gauge.source = "key_parameter_controls";
+        gauge.dirty = true;
+        gauge.accepted = false;
+        reason = "FindObject ROI and component parameters preview applied to Image View";
         return true;
     }
 
@@ -806,6 +1007,107 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
         gauge.accepted = false;
         reason =
             "FastMatch Learn/Search ROI preview applied from global_* xywh values";
+        return true;
+    }
+
+    if (gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge)
+    {
+        if (!gauge.has_ellipse_gauge)
+        {
+            reason = "Apply To Gauge requires an active FindEllipse gauge";
+            return false;
+        }
+
+        const int x0 = std::min(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y0 = std::min(gauge.ellipse_y0, gauge.ellipse_y1);
+        const int x1 = std::max(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y1 = std::max(gauge.ellipse_y0, gauge.ellipse_y1);
+        if (x1 <= x0 || y1 <= y0)
+        {
+            reason = "FindEllipse gauge rectangle is empty";
+            return false;
+        }
+
+        gauge.tool = "FindEllipse";
+        gauge.has_ellipse_gauge = true;
+        gauge.has_line_gauge = false;
+        gauge.has_circle_gauge = false;
+        gauge.ellipse_x0 = x0;
+        gauge.ellipse_y0 = y0;
+        gauge.ellipse_x1 = x1;
+        gauge.ellipse_y1 = y1;
+
+        const double cx = (static_cast<double>(x0) + static_cast<double>(x1)) * 0.5;
+        const double cy = (static_cast<double>(y0) + static_cast<double>(y1)) * 0.5;
+        const double rx = std::max(1.0, (static_cast<double>(x1) - static_cast<double>(x0)) * 0.5);
+        const double ry = std::max(1.0, (static_cast<double>(y1) - static_cast<double>(y0)) * 0.5);
+
+        auto shape = std::make_unique<EllipseShape>(cx, cy, rx, ry);
+        const std::string ownerRef =
+            gauge.primary_object_name.empty() ? "m_ellipse" : gauge.primary_object_name;
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi_ellipse",
+            std::move(shape));
+        element.tool_id = "FindEllipse";
+        element.owner_type = "FindEllipse";
+        element.owner_ref = ownerRef;
+        element.owner_binding = "setellipse";
+        element.semantic_role = "roi";
+        element.editable = true;
+        element.visible = true;
+        element.runtime_bound = true;
+        element.result_element = false;
+        element.stale = true;
+        element.runtime_edit_pending = true;
+
+        const int innerScale =
+            std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+        gauge.ellipse_inner_scale_percent = innerScale;
+        if (innerScale > 0)
+        {
+            auto innerShape = std::make_unique<EllipseShape>(
+                cx,
+                cy,
+                rx * static_cast<double>(innerScale) * 0.01,
+                ry * static_cast<double>(innerScale) * 0.01);
+            CxShapeElement& innerElement = m_annotationLayer.UpsertShape(
+                ownerRef + ".inner_scan_ellipse",
+                std::move(innerShape));
+            innerElement.tool_id = "FindEllipse";
+            innerElement.owner_type = "FindEllipse";
+            innerElement.owner_ref = ownerRef;
+            innerElement.owner_binding.clear();
+            innerElement.semantic_role = "scan";
+            innerElement.editable = false;
+            innerElement.visible = true;
+            innerElement.runtime_bound = true;
+            innerElement.result_element = false;
+            innerElement.stale = false;
+        }
+        else
+        {
+            m_annotationLayer.RemoveShapeByStableRef(
+                ownerRef + ".inner_scan_ellipse");
+        }
+        m_annotationLayer.MarkOwnerResultStale("FindEllipse", ownerRef);
+
+        // Keep the edit path value-based.  Do not mutate a live Parser
+        // FindEllipse object here: calling buildbbox() from the UI preview path
+        // can race the script replay path and make the ellipse jump back to the
+        // previous runtime-derived ROI.  Run Script rebuilds the Parser object
+        // from the injected global_ellipse_* values.
+        CXLOG_INFO(
+            "ManualConsole",
+            "findellipse_apply_to_gauge",
+            "value_snapshot",
+            "FindEllipse Apply To Gauge updated ShapeElement/global_* only; "
+            "runtime object will be rebuilt by Run Script");
+
+        ApplyManualGaugeToGlobals(m_manualTest);
+        gauge.source = "key_parameter_controls";
+        gauge.dirty = true;
+        gauge.accepted = false;
+        reason = "FindEllipse ROI preview applied to Image View and global_ellipse_*";
         return true;
     }
 
@@ -899,6 +1201,391 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string& reason)
     gauge.dirty = true;
     gauge.accepted = false;
     return true;
+}
+
+bool ViewController::ProjectCurrentGaugeToImageViewPreview(std::string& reason)
+{
+    reason.clear();
+
+    ManualGaugeState& gauge = m_manualTest.current_gauge;
+    const std::string originalSource = gauge.source;
+    const std::string originalReviewStatus = gauge.review_status;
+    const bool originalDirty = gauge.dirty;
+    const bool originalAccepted = gauge.accepted;
+
+    auto restoreGaugeState = [&]()
+    {
+        gauge.source = originalSource;
+        gauge.review_status = originalReviewStatus;
+        gauge.dirty = originalDirty;
+        gauge.accepted = originalAccepted;
+    };
+
+    auto ownerOrDefault = [&gauge](const char* fallback) -> std::string
+    {
+        return gauge.primary_object_name.empty()
+            ? std::string(fallback)
+            : gauge.primary_object_name;
+    };
+
+    auto stampInputElement = [](
+        CxShapeElement& element,
+        const std::string& toolId,
+        const std::string& ownerType,
+        const std::string& ownerRef,
+        const std::string& binding,
+        const std::string& role,
+        bool editable)
+    {
+        element.tool_id = toolId;
+        element.owner_type = ownerType;
+        element.owner_ref = ownerRef;
+        element.owner_binding = binding;
+        element.semantic_role = role;
+        element.editable = editable;
+        element.visible = true;
+        element.runtime_bound = false;
+        element.result_element = false;
+        element.stale = false;
+        element.runtime_edit_pending = false;
+        element.selected = false;
+    };
+
+    auto clearEvidencePreviewOwners = [this]()
+    {
+        const char* ownerTypes[] = {
+            "FindLine",
+            "Findline",
+            "FindCircle",
+            "Findcircle",
+            "FindEllipse",
+            "Findellipse",
+            "FindRect",
+            "Findrect",
+            "FindObject",
+            "Findobject",
+            "FindSegmentation",
+            "Findsegmentation",
+            "FastMatch",
+            "fastmatch",
+            "CFastMatch"
+        };
+
+        auto isManagedGaugeOwner = [&ownerTypes](const std::string& ownerType)
+        {
+            return std::find(
+                std::begin(ownerTypes),
+                std::end(ownerTypes),
+                ownerType) != std::end(ownerTypes);
+        };
+
+        auto& overlayElements = m_annotationLayer.Elements();
+        auto overlayIt = overlayElements.begin();
+        while (overlayIt != overlayElements.end())
+        {
+            if (isManagedGaugeOwner(overlayIt->owner_type))
+                overlayIt = overlayElements.erase(overlayIt);
+            else
+                ++overlayIt;
+        }
+
+        auto& elements = m_annotationLayer.ShapeElements();
+        auto it = elements.begin();
+        while (it != elements.end())
+        {
+            if (isManagedGaugeOwner(it->owner_type))
+                it = elements.erase(it);
+            else
+                ++it;
+        }
+        m_annotationLayer.SelectShape(-1);
+    };
+
+    clearEvidencePreviewOwners();
+
+    if (gauge.has_line_gauge || gauge.tool == "FindLine")
+    {
+        if (!gauge.has_line_gauge)
+        {
+            reason = "FindLine evidence has no line gauge geometry";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_line");
+
+        auto shape = std::make_unique<LineGaugeShape>(
+            static_cast<double>(gauge.line_x0),
+            static_cast<double>(gauge.line_y0),
+            static_cast<double>(gauge.line_x1),
+            static_cast<double>(gauge.line_y1),
+            static_cast<double>(std::max(1, gauge.tool_half_width)));
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi_axis",
+            std::move(shape));
+        stampInputElement(
+            element,
+            "FindLine",
+            "FindLine",
+            ownerRef,
+            "setline",
+            "roi",
+            true);
+
+        reason = "FindLine evidence gauge preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    if (gauge.has_circle_gauge || gauge.tool == "FindCircle")
+    {
+        if (!gauge.has_circle_gauge)
+        {
+            reason = "FindCircle evidence has no circle gauge geometry";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_circle");
+
+        int outer = gauge.outer_radius > 0 ? gauge.outer_radius : gauge.radius;
+        if (outer <= 0)
+        {
+            outer = static_cast<int>(std::lround(std::hypot(
+                static_cast<double>(gauge.circle_px - gauge.circle_cx),
+                static_cast<double>(gauge.circle_py - gauge.circle_cy))));
+        }
+        outer = std::max(1, outer);
+        const int inner = std::max(0, std::min(gauge.inner_radius, outer - 1));
+
+        auto shape = std::make_unique<CircleShape>(
+            static_cast<double>(gauge.circle_cx),
+            static_cast<double>(gauge.circle_cy),
+            static_cast<double>(outer),
+            static_cast<double>(inner));
+        shape->setScanSector(
+            gauge.circle_arc_enabled != 0,
+            static_cast<double>(gauge.circle_arc_start_deg),
+            static_cast<double>(gauge.circle_arc_end_deg));
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi_circle",
+            std::move(shape));
+        stampInputElement(
+            element,
+            "FindCircle",
+            "FindCircle",
+            ownerRef,
+            "setcircle",
+            "roi",
+            true);
+
+        reason = "FindCircle evidence gauge preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    if (gauge.has_ellipse_gauge || gauge.tool == "FindEllipse")
+    {
+        if (!gauge.has_ellipse_gauge)
+        {
+            reason = "FindEllipse evidence has no ellipse gauge geometry";
+            restoreGaugeState();
+            return false;
+        }
+
+        const int x0 = std::min(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y0 = std::min(gauge.ellipse_y0, gauge.ellipse_y1);
+        const int x1 = std::max(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y1 = std::max(gauge.ellipse_y0, gauge.ellipse_y1);
+        if (x1 <= x0 || y1 <= y0)
+        {
+            reason = "FindEllipse evidence gauge rectangle is empty";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_ellipse");
+
+        const double cx = (static_cast<double>(x0) + static_cast<double>(x1)) * 0.5;
+        const double cy = (static_cast<double>(y0) + static_cast<double>(y1)) * 0.5;
+        const double rx = std::max(1.0, (static_cast<double>(x1) - static_cast<double>(x0)) * 0.5);
+        const double ry = std::max(1.0, (static_cast<double>(y1) - static_cast<double>(y0)) * 0.5);
+
+        auto shape = std::make_unique<EllipseShape>(cx, cy, rx, ry);
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi_ellipse",
+            std::move(shape));
+        stampInputElement(
+            element,
+            "FindEllipse",
+            "FindEllipse",
+            ownerRef,
+            "setellipse",
+            "roi",
+            true);
+
+        const int innerScale =
+            std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+        if (innerScale > 0)
+        {
+            auto innerShape = std::make_unique<EllipseShape>(
+                cx,
+                cy,
+                rx * static_cast<double>(innerScale) * 0.01,
+                ry * static_cast<double>(innerScale) * 0.01);
+            CxShapeElement& innerElement = m_annotationLayer.UpsertShape(
+                ownerRef + ".inner_scan_ellipse",
+                std::move(innerShape));
+            stampInputElement(
+                innerElement,
+                "FindEllipse",
+                "FindEllipse",
+                ownerRef,
+                "",
+                "scan",
+                false);
+        }
+
+        reason = "FindEllipse evidence gauge preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    if (gauge.has_findobject_roi || gauge.tool == "FindObject")
+    {
+        if (!gauge.has_findobject_roi)
+        {
+            reason = "FindObject evidence has no ROI geometry";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_object");
+
+        auto shape = std::make_unique<RectShape>();
+        shape->setRect(
+            static_cast<double>(gauge.findobject_x0),
+            static_cast<double>(gauge.findobject_y0),
+            static_cast<double>(gauge.findobject_x1),
+            static_cast<double>(gauge.findobject_y1));
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".roi",
+            std::move(shape));
+        stampInputElement(
+            element,
+            "FindObject",
+            "FindObject",
+            ownerRef,
+            "setrect",
+            "roi",
+            true);
+
+        reason = "FindObject evidence ROI preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    if (gauge.has_segmentation_prompt_rect || gauge.tool == "FindSegmentation")
+    {
+        if (!gauge.has_segmentation_prompt_rect)
+        {
+            reason = "FindSegmentation evidence has no prompt rectangle";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_seg");
+
+        auto shape = std::make_unique<RectShape>();
+        shape->setRect(
+            static_cast<double>(gauge.segmentation_prompt_x0),
+            static_cast<double>(gauge.segmentation_prompt_y0),
+            static_cast<double>(gauge.segmentation_prompt_x1),
+            static_cast<double>(gauge.segmentation_prompt_y1));
+        CxShapeElement& element = m_annotationLayer.UpsertShape(
+            ownerRef + ".prompt_rect",
+            std::move(shape));
+        stampInputElement(
+            element,
+            "FindSegmentation",
+            "FindSegmentation",
+            ownerRef,
+            "setpromptrectxyxy",
+            "prompt_rect",
+            true);
+
+        reason = "FindSegmentation evidence prompt preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    if (gauge.tool == "FastMatch" || gauge.tool == "fastmatch" ||
+        gauge.tool == "CFastMatch")
+    {
+        auto readInt = [this](const std::string& key, int fallback)
+        {
+            const auto it = m_manualTest.runtime_int_vars.find(key);
+            return it == m_manualTest.runtime_int_vars.end()
+                ? fallback
+                : it->second;
+        };
+
+        const int learnX = std::max(0, readInt("global_learn_roi_x", 0));
+        const int learnY = std::max(0, readInt("global_learn_roi_y", 0));
+        const int learnW = std::max(0, readInt("global_learn_roi_w", 0));
+        const int learnH = std::max(0, readInt("global_learn_roi_h", 0));
+        const int searchX = std::max(0, readInt("global_search_roi_x", 0));
+        const int searchY = std::max(0, readInt("global_search_roi_y", 0));
+        const int searchW = std::max(0, readInt("global_search_roi_w", 0));
+        const int searchH = std::max(0, readInt("global_search_roi_h", 0));
+
+        if (learnW <= 0 || learnH <= 0 || searchW <= 0 || searchH <= 0)
+        {
+            reason = "FastMatch evidence has incomplete learn/search ROI globals";
+            restoreGaugeState();
+            return false;
+        }
+
+        const std::string ownerRef = ownerOrDefault("m_match");
+
+        auto upsertFastMatchRect =
+            [this, &stampInputElement, &ownerRef](
+                const std::string& binding,
+                int x,
+                int y,
+                int w,
+                int h)
+        {
+            auto shape = std::make_unique<RectShape>();
+            shape->setRect(
+                static_cast<double>(x),
+                static_cast<double>(y),
+                static_cast<double>(x + w),
+                static_cast<double>(y + h));
+            CxShapeElement& element = m_annotationLayer.UpsertShape(
+                ownerRef + "." + binding,
+                std::move(shape));
+            stampInputElement(
+                element,
+                "FastMatch",
+                "FastMatch",
+                ownerRef,
+                binding,
+                binding,
+                true);
+        };
+
+        upsertFastMatchRect("learn_roi", learnX, learnY, learnW, learnH);
+        upsertFastMatchRect("search_roi", searchX, searchY, searchW, searchH);
+
+        reason = "FastMatch evidence learn/search ROI preview projected";
+        restoreGaugeState();
+        return true;
+    }
+
+    reason = "selected evidence has no editable gauge preview";
+    restoreGaugeState();
+    return false;
 }
 
 const char* ViewController::ImageToolModeName(ImageToolMode mode)
@@ -1391,6 +2078,24 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
                     out.status = "created";
                     out.created_ref = element.stable_ref;
                     out.reason = "point created";
+                    std::string exportReason;
+                    if (ExportShapeElementToRuntimeGlobals(
+                            m_manualTest, element, exportReason))
+                    {
+                        const bool gaugeApplied =
+                            ApplyManualGaugeToGlobals(m_manualTest);
+                        if (gaugeApplied)
+                        {
+                            out.reason += "; " + exportReason;
+                            m_manualTest.debug_status = "annotation_point_exported";
+                            m_manualTest.debug_reason = exportReason;
+                        }
+                        else
+                        {
+                            out.reason += "; export normalization failed: " +
+                                m_manualTest.debug_reason;
+                        }
+                    }
                     CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created", "ref=" + out.created_ref);
                     m_lastPointerResult = out;
                     return out;

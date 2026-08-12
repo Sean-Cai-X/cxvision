@@ -1516,6 +1516,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_ellipse_y0", options.ellipse_y0);
             setGlobal("global_ellipse_x1", options.ellipse_x1);
             setGlobal("global_ellipse_y1", options.ellipse_y1);
+            setGlobal("global_findellipse_inner_scale_percent", options.ellipse_inner_scale_percent);
             setGlobal("global_tool_half_width", options.tool_half_width);
             setGlobal("global_wgap", options.wgap);
             setGlobal("global_hgap", options.hgap);
@@ -2037,6 +2038,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_ellipse_y0", options.ellipse_y0);
         setGlobal("global_ellipse_x1", options.ellipse_x1);
         setGlobal("global_ellipse_y1", options.ellipse_y1);
+        setGlobal("global_findellipse_inner_scale_percent", options.ellipse_inner_scale_percent);
         setGlobal("global_tool_half_width", options.tool_half_width);
         setGlobal("global_wgap", options.wgap);
         setGlobal("global_hgap", options.hgap);
@@ -2092,6 +2094,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             gauge.ellipse_y0 = options.ellipse_y0;
             gauge.ellipse_x1 = options.ellipse_x1;
             gauge.ellipse_y1 = options.ellipse_y1;
+            gauge.ellipse_inner_scale_percent = options.ellipse_inner_scale_percent;
         }
         else
         {

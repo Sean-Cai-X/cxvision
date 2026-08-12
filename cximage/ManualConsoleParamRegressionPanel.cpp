@@ -17,6 +17,124 @@
 #include <fstream>
 #include <vector>
 
+static std::string NormalizeKeyParamToolTypeLocal(const std::string& type);
+
+static void SyncSegmentationLegacyPointFromLists(ManualGaugeState& gauge)
+{
+  gauge.has_segmentation_positive_point =
+      !gauge.segmentation_positive_points.empty();
+  if (gauge.has_segmentation_positive_point)
+  {
+    const auto& point = gauge.segmentation_positive_points.back();
+    gauge.segmentation_positive_x = point.x;
+    gauge.segmentation_positive_y = point.y;
+  }
+
+  gauge.has_segmentation_negative_point =
+      !gauge.segmentation_negative_points.empty();
+  if (gauge.has_segmentation_negative_point)
+  {
+    const auto& point = gauge.segmentation_negative_points.back();
+    gauge.segmentation_negative_x = point.x;
+    gauge.segmentation_negative_y = point.y;
+  }
+}
+
+static void SeedSegmentationPromptListsFromLegacyFields(ManualGaugeState& gauge)
+{
+  if (gauge.has_segmentation_positive_point &&
+      gauge.segmentation_positive_points.empty())
+  {
+    ManualSegmentationPromptPoint point;
+    point.ref = "legacy_positive_0";
+    point.x = gauge.segmentation_positive_x;
+    point.y = gauge.segmentation_positive_y;
+    gauge.segmentation_positive_points.push_back(point);
+  }
+  if (gauge.has_segmentation_negative_point &&
+      gauge.segmentation_negative_points.empty())
+  {
+    ManualSegmentationPromptPoint point;
+    point.ref = "legacy_negative_0";
+    point.x = gauge.segmentation_negative_x;
+    point.y = gauge.segmentation_negative_y;
+    gauge.segmentation_negative_points.push_back(point);
+  }
+  SyncSegmentationLegacyPointFromLists(gauge);
+}
+
+static bool DrawSegmentationPromptPointList(
+    const char* label,
+    const ImVec4& color,
+    std::vector<ManualSegmentationPromptPoint>& points)
+{
+  bool edited = false;
+  ImGui::PushID(label);
+  const std::string header =
+      std::string(label) + " points (" + std::to_string(points.size()) + ")";
+  if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    ImGui::PopID();
+    return false;
+  }
+
+  if (points.empty())
+  {
+    ImGui::TextDisabled("No %s prompt points yet.", label);
+    ImGui::PopID();
+    return false;
+  }
+
+  const std::string tableId = std::string("findsegmentation_") + label + "_point_list";
+  if (ImGui::BeginTable(tableId.c_str(), 5,
+                        ImGuiTableFlags_Borders |
+                            ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp))
+  {
+    ImGui::TableSetupColumn("type");
+    ImGui::TableSetupColumn("#");
+    ImGui::TableSetupColumn("x");
+    ImGui::TableSetupColumn("y");
+    ImGui::TableSetupColumn("action");
+    ImGui::TableHeadersRow();
+
+    int removeIndex = -1;
+    for (int i = 0; i < static_cast<int>(points.size()); ++i)
+    {
+      ImGui::PushID(i);
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextColored(color, "%s", label);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d", i);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##x", &points[i].x);
+      points[i].x = std::max(0, points[i].x);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##y", &points[i].y);
+      points[i].y = std::max(0, points[i].y);
+      ImGui::TableSetColumnIndex(4);
+      if (ImGui::SmallButton("remove"))
+      {
+        removeIndex = i;
+        edited = true;
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+    if (removeIndex >= 0 &&
+        removeIndex < static_cast<int>(points.size()))
+    {
+      points.erase(points.begin() + removeIndex);
+    }
+  }
+
+  ImGui::PopID();
+  return edited;
+}
+
 CxParamRegressionTask BuildParamRegressionTaskFromManualGauge(
     const ManualTestContext& context)
 {
@@ -266,11 +384,13 @@ bool IsFindLineFindCircleContext(ManualTestContext& context)
     const ManualGaugeState& g = context.current_gauge;
     return (g.tool == "FindLine" || g.tool == "FindCircle" ||
             g.tool == "FindEllipse" || g.tool == "FindRect" ||
+            g.tool == "FindObject" ||
             g.tool == "FindSegmentation" ||
             g.tool == "FastMatch" || g.tool == "fastmatch" ||
             g.tool == "CFastMatch" || g.tool == "GridPatternClassTool" ||
             g.tool == "RegionPatternTool") ||
-           g.has_line_gauge || g.has_circle_gauge || g.has_ellipse_gauge;
+           g.has_line_gauge || g.has_circle_gauge || g.has_ellipse_gauge ||
+           g.has_findobject_roi;
 }
 
 static std::string ToLowerAsciiLocal(std::string text)
@@ -1097,17 +1217,65 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context)
   {
     if (object == nullptr)
     {
-      DrawPendingBindingLineLocal("prompt_rect", "run or select a TorchTask/FindSegmentation script first");
-      DrawPendingBindingLineLocal("positive_points", "pending runtime object");
-      DrawPendingBindingLineLocal("negative_points", "pending runtime object");
+      const ManualGaugeState& gauge = context.current_gauge;
+      if (gauge.tool == "FindSegmentation" ||
+          NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindSegmentation" ||
+          gauge.has_segmentation_prompt_rect)
+      {
+        ImGui::Text(
+            "prompt_rect: (%d,%d)-(%d,%d)",
+            gauge.segmentation_prompt_x0,
+            gauge.segmentation_prompt_y0,
+            gauge.segmentation_prompt_x1,
+            gauge.segmentation_prompt_y1);
+        ImGui::Text(
+            "mode=%d threshold=%d%%",
+            gauge.segmentation_mode,
+            gauge.segmentation_threshold_percent);
+        ImGui::Text(
+            "positive_point: %s (%d,%d)",
+            gauge.has_segmentation_positive_point ? "enabled" : "disabled",
+            gauge.segmentation_positive_x,
+            gauge.segmentation_positive_y);
+        ImGui::Text(
+            "negative_point: %s (%d,%d)",
+            gauge.has_segmentation_negative_point ? "enabled" : "disabled",
+            gauge.segmentation_negative_x,
+            gauge.segmentation_negative_y);
+        ImGui::TextDisabled(
+            "No runtime object yet; these values are staged for the next Run Script.");
+      }
+      else
+      {
+        DrawPendingBindingLineLocal("prompt_rect", "run or select a TorchTask/FindSegmentation script first");
+        DrawPendingBindingLineLocal("positive_points", "pending runtime object");
+        DrawPendingBindingLineLocal("negative_points", "pending runtime object");
+      }
     }
     else if (object->type == "FindSegmentation")
     {
       ImGui::Text("prompt_rect: %s",
                   object->segmentation_has_prompt_rect ? "available" : "pending_binding");
       ImGui::Text("backend: %s", object->segmentation_backend.empty() ? "-" : object->segmentation_backend.c_str());
-      DrawPendingBindingLineLocal("positive_points", "UI edit/save binding not enabled yet");
-      DrawPendingBindingLineLocal("negative_points", "UI edit/save binding not enabled yet");
+      const ManualGaugeState& gauge = context.current_gauge;
+      ImGui::Text(
+          "staged ROI: (%d,%d)-(%d,%d) mode=%d threshold=%d%%",
+          gauge.segmentation_prompt_x0,
+          gauge.segmentation_prompt_y0,
+          gauge.segmentation_prompt_x1,
+          gauge.segmentation_prompt_y1,
+          gauge.segmentation_mode,
+          gauge.segmentation_threshold_percent);
+      ImGui::Text(
+          "positive_point: %s (%d,%d)",
+          gauge.has_segmentation_positive_point ? "enabled" : "disabled",
+          gauge.segmentation_positive_x,
+          gauge.segmentation_positive_y);
+      ImGui::Text(
+          "negative_point: %s (%d,%d)",
+          gauge.has_segmentation_negative_point ? "enabled" : "disabled",
+          gauge.segmentation_negative_x,
+          gauge.segmentation_negative_y);
     }
     else
     {
@@ -2097,6 +2265,8 @@ static std::string ToolFindSettingGlobalKey(
     return "global_findellipse_findsetting";
   if (normalizedTool == "FindRect")
     return "global_findrect_findsetting";
+  if (normalizedTool == "FindObject")
+    return "global_findobject_findsetting";
   if (normalizedTool == "FastMatch")
     return "global_objfilter";
   return "global_findsetting";
@@ -2130,6 +2300,11 @@ static void StageObjectPrefilterFindSetting(
   else if (normalizedTool == "FindRect")
   {
     InjectManualGaugeInt(context, "global_findrect_findsetting", gauge.findsetting);
+  }
+  else if (normalizedTool == "FindObject")
+  {
+    InjectManualGaugeInt(context, "global_objfilter", gauge.findsetting);
+    InjectManualGaugeInt(context, "global_findobject_findsetting", gauge.findsetting);
   }
   else if (normalizedTool == "FastMatch")
   {
@@ -2300,40 +2475,60 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
         context, "global_segmentation_negative_y", gauge.segmentation_negative_y);
     gauge.has_segmentation_prompt_rect = true;
   }
+  SeedSegmentationPromptListsFromLegacyFields(gauge);
 
-  ImGui::TextColored(
-      ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
-      "FindSegmentation Prompt ROI");
-  ImGui::TextDisabled(
-      "Prompt rect is the editable region shown in Image View and exported to global_roi_*.");
-
-  if (ImGui::BeginTable("findsegmentation_prompt_rect_table", 5,
-                        ImGuiTableFlags_Borders |
-                            ImGuiTableFlags_RowBg |
-                            ImGuiTableFlags_SizingStretchProp))
+  if (ImGui::CollapsingHeader("Prompt ROI / Mode / Threshold",
+                              ImGuiTreeNodeFlags_DefaultOpen))
   {
-    ImGui::TableSetupColumn("Prompt");
-    ImGui::TableSetupColumn("x0");
-    ImGui::TableSetupColumn("y0");
-    ImGui::TableSetupColumn("x1");
-    ImGui::TableSetupColumn("y1");
-    ImGui::TableHeadersRow();
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::TextUnformatted("Prompt ROI");
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    edited |= ImGui::InputInt("##seg_prompt_x0", &gauge.segmentation_prompt_x0);
-    ImGui::TableSetColumnIndex(2);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    edited |= ImGui::InputInt("##seg_prompt_y0", &gauge.segmentation_prompt_y0);
-    ImGui::TableSetColumnIndex(3);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    edited |= ImGui::InputInt("##seg_prompt_x1", &gauge.segmentation_prompt_x1);
-    ImGui::TableSetColumnIndex(4);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    edited |= ImGui::InputInt("##seg_prompt_y1", &gauge.segmentation_prompt_y1);
-    ImGui::EndTable();
+    ImGui::TextColored(
+        ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
+        "FindSegmentation Prompt ROI");
+    ImGui::TextDisabled(
+        "Prompt rect is the editable region shown in Image View and exported to global_roi_*.");
+
+    if (ImGui::BeginTable("findsegmentation_prompt_rect_table", 5,
+                          ImGuiTableFlags_Borders |
+                              ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp))
+    {
+      ImGui::TableSetupColumn("Prompt");
+      ImGui::TableSetupColumn("x0");
+      ImGui::TableSetupColumn("y0");
+      ImGui::TableSetupColumn("x1");
+      ImGui::TableSetupColumn("y1");
+      ImGui::TableHeadersRow();
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted("Prompt ROI");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##seg_prompt_x0", &gauge.segmentation_prompt_x0);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##seg_prompt_y0", &gauge.segmentation_prompt_y0);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##seg_prompt_x1", &gauge.segmentation_prompt_x1);
+      ImGui::TableSetColumnIndex(4);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      edited |= ImGui::InputInt("##seg_prompt_y1", &gauge.segmentation_prompt_y1);
+      ImGui::EndTable();
+    }
+
+    ImGui::TextUnformatted("mode");
+    ImGui::SameLine(80.0f);
+    ImGui::SetNextItemWidth(120.0f);
+    edited |= ImGui::InputInt("##segmentation_mode", &gauge.segmentation_mode);
+    gauge.segmentation_mode = std::max(0, std::min(16, gauge.segmentation_mode));
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted("threshold %");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    edited |= ImGui::InputInt("##segmentation_threshold_percent",
+                              &gauge.segmentation_threshold_percent);
+    gauge.segmentation_threshold_percent = std::max(
+        0, std::min(100, gauge.segmentation_threshold_percent));
   }
 
   gauge.segmentation_prompt_x0 = std::max(0, gauge.segmentation_prompt_x0);
@@ -2345,37 +2540,122 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
       std::max(gauge.segmentation_prompt_y0 + 1,
                gauge.segmentation_prompt_y1);
 
-  ImGui::TextUnformatted("mode");
-  ImGui::SameLine(80.0f);
-  ImGui::SetNextItemWidth(120.0f);
-  edited |= ImGui::InputInt("##segmentation_mode", &gauge.segmentation_mode);
-  gauge.segmentation_mode = std::max(0, std::min(16, gauge.segmentation_mode));
+  ImGui::Separator();
+  ImGui::TextUnformatted("Prompt point pick mode");
+  ImGui::TextDisabled(
+      "Pick + / Pick - are mutually exclusive.  A point is enabled only after clicking Image View.");
+  const bool pickingPositive = gauge.segmentation_prompt_pick_mode == 1;
+  const bool pickingNegative = gauge.segmentation_prompt_pick_mode == 2;
+
+  if (pickingPositive)
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.68f, 0.34f, 1.0f));
+  if (ImGui::Button("Pick + Point", ImVec2(118.0f, 0.0f)))
+  {
+    gauge.segmentation_prompt_pick_mode = pickingPositive ? 0 : 1;
+    context.pending_annotation_tool_id =
+        gauge.segmentation_prompt_pick_mode == 1
+            ? "findsegmentation_positive_prompt"
+            : "__pointer_pan__";
+    context.pending_annotation_tool_reason =
+        gauge.segmentation_prompt_pick_mode == 1
+            ? "FindSegmentation positive prompt pick requested from Key Parameter Controls"
+            : "FindSegmentation prompt pick cancelled from Key Parameter Controls";
+    edited = true;
+  }
+  if (pickingPositive)
+    ImGui::PopStyleColor();
+  ImGui::SameLine();
+  if (pickingNegative)
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.78f, 0.30f, 0.28f, 1.0f));
+  if (ImGui::Button("Pick - Point", ImVec2(118.0f, 0.0f)))
+  {
+    gauge.segmentation_prompt_pick_mode = pickingNegative ? 0 : 2;
+    context.pending_annotation_tool_id =
+        gauge.segmentation_prompt_pick_mode == 2
+            ? "findsegmentation_negative_prompt"
+            : "__pointer_pan__";
+    context.pending_annotation_tool_reason =
+        gauge.segmentation_prompt_pick_mode == 2
+            ? "FindSegmentation negative prompt pick requested from Key Parameter Controls"
+            : "FindSegmentation prompt pick cancelled from Key Parameter Controls";
+    edited = true;
+  }
+  if (pickingNegative)
+    ImGui::PopStyleColor();
+  ImGui::SameLine();
+  if (ImGui::Button("Clear Prompt Points", ImVec2(150.0f, 0.0f)))
+  {
+    gauge.segmentation_prompt_pick_mode = 0;
+    gauge.segmentation_positive_points.clear();
+    gauge.segmentation_negative_points.clear();
+    gauge.has_segmentation_positive_point = false;
+    gauge.segmentation_positive_x = 0;
+    gauge.segmentation_positive_y = 0;
+    gauge.has_segmentation_negative_point = false;
+    gauge.segmentation_negative_x = 0;
+    gauge.segmentation_negative_y = 0;
+    SyncSegmentationLegacyPointFromLists(gauge);
+    context.pending_annotation_tool_id = "__pointer_pan__";
+    context.pending_annotation_tool_reason =
+        "FindSegmentation prompt points cleared from Key Parameter Controls";
+    edited = true;
+  }
+
+  const char* activePromptMode =
+      gauge.segmentation_prompt_pick_mode == 1
+          ? "positive"
+          : (gauge.segmentation_prompt_pick_mode == 2 ? "negative" : "none");
+  ImGui::Text("active pick: %s", activePromptMode);
 
   ImGui::SameLine();
-  ImGui::TextUnformatted("threshold %");
+  ImGui::TextDisabled("positive=%d negative=%d",
+                      static_cast<int>(gauge.segmentation_positive_points.size()),
+                      static_cast<int>(gauge.segmentation_negative_points.size()));
+
+  if (ImGui::Button("Clear + List", ImVec2(118.0f, 0.0f)))
+  {
+    gauge.segmentation_positive_points.clear();
+    gauge.has_segmentation_positive_point = false;
+    gauge.segmentation_positive_x = 0;
+    gauge.segmentation_positive_y = 0;
+    if (gauge.segmentation_prompt_pick_mode == 1)
+    {
+      gauge.segmentation_prompt_pick_mode = 0;
+      context.pending_annotation_tool_id = "__pointer_pan__";
+    }
+    context.pending_annotation_tool_reason =
+        "FindSegmentation positive prompt list cleared from Key Parameter Controls";
+    SyncSegmentationLegacyPointFromLists(gauge);
+    edited = true;
+  }
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(100.0f);
-  edited |= ImGui::InputInt("##segmentation_threshold_percent",
-                            &gauge.segmentation_threshold_percent);
+  if (ImGui::Button("Clear - List", ImVec2(118.0f, 0.0f)))
+  {
+    gauge.segmentation_negative_points.clear();
+    gauge.has_segmentation_negative_point = false;
+    gauge.segmentation_negative_x = 0;
+    gauge.segmentation_negative_y = 0;
+    if (gauge.segmentation_prompt_pick_mode == 2)
+    {
+      gauge.segmentation_prompt_pick_mode = 0;
+      context.pending_annotation_tool_id = "__pointer_pan__";
+    }
+    context.pending_annotation_tool_reason =
+        "FindSegmentation negative prompt list cleared from Key Parameter Controls";
+    SyncSegmentationLegacyPointFromLists(gauge);
+    edited = true;
+  }
+
+  edited |= DrawSegmentationPromptPointList(
+      "positive", ImVec4(0.40f, 1.0f, 0.45f, 1.0f),
+      gauge.segmentation_positive_points);
+  edited |= DrawSegmentationPromptPointList(
+      "negative", ImVec4(1.0f, 0.45f, 0.40f, 1.0f),
+      gauge.segmentation_negative_points);
+  SyncSegmentationLegacyPointFromLists(gauge);
+  gauge.segmentation_mode = std::max(0, std::min(16, gauge.segmentation_mode));
   gauge.segmentation_threshold_percent = std::max(
       0, std::min(100, gauge.segmentation_threshold_percent));
-
-  edited |= ImGui::Checkbox("positive prompt",
-                            &gauge.has_segmentation_positive_point);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(90.0f);
-  edited |= ImGui::InputInt("##seg_positive_x", &gauge.segmentation_positive_x);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(90.0f);
-  edited |= ImGui::InputInt("##seg_positive_y", &gauge.segmentation_positive_y);
-  edited |= ImGui::Checkbox("negative prompt",
-                            &gauge.has_segmentation_negative_point);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(90.0f);
-  edited |= ImGui::InputInt("##seg_negative_x", &gauge.segmentation_negative_x);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(90.0f);
-  edited |= ImGui::InputInt("##seg_negative_y", &gauge.segmentation_negative_y);
 
   InjectManualGaugeInt(context, "global_roi_x0", gauge.segmentation_prompt_x0);
   InjectManualGaugeInt(context, "global_roi_y0", gauge.segmentation_prompt_y0);
@@ -2410,6 +2690,69 @@ static bool DrawFindSegmentationPromptControls(ManualTestContext& context)
   InjectManualGaugeInt(context, "global_segmentation_negative_y",
                         gauge.segmentation_negative_y);
 
+  return edited;
+}
+
+static bool DrawFindObjectComponentControls(ManualTestContext& context)
+{
+  ManualGaugeState& gauge = context.current_gauge;
+  bool edited = false;
+  if (!gauge.has_findobject_roi)
+  {
+    gauge.findobject_x0 = RuntimeIntOr(context, "global_roi_x0", gauge.findobject_x0);
+    gauge.findobject_y0 = RuntimeIntOr(context, "global_roi_y0", gauge.findobject_y0);
+    gauge.findobject_x1 = RuntimeIntOr(context, "global_roi_x1", gauge.findobject_x1);
+    gauge.findobject_y1 = RuntimeIntOr(context, "global_roi_y1", gauge.findobject_y1);
+    gauge.findobject_foreground_mode = RuntimeIntOr(
+        context, "global_object_foreground_mode", gauge.findobject_foreground_mode);
+    gauge.findobject_threshold = RuntimeIntOr(
+        context, "global_object_threshold", gauge.findobject_threshold);
+    gauge.findobject_min_area = RuntimeIntOr(
+        context, "global_object_min_area", gauge.findobject_min_area);
+    gauge.has_findobject_roi = true;
+  }
+
+  ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                     "FindObject: ROI -> thresholded components -> result boxes");
+  ImGui::TextDisabled("Mode: 1 bright foreground, 2 dark foreground, 3 both. Results are not editable.");
+  if (ImGui::BeginTable("findobject_roi_table", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                        ImGuiTableFlags_SizingStretchProp))
+  {
+    ImGui::TableSetupColumn("x0");
+    ImGui::TableSetupColumn("y0");
+    ImGui::TableSetupColumn("x1");
+    ImGui::TableSetupColumn("y1");
+    ImGui::TableHeadersRow();
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0); ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##findobject_x0", &gauge.findobject_x0);
+    ImGui::TableSetColumnIndex(1); ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##findobject_y0", &gauge.findobject_y0);
+    ImGui::TableSetColumnIndex(2); ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##findobject_x1", &gauge.findobject_x1);
+    ImGui::TableSetColumnIndex(3); ImGui::SetNextItemWidth(-FLT_MIN);
+    edited |= ImGui::InputInt("##findobject_y1", &gauge.findobject_y1);
+    ImGui::EndTable();
+  }
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt("foreground mode", &gauge.findobject_foreground_mode);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt("binary threshold", &gauge.findobject_threshold);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt("minimum area", &gauge.findobject_min_area);
+
+  gauge.findobject_x0 = std::max(0, gauge.findobject_x0);
+  gauge.findobject_y0 = std::max(0, gauge.findobject_y0);
+  gauge.findobject_x1 = std::max(gauge.findobject_x0 + 1, gauge.findobject_x1);
+  gauge.findobject_y1 = std::max(gauge.findobject_y0 + 1, gauge.findobject_y1);
+  gauge.findobject_foreground_mode = std::max(1, std::min(3, gauge.findobject_foreground_mode));
+  gauge.findobject_threshold = std::max(0, std::min(255, gauge.findobject_threshold));
+  gauge.findobject_min_area = std::max(1, gauge.findobject_min_area);
+  gauge.threshold = gauge.findobject_threshold;
+  gauge.method = gauge.findobject_foreground_mode;
   return edited;
 }
 
@@ -2656,6 +2999,7 @@ static void ApplyPrimaryObjectToCurrentGauge(
   gauge.has_circle_gauge = tool == "FindCircle";
   gauge.has_ellipse_gauge = tool == "FindEllipse";
   gauge.has_segmentation_prompt_rect = tool == "FindSegmentation";
+  gauge.has_findobject_roi = tool == "FindObject";
   if (tool == "FindSegmentation")
   {
     gauge.segmentation_prompt_x0 =
@@ -2668,6 +3012,20 @@ static void ApplyPrimaryObjectToCurrentGauge(
         RuntimeIntOr(context, "global_roi_y1", gauge.segmentation_prompt_y1);
     gauge.segmentation_mode =
         RuntimeIntOr(context, "global_segmentation_mode", gauge.segmentation_mode);
+  }
+  if (tool == "FindObject")
+  {
+    gauge.findobject_x0 = RuntimeIntOr(context, "global_roi_x0", gauge.findobject_x0);
+    gauge.findobject_y0 = RuntimeIntOr(context, "global_roi_y0", gauge.findobject_y0);
+    gauge.findobject_x1 = RuntimeIntOr(context, "global_roi_x1", gauge.findobject_x1);
+    gauge.findobject_y1 = RuntimeIntOr(context, "global_roi_y1", gauge.findobject_y1);
+    gauge.findobject_foreground_mode =
+        RuntimeIntOr(context, "global_method", gauge.findobject_foreground_mode);
+    gauge.findobject_threshold =
+        RuntimeIntOr(context, "global_threshold", gauge.findobject_threshold);
+    gauge.gap = RuntimeIntOr(context, "global_gap", gauge.gap);
+    gauge.filterprofile =
+        RuntimeIntOr(context, "global_filterprofile", gauge.filterprofile);
   }
   gauge.dirty = true;
   gauge.review_status = "editing";
@@ -4647,6 +5005,9 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
   const bool isFindSegmentation =
       gauge.tool == "FindSegmentation" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindSegmentation";
+  const bool isFindObject =
+      gauge.tool == "FindObject" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindObject";
   if (gauge.tool == "FindLine" || gauge.has_line_gauge)
   {
       ImGui::Checkbox("Show single-line gauge scan ticks",
@@ -4688,6 +5049,12 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::TextColored(
           ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
           "FindSegmentation: prompt ROI -> segment -> boundary/overlay");
+  }
+  if (isFindObject)
+  {
+      ImGui::TextColored(
+          ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+          "FindObject: editable ROI -> binary components -> non-editable result boxes");
   }
   if (isGridPattern)
   {
@@ -4760,14 +5127,48 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       {
           bool ellipseGeometryEdited = false;
           ImGui::TextDisabled(
-              "FindEllipse uses the same direct gauge-editing model as FindCircle: geometry first, then edge params.");
-          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("x0", &gauge.ellipse_x0);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("y0", &gauge.ellipse_y0);
-          ImGui::SameLine(); ImGui::TextDisabled("ellipse center / first radius point");
+              "FindEllipse geometry is stored as bbox corners: setellipse(x0, y0, x1, y1).");
+          ImGui::TextDisabled(
+              "Image View handles expose the same bbox as derived center/radius values.");
+          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("bbox x0", &gauge.ellipse_x0);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("bbox y0", &gauge.ellipse_y0);
+          ImGui::SameLine(); ImGui::TextDisabled("bbox corner 0");
 
-          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("x1", &gauge.ellipse_x1);
-          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("y1", &gauge.ellipse_y1);
-          ImGui::SameLine(); ImGui::TextDisabled("ellipse second radius point");
+          ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("bbox x1", &gauge.ellipse_x1);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); ellipseGeometryEdited |= ImGui::InputInt("bbox y1", &gauge.ellipse_y1);
+          ImGui::SameLine(); ImGui::TextDisabled("bbox corner 1");
+
+          int ellipseCx = (gauge.ellipse_x0 + gauge.ellipse_x1) / 2;
+          int ellipseCy = (gauge.ellipse_y0 + gauge.ellipse_y1) / 2;
+          int ellipseRx = std::max(1, std::abs(gauge.ellipse_x1 - gauge.ellipse_x0) / 2);
+          int ellipseRy = std::max(1, std::abs(gauge.ellipse_y1 - gauge.ellipse_y0) / 2);
+          bool centerRadiusEdited = false;
+          ImGui::SetNextItemWidth(120.0f); centerRadiusEdited |= ImGui::InputInt("center cx", &ellipseCx);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); centerRadiusEdited |= ImGui::InputInt("center cy", &ellipseCy);
+          ImGui::SameLine(); ImGui::TextDisabled("derived from bbox");
+
+          ImGui::SetNextItemWidth(120.0f); centerRadiusEdited |= ImGui::InputInt("radius rx", &ellipseRx);
+          ImGui::SameLine(); ImGui::SetNextItemWidth(120.0f); centerRadiusEdited |= ImGui::InputInt("radius ry", &ellipseRy);
+          ImGui::SameLine(); ImGui::TextDisabled("edits rewrite bbox");
+          ImGui::SetNextItemWidth(120.0f);
+          ellipseGeometryEdited |= ImGui::InputInt(
+              "inner scale %", &gauge.ellipse_inner_scale_percent);
+          ImGui::SameLine();
+          ImGui::Text("annulus: inner rx=%d ry=%d",
+                      std::max(0, ellipseRx * gauge.ellipse_inner_scale_percent / 100),
+                      std::max(0, ellipseRy * gauge.ellipse_inner_scale_percent / 100));
+          if (centerRadiusEdited)
+          {
+              ellipseRx = std::max(1, ellipseRx);
+              ellipseRy = std::max(1, ellipseRy);
+              gauge.ellipse_x0 = ellipseCx - ellipseRx;
+              gauge.ellipse_y0 = ellipseCy - ellipseRy;
+              gauge.ellipse_x1 = ellipseCx + ellipseRx;
+              gauge.ellipse_y1 = ellipseCy + ellipseRy;
+              ellipseGeometryEdited = true;
+          }
+          gauge.ellipse_inner_scale_percent =
+              std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
 
           gaugeEdited |= ellipseGeometryEdited;
           if (ellipseGeometryEdited)
@@ -4820,6 +5221,15 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               context.apply_gauge_to_shape_requested = true;
           }
       }
+      else if (isFindObject)
+      {
+          const bool objectEdited = DrawFindObjectComponentControls(context);
+          gaugeEdited |= objectEdited;
+          if (objectEdited)
+          {
+              context.apply_gauge_to_shape_requested = true;
+          }
+      }
       else
       {
           ImGui::SetNextItemWidth(120.0f); gaugeEdited |= ImGui::InputInt("x0", &gauge.line_x0);
@@ -4832,6 +5242,8 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       ImGui::PopID();
   }
 
+  if (!isFindSegmentation)
+  {
   ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
   if (ImGui::CollapsingHeader("Edge Params"))
   {
@@ -4919,13 +5331,52 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               RuntimeIntOr(context, "global_findsetting", gauge.findsetting),
               toolKey.c_str(),
               RuntimeIntOr(context, toolKey, gauge.findsetting));
-          ImGui::TextDisabled(
-              "script must call setfindsetting/setobjfilter before measure(); "
-              "Run Script reapplies full gauge globals.");
+          if (isFindCircle)
+          {
+              ImGui::TextWrapped(
+                  "FindCircle test: 0=direct radial scan, 1=use FindObject "
+                  "prefilter before measure.  Run the same image/Gauge twice "
+                  "with only this value changed, then compare points, avgdist "
+                  "and false hits.");
+          }
+          else
+          {
+              ImGui::TextDisabled(
+                  "Run Script reapplies full gauge globals before measure(); "
+                  "compare result points and residual after changing this value.");
+          }
       }
 
-      if (isFindCircle || isFindEllipse)
+      if (isFindCircle || isFindEllipse || isFindObject)
       {
+          if (isFindObject)
+          {
+              gauge.findobject_threshold = gauge.threshold;
+              gauge.findobject_foreground_mode =
+                  std::max(1, std::min(3, gauge.method));
+
+              ImGui::TextUnformatted("gap");
+              ImGui::SameLine(80.0f);
+              ImGui::SetNextItemWidth(180.0f);
+              gaugeEdited |= ImGui::SliderInt("##findobject_gap", &gauge.gap, 0, 200);
+              ImGui::SameLine();
+              ImGui::SetNextItemWidth(70.0f);
+              gaugeEdited |= ImGui::InputInt("##findobject_gap_val", &gauge.gap);
+              gauge.gap = std::max(0, std::min(200, gauge.gap));
+
+              ImGui::TextUnformatted("filterprofile");
+              ImGui::SameLine(110.0f);
+              ImGui::SetNextItemWidth(180.0f);
+              gaugeEdited |= ImGui::SliderInt(
+                  "##findobject_filterprofile", &gauge.filterprofile, 0, 10);
+              ImGui::SameLine();
+              ImGui::SetNextItemWidth(70.0f);
+              gaugeEdited |= ImGui::InputInt(
+                  "##findobject_filterprofile_val", &gauge.filterprofile);
+              gauge.filterprofile = std::max(0, std::min(10, gauge.filterprofile));
+          }
+          else
+          {
           ImGui::TextUnformatted("gap");
           ImGui::SameLine(80.0f);
           ImGui::SetNextItemWidth(180.0f); gaugeEdited |= ImGui::SliderInt("##gap", &gauge.gap, 0, 200);
@@ -5026,6 +5477,7 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
               ImGui::SameLine();
               ImGui::TextDisabled("default=%d", ellipseConsistencyDefaultRange);
           }
+          }
       }
       else
       {
@@ -5110,6 +5562,13 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
       }
       ImGui::PopID();
   }
+  }
+  else
+  {
+    ImGui::TextDisabled(
+        "FindSegmentation uses Prompt ROI, mode, threshold and one active prompt point. "
+        "FindLine edge/gap/filter controls are intentionally hidden for this tool.");
+  }
 
   (void)DrawMetrologyExtensionPanel(context);
 
@@ -5118,11 +5577,35 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
     gauge.dirty = true;
     gauge.review_status = "editing";
     ++context.key_parameter_edit_revision;
-    context.last_key_parameter_edit_summary =
-        "threshold=" + std::to_string(gauge.threshold) +
-        " method=" + std::to_string(gauge.method) +
-        " linegap=" + std::to_string(gauge.linegap) +
-        " findsetting=" + std::to_string(gauge.findsetting);
+    if (isFindSegmentation)
+    {
+      context.last_key_parameter_edit_summary =
+          "prompt_roi=(" + std::to_string(gauge.segmentation_prompt_x0) + "," +
+          std::to_string(gauge.segmentation_prompt_y0) + "," +
+          std::to_string(gauge.segmentation_prompt_x1) + "," +
+          std::to_string(gauge.segmentation_prompt_y1) + ")" +
+          " mode=" + std::to_string(gauge.segmentation_mode) +
+          " threshold_percent=" +
+          std::to_string(gauge.segmentation_threshold_percent) +
+          " positive=" +
+          std::to_string(gauge.has_segmentation_positive_point ? 1 : 0) +
+          "(" + std::to_string(gauge.segmentation_positive_x) + "," +
+          std::to_string(gauge.segmentation_positive_y) + ")" +
+          " negative=" +
+          std::to_string(gauge.has_segmentation_negative_point ? 1 : 0) +
+          "(" + std::to_string(gauge.segmentation_negative_x) + "," +
+          std::to_string(gauge.segmentation_negative_y) + ")" +
+          " active_pick=" +
+          std::to_string(gauge.segmentation_prompt_pick_mode);
+    }
+    else
+    {
+      context.last_key_parameter_edit_summary =
+          "threshold=" + std::to_string(gauge.threshold) +
+          " method=" + std::to_string(gauge.method) +
+          " linegap=" + std::to_string(gauge.linegap) +
+          " findsetting=" + std::to_string(gauge.findsetting);
+    }
     if (gauge.tool == "FindCircle" || gauge.has_circle_gauge)
     {
       context.last_key_parameter_edit_summary +=
@@ -5206,6 +5689,11 @@ void DrawKeyParameterControlPanel(ManualTestContext& context)
             " fusion_mode=" +
             std::to_string(RuntimeIntOr(context, "global_grid_fusion_mode", 2));
       }
+    }
+    else if (isFindSegmentation)
+    {
+      // Summary was fully built above.  Do not append FindLine wgap/hgap or
+      // edge-selection fields to segmentation prompt parameters.
     }
     else
     {

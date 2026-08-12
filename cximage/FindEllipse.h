@@ -15,6 +15,10 @@ struct FindEllipseDisplaySnapshot
     double center_y = 0.0;
     double radius_x = 0.0;
     double radius_y = 0.0;
+    int inner_scale_percent = 0;
+    bool has_inner_ellipse = false;
+    double inner_radius_x = 0.0;
+    double inner_radius_y = 0.0;
 
     bool has_measure_points = false;
     int measure_points_count = 0;
@@ -135,6 +139,13 @@ public:
     virtual void setrect(int ix, int iy, int iw, int ih) { (void)ix; (void)iy; (void)iw; (void)ih; }
     void setellipse(int icentx, int icenty, int ipax, int ipay);
     void setellipse2(int icentx, int icenty, int ipax, int ipay,int idis);
+    void setbboxx0(int ix0);
+    void setbboxy0(int iy0);
+    void setbboxx1(int ix1);
+    void setbboxy1(int iy1);
+    void buildbbox();
+    void setinnerpercent(int percent);
+    int getinnerpercent() { return m_inner_scale_percent; }
     virtual void drawshape();
     void drawshapex( double dmovx, double dmovy,
         double dangle, double dzoomx, double dzoomy);
@@ -256,6 +267,12 @@ private:
     int m_roi_y0 = 0;
     int m_roi_x1 = 0;
     int m_roi_y1 = 0;
+    bool m_has_pending_bbox = false;
+    int m_pending_bbox_x0 = 0;
+    int m_pending_bbox_y0 = 0;
+    int m_pending_bbox_x1 = 0;
+    int m_pending_bbox_y1 = 0;
+    int m_inner_scale_percent = 0;
 
     bool m_has_fit_result = false;
     double m_fit_center_x = 0.0;

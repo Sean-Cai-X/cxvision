@@ -170,6 +170,11 @@ bool RenderCxShapeOverlay(
                 should_render = true;
             if (shape.semantic_role == "learn_roi" || shape.semantic_role == "search_roi")
                 should_render = true;
+            if (shape.semantic_role == "prompt_positive" ||
+                shape.semantic_role == "prompt_negative" ||
+                shape.semantic_role == "boundary" ||
+                shape.semantic_role == "boundary_bbox")
+                should_render = true;
         }
         else if (layer == CxOverlayLayer::RESULT)
         {
@@ -178,6 +183,11 @@ bool RenderCxShapeOverlay(
             if (shape.semantic_role == "roi" || shape.semantic_role == "scan")
                 should_render = true;
             if (shape.semantic_role == "expected_gt")
+                should_render = true;
+            if (shape.semantic_role == "prompt_positive" ||
+                shape.semantic_role == "prompt_negative" ||
+                shape.semantic_role == "boundary" ||
+                shape.semantic_role == "boundary_bbox")
                 should_render = true;
         }
         else if (layer == CxOverlayLayer::TOOL_DISPLAY)
@@ -218,6 +228,27 @@ bool RenderCxShapeOverlay(
         {
             result.rendered_measure_points_count += static_cast<int>(shape.points.size()) / 2;
             DrawMeasurePoints(output, shape, measure_color);
+        }
+        else if (shape.semantic_role == "prompt_positive")
+        {
+            // Prompt points are input evidence, not measurement samples.  They
+            // still belong in every artifact layer so a human can see why a
+            // segmentation result was produced.
+            DrawMeasurePoints(output, shape, cv::Scalar(80, 235, 100));
+        }
+        else if (shape.semantic_role == "prompt_negative")
+        {
+            DrawMeasurePoints(output, shape, cv::Scalar(80, 80, 245));
+        }
+        else if (shape.semantic_role == "boundary")
+        {
+            result.rendered_result_count++;
+            DrawRoiPolyline(output, shape, cv::Scalar(255, 220, 40));
+        }
+        else if (shape.semantic_role == "boundary_bbox")
+        {
+            result.rendered_result_count++;
+            DrawRoiRectangle(output, shape, cv::Scalar(255, 180, 40));
         }
         else if (shape.semantic_role == "result")
         {

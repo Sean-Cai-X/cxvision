@@ -154,7 +154,21 @@ static double CxShapeTest_setinitialcircle(double cx, double cy, double radius)
     return 0.0;
 }
 
-static double CxShapeTest_setinitialellipse(double cx, double cy, double rx, double ry)
+static double CxShapeTest_setinitialellipse(double radius_y, double radius_x, double center_y, double center_x)
+{
+    auto* current = CxShapeTestRuntime::Current();
+    if (current)
+    {
+        current->has_initial_ellipse = true;
+        current->initial_ex = center_x;
+        current->initial_ey = center_y;
+        current->initial_erx = radius_x;
+        current->initial_ery = radius_y;
+    }
+    return 0.0;
+}
+
+static double CxShapeTest_setinitialellipsecenter(double cx, double cy, double rx, double ry)
 {
     auto* current = CxShapeTestRuntime::Current();
     if (current)
@@ -532,6 +546,7 @@ void RegisterCxShapeTestBindings(mu::Parser& parser)
     parser.DefineFun("CxShapeTest_setinitialrect", (mu::fun_type4)&CxShapeTest_setinitialrect);
     parser.DefineFun("CxShapeTest_setinitialcircle", (mu::fun_type3)&CxShapeTest_setinitialcircle);
     parser.DefineFun("CxShapeTest_setinitialellipse", (mu::fun_type4)&CxShapeTest_setinitialellipse);
+    parser.DefineFun("CxShapeTest_setinitialellipsecenter", (mu::fun_type4)&CxShapeTest_setinitialellipsecenter);
     parser.DefineFun("CxShapeTest_setinitialline", (mu::fun_type4)&CxShapeTest_setinitialline);
     parser.DefineFun("CxShapeTest_seteditable", (mu::fun_type1)&CxShapeTest_seteditable);
     parser.DefineFun("CxShapeTest_setvisible", (mu::fun_type1)&CxShapeTest_setvisible);

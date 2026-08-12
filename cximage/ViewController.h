@@ -259,6 +259,8 @@ private:
   std::string ResolveCatalogScriptLabelById(const std::string& scriptId) const;
   void DrawScriptEditorBlock(ManualTestContext& context);
   void DrawScriptDebugCompilerBlock(ManualTestContext& context);
+  bool ConsumePendingManualScriptRun(ManualTestContext& context,
+                                     const char* trigger);
   void DrawCxParserExtLineViewsPanel(ManualTestContext& context);
   void DrawCxParserExtStatementViewsPanel(ManualTestContext& context);
   void DrawCxParserExtObjectAssignmentsPanel(ManualTestContext& context);
@@ -270,6 +272,7 @@ private:
   void drawKeyParameterControlsWindow();
   void drawMetrologyAnalyticsSmokeWindow();
   bool ApplyCurrentGaugeToEditableShape(std::string& reason);
+  bool ProjectCurrentGaugeToImageViewPreview(std::string& reason);
   void drawParameterTuningAndConclusionWindow();
   void drawTorchRuntimeEvidenceWindow();
   void drawTorchTrainingImageSetWindow();

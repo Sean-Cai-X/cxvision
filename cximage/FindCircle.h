@@ -90,6 +90,7 @@ struct FindCircleMeasureGeometryDebug
     int scan_boundary_clipped_lines = 0;
     int scan_boundary_extended_samples = 0;
     int candidate_boundary_reject_count = 0;
+    int candidate_endpoint_reject_count = 0;
     double selected_edge_radius_avg = 0.0;
     double selected_edge_radius_min = 0.0;
     double selected_edge_radius_max = 0.0;

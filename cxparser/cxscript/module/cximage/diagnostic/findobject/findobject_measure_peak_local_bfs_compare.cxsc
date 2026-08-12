@@ -11,7 +11,7 @@ int y1 = global_roi_y1;
 int width = x1 - x0;
 int height = y1 - y0;
 
-m_object.setrect(x0, y0, width, height);
+m_object.setrect(height, width, y0, x0);
 m_object.setsearchtype(global_method);
 m_object.setdistance(global_gap);
 m_object.setfilteredge(0);

@@ -3,6 +3,7 @@
 #include "ManualConsoleUtils.h"
 #include "ManualConsoleCxScriptDebug.h"
 #include "CxScriptHeadlessRuntime.h"
+#include "CxUnifiedLog.h"
 
 #include <sstream>
 #include <fstream>
@@ -74,6 +75,33 @@ bool ExtractJsonBool(const std::string& source, const char* key, bool& value)
     return true;
 }
 
+bool ExtractSegmentationPromptPointArray(
+    const std::string& source,
+    const char* key,
+    std::vector<ManualSegmentationPromptPoint>& points)
+{
+    const std::regex arrayPattern(
+        std::string("\\\"") + key + "\\\"\\s*:\\s*\\[([^\\]]*)\\]");
+    std::smatch arrayMatch;
+    if (!std::regex_search(source, arrayMatch, arrayPattern))
+        return false;
+    points.clear();
+    const std::string body = arrayMatch[1].str();
+    const std::regex pointPattern(
+        "\\{\\s*\\\"ref\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"\\s*,\\s*\\\"x\\\"\\s*:\\s*(-?[0-9]+)\\s*,\\s*\\\"y\\\"\\s*:\\s*(-?[0-9]+)\\s*\\}");
+    auto begin = std::sregex_iterator(body.begin(), body.end(), pointPattern);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it)
+    {
+        ManualSegmentationPromptPoint point;
+        point.ref = (*it)[1].str();
+        point.x = std::stoi((*it)[2].str());
+        point.y = std::stoi((*it)[3].str());
+        points.push_back(point);
+    }
+    return true;
+}
+
 int DefaultFindSettingForTool(const std::string& tool)
 {
     if (tool == "FindLine" || tool == "FindEllipse")
@@ -88,6 +116,113 @@ int ResolveManualGaugeFindSetting(const ManualGaugeState& gauge)
     return std::max(0, gauge.findsetting >= 0
                            ? gauge.findsetting
                            : DefaultFindSettingForTool(gauge.tool));
+}
+
+void SyncSegmentationLegacyPointFromLists(ManualGaugeState& gauge)
+{
+    gauge.has_segmentation_positive_point =
+        !gauge.segmentation_positive_points.empty();
+    if (gauge.has_segmentation_positive_point)
+    {
+        const auto& point = gauge.segmentation_positive_points.back();
+        gauge.segmentation_positive_x = point.x;
+        gauge.segmentation_positive_y = point.y;
+    }
+    else
+    {
+        gauge.segmentation_positive_x = 0;
+        gauge.segmentation_positive_y = 0;
+    }
+    gauge.has_segmentation_negative_point =
+        !gauge.segmentation_negative_points.empty();
+    if (gauge.has_segmentation_negative_point)
+    {
+        const auto& point = gauge.segmentation_negative_points.back();
+        gauge.segmentation_negative_x = point.x;
+        gauge.segmentation_negative_y = point.y;
+    }
+    else
+    {
+        gauge.segmentation_negative_x = 0;
+        gauge.segmentation_negative_y = 0;
+    }
+}
+
+void WriteSegmentationPromptPointArray(
+    std::ostream& out,
+    const char* key,
+    const std::vector<ManualSegmentationPromptPoint>& points,
+    bool trailingComma)
+{
+    out << "  \"" << key << "\": [";
+    for (std::size_t i = 0; i < points.size(); ++i)
+    {
+        if (i != 0)
+            out << ", ";
+        out << "{\"ref\":\"" << GaugeJsonEscape(points[i].ref)
+            << "\",\"x\":" << points[i].x
+            << ",\"y\":" << points[i].y << "}";
+    }
+    out << "]" << (trailingComma ? "," : "") << "\n";
+}
+
+void ApplySegmentationPromptFallbacksFromGlobals(
+    ManualTestContext& context,
+    ManualGaugeState& loaded)
+{
+    auto readInt = [&context](const std::string& key, int fallback)
+    {
+        const auto it = context.runtime_int_vars.find(key);
+        return it == context.runtime_int_vars.end() ? fallback : it->second;
+    };
+
+    loaded.has_segmentation_prompt_rect = true;
+    loaded.segmentation_prompt_x0 = readInt(
+        "global_roi_x0", readInt("global_roi_x", loaded.segmentation_prompt_x0));
+    loaded.segmentation_prompt_y0 = readInt(
+        "global_roi_y0", readInt("global_roi_y", loaded.segmentation_prompt_y0));
+    const int roiW = readInt("global_roi_width", 860);
+    const int roiH = readInt("global_roi_height", 700);
+    loaded.segmentation_prompt_x1 = readInt(
+        "global_roi_x1", loaded.segmentation_prompt_x0 + roiW);
+    loaded.segmentation_prompt_y1 = readInt(
+        "global_roi_y1", loaded.segmentation_prompt_y0 + roiH);
+    loaded.segmentation_mode = readInt(
+        "global_segmentation_mode", loaded.segmentation_mode);
+    loaded.segmentation_threshold_percent = readInt(
+        "global_segmentation_threshold_percent",
+        readInt("global_threshold", loaded.segmentation_threshold_percent));
+    loaded.has_segmentation_positive_point =
+        readInt("global_segmentation_positive_enabled", 0) != 0;
+    loaded.segmentation_positive_x = readInt(
+        "global_segmentation_positive_x", loaded.segmentation_positive_x);
+    loaded.segmentation_positive_y = readInt(
+        "global_segmentation_positive_y", loaded.segmentation_positive_y);
+    loaded.has_segmentation_negative_point =
+        readInt("global_segmentation_negative_enabled", 0) != 0;
+    loaded.segmentation_negative_x = readInt(
+        "global_segmentation_negative_x", loaded.segmentation_negative_x);
+    loaded.segmentation_negative_y = readInt(
+        "global_segmentation_negative_y", loaded.segmentation_negative_y);
+    if (loaded.has_segmentation_positive_point &&
+        loaded.segmentation_positive_points.empty())
+    {
+        ManualSegmentationPromptPoint point;
+        point.ref = "legacy_positive_0";
+        point.x = loaded.segmentation_positive_x;
+        point.y = loaded.segmentation_positive_y;
+        loaded.segmentation_positive_points.push_back(point);
+    }
+    if (loaded.has_segmentation_negative_point &&
+        loaded.segmentation_negative_points.empty())
+    {
+        ManualSegmentationPromptPoint point;
+        point.ref = "legacy_negative_0";
+        point.x = loaded.segmentation_negative_x;
+        point.y = loaded.segmentation_negative_y;
+        loaded.segmentation_negative_points.push_back(point);
+    }
+    SyncSegmentationLegacyPointFromLists(loaded);
 }
 
 bool AtomicReplaceFile(
@@ -172,15 +307,6 @@ bool ValidateManualGaugeGeometryForEditing(
     const ManualGaugeState& gauge,
     std::string& reason)
 {
-    if (gauge.tool == "FindObject")
-    {
-        if (gauge.line_x0 == gauge.line_x1 || gauge.line_y0 == gauge.line_y1)
-            reason = "FindObject ROI must have positive width and height";
-        else
-            reason.clear();
-        return reason.empty();
-    }
-
     if (gauge.tool == "FindLine" || gauge.tool == "FindRect")
     {
         if (!gauge.has_line_gauge)
@@ -239,6 +365,8 @@ bool ValidateManualGaugeGeometryForEditing(
         else if (gauge.findobject_x1 <= gauge.findobject_x0 ||
                  gauge.findobject_y1 <= gauge.findobject_y0)
             reason = "FindObject ROI must have positive width and height";
+        else
+            reason.clear();
         return reason.empty();
     }
     reason = "unsupported gauge tool";
@@ -571,10 +699,36 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
     }
     else if (gauge.tool == "FindEllipse")
     {
-        InjectManualGaugeInt(context, "global_ellipse_x0", gauge.ellipse_x0);
-        InjectManualGaugeInt(context, "global_ellipse_y0", gauge.ellipse_y0);
-        InjectManualGaugeInt(context, "global_ellipse_x1", gauge.ellipse_x1);
-        InjectManualGaugeInt(context, "global_ellipse_y1", gauge.ellipse_y1);
+        const int x0 = std::min(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y0 = std::min(gauge.ellipse_y0, gauge.ellipse_y1);
+        const int x1 = std::max(gauge.ellipse_x0, gauge.ellipse_x1);
+        const int y1 = std::max(gauge.ellipse_y0, gauge.ellipse_y1);
+        gauge.ellipse_x0 = x0;
+        gauge.ellipse_y0 = y0;
+        gauge.ellipse_x1 = x1;
+        gauge.ellipse_y1 = y1;
+
+        InjectManualGaugeInt(context, "global_ellipse_x0", x0);
+        InjectManualGaugeInt(context, "global_ellipse_y0", y0);
+        InjectManualGaugeInt(context, "global_ellipse_x1", x1);
+        InjectManualGaugeInt(context, "global_ellipse_y1", y1);
+        gauge.ellipse_inner_scale_percent =
+            std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+        InjectManualGaugeInt(
+            context,
+            "global_findellipse_inner_scale_percent",
+            gauge.ellipse_inner_scale_percent);
+        // Compatibility only: FindEllipse scripts must read global_ellipse_*.
+        // Mirror to global_roi_* so older working/candidate snapshots do not
+        // jump back to a stale FindLine ROI during manual review.
+        InjectManualGaugeInt(context, "global_roi_x0", x0);
+        InjectManualGaugeInt(context, "global_roi_y0", y0);
+        InjectManualGaugeInt(context, "global_roi_x1", x1);
+        InjectManualGaugeInt(context, "global_roi_y1", y1);
+        InjectManualGaugeInt(context, "global_roi_x", x0);
+        InjectManualGaugeInt(context, "global_roi_y", y0);
+        InjectManualGaugeInt(context, "global_roi_width", std::abs(x1 - x0));
+        InjectManualGaugeInt(context, "global_roi_height", std::abs(y1 - y0));
         InjectManualGaugeInt(context, "global_gap", gauge.gap);
         InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
         InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
@@ -672,6 +826,25 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
             InjectManualGaugeInt(context, "global_findellipse_selected_linegap", gauge.linegap);
             InjectManualGaugeInt(context, "global_findellipse_selected_gap", gauge.gap);
         }
+
+        std::ostringstream ellipseGlobals;
+        ellipseGlobals
+            << "bbox=(" << x0 << "," << y0 << "," << x1 << "," << y1 << ")"
+            << " inner_scale_percent=" << gauge.ellipse_inner_scale_percent
+            << " gap=" << gauge.gap
+            << " linegap=" << gauge.linegap
+            << " threshold=" << gauge.threshold
+            << " method=" << gauge.method
+            << " findsetting=" << findsetting
+            << " selected_edge=" << context.findellipse_selected_scan_edge
+            << " consistency="
+            << (context.findellipse_point_consistency_enabled ? 1 : 0)
+            << "/" << context.findellipse_point_consistency_range;
+        CXLOG_INFO(
+            "ManualConsole",
+            "findellipse_globals_injected",
+            "updated",
+            ellipseGlobals.str());
     }
     else if (IsRegionPatternGaugeTool(gauge.tool))
     {
@@ -799,6 +972,7 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
     }
     else if (IsFindSegmentationGaugeTool(gauge.tool))
     {
+        SyncSegmentationLegacyPointFromLists(gauge);
         int x0 = std::max(0, gauge.segmentation_prompt_x0);
         int y0 = std::max(0, gauge.segmentation_prompt_y0);
         int x1 = std::max(x0 + 1, gauge.segmentation_prompt_x1);
@@ -862,6 +1036,20 @@ bool ApplyManualGaugeToGlobals(ManualTestContext& context)
                              std::max(0, std::min(255, gauge.findobject_threshold)));
         InjectManualGaugeInt(context, "global_object_min_area",
                              std::max(1, gauge.findobject_min_area));
+        // find_object_direct_test.cxsc reads the standard cximage globals.
+        // Keep them synchronized with the FindObject-specific UI fields so
+        // Apply/Run uses exactly the rectangle and filtering shown in the UI.
+        InjectManualGaugeInt(context, "global_threshold",
+                             std::max(0, std::min(255, gauge.findobject_threshold)));
+        InjectManualGaugeInt(context, "global_method",
+                             std::max(0, std::min(3, gauge.findobject_foreground_mode)));
+        InjectManualGaugeInt(context, "global_gap", std::max(0, gauge.gap));
+        InjectManualGaugeInt(context, "global_filterprofile",
+                             std::max(0, std::min(10, gauge.filterprofile)));
+        const int findsetting = ResolveManualGaugeFindSetting(gauge);
+        InjectManualGaugeInt(context, "global_findsetting", findsetting);
+        InjectManualGaugeInt(context, "global_findobject_findsetting", findsetting);
+        InjectManualGaugeInt(context, "global_objfilter", findsetting);
     }
     else
     {
@@ -933,6 +1121,7 @@ bool SaveManualGaugeAnnotation(
     (void)gaugeName;
     ManualGaugeState& gauge = context.current_gauge;
     NormalizeManualGaugeGeometry(gauge);
+    SyncSegmentationLegacyPointFromLists(gauge);
     if (!ValidateManualGaugeGeometry(gauge, outReason))
         return false;
 
@@ -986,12 +1175,36 @@ bool SaveManualGaugeAnnotation(
          << "  \"ellipse_y0\": " << gauge.ellipse_y0 << ",\n"
          << "  \"ellipse_x1\": " << gauge.ellipse_x1 << ",\n"
          << "  \"ellipse_y1\": " << gauge.ellipse_y1 << ",\n"
+         << "  \"ellipse_inner_scale_percent\": " << gauge.ellipse_inner_scale_percent << ",\n"
          << "  \"has_segmentation_prompt_rect\": " << (gauge.has_segmentation_prompt_rect ? "true" : "false") << ",\n"
          << "  \"segmentation_prompt_x0\": " << gauge.segmentation_prompt_x0 << ",\n"
          << "  \"segmentation_prompt_y0\": " << gauge.segmentation_prompt_y0 << ",\n"
          << "  \"segmentation_prompt_x1\": " << gauge.segmentation_prompt_x1 << ",\n"
          << "  \"segmentation_prompt_y1\": " << gauge.segmentation_prompt_y1 << ",\n"
          << "  \"segmentation_mode\": " << gauge.segmentation_mode << ",\n"
+         << "  \"segmentation_threshold_percent\": " << gauge.segmentation_threshold_percent << ",\n"
+         << "  \"has_segmentation_positive_point\": " << (gauge.has_segmentation_positive_point ? "true" : "false") << ",\n"
+         << "  \"segmentation_positive_x\": " << gauge.segmentation_positive_x << ",\n"
+         << "  \"segmentation_positive_y\": " << gauge.segmentation_positive_y << ",\n"
+         << "  \"has_segmentation_negative_point\": " << (gauge.has_segmentation_negative_point ? "true" : "false") << ",\n"
+         << "  \"segmentation_negative_x\": " << gauge.segmentation_negative_x << ",\n"
+         << "  \"segmentation_negative_y\": " << gauge.segmentation_negative_y << ",\n";
+    WriteSegmentationPromptPointArray(
+        file, "segmentation_positive_points",
+        gauge.segmentation_positive_points, true);
+    WriteSegmentationPromptPointArray(
+        file, "segmentation_negative_points",
+        gauge.segmentation_negative_points, true);
+    file
+         << "  \"segmentation_prompt_pick_mode\": " << gauge.segmentation_prompt_pick_mode << ",\n"
+         << "  \"has_findobject_roi\": " << (gauge.has_findobject_roi ? "true" : "false") << ",\n"
+         << "  \"findobject_x0\": " << gauge.findobject_x0 << ",\n"
+         << "  \"findobject_y0\": " << gauge.findobject_y0 << ",\n"
+         << "  \"findobject_x1\": " << gauge.findobject_x1 << ",\n"
+         << "  \"findobject_y1\": " << gauge.findobject_y1 << ",\n"
+         << "  \"findobject_foreground_mode\": " << gauge.findobject_foreground_mode << ",\n"
+         << "  \"findobject_threshold\": " << gauge.findobject_threshold << ",\n"
+         << "  \"findobject_min_area\": " << gauge.findobject_min_area << ",\n"
          << "  \"wgap\": " << gauge.wgap << ",\n"
          << "  \"hgap\": " << gauge.hgap << ",\n"
          << "  \"scan_direction\": " << gauge.scan_direction << ",\n"
@@ -1078,6 +1291,17 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
     // FindSegmentation.
     ExtractJsonBool(source, "has_segmentation_prompt_rect",
                     loaded.has_segmentation_prompt_rect);
+    ExtractJsonBool(source, "has_segmentation_positive_point",
+                    loaded.has_segmentation_positive_point);
+    ExtractJsonBool(source, "has_segmentation_negative_point",
+                    loaded.has_segmentation_negative_point);
+    ExtractSegmentationPromptPointArray(
+        source, "segmentation_positive_points",
+        loaded.segmentation_positive_points);
+    ExtractSegmentationPromptPointArray(
+        source, "segmentation_negative_points",
+        loaded.segmentation_negative_points);
+    ExtractJsonBool(source, "has_findobject_roi", loaded.has_findobject_roi);
     const bool hasCircleArcEnabled =
         ExtractJsonBool(source, "circle_arc_enabled", loaded.circle_arc_enabled);
     if (!hasCircleArcEnabled)
@@ -1091,8 +1315,13 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         "line_x0", "line_y0", "line_x1", "line_y1", "tool_half_width",
         "circle_cx", "circle_cy", "circle_px", "circle_py", "radius",
         "inner_radius", "outer_radius", "circle_arc_start_deg", "circle_arc_end_deg", "ellipse_x0", "ellipse_y0",
-        "ellipse_x1", "ellipse_y1", "segmentation_prompt_x0", "segmentation_prompt_y0",
+        "ellipse_x1", "ellipse_y1", "ellipse_inner_scale_percent", "segmentation_prompt_x0", "segmentation_prompt_y0",
         "segmentation_prompt_x1", "segmentation_prompt_y1", "segmentation_mode",
+        "segmentation_threshold_percent", "segmentation_positive_x",
+        "segmentation_positive_y", "segmentation_negative_x",
+        "segmentation_negative_y", "segmentation_prompt_pick_mode",
+        "findobject_x0", "findobject_y0", "findobject_x1", "findobject_y1",
+        "findobject_foreground_mode", "findobject_threshold", "findobject_min_area",
         "wgap", "hgap", "scan_direction", "gap", "linegap",
         "threshold", "filterprofile", "method", "findsetting"
     };
@@ -1102,12 +1331,21 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
         &loaded.circle_px, &loaded.circle_py, &loaded.radius,
         &loaded.inner_radius, &loaded.outer_radius, &loaded.circle_arc_start_deg, &loaded.circle_arc_end_deg, &loaded.ellipse_x0,
         &loaded.ellipse_y0, &loaded.ellipse_x1, &loaded.ellipse_y1,
+        &loaded.ellipse_inner_scale_percent,
         &loaded.segmentation_prompt_x0, &loaded.segmentation_prompt_y0,
         &loaded.segmentation_prompt_x1, &loaded.segmentation_prompt_y1,
         &loaded.segmentation_mode,
+        &loaded.segmentation_threshold_percent,
+        &loaded.segmentation_positive_x, &loaded.segmentation_positive_y,
+        &loaded.segmentation_negative_x, &loaded.segmentation_negative_y,
+        &loaded.segmentation_prompt_pick_mode,
+        &loaded.findobject_x0, &loaded.findobject_y0, &loaded.findobject_x1,
+        &loaded.findobject_y1, &loaded.findobject_foreground_mode,
+        &loaded.findobject_threshold, &loaded.findobject_min_area,
         &loaded.wgap, &loaded.hgap, &loaded.scan_direction, &loaded.gap, &loaded.linegap,
         &loaded.threshold, &loaded.filterprofile, &loaded.method, &loaded.findsetting
     };
+    bool segmentationFallbackApplied = false;
     for (std::size_t i = 0; i < std::size(integer_keys); ++i)
     {
         if (!ExtractJsonInt(source, integer_keys[i], *integer_values[i]))
@@ -1143,8 +1381,23 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
                 continue;
             }
             if (std::string(integer_keys[i]).find("segmentation_") == 0 &&
-                !loaded.has_segmentation_prompt_rect &&
-                loaded.tool != "FindSegmentation")
+                loaded.tool == "FindSegmentation")
+            {
+                if (!segmentationFallbackApplied)
+                {
+                    ApplySegmentationPromptFallbacksFromGlobals(context, loaded);
+                    segmentationFallbackApplied = true;
+                }
+                continue;
+            }
+            if (std::string(integer_keys[i]).find("segmentation_") == 0 &&
+                !loaded.has_segmentation_prompt_rect)
+            {
+                continue;
+            }
+            if (std::string(integer_keys[i]).find("findobject_") == 0 &&
+                !loaded.has_findobject_roi &&
+                loaded.tool != "FindObject")
             {
                 continue;
             }
@@ -1166,6 +1419,15 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
             outReason = std::string("missing gauge field: ") + integer_keys[i];
             return false;
         }
+    }
+    if (loaded.tool == "FindSegmentation" &&
+        (!loaded.has_segmentation_prompt_rect || segmentationFallbackApplied))
+    {
+        ApplySegmentationPromptFallbacksFromGlobals(context, loaded);
+    }
+    if (loaded.tool == "FindSegmentation")
+    {
+        SyncSegmentationLegacyPointFromLists(loaded);
     }
     loaded.scan_direction = loaded.scan_direction == 1 ? 1 : 2;
     loaded.dirty = false;

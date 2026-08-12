@@ -876,6 +876,20 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindEllipse::setellipse2);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setellipse",
                             &FindEllipse::setellipse);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "setbboxx0",
+                            &FindEllipse::setbboxx0);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "setbboxy0",
+                            &FindEllipse::setbboxy0);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "setbboxx1",
+                            &FindEllipse::setbboxx1);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "setbboxy1",
+                            &FindEllipse::setbboxy1);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "buildbbox",
+                            &FindEllipse::buildbbox);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "setinnerpercent",
+                            &FindEllipse::setinnerpercent);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "getinnerpercent",
+                            &FindEllipse::getinnerpercent);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setgap",
                             &FindEllipse::Setgap);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "Show",

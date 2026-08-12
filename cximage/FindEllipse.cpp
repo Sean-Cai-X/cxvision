@@ -126,7 +126,7 @@ int FilterEllipsePointsByGaugeBoundaryDistance(PointsShape &points,
         EllipseNorm(x, y, center_x, center_y, radius_x, radius_y);
     const double distance = std::abs(norm - 1.0) * scale;
     if (std::isfinite(distance) && distance <= max_distance) {
-      filtered.addpoint(x, y);
+      filtered.addpoint(RoundToInt(x), RoundToInt(y));
       ++kept_count;
     }
   }
@@ -408,10 +408,19 @@ void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay) {
         const double boundary_dist =
             rx * ry / std::sqrt(ry * ry * nx * nx + rx * rx * ny * ny);
         const double clamped_dist = std::min(boundary_dist * outer_ratio, dist);
+        const double inner_ratio =
+            std::max(0.0, std::min(0.99,
+                                   static_cast<double>(m_inner_scale_percent) *
+                                       0.01));
+        const double inner_dist =
+            std::min(std::max(0.0, boundary_dist * inner_ratio),
+                     std::max(0.0, clamped_dist - 1.0));
+        const int start_x = RoundToInt(icx0 + nx * inner_dist);
+        const int start_y = RoundToInt(icy0 + ny * inner_dist);
         const int end_x = RoundToInt(icx0 + nx * clamped_dist);
         const int end_y = RoundToInt(icy0 + ny * clamped_dist);
         m_lines.push_back(aline1);
-        m_lines[m_lines.size() - 1].setline(icx0, icy0, end_x, end_y);
+        m_lines[m_lines.size() - 1].setline(start_x, start_y, end_x, end_y);
       } else {
         m_lines.push_back(aline1);
         m_lines[m_lines.size() - 1].setline(icx0, icy0, RoundToInt(apoint.X()),
@@ -440,8 +449,10 @@ void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay) {
       if (line_size < 2)
         continue;
 
-      const double n_start = EllipseNorm(cx, cy, cx, cy, rx, ry);
+      gp_Pnt p_start = line.getlinepoint(0);
       gp_Pnt p_end = line.getlinepoint(line_size - 1);
+      const double n_start =
+          EllipseNorm(p_start.X(), p_start.Y(), cx, cy, rx, ry);
       const double n_end = EllipseNorm(p_end.X(), p_end.Y(), cx, cy, rx, ry);
 
       m_scan_endpoint_norm_min =
@@ -454,6 +465,63 @@ void FindEllipse::setellipse(int icentx, int icenty, int ipax, int ipay) {
     }
   }
 }
+
+void FindEllipse::setbboxx0(int ix0) {
+  m_pending_bbox_x0 = ix0;
+  m_has_pending_bbox = true;
+}
+
+void FindEllipse::setbboxy0(int iy0) {
+  m_pending_bbox_y0 = iy0;
+  m_has_pending_bbox = true;
+}
+
+void FindEllipse::setbboxx1(int ix1) {
+  m_pending_bbox_x1 = ix1;
+  m_has_pending_bbox = true;
+}
+
+void FindEllipse::setbboxy1(int iy1) {
+  m_pending_bbox_y1 = iy1;
+  m_has_pending_bbox = true;
+}
+
+void FindEllipse::buildbbox() {
+  const int x0 = m_pending_bbox_x0;
+  const int y0 = m_pending_bbox_y0;
+  const int x1 = m_pending_bbox_x1;
+  const int y1 = m_pending_bbox_y1;
+
+  {
+    std::ostringstream oss;
+    oss << "requested_bbox=(" << x0 << "," << y0 << "," << x1 << "," << y1
+        << ")";
+    LogFindEllipseMeasureProbe("setellipse_bbox", "requested", oss.str());
+  }
+
+  setellipse(x0, y0, x1, y1);
+
+  {
+    std::ostringstream oss;
+    oss << "applied_roi=(" << m_roi_x0 << "," << m_roi_y0 << ")-("
+        << m_roi_x1 << "," << m_roi_y1 << ")"
+        << " inner_scale_percent=" << m_inner_scale_percent;
+    LogFindEllipseMeasureProbe("setellipse_bbox", "applied", oss.str());
+  }
+}
+
+void FindEllipse::setinnerpercent(int percent) {
+  m_inner_scale_percent = std::max(0, std::min(99, percent));
+  if (m_has_display_roi) {
+    setellipse(m_roi_x0, m_roi_y0, m_roi_x1, m_roi_y1);
+  }
+  std::ostringstream oss;
+  oss << "inner_scale_percent=" << m_inner_scale_percent
+      << " scan_lines=" << m_lines.size()
+      << " rebuild=" << (m_has_display_roi ? 1 : 0);
+  LogFindEllipseMeasureProbe("setellipse_annulus", "applied", oss.str());
+}
+
 void FindEllipse::setellipse2(int icentx, int icenty, int ipax, int ipay,
                               int idis) {
   Shape::setellipse2(icentx, icenty, ipax, ipay, idis);
@@ -1281,12 +1349,17 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot &out) const {
     out.center_y = static_cast<double>(m_roi_y0 + m_roi_y1) * 0.5;
     out.radius_x = std::abs(static_cast<double>(m_roi_x1 - m_roi_x0)) * 0.5;
     out.radius_y = std::abs(static_cast<double>(m_roi_y1 - m_roi_y0)) * 0.5;
+    out.inner_scale_percent = m_inner_scale_percent;
+    out.has_inner_ellipse = m_inner_scale_percent > 0;
+    out.inner_radius_x =
+        out.radius_x * static_cast<double>(m_inner_scale_percent) * 0.01;
+    out.inner_radius_y =
+        out.radius_y * static_cast<double>(m_inner_scale_percent) * 0.01;
   }
 
-  const PointsShape &points =
-      const_cast<FindEllipse *>(this)->getresultpoints();
-  out.has_measure_points = points.size() > 0;
-  out.measure_points_count = static_cast<int>(points.size());
+  const int measure_point_count = ClampSizeToInt(m_measurepoints.size());
+  out.has_measure_points = measure_point_count > 0;
+  out.measure_points_count = measure_point_count;
   out.has_fit_ellipse = m_has_fit_result;
   out.fit_center_x = m_fit_center_x;
   out.fit_center_y = m_fit_center_y;
@@ -1301,8 +1374,9 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot &out) const {
   out.method = m_iMethod;
   out.selected_edge_index = m_iselectedgenum;
   out.scan_line_count = static_cast<int>(m_lines.size());
-  out.scan_line_length =
-      m_lines.empty() ? 0 : const_cast<LineShape &>(m_lines[0]).getlinesize();
+  out.scan_line_length = out.has_roi
+                             ? RoundToInt(std::max(out.radius_x, out.radius_y) * 2.0)
+                             : 0;
   out.measure_failure_stage = m_measure_failure_stage;
   out.measure_failure_reason = m_measure_failure_reason;
 
@@ -1380,12 +1454,51 @@ void FindEllipse::PublishDisplayShapes(ICxShapeSink &sink,
     return;
 
   if (snapshot.has_roi) {
-    auto roi =
+    auto outer =
         std::make_unique<EllipseShape>(snapshot.center_x, snapshot.center_y,
                                        snapshot.radius_x, snapshot.radius_y);
 
     sink.UpsertShape(owner_ref + ".roi_ellipse", "FindEllipse", owner_ref,
-                     "setellipse", "roi", true, false, std::move(roi));
+                     "setellipse", "roi", true, false, std::move(outer));
+
+    auto outerScan =
+        std::make_unique<EllipseShape>(snapshot.center_x, snapshot.center_y,
+                                       snapshot.radius_x, snapshot.radius_y);
+    sink.UpsertShape(owner_ref + ".outer_scan_ellipse", "FindEllipse",
+                     owner_ref, "", "scan", false, false,
+                     std::move(outerScan));
+
+    if (snapshot.has_inner_ellipse) {
+      auto innerScan = std::make_unique<EllipseShape>(
+          snapshot.center_x, snapshot.center_y, snapshot.inner_radius_x,
+          snapshot.inner_radius_y);
+      sink.UpsertShape(owner_ref + ".inner_scan_ellipse", "FindEllipse",
+                       owner_ref, "", "scan", false, false,
+                       std::move(innerScan));
+    }
+  }
+
+  for (std::size_t i = 0; i < m_lines.size(); ++i) {
+    CxShapePoint p0;
+    CxShapePoint p1;
+    try {
+      if (!m_lines[i].exportLine(p0, p1))
+        continue;
+    } catch (...) {
+      continue;
+    }
+
+    if (!std::isfinite(p0.x) || !std::isfinite(p0.y) ||
+        !std::isfinite(p1.x) || !std::isfinite(p1.y)) {
+      continue;
+    }
+
+    auto scanLine = std::make_unique<LineShape>();
+    scanLine->setline(RoundToInt(p0.x), RoundToInt(p0.y),
+                      RoundToInt(p1.x), RoundToInt(p1.y));
+    sink.UpsertShape(owner_ref + ".scan_tick_" + std::to_string(i),
+                     "FindEllipse", owner_ref, "", "scan_tick", false, false,
+                     std::move(scanLine));
   }
 
   const PointsShape &points =
@@ -1393,7 +1506,8 @@ void FindEllipse::PublishDisplayShapes(ICxShapeSink &sink,
   if (points.size() > 0) {
     auto resultPoints = std::make_unique<PointsShape>();
     for (int i = 0; i < static_cast<int>(points.size()); ++i) {
-      resultPoints->addpoint(points.getx(i), points.gety(i));
+      resultPoints->addpoint(RoundToInt(points.getx(i)),
+                             RoundToInt(points.gety(i)));
     }
 
     sink.UpsertShape(owner_ref + ".measure_points", "FindEllipse", owner_ref,
@@ -1404,7 +1518,7 @@ void FindEllipse::PublishDisplayShapes(ICxShapeSink &sink,
   if (snapshot.has_fit_ellipse) {
     auto fitEllipse = std::make_unique<EllipseShape>(
         snapshot.fit_center_x, snapshot.fit_center_y, snapshot.fit_radius_x,
-        snapshot.fit_radius_y);
+        snapshot.fit_radius_y, snapshot.fit_angle_deg);
 
     sink.UpsertShape(owner_ref + ".fit_ellipse", "FindEllipse", owner_ref, "",
                      "result", false, true, std::move(fitEllipse));

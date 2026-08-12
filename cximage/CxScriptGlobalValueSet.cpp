@@ -151,6 +151,7 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_ellipse_y0"] = static_cast<double>(options.ellipse_y0);
     overrides["global_ellipse_x1"] = static_cast<double>(options.ellipse_x1);
     overrides["global_ellipse_y1"] = static_cast<double>(options.ellipse_y1);
+    overrides["global_findellipse_inner_scale_percent"] = 0.0;
 
     overrides["global_tool_half_width"] = static_cast<double>(options.tool_half_width);
     overrides["global_wgap"] = static_cast<double>(options.wgap);

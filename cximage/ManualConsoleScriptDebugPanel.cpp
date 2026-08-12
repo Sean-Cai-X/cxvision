@@ -341,6 +341,325 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
 }
 } // namespace
 
+bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
+                                                  const char* trigger)
+{
+  const bool runRequestedByCandidateSave =
+      !context.pending_execution_candidate_id.empty() &&
+      context.pending_execution_candidate_id ==
+          context.last_evidence_candidate_id;
+  const bool runRequestedByKeyParameterControls =
+      context.debug_action == "Key Parameter Controls Run Script" &&
+      context.debug_status == "MANUAL_RUN_REQUESTED";
+  const bool runRequestedByFastMatchAction =
+      context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
+      context.debug_action == "FastMatch Learn" ||
+      context.debug_action == "FastMatch Match" ||
+      context.debug_action == "FastMatch Learn + Match";
+  const bool runRequestedByTorchAction =
+      context.editor_source == "torch_runtime_action" &&
+      context.debug_status == "TORCH_ACTION_RUN_REQUESTED";
+  const bool usePendingExecutionSnapshot =
+      (runRequestedByCandidateSave || runRequestedByKeyParameterControls ||
+       runRequestedByFastMatchAction) &&
+      context.has_pending_execution_snapshot;
+  const bool useStagedTorchSnapshot =
+      runRequestedByTorchAction && context.has_pending_execution_snapshot;
+
+  if (!usePendingExecutionSnapshot && !useStagedTorchSnapshot)
+    return false;
+
+  SetCxCrashBreadcrumb("ConsumePendingManualScriptRun:begin");
+  CXLOG_INFO(
+      "ManualConsole",
+      "pending_manual_run_consume_begin",
+      "running",
+      std::string("trigger=") + (trigger == nullptr ? "(none)" : trigger) +
+          " debug_status=" + context.debug_status +
+          " debug_action=" + context.debug_action +
+          " script=" + context.loaded_script_path);
+
+  const ManualGaugeState frozenGauge = context.pending_execution_gauge;
+  const std::unordered_map<std::string, int> frozenGlobals =
+      context.pending_execution_globals;
+
+  auto clearPendingSnapshot = [&context]() {
+    context.has_pending_execution_snapshot = false;
+    context.pending_execution_globals.clear();
+    context.pending_execution_candidate_id.clear();
+    context.last_evidence_candidate_id.clear();
+    context.last_evidence_candidate_dir.clear();
+    context.last_evidence_candidate_reason.clear();
+  };
+
+  if (context.editor_text.empty())
+  {
+    context.debug_action = "Run";
+    context.run_state = "failed";
+    context.debug_status = "run_failed";
+    context.debug_reason = "Script Editor is empty";
+    clearPendingSnapshot();
+    CXLOG_ERROR(
+        "ManualConsole",
+        "pending_manual_run_consume_end",
+        "run_failed",
+        "reason=Script Editor is empty");
+    return true;
+  }
+
+  std::string sourceRefreshReason;
+  if (!RefreshCleanEditorFromSource(context, sourceRefreshReason))
+  {
+    context.debug_action = "Run";
+    context.run_state = "failed";
+    context.debug_status = "run_failed";
+    context.debug_reason = sourceRefreshReason;
+    clearPendingSnapshot();
+    CXLOG_ERROR(
+        "ManualConsole",
+        "pending_manual_run_consume_end",
+        "run_failed",
+        "reason=" + sourceRefreshReason);
+    return true;
+  }
+
+  std::string legacyMigrationReason;
+  const bool legacyFindCircleMigrated =
+      MigrateLegacyFindCircleCallsForRun(context, legacyMigrationReason);
+  if (legacyFindCircleMigrated)
+  {
+    CXLOG_WARN(
+        "ManualConsole",
+        "legacy_findcircle_script_migrated",
+        "MIGRATED_IN_MEMORY",
+        std::string("script=") + context.loaded_script_path +
+            ", reason=" + legacyMigrationReason);
+  }
+
+  std::string legacyFindLineMigrationReason;
+  const bool legacyFindLineMigrated =
+      MigrateLegacyFindLineCallsForRun(context, legacyFindLineMigrationReason);
+  if (legacyFindLineMigrated)
+  {
+    CXLOG_WARN(
+        "ManualConsole",
+        "legacy_findline_script_migrated",
+        "MIGRATED_IN_MEMORY",
+        std::string("script=") + context.loaded_script_path +
+            ", reason=" + legacyFindLineMigrationReason);
+  }
+
+  AnalyzeScript(context);
+  context.current_gauge = frozenGauge;
+  context.runtime_int_vars = frozenGlobals;
+  context.debug_action = "Run";
+  if (useStagedTorchSnapshot)
+  {
+    context.debug_reason = "Torch action input snapshot restored before execution.";
+  }
+  else if (runRequestedByKeyParameterControls)
+  {
+    context.debug_reason =
+        "Key Parameter Controls input snapshot restored before execution.";
+  }
+  else if (runRequestedByFastMatchAction)
+  {
+    context.debug_reason =
+        "FastMatch Learn/Match input snapshot restored before execution.";
+  }
+  else
+  {
+    context.debug_reason =
+        "candidate input snapshot restored before execution: candidate_id=" +
+        context.pending_execution_candidate_id;
+  }
+
+  for (const auto& input : context.runtime_int_vars)
+  {
+    if (input.first.rfind("global_", 0) == 0)
+      m_parserDebugBridge.SetGlobalInt(input.first, input.second);
+  }
+  for (const ScriptVariableView& observed : context.global_variable_views)
+  {
+    if (observed.name == "global_matInput" ||
+        observed.name.rfind("global_", 0) != 0)
+      continue;
+    if (context.runtime_int_vars.find(observed.name) ==
+        context.runtime_int_vars.end())
+    {
+      context.runtime_int_vars.emplace(observed.name, 0);
+      m_parserDebugBridge.SetGlobalInt(observed.name, 0);
+    }
+  }
+
+  std::stringstream ss;
+  ss << "\nManual effective globals:";
+  ss << "\nimage=" << (m_imageViewImage.empty() ? "s_img0" : "m_imageViewImage");
+  if (!m_imageViewImage.empty())
+    ss << " size=" << m_imageViewImage.cols << "x" << m_imageViewImage.rows;
+  else if (!s_img0.empty())
+    ss << " size=" << s_img0.cols << "x" << s_img0.rows;
+  ss << "\nscript=" << context.loaded_script_path;
+  ss << "\neditor_source=" << context.editor_source;
+  ss << "\nlearn_roi=("
+     << context.runtime_int_vars["global_learn_roi_x"] << ","
+     << context.runtime_int_vars["global_learn_roi_y"] << ","
+     << context.runtime_int_vars["global_learn_roi_w"] << ","
+     << context.runtime_int_vars["global_learn_roi_h"] << ")";
+  ss << "\nsearch_roi=("
+     << context.runtime_int_vars["global_search_roi_x"] << ","
+     << context.runtime_int_vars["global_search_roi_y"] << ","
+     << context.runtime_int_vars["global_search_roi_w"] << ","
+     << context.runtime_int_vars["global_search_roi_h"] << ")";
+  ss << "\nfastmatch_action="
+     << context.runtime_int_vars["global_fastmatch_action"];
+  ss << "\nroi=(" << context.runtime_int_vars["global_roi_x0"] << ","
+     << context.runtime_int_vars["global_roi_y0"] << ","
+     << context.runtime_int_vars["global_roi_x1"] << ","
+     << context.runtime_int_vars["global_roi_y1"] << ")";
+  ss << "\ngap=" << context.runtime_int_vars["global_gap"];
+  ss << "\nlinegap=" << context.runtime_int_vars["global_linegap"];
+  ss << "\nthreshold=" << context.runtime_int_vars["global_threshold"];
+  ss << "\nmethod=" << context.runtime_int_vars["global_method"];
+  const std::string effectiveGlobals = ss.str();
+
+  CXLOG_INFO(
+      "ManualConsole",
+      "manual_run_input_snapshot",
+      "READY",
+      std::string("source=") +
+          (sourceRefreshReason.empty() ? "pending_consumer" : "disk_refresh") +
+          effectiveGlobals);
+
+  if (legacyFindCircleMigrated)
+    context.debug_reason = legacyMigrationReason;
+  if (legacyFindLineMigrated)
+    context.debug_reason = legacyFindLineMigrationReason;
+
+  bool imageBound = true;
+  if (!m_imageViewImage.empty())
+    imageBound = m_parserDebugBridge.StageGlobalMatInput(m_imageViewImage);
+  else if (!s_img0.empty())
+    imageBound = m_parserDebugBridge.StageGlobalMatInput(s_img0);
+
+  std::string torchRequestReason;
+  const bool torchRequestReady = PrepareTorchUiRequestContext(
+      context.editor_text,
+      context.loaded_script_path,
+      torchRequestReason);
+  if (!torchRequestReady)
+  {
+    CXLOG_ERROR(
+        "TorchUI",
+        "torch_ui_request_blocked",
+        "BLOCKED",
+        torchRequestReason);
+  }
+
+  if (torchRequestReady)
+    m_annotationLayer.RemoveRuntimeOwnersNotIn(std::unordered_set<std::string>{});
+
+  context.run_state = "running";
+  const bool ran = imageBound && torchRequestReady &&
+      m_parserDebugBridge.RunScript(context.editor_text);
+  context.run_state = ran ? "runtime_finished" : "failed";
+  context.debug_status = ran ? "runtime_executed" : "run_failed";
+  context.debug_reason = ran
+      ? ("exact Script Editor text executed through ParserDebugBridge" +
+         (torchRequestReason.empty()
+              ? std::string()
+              : " | " + torchRequestReason))
+      : (!torchRequestReady
+             ? torchRequestReason
+             : (imageBound
+                    ? ("ParserDebugBridge rejected the Script Editor text: " +
+                       m_parserDebugBridge.LastError())
+                    : "ParserDebugBridge rejected Run: no Image View/default image available for global_matInput"));
+
+  if (ran)
+  {
+    CXLOG_INFO(
+        "ManualConsole",
+        "manual_run_finished",
+        "runtime_executed",
+        "script=" + context.loaded_script_path +
+            " reason=" + context.debug_reason);
+  }
+  else
+  {
+    CXLOG_ERROR(
+        "ManualConsole",
+        "manual_run_finished",
+        "run_failed",
+        "script=" + context.loaded_script_path +
+            " reason=" + context.debug_reason);
+  }
+
+  m_scriptResult.source = "manual_console_editor";
+  m_scriptResult.script_path = context.loaded_script_path;
+  m_scriptResult.status = ran ? "PENDING" : "BLOCKED";
+  m_scriptResult.reason = context.debug_reason;
+  m_scriptResult.runtime_fillback_status =
+      ran ? "runtime_objects_queried" : "not_started";
+
+  RefreshRuntimeObjectTable(
+      "Manual Console Pending Run", ran ? "runtime_executed" : "BLOCKED");
+
+  context.current_gauge = frozenGauge;
+  context.runtime_int_vars = frozenGlobals;
+
+  std::string snapshotPath;
+  std::string snapshotReason;
+  if (!SaveCxDebugSnapshotText(context, snapshotPath, snapshotReason))
+  {
+    context.debug_reason += " | debug snapshot save failed: " + snapshotReason;
+  }
+
+  if (runRequestedByCandidateSave &&
+      !context.last_evidence_candidate_id.empty() &&
+      !context.last_evidence_candidate_dir.empty())
+  {
+    std::filesystem::path candidateDir(context.last_evidence_candidate_dir);
+    CxEvidenceCandidateSaveOptions options;
+    if (candidateDir.has_parent_path() &&
+        candidateDir.parent_path().has_parent_path())
+    {
+      options.root_dir = candidateDir.parent_path().parent_path().string();
+    }
+    options.candidate_id = context.last_evidence_candidate_id;
+    options.case_id_override =
+        candidateDir.has_parent_path()
+            ? candidateDir.parent_path().filename().string()
+            : std::string();
+    options.mode = ran ? "runtime_finished" : "runtime_failed";
+    options.request_run = false;
+    options.add_to_evidence_chain = false;
+    options.preserve_input_snapshots = true;
+    CxEvidenceCandidateSaveResult candidateResult;
+    if (!SaveEvidenceCandidatePackage(context, options, candidateResult))
+    {
+      context.debug_reason +=
+          " | evidence candidate post-run update failed: " +
+          candidateResult.reason;
+    }
+    else
+    {
+      context.last_evidence_candidate_dir = candidateResult.candidate_dir;
+    }
+  }
+
+  clearPendingSnapshot();
+  CXLOG_INFO(
+      "ManualConsole",
+      "pending_manual_run_consume_end",
+      ran ? "runtime_executed" : "run_failed",
+      std::string("trigger=") + (trigger == nullptr ? "(none)" : trigger) +
+          " script=" + context.loaded_script_path +
+          " reason=" + context.debug_reason);
+  SetCxCrashBreadcrumb("ConsumePendingManualScriptRun:end");
+  return true;
+}
+
 void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 {
   SetCxCrashBreadcrumb("drawManualStateTestConsole:ScriptEditor:begin");
@@ -436,7 +755,37 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
 void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 {
   SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:begin");
-  if (!ImGui::CollapsingHeader("Debug Compiler", ImGuiTreeNodeFlags_DefaultOpen))
+  // Some parameter-panel actions (FastMatch Learn/Match, Save+Run candidate,
+  // Key Parameter Controls Run Script) stage a serial parser execution for the
+  // Debug Compiler block to consume on the next UI pass.  That execution must
+  // not depend on the operator keeping the Debug Compiler header expanded;
+  // otherwise the button only records a request and no runtime objects/model
+  // points are produced.
+  const bool deferredCandidateSaveRun =
+      !context.pending_execution_candidate_id.empty() &&
+      context.pending_execution_candidate_id ==
+          context.last_evidence_candidate_id &&
+      context.has_pending_execution_snapshot;
+  const bool deferredKeyParameterRun =
+      context.debug_action == "Key Parameter Controls Run Script" &&
+      context.debug_status == "MANUAL_RUN_REQUESTED" &&
+      context.has_pending_execution_snapshot;
+  const bool deferredFastMatchRun =
+      (context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
+       context.debug_action == "FastMatch Learn" ||
+       context.debug_action == "FastMatch Match" ||
+       context.debug_action == "FastMatch Learn + Match") &&
+      context.has_pending_execution_snapshot;
+  const bool deferredTorchRun =
+      context.editor_source == "torch_runtime_action" &&
+      context.debug_status == "TORCH_ACTION_RUN_REQUESTED" &&
+      context.has_pending_execution_snapshot;
+  const bool hasDeferredRun =
+      deferredCandidateSaveRun || deferredKeyParameterRun ||
+      deferredFastMatchRun || deferredTorchRun;
+  const bool debugCompilerOpen =
+      ImGui::CollapsingHeader("Debug Compiler", ImGuiTreeNodeFlags_DefaultOpen);
+  if (!debugCompilerOpen && !hasDeferredRun)
     return;
 
   ImGui::PushID("debug_compiler");
@@ -476,7 +825,10 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.debug_action == "Key Parameter Controls Run Script" &&
       context.debug_status == "MANUAL_RUN_REQUESTED";
   const bool runRequestedByFastMatchAction =
-      context.debug_status == "FASTMATCH_RUN_REQUESTED";
+      context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
+      context.debug_action == "FastMatch Learn" ||
+      context.debug_action == "FastMatch Match" ||
+      context.debug_action == "FastMatch Learn + Match";
   const bool runRequestedByTorchAction =
       context.editor_source == "torch_runtime_action" &&
       context.debug_status == "TORCH_ACTION_RUN_REQUESTED";
@@ -635,6 +987,8 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
          << context.runtime_int_vars["global_ellipse_y0"] << ","
          << context.runtime_int_vars["global_ellipse_x1"] << ","
          << context.runtime_int_vars["global_ellipse_y1"] << ")";
+      ss << "\nellipse_inner_scale_percent="
+         << context.runtime_int_vars["global_findellipse_inner_scale_percent"];
       ss << "\nroi=(" << context.runtime_int_vars["global_roi_x0"] << ","
          << context.runtime_int_vars["global_roi_y0"] << ","
          << context.runtime_int_vars["global_roi_x1"] << ","

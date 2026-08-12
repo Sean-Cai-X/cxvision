@@ -8,17 +8,20 @@ class EllipseShape : public ShapeBase
 public:
     EllipseShape();
     EllipseShape(double center_x, double center_y, double radius_x, double radius_y);
+    EllipseShape(double center_x, double center_y, double radius_x, double radius_y, double angle_deg);
 
     CxShapeKind kind() const override { return CxShapeKind::Ellipse; }
 
     void setCenter(double cx, double cy);
     void setRadiusX(double rx);
     void setRadiusY(double ry);
+    void setAngleDegrees(double angle_deg);
 
     double cx() const { return m_cx; }
     double cy() const { return m_cy; }
     double radiusX() const { return m_rx; }
     double radiusY() const { return m_ry; }
+    double angleDegrees() const { return m_angleDeg; }
 
     CxShapeHit hitTest(double x, double y, double tolerance) const override;
     void enumerateHandles(std::vector<CxShapeHandle>& out) const override;
@@ -40,6 +43,7 @@ private:
     double m_cy = 0.0;
     double m_rx = 50.0;
     double m_ry = 30.0;
+    double m_angleDeg = 0.0;
 };
 
 #endif

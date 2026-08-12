@@ -65,6 +65,40 @@ int RoundToInt(double value) {
   return static_cast<int>(std::lround(clamped));
 }
 
+gp_Pnt SamplePointOnDisplayedLine(LineShape &line, int sample_index,
+                                  int line_length) {
+  CxShapePoint p0;
+  CxShapePoint p1;
+  if (!line.exportLine(p0, p1) || line_length <= 1) {
+    return line.getlinepoint(std::max(0, sample_index));
+  }
+
+  const int max_index = std::max(1, line_length - 1);
+  const double t = std::min(
+      1.0, std::max(0.0,
+                    static_cast<double>(sample_index) /
+                        static_cast<double>(max_index)));
+  return gp_Pnt(p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t, 0.0);
+}
+
+double Distance2D(double x0, double y0, double x1, double y1) {
+  const double dx = x1 - x0;
+  const double dy = y1 - y0;
+  return std::sqrt(dx * dx + dy * dy);
+}
+
+double ComputeCirclePhysicalEndpointGuard(double scan_length, int linegap,
+                                          int gap) {
+  if (!(scan_length > 4.0))
+    return 0.0;
+  (void)linegap;
+  (void)gap;
+  // The annulus scan endpoints are real gauge borders: Rin/Rout can be valid
+  // edge candidates.  This guard is only for copy/padding seam residue exactly
+  // at the scan strip endpoint, so keep it intentionally narrow.
+  return std::min(1.5, std::max(0.75, scan_length * 0.02));
+}
+
 int ComputeCircleEdgeOffset(int edge_width, int default_offset) {
   if (edge_width <= 0)
     return 0;
@@ -142,7 +176,144 @@ void ApplyCircleObjectPrefilter(FindObject *find_object, Image *process_image,
   find_object->setrect(0, 0, process_width, line_count);
   find_object->setbrow(filter_mode);
   find_object->setminmaxarea(filter_min, filter_max);
-  find_object->Measure(*process_image);
+  // Keep FindCircle aligned with FindLine: 21/22 are selection-mask modes,
+  // and the legacy region-growth entry can start from the black background
+  // and treat the whole unwrapped band as one component.  The connected-
+  // components entry explicitly selects white (21) or black (22) components
+  // and writes the accepted mask back to the process image.
+  if (filter_mode == 21 || filter_mode == 22)
+    find_object->MeasureConnectedComponents(*process_image);
+  else
+    find_object->Measure(*process_image);
+}
+
+int ExtendCircleUnwrappedBinaryForFindObject(Image *process_image,
+                                             int process_width,
+                                             int line_count,
+                                             int tail_rows) {
+  if (process_image == nullptr || process_width <= 0 || line_count <= 0)
+    return 0;
+
+  cv::Mat &mat = process_image->getmat();
+  if (mat.empty())
+    return 0;
+
+  const int main_width = std::min(process_width, mat.cols);
+  const int roi_width = std::min(process_width + 3, mat.cols);
+  const int rows = std::min(line_count + std::max(0, tail_rows), mat.rows);
+  if (main_width <= 0 || rows <= 0)
+    return 0;
+
+  cv::Mat before = mat.clone();
+  int extended = 0;
+  const int connect_radius_x = std::max(1, std::min(3, process_width / 80 + 1));
+
+  auto is_foreground = [&](const cv::Mat &src, int y, int x) -> bool {
+    if (x < 0 || y < 0 || x >= src.cols || y >= src.rows)
+      return false;
+    if (src.channels() == 1)
+      return src.at<uchar>(y, x) > 0;
+    const cv::Vec3b v = src.at<cv::Vec3b>(y, x);
+    return v[0] > 0 || v[1] > 0 || v[2] > 0;
+  };
+
+  auto set_foreground = [&](int y, int x, const cv::Vec3b &value) {
+    if (x < 0 || y < 0 || x >= mat.cols || y >= mat.rows)
+      return;
+    if (mat.channels() == 1) {
+      uchar &dst = mat.at<uchar>(y, x);
+      if (dst == 0) {
+        dst = std::max<uchar>(value[0], 1);
+        ++extended;
+      }
+    } else {
+      cv::Vec3b &dst = mat.at<cv::Vec3b>(y, x);
+      if (dst[0] == 0 && dst[1] == 0 && dst[2] == 0) {
+        dst = value;
+        ++extended;
+      }
+    }
+  };
+
+  for (int y = 0; y < line_count && y < before.rows; ++y) {
+    for (int x = 0; x < main_width; ++x) {
+      if (!is_foreground(before, y, x))
+        continue;
+      const cv::Vec3b value =
+          before.channels() == 1
+              ? cv::Vec3b(before.at<uchar>(y, x), before.at<uchar>(y, x),
+                          before.at<uchar>(y, x))
+              : before.at<cv::Vec3b>(y, x);
+      for (int dy = -1; dy <= 1; ++dy) {
+        const int yy = y + dy;
+        if (yy < 0 || yy >= line_count || yy >= mat.rows)
+          continue;
+        for (int dx = -connect_radius_x; dx <= connect_radius_x; ++dx) {
+          set_foreground(yy, x + dx, value);
+        }
+      }
+    }
+  }
+
+  const int wrap_rows = std::min(std::max(0, tail_rows), line_count);
+  for (int pad = 0; pad < wrap_rows; ++pad) {
+    const int src_row = pad;
+    const int dst_row = line_count + pad;
+    if (src_row < 0 || src_row >= mat.rows || dst_row < 0 ||
+        dst_row >= mat.rows)
+      continue;
+    for (int x = 0; x < main_width; ++x) {
+      if (!is_foreground(mat, src_row, x))
+        continue;
+      const cv::Vec3b value =
+          mat.channels() == 1
+              ? cv::Vec3b(mat.at<uchar>(src_row, x),
+                          mat.at<uchar>(src_row, x),
+                          mat.at<uchar>(src_row, x))
+              : mat.at<cv::Vec3b>(src_row, x);
+      set_foreground(dst_row, x, value);
+    }
+  }
+
+  if (roi_width > main_width) {
+    for (int y = 0; y < rows; ++y) {
+      const int source_x = main_width - 1;
+      if (source_x < 0 || source_x >= mat.cols)
+        continue;
+      const cv::Vec3b value =
+          mat.channels() == 1
+              ? cv::Vec3b(mat.at<uchar>(y, source_x),
+                          mat.at<uchar>(y, source_x),
+                          mat.at<uchar>(y, source_x))
+              : mat.at<cv::Vec3b>(y, source_x);
+      for (int x = main_width; x < roi_width; ++x)
+        set_foreground(y, x, value);
+    }
+  }
+
+  return extended;
+}
+
+int CountCircleForegroundPixels(const cv::Mat &mat, int process_width,
+                                int line_count) {
+  if (mat.empty() || process_width <= 0 || line_count <= 0)
+    return 0;
+  const int rows = std::min(line_count, mat.rows);
+  const int cols = std::min(process_width, mat.cols);
+  int count = 0;
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      if (mat.channels() == 1) {
+        if (mat.at<uchar>(y, x) > 0)
+          ++count;
+      } else {
+        const cv::Vec3b v = mat.at<cv::Vec3b>(y, x);
+        if (v[0] > 0 || v[1] > 0 || v[2] > 0)
+          ++count;
+      }
+    }
+  }
+  return count;
 }
 
 int CountCircleBinaryCandidateRuns(const cv::Mat &mat, int process_width,
@@ -718,6 +889,7 @@ void FindCircle::Measure(Image &image) {
   m_lastMeasureGeometryDebug.scan_boundary_clipped_lines = 0;
   m_lastMeasureGeometryDebug.scan_boundary_extended_samples = 0;
   m_lastMeasureGeometryDebug.candidate_boundary_reject_count = 0;
+  m_lastMeasureGeometryDebug.candidate_endpoint_reject_count = 0;
 
   if (image.getmat().empty()) {
     LogFindCircleMeasureProbe("measure_image_fail", "failed",
@@ -889,13 +1061,10 @@ void FindCircle::Measure(Image &image) {
       return false;
     }
 
-    
-    if (sample_index == 0 && ilineslen1 > 1)
-      return false;
-
     const gp_Pnt source_point =
-        m_lines[static_cast<std::size_t>(line_index)].getlinepoint(
-            sample_index);
+        SamplePointOnDisplayedLine(
+            m_lines[static_cast<std::size_t>(line_index)], sample_index,
+            ilineslen1);
     const int source_x = RoundToInt(source_point.X());
     const int source_y = RoundToInt(source_point.Y());
     const int border_guard =
@@ -1022,54 +1191,73 @@ void FindCircle::Measure(Image &image) {
   const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
   if (!compact_domain && g_pbackfindobject != nullptr &&
       ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize)) {
-    LogFindCircleMeasureProbe("measure_before_object_prefilter", "running",
-                              "ifindset=" + std::to_string(m_ifindset));
+    const int circular_tail_rows = std::min(5, isize);
+    const int prefilter_width = iprocessw + 3;
+    const int prefilter_rows = isize + circular_tail_rows;
+    const int extended_samples = ExtendCircleUnwrappedBinaryForFindObject(
+        g_pbackimage, iprocessw, isize, circular_tail_rows);
+    const int foreground_before_prefilter = CountCircleForegroundPixels(
+        g_pbackimage->getmat(), prefilter_width, prefilter_rows);
+    LogFindCircleMeasureProbe(
+        "measure_before_object_prefilter", "running",
+        "ifindset=" + std::to_string(m_ifindset) +
+            ", unwrapped_extension=" + std::to_string(extended_samples) +
+            ", prefilter_rect=(0,0," + std::to_string(prefilter_width) + "," +
+            std::to_string(prefilter_rows) + ")" +
+            ", foreground_before=" +
+            std::to_string(foreground_before_prefilter));
     m_last_prefilter_used = 1;
-    cv::Mat binary_before_prefilter;
     int candidate_runs_before_prefilter = 0;
     if (!g_pbackimage->getmat().empty()) {
-      g_pbackimage->getmat().copyTo(binary_before_prefilter);
       candidate_runs_before_prefilter = CountCircleBinaryCandidateRuns(
-          binary_before_prefilter, iprocessw, isize, max_edge_width);
+          g_pbackimage->getmat(), iprocessw, isize, max_edge_width);
     }
     const int filter_min = compact_domain
                                ? std::min(static_cast<int>(m_ifiltermin),
                                           std::max(4, iprocessw / 2))
                                : static_cast<int>(m_ifiltermin);
     int effective_filter_min = filter_min;
-    ApplyCircleObjectPrefilter(g_pbackfindobject, g_pbackimage, iprocessw,
-                               isize, m_ifilterborw, effective_filter_min,
+    ApplyCircleObjectPrefilter(g_pbackfindobject, g_pbackimage, prefilter_width,
+                               prefilter_rows, m_ifilterborw,
+                               effective_filter_min,
                                static_cast<int>(m_ifiltermax));
+    const int first_component_count =
+        g_pbackfindobject->getdebugcomponentcount();
+    const int first_accepted_count =
+        g_pbackfindobject->getdebugacceptedcount();
+    const int first_rejected_count =
+        g_pbackfindobject->getdebugrejectedcount();
+    const int first_max_component_area =
+        g_pbackfindobject->getdebugmaxcomponentarea();
     int candidate_runs_after_prefilter = CountCircleBinaryCandidateRuns(
         g_pbackimage->getmat(), iprocessw, isize, max_edge_width);
-    if (candidate_runs_before_prefilter > 0 &&
-        candidate_runs_after_prefilter == 0 &&
-        !binary_before_prefilter.empty()) {
-      binary_before_prefilter.copyTo(g_pbackimage->getmat());
-      const int circle_safe_min =
-          std::max(1, std::min(filter_min, std::max(1, max_edge_width)));
-      if (circle_safe_min < filter_min) {
-        effective_filter_min = circle_safe_min;
-        ApplyCircleObjectPrefilter(g_pbackfindobject, g_pbackimage, iprocessw,
-                                   isize, m_ifilterborw, effective_filter_min,
-                                   static_cast<int>(m_ifiltermax));
-        candidate_runs_after_prefilter = CountCircleBinaryCandidateRuns(
-            g_pbackimage->getmat(), iprocessw, isize, max_edge_width);
-      }
-    }
-    if (candidate_runs_before_prefilter > 0 &&
-        candidate_runs_after_prefilter == 0 &&
-        !binary_before_prefilter.empty()) {
-      binary_before_prefilter.copyTo(g_pbackimage->getmat());
-      m_last_prefilter_used = 0;
-      m_lastMeasureGeometryDebug.object_prefilter_restored = 1;
+    int foreground_after_prefilter = CountCircleForegroundPixels(
+        g_pbackimage->getmat(), prefilter_width, prefilter_rows);
+    LogFindCircleMeasureProbe(
+        "measure_object_prefilter_first_pass", "running",
+        "effective_min=" + std::to_string(effective_filter_min) +
+            ", components=" + std::to_string(first_component_count) +
+            ", accepted=" + std::to_string(first_accepted_count) +
+            ", rejected=" + std::to_string(first_rejected_count) +
+            ", max_component_area=" +
+            std::to_string(first_max_component_area) +
+            ", foreground_after=" +
+            std::to_string(foreground_after_prefilter) +
+            ", runs_after=" +
+            std::to_string(candidate_runs_after_prefilter));
+    if (foreground_before_prefilter > 0 && foreground_after_prefilter == 0) {
+      m_lastMeasureGeometryDebug.object_prefilter_restored = 0;
       LogFindCircleMeasureProbe(
-          "measure_object_prefilter_restored", "running",
-          "object prefilter rejected all radial scan candidates; restored "
-          "original binary scan image, runs_before=" +
+          "measure_object_prefilter_empty", "running",
+          "object prefilter rejected all radial scan candidates; keeping "
+          "filtered empty result so findsetting=1 is visible, runs_before=" +
               std::to_string(candidate_runs_before_prefilter) +
               ", runs_after=" +
-              std::to_string(candidate_runs_after_prefilter));
+              std::to_string(candidate_runs_after_prefilter) +
+              ", foreground_before=" +
+              std::to_string(foreground_before_prefilter) +
+              ", foreground_after=" +
+              std::to_string(foreground_after_prefilter));
     }
     m_lastMeasureGeometryDebug.object_prefilter_applied =
         m_last_prefilter_used != 0 ? 1 : 0;
@@ -1086,6 +1274,10 @@ void FindCircle::Measure(Image &image) {
                                   std::to_string(candidate_runs_after_prefilter) +
                                   ", effective_min=" +
                                   std::to_string(effective_filter_min) +
+                                  ", foreground_before=" +
+                                  std::to_string(foreground_before_prefilter) +
+                                  ", foreground_after=" +
+                                  std::to_string(foreground_after_prefilter) +
                                   ", effective_prefilter_used=" +
                                   std::to_string(m_last_prefilter_used));
   }
@@ -1104,6 +1296,26 @@ void FindCircle::Measure(Image &image) {
   }
   if (stage_limit == 5)
     return;
+
+  if (m_lastMeasureGeometryDebug.object_prefilter_requested != 0 &&
+      m_lastMeasureGeometryDebug.object_prefilter_runs_before > 0 &&
+      m_lastMeasureGeometryDebug.object_prefilter_runs_after == 0) {
+    m_measurepoints.clear();
+    m_lastMeasureGeometryDebug.measure_points_count = 0;
+    m_lastMeasureGeometryDebug.valid_points_count = 0;
+    m_lastMeasureGeometryDebug.candidate_runs_total = 0;
+    m_lastMeasureGeometryDebug.candidate_runs_max_per_line = 0;
+    m_lastMeasureGeometryDebug.selected_edge_hits = 0;
+    m_lastMeasureGeometryDebug.selected_edge_misses = isize;
+    m_lastMeasureGeometryDebug.failure_stage = "object_prefilter_empty";
+    m_lastMeasureGeometryDebug.detail =
+        "FindCircle object prefilter removed all radial candidates; "
+        "measurement stopped before sampling.";
+    LogFindCircleMeasureProbe(
+        "measure_stop_object_prefilter_empty", "finished",
+        "object prefilter removed all radial candidates; measure_points=0");
+    return;
+  }
 
   LogFindCircleMeasureProbe(
       "measure_before_sampling_loop", "running",
@@ -1140,6 +1352,7 @@ void FindCircle::Measure(Image &image) {
   int selected_edge_hits = 0;
   int selected_edge_misses = 0;
   int candidate_boundary_reject_count = 0;
+  int candidate_endpoint_reject_count = 0;
   double selected_edge_radius_sum = 0.0;
   double selected_edge_radius_min = std::numeric_limits<double>::infinity();
   double selected_edge_radius_max = 0.0;
@@ -1299,7 +1512,31 @@ void FindCircle::Measure(Image &image) {
         candidate.position = candidate_position;
         candidate.score = score_candidate(candidate_position);
         const gp_Pnt candidate_point =
-            m_lines[inumy].getlinepoint(candidate_position);
+            SamplePointOnDisplayedLine(m_lines[inumy], candidate_position,
+                                       ilineslen1);
+        CxShapePoint scan_p0;
+        CxShapePoint scan_p1;
+        if (m_lines[inumy].exportLine(scan_p0, scan_p1)) {
+          const double scan_length =
+              Distance2D(scan_p0.x, scan_p0.y, scan_p1.x, scan_p1.y);
+          const double endpoint_guard_px =
+              ComputeCirclePhysicalEndpointGuard(scan_length,
+                                                 m_iSelectPointGap, m_igap);
+          if (endpoint_guard_px > 0.0) {
+            const double distance_to_begin =
+                Distance2D(candidate_point.X(), candidate_point.Y(),
+                           scan_p0.x, scan_p0.y);
+            const double distance_to_end =
+                Distance2D(candidate_point.X(), candidate_point.Y(),
+                           scan_p1.x, scan_p1.y);
+            if (distance_to_begin < endpoint_guard_px ||
+                distance_to_end < endpoint_guard_px) {
+              ++candidate_endpoint_reject_count;
+              ++candidate_boundary_reject_count;
+              return;
+            }
+          }
+        }
         const double dx = candidate_point.X() - static_cast<double>(m_icentx);
         const double dy = candidate_point.Y() - static_cast<double>(m_icenty);
         candidate.radius_from_center = std::sqrt(dx * dx + dy * dy);
@@ -1402,7 +1639,9 @@ void FindCircle::Measure(Image &image) {
         } else {
           int representative_position = -1;
           for (const CircleLineCandidate &candidate : line_candidates) {
-            gp_Pnt apoint = m_lines[inumy].getlinepoint(candidate.position);
+            gp_Pnt apoint =
+                SamplePointOnDisplayedLine(m_lines[inumy], candidate.position,
+                                           ilineslen1);
             m_measurepoints.addpoint(apoint);
             record_selected_radius(apoint);
             ++selected_edge_hits;
@@ -1437,7 +1676,9 @@ void FindCircle::Measure(Image &image) {
         }
       }
       if (selected_line_position >= 0) {
-        gp_Pnt apoint = m_lines[inumy].getlinepoint(selected_line_position);
+        gp_Pnt apoint =
+            SamplePointOnDisplayedLine(m_lines[inumy], selected_line_position,
+                                       ilineslen1);
         m_measurepoints.addpoint(apoint);
         record_selected_radius(apoint);
         if (inumy >= 0 && inumy < iscanlines)
@@ -1491,9 +1732,9 @@ void FindCircle::Measure(Image &image) {
 
         const int repaired_position =
             ClampCircleEdgePosition(sum / count, ilineslen1, right_margin);
-        gp_Pnt apoint =
-            m_lines[static_cast<std::size_t>(scan_index)].getlinepoint(
-                repaired_position);
+        gp_Pnt apoint = SamplePointOnDisplayedLine(
+            m_lines[static_cast<std::size_t>(scan_index)], repaired_position,
+            ilineslen1);
         m_measurepoints.addpoint(apoint);
         record_selected_radius(apoint);
         accepted_line_positions[static_cast<std::size_t>(scan_index)] =
@@ -1539,6 +1780,8 @@ void FindCircle::Measure(Image &image) {
   m_lastMeasureGeometryDebug.selected_edge_misses = selected_edge_misses;
   m_lastMeasureGeometryDebug.candidate_boundary_reject_count =
       candidate_boundary_reject_count;
+  m_lastMeasureGeometryDebug.candidate_endpoint_reject_count =
+      candidate_endpoint_reject_count;
   if (m_measurepoints.size() > 0 && std::isfinite(selected_edge_radius_min)) {
     m_lastMeasureGeometryDebug.selected_edge_radius_avg =
         selected_edge_radius_sum /
@@ -1571,6 +1814,8 @@ void FindCircle::Measure(Image &image) {
             m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
         ", candidate_boundary_reject_count=" +
         std::to_string(candidate_boundary_reject_count) +
+        ", candidate_endpoint_reject_count=" +
+        std::to_string(candidate_endpoint_reject_count) +
         ", selected_edge_radius_avg=" +
         std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
         ", selected_edge_radius_min=" +
@@ -1597,6 +1842,8 @@ void FindCircle::Measure(Image &image) {
             m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
         ", candidate_boundary_reject_count=" +
         std::to_string(candidate_boundary_reject_count) +
+        ", candidate_endpoint_reject_count=" +
+        std::to_string(candidate_endpoint_reject_count) +
         ", selected_edge_radius_avg=" +
         std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
         ", selected_edge_radius_min=" +
@@ -1641,6 +1888,8 @@ void FindCircle::Measure(Image &image) {
               m_lastMeasureGeometryDebug.scan_boundary_extended_samples) +
           ", candidate_boundary_reject_count=" +
           std::to_string(candidate_boundary_reject_count) +
+          ", candidate_endpoint_reject_count=" +
+          std::to_string(candidate_endpoint_reject_count) +
           ", selected_edge_radius_avg=" +
           std::to_string(m_lastMeasureGeometryDebug.selected_edge_radius_avg) +
           ", selected_edge_radius_min=" +

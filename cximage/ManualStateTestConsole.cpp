@@ -31,6 +31,7 @@
 #include "ManualConsoleScriptDebugPanel.h"
 #include "CxScriptCasePackageWriter.h"
 #include "CxScriptHeadlessRunner.h"
+#include "CxUnifiedLog.h"
 
 #include <imgui.h>
 
@@ -465,6 +466,9 @@ static void FillRuntimeObjectFromFindEllipse(
         object.ellipse_cy = static_cast<float>(snapshot.center_y);
         object.ellipse_rx = static_cast<float>(snapshot.radius_x);
         object.ellipse_ry = static_cast<float>(snapshot.radius_y);
+        object.ellipse_inner_scale_percent = snapshot.inner_scale_percent;
+        object.ellipse_inner_rx = static_cast<float>(snapshot.inner_radius_x);
+        object.ellipse_inner_ry = static_cast<float>(snapshot.inner_radius_y);
         object.measure_points_count = snapshot.measure_points_count;
         object.valid_points_count = snapshot.measure_points_count;
         object.has_measure_points = snapshot.has_measure_points;
@@ -736,6 +740,7 @@ void SeedDefaultManualGlobals(
         set("global_ellipse_y0", 360);
         set("global_ellipse_x1", 930);
         set("global_ellipse_y1", 580);
+        set("global_findellipse_inner_scale_percent", 0);
         set("global_gap", 5);
         set("global_linegap", 3);
         set("global_threshold", 8);
@@ -897,6 +902,8 @@ void SeedDefaultManualGlobals(
         gauge.ellipse_y0 = context.runtime_int_vars["global_ellipse_y0"];
         gauge.ellipse_x1 = context.runtime_int_vars["global_ellipse_x1"];
         gauge.ellipse_y1 = context.runtime_int_vars["global_ellipse_y1"];
+        gauge.ellipse_inner_scale_percent =
+            context.runtime_int_vars["global_findellipse_inner_scale_percent"];
         gauge.gap = context.runtime_int_vars["global_gap"];
     }
     else if (isLineScript)
@@ -1062,7 +1069,46 @@ void ViewController::RefreshRuntimeObjectTable(const std::string& lastMethod,
 
         SetCxCrashBreadcrumb("RefreshRuntimeObjectTable:FindEllipse:fill:" + name);
         RuntimeObjectView object;
-        FillRuntimeObjectFromFindEllipse(object, name, *ellipse);
+        try
+        {
+            FillRuntimeObjectFromFindEllipse(object, name, *ellipse);
+        }
+        catch (const std::exception& ex)
+        {
+            object = RuntimeObjectView{};
+            object.name = name;
+            object.type = "FindEllipse";
+            object.exists_in_parser = true;
+            object.last_method = lastMethod;
+            object.last_runtime_status = runtimeStatus;
+            object.runtime_state = "runtime_object_refresh_failed";
+            object.visualizable = false;
+            object.stale = true;
+            object.ellipse_result_status = "runtime_object_refresh_failed";
+            object.ellipse_result_reason = ex.what();
+            CXLOG_ERROR("ManualConsole",
+                        "findellipse_runtime_object_refresh",
+                        "failed",
+                        "object=" + name + " reason=" + std::string(ex.what()));
+        }
+        catch (...)
+        {
+            object = RuntimeObjectView{};
+            object.name = name;
+            object.type = "FindEllipse";
+            object.exists_in_parser = true;
+            object.last_method = lastMethod;
+            object.last_runtime_status = runtimeStatus;
+            object.runtime_state = "runtime_object_refresh_failed";
+            object.visualizable = false;
+            object.stale = true;
+            object.ellipse_result_status = "runtime_object_refresh_failed";
+            object.ellipse_result_reason = "unknown exception";
+            CXLOG_ERROR("ManualConsole",
+                        "findellipse_runtime_object_refresh",
+                        "failed",
+                        "object=" + name + " reason=unknown exception");
+        }
         object.last_method = lastMethod;
         object.last_runtime_status = runtimeStatus;
         m_manualTest.runtime_objects.push_back(object);
@@ -1689,14 +1735,88 @@ void ViewController::drawKeyParameterControlsWindow()
             }
             else
             {
-                m_manualTest.debug_status = "GAUGE_SHAPE_APPLY_FAILED";
-                m_manualTest.debug_reason = reason;
+                if (preservePendingFastMatchRun)
+                {
+                    // FastMatch Learn/Match is a staged serial parser run.  The
+                    // ROI edit may fail to apply back to an editable Shape in
+                    // some transient UI states, but the already captured
+                    // pending_execution_snapshot is the authoritative input for
+                    // the next Run pass.  Do not overwrite
+                    // FASTMATCH_RUN_REQUESTED here; otherwise the Learn button
+                    // logs a request but the Debug Compiler never consumes it.
+                    if (!m_manualTest.debug_reason.empty())
+                        m_manualTest.debug_reason += "; ";
+                    m_manualTest.debug_reason +=
+                        "shape apply skipped before FastMatch run: " + reason;
+                    CXLOG_INFO(
+                        "KeyParameterControls",
+                        "fastmatch_pending_run_preserved",
+                        "PENDING_RUN",
+                        "reason=" + reason);
+                }
+                else
+                {
+                    m_manualTest.debug_status = "GAUGE_SHAPE_APPLY_FAILED";
+                    m_manualTest.debug_reason = reason;
+                }
             }
         }
     }
     else
     {
         DrawKeyParameterUnavailableNotice(m_manualTest);
+    }
+
+    if (!m_manualTest.pending_annotation_tool_id.empty())
+    {
+        const std::string requestedTool = m_manualTest.pending_annotation_tool_id;
+        const std::string requestedReason = m_manualTest.pending_annotation_tool_reason;
+        m_manualTest.pending_annotation_tool_id.clear();
+        m_manualTest.pending_annotation_tool_reason.clear();
+
+        std::string reason;
+        if (requestedTool == "__pointer_pan__")
+        {
+            TestSetToolModePointerPan();
+            m_annotationStatus =
+                requestedReason.empty()
+                    ? "annotation tool disabled from Key Parameter Controls"
+                    : requestedReason;
+            m_manualTest.debug_status = "ANNOTATION_TOOL_POINTER_PAN";
+            m_manualTest.debug_reason = m_annotationStatus;
+            CXLOG_INFO(
+                "KeyParameterControls",
+                "annotation_tool_request",
+                "applied",
+                "tool=PointerPan reason=" + m_annotationStatus);
+        }
+        else if (TestSetActiveAnnotationTool(requestedTool, reason))
+        {
+            m_annotationStatus =
+                requestedReason.empty()
+                    ? ("annotation tool selected: " + requestedTool)
+                    : requestedReason;
+            m_manualTest.debug_status = "ANNOTATION_TOOL_SELECTED";
+            m_manualTest.debug_reason =
+                "tool=" + requestedTool + "; " + m_annotationStatus;
+            CXLOG_INFO(
+                "KeyParameterControls",
+                "annotation_tool_request",
+                "applied",
+                "tool=" + requestedTool + " reason=" + m_annotationStatus);
+        }
+        else
+        {
+            m_annotationStatus = reason;
+            m_manualTest.debug_status = "ANNOTATION_TOOL_SELECT_FAILED";
+            m_manualTest.debug_reason =
+                "tool=" + requestedTool + "; " + reason;
+            CXLOG_INFO(
+                "KeyParameterControls",
+                "annotation_tool_request",
+                "failed",
+                "tool=" + requestedTool + " reason=" + reason);
+        }
     }
 
     ImGui::End();

@@ -315,14 +315,72 @@ std::string BuildFindEllipseGeometrySummary(const RuntimeObjectView& object)
     return ss.str();
 }
 
+std::string BuildFindRectGeometrySummary(const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "geometry: object=" << object.name
+       << " | tool=findrect"
+       << " | runtime_state=" << object.runtime_state
+       << " | result_rects=" << object.valid_points_count
+       << " | measure_points_count=" << object.measure_points_count
+       << " | visualizable=" << (object.visualizable ? "true" : "false")
+       << " | visual_source=" << object.visual_source
+       << " | stale=" << (object.stale ? "true" : "false");
+
+    if (!object.display_summary.empty())
+        ss << " | raw_summary=" << object.display_summary;
+
+    return ss.str();
+}
+
+std::string BuildTorchTaskRuntimeSummary(const RuntimeObjectView& object)
+{
+    std::ostringstream ss;
+
+    ss << "runtime: object=" << object.name
+       << " | tool=torch_task"
+       << " | status=" << (object.torch_status.empty() ? object.runtime_state : object.torch_status)
+       << " | ok=" << object.torch_ok
+       << " | error_code=" << object.torch_error_code
+       << " | failure_stage="
+       << (object.torch_failure_stage.empty() ? "-" : object.torch_failure_stage)
+       << " | reason=" << (object.torch_reason.empty() ? "-" : object.torch_reason)
+       << " | device=" << (object.torch_actual_device.empty() ? "-" : object.torch_actual_device)
+       << " | result_count=" << object.torch_result_count
+       << " | mask_available=" << object.torch_mask_available
+       << " | infer_ms=" << object.torch_infer_ms
+       << " | train_ms=" << object.torch_train_ms
+       << " | total_ms=" << object.torch_total_ms
+       << " | result_ref=" << (object.torch_result_ref.empty() ? "(none)" : object.torch_result_ref)
+       << " | evidence_ref=" << (object.torch_evidence_ref.empty() ? "(none)" : object.torch_evidence_ref)
+       << " | primary_visual_ref="
+       << (object.torch_primary_visual_ref.empty() ? "(none)" : object.torch_primary_visual_ref)
+       << " | mask_ref=" << (object.torch_mask_ref.empty() ? "(none)" : object.torch_mask_ref)
+       << " | overlay_ref=" << (object.torch_overlay_ref.empty() ? "(none)" : object.torch_overlay_ref);
+
+    if (!object.torch_trainer_lifecycle_summary.empty())
+        ss << " | trainer_summary=" << object.torch_trainer_lifecycle_summary;
+    if (!object.torch_unified_mainline_summary.empty())
+        ss << " | mainline_summary=" << object.torch_unified_mainline_summary;
+
+    return ss.str();
+}
+
 std::string BuildGeometrySummary(const RuntimeObjectView& object)
 {
     if (object.type == "FindLine")
         return BuildFindLineGeometrySummary(object);
+    if (object.type == "FindCircle")
+        return BuildFindCircleGeometrySummary(object);
     if (object.type == "FindEllipse")
         return BuildFindEllipseGeometrySummary(object);
+    if (object.type == "FindRect")
+        return BuildFindRectGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
+    if (object.type == "TorchTask")
+        return BuildTorchTaskRuntimeSummary(object);
     if (object.type == "FastMatch")
     {
         std::ostringstream ss;
@@ -382,7 +440,15 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
         return ss.str();
     }
 
-    return BuildFindCircleGeometrySummary(object);
+    std::ostringstream ss;
+    ss << "runtime: object=" << object.name
+       << " | tool=" << (object.type.empty() ? "unknown" : object.type)
+       << " | status=unsupported_summary"
+       << " | runtime_state=" << object.runtime_state
+       << " | visualizable=" << (object.visualizable ? "true" : "false")
+       << " | stale=" << (object.stale ? "true" : "false")
+       << " | reason=BuildGeometrySummary has no registered summary branch for this object type";
+    return ss.str();
 }
 
 std::string BuildFindCircleOverlaySummary(const ManualTestContext& context,

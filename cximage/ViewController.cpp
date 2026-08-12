@@ -205,6 +205,11 @@ namespace
         {"find_segmentation", "findsegmentation", "FindSegmentation"});
   }
 
+  bool evidencePathIsFindObject(const std::string& scriptPath)
+  {
+    return evidencePathHasAny(scriptPath, {"find_object", "findobject", "FindObject"});
+  }
+
   bool evidencePathIsTorchTask(const std::string& scriptPath)
   {
     return evidencePathHasAny(
@@ -228,6 +233,8 @@ namespace
       return "FindRect";
     if (evidencePathIsFastMatch(scriptPath))
       return "FastMatch";
+    if (evidencePathIsFindObject(scriptPath))
+      return "FindObject";
     if (evidencePathIsFindSegmentation(scriptPath))
       return "FindSegmentation";
     if (evidencePathIsTorchTask(scriptPath))
@@ -449,6 +456,7 @@ namespace
     applied += setRequiredIntIfUsed("global_ellipse_y0", existingOr("global_ellipse_y0", roiY0)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_ellipse_x1", existingOr("global_ellipse_x1", roiX1)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_ellipse_y1", existingOr("global_ellipse_y1", roiY1)) ? 1 : 0;
+    applied += setRequiredIntIfUsed("global_findellipse_inner_scale_percent", existingOr("global_findellipse_inner_scale_percent", 0)) ? 1 : 0;
 
     applied += setRequiredIntIfUsed("global_method", existingOr("global_method", 0)) ? 1 : 0;
     applied += setRequiredIntIfUsed("global_threshold", existingOr("global_threshold", 20)) ? 1 : 0;
@@ -620,6 +628,7 @@ namespace
     const bool isLineScript = evidencePathIsFindLine(scriptPath);
     const bool isEllipseScript = evidencePathIsFindEllipse(scriptPath);
     const bool isFindSegmentationScript = evidencePathIsFindSegmentation(scriptPath);
+    const bool isFindObjectScript = evidencePathIsFindObject(scriptPath);
 
     ManualGaugeState gauge;
     gauge.case_id = context.active_case_id;
@@ -656,6 +665,8 @@ namespace
       gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
       gauge.ellipse_x1 = getInt("global_ellipse_x1", 0);
       gauge.ellipse_y1 = getInt("global_ellipse_y1", 0);
+      gauge.ellipse_inner_scale_percent =
+          getInt("global_findellipse_inner_scale_percent", 0);
     }
     else if (isLineScript)
     {
@@ -676,9 +687,22 @@ namespace
       gauge.segmentation_prompt_y1 = getInt("global_roi_y1", 820);
       gauge.segmentation_mode = getInt("global_segmentation_mode", 2);
     }
+    else if (isFindObjectScript)
+    {
+      gauge.tool = "FindObject";
+      gauge.has_findobject_roi = true;
+      gauge.findobject_x0 = getInt("global_roi_x0", 80);
+      gauge.findobject_y0 = getInt("global_roi_y0", 80);
+      gauge.findobject_x1 = getInt("global_roi_x1", 1180);
+      gauge.findobject_y1 = getInt("global_roi_y1", 880);
+      gauge.findobject_foreground_mode = getInt("global_method", 1);
+      gauge.findobject_threshold = getInt("global_threshold", 20);
+      gauge.findobject_min_area = getInt("global_object_min_area", 10);
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge || gauge.has_segmentation_prompt_rect)
+        gauge.has_ellipse_gauge || gauge.has_segmentation_prompt_rect ||
+        gauge.has_findobject_roi)
     {
       context.current_gauge = gauge;
     }
@@ -1627,6 +1651,8 @@ static std::string NormalizeSemanticEvidenceObjectTypeLocal(
         return "FindEllipse";
     if (lowered == "findrect")
         return "FindRect";
+    if (lowered == "findobject" || lowered == "find_object")
+        return "FindObject";
     if (lowered == "fastmatch" || lowered == "cfastmatch")
         return "FastMatch";
     if (lowered == "gridpatternclasstool" || lowered == "gridpatternclass")
@@ -1646,6 +1672,7 @@ static bool IsSemanticEvidenceEditableObjectTypeLocal(const std::string& type)
            normalized == "FindCircle" ||
            normalized == "FindEllipse" ||
            normalized == "FindRect" ||
+           normalized == "FindObject" ||
            normalized == "FastMatch" ||
            normalized == "GridPatternClassTool" ||
            normalized == "RegionPatternTool" ||
@@ -2235,6 +2262,8 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     applied += applyIntToken("ellipse_y0", "global_ellipse_y0") ? 1 : 0;
     applied += applyIntToken("ellipse_x1", "global_ellipse_x1") ? 1 : 0;
     applied += applyIntToken("ellipse_y1", "global_ellipse_y1") ? 1 : 0;
+    applied += applyIntToken("ellipse_inner_scale_percent", "global_findellipse_inner_scale_percent") ? 1 : 0;
+    applied += applyIntToken("inner_scale_percent", "global_findellipse_inner_scale_percent") ? 1 : 0;
 
     applied += applyIntToken("learn_roi_x", "global_learn_roi_x") ? 1 : 0;
     applied += applyIntToken("learn_roi_y", "global_learn_roi_y") ? 1 : 0;
@@ -2457,6 +2486,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
             !hasInt("global_ellipse_y0") ||
             !hasInt("global_ellipse_x1") ||
             !hasInt("global_ellipse_y1") ||
+            !hasInt("global_findellipse_inner_scale_percent") ||
             !hasInt("global_gap") ||
             !hasInt("global_linegap") ||
             !hasInt("global_threshold") ||
@@ -2486,6 +2516,25 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         }
 
         reason = "FindRect parameter globals available";
+        return true;
+    }
+
+    if (evidencePathIsFindObject(snapshot.script_path))
+    {
+        if (!hasInt("global_roi_x0") ||
+            !hasInt("global_roi_y0") ||
+            !hasInt("global_roi_x1") ||
+            !hasInt("global_roi_y1") ||
+            !hasInt("global_gap") ||
+            !hasInt("global_threshold") ||
+            !hasInt("global_method") ||
+            !hasInt("global_filterprofile"))
+        {
+            reason = "missing required FindObject global_* bindings";
+            return false;
+        }
+
+        reason = "FindObject parameter globals available";
         return true;
     }
 
@@ -3148,6 +3197,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
             "global_ellipse_y0",
             "global_ellipse_x1",
             "global_ellipse_y1",
+            "global_findellipse_inner_scale_percent",
             "global_gap",
             "global_linegap",
             "global_threshold",
@@ -3569,6 +3619,7 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
         evidencePathIsFindLine(snapshot.script_path) ||
         evidencePathIsFindEllipse(snapshot.script_path) ||
         evidencePathIsFindRect(snapshot.script_path) ||
+        evidencePathIsFindObject(snapshot.script_path) ||
         evidencePathIsFindSegmentation(snapshot.script_path) ||
         snapshot.tool == "TorchTask" ||
         evidencePathIsTorchTask(snapshot.script_path) ||
@@ -4265,7 +4316,8 @@ ViewController::ScriptResult ViewController::RunCxScript(const std::string& theS
   // bind it here as well for "Run Bound Script".
   if (m_manualTest.current_gauge.has_line_gauge ||
       m_manualTest.current_gauge.has_circle_gauge ||
-      m_manualTest.current_gauge.has_ellipse_gauge)
+      m_manualTest.current_gauge.has_ellipse_gauge ||
+      m_manualTest.current_gauge.has_findobject_roi)
   {
     ApplyManualGaugeToGlobals(m_manualTest);
   }
@@ -4378,6 +4430,32 @@ static bool SyncRuntimeObjectToManualGaugeState(
         return true;
     }
 
+    if (object.type == "FindEllipse" && object.has_ellipse_roi)
+    {
+        gauge.tool = "FindEllipse";
+        gauge.source = "runtime_object";
+        gauge.review_status = "editing";
+
+        gauge.has_ellipse_gauge = true;
+        gauge.has_line_gauge = false;
+        gauge.has_circle_gauge = false;
+
+        const int rx = std::max(1, static_cast<int>(std::lround(object.ellipse_rx)));
+        const int ry = std::max(1, static_cast<int>(std::lround(object.ellipse_ry)));
+        const int cx = static_cast<int>(std::lround(object.ellipse_cx));
+        const int cy = static_cast<int>(std::lround(object.ellipse_cy));
+        gauge.ellipse_x0 = cx - rx;
+        gauge.ellipse_y0 = cy - ry;
+        gauge.ellipse_x1 = cx + rx;
+        gauge.ellipse_y1 = cy + ry;
+        gauge.ellipse_inner_scale_percent =
+            std::max(0, std::min(99, object.ellipse_inner_scale_percent));
+
+        gauge.dirty = false;
+        gauge.accepted = false;
+        return true;
+    }
+
     return false;
 }
 
@@ -4438,8 +4516,12 @@ void ViewController::drawScriptAcceptancePanels()
       m_evidenceChainUiSection = i;
       if (i == 2)
       {
-        RebuildScriptEvidenceGroups();
-        EnsureEvidenceChainThumbnailsLoaded();
+        // Switching to the Evidence page must stay instant.  The page body
+        // performs lazy asset/group preparation and thumbnail loading with a
+        // per-frame budget; doing a synchronous rebuild here makes the tab
+        // click feel frozen on large evidence sets.
+        if (m_manualTest.script_evidence_groups.empty())
+            m_manualTest.script_evidence_groups_dirty = true;
       }
     }
     if (m_evidenceChainUiSection == i)
@@ -5374,6 +5456,11 @@ void ViewController::drawScriptAcceptancePanels()
     if (ImGui::InputInt("ellipse_y0", &gauge.ellipse_y0)) { gauge.dirty = true; gauge.review_status = "editing"; }
     if (ImGui::InputInt("ellipse_x1", &gauge.ellipse_x1)) { gauge.dirty = true; gauge.review_status = "editing"; }
     if (ImGui::InputInt("ellipse_y1", &gauge.ellipse_y1)) { gauge.dirty = true; gauge.review_status = "editing"; }
+    if (ImGui::InputInt("inner_scale_percent", &gauge.ellipse_inner_scale_percent)) {
+      gauge.ellipse_inner_scale_percent = std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+      gauge.dirty = true;
+      gauge.review_status = "editing";
+    }
     if (ImGui::InputInt("gap", &gauge.gap)) { gauge.dirty = true; gauge.review_status = "editing"; }
     if (ImGui::InputInt("linegap", &gauge.linegap)) { gauge.dirty = true; gauge.review_status = "editing"; }
     if (ImGui::InputInt("threshold", &gauge.threshold)) { gauge.dirty = true; gauge.review_status = "editing"; }
@@ -6546,6 +6633,8 @@ void ViewController::mainloop()
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawKeyParameterControlsWindow");
              drawKeyParameterControlsWindow();
+             ConsumePendingManualScriptRun(
+                 m_manualTest, "mainloop_after_key_parameter_controls");
              SetCxCrashBreadcrumb("mainloop:drawMetrologyAnalyticsSmokeWindow");
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawMetrologyAnalyticsSmokeWindow");
@@ -6566,6 +6655,15 @@ void ViewController::mainloop()
              if (logThisFrame)
                  CXLOG_INFO("ViewController", "mainloop_stage", "running", "stage=drawManualStateTestConsole");
              drawManualStateTestConsole();
+
+             // Key Parameter Controls, FastMatch action buttons, evidence
+             // candidate save+run, and Torch action panels can stage a serial
+             // parser run from different windows.  Consume the pending request
+             // after all UI panels have had a chance to write their snapshot so
+             // the actual script execution does not depend on window ordering
+             // or on the Debug Compiler header being visible.
+             ConsumePendingManualScriptRun(
+                 m_manualTest, "mainloop_after_all_manual_panels");
 
              ImGui::SetNextWindowPos(ImVec2(650, 20), ImGuiCond_FirstUseEver); // Normally user code doesn't need/want to call this because positions are saved in .ini file anyway. Here we just want to make the demo initial state a bit more friendly!
 
@@ -8472,11 +8570,30 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement& element, 
         double radius_x, radius_y, angle;
         if (element.shape->exportEllipse(center, radius_x, radius_y, angle))
         {
-            const ImVec2 c = ImageToScreen(center.x, center.y);
-            const float rx = (float)radius_x * sx;
-            const float ry = (float)radius_y * sy;
-            
-            drawList->AddEllipse(c, ImVec2(rx, ry), element.selected ? selectedColor : color, 0.0f, 64, thickness);
+            std::vector<ImVec2> ellipsePoints;
+            ellipsePoints.reserve(96);
+            const double angleRad = RADIAN(angle);
+            const double ca = std::cos(angleRad);
+            const double sa = std::sin(angleRad);
+            for (int i = 0; i < 96; ++i)
+            {
+                const double t =
+                    2.0 * PI * static_cast<double>(i) / 96.0;
+                const double localX = radius_x * std::cos(t);
+                const double localY = radius_y * std::sin(t);
+                ellipsePoints.push_back(ImageToScreen(
+                    center.x + localX * ca - localY * sa,
+                    center.y + localX * sa + localY * ca));
+            }
+            if (!ellipsePoints.empty())
+            {
+                drawList->AddPolyline(
+                    ellipsePoints.data(),
+                    static_cast<int>(ellipsePoints.size()),
+                    element.selected ? selectedColor : color,
+                    ImDrawFlags_Closed,
+                    thickness);
+            }
         }
         break;
     }

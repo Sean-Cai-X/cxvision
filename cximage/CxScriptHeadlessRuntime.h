@@ -324,6 +324,7 @@ struct CxScriptHeadlessOptions
     int ellipse_y0 = 0;
     int ellipse_x1 = 0;
     int ellipse_y1 = 0;
+    int ellipse_inner_scale_percent = 0;
 
     int tool_half_width = 20;
     int wgap = 32;

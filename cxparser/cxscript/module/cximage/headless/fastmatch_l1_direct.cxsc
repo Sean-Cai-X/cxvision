@@ -68,13 +68,17 @@ global_match_count = 0;
 global_candidate_count = 0;
 global_best_score = 0;
 
+int should_match = 1;
 if (fastmatch_action == 1)
 {
-    return;
+    should_match = 0;
 }
 
-m_match.match(&m_image);
+if (should_match == 1)
+{
+    m_match.match(&m_image);
 
-global_match_count = m_match.getresultcandidatecount();
-global_candidate_count = global_match_count;
-global_best_score = m_match.getresultbestscore();
+    global_match_count = m_match.getresultcandidatecount();
+    global_candidate_count = global_match_count;
+    global_best_score = m_match.getresultbestscore();
+}

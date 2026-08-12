@@ -81,6 +81,9 @@ struct RuntimeObjectView
     float ellipse_cy = 0.0f;
     float ellipse_rx = 0.0f;
     float ellipse_ry = 0.0f;
+    int ellipse_inner_scale_percent = 0;
+    float ellipse_inner_rx = 0.0f;
+    float ellipse_inner_ry = 0.0f;
     bool has_fit_ellipse = false;
     float fit_ellipse_cx = 0.0f;
     float fit_ellipse_cy = 0.0f;
@@ -604,6 +607,13 @@ struct GaugeHandle
     bool active = false;
 };
 
+struct ManualSegmentationPromptPoint
+{
+  std::string ref;
+  int x = 0;
+  int y = 0;
+};
+
 struct ManualGaugeState
 {
   std::string case_id;
@@ -647,6 +657,7 @@ struct ManualGaugeState
   int ellipse_y0 = 0;
   int ellipse_x1 = 0;
   int ellipse_y1 = 0;
+  int ellipse_inner_scale_percent = 0;
 
   bool has_segmentation_prompt_rect = false;
   int segmentation_prompt_x0 = 120;
@@ -660,7 +671,14 @@ struct ManualGaugeState
   bool has_segmentation_negative_point = false;
   int segmentation_negative_x = 0;
   int segmentation_negative_y = 0;
+  std::vector<ManualSegmentationPromptPoint> segmentation_positive_points;
+  std::vector<ManualSegmentationPromptPoint> segmentation_negative_points;
   int segmentation_threshold_percent = 50;
+  // 0 = none, 1 = next Image View point is positive prompt,
+  // 2 = next Image View point is negative prompt.  This is UI selection
+  // state only; global_* enabled flags are set only after an actual point
+  // shape is created or edited.
+  int segmentation_prompt_pick_mode = 0;
 
   // FindObject is a thresholded connected-components tool.  Keep its ROI and
   // filtering values separate from line/circle gauge fields so the parameter
@@ -1206,6 +1224,8 @@ struct ManualTestContext
   unsigned long long key_parameter_edit_revision = 0;
   std::string last_key_parameter_edit_summary;
   bool apply_gauge_to_shape_requested = false;
+  std::string pending_annotation_tool_id;
+  std::string pending_annotation_tool_reason;
 
   CxEvidenceSelfTestResult last_evidence_selftest_result;
 };

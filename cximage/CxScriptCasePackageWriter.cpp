@@ -164,6 +164,24 @@ std::string GenerateCandidateId()
     return buffer;
 }
 
+void WriteSegmentationPromptPointArray(
+    std::ostringstream& out,
+    const char* key,
+    const std::vector<ManualSegmentationPromptPoint>& points,
+    bool trailingComma)
+{
+    out << "  \"" << key << "\": [";
+    for (std::size_t i = 0; i < points.size(); ++i)
+    {
+        if (i != 0)
+            out << ", ";
+        out << "{\"ref\":\"" << JsonEscape(points[i].ref)
+            << "\",\"x\":" << points[i].x
+            << ",\"y\":" << points[i].y << "}";
+    }
+    out << "]" << (trailingComma ? "," : "") << "\n";
+}
+
 std::string EvidenceToolGroupLabel(const std::string& tool)
 {
     if (tool == "FindLine" || tool == "Findline")
@@ -350,6 +368,28 @@ bool WriteGaugeSnapshotJson(
          << "  \"ellipse_y0\": " << gauge.ellipse_y0 << ",\n"
          << "  \"ellipse_x1\": " << gauge.ellipse_x1 << ",\n"
          << "  \"ellipse_y1\": " << gauge.ellipse_y1 << ",\n"
+         << "  \"ellipse_inner_scale_percent\": " << gauge.ellipse_inner_scale_percent << ",\n"
+         << "  \"has_segmentation_prompt_rect\": " << (gauge.has_segmentation_prompt_rect ? "true" : "false") << ",\n"
+         << "  \"segmentation_prompt_x0\": " << gauge.segmentation_prompt_x0 << ",\n"
+         << "  \"segmentation_prompt_y0\": " << gauge.segmentation_prompt_y0 << ",\n"
+         << "  \"segmentation_prompt_x1\": " << gauge.segmentation_prompt_x1 << ",\n"
+         << "  \"segmentation_prompt_y1\": " << gauge.segmentation_prompt_y1 << ",\n"
+         << "  \"segmentation_mode\": " << gauge.segmentation_mode << ",\n"
+         << "  \"segmentation_threshold_percent\": " << gauge.segmentation_threshold_percent << ",\n"
+         << "  \"has_segmentation_positive_point\": " << (gauge.has_segmentation_positive_point ? "true" : "false") << ",\n"
+         << "  \"segmentation_positive_x\": " << gauge.segmentation_positive_x << ",\n"
+         << "  \"segmentation_positive_y\": " << gauge.segmentation_positive_y << ",\n"
+         << "  \"has_segmentation_negative_point\": " << (gauge.has_segmentation_negative_point ? "true" : "false") << ",\n"
+         << "  \"segmentation_negative_x\": " << gauge.segmentation_negative_x << ",\n"
+         << "  \"segmentation_negative_y\": " << gauge.segmentation_negative_y << ",\n";
+    WriteSegmentationPromptPointArray(
+        json, "segmentation_positive_points",
+        gauge.segmentation_positive_points, true);
+    WriteSegmentationPromptPointArray(
+        json, "segmentation_negative_points",
+        gauge.segmentation_negative_points, true);
+    json
+         << "  \"segmentation_prompt_pick_mode\": " << gauge.segmentation_prompt_pick_mode << ",\n"
          << "  \"wgap\": " << gauge.wgap << ",\n"
          << "  \"hgap\": " << gauge.hgap << ",\n"
          << "  \"gap\": " << gauge.gap << ",\n"
@@ -672,6 +712,7 @@ bool SaveEvidenceCandidatePackage(
     const std::string parameterSummary = EffectiveParameterSummary(context);
 
     NormalizeManualGaugeGeometry(context.current_gauge);
+    ApplyManualGaugeToGlobals(context);
     std::string gaugeReason;
     if (!ValidateManualGaugeGeometryForEditing(context.current_gauge, gaugeReason))
     {

@@ -50,6 +50,7 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
     if (lowered == "regionpatterntool" || lowered == "regionpattern")
         return "RegionPatternTool";
     if (lowered == "findsegmentation" ||
+        lowered.find("findsegmentation") != std::string::npos ||
         lowered.find("find_segmentation") != std::string::npos)
         return "FindSegmentation";
     if (lowered == "torchtask" || lowered == "torch" ||
@@ -941,10 +942,10 @@ static bool ValidateCandidateGaugeAnnotationLocal(
         int y0 = 0;
         int x1 = 0;
         int y1 = 0;
-        if (!ReadJsonIntFieldLocal(text, "line_x0", x0) ||
-            !ReadJsonIntFieldLocal(text, "line_y0", y0) ||
-            !ReadJsonIntFieldLocal(text, "line_x1", x1) ||
-            !ReadJsonIntFieldLocal(text, "line_y1", y1))
+        if (!ReadJsonIntFieldLocal(text, "findobject_x0", x0) ||
+            !ReadJsonIntFieldLocal(text, "findobject_y0", y0) ||
+            !ReadJsonIntFieldLocal(text, "findobject_x1", x1) ||
+            !ReadJsonIntFieldLocal(text, "findobject_y1", y1))
         {
             reason = "FindObject ROI gauge fields are incomplete";
             return false;
@@ -1401,6 +1402,10 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         scriptPath.find("find_object") != std::string::npos ||
         scriptPath.find("findobject") != std::string::npos ||
         scriptPath.find("FindObject") != std::string::npos;
+    const bool isFindSegmentationScript =
+        scriptPath.find("find_segmentation") != std::string::npos ||
+        scriptPath.find("findsegmentation") != std::string::npos ||
+        scriptPath.find("FindSegmentation") != std::string::npos;
     const bool isFastMatchScript =
         scriptPath.find("fastmatch") != std::string::npos ||
         scriptPath.find("FastMatch") != std::string::npos ||
@@ -1453,6 +1458,14 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         gauge.ellipse_y0 = getInt("global_ellipse_y0", 0);
         gauge.ellipse_x1 = getInt("global_ellipse_x1", 0);
         gauge.ellipse_y1 = getInt("global_ellipse_y1", 0);
+        gauge.ellipse_inner_scale_percent = std::max(
+            0,
+            std::min(
+                99,
+                getInt(
+                    "global_findellipse_inner_scale_percent",
+                    getInt("ellipse_inner_scale_percent",
+                           getInt("inner_scale_percent", 0)))));
     }
     else if (primaryType == "FindLine" ||
              (primaryType.empty() && isLineScript))
@@ -1471,12 +1484,50 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
         gauge.primary_object_type = "FindObject";
         if (gauge.primary_object_name.empty())
             gauge.primary_object_name = primaryObjectName.empty() ? "m_object" : primaryObjectName;
-        gauge.line_x0 = getInt("global_roi_x0", getInt("global_roi_x", 0));
-        gauge.line_y0 = getInt("global_roi_y0", getInt("global_roi_y", 0));
+        gauge.has_findobject_roi = true;
+        gauge.findobject_x0 = getInt("global_roi_x0", getInt("global_roi_x", 0));
+        gauge.findobject_y0 = getInt("global_roi_y0", getInt("global_roi_y", 0));
         const int roiW = getInt("global_roi_width", 0);
         const int roiH = getInt("global_roi_height", 0);
-        gauge.line_x1 = getInt("global_roi_x1", gauge.line_x0 + roiW);
-        gauge.line_y1 = getInt("global_roi_y1", gauge.line_y0 + roiH);
+        gauge.findobject_x1 = getInt("global_roi_x1", gauge.findobject_x0 + roiW);
+        gauge.findobject_y1 = getInt("global_roi_y1", gauge.findobject_y0 + roiH);
+        gauge.findobject_foreground_mode = getInt("global_method", gauge.method);
+        gauge.findobject_threshold = getInt("global_threshold", gauge.threshold);
+        gauge.findobject_min_area = getInt("global_object_min_area", 10);
+    }
+    else if (primaryType == "FindSegmentation" ||
+             (primaryType.empty() && isFindSegmentationScript))
+    {
+        gauge.tool = "FindSegmentation";
+        gauge.primary_object_type = "FindSegmentation";
+        if (gauge.primary_object_name.empty())
+            gauge.primary_object_name =
+                primaryObjectName.empty() ? "m_seg" : primaryObjectName;
+        if (gauge.primary_object_status.empty())
+            gauge.primary_object_status = "evidence_findsegmentation_selected";
+        gauge.has_segmentation_prompt_rect = true;
+        gauge.segmentation_prompt_x0 = getInt("global_roi_x0", getInt("global_roi_x", 120));
+        gauge.segmentation_prompt_y0 = getInt("global_roi_y0", getInt("global_roi_y", 120));
+        const int roiW = getInt("global_roi_width", 860);
+        const int roiH = getInt("global_roi_height", 700);
+        gauge.segmentation_prompt_x1 = getInt("global_roi_x1", gauge.segmentation_prompt_x0 + roiW);
+        gauge.segmentation_prompt_y1 = getInt("global_roi_y1", gauge.segmentation_prompt_y0 + roiH);
+        gauge.segmentation_mode = getInt("global_segmentation_mode", gauge.method);
+        gauge.segmentation_threshold_percent = getInt(
+            "global_segmentation_threshold_percent",
+            gauge.segmentation_threshold_percent);
+        gauge.has_segmentation_positive_point =
+            getInt("global_segmentation_positive_enabled", 0) != 0;
+        gauge.segmentation_positive_x = getInt(
+            "global_segmentation_positive_x", gauge.segmentation_positive_x);
+        gauge.segmentation_positive_y = getInt(
+            "global_segmentation_positive_y", gauge.segmentation_positive_y);
+        gauge.has_segmentation_negative_point =
+            getInt("global_segmentation_negative_enabled", 0) != 0;
+        gauge.segmentation_negative_x = getInt(
+            "global_segmentation_negative_x", gauge.segmentation_negative_x);
+        gauge.segmentation_negative_y = getInt(
+            "global_segmentation_negative_y", gauge.segmentation_negative_y);
     }
     else if (primaryType == "FastMatch" ||
              (primaryType.empty() && isFastMatchScript))
@@ -1490,8 +1541,8 @@ static void SyncEvidenceLockedGlobalsToManualGaugeLocal(
     }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
-        gauge.has_ellipse_gauge || gauge.tool == "FindObject" ||
-        gauge.tool == "FastMatch")
+        gauge.has_ellipse_gauge || gauge.has_findobject_roi ||
+        gauge.has_segmentation_prompt_rect || gauge.tool == "FastMatch")
     {
         context.current_gauge = gauge;
     }
@@ -3597,7 +3648,6 @@ void ViewController::RebuildScriptEvidenceGroups()
   m_manualTest.current_evidence_selection = CxEvidenceSelectionSnapshot{};
   m_manualTest.script_evidence_groups_dirty = true;
   m_manualTest.script_evidence_row_refs_dirty = true;
-  EnsureCxScriptWorkbenchAssetsLoaded();
 }
 
 void ViewController::RebuildScriptEvidenceRowRefs()
@@ -4202,6 +4252,21 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     };
 
     ManualTestContext& staged = m_manualTest;
+    // Selecting an Evidence row is an input-context switch, not a runtime
+    // result replay.  Clear the previous parser runtime object snapshot and
+    // any deferred runtime shape sync before projecting the new input Gauge;
+    // otherwise the old tool (notably FastMatch) can republish stale result
+    // shapes after the new FindLine/FindCircle Gauge is shown.
+    staged.runtime_objects.clear();
+    m_runtimeShapeSyncPending = false;
+    m_runtimeShapeSyncReason.clear();
+    m_runtimeShapeSyncDeferCount = 0;
+    m_scriptResult.result_ref.clear();
+    m_scriptResult.overlay_ref.clear();
+    m_scriptResult.evidence_ref.clear();
+    m_scriptResult.issue_entry_ref.clear();
+    m_scriptResult.runtime_fillback_status = "evidence_selection_cleared_previous_runtime";
+
     staged.current_evidence_selection = resolved;
     staged.selected_evidence_group = resolved.group_index;
     staged.selected_evidence_thumb = resolved.thumb_index;
@@ -4450,6 +4515,34 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
             " case_id=" + resolved.case_id +
             " image_id=" + resolved.image_id +
             " image_path=" + resolvedImagePath.string());
+
+        std::string previewReason;
+        const bool previewOk =
+            ProjectCurrentGaugeToImageViewPreview(previewReason);
+        if (previewOk)
+        {
+            m_annotationStatus =
+                "evidence image and input gauge loaded: " + previewReason;
+            CXLOG_INFO(
+                "EvidenceChain",
+                "evidence_input_gauge_preview",
+                "projected",
+                "script_id=" + resolved.script_id +
+                " case_id=" + resolved.case_id +
+                " image_id=" + resolved.image_id +
+                " reason=" + previewReason);
+        }
+        else
+        {
+            CXLOG_INFO(
+                "EvidenceChain",
+                "evidence_input_gauge_preview",
+                "skipped",
+                "script_id=" + resolved.script_id +
+                " case_id=" + resolved.case_id +
+                " image_id=" + resolved.image_id +
+                " reason=" + previewReason);
+        }
     }
 
     if (resolved.is_candidate || loadWorkingRevision)
