@@ -1,8 +1,4 @@
-/*
-  File: muparsertest.cpp.h
-  Role: Supplementary parser test declarations.
-*/
-
+﻿
 
 #include "muParserTest.h"
 
@@ -16,10 +12,6 @@
 using namespace std;
 static int iusingtestnum=0;
 
-/*
-  Role: Supplementary class-binding test double used by the legacy parser
-  test compilation path.
-*/
 class usingclass
 {
 public :
@@ -215,10 +207,7 @@ namespace mu
 
     int ParserTester::c_iCount = 0;
 
-    /*
-      Role: Build the supplementary regression harness used by this merged
-      test source.
-    */
+    
     ParserTester::ParserTester()
       :m_vTestFun()
       ,m_stream(&std::cout)

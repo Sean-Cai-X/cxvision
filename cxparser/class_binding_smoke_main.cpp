@@ -1,4 +1,4 @@
-
+﻿
 
 #include "muParser.h"
 
@@ -49,7 +49,6 @@ public:
   int flex_count;
   double flex_sum;
 };
-
 
 class MiniStringMap
 {
@@ -125,7 +124,6 @@ bool Check(bool condition, const char *message)
   }
   return true;
 }
-
 
 void ConfigureClassParser(mu::Parser &parser)
 {

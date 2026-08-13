@@ -1,7 +1,4 @@
-/*
-  File: muParserClass.cpp
-  Role: Parser-visible class binding runtime and scripted class support.
-*/
+﻿
 
 #include "muParserDef.h"
 #include "muParserClass.h"
@@ -13,10 +10,7 @@
 namespace mu
 {
 
-	/*
-	  Role: Materialize one parser-visible object instance and bind its
-	  generated member storage into the current parser.
-	*/
+	
 	void * CreateClass::addvar(const string_type & strobjname)
 	{
 		objmap_type::iterator item = m_objmap.find(strobjname);
@@ -60,10 +54,7 @@ namespace mu
 		return false;
 	}
 
-	/*
-	  Role: Resolve a scripted class function by name and execute it against
-	  one concrete object instance.
-	*/
+	
 	double CreateClass::ApplyClassFunc(void *pobj,const string_type &a_strFuncName,paramvect& parm)
 	{
 		string_type strobjname;
@@ -100,26 +91,20 @@ namespace mu
 
 	};
 
-	/*
-	  Role: Placeholder dispatch path for numeric parameter vectors.
-	*/
+	
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,paramvect& parm)
 	{
 
 		return 0;
 	}
 
-	/*
-	  Role: Placeholder dispatch path for object parameter vectors.
-	*/
+	
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,voidparamvect& parm)
 	{
 		return 0;
 	}
 
-	/*
-	  Role: Placeholder dispatch path for string parameter vectors.
-	*/
+	
 	double CreateClass::ApplyClassFunc(void *pobj,void  *apclassfunc,charpvect& parm)
 	{
 		return 0;

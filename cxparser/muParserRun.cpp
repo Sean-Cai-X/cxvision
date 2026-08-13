@@ -1,7 +1,4 @@
-/*
-  File: muParserRun.cpp
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #include "muParserRun.h"
 #include "muParserDef.h"
@@ -13,9 +10,7 @@ namespace mu
 	namespace runmu
 	{
 
-		/*
-		  Role: Initialize the interactive parser wrapper state.
-		*/
+		
 		ParserRun::ParserRun():
 		m_iVal(0)
 		{
@@ -75,10 +70,7 @@ namespace mu
 			return m_parser.GetStorageBase();
 		}
 
-		/*
-		  Role: Replay one stored bytecode collection through the wrapped
-		  parser.
-		*/
+		
 		double ParserRun::RunByteCode(ParserByteCode::storage_type Base)
 		{
 			m_parser.m_vByteCodeCollection.SetStorageBase(Base);
@@ -87,10 +79,7 @@ namespace mu
 			return dresult;
 		}
 
-		/*
-		  Role: Process one shell-style command and route it to parser wrapper
-		  helpers.
-		*/
+		
 		bool ParserRun::CommandLine(string astr)
 		{
 			std::string sLine=astr;
@@ -199,9 +188,7 @@ namespace mu
 
 			return false;
 		}
-		/*
-		  Role: Print the supported interactive commands.
-		*/
+		
 		void ParserRun::ShowHelp()
 		{
 			*m_stream<<"!-----------------help------------------- "<<"\r\n";

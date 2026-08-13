@@ -1,7 +1,4 @@
-/*
-  File: muParserTreeNode.cpp
-  Role: Support utilities used by the cxparser runtime.
-*/
+﻿
 
 #include <cmath>
 #include <string>
@@ -18,9 +15,7 @@
 namespace mu
 {
 
-	/*
-	  Role: Initialize one parser tree node container.
-	*/
+	
 	muParserTreeNode::muParserTreeNode()
 	{
 
@@ -79,9 +74,7 @@ namespace mu
 			return NULL;
 		}
 
-	/*
-	  Role: Remove one dependency edge from the outward use-node list.
-	*/
+	
 		bool  muParserTreeNode::DeleteParserUseNode(string_type str)
 		{
 			int iGetit=-1;
@@ -120,9 +113,7 @@ namespace mu
 			return NULL;
 		}
 
-	/*
-	  Role: Remove one dependency edge from the reverse use-this list.
-	*/
+	
 		bool  muParserTreeNode::DeleteParserUseThisNode(string_type str)
 		{
 			int iGetit=-1;

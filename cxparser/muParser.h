@@ -1,7 +1,4 @@
-/*
-  File: muParser.h
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #ifndef MU_PARSER_H
 #define MU_PARSER_H
@@ -12,10 +9,6 @@
 namespace mu
 {
 
-/*
-  Role: Default floating-point parser facade that registers built-in
-  constants, operators, and numeric helper functions.
-*/
 class  Parser : public ParserBase
 {
 private:
@@ -66,10 +59,7 @@ private:
 
 public:
 
-	/*
-	  Role: Build the default parser facade and register its standard runtime
-	  vocabulary.
-	*/
+	
 	Parser();
 	~Parser(){};
 	virtual void InitCharSets();
@@ -77,9 +67,7 @@ public:
 	virtual void InitConst();
 	virtual void InitOprt();
 
-	/*
-	  Role: Evaluate a numerical derivative by perturbing one bound variable.
-	*/
+	
 	value_type Diff(value_type *a_Var, value_type a_fPos) const;
 
 	int DogRun();

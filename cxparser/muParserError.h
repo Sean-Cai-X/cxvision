@@ -1,7 +1,4 @@
-/*
-  File: muParserError.h
-  Role: Parser error codes and error object support.
-*/
+﻿
 
 #ifndef MU_PARSER_ERROR_H
 #define MU_PARSER_ERROR_H
@@ -26,10 +23,7 @@
 namespace mu
 {
 
-    /*
-      Role: Stable parser error identifiers used throughout tokenization,
-      parsing, and runtime execution.
-    */
+    
     enum  EErrorCodes
 	{
 
@@ -76,10 +70,7 @@ namespace mu
 	  ecUNDEFINED           = -1
 	};
 
-    /*
-      Role: Own the canonical human-readable message templates for parser
-      error codes.
-    */
+    
     class  ParserErrorMsg
 	{
 	public:
@@ -99,10 +90,7 @@ namespace mu
 		static const self_type m_Instance;
 	};
 
-    /*
-      Role: Carry one parser error instance with message text, token,
-      position, and optional source expression context.
-    */
+    
     class  ParserError
 	{
 	private:

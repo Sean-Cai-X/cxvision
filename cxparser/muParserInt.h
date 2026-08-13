@@ -1,7 +1,4 @@
-/*
-  File: muParserInt.h
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #ifndef MU_PARSER_INT_H
 #define MU_PARSER_INT_H
@@ -12,10 +9,6 @@
 namespace mu
 {
 
-/*
-  Role: Integer-oriented parser facade that reuses ParserBase with integer
-  rounding and bitwise operator semantics.
-*/
 class ParserInt : public ParserBase
 {
 private:
@@ -60,10 +53,7 @@ private:
 
 public:
 
-    /*
-      Role: Build the integer parser facade and register integer-specific
-      value readers, operators, and functions.
-    */
+    
     ParserInt();
 
     virtual void InitFun();

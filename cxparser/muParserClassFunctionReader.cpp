@@ -1,7 +1,4 @@
-/*
-  File: muParserClassFunctionReader.cpp
-  Role: Reader path for scripted class-function bodies.
-*/
+﻿
 
 #include <cassert>
 #include <cstdio>
@@ -19,9 +16,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Copy the state of a scripted class-function token reader.
-  */
+  
   ParserClassFunctionReader::ParserClassFunctionReader(const ParserClassFunctionReader &a_Reader)
   {
     Assign(a_Reader);
@@ -193,10 +188,7 @@ namespace mu
     return m_UsedVar;
   }
 
-  /*
-    Role: Bind a new scripted class-function body to the reader and reset
-    scanning state.
-  */
+  
   void ParserClassFunctionReader::SetFormula(const string_type &a_strFormula)
   {
     m_strFormula = a_strFormula;
@@ -260,9 +252,6 @@ namespace mu
 #endif
   }
 
-/*
-  Role: Read the next token from a scripted class-function body.
-*/
 ParserClassFunctionReader::token_type ParserClassFunctionReader::ReadNextToken()
 {
     assert(m_pParser);

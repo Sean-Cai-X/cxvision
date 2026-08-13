@@ -1,7 +1,4 @@
-/*
-  File: muparserClassReader.cpp
-  Role: Reader path for class-aware parser expressions.
-*/
+﻿
 
 #include <cassert>
 #include <cstdio>
@@ -19,9 +16,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Copy the state of a class-aware token reader.
-  */
+  
   ParserClassReader::ParserClassReader(const ParserClassReader &a_Reader)
   {
     Assign(a_Reader);
@@ -199,10 +194,7 @@ namespace mu
     return m_UsedVar;
   }
 
-  /*
-    Role: Bind a new class-aware formula to the reader and reset scanning
-    state.
-  */
+  
   void ParserClassReader::SetFormula(const string_type &a_strFormula)
   {
     m_strFormula = a_strFormula;
@@ -266,9 +258,6 @@ namespace mu
 #endif
   }
 
-/*
-  Role: Read the next token from a class-aware expression stream.
-*/
 ParserClassReader::token_type ParserClassReader::ReadNextToken()
 {
     assert(m_pParser);

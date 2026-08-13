@@ -1,7 +1,4 @@
-/*
-  File: muParserToken.h
-  Role: Parser token representation and token metadata.
-*/
+﻿
 
 #ifndef MU_PARSER_TOKEN_H
 #define MU_PARSER_TOKEN_H
@@ -19,10 +16,7 @@ namespace mu
 {
 
 template<typename TBase, typename TString>
-/*
-  Role: Carry one token plus the runtime metadata needed by expression
-  parsing, control flow, and class-aware execution.
-*/
+
 class ParserToken
 				{
 public:
@@ -53,9 +47,7 @@ private:
 
 public:
 
-    /*
-      Role: Build an empty token ready to be filled by the token reader.
-    */
+    
     ParserToken()
       :m_iCode(cmUNKNOWN)
       ,m_iType(tpVOID)
@@ -84,10 +76,7 @@ public:
       return *this;
     }
 
-    /*
-      Role: Copy all token metadata, callback state, and class-binding
-      payloads from another token.
-    */
+    
     void Assign(const ParserToken &a_Tok)
     {
       m_iCode = a_Tok.m_iCode;
@@ -119,9 +108,7 @@ public:
         return (bool)(m_iFlags & a_iFlags);
     }
 
-    /*
-      Role: Store a plain parser command token.
-    */
+    
     ParserToken& Set(ECmdCode a_iType, const TString &a_strTok=TString())
     {
 
@@ -194,9 +181,7 @@ public:
 		return m_iGotoIndex;
 	}
 
-    /*
-      Role: Store a numeric literal token.
-    */
+    
     ParserToken& SetVal(TBase a_fVal, const TString &a_strTok=TString())
     {
       m_iCode = cmVAL;
@@ -210,9 +195,7 @@ public:
       return *this;
     }
 
-    /*
-      Role: Store a numeric variable token.
-    */
+    
     ParserToken& SetVar(TBase *a_pVar, const TString &a_strTok)
     {
       m_iCode = cmVAR;
@@ -227,9 +210,7 @@ public:
       return *this;
     }
 
-    /*
-      Role: Store a parser-visible class type token.
-    */
+    
 	ParserToken& SetClass(classbase *a_pBase, const TString &a_strTok)
 	{
 		m_iCode = cmClass;
@@ -243,9 +224,7 @@ public:
 		return *this;
 	}
 
-    /*
-      Role: Store a concrete class object token bound to one runtime object.
-    */
+    
 	ParserToken& SetClassVar(classbase *a_pBase,void *a_pclassobj, const TString &a_strTok=TString())
 	{
 		m_iCode = cmClassObj;

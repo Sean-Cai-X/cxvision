@@ -1,7 +1,4 @@
-/*
-  File: muParserStack.h
-  Role: Support utilities used by the cxparser runtime.
-*/
+﻿
 
 #ifndef MU_PARSER_STACK_H
 #define MU_PARSER_STACK_H
@@ -18,9 +15,7 @@ namespace mu
 {
 
 template <typename TValueType>
-/*
-  Role: Minimal deque-backed stack used by parser runtime code and tests.
-*/
+
 class ParserStack
 {
   private:
@@ -39,9 +34,7 @@ class ParserStack
      {
      }
 
-	 /*
-	   Role: Remove and return the top stack element.
-	 */
+	 
 	 TValueType pop()
      {
        if (empty())
@@ -52,9 +45,7 @@ class ParserStack
        return el;
      }
 
-     /*
-       Role: Push one value onto the stack.
-     */
+     
      void push(const TValueType& a_Val)
      {
 

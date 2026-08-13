@@ -1,7 +1,4 @@
-/*
-  File: muParserTokenReader.h
-  Role: Token reader interface for parser input streams.
-*/
+﻿
 
 #ifndef MU_PARSER_TOKEN_READER_H
 #define MU_PARSER_TOKEN_READER_H
@@ -23,16 +20,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Convert one parser expression string into a stream of tokens while
-    tracking syntax state, class-binding context, and used variables.
-
-    Mainline warning:
-    - This reader is part of the stability-sensitive parser path.
-    - Other threads should not route new feature work directly through this
-      class unless the change is macro-gated and mainline tests stay green.
-    - Prefer host/binding smoke targets for feature experiments.
-  */
+  
   class  ParserTokenReader
   {
   private:
@@ -147,10 +135,7 @@ namespace mu
 
       ParserTokenReader(ParserBase *a_pParent);
      ~ParserTokenReader();
-      /*
-        Role: Clone the token reader so copied parsers keep equivalent reader
-        configuration without sharing mutable tokenization state.
-      */
+      
       ParserTokenReader* Clone(ParserBase *a_pParent) const;
       void AddValIdent(identfun_type a_pCallback);
       void SetVarCreator(facfun_type a_pFactory);
@@ -172,9 +157,7 @@ namespace mu
       void ReInit();
 	  void EndExpress();
 
-      /*
-        Role: Return the next token from the current formula.
-      */
+      
       token_type ReadNextToken();
 
   private:

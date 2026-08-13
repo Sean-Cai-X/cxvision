@@ -1,18 +1,4 @@
-/*
-  File: torch_module_minimal_binding_main.cpp
-  Role: Establishes the first parser-facing host contract for torch_module.
-
-  Scope:
-  - define a minimal TorchTestHost binding
-  - validate object declaration and method dispatch
-  - validate control-flow guarded host calls
-
-  Note:
-  This target is intentionally decoupled from real libtorch linkage.
-  The host shape mirrors the future torch_module onboarding contract and
-  acts as the handoff point between cxparser mainline work and the
-  torch_module development thread.
-*/
+﻿
 
 #include "muParser.h"
 

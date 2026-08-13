@@ -1,7 +1,4 @@
-/*
-  File: muParserTest.h
-  Role: Regression test harness for parser behavior.
-*/
+﻿
 
 #ifndef MU_PARSER_TEST_H
 #define MU_PARSER_TEST_H
@@ -25,10 +22,6 @@ namespace mu
 namespace Test
 {
 
-/*
-  Role: Register and run parser regression groups covering base expressions,
-  control flow, class binding, and mixed parser features.
-*/
 class  ParserTester
 {
 public:
@@ -161,9 +154,7 @@ private:
 public:
     typedef int (ParserTester::*testfun_type)();
 
-	/*
-	  Role: Build one parser tester and register the selected test profile.
-	*/
+	
 	ParserTester(TestProfile profile = FullProfile);
 
    ~ParserTester()

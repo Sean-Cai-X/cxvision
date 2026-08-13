@@ -1,7 +1,4 @@
-/*
-  File: LeakWatcher.h
-  Role: Leak detection support used by the local build.
-*/
+﻿
 
 #ifndef IMWATCHINGYOULEAK
 #define IMWATCHINGYOULEAK
@@ -9,10 +6,7 @@
 #include <crtdbg.h>
 
 #ifdef _DEBUG
-/*
-  Role: Route debug allocations through CRT leak tracking helpers in local
-  debug builds.
-*/
+
 void* operator new(size_t nSize, const char * lpszFileName, int nLine)
 {
     return ::operator new(nSize, 1, lpszFileName, nLine);

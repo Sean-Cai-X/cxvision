@@ -1,7 +1,4 @@
-/*
-  File: muParserBytecode.h
-  Role: Bytecode storage and execution helpers.
-*/
+﻿
 
 #ifndef MU_PARSER_BYTECODE_H
 #define MU_PARSER_BYTECODE_H
@@ -18,10 +15,6 @@
 namespace mu
 {
 
-/*
-  Role: Build and store the parser bytecode stream used by optimized
-  execution paths and class-member call dispatch.
-*/
 class  ParserByteCode
 {
 public:
@@ -61,20 +54,11 @@ public:
     void AddAssignOp(value_type *a_pVar);
     void AddFun(void *a_pFun, int a_iArgc);
     void AddStrFun(void *a_pFun, int a_iArgc, int a_iIdx);
-    /*
-      Role: Append one class-member numeric call record to the bytecode
-      stream.
-    */
+    
 	void AddClassMemberFunNum(void *a_pclass,void *a_pobj,void *a_pFun, int a_iArgc);
-    /*
-      Role: Append one class-member object call record to the bytecode
-      stream.
-    */
+    
 	void AddClassMemberFunVoidp(void *a_pclass,void *a_pobj,void *a_pFun, int istocknum,void *the_pobj);
-    /*
-      Role: Append one class-member string call record to the bytecode
-      stream.
-    */
+    
     void AddClassMemberFunStr(void *a_pclass,void *a_pobj,void *a_pFun, int a_iArgc, int a_iIdx);
 	void SetCreateClassLP(CreateClass *pcreateclass);
 	void Finalize();

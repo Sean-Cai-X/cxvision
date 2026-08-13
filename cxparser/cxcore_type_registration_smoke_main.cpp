@@ -1,9 +1,4 @@
-/*
-  File: cxcore_type_registration_smoke_main.cpp
-  Role: Establishes a first cxcore-oriented registration subset so cxscript can
-  own more real inputs, outputs, and test-context objects without extending the
-  parser language itself.
-*/
+﻿
 
 #include "muParser.h"
 

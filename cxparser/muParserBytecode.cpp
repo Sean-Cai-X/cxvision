@@ -1,7 +1,4 @@
-/*
-  File: muParserBytecode.cpp
-  Role: Bytecode storage and execution helpers.
-*/
+﻿
 
 #include "muParserBytecode.h"
 
@@ -18,10 +15,7 @@
 namespace mu
 {
 
-  /*
-    Role: Initialize bytecode storage sizing rules for values and packed
-    pointers on the current build target.
-  */
+  
   ParserByteCode::ParserByteCode()
     :m_iStackPos(0)
     ,m_vBase()
@@ -52,9 +46,7 @@ namespace mu
     return *this;
   }
 
-  /*
-    Role: Pack one pointer-sized payload into the bytecode storage format.
-  */
+  
   void ParserByteCode::StorePtr(void *a_pAddr)
   {
     #if defined(_MSC_VER)
@@ -134,10 +126,7 @@ namespace mu
     StorePtr(a_pFun);
   }
 
-  /*
-    Role: Append a numeric class-member call record and keep stack depth in
-    sync with the runtime call convention.
-  */
+  
   void ParserByteCode::AddClassMemberFunNum(void *a_pclass,void *a_pobj,void *a_pFun, int a_iArgc)
   {
 	  if (a_iArgc>=0)
@@ -163,9 +152,7 @@ namespace mu
 	  m_vBase.push_back(-1);
  }
 
-  /*
-    Role: Append an object-parameter class-member call record.
-  */
+  
   void ParserByteCode::AddClassMemberFunVoidp(void *a_pclass,void *a_pobj,void *a_pFun, int istocknum2,void *the_pobj)
   {
 
@@ -184,9 +171,7 @@ namespace mu
 		  m_vBase.push_back(-1);
   }
 
-  /*
-    Role: Append a string-parameter class-member call record.
-  */
+  
   void ParserByteCode::AddClassMemberFunStr(void *a_pclass,void *a_pobj,void *a_pFun, int a_iArgc, int a_iIdx)
   {
 
@@ -223,9 +208,7 @@ namespace mu
     m_vBase.push_back(a_iIdx);
   }
 
-  /*
-    Role: Finalize the bytecode stream with the end marker sequence.
-  */
+  
   void ParserByteCode::Finalize()
   {
 

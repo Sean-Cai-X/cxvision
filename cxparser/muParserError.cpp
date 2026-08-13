@@ -1,7 +1,4 @@
-/*
-  File: muParserError.cpp
-  Role: Parser error codes and error object support.
-*/
+﻿
 
 #include "muParserError.h"
 
@@ -10,9 +7,7 @@ namespace mu
 
   const ParserErrorMsg ParserErrorMsg::m_Instance;
 
-  /*
-    Role: Return the singleton store of parser error message templates.
-  */
+  
   const ParserErrorMsg& ParserErrorMsg::Instance()
   {
     return m_Instance;
@@ -35,9 +30,7 @@ namespace mu
   ParserErrorMsg::ParserErrorMsg(const ParserErrorMsg&)
   {}
 
-  /*
-    Role: Populate the canonical parser error message table.
-  */
+  
   ParserErrorMsg::ParserErrorMsg()
     :m_vErrMsg(0)
   {
@@ -109,10 +102,7 @@ namespace mu
     m_strMsg = sMsg;
   }
 
-  /*
-    Role: Build a parser error from an error code, token, and expression
-    context.
-  */
+  
   ParserError::ParserError( EErrorCodes a_iErrc,
                             const string_type &sTok,
                             const string_type &sFormula,
@@ -187,10 +177,7 @@ namespace mu
   {
   }
 
-  /*
-    Role: Replace placeholder fragments such as $POS$ and $TOK$ in one
-    formatted parser error message.
-  */
+  
   void ParserError::ReplaceSubString( string_type &strSource,
                                       const string_type &strFind,
                                       const string_type &strReplaceWith)

@@ -1,7 +1,4 @@
-/*
-  File: muparserClassReader.h
-  Role: Reader path for class-aware parser expressions.
-*/
+﻿
 
 #ifndef MU_PARSER_CLASS_READER_H
 #define MU_PARSER_CLASS_READER_H
@@ -23,16 +20,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Token reader variant that understands parser-visible class
-    declarations, object references, and member access syntax.
-
-    Mainline warning:
-    - This class protects current class/object/member-access behavior.
-    - Do not attach new feature semantics here by default.
-    - Any change in this reader should be macro-gated, tested away from the
-      default path, and announced before it can affect other threads.
-  */
+  
   class   ParserClassReader
   {
   private:
@@ -143,9 +131,7 @@ namespace mu
   public:
       ParserClassReader(ParserBase *a_pParent);
      ~ParserClassReader();
-      /*
-        Role: Clone the class-aware token reader for copied parser instances.
-      */
+      
       ParserClassReader* Clone(ParserBase *a_pParent) const;
       void AddValIdent(identfun_type a_pCallback);
       void SetVarCreator(facfun_type a_pFactory);
@@ -167,9 +153,7 @@ namespace mu
       void ReInit();
 	  void EndExpress();
 
-      /*
-        Role: Return the next token from a class-aware expression stream.
-      */
+      
       token_type ReadNextToken();
 
 	  void SetCreateClass(CreateClass *pclass);

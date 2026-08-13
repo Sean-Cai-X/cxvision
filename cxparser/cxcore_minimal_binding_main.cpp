@@ -1,7 +1,4 @@
-/*
-  File: cxcore_minimal_binding_main.cpp
-  Role: Validates a controller-style parser flow modeled after cxcore ViewController usage.
-*/
+﻿
 
 #include "muParser.h"
 

@@ -1,8 +1,4 @@
-/*
-  File: muParserTest.cpp
-  Role: Regression test harness for parser behavior.
-*/
-
+﻿
 
 #include "muParserTest.h"
 
@@ -18,10 +14,6 @@ static int iusingtestnum=0;
 static double g_last_fucn4_args[4] = {0.0, 0.0, 0.0, 0.0};
 static int g_last_fucn_i4_args[4] = {0, 0, 0, 0};
 
-/*
-  Role: Exercise parser-visible class binding signatures inside regression
-  tests, including numeric, string, object, and variadic call patterns.
-*/
 class usingclass
 {
 public :
@@ -264,10 +256,7 @@ namespace mu
 
     int ParserTester::c_iCount = 0;
 
-    /*
-      Role: Build the regression harness for the selected parser test
-      profile.
-    */
+    
     ParserTester::ParserTester(TestProfile profile)
       :m_vTestFun()
       ,m_stream(&std::cout)

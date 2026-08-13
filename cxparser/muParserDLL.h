@@ -1,7 +1,4 @@
-/*
-  File: muParserDLL.h
-  Role: Support utilities used by the cxparser runtime.
-*/
+﻿
 
 #ifndef MU_PARSER_DLL_H
 #define MU_PARSER_DLL_H
@@ -39,10 +36,6 @@ extern "C"
 {
 #endif
 
-/*
-  Role: Export the C ABI used by external callers to create, configure, and
-  evaluate parser instances.
-*/
 MU_PARSER_API parser_handle MU_LIB_CALL  mupInit();
 MU_PARSER_API void MU_LIB_CALL  mupRelease(parser_handle a_hParser);
 MU_PARSER_API const char* MU_LIB_CALL  mupGetExpr(parser_handle a_hParser);

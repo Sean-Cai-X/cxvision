@@ -1,7 +1,4 @@
-/*
-  File: muParserRun.h
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #ifndef MU_PARSERRUN_H
 #define MU_PARSERRUN_H
@@ -23,10 +20,7 @@ namespace mu
 	namespace runmu
 	{
 
-		/*
-		  Role: Lightweight interactive wrapper around mu::Parser for command
-		  line style execution, bytecode replay, and manual inspection helpers.
-		*/
+		
 		class  ParserRun
 		{
 		public:
@@ -42,9 +36,7 @@ namespace mu
 				return &m_parser;
 			}
 
-			/*
-			  Role: Evaluate the current expression stored in the wrapped parser.
-			*/
+			
 			value_type Eval();
 			void SetExpr(string str);
 			double GetResult();
@@ -53,9 +45,7 @@ namespace mu
 			void SetVarFactory();
 
 			ParserByteCode::storage_type GetByteCode();
-			/*
-			  Role: Replay one previously collected bytecode storage block.
-			*/
+			
 			double RunByteCode(ParserByteCode::storage_type Base);
 
 		private:
@@ -74,10 +64,7 @@ namespace mu
 			void * m_Func;
 			void SelfTest();
 
-			/*
-			  Role: Execute one interactive shell command against the parser
-			  wrapper.
-			*/
+			
 			bool CommandLine(string szLine);
 			void ShowHelp();
 			void Calc(const char *pszFormula);

@@ -1,8 +1,4 @@
-/*
-  File: custom_type_mixed_args_smoke_main.cpp
-  Role: Validates a custom host template with mixed numeric and string
-  arguments without changing parser-core default behavior.
-*/
+﻿
 
 #include "muParser.h"
 #include "custom_type_template_adapter.h"

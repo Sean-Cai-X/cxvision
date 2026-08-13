@@ -1,7 +1,4 @@
-/*
-  File: muParserClassFunctionReader.h
-  Role: Reader path for scripted class-function bodies.
-*/
+﻿
 
 #ifndef MU_PARSER_CLASSFUNCTION_READER_H
 #define MU_PARSER_CLASSFUNCTION_READER_H
@@ -23,16 +20,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Token reader variant for scripted class-function bodies, including
-    control flow and class-object substitution context.
-
-    Mainline warning:
-    - This reader is one of the highest-risk parser paths because it mixes
-      class-function bodies, control flow, and object substitution.
-    - Avoid direct default-path changes from other threads.
-    - Use macro-gated experiments and independent smoke coverage first.
-  */
+  
   class   ParserClassFunctionReader
   {
   private:
@@ -147,10 +135,7 @@ namespace mu
   public:
       ParserClassFunctionReader(ParserBase *a_pParent);
      ~ParserClassFunctionReader();
-      /*
-        Role: Clone the scripted class-function reader for copied parser
-        instances.
-      */
+      
       ParserClassFunctionReader* Clone(ParserBase *a_pParent) const;
       void AddValIdent(identfun_type a_pCallback);
       void SetVarCreator(facfun_type a_pFactory);
@@ -172,9 +157,7 @@ namespace mu
       void ReInit();
 	  void EndExpress();
 
-      /*
-        Role: Return the next token from a scripted class-function body.
-      */
+      
       token_type ReadNextToken();
 
 	 void SetCreateClassObj(const string_type &a_strclass,const string_type &a_strobj);

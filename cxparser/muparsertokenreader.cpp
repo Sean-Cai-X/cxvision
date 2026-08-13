@@ -1,7 +1,4 @@
-/*
-  File: muparsertokenreader.cpp
-  Role: Token reader implementation for parser input streams.
-*/
+﻿
 
 #include <cassert>
 #include <cstdio>
@@ -19,9 +16,7 @@ namespace mu
 
   class ParserBase;
 
-  /*
-    Role: Copy token reader state used by parser clones and test scaffolds.
-  */
+  
   ParserTokenReader::ParserTokenReader(const ParserTokenReader &a_Reader)
   {
     Assign(a_Reader);
@@ -197,9 +192,7 @@ namespace mu
     return m_UsedVar;
   }
 
-  /*
-    Role: Rebind this reader to a new formula and reset tokenization state.
-  */
+  
   void ParserTokenReader::SetFormula(const string_type &a_strFormula)
   {
     m_strFormula = a_strFormula;
@@ -263,10 +256,6 @@ namespace mu
 #endif
   }
 
-/*
-  Role: Read the next parser token from the expression stream and route it
-  through the token recognizers in parser precedence order.
-*/
 ParserTokenReader::token_type ParserTokenReader::ReadNextToken()
 {
 
@@ -701,10 +690,7 @@ m_icurID = 0;
     return false;
   }
 
-  /*
-    Role: Recognize infix operators and reopen binary operator parsing after
-    prefix unary handling.
-  */
+  
   bool ParserTokenReader::IsInfixOpTok(token_type &a_Tok)
 
   {
@@ -805,10 +791,7 @@ m_icurID = 0;
     return true;
   }
 
-  /*
-    Role: Recognize numeric literals and update syntax flags for the next
-    parser stage.
-  */
+  
   bool ParserTokenReader::IsValTok(token_type &a_Tok)
   {
 
@@ -866,10 +849,7 @@ m_icurID = 0;
     #endif
   }
 
-  /*
-    Role: Recognize named variables, including parser-created symbols used
-    by class binding and control-flow execution.
-  */
+  
   bool ParserTokenReader::IsVarTok(token_type &a_Tok)
   {
 
@@ -1153,10 +1133,7 @@ m_icurID = 0;
     return true;
   }
 
-  /*
-    Role: Recognize string literals and hand them to the runtime as
-    string-valued tokens.
-  */
+  
   bool ParserTokenReader::IsString(token_type &a_Tok)
   {
     if (m_strFormula[m_iPos]!='"')

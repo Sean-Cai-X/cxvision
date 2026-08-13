@@ -1,4 +1,4 @@
-#ifndef CXPARSER_TORCH_GEOMETRY_ALIGNMENT_ACTIONS_H
+﻿#ifndef CXPARSER_TORCH_GEOMETRY_ALIGNMENT_ACTIONS_H
 #define CXPARSER_TORCH_GEOMETRY_ALIGNMENT_ACTIONS_H
 
 namespace cxparser
@@ -27,6 +27,6 @@ struct TorchGeometryAlignmentActions
   static constexpr const char* PublishAttachPacket = "cxcore.publish.attach_packet";
 };
 
-} // namespace cxparser
+} 
 
 #endif

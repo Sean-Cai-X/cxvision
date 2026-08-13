@@ -1,16 +1,9 @@
-/*
-  File: muParserFixes.h
-  Role: Support utilities used by the cxparser runtime.
-*/
+﻿
 
 #ifndef MU_PARSER_FIXES_H
 #ifdef _MSC_VER
 #define MU_PARSER_FIXES_H
 
-/*
-  Role: Provide compatibility shims for older MSVC and Intel compiler
-  combinations expected by legacy cxparser code.
-*/
 #ifdef __INTEL_COMPILER
 
 #pragma warning(disable:981)

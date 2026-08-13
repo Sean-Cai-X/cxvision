@@ -1,4 +1,4 @@
-#include "torch_geometry_alignment_binding.h"
+﻿#include "torch_geometry_alignment_binding.h"
 
 #include <exception>
 #include <iostream>
@@ -30,7 +30,7 @@ bool CheckActionMapEntry(
   return Check(std::string(entry->method_name) == expected_method, "binding action method mismatch");
 }
 
-} // namespace
+} 
 
 int main()
 {

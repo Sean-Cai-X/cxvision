@@ -1,17 +1,11 @@
-/*
-  File: muParserCallback.cpp
-  Role: Callback wrappers for functions and operators.
-*/
+﻿
 
 #include "muParserCallback.h"
 
 namespace mu
 {
 
-	/*
-	  Role: Build a callback descriptor for one-argument numeric functions or
-	  operators.
-	*/
+	
 	ParserCallback::ParserCallback(fun_type1 a_pFun, bool a_bAllowOpti, int a_iPrec, ECmdCode a_iCode)
 		:m_pFun((void*)a_pFun)
 		,m_iArgc(1)
@@ -199,9 +193,7 @@ namespace mu
   {
   }
 
-  /*
-    Role: Copy the callback metadata without changing the registered target.
-  */
+  
   ParserCallback::ParserCallback(const ParserCallback &a_Fun)
   {
     m_pFun = a_Fun.m_pFun;
@@ -213,9 +205,7 @@ namespace mu
 	m_iReturnType=a_Fun.m_iReturnType;
   }
 
-  /*
-    Role: Clone the callback descriptor for token and parser copies.
-  */
+  
   ParserCallback* ParserCallback::Clone() const
   {
     return new ParserCallback(*this);

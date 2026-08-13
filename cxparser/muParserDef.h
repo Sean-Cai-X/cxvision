@@ -1,7 +1,4 @@
-/*
-  File: muParserDef.h
-  Role: Shared enums, typedefs, and parser-wide protocol definitions.
-*/
+﻿
 
 #ifndef MUP_DEF_H
 #define MUP_DEF_H
@@ -55,10 +52,6 @@
 namespace mu
 {
 
-/*
-  Role: Command identifiers shared by token readers, parser execution, and
-  bytecode storage.
-*/
 enum ECmdCode
 {
 
@@ -123,9 +116,6 @@ enum ECmdCode
 
 };
 
-/*
-  Role: Runtime type identifiers attached to parser tokens and callbacks.
-*/
 enum ETypeCode
 {
   tpSTR  = 0,
@@ -139,10 +129,6 @@ enum ETypeCode
 
 };
 
-/*
-  Role: Class-member function signature identifiers used by class binding
-  registration and runtime dispatch.
-*/
 enum EParamCodes
 {
 	Param_none=1,
@@ -188,9 +174,6 @@ enum EParamCodes
 	Param_charp_any_Return_double
 };
 
-/*
-  Role: Distinguish the supported parser-visible class implementations.
-*/
 enum EClassTypeCodes
 {
 	CLASS_ORG=1,
@@ -199,9 +182,6 @@ enum EClassTypeCodes
 	CLASS_ANY
 };
 
-/*
-  Role: Operator precedence levels used by parser callback registration.
-*/
 enum EPrec
 {
 
@@ -259,10 +239,6 @@ typedef bool (*identfun_type)(const char_type*, int&, value_type&);
 
 typedef value_type* (*facfun_type)(const char_type*,void *);
 
-/*
-  Role: Virtual class bytecode fragments cached for parser-managed class
-  initialization and function dispatch.
-*/
 typedef struct virtualclass
 {
 	MUP_BYTECODE_TYPE * pclass_inicall;

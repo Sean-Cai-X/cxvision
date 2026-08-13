@@ -1,7 +1,4 @@
-/*
-  File: muParser.cpp
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #include "muParser.h"
 
@@ -52,10 +49,7 @@ value_type Parser::Mytest(value_type v)
 
     return 0;
 }
-/*
-  Role: Return a safe placeholder for the address-taking operator hook in the
-  default parser facade.
-*/
+
 value_type* Parser::GetAddress(value_type v)
 {
 	(void)v;
@@ -172,10 +166,6 @@ bool Parser::IsVal(const char_type *a_szExpr, int &a_iPos, value_type &a_fVal)
   return true;
 }
 
-/*
-  Role: Construct the default parser facade and register its standard
-  floating-point language surface.
-*/
 Parser::Parser()
   :ParserBase()
   ,m_fEpsilon((value_type)1e-7)
@@ -196,10 +186,6 @@ int Parser::DogRun()
 	return 1;
 }
 
-/*
-  Role: Configure the identifier and operator character sets accepted by the
-  default parser.
-*/
 void Parser::InitCharSets()
 {
   DefineNameChars("0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@");
@@ -208,10 +194,6 @@ void Parser::InitCharSets()
   DefineInfixOprtChars("+-*^/?<>=#!$%&|~'_");
 }
 
-/*
-  Role: Register built-in numeric and helper functions for the default
-  parser facade.
-*/
 void Parser::InitFun()
 {
 
@@ -254,27 +236,18 @@ void Parser::InitFun()
 
 }
 
-/*
-  Role: Register default numeric constants.
-*/
 void Parser::InitConst()
 {
   DefineConst("_pi", (value_type)PARSER_CONST_PI);
   DefineConst("_e", (value_type)PARSER_CONST_E);
 }
 
-/*
-  Role: Register the default prefix and address-style operators.
-*/
 void Parser::InitOprt()
 {
   DefineInfixOprt("-", UnaryMinus);
   DefineGetAdress("&", GetAddress);
 }
 
-/*
-  Role: Evaluate a simple numerical derivative around one bound variable.
-*/
 value_type Parser::Diff(value_type *a_Var, value_type a_fPos) const
 {
   assert(m_fEpsilon);

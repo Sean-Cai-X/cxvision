@@ -1,7 +1,4 @@
-/*
-  File: muParserInt.cpp
-  Role: Parser facade or runtime helper layer.
-*/
+﻿
 
 #include "muParserInt.h"
 
@@ -155,10 +152,6 @@ bool ParserInt::IsBinVal(const char_type *a_szExpr, int &a_iPos, value_type &a_f
   return true;
 }
 
-/*
-  Role: Construct the integer parser facade and register integer-oriented
-  token readers and operators.
-*/
 ParserInt::ParserInt()
 :ParserBase()
 {
@@ -171,17 +164,10 @@ ParserInt::ParserInt()
   InitOprt();
 }
 
-/*
-  Role: Register integer parser constants.
-*/
 void ParserInt::InitConst()
 {
 }
 
-/*
-  Role: Configure the identifier and operator character sets for integer
-  parsing.
-*/
 void ParserInt::InitCharSets()
 {
   DefineNameChars("0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@");
@@ -189,9 +175,6 @@ void ParserInt::InitCharSets()
   DefineInfixOprtChars("/+-*^?<>=!%&|~'_");
 }
 
-/*
-  Role: Register integer helper functions.
-*/
 void ParserInt::InitFun()
 {
   DefineFun("sign", Sign);
@@ -204,10 +187,6 @@ void ParserInt::InitFun()
 
 }
 
-/*
-  Role: Register integer and bitwise operators for the integer parser
-  facade.
-*/
 void ParserInt::InitOprt()
 {
 

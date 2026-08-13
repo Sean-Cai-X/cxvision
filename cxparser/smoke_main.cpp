@@ -1,7 +1,4 @@
-/*
-  File: smoke_main.cpp
-  Role: Executable entry point for smoke or regression validation.
-*/
+﻿
 
 #include "muParser.h"
 
@@ -12,17 +9,12 @@
 
 namespace
 {
-/*
-  Role: Compare floating-point smoke results with a small tolerance.
-*/
+
 bool NearlyEqual(double lhs, double rhs, double eps = 1e-9)
 {
   return std::fabs(lhs - rhs) <= eps;
 }
 
-/*
-  Role: Validate unary minus parsing and binary operator continuation.
-*/
 int RunUnaryMinusSmoke()
 {
   std::cout << "[CASE] unary minus" << std::endl;
@@ -52,9 +44,6 @@ int RunUnaryMinusSmoke()
   return 0;
 }
 
-/*
-  Role: Validate repeated control-flow evaluation on the interpreter path.
-*/
 int RunControlFlowSmoke()
 {
   std::cout << "[CASE] control flow" << std::endl;

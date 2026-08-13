@@ -1,13 +1,4 @@
-/*
-  File: foundation_flow_smoke_main.cpp
-  Role: Validates the planned non-Qt foundation flow that combines cxparser,
-  cxcore, OpenCASCADE, and CCCoreLib responsibilities.
-
-  Test levels:
-  - regular: workspace roots and one reference execution path
-  - standard: repeated load/run cycles with stable expected outcomes
-  - stress: high-frequency parser execution to catch state leakage
-*/
+﻿
 
 #include "muParser.h"
 

@@ -1,4 +1,4 @@
-
+﻿
 
 #include "muParser.h"
 
@@ -194,7 +194,6 @@ namespace
 
 namespace mu
 {
-
 
 ParserBase::ParserBase()
   :m_pParseFormula(&ParserBase::ParseString)
@@ -1284,7 +1283,6 @@ value_type ParserBase::ParseValue() const
 {
   return *(value_type*)(&m_pCmdCode[2]);
 }
-
 
 value_type ParserBase::ParseString() const
 {

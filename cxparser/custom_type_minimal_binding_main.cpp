@@ -1,14 +1,4 @@
-/*
-  File: custom_type_minimal_binding_main.cpp
-  Role: Smallest standalone template for onboarding a custom host type into
-  cxparser without affecting the default parser mainline.
-
-  Template rules:
-  - keep the type behind a host class
-  - reuse DefineClass / DefineClassFun only
-  - validate declaration, member call, if-guarded call, and return value
-  - do not change parser-core default behavior
-*/
+﻿
 
 #include "muParser.h"
 #include "custom_type_template_adapter.h"

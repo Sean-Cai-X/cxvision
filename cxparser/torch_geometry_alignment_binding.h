@@ -1,4 +1,4 @@
-#ifndef CXPARSER_TORCH_GEOMETRY_ALIGNMENT_BINDING_H
+﻿#ifndef CXPARSER_TORCH_GEOMETRY_ALIGNMENT_BINDING_H
 #define CXPARSER_TORCH_GEOMETRY_ALIGNMENT_BINDING_H
 
 #include "muParser.h"
@@ -302,6 +302,6 @@ inline const TorchGeometryBindingActionMapEntry* FindTorchGeometryBindingAction(
   return 0;
 }
 
-} // namespace cxparser
+} 
 
 #endif

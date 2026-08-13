@@ -1,7 +1,4 @@
-/*
-  File: muParserBase.h
-  Role: Core parser runtime and execution entry points.
-*/
+﻿
 
 #ifndef MU_PARSER_BASE_H
 #define MU_PARSER_BASE_H
@@ -24,17 +21,7 @@
 
 namespace mu
 {
-/*
-  Class: ParserBase
-  Role: Owns parser state, readers, bytecode buffers, symbol tables, and class registries.
 
-  Mainline warning:
-  - Reliability and stability take priority over new parser semantics.
-  - Changes touching reader selection, control-flow execution, class dispatch,
-    or bytecode/default execution paths must not alter default behavior unless
-    the mainline test chain has been revalidated.
-  - Prefer macro-gated branches for experimental parser work.
-*/
 
 	static const char_type *c_DefaultOprt[29]=
 	{
@@ -81,14 +68,14 @@ private:
     typedef ParserToken<vision_type, string_type> token_viosiontype;
  public:
 
-    /* Backwards-compatible public error alias. */
+    
     typedef ParserError exception_type;
 
     ParserBase();
     ParserBase( const ParserBase &a_Parser );
     ParserBase& operator=(const ParserBase &a_Parser);
 
-    /* Releases parser-owned class registry objects. */
+    
     virtual ~ParserBase()
     {
 			classbasemap_type:: iterator pIter,pIter2;
@@ -112,7 +99,7 @@ private:
 			}
 	}
 
-    /* Evaluates the active expression through the selected execution path. */
+    
     inline value_type Eval() const
     {
       if (m_bHasControlFlow)
@@ -122,7 +109,7 @@ private:
       return (this->*m_pParseFormula)();
     }
 
-    /* Sets the active expression and refreshes parser execution state. */
+    
     void SetExpr(const string_type &a_sExpr);
 	void SetVarFactory(facfun_type a_pFactory,void *a_pvoid=0);
     void EnableOptimizer(bool a_bIsOn=true);
@@ -217,11 +204,7 @@ private:
 		ReInit();
 	}
 
-  	/*
-  	  Registers a parser-declared class definition from script text.
-  	  This is the create-class semantic entry for class create / ctor-factory
-  	  metadata, not a direct runtime instance materialize path.
-  	*/
+  	
   	void DefineCreateClass(const char *a_szName,
   							const char *a_szstr)
 	{
@@ -241,11 +224,7 @@ private:
 		ReInit();
     }
 
-  	/*
-  	  Registers one scripted member body for a previously declared create-class.
-  	  Together with DefineCreateClass, this forms the scripted class creation
-  	  registration layer before later runtime instance materialize.
-  	*/
+  	
   	void DefineCreateClasFun(const char *a_szClassName,
  		const char *a_szClassmemberFuncName,
  		const char *a_szFuncStr)
@@ -261,19 +240,7 @@ private:
 		pCreateclass->AddClassFun(a_sClassmemberFuncName,a_sClassFunStr);
 	}
 
-	/*
-	  Runtime class-function registration entry.
-	  The many signature overloads below are legacy shells; the actual storage
-	  mainline is ParserClass::AddClassFun and should stay the single sink.
-	  New signature support should first map into the generic signature
-	  categories declared in muParserClass.h instead of adding more outward
-	  registration surface.
-
-	  Overload families:
-	  - fixed numeric / fixed integral / fixed mixed primitive callbacks
-	  - variadic numeric and variadic char* callbacks
-	  - scripted/create-class text registration (separate string overload)
-	*/
+	
 	template<class ACLASS, class TMETHOD>
 	void DefineClassFunImpl(const char *a_szClassName,
 							const char *a_szClassmemberFuncName,
@@ -348,11 +315,7 @@ private:
 		const char *a_szClassmemberFuncName,
 		const char *a_szClassFuncStr )
 	{
-		/*
-		  Role: Scripted class-function registration entry.
-		  This is the textual sibling of the runtime callback path and
-		  should stay separate from the generic callback registration sink.
-		*/
+		
 		string_type a_sClassName( a_szClassName);
 		string_type a_sClassmemberFuncName(a_szClassmemberFuncName);
 		string_type a_sFuncstr(a_szClassFuncStr);
@@ -381,7 +344,7 @@ private:
 
 	}
 
-    /* Clears user-defined symbols and parser-visible runtime objects. */
+    
     void ClearVar();
     void ClearFun();
     void ClearConst();
@@ -449,7 +412,7 @@ private:
 
  protected:
 
-    /* Initializes charsets, built-in functions, constants, and operators. */
+    
     void Init()
     {
       InitCharSets();
@@ -504,7 +467,7 @@ private:
                    const ParserStack<token_type > &a_stOprt) const;
 #endif
 
-    /* Active evaluation entry used by Eval(). */
+    
 	mutable ParseFunction  m_pParseFormula;
     mutable const ParserByteCode::map_type *m_pCmdCode;
     mutable ParserByteCode m_vByteCode;
@@ -542,7 +505,7 @@ private:
 	mutable classbasemap_type m_ClassDefMap;
 	mutable string_type m_StringFormula;
 
-    /* Optional virtual-class grouping hook used by extended parser flows. */
+    
     virtualclass *m_PVirClassGroup;
 
 	ParserByteCode::storage_type GetCollectionStorage()
@@ -631,5 +594,4 @@ private:
 }
 
 #endif
-
 

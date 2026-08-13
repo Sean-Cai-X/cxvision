@@ -1,7 +1,4 @@
-/*
-  File: muParserTreeNode.h
-  Role: Support utilities used by the cxparser runtime.
-*/
+﻿
 
 #if !defined(__PARSERTREENODE_H__)
 #define __PARSERTREENODE_H__
@@ -15,10 +12,7 @@ typedef struct  POINTXY
 namespace mu
 {
 
-	/*
-	  Role: Hold one parser expression node together with its stored bytecode,
-	  display text, and graph-style dependency links.
-	*/
+	
 	class muParserTreeNode
 	{
 		private:

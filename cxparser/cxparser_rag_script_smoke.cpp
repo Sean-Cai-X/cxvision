@@ -1,4 +1,4 @@
-
+﻿
 
 #include "muParser.h"
 
@@ -33,13 +33,11 @@ struct RagScriptCase
   double expected_result;
 };
 
-
 struct ExternalMethodIndex
 {
   const char *method_name;
   const char *signature;
 };
-
 
 struct ExternalClassIndex
 {
@@ -50,7 +48,6 @@ struct ExternalClassIndex
   const ExternalMethodIndex *methods;
   size_t method_count;
 };
-
 
 struct ExternalModuleIndex
 {
@@ -134,7 +131,6 @@ bool NearlyEqual(double lhs, double rhs, double eps = 1e-9)
   return std::fabs(lhs - rhs) <= eps;
 }
 
-
 void PrintScriptDescriptor(const RagScriptCase &script_case)
 {
   std::cout << "  [SCRIPT] module=" << script_case.module_name
@@ -144,7 +140,6 @@ void PrintScriptDescriptor(const RagScriptCase &script_case)
             << " file=" << script_case.file_name
             << std::endl;
 }
-
 
 void PrintExternalClassIndex()
 {
@@ -178,7 +173,6 @@ std::string LoadFileString(const std::string &path)
   buffer << input.rdbuf();
   return buffer.str();
 }
-
 
 bool SaveFileString(const std::string &path, const std::string &content)
 {
@@ -235,9 +229,6 @@ std::string JoinPath(const std::string &dir, const std::string &file_name)
   return path;
 }
 
-/*
-  Role: Register the smallest active class-binding surface used by current pseudo-code samples.
-*/
 void ConfigureClassBindings(mu::Parser &parser)
 {
   double *org_double = 0;
@@ -372,8 +363,8 @@ int RunTorchModuleCatalog()
   const std::string script_dir = GetRagScriptDir();
   const std::string module_dir = EnsureDir(JoinPath(script_dir, "torch_module"));
 
-  // Keep the RAG handoff smoke on a minimal parser->RAG catalog surface.
-  // This smoke should not expand into training/infer/smoke asset trees.
+  
+  
   const std::vector<RagScriptCase> cases = {
     {"torch_test_run_core", "torch_module", "TorchTestHost", "run_core", "torch_test_run_core.cxsc", "index_only", "TorchTestHost t;t.run_core();", 0.0},
     {"torch_test_run_mobilevit_if", "torch_module", "TorchTestHost", "run_mobilevit", "torch_test_run_mobilevit_if.cxsc", "index_only", "double gate=1;TorchTestHost t;if(gate){t.run_mobilevit();}", 0.0},

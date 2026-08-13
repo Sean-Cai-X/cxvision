@@ -1,7 +1,4 @@
-/*
-  File: muParserCallback.h
-  Role: Callback wrappers for functions and operators.
-*/
+﻿
 
 #ifndef MU_PARSER_CALLBACK_H
 #define MU_PARSER_CALLBACK_H
@@ -11,10 +8,6 @@
 namespace mu
 {
 
-/*
-  Role: Store one registered parser callback together with its call
-  convention, arity, precedence, and return-type metadata.
-*/
 class  ParserCallback
 {
 public:
@@ -42,10 +35,7 @@ public:
     ParserCallback();
     ParserCallback(const ParserCallback &a_Fun);
 
-    /*
-      Role: Duplicate the callback metadata object for tokens and parser
-      copies.
-    */
+    
     ParserCallback* Clone() const;
 
     bool IsOptimizable() const;
