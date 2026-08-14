@@ -664,4 +664,4 @@ inline SegmentationUnifiedMainlineSummary build_segmentation_unified_mainline_su
     return summary;
 }
 
-#endif  // TORCH_SEGMENTATION_MAINLINE_BRIDGE_H
+#endif

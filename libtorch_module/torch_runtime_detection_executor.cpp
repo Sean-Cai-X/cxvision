@@ -309,7 +309,7 @@ bool PostprocessAndWriteOutput(
     }
 }
 
-} // namespace
+}
 
 TorchTaskResultCpp ExecuteTorchDetectionTask(
     const TorchRuntimeCoreConfig& config,

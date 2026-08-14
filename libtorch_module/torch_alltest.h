@@ -1,7 +1,6 @@
 #ifndef TORCH_ALLTEST_H
 #define TORCH_ALLTEST_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <iostream>
@@ -29,7 +28,7 @@
 
 #include <fstream>
 #include <iostream>
-#include <filesystem> // C++17
+#include <filesystem>
 
 namespace fs = std::filesystem;
 
@@ -138,8 +137,6 @@ inline std::string resolve_yolo_export_output_path() {
     return resolve_fulltest_env_or_default("LIBTORCH_MODULE_YOLO_EXPORT_OUTPUT", "yolo_exported.pt");
 }
 
-// =========================================================================
-// =========================================================================
 int test_ModelConfigTest() {
     std::cout << "=== Testing ModelConfig ===" << std::endl;
 
@@ -168,11 +165,9 @@ int test_ModelConfigTest() {
 int test_UtilsTest() {
     std::cout << "=== Testing Utils ===" << std::endl;
 
-    // 1. make_divisible
     assert(make_divisible(64, 8) == 64);
     assert(make_divisible(65, 8) == 72);
 
-    // 2. scale_channels / scale_blocks
     std::vector<int64_t> base_channels = { 64, 128, 256 };
     float width_multiple = 0.25f;
     float depth_multiple = 0.33f;
@@ -189,13 +184,10 @@ int test_UtilsTest() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_NetworkShapeTest() {
     std::cout << "=== Testing Network Shapes ===" << std::endl;
     auto device = get_full_test_device();
 
-    // 1. CUDA Check
     if (device.is_cuda()) {
         std::cout << "CUDA available. Device count: " << torch::cuda::device_count() << std::endl;
         torch::Tensor t = torch::ones({ 2, 2 }, device);
@@ -206,26 +198,19 @@ int test_NetworkShapeTest() {
     }
 
     try {
-        // 2. Stem
-        // Stem(in, out) -> Conv(k=3, s=2)
         Stem stem(3, 32);
         stem->to(device);
         torch::Tensor x = torch::randn({ 1, 3, 640, 640 }, device);
         auto out_stem = stem->forward(x);
-        // 640 / 2 = 320
         assert(out_stem.size(2) == 320 && out_stem.size(3) == 320 && out_stem.size(1) == 32);
         std::cout << "[PASS] Stem shape passed: " << out_stem.sizes() << std::endl;
 
-        // 3. C2f
-        // C2f(in, out, n, shortcut)
         C2f c2f(32, 64, 2, true);
         c2f->to(device);
         auto out_c2f = c2f->forward(out_stem);
         assert(out_c2f.size(1) == 64 && out_c2f.size(2) == 320);
         std::cout << "[PASS] C2f shape passed: " << out_c2f.sizes() << std::endl;
 
-        // 4. SPPF
-        // SPPF(in, out, k)
         SPPF sppf(64, 64, 5);
         sppf->to(device);
         auto out_sppf = sppf->forward(out_c2f);
@@ -240,35 +225,26 @@ int test_NetworkShapeTest() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_AssignerTest() {
     std::cout << "=== Testing TaskAlignedAssigner ===" << std::endl;
 
     torch::Device device = get_full_test_device();
 
-    // Assigner(topk, num_classes, alpha, beta)
     int64_t num_classes = 80;
     TaskAlignedAssigner assigner(10, num_classes, 1.0f, 6.0f);
     assigner->to(device);
 
-    // Mock Data
     int64_t batch_size = 2;
     int64_t num_anchors = 8400;
 
-    // Preds
-    auto pd_scores = torch::rand({ batch_size, num_anchors, num_classes }, device); // Sigmoid scores
-    auto pd_bboxes = torch::rand({ batch_size, num_anchors, 4 }, device) * 640;     // xywh or xyxy
+    auto pd_scores = torch::rand({ batch_size, num_anchors, num_classes }, device);
+    auto pd_bboxes = torch::rand({ batch_size, num_anchors, 4 }, device) * 640;
 
-    // GT
     int64_t max_gt = 5;
     auto gt_labels = torch::randint(0, num_classes, { batch_size, max_gt, 1 }, device).to(torch::kLong);
     auto gt_bboxes = torch::rand({ batch_size, max_gt, 4 }, device) * 640;
-    auto gt_mask = torch::ones({ batch_size, max_gt, 1 }, device); // All valid
+    auto gt_mask = torch::ones({ batch_size, max_gt, 1 }, device);
 
-    // Forward (Batch mode)
-    // Assigner forward returns: assigned_gt_inds
-    // forward(pd_scores, pd_bboxes, gt_labels, gt_bboxes, gt_mask)
 
     try {
         auto assigned_inds = assigner->forward(
@@ -279,7 +255,7 @@ int test_AssignerTest() {
             gt_mask
         );
 
-        std::cout << "Assigned indices shape: " << assigned_inds.sizes() << std::endl; // Should be [B, A]
+        std::cout << "Assigned indices shape: " << assigned_inds.sizes() << std::endl;
 
         int pos_num = (assigned_inds > 0).sum().item<int>();
         std::cout << "Total positive samples: " << pos_num << std::endl;
@@ -294,8 +270,6 @@ int test_AssignerTest() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_LossTest() {
     std::cout << "=== Testing YOLOv8Loss ===" << std::endl;
 
@@ -305,23 +279,18 @@ int test_LossTest() {
         torch::Device device = get_full_test_device();
         loss_fn->to(device);
 
-        // P3, P4, P5
         int64_t B = 2;
         std::vector<torch::Tensor> preds;
-        preds.push_back(torch::randn({ B, 6400, 4 + num_classes }, device)); // P3: 80x80
-        preds.push_back(torch::randn({ B, 1600, 4 + num_classes }, device)); // P4: 40x40
-        preds.push_back(torch::randn({ B, 400, 4 + num_classes }, device));  // P5: 20x20
+        preds.push_back(torch::randn({ B, 6400, 4 + num_classes }, device));
+        preds.push_back(torch::randn({ B, 1600, 4 + num_classes }, device));
+        preds.push_back(torch::randn({ B, 400, 4 + num_classes }, device));
 
         int64_t N = 10;
         auto targets = torch::zeros({ B, N, 6 }, device);
-        // Fill batch index
         for (int b = 0; b < B; ++b) targets[b].select(1, 0).fill_(b);
-        // Fill class
         targets.select(2, 1).random_(0, num_classes);
-        // Fill box (normalized 0-1)
         targets.slice(2, 2, 6).uniform_(0.1, 0.9);
 
-        // 3. Compute Loss
         auto result = loss_fn->forward(preds, targets);
         torch::Tensor total_loss = std::get<0>(result);
         auto loss_items = std::get<1>(result);
@@ -377,21 +346,16 @@ int test_YoloModelBuildConfig() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_OpenCVImageStage() {
     std::cout << "=== Testing OpenCV Image Processing ===" << std::endl;
 
     DataAugmenter augmenter;
 
-    // Mock Image (100x100, 3ch)
     cv::Mat img(100, 100, CV_8UC3, cv::Scalar(100, 100, 100));
 
-    // 1. HSV
     cv::Mat img_hsv = augmenter.hsv_augment(img);
     assert(!img_hsv.empty());
 
-    // 2. Resize
     cv::Mat img_resized = augmenter.resize_image(img, 64);
     assert(!img_resized.empty());
 
@@ -443,10 +407,8 @@ int test_OpenCVAnnotationStage() {
 
     cv::Mat img(100, 100, CV_8UC3, cv::Scalar(100, 100, 100));
 
-    // Mock Labels: [cls, x1, y1, x2, y2]
     std::vector<std::vector<float>> labels = {{0, 0.1f, 0.1f, 0.5f, 0.5f}};
 
-    // Flip image and labels together.
     auto [img_flip, labels_flip] = augmenter.random_flip(img, labels);
     assert(!img_flip.empty());
     assert(labels_flip.size() == labels.size());
@@ -622,8 +584,6 @@ int test_YoloEvalSummaryContract() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_TrainDebug() {
     std::cout << "=== Testing Training Loop Debug ===" << std::endl;
 
@@ -634,13 +594,10 @@ int test_TrainDebug() {
         torch::Device device = get_full_test_device();
         model->to(device);
 
-        // Mock Batch
         int64_t B = 2;
         auto imgs = torch::randn({ B, 3, 640, 640 }, device);
-        auto targets = torch::zeros({ B, 5, 6 }, device); // [B, 5, 6]
-        // Fill batch idx
+        auto targets = torch::zeros({ B, 5, 6 }, device);
         for (int b = 0; b < B; ++b) targets[b].select(1, 0).fill_(b);
-        // Fill boxes
         targets.slice(2, 2, 6).uniform_(0.1, 0.9);
 
         TrainConfig train_cfg;
@@ -1143,30 +1100,7 @@ int test_YoloSmokeRuntimeConfig() {
     std::cout << "[PASS] YOLOv8 smoke runtime config passed" << std::endl;
     return 0;
 }
-/*
-import torch
-from ultralytics import YOLO
 
-# 1. Load the model
-model = YOLO('yolov8n.pt')
-
-# 2. Extract the state_dict
-sd = model.model.state_dict()
-
-# 3. Convert to a plain dict and move tensors to CPU
-# OrderedDict usually works, but a plain dict is simpler to export and inspect
-cpu_sd = {k: v.cpu() for k, v in sd.items()}
-
-# 4. Save the exported weights
-torch.save(cpu_sd, 'yolov8n_dict.pt')
-print(f"Exported {len(cpu_sd)} keys to yolov8n_dict.pt")
-
-# 5. Verify the saved artifact
-loaded = torch.load('yolov8n_dict.pt')
-print(f"Verification: Loaded type is {type(loaded)}")
-*/
-// =========================================================================
-// =========================================================================
 int test_Weight_Loading() {
     std::cout << "=== Testing Weight Parser ===" << std::endl;
 
@@ -1182,7 +1116,7 @@ int test_Weight_Loading() {
             }
         }
 
-        std::string weight_path = resolve_yolo_weight_path();//"d:\\yolov8n-seg_dict.pt";//yolov8n-pose_dict.pt
+        std::string weight_path = resolve_yolo_weight_path();
         if (!fs::exists(weight_path)) {
             std::cout << "SKIP missing YOLO weights: " << weight_path << std::endl;
             return 0;
@@ -1208,12 +1142,9 @@ int test_Weight_Loading() {
     return 0;
 
 }
-// =========================================================================
-// =========================================================================
 int test_ResNet_Load()
 {
     bool ran_any = false;
-    // 1. ResNet18
     try {
         std::cout << "=== Testing ResNet18 Loading ===" << std::endl;
         ResNet18 r18(1000, true);
@@ -1237,7 +1168,6 @@ int test_ResNet_Load()
         std::cerr << "Error loading ResNet18: " << e.what() << std::endl;
         return 1;
     }
-    // 2. ResNet50
     try {
         std::cout << "\n=== Testing ResNet50 Loading ===" << std::endl;
         ResNet50 r50(1000, true);
@@ -1268,7 +1198,6 @@ int test_ResNet_Load()
 int test_Inspect_Load()
 {
     bool ran_any = false;
-    // 1. ResNet18
 
     try {
         std::cout << "=== Testing Inspect small bone Loading ===" << std::endl;
@@ -1291,9 +1220,7 @@ int test_Inspect_Load()
     }
     catch (const c10::Error& e) {
         std::cerr << "Error loading  Inspect small bone : " << e.what() << std::endl;
-      //  return 1;
     }
-    // 2. ResNet50
     try {
         std::cout << "\n=== Testing Inspect large backbone weights Loading ===" << std::endl;
         ResNet50 r50(1000, true);
@@ -1327,7 +1254,7 @@ int test_amp_training() {
     torch::Device device = get_full_test_device();
     std::cout << "Training on: " << (device.is_cuda() ? "GPU" : "CPU") << std::endl;
 
-    ResNet18 model(10); // 10 classes
+    ResNet18 model(10);
     model->to(device);
 
     torch::optim::SGD optimizer(
@@ -1378,7 +1305,6 @@ int test_Transfer_Learning() {
 
     model->load_pretrained_and_reset_head(pretrained_path, num_classes);
 
-    // model->freeze_backbone(true);
 
     torch::optim::SGD optimizer(model->parameters(), torch::optim::SGDOptions(learning_rate).momentum(0.9));
     ManualGradScaler  scaler;
@@ -1392,7 +1318,6 @@ int test_Transfer_Learning() {
             auto imgs = torch::randn({ batch_size, 3, 224, 224 }, device);
             auto targets = torch::randint(0, num_classes, { batch_size }, device);
 
-           // float loss = model->train_step_amp(optimizer, scaler, imgs, targets);
             float loss = model->train_step_amp(model, optimizer, scaler, imgs, targets, device);
             epoch_loss += loss;
             batches++;
@@ -1402,8 +1327,6 @@ int test_Transfer_Learning() {
 
         std::cout << "\nEpoch " << epoch << " Avg Loss: " << epoch_loss / batches << std::endl;
 
-        // float acc = model->evaluate(val_loader, device);
-        // std::cout << "Val Acc: " << acc << std::endl;
 
         torch::save(model, "resnet18_finetuned.pt");
     }
@@ -1411,8 +1334,6 @@ int test_Transfer_Learning() {
     return 0;
 }
 
-// =========================================================================
-// =========================================================================
 int test_TrainTest() {
 
     TrainConfig train_config;
@@ -1423,7 +1344,6 @@ int test_TrainTest() {
     std::cout << "Starting training..." << std::endl;
     try{
         ModelConfig model_cfg = ModelConfig::get_config("nano");
-        // model_cfg.num_classes = 80;
 
         YOLOv8 model(model_cfg);
         torch::Device device = get_full_test_device();
@@ -1431,7 +1351,7 @@ int test_TrainTest() {
 
         std::cout << "Model initialized on " << (device.is_cuda() ? "GPU" : "CPU") << std::endl;
 
-        std::string weight_path = resolve_yolo_weight_path();//"d:\\yolov8n-seg_dict.pt";//yolov8n-pose_dict.pt
+        std::string weight_path = resolve_yolo_weight_path();
         const std::string train_img_dir = resolve_yolo_train_image_dir(train_config.data_path);
         const std::string train_label_dir = resolve_yolo_train_label_dir(train_config.data_path);
 
@@ -1451,8 +1371,8 @@ int test_TrainTest() {
         auto dataset = YoloDataset(
             train_img_dir,
             train_label_dir,
-            640, // img_size
-            true // is_train
+            640,
+            true
         ).map(torch::data::transforms::Stack<>());
 
         auto data_loader = torch::data::make_data_loader(
@@ -1473,21 +1393,18 @@ int test_TrainTest() {
             int batch_count = 0;
 
             for (auto& batch : *data_loader) {
-                auto imgs = batch.data.to(device);     // [B, 3, 640, 640]
-                auto targets = batch.target.to(device); // [B, MaxGT, 6] (0-col is placeholder)
+                auto imgs = batch.data.to(device);
+                auto targets = batch.target.to(device);
 
-                // targets: [B, N, 6] -> [B, N, 0] = batch_idx
                 for (int b = 0; b < targets.size(0); ++b) {
                     targets[b].select(1, 0).fill_(static_cast<float>(b));
                 }
 
                 optimizer.zero_grad();
 
-                // Forward & Loss
                 auto result = model->train_step(imgs, targets);
                 torch::Tensor total_loss = std::get<0>(result);
 
-                // Backward
                 total_loss.backward();
                 optimizer.step();
 
@@ -1587,7 +1504,7 @@ int test_Pipeline() {
     }
 }
 
-int test_Infer(){//(const std::string& img_path, const std::string& weight_path) {
+int test_Infer(){
     std::string img_path = resolve_yolo_infer_image_path();
     std::string weight_path = resolve_yolo_pretrained_path();
     std::string output_path = resolve_yolo_infer_output_path();
@@ -1638,14 +1555,13 @@ int test_Infer(){//(const std::string& img_path, const std::string& weight_path)
         .permute({ 2, 0, 1 })
         .to(torch::kFloat32)
         .div_(255.0f)
-        .unsqueeze(0) // [1, 3, 640, 640]
+        .unsqueeze(0)
         .to(device);
 
     torch::NoGradGuard no_grad;
     auto detections = model->forward(img_tensor);
 
-    // detections: [1, N, 6]
-    auto dets = detections[0].cpu(); // [N, 6]
+    auto dets = detections[0].cpu();
 
     std::cout << "Detected " << dets.size(0) << " objects." << std::endl;
 
@@ -1683,8 +1599,6 @@ void test_Export(const std::string& weight_path, const std::string& export_path)
     std::cout << "Model saved to " << export_path << std::endl;
 }
 
-// =========================================================================
-// =========================================================================
 inline int run_core_tests() {
     std::cout << "*********************************" << std::endl;
     std::cout << "* Running All Tests for YOLOv8 *" << std::endl;
@@ -1817,4 +1731,4 @@ inline int run_postprocess_contract_tests() {
     return failures;
 }
 
-#endif // TORCH_ALLTEST_H
+#endif

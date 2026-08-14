@@ -1,7 +1,6 @@
 #ifndef TORCH_DETECT_H
 #define TORCH_DETECT_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <vector>
@@ -10,13 +9,6 @@
 #include <stdexcept>
 #include <algorithm>
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
 #define likely(x) (x)
 #define unlikely(x) (x)
@@ -149,7 +141,6 @@ inline torch::Tensor nms(const torch::Tensor& bboxes, const torch::Tensor& score
     TORCH_CHECK(iou_threshold >= 0 && iou_threshold <= 1,
         "IoU threshold must be in [0,1], got: ", iou_threshold);
 
-    // KEY: custom NMS keeps the implementation local and device-agnostic.
     torch::Tensor bboxes_float = bboxes.to(torch::kFloat);
     torch::Tensor scores_float = scores.to(torch::kFloat);
     torch::Device device = bboxes_float.device();
@@ -204,7 +195,6 @@ inline std::vector<BBox> post_process(
     const YoloPostProcessConfig& config) {
     config.validate();
 
-    // MODIFIED: prediction protocol is [B, anchors, box_channels + classes] with no extra objectness term.
     TORCH_CHECK(pred.dim() == 3 && pred.size(2) == config.box_channels() + config.num_classes,
         "Prediction must be 3D (batch, anchors, box_channels+classes), got: ", pred.sizes());
 
@@ -213,7 +203,6 @@ inline std::vector<BBox> post_process(
 
     std::vector<BBox> final_bboxes;
 
-    // KEY: current implementation decodes and returns detections for batch item 0 only.
     auto pred_batch = pred_float[0];
     auto raw_boxes = pred_batch.narrow(1, 0, config.box_channels()).unsqueeze(0);
     auto boxes = collapse_yolo_box_predictions(raw_boxes, config).squeeze(0);
@@ -415,7 +404,6 @@ inline torch::Tensor scale_bboxes(const torch::Tensor& bboxes, const torch::Tens
     float pad_h = pad_shape[0].item<float>();
     float pad_w = pad_shape[1].item<float>();
 
-    // KEY: inverse letterbox-style rescaling back to the source image coordinates.
     float scale = std::min(pad_h / img_h, pad_w / img_w);
     float pad_x = (pad_w - img_w * scale) / 2.0f;
     float pad_y = (pad_h - img_h * scale) / 2.0f;
@@ -429,4 +417,4 @@ inline torch::Tensor scale_bboxes(const torch::Tensor& bboxes, const torch::Tens
     return bboxes_float;
 }
 
-#endif // TORCH_DETECT_H
+#endif

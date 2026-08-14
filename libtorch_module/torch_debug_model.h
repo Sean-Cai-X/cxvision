@@ -1,7 +1,6 @@
 #ifndef TORCH_DEBUG_MODEL_H
 #define TORCH_DEBUG_MODEL_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include "torch_DeepLabV3.h"
 #include "torch_utils_viz.h"
@@ -86,4 +85,4 @@ inline int debug_model() {
     return 0;
 }
 
-#endif // TORCH_DEBUG_MODEL_H
+#endif

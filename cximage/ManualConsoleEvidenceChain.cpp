@@ -3069,6 +3069,15 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             thumb.target_id = c.target_id;
             thumb.tool = NormalizeEvidenceToolTypeLocal(c.tool);
             thumb.parameter_summary = c.parameter_profile_id;
+            thumb.evidence_output_root = chain.output_root;
+            thumb.contract_id = c.contract_id;
+            thumb.expected_result = c.expected_result;
+            thumb.expected_policy_guard = c.expected_policy_guard;
+            thumb.evidence_level = c.level;
+            thumb.evidence_case_role = c.case_role;
+            thumb.source_case_id = c.source_case_id;
+            thumb.manual_review_required = c.manual_review_required;
+            thumb.promotion_candidate = c.promotion_candidate;
             thumb.evidence_category_override = c.display_category;
             thumb.status = c.manual_review_required
                 ? "pending_human_review"
@@ -4137,6 +4146,16 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
 
     out.parameter_summary = thumb.parameter_summary;
     out.parameter_profile_id = thumb.parameter_summary;
+
+    out.evidence_output_root = thumb.evidence_output_root;
+    out.contract_id = thumb.contract_id;
+    out.expected_result = thumb.expected_result;
+    out.expected_policy_guard = thumb.expected_policy_guard;
+    out.evidence_level = thumb.evidence_level;
+    out.evidence_case_role = thumb.evidence_case_role;
+    out.source_case_id = thumb.source_case_id;
+    out.manual_review_required = thumb.manual_review_required;
+    out.promotion_candidate = thumb.promotion_candidate;
 
     out.status = thumb.status;
     out.reason = thumb.reason;

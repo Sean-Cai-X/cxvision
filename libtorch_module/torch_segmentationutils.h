@@ -1,4 +1,3 @@
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <opencv2/opencv.hpp>
 #include "torch_deeplabv3_plus.h"
@@ -6,10 +5,8 @@
 class SegmentationUtils {
 public:
     static cv::Mat tensor_to_mask(const torch::Tensor& output_tensor) {
-        // output_tensor: [1, NumClasses, H, W]
 
-        // Argmax: [1, H, W]
-        auto pred = output_tensor.argmax(1).squeeze(0).cpu(); // [H, W]
+        auto pred = output_tensor.argmax(1).squeeze(0).cpu();
         pred = pred.to(torch::kByte);
 
         int h = pred.size(0);
@@ -23,7 +20,7 @@ public:
     }
 
     static cv::Mat extract_binary_mask(const torch::Tensor& output_tensor, int target_class_id) {
-        auto pred = output_tensor.argmax(1).squeeze(0).cpu(); // [H, W]
+        auto pred = output_tensor.argmax(1).squeeze(0).cpu();
 
         auto binary_tensor = (pred == target_class_id).to(torch::kByte) * 255;
 
@@ -37,8 +34,6 @@ public:
     }
 };
 
-// =========================================================
-// =========================================================
 void run_segmentation_inference() {
     std::cout << "Loading DeepLabV3+ with MobileNetV3..." << std::endl;
 
@@ -54,13 +49,12 @@ void run_segmentation_inference() {
 
     torch::Tensor input = torch::from_blob(img_resized.data, {1, 512, 512, 3}, torch::kByte);
     input = input.permute({0, 3, 1, 2}).to(torch::kFloat32).div(255.0);
-    // Normalize...
 
     torch::NoGradGuard no_grad;
     auto outputs = model->forward(input);
 
     if (outputs.find("out") != outputs.end()) {
-        torch::Tensor out = outputs["out"]; // [1, 21, 512, 512]
+        torch::Tensor out = outputs["out"];
 
         cv::Mat color_mask = SegmentationUtils::tensor_to_mask(out);
         cv::imwrite("seg_result_color.png", color_mask);

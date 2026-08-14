@@ -739,6 +739,23 @@ void AppendCandidateToEvidenceChain(
         context.script_evidence_groups.push_back(group);
         groupPtr = &context.script_evidence_groups.back();
     }
+
+    for (auto& existing : groupPtr->thumbs)
+    {
+        const bool sameCandidateId =
+            !thumb.candidate_id.empty() &&
+            existing.candidate_id == thumb.candidate_id;
+        const bool sameCandidateDir =
+            !thumb.candidate_dir.empty() &&
+            existing.candidate_dir == thumb.candidate_dir;
+        if (existing.is_candidate && (sameCandidateId || sameCandidateDir))
+        {
+            existing = thumb;
+            context.script_evidence_row_refs_dirty = true;
+            return;
+        }
+    }
+
     groupPtr->thumbs.push_back(thumb);
 
     // Saving creates a new immutable Evidence row, but does not switch the
@@ -777,8 +794,15 @@ bool SaveEvidenceCandidatePackage(
         return false;
     }
 
+    std::string requestedCandidateId = options.candidate_id;
+    if (requestedCandidateId.empty() &&
+        context.current_evidence_selection.has_saved_state &&
+        !context.current_evidence_selection.candidate_id.empty())
+    {
+        requestedCandidateId = context.current_evidence_selection.candidate_id;
+    }
     const std::string candidateId = SafePathComponentForCandidate(
-        options.candidate_id.empty() ? GenerateCandidateId() : options.candidate_id);
+        requestedCandidateId.empty() ? GenerateCandidateId() : requestedCandidateId);
     if (candidateId.empty())
     {
         result.reason = "candidate_id is empty";

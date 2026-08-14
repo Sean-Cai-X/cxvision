@@ -1,7 +1,6 @@
 #ifndef TORCH_UTILS_VIZ_H
 #define TORCH_UTILS_VIZ_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
@@ -12,8 +11,6 @@
 
 namespace torch_utils {
 
-    // =========================================================
-    // =========================================================
     class FeatureExtractor {
     public:
         void register_hook(torch::nn::Module& model, const std::string& layer_name) {
@@ -54,22 +51,19 @@ namespace torch_utils {
         std::map<std::string, torch::Tensor> features_;
     };
 
-    // =========================================================
-    // =========================================================
     class Visualizer {
     public:
         static void save_feature_map(const torch::Tensor& feature, const std::string& save_path) {
-            // feature shape: [B, C, H, W]
             if (feature.dim() != 4) return;
 
-            torch::Tensor heatmap = torch::mean(feature, 1, true).squeeze(0); // [1, H, W]
+            torch::Tensor heatmap = torch::mean(feature, 1, true).squeeze(0);
 
             heatmap = heatmap.to(torch::kFloat32);
             heatmap = heatmap - heatmap.min();
             heatmap = heatmap / heatmap.max();
             heatmap = heatmap * 255;
 
-            heatmap = heatmap.permute({1, 2, 0}).to(torch::kCPU); // [H, W, 1]
+            heatmap = heatmap.permute({1, 2, 0}).to(torch::kCPU);
 
             cv::Mat img_map(heatmap.size(0), heatmap.size(1), CV_32FC1, heatmap.data_ptr<float>());
             img_map.convertTo(img_map, CV_8UC1);
@@ -87,4 +81,4 @@ namespace torch_utils {
     };
 }
 
-#endif // TORCH_UTILS_VIZ_H
+#endif

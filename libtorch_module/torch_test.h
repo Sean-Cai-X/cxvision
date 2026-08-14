@@ -1,7 +1,6 @@
 #ifndef TORCH_TEST_H
 #define TORCH_TEST_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -59,7 +58,7 @@ inline void Test_Infer(const std::string& img_path, const std::string& weight_pa
         .clone()
         .to(torch::kFloat32)
         .div_(255.0f)
-        .unsqueeze(0) // [1, 3, 640, 640]
+        .unsqueeze(0)
         .to(device);
 
     torch::NoGradGuard no_grad;
@@ -103,4 +102,4 @@ inline void Test_Export(const std::string& weight_path, const std::string& expor
     std::cout << "Model saved to " << export_path << std::endl;
 }
 
-#endif // TORCH_TEST_H
+#endif

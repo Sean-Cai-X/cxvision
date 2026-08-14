@@ -645,4 +645,4 @@ inline MobileViTUnifiedMainlineSummary build_mobilevit_unified_mainline_summary(
     return summary;
 }
 
-#endif  // TORCH_MOBILEVIT_MAINLINE_BRIDGE_H
+#endif

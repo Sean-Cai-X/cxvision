@@ -1,7 +1,6 @@
 #ifndef TORCH_INCREMENTAL_PIPELINE_H
 #define TORCH_INCREMENTAL_PIPELINE_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <functional>
 #include <string>
@@ -21,10 +20,10 @@ struct RoiSample {
     std::string class_name;
     std::string subtype_name;
     std::string modality_tag;
-    torch::Tensor roi_tensor;        // [B, C, H, W] or [1, C, H, W]
-    torch::Tensor feature_map;       // backbone feature map
-    torch::Tensor external_geometry_descriptor;  // optional external geometry tensor, e.g. OCC semantic geometry
-    torch::Tensor external_shape_descriptor;     // optional external shape tensor, e.g. handcrafted contour descriptor
+    torch::Tensor roi_tensor;
+    torch::Tensor feature_map;
+    torch::Tensor external_geometry_descriptor;
+    torch::Tensor external_shape_descriptor;
 };
 
 struct PipelinePrediction {
@@ -176,4 +175,4 @@ private:
     PrototypeIndex prototype_index_;
 };
 
-#endif // TORCH_INCREMENTAL_PIPELINE_H
+#endif

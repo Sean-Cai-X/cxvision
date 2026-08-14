@@ -9,8 +9,6 @@
 
 #include "torch_modelconfig.h"
 
-// KEY: keep tuning knobs in a pure-LibTorch header so profile validation can
-// run in contract/minimal loops without OpenCV or dataset dependencies.
 
 struct OptimizerTuningConfig {
     int epochs = 100;

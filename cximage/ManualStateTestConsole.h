@@ -944,6 +944,15 @@ struct ScriptEvidenceThumb
     std::string target_id;
     std::string tool;
     std::string parameter_summary;
+    std::string evidence_output_root;
+    std::string contract_id;
+    std::string expected_result;
+    std::string expected_policy_guard;
+    std::string evidence_level;
+    std::string evidence_case_role;
+    std::string source_case_id;
+    bool manual_review_required = true;
+    bool promotion_candidate = false;
     std::string evidence_category_override;
     std::string status;
     std::string reason;
@@ -1006,6 +1015,16 @@ struct CxEvidenceSelectionSnapshot
 
     std::string parameter_profile_id;
     std::string parameter_summary;
+
+    std::string evidence_output_root;
+    std::string contract_id;
+    std::string expected_result;
+    std::string expected_policy_guard;
+    std::string evidence_level;
+    std::string evidence_case_role;
+    std::string source_case_id;
+    bool manual_review_required = true;
+    bool promotion_candidate = false;
 
     std::string status;
     std::string reason;

@@ -76,7 +76,7 @@ int run_mobilevit_train_stage() {
     return failures;
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
     const auto mode = parse_mode(argc, argv);

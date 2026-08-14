@@ -1,14 +1,8 @@
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <iostream>
 
 #include "torch_test_host.h"
 
-// KEY: unified full-validation entry for the current libtorch_module workspace.
-// CHECK: this path is intentionally broader than contract/minimal and is allowed
-// to depend on OpenCV-backed tests once the environment is ready.
-// EVOLVE: OCC extraction validation stays deferred until after the OpenCV stage
-// is stabilized again.
 int main() {
     const auto profile = TorchTestHost::current_profile();
 

@@ -59,15 +59,7 @@ namespace fs = std::filesystem;
 #define TORCH_FULL_ENABLE_OCC_STAGE 0
 #endif
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
-// KEY: keep test device selection centralized so all smoke tests share the same path.
 inline torch::Device get_mobilevit_test_device() {
     if (const char* use_cuda = std::getenv("LIBTORCH_MODULE_USE_CUDA")) {
         if (std::string(use_cuda) == "0") {
@@ -344,8 +336,6 @@ inline void write_review_visual_meta(const std::string& meta_path,
     output << "review_secondary_value=" << secondary_value << "\n";
 }
 
-// MODIFIED: deterministic fallback ROI for two-stage tests.
-// RISK: this is only a smoke-test helper, not a real detection result.
 inline BBox make_center_bbox(int64_t width, int64_t height, float scale = 0.5f) {
     const float roi_w = static_cast<float>(width) * scale;
     const float roi_h = static_cast<float>(height) * scale;
@@ -354,8 +344,6 @@ inline BBox make_center_bbox(int64_t width, int64_t height, float scale = 0.5f) 
     return {x1, y1, x1 + roi_w, y1 + roi_h, 1.0f, 0};
 }
 
-// KEY: crop detector ROI and reshape it into classifier input size.
-// CHECK: current resize path does not preserve aspect ratio with padding.
 inline torch::Tensor crop_and_resize_roi(const torch::Tensor& image_bchw, const BBox& bbox, int64_t out_size = 256) {
     TORCH_CHECK(image_bchw.dim() == 4 && image_bchw.size(0) == 1, "Expected a single image tensor in BCHW format");
 
@@ -377,18 +365,7 @@ inline torch::Tensor crop_and_resize_roi(const torch::Tensor& image_bchw, const 
             .align_corners(false));
 }
 
-// =========================================================================
-// MobileViTv2 and two-stage tests only.
-// Core YOLO/ResNet tests remain in torch_alltest.h.
-// CHECK: keep this file aligned with the full-validation stage only.
-// It can depend on broader model/test flows than contract/minimal, but OCC
-// extraction and semantic-geometry validation still remain deferred.
-// =========================================================================
 
-// =========================================================================
-// MobileViTv2 shape smoke test
-// =========================================================================
-// VERIFY: confirms the classifier head shape only; it is not an accuracy test.
 inline int test_MobileViTv2_Shape() {
     std::cout << "=== Testing MobileViTv2 Shapes ===" << std::endl;
     try {
@@ -410,10 +387,6 @@ inline int test_MobileViTv2_Shape() {
     }
 }
 
-// =========================================================================
-// MobileViTv2 weight-load smoke test
-// =========================================================================
-// CHECK: assumes the external weight file already matches the C++ module naming.
 inline int test_MobileViTv2_Load() {
     std::cout << "=== Testing MobileViTv2 Weight Loading ===" << std::endl;
     try {
@@ -444,10 +417,6 @@ inline int test_MobileViTv2_Load() {
     }
 }
 
-// =========================================================================
-// MobileViTv2 single-step training smoke test
-// =========================================================================
-// KEY: minimal train-step smoke test for gradient flow and optimizer wiring.
 inline int test_MobileViTv2_Train() {
     std::cout << "=== Testing MobileViTv2 Training Loop ===" << std::endl;
     try {
@@ -867,10 +836,6 @@ inline int test_Segmentation_UnifiedInferReview() {
     }
 }
 
-// =========================================================================
-// MobileViTv2 dataset/integration tests
-// =========================================================================
-// MODIFIED: dataset smoke test is path-safe and should pass even without local data.
 inline int test_MobileViTv2_DatasetSmoke() {
     std::cout << "=== Testing MobileViTv2 Dataset Smoke ===" << std::endl;
     try {
@@ -886,7 +851,6 @@ inline int test_MobileViTv2_DatasetSmoke() {
     }
 }
 
-// VERIFY: optional integration test that requires a real classification dataset on disk.
 inline int test_MobileViTv2_FullTrain() {
     std::cout << "=== Testing MobileViTv2 Full Training (Mock) ===" << std::endl;
     try {
@@ -949,8 +913,6 @@ inline int test_MobileViTv2_FullTrain() {
     }
 }
 
-// KEY: mock two-stage inference path: detector -> ROI -> classifier.
-// RISK: ROI currently comes from a deterministic center crop, not NMS-selected boxes.
 inline int test_YOLOv8_MobileViTv2_TwoStageInference() {
     std::cout << "=== Testing YOLOv8 + MobileViTv2 Two-Stage Inference ===" << std::endl;
     try {
@@ -1077,8 +1039,6 @@ inline int test_YOLOv8_MobileViTv2_TwoStageInference() {
     }
 }
 
-// KEY: mock two-stage training path that only trains the classifier branch.
-// EVOLVE: replace fixed ROIs with detector-selected proposals after detector outputs are stable.
 inline int test_YOLOv8_MobileViTv2_TwoStageTrainMock() {
     std::cout << "=== Testing YOLOv8 + MobileViTv2 Two-Stage Train Mock ===" << std::endl;
     try {
@@ -1140,12 +1100,6 @@ inline int test_YOLOv8_MobileViTv2_TwoStageTrainMock() {
     }
 }
 
-// =========================================================================
-// Unified MobileViTv2 test entry
-// =========================================================================
-// KEY: unified entry for MobileViTv2-only and two-stage pipeline tests.
-// CHECK: this is part of the broader full-validation path, not the pure
-// LibTorch contract/minimal loops.
 inline int run_mobilevit_tests() {
     std::cout << "***************************************" << std::endl;
     std::cout << "* Running MobileViTv2 and Two-Stage   *" << std::endl;
@@ -1211,4 +1165,4 @@ inline int run_mobilevit_tests() {
     return failures;
 }
 
-#endif // TORCH_ALLTEST_2_H
+#endif

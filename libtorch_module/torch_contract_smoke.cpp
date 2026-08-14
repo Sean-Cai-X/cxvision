@@ -362,7 +362,7 @@ void test_minimal_infer_loop_io_contract() {
     expect(torch::all(result.scores <= 1.0f).item<bool>(), "infer scores must be bounded");
 }
 
-} // namespace
+}
 
 int main() {
     auto device = get_test_device();

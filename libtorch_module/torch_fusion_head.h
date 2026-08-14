@@ -1,7 +1,6 @@
 #ifndef TORCH_FUSION_HEAD_H
 #define TORCH_FUSION_HEAD_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 
@@ -122,4 +121,4 @@ private:
 };
 TORCH_MODULE(MultiFeatureFusionHead);
 
-#endif // TORCH_FUSION_HEAD_H
+#endif

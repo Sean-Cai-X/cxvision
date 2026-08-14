@@ -1,7 +1,6 @@
 #ifndef TORCH_RESNET50_H
 #define TORCH_RESNET50_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <vector>
@@ -9,24 +8,13 @@
 #include <fstream>
 #include "torch_nnmodule.h"
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
-// =========================================================================
-// Structure: 1x1 Conv -> 3x3 Conv -> 1x1 Conv (Expansion=4)
-// =========================================================================
 class ResNetBottleneckImpl : public torch::nn::Module {
 public:
     ResNetBottleneckImpl(int64_t in_channels, int64_t mid_channels, int64_t stride = 1, int64_t expansion = 4) {
 
         int64_t out_channels = mid_channels * expansion;
 
-        // KEY: bottleneck path uses 1x1 reduce -> 3x3 -> 1x1 expand.
         cv1 = register_module("cv1",
             ConvModule(in_channels, mid_channels, 1, 1, 0, true, true, "relu"));
 
@@ -36,7 +24,6 @@ public:
         cv3 = register_module("cv3",
             ConvModule(mid_channels, out_channels, 1, 1, 0, true, false, "none"));
 
-        // KEY: shortcut is used when spatial size or channel count changes.
         if (stride != 1 || in_channels != out_channels) {
             downsample = register_module("downsample",
                 torch::nn::Sequential(
@@ -45,12 +32,10 @@ public:
                 ));
         }
 
-        // KEY: final activation is applied after residual addition.
         act = register_module("act", torch::nn::ReLU());
     }
 
     torch::Tensor forward(torch::Tensor x) {
-        // KEY: residual bottleneck forward path.
         auto identity = x;
 
         auto out = cv1->forward(x);
@@ -72,38 +57,29 @@ private:
 };
 TORCH_MODULE(ResNetBottleneck);
 
-// =========================================================================
-// ResNet50
-// =========================================================================
 class ResNet50Impl : public torch::nn::Module {
 public:
     ResNet50Impl(int64_t num_classes = 1000, bool include_top = true)
         : include_top_(include_top), num_classes_(num_classes) {
 
-        // KEY: standard ResNet stem.
         stem = register_module("stem",
             ConvModule(3, 64, 7, 2, 3, true, true, "relu"));
 
         pool = register_module("pool",
             torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions(3).stride(2).padding(1)));
 
-        // KEY: four bottleneck stages produce feature maps for classification/backbone use.
         layer1 = make_layer(64, 64, 3, 1);
         register_module("layer1", layer1);
 
-        // Layer 2: 256 -> 512, stride 2
         layer2 = make_layer(256, 128, 4, 2);
         register_module("layer2", layer2);
 
-        // Layer 3: 512 -> 1024, stride 2
         layer3 = make_layer(512, 256, 6, 2);
         register_module("layer3", layer3);
 
-        // Layer 4: 1024 -> 2048, stride 2
         layer4 = make_layer(1024, 512, 3, 2);
         register_module("layer4", layer4);
 
-        // KEY: optional classification head for include_top mode.
         if (include_top_) {
             avgpool = register_module("avgpool", torch::nn::AdaptiveAvgPool2d(torch::nn::AdaptiveAvgPool2dOptions({ 1, 1 })));
             fc = register_module("fc", torch::nn::Linear(2048, num_classes));
@@ -112,15 +88,9 @@ public:
     void export_structure(const std::string& path = "resnet50.mmd") {
         torch_utils::MermaidGenerator::generate(*this, path, "ResNet-50");
 
-        // torch::Tensor x = torch::randn({1, 3, 224, 224}, this->parameters()[0].device());
-        // torch_utils::MermaidGenerator::generate_from_trace(*this, {x}, "resnet18_trace.mmd");
     }
-// =========================================================================
-// Transfer-learning helpers
-// =========================================================================
 
     void load_pretrained_and_reset_head(const std::string& path, int64_t new_num_classes) {
-        // KEY: load backbone weights first, then rebuild FC if class count changes.
         load_weights(path);
 
         if (include_top_ && new_num_classes != num_classes_) {
@@ -137,7 +107,6 @@ public:
     }
 
     void freeze_backbone(bool freeze = true) {
-        // KEY: keep FC trainable while freezing backbone parameters.
         std::cout << "[Transfer] " << (freeze ? "Freezing" : "Unfreezing") << " backbone..." << std::endl;
 
         for (auto& pair : this->named_parameters()) {
@@ -150,7 +119,6 @@ public:
         }
     }
 
-    // KEY: classification forward path.
     torch::Tensor forward(torch::Tensor x) {
         x = stem->forward(x);
         x = pool->forward(x);
@@ -168,22 +136,20 @@ public:
         return x;
     }
 
-    // KEY: backbone-style feature export for detection/segmentation heads.
     std::vector<torch::Tensor> forward_features(torch::Tensor x) {
-        x = stem->forward(x); // stride 2
-        x = pool->forward(x); // stride 4
+        x = stem->forward(x);
+        x = pool->forward(x);
 
-        auto p2 = layer1->forward(x); // 256, s4
+        auto p2 = layer1->forward(x);
 
-        auto p3 = layer2->forward(p2); // 512, s8
-        auto p4 = layer3->forward(p3); // 1024, s16
-        auto p5 = layer4->forward(p4); // 2048, s32
+        auto p3 = layer2->forward(p2);
+        auto p4 = layer3->forward(p3);
+        auto p5 = layer4->forward(p4);
 
         return { p3, p4, p5 };
     }
 
     std::vector<int64_t> get_out_channels() const {
-        // KEY: P3/P4/P5 channel counts.
         return { 512, 1024, 2048 };
     }
 
@@ -191,7 +157,6 @@ public:
         ManualGradScaler& scaler,
         torch::Tensor imgs, torch::Tensor targets) {
 
-        // KEY: AMP training helper for classification fine-tuning.
         this->train();
         optimizer.zero_grad();
 

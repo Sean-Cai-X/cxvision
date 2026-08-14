@@ -30,8 +30,6 @@
 
 namespace {
 
-// KEY: minimal validation loop focused on pure LibTorch code paths only.
-// CHECK: keep this file free of OpenCV/OCC includes so toolchain issues are isolated.
 
 torch::Device get_test_device() {
     if (const char* use_cuda = std::getenv("LIBTORCH_MODULE_USE_CUDA")) {
@@ -465,11 +463,11 @@ void test_yolo_postprocess_contract() {
     dfl_cfg.reg_max = 4;
 
     auto dfl_pred = torch::zeros({1, 1, dfl_cfg.box_channels() + dfl_cfg.num_classes}, torch::kFloat32);
-    dfl_pred[0][0][1] = 6.0f;   // left bin -> 1
-    dfl_pred[0][0][5] = 6.0f;   // top bin -> 1
-    dfl_pred[0][0][10] = 6.0f;  // right bin -> 2
-    dfl_pred[0][0][15] = 6.0f;  // bottom bin -> 3
-    dfl_pred[0][0][16] = 0.9f;  // cls0
+    dfl_pred[0][0][1] = 6.0f;
+    dfl_pred[0][0][5] = 6.0f;
+    dfl_pred[0][0][10] = 6.0f;
+    dfl_pred[0][0][15] = 6.0f;
+    dfl_pred[0][0][16] = 0.9f;
 
     auto dfl_boxes = post_process(dfl_pred, dfl_cfg);
     expect(dfl_boxes.size() == 1, "DFL post_process should produce one detection");
@@ -954,7 +952,7 @@ void test_incremental_pipeline_external_descriptors() {
     expect(pred_after.topk.front().prototype_id == "proto_0", "top retrieved prototype mismatch");
 }
 
-} // namespace
+}
 
 int main() {
     std::cout << "========================================\n";

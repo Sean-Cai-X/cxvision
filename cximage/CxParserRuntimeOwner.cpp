@@ -6,6 +6,8 @@
 #include "CxScriptSuiteRegister.h"
 #include "CxScriptCatalogRuntime.h"
 #include "CxScriptCatalogRegister.h"
+#include "CxScriptEvidenceChainRuntime.h"
+#include "CxScriptEvidenceChainRegister.h"
 #include "CxParameterProfileRuntime.h"
 #include "CxParameterProfileRegister.h"
 #include "CxParamRegressionRuntime.h"
@@ -230,6 +232,13 @@ bool CxParserRuntimeOwner::EnsureBindings(
             {
                 RegisterCxScriptCatalogBindings(m_runtime->m_parser);
                 m_catalog_bindings_registered = true;
+            }
+            break;
+        case CxParserDocumentKind::EvidenceChain:
+            if (!m_evidence_chain_bindings_registered)
+            {
+                RegisterCxScriptEvidenceChainBindings(m_runtime->m_parser);
+                m_evidence_chain_bindings_registered = true;
             }
             break;
         case CxParserDocumentKind::ParameterProfile:
@@ -739,6 +748,45 @@ bool CxParserRuntimeOwner::ParseScriptCatalog(
     if (snapshot.scripts.empty())
     {
         reason = "catalog produced no entries";
+        return false;
+    }
+    return true;
+}
+bool CxParserRuntimeOwner::ParseEvidenceChain(
+    const std::string& path,
+    CxScriptEvidenceChainRuntime& snapshot,
+    std::string& reason)
+{
+    snapshot.Clear();
+    std::string source;
+    if (!ReadScript(path, source, reason) ||
+        !BeginExecution(CxParserDocumentKind::EvidenceChain, path, reason))
+        return false;
+
+    CxParserExecutionGuard guard(*this);
+    g_cxscript_evidence_chain.Clear();
+    g_current_evidence_case = nullptr;
+
+    try
+    {
+        if (!m_runtime->Compile(source.c_str()))
+        {
+            reason = "evidence chain Compile failed";
+            return false;
+        }
+        snapshot = g_cxscript_evidence_chain;
+    }
+    catch (const mu::Parser::exception_type& error)
+    {
+        reason = "evidence chain parse error: " + std::string(error.GetMsg());
+        return false;
+    }
+
+    g_cxscript_evidence_chain.Clear();
+    g_current_evidence_case = nullptr;
+    if (snapshot.cases.empty())
+    {
+        reason = "evidence chain produced no cases";
         return false;
     }
     return true;

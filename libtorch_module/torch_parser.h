@@ -1,7 +1,6 @@
 #ifndef TORCH_PARSER_H
 #define TORCH_PARSER_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -139,7 +138,6 @@ private:
             return true;
         }
         else {
-            // std::cerr << "[Missing] Key not found in weights: " << py_key << " (Cpp: " << cpp_key << ")" << std::endl;
             return false;
         }
     }
@@ -147,7 +145,6 @@ private:
     std::string map_cpp_to_python(const std::string& cpp_key) {
         std::string py_key = cpp_key;
 
-        // C++: backbone.stem -> Py: model.0
         py_key = std::regex_replace(py_key, std::regex("^backbone\\.stem"), "model.0");
         py_key = std::regex_replace(py_key, std::regex("^backbone\\.conv1"), "model.1");
         py_key = std::regex_replace(py_key, std::regex("^backbone\\.c2f1"), "model.2");
@@ -159,28 +156,17 @@ private:
         py_key = std::regex_replace(py_key, std::regex("^backbone\\.c2f4"), "model.8");
         py_key = std::regex_replace(py_key, std::regex("^backbone\\.sppf"), "model.9");
 
-        // C++: neck.c2f_p4 -> model.12
         py_key = std::regex_replace(py_key, std::regex("^neck\\.c2f_p4"), "model.12");
-        // C++: neck.c2f_p3 -> model.15
         py_key = std::regex_replace(py_key, std::regex("^neck\\.c2f_p3"), "model.15");
-        // C++: neck.down_p3 -> model.16
         py_key = std::regex_replace(py_key, std::regex("^neck\\.down_p3"), "model.16");
-        // C++: neck.c2f_n4 -> model.18
         py_key = std::regex_replace(py_key, std::regex("^neck\\.c2f_n4"), "model.18");
-        // C++: neck.down_p4 -> model.19
         py_key = std::regex_replace(py_key, std::regex("^neck\\.down_p4"), "model.19");
-        // C++: neck.c2f_n5 -> model.21
         py_key = std::regex_replace(py_key, std::regex("^neck\\.c2f_n5"), "model.21");
 
-        // C++: head -> model.22
         py_key = std::regex_replace(py_key, std::regex("^head"), "model.22");
 
-        // C2f Bottlenecks:
-        // C++: bottlenecks_.0 -> Py: m.0
         py_key = std::regex_replace(py_key, std::regex("bottlenecks_\\."), "m.");
 
-        // Detect Head Layers:
-        // C++: cv2_layers_.0 -> Py: cv2.0
         py_key = std::regex_replace(py_key, std::regex("cv2_layers_\\."), "cv2.");
         py_key = std::regex_replace(py_key, std::regex("cv3_layers_\\."), "cv3.");
 
@@ -188,4 +174,4 @@ private:
     }
 };
 
-#endif // TORCH_PARSER_H
+#endif

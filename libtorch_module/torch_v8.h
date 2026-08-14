@@ -23,13 +23,6 @@
 #include "torch_parser.h"
 #include "torch_mermaid.h"
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
 inline torch::optim::SGDOptions make_yolo_sgd_options(const TrainConfig& train_config) {
     auto optimizer_config = train_config.optimizer_config();
@@ -156,9 +149,6 @@ inline YoloEvalConfig make_yolo_eval_config(const ModelConfig& model_config, con
     return config;
 }
 
-// =========================================================================
-// YOLOv8 model wrapper
-// =========================================================================
 class YOLOv8Impl : public torch::nn::Module {
 public:
     YOLOv8Impl(ModelConfig config)
@@ -167,25 +157,20 @@ public:
 
     YOLOv8Impl(ModelConfig config, YoloModelBuildConfig build_config)
         : config_(config), build_config_(normalize_yolo_build_config(std::move(build_config))) {
-        // KEY: backbone extracts multi-scale feature maps.
         std::vector<int64_t> base_channels = { 64, 128, 256, 512, 1024 };
         backbone_ = register_module("backbone",
             YOLOv8Backbone(base_channels, config.depth_multiple, config.width_multiple));
 
-        // KEY: PAN neck fuses multi-scale backbone features.
         auto backbone_out_ch = backbone_->get_out_channels();
         pan_ = register_module("neck",
             PAN(backbone_out_ch, config.depth_multiple, config.width_multiple));
 
-        // KEY: detection head produces box and class outputs.
         head_ = register_module("head",
             YOLOv8Detect(config.num_classes, backbone_out_ch, config.strides, build_config_.head));
 
-        // KEY: loss module is used by the training helpers below.
         loss_fn_ = register_module("loss_fn", YOLOv8Loss(config.num_classes, build_config_.loss));
     }
 
-    // MODIFIED: local helper for pickle/state_dict loading.
     std::vector<char> get_the_bytes(const std::string& path) {
         std::ifstream file(path, std::ios::binary | std::ios::ate);
 
@@ -205,7 +190,6 @@ public:
     }
 
     void load_weights(const std::string& path) {
-        // CHECK: this expects a Python-exported state_dict with matching C++ keys.
         torch::NoGradGuard no_grad;
 
         std::vector<char> f = get_the_bytes(path);
@@ -239,23 +223,16 @@ public:
     }
 
     void load_checkpoint(const std::string & path) {
-        // MODIFIED: archive-based loader used by checkpoints saved from C++.
         torch::serialize::InputArchive archive;
         archive.load_from(path);
         this->load(archive);
     }
 
     void export_structure(const std::string& path = "yolov8.mmd") {
-        // KEY: structural export for graph/debug inspection.
         torch_utils::MermaidGenerator::generate(*this, path, "YOLOv8");
 
-        // torch::Tensor x = torch::randn({1, 3, 224, 224}, this->parameters()[0].device());
-        // torch_utils::MermaidGenerator::generate_from_trace(*this, {x}, "resnet18_trace.mmd");
     }
 
-// =========================================================================
-// Training helper
-// =========================================================================
     void train(const TrainConfig& train_config, const std::string& pretrained_weights = "") {
         train(train_config, train_config.runtime_config(pretrained_weights));
     }
@@ -263,12 +240,10 @@ public:
     void train(const TrainConfig& train_config, const YoloTrainRuntimeConfig& runtime_config) {
         std::cout << "\n[YOLOv8] Starting training..." << std::endl;
 
-        // KEY: choose runtime device before model and dataloader setup.
         torch::Device device = resolve_yolo_runtime_device(runtime_config);
         this->to(device);
         std::cout << "[YOLOv8] Device: " << (device.is_cuda() ? "GPU" : "CPU") << std::endl;
 
-        // CHECK: pretrained loading here uses WeightParser, not the local pickle loader.
         if (!runtime_config.pretrained_weights.empty()) {
             std::cout << "[YOLOv8] Loading pretrained weights from: " << runtime_config.pretrained_weights << std::endl;
             try {
@@ -280,7 +255,6 @@ public:
             }
         }
 
-        // KEY: dataset returns padded targets in [max_gt, 6] format.
         std::cout << "[YOLOv8] Loading dataset from: " << train_config.data_path << std::endl;
         auto train_paths = make_yolo_split_paths(train_config.data_path, "train");
         auto dataset_config = make_yolo_dataset_config(train_config, true);
@@ -291,7 +265,6 @@ public:
             make_yolo_loader_options(train_config.batch_size, train_config.dataloader_workers)
         );
 
-        // KEY: SGD configuration follows a YOLO-style momentum/weight decay setup.
         torch::optim::SGD optimizer(
             this->parameters(),
             make_yolo_sgd_options(train_config)
@@ -306,14 +279,12 @@ public:
                 auto imgs = batch.data.to(device);
                 auto targets = batch.target.to(device);
 
-                // KEY: write batch indices into target column 0 before loss computation.
                 for (int b = 0; b < targets.size(0); ++b) {
                     targets[b].select(1, 0).fill_(static_cast<float>(b));
                 }
 
                 optimizer.zero_grad();
 
-                // KEY: train_step_internal runs backbone + neck + head + loss in one call.
                 auto result = this->train_step_internal(imgs, targets);
                 torch::Tensor total_loss = std::get<0>(result);
 
@@ -338,9 +309,6 @@ public:
         }
         std::cout << "[YOLOv8] Training completed." << std::endl;
     }
-// =========================================================================
-// Validation helper
-// =========================================================================
     std::map<std::string, float> val(
         const std::string& data_path,
         int batch_size = 16,
@@ -501,7 +469,6 @@ public:
     }
 
     torch::Tensor forward(torch::Tensor x) {
-        // KEY: plain inference path used by post_process() and two-stage smoke tests.
         auto backbone_outs = backbone_->forward(x);
         auto neck_outs = pan_->forward(backbone_outs);
         return head_->forward(neck_outs);
@@ -509,7 +476,6 @@ public:
 
     std::tuple<torch::Tensor, std::unordered_map<std::string, float>>
         train_step(torch::Tensor imgs, torch::Tensor targets) {
-        // KEY: external training-step helper for callers that already prepared targets.
         auto backbone_outs = backbone_->forward(imgs);
         auto neck_outs = pan_->forward(backbone_outs);
         auto preds = head_->forward_train(neck_outs);
@@ -523,7 +489,6 @@ public:
 private:
     std::tuple<torch::Tensor, std::unordered_map<std::string, float>>
         train_step_internal(torch::Tensor imgs, torch::Tensor targets) {
-        // KEY: shared internal path used by train() and val().
         auto backbone_outs = backbone_->forward(imgs);
         auto neck_outs = pan_->forward(backbone_outs);
         auto preds = head_->forward_train(neck_outs);
@@ -539,6 +504,6 @@ private:
 };
 TORCH_MODULE(YOLOv8);
 
-#endif // TORCH_V8_H
+#endif
 
 

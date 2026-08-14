@@ -1,7 +1,6 @@
 #ifndef TORCH_YOLOV8_LOSS_H
 #define TORCH_YOLOV8_LOSS_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <vector>
@@ -16,13 +15,6 @@
 
 namespace F = torch::nn::functional;
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
 enum class YoloBoxDecodeStrategy {
     DirectStrideScaled
@@ -77,17 +69,15 @@ private:
 
         assigner = register_module("assigner", TaskAlignedAssigner(config_.topk, num_classes_, 1.0f, 6.0f));
 
-        // KEY: fixed detection strides for the current three-scale YOLO head.
         strides_ = register_buffer("strides", torch::tensor({ 8, 16, 32 }, torch::kFloat32));
     }
 
 public:
 
     std::tuple<torch::Tensor, std::unordered_map<std::string, float>> forward(
-        const std::vector<torch::Tensor>& preds, // [P3, P4, P5]
-        const torch::Tensor& targets_in) {       // [batch, max_gt, 6] (img_idx, cls, x, y, w, h)
+        const std::vector<torch::Tensor>& preds,
+        const torch::Tensor& targets_in) {
 
-        // KEY: move targets onto the same device as the registered stride buffer.
         torch::Device device = strides_.device();
         torch::Tensor targets = targets_in.to(device);
 
@@ -98,13 +88,12 @@ public:
 
         int64_t batch_size = targets.size(0);
 
-        // KEY: unpack padded targets into labels, boxes, and validity mask.
-        torch::Tensor gt_labels = targets.select(2, 1).to(torch::kLong); // [B, N]
-        torch::Tensor gt_bboxes = targets.slice(2, 2, 6);                // [B, N, 4]
-        torch::Tensor mask_gt = (targets.select(2, 1) >= 0).to(torch::kFloat32); // [B, N]
+        torch::Tensor gt_labels = targets.select(2, 1).to(torch::kLong);
+        torch::Tensor gt_bboxes = targets.slice(2, 2, 6);
+        torch::Tensor mask_gt = (targets.select(2, 1) >= 0).to(torch::kFloat32);
 
         for (size_t i = 0; i < preds.size(); ++i) {
-            torch::Tensor pred = preds[i]; // [B, Anchors, 4 + Cls]
+            torch::Tensor pred = preds[i];
             int64_t stride = strides_[i].item<int64_t>();
             int64_t box_channels = config_.box_channels();
 
@@ -113,13 +102,12 @@ public:
 
             torch::Tensor decoded_boxes = decode_boxes(pred_boxes, stride);
 
-            // KEY: decode boxes and match them with GT using TaskAlignedAssigner.
             torch::Tensor assigned_gt_inds = assigner->forward(
-                torch::sigmoid(pred_cls).unsqueeze(1), // [B, 1, A, C]
-                decoded_boxes.unsqueeze(1),            // [B, 1, A, 4]
-                gt_labels.unsqueeze(-1),               // [B, G, 1]
-                gt_bboxes,                             // [B, G, 4]
-                mask_gt.unsqueeze(-1)                  // [B, G, 1]
+                torch::sigmoid(pred_cls).unsqueeze(1),
+                decoded_boxes.unsqueeze(1),
+                gt_labels.unsqueeze(-1),
+                gt_bboxes,
+                mask_gt.unsqueeze(-1)
             );
 
             torch::Tensor pos_mask = assigned_gt_inds > 0;
@@ -127,13 +115,12 @@ public:
             total_num_pos += num_pos_scale;
 
             if (num_pos_scale.item<float>() > 0) {
-                // KEY: CIoU-style box regression loss on positive assignments only.
                 torch::Tensor pos_decoded_boxes = decoded_boxes.masked_select(pos_mask.unsqueeze(-1)).view({ -1, 4 });
 
                 auto batch_idx = torch::arange(batch_size, device).view({ -1, 1 }).expand_as(assigned_gt_inds);
 
-                auto valid_batch_idx = batch_idx.masked_select(pos_mask);     // [N_pos]
-                auto valid_gt_idx = assigned_gt_inds.masked_select(pos_mask).to(torch::kLong) - 1; // [N_pos] (0-based)
+                auto valid_batch_idx = batch_idx.masked_select(pos_mask);
+                auto valid_gt_idx = assigned_gt_inds.masked_select(pos_mask).to(torch::kLong) - 1;
 
                 auto gt_bboxes_flat = gt_bboxes.view({ -1, 4 });
                 auto flat_indices = valid_batch_idx * gt_bboxes.size(1) + valid_gt_idx;
@@ -149,14 +136,12 @@ public:
                 }
             }
 
-            // KEY: classification loss is BCE-with-logits over one-hot assigned labels.
             torch::Tensor scale_cls_loss = compute_cls_loss_vectorized(
                 pred_cls, gt_labels, assigned_gt_inds, pos_mask);
 
             loss_cls = loss_cls + scale_cls_loss.sum();
         }
 
-        // MODIFIED: guard against divide-by-zero when a batch has no positives.
         torch::Tensor num_pos_safe = torch::max(total_num_pos, torch::tensor(1.0f, device));
 
         loss_box = (loss_box / num_pos_safe) * config_.box_weight;
@@ -181,7 +166,6 @@ private:
         case YoloBoxDecodeStrategy::DirectStrideScaled:
         default:
             if (!config_.enable_dfl) {
-                // RISK: current non-DFL decode path is simplified and assumes direct xywh * stride decoding.
                 return pred_boxes * static_cast<float>(stride);
             }
             return decode_dfl_boxes(pred_boxes, stride);
@@ -212,9 +196,6 @@ private:
 
         auto logits = pred_boxes.view({pred_boxes.size(0), 4, config_.reg_max});
 
-        // RISK: the current training path still uses simplified xywh targets.
-        // This maps gt box coordinates into per-bin regression targets so the
-        // DFL branch is trainable before a fuller anchor-free target redesign.
         auto target = (gt_boxes / static_cast<float>(stride)).clamp(0.0f, static_cast<float>(config_.reg_max - 1) - 1e-3f);
         auto target_left = torch::floor(target).to(torch::kLong);
         auto target_right = torch::clamp(target_left + 1, 0, config_.reg_max - 1);
@@ -241,23 +222,20 @@ private:
     }
 
     torch::Tensor compute_cls_loss_vectorized(
-        const torch::Tensor& pred_cls,         // [B, A, NumClasses]
-        const torch::Tensor& gt_labels,        // [B, MaxGT]
-        const torch::Tensor& assigned_gt_inds, // [B, A] (1-based)
-        const torch::Tensor& pos_mask)         // [B, A]
+        const torch::Tensor& pred_cls,
+        const torch::Tensor& gt_labels,
+        const torch::Tensor& assigned_gt_inds,
+        const torch::Tensor& pos_mask)
     {
-        // KEY: build dense one-hot class targets for BCE loss.
         torch::Tensor target_one_hot = torch::zeros_like(pred_cls);
 
         if (pos_mask.any().item<bool>()) {
-            // CHECK: assigned_gt_inds is 1-based; convert to 0-based before gather().
-            auto gather_inds = (assigned_gt_inds - 1).clamp_min(0).to(torch::kLong); // [B, A]
+            auto gather_inds = (assigned_gt_inds - 1).clamp_min(0).to(torch::kLong);
 
             auto target_cls_ids = gt_labels.gather(1, gather_inds);
 
             auto one_hot = F::one_hot(target_cls_ids, num_classes_).to(pred_cls.dtype());
 
-            // pos_mask: [B, A] -> [B, A, 1]
             target_one_hot = one_hot * pos_mask.unsqueeze(-1);
         }
 
@@ -265,7 +243,6 @@ private:
         torch::Tensor loss = F::binary_cross_entropy_with_logits(pred_cls, target_one_hot, bce_options);
 
         if (config_.fl_gamma > 0.0f) {
-            // EVOLVE: focal modulation is optional and currently disabled by default.
             torch::Tensor pt = torch::exp(-loss);
             loss = (1.0f - pt).pow(config_.fl_gamma) * loss;
         }
@@ -274,7 +251,6 @@ private:
     }
 
     torch::Tensor bbox_iou(const torch::Tensor& boxes1, const torch::Tensor& boxes2, bool ciou = true) {
-        // KEY: IoU/CIoU computation expects [N, 4] boxes in xywh format.
         auto b1_x = boxes1.select(1, 0);
         auto b1_y = boxes1.select(1, 1);
         auto b1_w = boxes1.select(1, 2);
@@ -295,7 +271,6 @@ private:
         auto b2_x2 = b2_x + b2_w / 2.0f;
         auto b2_y2 = b2_y + b2_h / 2.0f;
 
-        // KEY: pairwise intersection/union area.
         auto inter_x1 = torch::max(b1_x1, b2_x1);
         auto inter_y1 = torch::max(b1_y1, b2_y1);
         auto inter_x2 = torch::min(b1_x2, b2_x2);
@@ -307,7 +282,6 @@ private:
         auto iou = inter_area / (union_area + 1e-7f);
 
         if (ciou) {
-            // KEY: CIoU adds enclosing-box, center-distance, and aspect-ratio penalties.
             auto c_x1 = torch::min(b1_x1, b2_x1);
             auto c_y1 = torch::min(b1_y1, b2_y1);
             auto c_x2 = torch::max(b1_x2, b2_x2);
@@ -315,10 +289,8 @@ private:
 
             auto c_diag_sq = (c_x2 - c_x1).pow(2) + (c_y2 - c_y1).pow(2) + 1e-7f;
 
-            // Center distance squared
             auto rho_sq = (b2_x - b1_x).pow(2) + (b2_y - b1_y).pow(2);
 
-            // Aspect ratio penalty
             auto w2_h2 = b2_w / (b2_h + 1e-7f);
             auto w1_h1 = b1_w / (b1_h + 1e-7f);
             auto v = (4.0f / (M_PI * M_PI)) * torch::pow(torch::atan(w2_h2) - torch::atan(w1_h1), 2);

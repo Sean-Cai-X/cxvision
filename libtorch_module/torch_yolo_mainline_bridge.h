@@ -668,4 +668,4 @@ inline YoloTrainerSessionResult run_yolo_trainer_session(
     return result;
 }
 
-#endif  // TORCH_YOLO_MAINLINE_BRIDGE_H
+#endif

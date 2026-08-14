@@ -1,13 +1,10 @@
 ﻿#ifndef TORCH_MOBILENETV3_H
 #define TORCH_MOBILENETV3_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <vector>
 
-// --------------------------------------------------------------------------
-// --------------------------------------------------------------------------
 class HardSigmoidImpl : public torch::nn::Module {
 public:
     torch::Tensor forward(torch::Tensor x) {
@@ -49,9 +46,6 @@ private:
 };
 TORCH_MODULE(SqueezeExcitation);
 
-// --------------------------------------------------------------------------
-// Inverted Residual Block
-// --------------------------------------------------------------------------
 struct InvertedResidualConfig {
     int64_t input_channels;
     int64_t kernel;
@@ -97,7 +91,6 @@ public:
         block_->push_back(torch::nn::BatchNorm2d(cnf.expanded_channels));
         add_activation(block_);
 
-        // 4. SE: Squeeze-and-Excitation
         if (cnf.use_se) {
             block_->push_back(SqueezeExcitation(cnf.expanded_channels));
         }
@@ -121,19 +114,13 @@ private:
 
 TORCH_MODULE(InvertedResidual);
 
-// --------------------------------------------------------------------------
-// MobileNetV3 Backbone
-// --------------------------------------------------------------------------
 class MobileNetV3Impl : public torch::nn::Module {
 public:
-    // mode: "small" or "large"
     MobileNetV3Impl(const std::string& mode = "large", int64_t output_stride = 16) {
-        // input_c, kernel, expanded_c, out_c, se, act, stride
         std::vector<InvertedResidualConfig> configs;
         const int64_t low_level_boundary_index = (mode == "large") ? 5 : 2;
 
         int64_t input_channel = 16;
-        // First Conv
         stem_->push_back(torch::nn::Conv2d(torch::nn::Conv2dOptions(3, input_channel, 3).stride(2).padding(1).bias(false)));
         stem_->push_back(torch::nn::BatchNorm2d(input_channel));
         stem_->push_back(HardSwish());
@@ -141,12 +128,12 @@ public:
         if (mode == "large") {
             configs = {
                 {16, 3, 16, 16, false, "RE", 1, 1},
-                {16, 3, 64, 24, false, "RE", 2, 1}, // stride 2 -> OS=4
+                {16, 3, 64, 24, false, "RE", 2, 1},
                 {24, 3, 72, 24, false, "RE", 1, 1},
-                {24, 5, 72, 40, true, "RE", 2, 1},  // stride 2 -> OS=8
+                {24, 5, 72, 40, true, "RE", 2, 1},
                 {40, 5, 120, 40, true, "RE", 1, 1},
                 {40, 5, 120, 40, true, "RE", 1, 1},
-                {40, 3, 240, 80, false, "HS", 2, 1}, // stride 2 -> OS=16
+                {40, 3, 240, 80, false, "HS", 2, 1},
                 {80, 3, 200, 80, false, "HS", 1, 1},
                 {80, 3, 184, 80, false, "HS", 1, 1},
                 {80, 3, 184, 80, false, "HS", 1, 1},
@@ -158,17 +145,16 @@ public:
             };
         }
         else {
-            // Small configs...
             configs = {
-               {16, 3, 16, 16, true, "RE", 2, 1}, // OS=4
-               {16, 3, 72, 24, false, "RE", 2, 1}, // OS=8
+               {16, 3, 16, 16, true, "RE", 2, 1},
+               {16, 3, 72, 24, false, "RE", 2, 1},
                {24, 3, 88, 24, false, "RE", 1, 1},
-               {24, 5, 96, 40, true, "HS", 2, 1}, // OS=16
+               {24, 5, 96, 40, true, "HS", 2, 1},
                {40, 5, 240, 40, true, "HS", 1, 1},
                {40, 5, 240, 40, true, "HS", 1, 1},
                {40, 5, 120, 48, true, "HS", 1, 1},
                {48, 5, 144, 48, true, "HS", 1, 1},
-               {48, 5, 288, 96, true, "HS", 2, 1}, // OS=32
+               {48, 5, 288, 96, true, "HS", 2, 1},
                {96, 5, 576, 96, true, "HS", 1, 1},
                {96, 5, 576, 96, true, "HS", 1, 1},
             };
@@ -197,7 +183,6 @@ public:
             }
         }
 
-        // Last Conv
         high_level_out_channels_ = (mode == "large") ? 960 : 576;
         final_layer_->push_back(torch::nn::Conv2d(torch::nn::Conv2dOptions(configs.back().out_channels, high_level_out_channels_, 1).bias(false)));
         final_layer_->push_back(torch::nn::BatchNorm2d(high_level_out_channels_));
@@ -209,7 +194,6 @@ public:
         register_module("final_layer", final_layer_);
     }
 
-    // Return: {low_level_feat, high_level_feat}
     std::pair<torch::Tensor, torch::Tensor> forward_features(torch::Tensor x) {
         auto stem_feat = stem_->forward(x);
         auto low_level_feat = low_level_features_->forward(stem_feat);
@@ -233,4 +217,4 @@ private:
 };
 TORCH_MODULE(MobileNetV3);
 
-#endif // TORCH_MOBILENETV3_H
+#endif

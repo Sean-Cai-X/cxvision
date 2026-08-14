@@ -345,7 +345,7 @@ bool PostprocessAndWriteOutput(
     }
 }
 
-} // namespace
+}
 
 TorchTaskResultCpp ExecuteTorchSegmentationTask(
     const TorchRuntimeCoreConfig& config,

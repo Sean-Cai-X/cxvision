@@ -1,7 +1,6 @@
 #ifndef TORCH_PROTOTYPE_INDEX_H
 #define TORCH_PROTOTYPE_INDEX_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 
@@ -229,4 +228,4 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> class_to_ids_;
 };
 
-#endif // TORCH_PROTOTYPE_INDEX_H
+#endif

@@ -1,7 +1,6 @@
 #ifndef TORCH_YOLO_DATASET_H
 #define TORCH_YOLO_DATASET_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <filesystem>
@@ -12,13 +11,6 @@
 
 namespace fs = std::filesystem;
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
 struct YoloDatasetConfig {
     int img_size = 640;
@@ -122,7 +114,6 @@ public:
         augmenter_ = DataAugmenter();
         label_loader_ = LabelLoader();
 
-        // KEY: collect supported image files from the image directory.
         if (fs::exists(img_dir_)) {
             for (const auto& entry : fs::directory_iterator(img_dir_)) {
                 std::string ext = entry.path().extension().string();
@@ -133,12 +124,10 @@ public:
             }
         }
         else {
-            // CHECK: missing dataset paths are surfaced early but do not throw.
             std::cerr << "Error: Image directory not found: " << img_dir_ << std::endl;
         }
     }
 
-    // KEY: dataset returns image tensor plus padded targets [max_gt, 6].
     torch::data::Example<> get(size_t index) override {
         std::string img_path = img_paths_[index];
         std::string label_filename = fs::path(img_path).stem().string() + ".txt";
@@ -146,14 +135,12 @@ public:
 
         cv::Mat img = cv::imread(img_path);
         if (img.empty()) {
-            // MODIFIED: return a padded invalid target tensor instead of crashing the loader.
             std::cerr << "Error: Image empty :  " << img_dir_ << std::endl;
             auto empty_img = torch::zeros({3, config_.img_size, config_.img_size}, torch::kFloat32);
             auto empty_target = torch::full({config_.max_gt, 6}, -1.0f, torch::kFloat32);
             return { empty_img, empty_target };
         }
 
-        // KEY: labels are read as normalized [cls, x1, y1, x2, y2] rows.
         std::vector<Annotation> anns = label_loader_.load_labels(label_path);
 
         std::vector<std::vector<float>> labels;
@@ -162,7 +149,6 @@ public:
         }
 
         if (config_.is_train) {
-            // CHECK: current training augmentation is HSV + random flip only.
             if (config_.enable_hsv) {
                 img = augmenter_.hsv_augment(img);
             }
@@ -176,11 +162,9 @@ public:
         if (config_.resize_policy == YoloResizePolicy::Letterbox) {
             std::tie(img, labels) = letterbox_image_and_labels(img, labels);
         } else {
-            // RISK: plain resize can distort geometry-sensitive datasets.
             img = augmenter_.resize_image(img, config_.img_size);
         }
 
-        // KEY: OpenCV (BGR, HWC) -> Torch (RGB, CHW, float, 0-1).
         cv::Mat img_rgb;
         cv::cvtColor(img, img_rgb, cv::COLOR_BGR2RGB);
         torch::Tensor img_tensor = torch::from_blob(img_rgb.data, { img_rgb.rows, img_rgb.cols, 3 }, torch::kUInt8)
@@ -190,18 +174,17 @@ public:
             .to(torch::kFloat32)
             .div_(255.0f);
 
-        // KEY: pad GT targets to a fixed max_gt count for stack-based dataloading.
-        torch::Tensor target_tensor = torch::full({ config_.max_gt, 6 }, -1.0f, torch::kFloat32); // [batch_idx, cls, x1, y1, x2, y2]
+        torch::Tensor target_tensor = torch::full({ config_.max_gt, 6 }, -1.0f, torch::kFloat32);
 
         int count = 0;
         for (const auto& l : labels) {
             if (count >= config_.max_gt) break;
-            target_tensor[count][0] = 0.0f; // Batch Index Placeholder
-            target_tensor[count][1] = l[0]; // Class
-            target_tensor[count][2] = l[1]; // x1
-            target_tensor[count][3] = l[2]; // y1
-            target_tensor[count][4] = l[3]; // x2
-            target_tensor[count][5] = l[4]; // y2
+            target_tensor[count][0] = 0.0f;
+            target_tensor[count][1] = l[0];
+            target_tensor[count][2] = l[1];
+            target_tensor[count][3] = l[2];
+            target_tensor[count][4] = l[3];
+            target_tensor[count][5] = l[4];
             count++;
         }
 
@@ -265,10 +248,9 @@ private:
     std::string img_dir_;
     std::string label_dir_;
     YoloDatasetConfig config_;
-    // EVOLVE: expose augmentation policy and max_gt as configurable constructor inputs.
     DataAugmenter augmenter_;
     LabelLoader label_loader_;
     std::vector<std::string> img_paths_;
 };
 
-#endif // TORCH_YOLO_DATASET_H
+#endif

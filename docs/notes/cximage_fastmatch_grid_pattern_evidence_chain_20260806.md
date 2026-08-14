@@ -15,6 +15,31 @@ fastmatch_structural_baseline_reference
   -> region_pattern_content_evidence
 ```
 
+## Standard Case Matrix
+
+| Case | Tool | Level | Image | Target | Script | Contract | Allowed conclusion |
+|---|---|---|---|---|---|---|---|
+| `fastmatch_structural_baseline_reference` | `FastMatch` | `T3/L1` | `fastmatch_bracket_test_l1` | `fastmatch_bracket_l1_rotation_pose` | `cxparser/cxscript/module/cximage/headless/fastmatch_l1_direct.cxsc` | `cxparser/cxscript/module/cximage/stage26/contracts/fastmatch_ok_contract.cxsc` | `HEADLESS_EXECUTION_PASS` or `FASTMATCH_PENDING_RESULT` |
+| `fastmatch_structural_l2_baseline_reference` | `FastMatch` | `T3/L2` | `fastmatch_bottle_test_l2` | `fastmatch_bottle_l2_reflection` | `cxparser/cxscript/module/cximage/headless/fastmatch_l1_direct.cxsc` | `cxparser/cxscript/module/cximage/stage26/contracts/fastmatch_ok_contract.cxsc` | `HEADLESS_EXECUTION_PASS` or `FASTMATCH_PENDING_RESULT` |
+| `fastmatch_structural_l3_baseline_reference` | `FastMatch` | `T3/L3` | `fastmatch_brakedisk_test_l3` | `fastmatch_brakedisk_l3_scale_translation` | `cxparser/cxscript/module/cximage/headless/fastmatch_l1_direct.cxsc` | `cxparser/cxscript/module/cximage/stage26/contracts/fastmatch_ok_contract.cxsc` | `HEADLESS_EXECUTION_PASS` or `FASTMATCH_PENDING_RESULT` |
+| `fastmatch_grid_pattern_class_evidence` | `GridPatternClassTool` | `T3` | `fastmatch_bracket_test_l1` | `fastmatch_bracket_l1_rotation_pose.template_rect` | `cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_grid_pattern_class_evidence.cxsc` | `PENDING_CLASS_MODEL_BINDING` | `GRID_PATTERN_FEATURE_PROJECTION_PASS`, `PENDING_BINDING`, `PENDING_HUMAN_REVIEW` |
+| `region_pattern_content_evidence` | `RegionPatternTool` | `T3` | `fastmatch_bracket_test_l1` | `fastmatch_bracket_l1_rotation_pose.region_roi` | `cxparser/cxscript/module/cximage/diagnostic/region_pattern/region_pattern_content_evidence.cxsc` | `PENDING_CLASS_MODEL_BINDING` | `REGION_PATTERN_DESCRIPTOR_AVAILABLE`, `PENDING_BINDING`, `PENDING_HUMAN_REVIEW` |
+
+All three cases now carry the same Evidence Chain metadata shape:
+`category`, `group`, `level`, `role`, `sourcecase`, `image`, `target`,
+`script`, `parameter`, `contract`, `expected`, and `expectedpolicyguard`.
+This is the manual review surface. Do not infer missing image, target,
+contract, or acceptance state from prose outside the case record.
+
+The fixed baseline anchors come from
+`D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/stage25_image_manifest.json`:
+
+| Match case | Level | Template image | Test image | Template ROI | Search ROI | Expected rect |
+|---|---|---|---|---|---|---|
+| `fastmatch_bracket_l1_rotation_pose` | `L1_high_contrast` | `fastmatch_bracket_template_l1` | `fastmatch_bracket_test_l1` | `243,92,235,285` | `0,0,640,480` | `210,75,260,330` |
+| `fastmatch_bottle_l2_reflection` | `L2_low_contrast_illumination` | `fastmatch_bottle_template_l2` | `fastmatch_bottle_test_l2` | `230,85,180,260` | `0,0,640,480` | `150,112,295,300` |
+| `fastmatch_brakedisk_l3_scale_translation` | `L3_complex_boundary` | `fastmatch_brakedisk_template_l3` | `fastmatch_brakedisk_test_l3` | `440,120,400,400` | `0,0,1280,1024` | `136,70,835,840` |
+
 The GridPattern branch analyzes local grid cells and a 3-to-5-level pooled
 hierarchy. The RegionPattern branch analyzes normalized gray/binary region
 content. A classifier model is not bound in either CASE, so classification
@@ -150,16 +175,18 @@ summary
 ## Verification Gate
 
 Use the user-selected `<BUILD_DIR>` only. Do not configure or create a parallel
-build directory.
+build directory. Asset-only edits do not require compile; compile is required
+only after C++ or binding changes.
 
-1. `T0`: catalog, evidence chain, direct script, image and globals values exist.
-2. Compile `cxvision_imgui_acceptance` after the C++ changes.
-3. `T3`: run the direct CASE with `--globals` pointing to the values file.
+1. `T0`: catalog, evidence chain, direct script, `stage25_image_manifest.json`, fixed match case `fastmatch_bracket_l1_rotation_pose`, image ids, contract or pending-binding marker, and globals values exist.
+2. `T3 baseline`: run the three structural baseline cases on `fastmatch_bracket_l1_rotation_pose`, `fastmatch_bottle_l2_reflection`, and `fastmatch_brakedisk_l3_scale_translation` through the standard headless route and verify model/candidate/result assets before any FastMatch result claim.
+3. `T3 grid`: run `fastmatch_grid_pattern_class_evidence` with `--globals cxparser/cxscript/module/cximage/diagnostic/fastmatch/fastmatch_grid_pattern_class_globals.values`.
 4. Confirm `global_grid_status=1`, nonzero descriptor dimension and 3-5 levels.
-5. Confirm Image View contains one analysis ROI plus active-cell rectangles and
-   direction lines on the actual ROI.
-6. Change ROI/grid/threshold controls, rerun, and verify the runtime facts and
-   overlays change together.
+5. Confirm Image View contains one analysis ROI plus active-cell rectangles and direction lines on the actual ROI.
+6. `T3 region`: run `region_pattern_content_evidence` with `--globals cxparser/cxscript/module/cximage/diagnostic/region_pattern/region_pattern_content_globals.values`.
+7. Confirm `global_region_status=1`, nonzero descriptor dimension, foreground/mean/std facts, one editable region ROI, and pooled block overlays.
+8. Change ROI/grid/threshold controls, rerun, and verify runtime facts and overlays change together.
+9. Record manual review as `MANUAL_GUI_PASS`, `MANUAL_GUI_FAIL`, `MANUAL_GUI_PARTIAL`, or `MANUAL_GUI_NOT_RUN`; automated runs must not fill `MANUAL_GUI_PASS`.
 
 Allowed conclusion after this gate:
 

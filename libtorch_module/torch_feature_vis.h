@@ -1,7 +1,6 @@
 #ifndef TORCH_FEATURE_VIS_H
 #define TORCH_FEATURE_VIS_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
@@ -32,7 +31,6 @@ namespace torch_utils {
                 std::string name = child.key();
                 auto module = child.value();
 
-                //
 
                 try {
                 }
@@ -43,14 +41,12 @@ namespace torch_utils {
         }
 
         static void save_feature_map(const torch::Tensor& features, const std::string& save_path) {
-            // features: [B, C, H, W]
             if (features.dim() != 4) return;
 
-            auto f = features[0].detach().cpu(); // [C, H, W]
+            auto f = features[0].detach().cpu();
 
-            auto avg_map = torch::mean(f, 0); // [H, W]
+            auto avg_map = torch::mean(f, 0);
 
-            // auto max_map = std::get<0>(torch::max(f, 0));
 
             avg_map = avg_map - avg_map.min();
             avg_map = avg_map / avg_map.max() * 255;
@@ -62,13 +58,12 @@ namespace torch_utils {
             cv::applyColorMap(img, color_img, cv::COLORMAP_JET);
 
             cv::imwrite(save_path, color_img);
-            // std::cout << "Saved: " << save_path << std::endl;
         }
 
     private:
         std::string output_dir_;
     };
 
-} // namespace torch_utils
+}
 
-#endif // TORCH_FEATURE_VIS_H
+#endif

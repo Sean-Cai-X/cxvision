@@ -1,7 +1,6 @@
 #ifndef TORCH_NNMODULE_H
 #define TORCH_NNMODULE_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <vector>
@@ -13,8 +12,6 @@
 #include <cassert>
 #include <iostream>
 
-// =========================================================================
-// =========================================================================
 
 static int make_divisible(int v, int divisor = 8, float min_ratio = 0.9) {
     int new_v = std::max(divisor, static_cast<int>((v + divisor - 1) / divisor) * divisor);
@@ -37,7 +34,7 @@ static int scale_blocks(int base_blocks, float depth_multiple) {
     return std::max(1, static_cast<int>(std::round(base_blocks * depth_multiple)));
 }
 
-/*
+
 struct ManualGradScaler {
 private:
     float scale_;
@@ -49,7 +46,7 @@ private:
 
 public:
     ManualGradScaler(
-        float init_scale = 65536.0f,    // 2^16
+        float init_scale = 65536.0f,
         float growth_factor = 2.0f,
         float backoff_factor = 0.5f,
         int growth_interval = 2000
@@ -82,93 +79,6 @@ public:
         found_inf_ = _check_inf_nan(model);
 
         if (found_inf_) {
-            for (auto& param : model->parameters()) {
-                if (param.grad().defined()) {
-                    param.grad().zero_();
-                }
-            }
-            return;
-        }
-
-        for (auto& param : model->parameters()) {
-            if (param.grad().defined()) {
-                param.grad().data() = param.grad().data() / scale_;
-            }
-        }
-
-        optimizer.step();
-    }
-
-    void update() {
-        if (found_inf_) {
-            scale_ *= backoff_factor_;
-            steps_since_growth_ = 0;
-        }
-        else {
-            steps_since_growth_++;
-            if (steps_since_growth_ >= growth_interval_) {
-                scale_ *= growth_factor_;
-                steps_since_growth_ = 0;
-            }
-        }
-        found_inf_ = false;
-    }
-
-    float get_scale() const {
-        return scale_;
-    }
-
-    bool get_found_inf() const {
-        return found_inf_;
-    }
-};
-
-*/
-struct ManualGradScaler {
-private:
-    float scale_;
-    float growth_factor_;
-    float backoff_factor_;
-    int growth_interval_;
-    int steps_since_growth_;
-    bool found_inf_;
-
-public:
-    ManualGradScaler(
-        float init_scale = 65536.0f,    // 2^16
-        float growth_factor = 2.0f,
-        float backoff_factor = 0.5f,
-        int growth_interval = 2000
-    ) : scale_(init_scale),
-        growth_factor_(growth_factor),
-        backoff_factor_(backoff_factor),
-        growth_interval_(growth_interval),
-        steps_since_growth_(0),
-        found_inf_(false) {
-    }
-
-    torch::Tensor scale(torch::Tensor loss) {
-        return loss * scale_;
-    }
-
-    bool _check_inf_nan(torch::nn::Module* model) {
-        for (const auto& param : model->parameters()) {
-            if (param.grad().defined()) {
-                if (torch::isnan(param.grad()).any().item<bool>() ||
-                    torch::isinf(param.grad()).any().item<bool>()) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    template<typename Optimizer>
-    void step(Optimizer& optimizer, torch::nn::Module* model) {
-        found_inf_ = _check_inf_nan(model);
-
-        if (found_inf_) {
-            // std::cout << "[AMP] Gradient overflow detected. Skipping step." << std::endl;
             optimizer.zero_grad();
             return;
         }
@@ -187,14 +97,12 @@ public:
         if (found_inf_) {
             scale_ *= backoff_factor_;
             steps_since_growth_ = 0;
-            // std::cout << "[AMP] Scale decreased to: " << scale_ << std::endl;
         }
         else {
             steps_since_growth_++;
             if (steps_since_growth_ >= growth_interval_) {
                 scale_ *= growth_factor_;
                 steps_since_growth_ = 0;
-                // std::cout << "[AMP] Scale increased to: " << scale_ << std::endl;
             }
         }
         found_inf_ = false;
@@ -220,12 +128,7 @@ ModuleHolder safe_register_module(
     return holder;
 }
 
-// =========================================================================
-// =========================================================================
 
-// -------------------------------------------------------------------------
-// ConvModule: Conv2d + BN + Act
-// -------------------------------------------------------------------------
 class ConvModuleImpl : public torch::nn::Module {
 public:
     ConvModuleImpl(int64_t in_channels, int64_t out_channels, int64_t kernel_size,
@@ -298,9 +201,6 @@ private:
 };
 TORCH_MODULE(ConvModule);
 
-// -------------------------------------------------------------------------
-// Bottleneck
-// -------------------------------------------------------------------------
 class BottleneckImpl : public torch::nn::Module {
 public:
     BottleneckImpl(int64_t in_channels, int64_t out_channels,
@@ -332,9 +232,6 @@ private:
 };
 TORCH_MODULE(Bottleneck);
 
-// -------------------------------------------------------------------------
-// C2f
-// -------------------------------------------------------------------------
 class C2fImpl : public torch::nn::Module {
 public:
     C2fImpl(int64_t in_channels, int64_t out_channels, int64_t num_blocks = 1,
@@ -378,9 +275,6 @@ private:
 };
 TORCH_MODULE(C2f);
 
-// -------------------------------------------------------------------------
-// Stem
-// -------------------------------------------------------------------------
 class StemImpl : public torch::nn::Module {
 public:
     StemImpl(int64_t in_channels = 3, int64_t out_channels = 64) {
@@ -397,9 +291,6 @@ private:
 };
 TORCH_MODULE(Stem);
 
-// -------------------------------------------------------------------------
-// SPPF
-// -------------------------------------------------------------------------
 class SPPFImpl : public torch::nn::Module {
 public:
     SPPFImpl(int64_t c1, int64_t c2, int64_t k = 5) {
@@ -427,4 +318,4 @@ private:
 };
 TORCH_MODULE(SPPF);
 
-#endif // TORCH_NNMODULE_H
+#endif

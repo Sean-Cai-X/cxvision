@@ -1139,6 +1139,12 @@ bool SaveManualGaugeAnnotation(
     SyncSegmentationLegacyPointFromLists(gauge);
     if (!ValidateManualGaugeGeometry(gauge, outReason))
         return false;
+    if (!ApplyManualGaugeToGlobals(context))
+    {
+        outReason = "cannot apply gauge to runtime globals before save: " +
+            context.debug_reason;
+        return false;
+    }
 
     std::filesystem::path dir;
     if (!ResolveManualGaugeCaseDir(context, dir, outReason))

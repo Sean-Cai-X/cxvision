@@ -1,8 +1,5 @@
 #include "CxScriptEvidenceChainRuntime.h"
-#include "CxScriptEvidenceChainRegister.h"
-#include "muParser.h"
-#include <fstream>
-#include <sstream>
+#include "CxParserRuntimeOwner.h"
 #include <filesystem>
 
 const CxScriptEvidenceCase* CxScriptEvidenceChainRuntime::FindCase(const std::string& evidence_id) const
@@ -37,35 +34,9 @@ bool LoadCxScriptEvidenceChainFile(
         return false;
     }
 
-    std::ifstream file(path);
-    if (!file.is_open())
-    {
-        out_reason = "Cannot open evidence chain file: " + script_path;
+    CxParserRuntimeOwner owner;
+    if (!owner.Initialize(out_reason))
         return false;
-    }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string script = buffer.str();
-
-    g_cxscript_evidence_chain.Clear();
-    g_current_evidence_case = nullptr;
-
-    mu::Parser parser;
-    parser.UsingClass(true);
-    RegisterCxScriptEvidenceChainBindings(parser);
-
-    try
-    {
-        parser.SetExpr(script);
-        parser.Eval();
-    }
-    catch (const mu::Parser::exception_type& e)
-    {
-        out_reason = "Evidence chain parse error: " + std::string(e.GetMsg());
-        return false;
-    }
-
-    out_chain = g_cxscript_evidence_chain;
-    return true;
+    return owner.ParseEvidenceChain(script_path, out_chain, out_reason);
 }

@@ -1,7 +1,6 @@
 #ifndef TORCH_FEATURE_HEAD_H
 #define TORCH_FEATURE_HEAD_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 
@@ -9,8 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-// A lightweight multi-branch feature head for ROI-level embedding extraction.
-// The intent is to sit on top of an existing backbone feature tensor.
 enum class FeatureBranchType {
     Semantic,
     Geometry,
@@ -245,4 +242,4 @@ private:
 };
 TORCH_MODULE(MultiBranchFeatureHead);
 
-#endif // TORCH_FEATURE_HEAD_H
+#endif

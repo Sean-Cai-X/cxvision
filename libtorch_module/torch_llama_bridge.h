@@ -1,7 +1,6 @@
 #ifndef TORCH_LLAMA_BRIDGE_H
 #define TORCH_LLAMA_BRIDGE_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <sstream>
 #include <string>
@@ -9,8 +8,6 @@
 
 #include "torch_prototype_index.h"
 
-// This bridge stays transport-agnostic on purpose.
-// It prepares prompt payloads that can be sent to llama.cpp-b8212 server / CLI.
 struct LlamaBridgeRequest {
     std::string image_path;
     std::string class_hint;
@@ -66,4 +63,4 @@ public:
     }
 };
 
-#endif // TORCH_LLAMA_BRIDGE_H
+#endif

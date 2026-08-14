@@ -1,7 +1,6 @@
 ﻿#ifndef TORCH_DATA_AUGMENTER_H
 #define TORCH_DATA_AUGMENTER_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
@@ -13,13 +12,6 @@
 #include <tuple>
 #include <algorithm>
 
-// Comment tags used in this file:
-// KEY: important execution path.
-// MODIFIED: behavior adjusted during the current cleanup pass.
-// CHECK: confirm during integration/debug.
-// RISK: known limitation or possible issue.
-// EVOLVE: recommended future improvement.
-// VERIFY: needs explicit runtime or numerical validation.
 
 enum class YoloResizePolicy {
     PlainResize,
@@ -140,7 +132,6 @@ struct TrainConfig {
     }
 };
 
-// KEY: normalized annotation stored as [x1, y1, x2, y2, class_id].
 struct Annotation {
     float x1;
     float y1;
@@ -149,7 +140,6 @@ struct Annotation {
     int class_id;
 };
 
-// KEY: reads YOLO txt labels and converts center-width-height to corners.
 class LabelLoader {
 public:
     std::vector<Annotation> load_labels(const std::string& label_path) {
@@ -188,7 +178,6 @@ public:
     }
 };
 
-// KEY: minimal augmentation pipeline shared by detection dataset loading.
 class DataAugmenter {
 public:
     DataAugmenter(float hsv_h = 0.015f, float hsv_s = 0.7f, float hsv_v = 0.4f,
@@ -196,7 +185,6 @@ public:
         : hsv_h_(hsv_h), hsv_s_(hsv_s), hsv_v_(hsv_v), flip_prob_(flip_prob) {
     }
 
-    // KEY: HSV jitter perturbs color statistics without changing geometry.
     cv::Mat hsv_augment(const cv::Mat& img) {
         cv::Mat hsv;
         cv::cvtColor(img, hsv, cv::COLOR_BGR2HSV);
@@ -223,8 +211,6 @@ public:
         return aug_img;
     }
 
-    // KEY: horizontal flip updates the image together with normalized bbox x coordinates.
-    // labels: [class_id, x1, y1, x2, y2]
     std::tuple<cv::Mat, std::vector<std::vector<float>>> random_flip(
         const cv::Mat& img,
         const std::vector<std::vector<float>>& labels) {
@@ -247,7 +233,6 @@ public:
         return { img.clone(), labels };
     }
 
-    // RISK: simple resize distorts aspect ratio; letterbox would preserve geometry better.
     cv::Mat resize_image(const cv::Mat& img, int target_size) {
         cv::Mat resized;
         cv::resize(img, resized, cv::Size(target_size, target_size));
@@ -259,4 +244,4 @@ private:
     float flip_prob_;
 };
 
-#endif // TORCH_DATA_AUGMENTER_H
+#endif

@@ -110,7 +110,7 @@ std::string BuildContractJson(
     return os.str();
 }
 
-} // namespace
+}
 
 TorchTaskResultCpp RunTorchCapabilitiesTask(
     const TorchRuntimeCoreConfig& config,

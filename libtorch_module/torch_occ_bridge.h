@@ -50,4 +50,4 @@ private:
     int64_t expected_dim_;
 };
 
-#endif // TORCH_OCC_BRIDGE_H
+#endif

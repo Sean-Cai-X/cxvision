@@ -1,7 +1,6 @@
 #ifndef TORCH_MERMAID_H
 #define TORCH_MERMAID_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -40,7 +39,6 @@ namespace torch_utils {
                 << ", out=" << linear->options.out_features();
         }
         else if (auto pool = module.as<torch::nn::MaxPool2dImpl>()) {
-            // MaxPool options access might vary by version, simplified here
             ss << "MaxPool";
         }
         return ss.str();
@@ -68,7 +66,7 @@ namespace torch_utils {
 
             file << "    INPUT[\"Input\"]:::other\n";
 
-            traverse_modules(model, file, prev_node, node_counter, "", 0, 2); // Max depth 2
+            traverse_modules(model, file, prev_node, node_counter, "", 0, 2);
 
             file.close();
             std::cout << "[SUCCESS] Mermaid diagram generated: " << output_path << std::endl;
@@ -116,64 +114,8 @@ namespace torch_utils {
         }
     };
 
-    /*static void generate_from_trace(torch::nn::Module& model, const std::vector<torch::Tensor>& inputs, const std::string& output_path) {
-        model.eval();
-        try {
-
-            auto traced = torch::jit::trace(model, inputs);
-            auto graph = traced.get_method("forward").graph();
-
-            std::ofstream file(output_path);
-            file << "flowchart TD\n";
-
-            std::map<const torch::jit::Value*, std::string> value_map;
-            int node_cnt = 0;
-
-            for (auto input : graph->inputs()) {
-                std::string id = "IN_" + std::to_string(node_cnt++);
-                value_map[input] = id;
-                file << "    " << id << "[Input]\n";
-            }
-
-            for (auto node : graph->nodes()) {
-                std::string kind = node->kind().toDisplayString();
-                if (kind == "prim::Constant" || kind == "prim::GetAttr") continue;
-
-                std::string node_id = "N_" + std::to_string(node_cnt++);
-                std::string label = kind;
-
-                if (node->scope()) {
-                    std::string scope_name = node->scope()->namesFromRoot();
-                    if (!scope_name.empty()) label += "\\n" + scope_name;
-                }
-
-                file << "    " << node_id << "[\"" << label << "\"]\n";
-
-                for (auto input : node->inputs()) {
-                    if (value_map.count(input)) {
-                        file << "    " << value_map[input] << " --> " << node_id << "\n";
-                    }
-                }
-
-                for (auto output : node->outputs()) {
-                    value_map[output] = node_id;
-                }
-            }
-
-            for (auto output : graph->outputs()) {
-                if (value_map.count(output)) {
-                    file << "    " << value_map[output] << " --> OUTPUT[Output]\n";
-                }
-            }
-
-            file.close();
-        }
-        catch (const std::exception& e) {
-            std::cerr << "[ERROR] Trace failed: " << e.what() << std::endl;
-        }
-    }
-    */
+    
 
 }
 
-#endif // TORCH_MERMAID_H
+#endif

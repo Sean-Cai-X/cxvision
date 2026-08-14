@@ -1,7 +1,6 @@
 #ifndef TORCH_UTIL_H
 #define TORCH_UTIL_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -30,6 +29,6 @@ namespace torch_utils {
         return torch::kCPU;
     }
 
-} // namespace torch_utils
+}
 
 #endif

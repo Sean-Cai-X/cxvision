@@ -1,7 +1,6 @@
 #ifndef TORCH_FP8_H
 #define TORCH_FP8_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include <torch/nn/module.h>
@@ -124,7 +123,7 @@ namespace torch_fp8 {
                     if (i != 1) reduce_dims.push_back(i);
                 }
 
-                auto amax = torch::amax(torch::abs(x), reduce_dims, /*keepdim=*/true);
+                auto amax = torch::amax(torch::abs(x), reduce_dims, true);
 
                 scale_val = calculate_per_channel_scale(amax, type_);
             }
@@ -155,7 +154,7 @@ namespace torch_fp8 {
 #ifdef USE_CUDA
             try {
                 auto prop = torch::cuda::get_device_properties(device.index());
-                return prop->major >= 8; // Ampere SM80+
+                return prop->major >= 8;
             }
             catch (...) { return false; }
 #endif
@@ -194,7 +193,6 @@ namespace torch_fp8 {
     private:
         void enable_fp8_inference() {
             for (auto module : model_->named_modules()) {
-                // name = module.key(), ptr = module.value()
                 if (auto conv = module.value()->as<torch::nn::Conv2dImpl>()) {
                     fp8_modules_[module.key()] = conv;
                 }
@@ -239,6 +237,6 @@ namespace torch_fp8 {
         return std::sqrt(mse);
     }
 
-} // namespace torch_fp8
+}
 
 #endif

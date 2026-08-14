@@ -1,18 +1,13 @@
 #ifndef TORCH_DEEPLABV3_H
 #define TORCH_DEEPLABV3_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 
 #include <torch/torch.h>
 #include "torch_resnet18.h"
 
-// =========================================================================
-// ASPP Module (Atrous Spatial Pyramid Pooling)
-// =========================================================================
 class ASPPConvImpl : public torch::nn::Module {
 public:
     ASPPConvImpl(int64_t in_channels, int64_t out_channels, int64_t dilation) {
-        // 3x3 Conv with dilation
         conv_ = register_module("conv", torch::nn::Conv2d(
             torch::nn::Conv2dOptions(in_channels, out_channels, 3)
             .padding(dilation).dilation(dilation).bias(false)));
@@ -41,11 +36,9 @@ public:
     }
 
     torch::Tensor forward(torch::Tensor x) {
-        auto size = x.sizes(); // [B, C, H, W]
-        // Global Average Pooling
+        auto size = x.sizes();
         auto out = torch::adaptive_avg_pool2d(x, { 1, 1 });
         out = relu_->forward(bn_->forward(conv_->forward(out)));
-        // Upsample back to original size
         return torch::nn::functional::interpolate(out,
             torch::nn::functional::InterpolateFuncOptions()
             .size(std::vector<int64_t>{size[2], size[3]})
@@ -64,7 +57,6 @@ public:
     ASPPImpl(int64_t in_channels, const std::vector<int64_t>& atrous_rates) {
         int64_t out_channels = 256;
 
-        // 1. 1x1 Conv
         conv1x1_ = register_module("conv1x1",
             torch::nn::Sequential(
                 torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, out_channels, 1).bias(false)),
@@ -72,17 +64,14 @@ public:
                 torch::nn::ReLU()
             ));
 
-        // 2. 3x3 Convs with rates
         for (size_t i = 0; i < atrous_rates.size(); ++i) {
             aspp_convs_.push_back(register_module(
                 "aspp_conv" + std::to_string(i),
                 ASPPConv(in_channels, out_channels, atrous_rates[i])));
         }
 
-        // 3. Image Pooling
         img_pool_ = register_module("img_pool", ASPPPooling(in_channels, out_channels));
 
-        // 4. Project
         project_ = register_module("project", torch::nn::Sequential(
             torch::nn::Conv2d(torch::nn::Conv2dOptions(out_channels * (2 + atrous_rates.size()), out_channels, 1).bias(false)),
             torch::nn::BatchNorm2d(out_channels),
@@ -110,9 +99,6 @@ private:
 };
 TORCH_MODULE(ASPP);
 
-// =========================================================================
-// DeepLabV3 Model
-// =========================================================================
 class DeepLabV3Impl : public torch::nn::Module {
 public:
     DeepLabV3Impl(int64_t num_classes, int64_t backbone_layers = 50) {
@@ -121,10 +107,8 @@ public:
 
         int64_t in_channels = 512;
 
-        // 2. ASPP
         aspp_ = register_module("aspp", ASPP(in_channels, std::vector<int64_t>{12, 24, 36}));
 
-        // 3. Head
         classifier_ = register_module("classifier", torch::nn::Conv2d(
             torch::nn::Conv2dOptions(256, num_classes, 1)));
     }
@@ -132,7 +116,6 @@ public:
     torch::Tensor forward(torch::Tensor x) {
         auto input_shape = x.sizes();
 
-        // Backbone Forward
 
         auto features = backbone_->as<ResNet18Impl>()->forward_features(x);
         TORCH_CHECK(!features.empty(), "ResNet18 forward_features returned no features");
@@ -140,7 +123,6 @@ public:
         auto aspp_out = aspp_->forward(features.back());
         auto out = classifier_->forward(aspp_out);
 
-        // Upsample to input size
         return torch::nn::functional::interpolate(out,
             torch::nn::functional::InterpolateFuncOptions()
             .size(std::vector<int64_t>{input_shape[2], input_shape[3]})
@@ -156,4 +138,4 @@ private:
 };
 TORCH_MODULE(DeepLabV3);
 
-#endif // TORCH_DEEPLABV3_H
+#endif

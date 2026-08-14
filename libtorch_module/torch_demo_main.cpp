@@ -93,7 +93,7 @@ void print_steps(TorchTestProfile profile) {
     }
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
     std::cout << std::unitbuf;

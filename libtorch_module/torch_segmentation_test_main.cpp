@@ -189,7 +189,7 @@ int export_cpp_state_dict_stage(const std::string& export_path) {
     }
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
     const auto options = parse_options(argc, argv);

@@ -20,12 +20,14 @@ enum class CxParserDocumentKind
     ShapeInteractionSuite,
     ScriptSuite,
     ScriptCatalog,
+    EvidenceChain,
     ParameterProfile,
     ParamRegression
 };
 
 struct CxScriptSuiteRuntime;
 struct CxScriptCatalogRuntime;
+struct CxScriptEvidenceChainRuntime;
 struct CxParameterProfileRuntime;
 struct CxParamRegressionRuntime;
 
@@ -64,6 +66,11 @@ public:
     bool ParseScriptCatalog(
         const std::string& path,
         CxScriptCatalogRuntime& snapshot,
+        std::string& reason);
+
+    bool ParseEvidenceChain(
+        const std::string& path,
+        CxScriptEvidenceChainRuntime& snapshot,
         std::string& reason);
 
     bool ParseParameterProfile(
@@ -128,6 +135,7 @@ private:
     bool m_shape_bindings_registered = false;
     bool m_suite_bindings_registered = false;
     bool m_catalog_bindings_registered = false;
+    bool m_evidence_chain_bindings_registered = false;
     bool m_parameter_bindings_registered = false;
     bool m_param_regression_bindings_registered = false;
     // Numeric locals declared by the currently executing CxScript. Their

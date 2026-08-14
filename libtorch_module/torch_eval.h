@@ -1,7 +1,6 @@
 #ifndef TORCH_EVAL_H
 #define TORCH_EVAL_H
 
-// NOTE: formatting normalized during the libtorch_module cleanup pass.
 #include <torch/csrc/api/include/torch/torch.h>
 #include <torch/csrc/api/include/torch/nn/module.h>
 #include <torch/csrc/api/include/torch/optim/optimizer.h>
@@ -24,14 +23,14 @@ namespace torch_eval {
 
         auto grids = torch::meshgrid({ grid_y, grid_x });
         TORCH_CHECK(grids.size() == 2, "meshgrid must return exactly 2 tensors");
-        torch::Tensor y = grids[0]; // shape: [h, w]
-        torch::Tensor x = grids[1]; // shape: [h, w]
+        torch::Tensor y = grids[0];
+        torch::Tensor x = grids[1];
 
         return { x, y };
     }
     inline torch::Tensor calculate_iou(
-        const torch::Tensor& boxes1, // [N, 4] (x1, y1, x2, y2)
-        const torch::Tensor& boxes2  // [M, 4] (x1, y1, x2, y2)
+        const torch::Tensor& boxes1,
+        const torch::Tensor& boxes2
     ) {
         TORCH_CHECK(boxes1.dim() == 2 && boxes1.size(1) == 4, "boxes1 must be [N,4]");
         TORCH_CHECK(boxes2.dim() == 2 && boxes2.size(1) == 4, "boxes2 must be [M,4]");
@@ -76,7 +75,7 @@ namespace torch_eval {
             return metrics;
         }
 
-        auto [sorted_scores, indices] = torch::sort(pred_scores, /*dim=*/0, /*descending=*/true);
+        auto [sorted_scores, indices] = torch::sort(pred_scores, 0, true);
         torch::Tensor sorted_boxes = pred_boxes.index_select(0, indices);
 
         torch::Tensor iou_matrix = calculate_iou(sorted_boxes, gt_boxes);
@@ -166,7 +165,6 @@ namespace torch_eval {
 
             auto output = model->forward(input);
 
-            // auto output = model.forward(input);
 
             if (device.type() == torch::kCUDA) {
                 torch::cuda::synchronize();
@@ -254,6 +252,6 @@ namespace torch_eval {
         return boxes / grid_wh;
     }
 
-} // namespace torch_eval
+}
 
-#endif // TORCH_EVAL_H
+#endif
