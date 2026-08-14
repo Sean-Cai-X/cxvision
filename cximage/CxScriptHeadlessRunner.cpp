@@ -1535,12 +1535,6 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             gauge.target_id = candidateContext.active_target_id;
             gauge.source = "headless";
             gauge.review_status = "pending_human_review";
-            gauge.tool = options.stage25_tool.empty() ? "FindLine" : options.stage25_tool;
-            gauge.has_line_gauge = true;
-            gauge.line_x0 = options.roi_x0;
-            gauge.line_y0 = options.roi_y0;
-            gauge.line_x1 = options.roi_x1;
-            gauge.line_y1 = options.roi_y1;
             gauge.tool_half_width = options.tool_half_width;
             gauge.threshold = options.threshold;
             gauge.method = options.method;
@@ -1549,6 +1543,43 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             gauge.hgap = options.hgap;
             gauge.gap = options.gap;
             gauge.filterprofile = options.filterprofile;
+
+            std::string lowerScript = options.script_path;
+            std::transform(lowerScript.begin(), lowerScript.end(), lowerScript.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            const std::string tool = !options.stage25_tool.empty()
+                ? options.stage25_tool
+                : (lowerScript.find("circle") != std::string::npos ? "FindCircle" :
+                   lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
+                   lowerScript.find("rect") != std::string::npos ? "FindRect" :
+                   lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
+                   "FindLine");
+            gauge.tool = tool;
+            if (tool == "FindCircle")
+            {
+                gauge.has_circle_gauge = true;
+                gauge.circle_cx = options.circle_cx;
+                gauge.circle_cy = options.circle_cy;
+                gauge.circle_px = options.circle_px;
+                gauge.circle_py = options.circle_py;
+            }
+            else if (tool == "FindEllipse")
+            {
+                gauge.has_ellipse_gauge = true;
+                gauge.ellipse_x0 = options.ellipse_x0;
+                gauge.ellipse_y0 = options.ellipse_y0;
+                gauge.ellipse_x1 = options.ellipse_x1;
+                gauge.ellipse_y1 = options.ellipse_y1;
+                gauge.ellipse_inner_scale_percent = options.ellipse_inner_scale_percent;
+            }
+            else
+            {
+                gauge.has_line_gauge = true;
+                gauge.line_x0 = options.roi_x0;
+                gauge.line_y0 = options.roi_y0;
+                gauge.line_x1 = options.roi_x1;
+                gauge.line_y1 = options.roi_y1;
+            }
 
             CxEvidenceCandidateSaveOptions candidateOptions;
             candidateOptions.root_dir = options.evidence_candidate_root.empty()

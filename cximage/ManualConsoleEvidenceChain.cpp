@@ -2624,6 +2624,10 @@ static void EnsureStructuredCxImageCatalogEntriesLoaded(ManualTestContext& conte
     context.catalog_path = catalogPath;
 }
 
+static bool EvidenceThumbLooksLikeFindEllipseLocal(
+    const ScriptEvidenceThumb& thumb,
+    const ScriptEvidenceGroup& group);
+
 static void AppendSavedEvidenceCandidatesLocal(
     ManualTestContext& context,
     const std::function<ScriptEvidenceGroup&(const std::string&)>& findGroup)
@@ -2682,6 +2686,7 @@ static void AppendSavedEvidenceCandidatesLocal(
 
     auto bindWorkingRevisionToOriginal =
         [&](const ScriptEvidenceThumb& candidate)
+        -> bool
     {
         for (auto& group : context.script_evidence_groups)
         {
@@ -2753,9 +2758,10 @@ static void AppendSavedEvidenceCandidatesLocal(
                         " original_script=" + original.script_path +
                         " image_id=" + original.image_id +
                         " target_id=" + original.target_id);
-                return;
+                return true;
             }
         }
+        return false;
     };
 
     for (const auto& bindingPath : bindings)
@@ -2886,8 +2892,14 @@ static void AppendSavedEvidenceCandidatesLocal(
                 ReadJsonStringFieldLocal(analysis, "primary_object_status");
         }
         PopulateEditableObjectBindingForThumbLocal(thumb);
-        if (candidateGaugeValid)
-            bindWorkingRevisionToOriginal(thumb);
+        const bool reboundToOriginal =
+            candidateGaugeValid && bindWorkingRevisionToOriginal(thumb);
+
+        if (reboundToOriginal &&
+            EvidenceThumbLooksLikeFindEllipseLocal(thumb, ScriptEvidenceGroup{}))
+        {
+            continue;
+        }
 
         const std::string candidateTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
         ScriptEvidenceGroup& group = findGroup(
@@ -2998,6 +3010,254 @@ static bool HasEvidenceChainThumbIdentityLocal(
     }
     return false;
 }
+
+static std::string EvidenceThumbCaseNameLocal(const ScriptEvidenceThumb& thumb)
+{
+    std::string value;
+    if (!thumb.case_id.empty())
+        value = thumb.case_id;
+    else if (!thumb.source_case_id.empty())
+        value = thumb.source_case_id;
+    else if (!thumb.script_id.empty())
+        value = thumb.script_id;
+    else if (!thumb.script_path.empty())
+        value = std::filesystem::path(thumb.script_path).stem().string();
+
+    const std::size_t candidateSuffix = value.find(" [");
+    if (candidateSuffix != std::string::npos)
+        value.erase(candidateSuffix);
+    return value;
+}
+
+static std::string LowerEvidenceKeyLocal(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+static bool EvidenceThumbLooksLikeFindEllipseLocal(
+    const ScriptEvidenceThumb& thumb,
+    const ScriptEvidenceGroup& group)
+{
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(thumb.tool.empty() ? group.label : thumb.tool);
+    if (normalizedTool == "FindEllipse")
+        return true;
+
+    const std::string key = LowerEvidenceKeyLocal(
+        thumb.case_id + " " +
+        thumb.source_case_id + " " +
+        thumb.script_id + " " +
+        thumb.script_path + " " +
+        thumb.source_evidence_script_path + " " +
+        thumb.reason + " " +
+        group.label);
+    return key.find("findellipse") != std::string::npos ||
+        key.find("find_ellipse") != std::string::npos;
+}
+
+static std::string FindEllipseCaseDedupeKeyLocal(
+    const ScriptEvidenceThumb& thumb)
+{
+    std::string caseName = EvidenceThumbCaseNameLocal(thumb);
+    if (caseName.empty())
+        caseName = thumb.case_id;
+    if (caseName.empty())
+        caseName = thumb.source_case_id;
+    if (caseName.empty())
+        caseName = thumb.script_id;
+    if (caseName.empty())
+        caseName = thumb.script_path;
+    if (caseName.empty())
+        caseName = thumb.source_evidence_script_path;
+    if (caseName.empty())
+        caseName = thumb.image_id + "|" + thumb.target_id;
+    return LowerEvidenceKeyLocal(caseName);
+}
+
+static bool FindEllipseThumbIsVerifiedLocal(const ScriptEvidenceThumb& thumb)
+{
+    const std::string key = LowerEvidenceKeyLocal(
+        thumb.evidence_category_override + " " + thumb.status + " " +
+        thumb.reason);
+    return key.find("verified") != std::string::npos;
+}
+
+static int FindEllipseThumbRestoreScoreLocal(const ScriptEvidenceThumb& thumb)
+{
+    int score = 0;
+    if (thumb.has_saved_state)
+        score += 1000;
+    if (thumb.is_candidate)
+        score += 300;
+    if (!thumb.runtime_globals_path.empty())
+        score += 250;
+    if (!thumb.gauge_annotation_path.empty())
+        score += 250;
+    if (!thumb.working_script_snapshot_path.empty())
+        score += 250;
+    if (!thumb.candidate_dir.empty())
+        score += 150;
+    if (!thumb.evidence_binding_path.empty())
+        score += 120;
+    if (!thumb.parameter_snapshot_path.empty())
+        score += 80;
+    if (FindEllipseThumbIsVerifiedLocal(thumb))
+        score += 70;
+    if (thumb.parameter_summary.find('=') != std::string::npos)
+        score += 40;
+    if (!thumb.image_path.empty())
+        score += 20;
+    if (!thumb.script_path.empty())
+        score += 10;
+    return score;
+}
+
+static void MergeFindEllipseThumbPayloadLocal(
+    ScriptEvidenceThumb& dst,
+    const ScriptEvidenceThumb& src)
+{
+    auto copyIfEmpty = [](std::string& target, const std::string& value)
+    {
+        if (target.empty() && !value.empty())
+            target = value;
+    };
+
+    copyIfEmpty(dst.candidate_id, src.candidate_id);
+    copyIfEmpty(dst.candidate_dir, src.candidate_dir);
+    copyIfEmpty(dst.evidence_binding_path, src.evidence_binding_path);
+    copyIfEmpty(dst.parameter_snapshot_path, src.parameter_snapshot_path);
+    copyIfEmpty(dst.runtime_globals_path, src.runtime_globals_path);
+    copyIfEmpty(dst.gauge_annotation_path, src.gauge_annotation_path);
+    copyIfEmpty(dst.working_script_snapshot_path,
+                src.working_script_snapshot_path);
+    copyIfEmpty(dst.source_evidence_script_path,
+                src.source_evidence_script_path);
+    copyIfEmpty(dst.case_id, src.case_id);
+    copyIfEmpty(dst.script_id, src.script_id);
+    copyIfEmpty(dst.script_path, src.script_path);
+    copyIfEmpty(dst.image_id, src.image_id);
+    copyIfEmpty(dst.image_path, src.image_path);
+    copyIfEmpty(dst.thumbnail_path, src.thumbnail_path);
+    copyIfEmpty(dst.target_id, src.target_id);
+    copyIfEmpty(dst.tool, src.tool);
+    copyIfEmpty(dst.parameter_summary, src.parameter_summary);
+    copyIfEmpty(dst.evidence_output_root, src.evidence_output_root);
+    copyIfEmpty(dst.contract_id, src.contract_id);
+    copyIfEmpty(dst.expected_result, src.expected_result);
+    copyIfEmpty(dst.expected_policy_guard, src.expected_policy_guard);
+    copyIfEmpty(dst.evidence_level, src.evidence_level);
+    copyIfEmpty(dst.evidence_case_role, src.evidence_case_role);
+    copyIfEmpty(dst.source_case_id, src.source_case_id);
+    copyIfEmpty(dst.primary_object_type, src.primary_object_type);
+    copyIfEmpty(dst.primary_object_name, src.primary_object_name);
+    copyIfEmpty(dst.primary_object_status, src.primary_object_status);
+
+    if (dst.dataset_images.empty() && !src.dataset_images.empty())
+        dst.dataset_images = src.dataset_images;
+    if (dst.annotations.empty() && !src.annotations.empty())
+        dst.annotations = src.annotations;
+
+    dst.has_saved_state = dst.has_saved_state || src.has_saved_state;
+    dst.is_candidate = dst.is_candidate || src.is_candidate;
+    dst.manual_review_required = dst.manual_review_required ||
+        src.manual_review_required;
+    dst.promotion_candidate = dst.promotion_candidate ||
+        src.promotion_candidate;
+
+    if (FindEllipseThumbIsVerifiedLocal(src))
+    {
+        dst.evidence_category_override = "Verified";
+        dst.status = "verified";
+        if (dst.reason.empty() ||
+            dst.reason.find("manual category:") != std::string::npos)
+        {
+            dst.reason = src.reason.empty()
+                ? "manual category: verified"
+                : src.reason;
+        }
+    }
+    else
+    {
+        copyIfEmpty(dst.evidence_category_override,
+                    src.evidence_category_override);
+        copyIfEmpty(dst.status, src.status);
+        copyIfEmpty(dst.reason, src.reason);
+    }
+}
+
+static void PruneFindEllipseDuplicateCasesByNameLocal(ManualTestContext& context)
+{
+    std::vector<std::string> caseOrder;
+    std::unordered_map<std::string, ScriptEvidenceThumb> bestThumbByCase;
+    std::unordered_map<std::string, int> bestScoreByCase;
+
+    for (const ScriptEvidenceGroup& group : context.script_evidence_groups)
+    {
+        for (const ScriptEvidenceThumb& thumb : group.thumbs)
+        {
+            if (!EvidenceThumbLooksLikeFindEllipseLocal(thumb, group))
+                continue;
+
+            const std::string caseKey = FindEllipseCaseDedupeKeyLocal(thumb);
+            if (caseKey.empty())
+                continue;
+
+            auto found = bestThumbByCase.find(caseKey);
+            if (found == bestThumbByCase.end())
+            {
+                if (caseOrder.size() >= 3)
+                    continue;
+                caseOrder.push_back(caseKey);
+                bestThumbByCase[caseKey] = thumb;
+                bestScoreByCase[caseKey] =
+                    FindEllipseThumbRestoreScoreLocal(thumb);
+                continue;
+            }
+
+            const int score = FindEllipseThumbRestoreScoreLocal(thumb);
+            if (score > bestScoreByCase[caseKey])
+            {
+                ScriptEvidenceThumb merged = thumb;
+                MergeFindEllipseThumbPayloadLocal(merged, found->second);
+                found->second = std::move(merged);
+                bestScoreByCase[caseKey] = score;
+            }
+            else
+            {
+                MergeFindEllipseThumbPayloadLocal(found->second, thumb);
+            }
+        }
+    }
+
+    std::unordered_map<std::string, bool> emitted;
+    for (ScriptEvidenceGroup& group : context.script_evidence_groups)
+    {
+        std::vector<ScriptEvidenceThumb> kept;
+        kept.reserve(group.thumbs.size());
+
+        for (ScriptEvidenceThumb& thumb : group.thumbs)
+        {
+            if (!EvidenceThumbLooksLikeFindEllipseLocal(thumb, group))
+            {
+                kept.push_back(std::move(thumb));
+                continue;
+            }
+
+            const std::string caseKey = FindEllipseCaseDedupeKeyLocal(thumb);
+            auto best = bestThumbByCase.find(caseKey);
+            if (best == bestThumbByCase.end() || emitted[caseKey])
+                continue;
+
+            kept.push_back(best->second);
+            emitted[caseKey] = true;
+        }
+
+        group.thumbs.swap(kept);
+    }
+}
+
 
 static int AppendCxScriptEvidenceChainFilesLocal(
     ManualTestContext& context,
@@ -3480,6 +3740,8 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       {
         return findOrCreateGroup("", "", label);
       });
+
+  PruneFindEllipseDuplicateCasesByNameLocal(m_manualTest);
 
   std::stable_sort(
       m_manualTest.script_evidence_groups.begin(),
@@ -4557,10 +4819,12 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                     resolved.parameter_summary,
                     lockedParamReason))
             {
-                reason = "failed to apply evidence locked parameters: " +
-                    lockedParamReason;
-                return false;
+                return abortSelection(
+                    "parameter_summary_apply",
+                    "failed to apply evidence locked parameters: " +
+                        lockedParamReason);
             }
+
             SyncEvidenceLockedGlobalsToManualGaugeLocal(
                 staged,
                 resolved.script_path,

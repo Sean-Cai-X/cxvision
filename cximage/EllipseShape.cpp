@@ -46,6 +46,11 @@ void EllipseShape::setAngleDegrees(double angle_deg)
     m_angleDeg = angle_deg;
 }
 
+void EllipseShape::setInnerScalePercent(double percent)
+{
+    m_innerScalePercent = std::max(0.0, std::min(99.0, percent));
+}
+
 static double MinDistanceToSegment(
     double px, double py,
     double x0, double y0,
@@ -143,6 +148,24 @@ CxShapeHit EllipseShape::hitTest(double x, double y, double tolerance) const
     if (ry_handle_dist_sq <= t_sq)
         return { true, CxShapeHandleRole::RadiusY, -1, std::sqrt(ry_handle_dist_sq) };
 
+    if (m_innerScalePercent > 0.0)
+    {
+        EllipseShape inner(m_cx, m_cy, innerRadiusX(), innerRadiusY(), m_angleDeg);
+        std::vector<CxShapePoint> innerBoundary;
+        inner.EnumerateBoundaryPoints(innerBoundary, 96);
+        const double innerBoundaryDistance =
+            MinDistanceToClosedPolyline(innerBoundary, x, y);
+        if (innerBoundaryDistance <= tolerance)
+        {
+            return {
+                true,
+                CxShapeHandleRole::InnerRadius,
+                -1,
+                innerBoundaryDistance
+            };
+        }
+    }
+
     std::vector<CxShapePoint> boundary;
     EnumerateBoundaryPoints(boundary, 96);
     const double boundaryDistance = MinDistanceToClosedPolyline(boundary, x, y);
@@ -163,6 +186,16 @@ void EllipseShape::enumerateHandles(std::vector<CxShapeHandle>& out) const
     out.push_back({ CxShapeHandleRole::Center, -1, { m_cx, m_cy }, "C" });
     out.push_back({ CxShapeHandleRole::RadiusX, -1, { m_cx + m_rx * c, m_cy + m_rx * s }, "Rx" });
     out.push_back({ CxShapeHandleRole::RadiusY, -1, { m_cx - m_ry * s, m_cy + m_ry * c }, "Ry" });
+    if (m_innerScalePercent > 0.0)
+    {
+        const double inner_rx = innerRadiusX();
+        out.push_back({
+            CxShapeHandleRole::InnerRadius,
+            -1,
+            { m_cx + inner_rx * c, m_cy + inner_rx * s },
+            "Rin"
+        });
+    }
 }
 
 void EllipseShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x, double y)
@@ -198,6 +231,19 @@ void EllipseShape::dragHandle(CxShapeHandleRole role, int vertex_index, double x
         m_ry = ry;
         break;
     }
+    case CxShapeHandleRole::InnerRadius:
+    {
+        const double rotation = RADIAN(m_angleDeg);
+        const double axis_x = std::cos(rotation);
+        const double axis_y = std::sin(rotation);
+        const double projected =
+            std::abs((x - m_cx) * axis_x + (y - m_cy) * axis_y);
+        const double inner_rx = std::min(m_rx - 1.0, std::max(0.0, projected));
+        m_innerScalePercent = m_rx > 1.0
+            ? std::max(0.0, std::min(99.0, inner_rx * 100.0 / m_rx))
+            : 0.0;
+        break;
+    }
     default:
         break;
     }
@@ -225,6 +271,14 @@ void EllipseShape::drawshape(gp_Path& painter)
     gp_Pnt p0(m_cx - m_rx, m_cy - m_ry, 0);
     gp_Pnt p1(m_cx + m_rx, m_cy + m_ry, 0);
     painter.AddRectangularEllipse(p0, p1);
+    if (m_innerScalePercent > 0.0)
+    {
+        const double inner_rx = innerRadiusX();
+        const double inner_ry = innerRadiusY();
+        gp_Pnt inner0(m_cx - inner_rx, m_cy - inner_ry, 0);
+        gp_Pnt inner1(m_cx + inner_rx, m_cy + inner_ry, 0);
+        painter.AddRectangularEllipse(inner0, inner1);
+    }
 }
 
 bool EllipseShape::exportEllipse(CxShapePoint& center, double& radius_x, double& radius_y, double& angle) const

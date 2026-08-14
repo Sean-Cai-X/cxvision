@@ -33,3 +33,11 @@ global_selected_linegap = linegap;
 
 m_ellipse.measureRobust(&m_image);
 m_ellipse.fitellipse();
+
+global_selected_method = method;
+global_selected_threshold = threshold;
+global_selected_linegap = linegap;
+global_valid_points_count = m_ellipse.getvalidpointcount();
+global_has_fit_ellipse = m_ellipse.hasfitresult();
+global_avgdist = m_ellipse.getavgdist();
+global_ellipse_ref = m_ellipse.get_result();

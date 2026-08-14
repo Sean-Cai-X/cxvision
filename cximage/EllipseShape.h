@@ -16,12 +16,16 @@ public:
     void setRadiusX(double rx);
     void setRadiusY(double ry);
     void setAngleDegrees(double angle_deg);
+    void setInnerScalePercent(double percent);
 
     double cx() const { return m_cx; }
     double cy() const { return m_cy; }
     double radiusX() const { return m_rx; }
     double radiusY() const { return m_ry; }
     double angleDegrees() const { return m_angleDeg; }
+    double innerScalePercent() const { return m_innerScalePercent; }
+    double innerRadiusX() const { return m_rx * m_innerScalePercent * 0.01; }
+    double innerRadiusY() const { return m_ry * m_innerScalePercent * 0.01; }
 
     CxShapeHit hitTest(double x, double y, double tolerance) const override;
     void enumerateHandles(std::vector<CxShapeHandle>& out) const override;
@@ -44,6 +48,7 @@ private:
     double m_rx = 50.0;
     double m_ry = 30.0;
     double m_angleDeg = 0.0;
+    double m_innerScalePercent = 0.0;
 };
 
 #endif

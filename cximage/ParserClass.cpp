@@ -924,6 +924,8 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindEllipse::getresultangle);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "getavgdist",
                             &FindEllipse::getavgdist);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse, "getvalidpointcount",
+                            &FindEllipse::getvalidpointcount);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "hasfitresult",
                             &FindEllipse::hasfitresult);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "get_result",

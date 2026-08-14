@@ -183,6 +183,18 @@ public:
     void setfindsetting(int ifindset);
     int getfindsetting() const { return m_ifindset; }
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
+    int getfilterborw() const { return m_ifilterborw; }
+    int getfiltermin() const { return static_cast<int>(m_ifiltermin); }
+    int getfiltermax() const { return static_cast<int>(m_ifiltermax); }
+    int getdebugprefilterused() const { return m_debug_prefilter_used; }
+    int getdebugprefiltercomponentcount() const { return m_debug_prefilter_component_count; }
+    int getdebugprefilteracceptedcount() const { return m_debug_prefilter_accepted_count; }
+    int getdebugprefilterrejectedcount() const { return m_debug_prefilter_rejected_count; }
+    int getdebugprefiltermaxarea() const { return m_debug_prefilter_max_area; }
+    int getdebugprefiltermaxw() const { return m_debug_prefilter_max_w; }
+    int getdebugprefiltermaxh() const { return m_debug_prefilter_max_h; }
+    int getdebugprefilterforegroundbefore() const { return m_debug_prefilter_foreground_before; }
+    int getdebugprefilterforegroundafter() const { return m_debug_prefilter_foreground_after; }
     void setselectedgenum(int iedgenum);
     void setpointconsistency(int enabled, int range);
 
@@ -197,6 +209,7 @@ public:
     double getresultradiusy();
     double getresultangle();
     double getavgdist();
+    int getvalidpointcount();
     double hasfitresult();
     double get_result() { return hasfitresult(); }
 
@@ -238,6 +251,15 @@ private:
     int m_ifilterborw;//21 w ,22 b ,23
     int64 m_ifiltermax;
     int64 m_ifiltermin;
+    int m_debug_prefilter_used = 0;
+    int m_debug_prefilter_component_count = 0;
+    int m_debug_prefilter_accepted_count = 0;
+    int m_debug_prefilter_rejected_count = 0;
+    int m_debug_prefilter_max_area = 0;
+    int m_debug_prefilter_max_w = 0;
+    int m_debug_prefilter_max_h = 0;
+    int m_debug_prefilter_foreground_before = 0;
+    int m_debug_prefilter_foreground_after = 0;
 
     int m_iselectedgenum;
     int m_ineedfixs;
@@ -318,6 +340,7 @@ private:
     void BuildEllipseFeatureGraph();
     void FindEllipseComponentsInGraph();
     void SelectBestEllipseSequence();
+    void ConvertEllipseCandidatesToMeasurePoints();
     void ConvertEllipseSequenceToMeasurePoints(int sequence_index);
 
     std::vector<EllipseEdgeBandCandidate> m_ellipse_edge_band_candidates;

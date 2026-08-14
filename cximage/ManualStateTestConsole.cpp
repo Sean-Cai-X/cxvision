@@ -978,10 +978,30 @@ void SeedDefaultManualGlobals(
         gauge.line_x1 = gauge.line_x0 + context.runtime_int_vars["global_region_roi_w"];
         gauge.line_y1 = gauge.line_y0 + context.runtime_int_vars["global_region_roi_h"];
     }
+    else if (isFastMatchScript)
+    {
+        // FastMatch Key Parameter Controls read shared learn parameters from
+        // ManualGaugeState and ROI/action parameters from runtime_int_vars.
+        // Keep both stores initialized from the same script-default snapshot;
+        // otherwise the first Learn click can re-inject stale/default gauge
+        // values over edited FastMatch globals.
+        gauge.tool = "FastMatch";
+        gauge.primary_object_type = "FastMatch";
+        gauge.primary_object_name = "m_match";
+        gauge.primary_object_status = "script_default";
+        gauge.line_x0 = context.runtime_int_vars["global_learn_roi_x"];
+        gauge.line_y0 = context.runtime_int_vars["global_learn_roi_y"];
+        gauge.line_x1 = gauge.line_x0 + context.runtime_int_vars["global_learn_roi_w"];
+        gauge.line_y1 = gauge.line_y0 + context.runtime_int_vars["global_learn_roi_h"];
+        gauge.wgap = context.runtime_int_vars["global_wgap"];
+        gauge.hgap = context.runtime_int_vars["global_hgap"];
+        gauge.filterprofile = context.runtime_int_vars["global_filterprofile"];
+        gauge.findsetting = context.runtime_int_vars["global_findsetting"];
+    }
 
     if (gauge.has_circle_gauge || gauge.has_line_gauge ||
         gauge.has_ellipse_gauge || isGridPatternScript ||
-        isRegionPatternScript)
+        isRegionPatternScript || isFastMatchScript)
         context.current_gauge = gauge;
 }
 

@@ -1169,7 +1169,7 @@ struct ManualTestContext
   int findcircle_point_consistency_range = 0;
   std::vector<ManualFindCircleEdgeParamState> findcircle_edge_params;
   int findellipse_selected_scan_edge = 0;
-  int findellipse_scan_edge_count = 4;
+  int findellipse_scan_edge_count = 3;
   int findellipse_best_fit_edge = 0;
   int findellipse_recommended_fit_edge = 0;
   int findellipse_relation_edge = 0;

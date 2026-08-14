@@ -42,6 +42,7 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <algorithm>
 
 #ifndef CXCORE_ENABLE_VIEWCONTROLLER_CUDA
 #define CXCORE_ENABLE_VIEWCONTROLLER_CUDA 0
@@ -529,12 +530,29 @@ namespace
     applied += setIntIfUsed("global_findcircle_attach_edge", existingOr("global_findcircle_attach_edge", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findcircle_point_consistency_enabled", existingOr("global_findcircle_point_consistency_enabled", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findcircle_point_consistency_range", existingOr("global_findcircle_point_consistency_range", 0)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_selected_edge", existingOr("global_findellipse_selected_edge", 0)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_edge_count", existingOr("global_findellipse_edge_count", 1)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_best_edge", existingOr("global_findellipse_best_edge", 0)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_recommended_edge", existingOr("global_findellipse_recommended_edge", 0)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_relation_edge", existingOr("global_findellipse_relation_edge", 0)) ? 1 : 0;
-    applied += setIntIfUsed("global_findellipse_attach_edge", existingOr("global_findellipse_attach_edge", 0)) ? 1 : 0;
+    const int findEllipseEdgeCount =
+        std::max(1, std::min(3, existingOr("global_findellipse_edge_count", 3)));
+    applied += setIntIfUsed(
+        "global_findellipse_selected_edge",
+        std::max(-1, std::min(findEllipseEdgeCount,
+                              existingOr("global_findellipse_selected_edge", 0)))) ? 1 : 0;
+    applied += setIntIfUsed("global_findellipse_edge_count", findEllipseEdgeCount) ? 1 : 0;
+    applied += setIntIfUsed(
+        "global_findellipse_best_edge",
+        std::max(0, std::min(findEllipseEdgeCount,
+                             existingOr("global_findellipse_best_edge", 0)))) ? 1 : 0;
+    applied += setIntIfUsed(
+        "global_findellipse_recommended_edge",
+        std::max(0, std::min(findEllipseEdgeCount,
+                             existingOr("global_findellipse_recommended_edge", 0)))) ? 1 : 0;
+    applied += setIntIfUsed(
+        "global_findellipse_relation_edge",
+        std::max(0, std::min(findEllipseEdgeCount,
+                             existingOr("global_findellipse_relation_edge", 0)))) ? 1 : 0;
+    applied += setIntIfUsed(
+        "global_findellipse_attach_edge",
+        std::max(0, std::min(findEllipseEdgeCount,
+                             existingOr("global_findellipse_attach_edge", 0)))) ? 1 : 0;
     applied += setIntIfUsed("global_findellipse_point_consistency_enabled", existingOr("global_findellipse_point_consistency_enabled", 0)) ? 1 : 0;
     applied += setIntIfUsed("global_findellipse_point_consistency_range", existingOr("global_findellipse_point_consistency_range", 0)) ? 1 : 0;
 
@@ -2207,6 +2225,65 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
         return true;
     };
 
+    auto applyRectToken = [&](const std::string& key,
+                              const std::string& globalX,
+                              const std::string& globalY,
+                              const std::string& globalW,
+                              const std::string& globalH) -> bool
+    {
+        const std::string pattern = key + "=";
+        const std::size_t pos = parameterSummary.find(pattern);
+        if (pos == std::string::npos)
+            return false;
+
+        std::size_t cursor = pos + pattern.size();
+        int values[4] = {0, 0, 0, 0};
+        for (int i = 0; i < 4; ++i)
+        {
+            while (cursor < parameterSummary.size() &&
+                   (std::isspace(static_cast<unsigned char>(parameterSummary[cursor])) ||
+                    parameterSummary[cursor] == ','))
+            {
+                ++cursor;
+            }
+
+            std::size_t end = cursor;
+            while (end < parameterSummary.size() &&
+                   (std::isdigit(static_cast<unsigned char>(parameterSummary[end])) ||
+                    parameterSummary[end] == '-' ||
+                    parameterSummary[end] == '+'))
+            {
+                ++end;
+            }
+
+            if (end == cursor)
+                return false;
+
+            try
+            {
+                values[i] = std::stoi(parameterSummary.substr(cursor, end - cursor));
+            }
+            catch (...)
+            {
+                return false;
+            }
+
+            cursor = end;
+            if (i < 3)
+            {
+                if (cursor >= parameterSummary.size() || parameterSummary[cursor] != ',')
+                    return false;
+                ++cursor;
+            }
+        }
+
+        context.runtime_int_vars[globalX] = values[0];
+        context.runtime_int_vars[globalY] = values[1];
+        context.runtime_int_vars[globalW] = values[2];
+        context.runtime_int_vars[globalH] = values[3];
+        return true;
+    };
+
     int applied = 0;
 
     applied += applyIntToken("method", "global_method") ? 1 : 0;
@@ -2264,6 +2341,8 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     applied += applyIntToken("ellipse_y1", "global_ellipse_y1") ? 1 : 0;
     applied += applyIntToken("ellipse_inner_scale_percent", "global_findellipse_inner_scale_percent") ? 1 : 0;
     applied += applyIntToken("inner_scale_percent", "global_findellipse_inner_scale_percent") ? 1 : 0;
+    applied += applyIntToken("findellipse_findsetting", "global_findellipse_findsetting") ? 1 : 0;
+    applied += applyIntToken("ellipse_findsetting", "global_findellipse_findsetting") ? 1 : 0;
 
     applied += applyIntToken("learn_roi_x", "global_learn_roi_x") ? 1 : 0;
     applied += applyIntToken("learn_roi_y", "global_learn_roi_y") ? 1 : 0;
@@ -2273,6 +2352,17 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     applied += applyIntToken("search_roi_y", "global_search_roi_y") ? 1 : 0;
     applied += applyIntToken("search_roi_w", "global_search_roi_w") ? 1 : 0;
     applied += applyIntToken("search_roi_h", "global_search_roi_h") ? 1 : 0;
+
+    applied += applyRectToken("learn_roi_xywh",
+                              "global_learn_roi_x",
+                              "global_learn_roi_y",
+                              "global_learn_roi_w",
+                              "global_learn_roi_h") ? 4 : 0;
+    applied += applyRectToken("search_roi_xywh",
+                              "global_search_roi_x",
+                              "global_search_roi_y",
+                              "global_search_roi_w",
+                              "global_search_roi_h") ? 4 : 0;
 
     if (applied == 0)
     {

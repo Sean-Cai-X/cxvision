@@ -357,6 +357,25 @@ bool CaptureFindEllipseResult(
     output.avgdist = tool.getavgdist();
     output.actual_findsetting = tool.getfindsetting();
     output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
+    output.object_prefilter_applied = tool.getdebugprefilterused() != 0;
+    output.object_filter_borw = tool.getfilterborw();
+    output.object_filter_min = tool.getfiltermin();
+    output.object_filter_max = tool.getfiltermax();
+    output.object_component_count = tool.getdebugprefiltercomponentcount();
+    output.object_component_accepted_count =
+        tool.getdebugprefilteracceptedcount();
+    output.object_component_rejected_count =
+        tool.getdebugprefilterrejectedcount();
+    output.object_component_max_area = tool.getdebugprefiltermaxarea();
+    output.object_component_max_width = tool.getdebugprefiltermaxw();
+    output.object_component_max_height = tool.getdebugprefiltermaxh();
+    output.object_foreground_before =
+        tool.getdebugprefilterforegroundbefore();
+    output.object_foreground_after =
+        tool.getdebugprefilterforegroundafter();
+    output.object_algorithm_branch =
+        output.object_prefilter_applied ? "FindEllipse.measureRobust.prefilter"
+                                        : std::string();
     output.failure_stage = output.has_fit_ellipse
         ? std::string()
         : (snapshot.measure_points_count > 0 ? "fitellipse" : "measure_points");

@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <opencv2/core/core.hpp>
 #include <opencv2/core/version.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -45,6 +46,136 @@ int ClampSizeToInt(std::size_t value) {
       static_cast<std::size_t>(std::numeric_limits<int>::max());
   return value > max_value ? std::numeric_limits<int>::max()
                            : static_cast<int>(value);
+}
+
+int CopyEllipseSeamTailRows(Image *process_image, int process_width,
+                            int line_count, int tail_rows) {
+  if (process_image == nullptr || process_width <= 0 || line_count <= 0 ||
+      tail_rows <= 0)
+    return 0;
+
+  cv::Mat &mat = process_image->getmat();
+  if (mat.empty())
+    return 0;
+
+  const int copy_width = std::min(process_width, mat.cols);
+  const int wrap_rows = std::min(std::max(0, tail_rows), line_count);
+  if (copy_width <= 0 || wrap_rows <= 0)
+    return 0;
+
+  int copied = 0;
+  for (int pad = 0; pad < wrap_rows; ++pad) {
+    const int src_row = pad;
+    const int dst_row = line_count + pad;
+    if (src_row < 0 || src_row >= mat.rows || dst_row < 0 ||
+        dst_row >= mat.rows)
+      continue;
+
+    mat(cv::Rect(0, src_row, copy_width, 1))
+        .copyTo(mat(cv::Rect(0, dst_row, copy_width, 1)));
+    ++copied;
+  }
+
+  return copied;
+}
+
+int MergeEllipseSeamTailRows(Image *process_image, int process_width,
+                             int line_count, int tail_rows) {
+  if (process_image == nullptr || process_width <= 0 || line_count <= 0 ||
+      tail_rows <= 0)
+    return 0;
+
+  cv::Mat &mat = process_image->getmat();
+  if (mat.empty())
+    return 0;
+
+  const int copy_width = std::min(process_width, mat.cols);
+  const int wrap_rows = std::min(std::max(0, tail_rows), line_count);
+  if (copy_width <= 0 || wrap_rows <= 0)
+    return 0;
+
+  int merged = 0;
+  const int channels = mat.channels();
+  for (int pad = 0; pad < wrap_rows; ++pad) {
+    const int src_row = line_count + pad;
+    const int dst_row = pad;
+    if (src_row < 0 || src_row >= mat.rows || dst_row < 0 ||
+        dst_row >= mat.rows)
+      continue;
+
+    for (int x = 0; x < copy_width; ++x) {
+      uchar *dst = mat.ptr<uchar>(dst_row) + x * channels;
+      const uchar *src = mat.ptr<uchar>(src_row) + x * channels;
+      for (int channel = 0; channel < channels; ++channel) {
+        if (src[channel] > dst[channel]) {
+          dst[channel] = src[channel];
+          ++merged;
+        }
+      }
+    }
+  }
+
+  return merged;
+}
+
+int CountEllipseForegroundPixels(const cv::Mat &mat, int process_width,
+                                 int line_count) {
+  if (mat.empty() || process_width <= 0 || line_count <= 0)
+    return 0;
+
+  const int rows = std::min(line_count, mat.rows);
+  const int cols = std::min(process_width, mat.cols);
+  const int channels = mat.channels();
+  int count = 0;
+
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      const uchar *px = mat.ptr<uchar>(y) + x * channels;
+      for (int channel = 0; channel < channels; ++channel) {
+        if (px[channel] > 0) {
+          ++count;
+          break;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+int ComputeEllipseEndpointGuard(int line_length, int linegap) {
+  if (line_length <= 12)
+    return 0;
+  const int linegap_guard = std::max(6, std::max(1, linegap) * 2);
+  const int length_guard = std::max(1, line_length / 12);
+  return std::min(linegap_guard, length_guard);
+}
+
+double ComputeEllipseInnerCandidateNormGuard(int inner_scale_percent) {
+  if (inner_scale_percent <= 0)
+    return 0.0;
+
+  const double inner_norm =
+      std::max(0.0, std::min(0.95, static_cast<double>(inner_scale_percent) *
+                                       0.01));
+  return std::min(0.95, inner_norm + 0.18);
+}
+
+void ApplyEllipseObjectPrefilter(FindObject *find_object, Image *process_image,
+                                 int process_width, int line_count,
+                                 int filter_mode, int filter_min,
+                                 int filter_max) {
+  if (find_object == nullptr || process_image == nullptr ||
+      process_width <= 0 || line_count <= 0)
+    return;
+
+  find_object->setrect(0, 0, process_width, line_count);
+  find_object->setbrow(filter_mode);
+  find_object->setminmaxarea(filter_min, filter_max);
+  if (filter_mode == 21 || filter_mode == 22)
+    find_object->MeasureConnectedComponents(*process_image);
+  else
+    find_object->Measure(*process_image);
 }
 
 int RoundToInt(double value) {
@@ -331,11 +462,19 @@ void FindEllipse::Setgap(int gap) {
         const double boundary_dist =
             rx * ry / std::sqrt(ry * ry * nx * nx + rx * rx * ny * ny);
         const double clamped_dist = std::min(boundary_dist * outer_ratio, dist);
+        const double inner_ratio =
+            std::max(0.0, std::min(0.99,
+                                   static_cast<double>(m_inner_scale_percent) *
+                                       0.01));
+        const double inner_dist =
+            std::min(std::max(0.0, boundary_dist * inner_ratio),
+                     std::max(0.0, clamped_dist - 1.0));
+        const int start_x = RoundToInt(cx + nx * inner_dist);
+        const int start_y = RoundToInt(cy + ny * inner_dist);
         const int end_x = RoundToInt(cx + nx * clamped_dist);
         const int end_y = RoundToInt(cy + ny * clamped_dist);
         m_lines.push_back(aline1);
-        m_lines[m_lines.size() - 1].setline(RoundToInt(cx), RoundToInt(cy),
-                                            end_x, end_y);
+        m_lines[m_lines.size() - 1].setline(start_x, start_y, end_x, end_y);
       } else {
         m_lines.push_back(aline1);
         m_lines[m_lines.size() - 1].setline(RoundToInt(cx), RoundToInt(cy),
@@ -1268,6 +1407,10 @@ double FindEllipse::getresultangle() { return m_fit_angle_deg; }
 
 double FindEllipse::getavgdist() { return m_fit_avgdist; }
 
+int FindEllipse::getvalidpointcount() {
+  return static_cast<int>(m_measurepoints.size());
+}
+
 double FindEllipse::hasfitresult() { return m_has_fit_result ? 1.0 : 0.0; }
 
 void FindEllipse::measure(void *pimage) {
@@ -1457,6 +1600,7 @@ void FindEllipse::PublishDisplayShapes(ICxShapeSink &sink,
     auto outer =
         std::make_unique<EllipseShape>(snapshot.center_x, snapshot.center_y,
                                        snapshot.radius_x, snapshot.radius_y);
+    outer->setInnerScalePercent(snapshot.inner_scale_percent);
 
     sink.UpsertShape(owner_ref + ".roi_ellipse", "FindEllipse", owner_ref,
                      "setellipse", "roi", true, false, std::move(outer));
@@ -1531,6 +1675,42 @@ void FindEllipse::MeasureRobust(Image &image) {
             << " linegap=" << m_iSelectPointGap << " gamma=" << m_igamarate
             << std::endl;
 
+  m_has_fit_result = false;
+  m_fit_avgdist = 0.0;
+  m_measurepoints.clear();
+  m_measure_failure_stage.clear();
+  m_measure_failure_reason.clear();
+
+  m_scan_candidate_lines = 0;
+  m_scan_total_candidates = 0;
+  m_scan_accepted_points_before_gate = 0;
+  m_accepted_boundary_ratio_sum = 0.0;
+  m_accepted_boundary_ratio_min = 999.0;
+  m_accepted_boundary_ratio_max = -999.0;
+  m_candidate_policy = "ellipse_robust_scan_buffer_edge_bands";
+
+  m_accepted_points_outside_ellipse_count = 0;
+  m_accepted_point_norm_sum = 0.0;
+  m_accepted_point_norm_count = 0;
+  m_accepted_point_norm_min = 999.0;
+  m_accepted_point_norm_max = -999.0;
+  m_rejected_boundary_band_candidate_count = 0;
+  m_rejected_boundary_band_norm_sum = 0.0;
+  m_rejected_boundary_band_norm_min = 999.0;
+  m_rejected_boundary_band_norm_max = -999.0;
+  m_point_consistency_input_points = 0;
+  m_point_consistency_output_points = 0;
+  m_point_consistency_removed_points = 0;
+  m_debug_prefilter_used = 0;
+  m_debug_prefilter_component_count = 0;
+  m_debug_prefilter_accepted_count = 0;
+  m_debug_prefilter_rejected_count = 0;
+  m_debug_prefilter_max_area = 0;
+  m_debug_prefilter_max_w = 0;
+  m_debug_prefilter_max_h = 0;
+  m_debug_prefilter_foreground_before = 0;
+  m_debug_prefilter_foreground_after = 0;
+
   m_ellipse_edge_band_candidates.clear();
   m_ellipse_fit_candidate_sequences.clear();
   m_ellipse_best_sequence_index = -1;
@@ -1555,6 +1735,11 @@ void FindEllipse::MeasureRobust(Image &image) {
   {
     const int isize = ClampSizeToInt(m_lines.size());
     if (isize <= 0) {
+      m_measure_failure_stage = "scan_lines_empty";
+      m_measure_failure_reason =
+          "FindEllipse robust measure has no scan lines; check setellipse/setgap order.";
+      LogFindEllipseMeasureProbe(
+          "robust_measure", "failed", m_measure_failure_reason);
       return;
     }
 
@@ -1563,6 +1748,11 @@ void FindEllipse::MeasureRobust(Image &image) {
       ilineslen = m_lines[0].getlinesize();
 
     if (ilineslen <= 0) {
+      m_measure_failure_stage = "scan_line_invalid";
+      m_measure_failure_reason =
+          "FindEllipse robust measure has invalid scan line length.";
+      LogFindEllipseMeasureProbe(
+          "robust_measure", "failed", m_measure_failure_reason);
       return;
     }
 
@@ -1570,24 +1760,92 @@ void FindEllipse::MeasureRobust(Image &image) {
       m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
     }
 
-    g_pbackimage->setroi(0, 0, ilineslen, isize);
+    const int seam_tail_rows = std::min(5, isize);
+    const int seam_rows_copied =
+        CopyEllipseSeamTailRows(g_pbackimage, ilineslen, isize,
+                                seam_tail_rows);
+
+    g_pbackimage->setroi(0, 0, ilineslen, isize + seam_tail_rows);
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate,
                                             m_iSelectPointGap, m_iMethod);
+    const int seam_values_merged =
+        MergeEllipseSeamTailRows(g_pbackimage, ilineslen, isize,
+                                 seam_tail_rows);
+    LogFindEllipseMeasureProbe(
+        "robust_measure_seam_extension", "finished",
+        "circular tail padding rows=" + std::to_string(seam_rows_copied) +
+            " merged_values=" + std::to_string(seam_values_merged));
+
+    if ((m_ifindset & 0x01) != 0 && g_pbackfindobject != nullptr) {
+      const int prefilter_rows = isize + seam_tail_rows;
+      const int filter_min =
+          ClampLongLongToInt(static_cast<long long>(m_ifiltermin));
+      const int filter_max =
+          ClampLongLongToInt(static_cast<long long>(m_ifiltermax));
+      m_debug_prefilter_foreground_before =
+          CountEllipseForegroundPixels(g_pbackimage->getmat(), ilineslen,
+                                       prefilter_rows);
+
+      ApplyEllipseObjectPrefilter(g_pbackfindobject, g_pbackimage, ilineslen,
+                                  prefilter_rows, m_ifilterborw, filter_min,
+                                  filter_max);
+
+      MergeEllipseSeamTailRows(g_pbackimage, ilineslen, isize,
+                               seam_tail_rows);
+      m_debug_prefilter_used = 1;
+      m_debug_prefilter_component_count =
+          g_pbackfindobject->getdebugcomponentcount();
+      m_debug_prefilter_accepted_count =
+          g_pbackfindobject->getdebugacceptedcount();
+      m_debug_prefilter_rejected_count =
+          g_pbackfindobject->getdebugrejectedcount();
+      m_debug_prefilter_max_area =
+          g_pbackfindobject->getdebugmaxcomponentarea();
+      m_debug_prefilter_max_w =
+          g_pbackfindobject->getdebugmaxcomponentw();
+      m_debug_prefilter_max_h =
+          g_pbackfindobject->getdebugmaxcomponenth();
+      m_debug_prefilter_foreground_after =
+          CountEllipseForegroundPixels(g_pbackimage->getmat(), ilineslen,
+                                       prefilter_rows);
+
+      LogFindEllipseMeasureProbe(
+          "robust_measure_object_prefilter", "finished",
+          "ifindset=" + std::to_string(m_ifindset) +
+              " filter=" + std::to_string(m_ifilterborw) +
+              " min=" + std::to_string(filter_min) +
+              " max=" + std::to_string(filter_max) +
+              " components=" +
+              std::to_string(m_debug_prefilter_component_count) +
+              " accepted=" +
+              std::to_string(m_debug_prefilter_accepted_count) +
+              " rejected=" +
+              std::to_string(m_debug_prefilter_rejected_count) +
+              " foreground=" +
+              std::to_string(m_debug_prefilter_foreground_before) + "->" +
+              std::to_string(m_debug_prefilter_foreground_after));
+    }
   }
 
   CollectEllipseEdgeBandsRobust(image);
 
   if (m_ellipse_edge_band_candidates.empty()) {
+    m_measure_failure_stage = "threshold_no_edge";
+    m_measure_failure_reason =
+        "FindEllipse robust preprocessing produced no scan-buffer edge bands.";
     LogFindEllipseMeasureProbe("robust_measure", "no_candidates",
-                               "no edge bands found");
+                               m_measure_failure_reason);
     return;
   }
 
   BuildEllipseFeatureGraph();
 
   if (m_ellipse_feature_graph.nodes.empty()) {
+    m_measure_failure_stage = "no_graph";
+    m_measure_failure_reason =
+        "FindEllipse robust edge bands did not create feature graph nodes.";
     LogFindEllipseMeasureProbe("robust_measure", "no_graph",
-                               "feature graph empty");
+                               m_measure_failure_reason);
     return;
   }
 
@@ -1598,20 +1856,26 @@ void FindEllipse::MeasureRobust(Image &image) {
   if (m_ellipse_best_sequence_index < 0 ||
       m_ellipse_best_sequence_index >=
           static_cast<int>(m_ellipse_fit_candidate_sequences.size())) {
+    m_measure_failure_stage = "no_sequence";
+    m_measure_failure_reason =
+        "FindEllipse robust feature graph did not select a valid sequence.";
     LogFindEllipseMeasureProbe("robust_measure", "no_sequence",
-                               "no valid sequence selected");
+                               m_measure_failure_reason);
     return;
   }
 
-  ConvertEllipseSequenceToMeasurePoints(m_ellipse_best_sequence_index);
+  ConvertEllipseCandidatesToMeasurePoints();
+  if (m_measurepoints.size() <= 0)
+    ConvertEllipseSequenceToMeasurePoints(m_ellipse_best_sequence_index);
+  m_scan_accepted_points_before_gate = ClampSizeToInt(m_measurepoints.size());
+  m_point_consistency_input_points = ClampSizeToInt(m_measurepoints.size());
+  m_point_consistency_output_points = m_point_consistency_input_points;
 
   LogFindEllipseMeasureProbe(
       "robust_measure", "success",
       "robust measurement completed with " +
-          std::to_string(
-              m_ellipse_fit_candidate_sequences[m_ellipse_best_sequence_index]
-                  .node_count) +
-          " points");
+          std::to_string(m_measurepoints.size()) +
+          " points selected_edge=" + std::to_string(m_iselectedgenum));
 }
 
 void FindEllipse::CollectEllipseEdgeBandsRobust(Image &image) {
@@ -1641,25 +1905,108 @@ void FindEllipse::CollectEllipseEdgeBandsRobust(Image &image) {
   if (half_width < 1)
     half_width = 3;
 
+  const double ellipse_cx =
+      (static_cast<double>(m_roi_x0) + static_cast<double>(m_roi_x1)) * 0.5;
+  const double ellipse_cy =
+      (static_cast<double>(m_roi_y0) + static_cast<double>(m_roi_y1)) * 0.5;
+  const double ellipse_rx =
+      std::max(1.0, std::abs(static_cast<double>(m_roi_x1) -
+                             static_cast<double>(m_roi_x0)) *
+                        0.5);
+  const double ellipse_ry =
+      std::max(1.0, std::abs(static_cast<double>(m_roi_y1) -
+                             static_cast<double>(m_roi_y0)) *
+                        0.5);
+  const double inner_candidate_norm_guard =
+      ComputeEllipseInnerCandidateNormGuard(m_inner_scale_percent);
+
+  int scan_buffer_out_of_range = 0;
+  int short_line_count = 0;
+
+  auto scanBufferForeground = [&](int scan_x, int scan_y) -> bool {
+    if (scan_x < 0 || scan_x >= w || scan_y < 0 || scan_y >= h) {
+      ++scan_buffer_out_of_range;
+      return false;
+    }
+
+    if (binary.channels() == 1)
+      return binary.at<uchar>(scan_y, scan_x) > 0;
+
+    const int channels = binary.channels();
+    const uchar *row = binary.ptr<uchar>(scan_y);
+    const uchar *px = row + scan_x * channels;
+    for (int channel = 0; channel < channels; ++channel) {
+      if (px[channel] > 0)
+        return true;
+    }
+    return false;
+  };
+
   for (int line_idx = 0; line_idx < static_cast<int>(m_lines.size());
        ++line_idx) {
     auto &line = m_lines[line_idx];
     int candidate_index = 0;
     int line_size = line.getlinesize();
+    const int scan_line_size = std::min(line_size, w);
+    if (scan_line_size <= 0 || line_idx < 0 || line_idx >= h) {
+      ++short_line_count;
+      continue;
+    }
 
     bool in_foreground = false;
     int seg_start = -1;
     int seg_end = -1;
+    const int endpoint_guard =
+        ComputeEllipseEndpointGuard(scan_line_size, m_iSelectPointGap);
 
-    for (int pt_idx = 0; pt_idx < line_size; ++pt_idx) {
-      gp_Pnt pt = line.getlinepoint(pt_idx);
-      int ix = static_cast<int>(std::lround(pt.X()));
-      int iy = static_cast<int>(std::lround(pt.Y()));
+    auto appendCandidate = [&](int start, int end) {
+      const int seg_len = end - start;
+      if (seg_len < 2)
+        return;
 
-      if (ix < 0 || ix >= w || iy < 0 || iy >= h)
-        continue;
+      const int seg_center = (start + end) / 2;
+      if (seg_center < 0 || seg_center >= line_size)
+        return;
+      if (endpoint_guard > 0 &&
+          (seg_center <= endpoint_guard ||
+           seg_center >= scan_line_size - 1 - endpoint_guard))
+        return;
 
-      bool is_foreground = binary.at<uchar>(iy, ix) > 0;
+      gp_Pnt center_pt = line.getlinepoint(seg_center);
+      if (inner_candidate_norm_guard > 0.0) {
+        const double norm =
+            EllipseNorm(center_pt.X(), center_pt.Y(), ellipse_cx, ellipse_cy,
+                        ellipse_rx, ellipse_ry);
+        if (norm <= inner_candidate_norm_guard)
+          return;
+      }
+
+      EllipseEdgeBandCandidate candidate;
+      candidate.scan_index = line_idx;
+      candidate.candidate_index = candidate_index++;
+      candidate.start_param = start;
+      candidate.end_param = end;
+      candidate.center_param = seg_center;
+      candidate.x = center_pt.X();
+      candidate.y = center_pt.Y();
+      candidate.arc_length = static_cast<double>(seg_len);
+      candidate.response_strength = static_cast<double>(seg_len);
+      candidate.polarity = 1.0;
+      candidate.edge_rank = seg_len >= 5 ? 0 : (seg_len >= 3 ? 1 : 2);
+      candidate.valid = true;
+
+      const int denom = line_size > 1 ? line_size : 1;
+      const double angle = static_cast<double>(seg_center) * 360.0 /
+                           static_cast<double>(denom);
+      candidate.profile = ExtractEllipseProfileAt(
+          gray, candidate.x, candidate.y, angle, 1.0, 1.0, half_width);
+
+      if (candidate.profile.size() >= 5)
+        m_ellipse_edge_band_candidates.push_back(candidate);
+    };
+
+    for (int pt_idx = 0; pt_idx < scan_line_size; ++pt_idx) {
+      const bool is_foreground = scanBufferForeground(pt_idx, line_idx);
 
       if (is_foreground && !in_foreground) {
         in_foreground = true;
@@ -1667,71 +2014,31 @@ void FindEllipse::CollectEllipseEdgeBandsRobust(Image &image) {
       } else if (!is_foreground && in_foreground) {
         in_foreground = false;
         seg_end = pt_idx;
-
-        int seg_len = seg_end - seg_start;
-        if (seg_len >= 2) {
-          int seg_center = (seg_start + seg_end) / 2;
-          gp_Pnt center_pt = line.getlinepoint(seg_center);
-
-          EllipseEdgeBandCandidate candidate;
-          candidate.scan_index = line_idx;
-          candidate.candidate_index = candidate_index++;
-          candidate.start_param = seg_start;
-          candidate.end_param = seg_end;
-          candidate.center_param = seg_center;
-          candidate.x = center_pt.X();
-          candidate.y = center_pt.Y();
-          candidate.arc_length = static_cast<double>(seg_len);
-          candidate.response_strength = static_cast<double>(seg_len);
-          candidate.polarity = 1.0;
-          candidate.edge_rank = seg_len >= 5 ? 0 : (seg_len >= 3 ? 1 : 2);
-          candidate.valid = true;
-
-          int denom = line_size > 1 ? line_size : 1;
-          double angle = static_cast<double>(seg_center) * 360.0 /
-                         static_cast<double>(denom);
-          candidate.profile = ExtractEllipseProfileAt(
-              gray, candidate.x, candidate.y, angle, 1.0, 1.0, half_width);
-
-          if (candidate.profile.size() >= 5) {
-            m_ellipse_edge_band_candidates.push_back(candidate);
-          }
-        }
+        appendCandidate(seg_start, seg_end);
       }
     }
 
     if (in_foreground) {
-      seg_end = line_size;
-      int seg_len = seg_end - seg_start;
-      if (seg_len >= 2) {
-        int seg_center = (seg_start + seg_end) / 2;
-        gp_Pnt center_pt = line.getlinepoint(seg_center);
-
-        EllipseEdgeBandCandidate candidate;
-        candidate.scan_index = line_idx;
-        candidate.candidate_index = candidate_index++;
-        candidate.start_param = seg_start;
-        candidate.end_param = seg_end;
-        candidate.center_param = seg_center;
-        candidate.x = center_pt.X();
-        candidate.y = center_pt.Y();
-        candidate.arc_length = static_cast<double>(seg_len);
-        candidate.response_strength = static_cast<double>(seg_len);
-        candidate.polarity = 1.0;
-        candidate.edge_rank = 0;
-        candidate.valid = true;
-
-        int denom = line_size > 1 ? line_size : 1;
-        double angle = static_cast<double>(seg_center) * 360.0 /
-                       static_cast<double>(denom);
-        candidate.profile = ExtractEllipseProfileAt(
-            gray, candidate.x, candidate.y, angle, 1.0, 1.0, half_width);
-
-        if (candidate.profile.size() >= 5) {
-          m_ellipse_edge_band_candidates.push_back(candidate);
-        }
-      }
+      appendCandidate(seg_start, scan_line_size);
     }
+
+    if (candidate_index > 0) {
+      ++m_scan_candidate_lines;
+      m_scan_total_candidates += candidate_index;
+    }
+  }
+
+  {
+    std::ostringstream oss;
+    oss << "scan_buffer=" << w << "x" << h
+        << " scan_lines=" << m_lines.size()
+        << " edge_band_candidates=" << m_ellipse_edge_band_candidates.size()
+        << " candidate_lines=" << m_scan_candidate_lines
+        << " total_candidates=" << m_scan_total_candidates
+        << " short_lines=" << short_line_count
+        << " scan_buffer_oob=" << scan_buffer_out_of_range;
+    LogFindEllipseMeasureProbe(
+        "robust_collect_edge_bands", "finished", oss.str());
   }
 }
 
@@ -1909,6 +2216,236 @@ void FindEllipse::SelectBestEllipseSequence() {
     m_ellipse_best_sequence_index = 0;
   } else {
     m_ellipse_best_sequence_index = -1;
+  }
+}
+
+void FindEllipse::ConvertEllipseCandidatesToMeasurePoints() {
+  m_measurepoints.clear();
+
+  std::map<int, std::vector<int>> candidate_params_by_scan;
+  for (const auto &candidate : m_ellipse_edge_band_candidates) {
+    if (!candidate.valid || !std::isfinite(candidate.x) ||
+        !std::isfinite(candidate.y))
+      continue;
+    candidate_params_by_scan[candidate.scan_index].push_back(
+        candidate.center_param);
+  }
+
+  for (auto &scan_candidates : candidate_params_by_scan) {
+    auto &line_candidates = scan_candidates.second;
+    std::sort(line_candidates.begin(), line_candidates.end());
+    line_candidates.erase(
+        std::unique(line_candidates.begin(), line_candidates.end()),
+        line_candidates.end());
+  }
+
+  const int scan_count = static_cast<int>(m_lines.size());
+  const double ellipse_cx =
+      (static_cast<double>(m_roi_x0) + static_cast<double>(m_roi_x1)) * 0.5;
+  const double ellipse_cy =
+      (static_cast<double>(m_roi_y0) + static_cast<double>(m_roi_y1)) * 0.5;
+  const double ellipse_rx =
+      std::max(1.0, std::abs(static_cast<double>(m_roi_x1) -
+                             static_cast<double>(m_roi_x0)) *
+                        0.5);
+  const double ellipse_ry =
+      std::max(1.0, std::abs(static_cast<double>(m_roi_y1) -
+                             static_cast<double>(m_roi_y0)) *
+                        0.5);
+  const double inner_candidate_norm_guard =
+      ComputeEllipseInnerCandidateNormGuard(m_inner_scale_percent);
+  auto candidatePointAllowed = [&](int scan_index, int param) -> bool {
+    if (scan_index < 0 || scan_index >= scan_count)
+      return false;
+    if (param < 0)
+      return false;
+    if (inner_candidate_norm_guard <= 0.0)
+      return true;
+
+    auto &line = m_lines[static_cast<std::size_t>(scan_index)];
+    if (param >= line.getlinesize())
+      return false;
+
+    const gp_Pnt point = line.getlinepoint(param);
+    const double norm =
+        EllipseNorm(point.X(), point.Y(), ellipse_cx, ellipse_cy, ellipse_rx,
+                    ellipse_ry);
+    return norm > inner_candidate_norm_guard;
+  };
+
+  if (m_iselectedgenum == 0 && scan_count >= 4) {
+    auto wrapIndex = [&](int index) -> int {
+      int wrapped = index % scan_count;
+      if (wrapped < 0)
+        wrapped += scan_count;
+      return wrapped;
+    };
+    auto paramsAt = [&](int index) -> const std::vector<int> * {
+      const auto found = candidate_params_by_scan.find(wrapIndex(index));
+      return found == candidate_params_by_scan.end() ? nullptr
+                                                     : &found->second;
+    };
+    auto sampleParam = [](const std::vector<int> &params, int index,
+                          int expected_count) -> int {
+      if (params.empty())
+        return -1;
+      if (params.size() == 1 || expected_count <= 1)
+        return params.front();
+      const double t =
+          static_cast<double>(index) / static_cast<double>(expected_count - 1);
+      const int mapped = static_cast<int>(
+          std::lround(t * static_cast<double>(params.size() - 1)));
+      return params[static_cast<std::size_t>(
+          std::max(0, std::min(mapped, static_cast<int>(params.size()) - 1)))];
+    };
+    auto hasNearbyParam = [](const std::vector<int> &params, int param) {
+      for (int existing : params) {
+        if (std::abs(existing - param) <= 2)
+          return true;
+      }
+      return false;
+    };
+    auto repairSeamScan = [&](int scan_index) {
+      std::vector<int> &current =
+          candidate_params_by_scan[wrapIndex(scan_index)];
+
+      const int max_search = std::min(8, std::max(2, scan_count / 12));
+      const std::vector<int> *left = nullptr;
+      const std::vector<int> *right = nullptr;
+      for (int offset = 1; offset <= max_search && left == nullptr; ++offset) {
+        const std::vector<int> *candidate = paramsAt(scan_index - offset);
+        if (candidate != nullptr && !candidate->empty())
+          left = candidate;
+      }
+      for (int offset = 1; offset <= max_search && right == nullptr; ++offset) {
+        const std::vector<int> *candidate = paramsAt(scan_index + offset);
+        if (candidate != nullptr && !candidate->empty())
+          right = candidate;
+      }
+      if (left == nullptr && right == nullptr)
+        return;
+
+      const int expected_count = std::max(
+          static_cast<int>(left != nullptr ? left->size() : 0),
+          static_cast<int>(right != nullptr ? right->size() : 0));
+      if (expected_count <= static_cast<int>(current.size()))
+        return;
+
+      const int line_size =
+          m_lines[static_cast<std::size_t>(wrapIndex(scan_index))].getlinesize();
+      if (line_size <= 0)
+        return;
+      const int endpoint_guard =
+          ComputeEllipseEndpointGuard(line_size, m_iSelectPointGap);
+      for (int index = 0; index < expected_count; ++index) {
+        int sum = 0;
+        int count = 0;
+        if (left != nullptr) {
+          const int param = sampleParam(*left, index, expected_count);
+          if (param >= 0) {
+            sum += param;
+            ++count;
+          }
+        }
+        if (right != nullptr) {
+          const int param = sampleParam(*right, index, expected_count);
+          if (param >= 0) {
+            sum += param;
+            ++count;
+          }
+        }
+        if (count <= 0)
+          continue;
+
+        const int repaired_param =
+            std::max(0, std::min(line_size - 1, sum / count));
+        if (endpoint_guard > 0 &&
+            (repaired_param <= endpoint_guard ||
+             repaired_param >= line_size - 1 - endpoint_guard))
+          continue;
+        if (!candidatePointAllowed(wrapIndex(scan_index), repaired_param))
+          continue;
+        if (!hasNearbyParam(current, repaired_param))
+          current.push_back(repaired_param);
+      }
+
+      std::sort(current.begin(), current.end());
+      current.erase(std::unique(current.begin(), current.end()),
+                    current.end());
+    };
+
+    const int seam_window = std::min(5, std::max(2, scan_count / 16));
+    for (int offset = 0; offset < seam_window; ++offset) {
+      repairSeamScan(offset);
+      repairSeamScan(scan_count - 1 - offset);
+    }
+  }
+
+  for (auto &scan_candidates : candidate_params_by_scan) {
+    const int scan_index = scan_candidates.first;
+    if (scan_index < 0 || scan_index >= scan_count)
+      continue;
+
+    auto &line_candidates = scan_candidates.second;
+    std::sort(line_candidates.begin(), line_candidates.end());
+
+    if (m_iselectedgenum == 0) {
+      for (const int param : line_candidates) {
+        if (!candidatePointAllowed(scan_index, param))
+          continue;
+        m_measurepoints.addpoint(
+            m_lines[static_cast<std::size_t>(scan_index)].getlinepoint(param));
+      }
+      continue;
+    }
+
+    int selected_param = -1;
+    if (m_iselectedgenum < 0) {
+      selected_param =
+          line_candidates.empty() ? -1 : line_candidates.back();
+    } else if (m_iselectedgenum <= static_cast<int>(line_candidates.size())) {
+      selected_param =
+          line_candidates[static_cast<std::size_t>(m_iselectedgenum - 1)];
+    }
+
+    if (selected_param >= 0) {
+      if (!candidatePointAllowed(scan_index, selected_param))
+        continue;
+      m_measurepoints.addpoint(
+          m_lines[static_cast<std::size_t>(scan_index)]
+              .getlinepoint(selected_param));
+    }
+  }
+
+  m_accepted_point_norm_sum = 0.0;
+  m_accepted_point_norm_count = 0;
+  m_accepted_point_norm_min = 999.0;
+  m_accepted_point_norm_max = -999.0;
+  m_accepted_points_outside_ellipse_count = 0;
+  m_accepted_boundary_ratio_sum = 0.0;
+  m_accepted_boundary_ratio_min = 999.0;
+  m_accepted_boundary_ratio_max = -999.0;
+
+  for (int index = 0; index < static_cast<int>(m_measurepoints.size());
+       ++index) {
+    const double norm =
+        EllipseNorm(m_measurepoints.getx(index), m_measurepoints.gety(index),
+                    ellipse_cx, ellipse_cy, ellipse_rx, ellipse_ry);
+    if (!std::isfinite(norm))
+      continue;
+
+    m_accepted_point_norm_sum += norm;
+    ++m_accepted_point_norm_count;
+    m_accepted_point_norm_min = std::min(m_accepted_point_norm_min, norm);
+    m_accepted_point_norm_max = std::max(m_accepted_point_norm_max, norm);
+    if (norm > 1.05)
+      ++m_accepted_points_outside_ellipse_count;
+
+    m_accepted_boundary_ratio_sum += norm;
+    m_accepted_boundary_ratio_min =
+        std::min(m_accepted_boundary_ratio_min, norm);
+    m_accepted_boundary_ratio_max =
+        std::max(m_accepted_boundary_ratio_max, norm);
   }
 }
 
