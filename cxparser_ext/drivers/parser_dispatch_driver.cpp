@@ -508,6 +508,15 @@ void FillTorchContractReportFields(const ParserDispatchCaseSpec &spec,
     return;
   }
 
+  if (spec.case_id == "torch.resnet18.baseline.feature")
+  {
+    report.metrics = "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref";
+    report.tolerance = "resnet18_baseline_feature";
+    report.failure_mode = "none";
+    report.summary = "resnet18 feature baseline ready";
+    return;
+  }
+
   if (spec.case_id == "torch.resnet50.baseline.feature")
   {
     report.metrics = "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref";
@@ -523,6 +532,15 @@ void FillTorchContractReportFields(const ParserDispatchCaseSpec &spec,
     report.tolerance = "deeplab_unified_infer";
     report.failure_mode = "none";
     report.summary = "deeplab unified infer ready";
+    return;
+  }
+
+  if (spec.case_id == "torch.resnet18.baseline.infer")
+  {
+    report.metrics = "classifier_output_shape,baseline_class_ref";
+    report.tolerance = "resnet18_baseline_infer";
+    report.failure_mode = "none";
+    report.summary = "resnet18 infer baseline ready";
     return;
   }
 

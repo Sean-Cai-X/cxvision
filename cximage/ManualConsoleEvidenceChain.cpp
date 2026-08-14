@@ -169,16 +169,49 @@ static std::vector<std::string> BuildEvidenceCategoryOverrideLookupKeysLocal(
     return keys;
 }
 
+static std::string PreferEvidenceCategoryOverrideLocal(
+    const std::string& current,
+    const std::string& candidate)
+{
+    if (candidate.empty())
+        return current;
+    if (current.empty())
+        return candidate;
+    if (current == candidate)
+        return current;
+    if (candidate == "Verified" || current == "Verified")
+        return "Verified";
+    if (candidate == "Defect" || current == "Defect")
+        return "Defect";
+    if (candidate == "To Verify" || current == "To Verify")
+        return "To Verify";
+    return current;
+}
+
+static void StoreEvidenceCategoryOverrideLocal(
+    ManualTestContext& context,
+    const ScriptEvidenceThumb& thumb,
+    const std::string& category)
+{
+    for (const std::string& key :
+         BuildEvidenceCategoryOverrideLookupKeysLocal(thumb))
+    {
+        if (!key.empty())
+            context.evidence_category_overrides[key] = category;
+    }
+}
+
 static std::string ResolveEvidenceCategoryOverrideLocal(
     const ManualTestContext& context,
     const ScriptEvidenceThumb& thumb)
 {
+    std::string resolved;
     for (const std::string& key :
          BuildEvidenceCategoryOverrideLookupKeysLocal(thumb))
     {
         const auto it = context.evidence_category_overrides.find(key);
         if (it != context.evidence_category_overrides.end())
-            return it->second;
+            resolved = PreferEvidenceCategoryOverrideLocal(resolved, it->second);
     }
 
     /*
@@ -186,9 +219,9 @@ static std::string ResolveEvidenceCategoryOverrideLocal(
      * saved candidates, catalog rows and working revisions.  Not every row
      * carries the same stable key, so after exact lookup we allow a curated
      * case-level/image-target override to match rows whose script/reason/path
-     * still contains the locked evidence identity.  This keeps To Verify from
-     * being polluted by stale candidate rows after an automatic propagation
-     * pass has already moved the case to Process Validation.
+     * still contains the locked evidence identity.  A manual Verified move
+     * must win over older To Verify entries for duplicate rows of the same
+     * case, otherwise the UI appears not to move the case.
      */
     const std::string haystack =
         thumb.case_id + " " +
@@ -210,7 +243,9 @@ static std::string ResolveEvidenceCategoryOverrideLocal(
                 (thumb.case_id == caseId ||
                  haystack.find(caseId) != std::string::npos))
             {
-                return entry.second;
+                resolved = PreferEvidenceCategoryOverrideLocal(
+                    resolved,
+                    entry.second);
             }
             continue;
         }
@@ -226,12 +261,14 @@ static std::string ResolveEvidenceCategoryOverrideLocal(
                 thumb.image_id == imageId &&
                 thumb.target_id == targetId)
             {
-                return entry.second;
+                resolved = PreferEvidenceCategoryOverrideLocal(
+                    resolved,
+                    entry.second);
             }
         }
     }
 
-    return thumb.evidence_category_override;
+    return resolved.empty() ? thumb.evidence_category_override : resolved;
 }
 
 static bool HasCuratedFindGeometryCategoryOverridesLocal(
@@ -7339,8 +7376,10 @@ void ViewController::DrawOneScriptEvidenceRow(
                                       const char* reason)
             {
                 thumb.evidence_category_override = category;
-                m_manualTest.evidence_category_overrides[
-                    BuildEvidenceCategoryOverrideKeyLocal(thumb)] = category;
+                StoreEvidenceCategoryOverrideLocal(
+                    m_manualTest,
+                    thumb,
+                    category);
                 thumb.status = status;
                 thumb.reason = reason;
                 m_manualTest.script_evidence_row_refs_dirty = true;

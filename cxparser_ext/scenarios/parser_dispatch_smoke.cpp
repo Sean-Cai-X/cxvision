@@ -1130,6 +1130,10 @@ int main()
                                     "roi_patch,class_label",
                                     "mobilevit roi patch + class label") ||
       !RunTorchContractMainlineCase("feature",
+                                    "torch.resnet18.baseline.feature",
+                                    "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref",
+                                    "resnet18 feature baseline ready") ||
+      !RunTorchContractMainlineCase("feature",
                                     "torch.resnet50.baseline.feature",
                                     "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref",
                                     "resnet50 feature baseline ready") ||
@@ -1149,6 +1153,10 @@ int main()
                                     "torch.deeplab.unified.infer",
                                     "region_tensor,mask_label,baseline_feature_ref",
                                     "deeplab unified infer ready") ||
+      !RunTorchContractMainlineCase("infer",
+                                    "torch.resnet18.baseline.infer",
+                                    "classifier_output_shape,baseline_class_ref",
+                                    "resnet18 infer baseline ready") ||
       !RunTorchContractMainlineCase("infer",
                                     "torch.resnet50.baseline.infer",
                                     "classifier_output_shape,baseline_class_ref",

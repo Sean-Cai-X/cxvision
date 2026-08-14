@@ -610,6 +610,15 @@ inline TorchExecutionProfileBridge ResolveTorchExecutionProfileBridge(
     if (it != meta_values.end())
       bridge.attach_back_confidence = it->second;
   }
+  else if (context.case_name == "torch.resnet18.baseline.infer" ||
+           context.case_name == "torch.resnet18.baseline.feature")
+  {
+    weight_items.push_back(
+      std::make_pair("resnet18",
+                     detail::ResolveEnvPathOrDefaultBridgeHelper(
+                       "LIBTORCH_MODULE_RESNET18_WEIGHTS",
+                       "resnet18_weights.pt")));
+  }
   else if (context.case_name == "torch.resnet50.baseline.infer" ||
            context.case_name == "torch.resnet50.baseline.feature")
   {

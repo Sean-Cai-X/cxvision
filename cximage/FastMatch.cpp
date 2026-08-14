@@ -1065,7 +1065,11 @@ void FastMatch::Learn(Image &image) {
   m_fastmatch_learn_a2_count = 0;
   m_fastmatch_learn_b2_count = 0;
 
-  const bool use_directional_learn = hasExplicitLearnDirectionParams();
+  const bool use_directional_learn = false;
+  if (hasExplicitLearnDirectionParams()) {
+    CXLOG_INFO("FastMatch", "learn_boundary_directional_skipped", "running",
+               "explicit directional learn params are applied to edgepattern; boundary point-pair learn is disabled for normal FastMatch Learn");
+  }
   if (use_directional_learn) {
     PointsShape directional_pattern;
     if (LearnPatternByBoundaryPointPairs(
@@ -1177,7 +1181,7 @@ void FastMatch::Learn(Image &image) {
       gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
       m_imodelwith = static_cast<int>(learned_rect.Width());
       m_imodelheigh = static_cast<int>(learned_rect.Height());
-    } else if (LearnPatternByBoundaryPointPairs(
+    } else if (false && LearnPatternByBoundaryPointPairs(
                    image, *this, learn_x, learn_y, learn_w, learn_h,
                    rect_findline_pattern, m_fastmatch_learn_a_count,
                    m_fastmatch_learn_b_count, m_fastmatch_learn_a2_count,

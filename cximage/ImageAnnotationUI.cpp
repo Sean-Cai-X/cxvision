@@ -670,7 +670,7 @@ void ReplaceEditorLine(std::string &editor, int lineIndex,
     output << item << '\n';
   editor = output.str();
 }
-}
+} // namespace
 
 void ViewController::initImageEvidenceLayer() {
   const fs::path repositoryRoot =
@@ -835,6 +835,42 @@ bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
     gauge.has_segmentation_prompt_rect = true;
   }
 
+  if (positivePoints.empty() && negativePoints.empty()) {
+
+    gauge.tool = "FindSegmentation";
+
+    gauge.source = "annotation_shape_elements";
+
+    if (foundPromptRect) {
+
+      gauge.review_status = "editing";
+
+      gauge.accepted = false;
+
+      gauge.dirty = true;
+    }
+
+    std::ostringstream ss;
+
+    ss << "no prompt point ShapeElements; preserved gauge prompt lists"
+
+       << " positive_points=" << gauge.segmentation_positive_points.size()
+
+       << " negative_points=" << gauge.segmentation_negative_points.size()
+
+       << " prompt_rect=" << (gauge.has_segmentation_prompt_rect ? 1 : 0)
+
+       << " rect_synced=" << (foundPromptRect ? 1 : 0);
+
+    reason = ss.str();
+
+    CXLOG_INFO("ImageAnnotationUI", "findsegmentation_prompt_lists_preserved",
+
+               "preserved", reason);
+
+    return foundPromptRect;
+  }
+
   const bool changed =
       positivePoints.size() != gauge.segmentation_positive_points.size() ||
       negativePoints.size() != gauge.segmentation_negative_points.size() ||
@@ -929,14 +965,14 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
         const bool sameOwner =
             it->owner_type == "FindSegmentation" &&
             (it->owner_ref.empty() || it->owner_ref == ownerRef);
-        const bool promptPoint =
-            it->shape && it->shape->kind() == CxShapeKind::Points &&
-            (it->semantic_role == "prompt_positive" ||
-             it->semantic_role == "prompt_negative" ||
-             it->owner_binding == "setpositivepointxy" ||
-             it->owner_binding == "setpositivepoint" ||
-             it->owner_binding == "setnegativepointxy" ||
-             it->owner_binding == "setnegativepoint");
+        const bool promptPoint = it->shape &&
+                                 it->shape->kind() == CxShapeKind::Points &&
+                                 (it->semantic_role == "prompt_positive" ||
+                                  it->semantic_role == "prompt_negative" ||
+                                  it->owner_binding == "setpositivepointxy" ||
+                                  it->owner_binding == "setpositivepoint" ||
+                                  it->owner_binding == "setnegativepointxy" ||
+                                  it->owner_binding == "setnegativepoint");
         if (sameOwner && promptPoint)
           it = elements.erase(it);
         else
@@ -950,7 +986,8 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
     std::vector<ManualSegmentationPromptPoint> positivePoints =
         gauge.segmentation_positive_points;
     if (positivePoints.empty() && gauge.has_segmentation_positive_point &&
-        gauge.segmentation_positive_x > 0 && gauge.segmentation_positive_y > 0) {
+        gauge.segmentation_positive_x > 0 &&
+        gauge.segmentation_positive_y > 0) {
       ManualSegmentationPromptPoint point;
       point.ref = ownerRef + ".prompt_positive.0";
       point.x = gauge.segmentation_positive_x;
@@ -961,7 +998,8 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
     std::vector<ManualSegmentationPromptPoint> negativePoints =
         gauge.segmentation_negative_points;
     if (negativePoints.empty() && gauge.has_segmentation_negative_point &&
-        gauge.segmentation_negative_x > 0 && gauge.segmentation_negative_y > 0) {
+        gauge.segmentation_negative_x > 0 &&
+        gauge.segmentation_negative_y > 0) {
       ManualSegmentationPromptPoint point;
       point.ref = ownerRef + ".prompt_negative.0";
       point.x = gauge.segmentation_negative_x;
@@ -995,244 +1033,245 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
     }
     m_annotationLayer.MarkOwnerResultStale("FindSegmentation", ownerRef);
 
-
-  ApplyManualGaugeToGlobals(m_manualTest);
-  gauge.source = "key_parameter_controls";
-  gauge.dirty = true;
-  gauge.accepted = false;
-  reason = "FindSegmentation prompt ROI and typed points preview applied to "
-           "Image View";
-  return true;
-}
-
-if (gauge.tool == "FindObject") {
-  auto readInt = [this](const std::string &key, int fallback) {
-    const auto it = m_manualTest.runtime_int_vars.find(key);
-    return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
-  };
-  if (!gauge.has_findobject_roi) {
-    gauge.findobject_x0 = std::max(0, readInt("global_roi_x0", 80));
-    gauge.findobject_y0 = std::max(0, readInt("global_roi_y0", 80));
-    gauge.findobject_x1 =
-        std::max(gauge.findobject_x0 + 1, readInt("global_roi_x1", 1180));
-    gauge.findobject_y1 =
-        std::max(gauge.findobject_y0 + 1, readInt("global_roi_y1", 880));
-    gauge.has_findobject_roi = true;
-  }
-  auto shape = std::make_unique<RectShape>();
-  shape->setRect(gauge.findobject_x0, gauge.findobject_y0, gauge.findobject_x1,
-                 gauge.findobject_y1);
-  const std::string ownerRef = gauge.primary_object_name.empty()
-                                   ? "m_object"
-                                   : gauge.primary_object_name;
-  CxShapeElement &element =
-      m_annotationLayer.UpsertShape(ownerRef + ".roi", std::move(shape));
-  element.tool_id = "FindObject";
-  element.owner_type = "FindObject";
-  element.owner_ref = ownerRef;
-  element.owner_binding = "setrect";
-  element.semantic_role = "roi";
-  element.editable = true;
-  element.visible = true;
-  element.runtime_bound = true;
-  element.result_element = false;
-  element.stale = true;
-  element.runtime_edit_pending = true;
-  m_annotationLayer.MarkOwnerResultStale("FindObject", ownerRef);
-  ApplyManualGaugeToGlobals(m_manualTest);
-  gauge.source = "key_parameter_controls";
-  gauge.dirty = true;
-  gauge.accepted = false;
-  reason =
-      "FindObject ROI and component parameters preview applied to Image View";
-  return true;
-}
-
-if (gauge.tool == "FastMatch" || gauge.tool == "fastmatch" ||
-    gauge.tool == "CFastMatch") {
-  auto readInt = [this](const std::string &key, int fallback) {
-    auto it = m_manualTest.runtime_int_vars.find(key);
-    return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
-  };
-
-  const int learnX = std::max(0, readInt("global_learn_roi_x", 120));
-  const int learnY = std::max(0, readInt("global_learn_roi_y", 120));
-  const int learnW = std::max(1, readInt("global_learn_roi_w", 120));
-  const int learnH = std::max(1, readInt("global_learn_roi_h", 90));
-  const int searchX = std::max(0, readInt("global_search_roi_x", 0));
-  const int searchY = std::max(0, readInt("global_search_roi_y", 0));
-  const int searchW = std::max(1, readInt("global_search_roi_w", 640));
-  const int searchH = std::max(1, readInt("global_search_roi_h", 480));
-
-  if (searchW <= learnW || searchH <= learnH) {
-    reason = "FastMatch search ROI must be larger than learn ROI before "
-             "preview/apply";
-    return false;
+    ApplyManualGaugeToGlobals(m_manualTest);
+    gauge.source = "key_parameter_controls";
+    gauge.dirty = true;
+    gauge.accepted = false;
+    reason = "FindSegmentation prompt ROI and typed points preview applied to "
+             "Image View";
+    return true;
   }
 
-  const std::string ownerRef =
-      gauge.primary_object_name.empty() ? "m_match" : gauge.primary_object_name;
-
-  auto upsertFastMatchRect = [this, &ownerRef](const std::string &binding,
-                                               int x, int y, int w, int h) {
+  if (gauge.tool == "FindObject") {
+    auto readInt = [this](const std::string &key, int fallback) {
+      const auto it = m_manualTest.runtime_int_vars.find(key);
+      return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+    };
+    if (!gauge.has_findobject_roi) {
+      gauge.findobject_x0 = std::max(0, readInt("global_roi_x0", 80));
+      gauge.findobject_y0 = std::max(0, readInt("global_roi_y0", 80));
+      gauge.findobject_x1 =
+          std::max(gauge.findobject_x0 + 1, readInt("global_roi_x1", 1180));
+      gauge.findobject_y1 =
+          std::max(gauge.findobject_y0 + 1, readInt("global_roi_y1", 880));
+      gauge.has_findobject_roi = true;
+    }
     auto shape = std::make_unique<RectShape>();
-    shape->setRect(static_cast<double>(x), static_cast<double>(y),
-                   static_cast<double>(x + w), static_cast<double>(y + h));
-    CxShapeElement &element = m_annotationLayer.UpsertShape(
-        ownerRef + "." + binding, std::move(shape));
-    element.tool_id = "FastMatch";
-    element.owner_type = "FastMatch";
+    shape->setRect(gauge.findobject_x0, gauge.findobject_y0,
+                   gauge.findobject_x1, gauge.findobject_y1);
+    const std::string ownerRef = gauge.primary_object_name.empty()
+                                     ? "m_object"
+                                     : gauge.primary_object_name;
+    CxShapeElement &element =
+        m_annotationLayer.UpsertShape(ownerRef + ".roi", std::move(shape));
+    element.tool_id = "FindObject";
+    element.owner_type = "FindObject";
     element.owner_ref = ownerRef;
-    element.owner_binding = binding;
-    element.semantic_role = binding;
+    element.owner_binding = "setrect";
+    element.semantic_role = "roi";
     element.editable = true;
     element.visible = true;
     element.runtime_bound = true;
     element.result_element = false;
     element.stale = true;
     element.runtime_edit_pending = true;
-  };
-
-  upsertFastMatchRect("learn_roi", learnX, learnY, learnW, learnH);
-  upsertFastMatchRect("search_roi", searchX, searchY, searchW, searchH);
-  m_annotationLayer.MarkOwnerResultStale("FastMatch", ownerRef);
-
-  ApplyManualGaugeToGlobals(m_manualTest);
-  gauge.source = "key_parameter_controls";
-  gauge.dirty = true;
-  gauge.accepted = false;
-  reason =
-      "FastMatch Learn/Search ROI preview applied from global_* xywh values";
-  return true;
-}
-
-if (gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge) {
-  if (!gauge.has_ellipse_gauge) {
-    reason = "Apply To Gauge requires an active FindEllipse gauge";
-    return false;
+    m_annotationLayer.MarkOwnerResultStale("FindObject", ownerRef);
+    ApplyManualGaugeToGlobals(m_manualTest);
+    gauge.source = "key_parameter_controls";
+    gauge.dirty = true;
+    gauge.accepted = false;
+    reason =
+        "FindObject ROI and component parameters preview applied to Image View";
+    return true;
   }
 
-  const int x0 = std::min(gauge.ellipse_x0, gauge.ellipse_x1);
-  const int y0 = std::min(gauge.ellipse_y0, gauge.ellipse_y1);
-  const int x1 = std::max(gauge.ellipse_x0, gauge.ellipse_x1);
-  const int y1 = std::max(gauge.ellipse_y0, gauge.ellipse_y1);
-  if (x1 <= x0 || y1 <= y0) {
-    reason = "FindEllipse gauge rectangle is empty";
-    return false;
-  }
+  if (gauge.tool == "FastMatch" || gauge.tool == "fastmatch" ||
+      gauge.tool == "CFastMatch") {
+    auto readInt = [this](const std::string &key, int fallback) {
+      auto it = m_manualTest.runtime_int_vars.find(key);
+      return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+    };
 
-  gauge.tool = "FindEllipse";
-  gauge.has_ellipse_gauge = true;
-  gauge.has_line_gauge = false;
-  gauge.has_circle_gauge = false;
-  gauge.ellipse_x0 = x0;
-  gauge.ellipse_y0 = y0;
-  gauge.ellipse_x1 = x1;
-  gauge.ellipse_y1 = y1;
+    const int learnX = std::max(0, readInt("global_learn_roi_x", 120));
+    const int learnY = std::max(0, readInt("global_learn_roi_y", 120));
+    const int learnW = std::max(1, readInt("global_learn_roi_w", 120));
+    const int learnH = std::max(1, readInt("global_learn_roi_h", 90));
+    const int searchX = std::max(0, readInt("global_search_roi_x", 0));
+    const int searchY = std::max(0, readInt("global_search_roi_y", 0));
+    const int searchW = std::max(1, readInt("global_search_roi_w", 640));
+    const int searchH = std::max(1, readInt("global_search_roi_h", 480));
 
-  const double cx = (static_cast<double>(x0) + static_cast<double>(x1)) * 0.5;
-  const double cy = (static_cast<double>(y0) + static_cast<double>(y1)) * 0.5;
-  const double rx =
-      std::max(1.0, (static_cast<double>(x1) - static_cast<double>(x0)) * 0.5);
-  const double ry =
-      std::max(1.0, (static_cast<double>(y1) - static_cast<double>(y0)) * 0.5);
-
-  const int innerScale =
-      std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
-  gauge.ellipse_inner_scale_percent = innerScale;
-
-  auto shape = std::make_unique<EllipseShape>(cx, cy, rx, ry);
-  shape->setInnerScalePercent(innerScale);
-  const std::string ownerRef = gauge.primary_object_name.empty()
-                                   ? "m_ellipse"
-                                   : gauge.primary_object_name;
-  CxShapeElement &element = m_annotationLayer.UpsertShape(
-      ownerRef + ".roi_ellipse", std::move(shape));
-  element.tool_id = "FindEllipse";
-  element.owner_type = "FindEllipse";
-  element.owner_ref = ownerRef;
-  element.owner_binding = "setellipse";
-  element.semantic_role = "roi";
-  element.editable = true;
-  element.visible = true;
-  element.runtime_bound = true;
-  element.result_element = false;
-  element.stale = true;
-  element.runtime_edit_pending = true;
-
-  m_annotationLayer.RemoveShapeByStableRef(ownerRef + ".inner_scan_ellipse");
-  m_annotationLayer.MarkOwnerResultStale("FindEllipse", ownerRef);
-
-  CXLOG_INFO("ManualConsole", "findellipse_apply_to_gauge", "value_snapshot",
-             "FindEllipse Apply To Gauge updated ShapeElement/global_* only; "
-             "runtime object will be rebuilt by Run Script");
-
-  ApplyManualGaugeToGlobals(m_manualTest);
-  gauge.source = "key_parameter_controls";
-  gauge.dirty = true;
-  gauge.accepted = false;
-  reason = "FindEllipse ROI preview applied to Image View and global_ellipse_*";
-  return true;
-}
-
-if (gauge.tool != "FindCircle" || !gauge.has_circle_gauge) {
-  reason = "Apply To Gauge currently requires an active FindCircle gauge";
-  return false;
-}
-
-const int outer =
-    std::max(1, gauge.outer_radius > 0 ? gauge.outer_radius : gauge.radius);
-const int inner = std::max(0, std::min(gauge.inner_radius, outer - 1));
-gauge.outer_radius = outer;
-gauge.inner_radius = inner;
-gauge.radius = outer;
-gauge.circle_px = gauge.circle_cx + outer;
-gauge.circle_py = gauge.circle_cy;
-if (gauge.circle_arc_enabled != 0 &&
-    std::abs(gauge.circle_arc_end_deg - gauge.circle_arc_start_deg) >= 360) {
-  gauge.circle_arc_enabled = 0;
-  gauge.circle_arc_start_deg = 0;
-  gauge.circle_arc_end_deg = 360;
-}
-
-if (!m_annotationLayer.ApplyFindCircleAnnulusGauge(
-        gauge.primary_object_name, static_cast<double>(gauge.circle_cx),
-        static_cast<double>(gauge.circle_cy), static_cast<double>(inner),
-        static_cast<double>(outer), gauge.circle_arc_enabled != 0,
-        static_cast<double>(gauge.circle_arc_start_deg),
-        static_cast<double>(gauge.circle_arc_end_deg), reason)) {
-  return false;
-}
-
-if (!gauge.primary_object_name.empty()) {
-  FindCircle *runtime_circle =
-      static_cast<FindCircle *>(m_parserDebugBridge.QueryClassObject(
-          "FindCircle", gauge.primary_object_name));
-  if (runtime_circle != nullptr) {
-    const int ring_width = std::max(0, outer - inner);
-    runtime_circle->Setgap(gauge.gap);
-    runtime_circle->setlinegap(gauge.linegap);
-    runtime_circle->setthre(gauge.threshold);
-    runtime_circle->setmethod(gauge.method);
-    if (ring_width > 0) {
-      runtime_circle->setcircle2(gauge.circle_cx, gauge.circle_cy,
-                                 gauge.circle_cx + outer, gauge.circle_cy,
-                                 ring_width);
-    } else {
-      runtime_circle->setcircle(gauge.circle_cx, gauge.circle_cy,
-                                gauge.circle_cx + outer, gauge.circle_cy);
+    if (searchW <= learnW || searchH <= learnH) {
+      reason = "FastMatch search ROI must be larger than learn ROI before "
+               "preview/apply";
+      return false;
     }
-    runtime_circle->setscanarc(gauge.circle_arc_start_deg,
-                               gauge.circle_arc_end_deg,
-                               gauge.circle_arc_enabled);
-  }
-}
 
-ApplyManualGaugeToGlobals(m_manualTest);
-gauge.source = "key_parameter_controls";
-gauge.dirty = true;
-gauge.accepted = false;
-return true;
+    const std::string ownerRef = gauge.primary_object_name.empty()
+                                     ? "m_match"
+                                     : gauge.primary_object_name;
+
+    auto upsertFastMatchRect = [this, &ownerRef](const std::string &binding,
+                                                 int x, int y, int w, int h) {
+      auto shape = std::make_unique<RectShape>();
+      shape->setRect(static_cast<double>(x), static_cast<double>(y),
+                     static_cast<double>(x + w), static_cast<double>(y + h));
+      CxShapeElement &element = m_annotationLayer.UpsertShape(
+          ownerRef + "." + binding, std::move(shape));
+      element.tool_id = "FastMatch";
+      element.owner_type = "FastMatch";
+      element.owner_ref = ownerRef;
+      element.owner_binding = binding;
+      element.semantic_role = binding;
+      element.editable = true;
+      element.visible = true;
+      element.runtime_bound = true;
+      element.result_element = false;
+      element.stale = true;
+      element.runtime_edit_pending = true;
+    };
+
+    upsertFastMatchRect("learn_roi", learnX, learnY, learnW, learnH);
+    upsertFastMatchRect("search_roi", searchX, searchY, searchW, searchH);
+    m_annotationLayer.MarkOwnerResultStale("FastMatch", ownerRef);
+
+    ApplyManualGaugeToGlobals(m_manualTest);
+    gauge.source = "key_parameter_controls";
+    gauge.dirty = true;
+    gauge.accepted = false;
+    reason =
+        "FastMatch Learn/Search ROI preview applied from global_* xywh values";
+    return true;
+  }
+
+  if (gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge) {
+    if (!gauge.has_ellipse_gauge) {
+      reason = "Apply To Gauge requires an active FindEllipse gauge";
+      return false;
+    }
+
+    const int x0 = std::min(gauge.ellipse_x0, gauge.ellipse_x1);
+    const int y0 = std::min(gauge.ellipse_y0, gauge.ellipse_y1);
+    const int x1 = std::max(gauge.ellipse_x0, gauge.ellipse_x1);
+    const int y1 = std::max(gauge.ellipse_y0, gauge.ellipse_y1);
+    if (x1 <= x0 || y1 <= y0) {
+      reason = "FindEllipse gauge rectangle is empty";
+      return false;
+    }
+
+    gauge.tool = "FindEllipse";
+    gauge.has_ellipse_gauge = true;
+    gauge.has_line_gauge = false;
+    gauge.has_circle_gauge = false;
+    gauge.ellipse_x0 = x0;
+    gauge.ellipse_y0 = y0;
+    gauge.ellipse_x1 = x1;
+    gauge.ellipse_y1 = y1;
+
+    const double cx = (static_cast<double>(x0) + static_cast<double>(x1)) * 0.5;
+    const double cy = (static_cast<double>(y0) + static_cast<double>(y1)) * 0.5;
+    const double rx = std::max(
+        1.0, (static_cast<double>(x1) - static_cast<double>(x0)) * 0.5);
+    const double ry = std::max(
+        1.0, (static_cast<double>(y1) - static_cast<double>(y0)) * 0.5);
+
+    const int innerScale =
+        std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
+    gauge.ellipse_inner_scale_percent = innerScale;
+
+    auto shape = std::make_unique<EllipseShape>(cx, cy, rx, ry);
+    shape->setInnerScalePercent(innerScale);
+    const std::string ownerRef = gauge.primary_object_name.empty()
+                                     ? "m_ellipse"
+                                     : gauge.primary_object_name;
+    CxShapeElement &element = m_annotationLayer.UpsertShape(
+        ownerRef + ".roi_ellipse", std::move(shape));
+    element.tool_id = "FindEllipse";
+    element.owner_type = "FindEllipse";
+    element.owner_ref = ownerRef;
+    element.owner_binding = "setellipse";
+    element.semantic_role = "roi";
+    element.editable = true;
+    element.visible = true;
+    element.runtime_bound = true;
+    element.result_element = false;
+    element.stale = true;
+    element.runtime_edit_pending = true;
+
+    m_annotationLayer.RemoveShapeByStableRef(ownerRef + ".inner_scan_ellipse");
+    m_annotationLayer.MarkOwnerResultStale("FindEllipse", ownerRef);
+
+    CXLOG_INFO("ManualConsole", "findellipse_apply_to_gauge", "value_snapshot",
+               "FindEllipse Apply To Gauge updated ShapeElement/global_* only; "
+               "runtime object will be rebuilt by Run Script");
+
+    ApplyManualGaugeToGlobals(m_manualTest);
+    gauge.source = "key_parameter_controls";
+    gauge.dirty = true;
+    gauge.accepted = false;
+    reason =
+        "FindEllipse ROI preview applied to Image View and global_ellipse_*";
+    return true;
+  }
+
+  if (gauge.tool != "FindCircle" || !gauge.has_circle_gauge) {
+    reason = "Apply To Gauge currently requires an active FindCircle gauge";
+    return false;
+  }
+
+  const int outer =
+      std::max(1, gauge.outer_radius > 0 ? gauge.outer_radius : gauge.radius);
+  const int inner = std::max(0, std::min(gauge.inner_radius, outer - 1));
+  gauge.outer_radius = outer;
+  gauge.inner_radius = inner;
+  gauge.radius = outer;
+  gauge.circle_px = gauge.circle_cx + outer;
+  gauge.circle_py = gauge.circle_cy;
+  if (gauge.circle_arc_enabled != 0 &&
+      std::abs(gauge.circle_arc_end_deg - gauge.circle_arc_start_deg) >= 360) {
+    gauge.circle_arc_enabled = 0;
+    gauge.circle_arc_start_deg = 0;
+    gauge.circle_arc_end_deg = 360;
+  }
+
+  if (!m_annotationLayer.ApplyFindCircleAnnulusGauge(
+          gauge.primary_object_name, static_cast<double>(gauge.circle_cx),
+          static_cast<double>(gauge.circle_cy), static_cast<double>(inner),
+          static_cast<double>(outer), gauge.circle_arc_enabled != 0,
+          static_cast<double>(gauge.circle_arc_start_deg),
+          static_cast<double>(gauge.circle_arc_end_deg), reason)) {
+    return false;
+  }
+
+  if (!gauge.primary_object_name.empty()) {
+    FindCircle *runtime_circle =
+        static_cast<FindCircle *>(m_parserDebugBridge.QueryClassObject(
+            "FindCircle", gauge.primary_object_name));
+    if (runtime_circle != nullptr) {
+      const int ring_width = std::max(0, outer - inner);
+      runtime_circle->Setgap(gauge.gap);
+      runtime_circle->setlinegap(gauge.linegap);
+      runtime_circle->setthre(gauge.threshold);
+      runtime_circle->setmethod(gauge.method);
+      if (ring_width > 0) {
+        runtime_circle->setcircle2(gauge.circle_cx, gauge.circle_cy,
+                                   gauge.circle_cx + outer, gauge.circle_cy,
+                                   ring_width);
+      } else {
+        runtime_circle->setcircle(gauge.circle_cx, gauge.circle_cy,
+                                  gauge.circle_cx + outer, gauge.circle_cy);
+      }
+      runtime_circle->setscanarc(gauge.circle_arc_start_deg,
+                                 gauge.circle_arc_end_deg,
+                                 gauge.circle_arc_enabled);
+    }
+  }
+
+  ApplyManualGaugeToGlobals(m_manualTest);
+  gauge.source = "key_parameter_controls";
+  gauge.dirty = true;
+  gauge.accepted = false;
+  return true;
 }
 
 bool ViewController::ProjectCurrentGaugeToImageViewPreview(
@@ -1728,9 +1767,9 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
 
       if (deferRuntimeToolWriteback) {
         commit.runtime_writeback = false;
-        out.reason =
-            commit.owner_type + " ROI edit accepted; exported to globals; "
-                                "runtime object update deferred until next Run";
+        out.reason = commit.owner_type +
+                     " ROI edit accepted; exported to globals; "
+                     "runtime object update deferred until next Run";
       } else if (ok && commit.owner_type == "FastMatch" && commit.editable &&
                  !commit.owner_binding.empty()) {
         void *toolObj =

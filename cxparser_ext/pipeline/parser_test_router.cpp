@@ -1142,6 +1142,26 @@ bool BuildTorchPlan(const ParserTestRequest &request, ParserTestPlan &plan)
     return true;
   }
 
+  if (request.layer == "feature" &&
+      IsOneOf(request.case_name, {"torch.resnet18.baseline.feature"}))
+  {
+    plan.kind = ptpk_execution_target;
+    plan.supported = true;
+    plan.target = MakeParserEvalTarget(request, "1");
+    plan.target.task_subtype = "torch_resnet18_baseline_feature";
+    return true;
+  }
+
+  if (request.layer == "infer" &&
+      IsOneOf(request.case_name, {"torch.resnet18.baseline.infer"}))
+  {
+    plan.kind = ptpk_execution_target;
+    plan.supported = true;
+    plan.target = MakeParserEvalTarget(request, "1");
+    plan.target.task_subtype = "torch_resnet18_baseline_infer";
+    return true;
+  }
+
   plan.reason = "torch case is not registered in first-stage router";
   return false;
 }

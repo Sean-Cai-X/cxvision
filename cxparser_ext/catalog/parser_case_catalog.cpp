@@ -106,6 +106,8 @@ bool IsTorchContractScriptCase(const ParserDispatchRequest &request)
     return case_id == "mobilevit_roi_patch_class_label_contract" ||
            case_id == "torch.mobilevit.session.feature" ||
            case_id == "torch.resnet50.baseline.feature" ||
+           case_id == "torch.resnet18.baseline.feature" ||
+
            case_id == "deeplab_region_tensor_mask_label_contract" ||
            case_id == "torch.deeplab.contract.feature" ||
            case_id == "yolov8_image_window_bbox_class_targets_contract" ||
@@ -116,6 +118,8 @@ bool IsTorchContractScriptCase(const ParserDispatchRequest &request)
   {
     return case_id == "torch.mobilevit.unified.infer" ||
            case_id == "torch.deeplab.unified.infer" ||
+           case_id == "torch.resnet18.baseline.infer" ||
+
            case_id == "torch.resnet50.baseline.infer";
   }
 
@@ -151,6 +155,13 @@ const char *NormalizeTorchContractCaseId(const std::string &case_id)
 
   if (case_id == "torch.deeplab.unified.infer")
     return "torch.deeplab.unified.infer";
+
+
+  if (case_id == "torch.resnet18.baseline.feature")
+    return "torch.resnet18.baseline.feature";
+
+  if (case_id == "torch.resnet18.baseline.infer")
+    return "torch.resnet18.baseline.infer";
 
   if (case_id == "torch.resnet50.baseline.feature")
     return "torch.resnet50.baseline.feature";
@@ -448,6 +459,24 @@ bool ResolveDispatchCase(const ParserDispatchRequest &raw_request,
                                   "scenario",
                                   normalized_case_id,
                                   "cxparser/rag_script_cases/torch_module/scenario/torch_yolo_mobilevit_infer_scenario.cxsc");
+      return true;
+    }
+
+    if (std::string(normalized_case_id) == "torch.resnet18.baseline.feature")
+    {
+      FillTorchContractScriptCase(spec,
+                                  "feature",
+                                  normalized_case_id,
+                                  "cxparser/rag_script_cases/torch_module/feature/torch_resnet18_baseline_feature.cxsc");
+      return true;
+    }
+
+    if (std::string(normalized_case_id) == "torch.resnet18.baseline.infer")
+    {
+      FillTorchContractScriptCase(spec,
+                                  "infer",
+                                  normalized_case_id,
+                                  "cxparser/rag_script_cases/torch_module/infer/torch_resnet18_baseline_infer.cxsc");
       return true;
     }
 

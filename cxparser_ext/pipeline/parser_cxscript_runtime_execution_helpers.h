@@ -850,6 +850,17 @@ bool ApplyTorchContractCaseBridge(const CxScriptExecutionContext &context,
     return true;
   }
 
+  if (context.case_name == "torch.resnet18.baseline.feature")
+  {
+    result.metrics = "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref";
+    result.tolerance = "resnet18_baseline_feature";
+    result.summary = "resnet18 feature baseline ready";
+    result.baseline_feature_ref =
+      result.task_id.empty() ? "torch.resnet18.baseline.feature.baseline_feature_ref"
+                             : result.task_id + ".baseline_feature_ref";
+    return true;
+  }
+
   if (context.case_name == "torch.resnet50.baseline.feature")
   {
     result.metrics = "classifier_output_shape,p3_p4_p5_feature_shapes,baseline_feature_ref";
@@ -908,6 +919,17 @@ bool ApplyTorchContractCaseBridge(const CxScriptExecutionContext &context,
       result.task_id.empty() ? "torch.deeplab.unified.infer.roi_diff_candidate_ref"
                              : result.task_id + ".roi_diff_candidate_ref";
     result.roi_diff_candidate_count = "3";
+    return true;
+  }
+
+  if (context.case_name == "torch.resnet18.baseline.infer")
+  {
+    result.metrics = "classifier_output_shape,baseline_class_ref";
+    result.tolerance = "resnet18_baseline_infer";
+    result.summary = "resnet18 infer baseline ready";
+    result.baseline_class_ref =
+      result.task_id.empty() ? "torch.resnet18.baseline.infer.baseline_class_ref"
+                             : result.task_id + ".baseline_class_ref";
     return true;
   }
 
@@ -1484,4 +1506,3 @@ void AppendRuntimeDetail(CxScriptExecutionResult &result,
   if (collect_debug || keep_in_lightweight)
     result.details.push_back(line);
 }
-
