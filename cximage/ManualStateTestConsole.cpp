@@ -1522,9 +1522,9 @@ void ViewController::RefreshRuntimeObjectTable(
               ? ("runtime_object:" + object.name)
               : object.segmentation_result_ref;
       m_manualTest.current_result_ref.status =
-          object.segmentation_backend_status.empty()
-              ? object.runtime_state
-              : object.segmentation_backend_status;
+          object.segmentation_contour_count > 0
+              ? "boundary_available_pending_human_review"
+              : "boundary_unavailable";
       m_manualTest.current_result_ref.points_count =
           object.segmentation_contour_count;
       m_manualTest.current_result_ref.valid_points_count =
@@ -1636,10 +1636,10 @@ void ViewController::RefreshRuntimeObjectTable(
               object.segmentation_result_ref.empty()
                   ? ("runtime_object:" + object.name)
                   : object.segmentation_result_ref;
-          m_manualTest.current_result_ref.status =
-              object.segmentation_backend_status.empty()
-                  ? object.runtime_state
-                  : object.segmentation_backend_status;
+          m_manualTest.current_result_ref.status =
+              object.segmentation_contour_count > 0
+                  ? "boundary_available_pending_human_review"
+                  : "boundary_unavailable";
           m_manualTest.current_result_ref.points_count =
               object.segmentation_contour_count;
           m_manualTest.current_result_ref.valid_points_count =

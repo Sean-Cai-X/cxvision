@@ -60,6 +60,10 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 | `torch_detection_yolov8_cpu_artifact_evidence` | T6 | `cxparser/cxscript/module/torch/torch_detection_cpu_direct.cxsc` | detection result refs when detector artifacts are produced |
 | `torch_detection_contract_cpu_evidence` | T4 | `cxparser/cxscript/module/torch/torch_detection_contract_direct.cxsc` | detection contract route status |
 | `torch_train_lifecycle_cpu_evidence` | T3 | `cxparser/cxscript/module/torch/torch_train_lifecycle_direct_test.cxsc` | `global_headless_ok` and `global_torch_ok` for tiny CPU train lifecycle route |
+| `torch_resnet18_baseline_feature_evidence` | T5 | `cxparser/rag_script_cases/torch_module/feature/torch_resnet18_baseline_feature.cxsc` | `classifier_output_shape`, `p3_p4_p5_feature_shapes`, `baseline_feature_ref` |
+| `torch_resnet18_baseline_infer_evidence` | T5 | `cxparser/rag_script_cases/torch_module/infer/torch_resnet18_baseline_infer.cxsc` | `classifier_output_shape`, `baseline_class_ref` |
+| `torch_resnet50_baseline_feature_evidence` | T5 | `cxparser/rag_script_cases/torch_module/feature/torch_resnet50_baseline_feature.cxsc` | `classifier_output_shape`, `p3_p4_p5_feature_shapes`, `baseline_feature_ref` |
+| `torch_resnet50_baseline_infer_evidence` | T5 | `cxparser/rag_script_cases/torch_module/infer/torch_resnet50_baseline_infer.cxsc` | `classifier_output_shape`, `baseline_class_ref` |
 
 ## Guardrails
 
@@ -74,9 +78,11 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 
 ## Manual Test Steps
 
-1. Open the UI Evidence Chain panel and select any `Torch Evidence Candidates` case.
-2. In `Torch Training Image Set`, click `Sync Selected Evidence Case`.
-3. Confirm the train, validation, and test rails are no longer empty.
-4. Click a training/validation/test thumbnail and confirm Image View loads the DeepPCB image.
-5. Confirm `Annotated Regions / Features` reports non-zero rect count and the image overlay shows editable bbox regions.
-6. Keep the final state as `PENDING_HUMAN_REVIEW` until a human accepts the dataset split and model task semantics.
+1. Open the UI Evidence Chain panel and expand `Torch Evidence Candidates`.
+2. Confirm these four rows exist: `torch_resnet18_baseline_feature_evidence`, `torch_resnet18_baseline_infer_evidence`, `torch_resnet50_baseline_feature_evidence`, and `torch_resnet50_baseline_infer_evidence`.
+3. Select each ResNet row and confirm its script path, source case, contract, expected metrics, and DeepPCB image binding match the Cases table above.
+4. In `Torch Training Image Set`, click `Sync Selected Evidence Case`.
+5. Confirm the train, validation, and test rails are no longer empty.
+6. Click a training/validation/test thumbnail and confirm Image View loads the DeepPCB image.
+7. Confirm `Annotated Regions / Features` reports non-zero rect count and the image overlay shows editable bbox regions.
+8. Keep the final state as `PENDING_HUMAN_REVIEW` until a human accepts the dataset split and model task semantics.

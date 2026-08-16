@@ -4305,7 +4305,13 @@ bool ViewController::PrepareTorchUiRequestContext(
     << ",\"max_detections\":"
     << runtimeInt("global_torch_max_detections", 100)
     << ",\"epochs\":" << runtimeInt("global_torch_epochs", 1)
-    << ",\"batch_size\":" << runtimeInt("global_torch_batch_size", 1)
+    << R"(,"batch_size":)" << runtimeInt("global_torch_batch_size", 1)
+    << R"(,"num_classes":)" << runtimeInt("global_torch_num_classes", 7)
+    << R"(,"top_k":)" << runtimeInt("global_torch_top_k", 5)
+    << R"(,"normalize_input":)"
+    << runtimeInt("global_torch_normalize_input", 1)
+    << R"(,"feature_pyramid_enabled":)"
+    << runtimeInt("global_torch_feature_pyramid_enabled", 0)
     << "}";
 
   // Use forward-slash paths in the CxScript string literal.  The parser's
@@ -4666,6 +4672,10 @@ void ViewController::drawScriptAcceptancePanels()
   else if (m_evidenceChainUiSection == 1)
   {
     ImGui::TextUnformatted("Case / 用例");
+    // Case and Evidence are two views of the same file-driven source.
+    // Populate both before rendering the Case table so CxEvidenceChain cases
+    // are not visible only on the Evidence tab.
+    EnsureCxScriptWorkbenchAssetsLoaded();
     DrawEvidenceCaseListPanel(m_manualTest);
   }
   else if (m_evidenceChainUiSection == 2)

@@ -838,6 +838,8 @@ struct ManualEvidenceItem
 
     std::string image_path;
     std::string replay_package_path;
+    // Non-empty only for Case-tab rows projected from a file-driven Evidence Chain.
+    std::string source_evidence_chain_path;
     std::string gauge_annotation_path;
 };
 

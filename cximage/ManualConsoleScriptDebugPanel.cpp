@@ -363,28 +363,35 @@ bool MigrateLegacyFindSegmentationPromptCallsForRun(
   if (context.editor_text.find("FindSegmentation") == std::string::npos)
     return false;
 
-  const std::string oldPositive =
-      "m_seg.setpositivepointxy(global_segmentation_positive_x, global_segmentation_positive_y);";
-  const std::string newPositive =
+  // Fixed-int member calls travel through Param_int_2. The parser restores
+  // source order before class dispatch, and classfunc::UseFUNC reverses the
+  // fixed argument vector when invoking the registered C++ member. The
+  // FindSegmentation *xy wrappers intentionally accept (y, x) and restore
+  // (x, y) internally, so CxScript must remain human-readable (x, y).
+  const std::string reversedPositive =
       "m_seg.setpositivepointxy(global_segmentation_positive_y, global_segmentation_positive_x);";
-  const std::string oldNegative =
-      "m_seg.setnegativepointxy(global_segmentation_negative_x, global_segmentation_negative_y);";
-  const std::string newNegative =
+  const std::string canonicalPositive =
+      "m_seg.setpositivepointxy(global_segmentation_positive_x, global_segmentation_positive_y);";
+  const std::string reversedNegative =
       "m_seg.setnegativepointxy(global_segmentation_negative_y, global_segmentation_negative_x);";
+  const std::string canonicalNegative =
+      "m_seg.setnegativepointxy(global_segmentation_negative_x, global_segmentation_negative_y);";
 
-  const bool hasLegacyPositive =
-      context.editor_text.find(oldPositive) != std::string::npos;
-  const bool hasLegacyNegative =
-      context.editor_text.find(oldNegative) != std::string::npos;
-  if (!hasLegacyPositive && !hasLegacyNegative)
+  const bool hasReversedPositive =
+      context.editor_text.find(reversedPositive) != std::string::npos;
+  const bool hasReversedNegative =
+      context.editor_text.find(reversedNegative) != std::string::npos;
+  if (!hasReversedPositive && !hasReversedNegative)
     return false;
 
-  ReplaceAllScriptTextLocal(context.editor_text, oldPositive, newPositive);
-  ReplaceAllScriptTextLocal(context.editor_text, oldNegative, newNegative);
+  ReplaceAllScriptTextLocal(
+      context.editor_text, reversedPositive, canonicalPositive);
+  ReplaceAllScriptTextLocal(
+      context.editor_text, reversedNegative, canonicalNegative);
   context.editor_dirty = true;
   context.analyzed_text.clear();
   reason =
-      "legacy FindSegmentation prompt point calls migrated in memory to set*pointxy(y,x); historical script_snapshot.cxsc was not modified";
+      "FindSegmentation prompt point calls corrected in memory to set*pointxy(x,y) after Param_int_2 dispatch verification; historical script_snapshot.cxsc was not modified";
   return true;
 }
 } // namespace
@@ -555,6 +562,9 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
 
   std::stringstream ss;
   ss << "\nManual effective globals:";
+  ss << "\nimage_path="
+     << (context.image_file_path.empty() ? "(untracked)"
+                                         : context.image_file_path);
   ss << "\nimage=" << (m_imageViewImage.empty() ? "s_img0" : "m_imageViewImage");
   if (!m_imageViewImage.empty())
     ss << " size=" << m_imageViewImage.cols << "x" << m_imageViewImage.rows;
@@ -688,6 +698,14 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
 
   RefreshRuntimeObjectTable(
       "Manual Console Pending Run", ran ? "runtime_executed" : "BLOCKED");
+  CXLOG_INFO(
+      "ManualConsole",
+      "manual_run_conclusion",
+      m_manualTest.debug_status,
+      "script=" + context.loaded_script_path +
+          " result_type=" + m_manualTest.current_result_ref.result_type +
+          " result_status=" + m_manualTest.current_result_ref.status +
+          " reason=" + m_manualTest.debug_reason);
 
   // RefreshRuntimeObjectTable() projects the newly-created runtime object and
   // may replace current_gauge.  A deferred Key Parameter/Candidate run must
@@ -1256,6 +1274,14 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:refresh_runtime_objects");
       RefreshRuntimeObjectTable(
         "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
+      CXLOG_INFO(
+          "ManualConsole",
+          "manual_run_conclusion",
+          context.debug_status,
+          "script=" + context.loaded_script_path +
+              " result_type=" + context.current_result_ref.result_type +
+              " result_status=" + context.current_result_ref.status +
+              " reason=" + context.debug_reason);
 
       // Runtime projection is allowed to update result objects, but it must
       // not visually roll the candidate editor back to values from the

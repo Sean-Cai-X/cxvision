@@ -143,25 +143,26 @@ void ReplaceAllLocal(std::string &text, const std::string &from,
 std::string NormalizeFindSegmentationPromptCallOrderForSnapshot(
     const std::string &scriptText, bool *outChanged) {
   std::string normalized = scriptText;
-  const std::string oldPositive =
-      "m_seg.setpositivepointxy(global_segmentation_positive_x, "
-      "global_segmentation_positive_y);";
-  const std::string newPositive =
+  const std::string reversedPositive =
       "m_seg.setpositivepointxy(global_segmentation_positive_y, "
       "global_segmentation_positive_x);";
-  const std::string oldNegative =
-      "m_seg.setnegativepointxy(global_segmentation_negative_x, "
-      "global_segmentation_negative_y);";
-  const std::string newNegative =
+  const std::string canonicalPositive =
+      "m_seg.setpositivepointxy(global_segmentation_positive_x, "
+      "global_segmentation_positive_y);";
+  const std::string reversedNegative =
       "m_seg.setnegativepointxy(global_segmentation_negative_y, "
       "global_segmentation_negative_x);";
+  const std::string canonicalNegative =
+      "m_seg.setnegativepointxy(global_segmentation_negative_x, "
+      "global_segmentation_negative_y);";
 
-  const bool hadOld = normalized.find(oldPositive) != std::string::npos ||
-                      normalized.find(oldNegative) != std::string::npos;
-  ReplaceAllLocal(normalized, oldPositive, newPositive);
-  ReplaceAllLocal(normalized, oldNegative, newNegative);
+  const bool hadReversed =
+      normalized.find(reversedPositive) != std::string::npos ||
+      normalized.find(reversedNegative) != std::string::npos;
+  ReplaceAllLocal(normalized, reversedPositive, canonicalPositive);
+  ReplaceAllLocal(normalized, reversedNegative, canonicalNegative);
   if (outChanged)
-    *outChanged = hadOld && normalized != scriptText;
+    *outChanged = hadReversed && normalized != scriptText;
   return normalized;
 }
 

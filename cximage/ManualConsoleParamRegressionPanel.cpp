@@ -473,7 +473,7 @@ static std::string TorchTaskFeatureLocal(const ManualTestContext &context) {
   if (key.find("detect") != std::string::npos ||
       key.find("yolo") != std::string::npos)
     return "object_detection";
-  if (key.find("classif") != std::string::npos)
+  if (key.find("classif") != std::string::npos || key.find("resnet18") != std::string::npos || key.find("resnet50") != std::string::npos)
     return "classification";
   if (key.find("anomaly") != std::string::npos)
     return "anomaly_detection";
@@ -502,7 +502,7 @@ TorchSelectedEvidenceFeatureLocal(const ManualTestContext &context) {
   if (key.find("detect") != std::string::npos ||
       key.find("yolo") != std::string::npos)
     return "object_detection";
-  if (key.find("classif") != std::string::npos)
+  if (key.find("classif") != std::string::npos || key.find("resnet18") != std::string::npos || key.find("resnet50") != std::string::npos)
     return "classification";
   if (key.find("anomaly") != std::string::npos)
     return "anomaly_detection";
@@ -525,6 +525,12 @@ static void ApplyTorchParameterDefaultsLocal(ManualTestContext &context,
   int maxDetections = 100;
   int epochs = 20;
   int batchSize = 4;
+  const std::string evidenceKey = ToLowerAsciiLocal(
+      context.current_evidence_selection.case_id + " " +
+      context.current_evidence_selection.script_id + " " +
+      context.current_evidence_selection.script_path);
+  const int featurePyramid =
+      evidenceKey.find("feature") != std::string::npos ? 1 : 0;
 
   if (feature == "object_detection") {
     inputWidth = 640;
@@ -577,6 +583,11 @@ static void ApplyTorchParameterDefaultsLocal(ManualTestContext &context,
   InjectManualGaugeInt(context, "global_torch_max_detections", maxDetections);
   InjectManualGaugeInt(context, "global_torch_epochs", epochs);
   InjectManualGaugeInt(context, "global_torch_batch_size", batchSize);
+  InjectManualGaugeInt(context, "global_torch_num_classes", 7);
+  InjectManualGaugeInt(context, "global_torch_top_k", 5);
+  InjectManualGaugeInt(context, "global_torch_normalize_input", 1);
+  InjectManualGaugeInt(context, "global_torch_feature_pyramid_enabled",
+                       featurePyramid);
   context.torch_parameter_defaults_key = profileKey;
   CXLOG_INFO("TorchKeyParameters", "torch_parameter_defaults_applied",
              "ui_event",
@@ -1397,6 +1408,39 @@ void DrawTorchAnnotationKeyParameterPanel(ManualTestContext &context) {
         "Values marked request-bound enter CxTorchTaskSpec.extra_json through "
         "the selected script's request context. Backend consumption remains "
         "task/manifest-specific and is not implied by request binding.");
+    const std::string selectedTorchKey = ToLowerAsciiLocal(
+        evidence.case_id + " " + evidence.script_id + " " +
+        evidence.script_path + " " + evidence.parameter_summary);
+    const bool isResNet18 =
+        selectedTorchKey.find("resnet18") != std::string::npos;
+    const bool isResNet50 =
+        selectedTorchKey.find("resnet50") != std::string::npos;
+    if (feature == "classification" && (isResNet18 || isResNet50)) {
+      const bool featureMode =
+          selectedTorchKey.find("feature") != std::string::npos;
+      DrawReadonlyFieldLocal("model family", "classification");
+      DrawReadonlyFieldLocal("backbone", isResNet18 ? "ResNet18" : "ResNet50");
+      DrawReadonlyFieldLocal("execution mode",
+                             featureMode ? "feature" : "infer");
+      DrawReadonlyFieldLocal(
+          "weight dependency",
+          isResNet18
+              ? "LIBTORCH_MODULE_RESNET18_WEIGHTS / resnet18_weights.pt"
+              : "LIBTORCH_MODULE_RESNET50_WEIGHTS / resnet50_weights.pt");
+      DrawRuntimeIntRow(context, "class count", "global_torch_num_classes", 7,
+                        1, 100000, 175.0f);
+      DrawRuntimeIntRow(context, "top-k", "global_torch_top_k", 5, 1, 1000,
+                        175.0f);
+      DrawRuntimeIntRow(context, "ImageNet normalization (0/1)",
+                        "global_torch_normalize_input", 1, 0, 1, 175.0f);
+      DrawRuntimeIntRow(context, "feature pyramid (0/1)",
+                        "global_torch_feature_pyramid_enabled",
+                        featureMode ? 1 : 0, 0, 1, 175.0f);
+      ImGui::TextDisabled(
+          "ResNet controls are staged with the selected Evidence case. "
+          "They do not change the fixed backbone declared by that case.");
+      ImGui::Separator();
+    }
     ImGui::TextDisabled("ROI (image coordinates)");
     DrawRuntimeIntRow(context, "roi x0", "global_roi_x0", 0, 0, 100000, 175.0f);
     DrawRuntimeIntRow(context, "roi y0", "global_roi_y0", 0, 0, 100000, 175.0f);
@@ -2035,6 +2079,26 @@ void DrawConclusionSummaryPanel(const ManualTestContext &context) {
               UiTextOrDash(r.value));
   ImGui::Text("status: %s | reason: %s", UiTextOrDash(r.status),
               UiTextOrDash(r.reason));
+
+  if (r.result_type == "FindSegmentationResult") {
+    const bool boundaryAvailable = r.valid_points_count > 0;
+    ImGui::Separator();
+    ImGui::TextUnformatted("Tool: FindSegmentation");
+    ImGui::Text("contours: %d", r.valid_points_count);
+    ImGui::TextColored(
+        boundaryAvailable ? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
+                          : ImVec4(1.0f, 0.45f, 0.30f, 1.0f),
+        "conclusion: %s",
+        boundaryAvailable ? "boundary_available_pending_human_review"
+                          : "boundary_unavailable");
+    ImGui::TextWrapped("runtime reason: %s", UiTextOrDash(r.reason));
+    ImGui::TextWrapped(
+        "evidence: %s",
+        context.image_overlay_summary.empty()
+            ? "ASSET_MISSING: segmentation overlay/evidence unavailable"
+            : context.image_overlay_summary.c_str());
+    return;
+  }
 
   if (ImGui::BeginTable("conclusion_summary_table", 4,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |

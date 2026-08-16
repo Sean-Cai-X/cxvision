@@ -933,10 +933,10 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
     element.semantic_role = "prompt_rect";
     element.editable = true;
     element.visible = true;
-    element.runtime_bound = true;
+    element.runtime_bound = false;
     element.result_element = false;
-    element.stale = true;
-    element.runtime_edit_pending = true;
+    element.stale = false;
+    element.runtime_edit_pending = false;
 
     auto upsert_prompt_point =
         [this, &ownerRef](const std::string &stable_suffix,
@@ -953,10 +953,10 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
           point.semantic_role = role;
           point.editable = true;
           point.visible = true;
-          point.runtime_bound = true;
-          point.result_element = false;
-          point.stale = true;
-          point.runtime_edit_pending = true;
+          point.runtime_bound = false;
+          point.result_element = false;
+          point.stale = false;
+          point.runtime_edit_pending = false;
         };
     auto remove_existing_prompt_points = [this, &ownerRef]() {
       auto &elements = m_annotationLayer.ShapeElements();

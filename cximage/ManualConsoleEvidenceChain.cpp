@@ -61,11 +61,6 @@ static std::string NormalizeEvidenceToolTypeLocal(const std::string& typeOrTool)
     return typeOrTool;
 }
 
-// Evidence rows loaded from catalog/cxsc normally retain a relative script
-// path, while a saved candidate records the absolute source path.  Do not
-// require those two textual paths to be identical when restoring the active
-// working revision after an application restart.  The durable identity is the
-// source script file name together with image_id and target_id.
 static std::string EvidenceSourceFileNameLocal(const std::string& pathOrId)
 {
     if (pathOrId.empty())
@@ -214,15 +209,7 @@ static std::string ResolveEvidenceCategoryOverrideLocal(
             resolved = PreferEvidenceCategoryOverrideLocal(resolved, it->second);
     }
 
-    /*
-     * Evidence rows come from several sources: locked suite handoff,
-     * saved candidates, catalog rows and working revisions.  Not every row
-     * carries the same stable key, so after exact lookup we allow a curated
-     * case-level/image-target override to match rows whose script/reason/path
-     * still contains the locked evidence identity.  A manual Verified move
-     * must win over older To Verify entries for duplicate rows of the same
-     * case, otherwise the UI appears not to move the case.
-     */
+    
     const std::string haystack =
         thumb.case_id + " " +
         thumb.script_id + " " +
@@ -310,14 +297,7 @@ static std::pair<int, std::string> ClassifyEvidenceMajorBucketLocal(
         groupLabel.find("Needs Human Setting") != std::string::npos ||
         groupLabel.find("needs human setting") != std::string::npos;
 
-    /*
-     * To Verify is an operator work queue.  Once a curated propagation pass
-     * exists, only the explicit manual guidance queue rows may occupy this
-     * bucket; duplicate handoff/catalog/candidate rows for the same case are
-     * evidence context and belong to Process Validation.  This makes the UI
-     * count traceable to manual_guidance_queue.tsv instead of incidental
-     * duplicate rows.
-     */
+    
     if (categoryOverride == "To Verify" &&
         hasCuratedFindGeometry &&
         !isManualGuidanceRow)
@@ -487,10 +467,6 @@ static bool LoadEvidenceCategoryOverridesLocal(ManualTestContext& context)
         const std::size_t tab = line.find('\t');
         if (tab == std::string::npos)
             continue;
-        // std::getline removes '\n' but preserves the '\r' in CRLF files.
-        // Trim both fields so exact category comparisons do not receive
-        // "To Verify\r" / "Process Validation\r" and silently miss every
-        // curated override on Windows.
         const std::string key = TrimLine(
             UnescapeEvidenceOverrideFieldLocal(line.substr(0, tab)));
         const std::string category = TrimLine(
@@ -1309,9 +1285,6 @@ static bool ApplyCandidateRuntimeGlobalsLocal(
     {
         ManualFindCircleEdgeParamState& params =
             context.findcircle_edge_params[static_cast<std::size_t>(edge)];
-        // Old candidate packages may contain divergent edgeN_* values from a
-        // superseded UI interpretation. The main FindCircle globals are the
-        // authoritative single parameter set; Edge N only selects a crossing.
         params.initialized = true;
         params.threshold = sharedCircleThreshold;
         params.method = sharedCircleMethod;
@@ -1737,10 +1710,6 @@ static std::vector<std::string> BuildEvidenceFallbackImageCandidates(
         candidates.push_back(path);
     };
 
-    // Fallback bindings belong to the Evidence list, not to the mutable
-    // current Image View.  Including context.image_file_path (or another
-    // runtime image view) made a double-click change the candidate set used
-    // by later rows and visually looked like thumbnail propagation.
     for (const auto& item : context.image_manifest_items)
     {
         addCandidate(item.image_path);
@@ -1791,10 +1760,6 @@ static bool IsAllowedEvidenceFallbackScript(const std::string& path)
     if (IsDeprecatedCxScriptPath(path))
         return false;
 
-    // Evidence Chain is allowed to create placeholders for current direct,
-    // frozen, headless and diagnostic assets.  Deprecated scripts remain
-    // runnable from the legacy catalog only; they must not become semantic
-    // evidence bindings by accident.
     return path.find("/headless/") != std::string::npos ||
            path.find("\\headless\\") != std::string::npos ||
            path.find("/frozen/") != std::string::npos ||
@@ -1882,10 +1847,6 @@ static void AssignFallbackImageToThumb(
             return *left < *right;
         });
 
-    // Allocate independently per tool family.  A single global cursor can
-    // still land on the same modulo value when catalog entries of one family
-    // are far apart.  Per-family cursors guarantee round-robin thumbnails for
-    // FindLine/FindCircle/FindEllipse/FindRect/FastMatch.
     const std::size_t index = nextIndexByPool[poolKey]++;
     const std::string& path = preferred.empty()
         ? candidates[index % candidates.size()]
@@ -2456,13 +2417,6 @@ static void AppendManualGuidanceQueueLocal(
         if (cells.size() > 10)
             thumb.candidate_dir = cells[10];
 
-        // A manual-guidance algorithm package is evidence, not automatically
-        // a restorable GUI working revision.  Only advertise saved state when
-        // the complete transactional restore package exists.  The current
-        // propagation cases contain globals.txt/result assets but no working
-        // script/gauge snapshot, so they must open the declared frozen script
-        // and restore its locked parameters instead of aborting on a missing
-        // script_snapshot_path.
         if (!thumb.candidate_dir.empty())
         {
             const std::filesystem::path candidateRoot(thumb.candidate_dir);
@@ -2492,9 +2446,6 @@ static void AppendManualGuidanceQueueLocal(
             }
         }
 
-        // The queue's historical source_script column contains the runtime
-        // result summary for these generated cases.  The editable source is
-        // the explicit cxscript path above; keep that identity traceable.
         thumb.source_evidence_script_path = thumb.script_path;
 
         if (thumb.image_path.empty())
@@ -2511,15 +2462,7 @@ static void AppendManualGuidanceQueueLocal(
             if (existing.case_id == thumb.case_id &&
                 existing.target_id == thumb.target_id)
             {
-                /*
-                 * The algorithm-review handoff is loaded before the manual
-                 * guidance queue and may already have inserted the same case
-                 * as pending_algorithm_review.  The queue is the curated
-                 * operator work list, so it must replace the earlier row
-                 * instead of being dropped by de-duplication; otherwise the
-                 * To Verify bucket becomes 0 even though the queue contains
-                 * the three expected human-guided cases.
-                 */
+                
                 existing = thumb;
                 exists = true;
                 break;
@@ -2669,16 +2612,8 @@ static void AppendSavedEvidenceCandidatesLocal(
     ManualTestContext& context,
     const std::function<ScriptEvidenceGroup&(const std::string&)>& findGroup)
 {
-    // New writes use the stable project run root.  Do not read the process
-    // working-directory root here: when the GUI is started from build/Release
-    // it pulls stale build-local candidate packages into the manual review
-    // list and can re-trigger old parser/image binding states.
     std::vector<std::filesystem::path> roots;
     roots.push_back(ResolveCxVisionRunPath("cxscript_runs/evidence_candidates"));
-    // Builds prior to the stable project run-root change wrote GUI candidates
-    // below <repo>/cxscript_runs.  Resolve that location independently of the
-    // process working directory so an upgraded binary can still restore the
-    // user's latest saved working revision.
     const std::filesystem::path repoLocalRoot =
         (ResolveCaseDirectory(".") / "cxscript_runs/evidence_candidates")
             .lexically_normal();
@@ -2762,11 +2697,6 @@ static void AppendSavedEvidenceCandidatesLocal(
                 original.has_saved_state = true;
                 original.source_evidence_script_path =
                     candidate.source_evidence_script_path;
-                // Legacy Catalog rows frequently expose the generic type
-                // "module" even though the script declares FindEllipse,
-                // FindLine, etc.  Once a validated candidate is rebound, its
-                // explicit tool identity is authoritative for navigation and
-                // parameter-panel routing.
                 const std::string originalTool =
                     NormalizeEvidenceToolTypeLocal(original.tool);
                 const std::string candidateTool =
@@ -3353,6 +3283,36 @@ static int AppendCxScriptEvidenceChainFilesLocal(
 
         for (const CxScriptEvidenceCase& c : chain.cases)
         {
+            const auto existingCase = std::find_if(
+                context.evidence_items.begin(),
+                context.evidence_items.end(),
+                [&](const ManualEvidenceItem& item)
+                {
+                    return item.case_id == c.evidence_id;
+                });
+            if (existingCase == context.evidence_items.end())
+            {
+                ManualEvidenceItem item;
+                item.case_id = c.evidence_id;
+                item.level = c.level;
+                item.image_id = c.image_id;
+                item.target_id = c.target_id;
+                item.tool = NormalizeEvidenceToolTypeLocal(c.tool);
+                item.script_id = DeriveEvidenceScriptIdLocal(c.script_id);
+                item.parameter_profile_id = c.parameter_profile_id;
+                item.gauge_status =
+                    c.annotations.empty() ? "unannotated" : "annotated";
+                item.probe_status = "pending";
+                item.contract_status =
+                    c.contract_id.empty() ? "missing" : "pending";
+                item.review_status = c.manual_review_required
+                    ? "pending_human_review"
+                    : "unreviewed";
+                item.image_path =
+                    ResolveEvidenceChainImagePathLocal(context, c.image_id);
+                item.source_evidence_chain_path = file.string();
+                context.evidence_items.push_back(std::move(item));
+            }
             ScriptEvidenceThumb thumb;
             thumb.case_id = c.evidence_id;
             thumb.script_id = DeriveEvidenceScriptIdLocal(c.script_id);
@@ -3462,6 +3422,15 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
   LoadEvidenceCategoryOverridesLocal(m_manualTest);
 
   EnsureStructuredCxImageCatalogEntriesLoaded(m_manualTest);
+  m_manualTest.evidence_items.erase(
+      std::remove_if(
+          m_manualTest.evidence_items.begin(),
+          m_manualTest.evidence_items.end(),
+          [](const ManualEvidenceItem& item)
+          {
+            return !item.source_evidence_chain_path.empty();
+          }),
+      m_manualTest.evidence_items.end());
 
   for (auto& group : m_manualTest.script_evidence_groups)
   {
@@ -3646,9 +3615,6 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         : "catalog fallback default params from policy " +
           entry.parameter_policy_id;
 
-    // A plain Catalog entry has no semantic image binding.  Do not attach the
-    // first manifest image to every row; ApplyHDReferenceImageBindingLocal or
-    // the per-tool fallback allocator below is responsible for this row.
     ApplyHDReferenceImageBindingLocal(thumb);
     AssignFallbackImageToThumb(
         thumb,
@@ -3698,8 +3664,6 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
         return findOrCreateGroup("", "", label);
       });
 
-  // Keep baseline Catalog entries alongside Suite/review evidence.  The old
-  // empty-only condition made a review handoff hide the entire Verified list.
   {
     for (const auto& item : m_scriptCatalog)
     {
@@ -3742,10 +3706,6 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
       thumb.status = item.status;
       thumb.reason = item.description;
 
-      // Legacy file-list rows are also unbound until an explicit Evidence
-      // asset, HD reference binding, or the per-tool fallback allocator
-      // supplies an image.  Current Image View must never propagate to all
-      // remaining thumbnails after a click.
       ApplyHDReferenceImageBindingLocal(thumb);
 
       if (thumb.parameter_summary.empty() ||
@@ -3766,11 +3726,6 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded()
     }
   }
 
-  // Restore saved candidates only after every baseline source has been added.
-  // In particular, direct scripts that are present only in the legacy Catalog
-  // block above do not exist when the Suite/structured groups are assembled.
-  // Binding candidates before this point leaves the saved package visible as a
-  // separate row but the original Evidence row still points at baseline data.
   AppendSavedEvidenceCandidatesLocal(
       m_manualTest,
       [&](const std::string& label) -> ScriptEvidenceGroup&
@@ -5390,6 +5345,8 @@ static bool IsEvidenceSelectionImageSetLocal(
     {
         key = NormalizeEvidenceImageSetKeyLocal(key);
         if (key == "hd_fruit_classification_reference_direct" ||
+            key.rfind("torch_resnet18_baseline_", 0) == 0 ||
+            key.rfind("torch_resnet50_baseline_", 0) == 0 ||
             key == "hd_juice_bottle_anomaly_reference_direct" ||
             key == "hd_dongle_ocr_reference_direct" ||
             key == "hd_pill_semantic_segmentation_reference_direct" ||
@@ -5729,6 +5686,10 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection()
             ++added;
         }
 
+        const int referenceSetCount =
+            AddHDReferenceImageSetForCurrentSelection();
+        added += referenceSetCount;
+
         if (preferredImageIndex >= 0)
             m_manualTest.selected_torch_training_image = preferredImageIndex;
         else if (!m_manualTest.torch_training_images.empty())
@@ -5828,6 +5789,11 @@ int ViewController::AddHDReferenceImageSetForCurrentSelection()
     {
         key.resize(key.size() - suffix.size());
     }
+    if (key.rfind("torch_resnet18_baseline_", 0) == 0 ||
+        key.rfind("torch_resnet50_baseline_", 0) == 0)
+    {
+        key = "hd_fruit_classification_reference_direct";
+    }
 
     struct DirBinding
     {
@@ -5839,11 +5805,11 @@ int ViewController::AddHDReferenceImageSetForCurrentSelection()
     };
 
     static const DirBinding kDirs[] = {
-        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn", 16},
-        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_golden_delicious", 16},
-        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_topaz", 16},
-        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/peach", 16},
-        {"hd_fruit_classification_reference_direct", "train", "unlabeled", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/pear", 16},
+        {"hd_fruit_classification_reference_direct", "train", "apple_braeburn", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn", 16},
+        {"hd_fruit_classification_reference_direct", "train", "apple_golden_delicious", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_golden_delicious", 16},
+        {"hd_fruit_classification_reference_direct", "train", "apple_topaz", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_topaz", 16},
+        {"hd_fruit_classification_reference_direct", "train", "peach", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/peach", 16},
+        {"hd_fruit_classification_reference_direct", "train", "pear", "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/pear", 16},
 
         {"hd_juice_bottle_anomaly_reference_direct", "train", "good", "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good", 64},
         {"hd_juice_bottle_anomaly_reference_direct", "test", "anomaly", "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/logical_anomaly", 64},
