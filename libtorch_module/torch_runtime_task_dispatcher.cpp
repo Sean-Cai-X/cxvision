@@ -3,6 +3,7 @@
 #include "torch_runtime_manifest.h"
 #include "torch_runtime_segmentation_executor.h"
 #include "torch_runtime_detection_executor.h"
+#include "torch_runtime_edgesam_executor.h"
 #include "torch_segmentation_mainline_bridge.h"
 #include "torch_test_host.h"
 #include <chrono>
@@ -69,6 +70,26 @@ std::string QuoteRuntimeTaskJsonString(const std::string& value)
     return os.str();
 }
 
+std::string ExtractRuntimeTaskJsonString(
+    const std::string& json,
+    const std::string& key)
+{
+    const std::string marker = "\"" + key + "\"";
+    std::size_t pos = json.find(marker);
+    if (pos == std::string::npos)
+        return {};
+    pos = json.find(':', pos + marker.size());
+    if (pos == std::string::npos)
+        return {};
+    pos = json.find('"', pos + 1);
+    if (pos == std::string::npos)
+        return {};
+    const std::size_t end = json.find('"', pos + 1);
+    if (end == std::string::npos)
+        return {};
+    return json.substr(pos + 1, end - pos - 1);
+}
+
 torch::Tensor MakeSegmentationLifecycleImages(
     const SegmentationMainlineRunnerConfig& config)
 {
@@ -123,10 +144,74 @@ struct EvidenceDatasetImage
 {
     std::string image_id;
     std::filesystem::path path;
+    std::filesystem::path mask_path;
     std::string split;
     std::string label;
     std::vector<EvidenceNormBbox> boxes;
 };
+
+std::vector<EvidenceDatasetImage> CollectRasterDatasetManifestImages(
+    const TorchTaskRequestCpp& request,
+    const int max_images_per_split)
+{
+    if (request.manifest_path.empty())
+        return {};
+    std::ifstream input(request.manifest_path);
+    if (!input)
+        return {};
+    const std::string text(
+        (std::istreambuf_iterator<char>(input)),
+        std::istreambuf_iterator<char>());
+    if (text.find("cxvision.torch.training_dataset.v2") ==
+        std::string::npos)
+    {
+        return {};
+    }
+
+    std::vector<EvidenceDatasetImage> rows;
+    EvidenceDatasetImage current;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        const std::string image_id =
+            ExtractRuntimeTaskJsonString(line, "image_id");
+        if (!image_id.empty())
+            current.image_id = image_id;
+        const std::string image_path =
+            ExtractRuntimeTaskJsonString(line, "image_path");
+        if (!image_path.empty())
+            current.path = image_path;
+        const std::string mask_path =
+            ExtractRuntimeTaskJsonString(line, "mask_path");
+        if (!mask_path.empty())
+            current.mask_path = mask_path;
+        const std::string split =
+            ExtractRuntimeTaskJsonString(line, "split");
+        if (!split.empty())
+            current.split = split;
+        const std::string label =
+            ExtractRuntimeTaskJsonString(line, "label");
+        if (!label.empty())
+            current.label = label;
+
+        if (line.find("    }") != std::string::npos &&
+            !current.image_id.empty() && !current.path.empty() &&
+            !current.mask_path.empty())
+        {
+            int split_count = 0;
+            for (const EvidenceDatasetImage& row : rows)
+            {
+                if (row.split == current.split)
+                    ++split_count;
+            }
+            if (split_count < max_images_per_split)
+                rows.push_back(current);
+            current = {};
+        }
+    }
+    return rows;
+}
 
 struct EvidenceSplitSummary
 {
@@ -567,9 +652,31 @@ bool BuildEvidenceImageBatch(
             torch::kFloat32).clone().permute({2, 0, 1});
         image_tensors.push_back(image_tensor);
 
-        cv::Mat binary = MakeMaskFromEvidenceBboxes(
-            evidence,
-            config.input_size);
+        cv::Mat binary;
+        if (!evidence.mask_path.empty())
+        {
+            cv::Mat source_mask =
+                cv::imread(evidence.mask_path.string(), cv::IMREAD_GRAYSCALE);
+            if (source_mask.empty())
+            {
+                image_tensors.pop_back();
+                continue;
+            }
+            cv::resize(
+                source_mask,
+                binary,
+                cv::Size(config.input_size, config.input_size),
+                0.0,
+                0.0,
+                cv::INTER_NEAREST);
+            cv::threshold(binary, binary, 0, 1, cv::THRESH_BINARY);
+        }
+        else
+        {
+            binary = MakeMaskFromEvidenceBboxes(
+                evidence,
+                config.input_size);
+        }
         foreground_pixels += static_cast<double>(cv::countNonZero(binary));
         total_pixels += static_cast<double>(binary.rows * binary.cols);
         auto mask_tensor = torch::from_blob(
@@ -616,7 +723,20 @@ bool BuildSegmentationLifecycleRealImageBatch(
 {
     int annotation_count = 0;
     std::vector<EvidenceDatasetImage> manifest_images =
-        CollectEvidenceManifestAnnotatedImages(request, 4, annotation_count);
+        CollectRasterDatasetManifestImages(request, 4);
+    if (!manifest_images.empty())
+    {
+        for (const EvidenceDatasetImage& row : manifest_images)
+        {
+            if (!row.mask_path.empty())
+                ++annotation_count;
+        }
+    }
+    else
+    {
+        manifest_images =
+            CollectEvidenceManifestAnnotatedImages(request, 4, annotation_count);
+    }
     artifacts.total_annotations = annotation_count;
     std::vector<std::filesystem::path> image_paths;
     if (!manifest_images.empty())
@@ -665,7 +785,9 @@ bool BuildSegmentationLifecycleRealImageBatch(
         eval_image_count = static_cast<int>(eval_images.size(0));
         config.batch_size = image_count;
         dataset_source = "evidence_manifest";
-        mask_source = "bbox_xywh_norm";
+        mask_source = manifest_images.front().mask_path.empty()
+            ? "bbox_xywh_norm"
+            : "raster_mask_png";
         WriteEvidenceSplitArtifacts(
             std::filesystem::path(request.output_dir),
             manifest_images,
@@ -780,7 +902,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             make_segmentation_mainline_runner_config(
                 "deeplabv3plus",
                 "mobilenet_v3_large",
-                3,
+                2,
                 128,
                 2);
 
@@ -821,35 +943,171 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             lifecycle_mask_source = "synthetic_random";
         }
 
-        const auto smoke =
-            run_segmentation_smoke_train_step(
-                train_images,
-                train_masks,
-                runner_config);
+        const torch::Device device =
+            resolve_segmentation_device(runner_config.device_policy);
+        DeepLabV3Plus trained_model(
+            runner_config.backbone, runner_config.num_classes);
+        const std::string parent_weights =
+            ExtractRuntimeTaskJsonString(
+                request.extra_json, "parent_weights");
+        if (!parent_weights.empty())
+        {
+            TORCH_CHECK(
+                std::filesystem::exists(parent_weights),
+                "parent_weights does not exist: ", parent_weights);
+            torch::load(trained_model, parent_weights);
+        }
+        trained_model->to(device);
+        trained_model->train();
+
+        torch::optim::Adam optimizer(
+            trained_model->parameters(),
+            torch::optim::AdamOptions(runner_config.optimizer.lr)
+                .weight_decay(runner_config.optimizer.weight_decay));
+        train_images = train_images.to(device);
+        train_masks = train_masks.to(device, torch::kLong);
+        optimizer.zero_grad();
+        torch::Tensor train_logits =
+            trained_model->forward(train_images).at("out");
+        torch::Tensor train_loss =
+            torch::nn::functional::cross_entropy(train_logits, train_masks);
+        TORCH_CHECK(
+            torch::isfinite(train_loss).item<bool>(),
+            "persistent segmentation training loss is not finite");
+        train_loss.backward();
+
+        double grad_mean = 0.0;
+        bool has_grad = false;
+        for (const torch::Tensor& parameter : trained_model->parameters())
+        {
+            if (parameter.grad().defined())
+            {
+                grad_mean = parameter.grad().abs().mean().item<double>();
+                has_grad = true;
+                break;
+            }
+        }
+        TORCH_CHECK(
+            has_grad,
+            "persistent segmentation training produced no gradients");
+        optimizer.step();
+
+        trained_model->eval();
+        eval_images = eval_images.to(device);
+        eval_masks = eval_masks.to(device, torch::kLong);
+        double eval_loss = 0.0;
+        double foreground_iou = 0.0;
+        double avg_confidence = 0.0;
+        torch::Tensor eval_prediction_cpu;
+        {
+            torch::NoGradGuard no_grad;
+            torch::Tensor eval_logits =
+                trained_model->forward(eval_images).at("out");
+            eval_loss = torch::nn::functional::cross_entropy(
+                eval_logits, eval_masks).item<double>();
+            torch::Tensor probabilities = torch::softmax(eval_logits, 1);
+            torch::Tensor prediction = probabilities.argmax(1);
+            eval_prediction_cpu =
+                prediction.index({0}).to(torch::kUInt8).mul(255).cpu()
+                    .contiguous();
+            torch::Tensor pred_foreground = prediction.gt(0);
+            torch::Tensor truth_foreground = eval_masks.gt(0);
+            const double intersection = pred_foreground.logical_and(
+                truth_foreground).sum().item<double>();
+            const double union_count = pred_foreground.logical_or(
+                truth_foreground).sum().item<double>();
+            foreground_iou =
+                union_count > 0.0 ? intersection / union_count : 1.0;
+            avg_confidence =
+                std::get<0>(probabilities.max(1)).mean().item<double>();
+        }
+
+        SegmentationSmokeStepResult smoke;
+        smoke.loss = train_loss.item<double>();
+        smoke.grad_mean = grad_mean;
+        smoke.batch_size = static_cast<int>(train_images.size(0));
+        smoke.input_size = runner_config.input_size;
         smoke.validate();
 
-        const auto session =
-            run_segmentation_trainer_session(
-                train_images,
-                train_masks,
-                eval_images,
-                eval_masks,
-                runner_config);
-        session.validate();
+        std::filesystem::path output_dir(request.output_dir);
+        if (!output_dir.empty())
+            std::filesystem::create_directories(output_dir);
+        const std::filesystem::path model_package_dir =
+            output_dir / "deeplab_incremental_model";
+        const std::filesystem::path model_weights_dir =
+            model_package_dir / "weights";
+        std::filesystem::create_directories(model_weights_dir);
+        const std::filesystem::path model_weights_path =
+            model_weights_dir / "deeplab_incremental.pt";
+        torch::save(trained_model, model_weights_path.string());
 
-        const auto analysis =
-            build_segmentation_trainer_analysis(session);
-        analysis.validate();
+        std::filesystem::path inference_mask_path;
+        std::filesystem::path inference_overlay_path;
+        cv::Mat source_image =
+            cv::imread(request.input_image, cv::IMREAD_COLOR);
+        if (!source_image.empty() && eval_prediction_cpu.defined())
+        {
+            cv::Mat small_mask(
+                runner_config.input_size,
+                runner_config.input_size,
+                CV_8UC1,
+                eval_prediction_cpu.data_ptr<unsigned char>());
+            cv::Mat inference_mask;
+            cv::resize(
+                small_mask,
+                inference_mask,
+                source_image.size(),
+                0.0,
+                0.0,
+                cv::INTER_NEAREST);
+            inference_mask_path =
+                output_dir / "incremental_inference_mask.png";
+            inference_overlay_path =
+                output_dir / "incremental_inference_overlay.png";
+            cv::imwrite(inference_mask_path.string(), inference_mask);
+            cv::Mat overlay = source_image.clone();
+            cv::Mat tint(
+                source_image.size(),
+                source_image.type(),
+                cv::Scalar(0, 190, 0));
+            tint.copyTo(overlay, inference_mask);
+            cv::addWeighted(
+                source_image, 0.55, overlay, 0.45, 0.0, overlay);
+            cv::imwrite(inference_overlay_path.string(), overlay);
+        }
 
-        const auto unified =
-            build_segmentation_unified_mainline_bundle(
-                session.session,
-                analysis);
-        unified.validate();
-
-        const auto summary =
-            build_segmentation_unified_mainline_summary(unified);
-        summary.validate();
+        const std::filesystem::path model_manifest_path =
+            model_package_dir / "model_manifest.json";
+        {
+            std::ofstream manifest_output(model_manifest_path);
+            manifest_output
+                << "{"
+                << "\"schema\":\"cxvision.torch_model_manifest\","
+                << "\"schema_version\":1,"
+                << "\"model_id\":\"deeplab_incremental_"
+                << deterministic_seed << "\","
+                << "\"parent_model_id\":\""
+                << (parent_weights.empty()
+                        ? "random_initialization"
+                        : "provided_cpp_state_dict")
+                << "\","
+                << "\"task\":\"segmentation\","
+                << "\"architecture\":\"deeplabv3plus\","
+                << "\"backbone\":\"mobilenet_v3_large\","
+                << "\"weights\":\"weights/deeplab_incremental.pt\","
+                << "\"weights_format\":\"cpp_state_dict\","
+                << "\"num_classes\":2,"
+                << "\"model_name\":\"deeplab_incremental\","
+                << "\"model_version\":\"incremental-1\","
+                << "\"input\":{"
+                << "\"width\":128,\"height\":128,\"color\":\"rgb\","
+                << "\"scale\":0.003921568627,"
+                << "\"mean\":[0.0,0.0,0.0],"
+                << "\"std\":[1.0,1.0,1.0]},"
+                << "\"postprocess\":{"
+                << "\"target_class_id\":1,\"min_component_area\":20}"
+                << "}\n";
+        }
 
         const auto end = std::chrono::steady_clock::now();
         result.train_runtime_ms =
@@ -864,12 +1122,17 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         result.ok = true;
         result.error_code = 0;
         result.status = "success";
-        result.trainer_lifecycle_summary = analysis.lifecycle_summary.summary;
-        result.unified_mainline_summary = summary.summary;
-
-        std::filesystem::path output_dir(request.output_dir);
-        if (!output_dir.empty())
-            std::filesystem::create_directories(output_dir);
+        result.trainer_lifecycle_summary =
+            "persistent model instance completed optimizer step and evaluation";
+        result.unified_mainline_summary =
+            "incremental cpp_state_dict and model manifest exported";
+        if (!inference_overlay_path.empty())
+        {
+            result.primary_visual_ref = inference_overlay_path.string();
+            result.visualization_refs =
+                inference_mask_path.string() + ";" +
+                inference_overlay_path.string();
+        }
 
         const std::filesystem::path result_path =
             output_dir.empty()
@@ -910,9 +1173,17 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         result_json << "\"input_size\":" << runner_config.input_size << ",";
         result_json << "\"smoke_loss\":" << smoke.loss << ",";
         result_json << "\"grad_mean\":" << smoke.grad_mean << ",";
-        result_json << "\"eval_loss\":" << session.session.eval.loss << ",";
-        result_json << "\"foreground_iou\":" << session.session.eval.foreground_iou << ",";
-        result_json << "\"avg_confidence\":" << session.session.eval.avg_confidence << ",";
+        result_json << "\"eval_loss\":" << eval_loss << ",";
+        result_json << "\"foreground_iou\":" << foreground_iou << ",";
+        result_json << "\"avg_confidence\":" << avg_confidence << ",";
+        result_json << "\"model_weights_ref\":"
+                    << QuoteRuntimeTaskJsonString(model_weights_path.string()) << ",";
+        result_json << "\"model_manifest_ref\":"
+                    << QuoteRuntimeTaskJsonString(model_manifest_path.string()) << ",";
+        result_json << "\"mask_ref\":"
+                    << QuoteRuntimeTaskJsonString(inference_mask_path.string()) << ",";
+        result_json << "\"overlay_ref\":"
+                    << QuoteRuntimeTaskJsonString(inference_overlay_path.string()) << ",";
         result_json << "\"trainer_lifecycle_summary\":"
                     << QuoteRuntimeTaskJsonString(result.trainer_lifecycle_summary) << ",";
         result_json << "\"unified_mainline_summary\":"
@@ -937,7 +1208,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             evidence << "{";
             evidence << "\"schema\":\"cxvision.torch.training_lifecycle_evidence.v1\",";
             evidence << "\"task\":" << QuoteRuntimeTaskJsonString(request.task) << ",";
-            evidence << "\"training_stage\":\"tiny_smoke\",";
+            evidence << "\"training_stage\":\"persistent_incremental\",";
             evidence << "\"deterministic_seed\":" << deterministic_seed << ",";
             evidence << "\"dataset_source\":" << QuoteRuntimeTaskJsonString(lifecycle_dataset_source) << ",";
             evidence << "\"mask_source\":" << QuoteRuntimeTaskJsonString(lifecycle_mask_source) << ",";
@@ -960,7 +1231,16 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             evidence << "\"input_size\":" << runner_config.input_size << ",";
             evidence << "\"finite_loss\":true,";
             evidence << "\"grad_mean\":" << smoke.grad_mean << ",";
-            evidence << "\"semantic_quality\":\"not_evaluated\"";
+            evidence << "\"eval_loss\":" << eval_loss << ",";
+            evidence << "\"foreground_iou\":" << foreground_iou << ",";
+            evidence << "\"avg_confidence\":" << avg_confidence << ",";
+            evidence << "\"model_weights_ref\":"
+                     << QuoteRuntimeTaskJsonString(model_weights_path.string())
+                     << ",";
+            evidence << "\"model_manifest_ref\":"
+                     << QuoteRuntimeTaskJsonString(model_manifest_path.string())
+                     << ",";
+            evidence << "\"semantic_quality\":\"pending_human_review\"";
             evidence << "}\n";
             result.evidence_ref = evidence_path.string();
         }
@@ -972,7 +1252,8 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         if (!request.input_image.empty())
         {
             result.input_image_ref = request.input_image;
-            result.primary_visual_ref = request.input_image;
+            if (result.primary_visual_ref.empty())
+                result.primary_visual_ref = request.input_image;
         }
     }
     catch (const std::exception& e)
@@ -1124,6 +1405,12 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
         return ExecuteTorchSegmentationTask(
             config,
             request);
+    }
+
+    if (request.task ==
+        TorchRuntimeTaskIds::EdgeSamPromptSegmentation)
+    {
+        return ExecuteTorchEdgeSamTask(config, request);
     }
 
     if (request.task ==

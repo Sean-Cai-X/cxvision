@@ -2297,4 +2297,269 @@ Options:
 <p align="center">
 <img src="https://raw.githubusercontent.com/Sean-Cai-X/cxvision/codex/cxcore-integration/diagram2.png" width="100%">
 </p>
-*文档版本: v2.4 | 对应分支: codex/cxcore-integration | 核验日期: 2026-08-07 | 代码基线: 8c77433 | 基于仓库: cxvision_repo*
+
+
+ FindSegmentation->torch /  FindLine->FindGauge 
+ 两种工具在深度学习和传统分析上的交汇,
+ FindLine和其工具参数链路代表的分析测量的原子语义链路的可解释性,
+ 而FindSegmentation开始的模型和增量训练带来的边界深度学习构建化,
+ 这里恰恰是Ensmallen 和Mlpack关键的两个原子路径的开端,
+ 所以当前的推进进入一个融合语义和特征和参数链路交错的节点,用理解上说,
+ 深度学习的神经网络的不可理解在分析网络的可理解进行了稀疏化处理,这是系统智能化关键路径 
+
+这里的关键并不是简单地把“传统视觉 + 深度学习”放到同一个框架里，
+而是要建立一条能够在两者之间转换、约束和验证的中间语义层。
+
+  可以把当前节点理解为：
+
+  像素 / 图像
+     │
+     ├─ FindSegmentation → Torch → 特征与边界概率
+     │                         │
+     │                         ▼
+     │                 可学习但弱可解释的表征
+     │
+     └─ FindLine → FindGauge → 点、边、距离、方向、容差
+                               │
+                               ▼
+                       可解释的测量原子语义
+
+  真正需要融合的是下面这一层：
+
+  模型特征
+     ↓ 投影、筛选、约束
+  测量原子
+     ↓ 组合
+  工程语义、Contract、PASS/FAIL
+
+  ### 1. FindLine → FindGauge 是“可解释原子链”
+
+  FindLine 不应只被理解为一个检测算法，它实际上定义了一组稳定、可追踪的分析原子：
+
+  - 输入区域是什么；
+  - 扫描方向是什么；
+  - 极性、阈值、Gap、采样密度是什么；
+  - 得到了哪些测量点；
+  - 哪些点被过滤；
+  - 使用什么拟合方法；
+  - 输出直线的角度、位置、残差和置信度是什么；
+  - 结果如何参与距离、角度、平行度等 Gauge 结论。
+
+  因此 FindGauge 不是另一个孤立工具，而应是 FindLine、FindCircle、Shape、几何关系等原子的组合层：
+
+  ROI
+  → Scan
+  → Edge Samples
+  → Filtered Samples
+  → Geometric Primitive
+  → Gauge Relation
+  → Tolerance Decision
+
+  这条链的价值在于每个中间状态都能快照、比较、回放和解释。参数也不是零散 UI 数字，而是这个语义链上各阶段的控制变量。
+
+  ### 2. FindSegmentation → Torch 是“可学习边界构造链”
+
+  FindSegmentation 的意义也不应只停留在输出 mask。它提供的是传统固定算子难以稳定构造的边界先验：
+
+  图像
+  → 神经网络特征
+  → 类别概率 / Mask
+  → 边界概率
+  → 连通区域或候选轮廓
+  → 工程测量候选
+
+  模型可以解决纹理复杂、对比度不稳定、边缘局部缺失、背景干扰等问题。但模型输出本身不等于最终测量事实。
+
+  例如模型输出一块区域，不代表已经得到了可验收的宽度、圆心、直线或间距。它仍需投影到传统分析原子：
+
+  Segmentation Mask
+  → Boundary Candidate
+  → FindLine/FindCircle Sampling
+  → Robust Fit
+  → Gauge Measurement
+  → Contract
+
+  这样 Torch 负责“在哪里找”和“哪些像素更可能属于目标”，FindLine/FindGauge 负责“最终测量了什么、为何得到这个数值”。
+
+  ### 3. “不可理解被可理解网络稀疏化”需要进一步精确定义
+
+   这里的“稀疏化”最好不要只理解成数学意义上的稀疏参数或稀疏权重。它更接近三种稀疏化：
+
+  1. 空间稀疏化
+
+     神经网络把整幅图压缩成有限的候选区域、边界或关键点。
+
+  2. 语义稀疏化
+
+     高维特征最终被投影成少量工程原子：线、圆、区域、中心、方向、距离。
+
+  3. 决策稀疏化
+
+     最终 Contract 不直接解释数百万个网络参数，而解释少量可验证事实：
+
+     左边界 = ...
+     右边界 = ...
+     拟合残差 = ...
+     宽度 = ...
+     容差范围 = ...
+
+  所以更准确的描述是：
+
+  > 深度学习并未被完整解释，而是通过可解释测量原子形成了一个受约束的语义瓶颈。工程结论只允许从这个瓶颈之后产生。
+
+  这很重要。不能声称 FindLine 解释了神经网络内部为什么作出某个像素分类；它解释的是模型输出如何被转换成最终测量事实。
+
+  ### 4. Ensmallen 与 mlpack 的位置
+
+  这两个路径不宜被放成 Torch 的替代品，而应成为连接模型特征和分析参数的两类基础能力。
+
+  Ensmallen 更适合承担“参数优化原子”：
+
+  固定输入与固定 ROI
+  → 参数向量
+  → 执行统一测量链
+  → 计算可解释目标函数
+  → 优化器提出下一组参数
+
+  目标函数不能只写成“是否通过”，而应分解为：
+
+  边界响应强度
+  + 有效点覆盖率
+  - 拟合残差
+  - 参数敏感度
+  - ROI 扰动敏感度
+  - 超时和失败惩罚
+
+  这样优化结果仍能映射回 threshold、gap、filter、sample interval 等明确参数。
+
+  mlpack 更适合承担“轻量特征学习原子”：
+
+  传统特征 / Torch embedding / 测量摘要
+  → 分类、聚类、异常检测或回归
+  → 候选排序、失败分类、参数建议
+
+  它可以处在两个位置：
+
+  - Torch 之前或旁边：用低成本模型判断是否需要运行重模型；
+  - Torch 与 Gauge 之间：基于模型特征和传统测量特征选择算法分支、参数 Profile 或候选排序。
+
+  因此三者可形成分层关系：
+
+  Torch
+  高维视觉表征与复杂分割
+          │
+          ▼
+  mlpack
+  特征选择、分类、回归、异常检测
+          │
+          ▼
+  Ensmallen
+  可解释参数链上的约束优化
+          │
+          ▼
+  FindLine / FindCircle / FindGauge
+  确定性测量与工程事实
+
+  但它们都不能各自建设独立执行链，必须共享统一请求、执行核心、结果和证据结构。
+
+  ### 5. 后续架构重点不是增加工具，而是定义公共中间表示
+
+  [下一步]最有价值的不是马上实现更多模型或优化器，而是先固定一套跨工具的中间结果。
+
+  建议至少包括四层：
+
+  Layer 1：Perception Evidence
+  概率图、Mask、Embedding、响应图、候选区域
+
+  Layer 2：Measurement Evidence
+  扫描线、采样点、边缘点、过滤点、拟合输入
+
+  Layer 3：Geometric Facts
+  Line、Circle、Contour、Center、Angle、Distance、Residual
+
+  Layer 4：Business Facts
+  尺寸、容差、缺陷类别、Contract 结论
+
+  每层都要携带：
+
+  - 来源工具和对象引用；
+  - 输入图片及 ROI 标识；
+  - 参数快照；
+  - 坐标系；
+  - 置信度或质量指标；
+  - 上游证据引用；
+  - stale/version 状态；
+  - elapsed、timeout、failure stage；
+  - 可回放所需信息。
+
+  由此形成真正的证据图：
+
+  模型版本
+    → segmentation candidate
+    → boundary candidate
+    → measurement samples
+    → fitted line
+    → gauge value
+    → contract conclusion
+
+  UI、Headless、Suite 和参数回归只是这张证据图的不同消费者，不再自行解释结果。
+
+  ### 6. 增量训练必须与在线测量链隔离
+
+  FindSegmentation 引入增量训练后，最危险的问题不是训练失败，而是运行语义漂移：
+
+  - 同一个 case 因模型更新得到不同 mask；
+  - ROI 和参数未变，但候选边界改变；
+  - 人工修正数据被立即用于模型更新；
+  - 新模型覆盖旧模型后无法复现历史结果；
+  - Contract 的变化被模型版本变化掩盖。
+
+  因此增量训练应当是明确的离线闭环：
+
+  运行证据
+  → 人工审核
+  → 标注修正
+  → 生成候选训练集版本
+  → 训练候选模型
+  → 固定 L1/L2/L3 回归
+  → 人工批准
+  → 模型 Promotion
+
+  在线执行只能消费已经批准、不可变的模型版本。一次运行必须冻结：
+
+  - 模型 ID 与 Hash；
+  - 数据集版本；
+  - 预处理 Profile；
+  - 后处理参数；
+  - 测量参数；
+  - 脚本快照；
+  - Contract 版本。
+
+  模型建议和参数优化都不能直接改变当前运行对象，也不能绕过人工选择与 Promotion gate。
+
+  ### 7.  推进顺序
+
+  第一阶段先固定 FindLine → FindGauge 的原子语义链，明确每个阶段的输入、输出、参数和证据。这是整个系统的解释基准。
+
+  第二阶段让 FindSegmentation 只提供候选区域、概率图和边界先验，不直接输出最终业务 PASS/FAIL。
+
+  第三阶段建立从 segmentation evidence 到 measurement evidence 的标准投影，使模型结果能够进入相同的 FindLine/FindCircle/
+  Gauge 链。
+
+  第四阶段引入 mlpack，先做失败分类、候选排序和参数建议，不直接改变 Gauge。
+
+  第五阶段引入 Ensmallen，在固定图片、固定 ROI、固定 Contract 和严格预算内优化可解释参数；候选结果仍走 L1 → L2 → L3 → 人
+  工审核。
+
+  第六阶段才开展增量训练，并把数据集、模型、参数 Profile、Contract 的版本治理纳入统一证据链。
+
+  最终目标可以概括为：
+
+  > 深度学习负责扩大可感知边界，传统分析负责收敛为可解释测量；mlpack负责学习两者之间的映射，Ensmallen负责在约束内优化显
+  > 式参数。所有结果最终必须落到统一的几何事实、证据引用和 Contract 上。
+
+  这也意味着下一阶段最关键的设计对象不是某个新算法类，而是“模型证据如何可靠地成为测量证据”的统一契约。只要这个契约稳定，
+  FindSegmentation、Torch、mlpack、Ensmallen 和 FindGauge 才会成为同一条开发链，而不是四套继续扩张的框架。
+
+  
+*文档版本: v2.4 | 对应分支: codex/cxcore-integration | 核验日期: 2026-08-16 | 代码基线: 8c77433 | 基于仓库: cxvision_repo*

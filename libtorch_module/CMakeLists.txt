@@ -290,6 +290,7 @@ if(LIBTORCH_MODULE_BUILD_RUNTIME_DLL)
             torch_runtime_artifact_writer.cpp
             torch_runtime_contract.cpp
             torch_runtime_segmentation_executor.cpp
+            torch_runtime_edgesam_executor.cpp
             torch_runtime_detection_executor.cpp
             torch_test_host.h
             torch_alltest.h

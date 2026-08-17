@@ -674,7 +674,12 @@ bool CaptureFindSegmentationResult(
     output.has_result_rect = output.segmentation_contour_count > 0;
     output.result_rect_count = output.segmentation_contour_count;
     output.avgdist = output.segmentation_primary_area;
-    output.failure_stage = output.segmentation_contour_count > 0 ? std::string() : "boundary_contours";
+    if (output.segmentation_contour_count > 0) {
+        output.failure_stage.clear();
+    } else {
+        const std::string& backend_status = tool.result().backend_status;
+        output.failure_stage = backend_status.empty() ? "boundary_contours" : backend_status;
+    }
     if (!output.failure_stage.empty())
         output.reason = tool.m_reason.empty() ? "FindSegmentation boundary unavailable" : tool.m_reason;
 

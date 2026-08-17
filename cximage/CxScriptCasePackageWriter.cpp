@@ -73,6 +73,16 @@ bool LooksLikeFindEllipseCandidate(
          key.find("find_ellipse") != std::string::npos;
 }
 
+std::string StripEvidenceCandidateDisplaySuffix(std::string value) {
+  const std::string marker = " [candidate_";
+  std::size_t pos = value.find(marker);
+  while (pos != std::string::npos && value.find(']', pos) != std::string::npos) {
+    value.erase(pos);
+    pos = value.find(marker);
+  }
+  return value;
+}
+
 void SanitizeFindEllipseCandidateGlobals(
     const std::string &tool, const std::string &caseId,
     const std::string &scriptId, const std::string &scriptPath,
@@ -410,11 +420,13 @@ std::string EffectiveScriptPath(const ManualTestContext &context) {
 std::string EffectiveScriptId(const ManualTestContext &context) {
   if (context.current_evidence_selection.valid &&
       !context.current_evidence_selection.script_id.empty())
-    return context.current_evidence_selection.script_id;
+    return StripEvidenceCandidateDisplaySuffix(
+        context.current_evidence_selection.script_id);
   const std::string scriptPath = EffectiveScriptPath(context);
   if (!scriptPath.empty())
-    return std::filesystem::path(scriptPath).filename().string();
-  return context.active_script_case_name;
+    return StripEvidenceCandidateDisplaySuffix(
+        std::filesystem::path(scriptPath).filename().string());
+  return StripEvidenceCandidateDisplaySuffix(context.active_script_case_name);
 }
 
 std::string EffectiveCaseId(const ManualTestContext &context) {

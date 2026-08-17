@@ -2373,7 +2373,7 @@ int RunCxVisionApplication(int argc, char** argv)
 
     if (evidenceOptions.torch_training_label_package_smoke)
     {
-        std::cout << "[MAIN] Torch training label-package smoke begin\n";
+        std::cout << "[MAIN] Torch training dataset smoke begin\n";
         ViewController controller;
         std::string initReason;
         if (!controller.InitEvidenceSelfTestEnvironment(initReason))
@@ -2398,8 +2398,8 @@ int RunCxVisionApplication(int argc, char** argv)
                   << "package_path=" << packagePath << "\n"
                   << "out_dir=" << outDir << "\n"
                   << "conclusion=" << (ok
-                        ? "LABEL_PACKAGE_EXPORT_PASS_TO_VERIFY"
-                        : "LABEL_PACKAGE_EXPORT_FAIL") << "\n"
+                        ? "TRAINING_DATASET_EXPORT_PASS_TO_VERIFY"
+                        : "TRAINING_DATASET_EXPORT_FAIL") << "\n"
                   << "reason=" << reason << "\n";
         return ok ? 0 : 1;
     }

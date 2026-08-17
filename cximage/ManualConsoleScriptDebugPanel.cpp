@@ -698,15 +698,23 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
 
   RefreshRuntimeObjectTable(
       "Manual Console Pending Run", ran ? "runtime_executed" : "BLOCKED");
+  std::string manualConclusionStatus = m_manualTest.debug_status;
+  if (ran &&
+      m_manualTest.current_result_ref.result_type == "FindSegmentationResult" &&
+      !m_manualTest.current_result_ref.status.empty())
+  {
+    manualConclusionStatus = m_manualTest.current_result_ref.status;
+  }
   CXLOG_INFO(
       "ManualConsole",
       "manual_run_conclusion",
-      m_manualTest.debug_status,
+      manualConclusionStatus,
       "script=" + context.loaded_script_path +
+          " debug_status=" + m_manualTest.debug_status +
+          " script_result_status=" + m_scriptResult.status +
           " result_type=" + m_manualTest.current_result_ref.result_type +
           " result_status=" + m_manualTest.current_result_ref.status +
           " reason=" + m_manualTest.debug_reason);
-
   // RefreshRuntimeObjectTable() projects the newly-created runtime object and
   // may replace current_gauge.  A deferred Key Parameter/Candidate run must
   // keep the exact input snapshot that was applied and persisted, not the
@@ -965,6 +973,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       runRequestedByTorchAction)
   {
     SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
+    bool ran = false;
     if (context.editor_text.empty())
     {
       context.debug_action = "Run";
@@ -1225,7 +1234,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
 
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:run_script");
       context.run_state = "running";
-      const bool ran = imageBound && torchRequestReady &&
+      ran = imageBound && torchRequestReady &&
           m_parserDebugBridge.RunScript(context.editor_text);
       context.run_state = ran ? "runtime_finished" : "failed";
       context.debug_status = ran ? "runtime_executed" : "run_failed";
@@ -1274,15 +1283,23 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:refresh_runtime_objects");
       RefreshRuntimeObjectTable(
         "Manual Console Run", ran ? "runtime_executed" : "BLOCKED");
+      std::string manualConclusionStatus = context.debug_status;
+      if (ran &&
+          context.current_result_ref.result_type == "FindSegmentationResult" &&
+          !context.current_result_ref.status.empty())
+      {
+        manualConclusionStatus = context.current_result_ref.status;
+      }
       CXLOG_INFO(
           "ManualConsole",
           "manual_run_conclusion",
-          context.debug_status,
+          manualConclusionStatus,
           "script=" + context.loaded_script_path +
+              " debug_status=" + context.debug_status +
+              " script_result_status=" + m_scriptResult.status +
               " result_type=" + context.current_result_ref.result_type +
               " result_status=" + context.current_result_ref.status +
               " reason=" + context.debug_reason);
-
       // Runtime projection is allowed to update result objects, but it must
       // not visually roll the candidate editor back to values from the
       // selected Evidence row.  Preserve the input snapshot until the run has

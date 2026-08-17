@@ -20,6 +20,9 @@ inline constexpr const char* DetectionContract =
 inline constexpr const char* DeepLabV3PlusSegmentation =
     "torch.infer.segmentation.deeplabv3plus.v1";
 
+inline constexpr const char* EdgeSamPromptSegmentation =
+    "torch.infer.segmentation.edgesam.v1";
+
 inline constexpr const char* YoloV8Detection =
     "torch.infer.detection.yolov8.v1";
 

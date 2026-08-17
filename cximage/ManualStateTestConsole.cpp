@@ -679,6 +679,11 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
   const bool isRegionPatternScript =
       scriptPath.find("region_pattern") != std::string::npos ||
       scriptPath.find("RegionPatternTool") != std::string::npos;
+  const bool isSegmentationScript =
+      scriptPath.find("find_segmentation") != std::string::npos ||
+      scriptPath.find("findsegmentation") != std::string::npos ||
+      scriptPath.find("FindSegmentation") != std::string::npos;
+
   const bool isVerticalLineScript =
       scriptPath.find("find_line_vertical") != std::string::npos ||
       scriptPath.find("findline_vertical") != std::string::npos;
@@ -815,7 +820,23 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_grid_overlay_truncated", 0);
   }
 
+  if (isSegmentationScript) {
+    set("global_segmentation_mode", 2);
+    set("global_segmentation_threshold_percent", 50);
+    set("global_segmentation_positive_enabled", 1);
+    set("global_segmentation_positive_x", 320);
+    set("global_segmentation_positive_y", 260);
+    set("global_segmentation_negative_enabled", 1);
+    set("global_segmentation_negative_x", 80);
+    set("global_segmentation_negative_y", 80);
+    set("global_segmentation_prompt_x0", 120);
+    set("global_segmentation_prompt_y0", 120);
+    set("global_segmentation_prompt_x1", 980);
+    set("global_segmentation_prompt_y1", 820);
+  }
+
   if (isRegionPatternScript) {
+
     set("global_region_roi_x", 120);
     set("global_region_roi_y", 120);
     set("global_region_roi_w", 120);
@@ -916,6 +937,36 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
         gauge.line_x0 + context.runtime_int_vars["global_region_roi_w"];
     gauge.line_y1 =
         gauge.line_y0 + context.runtime_int_vars["global_region_roi_h"];
+  } else if (isSegmentationScript) {
+    gauge.tool = "FindSegmentation";
+    gauge.primary_object_type = "FindSegmentation";
+    gauge.primary_object_name = "m_seg";
+    gauge.primary_object_status = "script_default";
+    gauge.has_segmentation_prompt_rect = true;
+    gauge.segmentation_prompt_x0 =
+        context.runtime_int_vars["global_segmentation_prompt_x0"];
+    gauge.segmentation_prompt_y0 =
+        context.runtime_int_vars["global_segmentation_prompt_y0"];
+    gauge.segmentation_prompt_x1 =
+        context.runtime_int_vars["global_segmentation_prompt_x1"];
+    gauge.segmentation_prompt_y1 =
+        context.runtime_int_vars["global_segmentation_prompt_y1"];
+    gauge.segmentation_mode =
+        context.runtime_int_vars["global_segmentation_mode"];
+    gauge.segmentation_threshold_percent =
+        context.runtime_int_vars["global_segmentation_threshold_percent"];
+    gauge.has_segmentation_positive_point =
+        context.runtime_int_vars["global_segmentation_positive_enabled"] != 0;
+    gauge.segmentation_positive_x =
+        context.runtime_int_vars["global_segmentation_positive_x"];
+    gauge.segmentation_positive_y =
+        context.runtime_int_vars["global_segmentation_positive_y"];
+    gauge.has_segmentation_negative_point =
+        context.runtime_int_vars["global_segmentation_negative_enabled"] != 0;
+    gauge.segmentation_negative_x =
+        context.runtime_int_vars["global_segmentation_negative_x"];
+    gauge.segmentation_negative_y =
+        context.runtime_int_vars["global_segmentation_negative_y"];
   } else if (isFastMatchScript) {
     // FastMatch Key Parameter Controls read shared learn parameters from
     // ManualGaugeState and ROI/action parameters from runtime_int_vars.
@@ -940,7 +991,7 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
 
   if (gauge.has_circle_gauge || gauge.has_line_gauge ||
       gauge.has_ellipse_gauge || isGridPatternScript || isRegionPatternScript ||
-      isFastMatchScript)
+      isSegmentationScript || isFastMatchScript)
     context.current_gauge = gauge;
 }
 
@@ -1621,11 +1672,19 @@ void ViewController::RefreshRuntimeObjectTable(
       }
 
       if (object.type == "FindSegmentation") {
-        m_manualTest.debug_status = object.segmentation_contour_count > 0
-                                        ? "runtime_result_available"
-                                        : "runtime_executed_without_boundary";
+        const bool hasBoundary = object.segmentation_contour_count > 0;
+        const bool promptQualityFail =
+            object.segmentation_backend_status == "prompt_quality_fail" ||
+            object.runtime_state == "prompt_quality_fail";
+        const std::string segmentationResultStatus =
+            hasBoundary ? "boundary_available_pending_human_review"
+                        : (promptQualityFail ? "prompt_quality_fail"
+                                             : "boundary_unavailable");
+
+        m_manualTest.debug_status =
+            hasBoundary ? "runtime_result_available" : segmentationResultStatus;
         m_manualTest.debug_reason = BuildRuntimeFeedbackReason(object);
-        m_scriptResult.status = "PENDING_REVIEW";
+        m_scriptResult.status = hasBoundary ? "PENDING_REVIEW" : "FAIL";
         m_scriptResult.reason = m_manualTest.debug_reason;
         if (m_manualTest.current_result_ref.source_object.empty()) {
           m_manualTest.current_result_ref.source_object = object.name;
@@ -1636,16 +1695,12 @@ void ViewController::RefreshRuntimeObjectTable(
               object.segmentation_result_ref.empty()
                   ? ("runtime_object:" + object.name)
                   : object.segmentation_result_ref;
-          m_manualTest.current_result_ref.status =
-              object.segmentation_contour_count > 0
-                  ? "boundary_available_pending_human_review"
-                  : "boundary_unavailable";
+          m_manualTest.current_result_ref.status = segmentationResultStatus;
           m_manualTest.current_result_ref.points_count =
               object.segmentation_contour_count;
           m_manualTest.current_result_ref.valid_points_count =
               object.segmentation_contour_count;
           m_manualTest.current_result_ref.reason =
-
               BuildRuntimeFeedbackReason(object);
         }
         break;
@@ -1807,9 +1862,9 @@ void ViewController::drawTorchRuntimeEvidenceWindow() {
     return;
   }
 
-  ImGui::TextWrapped(
-      "Torch layer is separated from geometry key parameters. "
-      "Use this window for model/runtime/artifact/prompt/review visibility.");
+  ImGui::TextWrapped("Torch layer is separated from geometry key parameters. "
+                     "Use this window for model/runtime/artifact/prompt/review "
+                     "visibility.");
   ImGui::Separator();
 
   DrawTorchKeyStatusPanel(m_manualTest);

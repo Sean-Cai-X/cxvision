@@ -170,11 +170,20 @@ void AttachSegmentationMaskRefs(
 
     const std::filesystem::path result_path(source.result_ref);
     const std::filesystem::path result_dir = result_path.parent_path();
-    const std::filesystem::path mask_path = result_dir / "mask_binary.png";
+    std::filesystem::path mask_path = result_dir / "mask_binary.png";
     const std::filesystem::path contour_path = result_dir / "contours.json";
-    const std::filesystem::path overlay_path = source.primary_visual_ref.empty()
+    std::filesystem::path overlay_path = source.primary_visual_ref.empty()
         ? result_dir / "mask_overlay.png"
         : std::filesystem::path(source.primary_visual_ref);
+
+    if (!std::filesystem::exists(mask_path)) {
+        const std::size_t separator = source.visualization_refs.find(';');
+        if (separator != std::string::npos) {
+            mask_path = source.visualization_refs.substr(0, separator);
+            if (overlay_path.empty())
+                overlay_path = source.visualization_refs.substr(separator + 1);
+        }
+    }
 
     if (!std::filesystem::exists(mask_path)) {
         return;

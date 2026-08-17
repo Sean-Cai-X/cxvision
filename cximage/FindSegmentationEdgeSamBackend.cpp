@@ -213,23 +213,22 @@ bool ParseFindSegmentationContours(const std::filesystem::path &contour_path,
 
 bool ApplyPromptRectConstraintToTorchSegmentationResult(
     const FindSegmentationInput &input, const std::filesystem::path &result_dir,
-    FindSegmentationResult &output) {
-  if (!input.has_rect || input.image.empty()) {
-    std::cout << "[FindSegmentation] prompt roi constraint skipped: has_rect="
-              << (input.has_rect ? "true" : "false")
-              << " image_empty=" << (input.image.empty() ? "true" : "false")
-              << "\n"
-              << std::flush;
+    const cv::Rect &runtime_input_roi, FindSegmentationResult &output) {
+  if (!input.has_rect || input.image.empty())
     return false;
-  }
 
   const cv::Rect image_bounds(0, 0, input.image.cols, input.image.rows);
   const cv::Rect image_roi = input.rect & image_bounds;
-  if (image_roi.width <= 0 || image_roi.height <= 0) {
+  const cv::Rect constrained_image_roi = image_roi & runtime_input_roi;
+  if (image_roi.width <= 0 || image_roi.height <= 0 ||
+      constrained_image_roi.width <= 0 || constrained_image_roi.height <= 0) {
     std::cout << "[FindSegmentation] prompt roi constraint skipped: invalid "
                  "image_roi="
               << image_roi.x << "," << image_roi.y << "," << image_roi.width
-              << "," << image_roi.height << "\n"
+              << "," << image_roi.height << " runtime_input_roi="
+              << runtime_input_roi.x << "," << runtime_input_roi.y << ","
+              << runtime_input_roi.width << "," << runtime_input_roi.height
+              << "\n"
               << std::flush;
     return false;
   }
@@ -245,63 +244,197 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
   }
 
   const double sx = static_cast<double>(raw_mask.cols) /
-                    static_cast<double>(input.image.cols);
+                    static_cast<double>(runtime_input_roi.width);
   const double sy = static_cast<double>(raw_mask.rows) /
-                    static_cast<double>(input.image.rows);
-  if (sx <= 0.0 || sy <= 0.0) {
-    std::cout
-        << "[FindSegmentation] prompt roi constraint skipped: invalid scale sx="
-        << sx << " sy=" << sy << "\n"
-        << std::flush;
+                    static_cast<double>(runtime_input_roi.height);
+  if (sx <= 0.0 || sy <= 0.0)
     return false;
-  }
 
-  cv::Rect mask_roi(static_cast<int>(std::round(image_roi.x * sx)),
-                    static_cast<int>(std::round(image_roi.y * sy)),
-                    static_cast<int>(std::round(image_roi.width * sx)),
-                    static_cast<int>(std::round(image_roi.height * sy)));
+  const int mask_x0 = static_cast<int>(std::round(
+      (constrained_image_roi.x - runtime_input_roi.x) * sx));
+  const int mask_y0 = static_cast<int>(std::round(
+      (constrained_image_roi.y - runtime_input_roi.y) * sy));
+  const int mask_x1 = static_cast<int>(std::round(
+      (constrained_image_roi.x + constrained_image_roi.width -
+       runtime_input_roi.x) *
+      sx));
+  const int mask_y1 = static_cast<int>(std::round(
+      (constrained_image_roi.y + constrained_image_roi.height -
+       runtime_input_roi.y) *
+      sy));
+  cv::Rect mask_roi(mask_x0, mask_y0, mask_x1 - mask_x0,
+                    mask_y1 - mask_y0);
   mask_roi &= cv::Rect(0, 0, raw_mask.cols, raw_mask.rows);
-  if (mask_roi.width <= 0 || mask_roi.height <= 0) {
-    std::cout
-        << "[FindSegmentation] prompt roi constraint skipped: invalid mask_roi="
-        << mask_roi.x << "," << mask_roi.y << "," << mask_roi.width << ","
-        << mask_roi.height << "\n"
-        << std::flush;
+  if (mask_roi.width <= 0 || mask_roi.height <= 0)
     return false;
-  }
 
-  const int raw_foreground = cv::countNonZero(raw_mask);
+  cv::Mat runtime_mask;
+  if (raw_mask.cols == runtime_input_roi.width &&
+      raw_mask.rows == runtime_input_roi.height) {
+    runtime_mask = raw_mask.clone();
+  } else {
+    cv::resize(raw_mask, runtime_mask, runtime_input_roi.size(), 0.0, 0.0,
+               cv::INTER_NEAREST);
+  }
+  cv::threshold(runtime_mask, runtime_mask, 0, 255, cv::THRESH_BINARY);
+
+  const int raw_foreground = cv::countNonZero(runtime_mask);
   const double raw_foreground_ratio =
-      raw_mask.total() == 0 ? 0.0
-                            : static_cast<double>(raw_foreground) /
-                                  static_cast<double>(raw_mask.total());
-  const int roi_foreground = cv::countNonZero(raw_mask(mask_roi));
-  const double roi_foreground_ratio =
-      static_cast<double>(roi_foreground) /
-      static_cast<double>(mask_roi.width * mask_roi.height);
+      runtime_mask.total() == 0
+          ? 0.0
+          : static_cast<double>(raw_foreground) /
+                static_cast<double>(runtime_mask.total());
 
-  bool negative_prompt_hit_foreground = false;
-  if (input.has_negative_point) {
-    const int nx = static_cast<int>(std::round(input.negative_point.x * sx));
-    const int ny = static_cast<int>(std::round(input.negative_point.y * sy));
-    if (nx >= 0 && ny >= 0 && nx < raw_mask.cols && ny < raw_mask.rows)
-      negative_prompt_hit_foreground = raw_mask.at<unsigned char>(ny, nx) != 0;
+  auto runtimePoint = [&](const cv::Point &point, bool &in_runtime_input) {
+    in_runtime_input = runtime_input_roi.contains(point);
+    return cv::Point(point.x - runtime_input_roi.x,
+                     point.y - runtime_input_roi.y);
+  };
+
+  bool positive_prompt_in_runtime_input = false;
+  const cv::Point positive_runtime_point =
+      runtimePoint(input.positive_point, positive_prompt_in_runtime_input);
+  bool negative_prompt_in_runtime_input = false;
+  const cv::Point negative_runtime_point =
+      runtimePoint(input.negative_point, negative_prompt_in_runtime_input);
+
+  bool refinement_ok = true;
+  bool refinement_applied = false;
+  if (input.has_positive_point || input.has_negative_point) {
+    cv::Mat grabcut_labels(runtime_mask.size(), CV_8UC1,
+                           cv::Scalar(cv::GC_PR_BGD));
+    grabcut_labels.setTo(cv::GC_PR_FGD, runtime_mask);
+
+    const int min_side = (std::min)(runtime_mask.cols, runtime_mask.rows);
+    const int border = (std::max)(1, min_side / 256);
+    const int point_radius = (std::max)(3, min_side / 128);
+    grabcut_labels.rowRange(0, border).setTo(cv::GC_BGD);
+    grabcut_labels.rowRange(grabcut_labels.rows - border,
+                            grabcut_labels.rows)
+        .setTo(cv::GC_BGD);
+    grabcut_labels.colRange(0, border).setTo(cv::GC_BGD);
+    grabcut_labels.colRange(grabcut_labels.cols - border,
+                            grabcut_labels.cols)
+        .setTo(cv::GC_BGD);
+
+    if (input.has_positive_point && positive_prompt_in_runtime_input) {
+      cv::circle(grabcut_labels, positive_runtime_point, point_radius,
+                 cv::Scalar(cv::GC_FGD), cv::FILLED);
+    }
+    if (input.has_negative_point && negative_prompt_in_runtime_input) {
+      cv::circle(grabcut_labels, negative_runtime_point, point_radius,
+                 cv::Scalar(cv::GC_BGD), cv::FILLED);
+    }
+
+    try {
+      cv::Mat background_model;
+      cv::Mat foreground_model;
+      cv::grabCut(input.image(runtime_input_roi), grabcut_labels, cv::Rect(),
+                  background_model, foreground_model, 3,
+                  cv::GC_INIT_WITH_MASK);
+      runtime_mask =
+          (grabcut_labels == cv::GC_FGD) |
+          (grabcut_labels == cv::GC_PR_FGD);
+      runtime_mask.convertTo(runtime_mask, CV_8UC1, 255);
+      refinement_applied = true;
+    } catch (const cv::Exception &ex) {
+      refinement_ok = false;
+      std::cout << "[FindSegmentation] prompt refinement failed: "
+                << ex.what() << "\n"
+                << std::flush;
+    }
   }
 
-  if (raw_foreground_ratio >= 0.98 ||
-      (input.has_negative_point && roi_foreground_ratio >= 0.98) ||
-      negative_prompt_hit_foreground) {
+  if (refinement_ok && input.has_positive_point &&
+      positive_prompt_in_runtime_input) {
+    cv::Mat component_labels;
+    const int component_count =
+        cv::connectedComponents(runtime_mask, component_labels, 8, CV_32S);
+    const int positive_label =
+        component_labels.at<int>(positive_runtime_point.y,
+                                 positive_runtime_point.x);
+    if (positive_label > 0 && component_count > positive_label) {
+      runtime_mask = component_labels == positive_label;
+      runtime_mask.convertTo(runtime_mask, CV_8UC1, 255);
+    } else {
+      runtime_mask.setTo(0);
+    }
+  }
+
+  auto sampleRefinedMask = [&](const cv::Point &point,
+                               bool in_runtime_input) {
+    if (!in_runtime_input)
+      return false;
+    return runtime_mask.at<unsigned char>(point.y, point.x) != 0;
+  };
+
+  const bool positive_prompt_hit_foreground =
+      input.has_positive_point &&
+      sampleRefinedMask(positive_runtime_point,
+                        positive_prompt_in_runtime_input);
+  const bool negative_prompt_hit_foreground =
+      input.has_negative_point &&
+      sampleRefinedMask(negative_runtime_point,
+                        negative_prompt_in_runtime_input);
+
+  const int refined_foreground = cv::countNonZero(runtime_mask);
+  const double refined_foreground_ratio =
+      runtime_mask.total() == 0
+          ? 0.0
+          : static_cast<double>(refined_foreground) /
+                static_cast<double>(runtime_mask.total());
+
+  std::cout << "[FindSegmentation] prompt coordinate map runtime_input_roi="
+            << runtime_input_roi.x << "," << runtime_input_roi.y << ","
+            << runtime_input_roi.width << "," << runtime_input_roi.height
+            << " raw_mask=" << raw_mask.cols << "x" << raw_mask.rows
+            << " scale=" << sx << "," << sy << " mask_roi=" << mask_roi.x
+            << "," << mask_roi.y << "," << mask_roi.width << ","
+            << mask_roi.height << " positive_in_runtime="
+            << (positive_prompt_in_runtime_input ? "true" : "false")
+            << " negative_in_runtime="
+            << (negative_prompt_in_runtime_input ? "true" : "false")
+            << " refinement_applied="
+            << (refinement_applied ? "true" : "false") << "\n"
+            << std::flush;
+  std::cout << "[FindSegmentation] prompt refinement method="
+               "deeplab_grabcut"
+            << " raw_foreground_ratio=" << raw_foreground_ratio
+            << " refined_foreground_ratio=" << refined_foreground_ratio
+            << " positive_prompt_hit_foreground="
+            << (positive_prompt_hit_foreground ? "true" : "false")
+            << " negative_prompt_hit_foreground="
+            << (negative_prompt_hit_foreground ? "true" : "false") << "\n"
+            << std::flush;
+
+  const bool prompt_quality_fail =
+      !refinement_ok || refined_foreground == 0 ||
+      refined_foreground_ratio >= 0.98 ||
+      (input.has_positive_point &&
+       (!positive_prompt_in_runtime_input ||
+        !positive_prompt_hit_foreground)) ||
+      (input.has_negative_point && negative_prompt_in_runtime_input &&
+       negative_prompt_hit_foreground);
+  if (prompt_quality_fail) {
     output.ok = false;
     output.backend_status = "prompt_quality_fail";
     output.status = "prompt_quality_fail";
     output.reason =
-        "libtorch segmentation rejected: prompt mask ignores "
-        "foreground/background constraints; "
+        "libtorch segmentation rejected after DeepLab prompt refinement; "
         "raw_foreground_ratio=" +
         std::to_string(raw_foreground_ratio) +
-        ", roi_foreground_ratio=" + std::to_string(roi_foreground_ratio) +
+        ", refined_foreground_ratio=" +
+        std::to_string(refined_foreground_ratio) +
+        ", refinement_applied=" +
+        std::string(refinement_applied ? "true" : "false") +
+        ", positive_prompt_hit_foreground=" +
+        std::string(positive_prompt_hit_foreground ? "true" : "false") +
         ", negative_prompt_hit_foreground=" +
-        std::string(negative_prompt_hit_foreground ? "true" : "false");
+        std::string(negative_prompt_hit_foreground ? "true" : "false") +
+        ", runtime_input_roi=" + std::to_string(runtime_input_roi.x) + "," +
+        std::to_string(runtime_input_roi.y) + "," +
+        std::to_string(runtime_input_roi.width) + "," +
+        std::to_string(runtime_input_roi.height);
     output.contours.clear();
     output.contour_count = 0;
     output.primary_area = 0.0;
@@ -311,52 +444,41 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
     return true;
   }
 
-  cv::Mat constrained_mask = cv::Mat::zeros(raw_mask.size(), raw_mask.type());
-  raw_mask(mask_roi).copyTo(constrained_mask(mask_roi));
+  cv::Mat constrained_mask = cv::Mat::zeros(input.image.size(), CV_8UC1);
+  const cv::Rect runtime_local_roi(
+      constrained_image_roi.x - runtime_input_roi.x,
+      constrained_image_roi.y - runtime_input_roi.y,
+      constrained_image_roi.width, constrained_image_roi.height);
+  runtime_mask(runtime_local_roi).copyTo(
+      constrained_mask(constrained_image_roi));
 
   std::vector<std::vector<cv::Point>> mask_contours;
-  cv::findContours(constrained_mask, mask_contours, cv::RETR_EXTERNAL,
+  cv::Mat contour_mask = constrained_mask.clone();
+  cv::findContours(contour_mask, mask_contours, cv::RETR_EXTERNAL,
                    cv::CHAIN_APPROX_SIMPLE);
 
   std::vector<FindSegmentationContour> mapped_contours;
   mapped_contours.reserve(mask_contours.size());
   double best_area = 0.0;
-
   for (const std::vector<cv::Point> &contour : mask_contours) {
     if (contour.size() < 3)
       continue;
-
     FindSegmentationContour mapped;
-    mapped.points.reserve(contour.size());
-    for (const cv::Point &p : contour) {
-      int x = static_cast<int>(std::round(static_cast<double>(p.x) / sx));
-      int y = static_cast<int>(std::round(static_cast<double>(p.y) / sy));
-      x = (std::max)(0, (std::min)(input.image.cols - 1, x));
-      y = (std::max)(0, (std::min)(input.image.rows - 1, y));
-      mapped.points.emplace_back(x, y);
-    }
-
+    mapped.points = contour;
     mapped.area = std::abs(cv::contourArea(mapped.points));
     mapped.perimeter = cv::arcLength(mapped.points, true);
     if (mapped.area < 1.0)
       continue;
-
     best_area = (std::max)(best_area, mapped.area);
     mapped_contours.push_back(std::move(mapped));
   }
 
-  if (mapped_contours.empty()) {
-    std::cout
-        << "[FindSegmentation] prompt roi constraint skipped: no mapped contour"
-        << "\n"
-        << std::flush;
+  if (mapped_contours.empty())
     return false;
-  }
 
   cv::Mat overlay = input.image.clone();
   for (const FindSegmentationContour &contour : mapped_contours) {
-    std::vector<std::vector<cv::Point>> one;
-    one.push_back(contour.points);
+    std::vector<std::vector<cv::Point>> one{contour.points};
     cv::drawContours(overlay, one, 0, cv::Scalar(0, 255, 255), 2);
   }
 
@@ -366,28 +488,62 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
       result_dir / "mask_overlay_prompt_roi.png";
   const std::filesystem::path constrained_contour_path =
       result_dir / "contours_prompt_roi.json";
-
   cv::imwrite(constrained_mask_path.string(), constrained_mask);
   cv::imwrite(constrained_overlay_path.string(), overlay);
 
   std::ofstream json(constrained_contour_path);
   if (json) {
-    json << "{\"contour_count\":" << mapped_contours.size()
-         << ",\"prompt_roi\":{\"x\":" << image_roi.x << ",\"y\":" << image_roi.y
-         << ",\"width\":" << image_roi.width
-         << ",\"height\":" << image_roi.height
-         << "},\"source\":\"prompt_roi_constrained_libtorch_mask\""
-         << ",\"contours\":[";
+    const char quote = static_cast<char>(34);
+    auto writeKey = [&](const char *key) {
+      json << quote << key << quote << ':';
+    };
+
+    json << '{';
+    writeKey("contour_count");
+    json << mapped_contours.size() << ',';
+
+    writeKey("prompt_roi");
+    json << '{';
+    writeKey("x");
+    json << image_roi.x << ',';
+    writeKey("y");
+    json << image_roi.y << ',';
+    writeKey("width");
+    json << image_roi.width << ',';
+    writeKey("height");
+    json << image_roi.height << "},";
+
+    writeKey("runtime_input_roi");
+    json << '{';
+    writeKey("x");
+    json << runtime_input_roi.x << ',';
+    writeKey("y");
+    json << runtime_input_roi.y << ',';
+    writeKey("width");
+    json << runtime_input_roi.width << ',';
+    writeKey("height");
+    json << runtime_input_roi.height << "},";
+
+    writeKey("source");
+    json << quote << "prompt_roi_cropped_libtorch_mask" << quote << ',';
+    writeKey("contours");
+    json << '[';
     for (std::size_t i = 0; i < mapped_contours.size(); ++i) {
       if (i > 0)
-        json << ",";
+        json << ',';
       const FindSegmentationContour &contour = mapped_contours[i];
-      json << "{\"area\":" << contour.area
-           << ",\"point_count\":" << contour.points.size() << ",\"points\":[";
+      json << '{';
+      writeKey("area");
+      json << contour.area << ',';
+      writeKey("point_count");
+      json << contour.points.size() << ',';
+      writeKey("points");
+      json << '[';
       for (std::size_t j = 0; j < contour.points.size(); ++j) {
         if (j > 0)
-          json << ",";
-        json << "[" << contour.points[j].x << "," << contour.points[j].y << "]";
+          json << ',';
+        json << '[' << contour.points[j].x << ',' << contour.points[j].y
+             << ']';
       }
       json << "]}";
     }
@@ -406,7 +562,10 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
   output.contour_ref = constrained_contour_path.string();
   std::cout << "[FindSegmentation] prompt roi constraint applied: roi="
             << image_roi.x << "," << image_roi.y << "," << image_roi.width
-            << "," << image_roi.height << " contours=" << output.contour_count
+            << "," << image_roi.height << " runtime_input="
+            << runtime_input_roi.width << "x" << runtime_input_roi.height
+            << " output_mask=" << constrained_mask.cols << "x"
+            << constrained_mask.rows << " contours=" << output.contour_count
             << " contour_ref=" << output.contour_ref << "\n"
             << std::flush;
   return true;
@@ -523,7 +682,47 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
     return false;
   }
 
-  if (!cv::imwrite(input_image_path.string(), input.image)) {
+  const cv::Rect image_bounds(0, 0, input.image.cols, input.image.rows);
+  cv::Rect runtime_input_roi = image_bounds;
+  if (input.has_rect) {
+    runtime_input_roi = input.rect & image_bounds;
+    if (runtime_input_roi.width <= 0 || runtime_input_roi.height <= 0) {
+      output.ok = false;
+      output.backend_status = "prompt_input_invalid";
+      output.status = "prompt_input_invalid";
+      output.reason = "prompt ROI does not intersect the input image";
+      reason = output.reason;
+      return false;
+    }
+  }
+
+  if (input.has_positive_point &&
+      !runtime_input_roi.contains(input.positive_point)) {
+    output.ok = false;
+    output.backend_status = "prompt_input_invalid";
+    output.status = "prompt_input_invalid";
+    output.reason = "positive prompt point is outside the effective prompt ROI";
+    reason = output.reason;
+    return false;
+  }
+
+  const bool negative_in_runtime_input =
+      input.has_negative_point &&
+      runtime_input_roi.contains(input.negative_point);
+  cv::Mat runtime_input_image = input.image(runtime_input_roi).clone();
+  std::cout << "[FindSegmentation] inference input roi="
+            << runtime_input_roi.x << "," << runtime_input_roi.y << ","
+            << runtime_input_roi.width << "," << runtime_input_roi.height
+            << " source_image=" << input.image.cols << "x" << input.image.rows
+            << " runtime_image=" << runtime_input_image.cols << "x"
+            << runtime_input_image.rows << " positive="
+            << input.positive_point.x << "," << input.positive_point.y
+            << " negative=" << input.negative_point.x << ","
+            << input.negative_point.y << " negative_in_runtime="
+            << (negative_in_runtime_input ? "true" : "false") << "\n"
+            << std::flush;
+
+  if (!cv::imwrite(input_image_path.string(), runtime_input_image)) {
     output.ok = false;
     output.backend_status = "input_image_write_failed";
     output.status = "input_image_write_failed";
@@ -532,7 +731,6 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
     reason = output.reason;
     return false;
   }
-
   TorchRuntimeGuiConfig config;
   config.device = input.device.empty() ? "cpu" : input.device;
   config.model_root = input.model_path;
@@ -549,29 +747,78 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   }
 
   std::ostringstream extra;
-  extra << "{";
-  extra << "\"backend\":\"" << output.backend << "\"";
-  extra << ",\"threshold\":" << input.threshold;
-  extra << ",\"mode\":" << input.mode;
-  extra << ",\"has_rect\":" << (input.has_rect ? "true" : "false");
-  if (input.has_rect) {
-    extra << ",\"roi\":{";
-    extra << "\"x\":" << input.rect.x;
-    extra << ",\"y\":" << input.rect.y;
-    extra << ",\"width\":" << input.rect.width;
-    extra << ",\"height\":" << input.rect.height;
-    extra << "}";
-  }
-  extra << ",\"positive_prompt\":{\"enabled\":"
-        << (input.has_positive_point ? "true" : "false")
-        << ",\"x\":" << input.positive_point.x
-        << ",\"y\":" << input.positive_point.y << "}";
-  extra << ",\"negative_prompt\":{\"enabled\":"
-        << (input.has_negative_point ? "true" : "false")
-        << ",\"x\":" << input.negative_point.x
-        << ",\"y\":" << input.negative_point.y << "}";
-  extra << "}";
+  const char json_quote = static_cast<char>(34);
+  auto writeJsonKey = [&](const char *key) {
+    extra << json_quote << key << json_quote << ':';
+  };
+  extra << '{';
+  writeJsonKey("backend");
+  extra << json_quote << output.backend << json_quote;
+  extra << ',';
+  writeJsonKey("threshold");
+  extra << input.threshold;
+  extra << ',';
+  writeJsonKey("mode");
+  extra << input.mode;
+  extra << ',';
+  writeJsonKey("coordinate_space");
+  extra << json_quote << "runtime_input_roi" << json_quote;
+  extra << ',';
+  writeJsonKey("has_rect");
+  extra << (input.has_rect ? "true" : "false");
 
+  extra << ',';
+  writeJsonKey("roi");
+  extra << '{';
+  writeJsonKey("x");
+  extra << 0 << ',';
+  writeJsonKey("y");
+  extra << 0 << ',';
+  writeJsonKey("width");
+  extra << runtime_input_roi.width << ',';
+  writeJsonKey("height");
+  extra << runtime_input_roi.height << '}';
+
+  extra << ',';
+  writeJsonKey("source_roi");
+  extra << '{';
+  writeJsonKey("x");
+  extra << runtime_input_roi.x << ',';
+  writeJsonKey("y");
+  extra << runtime_input_roi.y << ',';
+  writeJsonKey("width");
+  extra << runtime_input_roi.width << ',';
+  writeJsonKey("height");
+  extra << runtime_input_roi.height << '}';
+
+  extra << ',';
+  writeJsonKey("positive_prompt");
+  extra << '{';
+  writeJsonKey("enabled");
+  extra << (input.has_positive_point ? "true" : "false") << ',';
+  writeJsonKey("x");
+  extra << input.positive_point.x - runtime_input_roi.x << ',';
+  writeJsonKey("y");
+  extra << input.positive_point.y - runtime_input_roi.y << ',';
+  writeJsonKey("source_x");
+  extra << input.positive_point.x << ',';
+  writeJsonKey("source_y");
+  extra << input.positive_point.y << '}';
+
+  extra << ',';
+  writeJsonKey("negative_prompt");
+  extra << '{';
+  writeJsonKey("enabled");
+  extra << (negative_in_runtime_input ? "true" : "false") << ',';
+  writeJsonKey("x");
+  extra << input.negative_point.x - runtime_input_roi.x << ',';
+  writeJsonKey("y");
+  extra << input.negative_point.y - runtime_input_roi.y << ',';
+  writeJsonKey("source_x");
+  extra << input.negative_point.x << ',';
+  writeJsonKey("source_y");
+  extra << input.negative_point.y << '}';
+  extra << '}';
   TorchRuntimeGuiRequest request;
   request.task = "torch.infer.segmentation.deeplabv3plus.v1";
   request.case_name = "find_segmentation_libtorch_backend";
@@ -622,7 +869,7 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
 
   if (output.ok && input.has_rect) {
     const bool constrained = ApplyPromptRectConstraintToTorchSegmentationResult(
-        input, result_dir, output);
+        input, result_dir, runtime_input_roi, output);
     if (!constrained) {
       if (input.has_positive_point || input.has_negative_point) {
         output.ok = false;
