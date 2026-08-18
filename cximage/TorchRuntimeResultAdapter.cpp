@@ -159,6 +159,72 @@ void AttachDetectionResults(
     }
 }
 
+void AttachInstanceSegmentationResults(
+    const TorchRuntimeGuiResult& source,
+    const CxTorchTaskSpec& task,
+    CxInferenceResult& target)
+{
+    if (task.task_id.find("instance_segmentation") == std::string::npos ||
+        source.result_ref.empty())
+    {
+        return;
+    }
+
+    std::string json;
+    if (!ReadTorchAdapterTextFile(source.result_ref, json))
+        return;
+
+    std::size_t instance_pos = json.find(R"("stable_id")");
+    while (instance_pos != std::string::npos)
+    {
+        const std::size_t next_instance =
+            json.find(R"("stable_id")", instance_pos + 11);
+        const std::string instance_json = json.substr(
+            instance_pos,
+            next_instance == std::string::npos
+                ? std::string::npos
+                : next_instance - instance_pos);
+
+        double x0 = 0.0;
+        double y0 = 0.0;
+        double x1 = 0.0;
+        double y1 = 0.0;
+        double confidence = 0.0;
+        double class_id = -1.0;
+        const bool has_box =
+            ExtractTorchAdapterJsonNumber(instance_json, "x0", x0) &&
+            ExtractTorchAdapterJsonNumber(instance_json, "y0", y0) &&
+            ExtractTorchAdapterJsonNumber(instance_json, "x1", x1) &&
+            ExtractTorchAdapterJsonNumber(instance_json, "y1", y1);
+
+        if (has_box && x1 > x0 && y1 > y0)
+        {
+            ExtractTorchAdapterJsonNumber(
+                instance_json, "class_confidence", confidence);
+            ExtractTorchAdapterJsonNumber(
+                instance_json, "class_id", class_id);
+
+            CxTorchDetection detection;
+            detection.x = x0;
+            detection.y = y0;
+            detection.width = x1 - x0;
+            detection.height = y1 - y0;
+            detection.confidence = confidence;
+            detection.class_id = static_cast<int>(class_id);
+            target.detections.push_back(detection);
+        }
+
+        instance_pos = next_instance;
+    }
+
+    double instance_count = 0.0;
+    if (ExtractTorchAdapterJsonNumber(
+            source.result_json, "instance_count", instance_count))
+    {
+        target.metrics["instance_count"] = instance_count;
+    }
+}
+
 void AttachSegmentationMaskRefs(
     const TorchRuntimeGuiResult& source,
     const CxTorchTaskSpec& task,
@@ -246,6 +312,7 @@ bool TorchRuntimeResultAdapter::AdaptToInferenceResult(
     target.unified_mainline_summary = source.unified_mainline_summary;
 
     AttachSegmentationMaskRefs(source, task, target);
+    AttachInstanceSegmentationResults(source, task, target);
     AttachDetectionResults(source, task, target);
 
     if (!source.ok) {

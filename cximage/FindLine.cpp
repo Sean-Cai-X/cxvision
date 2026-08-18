@@ -3366,6 +3366,299 @@ void FindLine::RefineBestChainSubpixel(Image& image, FindLineMeasureProfileStats
     stats.subpixel_ms = ElapsedMilliseconds(begin, std::chrono::steady_clock::now());
 }
 
+
+void FindLine::BuildBoundaryAnalysisSnapshot(Image& image)
+{
+    m_boundaryAnalysis = FindLineBoundaryAnalysisSnapshot();
+    m_boundaryAnalysis.expected_scan_count =
+        m_lastMeasureInputDebug.scan_rows_examined > 0
+            ? m_lastMeasureInputDebug.scan_rows_examined
+            : static_cast<int>(m_lastMeasureInputDebug.scan_diagnostics.size());
+
+    cv::Mat source = image.getmat();
+    if (source.empty())
+    {
+        m_boundaryAnalysis.status = "INPUT_IMAGE_UNAVAILABLE";
+        return;
+    }
+
+    cv::Mat gray;
+    if (source.channels() == 1)
+        gray = source;
+    else
+        cv::cvtColor(source, gray, cv::COLOR_BGR2GRAY);
+
+    const double lineDx =
+        m_lastMeasureInputDebug.roi_x1 - m_lastMeasureInputDebug.roi_x0;
+    const double lineDy =
+        m_lastMeasureInputDebug.roi_y1 - m_lastMeasureInputDebug.roi_y0;
+    const double lineLength = std::hypot(lineDx, lineDy);
+    if (lineLength <= 1.0e-12)
+    {
+        m_boundaryAnalysis.status = "DEGENERATE_GAUGE_DIRECTION";
+        return;
+    }
+    const double normalX = -lineDy / lineLength;
+    const double normalY = lineDx / lineLength;
+
+    auto sampleBilinear = [&gray](double x, double y, double& value) -> bool
+    {
+        if (x < 0.0 || y < 0.0 ||
+            x > static_cast<double>(gray.cols - 1) ||
+            y > static_cast<double>(gray.rows - 1))
+            return false;
+        cv::Mat sample;
+        cv::getRectSubPix(
+            gray, cv::Size(1, 1),
+            cv::Point2f(static_cast<float>(x), static_cast<float>(y)),
+            sample, CV_32F);
+        if (sample.empty())
+            return false;
+        value = static_cast<double>(sample.at<float>(0, 0));
+        return std::isfinite(value);
+    };
+
+    auto appendBoundaryPoint = [&](int scanType, int scanIndex,
+                                   double measuredX, double measuredY)
+    {
+        FindLineBoundaryPointSnapshot point;
+        point.scan_index = scanIndex;
+        point.scan_type = scanType;
+        point.measured_x = measuredX;
+        point.measured_y = measuredY;
+        point.refined_x = measuredX;
+        point.refined_y = measuredY;
+
+        bool profileReady = true;
+        for (int i = 0; i < 5; ++i)
+        {
+            const double offset = static_cast<double>(i - 2);
+            if (!sampleBilinear(
+                    point.measured_x + normalX * offset,
+                    point.measured_y + normalY * offset,
+                    point.profile[static_cast<std::size_t>(i)]))
+            {
+                profileReady = false;
+                break;
+            }
+        }
+
+        if (profileReady)
+        {
+            const double gradLeft =
+                std::abs(point.profile[2] - point.profile[0]);
+            const double gradCenter =
+                std::abs(point.profile[3] - point.profile[1]);
+            const double gradRight =
+                std::abs(point.profile[4] - point.profile[2]);
+            const double denominator =
+                gradLeft - 2.0 * gradCenter + gradRight;
+
+            point.response_strength = gradCenter;
+            point.local_noise =
+                0.5 * (
+                    std::abs(point.profile[0] - 2.0 * point.profile[1] + point.profile[2]) +
+                    std::abs(point.profile[2] - 2.0 * point.profile[3] + point.profile[4]));
+            point.polarity = point.profile[3] > point.profile[1]
+                ? 1
+                : (point.profile[3] < point.profile[1] ? -1 : 0);
+            point.localization_sigma_px = std::min(
+                10.0,
+                point.local_noise /
+                    std::max(1.0e-9, point.response_strength));
+
+            if (std::abs(denominator) > 1.0e-9 &&
+                point.response_strength > 1.0e-9)
+            {
+                point.subpixel_offset = std::max(
+                    -0.5,
+                    std::min(
+                        0.5,
+                        0.5 * (gradLeft - gradRight) / denominator));
+                point.refined_x =
+                    point.measured_x + normalX * point.subpixel_offset;
+                point.refined_y =
+                    point.measured_y + normalY * point.subpixel_offset;
+                point.interpolation_valid = true;
+            }
+        }
+        m_boundaryAnalysis.points.push_back(point);
+    };
+
+    // Boundary analysis is a post-measurement quality layer.  Its input must
+    // therefore be the exact point set consumed by fitline(), rather than the
+    // larger diagnostic candidate stream (which can contain accepted points
+    // from scan branches that were not selected for the final measurement).
+    const PointsShape& finalW = getresultpointsw();
+    for (int i = 0; i < finalW.size(); ++i)
+        appendBoundaryPoint(0, i, finalW.getx(i), finalW.gety(i));
+
+    const PointsShape& finalH = getresultpointsh();
+    for (int i = 0; i < finalH.size(); ++i)
+        appendBoundaryPoint(1, i, finalH.getx(i), finalH.gety(i));
+
+    if (m_boundaryAnalysis.expected_scan_count <= 0)
+    {
+        m_boundaryAnalysis.expected_scan_count =
+            static_cast<int>(m_boundaryAnalysis.points.size());
+    }
+
+    m_boundaryAnalysis.status = m_boundaryAnalysis.points.empty()
+        ? "NO_ACCEPTED_BOUNDARY_POINTS"
+        : "BOUNDARY_POINTS_CAPTURED";
+}
+
+FindLineBoundaryAnalysisSnapshot FindLine::boundaryanalysissnapshot() const
+{
+    FindLineBoundaryAnalysisSnapshot result = m_boundaryAnalysis;
+    result.accepted_point_count =
+        static_cast<int>(result.points.size());
+
+    std::vector<double> responses;
+    std::vector<double> offsets;
+    std::vector<double> sigmas;
+    std::vector<double> residuals;
+    for (auto& point : result.points)
+    {
+        responses.push_back(point.response_strength);
+        sigmas.push_back(point.localization_sigma_px);
+        if (point.interpolation_valid)
+        {
+            ++result.interpolation_valid_count;
+            offsets.push_back(point.subpixel_offset);
+        }
+    }
+
+    const double fitDx = m_result_x1 - m_result_x0;
+    const double fitDy = m_result_y1 - m_result_y0;
+    const double fitLength = std::hypot(fitDx, fitDy);
+    const bool fitValid = m_has_fit_result && fitLength > 1.0e-12;
+    if (fitValid)
+    {
+        const double nx = -fitDy / fitLength;
+        const double ny = fitDx / fitLength;
+        for (auto& point : result.points)
+        {
+            point.fit_residual_px = std::abs(
+                (point.refined_x - m_result_x0) * nx +
+                (point.refined_y - m_result_y0) * ny);
+            point.fit_residual_valid = true;
+            residuals.push_back(point.fit_residual_px);
+        }
+        result.fit_residual_count =
+            static_cast<int>(residuals.size());
+    }
+
+    auto mean = [](const std::vector<double>& values) -> double
+    {
+        if (values.empty())
+            return 0.0;
+        double sum = 0.0;
+        for (double value : values)
+            sum += value;
+        return sum / static_cast<double>(values.size());
+    };
+    auto percentile = [](std::vector<double> values, double p) -> double
+    {
+        if (values.empty())
+            return 0.0;
+        std::sort(values.begin(), values.end());
+        const double position =
+            std::max(0.0, std::min(1.0, p)) *
+            static_cast<double>(values.size() - 1);
+        const std::size_t lo =
+            static_cast<std::size_t>(std::floor(position));
+        const std::size_t hi =
+            static_cast<std::size_t>(std::ceil(position));
+        const double t = position - static_cast<double>(lo);
+        return values[lo] * (1.0 - t) + values[hi] * t;
+    };
+    auto stddev = [&mean](const std::vector<double>& values) -> double
+    {
+        if (values.size() < 2)
+            return 0.0;
+        const double average = mean(values);
+        double sum = 0.0;
+        for (double value : values)
+        {
+            const double delta = value - average;
+            sum += delta * delta;
+        }
+        return std::sqrt(sum /
+            static_cast<double>(values.size() - 1));
+    };
+
+    result.coverage_ratio = result.expected_scan_count > 0
+        ? static_cast<double>(result.accepted_point_count) /
+          static_cast<double>(result.expected_scan_count)
+        : 0.0;
+    result.response_mean = mean(responses);
+    result.response_median = percentile(responses, 0.5);
+    result.response_cv = result.response_mean > 1.0e-12
+        ? stddev(responses) / result.response_mean
+        : 0.0;
+    result.subpixel_offset_mean = mean(offsets);
+    result.subpixel_offset_stddev = stddev(offsets);
+    result.localization_sigma_mean_px = mean(sigmas);
+
+    if (!residuals.empty())
+    {
+        double squaredSum = 0.0;
+        for (double residual : residuals)
+            squaredSum += residual * residual;
+        result.residual_rmse_px = std::sqrt(
+            squaredSum / static_cast<double>(residuals.size()));
+        result.residual_p95_px = percentile(residuals, 0.95);
+        result.residual_max_px =
+            *std::max_element(residuals.begin(), residuals.end());
+        const double outlierLimit =
+            std::max(1.5, 3.0 * percentile(residuals, 0.5));
+        int outlierCount = 0;
+        for (double residual : residuals)
+        {
+            if (residual > outlierLimit)
+                ++outlierCount;
+        }
+        result.outlier_ratio =
+            static_cast<double>(outlierCount) /
+            static_cast<double>(residuals.size());
+    }
+
+    if (result.accepted_point_count < 2)
+    {
+        result.status = "INSUFFICIENT_BOUNDARY_POINTS";
+        result.reliability_level = "UNAVAILABLE";
+        result.reliability_score = 0.0;
+        return result;
+    }
+
+    const double coverageScore =
+        std::max(0.0, std::min(1.0, result.coverage_ratio));
+    const double interpolationScore =
+        static_cast<double>(result.interpolation_valid_count) /
+        static_cast<double>(result.accepted_point_count);
+    const double signalScore =
+        1.0 / (1.0 + std::max(0.0, result.response_cv));
+    const double fitScore = fitValid
+        ? 1.0 / (1.0 + std::max(0.0, result.residual_p95_px))
+        : 0.0;
+    result.reliability_score = std::max(
+        0.0,
+        std::min(
+            1.0,
+            0.30 * coverageScore +
+            0.20 * interpolationScore +
+            0.20 * signalScore +
+            0.30 * fitScore));
+    result.status = fitValid
+        ? "BOUNDARY_ANALYSIS_AVAILABLE"
+        : "BOUNDARY_POINTS_AVAILABLE_FIT_PENDING";
+    result.reliability_level = result.reliability_score >= 0.80
+        ? "HIGH"
+        : (result.reliability_score >= 0.55 ? "MEDIUM" : "LOW");
+    return result;
+}
+
 void FindLine::FilterMeasurePoints(FindLineMeasureProfileStats& stats)
 {
     const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -4072,6 +4365,7 @@ void FindLine::measure(void* pimage)
         m_lastMeasureInputDebug.measure_source =
             "original_measure_pipeline_diagnostics_only";
     }
+    BuildBoundaryAnalysisSnapshot(*image);
 }
 void FindLine::ProbeDisplayRoiGrayStats(Image& image)
 {

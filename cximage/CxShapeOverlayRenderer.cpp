@@ -164,6 +164,9 @@ bool RenderCxShapeOverlay(
 
         bool should_render = false;
 
+        if (shape.semantic_role == "boundary_refined_points")
+            should_render = true;
+
         if (layer == CxOverlayLayer::EVIDENCE)
         {
             if (shape.semantic_role == "roi" || shape.semantic_role == "scan" || shape.semantic_role == "measure_points")
@@ -228,6 +231,10 @@ bool RenderCxShapeOverlay(
         {
             result.rendered_measure_points_count += static_cast<int>(shape.points.size()) / 2;
             DrawMeasurePoints(output, shape, measure_color);
+        }
+else if (shape.semantic_role == "boundary_refined_points")
+        {
+            DrawMeasurePoints(output, shape, cv::Scalar(255, 80, 255));
         }
         else if (shape.semantic_role == "prompt_positive")
         {

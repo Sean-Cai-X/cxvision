@@ -249,28 +249,85 @@ std::string BuildObservations(
     return out.str();
 }
 
+std::string BuildBoundaryAnalysis(
+    const CxScriptExecutionCapture& capture)
+{
+    std::ostringstream out;
+    out << "{" << std::endl;
+    out << R"(  "schema": "cxvision.findline_boundary_analysis.v1",)" << std::endl;
+    out << R"(  "status": ")" << JsonEscapeLocal(capture.boundary_analysis_status) << R"(",)" << std::endl;
+    out << R"(  "reliability_level": ")" << JsonEscapeLocal(capture.boundary_reliability_level) << R"(",)" << std::endl;
+    out << R"(  "expected_scan_count": )" << capture.boundary_expected_scan_count << "," << std::endl;
+    out << R"(  "accepted_point_count": )" << capture.boundary_accepted_point_count << "," << std::endl;
+    out << R"(  "interpolation_valid_count": )" << capture.boundary_interpolation_valid_count << "," << std::endl;
+    out << R"(  "fit_residual_count": )" << capture.boundary_fit_residual_count << "," << std::endl;
+    out << R"(  "coverage_ratio": )" << capture.boundary_coverage_ratio << "," << std::endl;
+    out << R"(  "response_mean": )" << capture.boundary_response_mean << "," << std::endl;
+    out << R"(  "response_median": )" << capture.boundary_response_median << "," << std::endl;
+    out << R"(  "response_cv": )" << capture.boundary_response_cv << "," << std::endl;
+    out << R"(  "subpixel_offset_mean": )" << capture.boundary_subpixel_offset_mean << "," << std::endl;
+    out << R"(  "subpixel_offset_stddev": )" << capture.boundary_subpixel_offset_stddev << "," << std::endl;
+    out << R"(  "localization_sigma_mean_px": )" << capture.boundary_localization_sigma_mean_px << "," << std::endl;
+    out << R"(  "residual_rmse_px": )" << capture.boundary_residual_rmse_px << "," << std::endl;
+    out << R"(  "residual_p95_px": )" << capture.boundary_residual_p95_px << "," << std::endl;
+    out << R"(  "residual_max_px": )" << capture.boundary_residual_max_px << "," << std::endl;
+    out << R"(  "outlier_ratio": )" << capture.boundary_outlier_ratio << "," << std::endl;
+    out << R"(  "reliability_score": )" << capture.boundary_reliability_score << "," << std::endl;
+    out << R"(  "policy": {"subpixel_model":"five_sample_gradient_parabola","offset_clamp_px":0.5,"decision_scope":"quality_annotation_not_contract_pass"},)" << std::endl;
+    out << R"(  "points": [)" << std::endl;
+    for (std::size_t i = 0; i < capture.boundary_points.size(); ++i)
+    {
+        const auto& point = capture.boundary_points[i];
+        out << R"(    {"scan_index":)" << point.scan_index
+            << R"(,"scan_type":)" << point.scan_type
+            << R"(,"measured_x":)" << point.measured_x
+            << R"(,"measured_y":)" << point.measured_y
+            << R"(,"refined_x":)" << point.refined_x
+            << R"(,"refined_y":)" << point.refined_y
+            << R"(,"subpixel_offset":)" << point.subpixel_offset
+            << R"(,"response_strength":)" << point.response_strength
+            << R"(,"local_noise":)" << point.local_noise
+            << R"(,"localization_sigma_px":)" << point.localization_sigma_px
+            << R"(,"fit_residual_px":)" << point.fit_residual_px
+            << R"(,"polarity":)" << point.polarity
+            << R"(,"interpolation_valid":)" << BoolText(point.interpolation_valid)
+            << R"(,"fit_residual_valid":)" << BoolText(point.fit_residual_valid)
+            << R"(,"profile":[)"
+            << point.profile[0] << "," << point.profile[1] << ","
+            << point.profile[2] << "," << point.profile[3] << ","
+            << point.profile[4] << "]"
+            << "}" << (i + 1 < capture.boundary_points.size() ? "," : "")
+            << std::endl;
+    }
+    out << "  ]" << std::endl;
+    out << "}" << std::endl;
+    return out.str();
+}
+
 std::string BuildRelations(
     const CxScriptExecutionCapture& capture,
     const std::string& tool,
     const std::map<std::string, int>& role_counts)
 {
     std::ostringstream out;
-    out << "{\n";
-    out << "  \"schema\": \"cxvision.measurement_relations.v1\",\n";
-    out << "  \"tool\": \"" << JsonEscapeLocal(tool) << "\",\n";
-    out << "  \"relations\": [\n";
-    out << "    {\"predicate\":\"tool_has_measure_points\", \"subject\":\"runtime_tool\", \"object\":\"measure_points\", \"value\":"
-        << BoolText(capture.valid_points_count > 0) << "},\n";
-    out << "    {\"predicate\":\"tool_has_fit_result\", \"subject\":\"runtime_tool\", \"object\":\"fit_result\", \"value\":"
-        << BoolText(capture.has_fit_line || capture.has_fit_circle || capture.has_fit_ellipse || capture.has_result_rect) << "},\n";
-    out << "    {\"predicate\":\"shape_roles_available\", \"subject\":\"shape_snapshot\", \"object\":\"runtime_tool\", \"roi_count\":"
+    out << "{" << std::endl;
+    out << R"(  "schema": "cxvision.measurement_relations.v1",)" << std::endl;
+    out << R"(  "tool": ")" << JsonEscapeLocal(tool) << R"(",)" << std::endl;
+    out << R"(  "relations": [)" << std::endl;
+    out << R"(    {"predicate":"tool_has_measure_points","subject":"runtime_tool","object":"measure_points","value":)"
+        << BoolText(capture.valid_points_count > 0) << "}," << std::endl;
+    out << R"(    {"predicate":"tool_has_fit_result","subject":"runtime_tool","object":"fit_result","value":)"
+        << BoolText(capture.has_fit_line || capture.has_fit_circle || capture.has_fit_ellipse || capture.has_result_rect) << "}," << std::endl;
+    out << R"(    {"predicate":"shape_roles_available","subject":"shape_snapshot","object":"runtime_tool","roi_count":)"
         << (role_counts.count("roi") ? role_counts.at("roi") : 0)
-        << ", \"scan_count\":" << (role_counts.count("scan") ? role_counts.at("scan") : 0)
-        << ", \"result_count\":" << (role_counts.count("result") ? role_counts.at("result") : 0) << "}\n";
-    out << "  ]\n";
-    out << "}\n";
+        << R"(,"scan_count":)" << (role_counts.count("scan") ? role_counts.at("scan") : 0)
+        << R"(,"result_count":)" << (role_counts.count("result") ? role_counts.at("result") : 0)
+        << "}" << std::endl;
+    out << "  ]" << std::endl;
+    out << "}" << std::endl;
     return out.str();
 }
+
 
 std::string BuildFeatureVector(
     const CxScriptExecutionCapture& capture,
@@ -381,6 +438,8 @@ bool WriteMeasurementSemanticSidecars(
         { "coordinate_transform_trace.json", BuildCoordinateTransformTrace() },
         { "measurement_behavior_trace.json", BuildBehaviorTrace(capture, tool) },
         { "measurement_observations.json", BuildObservations(capture, tool) },
+
+        { "boundary_analysis.json", BuildBoundaryAnalysis(capture) },
         { "measurement_relations.json", BuildRelations(capture, tool, role_counts) },
         { "measurement_feature_vector.json", BuildFeatureVector(capture, tool) },
         { "semantic_pattern_result.json", BuildSemanticPatternResult() },

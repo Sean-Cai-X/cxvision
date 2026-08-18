@@ -16,7 +16,10 @@
 #include "CxScriptSuiteRuntime.h"
 #include "CxParamRegressionRuntime.h"
 #include "CxParamProbeRunner.h"
+#include "gwy_reference/CxExternalGwyReferenceBackend.h"
 #include "metrology_analytics/CxMetrologyAnalyticsSmoke.h"
+#include "metrology_analytics/CxSurfaceBasicStats.h"
+#include "metrology_analytics/CxSurfaceField.h"
 
 #if defined(CXVISION_ENABLE_LEGACY_STAGE25_CPP)
 #include "CxScriptStage25Runner.h"
@@ -696,6 +699,67 @@ int RunMetrologyAnalyticsSmokeCli(int argc, char** argv)
         std::cout << "reason=" << reason << "\n";
 
     return (ok && result.fail_count == 0) ? 0 : 1;
+}
+
+int RunGwyReferenceInterfaceSmokeCli(int argc, char** argv)
+{
+    const std::string runId = CxUnifiedLog::Instance().GenerateRunId();
+    const std::string outArg = CliValueAfter(argc, argv, "--out");
+    const std::filesystem::path outDir = outArg.empty()
+        ? std::filesystem::path(
+              "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/"
+              "gwy_reference/run_" + runId + "_interface_null")
+        : std::filesystem::path(outArg);
+
+    cxvision::gwy_reference::CxGwyReferenceRequest request;
+    request.request_id = runId;
+    request.case_id = "gwy_reference_interface_null_smoke";
+    request.algorithm_id = "surface.basic_stats";
+    request.input_ref = "builtin:flat5";
+    request.input_hash = "builtin-flat5-v1";
+    request.mode = cxvision::gwy_reference::CxGwyExecutionMode::DualCompare;
+
+    auto backend = cxvision::gwy_reference::CreateGwyReferenceBackend();
+    cxvision::metrology_analytics::CxPhysUnit unit;
+    cxvision::metrology_analytics::CxSurfaceField nativeField(5, 5, unit);
+    nativeField.fillFromGenerator([](int, int) { return 5.0; });
+    const auto nativeStats =
+        cxvision::metrology_analytics::computeSurfaceBasicStats(nativeField);
+    cxvision::gwy_reference::CxGwyNormalizedResult nativeResult;
+    nativeResult.implementation = "cxvision.metrology_analytics";
+    nativeResult.implementation_version = "1";
+    nativeResult.status = "CX_NATIVE_EXECUTION_COMPLETE";
+    nativeResult.conclusion = "PENDING_HUMAN_REVIEW";
+    nativeResult.reason = "cxvision native flat5 basic statistics executed";
+    nativeResult.backend_available = true;
+    nativeResult.executed = true;
+    nativeResult.algorithm_success = true;
+    nativeResult.metrics = {
+        {"basic_stats.min", nativeStats.min},
+        {"basic_stats.max", nativeStats.max},
+        {"basic_stats.mean", nativeStats.mean},
+        {"basic_stats.ra", nativeStats.ra},
+        {"basic_stats.rms", nativeStats.rms},
+        {"basic_stats.skewness", nativeStats.skewness},
+        {"basic_stats.kurtosis", nativeStats.kurtosis_excess}
+    };
+    cxvision::gwy_reference::CxGwyReferenceRunPackage package;
+    std::string reason;
+    const bool ok = cxvision::gwy_reference::RunReferenceInterfaceClosure(
+        request, *backend, &nativeResult, outDir, package, reason);
+
+    std::cout << "gwy_reference_interface_ok=" << (ok ? "true" : "false") << "\n";
+    std::cout << "backend_available="
+              << (package.reference_result.backend_available ? "true" : "false") << "\n";
+    std::cout << "algorithm_executed="
+              << (package.reference_result.executed ? "true" : "false") << "\n";
+    std::cout << "reference_status=" << package.reference_result.status << "\n";
+    std::cout << "conclusion=" << package.comparison.conclusion << "\n";
+    std::cout << "promotion_allowed=false\n";
+    std::cout << "out_dir=" << outDir.string() << "\n";
+    std::cout << "report=" << package.report_path.string() << "\n";
+    std::cout << "reason=" << reason << "\n";
+    return ok ? 0 : 1;
 }
 
 int RunMetrologyAnalyticsSelfTestCli(int argc, char** argv, const std::string& filter)
@@ -2347,6 +2411,11 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions& options)
 
 int RunCxVisionApplication(int argc, char** argv)
 {
+    if (HasCliArg(argc, argv, "--gwy-reference-smoke"))
+    {
+        return RunGwyReferenceInterfaceSmokeCli(argc, argv);
+    }
+
     if (HasCliArg(argc, argv, "--metrology-analytics-smoke"))
     {
         return RunMetrologyAnalyticsSmokeCli(argc, argv);

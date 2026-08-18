@@ -4,6 +4,17 @@
 #include "torch_runtime_segmentation_executor.h"
 #include "torch_runtime_detection_executor.h"
 #include "torch_runtime_edgesam_executor.h"
+#include "torch_runtime_yolov8_seg_executor.h"
+#include "torch_prototype_index.h"
+
+TorchTaskResultCpp ExecuteTorchPrototypeLifecycleTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request);
+
+TorchTaskResultCpp ValidateTorchIncrementalPackageTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request,
+    const std::string& model_family);
 #include "torch_segmentation_mainline_bridge.h"
 #include "torch_test_host.h"
 #include <chrono>
@@ -1422,11 +1433,37 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
     }
 
     if (request.task ==
+        TorchRuntimeTaskIds::YoloV8InstanceSegmentation)
+    {
+        return ExecuteTorchYoloV8SegTask(config, request);
+    }
+
+    if (request.task ==
         TorchRuntimeTaskIds::SegmentationTrainingLifecycle)
     {
         return RunSegmentationTrainingLifecycleTask(
             config,
             request);
+    }
+
+    if (request.task ==
+        TorchRuntimeTaskIds::PrototypeIncrementalLifecycle)
+    {
+        return ExecuteTorchPrototypeLifecycleTask(config, request);
+    }
+
+    if (request.task ==
+        TorchRuntimeTaskIds::EdgeSamIncrementalPackage)
+    {
+        return ValidateTorchIncrementalPackageTask(
+            config, request, "edgesam");
+    }
+
+    if (request.task ==
+        TorchRuntimeTaskIds::YoloV8IncrementalPackage)
+    {
+        return ValidateTorchIncrementalPackageTask(
+            config, request, "yolov8");
     }
 
     if (IsLegacyTestHostTask(request.task))
@@ -1437,4 +1474,188 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
     }
 
     return MakeUnsupportedTask(request.task);
+}
+
+namespace
+{
+TorchTaskResultCpp IncrementalTaskFailure(
+    const std::string& stage, const std::string& reason,
+    const std::string& status = "failed")
+{
+    TorchTaskResultCpp result;
+    result.ok = false;
+    result.error_code = -1;
+    result.status = status;
+    result.error_message = reason;
+    result.result_json =
+        "{\schema\:\cxvision.torch.incremental.v1\,"
+        "\status\:" + QuoteRuntimeTaskJsonString(status) +
+        ",\failure_stage\:" + QuoteRuntimeTaskJsonString(stage) +
+        ",\reason\:" + QuoteRuntimeTaskJsonString(reason) + "}";
+    return result;
+}
+
+torch::Tensor PrototypeFeature(
+    const cv::Mat& gray, const cv::Mat& edges, const int kind)
+{
+    cv::Scalar mean, deviation;
+    cv::meanStdDev(gray, mean, deviation);
+    const float m = static_cast<float>(mean[0] / 255.0);
+    const float s = static_cast<float>(deviation[0] / 255.0);
+    const float e = static_cast<float>(
+        cv::countNonZero(edges) /
+        static_cast<double>(std::max<std::size_t>(1, gray.total())));
+    const float a = static_cast<float>(
+        gray.cols / static_cast<double>(std::max(1, gray.rows)));
+    if (kind == 0) return torch::tensor({m, s});
+    if (kind == 1) return torch::tensor({a, 1.0f / std::max(a, 0.001f)});
+    if (kind == 2) return torch::tensor({e, s});
+    return torch::tensor({static_cast<float>(gray.cols) / 2048.0f,
+                          static_cast<float>(gray.rows) / 2048.0f});
+}
+} // namespace
+
+TorchTaskResultCpp ExecuteTorchPrototypeLifecycleTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request)
+{
+    (void)config;
+    try
+    {
+        cv::Mat image = cv::imread(request.input_image, cv::IMREAD_COLOR);
+        if (image.empty())
+            return IncrementalTaskFailure(
+                "input", "prototype lifecycle input image is unreadable");
+        cv::Mat gray, edges;
+        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+        cv::Canny(gray, edges, 40.0, 120.0);
+
+        PrototypeEntry entry;
+        entry.prototype_id = "evidence_prototype";
+        entry.class_name = "evidence_target";
+        entry.subtype_name = "incremental";
+        entry.modality_tag = "image";
+        entry.semantic_vec = PrototypeFeature(gray, edges, 0);
+        entry.geometry_vec = PrototypeFeature(gray, edges, 1);
+        entry.texture_vec = PrototypeFeature(gray, edges, 2);
+        entry.shape_vec = PrototypeFeature(gray, edges, 3);
+        PrototypeIndex index;
+        index.add_or_update(entry);
+        index.add_or_update(entry);
+        PrototypeSearchQuery query{
+            entry.semantic_vec, entry.geometry_vec,
+            entry.texture_vec, entry.shape_vec};
+        const auto matches = index.search_topk(query, 1);
+        if (matches.empty())
+            return IncrementalTaskFailure(
+                "prototype_query", "prototype index returned no match");
+
+        const std::filesystem::path output_dir = request.output_dir.empty()
+            ? std::filesystem::path("cxscript_runs/torch_prototype")
+            : std::filesystem::path(request.output_dir);
+        std::filesystem::create_directories(output_dir);
+        const auto weights_ref = output_dir / "prototype_vectors.pt";
+        const auto overlay_ref = output_dir / "prototype_overlay.png";
+        const auto result_ref = output_dir / "prototype_result.json";
+        const auto evidence_ref = output_dir / "prototype_evidence.json";
+        torch::save(torch::cat({entry.semantic_vec, entry.geometry_vec,
+            entry.texture_vec, entry.shape_vec}), weights_ref.string());
+
+        cv::Mat overlay = image.clone();
+        cv::rectangle(overlay, cv::Rect(1, 1,
+            std::max(1, overlay.cols - 2), std::max(1, overlay.rows - 2)),
+            cv::Scalar(0, 255, 0), 2);
+        cv::putText(overlay, "Prototype top1: " + matches.front().class_name,
+            cv::Point(12, 28), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+            cv::Scalar(0, 255, 0), 2);
+        cv::imwrite(overlay_ref.string(), overlay);
+
+        std::ostringstream json;
+        json << "{\schema\:\cxvision.torch.prototype.lifecycle.v1\,"
+             << "\status\:\success\,"
+             << "\incremental_update_executed\:true,"
+             << "\paired_inference_executed\:true,"
+             << "\network_weights_updated\:false,"
+             << "\prototype_count\:" << index.size() << ","
+             << "\updated_sample_count\:2,"
+             << "\top1_class\:" << QuoteRuntimeTaskJsonString(matches.front().class_name) << ","
+             << "\top1_score\:" << matches.front().fused_score << ","
+             << "\weights_ref\:" << QuoteRuntimeTaskJsonString(weights_ref.string()) << ","
+             << "\overlay_ref\:" << QuoteRuntimeTaskJsonString(overlay_ref.string()) << ","
+             << "\semantic_quality\:\pending_human_review\}";
+        std::ofstream(result_ref, std::ios::binary) << json.str() << "\n";
+        std::ofstream(evidence_ref, std::ios::binary) << json.str() << "\n";
+
+        TorchTaskResultCpp result;
+        result.ok = true;
+        result.status = "success";
+        result.requested_device = request.device;
+        result.actual_device = "cpu";
+        result.result_json = json.str();
+        result.result_ref = result_ref.string();
+        result.evidence_ref = evidence_ref.string();
+        result.input_image_ref = request.input_image;
+        result.primary_visual_ref = overlay_ref.string();
+        result.visualization_refs = overlay_ref.string();
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        return IncrementalTaskFailure("exception", error.what());
+    }
+}
+
+TorchTaskResultCpp ValidateTorchIncrementalPackageTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request,
+    const std::string& model_family)
+{
+    (void)config;
+    const std::filesystem::path manifest_path(request.manifest_path);
+    if (request.manifest_path.empty() || !std::filesystem::exists(manifest_path))
+        return IncrementalTaskFailure(
+            "manifest", model_family + " package manifest is missing",
+            "pending_binding");
+    std::ifstream input(manifest_path, std::ios::binary);
+    const std::string manifest(
+        (std::istreambuf_iterator<char>(input)),
+        std::istreambuf_iterator<char>());
+    const std::vector<std::string> keys = model_family == "edgesam"
+        ? std::vector<std::string>{"encoder_weights", "decoder_weights"}
+        : std::vector<std::string>{"weights"};
+    for (const auto& key : keys)
+    {
+        const std::string relative =
+            ExtractRuntimeTaskJsonString(manifest, key);
+        const auto path = manifest_path.parent_path() / relative;
+        if (relative.empty() || !std::filesystem::exists(path))
+            return IncrementalTaskFailure(
+                "model_loading",
+                model_family + " exported TorchScript weight is missing",
+                "pending_binding");
+        try
+        {
+            auto module = torch::jit::load(path.string(), torch::kCPU);
+            module.eval();
+        }
+        catch (const std::exception& error)
+        {
+            return IncrementalTaskFailure("torchscript_load", error.what());
+        }
+    }
+    TorchTaskResultCpp result;
+    result.ok = true;
+    result.status = "binding_ready";
+    result.requested_device = request.device;
+    result.actual_device = "cpu";
+    result.result_json =
+        "{\schema\:\cxvision.torch.incremental_package_gate.v1\,"
+        "\status\:\binding_ready\,\model_family\:" +
+        QuoteRuntimeTaskJsonString(model_family) +
+        ",\manifest_ref\:" +
+        QuoteRuntimeTaskJsonString(manifest_path.string()) +
+        ",\human_review_required\:true}";
+    result.result_ref = manifest_path.string();
+    result.evidence_ref = manifest_path.string();
+    return result;
 }

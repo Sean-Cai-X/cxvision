@@ -29,7 +29,9 @@ bool LoadFirstContourPoints(
         (std::istreambuf_iterator<char>(input)),
         std::istreambuf_iterator<char>());
 
-    const std::size_t points_key = json.find("\"points\"");
+    std::size_t points_key = json.find(R"("points")");
+    if (points_key == std::string::npos)
+        points_key = json.find(R"("outer_contours")");
     if (points_key == std::string::npos)
         return false;
 

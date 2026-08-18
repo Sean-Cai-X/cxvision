@@ -42,7 +42,13 @@ bool LoadTorchModelManifest(
 
     fs["weights"] >> manifest.weights;
     fs["weights_format"] >> manifest.weights_format;
+    if (fs["weights_hash"].isString())
+        fs["weights_hash"] >> manifest.weights_hash;
     fs["num_classes"] >> manifest.num_classes;
+    fs["mask_channels"] >> manifest.mask_channels;
+    fs["prototype_channels"] >> manifest.prototype_channels;
+    fs["configured_prototype_channels"] >>
+        manifest.configured_prototype_channels;
 
     if (fs["classes"].isSeq())
     {
@@ -101,6 +107,7 @@ bool LoadTorchModelManifest(
         post_node["confidence_threshold"] >> manifest.confidence_threshold;
         post_node["iou_threshold"] >> manifest.iou_threshold;
         post_node["max_detections"] >> manifest.max_detections;
+        post_node["mask_threshold"] >> manifest.mask_threshold;
     }
 
     fs.release();
@@ -122,7 +129,8 @@ bool ValidateTorchModelManifest(
         return false;
     }
 
-    if (manifest.schema_version != 1)
+    if (manifest.schema_version != 1 &&
+        manifest.schema_version != 2)
     {
         reason = "unsupported schema version: " + std::to_string(manifest.schema_version);
         return false;
@@ -275,5 +283,68 @@ bool ValidateDetectionManifest(
         return false;
     }
 
+    return true;
+}
+
+bool ValidateInstanceSegmentationManifest(
+    const TorchModelManifest& manifest,
+    std::string& reason)
+{
+    if (!ValidateTorchModelManifest(manifest, reason))
+        return false;
+    if (manifest.schema_version != 2)
+    {
+        reason = "instance segmentation requires manifest schema version 2";
+        return false;
+    }
+    if (manifest.task != "instance_segmentation")
+    {
+        reason = "task must be 'instance_segmentation'";
+        return false;
+    }
+    if (manifest.architecture != "yolov8_seg")
+    {
+        reason = "architecture must be 'yolov8_seg'";
+        return false;
+    }
+    if (manifest.variant != "nano")
+    {
+        reason = "only the preflighted nano variant is supported";
+        return false;
+    }
+    if (manifest.weights_format != "python_state_dict")
+    {
+        reason = "weights_format must be 'python_state_dict'";
+        return false;
+    }
+    if (manifest.mask_channels != 32 ||
+        manifest.prototype_channels != 64)
+    {
+        reason = "preflighted YOLOv8n-Seg requires nm=32 and effective npr=64";
+        return false;
+    }
+    if (manifest.class_names.size() !=
+        static_cast<std::size_t>(manifest.num_classes))
+    {
+        reason = "class_names count does not match num_classes";
+        return false;
+    }
+    if (manifest.weights_hash.empty())
+    {
+        reason = "weights_hash is required";
+        return false;
+    }
+    if (manifest.mask_threshold < 0.0f ||
+        manifest.mask_threshold > 1.0f)
+    {
+        reason = "mask_threshold must be in [0,1]";
+        return false;
+    }
+    if (!std::filesystem::exists(manifest.weights_path))
+    {
+        reason = "weights file not found: " +
+                 manifest.weights_path.string();
+        return false;
+    }
     return true;
 }

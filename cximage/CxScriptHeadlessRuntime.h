@@ -1,6 +1,7 @@
 #ifndef CXIMAGE_CXSCRIPT_HEADLESS_RUNTIME_H
 #define CXIMAGE_CXSCRIPT_HEADLESS_RUNTIME_H
 
+#include <array>
 #include <string>
 #include <vector>
 #include <map>
@@ -19,6 +20,25 @@ struct CxFindLineScanDiagnosticSnapshot
     double accepted_x = 0.0;
     double accepted_y = 0.0;
     std::string reject_reason;
+};
+
+struct CxFindLineBoundaryPointEvidenceSnapshot
+{
+    int scan_index = -1;
+    int scan_type = 0;
+    double measured_x = 0.0;
+    double measured_y = 0.0;
+    double refined_x = 0.0;
+    double refined_y = 0.0;
+    double subpixel_offset = 0.0;
+    double response_strength = 0.0;
+    double local_noise = 0.0;
+    double localization_sigma_px = 0.0;
+    double fit_residual_px = 0.0;
+    int polarity = 0;
+    bool interpolation_valid = false;
+    bool fit_residual_valid = false;
+    std::array<double, 5> profile = { 0.0, 0.0, 0.0, 0.0, 0.0 };
 };
 
 struct CxFindLineEdgeEvaluationSnapshot
@@ -70,6 +90,27 @@ struct CxScriptExecutionCapture
     int findline_evaluated_edge_count = 0;
     int findline_best_edge_index = 0;
     double findline_best_edge_score = 0.0;
+
+    std::string boundary_analysis_status;
+    std::string boundary_reliability_level;
+    int boundary_expected_scan_count = 0;
+    int boundary_accepted_point_count = 0;
+    int boundary_interpolation_valid_count = 0;
+    int boundary_fit_residual_count = 0;
+    double boundary_coverage_ratio = 0.0;
+    double boundary_response_mean = 0.0;
+    double boundary_response_median = 0.0;
+    double boundary_response_cv = 0.0;
+    double boundary_subpixel_offset_mean = 0.0;
+    double boundary_subpixel_offset_stddev = 0.0;
+    double boundary_localization_sigma_mean_px = 0.0;
+    double boundary_residual_rmse_px = 0.0;
+    double boundary_residual_p95_px = 0.0;
+    double boundary_residual_max_px = 0.0;
+    double boundary_outlier_ratio = 0.0;
+    double boundary_reliability_score = 0.0;
+    std::vector<CxFindLineBoundaryPointEvidenceSnapshot> boundary_points;
+
     int circle_point_consistency_enabled = 0;
     double circle_point_consistency_range = 0.0;
     int circle_point_consistency_input_points = 0;
@@ -458,7 +499,6 @@ struct CxScriptHeadlessResult
     bool has_fit_circle = false;
     bool has_fit_ellipse = false;
     bool has_result_rect = false;
-
     int model_point_count = 0;
     int fastmatch_learn_a_count = 0;
     int fastmatch_learn_b_count = 0;

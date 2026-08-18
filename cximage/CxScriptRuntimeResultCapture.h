@@ -54,6 +54,27 @@ struct CxScriptToolResultCapture
     int findline_evaluated_edge_count = 0;
     int findline_best_edge_index = 0;
     double findline_best_edge_score = 0.0;
+
+    std::string boundary_analysis_status;
+    std::string boundary_reliability_level;
+    int boundary_expected_scan_count = 0;
+    int boundary_accepted_point_count = 0;
+    int boundary_interpolation_valid_count = 0;
+    int boundary_fit_residual_count = 0;
+    double boundary_coverage_ratio = 0.0;
+    double boundary_response_mean = 0.0;
+    double boundary_response_median = 0.0;
+    double boundary_response_cv = 0.0;
+    double boundary_subpixel_offset_mean = 0.0;
+    double boundary_subpixel_offset_stddev = 0.0;
+    double boundary_localization_sigma_mean_px = 0.0;
+    double boundary_residual_rmse_px = 0.0;
+    double boundary_residual_p95_px = 0.0;
+    double boundary_residual_max_px = 0.0;
+    double boundary_outlier_ratio = 0.0;
+    double boundary_reliability_score = 0.0;
+    std::vector<CxFindLineBoundaryPointEvidenceSnapshot> boundary_points;
+
     int circle_point_consistency_enabled = 0;
     double circle_point_consistency_range = 0.0;
     int circle_point_consistency_input_points = 0;

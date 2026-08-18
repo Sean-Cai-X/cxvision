@@ -168,6 +168,54 @@ bool CaptureFindLineResult(
     output.findline_evaluated_edge_count = debug.evaluated_edge_count;
     output.findline_best_edge_index = debug.best_edge_index;
     output.findline_best_edge_score = debug.best_edge_score;
+
+    const FindLineBoundaryAnalysisSnapshot boundary =
+        tool.boundaryanalysissnapshot();
+    output.boundary_analysis_status = boundary.status;
+    output.boundary_reliability_level = boundary.reliability_level;
+    output.boundary_expected_scan_count = boundary.expected_scan_count;
+    output.boundary_accepted_point_count = boundary.accepted_point_count;
+    output.boundary_interpolation_valid_count =
+        boundary.interpolation_valid_count;
+    output.boundary_fit_residual_count = boundary.fit_residual_count;
+    output.boundary_coverage_ratio = boundary.coverage_ratio;
+    output.boundary_response_mean = boundary.response_mean;
+    output.boundary_response_median = boundary.response_median;
+    output.boundary_response_cv = boundary.response_cv;
+    output.boundary_subpixel_offset_mean =
+        boundary.subpixel_offset_mean;
+    output.boundary_subpixel_offset_stddev =
+        boundary.subpixel_offset_stddev;
+    output.boundary_localization_sigma_mean_px =
+        boundary.localization_sigma_mean_px;
+    output.boundary_residual_rmse_px = boundary.residual_rmse_px;
+    output.boundary_residual_p95_px = boundary.residual_p95_px;
+    output.boundary_residual_max_px = boundary.residual_max_px;
+    output.boundary_outlier_ratio = boundary.outlier_ratio;
+    output.boundary_reliability_score = boundary.reliability_score;
+    output.boundary_points.clear();
+    for (const auto& point : boundary.points)
+    {
+        CxFindLineBoundaryPointEvidenceSnapshot snapshot;
+        snapshot.scan_index = point.scan_index;
+        snapshot.scan_type = point.scan_type;
+        snapshot.measured_x = point.measured_x;
+        snapshot.measured_y = point.measured_y;
+        snapshot.refined_x = point.refined_x;
+        snapshot.refined_y = point.refined_y;
+        snapshot.subpixel_offset = point.subpixel_offset;
+        snapshot.response_strength = point.response_strength;
+        snapshot.local_noise = point.local_noise;
+        snapshot.localization_sigma_px =
+            point.localization_sigma_px;
+        snapshot.fit_residual_px = point.fit_residual_px;
+        snapshot.polarity = point.polarity;
+        snapshot.interpolation_valid = point.interpolation_valid;
+        snapshot.fit_residual_valid = point.fit_residual_valid;
+        snapshot.profile = point.profile;
+        output.boundary_points.push_back(snapshot);
+    }
+
     output.findline_edge_evaluations.clear();
     for (const auto& eval : debug.edge_evaluations)
     {
@@ -275,6 +323,28 @@ bool CaptureFindLineResult(
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
     CopyShapeElementsToSnapshots(layer, output.shapes);
+
+    if (!output.boundary_points.empty())
+    {
+        CxShapeElementSnapshot refined;
+        refined.stable_ref = output.owner_ref + ":boundary_refined_points";
+        refined.owner_type = "FindLine";
+        refined.owner_ref = output.owner_ref;
+        refined.semantic_role = "boundary_refined_points";
+        refined.editable = false;
+        refined.result_element = true;
+        refined.shape_kind = "PointsShape";
+        for (const auto& point : output.boundary_points)
+        {
+            if (!point.interpolation_valid)
+                continue;
+            refined.points.push_back(point.refined_x);
+            refined.points.push_back(point.refined_y);
+        }
+        if (!refined.points.empty())
+            output.shapes.push_back(refined);
+    }
+
 
     return true;
 }
@@ -717,6 +787,48 @@ static void MergeToolCapture(
     capture.findline_evaluated_edge_count = tool.findline_evaluated_edge_count;
     capture.findline_best_edge_index = tool.findline_best_edge_index;
     capture.findline_best_edge_score = tool.findline_best_edge_score;
+
+    if (!tool.boundary_analysis_status.empty())
+    {
+        capture.boundary_analysis_status =
+            tool.boundary_analysis_status;
+        capture.boundary_reliability_level =
+            tool.boundary_reliability_level;
+        capture.boundary_expected_scan_count =
+            tool.boundary_expected_scan_count;
+        capture.boundary_accepted_point_count =
+            tool.boundary_accepted_point_count;
+        capture.boundary_interpolation_valid_count =
+            tool.boundary_interpolation_valid_count;
+        capture.boundary_fit_residual_count =
+            tool.boundary_fit_residual_count;
+        capture.boundary_coverage_ratio =
+            tool.boundary_coverage_ratio;
+        capture.boundary_response_mean =
+            tool.boundary_response_mean;
+        capture.boundary_response_median =
+            tool.boundary_response_median;
+        capture.boundary_response_cv =
+            tool.boundary_response_cv;
+        capture.boundary_subpixel_offset_mean =
+            tool.boundary_subpixel_offset_mean;
+        capture.boundary_subpixel_offset_stddev =
+            tool.boundary_subpixel_offset_stddev;
+        capture.boundary_localization_sigma_mean_px =
+            tool.boundary_localization_sigma_mean_px;
+        capture.boundary_residual_rmse_px =
+            tool.boundary_residual_rmse_px;
+        capture.boundary_residual_p95_px =
+            tool.boundary_residual_p95_px;
+        capture.boundary_residual_max_px =
+            tool.boundary_residual_max_px;
+        capture.boundary_outlier_ratio =
+            tool.boundary_outlier_ratio;
+        capture.boundary_reliability_score =
+            tool.boundary_reliability_score;
+        capture.boundary_points = tool.boundary_points;
+    }
+
     capture.findline_edge_evaluations.insert(
         capture.findline_edge_evaluations.end(),
         tool.findline_edge_evaluations.begin(),
@@ -1305,6 +1417,12 @@ bool CaptureTorchTaskResult(
     BackfillTorchSegmentationMetricsFromArtifacts(
         output.segmentation_contour_ref,
         output);
+    if (output.segmentation_contour_count == 0 &&
+        inference_result.mask.has_value() &&
+        inference_result.mask->available)
+    {
+        output.segmentation_contour_count = output.torch_result_count;
+    }
 
     output.algorithm_executed = tool.getok() != 0;
     output.measure_completed = tool.getok() != 0;

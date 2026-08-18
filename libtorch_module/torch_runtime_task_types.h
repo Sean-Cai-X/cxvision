@@ -23,8 +23,20 @@ inline constexpr const char* DeepLabV3PlusSegmentation =
 inline constexpr const char* EdgeSamPromptSegmentation =
     "torch.infer.segmentation.edgesam.v1";
 
+inline constexpr const char* EdgeSamIncrementalPackage =
+    "torch.train.segmentation.edgesam.decoder.v1";
+
+inline constexpr const char* YoloV8IncrementalPackage =
+    "torch.train.detection.yolov8.package.v1";
+
+inline constexpr const char* PrototypeIncrementalLifecycle =
+    "torch.incremental.prototype.lifecycle.v1";
+
 inline constexpr const char* YoloV8Detection =
     "torch.infer.detection.yolov8.v1";
+
+inline constexpr const char* YoloV8InstanceSegmentation =
+    "torch.infer.instance_segmentation.yolov8.v1";
 
 inline constexpr const char* SegmentationTrainingLifecycle =
     "torch.train.segmentation.lifecycle_smoke.v1";

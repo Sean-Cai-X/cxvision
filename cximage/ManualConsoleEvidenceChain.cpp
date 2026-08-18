@@ -259,98 +259,15 @@ ClassifyEvidenceMajorBucketLocal(const ManualTestContext &context,
                                  const std::string &groupLabel) {
   const std::string categoryOverride =
       ResolveEvidenceCategoryOverrideLocal(context, thumb);
-  const bool hasCuratedFindGeometry =
-      HasCuratedFindGeometryCategoryOverridesLocal(context);
-  const bool isManualGuidanceRow =
-      thumb.status == "pending_human_guidance" ||
-      groupLabel.find("Needs Human Setting") != std::string::npos ||
-      groupLabel.find("needs human setting") != std::string::npos;
-
-  if (categoryOverride == "To Verify" && hasCuratedFindGeometry &&
-      !isManualGuidanceRow) {
-    return {3, "Process Validation"};
-  }
-
-  if (categoryOverride == "Verified")
-    return {0, "Verified"};
-  if (categoryOverride == "To Verify")
-    return {1, "To Verify"};
-  if (categoryOverride == "Defect")
-    return {2, "Defect"};
-  if (categoryOverride == "Process Validation")
-    return {3, "Process Validation"};
-  if (categoryOverride == "Torch Evidence Candidates")
-    return {5, "Torch Evidence Candidates"};
-  if (categoryOverride == "Torch / Model Validation")
-    return {6, "Torch / Model Validation"};
   if (!categoryOverride.empty())
-    return {4, categoryOverride};
+    return {0, categoryOverride};
 
-  const std::string key = BuildEvidenceClassificationKeyLocal(
-      thumb.tool, thumb.script_id, thumb.script_path, groupLabel, thumb.status,
-      thumb.reason, thumb.parameter_summary);
+  if (!groupLabel.empty())
+    return {0, groupLabel};
 
-  if (IsTorchEvidenceCandidateRowLocal(thumb, groupLabel))
-    return {5, "Torch Evidence Candidates"};
-
-  const std::string normalizedTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
-  const bool isExplicitCxImageTool =
-      normalizedTool == "FindLine" || normalizedTool == "FindCircle" ||
-      normalizedTool == "FindObject" || normalizedTool == "FindEllipse" ||
-      normalizedTool == "FindRect" || normalizedTool == "RegionPatternTool" ||
-      normalizedTool == "GridPatternClassTool" || normalizedTool == "FastMatch";
-  const bool isTorchLayer =
-      !isExplicitCxImageTool &&
-      (key.find("torch") != std::string::npos ||
-       key.find("find_segmentation") != std::string::npos ||
-       key.find("findsegmentation") != std::string::npos ||
-       key.find("edgesam") != std::string::npos ||
-       key.find("segmentation") != std::string::npos ||
-       key.find("detection") != std::string::npos ||
-       key.find("model") != std::string::npos);
-
-  if (isTorchLayer)
-    return {6, "Torch / Model Validation"};
-
-  if (normalizedTool == "TorchTask")
-    return {6, "Torch / Model Validation"};
-
-  const bool isCuratedFindGeometryTool =
-      normalizedTool == "FindLine" || normalizedTool == "FindCircle" ||
-      key.find("findline") != std::string::npos ||
-      key.find("find_line") != std::string::npos ||
-      key.find("findcircle") != std::string::npos ||
-      key.find("find_circle") != std::string::npos;
-
-  if (isCuratedFindGeometryTool && hasCuratedFindGeometry) {
-    return {3, "Process Validation"};
-  }
-
-  if (key.find("pending_algorithm_review") != std::string::npos ||
-      key.find("pending_human_review") != std::string::npos ||
-      key.find("primary_object_selection_pending") != std::string::npos ||
-      key.find("pending") != std::string::npos ||
-      key.find("待验证") != std::string::npos ||
-      key.find("待测试") != std::string::npos)
-    return {1, "To Verify"};
-
-  if (key.find("fail") != std::string::npos ||
-      key.find("error") != std::string::npos ||
-      key.find("defect") != std::string::npos ||
-      key.find("blocked") != std::string::npos ||
-      key.find("有缺陷") != std::string::npos)
-    return {2, "Defect"};
-
-  if (key.find("diagnostic") != std::string::npos ||
-      key.find("legacy") != std::string::npos ||
-      key.find("ng_expected") != std::string::npos ||
-      key.find("smoke") != std::string::npos ||
-      key.find("process") != std::string::npos ||
-      key.find("过程") != std::string::npos)
-    return {3, "Process Validation"};
-
-  return {0, "Verified"};
+  return {0, "Uncategorized"};
 }
+
 
 static std::filesystem::path EvidenceCategoryOverridesPathLocal() {
   return ResolveCxVisionRunPath(
@@ -1977,6 +1894,7 @@ static void AppendManualAlgorithmReviewHandoffLocal(
     thumb.parameter_summary = BuildManualReviewParamSummaryLocal(
         tool, failureClass, runtimeSummary, extraEvidence);
     thumb.status = "pending_algorithm_review";
+    thumb.evidence_category_override = "To Verify";
     thumb.reason =
         "manual algorithm review from handoff; failure_class=" + failureClass +
         "; result_summary=" + runtimeSummary + "; tool_display=" + toolDisplay +
@@ -1987,7 +1905,7 @@ static void AppendManualAlgorithmReviewHandoffLocal(
 
     PopulateEditableObjectBindingForThumbLocal(thumb);
 
-    ScriptEvidenceGroup &group = findGroup(tool + " / Needs Human Setting");
+    ScriptEvidenceGroup &group = findGroup(tool);
     bool exists = false;
     for (const auto &existing : group.thumbs) {
       if (existing.case_id == thumb.case_id) {
@@ -2190,8 +2108,7 @@ static void AppendManualGuidanceQueueLocal(
 
     PopulateEditableObjectBindingForThumbLocal(thumb);
 
-    ScriptEvidenceGroup &group =
-        findGroup(thumb.tool + " / Needs Human Setting");
+    ScriptEvidenceGroup &group = findGroup(thumb.tool);
     bool exists = false;
     for (auto &existing : group.thumbs) {
       if (existing.case_id == thumb.case_id &&
@@ -2866,6 +2783,46 @@ PruneFindEllipseDuplicateCasesByNameLocal(ManualTestContext &context) {
   }
 }
 
+struct EvidenceChainFolderPlacementLocal {
+  std::string category;
+  std::string group;
+};
+
+static std::string EvidenceFolderLabelFromPathPartLocal(std::string value) {
+  value = std::filesystem::path(value).filename().string();
+  const std::size_t dot = value.find('.');
+  const std::size_t sep = value.find_first_of("_-");
+  if (dot != std::string::npos && sep != std::string::npos && dot < sep)
+    value.erase(0, sep + 1);
+  for (char &ch : value) {
+    if (ch == '_' || ch == '-')
+      ch = ' ';
+  }
+  return TrimLine(value);
+}
+
+static EvidenceChainFolderPlacementLocal ResolveEvidenceChainFolderPlacementLocal(
+    const std::filesystem::path &root, const std::filesystem::path &file) {
+  EvidenceChainFolderPlacementLocal placement;
+  std::error_code ec;
+  const std::filesystem::path rel = std::filesystem::relative(file, root, ec);
+  if (ec)
+    return placement;
+
+  std::vector<std::string> dirs;
+  for (const auto &part : rel.parent_path()) {
+    const std::string label = EvidenceFolderLabelFromPathPartLocal(part.string());
+    if (!label.empty())
+      dirs.push_back(label);
+  }
+
+  if (!dirs.empty())
+    placement.category = dirs.front();
+  if (dirs.size() >= 2)
+    placement.group = dirs[1];
+  return placement;
+}
+
 static int AppendCxScriptEvidenceChainFilesLocal(
     ManualTestContext &context,
     const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
@@ -2910,6 +2867,8 @@ static int AppendCxScriptEvidenceChainFilesLocal(
       continue;
     }
     ++loadedFiles;
+    const EvidenceChainFolderPlacementLocal folderPlacement =
+        ResolveEvidenceChainFolderPlacementLocal(root, file);
 
     for (const CxScriptEvidenceCase &c : chain.cases) {
       const auto existingCase = std::find_if(
@@ -2958,7 +2917,9 @@ static int AppendCxScriptEvidenceChainFilesLocal(
       thumb.source_case_id = c.source_case_id;
       thumb.manual_review_required = c.manual_review_required;
       thumb.promotion_candidate = c.promotion_candidate;
-      thumb.evidence_category_override = c.display_category;
+      thumb.evidence_category_override =
+          folderPlacement.category.empty() ? c.display_category
+                                           : folderPlacement.category;
       thumb.status =
           c.manual_review_required ? "pending_human_review" : "ready";
       thumb.reason = "cxscript evidence chain: " + chain.chain_id +
@@ -3007,12 +2968,11 @@ static int AppendCxScriptEvidenceChainFilesLocal(
         continue;
 
       const std::string groupLabel =
-          c.display_group.empty()
-              ? InferEvidenceChainToolBucketLocal(
-                    thumb.tool, thumb.script_id, thumb.script_path,
-                    thumb.tool.empty() ? chain.chain_name : thumb.tool,
-                    thumb.status, thumb.reason, thumb.parameter_summary)
-              : c.display_group;
+          !folderPlacement.group.empty()
+              ? folderPlacement.group
+              : (!c.display_group.empty()
+                     ? c.display_group
+                     : std::filesystem::path(file).stem().string());
       findGroup(groupLabel).thumbs.push_back(std::move(thumb));
       ++appended;
     }
@@ -5223,6 +5183,70 @@ void ViewController::DrawTorchTrainingImageRail(const char *split,
   ImGui::EndChild();
 }
 
+static bool SaveEvidenceManualReviewLocal(const ScriptEvidenceThumb &thumb,
+                                          const std::string &decision,
+                                          std::string &savedPath,
+                                          std::string &reason) {
+  reason.clear();
+  savedPath.clear();
+
+  std::filesystem::path reviewDir;
+  if (!thumb.candidate_dir.empty()) {
+    reviewDir = std::filesystem::path(thumb.candidate_dir);
+  } else {
+    std::string safeCase = thumb.case_id.empty() ? "evidence_case" : thumb.case_id;
+    for (char &ch : safeCase) {
+      const unsigned char uch = static_cast<unsigned char>(ch);
+      if (!std::isalnum(uch) && ch != '-' && ch != '_')
+        ch = '_';
+    }
+    reviewDir = ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/manual_reviews/" + safeCase);
+  }
+
+  std::error_code ec;
+  std::filesystem::create_directories(reviewDir, ec);
+  if (ec) {
+    reason = "failed to create manual review directory: " +
+             reviewDir.string() + " reason=" + ec.message();
+    return false;
+  }
+
+  const std::filesystem::path reviewPath = reviewDir / "human_review.json";
+  std::ofstream out(reviewPath, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    reason = "failed to open manual review file: " + reviewPath.string();
+    return false;
+  }
+
+  out << "{\n"
+      << "  \"schema\": \"cxvision.manual_gui_review.v1\",\n"
+      << "  \"case_id\": \"" << JsonEscape(thumb.case_id) << "\",\n"
+      << "  \"script_id\": \"" << JsonEscape(thumb.script_id) << "\",\n"
+      << "  \"image_id\": \"" << JsonEscape(thumb.image_id) << "\",\n"
+      << "  \"target_id\": \"" << JsonEscape(thumb.target_id) << "\",\n"
+      << "  \"tool\": \"" << JsonEscape(thumb.tool) << "\",\n"
+      << "  \"decision\": \"" << JsonEscape(decision) << "\",\n"
+      << "  \"reviewed_at\": \"" << JsonEscape(CurrentTimestamp()) << "\",\n"
+      << "  \"review_source\": \"ManualStateTestConsole/To Verify\",\n"
+      << "  \"promotion_allowed\": false,\n"
+      << "  \"image_path\": \"" << JsonEscape(thumb.image_path) << "\",\n"
+      << "  \"script_path\": \"" << JsonEscape(thumb.script_path) << "\",\n"
+      << "  \"parameter_summary\": \""
+      << JsonEscape(thumb.parameter_summary) << "\",\n"
+      << "  \"review_note\": \"Decision saved by a human from the Evidence To Verify row; promotion remains blocked.\"\n"
+      << "}\n";
+  out.flush();
+  if (!out) {
+    reason = "failed to write manual review file: " + reviewPath.string();
+    return false;
+  }
+
+  savedPath = reviewPath.string();
+  reason = "manual review saved: " + savedPath;
+  return true;
+}
+
 static std::string TorchDatasetFileStemLocal(
     const TorchTrainingImageItem &item, std::size_t index) {
   std::string stem = item.image_id.empty()
@@ -6202,13 +6226,37 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
   auto classifyTool =
       [&](const ScriptEvidenceThumb &thumb,
           const ScriptEvidenceGroup &group) -> std::pair<int, std::string> {
+    const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
+    const bool isToVerify = classifyMajor(thumb, group).second == "To Verify";
+    if (isToVerify && !exactTool.empty()) {
+      int priority = 30;
+      if (exactTool == "FindLine")
+        priority = 0;
+      else if (exactTool == "FindCircle")
+        priority = 1;
+      else if (exactTool == "FindObject")
+        priority = 2;
+      else if (exactTool == "FindEllipse")
+        priority = 3;
+      else if (exactTool == "FindRect")
+        priority = 4;
+      else if (exactTool == "RegionPatternTool")
+        priority = 5;
+      else if (exactTool == "GridPatternClassTool")
+        priority = 6;
+      else if (exactTool == "FastMatch")
+        priority = 7;
+      else if (exactTool == "FindSegmentation")
+        priority = 8;
+      else if (exactTool == "TorchTask")
+        priority = 9;
+      return {priority, exactTool};
+    }
+
     const std::string key =
         toLower(thumb.tool + " " + thumb.script_id + " " + thumb.script_path +
                 " " + thumb.status + " " + thumb.reason + " " +
                 thumb.parameter_summary + " " + group.label);
-
-    if (!thumb.evidence_category_override.empty() && !group.label.empty())
-      return {0, group.label};
 
     if (IsTorchEvidenceCandidateRowLocal(thumb, group.label)) {
       const std::string label =
@@ -6217,7 +6265,6 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
       return {0, label};
     }
 
-    const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
     if (exactTool == "FindLine")
       return {0, "FindLine"};
     if (exactTool == "FindCircle")
@@ -6238,6 +6285,12 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
       return {8, "FindSegmentation Prompt / EdgeSam"};
     if (exactTool == "TorchTask")
       return {9, "Torch / Model Validation"};
+
+    // Category membership describes workflow state; it must not replace the
+    // tool navigation key.  Only fall back to a legacy storage-group label
+    // when the row has no registered/normalized tool value.
+    if (!thumb.evidence_category_override.empty() && !group.label.empty())
+      return {0, group.label};
 
     // Only infer Torch/model ownership from free text when the row has no
     // explicit tool type.  Every candidate parameter snapshot contains
@@ -6298,16 +6351,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     return {30, group.label.empty() ? "Other" : group.label};
   };
 
-  // These are navigation buckets, not data-dependent labels.  Keep all four
-  // visible even when a bucket has no evidence yet, so the operator always
-  // sees the same Evidence Chain workflow.
-  std::vector<EvidenceMajorCategory> categories = {
-      {"Verified", 0, {}},
-      {"To Verify", 1, {}},
-      {"Defect", 2, {}},
-      {"Process Validation", 3, {}},
-      {"Torch Evidence Candidates", 5, {}},
-      {"Torch / Model Validation", 6, {}}};
+  std::vector<EvidenceMajorCategory> categories;
 
   auto findOrCreateMajor =
       [&](int priority, const std::string &label) -> EvidenceMajorCategory & {
@@ -6593,8 +6637,10 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
 
     ImGui::TableSetColumnIndex(0);
 
-    ImGui::TextUnformatted(thumb.script_id.empty() ? "(no script)"
-                                                   : thumb.script_id.c_str());
+    ImGui::Text("case: %s", thumb.case_id.empty() ? "(no case)"
+                                                  : thumb.case_id.c_str());
+    if (!thumb.script_id.empty() && thumb.script_id != thumb.case_id)
+      textEllipsized("script: ", thumb.script_id, 82);
     textEllipsized("path: ", thumb.script_path, 82);
     ImGui::Text("tool: %s | status: %s",
                 thumb.tool.empty() ? "-" : thumb.tool.c_str(),
@@ -6700,12 +6746,11 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
     ImGui::Separator();
 
     if (ImGui::BeginMenu("Move To Category")) {
-      auto moveToCategory = [&](const char *category, const char *status,
-                                const char *reason) {
+      auto moveToCategory = [&](const std::string &category) {
         thumb.evidence_category_override = category;
         StoreEvidenceCategoryOverrideLocal(m_manualTest, thumb, category);
-        thumb.status = status;
-        thumb.reason = reason;
+        thumb.status = "manual_category";
+        thumb.reason = "manual category: " + category;
         m_manualTest.script_evidence_row_refs_dirty = true;
         std::string saveReason;
         if (SaveEvidenceCategoryOverridesLocal(m_manualTest, saveReason)) {
@@ -6719,23 +6764,70 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
         }
       };
 
-      if (ImGui::MenuItem("Verified"))
-        moveToCategory("Verified", "verified", "manual category: verified");
-      if (ImGui::MenuItem("To Verify"))
-        moveToCategory("To Verify", "pending_human_review",
-                       "manual category: to verify");
-      if (ImGui::MenuItem("Defect"))
-        moveToCategory("Defect", "defect", "manual category: defect");
-      if (ImGui::MenuItem("Process Validation"))
-        moveToCategory("Process Validation", "process_validation",
-                       "manual category: process validation");
-      if (ImGui::MenuItem("Torch Evidence Candidates"))
-        moveToCategory("Torch Evidence Candidates", "torch_evidence_candidate",
-                       "manual category: torch evidence candidate");
-      if (ImGui::MenuItem("Torch / Model Validation"))
-        moveToCategory("Torch / Model Validation", "model_validation",
-                       "manual category: model validation");
+      std::vector<std::string> categoryLabels;
+      auto addCategoryLabel = [&](const std::string &label) {
+        const std::string trimmed = TrimLine(label);
+        if (trimmed.empty())
+          return;
+        if (std::find(categoryLabels.begin(), categoryLabels.end(), trimmed) ==
+            categoryLabels.end())
+          categoryLabels.push_back(trimmed);
+      };
+      for (const ScriptEvidenceGroup &loadedGroup :
+           m_manualTest.script_evidence_groups) {
+        for (const ScriptEvidenceThumb &loadedThumb : loadedGroup.thumbs)
+          addCategoryLabel(
+              ResolveEvidenceCategoryOverrideLocal(m_manualTest, loadedThumb));
+      }
+      std::stable_sort(categoryLabels.begin(), categoryLabels.end());
 
+      if (categoryLabels.empty()) {
+        ImGui::TextDisabled("No external categories loaded.");
+      } else {
+        for (const std::string &category : categoryLabels) {
+          if (ImGui::MenuItem(category.c_str()))
+            moveToCategory(category);
+        }
+      }
+
+      ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Save Manual Review")) {
+      auto saveReview = [&](const char *decision, const char *category,
+                            const char *status) {
+        std::string savedPath;
+        std::string saveReason;
+        if (!SaveEvidenceManualReviewLocal(thumb, decision, savedPath,
+                                           saveReason)) {
+          m_manualTest.debug_status = "MANUAL_GUI_REVIEW_SAVE_FAIL";
+          m_manualTest.debug_reason = saveReason;
+          return;
+        }
+
+        thumb.evidence_category_override = category;
+        thumb.status = status;
+        thumb.reason = std::string("manual GUI review: ") + decision +
+                       "; review=" + savedPath;
+        StoreEvidenceCategoryOverrideLocal(m_manualTest, thumb, category);
+        m_manualTest.script_evidence_row_refs_dirty = true;
+
+        std::string categoryReason;
+        if (!SaveEvidenceCategoryOverridesLocal(m_manualTest,
+                                                categoryReason)) {
+          m_manualTest.debug_status = "MANUAL_GUI_REVIEW_CATEGORY_SAVE_FAIL";
+          m_manualTest.debug_reason = saveReason + "; " + categoryReason;
+          return;
+        }
+        m_manualTest.debug_status = decision;
+        m_manualTest.debug_reason = saveReason;
+      };
+
+      if (ImGui::MenuItem("MANUAL_GUI_PASS"))
+        saveReview("MANUAL_GUI_PASS", "Verified", "manual_gui_pass");
+      if (ImGui::MenuItem("MANUAL_GUI_PARTIAL"))
+        saveReview("MANUAL_GUI_PARTIAL", "To Verify", "manual_gui_partial");
+      if (ImGui::MenuItem("MANUAL_GUI_FAIL"))
+        saveReview("MANUAL_GUI_FAIL", "Defect", "manual_gui_fail");
       ImGui::EndMenu();
     }
 

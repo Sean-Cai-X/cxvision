@@ -125,6 +125,49 @@ struct ScanLineEdgeBands
     std::vector<EdgeBandCandidate> bands;
 };
 
+struct FindLineBoundaryPointSnapshot
+{
+    int scan_index = -1;
+    int scan_type = 0;
+    double measured_x = 0.0;
+    double measured_y = 0.0;
+    double refined_x = 0.0;
+    double refined_y = 0.0;
+    double subpixel_offset = 0.0;
+    double response_strength = 0.0;
+    double local_noise = 0.0;
+    double localization_sigma_px = 0.0;
+    double fit_residual_px = 0.0;
+    int polarity = 0;
+    bool interpolation_valid = false;
+    bool fit_residual_valid = false;
+    std::array<double, 5> profile = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+};
+
+struct FindLineBoundaryAnalysisSnapshot
+{
+    std::string schema = "cxvision.findline_boundary_analysis.v1";
+    std::string status = "NOT_ANALYZED";
+    std::string reliability_level = "UNAVAILABLE";
+    int expected_scan_count = 0;
+    int accepted_point_count = 0;
+    int interpolation_valid_count = 0;
+    int fit_residual_count = 0;
+    double coverage_ratio = 0.0;
+    double response_mean = 0.0;
+    double response_median = 0.0;
+    double response_cv = 0.0;
+    double subpixel_offset_mean = 0.0;
+    double subpixel_offset_stddev = 0.0;
+    double localization_sigma_mean_px = 0.0;
+    double residual_rmse_px = 0.0;
+    double residual_p95_px = 0.0;
+    double residual_max_px = 0.0;
+    double outlier_ratio = 0.0;
+    double reliability_score = 0.0;
+    std::vector<FindLineBoundaryPointSnapshot> points;
+};
+
 struct FindLineMeasureProfileStats
 {
     double total_ms = 0.0;
@@ -166,7 +209,7 @@ struct FindLineMeasureInputDebug
     struct ScanDiagnostic
     {
         int scan_index = -1;
-        int scan_type = 0; // 0=w, 1=h
+        int scan_type = 0;
         int candidate_count = 0;
         bool accepted = false;
         double accepted_x = 0.0;
@@ -243,9 +286,6 @@ struct FindLineMeasureInputDebug
     int original_scan_h_length = 0;
     int original_process_width = 0;
 
-    // Original Measure() scan-run extraction evidence.  These counters
-    // deliberately describe the legacy scan loop as executed; they do not
-    // change its threshold, polarity, selection or fitting behaviour.
     int scan_rows_examined = 0;
     int scan_rows_with_foreground = 0;
     int scan_runs_total = 0;
@@ -633,6 +673,8 @@ public:
     void SeekPoints(PointsShape& seekpoints);
     void InflectionPoint(void* points);
     const FindLineMeasureProfileStats& lastmeasureprofilestats() const { return m_lastMeasureProfile; }
+
+    FindLineBoundaryAnalysisSnapshot boundaryanalysissnapshot() const;
 private:
     void ClearMeasureState();
     void BuildScanProfiles(Image& image, FindLineMeasureProfileStats& stats, const std::chrono::steady_clock::time_point& total_begin);
@@ -641,6 +683,8 @@ private:
     void SolveBestEdgeChain(FindLineMeasureProfileStats& stats);
     void ConvertBestChainToMeasurePoints(FindLineMeasureProfileStats& stats);
     void RefineBestChainSubpixel(Image& image, FindLineMeasureProfileStats& stats);
+
+    void BuildBoundaryAnalysisSnapshot(Image& image);
     void FilterMeasurePoints(FindLineMeasureProfileStats& stats);
     void FitWeightedLeastSquares(FindLineMeasureProfileStats& stats);
     void RefineJointConsistency(FindLineMeasureProfileStats& stats);
@@ -700,6 +744,8 @@ private:
     std::vector<EdgeBandCandidate> m_bestEdgeChain;
     FindLineMeasureProfileStats m_lastMeasureProfile;
     FindLineMeasureInputDebug m_lastMeasureInputDebug;
+
+    FindLineBoundaryAnalysisSnapshot m_boundaryAnalysis;
     int m_measure_fallback_mode = 0;
 
     std::vector<FitCandidateSequence> m_fit_candidate_sequences;

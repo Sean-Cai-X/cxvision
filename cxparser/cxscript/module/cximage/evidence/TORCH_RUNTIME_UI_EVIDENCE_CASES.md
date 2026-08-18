@@ -86,3 +86,50 @@ This local Evidence Chain package gives the UI torch thread a stable board-level
 6. Click a training/validation/test thumbnail and confirm Image View loads the DeepPCB image.
 7. Confirm `Annotated Regions / Features` reports non-zero rect count and the image overlay shows editable bbox regions.
 8. Keep the final state as `PENDING_HUMAN_REVIEW` until a human accepts the dataset split and model task semantics.
+
+## Incremental Training + Inference Closed Loop
+
+| case_id | model | incremental stage | paired inference | current gate |
+|---|---|---|---|---|
+| `torch_train_lifecycle_cpu_evidence` | DeepLabV3+ | persistent optimizer step, checkpoint and manifest export | mask + overlay validation in the same lifecycle | `PENDING_HUMAN_REVIEW` |
+| `torch_prototype_incremental_train_infer_evidence` | PrototypeIndex | merge two evidence descriptors and persist vector tensor | top-1 fused query + overlay in the same TorchTask | `PENDING_HUMAN_REVIEW` |
+| `torch_edgesam_incremental_package_evidence` | EdgeSAM-3x | decoder incremental trainer/export package gate | `torch_edgesam_3x_prompt_cpu_evidence` | `PENDING_BINDING` until real encoder/decoder TorchScript weights exist |
+| `torch_yolov8_incremental_package_evidence` | YOLOv8 | incremental TorchScript package gate | `torch_detection_yolov8_cpu_artifact_evidence` | `PENDING_BINDING` until real incremental export exists |
+
+The package-gate cases never substitute fixed parameters or placeholder output for a trained model. Missing or unloadable weights must remain `PENDING_BINDING`.
+
+## Manual Closed-Loop Verification
+
+1. Build and launch `<BUILD_DIR>/Release/cxvision_imgui_acceptance.exe` from `<REPO_ROOT>`.
+2. Open the Evidence Chain panel and load `torch_runtime_ui_evidence_chain.cxsc`.
+3. Expand `Incremental Training + Inference Closed Loop`; confirm the four model rows above are visible.
+4. Select `torch_train_lifecycle_cpu_evidence`, sync its dataset, run it once, and verify optimizer-step metrics, model weights, model manifest, inference mask, overlay, and Evidence references all point to the new run directory.
+5. Compare the DeepLab result summary with the overlay. Record human accept/reject; do not infer semantic acceptance from finite loss alone.
+6. Select `torch_prototype_incremental_train_infer_evidence`, run it once, and verify `incremental_update_executed=true`, `paired_inference_executed=true`, `updated_sample_count=2`, `network_weights_updated=false`, a persisted vector tensor, top-1 score, and `prototype_overlay.png`.
+7. Confirm the Prototype overlay is shown in Image View and its top-1 class agrees with the result/evidence JSON before recording human accept/reject.
+8. Select `torch_edgesam_incremental_package_evidence`. Before export it must show `PENDING_BINDING`; after a real `encoder.ts` and `decoder.ts` export, rerun the package gate and then the paired prompt inference case.
+9. For EdgeSAM, verify the positive point is foreground, the negative point is background, the mask/overlay refs exist, and any Python/C++ consistency tolerance is not exceeded.
+10. Select `torch_yolov8_incremental_package_evidence`. Before a real exported weight it must show `PENDING_BINDING`; after export, rerun the gate and then `torch_detection_yolov8_cpu_artifact_evidence`.
+11. For YOLOv8, compare candidate boxes, class/score values, Evidence overlay and result summary against the editable DeepPCB annotations.
+12. Save a separate human review decision for each model. Keep the overall state `PENDING_HUMAN_REVIEW` unless all required artifacts are from the same run ID and the reviewer explicitly accepts them.
+
+
+## YOLOv8n-Seg automatic instance segmentation review
+
+Evidence case: `torch_yolov8n_seg_cpu_evidence`.
+
+This case is the primary automatic segmentation path. It requires strict 417/417 state-dict mapping, per-instance masks and bbox geometry, `SegmentationEvidence v2`, original-image edge `MeasurementEvidence v1`, tensor shape trace, weight mapping report, and both segmentation and measurement overlays.
+
+The restored weights are COCO80 pretrained weights. This case validates the C++ binding and evidence closure; it does not claim DeepPCB semantic accuracy. Keep the decision `PENDING_HUMAN_REVIEW` until the reviewer confirms the visible instance boundaries, coordinates, artifacts, and UI result count.
+
+The paired incremental case is `torch_yolov8n_seg_incremental_head_proto_evidence`. It must remain `PENDING_BINDING` until a real polygon or instance-mask dataset is supplied and a candidate package is produced by box/class/DFL/mask/assignment training. Bbox-only DeepPCB annotations are not accepted as segmentation training labels.
+
+Manual steps:
+
+1. Launch `<BUILD_DIR>/Release/cxvision_imgui_acceptance.exe` from `<REPO_ROOT>`.
+2. Open the Evidence Chain panel and load `torch_runtime_ui_evidence_chain.cxsc`.
+3. Select `torch_yolov8n_seg_cpu_evidence`, sync the dataset, and run once.
+4. Verify Image View shows `mask_overlay.png`; switch to `measurement_overlay.png` and confirm refined green source-edge points remain inside the mask boundary search band.
+5. Confirm ToolDisplay reports a non-zero result count and the same run directory for `instances.json`, `torch_runtime_evidence.json`, `measurement_evidence.json`, and overlays.
+6. Inspect one selected instance: bbox, class/score, mask quality, stability, contour, centroid, pixel area, oriented rectangle axes, rejected points, and uncertainty must refer to the same stable ID.
+7. Record human accept/reject for runtime/evidence correctness separately from semantic model quality. Do not promote a profile from this COCO80 review case.

@@ -2,6 +2,9 @@
 #include "metrology_analytics/tests/ManualConsoleAnalyticsSmoke.h"
 
 #include "metrology_analytics/CxAnalyticsObservationBridgeDraft.h"
+#include "gwy_reference/CxExternalGwyReferenceBackend.h"
+#include "metrology_analytics/CxSurfaceBasicStats.h"
+#include "metrology_analytics/CxSurfaceField.h"
 
 #include <chrono>
 #include <ctime>
@@ -155,6 +158,78 @@ void DrawManualConsoleAnalyticsSmokePanel(
         const auto ids = CxAnalyticsObservationBridgeDraft::SupportedObservationIds();
         for (const auto& id : ids)
             ImGui::BulletText("%s", id.c_str());
+    }
+
+    if (ImGui::CollapsingHeader("GWY Reference Interface",
+                                ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        static const char* modes[] = {
+            "Cx Native", "GWY Reference", "Dual Compare"
+        };
+        ImGui::Combo("execution mode", &state.gwy_execution_mode, modes, 3);
+        ImGui::Text("status: %s", state.gwy_interface_status.c_str());
+        ImGui::TextWrapped("reason: %s", state.gwy_interface_reason.c_str());
+        ImGui::TextWrapped(
+            "The published interface is dependency-free. Until an external "
+            "runner is bound, closure artifacts are generated with "
+            "PENDING_BINDING and promotion_allowed=false.");
+
+        if (ImGui::Button("Run GWY Interface Closure"))
+        {
+            const std::filesystem::path outDir =
+                state.output_root / MakeManualAnalyticsRunId() /
+                "gwy_reference_interface";
+            gwy_reference::CxGwyReferenceRequest request;
+            request.request_id = outDir.parent_path().filename().string();
+            request.case_id = "gwy_reference_manual_interface_null";
+            request.algorithm_id = "surface.basic_stats";
+            request.input_ref = "builtin:flat5";
+            request.input_hash = "builtin-flat5-v1";
+            request.mode = static_cast<gwy_reference::CxGwyExecutionMode>(
+                std::max(0, std::min(2, state.gwy_execution_mode)));
+
+            auto backend = gwy_reference::CreateGwyReferenceBackend();
+            CxPhysUnit unit;
+            CxSurfaceField nativeField(5, 5, unit);
+            nativeField.fillFromGenerator([](int, int) { return 5.0; });
+            const auto nativeStats = computeSurfaceBasicStats(nativeField);
+            gwy_reference::CxGwyNormalizedResult nativeResult;
+            nativeResult.implementation = "cxvision.metrology_analytics";
+            nativeResult.implementation_version = "1";
+            nativeResult.status = "CX_NATIVE_EXECUTION_COMPLETE";
+            nativeResult.conclusion = "PENDING_HUMAN_REVIEW";
+            nativeResult.reason =
+                "cxvision native flat5 basic statistics executed";
+            nativeResult.backend_available = true;
+            nativeResult.executed = true;
+            nativeResult.algorithm_success = true;
+            nativeResult.metrics = {
+                {"basic_stats.min", nativeStats.min},
+                {"basic_stats.max", nativeStats.max},
+                {"basic_stats.mean", nativeStats.mean},
+                {"basic_stats.ra", nativeStats.ra},
+                {"basic_stats.rms", nativeStats.rms},
+                {"basic_stats.skewness", nativeStats.skewness},
+                {"basic_stats.kurtosis", nativeStats.kurtosis_excess}
+            };
+            gwy_reference::CxGwyReferenceRunPackage package;
+            std::string closureReason;
+            const bool ok = gwy_reference::RunReferenceInterfaceClosure(
+                request, *backend, &nativeResult, outDir, package, closureReason);
+            state.gwy_interface_status = ok
+                ? package.comparison.conclusion
+                : "GWY_REFERENCE_INTERFACE_FAIL";
+            state.gwy_interface_reason = closureReason;
+            state.gwy_interface_output_dir = outDir.string();
+            state.gwy_interface_report_path = package.report_path.string();
+        }
+
+        if (!state.gwy_interface_output_dir.empty())
+        {
+            ImGui::TextWrapped("out: %s", state.gwy_interface_output_dir.c_str());
+            ImGui::TextWrapped("report: %s",
+                               state.gwy_interface_report_path.c_str());
+        }
     }
 }
 

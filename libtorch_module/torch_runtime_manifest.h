@@ -37,6 +37,11 @@ struct TorchModelManifest
     float confidence_threshold = 0.25f;
     float iou_threshold = 0.45f;
     int max_detections = 100;
+    int mask_channels = 0;
+    int prototype_channels = 0;
+    int configured_prototype_channels = 0;
+    float mask_threshold = 0.5f;
+    std::string weights_hash;
 
     std::filesystem::path manifest_directory;
     std::filesystem::path weights_path;
@@ -58,5 +63,9 @@ bool ValidateSegmentationManifest(
     std::string& reason);
 
 bool ValidateDetectionManifest(
+    const TorchModelManifest& manifest,
+    std::string& reason);
+
+bool ValidateInstanceSegmentationManifest(
     const TorchModelManifest& manifest,
     std::string& reason);
