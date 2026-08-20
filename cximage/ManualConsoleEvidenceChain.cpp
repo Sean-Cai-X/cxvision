@@ -66,35 +66,51 @@ NormalizeEvidenceToolTypeLocal(const std::string &typeOrTool) {
 static std::string EvidenceSourceFileNameLocal(const std::string &pathOrId) {
   if (pathOrId.empty())
     return {};
-
-  std::string fileName = std::filesystem::path(pathOrId).filename().string();
-  if (fileName.empty())
-    fileName = pathOrId;
-
-  const std::size_t candidateSuffix = fileName.find(" [");
-  if (candidateSuffix != std::string::npos)
-    fileName.erase(candidateSuffix);
-
-  std::transform(
-      fileName.begin(), fileName.end(), fileName.begin(),
-      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-  return fileName;
+SameEvidenceSourceScriptLocal(const std::string &candidateSourcePath,
+                              const ScriptEvidenceThumb &original) {
+  if (candidateSourcePath.empty())
+    return false;
+
+  const std::string candidateNormalized =
+      std::filesystem::path(candidateSourcePath).lexically_normal().string();
+  const std::string originalSourceScriptPath =
+      !original.source_evidence_script_path.empty()
+          ? std::filesystem::path(original.source_evidence_script_path)
+                .lexically_normal()
+                .string()
+          : std::filesystem::path(original.script_path).lexically_normal().string();
+  const std::string candidateScriptIdFallback =
+      std::filesystem::path(original.script_id).lexically_normal().string();
+
+  if (!candidateNormalized.empty() &&
+      (candidateNormalized == originalSourceScriptPath ||
+       candidateNormalized == candidateScriptIdFallback)) {
+    return true;
+  }
+
+  const std::string candidateFile =
+      EvidenceSourceFileNameLocal(candidateSourcePath);
+  if (candidateFile.empty())
+    return false;
+  if (candidateFile == EvidenceSourceFileNameLocal(original.source_evidence_script_path) ||
+      candidateFile == EvidenceSourceFileNameLocal(original.script_path) ||
+      candidateFile == EvidenceSourceFileNameLocal(original.script_id)) {
+    return true;
+  }
+
+  const std::string candidate =
+      ReadJsonStringFieldLocal(candidateNormalized, "script_path");
+  if (!candidate.empty()) {
+    const std::string candidateFromJson =
+        std::filesystem::path(candidate).lexically_normal().string();
+    if (!candidateFromJson.empty() &&
+        (candidateFromJson == originalSourceScriptPath ||
+         candidateFromJson == candidateScriptIdFallback)) {
+      return true;
+    }
+  }
+  return false;
 }
-
-static std::string StripEvidenceCandidateDisplaySuffixLocal(std::string value) {
-  const std::string marker = " [candidate_";
-  std::size_t pos = value.find(marker);
-  while (pos != std::string::npos &&
-         value.find(']', pos) != std::string::npos) {
-    value.erase(pos);
-    pos = value.find(marker);
-  }
-  return value;
-}
-
-static bool
-SameEvidenceSourceScriptLocal(const std::string &candidateSourcePath,
-                              const ScriptEvidenceThumb &original) {
   if (candidateSourcePath.empty())
     return false;
 
@@ -2251,6 +2267,12 @@ static void AppendSavedEvidenceCandidatesLocal(
     const std::function<ScriptEvidenceGroup &(const std::string &)>
         &findGroup) {
   std::vector<std::filesystem::path> roots;
+static void
+AppendSavedEvidenceCandidatesLocal(
+    ManualTestContext &context,
+    const std::function<ScriptEvidenceGroup &(const std::string &)>
+        &findGroup) {
+  std::vector<std::filesystem::path> roots;
   roots.push_back(ResolveCxVisionRunPath("cxscript_runs/evidence_candidates"));
   const std::filesystem::path repoLocalRoot =
       (ResolveCaseDirectory(".") / "cxscript_runs/evidence_candidates")
@@ -2275,39 +2297,79 @@ static void AppendSavedEvidenceCandidatesLocal(
     }
   }
 
-  std::stable_sort(bindings.begin(), bindings.end(),
-                   [](const std::filesystem::path &left,
-                      const std::filesystem::path &right) {
-                     std::error_code leftEc;
-                     std::error_code rightEc;
-                     const auto leftTime =
-                         std::filesystem::last_write_time(left, leftEc);
-                     const auto rightTime =
-                         std::filesystem::last_write_time(right, rightEc);
-                     if (!leftEc && !rightEc && leftTime != rightTime)
-                       return leftTime < rightTime;
-                     return left.string() < right.string();
+  auto normalizeCandidateKeyPart = [](std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) {
+                     return static_cast<char>(std::tolower(ch));
                    });
+    return TrimLine(value);
+  };
 
-  auto bindWorkingRevisionToOriginal =
-      [&](const ScriptEvidenceThumb &candidate) -> bool {
+  auto buildCandidateDedupKey =
+      [&](const ScriptEvidenceThumb &candidate) -> std::string {
+    std::ostringstream key;
+    const std::string caseName = !candidate.case_id.empty()
+                                    ? candidate.case_id
+                                    : (!candidate.source_case_id.empty()
+                                           ? candidate.source_case_id
+                                           : candidate.script_id);
+    if (!caseName.empty())
+      key << "case=" << normalizeCandidateKeyPart(caseName);
+
+    const std::string sourceScript =
+        !candidate.source_evidence_script_path.empty()
+            ? candidate.source_evidence_script_path
+            : (!candidate.script_path.empty() ? candidate.script_path
+                                            : candidate.script_id);
+    if (!sourceScript.empty()) {
+      if (!key.str().empty())
+        key << "|";
+      key << "source="
+          << normalizeCandidateKeyPart(
+                 std::filesystem::path(sourceScript).lexically_normal().string());
+    }
+
+    if (!candidate.image_id.empty()) {
+      if (!key.str().empty())
+        key << "|";
+      key << "image=" << normalizeCandidateKeyPart(candidate.image_id);
+    }
+    if (!candidate.target_id.empty()) {
+      if (!key.str().empty())
+        key << "|";
+      key << "target=" << normalizeCandidateKeyPart(candidate.target_id);
+    }
+
+    const std::string tool = normalizeCandidateKeyPart(candidate.tool);
+    if (!tool.empty()) {
+      if (!key.str().empty())
+        key << "|";
+      key << "tool=" << tool;
+    }
+
+    return key.str();
+  };
+
+  auto bindWorkingRevisionToOriginal = [&](const ScriptEvidenceThumb &candidate) -> bool {
     for (auto &group : context.script_evidence_groups) {
       for (auto &original : group.thumbs) {
         if (original.is_candidate)
           continue;
+
         const bool sameCase =
-            !candidate.case_id.empty() && original.case_id == candidate.case_id;
-        const bool sameScript = SameEvidenceSourceScriptLocal(
-            candidate.source_evidence_script_path, original);
+            !candidate.case_id.empty() && !original.case_id.empty() &&
+            original.case_id == candidate.case_id;
+        const bool sameScript =
+            SameEvidenceSourceScriptLocal(candidate.source_evidence_script_path, original);
         const bool sameImage = candidate.image_id.empty() ||
                                original.image_id.empty() ||
                                original.image_id == candidate.image_id;
         const bool sameTarget = candidate.target_id.empty() ||
                                 original.target_id.empty() ||
                                 original.target_id == candidate.target_id;
-        const bool identityMatches =
+        const bool sameEvidence =
             sameCase || (sameScript && sameImage && sameTarget);
-        if (!identityMatches)
+        if (!sameEvidence)
           continue;
 
         original.candidate_id = candidate.candidate_id;
@@ -2316,14 +2378,12 @@ static void AppendSavedEvidenceCandidatesLocal(
         original.parameter_snapshot_path = candidate.parameter_snapshot_path;
         original.runtime_globals_path = candidate.runtime_globals_path;
         original.gauge_annotation_path = candidate.gauge_annotation_path;
-        original.working_script_snapshot_path = candidate.script_path;
-        original.has_saved_state = true;
+        original.working_script_snapshot_path = candidate.working_script_snapshot_path;
+        original.has_saved_state = candidate.has_saved_state;
         original.source_evidence_script_path =
             candidate.source_evidence_script_path;
-        const std::string originalTool =
-            NormalizeEvidenceToolTypeLocal(original.tool);
-        const std::string candidateTool =
-            NormalizeEvidenceToolTypeLocal(candidate.tool);
+        const std::string originalTool = NormalizeEvidenceToolTypeLocal(original.tool);
+        const std::string candidateTool = NormalizeEvidenceToolTypeLocal(candidate.tool);
         if (!candidateTool.empty() &&
             (originalTool.empty() || originalTool == "module" ||
              originalTool == "unknown")) {
@@ -2331,13 +2391,11 @@ static void AppendSavedEvidenceCandidatesLocal(
         }
         original.parameter_summary = candidate.parameter_summary;
         original.status = candidate.status;
-        original.reason = "active working revision=" + candidate.candidate_id +
-                          "; restored from candidate binding; " +
-                          candidate.reason;
+        original.reason = candidate.reason;
         CXLOG_INFO("EvidenceChain", "working_revision_rebound", "restored",
                    "case_id=" + candidate.case_id +
-                       " candidate_id=" + candidate.candidate_id + " match=" +
-                       (sameCase ? "case_id" : "script_image_target") +
+                       " candidate_id=" + candidate.candidate_id +
+                       " match=" + (sameCase ? "case_id" : "script_image_target") +
                        " source=" + candidate.source_evidence_script_path +
                        " original_script=" + original.script_path +
                        " image_id=" + original.image_id +
@@ -2348,8 +2406,23 @@ static void AppendSavedEvidenceCandidatesLocal(
     return false;
   };
 
-  for (const auto &bindingPath : bindings) {
+  std::stable_sort(bindings.begin(), bindings.end(),
+                   [](const std::filesystem::path &left,
+                      const std::filesystem::path &right) {
+                     std::error_code leftEc;
+                     std::error_code rightEc;
+                     const auto leftTime =
+                         std::filesystem::last_write_time(left, leftEc);
+                     const auto rightTime =
+                         std::filesystem::last_write_time(right, rightEc);
+                     if (!leftEc && !rightEc && leftTime != rightTime)
+                       return rightTime < leftTime;
+                     return left.string() < right.string();
+                   });
 
+  std::unordered_set<std::string> seenCandidateKeys;
+
+  for (const auto &bindingPath : bindings) {
     std::string binding;
     if (!ReadTextFile(bindingPath.string(), binding))
       continue;
@@ -2414,9 +2487,14 @@ static void AppendSavedEvidenceCandidatesLocal(
       thumb.source_evidence_script_path =
           ReadJsonStringFieldLocal(binding, "script_path");
     thumb.case_id = caseId;
-    thumb.script_id = (originalScriptId.empty() ? std::string("candidate")
-                                                : originalScriptId) +
-                      " [" + candidateId + "]";
+    thumb.script_id =
+        originalScriptId.empty() ? caseId : originalScriptId;
+    if (thumb.script_id.empty() && !thumb.source_evidence_script_path.empty())
+      thumb.script_id =
+          std::filesystem::path(thumb.source_evidence_script_path).stem().string();
+    if (thumb.script_id.empty() && !scriptSnapshot.empty())
+      thumb.script_id =
+          std::filesystem::path(scriptSnapshot).stem().string();
     thumb.script_path = scriptSnapshot;
     thumb.image_id = ReadJsonStringFieldLocal(binding, "image_id");
     thumb.image_path = imagePath;
@@ -2425,6 +2503,12 @@ static void AppendSavedEvidenceCandidatesLocal(
     thumb.tool = bindingTool;
     thumb.parameter_summary =
         ReadJsonStringFieldLocal(binding, "parameter_summary");
+
+    const std::string candidateDirName =
+        bindingPath.parent_path().parent_path().filename().string();
+    const std::string evidenceCaseFolderLabel =
+        EvidenceFolderLabelFromPathPartLocal(candidateDirName);
+
     if (!candidateGaugeValid) {
       thumb.status = "invalid_saved_candidate";
       thumb.evidence_category_override = "Defect";
@@ -2462,21 +2546,36 @@ static void AppendSavedEvidenceCandidatesLocal(
           ReadJsonStringFieldLocal(analysis, "primary_object_status");
     }
     PopulateEditableObjectBindingForThumbLocal(thumb);
+
+    if (thumb.parameter_summary.empty() ||
+        thumb.parameter_summary.find('=') == std::string::npos)
+      thumb.parameter_summary =
+          BuildDefaultEvidenceParamSummaryForScript(scriptSnapshot);
+
+    const std::string dedupKey = buildCandidateDedupKey(thumb);
+    if (seenCandidateKeys.find(dedupKey) != seenCandidateKeys.end())
+      continue;
+
     const bool reboundToOriginal =
         candidateGaugeValid && bindWorkingRevisionToOriginal(thumb);
+    if (reboundToOriginal && EvidenceThumbLooksLikeFindEllipseLocal(thumb, ScriptEvidenceGroup{}))
+      continue;
 
-    if (reboundToOriginal &&
-        EvidenceThumbLooksLikeFindEllipseLocal(thumb, ScriptEvidenceGroup{})) {
+    const std::string baseLabel =
+        evidenceCaseFolderLabel.empty() ? "Saved Candidates" : evidenceCaseFolderLabel;
+    const std::string candidateTool =
+        NormalizeEvidenceToolTypeLocal(thumb.tool);
+    const std::string groupLabel =
+        candidateTool.empty() ? baseLabel : (baseLabel + " / " + candidateTool);
+
+    if (reboundToOriginal) {
+      // The saved candidate has been rebound to an existing baseline row.
+      // Keep list stable by not appending a second visible row.
+      seenCandidateKeys.insert(dedupKey);
       continue;
     }
 
-    const std::string candidateTool =
-        NormalizeEvidenceToolTypeLocal(thumb.tool);
-    ScriptEvidenceGroup &group = findGroup(
-        (candidateTool.empty() ? std::string("Unknown") : candidateTool) +
-        (!candidateGaugeValid ? " / Invalid Saved Candidates"
-         : humanConfirmed     ? " / Human Confirmed Candidates"
-                              : " / Saved Pending Candidates"));
+    ScriptEvidenceGroup &group = findGroup(groupLabel);
     bool exists = false;
     for (const auto &existing : group.thumbs) {
       if (existing.is_candidate &&
@@ -2485,11 +2584,21 @@ static void AppendSavedEvidenceCandidatesLocal(
         exists = true;
         break;
       }
+      if (!existing.is_candidate &&
+          existing.case_id == thumb.case_id &&
+          existing.script_id == thumb.script_id) {
+        exists = true;
+        break;
+      }
     }
+
+    seenCandidateKeys.insert(dedupKey);
     if (!exists)
       group.thumbs.push_back(std::move(thumb));
   }
 }
+
+static bool LooksLikeCxScriptPathLocal(const std::string &value) {
 
 static bool LooksLikeCxScriptPathLocal(const std::string &value) {
   if (value.empty())

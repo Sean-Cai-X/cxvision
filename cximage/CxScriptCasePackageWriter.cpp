@@ -83,6 +83,13 @@ std::string StripEvidenceCandidateDisplaySuffix(std::string value) {
   return value;
 }
 
+std::string NormalizeEvidenceSourceForComparison(const std::string &pathOrId) {
+  if (pathOrId.empty())
+    return {};
+  return ResolveWorkspaceFile(pathOrId).lexically_normal().string();
+}
+
+
 void SanitizeFindEllipseCandidateGlobals(
     const std::string &tool, const std::string &caseId,
     const std::string &scriptId, const std::string &scriptPath,
@@ -676,6 +683,8 @@ bool AppendCandidateToEvidenceChain(
     const std::string &imageId, const std::string &imagePath,
     const std::string &targetId, const std::string &tool,
     const std::string &parameterSummary) {
+  bool workingRevisionBound = false;
+
   auto bindWorkingRevision = [&](ScriptEvidenceThumb &target) {
     target.candidate_id = result.candidate_id;
     target.candidate_dir = result.candidate_dir;
@@ -701,52 +710,46 @@ bool AppendCandidateToEvidenceChain(
     if (existing.is_candidate)
       return false;
 
-    const std::filesystem::path resolvedSource =
-        ResolveWorkspaceFile(sourceEvidenceScriptPath).lexically_normal();
-    const bool sameCase = !caseId.empty() && existing.case_id == caseId;
-    const bool sameScript =
-        !sourceEvidenceScriptPath.empty() &&
-        ResolveWorkspaceFile(existing.script_path).lexically_normal() ==
-            resolvedSource;
-    const bool sameImage = imageId.empty() || existing.image_id.empty() ||
-                           existing.image_id == imageId;
-    const bool sameTarget = targetId.empty() || existing.target_id.empty() ||
-                            existing.target_id == targetId;
+    const std::string sourceEvidencePath =
+        NormalizeEvidenceSourceForComparison(sourceEvidenceScriptPath);
+    const std::string fallbackScriptPath =
+        NormalizeEvidenceSourceForComparison(scriptPath);
+    const std::string resolvedSource =
+        !sourceEvidencePath.empty() ? sourceEvidencePath : fallbackScriptPath;
 
-    // Some script/catalog Evidence rows intentionally do not have a case_id.
-    // Their stable working revision identity is script + image + target,
-    // otherwise saving falls back to manual_case and reopening the row
-    // restores old default parameters.
-    return sameCase || (sameScript && sameImage && sameTarget);
+    const std::string existingSourceEvidencePath =
+        NormalizeEvidenceSourceForComparison(existing.source_evidence_script_path);
+    const std::string existingScriptPath =
+        NormalizeEvidenceSourceForComparison(existing.script_path);
+
+    const bool sameCase = !caseId.empty() && !existing.case_id.empty() &&
+                         existing.case_id == caseId;
+    const bool sameSourceScript =
+        !resolvedSource.empty() &&
+        (!existingSourceEvidencePath.empty()
+             ? existingSourceEvidencePath == resolvedSource
+             : !existingScriptPath.empty() &&
+                   existingScriptPath == resolvedSource);
+    const bool sameImage = imageId.empty() || existing.image_id.empty() ||
+                          existing.image_id == imageId;
+    const bool sameTarget = targetId.empty() || existing.target_id.empty() ||
+                           existing.target_id == targetId;
+
+    // Some rows intentionally do not have case_id; keep stable matching by
+    // source script + image/target for manual/legacy entries.
+    return sameCase || (sameSourceScript && sameImage && sameTarget);
   };
 
-  bool workingRevisionBound = false;
-  const int selectedGroup = context.selected_evidence_group;
-  const int selectedThumb = context.selected_evidence_thumb;
-  if (selectedGroup >= 0 &&
-      selectedGroup < static_cast<int>(context.script_evidence_groups.size())) {
-    ScriptEvidenceGroup &selected =
-        context.script_evidence_groups[selectedGroup];
-    if (selectedThumb >= 0 &&
-        selectedThumb < static_cast<int>(selected.thumbs.size()) &&
-        !selected.thumbs[selectedThumb].is_candidate) {
-      bindWorkingRevision(selected.thumbs[selectedThumb]);
+  for (auto &group : context.script_evidence_groups) {
+    for (auto &existing : group.thumbs) {
+      if (!sameEvidenceIdentity(existing))
+        continue;
+      bindWorkingRevision(existing);
       workingRevisionBound = true;
+      break;
     }
-  }
-
-  if (!workingRevisionBound) {
-    for (auto &group : context.script_evidence_groups) {
-      for (auto &existing : group.thumbs) {
-        if (!sameEvidenceIdentity(existing))
-          continue;
-        bindWorkingRevision(existing);
-        workingRevisionBound = true;
-        break;
-      }
-      if (workingRevisionBound)
-        break;
-    }
+    if (workingRevisionBound)
+      break;
   }
 
   if (!context.current_evidence_selection.is_candidate) {
@@ -796,13 +799,24 @@ bool AppendCandidateToEvidenceChain(
       (std::filesystem::path(result.candidate_dir) / "runtime_globals.json")
           .string();
   thumb.gauge_annotation_path = result.gauge_annotation_path;
-  thumb.working_script_snapshot_path = result.script_snapshot_path;
-  thumb.is_candidate = true;
+  thumb.working_script_snapshot_path = scriptPath;
+  thumb.is_candidate = false;
   thumb.has_saved_state = true;
   thumb.source_evidence_script_path = sourceEvidenceScriptPath;
   thumb.case_id = caseId;
-  thumb.script_id = (scriptId.empty() ? std::string("candidate") : scriptId) +
-                    " [" + result.candidate_id + "]";
+  thumb.script_id = !scriptId.empty() ? StripEvidenceCandidateDisplaySuffix(scriptId)
+                                      : (caseId.empty()
+                                             ? std::string("candidate_case")
+                                             : caseId);
+  if (thumb.script_id.empty() && !sourceEvidenceScriptPath.empty())
+    thumb.script_id =
+        StripEvidenceCandidateDisplaySuffix(std::filesystem::path(
+            sourceEvidenceScriptPath)
+                                              .stem()
+                                              .string());
+  if (thumb.script_id.empty() && !scriptPath.empty())
+    thumb.script_id = StripEvidenceCandidateDisplaySuffix(
+        std::filesystem::path(scriptPath).stem().string());
   thumb.script_path = result.script_snapshot_path;
   thumb.image_id = imageId;
   thumb.image_path = imagePath;
@@ -814,15 +828,10 @@ bool AppendCandidateToEvidenceChain(
   thumb.primary_object_name = context.current_gauge.primary_object_name;
   thumb.primary_object_status = context.current_gauge.primary_object_status;
   thumb.status = "pending_human_review";
-  thumb.reason =
-      "evidence candidate saved; candidate_id=" + result.candidate_id +
-      "; candidate_dir=" + result.candidate_dir;
-  thumb.primary_object_type = context.current_gauge.primary_object_type;
-  thumb.primary_object_name = context.current_gauge.primary_object_name;
-  thumb.primary_object_status =
-      context.current_gauge.primary_object_status.empty()
-          ? "unresolved"
-          : context.current_gauge.primary_object_status;
+  thumb.reason = "evidence candidate saved; candidate_id=" + result.candidate_id +
+                "; candidate_dir=" + result.candidate_dir;
+  if (thumb.primary_object_status.empty())
+    thumb.primary_object_status = "unresolved";
 
   const std::string groupLabel = EvidenceToolGroupLabel(tool);
   ScriptEvidenceGroup *groupPtr = nullptr;
@@ -840,20 +849,31 @@ bool AppendCandidateToEvidenceChain(
   }
 
   for (auto &existing : groupPtr->thumbs) {
-    const bool sameCandidateId = !thumb.candidate_id.empty() &&
-                                 existing.candidate_id == thumb.candidate_id;
+    const bool sameCase = !thumb.case_id.empty() && !existing.case_id.empty() &&
+                         existing.case_id == thumb.case_id;
+    const bool sameScript = !thumb.script_id.empty() &&
+                           !existing.script_id.empty() &&
+                           existing.script_id == thumb.script_id;
     const bool sameCandidateDir = !thumb.candidate_dir.empty() &&
-                                  existing.candidate_dir == thumb.candidate_dir;
+                                 existing.candidate_dir == thumb.candidate_dir;
+    const bool sameImage = !thumb.image_id.empty() &&
+                          !existing.image_id.empty() &&
+                          thumb.image_id == existing.image_id;
+    const bool sameTarget = !thumb.target_id.empty() &&
+                           !existing.target_id.empty() &&
+                           thumb.target_id == existing.target_id;
     const bool sameFindEllipseCase =
         LooksLikeFindEllipseCandidate(tool, caseId, scriptId, scriptPath,
-                                      sourceEvidenceScriptPath) &&
+                                     sourceEvidenceScriptPath) &&
         !caseId.empty() && existing.case_id == caseId &&
         (targetId.empty() || existing.target_id.empty() ||
          existing.target_id == targetId) &&
         (imageId.empty() || existing.image_id.empty() ||
          existing.image_id == imageId);
+
     if (existing.is_candidate &&
-        (sameCandidateId || sameCandidateDir || sameFindEllipseCase)) {
+        (sameCase || sameScript || sameCandidateDir ||
+         (sameImage && sameTarget) || sameFindEllipseCase)) {
       existing = thumb;
       context.script_evidence_row_refs_dirty = true;
       return true;
@@ -862,17 +882,12 @@ bool AppendCandidateToEvidenceChain(
 
   groupPtr->thumbs.push_back(thumb);
 
-  // Saving creates a new immutable Evidence row, but does not switch the
-  // active Workbench away from its baseline.  A Candidate is restored only
-  // when the user or Headless explicitly selects that Candidate row.
+  // Saving creates a new immutable Evidence row, but does not switch the active
+  // workbench away from its baseline.
   context.script_evidence_row_refs_dirty = true;
   return true;
 }
-} // namespace
 
-void AppendEvidenceCandidateStateProbe(const ManualTestContext &context,
-                                       const std::string &candidateDir,
-                                       const std::string &candidateId,
                                        const std::string &phase,
                                        const std::string &status,
                                        const std::string &reason) {
