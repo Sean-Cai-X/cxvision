@@ -77,6 +77,14 @@ void DrawFitLine(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Sc
     }
 }
 
+static bool IsTorchModelResultRole(const std::string& role)
+{
+    return role == "model_best_result" ||
+           role == "model_candidate" ||
+           role == "model_segmentation_mask" ||
+           role == "model_segmentation_contour";
+}
+
 void DrawLineGaugeFrame(cv::Mat& img, const CxShapeElementSnapshot& shape, const cv::Scalar& color)
 {
     if (shape.points.size() < 4)
@@ -178,6 +186,8 @@ bool RenderCxShapeOverlay(
                 shape.semantic_role == "boundary" ||
                 shape.semantic_role == "boundary_bbox")
                 should_render = true;
+            if (IsTorchModelResultRole(shape.semantic_role))
+                should_render = true;
         }
         else if (layer == CxOverlayLayer::RESULT)
         {
@@ -191,6 +201,8 @@ bool RenderCxShapeOverlay(
                 shape.semantic_role == "prompt_negative" ||
                 shape.semantic_role == "boundary" ||
                 shape.semantic_role == "boundary_bbox")
+                should_render = true;
+            if (IsTorchModelResultRole(shape.semantic_role))
                 should_render = true;
         }
         else if (layer == CxOverlayLayer::TOOL_DISPLAY)
@@ -268,6 +280,21 @@ else if (shape.semantic_role == "boundary_refined_points")
                 DrawFitLine(output, shape, result_color);
             else if (shape.shape_kind == "RectShape")
                 DrawRoiRectangle(output, shape, result_color);
+        }
+        else if (shape.semantic_role == "model_best_result" ||
+                 shape.semantic_role == "model_candidate")
+        {
+            result.rendered_result_count++;
+            DrawRoiRectangle(output, shape, result_color);
+        }
+        else if (shape.semantic_role == "model_segmentation_contour")
+        {
+            result.rendered_result_count++;
+            DrawRoiPolyline(output, shape, cv::Scalar(255, 220, 40));
+        }
+        else if (shape.semantic_role == "model_segmentation_mask")
+        {
+            result.rendered_result_count++;
         }
         else if (shape.semantic_role == "learn_roi" || shape.semantic_role == "search_roi")
         {

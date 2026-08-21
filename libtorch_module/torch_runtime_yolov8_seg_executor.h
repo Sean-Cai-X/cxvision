@@ -5,3 +5,7 @@
 TorchTaskResultCpp ExecuteTorchYoloV8SegTask(
     const TorchRuntimeCoreConfig& config,
     const TorchTaskRequestCpp& request);
+
+TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request);

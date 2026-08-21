@@ -59,8 +59,10 @@ enum class CxTorchTaskKind
     Classification,
     FeatureExtraction,
     TemplateDifference,
-    TrainingLifecycle
-};
+    TrainingLifecycle,
+    PrototypeLifecycle
+};
+
 
 struct CxTorchTaskSpec
 {

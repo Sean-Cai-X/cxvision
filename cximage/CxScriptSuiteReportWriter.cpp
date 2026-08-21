@@ -1,4 +1,5 @@
 #include "CxScriptSuiteReportWriter.h"
+#include "CxPrecisionEvaluation.h"
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -62,14 +63,17 @@ std::string DeriveFailureClass(const CxScriptSuiteCaseResult& result)
 
     if (result.tool == "FindCircle")
     {
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(result);
+        if (precision.evaluated && !precision.residual_pass)
+            return "findcircle_fail_precision_residual";
         if (result.valid_points_count < 3)
             return "findcircle_fail_insufficient_points";
         if (!result.has_fit_circle)
             return "findcircle_fail_no_fit_circle";
         if (result.circle_radius <= 0.0)
             return "findcircle_fail_invalid_radius";
-        if (result.avgdist > 8.0)
-            return "findcircle_fail_high_residual";
+        if (precision.evaluated && !precision.residual_pass)
+            return "findcircle_fail_precision_residual";
         return "findcircle_contract_metric_failed";
     }
 
@@ -95,6 +99,7 @@ std::string SuggestedActionForFailureClass(const std::string& failureClass)
         {"circle_measure_no_result_points", "FindCircle 未产生测量点；优先检查圆环采样半径、gap/linegap、极性和阈值"},
         {"findcircle_fail_invalid_radius", "检查 setcircle(cx,cy,px,py) 半径语义和 Gauge 初始化"},
         {"findcircle_fail_high_residual", "检查异常点剔除、圆弧遮挡、低对比残差阈值"},
+        {"findcircle_fail_precision_residual", "精度 residual gate 已失败；优先做输入/参数/调用顺序/对象状态差分，不先放宽阈值"},
         {"findline_contract_metric_failed", "检查 FindLine contract 指标、overlay/tool_display 与 runtime summary 是否一致"},
         {"findcircle_contract_metric_failed", "检查 FindCircle contract 指标、avgdist 阈值和 runtime summary 是否一致"}
     };
@@ -120,8 +125,8 @@ void CxScriptSuiteReportWriter::WriteSuiteRunReport(
         return;
 
     file << "# Suite Run Report\n\n";
-    file << "| Case | Level | Image | Tool | Script | Expected | Points | Fit | PolicyGuard | ContractPass | Conclusion |\n";
-    file << "|------|-------|-------|------|--------|----------|--------|-----|-------------|--------------|------------|\n";
+    file << "| Case | Level | Image | Tool | Script | Expected | Points | Fit | PrecisionGate | ResidualPx | ResidualLimitPx | PolicyGuard | ContractPass | Conclusion |\n";
+    file << "|------|-------|-------|------|--------|----------|--------|-----|---------------|------------|-----------------|-------------|--------------|------------|\n";
 
     for (const auto& result : caseResults)
     {
@@ -133,6 +138,10 @@ void CxScriptSuiteReportWriter::WriteSuiteRunReport(
         file << result.expected_result << " | ";
         file << result.valid_points_count << " | ";
         file << (result.has_fit_line || result.has_fit_circle ? "yes" : "no") << " | ";
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(result);
+        file << precision.status << " | ";
+        file << std::fixed << std::setprecision(2) << precision.residual_px << " | ";
+        file << std::fixed << std::setprecision(2) << precision.residual_limit_px << " | ";
         file << result.actual_policy_guard << " | ";
         file << (result.contract_pass ? "yes" : "no") << " | ";
         file << result.conclusion << " |\n";
@@ -190,6 +199,19 @@ void CxScriptSuiteReportWriter::WriteSuiteRunReportJson(
         file << "      \"tool\": \"" << r.tool << "\",\n";
         file << "      \"expected_result\": \"" << r.expected_result << "\",\n";
         file << "      \"actual_policy_guard\": \"" << r.actual_policy_guard << "\",\n";
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(r);
+        file << "      \"precision_metric_family\": \"" << precision.metric_family << "\",\n";
+        file << "      \"precision_gate_status\": \"" << precision.status << "\",\n";
+        file << "      \"precision_gate_evaluated\": " << (precision.evaluated ? "true" : "false") << ",\n";
+        file << "      \"precision_residual_px\": " << precision.residual_px << ",\n";
+        file << "      \"precision_residual_limit_px\": " << precision.residual_limit_px << ",\n";
+        file << "      \"precision_residual_pass\": " << (precision.residual_pass ? "true" : "false") << ",\n";
+        file << "      \"local_support\": " << r.local_support << ",\n";
+        file << "      \"local_mean_distance\": " << r.local_mean_distance << ",\n";
+        file << "      \"fit_offset\": " << r.fit_offset << ",\n";
+        file << "      \"precision_support\": " << precision.support << ",\n";
+        file << "      \"precision_support_limit\": " << precision.support_limit << ",\n";
+        file << "      \"precision_failure_reason\": \"" << precision.reason << "\",\n";
         file << "      \"contract_pass\": " << (r.contract_pass ? "true" : "false") << ",\n";
         file << "      \"conclusion\": \"" << r.conclusion << "\"\n";
         file << "    }";
@@ -444,8 +466,8 @@ void CxScriptSuiteReportWriter::WriteFindCircleAlgorithmIterationReport(
         return;
 
     file << "# FindCircle Algorithm Iteration Report\n\n";
-    file << "| Level | Image | Target | Script | Runtime Points | Global Points | Runtime Fit | Global Fit | Global Echo | Radius | AvgDist | Contract | Status | Conclusion | ToolDisplay |\n";
-    file << "|-------|-------|--------|--------|----------------|---------------|-------------|------------|-------------|--------|---------|----------|--------|------------|-------------|\n";
+    file << "| Level | Image | Target | Script | Runtime Points | Global Points | Runtime Fit | Global Fit | Global Echo | Radius | AvgDist | PrecisionGate | ResidualLimitPx | Contract | Status | Conclusion | ToolDisplay |\n";
+    file << "|-------|-------|--------|--------|----------------|---------------|-------------|------------|-------------|--------|---------|---------------|-----------------|----------|--------|------------|-------------|\n";
 
     int passed = 0, failed = 0;
     for (const auto& result : caseResults)
@@ -464,6 +486,9 @@ void CxScriptSuiteReportWriter::WriteFindCircleAlgorithmIterationReport(
         file << (result.runtime_global_result_mismatch ? "mismatch" : "ok") << " | ";
         file << std::fixed << std::setprecision(2) << result.circle_radius << " | ";
         file << std::fixed << std::setprecision(2) << result.avgdist << " | ";
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(result);
+        file << precision.status << " | ";
+        file << std::fixed << std::setprecision(2) << precision.residual_limit_px << " | ";
         file << (result.contract_pass ? "yes" : "no") << " | ";
         file << result.contract_status << " | ";
         file << result.conclusion << " | ";
@@ -589,6 +614,11 @@ void CxScriptSuiteReportWriter::WriteFailureClassificationReport(
             file << "- **Has Fit Circle**: " << (result.has_fit_circle ? "yes" : "no") << "\n";
             file << "- **Circle Radius**: " << std::fixed << std::setprecision(2) << result.circle_radius << "\n";
             file << "- **Avg Dist**: " << std::fixed << std::setprecision(2) << result.avgdist << "\n";
+            const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(result);
+            file << "- **Precision Gate**: " << precision.status << "\n";
+            file << "- **Precision Residual Limit Px**: " << std::fixed << std::setprecision(2) << precision.residual_limit_px << "\n";
+            file << "- **Precision Residual Pass**: " << (precision.residual_pass ? "yes" : "no") << "\n";
+            file << "- **Precision Failure Reason**: " << precision.reason << "\n";
             file << "- **Fit Filter Input / Kept / Rejected**: "
                  << result.fit_filter_input_count
                  << " / " << result.fit_filter_kept_count

@@ -214,12 +214,19 @@ static void FillRuntimeObjectFromFindCircle(RuntimeObjectView &object,
   object.circle_scan_lines_processed = debug.scan_lines_processed;
   object.circle_total_samples = debug.total_samples;
   object.circle_elapsed_ms = debug.elapsed_ms;
-  if (object.has_fit_result) {
-    object.fit_cx = static_cast<float>(circle.getresultcentx());
-    object.fit_cy = static_cast<float>(circle.getresultcenty());
-    object.fit_radius = static_cast<float>(circle.getradius());
-    object.fit_avgdist = static_cast<float>(circle.getavgdist());
-    object.runtime_state = "geometry_result_available";
+  if (object.has_fit_result) {
+    object.fit_cx = static_cast<float>(circle.getresultcentx());
+    object.fit_cy = static_cast<float>(circle.getresultcenty());
+    object.fit_radius = static_cast<float>(circle.getradius());
+    object.fit_avgdist = static_cast<float>(circle.getavgdist());
+    object.runtime_state = "geometry_result_available";
+    object.last_runtime_status = "runtime_executed";
+  } else if (object.has_measure_points) {
+    object.runtime_state = "fitcircle_degenerate_after_measure_points";
+    object.last_runtime_status = "PENDING_BINDING";
+  } else {
+    object.runtime_state = "fitcircle_pending_binding";
+    object.last_runtime_status = "PENDING_BINDING";
   }
 
   object.display_summary = BuildFindCircleGeometrySummary(object);
@@ -1495,6 +1502,12 @@ void ViewController::RefreshRuntimeObjectTable(
     if (object.type == "FindCircle") {
       m_manualTest.current_result_ref.name = "global_circle_ref";
       m_manualTest.current_result_ref.result_type = "FindCircleResult";
+      m_manualTest.current_result_ref.status = object.has_fit_result
+          ? "geometry_result_available"
+          : object.runtime_state;
+      m_manualTest.current_result_ref.reason = object.has_fit_result
+          ? "bound to runtime object geometry result"
+          : object.display_summary;
       m_manualTest.current_result_ref.fit_cx = object.fit_cx;
       m_manualTest.current_result_ref.fit_cy = object.fit_cy;
       m_manualTest.current_result_ref.fit_radius = object.fit_radius;

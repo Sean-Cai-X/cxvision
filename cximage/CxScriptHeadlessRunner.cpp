@@ -110,6 +110,311 @@ std::string LoadCxScriptSource(const std::string& script_path, std::string& reas
     return script_source;
 }
 
+static std::filesystem::path NormalizeSegmentationArtifactPath(
+    const std::string& ref)
+{
+    std::string normalized = ref;
+    for (char& ch : normalized)
+    {
+        if (ch == '/' || ch == '\\')
+            ch = std::filesystem::path::preferred_separator;
+    }
+    return std::filesystem::path(normalized);
+}
+
+static std::filesystem::path SegmentationArtifactIoPath(
+    const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    if (!path.is_absolute())
+        return path;
+
+    const std::wstring value = path.wstring();
+    if (value.rfind(LR"(\\?\)", 0) == 0)
+        return path;
+    if (value.rfind(LR"(\\)", 0) == 0)
+        return std::filesystem::path(
+            std::wstring(LR"(\\?\UNC\)") + value.substr(2));
+    return std::filesystem::path(std::wstring(LR"(\\?\)") + value);
+#else
+    return path;
+#endif
+}
+
+static bool WriteSegmentationArtifactTextFile(
+    const std::filesystem::path& path,
+    const std::string& text)
+{
+#ifdef _WIN32
+    std::error_code ec;
+    const std::filesystem::path temporary =
+        std::filesystem::temp_directory_path(ec) /
+        ("cx_segmentation_artifact_trace_" +
+         std::to_string(GetCurrentProcessId()) + "_" +
+         std::to_string(GetTickCount64()) + ".json");
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+        return false;
+    file << text;
+    file.close();
+    if (!file.good())
+    {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    ec.clear();
+    std::filesystem::copy_file(
+        temporary,
+        SegmentationArtifactIoPath(path),
+        std::filesystem::copy_options::overwrite_existing,
+        ec);
+    const bool copied = !ec;
+    ec.clear();
+    std::filesystem::remove(temporary, ec);
+    return copied;
+#else
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+        return false;
+    file << text;
+    return file.good();
+#endif
+}
+
+static void WriteSegmentationArtifactPersistTrace(
+    const std::filesystem::path& output_dir,
+    const std::string& source_ref,
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& source_dir,
+    const std::filesystem::path& artifact_dir,
+    bool source_exists,
+    bool source_dir_exists,
+    const std::string& status)
+{
+    int artifact_entry_count = 0;
+    std::error_code ec;
+    if (!artifact_dir.empty() &&
+        std::filesystem::exists(SegmentationArtifactIoPath(artifact_dir), ec) &&
+        !ec)
+    {
+        std::filesystem::recursive_directory_iterator it(
+            SegmentationArtifactIoPath(artifact_dir),
+            ec);
+        std::filesystem::recursive_directory_iterator end;
+        while (!ec && it != end)
+        {
+            ++artifact_entry_count;
+            it.increment(ec);
+        }
+    }
+    ec.clear();
+    auto has_artifact = [&](const char* name) {
+        ec.clear();
+        return !artifact_dir.empty() &&
+            std::filesystem::exists(
+                SegmentationArtifactIoPath(artifact_dir / name),
+                ec) &&
+            !ec;
+    };
+
+    std::ostringstream trace_file;
+
+    const char q = static_cast<char>(34);
+    auto write_string = [&](const char* key, const std::string& value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << q << JsonEscape(value) << q << (comma ? "," : "") << "\n";
+    };
+    auto write_bool = [&](const char* key, bool value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << (value ? "true" : "false") << (comma ? "," : "") << "\n";
+    };
+    auto write_int = [&](const char* key, int value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << value << (comma ? "," : "") << "\n";
+    };
+
+    trace_file << "{\n";
+    write_string("source_ref", source_ref, true);
+    write_string("source_path", source_path.string(), true);
+    write_string("source_dir", source_dir.string(), true);
+    write_string("artifact_dir", artifact_dir.string(), true);
+    write_bool("source_exists", source_exists, true);
+    write_bool("source_dir_exists", source_dir_exists, true);
+    write_int("artifact_entry_count", artifact_entry_count, true);
+    write_bool("has_torch_runtime_evidence", has_artifact("torch_runtime_evidence.json"), true);
+    write_bool("has_tensor_shape_trace", has_artifact("tensor_shape_trace.json"), true);
+    write_bool("has_weight_mapping_report", has_artifact("weight_mapping_report.json"), true);
+    write_bool("has_measurement_evidence", has_artifact("measurement_evidence.json"), true);
+    write_string("status", status, false);
+    trace_file << "}\n";
+    WriteSegmentationArtifactTextFile(
+        output_dir / "segmentation_artifact_persist_trace.json",
+        trace_file.str());
+}
+
+static void RemapSegmentationArtifactRef(
+    std::string& ref,
+    const std::filesystem::path& artifact_dir)
+{
+    if (ref.empty() || artifact_dir.empty())
+        return;
+
+    std::error_code ec;
+    const std::filesystem::path source_path =
+        NormalizeSegmentationArtifactPath(ref);
+    if (!std::filesystem::exists(SegmentationArtifactIoPath(source_path), ec) || ec)
+        return;
+
+    const std::filesystem::path destination =
+        artifact_dir / source_path.filename();
+    ec.clear();
+    std::filesystem::copy_file(
+        SegmentationArtifactIoPath(source_path),
+        SegmentationArtifactIoPath(destination),
+        std::filesystem::copy_options::overwrite_existing,
+        ec);
+    if (ec)
+        return;
+
+    ref = destination.string();
+}
+
+
+static void PersistSegmentationArtifacts(
+    const std::filesystem::path& output_dir,
+    CxScriptExecutionCapture& capture)
+{
+    const std::string source_ref =
+        !capture.segmentation_result_ref.empty()
+            ? capture.segmentation_result_ref
+            : (!capture.segmentation_contour_ref.empty()
+                   ? capture.segmentation_contour_ref
+                   : capture.segmentation_overlay_ref);
+    if (source_ref.empty())
+        return;
+
+    std::error_code ec;
+    const std::filesystem::path artifact_dir =
+        output_dir / "segmentation_artifacts";
+    std::filesystem::create_directories(artifact_dir, ec);
+    if (ec)
+    {
+        WriteSegmentationArtifactPersistTrace(
+            output_dir,
+            source_ref,
+            std::filesystem::path(),
+            std::filesystem::path(),
+            artifact_dir,
+            false,
+            false,
+            "create_artifact_dir_failed");
+        return;
+    }
+
+    const std::filesystem::path source_path =
+        NormalizeSegmentationArtifactPath(source_ref);
+    const bool source_exists =
+        std::filesystem::exists(source_path, ec) && !ec;
+    ec.clear();
+
+    const std::filesystem::path source_dir = source_path.parent_path();
+    const bool source_dir_exists =
+        !source_dir.empty() && std::filesystem::exists(source_dir, ec) && !ec;
+    ec.clear();
+    if (!source_exists || !source_dir_exists)
+    {
+        WriteSegmentationArtifactPersistTrace(
+            output_dir,
+            source_ref,
+            source_path,
+            source_dir,
+            artifact_dir,
+            source_exists,
+            source_dir_exists,
+            "source_missing");
+        return;
+    }
+
+    ec.clear();
+    const std::filesystem::path canonical_source =
+        std::filesystem::weakly_canonical(source_dir, ec);
+    ec.clear();
+    const std::filesystem::path canonical_artifact =
+        std::filesystem::weakly_canonical(artifact_dir, ec);
+    if (!canonical_source.empty() && !canonical_artifact.empty() &&
+        canonical_source == canonical_artifact)
+    {
+        WriteSegmentationArtifactPersistTrace(
+            output_dir,
+            source_ref,
+            source_path,
+            source_dir,
+            artifact_dir,
+            source_exists,
+            source_dir_exists,
+            "already_case_local");
+        return;
+    }
+
+    ec.clear();
+    for (const auto& entry : std::filesystem::directory_iterator(source_dir, ec))
+    {
+        if (ec)
+            break;
+
+        std::error_code copy_ec;
+        const std::filesystem::path canonical_entry =
+            std::filesystem::weakly_canonical(entry.path(), copy_ec);
+        copy_ec.clear();
+        if (!canonical_entry.empty() && !canonical_artifact.empty() &&
+            canonical_entry == canonical_artifact)
+        {
+            continue;
+        }
+
+        const std::filesystem::path destination =
+            artifact_dir / entry.path().filename();
+        std::filesystem::copy(
+            SegmentationArtifactIoPath(entry.path()),
+            SegmentationArtifactIoPath(destination),
+            std::filesystem::copy_options::recursive |
+                std::filesystem::copy_options::overwrite_existing,
+            copy_ec);
+    }
+
+    RemapSegmentationArtifactRef(
+        capture.segmentation_result_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_mask_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_contour_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_overlay_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_raw_result_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_raw_mask_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_raw_contour_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_raw_overlay_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_refined_result_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_refined_mask_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_refined_contour_ref, artifact_dir);
+    RemapSegmentationArtifactRef(
+        capture.segmentation_refined_overlay_ref, artifact_dir);
+
+    WriteSegmentationArtifactPersistTrace(
+        output_dir,
+        source_ref,
+        source_path,
+        source_dir,
+        artifact_dir,
+        source_exists,
+        source_dir_exists,
+        "persisted");
+}
+
 void DefineCxScriptLocalVariables(
     mu::CxParserRuntime& runtime,
     const std::string& source,
@@ -317,6 +622,8 @@ bool InjectCxScriptGlobals(
             { "global_rendered_measure_points_count", static_cast<double>(options.contract_rendered_measure_points_count) },
             { "global_rendered_result_count", static_cast<double>(options.contract_rendered_result_count) },
             { "global_result_overlay_changed_pixels", static_cast<double>(options.contract_result_overlay_changed_pixels) },
+            { "global_torch_ok", static_cast<double>(options.contract_torch_ok) },
+            { "global_torch_result_count", static_cast<double>(options.contract_torch_result_count) },
             { "global_policy_guard_match", static_cast<double>(options.policy_guard_match) },
             { "global_circle_radius", options.circle_radius },
             { "global_avgdist", options.avgdist },
@@ -485,7 +792,8 @@ bool ExecuteCxScriptSequential(
             ? "CxScript contract conditions passed"
             : "CxScript contract conditions failed";
     }
-    else try
+
+    if (!options.contract_context_enabled) try
     {
         if (!CaptureRuntimeToolResults(runtime, capture, reason))
         {
@@ -636,6 +944,17 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["tool_effective_wgap"] = capture.tool_wgap;
     pkg.metrics["tool_effective_hgap"] = capture.tool_hgap;
     pkg.metrics["tool_effective_linegap"] = capture.tool_linegap;
+    pkg.metrics["tool_input_line_x0"] = capture.tool_input_line_x0;
+    pkg.metrics["tool_input_line_y0"] = capture.tool_input_line_y0;
+    pkg.metrics["tool_input_line_x1"] = capture.tool_input_line_x1;
+    pkg.metrics["tool_input_line_y1"] = capture.tool_input_line_y1;
+    pkg.metrics["tool_input_line_half_width"] =
+        capture.tool_input_line_half_width;
+    pkg.metrics["tool_input_circle_cx"] = capture.tool_input_circle_cx;
+    pkg.metrics["tool_input_circle_cy"] = capture.tool_input_circle_cy;
+    pkg.metrics["tool_input_circle_px"] = capture.tool_input_circle_px;
+    pkg.metrics["tool_input_circle_py"] = capture.tool_input_circle_py;
+    pkg.metrics["tool_input_circle_gap"] = capture.tool_input_circle_gap;
     pkg.metrics["scan_rows_examined"] = capture.scan_rows_examined;
     pkg.metrics["scan_rows_with_foreground"] = capture.scan_rows_with_foreground;
     pkg.metrics["scan_runs_total"] = capture.scan_runs_total;
@@ -705,6 +1024,14 @@ CxScriptResultPackage BuildCxScriptResultPackage(
             ? 1.0 : 0.0;
     pkg.metrics["circle_radius"] = capture.circle_radius;
     pkg.metrics["avgdist"] = capture.avgdist;
+    pkg.metrics["local_support"] = capture.boundary_coverage_ratio;
+    pkg.metrics["local_mean_distance"] = capture.boundary_residual_rmse_px;
+    pkg.metrics["fit_offset"] = capture.boundary_residual_p95_px;
+    pkg.metrics["boundary_coverage_ratio"] = capture.boundary_coverage_ratio;
+    pkg.metrics["boundary_residual_rmse_px"] = capture.boundary_residual_rmse_px;
+    pkg.metrics["boundary_residual_p95_px"] = capture.boundary_residual_p95_px;
+    pkg.metrics["boundary_residual_max_px"] = capture.boundary_residual_max_px;
+    pkg.metrics["boundary_reliability_score"] = capture.boundary_reliability_score;
     const double circle_gauge_cx = readRuntimeGlobal("global_circle_cx");
     const double circle_gauge_cy = readRuntimeGlobal("global_circle_cy");
     const double circle_inner_radius = readRuntimeGlobal("global_circle_inner_radius");
@@ -901,6 +1228,47 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["segmentation_mask_ref"] = capture.segmentation_mask_ref;
     pkg.facts["segmentation_contour_ref"] = capture.segmentation_contour_ref;
     pkg.facts["segmentation_overlay_ref"] = capture.segmentation_overlay_ref;
+    pkg.facts["segmentation_task_id"] = capture.segmentation_task_id;
+
+    pkg.facts["segmentation_model_id"] = capture.segmentation_model_id;
+
+    pkg.facts["segmentation_model_package_ref"] = capture.segmentation_model_package_ref;
+
+    pkg.facts["segmentation_manifest_path"] = capture.segmentation_manifest_path;
+
+    pkg.facts["segmentation_postprocess_profile"] = capture.segmentation_postprocess_profile;
+
+    pkg.facts["segmentation_parameter_profile_ref"] = capture.segmentation_parameter_profile_ref;
+
+    pkg.facts["segmentation_region_count"] = std::to_string(capture.segmentation_region_count);
+
+    pkg.facts["segmentation_raw_result_available"] = capture.segmentation_raw_result_available ? "true" : "false";
+
+    pkg.facts["segmentation_refined_result_available"] = capture.segmentation_refined_result_available ? "true" : "false";
+
+    pkg.facts["segmentation_fallback_used"] = capture.segmentation_fallback_used ? "true" : "false";
+
+    pkg.facts["segmentation_result_stage"] = capture.segmentation_result_stage;
+
+    pkg.facts["segmentation_refinement_method"] = capture.segmentation_refinement_method;
+
+    pkg.facts["segmentation_raw_result_ref"] = capture.segmentation_raw_result_ref;
+
+    pkg.facts["segmentation_raw_mask_ref"] = capture.segmentation_raw_mask_ref;
+
+    pkg.facts["segmentation_raw_contour_ref"] = capture.segmentation_raw_contour_ref;
+
+    pkg.facts["segmentation_raw_overlay_ref"] = capture.segmentation_raw_overlay_ref;
+
+    pkg.facts["segmentation_refined_result_ref"] = capture.segmentation_refined_result_ref;
+
+    pkg.facts["segmentation_refined_mask_ref"] = capture.segmentation_refined_mask_ref;
+
+    pkg.facts["segmentation_refined_contour_ref"] = capture.segmentation_refined_contour_ref;
+
+    pkg.facts["segmentation_refined_overlay_ref"] = capture.segmentation_refined_overlay_ref;
+
+
     pkg.facts["torch_ok"] = capture.torch_ok != 0 ? "true" : "false";
     pkg.facts["torch_status"] = capture.torch_status;
     pkg.facts["torch_failure_stage"] = capture.torch_failure_stage;
@@ -1058,6 +1426,14 @@ bool SaveFindObjectBranchEvidenceJson(
     file << "    \"has_fit_line\": " << (capture.has_fit_line ? "true" : "false") << ",\n";
     file << "    \"valid_points_count\": " << capture.valid_points_count << ",\n";
     file << "    \"avgdist\": " << capture.avgdist << ",\n";
+    file << "    \"local_support\": " << capture.boundary_coverage_ratio << ",\n";
+    file << "    \"local_mean_distance\": " << capture.boundary_residual_rmse_px << ",\n";
+    file << "    \"fit_offset\": " << capture.boundary_residual_p95_px << ",\n";
+    file << "    \"boundary_coverage_ratio\": " << capture.boundary_coverage_ratio << ",\n";
+    file << "    \"boundary_residual_rmse_px\": " << capture.boundary_residual_rmse_px << ",\n";
+    file << "    \"boundary_residual_p95_px\": " << capture.boundary_residual_p95_px << ",\n";
+    file << "    \"boundary_residual_max_px\": " << capture.boundary_residual_max_px << ",\n";
+    file << "    \"boundary_reliability_score\": " << capture.boundary_reliability_score << ",\n";
     file << "    \"rendered_measure_points_count\": " << capture.rendered_measure_points_count << ",\n";
     file << "    \"rendered_result_count\": " << capture.rendered_result_count << ",\n";
     file << "    \"failure_stage\": \"" << JsonEscape(capture.failure_stage) << "\",\n";
@@ -1659,6 +2035,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             result.tool_display_path = tool_display_path.string();
     }
 
+    PersistSegmentationArtifacts(output_dir, capture);
+
     // Rendering facts are part of the contract input, so persist the summary
     // only after all overlay passes have updated the capture.
     if (SaveCxScriptHeadlessSummaryJson(capture, summary_path, reason))
@@ -1749,6 +2127,14 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"ellipse_point_consistency_output_points\": " << capture.ellipse_point_consistency_output_points << ",\n";
         object_state_file << "  \"ellipse_point_consistency_removed_points\": " << capture.ellipse_point_consistency_removed_points << ",\n";
         object_state_file << "  \"avgdist\": " << capture.avgdist << ",\n";
+        object_state_file << "  \"local_support\": " << capture.boundary_coverage_ratio << ",\n";
+        object_state_file << "  \"local_mean_distance\": " << capture.boundary_residual_rmse_px << ",\n";
+        object_state_file << "  \"fit_offset\": " << capture.boundary_residual_p95_px << ",\n";
+        object_state_file << "  \"boundary_coverage_ratio\": " << capture.boundary_coverage_ratio << ",\n";
+        object_state_file << "  \"boundary_residual_rmse_px\": " << capture.boundary_residual_rmse_px << ",\n";
+        object_state_file << "  \"boundary_residual_p95_px\": " << capture.boundary_residual_p95_px << ",\n";
+        object_state_file << "  \"boundary_residual_max_px\": " << capture.boundary_residual_max_px << ",\n";
+        object_state_file << "  \"boundary_reliability_score\": " << capture.boundary_reliability_score << ",\n";
         object_state_file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
         object_state_file << "  \"top1_rect_x\": " << capture.top1_rect_x << ",\n";
         object_state_file << "  \"top1_rect_y\": " << capture.top1_rect_y << ",\n";
@@ -1805,6 +2191,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"object_filter_max\": " << capture.object_filter_max << ",\n";
         object_state_file << "  \"tool_effective_method\": " << capture.tool_method << ",\n";
         object_state_file << "  \"tool_effective_threshold\": " << capture.tool_threshold << ",\n";
+        object_state_file << "  \"tool_input_line_x0\": " << capture.tool_input_line_x0 << ",\n";
+        object_state_file << "  \"tool_input_line_y0\": " << capture.tool_input_line_y0 << ",\n";
+        object_state_file << "  \"tool_input_line_x1\": " << capture.tool_input_line_x1 << ",\n";
+        object_state_file << "  \"tool_input_line_y1\": " << capture.tool_input_line_y1 << ",\n";
+        object_state_file << "  \"tool_input_line_half_width\": " << capture.tool_input_line_half_width << ",\n";
+        object_state_file << "  \"tool_input_circle_cx\": " << capture.tool_input_circle_cx << ",\n";
+        object_state_file << "  \"tool_input_circle_cy\": " << capture.tool_input_circle_cy << ",\n";
+        object_state_file << "  \"tool_input_circle_px\": " << capture.tool_input_circle_px << ",\n";
+        object_state_file << "  \"tool_input_circle_py\": " << capture.tool_input_circle_py << ",\n";
+        object_state_file << "  \"tool_input_circle_gap\": " << capture.tool_input_circle_gap << ",\n";
         object_state_file << "  \"scan_rows_examined\": " << capture.scan_rows_examined << ",\n";
         object_state_file << "  \"scan_rows_with_foreground\": " << capture.scan_rows_with_foreground << ",\n";
         object_state_file << "  \"scan_runs_total\": " << capture.scan_runs_total << ",\n";
@@ -1848,6 +2244,26 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"segmentation_mask_ref\": \"" << JsonEscape(capture.segmentation_mask_ref) << "\",\n";
         object_state_file << "  \"segmentation_contour_ref\": \"" << JsonEscape(capture.segmentation_contour_ref) << "\",\n";
         object_state_file << "  \"segmentation_overlay_ref\": \"" << JsonEscape(capture.segmentation_overlay_ref) << "\",\n";
+        object_state_file << "  \"segmentation_task_id\": \"" << JsonEscape(capture.segmentation_task_id) << "\",\n";
+        object_state_file << "  \"segmentation_model_id\": \"" << JsonEscape(capture.segmentation_model_id) << "\",\n";
+        object_state_file << "  \"segmentation_model_package_ref\": \"" << JsonEscape(capture.segmentation_model_package_ref) << "\",\n";
+        object_state_file << "  \"segmentation_manifest_path\": \"" << JsonEscape(capture.segmentation_manifest_path) << "\",\n";
+        object_state_file << "  \"segmentation_postprocess_profile\": \"" << JsonEscape(capture.segmentation_postprocess_profile) << "\",\n";
+        object_state_file << "  \"segmentation_parameter_profile_ref\": \"" << JsonEscape(capture.segmentation_parameter_profile_ref) << "\",\n";
+        object_state_file << "  \"segmentation_region_count\": " << capture.segmentation_region_count << ",\n";
+        object_state_file << "  \"segmentation_raw_result_available\": " << (capture.segmentation_raw_result_available ? "true" : "false") << ",\n";
+        object_state_file << "  \"segmentation_refined_result_available\": " << (capture.segmentation_refined_result_available ? "true" : "false") << ",\n";
+        object_state_file << "  \"segmentation_fallback_used\": " << (capture.segmentation_fallback_used ? "true" : "false") << ",\n";
+        object_state_file << "  \"segmentation_result_stage\": \"" << JsonEscape(capture.segmentation_result_stage) << "\",\n";
+        object_state_file << "  \"segmentation_refinement_method\": \"" << JsonEscape(capture.segmentation_refinement_method) << "\",\n";
+        object_state_file << "  \"segmentation_raw_result_ref\": \"" << JsonEscape(capture.segmentation_raw_result_ref) << "\",\n";
+        object_state_file << "  \"segmentation_raw_mask_ref\": \"" << JsonEscape(capture.segmentation_raw_mask_ref) << "\",\n";
+        object_state_file << "  \"segmentation_raw_contour_ref\": \"" << JsonEscape(capture.segmentation_raw_contour_ref) << "\",\n";
+        object_state_file << "  \"segmentation_raw_overlay_ref\": \"" << JsonEscape(capture.segmentation_raw_overlay_ref) << "\",\n";
+        object_state_file << "  \"segmentation_refined_result_ref\": \"" << JsonEscape(capture.segmentation_refined_result_ref) << "\",\n";
+        object_state_file << "  \"segmentation_refined_mask_ref\": \"" << JsonEscape(capture.segmentation_refined_mask_ref) << "\",\n";
+        object_state_file << "  \"segmentation_refined_contour_ref\": \"" << JsonEscape(capture.segmentation_refined_contour_ref) << "\",\n";
+        object_state_file << "  \"segmentation_refined_overlay_ref\": \"" << JsonEscape(capture.segmentation_refined_overlay_ref) << "\",\n";
         object_state_file << "  \"torch_ok\": " << capture.torch_ok << ",\n";
         object_state_file << "  \"torch_error_code\": " << capture.torch_error_code << ",\n";
         object_state_file << "  \"torch_train_ms\": " << capture.torch_train_ms << ",\n";
@@ -1929,6 +2345,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "budget_exceeded: " << (capture.budget_exceeded ? "true" : "false") << "\n";
         log_file << "tool_effective_method: " << capture.tool_method << "\n";
         log_file << "tool_effective_threshold: " << capture.tool_threshold << "\n";
+        log_file << "tool_input_line: "
+                 << capture.tool_input_line_x0 << ","
+                 << capture.tool_input_line_y0 << ","
+                 << capture.tool_input_line_x1 << ","
+                 << capture.tool_input_line_y1 << ","
+                 << capture.tool_input_line_half_width << "\n";
+        log_file << "tool_input_circle: "
+                 << capture.tool_input_circle_cx << ","
+                 << capture.tool_input_circle_cy << ","
+                 << capture.tool_input_circle_px << ","
+                 << capture.tool_input_circle_py << ","
+                 << capture.tool_input_circle_gap << "\n";
         log_file << "scan_rows_examined: " << capture.scan_rows_examined << "\n";
         log_file << "scan_rows_with_foreground: " << capture.scan_rows_with_foreground << "\n";
         log_file << "scan_runs_total: " << capture.scan_runs_total << "\n";

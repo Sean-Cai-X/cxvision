@@ -368,16 +368,73 @@ std::string BuildSemanticPatternResult()
         "}\n";
 }
 
-std::string BuildAccuracyEvaluation(const CxScriptExecutionCapture& capture)
+std::string BuildAccuracyEvaluation(
+    const CxScriptExecutionCapture& capture,
+    const std::string& tool)
 {
+    constexpr double kFindCircleResidualLimitPx = 8.0;
+    const bool is_findcircle = tool == "FindCircle";
+    const bool residual_gate_evaluated =
+        is_findcircle &&
+        capture.runtime_completed &&
+        !capture.budget_exceeded &&
+        capture.valid_points_count >= 3 &&
+        capture.has_fit_circle &&
+        capture.circle_radius > 0.0;
+    const bool residual_gate_pass =
+        residual_gate_evaluated &&
+        capture.avgdist <= kFindCircleResidualLimitPx;
+
+    std::string status = "PENDING_GROUND_TRUTH";
+    std::string reason = "Ground truth and perturbation matrix are not bound for this sidecar stage.";
+    if (is_findcircle)
+    {
+        if (!capture.runtime_completed)
+        {
+            status = "NOT_EVALUATED_RUNTIME_INCOMPLETE";
+            reason = "Runtime did not complete; residual precision gate cannot be evaluated.";
+        }
+        else if (capture.budget_exceeded)
+        {
+            status = "NOT_EVALUATED_BUDGET_EXCEEDED";
+            reason = "Algorithm budget was exceeded; residual precision gate cannot be evaluated.";
+        }
+        else if (capture.valid_points_count < 3)
+        {
+            status = "NOT_EVALUATED_INSUFFICIENT_POINTS";
+            reason = "FindCircle residual precision gate requires at least 3 valid points.";
+        }
+        else if (!capture.has_fit_circle || capture.circle_radius <= 0.0)
+        {
+            status = "NOT_EVALUATED_NO_FIT_CIRCLE";
+            reason = "FindCircle residual precision gate requires a fitted circle.";
+        }
+        else if (residual_gate_pass)
+        {
+            status = "RESIDUAL_GATE_PASS";
+            reason = "FindCircle avgdist is within the residual precision limit.";
+        }
+        else
+        {
+            status = "RESIDUAL_GATE_FAIL";
+            reason = "FindCircle avgdist exceeds the residual precision limit.";
+        }
+    }
+
     std::ostringstream out;
     out << "{\n";
     out << "  \"schema\": \"cxvision.accuracy_evaluation.v1\",\n";
-    out << "  \"status\": \"PENDING_GROUND_TRUTH\",\n";
+    out << "  \"tool\": \"" << JsonEscapeLocal(tool) << "\",\n";
+    out << "  \"status\": \"" << status << "\",\n";
+    out << "  \"precision_gate\": \"" << (is_findcircle ? "findcircle_residual_avgdist" : "not_bound") << "\",\n";
     out << "  \"residual_px\": " << capture.avgdist << ",\n";
+    out << "  \"residual_limit_px\": " << (is_findcircle ? kFindCircleResidualLimitPx : 0.0) << ",\n";
+    out << "  \"residual_gate_evaluated\": " << BoolText(residual_gate_evaluated) << ",\n";
+    out << "  \"residual_gate_pass\": " << BoolText(residual_gate_pass) << ",\n";
+    out << "  \"ground_truth_status\": \"PENDING_GROUND_TRUTH\",\n";
     out << "  \"repeatability_status\": \"NOT_EVALUATED\",\n";
     out << "  \"stability_status\": \"NOT_EVALUATED\",\n";
-    out << "  \"reason\": \"Ground truth and perturbation matrix are not bound for this sidecar stage.\"\n";
+    out << "  \"reason\": \"" << JsonEscapeLocal(reason) << "\"\n";
     out << "}\n";
     return out.str();
 }
@@ -443,7 +500,7 @@ bool WriteMeasurementSemanticSidecars(
         { "measurement_relations.json", BuildRelations(capture, tool, role_counts) },
         { "measurement_feature_vector.json", BuildFeatureVector(capture, tool) },
         { "semantic_pattern_result.json", BuildSemanticPatternResult() },
-        { "accuracy_evaluation.json", BuildAccuracyEvaluation(capture) },
+        { "accuracy_evaluation.json", BuildAccuracyEvaluation(capture, tool) },
         { "uncertainty_budget.json", BuildUncertaintyBudget() },
         { "algorithm_provenance.json", BuildAlgorithmProvenance(tool) },
         { "measurement_semantic_contract_result.json", BuildContractResult(capture) }

@@ -38,6 +38,9 @@ inline constexpr const char* YoloV8Detection =
 inline constexpr const char* YoloV8InstanceSegmentation =
     "torch.infer.instance_segmentation.yolov8.v1";
 
+inline constexpr const char* YoloV8SegBackwardSmoke =
+    "torch.train.instance_segmentation.yolov8.backward_smoke.v1";
+
 inline constexpr const char* SegmentationTrainingLifecycle =
     "torch.train.segmentation.lifecycle_smoke.v1";
 }

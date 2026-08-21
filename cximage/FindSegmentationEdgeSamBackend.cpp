@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <chrono>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -75,6 +77,9 @@ FindSegmentationDefaultManifestPath(const FindSegmentationInput &input) {
     return candidate;
   };
 
+  if (!input.manifest_path.empty())
+    return resolve_existing(input.manifest_path);
+
   if (!input.model_path.empty()) {
     std::filesystem::path configured(input.model_path);
     if (configured.extension() == ".json")
@@ -84,7 +89,6 @@ FindSegmentationDefaultManifestPath(const FindSegmentationInput &input) {
   return resolve_existing("libtorch_module/testdata/manifests/"
                           "deeplab_cpp_state_dict_smoke_v1.json");
 }
-
 std::filesystem::path FindSegmentationRuntimeOutputDir() {
   std::filesystem::path root =
       "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless";
@@ -95,17 +99,24 @@ std::filesystem::path FindSegmentationRuntimeOutputDir() {
   const int pid = 0;
 #endif
 
+  static unsigned long long sequence = 0;
+  const auto now = std::chrono::steady_clock::now().time_since_epoch();
+  const auto ticks =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
   std::ostringstream name;
-  name << "find_segmentation_libtorch_backend_" << pid;
+  name << "find_segmentation_libtorch_backend_" << pid << "_"
+       << ticks << "_" << (++sequence);
   return root / name.str();
 }
 
-bool ReadFindSegmentationTextFile(const std::filesystem::path &path,
-                                  std::string &text) {
-  text.clear();
+bool ReadFindSegmentationTextFile(const std::filesystem::path &path,
+                                  std::string &text) {
+  text.clear();
+
+  std::ifstream input(path);
+  if (!input)
 
-  std::ifstream input(path);
-  if (!input)
     return false;
 
   text.assign(std::istreambuf_iterator<char>(input),
@@ -137,11 +148,124 @@ bool ExtractFindSegmentationJsonNumber(const std::string &json,
   return true;
 }
 
+std::vector<double> ExtractFindSegmentationJsonNumbers(
+    const std::string &text) {
+  std::vector<double> values;
+  const char *cursor = text.c_str();
+  char *next = nullptr;
+
+  while (*cursor != '\0') {
+    if (std::isdigit(static_cast<unsigned char>(*cursor)) || *cursor == '-' ||
+        *cursor == '+' || *cursor == '.') {
+      const double parsed = std::strtod(cursor, &next);
+      if (next != cursor) {
+        values.push_back(parsed);
+        cursor = next;
+        continue;
+      }
+    }
+    ++cursor;
+  }
+
+  return values;
+}
+
+std::size_t FindMatchingJsonArrayEnd(const std::string &json,
+                                     std::size_t array_begin) {
+  int depth = 0;
+  for (std::size_t i = array_begin; i < json.size(); ++i) {
+    if (json[i] == '[')
+      ++depth;
+    else if (json[i] == ']') {
+      --depth;
+      if (depth == 0)
+        return i;
+    }
+  }
+  return std::string::npos;
+}
+
+bool ParseFindSegmentationYoloOuterContours(
+    const std::string &json, FindSegmentationResult &output) {
+  std::size_t search_pos = 0;
+  std::vector<FindSegmentationContour> contours;
+  double best_area = 0.0;
+
+  while (true) {
+    const std::size_t key_pos = json.find("\"outer_contours\"", search_pos);
+    if (key_pos == std::string::npos)
+      break;
+
+    const std::size_t array_begin = json.find('[', key_pos);
+    if (array_begin == std::string::npos)
+      break;
+
+    const std::size_t array_end =
+        FindMatchingJsonArrayEnd(json, array_begin);
+    if (array_end == std::string::npos)
+      break;
+
+    const std::string outer_text =
+        json.substr(array_begin, array_end - array_begin + 1);
+
+    FindSegmentationContour contour;
+    std::size_t point_pos = 0;
+    while (true) {
+      const std::size_t x_key = outer_text.find("\"x\"", point_pos);
+      if (x_key == std::string::npos)
+        break;
+
+      const std::size_t x_colon = outer_text.find(':', x_key);
+      const std::size_t y_key = outer_text.find("\"y\"", x_key);
+      const std::size_t y_colon =
+          y_key == std::string::npos ? std::string::npos
+                                     : outer_text.find(':', y_key);
+      if (x_colon == std::string::npos || y_colon == std::string::npos)
+        break;
+
+      char *x_end = nullptr;
+      char *y_end = nullptr;
+      const double x =
+          std::strtod(outer_text.c_str() + x_colon + 1, &x_end);
+      const double y =
+          std::strtod(outer_text.c_str() + y_colon + 1, &y_end);
+      if (x_end != outer_text.c_str() + x_colon + 1 &&
+          y_end != outer_text.c_str() + y_colon + 1) {
+        contour.points.emplace_back(static_cast<int>(std::lround(x)),
+                                    static_cast<int>(std::lround(y)));
+      }
+
+      point_pos = y_colon + 1;
+    }
+
+    if (contour.points.size() >= 3) {
+      contour.area = std::abs(cv::contourArea(contour.points));
+      best_area = (std::max)(best_area, contour.area);
+      contours.push_back(std::move(contour));
+    }
+
+    search_pos = array_end + 1;
+  }
+
+  if (contours.empty())
+    return false;
+
+  output.contours = std::move(contours);
+  output.contour_count = static_cast<int>(output.contours.size());
+  output.primary_area = best_area;
+  output.region_count = output.contour_count;
+  return true;
+}
+
 bool ParseFindSegmentationContours(const std::filesystem::path &contour_path,
                                    FindSegmentationResult &output) {
   std::string json;
   if (!ReadFindSegmentationTextFile(contour_path, json))
     return false;
+
+  if (json.find("\"outer_contours\"") != std::string::npos &&
+      ParseFindSegmentationYoloOuterContours(json, output))
+    return true;
 
   double contour_count = 0.0;
   if (ExtractFindSegmentationJsonNumber(json, "contour_count", contour_count))
@@ -176,24 +300,9 @@ bool ParseFindSegmentationContours(const std::filesystem::path &contour_path,
   if (array_end == std::string::npos)
     return output.contour_count > 0;
 
-  std::vector<double> values;
   const std::string array_text =
       json.substr(array_begin, array_end - array_begin + 1);
-  const char *cursor = array_text.c_str();
-  char *next = nullptr;
-
-  while (*cursor != '\0') {
-    if (std::isdigit(static_cast<unsigned char>(*cursor)) || *cursor == '-' ||
-        *cursor == '+' || *cursor == '.') {
-      const double parsed = std::strtod(cursor, &next);
-      if (next != cursor) {
-        values.push_back(parsed);
-        cursor = next;
-        continue;
-      }
-    }
-    ++cursor;
-  }
+  std::vector<double> values = ExtractFindSegmentationJsonNumbers(array_text);
 
   if (values.size() < 4 || (values.size() % 2) != 0)
     return output.contour_count > 0;
@@ -419,6 +528,8 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
     output.ok = false;
     output.backend_status = "prompt_quality_fail";
     output.status = "prompt_quality_fail";
+    output.result_stage = "failed";
+    output.refinement_method = "deeplab_grabcut_prompt_quality_rejected";
     output.reason =
         "libtorch segmentation rejected after DeepLab prompt refinement; "
         "raw_foreground_ratio=" +
@@ -560,6 +671,14 @@ bool ApplyPromptRectConstraintToTorchSegmentationResult(
   output.mask_ref = constrained_mask_path.string();
   output.overlay_ref = constrained_overlay_path.string();
   output.contour_ref = constrained_contour_path.string();
+  output.refined_result_ref = output.result_ref;
+  output.refined_mask_ref = output.mask_ref;
+  output.refined_contour_ref = output.contour_ref;
+  output.refined_overlay_ref = output.overlay_ref;
+  output.refined_result_available = true;
+  output.result_stage = "refined";
+  output.refinement_method = refinement_applied ? "deeplab_grabcut_prompt_roi" : "prompt_roi_constraint";
+
   std::cout << "[FindSegmentation] prompt roi constraint applied: roi="
             << image_roi.x << "," << image_roi.y << "," << image_roi.width
             << "," << image_roi.height << " runtime_input="
@@ -637,6 +756,19 @@ bool ApplyPromptRectFallbackContourToTorchSegmentationResult(
   output.mask_ref = fallback_mask_path.string();
   output.overlay_ref = fallback_overlay_path.string();
   output.contour_ref = fallback_contour_path.string();
+  output.fallback_used = true;
+
+  output.result_stage = "fallback";
+
+  output.refinement_method = "prompt_roi_fallback_for_libtorch_smoke";
+
+  output.backend_status = "prompt_roi_fallback";
+
+  output.status = "prompt_roi_fallback";
+
+  output.reason = "prompt ROI fallback contour generated; not a valid raw model result";
+
+
   std::cout << "[FindSegmentation] prompt roi fallback applied: roi="
             << image_roi.x << "," << image_roi.y << "," << image_roi.width
             << "," << image_roi.height << " contour_ref=" << output.contour_ref
@@ -650,6 +782,13 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
                                          FindSegmentationResult &output,
                                          std::string &reason) {
   output.backend = input.backend.empty() ? "edgesam" : input.backend;
+  output.task_id = input.task_id;
+  output.model_id = input.model_id;
+  output.model_package_ref = input.model_package_ref;
+  output.manifest_path = input.manifest_path;
+  output.postprocess_profile = input.postprocess_profile;
+  output.parameter_profile_ref = input.parameter_profile_ref;
+
 
   const std::string runtime_dll = FindSegmentationTorchRuntimeDllPath();
 
@@ -667,6 +806,10 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
 
   const std::filesystem::path manifest_path =
       FindSegmentationDefaultManifestPath(input);
+  output.manifest_path = manifest_path.string();
+  if (output.task_id.empty())
+    output.task_id = "torch.infer.segmentation.deeplabv3plus.v1";
+
   const std::filesystem::path output_dir = FindSegmentationRuntimeOutputDir();
   const std::filesystem::path input_image_path =
       output_dir / "find_segmentation_libtorch_input.png";
@@ -733,7 +876,8 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   }
   TorchRuntimeGuiConfig config;
   config.device = input.device.empty() ? "cpu" : input.device;
-  config.model_root = input.model_path;
+  config.model_root = input.model_package_ref.empty() ? input.model_path : input.model_package_ref;
+
   config.output_root = output_dir.string();
   config.log_level = "info";
 
@@ -820,7 +964,8 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   extra << input.negative_point.y << '}';
   extra << '}';
   TorchRuntimeGuiRequest request;
-  request.task = "torch.infer.segmentation.deeplabv3plus.v1";
+  request.task = input.task_id.empty() ? "torch.infer.segmentation.deeplabv3plus.v1" : input.task_id;
+
   request.case_name = "find_segmentation_libtorch_backend";
   request.input_image = input_image_path.string();
   request.manifest_path = manifest_path.string();
@@ -830,11 +975,17 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   TorchRuntimeGuiResult torch_result = bridge.RunTask(request);
   bridge.Destroy();
 
+  const bool is_instance_segmentation_task =
+      input.task_id.find("instance_segmentation") != std::string::npos ||
+      input.task_id.find("yolov8") != std::string::npos;
+
   output.ok = torch_result.ok;
-  output.backend_status = torch_result.ok ? "libtorch_segmentation_ready"
-                                          : "libtorch_segmentation_failed";
-  output.status = torch_result.ok ? "libtorch_segmentation_ready"
-                                  : "libtorch_segmentation_failed";
+  output.backend_status =
+      torch_result.ok
+          ? (is_instance_segmentation_task ? "instance_segmentation_ready"
+                                           : "libtorch_segmentation_ready")
+          : "libtorch_segmentation_failed";
+  output.status = output.backend_status;
   output.reason = torch_result.ok ? "libtorch segmentation task executed"
                                   : (torch_result.error_message.empty()
                                          ? "torch runtime task failed"
@@ -846,15 +997,19 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
           ? output_dir
           : std::filesystem::path(torch_result.result_ref).parent_path();
 
-  const std::filesystem::path mask_path = result_dir / "mask_binary.png";
+  const std::filesystem::path binary_mask_path = result_dir / "mask_binary.png";
+  const std::filesystem::path label_mask_path = result_dir / "mask_labels.png";
   const std::filesystem::path contour_path = result_dir / "contours.json";
   const std::filesystem::path overlay_path = result_dir / "mask_overlay.png";
 
-  output.mask_ref = std::filesystem::exists(mask_path)
-                        ? mask_path.string()
-                        : (torch_result.attach_back_ref.empty()
-                               ? torch_result.result_ref
-                               : torch_result.attach_back_ref);
+  if (std::filesystem::exists(binary_mask_path))
+    output.mask_ref = binary_mask_path.string();
+  else if (std::filesystem::exists(label_mask_path))
+    output.mask_ref = label_mask_path.string();
+  else
+    output.mask_ref = torch_result.attach_back_ref.empty()
+                          ? torch_result.result_ref
+                          : torch_result.attach_back_ref;
   output.contour_ref = std::filesystem::exists(contour_path)
                            ? contour_path.string()
                            : torch_result.evidence_ref;
@@ -864,10 +1019,19 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
                                   ? torch_result.evidence_ref
                                   : torch_result.primary_visual_ref);
 
+  output.raw_result_ref = output.result_ref;
+  output.raw_mask_ref = output.mask_ref;
+  output.raw_contour_ref = output.contour_ref;
+  output.raw_overlay_ref = output.overlay_ref;
+  output.raw_result_available = !output.raw_result_ref.empty() ||
+                                !output.raw_mask_ref.empty() ||
+                                !output.raw_contour_ref.empty();
+  output.result_stage = output.ok ? "raw" : "failed";
+
   if (!output.contour_ref.empty())
     ParseFindSegmentationContours(output.contour_ref, output);
 
-  if (output.ok && input.has_rect) {
+  if (output.ok && input.has_rect && !is_instance_segmentation_task) {
     const bool constrained = ApplyPromptRectConstraintToTorchSegmentationResult(
         input, result_dir, runtime_input_roi, output);
     if (!constrained) {
@@ -875,6 +1039,8 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
         output.ok = false;
         output.backend_status = "prompt_quality_fail";
         output.status = "prompt_quality_fail";
+        output.result_stage = "failed";
+        output.refinement_method = "prompt_quality_rejected";
         output.reason =
             "libtorch segmentation rejected: prompted run did not produce a "
             "valid prompt-constrained contour";

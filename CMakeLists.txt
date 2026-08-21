@@ -173,6 +173,7 @@ set(CXSCRIPT_RUNTIME_SOURCES
   cximage/CxScriptImageManifestRuntime.cpp
   cximage/CxScriptSuiteRunner.cpp
   cximage/CxScriptSuiteReportWriter.cpp
+  cximage/CxPrecisionEvaluation.cpp
   cximage/CxScriptToolDisplayExporter.cpp
   cximage/CxScriptBestCaseSelector.cpp
   cximage/CxParameterProfileRuntime.cpp

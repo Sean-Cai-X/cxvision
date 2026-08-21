@@ -14,6 +14,7 @@
 #include "ManualStateTestConsole.h"
 #include "CxScriptHeadlessRuntime.h"
 #include "CxUnifiedLog.h"
+#include "CxPrecisionEvaluation.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -70,6 +71,33 @@ const CxScriptCatalogEntry* FindCatalogScriptById(
 
 namespace
 {
+    std::string NormalizeManifestPathForCompare(std::string path)
+    {
+        for (char& ch : path)
+        {
+            if (ch == '\\')
+                ch = '/';
+            else
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        return path;
+    }
+
+    bool IsStage25L1L3CanonicalManifest(const std::string& manifestPath)
+    {
+        const std::string normalized = NormalizeManifestPathForCompare(manifestPath);
+        const std::string canonical =
+            "cxparser/cxscript/module/cximage/stage25/manifests/stage25_l1_l3_manifest.json";
+        return normalized == canonical ||
+               (normalized.size() > canonical.size() &&
+                normalized.compare(normalized.size() - canonical.size(), canonical.size(), canonical) == 0);
+    }
+
+    bool RequiresStage25L1L3CanonicalManifest(const CxScriptSuiteRuntime& suite)
+    {
+        return suite.suite_id == "stage25_l1_l3_parameter_consistency";
+    }
+
     bool StopForHumanReviewIfNeeded(
         const CxScriptSuiteRunOptions& options,
         CxScriptSuiteCaseResult& caseResult,
@@ -483,6 +511,15 @@ namespace
             else if (JsonLineHasKey(line, "result_overlay_changed_pixels"))
             {
                 try { out.result_overlay_changed_pixels = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "torch_ok"))
+            {
+                out.torch_ok = ParseJsonBoolValue(JsonLineValue(line)) ? 1 : 0;
+                try { out.torch_ok = std::stoi(JsonLineValue(line)); } catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "torch_result_count"))
+            {
+                try { out.torch_result_count = std::stoi(JsonLineValue(line)); } catch (...) {}
             }
             else if (JsonLineHasKey(line, "scan_rows_examined"))
             {
@@ -940,6 +977,16 @@ namespace
                     2,
                     cv::LINE_AA);
             }
+            else if (resolved.target->tool == "FindSegmentation")
+            {
+                cv::rectangle(
+                    preview,
+                    cv::Point(resolved.target->x0, resolved.target->y0),
+                    cv::Point(resolved.target->x1, resolved.target->y1),
+                    cv::Scalar(0, 255, 0),
+                    2,
+                    cv::LINE_AA);
+            }
         }
 
         int y = 30;
@@ -1103,6 +1150,7 @@ namespace
         file << "  \"evidence_id\": \"" << JsonEscape(r.evidence_id) << "\",\n";
         file << "  \"image_id\": \"" << JsonEscape(r.image_id) << "\",\n";
         file << "  \"target_id\": \"" << JsonEscape(r.target_id) << "\",\n";
+        file << "  \"tool\": \"" << JsonEscape(r.tool) << "\",\n";
         file << "  \"script_id\": \"" << JsonEscape(r.script_id) << "\",\n";
         file << "  \"parameter_profile_id\": \"" << JsonEscape(r.parameter_profile_id) << "\",\n";
         file << "\n";
@@ -1126,6 +1174,19 @@ namespace
         file << "  \"runtime_global_result_mismatch\": " << (r.runtime_global_result_mismatch ? "true" : "false") << ",\n";
         file << "  \"circle_radius\": " << r.circle_radius << ",\n";
         file << "  \"avgdist\": " << r.avgdist << ",\n";
+        file << "  \"local_support\": " << r.local_support << ",\n";
+        file << "  \"local_mean_distance\": " << r.local_mean_distance << ",\n";
+        file << "  \"fit_offset\": " << r.fit_offset << ",\n";
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(r);
+        file << "  \"precision_metric_family\": \"" << JsonEscape(precision.metric_family) << "\",\n";
+        file << "  \"precision_gate_status\": \"" << JsonEscape(precision.status) << "\",\n";
+        file << "  \"precision_gate_evaluated\": " << (precision.evaluated ? "true" : "false") << ",\n";
+        file << "  \"precision_residual_px\": " << precision.residual_px << ",\n";
+        file << "  \"precision_residual_limit_px\": " << precision.residual_limit_px << ",\n";
+        file << "  \"precision_residual_pass\": " << (precision.residual_pass ? "true" : "false") << ",\n";
+        file << "  \"precision_support\": " << precision.support << ",\n";
+        file << "  \"precision_support_limit\": " << precision.support_limit << ",\n";
+        file << "  \"precision_failure_reason\": \"" << JsonEscape(precision.reason) << "\",\n";
         file << "  \"scan_rows_examined\": " << r.scan_rows_examined << ",\n";
         file << "  \"scan_rows_with_foreground\": " << r.scan_rows_with_foreground << ",\n";
         file << "  \"scan_runs_total\": " << r.scan_runs_total << ",\n";
@@ -1414,6 +1475,8 @@ namespace
         contractHeadless.contract_rendered_measure_points_count = r.rendered_measure_points_count;
         contractHeadless.contract_rendered_result_count = r.rendered_result_count;
         contractHeadless.contract_result_overlay_changed_pixels = r.result_overlay_changed_pixels;
+        contractHeadless.contract_torch_ok = r.torch_ok;
+        contractHeadless.contract_torch_result_count = r.torch_result_count;
         contractHeadless.points_count = r.points_count;
         contractHeadless.valid_points_count = r.valid_points_count;
         contractHeadless.has_fit_line = r.has_fit_line ? 1 : 0;
@@ -2254,6 +2317,16 @@ bool RunCxScriptSuite(
         }
     }
 
+    if (RequiresStage25L1L3CanonicalManifest(suite) &&
+        !IsStage25L1L3CanonicalManifest(options.image_manifest_path))
+    {
+        result.reason =
+            "stage25_l1_l3_parameter_consistency requires canonical image manifest: "
+            "cxparser/cxscript/module/cximage/stage25/manifests/stage25_l1_l3_manifest.json; got: " +
+            options.image_manifest_path;
+        return false;
+    }
+
     CxScriptImageManifestRuntime imageManifest;
 
     if (!LoadStage25ImageManifestJson(
@@ -2456,6 +2529,9 @@ bool RunCxScriptSuite(
 
         std::cout << "[SUITE] report suite_run begin\n" << std::flush;
         CxScriptSuiteReportWriter::WriteSuiteRunReport(
+            outRoot,
+            result.case_results);
+        CxScriptSuiteReportWriter::WriteSuiteRunReportJson(
             outRoot,
             result.case_results);
         std::cout << "[SUITE] report suite_run end\n" << std::flush;

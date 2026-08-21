@@ -118,6 +118,8 @@ struct CxScriptSuiteCaseResult
     std::string contract_status;
     std::string contract_conclusion;
     std::string conclusion;
+    int torch_ok = 0;
+    int torch_result_count = 0;
     std::string policy_guard;
     std::string gauge_source;
     std::string gauge_review_status;

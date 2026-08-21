@@ -594,8 +594,27 @@ void FillFindCircleResultView(RuntimeObjectView& object,
     object.has_measure_points = !object.measure_points_xy.empty();
     object.valid_points_count =
         static_cast<int>(object.measure_points_xy.size() / 2);
-    if (object.has_measure_points || object.has_fit_result)
+
+    if (object.has_fit_result)
+    {
         object.runtime_state = "geometry_result_available";
+        object.last_runtime_status = "runtime_executed";
+    }
+    else if (methodName != "measure")
+    {
+        object.runtime_state = object.has_measure_points
+            ? "fitcircle_degenerate_after_measure_points"
+            : "fitcircle_pending_binding";
+        object.last_runtime_status = "PENDING_BINDING";
+    }
+    else if (object.has_measure_points)
+    {
+        object.runtime_state = "measure_points_available";
+    }
+    else
+    {
+        object.runtime_state = "measure_points_unavailable";
+    }
 
     std::ostringstream summary;
     summary << methodName
@@ -906,6 +925,7 @@ bool TryExecuteFindCircleRuntimeMethod(ManualTestContext& context,
         object.runtime_state = "runtime_exception";
         object.display_summary = line.reason;
 
+
         context.run_state = "blocked";
         context.debug_status = "BLOCKED";
         context.debug_reason = line.reason;
@@ -915,9 +935,13 @@ bool TryExecuteFindCircleRuntimeMethod(ManualTestContext& context,
     object.last_update_line = context.line_views[static_cast<std::size_t>(lineIndex)].line_no;
 
     ScriptLineView& line = context.line_views[static_cast<std::size_t>(lineIndex)];
-    line.status = "runtime_executed";
-    line.reason = "FindCircle." + call.method +
+    line.status = object.last_runtime_status.empty()
+        ? "runtime_executed"
+        : object.last_runtime_status;
+
+    line.reason = "FindCircle." + call.method +
         " executed by direct runtime bridge | " + object.display_summary;
+
     line.timestamp = CurrentTimestamp();
     AppendCxDebugEvent(
         context,

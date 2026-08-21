@@ -13,6 +13,12 @@ struct FindSegmentationInput
     std::string model_path;
     std::string device = "auto";
     std::string backend = "opencv_smoke";
+    std::string task_id;
+    std::string model_id;
+    std::string model_package_ref;
+    std::string manifest_path;
+    std::string postprocess_profile;
+    std::string parameter_profile_ref;
 
     double threshold = 0.5;
     int mode = 0;

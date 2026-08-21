@@ -1142,6 +1142,23 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindSegmentation::setbackend);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmodel",
                             &FindSegmentation::setmodel);
+
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "settask",
+                            &FindSegmentation::settask);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmodelid",
+                            &FindSegmentation::setmodelid);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setmodelpackage",
+                            &FindSegmentation::setmodelpackage);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmanifest",
+                            &FindSegmentation::setmanifest);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setpostprocessprofile",
+                            &FindSegmentation::setpostprocessprofile);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setparameterprofile",
+                            &FindSegmentation::setparameterprofile);
+
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setdevice",
                             &FindSegmentation::setdevice);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
@@ -1343,6 +1360,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setmatchrectxywh",
                             &FastMatch::setmatchrectxywh_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setexpectedrect",
+                            &FastMatch::setexpectedrect);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setminscore", &FastMatch::setminscore);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,

@@ -683,9 +683,7 @@ bool AppendCandidateToEvidenceChain(
     const std::string &imageId, const std::string &imagePath,
     const std::string &targetId, const std::string &tool,
     const std::string &parameterSummary) {
-  bool workingRevisionBound = false;
-
-  auto bindWorkingRevision = [&](ScriptEvidenceThumb &target) {
+  auto bindCurrentCaseState = [&](auto &target) {
     target.candidate_id = result.candidate_id;
     target.candidate_dir = result.candidate_dir;
     target.evidence_binding_path = result.evidence_binding_path;
@@ -694,7 +692,9 @@ bool AppendCandidateToEvidenceChain(
         (std::filesystem::path(result.candidate_dir) / "runtime_globals.json")
             .string();
     target.gauge_annotation_path = result.gauge_annotation_path;
-    target.working_script_snapshot_path = scriptPath;
+    target.working_script_snapshot_path = result.script_snapshot_path.empty()
+                                            ? scriptPath
+                                            : result.script_snapshot_path;
     target.has_saved_state = true;
     target.source_evidence_script_path = sourceEvidenceScriptPath;
     target.parameter_summary = parameterSummary;
@@ -702,134 +702,49 @@ bool AppendCandidateToEvidenceChain(
     target.primary_object_name = context.current_gauge.primary_object_name;
     target.primary_object_status = context.current_gauge.primary_object_status;
     target.status = "pending_human_review";
-    target.reason = "active working revision=" + result.candidate_id +
-                    "; baseline source remains unchanged";
+    target.reason = "current case state updated; working_state=" +
+                    result.candidate_id;
+    target.is_candidate = false;
   };
-
-  auto sameEvidenceIdentity = [&](const ScriptEvidenceThumb &existing) {
-    if (existing.is_candidate)
-      return false;
-
-    const std::string sourceEvidencePath =
-        NormalizeEvidenceSourceForComparison(sourceEvidenceScriptPath);
-    const std::string fallbackScriptPath =
-        NormalizeEvidenceSourceForComparison(scriptPath);
-    const std::string resolvedSource =
-        !sourceEvidencePath.empty() ? sourceEvidencePath : fallbackScriptPath;
-
-    const std::string existingSourceEvidencePath =
-        NormalizeEvidenceSourceForComparison(existing.source_evidence_script_path);
-    const std::string existingScriptPath =
-        NormalizeEvidenceSourceForComparison(existing.script_path);
-
-    const bool sameCase = !caseId.empty() && !existing.case_id.empty() &&
-                         existing.case_id == caseId;
-    const bool sameSourceScript =
-        !resolvedSource.empty() &&
-        (!existingSourceEvidencePath.empty()
-             ? existingSourceEvidencePath == resolvedSource
-             : !existingScriptPath.empty() &&
-                   existingScriptPath == resolvedSource);
-    const bool sameImage = imageId.empty() || existing.image_id.empty() ||
-                          existing.image_id == imageId;
-    const bool sameTarget = targetId.empty() || existing.target_id.empty() ||
-                           existing.target_id == targetId;
-
-    // Some rows intentionally do not have case_id; keep stable matching by
-    // source script + image/target for manual/legacy entries.
-    return sameCase || (sameSourceScript && sameImage && sameTarget);
-  };
-
-  for (auto &group : context.script_evidence_groups) {
-    for (auto &existing : group.thumbs) {
-      if (!sameEvidenceIdentity(existing))
-        continue;
-      bindWorkingRevision(existing);
-      workingRevisionBound = true;
-      break;
-    }
-    if (workingRevisionBound)
-      break;
-  }
 
   if (!context.current_evidence_selection.is_candidate) {
-    context.current_evidence_selection.candidate_id = result.candidate_id;
-    context.current_evidence_selection.candidate_dir = result.candidate_dir;
-    context.current_evidence_selection.evidence_binding_path =
-        result.evidence_binding_path;
-    context.current_evidence_selection.parameter_snapshot_path =
-        result.parameter_snapshot_path;
-    context.current_evidence_selection.runtime_globals_path =
-        (std::filesystem::path(result.candidate_dir) / "runtime_globals.json")
-            .string();
-    context.current_evidence_selection.gauge_annotation_path =
-        result.gauge_annotation_path;
-    context.current_evidence_selection.working_script_snapshot_path =
-        scriptPath;
-    context.current_evidence_selection.has_saved_state = true;
-    context.current_evidence_selection.source_evidence_script_path =
-        sourceEvidenceScriptPath;
-    context.current_evidence_selection.parameter_summary = parameterSummary;
+    context.current_evidence_selection.case_id = caseId;
+    context.current_evidence_selection.script_id =
+        !scriptId.empty() ? StripEvidenceCandidateDisplaySuffix(scriptId)
+                          : caseId;
+    context.current_evidence_selection.script_path =
+        result.script_snapshot_path.empty() ? scriptPath
+                                            : result.script_snapshot_path;
+    context.current_evidence_selection.image_id = imageId;
+    context.current_evidence_selection.image_path = imagePath;
+    context.current_evidence_selection.target_id = targetId;
+    context.current_evidence_selection.tool = tool;
+    bindCurrentCaseState(context.current_evidence_selection);
     context.current_evidence_selection.parameter_profile_id = parameterSummary;
-    context.current_evidence_selection.primary_object_type =
-        context.current_gauge.primary_object_type;
-    context.current_evidence_selection.primary_object_name =
-        context.current_gauge.primary_object_name;
-    context.current_evidence_selection.primary_object_status =
-        context.current_gauge.primary_object_status;
-    context.current_evidence_selection.status = "pending_human_review";
-    context.current_evidence_selection.reason =
-        "active working revision=" + result.candidate_id;
-  }
-
-  if (workingRevisionBound) {
-    // Existing Evidence rows carry the saved working revision directly.
-    // Do not append a second visible candidate row; that reshuffles the
-    // case/thumb list after Key Parameter Controls saves.
-    context.script_evidence_row_refs_dirty = true;
-    return false;
   }
 
   ScriptEvidenceThumb thumb;
-  thumb.candidate_id = result.candidate_id;
-  thumb.candidate_dir = result.candidate_dir;
-  thumb.evidence_binding_path = result.evidence_binding_path;
-  thumb.parameter_snapshot_path = result.parameter_snapshot_path;
-  thumb.runtime_globals_path =
-      (std::filesystem::path(result.candidate_dir) / "runtime_globals.json")
-          .string();
-  thumb.gauge_annotation_path = result.gauge_annotation_path;
-  thumb.working_script_snapshot_path = scriptPath;
-  thumb.is_candidate = false;
-  thumb.has_saved_state = true;
-  thumb.source_evidence_script_path = sourceEvidenceScriptPath;
   thumb.case_id = caseId;
   thumb.script_id = !scriptId.empty() ? StripEvidenceCandidateDisplaySuffix(scriptId)
                                       : (caseId.empty()
-                                             ? std::string("candidate_case")
+                                             ? std::string("current_case")
                                              : caseId);
   if (thumb.script_id.empty() && !sourceEvidenceScriptPath.empty())
-    thumb.script_id =
-        StripEvidenceCandidateDisplaySuffix(std::filesystem::path(
-            sourceEvidenceScriptPath)
-                                              .stem()
-                                              .string());
+    thumb.script_id = StripEvidenceCandidateDisplaySuffix(
+        std::filesystem::path(sourceEvidenceScriptPath).stem().string());
   if (thumb.script_id.empty() && !scriptPath.empty())
     thumb.script_id = StripEvidenceCandidateDisplaySuffix(
         std::filesystem::path(scriptPath).stem().string());
-  thumb.script_path = result.script_snapshot_path;
+  thumb.script_path = result.script_snapshot_path.empty()
+                          ? scriptPath
+                          : result.script_snapshot_path;
+  thumb.source_evidence_script_path = sourceEvidenceScriptPath;
   thumb.image_id = imageId;
   thumb.image_path = imagePath;
   thumb.thumbnail_path = imagePath;
   thumb.target_id = targetId;
   thumb.tool = tool;
-  thumb.parameter_summary = parameterSummary;
-  thumb.primary_object_type = context.current_gauge.primary_object_type;
-  thumb.primary_object_name = context.current_gauge.primary_object_name;
-  thumb.primary_object_status = context.current_gauge.primary_object_status;
-  thumb.status = "pending_human_review";
-  thumb.reason = "evidence candidate saved; candidate_id=" + result.candidate_id +
-                "; candidate_dir=" + result.candidate_dir;
+  bindCurrentCaseState(thumb);
   if (thumb.primary_object_status.empty())
     thumb.primary_object_status = "unresolved";
 
@@ -854,43 +769,27 @@ bool AppendCandidateToEvidenceChain(
     const bool sameScript = !thumb.script_id.empty() &&
                            !existing.script_id.empty() &&
                            existing.script_id == thumb.script_id;
-    const bool sameCandidateDir = !thumb.candidate_dir.empty() &&
-                                 existing.candidate_dir == thumb.candidate_dir;
-    const bool sameImage = !thumb.image_id.empty() &&
-                          !existing.image_id.empty() &&
-                          thumb.image_id == existing.image_id;
-    const bool sameTarget = !thumb.target_id.empty() &&
-                           !existing.target_id.empty() &&
-                           thumb.target_id == existing.target_id;
-    const bool sameFindEllipseCase =
-        LooksLikeFindEllipseCandidate(tool, caseId, scriptId, scriptPath,
-                                     sourceEvidenceScriptPath) &&
-        !caseId.empty() && existing.case_id == caseId &&
-        (targetId.empty() || existing.target_id.empty() ||
-         existing.target_id == targetId) &&
-        (imageId.empty() || existing.image_id.empty() ||
-         existing.image_id == imageId);
-
-    if (existing.is_candidate &&
-        (sameCase || sameScript || sameCandidateDir ||
-         (sameImage && sameTarget) || sameFindEllipseCase)) {
+    const bool sameImageTarget = !thumb.image_id.empty() &&
+                                 !thumb.target_id.empty() &&
+                                 thumb.image_id == existing.image_id &&
+                                 thumb.target_id == existing.target_id;
+    if (sameCase || sameScript || sameImageTarget) {
       existing = thumb;
       context.script_evidence_row_refs_dirty = true;
-      return true;
+      return false;
     }
   }
 
   groupPtr->thumbs.push_back(thumb);
-
-  // Saving creates a new immutable Evidence row, but does not switch the active
-  // workbench away from its baseline.
   context.script_evidence_row_refs_dirty = true;
   return true;
 }
+}
 
-                                       const std::string &phase,
-                                       const std::string &status,
-                                       const std::string &reason) {
+void AppendEvidenceCandidateStateProbe(
+    const ManualTestContext &context, const std::string &candidateDir,
+    const std::string &candidateId, const std::string &phase,
+    const std::string &status, const std::string &reason) {
   AppendEvidenceCandidateStateProbeImpl(context, candidateDir, candidateId,
                                         phase, status, reason);
 }
@@ -908,18 +807,11 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
     result.reason = "case_id is empty";
     return false;
   }
-
-  std::string requestedCandidateId = options.candidate_id;
-  if (requestedCandidateId.empty() &&
-      context.current_evidence_selection.has_saved_state &&
-      !context.current_evidence_selection.candidate_id.empty()) {
-    requestedCandidateId = context.current_evidence_selection.candidate_id;
-  }
   const std::string candidateId = SafePathComponentForCandidate(
-      requestedCandidateId.empty() ? GenerateCandidateId()
-                                   : requestedCandidateId);
+      options.candidate_id.empty() ? std::string("current")
+                                   : options.candidate_id);
   if (candidateId.empty()) {
-    result.reason = "candidate_id is empty";
+    result.reason = "case working state id is empty";
     return false;
   }
   const std::string originalScriptText = CurrentScriptText(context);
@@ -927,12 +819,8 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
   bool normalizedFindSegmentationPromptOrder = false;
 
   const std::string scriptText =
-
       NormalizeFindSegmentationPromptCallOrderForSnapshot(
-
-          originalScriptText,
-
-          &normalizedFindSegmentationPromptOrder);
+          originalScriptText, &normalizedFindSegmentationPromptOrder);
 
   if (scriptText.empty())
 
@@ -1275,39 +1163,37 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
         context.current_gauge.primary_object_status;
     context.current_evidence_selection.status = "pending_human_review";
     context.current_evidence_selection.reason =
-        "active working revision=" + result.candidate_id;
+        "current case state updated; working_state=" + result.candidate_id;
   }
 
   if (options.add_to_evidence_chain) {
-    const bool candidateRowAdded = AppendCandidateToEvidenceChain(
+    const bool caseRowAdded = AppendCandidateToEvidenceChain(
         context, result, caseId, scriptId, scriptSnapshotPath.string(),
         ResolveWorkspaceFile(sourceEvidenceScriptPath).string(), imageId,
         imagePath, targetId, tool, parameterSummary);
     AppendEvidenceCandidateStateProbe(
         context, result.candidate_dir, result.candidate_id,
-        "working_revision_bound", "available",
-        "original Evidence row now points to this candidate package; baseline "
-        "source script remains unchanged");
-    if (candidateRowAdded) {
+        "current_case_updated", "available",
+        "Development case current state was written and bound by case_id");
+    if (caseRowAdded) {
       AppendEvidenceCandidateStateProbe(
           context, result.candidate_dir, result.candidate_id,
-          "candidate_row_added", "available",
-          "saved candidate was added to Evidence Chain; current Workbench "
-          "values remain unchanged");
+          "case_row_added", "available",
+          "current Development case was added to Evidence Chain");
     } else {
       AppendEvidenceCandidateStateProbe(
           context, result.candidate_dir, result.candidate_id,
-          "candidate_row_suppressed", "stable_list",
-          "saved candidate was bound to the existing Evidence row; case list "
-          "remains unchanged");
+          "case_row_updated", "stable_list",
+          "current Development case was bound to the existing Evidence row; "
+          "case list remains unchanged");
     }
   }
   context.editor_dirty = false;
-  context.debug_action = options.request_run ? "Save And Run Evidence Candidate"
-                                             : "Save Evidence Candidate";
+  context.debug_action = options.request_run ? "Save And Run Current Case"
+                                             : "Save Current Case";
   context.debug_status = options.request_run
-                             ? "EVIDENCE_CANDIDATE_RUN_REQUESTED"
-                             : "EVIDENCE_CANDIDATE_SAVED";
+                             ? "CURRENT_CASE_RUN_REQUESTED"
+                             : "CURRENT_CASE_SAVED";
   context.debug_reason = result.candidate_dir;
   // Only an initial save owns the pending-candidate slot.  A post-run update
   // must not replace it or make later ordinary Run actions update a stale

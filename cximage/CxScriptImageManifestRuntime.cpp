@@ -629,6 +629,10 @@ namespace
                                     {
                                         target.has_line = seen_x0 && seen_y0 && seen_x1 && seen_y1;
                                     }
+                                    else if (target.tool == "FindSegmentation")
+                                    {
+                                        target.has_line = seen_x0 && seen_y0 && seen_x1 && seen_y1;
+                                    }
                                     else if (target.tool == "FindCircle")
                                     {
                                         target.has_circle = seen_cx && seen_cy && seen_px && seen_py;
@@ -1091,6 +1095,43 @@ namespace
             }
         }
 
+        if (target.tool == "FindSegmentation")
+        {
+            if (!target.has_line)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindSegmentation ROI missing required rectangle fields");
+                return;
+            }
+
+            if (target.x1 <= target.x0 || target.y1 <= target.y0)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindSegmentation ROI must have positive width and height");
+            }
+
+            const bool intersects =
+                target.x1 > 0 && target.y1 > 0 &&
+                target.x0 < image.width && target.y0 < image.height;
+            if (!intersects)
+            {
+                AddImageManifestIssue(
+                    result,
+                    "error",
+                    image.image_id,
+                    target.target_id,
+                    "FindSegmentation ROI is completely outside image");
+            }
+        }
+
         if (target.tool == "FindCircle")
         {
             if (!target.has_circle)
@@ -1397,7 +1438,8 @@ CxScriptImageManifestValidationResult ValidateStage25ImageManifest(
             else if (target.tool != "FindLine" &&
                      target.tool != "FindCircle" &&
                      target.tool != "FindEllipse" &&
-                     target.tool != "FindRect")
+                     target.tool != "FindRect" &&
+                     target.tool != "FindSegmentation")
             {
                 AddImageManifestIssue(
                     result,

@@ -398,6 +398,10 @@ public:
     int thre();
     int linegap() { return m_iSelectPointGap; }
     int objfilter() const { return m_iobjfilterset; }
+    double inputlinex0() const { return m_display_line_x0; }
+    double inputliney0() const { return m_display_line_y0; }
+    double inputlinex1() const { return m_display_line_x1; }
+    double inputliney1() const { return m_display_line_y1; }
 
     void clear();
     void setshow(int ishow);

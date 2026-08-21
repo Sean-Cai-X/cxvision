@@ -66,69 +66,37 @@ NormalizeEvidenceToolTypeLocal(const std::string &typeOrTool) {
 static std::string EvidenceSourceFileNameLocal(const std::string &pathOrId) {
   if (pathOrId.empty())
     return {};
-SameEvidenceSourceScriptLocal(const std::string &candidateSourcePath,
-                              const ScriptEvidenceThumb &original) {
-  if (candidateSourcePath.empty())
-    return false;
-
-  const std::string candidateNormalized =
-      std::filesystem::path(candidateSourcePath).lexically_normal().string();
-  const std::string originalSourceScriptPath =
-      !original.source_evidence_script_path.empty()
-          ? std::filesystem::path(original.source_evidence_script_path)
-                .lexically_normal()
-                .string()
-          : std::filesystem::path(original.script_path).lexically_normal().string();
-  const std::string candidateScriptIdFallback =
-      std::filesystem::path(original.script_id).lexically_normal().string();
-
-  if (!candidateNormalized.empty() &&
-      (candidateNormalized == originalSourceScriptPath ||
-       candidateNormalized == candidateScriptIdFallback)) {
-    return true;
-  }
-
-  const std::string candidateFile =
-      EvidenceSourceFileNameLocal(candidateSourcePath);
-  if (candidateFile.empty())
-    return false;
-  if (candidateFile == EvidenceSourceFileNameLocal(original.source_evidence_script_path) ||
-      candidateFile == EvidenceSourceFileNameLocal(original.script_path) ||
-      candidateFile == EvidenceSourceFileNameLocal(original.script_id)) {
-    return true;
-  }
-
-  const std::string candidate =
-      ReadJsonStringFieldLocal(candidateNormalized, "script_path");
-  if (!candidate.empty()) {
-    const std::string candidateFromJson =
-        std::filesystem::path(candidate).lexically_normal().string();
-    if (!candidateFromJson.empty() &&
-        (candidateFromJson == originalSourceScriptPath ||
-         candidateFromJson == candidateScriptIdFallback)) {
-      return true;
-    }
-  }
-  return false;
+  return std::filesystem::path(pathOrId).filename().string();
 }
+
+static bool SameEvidenceSourceScriptLocal(
+    const std::string &candidateSourcePath,
+    const ScriptEvidenceThumb &original) {
   if (candidateSourcePath.empty())
     return false;
 
   const std::filesystem::path candidateSource =
       ResolveWorkspaceFile(candidateSourcePath).lexically_normal();
-  const std::filesystem::path originalSource =
-      ResolveWorkspaceFile(original.script_path).lexically_normal();
-  if (candidateSource == originalSource)
-    return true;
+  const std::string originalPath =
+      !original.source_evidence_script_path.empty()
+          ? original.source_evidence_script_path
+          : original.script_path;
+  if (!originalPath.empty()) {
+    const std::filesystem::path originalSource =
+        ResolveWorkspaceFile(originalPath).lexically_normal();
+    if (candidateSource == originalSource)
+      return true;
+  }
 
   const std::string candidateFile =
       EvidenceSourceFileNameLocal(candidateSourcePath);
   if (candidateFile.empty())
     return false;
-  return candidateFile == EvidenceSourceFileNameLocal(original.script_path) ||
+  return candidateFile ==
+             EvidenceSourceFileNameLocal(original.source_evidence_script_path) ||
+         candidateFile == EvidenceSourceFileNameLocal(original.script_path) ||
          candidateFile == EvidenceSourceFileNameLocal(original.script_id);
 }
-
 static std::string BuildEvidenceClassificationKeyLocal(
     const std::string &tool, const std::string &scriptId,
     const std::string &scriptPath, const std::string &label,
@@ -2262,11 +2230,18 @@ static bool
 EvidenceThumbLooksLikeFindEllipseLocal(const ScriptEvidenceThumb &thumb,
                                        const ScriptEvidenceGroup &group);
 
-static void AppendSavedEvidenceCandidatesLocal(
-    ManualTestContext &context,
-    const std::function<ScriptEvidenceGroup &(const std::string &)>
-        &findGroup) {
-  std::vector<std::filesystem::path> roots;
+static std::string StripEvidenceCandidateDisplaySuffixLocal(std::string value) {
+  const std::string marker = " [candidate_";
+  std::size_t pos = value.find(marker);
+  while (pos != std::string::npos && value.find(']', pos) != std::string::npos) {
+    value.erase(pos);
+    pos = value.find(marker);
+  }
+  return value;
+}
+
+static std::string EvidenceFolderLabelFromPathPartLocal(std::string value);
+
 static void
 AppendSavedEvidenceCandidatesLocal(
     ManualTestContext &context,
@@ -2597,8 +2572,6 @@ AppendSavedEvidenceCandidatesLocal(
       group.thumbs.push_back(std::move(thumb));
   }
 }
-
-static bool LooksLikeCxScriptPathLocal(const std::string &value) {
 
 static bool LooksLikeCxScriptPathLocal(const std::string &value) {
   if (value.empty())
@@ -6489,28 +6462,62 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     major.tools.push_back(tool);
     return major.tools.back();
   };
+  auto uniqueCaseKey = [&](const ScriptEvidenceThumb &thumb,
+                           const ScriptEvidenceGroup &group) -> std::string {
+    if (!thumb.case_id.empty())
+      return "case=" + thumb.case_id;
+    if (!thumb.script_id.empty())
+      return "script=" + StripEvidenceCandidateDisplaySuffixLocal(
+                             thumb.script_id);
+    return "fallback=" + group.label + "|" + thumb.image_id + "|" +
+           thumb.target_id + "|" + thumb.script_path;
+  };
+
+  std::vector<ScriptEvidenceRowRef> uniqueRows;
+  std::unordered_map<std::string, std::size_t> uniqueRowSlots;
 
   for (std::size_t gi = 0; gi < m_manualTest.script_evidence_groups.size();
        ++gi) {
     ScriptEvidenceGroup &group = m_manualTest.script_evidence_groups[gi];
     for (std::size_t ti = 0; ti < group.thumbs.size(); ++ti) {
       ScriptEvidenceThumb &thumb = group.thumbs[ti];
-      const auto majorClass = classifyMajor(thumb, group);
-      const auto toolClass = classifyTool(thumb, group);
 
       ScriptEvidenceRowRef row;
       row.group_index = static_cast<int>(gi);
       row.thumb_index = static_cast<int>(ti);
       row.is_group_header = false;
-      row.label = thumb.script_id;
+      row.label = StripEvidenceCandidateDisplaySuffixLocal(
+          thumb.script_id.empty() ? thumb.case_id : thumb.script_id);
 
-      EvidenceMajorCategory &major =
-          findOrCreateMajor(majorClass.first, majorClass.second);
-      findOrCreateTool(major, toolClass.first, toolClass.second)
-          .rows.push_back(row);
+      const std::string key = uniqueCaseKey(thumb, group);
+      const auto existingSlot = uniqueRowSlots.find(key);
+      if (existingSlot == uniqueRowSlots.end()) {
+        uniqueRowSlots[key] = uniqueRows.size();
+        uniqueRows.push_back(row);
+      } else {
+        uniqueRows[existingSlot->second] = row;
+      }
     }
   }
 
+  for (const ScriptEvidenceRowRef &row : uniqueRows) {
+    if (row.group_index < 0 ||
+        row.group_index >=
+            static_cast<int>(m_manualTest.script_evidence_groups.size()))
+      continue;
+    ScriptEvidenceGroup &group =
+        m_manualTest.script_evidence_groups[row.group_index];
+    if (row.thumb_index < 0 ||
+        row.thumb_index >= static_cast<int>(group.thumbs.size()))
+      continue;
+    ScriptEvidenceThumb &thumb = group.thumbs[row.thumb_index];
+    const auto majorClass = classifyMajor(thumb, group);
+    const auto toolClass = classifyTool(thumb, group);
+
+    EvidenceMajorCategory &major =
+        findOrCreateMajor(majorClass.first, majorClass.second);
+    findOrCreateTool(major, toolClass.first, toolClass.second).rows.push_back(row);
+  }
   static int classificationDebugDumpBudget = 3;
   if (classificationDebugDumpBudget > 0) {
     --classificationDebugDumpBudget;
@@ -6522,7 +6529,6 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
       }
       return value;
     };
-
     std::ostringstream debug;
     debug << "major\ttool\tgroup_label\tcase_id\timage_id\ttarget_id\t"
           << "candidate_id\tstatus\toverride\tscript_id\treason\n";

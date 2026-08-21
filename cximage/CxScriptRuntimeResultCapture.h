@@ -36,6 +36,16 @@ struct CxScriptToolResultCapture
     int tool_wgap = 0;
     int tool_hgap = 0;
     int tool_linegap = 0;
+    double tool_input_line_x0 = 0.0;
+    double tool_input_line_y0 = 0.0;
+    double tool_input_line_x1 = 0.0;
+    double tool_input_line_y1 = 0.0;
+    double tool_input_line_half_width = 0.0;
+    int tool_input_circle_cx = 0;
+    int tool_input_circle_cy = 0;
+    int tool_input_circle_px = 0;
+    int tool_input_circle_py = 0;
+    int tool_input_circle_gap = 0;
 
     int scan_rows_examined = 0;
     int scan_rows_with_foreground = 0;
@@ -228,6 +238,47 @@ struct CxScriptToolResultCapture
     std::string segmentation_mask_ref;
     std::string segmentation_contour_ref;
     std::string segmentation_overlay_ref;
+    std::string segmentation_task_id;
+
+    std::string segmentation_model_id;
+
+    std::string segmentation_model_package_ref;
+
+    std::string segmentation_manifest_path;
+
+    std::string segmentation_postprocess_profile;
+
+    std::string segmentation_parameter_profile_ref;
+
+    int segmentation_region_count = 0;
+
+    bool segmentation_raw_result_available = false;
+
+    bool segmentation_refined_result_available = false;
+
+    bool segmentation_fallback_used = false;
+
+    std::string segmentation_result_stage;
+
+    std::string segmentation_refinement_method;
+
+    std::string segmentation_raw_result_ref;
+
+    std::string segmentation_raw_mask_ref;
+
+    std::string segmentation_raw_contour_ref;
+
+    std::string segmentation_raw_overlay_ref;
+
+    std::string segmentation_refined_result_ref;
+
+    std::string segmentation_refined_mask_ref;
+
+    std::string segmentation_refined_contour_ref;
+
+    std::string segmentation_refined_overlay_ref;
+
+
 
     int torch_ok = 0;
     int torch_error_code = 0;

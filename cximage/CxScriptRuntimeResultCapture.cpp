@@ -151,6 +151,11 @@ bool CaptureFindLineResult(
     output.tool_wgap = debug.wgap;
     output.tool_hgap = debug.hgap;
     output.tool_linegap = debug.linegap;
+    output.tool_input_line_x0 = tool.inputlinex0();
+    output.tool_input_line_y0 = tool.inputliney0();
+    output.tool_input_line_x1 = tool.inputlinex1();
+    output.tool_input_line_y1 = tool.inputliney1();
+    output.tool_input_line_half_width = debug.measure_geometry_half_width;
     output.scan_rows_examined = debug.scan_rows_examined;
     output.scan_rows_with_foreground = debug.scan_rows_with_foreground;
     output.scan_runs_total = debug.scan_runs_total;
@@ -364,6 +369,15 @@ bool CaptureFindCircleResult(
     output.circle_cy = tool.getresultcenty();
     output.circle_radius = tool.getradius();
     output.avgdist = tool.getavgdist();
+    output.tool_method = tool.getmethod();
+    output.tool_threshold = tool.getthreshold();
+    output.tool_wgap = tool.getgap();
+    output.tool_linegap = tool.getlinegap();
+    output.tool_input_circle_cx = tool.getcirclecentx();
+    output.tool_input_circle_cy = tool.getcirclecenty();
+    output.tool_input_circle_px = tool.getcirclepax();
+    output.tool_input_circle_py = tool.getcirclepay();
+    output.tool_input_circle_gap = tool.getgap();
     output.actual_findsetting = tool.getfindsetting();
     output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
     output.object_prefilter_applied = tool.getdebugprefilterused() != 0;
@@ -740,7 +754,33 @@ bool CaptureFindSegmentationResult(
     output.segmentation_contour_ref = tool.get_contour_ref();
     output.segmentation_overlay_ref = tool.get_overlay_ref();
 
+    const FindSegmentationResult& segmentation_result = tool.result();
+    output.segmentation_task_id = segmentation_result.task_id;
+    output.segmentation_model_id = segmentation_result.model_id;
+    output.segmentation_model_package_ref = segmentation_result.model_package_ref;
+    output.segmentation_manifest_path = segmentation_result.manifest_path;
+    output.segmentation_postprocess_profile = segmentation_result.postprocess_profile;
+    output.segmentation_parameter_profile_ref = segmentation_result.parameter_profile_ref;
+    output.segmentation_region_count = segmentation_result.region_count;
+    output.segmentation_raw_result_available = segmentation_result.raw_result_available;
+    output.segmentation_refined_result_available = segmentation_result.refined_result_available;
+    output.segmentation_fallback_used = segmentation_result.fallback_used;
+    output.segmentation_result_stage = segmentation_result.result_stage;
+    output.segmentation_refinement_method = segmentation_result.refinement_method;
+    output.segmentation_raw_result_ref = segmentation_result.raw_result_ref;
+    output.segmentation_raw_mask_ref = segmentation_result.raw_mask_ref;
+    output.segmentation_raw_contour_ref = segmentation_result.raw_contour_ref;
+    output.segmentation_raw_overlay_ref = segmentation_result.raw_overlay_ref;
+    output.segmentation_refined_result_ref = segmentation_result.refined_result_ref;
+    output.segmentation_refined_mask_ref = segmentation_result.refined_mask_ref;
+    output.segmentation_refined_contour_ref = segmentation_result.refined_contour_ref;
+    output.segmentation_refined_overlay_ref = segmentation_result.refined_overlay_ref;
+
+
     output.valid_points_count = output.segmentation_contour_count;
+    output.algorithm_executed = output.segmentation_status_code != 0 ||
+                                !output.segmentation_result_stage.empty();
+    output.measure_completed = output.segmentation_contour_count > 0;
     output.has_result_rect = output.segmentation_contour_count > 0;
     output.result_rect_count = output.segmentation_contour_count;
     output.avgdist = output.segmentation_primary_area;
@@ -770,6 +810,16 @@ static void MergeToolCapture(
     capture.tool_wgap = tool.tool_wgap;
     capture.tool_hgap = tool.tool_hgap;
     capture.tool_linegap = tool.tool_linegap;
+    capture.tool_input_line_x0 = tool.tool_input_line_x0;
+    capture.tool_input_line_y0 = tool.tool_input_line_y0;
+    capture.tool_input_line_x1 = tool.tool_input_line_x1;
+    capture.tool_input_line_y1 = tool.tool_input_line_y1;
+    capture.tool_input_line_half_width = tool.tool_input_line_half_width;
+    capture.tool_input_circle_cx = tool.tool_input_circle_cx;
+    capture.tool_input_circle_cy = tool.tool_input_circle_cy;
+    capture.tool_input_circle_px = tool.tool_input_circle_px;
+    capture.tool_input_circle_py = tool.tool_input_circle_py;
+    capture.tool_input_circle_gap = tool.tool_input_circle_gap;
     capture.scan_rows_examined = tool.scan_rows_examined;
     capture.scan_rows_with_foreground = tool.scan_rows_with_foreground;
     capture.scan_runs_total = tool.scan_runs_total;
@@ -1006,6 +1056,59 @@ static void MergeToolCapture(
     if (!tool.segmentation_overlay_ref.empty())
         capture.segmentation_overlay_ref = tool.segmentation_overlay_ref;
 
+    if (!tool.segmentation_task_id.empty())
+        capture.segmentation_task_id = tool.segmentation_task_id;
+
+    if (!tool.segmentation_model_id.empty())
+        capture.segmentation_model_id = tool.segmentation_model_id;
+
+    if (!tool.segmentation_model_package_ref.empty())
+        capture.segmentation_model_package_ref = tool.segmentation_model_package_ref;
+
+    if (!tool.segmentation_manifest_path.empty())
+        capture.segmentation_manifest_path = tool.segmentation_manifest_path;
+
+    if (!tool.segmentation_postprocess_profile.empty())
+        capture.segmentation_postprocess_profile = tool.segmentation_postprocess_profile;
+
+    if (!tool.segmentation_parameter_profile_ref.empty())
+        capture.segmentation_parameter_profile_ref = tool.segmentation_parameter_profile_ref;
+
+    capture.segmentation_region_count += tool.segmentation_region_count;
+    capture.segmentation_raw_result_available = capture.segmentation_raw_result_available || tool.segmentation_raw_result_available;
+    capture.segmentation_refined_result_available = capture.segmentation_refined_result_available || tool.segmentation_refined_result_available;
+    capture.segmentation_fallback_used = capture.segmentation_fallback_used || tool.segmentation_fallback_used;
+
+    if (!tool.segmentation_result_stage.empty())
+        capture.segmentation_result_stage = tool.segmentation_result_stage;
+
+    if (!tool.segmentation_refinement_method.empty())
+        capture.segmentation_refinement_method = tool.segmentation_refinement_method;
+
+    if (!tool.segmentation_raw_result_ref.empty())
+        capture.segmentation_raw_result_ref = tool.segmentation_raw_result_ref;
+
+    if (!tool.segmentation_raw_mask_ref.empty())
+        capture.segmentation_raw_mask_ref = tool.segmentation_raw_mask_ref;
+
+    if (!tool.segmentation_raw_contour_ref.empty())
+        capture.segmentation_raw_contour_ref = tool.segmentation_raw_contour_ref;
+
+    if (!tool.segmentation_raw_overlay_ref.empty())
+        capture.segmentation_raw_overlay_ref = tool.segmentation_raw_overlay_ref;
+
+    if (!tool.segmentation_refined_result_ref.empty())
+        capture.segmentation_refined_result_ref = tool.segmentation_refined_result_ref;
+
+    if (!tool.segmentation_refined_mask_ref.empty())
+        capture.segmentation_refined_mask_ref = tool.segmentation_refined_mask_ref;
+
+    if (!tool.segmentation_refined_contour_ref.empty())
+        capture.segmentation_refined_contour_ref = tool.segmentation_refined_contour_ref;
+
+    if (!tool.segmentation_refined_overlay_ref.empty())
+        capture.segmentation_refined_overlay_ref = tool.segmentation_refined_overlay_ref;
+
     if (tool.torch_ok != 0)
         capture.torch_ok = tool.torch_ok;
     if (tool.torch_error_code != 0)
@@ -1065,7 +1168,11 @@ static void MergeToolCapture(
 
         if (shape.semantic_role == "result" ||
             shape.semantic_role == "boundary" ||
-            shape.semantic_role == "boundary_bbox")
+            shape.semantic_role == "boundary_bbox" ||
+            shape.semantic_role == "model_best_result" ||
+            shape.semantic_role == "model_candidate" ||
+            shape.semantic_role == "model_segmentation_mask" ||
+            shape.semantic_role == "model_segmentation_contour")
             capture.rendered_result_count++;
     }
 }

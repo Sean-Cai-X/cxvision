@@ -1439,6 +1439,12 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
     }
 
     if (request.task ==
+        TorchRuntimeTaskIds::YoloV8SegBackwardSmoke)
+    {
+        return ExecuteTorchYoloV8SegBackwardSmokeTask(config, request);
+    }
+
+    if (request.task ==
         TorchRuntimeTaskIds::SegmentationTrainingLifecycle)
     {
         return RunSegmentationTrainingLifecycleTask(

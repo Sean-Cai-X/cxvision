@@ -19,6 +19,8 @@ void TorchTask::settask(const char* value)
         task_.kind = CxTorchTaskKind::Segmentation;
     else if (task_.task_id == "torch.infer.detection.yolov8.v1")
         task_.kind = CxTorchTaskKind::Detection;
+    else if (task_.task_id == "torch.incremental.prototype.lifecycle.v1")
+        task_.kind = CxTorchTaskKind::PrototypeLifecycle;
     else if (task_.task_id.find("train") != std::string::npos)
         task_.kind = CxTorchTaskKind::TrainingLifecycle;
     else if (task_.task_id.find("segmentation") != std::string::npos)
@@ -120,20 +122,23 @@ void TorchTask::run(void* image_object)
     reason_.clear();
 
     Image* image = static_cast<Image*>(image_object);
-    if (image == nullptr || image->getmat().empty()) {
+    if (image == nullptr || image->getmat().empty())
+    {
         status_ = "invalid_input_image";
         reason_ = "TorchTask input Image is empty";
         return;
     }
 
     std::string validation_reason;
-    if (!ValidateCxTorchTaskSpec(task_, validation_reason)) {
+    if (!ValidateCxTorchTaskSpec(task_, validation_reason))
+    {
         status_ = "request_validation_failed";
         reason_ = validation_reason;
         return;
     }
 
-    if (!executor_.Execute(task_, result_, reason_)) {
+    if (!executor_.Execute(task_, result_, reason_))
+    {
         status_ = result_.failure_stage.empty() ? "torch_execute_failed" : result_.failure_stage;
         return;
     }
@@ -213,17 +218,15 @@ char* TorchTask::getprimaryvisualref()
 
 char* TorchTask::getmaskref()
 {
-    if (result_.mask.has_value()) {
+    if (result_.mask.has_value())
         return const_cast<char*>(result_.mask->mask_ref.c_str());
-    }
     return const_cast<char*>("");
 }
 
 char* TorchTask::getoverlayref()
 {
-    if (result_.mask.has_value()) {
+    if (result_.mask.has_value())
         return const_cast<char*>(result_.mask->overlay_ref.c_str());
-    }
     return const_cast<char*>("");
 }
 

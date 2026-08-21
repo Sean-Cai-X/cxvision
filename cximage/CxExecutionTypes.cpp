@@ -34,6 +34,7 @@ bool ValidateCxTorchTaskSpec(const CxTorchTaskSpec& task, std::string& reason)
         task.kind == CxTorchTaskKind::Classification ||
         task.kind == CxTorchTaskKind::FeatureExtraction ||
         task.kind == CxTorchTaskKind::TemplateDifference ||
+        task.kind == CxTorchTaskKind::PrototypeLifecycle ||
         task.kind == CxTorchTaskKind::SegmentationContract ||
         task.kind == CxTorchTaskKind::DetectionContract;
 

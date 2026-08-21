@@ -15,6 +15,13 @@ public:
 
     void setbackend(const char* backend);
     void setmodel(const char* model_path);
+    void settask(const char* task_id);
+    void setmodelid(const char* model_id);
+    void setmodelpackage(const char* model_package_ref);
+    void setmanifest(const char* manifest_path);
+    void setpostprocessprofile(const char* postprocess_profile);
+    void setparameterprofile(const char* parameter_profile_ref);
+
     void setdevice(const char* device);
 
     void setthreshold(double threshold);
@@ -62,6 +69,19 @@ public:
 private:
     std::string m_backend = "opencv_smoke";
     std::string m_model_path;
+    std::string m_task_id;
+
+    std::string m_model_id;
+
+    std::string m_model_package_ref;
+
+    std::string m_manifest_path;
+
+    std::string m_postprocess_profile;
+
+    std::string m_parameter_profile_ref;
+
+
     std::string m_device = "auto";
 
     double m_threshold = 0.5;

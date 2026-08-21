@@ -307,6 +307,10 @@ public:
     int getcirclecenty() const { return m_icenty; }
     int getcirclepax() const { return m_ipax; }
     int getcirclepay() const { return m_ipay; }
+    int getgap() const { return m_igap; }
+    int getlinegap() const { return m_iSelectPointGap; }
+    int getmethod() const { return m_iMethod; }
+    int getthreshold() const { return m_iThreshold; }
     int getannulusinner();
     int getannulusouter();
     int getannuluswidth();

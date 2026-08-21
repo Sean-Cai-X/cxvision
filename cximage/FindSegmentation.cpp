@@ -22,6 +22,37 @@ void FindSegmentation::setmodel(const char *model_path) {
     m_model_path = model_path;
 }
 
+void FindSegmentation::settask(const char *task_id) {
+  if (task_id != nullptr)
+    m_task_id = task_id;
+}
+
+void FindSegmentation::setmodelid(const char *model_id) {
+  if (model_id != nullptr)
+    m_model_id = model_id;
+}
+
+void FindSegmentation::setmodelpackage(const char *model_package_ref) {
+  if (model_package_ref != nullptr)
+    m_model_package_ref = model_package_ref;
+}
+
+void FindSegmentation::setmanifest(const char *manifest_path) {
+  if (manifest_path != nullptr)
+    m_manifest_path = manifest_path;
+}
+
+void FindSegmentation::setpostprocessprofile(const char *postprocess_profile) {
+  if (postprocess_profile != nullptr)
+    m_postprocess_profile = postprocess_profile;
+}
+
+void FindSegmentation::setparameterprofile(const char *parameter_profile_ref) {
+  if (parameter_profile_ref != nullptr)
+    m_parameter_profile_ref = parameter_profile_ref;
+}
+
+
 void FindSegmentation::setdevice(const char *device) {
   if (device != nullptr)
     m_device = device;
@@ -76,9 +107,23 @@ void FindSegmentation::segment(void *image) {
   m_last_input_request.backend = m_backend;
   m_last_input_request.model_path = m_model_path;
   m_last_input_request.device = m_device;
+  m_last_input_request.task_id = m_task_id;
+  m_last_input_request.model_id = m_model_id;
+  m_last_input_request.model_package_ref = m_model_package_ref;
+  m_last_input_request.manifest_path = m_manifest_path;
+  m_last_input_request.postprocess_profile = m_postprocess_profile;
+  m_last_input_request.parameter_profile_ref = m_parameter_profile_ref;
+
   m_last_input_request.threshold = m_threshold;
   m_last_input_request.mode = m_mode;
   m_backend_diagnostic.backend = m_backend;
+  m_backend_diagnostic.task_id = m_task_id;
+  m_backend_diagnostic.model_id = m_model_id;
+  m_backend_diagnostic.model_package_ref = m_model_package_ref;
+  m_backend_diagnostic.manifest_path = m_manifest_path;
+  m_backend_diagnostic.postprocess_profile = m_postprocess_profile;
+  m_backend_diagnostic.parameter_profile_ref = m_parameter_profile_ref;
+
   m_backend_diagnostic.prompt_rect_ready = m_has_rect;
   m_backend_diagnostic.prompt_point_ready = m_has_positive_point;
   m_backend_diagnostic.prompt_positive_ready = m_has_positive_point;
@@ -122,6 +167,13 @@ void FindSegmentation::segment(void *image) {
   input.model_path = m_model_path;
   input.device = m_device;
   input.backend = m_backend;
+  input.task_id = m_task_id;
+  input.model_id = m_model_id;
+  input.model_package_ref = m_model_package_ref;
+  input.manifest_path = m_manifest_path;
+  input.postprocess_profile = m_postprocess_profile;
+  input.parameter_profile_ref = m_parameter_profile_ref;
+
   input.threshold = m_threshold;
   input.mode = m_mode;
 
@@ -166,70 +218,57 @@ void FindSegmentation::segment(void *image) {
 
   std::string reason;
 
-  try
-
-  {
-
-    if (m_backend == "edgesam" || m_backend == "libtorch_segmentation")
-
+  try {
+    if (m_backend == "torch" || m_backend == "edgesam" || m_backend == "libtorch_segmentation")
     {
-
       FindSegmentationEdgeSamBackend backend;
-
       backend.Run(input, m_result, reason);
-
     }
-
-    else
-
-    {
-
+    else {
       FindSegmentationOpenCvSmokeBackend backend;
-
       backend.Run(input, m_result, reason);
     }
-
   }
-
-  catch (const std::exception &ex)
-
-  {
-
+  catch (const std::exception &ex) {
     m_result = FindSegmentationResult();
-
     m_result.ok = false;
-
     m_result.backend = m_backend;
-
     m_result.backend_status = "backend_exception";
-
     m_result.status = "backend_exception";
-
     m_result.reason =
         std::string("FindSegmentation backend exception: ") + ex.what();
-
     reason = m_result.reason;
-
   }
-
-  catch (...)
-
-  {
-
+  catch (...) {
     m_result = FindSegmentationResult();
-
     m_result.ok = false;
-
     m_result.backend = m_backend;
-
     m_result.backend_status = "backend_unknown_exception";
-
     m_result.status = "backend_unknown_exception";
-
     m_result.reason = "FindSegmentation backend unknown exception";
-
     reason = m_result.reason;
   }
+
+  if (m_result.task_id.empty())
+    m_result.task_id = m_task_id;
+
+  if (m_result.model_id.empty())
+    m_result.model_id = m_model_id;
+
+  if (m_result.model_package_ref.empty())
+    m_result.model_package_ref = m_model_package_ref;
+
+  if (m_result.manifest_path.empty())
+    m_result.manifest_path = m_manifest_path;
+
+  if (m_result.postprocess_profile.empty())
+    m_result.postprocess_profile = m_postprocess_profile;
+
+  if (m_result.parameter_profile_ref.empty())
+    m_result.parameter_profile_ref = m_parameter_profile_ref;
+
+  if (m_result.result_stage == "not_run")
+    m_result.result_stage = m_result.ok ? "raw" : "failed";
 
   m_status = m_result.status;
   m_reason = m_result.reason;
@@ -246,6 +285,13 @@ void FindSegmentation::segment(void *image) {
   m_backend_diagnostic.mask_height = m_result.mask_height;
   m_backend_diagnostic.contour_count = m_result.contour_count;
   m_backend_diagnostic.primary_area = m_result.primary_area;
+  m_backend_diagnostic.region_count = m_result.region_count;
+  m_backend_diagnostic.raw_result_available = m_result.raw_result_available;
+  m_backend_diagnostic.refined_result_available = m_result.refined_result_available;
+  m_backend_diagnostic.fallback_used = m_result.fallback_used;
+  m_backend_diagnostic.result_stage = m_result.result_stage;
+  m_backend_diagnostic.refinement_method = m_result.refinement_method;
+
 
   m_result_ref = m_result.result_ref.empty() ? "segmentation:" + m_backend
                                              : m_result.result_ref;

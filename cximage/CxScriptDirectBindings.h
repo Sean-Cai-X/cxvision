@@ -125,6 +125,19 @@ class FindSegmentationBinding : public PendingObjectBinding
 public:
     void setbackend(mu::charpvect&) {}
     void setmodel(mu::charpvect&) {}
+    void settask(mu::charpvect&) {}
+
+    void setmodelid(mu::charpvect&) {}
+
+    void setmodelpackage(mu::charpvect&) {}
+
+    void setmanifest(mu::charpvect&) {}
+
+    void setpostprocessprofile(mu::charpvect&) {}
+
+    void setparameterprofile(mu::charpvect&) {}
+
+
     void setdevice(mu::charpvect&) {}
     void setthreshold(double) {}
     void setpromptrect(int, int, int, int) {}
