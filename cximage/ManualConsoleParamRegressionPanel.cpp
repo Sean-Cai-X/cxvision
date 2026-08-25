@@ -383,6 +383,31 @@ static bool ContainsNoCaseLocal(const std::string &text,
          std::string::npos;
 }
 
+static std::string ReadEvidenceParameterTokenLocal(const std::string &summary,
+                                                   const std::string &key) {
+  std::istringstream tokens(summary);
+  std::string token;
+  const std::string prefix = key + "=";
+  while (tokens >> token) {
+    if (token.rfind(prefix, 0) == 0)
+      return token.substr(prefix.size());
+  }
+  return {};
+}
+
+static std::string ExplicitTorchEvidenceFeatureLocal(
+    const ManualTestContext &context) {
+  const std::string feature = ToLowerAsciiLocal(ReadEvidenceParameterTokenLocal(
+      context.current_evidence_selection.parameter_summary, "torch_feature"));
+  if (feature == "instance_segmentation" ||
+      feature == "semantic_segmentation" || feature == "object_detection" ||
+      feature == "classification" || feature == "anomaly_detection" ||
+      feature == "ocr" || feature == "training_lifecycle") {
+    return feature;
+  }
+  return {};
+}
+
 static const RuntimeObjectView *
 FindPrimaryTorchRuntimeObjectLocal(const ManualTestContext &context) {
   const std::string &primary = context.current_gauge.primary_object_name;
@@ -451,6 +476,11 @@ static std::string TorchTaskFeatureLocal(const ManualTestContext &context) {
       return "semantic_segmentation";
   }
 
+  const std::string explicitFeature =
+      ExplicitTorchEvidenceFeatureLocal(context);
+  if (!explicitFeature.empty())
+    return explicitFeature;
+
   // The selected Evidence case is authoritative.  Only fall back to the
   // editor when no Evidence script/tool is selected; otherwise a previously
   // opened training script can incorrectly seed a detection case.
@@ -484,6 +514,11 @@ static std::string TorchTaskFeatureLocal(const ManualTestContext &context) {
 
 static std::string
 TorchSelectedEvidenceFeatureLocal(const ManualTestContext &context) {
+  const std::string explicitFeature =
+      ExplicitTorchEvidenceFeatureLocal(context);
+  if (!explicitFeature.empty())
+    return explicitFeature;
+
   std::string source = context.current_evidence_selection.script_id + " " +
                        context.current_evidence_selection.script_path + " " +
                        context.current_evidence_selection.tool;
@@ -575,26 +610,60 @@ static void ApplyTorchParameterDefaultsLocal(ManualTestContext &context,
     batchSize = 2;
   }
 
-  InjectManualGaugeInt(context, "global_torch_input_width", inputWidth);
-  InjectManualGaugeInt(context, "global_torch_input_height", inputHeight);
-  InjectManualGaugeInt(context, "global_torch_confidence_percent", confidence);
-  InjectManualGaugeInt(context, "global_torch_mask_threshold_percent",
-                       maskThreshold);
-  InjectManualGaugeInt(context, "global_torch_max_detections", maxDetections);
-  InjectManualGaugeInt(context, "global_torch_epochs", epochs);
-  InjectManualGaugeInt(context, "global_torch_batch_size", batchSize);
-  InjectManualGaugeInt(context, "global_torch_num_classes", 7);
-  InjectManualGaugeInt(context, "global_torch_top_k", 5);
-  InjectManualGaugeInt(context, "global_torch_normalize_input", 1);
-  InjectManualGaugeInt(context, "global_torch_feature_pyramid_enabled",
-                       featurePyramid);
+  auto injectIfMissing = [&](const std::string &key, int value) {
+    if (context.runtime_int_vars.find(key) == context.runtime_int_vars.end())
+      InjectManualGaugeInt(context, key, value);
+  };
+  injectIfMissing("global_torch_input_width", inputWidth);
+  injectIfMissing("global_torch_input_height", inputHeight);
+  injectIfMissing("global_torch_confidence_percent", confidence);
+  injectIfMissing("global_torch_iou_threshold_percent", 45);
+  injectIfMissing("global_torch_mask_threshold_percent", maskThreshold);
+  injectIfMissing("global_torch_max_detections", maxDetections);
+  injectIfMissing("global_torch_epochs", epochs);
+  injectIfMissing("global_torch_batch_size", batchSize);
+  injectIfMissing("global_torch_num_classes", 7);
+  injectIfMissing("global_torch_top_k", 5);
+  injectIfMissing("global_torch_normalize_input", 1);
+  injectIfMissing("global_torch_feature_pyramid_enabled", featurePyramid);
   context.torch_parameter_defaults_key = profileKey;
+  auto actualValue = [&](const std::string &key) {
+    const auto it = context.runtime_int_vars.find(key);
+    return it == context.runtime_int_vars.end() ? 0 : it->second;
+  };
+  const bool evidenceBound =
+      !ExplicitTorchEvidenceFeatureLocal(context).empty();
   CXLOG_INFO("TorchKeyParameters", "torch_parameter_defaults_applied",
              "ui_event",
-             "profile=" + feature + " epochs=" + std::to_string(epochs) +
-                 " batch_size=" + std::to_string(batchSize) +
-                 " input=" + std::to_string(inputWidth) + "x" +
-                 std::to_string(inputHeight));
+             "profile=" + feature +
+                 " evidence_bound=" + (evidenceBound ? "true" : "false") +
+                 " input=" +
+                 std::to_string(actualValue("global_torch_input_width")) +
+                 "x" +
+                 std::to_string(actualValue("global_torch_input_height")) +
+                 " confidence_percent=" +
+                 std::to_string(
+                     actualValue("global_torch_confidence_percent")) +
+                 " iou_percent=" +
+                 std::to_string(
+                     actualValue("global_torch_iou_threshold_percent")) +
+                 " mask_percent=" +
+                 std::to_string(
+                     actualValue("global_torch_mask_threshold_percent")) +
+                 " max_detections=" +
+                 std::to_string(
+                     actualValue("global_torch_max_detections")) +
+                 " num_classes=" +
+                 std::to_string(actualValue("global_torch_num_classes")) +
+                 " epochs=" +
+                 std::to_string(actualValue("global_torch_epochs")) +
+                 " batch_size=" +
+                 std::to_string(actualValue("global_torch_batch_size")) +
+                 " result_count=" +
+                 std::to_string(actualValue("global_torch_result_count")) +
+                 " training_step=" +
+                 std::to_string(
+                     actualValue("global_torch_training_step_executed")));
 }
 
 static bool TorchAnnotationBoundsLocal(const TorchTrainingImageItem &item,
@@ -1175,7 +1244,79 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
 
   if (ImGui::CollapsingHeader("Torch Training Status",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
-    if (object == nullptr) {
+    const std::string &evidenceParams =
+        context.current_evidence_selection.parameter_summary;
+    const std::string trainingStep = ReadEvidenceParameterTokenLocal(
+        evidenceParams, "torch_training_step_executed");
+    const std::string trainingSamples = ReadEvidenceParameterTokenLocal(
+        evidenceParams, "torch_training_sample_count");
+    const std::string trainingInstances = ReadEvidenceParameterTokenLocal(
+        evidenceParams, "torch_training_instance_count");
+    if (!trainingStep.empty() || !trainingSamples.empty() ||
+        !trainingInstances.empty()) {
+      DrawReadonlyFieldLocal("evidence_feature", selectedFeature);
+      DrawReadonlyFieldLocal("training_step_executed", trainingStep);
+      DrawReadonlyFieldLocal("training_sample_count", trainingSamples);
+      DrawReadonlyFieldLocal("training_instance_count", trainingInstances);
+      DrawReadonlyFieldLocal(
+          "loss_phase",
+          ReadEvidenceParameterTokenLocal(evidenceParams, "torch_loss_phase"));
+      DrawReadonlyFieldLocal(
+          "total_loss",
+          ReadEvidenceParameterTokenLocal(evidenceParams, "torch_total_loss"));
+      DrawReadonlyFieldLocal(
+          "box/class/dfl/mask loss",
+          ReadEvidenceParameterTokenLocal(evidenceParams, "torch_box_loss") +
+              " / " +
+              ReadEvidenceParameterTokenLocal(evidenceParams,
+                                              "torch_class_loss") +
+              " / " +
+              ReadEvidenceParameterTokenLocal(evidenceParams,
+                                              "torch_dfl_loss") +
+              " / " +
+              ReadEvidenceParameterTokenLocal(evidenceParams,
+                                              "torch_mask_loss"));
+      ImGui::TextDisabled(
+          "Values above are restored from Evidence assets; they are not a new "
+          "training execution.");
+      ImGui::Separator();
+    }
+    const CxTorchTrainingRunBinding &trainingRun =
+        context.torch_training_run;
+    if (trainingRun.available) {
+      DrawReadonlyFieldLocal("training_mode", "DATASET_MULTI_EPOCH");
+      DrawReadonlyFieldLocal("dataset_consumed", "true");
+      DrawReadonlyFieldLocal("dataset_source", trainingRun.dataset_source);
+      DrawReadonlyFieldLocal("optimizer", trainingRun.optimizer);
+      DrawReadonlyFieldLocal("lr_schedule", trainingRun.lr_schedule);
+      DrawReadonlyFieldLocal("initial_learning_rate",
+                             trainingRun.learning_rate);
+      DrawReadonlyFieldLocal("min_learning_rate",
+                             trainingRun.min_learning_rate);
+      DrawReadonlyFieldLocal("weight_decay", trainingRun.weight_decay);
+      ImGui::Text("loss weights box/class/DFL/mask: %.4g / %.4g / %.4g / %.4g",
+                  trainingRun.box_loss_weight,
+                  trainingRun.class_loss_weight,
+                  trainingRun.dfl_loss_weight,
+                  trainingRun.mask_loss_weight);
+      ImGui::Text("epochs: %d / %d | optimizer steps: %d",
+                  trainingRun.completed_epochs,
+                  trainingRun.configured_epochs,
+                  trainingRun.completed_epochs);
+      ImGui::Text("samples: %d | instances: %d",
+                  trainingRun.train_sample_count,
+                  trainingRun.train_instance_count);
+      if (!trainingRun.epochs.empty()) {
+        const CxTorchTrainingEpochMetric &finalMetric =
+            trainingRun.epochs.back();
+        ImGui::Text("final total/box/class/DFL/mask: %.6g / %.6g / %.6g / %.6g / %.6g",
+                    finalMetric.total_loss, finalMetric.box_loss,
+                    finalMetric.class_loss, finalMetric.dfl_loss,
+                    finalMetric.mask_loss);
+      }
+      DrawReadonlyFieldLocal("training_trace",
+                             trainingRun.training_trace_path);
+    } else if (object == nullptr) {
       DrawReadonlyFieldLocal("requested_feature", selectedFeature);
       DrawReadonlyFieldLocal("requested_epochs",
                              context.runtime_int_vars["global_torch_epochs"]);
@@ -1456,7 +1597,10 @@ void DrawTorchAnnotationKeyParameterPanel(ManualTestContext &context) {
     DrawRuntimeIntRow(context, "input height", "global_torch_input_height", 512,
                       16, 4096, 175.0f);
     DrawRuntimeIntRow(context, "confidence threshold %",
-                      "global_torch_confidence_percent", 50, 0, 100, 175.0f);
+                       "global_torch_confidence_percent", 50, 0, 100, 175.0f);
+    DrawRuntimeIntRow(context, "IoU threshold %",
+                      "global_torch_iou_threshold_percent", 45, 0, 100,
+                      175.0f);
     DrawRuntimeIntRow(context, "mask threshold %",
                       "global_torch_mask_threshold_percent", 50, 0, 100,
                       175.0f);
@@ -1469,6 +1613,29 @@ void DrawTorchAnnotationKeyParameterPanel(ManualTestContext &context) {
                       175.0f);
     DrawRuntimeIntRow(context, "batch size", "global_torch_batch_size", 1, 1,
                       1024, 175.0f);
+    const std::string &evidenceParams = evidence.parameter_summary;
+    const std::string evidenceResultCount = ReadEvidenceParameterTokenLocal(
+        evidenceParams, "torch_result_count");
+    if (!evidenceResultCount.empty()) {
+      ImGui::Separator();
+      ImGui::TextDisabled("Evidence stability context (read-only)");
+      DrawReadonlyFieldLocal("result count", evidenceResultCount);
+      DrawReadonlyFieldLocal(
+          "delta from baseline",
+          ReadEvidenceParameterTokenLocal(evidenceParams,
+                                          "torch_result_count_delta"));
+      DrawReadonlyFieldLocal(
+          "ROI shift dx/dy",
+          ReadEvidenceParameterTokenLocal(evidenceParams,
+                                          "torch_roi_shift_dx_px") +
+              " / " +
+              ReadEvidenceParameterTokenLocal(evidenceParams,
+                                              "torch_roi_shift_dy_px"));
+      DrawReadonlyFieldLocal(
+          "model manifest",
+          ReadEvidenceParameterTokenLocal(evidenceParams,
+                                          "torch_model_manifest"));
+    }
     if (feature == "training_lifecycle") {
       ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.25f, 1.0f),
                          "Tiny Smoke effective profile: epochs=1, "
@@ -1619,7 +1786,105 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext &context) {
   }
 
   if (ImGui::CollapsingHeader("Training Curve / Param Map",
-                              ImGuiTreeNodeFlags_DefaultOpen)) {
+                               ImGuiTreeNodeFlags_DefaultOpen)) {
+    const CxTorchTrainingRunBinding &boundTraining =
+        context.torch_training_run;
+    if (boundTraining.available) {
+      std::vector<float> totalLoss;
+      std::vector<float> boxLoss;
+      std::vector<float> classLoss;
+      std::vector<float> dflLoss;
+      std::vector<float> maskLoss;
+      std::vector<float> learningRates;
+      for (const CxTorchTrainingEpochMetric &metric : boundTraining.epochs) {
+        totalLoss.push_back(static_cast<float>(metric.total_loss));
+        boxLoss.push_back(static_cast<float>(metric.box_loss));
+        classLoss.push_back(static_cast<float>(metric.class_loss));
+        dflLoss.push_back(static_cast<float>(metric.dfl_loss));
+        maskLoss.push_back(static_cast<float>(metric.mask_loss));
+        learningRates.push_back(static_cast<float>(metric.learning_rate));
+      }
+      ImGui::Text("REAL_MULTI_EPOCH_SERIES | epochs %d/%d | samples %d | instances %d",
+                  boundTraining.completed_epochs,
+                  boundTraining.configured_epochs,
+                  boundTraining.train_sample_count,
+                  boundTraining.train_instance_count);
+      ImGui::Text("optimizer %s | schedule %s | LR %.8g -> %.8g | decay %.8g",
+                  boundTraining.optimizer.c_str(),
+                  boundTraining.lr_schedule.c_str(),
+                  boundTraining.learning_rate,
+                  boundTraining.min_learning_rate,
+                  boundTraining.weight_decay);
+      if (!totalLoss.empty()) {
+        ImGui::PlotLines("Total loss", totalLoss.data(),
+                         static_cast<int>(totalLoss.size()), 0, nullptr,
+                         FLT_MAX, FLT_MAX, ImVec2(-1.0f, 90.0f));
+        ImGui::PlotLines("Box loss", boxLoss.data(),
+                         static_cast<int>(boxLoss.size()), 0, nullptr,
+                         FLT_MAX, FLT_MAX, ImVec2(-1.0f, 48.0f));
+        ImGui::PlotLines("Class loss", classLoss.data(),
+                         static_cast<int>(classLoss.size()), 0, nullptr,
+                         FLT_MAX, FLT_MAX, ImVec2(-1.0f, 48.0f));
+        ImGui::PlotLines("DFL loss", dflLoss.data(),
+                         static_cast<int>(dflLoss.size()), 0, nullptr,
+                         FLT_MAX, FLT_MAX, ImVec2(-1.0f, 48.0f));
+        ImGui::PlotLines("Mask loss", maskLoss.data(),
+                         static_cast<int>(maskLoss.size()), 0, nullptr,
+                         FLT_MAX, FLT_MAX, ImVec2(-1.0f, 48.0f));
+        ImGui::PlotLines("Learning rate", learningRates.data(),
+                         static_cast<int>(learningRates.size()), 0, nullptr,
+                         0.0f, FLT_MAX, ImVec2(-1.0f, 48.0f));
+        int decreasingSteps = 0;
+        for (std::size_t i = 1; i < boundTraining.epochs.size(); ++i) {
+          if (boundTraining.epochs[i].total_loss <
+              boundTraining.epochs[i - 1].total_loss)
+            ++decreasingSteps;
+        }
+        const double firstLoss = boundTraining.epochs.front().total_loss;
+        const double finalLoss = boundTraining.epochs.back().total_loss;
+        ImGui::Text("loss first/final: %.6g / %.6g | change %.2f%% | decreasing %d/%d",
+                    firstLoss, finalLoss,
+                    firstLoss != 0.0
+                        ? (finalLoss - firstLoss) / firstLoss * 100.0
+                        : 0.0,
+                    decreasingSteps,
+                    static_cast<int>(boundTraining.epochs.size() - 1));
+      }
+      if (ImGui::BeginTable("bound_training_param_map", 6,
+                            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_ScrollY,
+                            ImVec2(-1.0f, 220.0f))) {
+        ImGui::TableSetupColumn("Epoch");
+        ImGui::TableSetupColumn("Group");
+        ImGui::TableSetupColumn("Grad mean");
+        ImGui::TableSetupColumn("Grad norm");
+        ImGui::TableSetupColumn("Update norm");
+        ImGui::TableSetupColumn("Update/Param");
+        ImGui::TableHeadersRow();
+        for (const CxTorchTrainingEpochMetric &metric : boundTraining.epochs) {
+          for (const auto &group : metric.parameter_groups) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", metric.epoch);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(group.name.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.4g", group.grad_mean);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.4g", group.grad_norm);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.4g", group.update_norm);
+            ImGui::TableSetColumnIndex(5);
+            ImGui::Text("%.4g", group.param_norm > 0.0
+                                      ? group.update_norm / group.param_norm
+                                      : 0.0);
+          }
+        }
+        ImGui::EndTable();
+      }
+      DrawReadonlyFieldLocal("training_trace",
+                             boundTraining.training_trace_path);
+    } else {
     std::vector<TorchCurveSampleLocal> samples;
     if (object != nullptr && object->type == "TorchTask")
       samples = BuildTorchCurveSamplesLocal(*object);
@@ -1736,6 +2001,7 @@ void DrawTorchEvidenceAndReviewPanel(const ManualTestContext &context) {
                              object->segmentation_result_ref);
       DrawReadonlyFieldLocal("segmentation_overlay_ref",
                              object->segmentation_overlay_ref);
+    }
     }
   }
 }
@@ -3428,13 +3694,35 @@ static std::string FindLineEdgeLabel(int edge) {
   return edge == 0 ? "All edges" : ("Edge " + std::to_string(edge));
 }
 
+static int FindLineRuntimeSelectedEdgeForScript(int edge, int edgeCount) {
+  const int count = std::max(1, std::min(16, edgeCount));
+  const int clamped = std::max(-1, std::min(edge, count));
+  if (count == 2 && clamped == 2)
+    return -1;
+  return clamped;
+}
+
 static std::string FindLineSelectedEdgeLabel(int edge, int edgeCount) {
-  (void)edgeCount;
   if (edge == -1)
     return "Last edge";
   if (edge == 0)
     return "All edges";
+  if (FindLineRuntimeSelectedEdgeForScript(edge, edgeCount) == -1)
+    return "Edge " + std::to_string(edge) + " (last edge)";
   return FindLineEdgeLabel(edge);
+}
+
+static std::string FindLineSelectedEdgeSummary(int edge, int edgeCount) {
+  const int runtimeEdge = FindLineRuntimeSelectedEdgeForScript(edge, edgeCount);
+  std::string summary =
+      std::to_string(edge) + "/" + std::to_string(edgeCount);
+  if (runtimeEdge != edge) {
+    summary += "(runtime=" + std::to_string(runtimeEdge);
+    if (runtimeEdge == -1)
+      summary += ":last";
+    summary += ")";
+  }
+  return summary;
 }
 
 static ManualFindCircleEdgeParamState
@@ -4352,11 +4640,14 @@ static bool DrawFindLineEdgeRolePanel(ManualTestContext &context,
   ImGui::TextDisabled("future: shape attach/binding");
   ImGui::PopID();
 
-  ImGui::Text(
-      "globals: selected=%d best=%d recommended=%d relation=%d attach=%d",
-      context.findline_selected_scan_edge, context.findline_best_fit_edge,
-      context.findline_recommended_fit_edge, context.findline_relation_edge,
-      context.findline_attach_edge);
+  const int runtimeSelectedEdge = FindLineRuntimeSelectedEdgeForScript(
+      context.findline_selected_scan_edge, context.findline_scan_edge_count);
+  ImGui::Text("globals: selected=%d runtime=%d best=%d recommended=%d "
+              "relation=%d attach=%d",
+              context.findline_selected_scan_edge, runtimeSelectedEdge,
+              context.findline_best_fit_edge,
+              context.findline_recommended_fit_edge,
+              context.findline_relation_edge, context.findline_attach_edge);
 
   return edited;
 }
@@ -4399,7 +4690,8 @@ static bool DrawFindLineEdgeSelectorPanel(ManualTestContext &context) {
       edited = true;
     }
     for (int i = 1; i <= context.findline_scan_edge_count; ++i) {
-      const std::string label = "Edge " + std::to_string(i);
+      const std::string label =
+          FindLineSelectedEdgeLabel(i, context.findline_scan_edge_count);
       const bool selected = context.findline_selected_scan_edge == i;
       if (ImGui::Selectable(label.c_str(), selected)) {
         context.findline_selected_scan_edge = i;
@@ -4429,8 +4721,16 @@ static bool DrawFindLineEdgeSelectorPanel(ManualTestContext &context) {
             context.findline_selected_scan_edge)];
     params.initialized = true;
 
-    ImGui::Text("Current: Edge %d / %d", context.findline_selected_scan_edge,
-                context.findline_scan_edge_count);
+    const int runtimeEdge = FindLineRuntimeSelectedEdgeForScript(
+        context.findline_selected_scan_edge, context.findline_scan_edge_count);
+    if (runtimeEdge == -1) {
+      ImGui::Text("Current: Edge %d / %d (runtime Last edge)",
+                  context.findline_selected_scan_edge,
+                  context.findline_scan_edge_count);
+    } else {
+      ImGui::Text("Current: Edge %d / %d", context.findline_selected_scan_edge,
+                  context.findline_scan_edge_count);
+    }
 
     ImGui::SetNextItemWidth(100.0f);
     edited |= ImGui::InputInt("edge threshold", &params.threshold);
@@ -5684,8 +5984,8 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
           " filterprofile=" + std::to_string(gauge.filterprofile) +
           " findsetting=" + std::to_string(gauge.findsetting) +
           " selected_edge=" +
-          std::to_string(context.findline_selected_scan_edge) + "/" +
-          std::to_string(context.findline_scan_edge_count) +
+          FindLineSelectedEdgeSummary(context.findline_selected_scan_edge,
+                                      context.findline_scan_edge_count) +
           " best_edge=" + std::to_string(context.findline_best_fit_edge) +
           " recommended_edge=" +
           std::to_string(context.findline_recommended_fit_edge) +

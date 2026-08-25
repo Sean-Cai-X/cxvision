@@ -182,72 +182,72 @@ static bool WriteSegmentationArtifactTextFile(
 }
 
 static void WriteSegmentationArtifactPersistTrace(
-    const std::filesystem::path& output_dir,
-    const std::string& source_ref,
-    const std::filesystem::path& source_path,
-    const std::filesystem::path& source_dir,
-    const std::filesystem::path& artifact_dir,
-    bool source_exists,
-    bool source_dir_exists,
-    const std::string& status)
-{
-    int artifact_entry_count = 0;
-    std::error_code ec;
+    const std::filesystem::path& output_dir,
+    const std::string& source_ref,
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& source_dir,
+    const std::filesystem::path& artifact_dir,
+    bool source_exists,
+    bool source_dir_exists,
+    const std::string& status)
+{
+    int artifact_entry_count = 0;
+    std::error_code ec;
     if (!artifact_dir.empty() &&
         std::filesystem::exists(SegmentationArtifactIoPath(artifact_dir), ec) &&
         !ec)
-    {
+    {
         std::filesystem::recursive_directory_iterator it(
             SegmentationArtifactIoPath(artifact_dir),
             ec);
-        std::filesystem::recursive_directory_iterator end;
-        while (!ec && it != end)
-        {
-            ++artifact_entry_count;
-            it.increment(ec);
-        }
-    }
-    ec.clear();
-    auto has_artifact = [&](const char* name) {
-        ec.clear();
+        std::filesystem::recursive_directory_iterator end;
+        while (!ec && it != end)
+        {
+            ++artifact_entry_count;
+            it.increment(ec);
+        }
+    }
+    ec.clear();
+    auto has_artifact = [&](const char* name) {
+        ec.clear();
         return !artifact_dir.empty() &&
             std::filesystem::exists(
                 SegmentationArtifactIoPath(artifact_dir / name),
                 ec) &&
             !ec;
-    };
-
+    };
+
     std::ostringstream trace_file;
-
-    const char q = static_cast<char>(34);
-    auto write_string = [&](const char* key, const std::string& value, bool comma) {
-        trace_file << "  " << q << key << q << ": " << q << JsonEscape(value) << q << (comma ? "," : "") << "\n";
-    };
-    auto write_bool = [&](const char* key, bool value, bool comma) {
-        trace_file << "  " << q << key << q << ": " << (value ? "true" : "false") << (comma ? "," : "") << "\n";
-    };
-    auto write_int = [&](const char* key, int value, bool comma) {
-        trace_file << "  " << q << key << q << ": " << value << (comma ? "," : "") << "\n";
-    };
-
-    trace_file << "{\n";
-    write_string("source_ref", source_ref, true);
-    write_string("source_path", source_path.string(), true);
-    write_string("source_dir", source_dir.string(), true);
-    write_string("artifact_dir", artifact_dir.string(), true);
-    write_bool("source_exists", source_exists, true);
-    write_bool("source_dir_exists", source_dir_exists, true);
-    write_int("artifact_entry_count", artifact_entry_count, true);
-    write_bool("has_torch_runtime_evidence", has_artifact("torch_runtime_evidence.json"), true);
-    write_bool("has_tensor_shape_trace", has_artifact("tensor_shape_trace.json"), true);
-    write_bool("has_weight_mapping_report", has_artifact("weight_mapping_report.json"), true);
-    write_bool("has_measurement_evidence", has_artifact("measurement_evidence.json"), true);
-    write_string("status", status, false);
+
+    const char q = static_cast<char>(34);
+    auto write_string = [&](const char* key, const std::string& value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << q << JsonEscape(value) << q << (comma ? "," : "") << "\n";
+    };
+    auto write_bool = [&](const char* key, bool value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << (value ? "true" : "false") << (comma ? "," : "") << "\n";
+    };
+    auto write_int = [&](const char* key, int value, bool comma) {
+        trace_file << "  " << q << key << q << ": " << value << (comma ? "," : "") << "\n";
+    };
+
+    trace_file << "{\n";
+    write_string("source_ref", source_ref, true);
+    write_string("source_path", source_path.string(), true);
+    write_string("source_dir", source_dir.string(), true);
+    write_string("artifact_dir", artifact_dir.string(), true);
+    write_bool("source_exists", source_exists, true);
+    write_bool("source_dir_exists", source_dir_exists, true);
+    write_int("artifact_entry_count", artifact_entry_count, true);
+    write_bool("has_torch_runtime_evidence", has_artifact("torch_runtime_evidence.json"), true);
+    write_bool("has_tensor_shape_trace", has_artifact("tensor_shape_trace.json"), true);
+    write_bool("has_weight_mapping_report", has_artifact("weight_mapping_report.json"), true);
+    write_bool("has_measurement_evidence", has_artifact("measurement_evidence.json"), true);
+    write_string("status", status, false);
     trace_file << "}\n";
     WriteSegmentationArtifactTextFile(
         output_dir / "segmentation_artifact_persist_trace.json",
         trace_file.str());
-}
+}
 
 static void RemapSegmentationArtifactRef(
     std::string& ref,
@@ -459,6 +459,633 @@ void DefineCxScriptLocalVariables(
 }
 
 using CxScriptGlobalStorage = std::map<std::string, double>;
+
+static std::string EscapeManualReviewHandoffCell(std::string value)
+{
+    for (char& ch : value)
+    {
+        if (ch == '|' || ch == '\r' || ch == '\n' || ch == '\t')
+            ch = ' ';
+    }
+    const size_t first = value.find_first_not_of(" ");
+    if (first == std::string::npos)
+        return "-";
+    const size_t last = value.find_last_not_of(" ");
+    return value.substr(first, last - first + 1);
+}
+
+static std::string TrimManualReviewValue(std::string value)
+{
+    const size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return {};
+    const size_t last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+static std::string ExtractManualReviewJsonStringField(
+    const std::string& object,
+    const std::string& field)
+{
+    const std::string token = "\"" + field + "\"";
+    size_t pos = object.find(token);
+    if (pos == std::string::npos)
+        return {};
+    pos = object.find(':', pos + token.size());
+    if (pos == std::string::npos)
+        return {};
+    pos = object.find('"', pos + 1);
+    if (pos == std::string::npos)
+        return {};
+
+    std::string value;
+    bool escaped = false;
+    for (++pos; pos < object.size(); ++pos)
+    {
+        const char ch = object[pos];
+        if (escaped)
+        {
+            switch (ch)
+            {
+            case '\\':
+                value.push_back('\\');
+                break;
+            case '"':
+                value.push_back('"');
+                break;
+            case '/':
+                value.push_back('/');
+                break;
+            case 'n':
+                value.push_back('\n');
+                break;
+            case 'r':
+                value.push_back('\r');
+                break;
+            case 't':
+                value.push_back('\t');
+                break;
+            default:
+                value.push_back(ch);
+                break;
+            }
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\')
+        {
+            escaped = true;
+            continue;
+        }
+        if (ch == '"')
+            break;
+        value.push_back(ch);
+    }
+    return value;
+}
+
+static std::string ExtractManualReviewJsonScalarField(
+    const std::string& object,
+    const std::string& field)
+{
+    const std::string token = "\"" + field + "\"";
+    size_t pos = object.find(token);
+    if (pos == std::string::npos)
+        return {};
+    pos = object.find(':', pos + token.size());
+    if (pos == std::string::npos)
+        return {};
+    ++pos;
+    while (pos < object.size() &&
+           std::isspace(static_cast<unsigned char>(object[pos])))
+    {
+        ++pos;
+    }
+    if (pos >= object.size())
+        return {};
+    if (object[pos] == '"')
+        return ExtractManualReviewJsonStringField(object, field);
+
+    size_t end = pos;
+    while (end < object.size() &&
+           object[end] != ',' && object[end] != '}' &&
+           object[end] != '\r' && object[end] != '\n')
+    {
+        ++end;
+    }
+    return TrimManualReviewValue(object.substr(pos, end - pos));
+}
+
+static std::vector<std::string> ExtractManualReviewJsonRowsObjects(
+    const std::string& text)
+{
+    std::vector<std::string> objects;
+    const size_t rows_pos = text.find("\"rows\"");
+    if (rows_pos == std::string::npos)
+        return objects;
+    size_t pos = text.find('[', rows_pos);
+    if (pos == std::string::npos)
+        return objects;
+
+    bool in_string = false;
+    bool escaped = false;
+    int depth = 0;
+    size_t object_begin = std::string::npos;
+    for (++pos; pos < text.size(); ++pos)
+    {
+        const char ch = text[pos];
+        if (in_string)
+        {
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+            if (ch == '"')
+                in_string = false;
+            continue;
+        }
+
+        if (ch == '"')
+        {
+            in_string = true;
+            continue;
+        }
+        if (ch == '{')
+        {
+            if (depth == 0)
+                object_begin = pos;
+            ++depth;
+            continue;
+        }
+        if (ch == '}')
+        {
+            if (depth > 0)
+                --depth;
+            if (depth == 0 && object_begin != std::string::npos)
+            {
+                objects.push_back(text.substr(object_begin, pos - object_begin + 1));
+                object_begin = std::string::npos;
+            }
+            continue;
+        }
+        if (ch == ']' && depth == 0)
+            break;
+    }
+    return objects;
+}
+
+struct HeadlessManualReviewStabilityRow
+{
+    std::string review_item;
+    std::string case_id;
+    std::string failure_class;
+    std::string result_ref;
+    std::string overlay_ref;
+    std::string extra_evidence;
+};
+
+static std::string BuildHeadlessStabilityFailureClass(
+    const std::string& delta,
+    const std::string& overlay_matches)
+{
+    if (!delta.empty() && delta != "0")
+        return "l3_stability_risk_instance_delta_" + delta;
+    if (overlay_matches == "false")
+        return "l3_stability_overlay_changed";
+    return "l3_stability_pending_human_review";
+}
+
+static void AppendManualReviewExtraField(
+    std::vector<std::string>& fields,
+    const std::string& key,
+    const std::string& value)
+{
+    if (!value.empty())
+        fields.push_back(key + "=" + value);
+}
+
+static std::vector<HeadlessManualReviewStabilityRow>
+LoadHeadlessManualReviewStabilityRows(
+    const std::filesystem::path& output_dir,
+    const std::string& parent_case_id)
+{
+    std::vector<HeadlessManualReviewStabilityRow> rows;
+    const std::filesystem::path matrix_path = output_dir / "stability_matrix.json";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(matrix_path, ec) || ec)
+        return rows;
+
+    std::string text;
+    if (!ReadTextFile(matrix_path.string(), text))
+        return rows;
+
+    const std::vector<std::string> objects =
+        ExtractManualReviewJsonRowsObjects(text);
+    auto normalizePathKey = [](const std::filesystem::path& path)
+        -> std::string
+    {
+        std::error_code canonical_ec;
+        std::filesystem::path normalized =
+            std::filesystem::weakly_canonical(path, canonical_ec);
+        if (canonical_ec)
+            normalized = path.lexically_normal();
+        std::string key = normalized.generic_string();
+#ifdef _WIN32
+        std::transform(key.begin(), key.end(), key.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+#endif
+        return key;
+    };
+
+    std::map<std::string, std::string> matrix_rows_by_overlay;
+    for (const std::string& object : objects)
+    {
+        const std::string overlay_ref = ExtractManualReviewJsonStringField(
+            object, "inference_overlay_ref");
+        if (!overlay_ref.empty())
+            matrix_rows_by_overlay[normalizePathKey(overlay_ref)] = object;
+    }
+
+    std::vector<std::filesystem::path> evidence_directories;
+    std::vector<std::filesystem::path> pending_directories{output_dir};
+    while (!pending_directories.empty())
+    {
+        const std::filesystem::path directory = pending_directories.back();
+        pending_directories.pop_back();
+
+        const std::filesystem::path overlay_path = directory / "mask_overlay.png";
+        const std::filesystem::path result_path = directory / "instances.json";
+        std::error_code overlay_ec;
+        std::error_code result_ec;
+        if (std::filesystem::is_regular_file(overlay_path, overlay_ec) &&
+            !overlay_ec &&
+            std::filesystem::is_regular_file(result_path, result_ec) &&
+            !result_ec &&
+            matrix_rows_by_overlay.find(normalizePathKey(overlay_path)) !=
+                matrix_rows_by_overlay.end())
+        {
+            evidence_directories.push_back(directory);
+        }
+
+        std::error_code iterator_ec;
+        std::filesystem::directory_iterator it(
+            directory,
+            std::filesystem::directory_options::skip_permission_denied,
+            iterator_ec);
+        const std::filesystem::directory_iterator end;
+        while (!iterator_ec && it != end)
+        {
+            std::error_code entry_ec;
+            if (it->is_directory(entry_ec) && !entry_ec &&
+                !it->is_symlink(entry_ec))
+            {
+                pending_directories.push_back(it->path());
+            }
+            it.increment(iterator_ec);
+        }
+    }
+
+    std::stable_sort(evidence_directories.begin(), evidence_directories.end());
+    for (const std::filesystem::path& evidence_directory : evidence_directories)
+    {
+        const std::filesystem::path overlay_path =
+            evidence_directory / "mask_overlay.png";
+        const std::filesystem::path result_path =
+            evidence_directory / "instances.json";
+        const std::string& object =
+            matrix_rows_by_overlay.at(normalizePathKey(overlay_path));
+        const std::string source_case_id =
+            ExtractManualReviewJsonStringField(object, "case_id");
+
+        const std::string delta = ExtractManualReviewJsonScalarField(
+            object, "instance_count_delta_from_baseline");
+        const std::string overlay_matches = ExtractManualReviewJsonScalarField(
+            object, "overlay_hash_matches_baseline");
+        const std::string result_ref = result_path.string();
+        const std::string overlay_ref = overlay_path.string();
+        const std::string model_manifest_ref = ExtractManualReviewJsonStringField(
+            object, "model_manifest_ref");
+        const std::string perturbation_type = ExtractManualReviewJsonStringField(
+            object, "perturbation_type");
+
+        std::vector<std::string> extra_fields;
+        AppendManualReviewExtraField(extra_fields, "stability_case_id",
+            source_case_id);
+        AppendManualReviewExtraField(extra_fields, "perturbation_type",
+            perturbation_type);
+        AppendManualReviewExtraField(extra_fields, "roi_shift_dx_px",
+            ExtractManualReviewJsonScalarField(object, "roi_shift_dx_px"));
+        AppendManualReviewExtraField(extra_fields, "roi_shift_dy_px",
+            ExtractManualReviewJsonScalarField(object, "roi_shift_dy_px"));
+        AppendManualReviewExtraField(extra_fields, "confidence_threshold",
+            ExtractManualReviewJsonScalarField(object, "confidence_threshold"));
+        AppendManualReviewExtraField(extra_fields, "instance_count",
+            ExtractManualReviewJsonScalarField(object, "instance_count"));
+        AppendManualReviewExtraField(extra_fields,
+            "instance_count_delta_from_baseline", delta);
+        AppendManualReviewExtraField(extra_fields, "stability_matrix",
+            matrix_path.string());
+        AppendManualReviewExtraField(extra_fields, "inference_result",
+            result_ref);
+        AppendManualReviewExtraField(extra_fields, "inference_overlay",
+            overlay_ref);
+        AppendManualReviewExtraField(extra_fields, "model_manifest",
+            model_manifest_ref);
+
+        std::ostringstream extra;
+        for (size_t i = 0; i < extra_fields.size(); ++i)
+        {
+            if (i > 0)
+                extra << "; ";
+            extra << extra_fields[i];
+        }
+
+        std::error_code relative_ec;
+        std::filesystem::path case_folder = std::filesystem::relative(
+            evidence_directory, output_dir, relative_ec);
+        if (relative_ec || case_folder.empty())
+            case_folder = evidence_directory.filename();
+
+        std::string folder_case_id = case_folder.generic_string();
+        std::replace(folder_case_id.begin(), folder_case_id.end(), '/', '_');
+        std::replace(folder_case_id.begin(), folder_case_id.end(), '\\', '_');
+
+        HeadlessManualReviewStabilityRow row;
+        row.review_item = case_folder.generic_string();
+        row.case_id = parent_case_id + "__" + folder_case_id;
+        row.failure_class = BuildHeadlessStabilityFailureClass(
+            delta, overlay_matches);
+        row.result_ref = result_ref;
+        row.overlay_ref = overlay_ref;
+        row.extra_evidence = extra.str();
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+static void WriteManualReviewHandoffTableRow(
+    std::ofstream& file,
+    const std::string& review_item,
+    const std::string& internal_case_id,
+    const std::string& tool,
+    const std::string& image_id,
+    const std::string& target_id,
+    const std::string& failure_class,
+    const std::string& runtime_summary,
+    const std::string& tool_display,
+    const std::string& result_overlay,
+    const std::string& evidence_overlay,
+    const std::string& roi_preview,
+    const std::string& script_snapshot,
+    const std::string& extra_evidence)
+{
+    file << "| " << EscapeManualReviewHandoffCell(review_item)
+         << " | Manual Review / Evidence > To Verify"
+         << " | " << EscapeManualReviewHandoffCell(internal_case_id)
+         << " | " << EscapeManualReviewHandoffCell(tool)
+         << " | " << EscapeManualReviewHandoffCell(image_id)
+         << " | " << EscapeManualReviewHandoffCell(target_id)
+         << " | " << EscapeManualReviewHandoffCell(failure_class)
+         << " | " << EscapeManualReviewHandoffCell(runtime_summary)
+         << " | " << EscapeManualReviewHandoffCell(tool_display)
+         << " | " << EscapeManualReviewHandoffCell(result_overlay)
+         << " | " << EscapeManualReviewHandoffCell(evidence_overlay)
+         << " | " << EscapeManualReviewHandoffCell(roi_preview)
+         << " | " << EscapeManualReviewHandoffCell(script_snapshot)
+         << " | " << EscapeManualReviewHandoffCell(extra_evidence)
+         << " |\n";
+}
+
+static std::string BuildManualReviewVisibleItemLabel(
+    const CxScriptHeadlessOptions& options,
+    const std::string& internal_case_id)
+{
+    if (!internal_case_id.empty())
+        return internal_case_id;
+    if (!options.script_path.empty())
+    {
+        const std::string stem =
+            std::filesystem::path(options.script_path).stem().string();
+        if (!stem.empty())
+            return stem;
+    }
+    return "current_case";
+}
+
+static std::string InferHeadlessManualReviewTool(
+    const CxScriptHeadlessOptions& options)
+{
+    std::string key = options.script_path + " " + options.case_name + " " +
+        options.case_id + " " + options.stage25_tool;
+    std::transform(key.begin(), key.end(), key.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    if (key.find("find_segmentation") != std::string::npos ||
+        key.find("findsegmentation") != std::string::npos)
+        return "FindSegmentation";
+    if (key.find("torch") != std::string::npos ||
+        key.find("yolo") != std::string::npos ||
+        key.find("deeplab") != std::string::npos ||
+        key.find("backward") != std::string::npos)
+        return "TorchTask";
+    if (!options.stage25_tool.empty())
+        return options.stage25_tool;
+    if (key.find("circle") != std::string::npos)
+        return "FindCircle";
+    if (key.find("ellipse") != std::string::npos)
+        return "FindEllipse";
+    if (key.find("rect") != std::string::npos)
+        return "FindRect";
+    if (key.find("fastmatch") != std::string::npos)
+        return "FastMatch";
+    return "FindLine";
+}
+
+static void AppendExistingManualReviewArtifact(
+    std::vector<std::string>& artifacts,
+    const std::filesystem::path& path)
+{
+    if (path.empty())
+        return;
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(path, ec) && !ec)
+        artifacts.push_back(path.string());
+}
+
+static bool WriteHeadlessManualReviewHandoff(
+    const CxScriptHeadlessOptions& options,
+    const CxScriptExecutionCapture& capture,
+    const CxScriptHeadlessResult& result,
+    const std::filesystem::path& output_dir,
+    std::string& reason)
+{
+    reason.clear();
+    if (options.contract_context_enabled)
+        return true;
+    if (result.summary_path.empty())
+    {
+        reason = "manual review handoff requires result_summary.json";
+        return false;
+    }
+
+    const std::filesystem::path handoff_path =
+        output_dir / "manual_algorithm_review_handoff.md";
+    std::ofstream file(handoff_path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+    {
+        reason = "failed to open manual review handoff: " +
+            handoff_path.string();
+        return false;
+    }
+
+    const std::string case_id = !options.case_name.empty()
+        ? options.case_name
+        : (!options.case_id.empty() ? options.case_id : output_dir.filename().string());
+    const std::string image_id = !options.image_id.empty()
+        ? options.image_id
+        : (!options.stage25_image_id.empty() ? options.stage25_image_id : "headless_image");
+    const std::string target_id = !options.target_id.empty()
+        ? options.target_id
+        : (!options.stage25_target_id.empty() ? options.stage25_target_id : "headless_target");
+    const std::string tool = InferHeadlessManualReviewTool(options);
+    const std::string review_item =
+        BuildManualReviewVisibleItemLabel(options, case_id);
+
+    std::vector<std::string> extra_artifacts;
+    auto append_artifact = [&](const std::string& key,
+                               const std::filesystem::path& path) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(path, ec) && !ec)
+            extra_artifacts.push_back(key + "=" + path.string());
+    };
+    append_artifact("segmentation_trace",
+        output_dir / "segmentation_artifact_persist_trace.json");
+    append_artifact("yolov8seg_evidence",
+        output_dir / "yolov8seg_backward_smoke_evidence.json");
+    append_artifact("loss_breakdown", output_dir / "loss_breakdown.json");
+    append_artifact("training_trace", output_dir / "training_trace.json");
+    append_artifact("gradient_report", output_dir / "gradient_report.json");
+    append_artifact("parameter_update_report",
+        output_dir / "parameter_update_report.json");
+    append_artifact("freeze_ablation_report",
+        output_dir / "freeze_ablation_report.json");
+    append_artifact("dataset_summary", output_dir / "dataset_summary.json");
+    append_artifact("l2_case_matrix", output_dir / "l2_case_matrix.json");
+    append_artifact("stability_matrix", output_dir / "stability_matrix.json");
+    append_artifact("result_variation", output_dir / "result_variation.json");
+    append_artifact("stability_report", output_dir / "stability_report.md");
+    append_artifact("timeout_report", output_dir / "timeout_report.md");
+    append_artifact("human_review", output_dir / "human_review.json");
+    append_artifact("overlay_validation", output_dir / "overlay_validation.json");
+    append_artifact("object_state", output_dir / "object_state.json");
+    append_artifact("variable_snapshot", output_dir / "variable_snapshot.json");
+
+    std::ostringstream extra;
+    for (size_t i = 0; i < extra_artifacts.size(); ++i)
+    {
+        if (i > 0)
+            extra << "; ";
+        extra << extra_artifacts[i];
+    }
+
+    std::string failure_class = capture.failure_stage.empty()
+        ? std::string("pending_human_review")
+        : capture.failure_stage;
+    if (capture.budget_exceeded)
+        failure_class = "algorithm_budget_exceeded";
+
+    file << "# Manual Algorithm Review Handoff\n\n";
+    file << "- schema: `cxvision.manual_algorithm_review_handoff.v1`\n";
+    file << "- source: `cxscript_headless`\n";
+    file << "- conclusion: `PENDING_HUMAN_REVIEW`\n\n";
+    file << "Human review must use the visible item under `Manual Review / Evidence > To Verify`; `Internal Case ID` is for trace only. Suite views are automation evidence, not the human project-analysis entry.\n\n";
+    file << "| Review Item | Open In | Internal Case ID | Tool | Image | Target | Failure Class | Runtime Summary | Tool Display | Result Overlay | Evidence Overlay | ROI Preview | Script Snapshot | Extra Evidence |\n";
+    file << "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
+    WriteManualReviewHandoffTableRow(
+        file,
+        review_item,
+        case_id,
+        tool,
+        image_id,
+        target_id,
+        failure_class,
+        result.summary_path,
+        result.tool_display_path,
+        result.result_overlay_path,
+        result.evidence_overlay_path,
+        result.evidence_overlay_path,
+        options.script_path,
+        extra.str());
+
+    const std::vector<HeadlessManualReviewStabilityRow> stability_rows =
+        LoadHeadlessManualReviewStabilityRows(output_dir, case_id);
+    if (!stability_rows.empty())
+    {
+        const std::filesystem::path matrix_path =
+            output_dir / "stability_matrix.json";
+        const std::string matrix_overlay = stability_rows.front().overlay_ref.empty()
+            ? result.evidence_overlay_path
+            : stability_rows.front().overlay_ref;
+        WriteManualReviewHandoffTableRow(
+            file,
+            matrix_path.filename().string(),
+            case_id + "__" + matrix_path.stem().string(),
+            tool,
+            image_id,
+            target_id,
+            "pending_human_review",
+            result.summary_path,
+            result.tool_display_path,
+            matrix_overlay,
+            matrix_overlay,
+            matrix_overlay,
+            options.script_path,
+            extra.str());
+    }
+    for (const HeadlessManualReviewStabilityRow& row : stability_rows)
+    {
+        const std::string overlay = row.overlay_ref.empty()
+            ? result.evidence_overlay_path
+            : row.overlay_ref;
+        WriteManualReviewHandoffTableRow(
+            file,
+            row.review_item,
+            row.case_id,
+            tool,
+            image_id,
+            target_id,
+            row.failure_class,
+            result.summary_path,
+            result.tool_display_path,
+            overlay,
+            overlay,
+            overlay,
+            options.script_path,
+            row.extra_evidence.empty()
+                ? extra.str()
+                : row.extra_evidence + "; " + extra.str());
+    }
+
+    file.flush();
+    if (!file.good())
+    {
+        reason = "failed while writing manual review handoff: " +
+            handoff_path.string();
+        return false;
+    }
+
+    reason = handoff_path.string();
+    return true;
+}
+
+
+
 
 std::vector<std::string> ExtractCxScriptGlobalDeclarations(const std::string& source)
 {
@@ -675,9 +1302,29 @@ bool InjectCxScriptRuntimeStrings(
         // TorchTask therefore uses the same image, case, and artifact root as
         // the surrounding Headless evidence package.
         const char separator = '|';
+        std::ostringstream torch_context;
+        torch_context << "{\"schema\":\"cx.torch.training_context.v1\""
+                      << ",\"source\":\"headless\""
+                      << ",\"epochs\":" << options.torch_training_epochs
+                      << ",\"learning_rate\":" << std::setprecision(12)
+                      << options.torch_learning_rate
+                      << ",\"lr_schedule\":\""
+                      << JsonEscape(options.torch_lr_schedule) << "\""
+                      << ",\"min_learning_rate\":"
+                      << options.torch_min_learning_rate
+                      << ",\"weight_decay\":" << options.torch_weight_decay
+                      << ",\"box_loss_weight\":"
+                      << options.torch_box_loss_weight
+                      << ",\"class_loss_weight\":"
+                      << options.torch_class_loss_weight
+                      << ",\"dfl_loss_weight\":"
+                      << options.torch_dfl_loss_weight
+                      << ",\"mask_loss_weight\":"
+                      << options.torch_mask_loss_weight << "}";
         const std::string request_context = case_id + separator +
             options.image_path + separator + options.output_dir + separator +
-            "{\"schema\":\"cx.torch.annotation_context.v1\",\"source\":\"headless\"}";
+            torch_context.str() +
+            separator + options.torch_dataset_root;
         runtime.DefineStringConstant("global_torch_request_context", request_context);
     }
     catch (const std::exception& e)
@@ -1689,6 +2336,26 @@ bool ParseCxScriptHeadlessArgs(
             options.image_path = argv[++i];
         else if (arg == "--template-image" && i + 1 < argc)
             options.template_image_path = argv[++i];
+        else if (arg == "--torch-dataset-root" && i + 1 < argc)
+            options.torch_dataset_root = argv[++i];
+        else if (arg == "--torch-epochs" && i + 1 < argc)
+            options.torch_training_epochs = std::max(1, std::stoi(argv[++i]));
+        else if (arg == "--torch-learning-rate" && i + 1 < argc)
+            options.torch_learning_rate = std::stod(argv[++i]);
+        else if (arg == "--torch-lr-schedule" && i + 1 < argc)
+            options.torch_lr_schedule = argv[++i];
+        else if (arg == "--torch-min-learning-rate" && i + 1 < argc)
+            options.torch_min_learning_rate = std::stod(argv[++i]);
+        else if (arg == "--torch-weight-decay" && i + 1 < argc)
+            options.torch_weight_decay = std::stod(argv[++i]);
+        else if (arg == "--torch-box-loss-weight" && i + 1 < argc)
+            options.torch_box_loss_weight = std::stod(argv[++i]);
+        else if (arg == "--torch-class-loss-weight" && i + 1 < argc)
+            options.torch_class_loss_weight = std::stod(argv[++i]);
+        else if (arg == "--torch-dfl-loss-weight" && i + 1 < argc)
+            options.torch_dfl_loss_weight = std::stod(argv[++i]);
+        else if (arg == "--torch-mask-loss-weight" && i + 1 < argc)
+            options.torch_mask_loss_weight = std::stod(argv[++i]);
         else if (arg == "--script" && i + 1 < argc)
             options.script_path = argv[++i];
         else if (arg == "--globals" && i + 1 < argc)
@@ -2415,6 +3082,16 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file.close();
     }
 
+    std::string manual_review_handoff_reason;
+    const bool manual_review_handoff_ok = WriteHeadlessManualReviewHandoff(
+        options,
+        capture,
+        result,
+        output_dir,
+        manual_review_handoff_reason);
+    if (!manual_review_handoff_ok && result.reason.empty())
+        result.reason = manual_review_handoff_reason;
+
     bool snapshot_ok = !result.snapshot_path.empty();
     bool summary_ok = !result.summary_path.empty();
     const bool torch_task_ok = capture.torch_ok != 0;
@@ -2429,10 +3106,13 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
              segmentation_result_ok));
     bool result_ok = !result.result_overlay_path.empty();
     bool tool_display_ok = !result.tool_display_path.empty();
+    bool manual_review_handoff_asset_ok =
+        options.contract_context_enabled || manual_review_handoff_ok;
 
     result.assets_complete = options.contract_context_enabled
         ? (snapshot_ok && summary_ok)
-        : (snapshot_ok && summary_ok && evidence_ok && result_ok && tool_display_ok);
+        : (snapshot_ok && summary_ok && evidence_ok && result_ok &&
+           tool_display_ok && manual_review_handoff_asset_ok);
     result.ok = result.executed && result.runtime_ok && result.assets_complete;
     result.exit_code = result.ok ? 0 : 1;
 

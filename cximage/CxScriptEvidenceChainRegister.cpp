@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 CxScriptEvidenceChainRuntime g_cxscript_evidence_chain;
 CxScriptEvidenceCase* g_current_evidence_case = nullptr;
@@ -229,6 +230,41 @@ double CxEvidenceChain_case_setgroup(const char* value)
     return 0.0;
 }
 
+double CxEvidenceChain_case_setworkflow(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    const auto values = ParseEvidenceKeyValueListLocal(value);
+    g_current_evidence_case->workflow_id =
+        GetEvidenceKvLocal(values, "id");
+    g_current_evidence_case->workflow_stage =
+        GetEvidenceKvLocal(values, "stage");
+    g_current_evidence_case->workflow_status =
+        GetEvidenceKvLocal(values, "status", "pending");
+    g_current_evidence_case->workflow_prerequisites =
+        GetEvidenceKvLocal(values, "prerequisites");
+    g_current_evidence_case->dataset_role =
+        GetEvidenceKvLocal(values, "dataset_role");
+    g_current_evidence_case->annotation_policy =
+        GetEvidenceKvLocal(values, "annotation_policy");
+    g_current_evidence_case->gate_policy =
+        GetEvidenceKvLocal(values, "gate");
+    g_current_evidence_case->parent_model_ref =
+        GetEvidenceKvLocal(values, "parent");
+    g_current_evidence_case->child_model_ref =
+        GetEvidenceKvLocal(values, "child");
+    g_current_evidence_case->workflow_stage_index =
+        GetEvidenceKvIntLocal(values, "stage_index", 0);
+    g_current_evidence_case->workflow_stage_count =
+        GetEvidenceKvIntLocal(values, "stage_count", 0);
+    g_current_evidence_case->dataset_frozen =
+        GetEvidenceKvIntLocal(values, "frozen", 0) != 0;
+    g_current_evidence_case->promotion_candidate =
+        GetEvidenceKvIntLocal(values, "promotion_candidate", 0) != 0;
+    return 0.0;
+}
+
 double CxEvidenceChain_case_adddatasetimage(const char* value)
 {
     if (!g_current_evidence_case)
@@ -274,6 +310,44 @@ double CxEvidenceChain_case_addbbox_xywh_norm(const char* value)
     return 0.0;
 }
 
+double CxEvidenceChain_case_addpolygon(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    const auto values = ParseEvidenceKeyValueListLocal(value);
+    const std::string encoded = GetEvidenceKvLocal(values, "points");
+    std::vector<double> points;
+    std::istringstream pointStream(encoded);
+    std::string pair;
+    while (std::getline(pointStream, pair, ';'))
+    {
+        const std::size_t comma = pair.find(',');
+        if (comma == std::string::npos)
+            continue;
+        points.push_back(std::strtod(pair.substr(0, comma).c_str(), nullptr));
+        points.push_back(std::strtod(pair.substr(comma + 1).c_str(), nullptr));
+    }
+    if (points.size() < 6 || (points.size() % 2) != 0)
+        return 0.0;
+
+    CxScriptEvidenceAnnotation annotation;
+    annotation.image_id = GetEvidenceKvLocal(values, "image_id");
+    annotation.shape_kind = "PolylineShape";
+    annotation.semantic_role =
+        GetEvidenceKvLocal(values, "role", "mask_polygon");
+    annotation.owner_binding =
+        GetEvidenceKvLocal(values, "binding", "label_polygon");
+    annotation.label = GetEvidenceKvLocal(values, "label", "anomaly");
+    annotation.class_id = GetEvidenceKvIntLocal(values, "class_id", -1);
+    annotation.normalized = GetEvidenceKvIntLocal(values, "normalized", 1) != 0;
+    annotation.closed = true;
+    annotation.points_xy = std::move(points);
+    if (!annotation.image_id.empty())
+        g_current_evidence_case->annotations.push_back(std::move(annotation));
+    return 0.0;
+}
+
 double CxEvidenceChain_case_clone_dataset_from(const char* value)
 {
     if (!g_current_evidence_case || !value || value[0] == '\0')
@@ -313,7 +387,9 @@ void RegisterCxScriptEvidenceChainBindings(mu::Parser& parser)
     parser.DefineFun("CxEvidenceChain_case_setlevel", (mu::strfun_type1)&CxEvidenceChain_case_setlevel);
     parser.DefineFun("CxEvidenceChain_case_setcategory", (mu::strfun_type1)&CxEvidenceChain_case_setcategory);
     parser.DefineFun("CxEvidenceChain_case_setgroup", (mu::strfun_type1)&CxEvidenceChain_case_setgroup);
+    parser.DefineFun("CxEvidenceChain_case_setworkflow", (mu::strfun_type1)&CxEvidenceChain_case_setworkflow);
     parser.DefineFun("CxEvidenceChain_case_adddatasetimage", (mu::strfun_type1)&CxEvidenceChain_case_adddatasetimage);
     parser.DefineFun("CxEvidenceChain_case_addbbox_xywh_norm", (mu::strfun_type1)&CxEvidenceChain_case_addbbox_xywh_norm);
+    parser.DefineFun("CxEvidenceChain_case_addpolygon", (mu::strfun_type1)&CxEvidenceChain_case_addpolygon);
     parser.DefineFun("CxEvidenceChain_case_clone_dataset_from", (mu::strfun_type1)&CxEvidenceChain_case_clone_dataset_from);
 }

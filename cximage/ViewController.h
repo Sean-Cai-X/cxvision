@@ -248,6 +248,8 @@ private:
       std::string& packagePath,
       std::string& reason);
   void DrawTorchTrainingImageRail(const char* split, const char* label);
+    void DrawTorchEvidenceTrainingPanel();
+    void DrawEvidenceWorkflowPanel();
   bool LoadImageIntoImageView(const std::string& imagePath,
                               std::string& reason);
   bool LoadImageForEvidenceSelfTest(const std::string& imagePath,

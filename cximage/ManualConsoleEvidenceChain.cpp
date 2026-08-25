@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cfloat>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +27,7 @@
 #include <memory>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
@@ -237,10 +239,34 @@ static bool IsTorchEvidenceCandidateRowLocal(const ScriptEvidenceThumb &thumb,
          thumb.evidence_category_override == "Torch Evidence Candidates";
 }
 
+static bool IsPendingRestorableEvidenceCandidateLocal(
+    const ScriptEvidenceThumb &thumb) {
+  if (!thumb.is_candidate && !thumb.has_saved_state)
+    return false;
+
+  std::string key =
+      thumb.status + " " + thumb.reason + " " + thumb.evidence_category_override;
+  std::transform(
+      key.begin(), key.end(), key.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  if (key.find("manual_confirmed") != std::string::npos ||
+      key.find("manual_gui_pass") != std::string::npos ||
+      key.find("manual accepted") != std::string::npos) {
+    return false;
+  }
+
+  return key.find("pending_human_review") != std::string::npos ||
+         key.find("pending manual acceptance") != std::string::npos ||
+         key.find("gauge_accepted=false") != std::string::npos;
+}
+
 static std::pair<int, std::string>
 ClassifyEvidenceMajorBucketLocal(const ManualTestContext &context,
                                  const ScriptEvidenceThumb &thumb,
                                  const std::string &groupLabel) {
+  if (IsPendingRestorableEvidenceCandidateLocal(thumb))
+    return {0, "To Verify"};
+
   const std::string categoryOverride =
       ResolveEvidenceCategoryOverrideLocal(context, thumb);
   if (!categoryOverride.empty())
@@ -767,6 +793,97 @@ static std::string ReadJsonStringFieldLocal(const std::string &text,
   }
 
   return {};
+}
+
+static bool ReadJsonDoubleFieldLocal(const std::string &text,
+                                     const std::string &key,
+                                     double &outValue) {
+  const std::string pattern = "\"" + key + "\"";
+  const std::size_t keyPos = text.find(pattern);
+  if (keyPos == std::string::npos)
+    return false;
+  const std::size_t colon = text.find(':', keyPos + pattern.size());
+  if (colon == std::string::npos)
+    return false;
+
+  std::size_t begin = colon + 1;
+  while (begin < text.size() &&
+         std::isspace(static_cast<unsigned char>(text[begin]))) {
+    ++begin;
+  }
+
+  std::size_t end = begin;
+  while (end < text.size() &&
+         (std::isdigit(static_cast<unsigned char>(text[end])) ||
+          text[end] == '-' || text[end] == '+' || text[end] == '.' ||
+          text[end] == 'e' || text[end] == 'E')) {
+    ++end;
+  }
+  if (end == begin)
+    return false;
+
+  try {
+    outValue = std::stod(text.substr(begin, end - begin));
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+static std::string ExtractJsonObjectByStringFieldLocal(
+    const std::string &text, const std::string &key,
+    const std::string &expectedValue) {
+  const std::string pattern = "\"" + key + "\"";
+  std::size_t search = 0;
+  while ((search = text.find(pattern, search)) != std::string::npos) {
+    const std::string value =
+        ReadJsonStringFieldLocal(text.substr(search), key);
+    if (value != expectedValue) {
+      search += pattern.size();
+      continue;
+    }
+
+    const std::size_t objectBegin = text.rfind('{', search);
+    if (objectBegin == std::string::npos)
+      return {};
+
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    for (std::size_t i = objectBegin; i < text.size(); ++i) {
+      const char ch = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+      } else if (ch == '{') {
+        ++depth;
+      } else if (ch == '}' && --depth == 0) {
+        return text.substr(objectBegin, i - objectBegin + 1);
+      }
+    }
+    return {};
+  }
+  return {};
+}
+
+static std::string ReadSemicolonFieldLocal(const std::string &fields,
+                                           const std::string &field) {
+  const std::string token = field + "=";
+  const std::size_t begin = fields.find(token);
+  if (begin == std::string::npos)
+    return {};
+  const std::size_t valueBegin = begin + token.size();
+  const std::size_t end = fields.find(';', valueBegin);
+  return TrimLine(fields.substr(valueBegin, end - valueBegin));
 }
 
 static bool
@@ -1769,7 +1886,140 @@ static std::string BuildManualReviewParamSummaryLocal(
   oss << "evidence_locked=1"
       << " tool=" << normalizedTool;
 
-  if (normalizedTool == "FindLine") {
+  if (normalizedTool == "TorchTask") {
+    std::string matrixPath =
+        ReadSemicolonFieldLocal(extraEvidence, "stability_matrix");
+    if (matrixPath.empty()) {
+      std::istringstream fields(extraEvidence);
+      std::string candidate;
+      while (std::getline(fields, candidate, ';')) {
+        candidate = TrimLine(candidate);
+        std::string candidateText;
+        if (!candidate.empty() && ReadTextFile(candidate, candidateText) &&
+            ReadJsonStringFieldLocal(candidateText, "schema").find(
+                "stability_matrix") != std::string::npos) {
+          matrixPath = candidate;
+          break;
+        }
+      }
+    }
+
+    std::string matrixText;
+    ReadTextFile(matrixPath, matrixText);
+    std::string stabilityCaseId =
+        ReadSemicolonFieldLocal(extraEvidence, "stability_case_id");
+    if (stabilityCaseId.empty())
+      stabilityCaseId =
+          ReadJsonStringFieldLocal(matrixText, "baseline_case_id");
+    const std::string matrixRow = ExtractJsonObjectByStringFieldLocal(
+        matrixText, "case_id", stabilityCaseId);
+
+    std::string modelManifestPath =
+        ReadSemicolonFieldLocal(extraEvidence, "model_manifest");
+    if (modelManifestPath.empty())
+      modelManifestPath =
+          ReadJsonStringFieldLocal(matrixRow, "model_manifest_ref");
+    std::string modelManifestText;
+    ReadTextFile(modelManifestPath, modelManifestText);
+
+    const std::string task =
+        ReadJsonStringFieldLocal(modelManifestText, "task");
+    if (!task.empty())
+      oss << " torch_feature=" << task;
+
+    auto appendManifestInt = [&](const std::string &jsonKey,
+                                 const std::string &paramKey) {
+      int value = 0;
+      if (ReadJsonIntFieldLocal(modelManifestText, jsonKey, value))
+        oss << " " << paramKey << "=" << value;
+    };
+    appendManifestInt("width", "torch_input_width");
+    appendManifestInt("height", "torch_input_height");
+    appendManifestInt("max_detections", "torch_max_detections");
+    appendManifestInt("num_classes", "torch_num_classes");
+    appendManifestInt("sample_count", "torch_training_sample_count");
+    appendManifestInt("instance_count", "torch_training_instance_count");
+
+    auto appendPercent = [&](const std::string &summaryValue,
+                             const std::string &manifestKey,
+                             const std::string &paramKey) {
+      double value = 0.0;
+      bool available = false;
+      if (!summaryValue.empty()) {
+        try {
+          value = std::stod(summaryValue);
+          available = true;
+        } catch (...) {
+        }
+      }
+      if (!available)
+        available =
+            ReadJsonDoubleFieldLocal(modelManifestText, manifestKey, value);
+      if (available)
+        oss << " " << paramKey << "="
+            << static_cast<int>(std::lround(value * 100.0));
+    };
+    appendPercent(
+        ReadSemicolonFieldLocal(extraEvidence, "confidence_threshold"),
+        "confidence_threshold", "torch_confidence_percent");
+    appendPercent({}, "iou_threshold", "torch_iou_threshold_percent");
+    appendPercent({}, "mask_threshold", "torch_mask_threshold_percent");
+
+    auto appendMatrixInt = [&](const std::string &jsonKey,
+                               const std::string &paramKey) {
+      int value = 0;
+      if (ReadJsonIntFieldLocal(matrixRow, jsonKey, value))
+        oss << " " << paramKey << "=" << value;
+    };
+    appendMatrixInt("roi_shift_dx_px", "torch_roi_shift_dx_px");
+    appendMatrixInt("roi_shift_dy_px", "torch_roi_shift_dy_px");
+    appendMatrixInt("instance_count", "torch_result_count");
+    appendMatrixInt("instance_count_delta_from_baseline",
+                    "torch_result_count_delta");
+
+    bool trainingStepExecuted = false;
+    if (ReadJsonBoolFieldLocal(matrixRow, "training_step_executed",
+                               trainingStepExecuted)) {
+      oss << " torch_training_step_executed="
+          << (trainingStepExecuted ? 1 : 0);
+    }
+    bool inferenceOk = false;
+    if (ReadJsonBoolFieldLocal(matrixRow, "inference_ok", inferenceOk))
+      oss << " torch_inference_ok=" << (inferenceOk ? 1 : 0);
+
+    const char *lossKeys[] = {"total_loss", "box_loss", "class_loss",
+                              "dfl_loss", "mask_loss"};
+    for (const char *lossKey : lossKeys) {
+      double value = 0.0;
+      if (ReadJsonDoubleFieldLocal(matrixRow, lossKey, value))
+        oss << " torch_" << lossKey << "=" << value;
+    }
+
+    const std::string lossPhase =
+        ReadJsonStringFieldLocal(modelManifestText, "loss_phase");
+    if (!lossPhase.empty())
+      oss << " torch_loss_phase=" << lossPhase;
+    if (!matrixPath.empty())
+      oss << " torch_stability_matrix=" << matrixPath;
+    if (!modelManifestPath.empty())
+      oss << " torch_model_manifest=" << modelManifestPath;
+
+    std::string inferenceResult =
+        ReadSemicolonFieldLocal(extraEvidence, "inference_result");
+    if (inferenceResult.empty())
+      inferenceResult =
+          ReadJsonStringFieldLocal(matrixRow, "inference_result_ref");
+    if (!inferenceResult.empty())
+      oss << " torch_result_ref=" << inferenceResult;
+
+    std::string inferenceOverlay =
+        ReadSemicolonFieldLocal(extraEvidence, "inference_overlay");
+    if (inferenceOverlay.empty())
+      inferenceOverlay =
+          ReadJsonStringFieldLocal(matrixRow, "inference_overlay_ref");
+    if (!inferenceOverlay.empty())
+      oss << " torch_overlay_ref=" << inferenceOverlay;
+  } else if (normalizedTool == "FindLine") {
     appendInt(oss, summaryText, "roi_x0", "roi_x0", missing);
     appendInt(oss, summaryText, "roi_y0", "roi_y0", missing);
     appendInt(oss, summaryText, "roi_x1", "roi_x1", missing);
@@ -1824,23 +2074,228 @@ static bool
 IsManualReviewHandoffCaseRowLocal(const std::vector<std::string> &cells) {
   if (cells.size() < 11)
     return false;
-  if (cells[0] == "Case" || cells[0].find("---") != std::string::npos)
+  if (cells[0] == "Case" || cells[0] == "Review Item" ||
+      cells[0].find("---") != std::string::npos)
     return false;
+  if (cells.size() >= 14 &&
+      cells[1].find("Manual Review / Evidence") != std::string::npos) {
+    return !cells[0].empty() && !cells[2].empty() && !cells[3].empty() &&
+           !cells[7].empty() && !cells[12].empty();
+  }
   return !cells[0].empty() && !cells[1].empty() && !cells[5].empty() &&
          !cells[10].empty();
 }
 
-static void AppendManualAlgorithmReviewHandoffLocal(
+static std::string BuildManualReviewVisibleCaseLabelLocal(
+    const std::string &internalCaseId) {
+  const std::size_t separator = internalCaseId.rfind("__");
+  return separator == std::string::npos
+      ? internalCaseId
+      : internalCaseId.substr(separator + 2);
+}
+
+static std::string ReadManualReviewExtraFieldLocal(
+    const std::string &extraEvidence, const std::string &field) {
+  return ReadSemicolonFieldLocal(extraEvidence, field);
+}
+
+static std::string FindManualReviewArtifactPathLocal(
+    const std::string &extraEvidence, const std::string &field,
+    const std::string &fileName) {
+  std::string path = ReadManualReviewExtraFieldLocal(extraEvidence, field);
+  if (!path.empty())
+    return path;
+
+  std::istringstream fields(extraEvidence);
+  std::string candidate;
+  while (std::getline(fields, candidate, ';')) {
+    candidate = TrimLine(candidate);
+    const std::size_t equals = candidate.find('=');
+    if (equals != std::string::npos)
+      candidate = TrimLine(candidate.substr(equals + 1));
+    if (std::filesystem::path(candidate).filename() == fileName)
+      return candidate;
+  }
+  return {};
+}
+
+static bool LoadTorchDatasetBindingsLocal(
+    const std::string &summaryPath,
+    std::vector<CxEvidenceDatasetImageBinding> &images,
+    std::vector<CxEvidenceAnnotationBinding> &annotations,
+    std::string &reason) {
+  reason.clear();
+  images.clear();
+  annotations.clear();
+  if (summaryPath.empty()) {
+    reason = "dataset summary path is empty";
+    return false;
+  }
+
+  try {
+    cv::FileStorage storage(summaryPath, cv::FileStorage::READ);
+    if (!storage.isOpened()) {
+      reason = "cannot open dataset summary: " + summaryPath;
+      return false;
+    }
+    std::string schema;
+    storage["schema"] >> schema;
+    if (schema.find("cxvision.yolov8seg.dataset_summary") != 0) {
+      reason = "unsupported dataset summary schema: " + schema;
+      return false;
+    }
+
+    std::set<std::string> imageKeys;
+    std::set<std::string> annotationKeys;
+    const cv::FileNode rows = storage["rows"];
+    for (const auto &row : rows) {
+      CxEvidenceDatasetImageBinding image;
+      row["image_id"] >> image.image_id;
+      row["image_ref"] >> image.image_path;
+      row["split"] >> image.split;
+      row["label"] >> image.label;
+      image.source = "yolov8seg_dataset_summary";
+      if (image.split.empty())
+        image.split = "train";
+      if (image.label.empty())
+        image.label = "unlabeled";
+      const std::string imageKey =
+          image.split + "|" + image.image_id + "|" + image.image_path;
+      if (!image.image_path.empty() && imageKeys.insert(imageKey).second)
+        images.push_back(image);
+
+      const cv::FileNode boxes = row["annotations"];
+      for (const auto &box : boxes) {
+        CxEvidenceAnnotationBinding annotation;
+        annotation.image_id = image.image_id;
+        box["class_id"] >> annotation.class_id;
+        box["x0"] >> annotation.x0;
+        box["y0"] >> annotation.y0;
+        box["x1"] >> annotation.x1;
+        box["y1"] >> annotation.y1;
+        int normalized = 1;
+        box["normalized"] >> normalized;
+        annotation.normalized = normalized != 0;
+        annotation.label = image.label.empty() ? "annotated" : image.label;
+        annotation.semantic_role = "bbox";
+        std::ostringstream key;
+        key << annotation.image_id << '|' << annotation.class_id << '|'
+            << annotation.x0 << '|' << annotation.y0 << '|'
+            << annotation.x1 << '|' << annotation.y1;
+        if (annotationKeys.insert(key.str()).second)
+          annotations.push_back(annotation);
+      }
+    }
+  } catch (const cv::Exception &error) {
+    reason = "dataset summary parse failed: " + std::string(error.what());
+    return false;
+  }
+
+  reason = "images=" + std::to_string(images.size()) +
+           " annotations=" + std::to_string(annotations.size());
+  return !images.empty();
+}
+
+static bool LoadTorchTrainingRunBindingLocal(
+    const std::string &tracePath, CxTorchTrainingRunBinding &run,
+    std::string &reason) {
+  reason.clear();
+  run = CxTorchTrainingRunBinding{};
+  if (tracePath.empty()) {
+    reason = "training trace path is empty";
+    return false;
+  }
+
+  try {
+    cv::FileStorage storage(tracePath, cv::FileStorage::READ);
+    if (!storage.isOpened()) {
+      reason = "cannot open training trace: " + tracePath;
+      return false;
+    }
+    std::string schema;
+    storage["schema"] >> schema;
+    if (schema != "cxvision.yolov8seg.training_trace.v1") {
+      reason = "unsupported training trace schema: " + schema;
+      return false;
+    }
+    storage["status"] >> run.status;
+    storage["task"] >> run.task;
+    storage["dataset_source"] >> run.dataset_source;
+    storage["optimizer"] >> run.optimizer;
+    storage["lr_schedule"] >> run.lr_schedule;
+    storage["loss_phase"] >> run.loss_phase;
+    storage["configured_epochs"] >> run.configured_epochs;
+    storage["completed_epochs"] >> run.completed_epochs;
+    storage["train_sample_count"] >> run.train_sample_count;
+    storage["train_instance_count"] >> run.train_instance_count;
+    storage["learning_rate"] >> run.learning_rate;
+    storage["min_learning_rate"] >> run.min_learning_rate;
+    storage["weight_decay"] >> run.weight_decay;
+    const cv::FileNode lossWeights = storage["loss_weights"];
+    if (!lossWeights.empty()) {
+      lossWeights["box"] >> run.box_loss_weight;
+      lossWeights["class"] >> run.class_loss_weight;
+      lossWeights["dfl"] >> run.dfl_loss_weight;
+      lossWeights["mask"] >> run.mask_loss_weight;
+    }
+    run.training_trace_path = tracePath;
+
+    const cv::FileNode epochs = storage["epochs"];
+    for (const auto &node : epochs) {
+      CxTorchTrainingEpochMetric metric;
+      node["epoch"] >> metric.epoch;
+      node["learning_rate"] >> metric.learning_rate;
+      node["total_loss"] >> metric.total_loss;
+      node["box_loss"] >> metric.box_loss;
+      node["class_loss"] >> metric.class_loss;
+      node["dfl_loss"] >> metric.dfl_loss;
+      node["mask_loss"] >> metric.mask_loss;
+      node["sample_count"] >> metric.sample_count;
+      node["instance_count"] >> metric.instance_count;
+      const cv::FileNode parameterGroups = node["parameter_groups"];
+      for (const char *groupName : {"backbone", "pan_fpn", "box_head",
+                                    "class_head", "mask_coeff_head",
+                                    "proto_branch", "other"}) {
+        const cv::FileNode group = parameterGroups[groupName];
+        if (group.empty())
+          continue;
+        CxTorchTrainingEpochMetric::ParameterGroup parsed;
+        parsed.name = groupName;
+        int gradDefined = 0;
+        group["grad_defined"] >> gradDefined;
+        parsed.grad_defined = gradDefined != 0;
+        group["grad_mean"] >> parsed.grad_mean;
+        group["grad_max"] >> parsed.grad_max;
+        group["grad_norm"] >> parsed.grad_norm;
+        group["param_norm"] >> parsed.param_norm;
+        group["update_norm"] >> parsed.update_norm;
+        group["parameter_count"] >> parsed.parameter_count;
+        metric.parameter_groups.push_back(std::move(parsed));
+      }
+      run.epochs.push_back(metric);
+    }
+    run.available = !run.epochs.empty();
+  } catch (const cv::Exception &error) {
+    reason = "training trace parse failed: " + std::string(error.what());
+    return false;
+  }
+
+  reason = "epochs=" + std::to_string(run.epochs.size());
+  return run.available;
+}
+
+static int AppendManualAlgorithmReviewHandoffLocal(
     ManualTestContext &context, const std::string &handoffPath,
     const std::function<std::string(const std::string &)> &resolveImagePath,
     const std::function<ScriptEvidenceGroup &(const std::string &)>
         &findGroup) {
   std::string text;
   if (!ReadTextFile(handoffPath, text))
-    return;
+    return 0;
 
   std::istringstream input(text);
   std::string line;
+  int appended = 0;
   while (std::getline(input, line)) {
     if (line.find('|') == std::string::npos)
       continue;
@@ -1849,42 +2304,88 @@ static void AppendManualAlgorithmReviewHandoffLocal(
     if (!IsManualReviewHandoffCaseRowLocal(cells))
       continue;
 
-    const std::string caseId = cells[0];
-    const std::string tool = NormalizeEvidenceToolTypeLocal(cells[1]);
-    const std::string imageId = cells[2];
-    const std::string targetId = cells[3];
-    const std::string failureClass = cells[4];
-    const std::string runtimeSummary = cells[5];
-    const std::string toolDisplay = cells[6];
-    const std::string resultOverlay = cells[7];
-    const std::string evidenceOverlay = cells[8];
-    const std::string roiPreview = cells[9];
-    const std::string scriptSnapshot = cells[10];
-    const std::string extraEvidence =
-        cells.size() > 11 ? cells[11] : std::string();
+    const bool hasReviewItemColumns =
+        cells.size() >= 14 &&
+        cells[1].find("Manual Review / Evidence") != std::string::npos;
+    const std::string internalCaseId =
+        hasReviewItemColumns ? cells[2] : cells[0];
+    const std::string visibleCaseId = hasReviewItemColumns
+        ? cells[0]
+        : BuildManualReviewVisibleCaseLabelLocal(internalCaseId);
+    const std::string tool = NormalizeEvidenceToolTypeLocal(
+        hasReviewItemColumns ? cells[3] : cells[1]);
+    const std::string imageId = hasReviewItemColumns ? cells[4] : cells[2];
+    const std::string targetId = hasReviewItemColumns ? cells[5] : cells[3];
+    const std::string failureClass =
+        hasReviewItemColumns ? cells[6] : cells[4];
+    const std::string runtimeSummary =
+        hasReviewItemColumns ? cells[7] : cells[5];
+    const std::string toolDisplay = hasReviewItemColumns ? cells[8] : cells[6];
+    const std::string resultOverlay =
+        hasReviewItemColumns ? cells[9] : cells[7];
+    const std::string evidenceOverlay =
+        hasReviewItemColumns ? cells[10] : cells[8];
+    const std::string roiPreview = hasReviewItemColumns ? cells[11] : cells[9];
+    const std::string scriptSnapshot =
+        hasReviewItemColumns ? cells[12] : cells[10];
+    const std::string extraEvidence = hasReviewItemColumns
+        ? (cells.size() > 13 ? cells[13] : std::string())
+        : (cells.size() > 11 ? cells[11] : std::string());
 
     ScriptEvidenceThumb thumb;
-    thumb.case_id = caseId;
-    thumb.script_id = caseId;
+    thumb.case_id = internalCaseId;
+    thumb.script_id = visibleCaseId;
     thumb.script_path = scriptSnapshot;
     thumb.image_id = imageId;
     thumb.image_path =
         ResolveOriginalImagePathFromEvidencePacketLocal(runtimeSummary);
     if (thumb.image_path.empty())
       thumb.image_path = resolveImagePath(imageId);
-    thumb.thumbnail_path = roiPreview.empty() ? toolDisplay : roiPreview;
+    auto firstExistingImage = [](const std::vector<std::string> &paths) {
+      for (const std::string &path : paths) {
+        std::error_code ec;
+        if (!path.empty() && std::filesystem::is_regular_file(path, ec))
+          return path;
+      }
+      return std::string{};
+    };
+    const std::string reviewImage = firstExistingImage(
+        {evidenceOverlay, resultOverlay, roiPreview, toolDisplay});
+    if (thumb.image_path.empty())
+      thumb.image_path = reviewImage;
+    thumb.thumbnail_path = firstExistingImage(
+        {roiPreview, evidenceOverlay, resultOverlay, toolDisplay});
     thumb.target_id = targetId;
     thumb.tool = tool;
     thumb.parameter_summary = BuildManualReviewParamSummaryLocal(
         tool, failureClass, runtimeSummary, extraEvidence);
+    if (tool == "TorchTask") {
+      const std::string datasetSummaryPath = FindManualReviewArtifactPathLocal(
+          extraEvidence, "dataset_summary", "dataset_summary.json");
+      const std::string trainingTracePath = FindManualReviewArtifactPathLocal(
+          extraEvidence, "training_trace", "training_trace.json");
+      std::string bindingReason;
+      LoadTorchDatasetBindingsLocal(datasetSummaryPath, thumb.dataset_images,
+                                    thumb.annotations, bindingReason);
+      thumb.training_run.dataset_summary_path = datasetSummaryPath;
+      std::string traceReason;
+      LoadTorchTrainingRunBindingLocal(trainingTracePath, thumb.training_run,
+                                       traceReason);
+      thumb.training_run.dataset_summary_path = datasetSummaryPath;
+    }
     thumb.status = "pending_algorithm_review";
     thumb.evidence_category_override = "To Verify";
     thumb.reason =
         "manual algorithm review from handoff; failure_class=" + failureClass +
+        "; internal_case_id=" + internalCaseId +
         "; result_summary=" + runtimeSummary + "; tool_display=" + toolDisplay +
         "; result_overlay=" + resultOverlay +
         "; evidence_overlay=" + evidenceOverlay +
         "; roi_preview=" + roiPreview + "; source_image=" + thumb.image_path +
+        "; dataset_images=" + std::to_string(thumb.dataset_images.size()) +
+        "; annotations=" + std::to_string(thumb.annotations.size()) +
+        "; training_epochs=" +
+        std::to_string(thumb.training_run.completed_epochs) +
         "; handoff=" + handoffPath;
 
     PopulateEditableObjectBindingForThumbLocal(thumb);
@@ -1897,12 +2398,45 @@ static void AppendManualAlgorithmReviewHandoffLocal(
         break;
       }
     }
-    if (!exists)
+    if (!exists) {
       group.thumbs.push_back(thumb);
+      ++appended;
+    }
+
+    const std::string matrixPath =
+        ReadManualReviewExtraFieldLocal(extraEvidence, "stability_matrix");
+    if (!matrixPath.empty()) {
+      ScriptEvidenceThumb matrixThumb = thumb;
+      const std::filesystem::path matrixFile(matrixPath);
+      const std::size_t separator = internalCaseId.rfind("__");
+      const std::string parentCaseId = separator == std::string::npos
+          ? internalCaseId
+          : internalCaseId.substr(0, separator);
+      matrixThumb.case_id =
+          parentCaseId + "__" + matrixFile.stem().string();
+      matrixThumb.script_id = matrixFile.filename().string();
+      matrixThumb.status = "pending_algorithm_review";
+      matrixThumb.reason =
+          "manual algorithm review from folder artifact; matrix=" +
+          matrixPath + "; handoff=" + handoffPath;
+
+      bool matrixExists = false;
+      for (const auto &existing : group.thumbs) {
+        if (existing.case_id == matrixThumb.case_id) {
+          matrixExists = true;
+          break;
+        }
+      }
+      if (!matrixExists) {
+        group.thumbs.push_back(matrixThumb);
+        ++appended;
+      }
+    }
   }
 
   context.debug_status = "MANUAL_ALGORITHM_REVIEW_HANDOFF_LOADED";
   context.debug_reason = handoffPath;
+  return appended;
 }
 
 static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
@@ -1919,14 +2453,43 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   }
 
   std::vector<std::filesystem::path> handoffs;
-  std::filesystem::recursive_directory_iterator it(
-      root, std::filesystem::directory_options::skip_permission_denied, ec);
-  const std::filesystem::recursive_directory_iterator end;
-  for (; !ec && it != end; it.increment(ec)) {
-    if (!it->is_regular_file(ec))
+  std::vector<std::string> scanErrors;
+  std::vector<std::filesystem::path> pendingDirectories{root};
+  while (!pendingDirectories.empty()) {
+    const std::filesystem::path directory = pendingDirectories.back();
+    pendingDirectories.pop_back();
+
+    std::error_code directoryEc;
+    std::filesystem::directory_iterator it(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryEc);
+    const std::filesystem::directory_iterator end;
+    if (directoryEc) {
+      scanErrors.push_back(directory.string() + ": " + directoryEc.message());
       continue;
-    if (it->path().filename() == "manual_algorithm_review_handoff.md")
-      handoffs.push_back(it->path());
+    }
+
+    while (it != end) {
+      const std::filesystem::directory_entry entry = *it;
+      std::error_code entryEc;
+      if (entry.is_regular_file(entryEc)) {
+        if (entry.path().filename() == "manual_algorithm_review_handoff.md")
+          handoffs.push_back(entry.path());
+      } else if (!entryEc && entry.is_directory(entryEc) &&
+                 !entry.is_symlink(entryEc)) {
+        pendingDirectories.push_back(entry.path());
+      }
+      if (entryEc) {
+        scanErrors.push_back(entry.path().string() + ": " + entryEc.message());
+      }
+
+      it.increment(directoryEc);
+      if (directoryEc) {
+        scanErrors.push_back(directory.string() + ": " +
+                             directoryEc.message());
+        break;
+      }
+    }
   }
 
   std::stable_sort(handoffs.begin(), handoffs.end(),
@@ -1947,10 +2510,20 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   for (const auto &group : context.script_evidence_groups)
     before += static_cast<int>(group.thumbs.size());
 
+  std::ostringstream scanDebug;
+  scanDebug << "root\t" << root.string() << '\n';
+  for (const std::string &scanError : scanErrors)
+    scanDebug << "scan_error\t" << scanError << '\n';
+  scanDebug << "handoff_path\tappended_cases\n";
   for (const auto &handoff : handoffs) {
-    AppendManualAlgorithmReviewHandoffLocal(context, handoff.string(),
-                                            resolveImagePath, findGroup);
+    const int handoffAppended = AppendManualAlgorithmReviewHandoffLocal(
+        context, handoff.string(), resolveImagePath, findGroup);
+    scanDebug << handoff.string() << '\t' << handoffAppended << '\n';
   }
+
+  const std::filesystem::path scanDebugPath = ResolveCxVisionRunPath(
+      "cxscript_runs/evidence_chain/manual_review_handoff_scan_debug.tsv");
+  WriteTextFile(scanDebugPath, scanDebug.str());
 
   int after = 0;
   for (const auto &group : context.script_evidence_groups)
@@ -1959,7 +2532,9 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   const int appended = std::max(0, after - before);
   std::ostringstream oss;
   oss << "manual algorithm review handoffs scanned=" << handoffs.size()
-      << " appended_cases=" << appended;
+      << " appended_cases=" << appended
+      << " root=" << root.string()
+      << " debug=" << scanDebugPath.string();
   reason = oss.str();
   return appended;
 }
@@ -2774,6 +3349,8 @@ static void MergeFindEllipseThumbPayloadLocal(ScriptEvidenceThumb &dst,
   copyIfEmpty(dst.evidence_level, src.evidence_level);
   copyIfEmpty(dst.evidence_case_role, src.evidence_case_role);
   copyIfEmpty(dst.source_case_id, src.source_case_id);
+  copyIfEmpty(dst.evidence_head_folder, src.evidence_head_folder);
+  copyIfEmpty(dst.evidence_case_folder, src.evidence_case_folder);
   copyIfEmpty(dst.primary_object_type, src.primary_object_type);
   copyIfEmpty(dst.primary_object_name, src.primary_object_name);
   copyIfEmpty(dst.primary_object_status, src.primary_object_status);
@@ -2905,6 +3482,37 @@ static EvidenceChainFolderPlacementLocal ResolveEvidenceChainFolderPlacementLoca
   return placement;
 }
 
+static void LoadSavedEvidenceManualReviewLocal(ScriptEvidenceThumb &thumb) {
+  if (thumb.case_id.empty())
+    return;
+  std::string safeCase = thumb.case_id;
+  for (char &ch : safeCase) {
+    const unsigned char value = static_cast<unsigned char>(ch);
+    if (!std::isalnum(value) && ch != '-' && ch != '_')
+      ch = '_';
+  }
+  const std::filesystem::path reviewPath = ResolveCxVisionRunPath(
+      "cxscript_runs/evidence_chain/manual_reviews/" + safeCase +
+      "/human_review.json");
+  if (!std::filesystem::is_regular_file(reviewPath))
+    return;
+
+  cv::FileStorage storage(reviewPath.string(), cv::FileStorage::READ);
+  if (!storage.isOpened())
+    return;
+  std::string decision;
+  storage["decision"] >> decision;
+  if (decision == "MANUAL_GUI_PASS")
+    thumb.status = "manual_gui_pass";
+  else if (decision == "MANUAL_GUI_PARTIAL")
+    thumb.status = "manual_gui_partial";
+  else if (decision == "MANUAL_GUI_FAIL")
+    thumb.status = "manual_gui_fail";
+  else
+    return;
+  thumb.reason += "; persisted_review=" + reviewPath.string();
+}
+
 static int AppendCxScriptEvidenceChainFilesLocal(
     ManualTestContext &context,
     const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
@@ -2999,9 +3607,28 @@ static int AppendCxScriptEvidenceChainFilesLocal(
       thumb.source_case_id = c.source_case_id;
       thumb.manual_review_required = c.manual_review_required;
       thumb.promotion_candidate = c.promotion_candidate;
-      thumb.evidence_category_override =
-          folderPlacement.category.empty() ? c.display_category
-                                           : folderPlacement.category;
+      thumb.evidence_category_override = c.display_category;
+      thumb.evidence_group_override = c.display_group;
+      thumb.evidence_head_folder = folderPlacement.category;
+      thumb.evidence_case_folder = folderPlacement.group;
+      const std::string groupLabel =
+          !folderPlacement.group.empty()
+              ? folderPlacement.group
+              : (!c.display_group.empty()
+                     ? c.display_group
+                     : std::filesystem::path(file).stem().string());
+      thumb.workflow_id = c.workflow_id;
+      thumb.workflow_stage = c.workflow_stage;
+      thumb.workflow_status = c.workflow_status;
+      thumb.workflow_prerequisites = c.workflow_prerequisites;
+      thumb.dataset_role = c.dataset_role;
+      thumb.annotation_policy = c.annotation_policy;
+      thumb.gate_policy = c.gate_policy;
+      thumb.parent_model_ref = c.parent_model_ref;
+      thumb.child_model_ref = c.child_model_ref;
+      thumb.workflow_stage_index = c.workflow_stage_index;
+      thumb.workflow_stage_count = c.workflow_stage_count;
+      thumb.dataset_frozen = c.dataset_frozen;
       thumb.status =
           c.manual_review_required ? "pending_human_review" : "ready";
       thumb.reason = "cxscript evidence chain: " + chain.chain_id +
@@ -3032,6 +3659,8 @@ static int AppendCxScriptEvidenceChainFilesLocal(
         binding.x1 = annotation.x1;
         binding.y1 = annotation.y1;
         binding.normalized = annotation.normalized;
+        binding.closed = annotation.closed;
+        binding.points_xy = annotation.points_xy;
         thumb.annotations.push_back(std::move(binding));
       }
 
@@ -3041,20 +3670,20 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             BuildDefaultEvidenceParamSummaryForScript(thumb.script_path);
       }
 
-      ApplyHDReferenceImageBindingLocal(thumb);
-      AssignFallbackImageToThumb(thumb, fallbackImages,
-                                 fallbackImageIndexByPool);
+      // Workflow cases deliberately remain unbound until their manifest supplies
+      // an image. An unrelated fallback image would make a blocked gate appear
+      // ready for review.
+      if (thumb.workflow_id.empty()) {
+        ApplyHDReferenceImageBindingLocal(thumb);
+        AssignFallbackImageToThumb(thumb, fallbackImages,
+                                   fallbackImageIndexByPool);
+      }
       PopulateEditableObjectBindingForThumbLocal(thumb);
+      LoadSavedEvidenceManualReviewLocal(thumb);
 
       if (HasEvidenceChainThumbIdentityLocal(context, thumb))
         continue;
 
-      const std::string groupLabel =
-          !folderPlacement.group.empty()
-              ? folderPlacement.group
-              : (!c.display_group.empty()
-                     ? c.display_group
-                     : std::filesystem::path(file).stem().string());
       findGroup(groupLabel).thumbs.push_back(std::move(thumb));
       ++appended;
     }
@@ -3949,6 +4578,19 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
   out.source_case_id = thumb.source_case_id;
   out.manual_review_required = thumb.manual_review_required;
   out.promotion_candidate = thumb.promotion_candidate;
+  out.evidence_group_override = thumb.evidence_group_override;
+  out.workflow_id = thumb.workflow_id;
+  out.workflow_stage = thumb.workflow_stage;
+  out.workflow_status = thumb.workflow_status;
+  out.workflow_prerequisites = thumb.workflow_prerequisites;
+  out.dataset_role = thumb.dataset_role;
+  out.annotation_policy = thumb.annotation_policy;
+  out.gate_policy = thumb.gate_policy;
+  out.parent_model_ref = thumb.parent_model_ref;
+  out.child_model_ref = thumb.child_model_ref;
+  out.workflow_stage_index = thumb.workflow_stage_index;
+  out.workflow_stage_count = thumb.workflow_stage_count;
+  out.dataset_frozen = thumb.dataset_frozen;
 
   out.status = thumb.status;
   out.reason = thumb.reason;
@@ -3967,6 +4609,7 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
   out.primary_object_status = thumb.primary_object_status;
   out.dataset_images = thumb.dataset_images;
   out.annotations = thumb.annotations;
+  out.training_run = thumb.training_run;
 
   if (MigrateLegacyEvidenceSelectionSnapshotLocal(out)) {
     CXLOG_INFO("EvidenceChain", "legacy_candidate_schema_migrated",
@@ -4139,6 +4782,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   staged.runtime_objects.clear();
 
   staged.current_evidence_selection = resolved;
+  staged.torch_training_run = resolved.training_run;
   staged.selected_evidence_group = resolved.group_index;
   staged.selected_evidence_thumb = resolved.thumb_index;
   staged.active_case_id = resolved.case_id;
@@ -4264,8 +4908,13 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                                             : "active_working_revision";
   } else {
     std::string lockedParamReason;
-    if (EvidenceSnapshotHasLockedParamSummaryLocal(resolved,
-                                                   lockedParamReason)) {
+    if (!resolved.workflow_id.empty()) {
+      // Workflow metadata describes gate inputs and expected evidence. It is
+      // not a runtime-global parameter snapshot and must remain selectable
+      // before a concrete dataset/training case has been bound.
+      parameterSource = "workflow_metadata";
+    } else if (EvidenceSnapshotHasLockedParamSummaryLocal(
+                   resolved, lockedParamReason)) {
       if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
               staged, resolved.parameter_summary, lockedParamReason)) {
         return abortSelection("parameter_summary_apply",
@@ -4284,6 +4933,71 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
       staged.current_evidence_selection.primary_object_status =
           staged.current_gauge.primary_object_status;
       parameterSource = "evidence_parameter_snapshot";
+    }
+  }
+
+  if (NormalizeEvidenceToolTypeLocal(resolved.tool) == "TorchTask") {
+    auto readSummaryInt = [&](const std::string &key, int fallback) {
+      const std::string value = ReadKeyValueFromEvidenceParamSummaryLocal(
+          resolved.parameter_summary, key);
+      if (value.empty())
+        return fallback;
+      try {
+        return std::stoi(value);
+      } catch (...) {
+        return fallback;
+      }
+    };
+    const std::string resultRef =
+        ReadKeyValueFromEvidenceParamSummaryLocal(resolved.parameter_summary,
+                                                  "torch_result_ref");
+    const std::string overlayRef =
+        ReadKeyValueFromEvidenceParamSummaryLocal(resolved.parameter_summary,
+                                                  "torch_overlay_ref");
+    const std::string matrixRef =
+        ReadKeyValueFromEvidenceParamSummaryLocal(
+            resolved.parameter_summary, "torch_stability_matrix");
+    const std::string manifestRef =
+        ReadKeyValueFromEvidenceParamSummaryLocal(
+            resolved.parameter_summary, "torch_model_manifest");
+    std::error_code resultEc;
+    std::error_code overlayEc;
+    const bool hasResultArtifact =
+        !resultRef.empty() && std::filesystem::is_regular_file(resultRef, resultEc);
+    const bool hasOverlayArtifact =
+        !overlayRef.empty() &&
+        std::filesystem::is_regular_file(overlayRef, overlayEc);
+    if (hasResultArtifact || hasOverlayArtifact) {
+      RuntimeObjectView artifact;
+      artifact.name = resolved.primary_object_name.empty()
+                          ? "evidence_artifact"
+                          : resolved.primary_object_name;
+      artifact.type = "TorchTask";
+      artifact.exists_in_parser = false;
+      artifact.last_runtime_status = "EVIDENCE_ARTIFACT_LOADED";
+      artifact.runtime_state = "READ_ONLY_EVIDENCE";
+      artifact.display_summary =
+          "Existing Evidence artifacts loaded without algorithm re-execution";
+      artifact.visualizable = hasOverlayArtifact;
+      artifact.visual_source = "evidence_artifact";
+      artifact.stale = false;
+      artifact.is_torch_task = true;
+      artifact.torch_ok =
+          readSummaryInt("torch_inference_ok", hasResultArtifact ? 1 : 0);
+      artifact.torch_result_count =
+          readSummaryInt("torch_result_count", 0);
+      artifact.torch_mask_available = hasOverlayArtifact ? 1 : 0;
+      artifact.torch_status = "EVIDENCE_ARTIFACT_LOADED";
+      artifact.torch_reason =
+          "Read-only Evidence projection; TorchTask was not re-executed";
+      artifact.torch_result_ref = resultRef;
+      artifact.torch_evidence_ref =
+          matrixRef.empty() ? manifestRef : matrixRef;
+      artifact.torch_primary_visual_ref = overlayRef;
+      artifact.torch_overlay_ref = overlayRef;
+      artifact.torch_unified_mainline_summary =
+          "result and overlay references restored from Evidence package";
+      staged.runtime_objects.push_back(std::move(artifact));
     }
   }
 
@@ -4544,11 +5258,30 @@ static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
       continue;
     }
 
+    std::vector<double> points = annotation.points_xy;
+    if (annotation.normalized && imageW > 0 && imageH > 0) {
+      for (std::size_t pointIndex = 1; pointIndex < points.size();
+           pointIndex += 2) {
+        points[pointIndex - 1] *= static_cast<double>(imageW);
+        points[pointIndex] *= static_cast<double>(imageH);
+      }
+    }
+
     double x0 = annotation.x0;
     double y0 = annotation.y0;
     double x1 = annotation.x1;
     double y1 = annotation.y1;
-    if (annotation.normalized && imageW > 0 && imageH > 0) {
+    if (!points.empty()) {
+      x0 = x1 = points[0];
+      y0 = y1 = points[1];
+      for (std::size_t pointIndex = 3; pointIndex < points.size();
+           pointIndex += 2) {
+        x0 = std::min(x0, points[pointIndex - 1]);
+        x1 = std::max(x1, points[pointIndex - 1]);
+        y0 = std::min(y0, points[pointIndex]);
+        y1 = std::max(y1, points[pointIndex]);
+      }
+    } else if (annotation.normalized && imageW > 0 && imageH > 0) {
       x0 *= static_cast<double>(imageW);
       x1 *= static_cast<double>(imageW);
       y0 *= static_cast<double>(imageH);
@@ -4561,7 +5294,10 @@ static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
       std::swap(y0, y1);
 
     TorchTrainingAnnotationShapeSnapshot snap;
-    snap.stable_ref = item.image_id + "_bbox_" + std::to_string(shapeIndex + 1);
+    snap.class_id = annotation.class_id;
+    const bool polygon = points.size() >= 6;
+    snap.stable_ref = item.image_id + (polygon ? "_polygon_" : "_bbox_") +
+                      std::to_string(shapeIndex + 1);
     snap.tool_id = "TorchTask";
     snap.owner_type = "TorchDataset";
     snap.owner_ref = item.image_id;
@@ -4572,12 +5308,25 @@ static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
                          std::to_string(annotation.class_id);
     snap.shape_kind =
         annotation.shape_kind.empty() ? "RectShape" : annotation.shape_kind;
-    snap.center_x = (x0 + x1) * 0.5;
-    snap.center_y = (y0 + y1) * 0.5;
-    snap.radius_x = std::max(0.0, (x1 - x0) * 0.5);
-    snap.radius_y = std::max(0.0, (y1 - y0) * 0.5);
-    snap.points_xy = {x0, y0, x1, y0, x1, y1, x0, y1};
-    snap.closed = true;
+    if (polygon) {
+      for (std::size_t pointIndex = 1; pointIndex < points.size();
+           pointIndex += 2) {
+        snap.center_x += points[pointIndex - 1];
+        snap.center_y += points[pointIndex];
+      }
+      const double pointCount = static_cast<double>(points.size() / 2);
+      snap.center_x /= pointCount;
+      snap.center_y /= pointCount;
+    } else {
+      snap.center_x = (x0 + x1) * 0.5;
+      snap.center_y = (y0 + y1) * 0.5;
+      snap.radius_x = std::max(0.0, (x1 - x0) * 0.5);
+      snap.radius_y = std::max(0.0, (y1 - y0) * 0.5);
+    }
+    snap.points_xy = polygon ? std::move(points)
+                             : std::vector<double>{x0, y0, x1, y0,
+                                                   x1, y1, x0, y1};
+    snap.closed = polygon ? annotation.closed : true;
     snap.editable = true;
     snap.visible = true;
     snap.result_element = false;
@@ -4586,11 +5335,14 @@ static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
   }
 
   item.annotation_shape_count = static_cast<int>(item.annotation_shapes.size());
-  item.annotation_overlay_count = item.annotation_shape_count;
-  item.annotation_status =
-      item.annotation_shape_count > 0 ? "reviewed" : "unlabeled";
+  // Evidence polygons are restored as ShapeElements.  Overlay elements are a
+  // separate collection and must not mirror the shape count.
+  item.annotation_overlay_count = 0;
+  item.annotation_status = item.annotation_shape_count > 0
+                               ? "draft_pending_human_review"
+                               : "unlabeled";
   item.annotation_reason = item.annotation_shape_count > 0
-                               ? "loaded from evidence dataset annotations"
+                               ? "polygon draft loaded from evidence dataset; human review not recorded"
                                : "no evidence annotation bound for image";
 }
 
@@ -4749,6 +5501,13 @@ void ViewController::CaptureCurrentTorchTrainingAnnotationState() {
     snap.owner_ref = element.owner_ref;
     snap.owner_binding = element.owner_binding;
     snap.semantic_role = element.semantic_role;
+    const auto previous = std::find_if(
+        item.annotation_shapes.begin(), item.annotation_shapes.end(),
+        [&snap](const TorchTrainingAnnotationShapeSnapshot &candidate) {
+          return candidate.stable_ref == snap.stable_ref;
+        });
+    if (previous != item.annotation_shapes.end())
+      snap.class_id = previous->class_id;
     snap.shape_kind = CxShapeKindName(geo.kind);
     snap.center_x = geo.center.x;
     snap.center_y = geo.center.y;
@@ -4773,17 +5532,36 @@ void ViewController::CaptureCurrentTorchTrainingAnnotationState() {
 
   auto sameShape = [](const TorchTrainingAnnotationShapeSnapshot &a,
                       const TorchTrainingAnnotationShapeSnapshot &b) -> bool {
-    return a.stable_ref == b.stable_ref && a.tool_id == b.tool_id &&
+    constexpr double kGeometryEpsilon = 1e-3;
+    const auto sameDouble = [=](double lhs, double rhs) {
+      return std::abs(lhs - rhs) <= kGeometryEpsilon;
+    };
+    const auto samePoints = [&sameDouble](const std::vector<double> &lhs,
+                                          const std::vector<double> &rhs) {
+      if (lhs.size() != rhs.size())
+        return false;
+      for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (!sameDouble(lhs[i], rhs[i]))
+          return false;
+      }
+      return true;
+    };
+    return a.class_id == b.class_id && a.stable_ref == b.stable_ref &&
+           a.tool_id == b.tool_id &&
            a.owner_type == b.owner_type && a.owner_ref == b.owner_ref &&
            a.owner_binding == b.owner_binding &&
            a.semantic_role == b.semantic_role && a.shape_kind == b.shape_kind &&
-           a.center_x == b.center_x && a.center_y == b.center_y &&
-           a.radius == b.radius && a.inner_radius == b.inner_radius &&
-           a.radius_x == b.radius_x && a.radius_y == b.radius_y &&
-           a.angle == b.angle && a.half_width == b.half_width &&
+           sameDouble(a.center_x, b.center_x) &&
+           sameDouble(a.center_y, b.center_y) &&
+           sameDouble(a.radius, b.radius) &&
+           sameDouble(a.inner_radius, b.inner_radius) &&
+           sameDouble(a.radius_x, b.radius_x) &&
+           sameDouble(a.radius_y, b.radius_y) &&
+           sameDouble(a.angle, b.angle) &&
+           sameDouble(a.half_width, b.half_width) &&
            a.closed == b.closed && a.editable == b.editable &&
            a.visible == b.visible && a.result_element == b.result_element &&
-           a.points_xy == b.points_xy;
+           samePoints(a.points_xy, b.points_xy);
   };
   bool changed = item.annotation_overlay_count != capturedOverlayCount ||
                  item.annotation_shapes.size() != capturedShapes.size();
@@ -4835,6 +5613,11 @@ void ViewController::RestoreTorchTrainingAnnotationState(
         snap.owner_binding.empty() ? "manual_annotation" : snap.owner_binding,
         snap.semantic_role.empty() ? "annotation" : snap.semantic_role,
         snap.editable, snap.result_element, std::move(shape));
+    if (CxShapeElement *restoredElement =
+            m_annotationLayer.FindShapeByStableRef(stableRef)) {
+      restoredElement->tool_id = snap.tool_id;
+      restoredElement->visible = snap.visible;
+    }
     ++restored;
   }
 
@@ -4977,17 +5760,32 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
     const int referenceSetCount = AddHDReferenceImageSetForCurrentSelection();
     added += referenceSetCount;
 
+    int imageToLoad = -1;
     if (preferredImageIndex >= 0)
-      m_manualTest.selected_torch_training_image = preferredImageIndex;
+      imageToLoad = preferredImageIndex;
     else if (!m_manualTest.torch_training_images.empty())
-      m_manualTest.selected_torch_training_image = 0;
+      imageToLoad = 0;
+
+    std::string imageLoadReason;
+    bool imageLoaded = false;
+    if (imageToLoad >= 0) {
+      // The previous Image View belongs to another evidence selection.  Do
+      // not capture its annotation layer into the newly rebuilt dataset.
+      m_manualTest.selected_torch_training_image = -1;
+      imageLoaded =
+          LoadTorchTrainingImageIntoAnnotationView(imageToLoad, imageLoadReason);
+    }
 
     m_manualTest.torch_training_image_status =
-        added > 0 ? "EVIDENCE_DATASET_BOUND" : "EVIDENCE_DATASET_EMPTY";
+        added <= 0 ? "EVIDENCE_DATASET_EMPTY"
+                   : (imageLoaded ? "EVIDENCE_DATASET_BOUND"
+                                  : "EVIDENCE_DATASET_IMAGE_LOAD_FAIL");
     m_manualTest.torch_training_image_reason =
         "synced evidence dataset images for " + sel.case_id +
         " count=" + std::to_string(added) +
-        " annotations=" + std::to_string(sel.annotations.size());
+        " annotations=" + std::to_string(sel.annotations.size()) +
+        " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
+        (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
     CXLOG_INFO("TorchTrainingImageSet", "evidence_dataset_sync_complete",
                m_manualTest.torch_training_image_status,
                m_manualTest.torch_training_image_reason);
@@ -5265,6 +6063,352 @@ void ViewController::DrawTorchTrainingImageRail(const char *split,
   ImGui::EndChild();
 }
 
+void ViewController::DrawEvidenceWorkflowPanel() {
+  const CxEvidenceSelectionSnapshot &selection =
+      m_manualTest.current_evidence_selection;
+  if (!selection.valid || selection.workflow_id.empty())
+    return;
+
+  struct WorkflowRow {
+    const ScriptEvidenceThumb *thumb = nullptr;
+    std::string effective_status;
+    bool prerequisites_ready = false;
+  };
+
+  auto lower = [](std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) {
+                     return static_cast<char>(std::tolower(ch));
+                   });
+    return value;
+  };
+  auto isCompleteStatus = [&](const std::string &status) {
+    const std::string value = lower(status);
+    return value == "complete" || value == "completed" ||
+           value == "passed" || value == "accepted" ||
+           value == "manual_gui_pass";
+  };
+
+  std::vector<WorkflowRow> rows;
+  std::unordered_map<std::string, std::string> statusByCase;
+  for (const ScriptEvidenceGroup &group : m_manualTest.script_evidence_groups) {
+    for (const ScriptEvidenceThumb &thumb : group.thumbs) {
+      if (thumb.workflow_id != selection.workflow_id)
+        continue;
+      std::string status = thumb.status;
+      if (status.empty() || status == "ready" ||
+          status == "pending_human_review")
+        status = thumb.workflow_status.empty() ? "pending"
+                                               : thumb.workflow_status;
+      rows.push_back({&thumb, status, false});
+      statusByCase[thumb.case_id] = status;
+    }
+  }
+  if (rows.empty())
+    return;
+
+  std::stable_sort(rows.begin(), rows.end(),
+                   [](const WorkflowRow &left, const WorkflowRow &right) {
+                     if (left.thumb->workflow_stage_index !=
+                         right.thumb->workflow_stage_index)
+                       return left.thumb->workflow_stage_index <
+                              right.thumb->workflow_stage_index;
+                     return left.thumb->case_id < right.thumb->case_id;
+                   });
+
+  int completed = 0;
+  bool allComplete = true;
+  for (WorkflowRow &row : rows) {
+    bool prerequisitesReady = true;
+    std::istringstream prerequisites(row.thumb->workflow_prerequisites);
+    std::string prerequisite;
+    while (std::getline(prerequisites, prerequisite, ',')) {
+      prerequisite = TrimLine(prerequisite);
+      if (prerequisite.empty() || prerequisite == "none")
+        continue;
+      const auto found = statusByCase.find(prerequisite);
+      if (found == statusByCase.end() || !isCompleteStatus(found->second)) {
+        prerequisitesReady = false;
+        break;
+      }
+    }
+    row.prerequisites_ready = prerequisitesReady;
+    const bool complete = isCompleteStatus(row.effective_status);
+    completed += complete ? 1 : 0;
+    allComplete = allComplete && complete;
+  }
+
+  const bool selectedHumanAccepted =
+      lower(selection.status) == "manual_gui_pass";
+  const bool promotionAllowed = selection.promotion_candidate && allComplete &&
+                                selectedHumanAccepted &&
+                                !selection.parent_model_ref.empty() &&
+                                !selection.child_model_ref.empty();
+
+  ImGui::Separator();
+  if (!ImGui::CollapsingHeader("Reliability Workflow / Promotion Gate",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+
+  ImGui::Text("Workflow: %s", selection.workflow_id.c_str());
+  const float progress = rows.empty()
+                             ? 0.0f
+                             : static_cast<float>(completed) /
+                                   static_cast<float>(rows.size());
+  const std::string progressLabel = std::to_string(completed) + " / " +
+                                    std::to_string(rows.size()) + " complete";
+  ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressLabel.c_str());
+  ImGui::Text("Selected: %s | stage %d/%d | dataset %s | frozen %s",
+              selection.case_id.c_str(), selection.workflow_stage_index,
+              selection.workflow_stage_count,
+              selection.dataset_role.empty() ? "-" : selection.dataset_role.c_str(),
+              selection.dataset_frozen ? "yes" : "no");
+  ImGui::TextWrapped("Annotation policy: %s",
+                     selection.annotation_policy.empty()
+                         ? "-"
+                         : selection.annotation_policy.c_str());
+  ImGui::TextWrapped("Gate policy: %s",
+                     selection.gate_policy.empty() ? "-"
+                                                   : selection.gate_policy.c_str());
+  ImGui::Text("Parent: %s | Child: %s",
+              selection.parent_model_ref.empty()
+                  ? "not bound"
+                  : selection.parent_model_ref.c_str(),
+              selection.child_model_ref.empty()
+                  ? "not bound"
+                  : selection.child_model_ref.c_str());
+  ImGui::TextColored(
+      promotionAllowed ? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
+                       : ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+      "Promotion: %s",
+      promotionAllowed ? "ALLOWED_BY_RECORDED_GATES" : "BLOCKED");
+
+  if (ImGui::BeginTable("evidence_reliability_workflow", 5,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_ScrollY,
+                        ImVec2(-1.0f, 230.0f))) {
+    ImGui::TableSetupColumn("Step");
+    ImGui::TableSetupColumn("Case");
+    ImGui::TableSetupColumn("Stage");
+    ImGui::TableSetupColumn("Status");
+    ImGui::TableSetupColumn("Prerequisite");
+    ImGui::TableHeadersRow();
+    for (const WorkflowRow &row : rows) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("%d", row.thumb->workflow_stage_index);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextUnformatted(row.thumb->case_id.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextUnformatted(row.thumb->workflow_stage.c_str());
+      ImGui::TableSetColumnIndex(3);
+      ImGui::TextUnformatted(row.effective_status.c_str());
+      ImGui::TableSetColumnIndex(4);
+      if (row.prerequisites_ready)
+        ImGui::TextUnformatted("ready");
+      else
+        ImGui::Text("blocked: %s", row.thumb->workflow_prerequisites.c_str());
+    }
+    ImGui::EndTable();
+  }
+}
+
+void ViewController::DrawTorchEvidenceTrainingPanel() {
+  const CxEvidenceSelectionSnapshot &selection =
+      m_manualTest.current_evidence_selection;
+  if (!selection.valid ||
+      NormalizeEvidenceToolTypeLocal(selection.tool) != "TorchTask")
+    return;
+
+  ImGui::Separator();
+  if (!ImGui::CollapsingHeader("Dataset / Annotation / Training",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+
+  int trainCount = 0;
+  int valCount = 0;
+  int testCount = 0;
+  int annotatedCount = 0;
+  for (const TorchTrainingImageItem &item :
+       m_manualTest.torch_training_images) {
+    if (item.split == "train")
+      ++trainCount;
+    else if (item.split == "val")
+      ++valCount;
+    else if (item.split == "test")
+      ++testCount;
+    if (item.annotation_shape_count > 0)
+      ++annotatedCount;
+  }
+  ImGui::Text("Images: train %d | val %d | test %d | annotated %d",
+              trainCount, valCount, testCount, annotatedCount);
+
+  const CxTorchTrainingRunBinding &run = m_manualTest.torch_training_run;
+  if (run.available) {
+    ImGui::Text("Training: %s | %s | LR %.8g", run.status.c_str(),
+                run.optimizer.c_str(), run.learning_rate);
+    ImGui::Text("LR schedule: %s | min LR %.8g | weight decay %.8g",
+                run.lr_schedule.c_str(), run.min_learning_rate,
+                run.weight_decay);
+    ImGui::Text("Loss weights: box %.4g | class %.4g | DFL %.4g | mask %.4g",
+                run.box_loss_weight, run.class_loss_weight,
+                run.dfl_loss_weight, run.mask_loss_weight);
+    ImGui::Text("Loss phase: %s", run.loss_phase.c_str());
+    ImGui::Text("Epochs: %d / %d | samples %d | instances %d",
+                run.completed_epochs, run.configured_epochs,
+                run.train_sample_count, run.train_instance_count);
+    const float progress = run.configured_epochs > 0
+                               ? std::clamp(
+                                     static_cast<float>(run.completed_epochs) /
+                                         run.configured_epochs,
+                                     0.0f, 1.0f)
+                               : 0.0f;
+    ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
+
+    std::vector<float> totalLoss;
+    std::vector<float> learningRates;
+    totalLoss.reserve(run.epochs.size());
+    learningRates.reserve(run.epochs.size());
+    for (const CxTorchTrainingEpochMetric &metric : run.epochs) {
+      totalLoss.push_back(static_cast<float>(metric.total_loss));
+      learningRates.push_back(static_cast<float>(metric.learning_rate));
+    }
+    if (!totalLoss.empty())
+      ImGui::PlotLines("Loss by epoch", totalLoss.data(),
+                       static_cast<int>(totalLoss.size()), 0, nullptr,
+                       FLT_MAX, FLT_MAX, ImVec2(-1.0f, 80.0f));
+    if (!learningRates.empty())
+      ImGui::PlotLines("LR by epoch", learningRates.data(),
+                       static_cast<int>(learningRates.size()), 0, nullptr,
+                       0.0f, FLT_MAX, ImVec2(-1.0f, 48.0f));
+    if (run.epochs.size() >= 2) {
+      int decreasingSteps = 0;
+      for (std::size_t i = 1; i < run.epochs.size(); ++i) {
+        if (run.epochs[i].total_loss < run.epochs[i - 1].total_loss)
+          ++decreasingSteps;
+      }
+      const double firstLoss = run.epochs.front().total_loss;
+      const double finalLoss = run.epochs.back().total_loss;
+      const double reduction = firstLoss != 0.0
+                                   ? (firstLoss - finalLoss) / firstLoss * 100.0
+                                   : 0.0;
+      ImGui::Text("Curve: first %.6g | final %.6g | reduction %.2f%% | "
+                  "decreasing steps %d/%d",
+                  firstLoss, finalLoss, reduction, decreasingSteps,
+                  static_cast<int>(run.epochs.size() - 1));
+    }
+
+    if (ImGui::BeginTable("evidence_training_metrics", 7,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY,
+                          ImVec2(-1.0f, 180.0f))) {
+      ImGui::TableSetupColumn("Epoch");
+      ImGui::TableSetupColumn("LR");
+      ImGui::TableSetupColumn("Total");
+      ImGui::TableSetupColumn("Box");
+      ImGui::TableSetupColumn("Class");
+      ImGui::TableSetupColumn("DFL");
+      ImGui::TableSetupColumn("Mask");
+      ImGui::TableHeadersRow();
+      for (const CxTorchTrainingEpochMetric &metric : run.epochs) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", metric.epoch);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%.3g", metric.learning_rate);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%.5f", metric.total_loss);
+        ImGui::TableSetColumnIndex(3);
+        ImGui::Text("%.5f", metric.box_loss);
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%.5f", metric.class_loss);
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%.5f", metric.dfl_loss);
+        ImGui::TableSetColumnIndex(6);
+        ImGui::Text("%.5f", metric.mask_loss);
+      }
+      ImGui::EndTable();
+    }
+    if (ImGui::TreeNodeEx("Parameter Update Map by Epoch",
+                          ImGuiTreeNodeFlags_DefaultOpen)) {
+      if (ImGui::BeginTable("evidence_parameter_update_map", 6,
+                            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_ScrollY,
+                            ImVec2(-1.0f, 190.0f))) {
+        ImGui::TableSetupColumn("Epoch");
+        ImGui::TableSetupColumn("Group");
+        ImGui::TableSetupColumn("Grad mean");
+        ImGui::TableSetupColumn("Grad norm");
+        ImGui::TableSetupColumn("Update norm");
+        ImGui::TableSetupColumn("Update / Param");
+        ImGui::TableHeadersRow();
+        for (const CxTorchTrainingEpochMetric &metric : run.epochs) {
+          for (const auto &group : metric.parameter_groups) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", metric.epoch);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(group.name.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.4g", group.grad_mean);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.4g", group.grad_norm);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.4g", group.update_norm);
+            ImGui::TableSetColumnIndex(5);
+            ImGui::Text("%.4g", group.param_norm > 0.0
+                                      ? group.update_norm / group.param_norm
+                                      : 0.0);
+          }
+        }
+        ImGui::EndTable();
+      }
+      ImGui::TreePop();
+    }
+  } else {
+    ImGui::TextDisabled("Training trace is not available for this case.");
+  }
+
+  m_manualTest.script_evidence_thumb_load_count_this_frame = 0;
+  DrawTorchTrainingImageRail("train", "Training Set / 训练集");
+  DrawTorchTrainingImageRail("val", "Validation Set / 验证集");
+  DrawTorchTrainingImageRail("test", "Test Set / 测试集");
+
+  if (m_manualTest.selected_torch_training_image >= 0 &&
+      m_manualTest.selected_torch_training_image <
+          static_cast<int>(m_manualTest.torch_training_images.size())) {
+    const TorchTrainingImageItem &item =
+        m_manualTest.torch_training_images[static_cast<std::size_t>(
+            m_manualTest.selected_torch_training_image)];
+    ImGui::Text("Selected annotation: %s | class boxes %d",
+                item.image_id.c_str(), item.annotation_shape_count);
+    if (ImGui::BeginTable("evidence_annotation_metrics", 3,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg,
+                          ImVec2(-1.0f, 105.0f))) {
+      ImGui::TableSetupColumn("Class");
+      ImGui::TableSetupColumn("Shape");
+      ImGui::TableSetupColumn("Bounds");
+      ImGui::TableHeadersRow();
+      for (const TorchTrainingAnnotationShapeSnapshot &shape :
+           item.annotation_shapes) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", shape.class_id);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(shape.shape_kind.c_str());
+        ImGui::TableSetColumnIndex(2);
+        if (shape.points_xy.size() >= 6)
+          ImGui::Text("%.0f,%.0f - %.0f,%.0f", shape.points_xy[0],
+                      shape.points_xy[1], shape.points_xy[4],
+                      shape.points_xy[5]);
+        else
+          ImGui::TextUnformatted("-");
+      }
+      ImGui::EndTable();
+    }
+  }
+}
+
 static bool SaveEvidenceManualReviewLocal(const ScriptEvidenceThumb &thumb,
                                           const std::string &decision,
                                           std::string &savedPath,
@@ -5301,8 +6445,13 @@ static bool SaveEvidenceManualReviewLocal(const ScriptEvidenceThumb &thumb,
     return false;
   }
 
+  const std::string reviewItemLabel = StripEvidenceCandidateDisplaySuffixLocal(
+      thumb.script_id.empty() ? thumb.case_id : thumb.script_id);
+
   out << "{\n"
       << "  \"schema\": \"cxvision.manual_gui_review.v1\",\n"
+      << "  \"review_item_label\": \"" << JsonEscape(reviewItemLabel)
+      << "\",\n"
       << "  \"case_id\": \"" << JsonEscape(thumb.case_id) << "\",\n"
       << "  \"script_id\": \"" << JsonEscape(thumb.script_id) << "\",\n"
       << "  \"image_id\": \"" << JsonEscape(thumb.image_id) << "\",\n"
@@ -5310,13 +6459,13 @@ static bool SaveEvidenceManualReviewLocal(const ScriptEvidenceThumb &thumb,
       << "  \"tool\": \"" << JsonEscape(thumb.tool) << "\",\n"
       << "  \"decision\": \"" << JsonEscape(decision) << "\",\n"
       << "  \"reviewed_at\": \"" << JsonEscape(CurrentTimestamp()) << "\",\n"
-      << "  \"review_source\": \"ManualStateTestConsole/To Verify\",\n"
+      << "  \"review_source\": \"Manual Review / Evidence > To Verify\",\n"
       << "  \"promotion_allowed\": false,\n"
       << "  \"image_path\": \"" << JsonEscape(thumb.image_path) << "\",\n"
       << "  \"script_path\": \"" << JsonEscape(thumb.script_path) << "\",\n"
       << "  \"parameter_summary\": \""
       << JsonEscape(thumb.parameter_summary) << "\",\n"
-      << "  \"review_note\": \"Decision saved by a human from the Evidence To Verify row; promotion remains blocked.\"\n"
+      << "  \"review_note\": \"Decision saved by a human from Manual Review / Evidence > To Verify using review_item_label; promotion remains blocked.\"\n"
       << "}\n";
   out.flush();
   if (!out) {
@@ -5346,62 +6495,76 @@ static std::string TorchDatasetFileStemLocal(
 static bool RasterizeTorchTrainingShapeLocal(
     const TorchTrainingAnnotationShapeSnapshot &shape, cv::Mat &mask,
     bool &weakBoxSupervision) {
+  weakBoxSupervision = false;
   if (shape.result_element)
     return false;
-  if (shape.shape_kind == "PolylineShape" && !shape.closed)
+  std::string semanticRole = shape.semantic_role;
+  std::transform(semanticRole.begin(), semanticRole.end(), semanticRole.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  if (shape.shape_kind == "RectShape" ||
+      semanticRole.find("bbox") != std::string::npos)
+    return false;
+  if (shape.shape_kind != "PolylineShape" || !shape.closed)
     return false;
 
   std::vector<cv::Point> points;
   for (std::size_t i = 1; i < shape.points_xy.size(); i += 2) {
-    points.emplace_back(
-        static_cast<int>(std::lround(shape.points_xy[i - 1])),
-        static_cast<int>(std::lround(shape.points_xy[i])));
+    const double x = shape.points_xy[i - 1];
+    const double y = shape.points_xy[i];
+    if (!std::isfinite(x) || !std::isfinite(y) || x < 0.0 || y < 0.0 ||
+        x >= mask.cols || y >= mask.rows)
+      return false;
+    const cv::Point point(static_cast<int>(std::lround(x)),
+                          static_cast<int>(std::lround(y)));
+    if (points.empty() || points.back() != point)
+      points.push_back(point);
+  }
+  if (points.size() > 3 && points.front() == points.back())
+    points.pop_back();
+  if (points.size() < 3 || std::abs(cv::contourArea(points)) < 1.0)
+    return false;
+
+  auto orientation = [](const cv::Point &a, const cv::Point &b,
+                        const cv::Point &c) {
+    const long long value =
+        static_cast<long long>(b.y - a.y) * (c.x - b.x) -
+        static_cast<long long>(b.x - a.x) * (c.y - b.y);
+    return (value > 0) - (value < 0);
+  };
+  auto onSegment = [](const cv::Point &a, const cv::Point &b,
+                      const cv::Point &c) {
+    return b.x >= std::min(a.x, c.x) && b.x <= std::max(a.x, c.x) &&
+           b.y >= std::min(a.y, c.y) && b.y <= std::max(a.y, c.y);
+  };
+  auto intersects = [&](const cv::Point &a, const cv::Point &b,
+                        const cv::Point &c, const cv::Point &d) {
+    const int o1 = orientation(a, b, c);
+    const int o2 = orientation(a, b, d);
+    const int o3 = orientation(c, d, a);
+    const int o4 = orientation(c, d, b);
+    if (o1 != o2 && o3 != o4)
+      return true;
+    return (o1 == 0 && onSegment(a, c, b)) ||
+           (o2 == 0 && onSegment(a, d, b)) ||
+           (o3 == 0 && onSegment(c, a, d)) ||
+           (o4 == 0 && onSegment(c, b, d));
+  };
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const std::size_t iNext = (i + 1) % points.size();
+    for (std::size_t j = i + 1; j < points.size(); ++j) {
+      const std::size_t jNext = (j + 1) % points.size();
+      if (i == j || iNext == j || jNext == i)
+        continue;
+      if (intersects(points[i], points[iNext], points[j], points[jNext]))
+        return false;
+    }
   }
 
-  if (shape.shape_kind == "RectShape") {
-    if (points.size() >= 3) {
-      cv::fillConvexPoly(mask, points, cv::Scalar(255), cv::LINE_8);
-    } else {
-      cv::rectangle(
-          mask,
-          cv::Point(static_cast<int>(
-                        std::lround(shape.center_x - shape.radius_x)),
-                    static_cast<int>(
-                        std::lround(shape.center_y - shape.radius_y))),
-          cv::Point(static_cast<int>(
-                        std::lround(shape.center_x + shape.radius_x)),
-                    static_cast<int>(
-                        std::lround(shape.center_y + shape.radius_y))),
-          cv::Scalar(255), cv::FILLED);
-    }
-    weakBoxSupervision = true;
-    return true;
-  }
-  if (shape.shape_kind == "CircleShape" && shape.radius > 0.0) {
-    cv::circle(mask,
-               cv::Point(static_cast<int>(std::lround(shape.center_x)),
-                         static_cast<int>(std::lround(shape.center_y))),
-               std::max(1, static_cast<int>(std::lround(shape.radius))),
-               cv::Scalar(255), cv::FILLED, cv::LINE_8);
-    return true;
-  }
-  if (shape.shape_kind == "EllipseShape" && shape.radius_x > 0.0 &&
-      shape.radius_y > 0.0) {
-    cv::ellipse(
-        mask,
-        cv::Point(static_cast<int>(std::lround(shape.center_x)),
-                  static_cast<int>(std::lround(shape.center_y))),
-        cv::Size(std::max(1, static_cast<int>(std::lround(shape.radius_x))),
-                 std::max(1, static_cast<int>(std::lround(shape.radius_y)))),
-        shape.angle, 0.0, 360.0, cv::Scalar(255), cv::FILLED, cv::LINE_8);
-    return true;
-  }
-  if (shape.shape_kind == "PolylineShape" && points.size() >= 3) {
-    cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{points},
-                 cv::Scalar(255), cv::LINE_8);
-    return true;
-  }
-  return false;
+  cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{points},
+               cv::Scalar(255), cv::LINE_8);
+  return cv::countNonZero(mask) > 0;
 }
 
 bool ViewController::ExportTorchTrainingLabelPackage(
@@ -5439,17 +6602,10 @@ bool ViewController::ExportTorchTrainingLabelPackage(
     int rasterMaskCount = 0;
     int rejectedShapeCount = 0;
     int weakMaskCount = 0;
-    std::ostringstream json;
-    json << "{\n";
-    json << "  \"schema\": \"cxvision.torch.training_dataset.v2\",\n";
-    json << "  \"status\": \"DATASET_EXPORT_READY_TO_VERIFY\",\n";
-    json << "  \"training_mode\": \"raster_mask_dataset\",\n";
-    json << "  \"dataset_consumed_by_current_runtime\": true,\n";
-    json << "  \"segmentation_mask_export_ready\": true,\n";
-    json << "  \"run_id\": \"" << JsonEscape(runId) << "\",\n";
-    json << "  \"evidence_case_id\": \""
-         << JsonEscape(m_manualTest.current_evidence_selection.case_id) << "\",\n";
-    json << "  \"images\": [\n";
+    int bboxOnlyRejectedCount = 0;
+    int invalidPolygonCount = 0;
+    int trainImageWithoutMaskCount = 0;
+    std::ostringstream imageRows;
 
     for (std::size_t imageIndex = 0;
          imageIndex < m_manualTest.torch_training_images.size();
@@ -5471,6 +6627,15 @@ bool ViewController::ExportTorchTrainingLabelPackage(
         for (const TorchTrainingAnnotationShapeSnapshot& shape :
              item.annotation_shapes)
         {
+            std::string semanticRole = shape.semantic_role;
+            std::transform(semanticRole.begin(), semanticRole.end(),
+                semanticRole.begin(), [](unsigned char ch) {
+                  return static_cast<char>(std::tolower(ch));
+                });
+            const bool bboxOnly = shape.shape_kind == "RectShape" ||
+                semanticRole.find("bbox") != std::string::npos;
+            if (bboxOnly)
+                ++bboxOnlyRejectedCount;
             if (imageExists &&
                 RasterizeTorchTrainingShapeLocal(
                     shape, mask, weakBoxSupervision))
@@ -5480,8 +6645,12 @@ bool ViewController::ExportTorchTrainingLabelPackage(
             else
             {
                 ++rejectedShapeCount;
+                if (!bboxOnly)
+                    ++invalidPolygonCount;
             }
         }
+        if (item.split == "train" && acceptedShapeCount == 0)
+            ++trainImageWithoutMaskCount;
 
         std::string maskPath;
         std::string overlayPath;
@@ -5544,31 +6713,31 @@ bool ViewController::ExportTorchTrainingLabelPackage(
                 ++weakMaskCount;
         }
         if (imageIndex != 0)
-            json << ",\n";
-        json << "    {\n";
-        json << "      \"image_id\": \"" << JsonEscape(item.image_id) << "\",\n";
-        json << "      \"image_path\": \"" << JsonEscape(item.image_path) << "\",\n";
-        json << "      \"image_exists\": " << (imageExists ? "true" : "false") << ",\n";
-        json << "      \"width\": " << (imageExists ? image.cols : 0) << ",\n";
-        json << "      \"height\": " << (imageExists ? image.rows : 0) << ",\n";
-        json << "      \"case_id\": \"" << JsonEscape(item.case_id) << "\",\n";
-        json << "      \"target_id\": \"" << JsonEscape(item.target_id) << "\",\n";
-        json << "      \"source\": \"" << JsonEscape(item.source) << "\",\n";
-        json << "      \"split\": \"" << JsonEscape(item.split) << "\",\n";
-        json << "      \"label\": \"" << JsonEscape(item.label) << "\",\n";
-        json << "      \"annotation_status\": \"" << JsonEscape(item.annotation_status) << "\",\n";
-        json << "      \"mask_path\": \"" << JsonEscape(maskPath) << "\",\n";
-        json << "      \"overlay_path\": \"" << JsonEscape(overlayPath) << "\",\n";
-        json << "      \"mask_supervision\": \""
-             << (weakBoxSupervision ? "weak_bbox" : "precise_region")
-             << "\",\n";
-        json << "      \"foreground_ratio\": " << foregroundRatio << ",\n";
-        json << "      \"positive_point\": [" << positivePoint.x << ","
-             << positivePoint.y << "],\n";
-        json << "      \"negative_point\": [" << negativePoint.x << ","
-             << negativePoint.y << "],\n";
-        json << "      \"accepted_shape_count\": " << acceptedShapeCount << ",\n";
-        json << "      \"shapes\": [";
+            imageRows << ",\n";
+        imageRows << "    {\n";
+        imageRows << "      \"image_id\": \"" << JsonEscape(item.image_id) << "\",\n";
+        imageRows << "      \"image_path\": \"" << JsonEscape(item.image_path) << "\",\n";
+        imageRows << "      \"image_exists\": " << (imageExists ? "true" : "false") << ",\n";
+        imageRows << "      \"width\": " << (imageExists ? image.cols : 0) << ",\n";
+        imageRows << "      \"height\": " << (imageExists ? image.rows : 0) << ",\n";
+        imageRows << "      \"case_id\": \"" << JsonEscape(item.case_id) << "\",\n";
+        imageRows << "      \"target_id\": \"" << JsonEscape(item.target_id) << "\",\n";
+        imageRows << "      \"source\": \"" << JsonEscape(item.source) << "\",\n";
+        imageRows << "      \"split\": \"" << JsonEscape(item.split) << "\",\n";
+        imageRows << "      \"label\": \"" << JsonEscape(item.label) << "\",\n";
+        imageRows << "      \"annotation_status\": \"" << JsonEscape(item.annotation_status) << "\",\n";
+        imageRows << "      \"mask_path\": \"" << JsonEscape(maskPath) << "\",\n";
+        imageRows << "      \"overlay_path\": \"" << JsonEscape(overlayPath) << "\",\n";
+        imageRows << "      \"mask_supervision\": \""
+                  << (acceptedShapeCount > 0 ? "polygon" : "rejected")
+                  << "\",\n";
+        imageRows << "      \"foreground_ratio\": " << foregroundRatio << ",\n";
+        imageRows << "      \"positive_point\": [" << positivePoint.x << ","
+                  << positivePoint.y << "],\n";
+        imageRows << "      \"negative_point\": [" << negativePoint.x << ","
+                  << negativePoint.y << "],\n";
+        imageRows << "      \"accepted_shape_count\": " << acceptedShapeCount << ",\n";
+        imageRows << "      \"shapes\": [";
         for (std::size_t shapeIndex = 0;
              shapeIndex < item.annotation_shapes.size();
              ++shapeIndex)
@@ -5587,9 +6756,10 @@ bool ViewController::ExportTorchTrainingLabelPackage(
                 shape.semantic_role.find("bbox") != std::string::npos)
                 ++bboxCandidateCount;
             if (shapeIndex != 0)
-                json << ",";
-            json << "\n        {\"stable_ref\":\"" << JsonEscape(shape.stable_ref)
-                 << "\",\"shape_kind\":\"" << JsonEscape(shape.shape_kind)
+                imageRows << ",";
+            imageRows << "\n        {\"stable_ref\":\"" << JsonEscape(shape.stable_ref)
+                 << "\",\"class_id\":" << shape.class_id
+                 << ",\"shape_kind\":\"" << JsonEscape(shape.shape_kind)
                  << "\",\"semantic_role\":\"" << JsonEscape(shape.semantic_role)
                  << "\",\"owner_binding\":\"" << JsonEscape(shape.owner_binding)
                  << "\",\"closed\":" << (shape.closed ? "true" : "false")
@@ -5605,15 +6775,34 @@ bool ViewController::ExportTorchTrainingLabelPackage(
                  ++pointIndex)
             {
                 if (pointIndex != 0)
-                    json << ",";
-                json << shape.points_xy[pointIndex];
+                    imageRows << ",";
+                imageRows << shape.points_xy[pointIndex];
             }
-            json << "]}";
+            imageRows << "]}";
         }
         if (!item.annotation_shapes.empty())
-            json << "\n      ";
-        json << "]\n    }";
+            imageRows << "\n      ";
+        imageRows << "]\n    }";
     }
+    const bool datasetReady = imageCount > 0 && imageMissingCount == 0 &&
+        rasterMaskCount > 0 && bboxOnlyRejectedCount == 0 &&
+        invalidPolygonCount == 0 && trainImageWithoutMaskCount == 0;
+    const std::string datasetStatus = datasetReady
+        ? "DATASET_EXPORT_READY_TO_VERIFY"
+        : "DATASET_PREFLIGHT_FAIL_REAL_POLYGON_REQUIRED";
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"schema\": \"cxvision.torch.training_dataset.v2\",\n";
+    json << "  \"status\": \"" << datasetStatus << "\",\n";
+    json << "  \"training_mode\": \"polygon_mask_dataset\",\n";
+    json << "  \"dataset_consumed_by_current_runtime\": "
+         << (datasetReady ? "true" : "false") << ",\n";
+    json << "  \"segmentation_mask_export_ready\": "
+         << (datasetReady ? "true" : "false") << ",\n";
+    json << "  \"run_id\": \"" << JsonEscape(runId) << "\",\n";
+    json << "  \"evidence_case_id\": \""
+         << JsonEscape(m_manualTest.current_evidence_selection.case_id) << "\",\n";
+    json << "  \"images\": [\n" << imageRows.str();
     json << "\n  ],\n";
     json << "  \"summary\": {\n";
     json << "    \"image_count\": " << imageCount << ",\n";
@@ -5623,6 +6812,10 @@ bool ViewController::ExportTorchTrainingLabelPackage(
     json << "    \"bbox_candidate_count\": " << bboxCandidateCount << ",\n";
     json << "    \"raster_mask_count\": " << rasterMaskCount << ",\n";
     json << "    \"weak_mask_count\": " << weakMaskCount << ",\n";
+    json << "    \"bbox_only_rejected_count\": " << bboxOnlyRejectedCount << ",\n";
+    json << "    \"invalid_polygon_count\": " << invalidPolygonCount << ",\n";
+    json << "    \"train_image_without_mask_count\": "
+         << trainImageWithoutMaskCount << ",\n";
     json << "    \"rejected_shape_count\": " << rejectedShapeCount << "\n";
     json << "  }\n}";
 
@@ -5635,25 +6828,25 @@ bool ViewController::ExportTorchTrainingLabelPackage(
     }
 
     packagePath = path.string();
-    reason = "DATASET_EXPORT_READY_TO_VERIFY: images=" +
+    reason = datasetStatus + ": images=" +
         std::to_string(imageCount) + " masks=" +
-        std::to_string(rasterMaskCount) + " weak_masks=" +
-        std::to_string(weakMaskCount) + " rejected_shapes=" +
+        std::to_string(rasterMaskCount) + " bbox_only_rejected=" +
+        std::to_string(bboxOnlyRejectedCount) + " invalid_polygons=" +
+        std::to_string(invalidPolygonCount) + " rejected_shapes=" +
         std::to_string(rejectedShapeCount);
-    m_manualTest.torch_training_image_status =
-        "DATASET_EXPORT_READY_TO_VERIFY";
+    m_manualTest.torch_training_image_status = datasetStatus;
     m_manualTest.torch_training_image_reason = reason + " path=" + packagePath;
     CXLOG_INFO(
         "TorchTrainingImageSet",
         "training_dataset_exported",
-        "DATASET_EXPORT_READY_TO_VERIFY",
+        datasetStatus,
         "path=" + packagePath +
             " images=" + std::to_string(imageCount) +
             " shapes=" + std::to_string(shapeCount) +
             " closed_regions=" + std::to_string(closedRegionCount) +
             " bbox_candidates=" + std::to_string(bboxCandidateCount) +
             " masks=" + std::to_string(rasterMaskCount));
-    return rasterMaskCount > 0;
+    return datasetReady;
 }
 
 bool ViewController::RunTorchTrainingLabelPackageSmoke(
@@ -5680,43 +6873,143 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
         return false;
     }
 
-    CxEvidenceSelfTestBatchRequest batch;
-    batch.run_id = runId;
-    batch.out_dir = outDir.string();
-    batch.tool_filter = "TorchTask";
-    std::string batchReason;
-    if (!BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(batch, batchReason))
-    {
-        reason = "cannot resolve Torch evidence rows: " + batchReason;
-        return false;
-    }
-
+    CxEvidenceSelfTestRequest directRequest;
     const CxEvidenceSelfTestRequest* selectedRequest = nullptr;
-    for (const CxEvidenceSelfTestRequest& item : batch.cases)
+    bool directDatasetPrepared = false;
+    const std::filesystem::path preferredPath =
+        ResolveWorkspaceFile(preferredScriptId);
+    if (!preferredScriptId.empty() &&
+        preferredPath.extension() == ".cxsc" &&
+        std::filesystem::is_regular_file(preferredPath))
     {
-        if (!preferredScriptId.empty() && item.script_id == preferredScriptId)
+        CxScriptEvidenceChainRuntime chain;
+        std::string loadReason;
+        if (!LoadCxScriptEvidenceChainFile(
+                preferredPath.string(), chain, loadReason))
         {
-            selectedRequest = &item;
-            break;
+            reason = "cannot load requested Evidence dataset file: " + loadReason;
+            return false;
         }
+        const auto evidenceCase = std::find_if(
+            chain.cases.begin(), chain.cases.end(),
+            [](const CxScriptEvidenceCase& item) {
+              return NormalizeEvidenceToolTypeLocal(item.tool) == "TorchTask" &&
+                     !item.dataset_images.empty();
+            });
+        if (evidenceCase == chain.cases.end())
+        {
+            reason = "requested Evidence dataset file has no TorchTask dataset case";
+            return false;
+        }
+
+        std::vector<CxEvidenceAnnotationBinding> annotations;
+        for (const CxScriptEvidenceAnnotation& source : evidenceCase->annotations)
+        {
+            CxEvidenceAnnotationBinding binding;
+            binding.image_id = source.image_id;
+            binding.shape_kind = source.shape_kind;
+            binding.semantic_role = source.semantic_role;
+            binding.owner_binding = source.owner_binding;
+            binding.label = source.label;
+            binding.class_id = source.class_id;
+            binding.x0 = source.x0;
+            binding.y0 = source.y0;
+            binding.x1 = source.x1;
+            binding.y1 = source.y1;
+            binding.normalized = source.normalized;
+            binding.closed = source.closed;
+            binding.points_xy = source.points_xy;
+            annotations.push_back(std::move(binding));
+        }
+
+        ClearTorchTrainingImageSetForEvidenceSyncLocal(
+            m_manualTest, "load Training Image Set from Evidence dataset file");
+        m_manualTest.active_case_id = evidenceCase->evidence_id;
+        m_manualTest.active_target_id = evidenceCase->target_id;
+        for (const CxScriptEvidenceDatasetImage& source :
+             evidenceCase->dataset_images)
+        {
+            AddTorchTrainingImageFromPath(
+                source.image_path, source.image_id, source.split,
+                source.label, source.source);
+            TorchTrainingImageItem& added =
+                m_manualTest.torch_training_images.back();
+            added.case_id = evidenceCase->evidence_id;
+            added.target_id = evidenceCase->target_id;
+            ApplyEvidenceAnnotationsToTorchTrainingItemLocal(added, annotations);
+        }
+        const auto annotated = std::find_if(
+            m_manualTest.torch_training_images.begin(),
+            m_manualTest.torch_training_images.end(),
+            [](const TorchTrainingImageItem& item) {
+              return !item.annotation_shapes.empty();
+            });
+        if (annotated == m_manualTest.torch_training_images.end())
+        {
+            reason = "Evidence dataset has no annotations; GUI annotation is required";
+            return false;
+        }
+        m_manualTest.selected_torch_training_image = static_cast<int>(
+            std::distance(m_manualTest.torch_training_images.begin(), annotated));
+        directRequest.case_id = evidenceCase->evidence_id;
+        directRequest.script_id = DeriveEvidenceScriptIdLocal(evidenceCase->script_id);
+        directRequest.script_path = evidenceCase->script_id;
+        directRequest.image_id = evidenceCase->image_id;
+        directRequest.image_path = annotated->image_path;
+        directRequest.target_id = evidenceCase->target_id;
+        directRequest.tool = "TorchTask";
+        selectedRequest = &directRequest;
+        directDatasetPrepared = true;
     }
-    if (selectedRequest == nullptr)
+    else
     {
+        CxEvidenceSelfTestBatchRequest batch;
+        batch.run_id = runId;
+        batch.out_dir = outDir.string();
+        batch.tool_filter = "TorchTask";
+        std::string batchReason;
+        if (!BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(batch, batchReason))
+        {
+            reason = "cannot resolve Torch evidence rows: " + batchReason;
+            return false;
+        }
         for (const CxEvidenceSelfTestRequest& item : batch.cases)
         {
-            std::string key = item.script_id + " " + item.script_path + " " + item.tool;
-            std::transform(key.begin(), key.end(), key.begin(),
-                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-            if (key.find("torch") != std::string::npos && !item.image_path.empty())
+            if (!preferredScriptId.empty() &&
+                (item.script_id == preferredScriptId ||
+                 item.case_id == preferredScriptId ||
+                 item.script_path == preferredScriptId))
             {
-                selectedRequest = &item;
+                directRequest = item;
+                selectedRequest = &directRequest;
                 break;
+            }
+        }
+        if (selectedRequest == nullptr && preferredScriptId.empty())
+        {
+            for (const CxEvidenceSelfTestRequest& item : batch.cases)
+            {
+                std::string key =
+                    item.script_id + " " + item.script_path + " " + item.tool;
+                std::transform(key.begin(), key.end(), key.begin(),
+                    [](unsigned char ch) {
+                      return static_cast<char>(std::tolower(ch));
+                    });
+                if (key.find("torch") != std::string::npos &&
+                    !item.image_path.empty())
+                {
+                    directRequest = item;
+                    selectedRequest = &directRequest;
+                    break;
+                }
             }
         }
     }
     if (selectedRequest == nullptr)
     {
-        reason = "no Torch evidence case with an image is available for label-package smoke";
+        reason = preferredScriptId.empty()
+            ? "no Torch evidence case with an image is available for label-package smoke"
+            : "requested Torch evidence script/case was not found: " + preferredScriptId;
         return false;
     }
 
@@ -5729,8 +7022,9 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
 
     CxEvidenceSelectionSnapshot snapshot;
     std::string stageReason;
-    if (!ResolveEvidenceSelfTestSnapshot(*selectedRequest, snapshot, stageReason) ||
-        !ApplyEvidenceSelectionSnapshotToManualContext(snapshot, false, stageReason))
+    if (!directDatasetPrepared &&
+        (!ResolveEvidenceSelfTestSnapshot(*selectedRequest, snapshot, stageReason) ||
+         !ApplyEvidenceSelectionSnapshotToManualContext(snapshot, false, stageReason)))
     {
         reason = "Torch evidence selection/load failed: " + stageReason;
         return false;
@@ -5738,7 +7032,10 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
     // The command-line smoke intentionally has no GLFW/OpenGL Image View.
     // Reuse the same loaded-image state path used by Evidence selftests;
     // actual image-view drawing/pointer behavior remains covered by GUI L2.
-    if (!LoadImageForEvidenceSelfTest(snapshot.image_path, stageReason))
+    const std::string selectedImagePath = directDatasetPrepared
+        ? selectedRequest->image_path
+        : snapshot.image_path;
+    if (!LoadImageForEvidenceSelfTest(selectedImagePath, stageReason))
     {
         reason = "headless Image View state load failed: " + stageReason;
         return false;
@@ -5751,7 +7048,7 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
         "TorchTrainingImageSet",
         "training_label_package_smoke_dataset_reused",
         "ready",
-        "case_id=" + snapshot.case_id +
+        "case_id=" + selectedRequest->case_id +
             " image_count=" +
             std::to_string(m_manualTest.torch_training_images.size()));
     if (m_manualTest.torch_training_images.empty())
@@ -5765,6 +7062,23 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
         imageIndex >= static_cast<int>(m_manualTest.torch_training_images.size()))
     {
         imageIndex = 0;
+    }
+    if (m_manualTest.torch_training_images[static_cast<std::size_t>(imageIndex)]
+            .annotation_shapes.empty())
+    {
+        const auto annotated = std::find_if(
+            m_manualTest.torch_training_images.begin(),
+            m_manualTest.torch_training_images.end(),
+            [](const TorchTrainingImageItem& candidate) {
+              return !candidate.annotation_shapes.empty();
+            });
+        if (annotated == m_manualTest.torch_training_images.end())
+        {
+            reason = "Training Image Set has no annotations; GUI annotation is required";
+            return false;
+        }
+        imageIndex = static_cast<int>(std::distance(
+            m_manualTest.torch_training_images.begin(), annotated));
     }
     m_manualTest.selected_torch_training_image = imageIndex;
     RestoreTorchTrainingAnnotationState(
@@ -5790,37 +7104,11 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
         return false;
     }
 
-    const double x0 = std::max(0.0, static_cast<double>(image.cols) * 0.20);
-    const double y0 = std::max(0.0, static_cast<double>(image.rows) * 0.20);
-    const double x1 = std::max(x0 + 2.0, static_cast<double>(image.cols) * 0.60);
-    const double y1 = std::max(y0 + 2.0, static_cast<double>(image.rows) * 0.60);
-    const std::string stableRef = "torch_label_package_smoke_bbox";
-    m_annotationLayer.UpsertShape(
-        stableRef,
-        "TorchDataset",
-        item.image_id,
-        "label_bbox",
-        "smoke_annotation",
-        true,
-        false,
-        std::make_unique<RectShape>(x0, y0, x1, y1));
-    item.label = "anomaly";
-    CaptureCurrentTorchTrainingAnnotationState();
-
-    bool shapeCaptured = false;
-    for (const TorchTrainingAnnotationShapeSnapshot& shape : item.annotation_shapes)
-    {
-        if (shape.stable_ref == stableRef && shape.shape_kind == "RectShape")
-        {
-            shapeCaptured = true;
-            break;
-        }
-    }
-    if (!shapeCaptured)
-    {
-        reason = "AnnotationLayer -> Training Image Set shape snapshot failed";
-        return false;
-    }
+    const std::string stableRef = item.annotation_shapes.front().stable_ref;
+    std::size_t annotationShapeCount = 0;
+    for (const TorchTrainingImageItem& candidate :
+         m_manualTest.torch_training_images)
+        annotationShapeCount += candidate.annotation_shapes.size();
 
     std::string exportReason;
     if (!ExportTorchTrainingLabelPackage(packagePath, exportReason))
@@ -5840,11 +7128,12 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
         std::string::npos;
     const bool imageOk = packageText.find(JsonEscape(item.image_path)) !=
         std::string::npos;
-    const bool labelOk = packageText.find("\"label\": \"anomaly\"") !=
-        std::string::npos;
+    const bool labelOk = !item.label.empty() &&
+        packageText.find("\"label\": \"" + JsonEscape(item.label) + "\"") !=
+            std::string::npos;
     const bool maskOk =
         packageText.find("\"mask_path\": \"") != std::string::npos &&
-        packageText.find("\"raster_mask_count\": 1") != std::string::npos;
+        packageText.find("\"raster_mask_count\": 0") == std::string::npos;
     const bool promptOk =
         packageText.find("\"positive_point\": [") != std::string::npos &&
         packageText.find("\"negative_point\": [") != std::string::npos;
@@ -5863,6 +7152,7 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
            << "  \"image_path\": \"" << JsonEscape(item.image_path) << "\",\n"
            << "  \"label\": \"" << JsonEscape(item.label) << "\",\n"
            << "  \"shape_ref\": \"" << stableRef << "\",\n"
+           << "  \"annotation_shape_count\": " << annotationShapeCount << ",\n"
            << "  \"package_path\": \"" << JsonEscape(packagePath) << "\",\n"
            << "  \"checks\": {\n"
            << "    \"schema\": " << (schemaOk ? "true" : "false") << ",\n"
@@ -5897,7 +7187,7 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
 
 void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::SetNextWindowPos(ImVec2(1380, 740), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(620, 420), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(720, 760), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin("Torch Training Image Set", nullptr,
                     ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
@@ -5920,6 +7210,82 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::Text("status: %s", m_manualTest.torch_training_image_status.c_str());
   ImGui::TextWrapped("reason: %s",
                      m_manualTest.torch_training_image_reason.c_str());
+
+  const CxTorchTrainingRunBinding &trainingRun =
+      m_manualTest.torch_training_run;
+  if (trainingRun.available &&
+      ImGui::CollapsingHeader("Training Run", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("status: %s", trainingRun.status.c_str());
+    ImGui::Text("optimizer: %s | learning rate: %.8g",
+                trainingRun.optimizer.c_str(), trainingRun.learning_rate);
+    ImGui::Text("schedule: %s | min LR: %.8g | weight decay: %.8g",
+                trainingRun.lr_schedule.c_str(),
+                trainingRun.min_learning_rate, trainingRun.weight_decay);
+    ImGui::Text("loss weights box/class/DFL/mask: %.4g / %.4g / %.4g / %.4g",
+                trainingRun.box_loss_weight, trainingRun.class_loss_weight,
+                trainingRun.dfl_loss_weight, trainingRun.mask_loss_weight);
+    ImGui::Text("epochs: %d / %d | samples: %d | instances: %d",
+                trainingRun.completed_epochs, trainingRun.configured_epochs,
+                trainingRun.train_sample_count,
+                trainingRun.train_instance_count);
+    const float progress = trainingRun.configured_epochs > 0
+                               ? std::clamp(
+                                     static_cast<float>(trainingRun.completed_epochs) /
+                                         trainingRun.configured_epochs,
+                                     0.0f, 1.0f)
+                               : 0.0f;
+    ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
+
+    std::vector<float> totalLoss;
+    std::vector<float> maskLoss;
+    totalLoss.reserve(trainingRun.epochs.size());
+    maskLoss.reserve(trainingRun.epochs.size());
+    for (const CxTorchTrainingEpochMetric &metric : trainingRun.epochs) {
+      totalLoss.push_back(static_cast<float>(metric.total_loss));
+      maskLoss.push_back(static_cast<float>(metric.mask_loss));
+    }
+    if (!totalLoss.empty()) {
+      ImGui::PlotLines("Total loss", totalLoss.data(),
+                       static_cast<int>(totalLoss.size()), 0, nullptr,
+                       FLT_MAX, FLT_MAX, ImVec2(-1.0f, 80.0f));
+      ImGui::PlotLines("Mask loss", maskLoss.data(),
+                       static_cast<int>(maskLoss.size()), 0, nullptr,
+                       FLT_MAX, FLT_MAX, ImVec2(-1.0f, 64.0f));
+    }
+
+    if (ImGui::BeginTable(
+            "torch_training_epoch_metrics", 7,
+            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_ScrollY,
+            ImVec2(-1.0f, 150.0f))) {
+      ImGui::TableSetupColumn("Epoch");
+      ImGui::TableSetupColumn("Total");
+      ImGui::TableSetupColumn("Box");
+      ImGui::TableSetupColumn("Class");
+      ImGui::TableSetupColumn("DFL");
+      ImGui::TableSetupColumn("Mask");
+      ImGui::TableSetupColumn("LR");
+      ImGui::TableHeadersRow();
+      for (const CxTorchTrainingEpochMetric &metric : trainingRun.epochs) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", metric.epoch);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%.5f", metric.total_loss);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%.5f", metric.box_loss);
+        ImGui::TableSetColumnIndex(3);
+        ImGui::Text("%.5f", metric.class_loss);
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%.5f", metric.dfl_loss);
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%.5f", metric.mask_loss);
+        ImGui::TableSetColumnIndex(6);
+        ImGui::Text("%.3g", metric.learning_rate);
+      }
+      ImGui::EndTable();
+    }
+  }
 
   if (!m_annotationLayer.HasActiveDrag() &&
       m_manualTest.selected_torch_training_image >= 0 &&
@@ -6137,6 +7503,32 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     ImGui::Text("Annotation: %s | shapes=%d | overlays=%d",
                 item.annotation_status.c_str(), item.annotation_shape_count,
                 item.annotation_overlay_count);
+    if (!item.annotation_shapes.empty() &&
+        ImGui::BeginTable("torch_annotation_shapes", 3,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg,
+                          ImVec2(-1.0f, 110.0f))) {
+      ImGui::TableSetupColumn("Class");
+      ImGui::TableSetupColumn("Shape");
+      ImGui::TableSetupColumn("Bounds");
+      ImGui::TableHeadersRow();
+      for (const TorchTrainingAnnotationShapeSnapshot &shape :
+           item.annotation_shapes) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", shape.class_id);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(shape.shape_kind.c_str());
+        ImGui::TableSetColumnIndex(2);
+        if (shape.points_xy.size() >= 6) {
+          ImGui::Text("%.0f,%.0f - %.0f,%.0f", shape.points_xy[0],
+                      shape.points_xy[1], shape.points_xy[4],
+                      shape.points_xy[5]);
+        } else {
+          ImGui::TextUnformatted("-");
+        }
+      }
+      ImGui::EndTable();
+    }
 
     if (ImGui::Button("label: good")) {
       item.label = "good";
@@ -6275,7 +7667,9 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
 
   const float rowHeight = 128.0f;
   const float availableHeight = ImGui::GetContentRegionAvail().y;
-  const float targetHeight = rowHeight * 4.0f + 72.0f;
+  const float targetHeight = m_manualTest.script_evidence_case_filter.empty()
+                                 ? rowHeight * 4.0f + 72.0f
+                                 : rowHeight + 92.0f;
   const float listHeight = std::max(
       220.0f, std::min(availableHeight > 0.0f ? availableHeight : targetHeight,
                        targetHeight));
@@ -6284,6 +7678,17 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     std::string label;
     int priority = 100;
     std::vector<ScriptEvidenceRowRef> rows;
+    std::vector<ScriptEvidenceRowRef> direct_rows;
+    struct CaseFolder {
+      std::string label;
+      std::vector<ScriptEvidenceRowRef> rows;
+    };
+    struct HeadFolder {
+      std::string label;
+      std::vector<ScriptEvidenceRowRef> direct_rows;
+      std::vector<CaseFolder> case_folders;
+    };
+    std::vector<HeadFolder> head_folders;
   };
 
   struct EvidenceMajorCategory {
@@ -6299,15 +7704,32 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     return value;
   };
 
+  ImGui::SetNextItemWidth(-1.0f);
+  InputTextString("Filter cases", m_manualTest.script_evidence_case_filter);
+  const std::string caseFilter =
+      toLower(TrimLine(m_manualTest.script_evidence_case_filter));
+
   auto classifyMajor =
       [&](const ScriptEvidenceThumb &thumb,
           const ScriptEvidenceGroup &group) -> std::pair<int, std::string> {
+    if (!thumb.evidence_head_folder.empty()) {
+      const std::string categoryOverride =
+          ResolveEvidenceCategoryOverrideLocal(m_manualTest, thumb);
+      if (categoryOverride == "Verified")
+        return {1, "Verified"};
+      if (categoryOverride == "Defect")
+        return {2, "Defect"};
+      return {0, "To Verify"};
+    }
     return ClassifyEvidenceMajorBucketLocal(m_manualTest, thumb, group.label);
   };
-
   auto classifyTool =
       [&](const ScriptEvidenceThumb &thumb,
           const ScriptEvidenceGroup &group) -> std::pair<int, std::string> {
+    if (thumb.evidence_head_folder.empty() &&
+        !thumb.evidence_group_override.empty())
+      return {std::max(0, thumb.workflow_stage_index),
+              thumb.evidence_group_override};
     const std::string exactTool = NormalizeEvidenceToolTypeLocal(thumb.tool);
     const bool isToVerify = classifyMajor(thumb, group).second == "To Verify";
     if (isToVerify && !exactTool.empty()) {
@@ -6462,6 +7884,30 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     major.tools.push_back(tool);
     return major.tools.back();
   };
+  auto findOrCreateHeadFolder = [](EvidenceCategory &tool,
+                                   const std::string &label)
+      -> EvidenceCategory::HeadFolder & {
+    for (auto &folder : tool.head_folders) {
+      if (folder.label == label)
+        return folder;
+    }
+    EvidenceCategory::HeadFolder folder;
+    folder.label = label;
+    tool.head_folders.push_back(std::move(folder));
+    return tool.head_folders.back();
+  };
+  auto findOrCreateCaseFolder = [](EvidenceCategory::HeadFolder &head,
+                                   const std::string &label)
+      -> EvidenceCategory::CaseFolder & {
+    for (auto &folder : head.case_folders) {
+      if (folder.label == label)
+        return folder;
+    }
+    EvidenceCategory::CaseFolder folder;
+    folder.label = label;
+    head.case_folders.push_back(std::move(folder));
+    return head.case_folders.back();
+  };
   auto uniqueCaseKey = [&](const ScriptEvidenceThumb &thumb,
                            const ScriptEvidenceGroup &group) -> std::string {
     if (!thumb.case_id.empty())
@@ -6511,12 +7957,34 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         row.thumb_index >= static_cast<int>(group.thumbs.size()))
       continue;
     ScriptEvidenceThumb &thumb = group.thumbs[row.thumb_index];
+    if (!caseFilter.empty()) {
+      const std::string searchable = toLower(
+          thumb.case_id + " " + thumb.script_id + " " + thumb.image_id + " " +
+          thumb.target_id + " " + thumb.tool + " " + group.label);
+      if (searchable.find(caseFilter) == std::string::npos)
+        continue;
+    }
     const auto majorClass = classifyMajor(thumb, group);
     const auto toolClass = classifyTool(thumb, group);
 
     EvidenceMajorCategory &major =
         findOrCreateMajor(majorClass.first, majorClass.second);
-    findOrCreateTool(major, toolClass.first, toolClass.second).rows.push_back(row);
+    EvidenceCategory &tool =
+        findOrCreateTool(major, toolClass.first, toolClass.second);
+    tool.rows.push_back(row);
+    if (thumb.evidence_head_folder.empty()) {
+      tool.direct_rows.push_back(row);
+      continue;
+    }
+
+    EvidenceCategory::HeadFolder &head =
+        findOrCreateHeadFolder(tool, thumb.evidence_head_folder);
+    if (thumb.evidence_case_folder.empty()) {
+      head.direct_rows.push_back(row);
+      continue;
+    }
+    findOrCreateCaseFolder(head, thumb.evidence_case_folder)
+        .rows.push_back(row);
   }
   static int classificationDebugDumpBudget = 3;
   if (classificationDebugDumpBudget > 0) {
@@ -6581,9 +8049,42 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
             return left.priority < right.priority;
           return left.label < right.label;
         });
+    for (auto &tool : major.tools) {
+      std::stable_sort(
+          tool.head_folders.begin(), tool.head_folders.end(),
+          [](const EvidenceCategory::HeadFolder &left,
+             const EvidenceCategory::HeadFolder &right) {
+            return left.label < right.label;
+          });
+      for (auto &head : tool.head_folders) {
+        std::stable_sort(
+            head.case_folders.begin(), head.case_folders.end(),
+            [](const EvidenceCategory::CaseFolder &left,
+               const EvidenceCategory::CaseFolder &right) {
+              return left.label < right.label;
+            });
+      }
+    }
   }
 
   ImGui::BeginChild("script_evidence_by_group", ImVec2(-1, listHeight), true);
+
+  auto drawEvidenceRow = [&](const ScriptEvidenceRowRef &ref) {
+    if (ref.group_index < 0 ||
+        ref.group_index >=
+            static_cast<int>(m_manualTest.script_evidence_groups.size()))
+      return;
+
+    ScriptEvidenceGroup &group =
+        m_manualTest.script_evidence_groups[ref.group_index];
+    if (ref.thumb_index < 0 ||
+        ref.thumb_index >= static_cast<int>(group.thumbs.size()))
+      return;
+
+    ScriptEvidenceThumb &thumb = group.thumbs[ref.thumb_index];
+    EnsureScriptEvidenceThumbTexture(thumb);
+    DrawOneScriptEvidenceRow(ref.group_index, ref.thumb_index, thumb, rowHeight);
+  };
 
   for (std::size_t ci = 0; ci < categories.size(); ++ci) {
     EvidenceMajorCategory &major = categories[ci];
@@ -6616,26 +8117,44 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         ImGuiTreeNodeFlags toolFlags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_OpenOnArrow;
         if (ImGui::TreeNodeEx(toolHeader.c_str(), toolFlags)) {
-          for (const ScriptEvidenceRowRef &ref : tool.rows) {
-            if (ref.group_index < 0 ||
-                ref.group_index >=
-                    static_cast<int>(
-                        m_manualTest.script_evidence_groups.size()))
-              continue;
+          for (const ScriptEvidenceRowRef &ref : tool.direct_rows)
+            drawEvidenceRow(ref);
 
-            ScriptEvidenceGroup &group =
-                m_manualTest.script_evidence_groups[ref.group_index];
+          for (std::size_t hi = 0; hi < tool.head_folders.size(); ++hi) {
+            EvidenceCategory::HeadFolder &head = tool.head_folders[hi];
+            int headCount = static_cast<int>(head.direct_rows.size());
+            for (const auto &folder : head.case_folders)
+              headCount += static_cast<int>(folder.rows.size());
 
-            if (ref.thumb_index < 0 ||
-                ref.thumb_index >= static_cast<int>(group.thumbs.size()))
-              continue;
+            ImGui::PushID(static_cast<int>(hi));
+            const std::string headHeader =
+                head.label + " (" + std::to_string(headCount) + ")";
+            ImGuiTreeNodeFlags headFlags = ImGuiTreeNodeFlags_OpenOnArrow;
+            if (!caseFilter.empty())
+              headFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+            if (ImGui::TreeNodeEx(headHeader.c_str(), headFlags)) {
+              for (const ScriptEvidenceRowRef &ref : head.direct_rows)
+                drawEvidenceRow(ref);
 
-            ScriptEvidenceThumb &thumb = group.thumbs[ref.thumb_index];
-
-            EnsureScriptEvidenceThumbTexture(thumb);
-
-            DrawOneScriptEvidenceRow(ref.group_index, ref.thumb_index, thumb,
-                                     rowHeight);
+              for (std::size_t fi = 0; fi < head.case_folders.size(); ++fi) {
+                EvidenceCategory::CaseFolder &folder = head.case_folders[fi];
+                ImGui::PushID(static_cast<int>(fi));
+                const std::string folderHeader =
+                    folder.label + " (" + std::to_string(folder.rows.size()) +
+                    ")";
+                ImGuiTreeNodeFlags folderFlags = ImGuiTreeNodeFlags_OpenOnArrow;
+                if (!caseFilter.empty())
+                  folderFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+                if (ImGui::TreeNodeEx(folderHeader.c_str(), folderFlags)) {
+                  for (const ScriptEvidenceRowRef &ref : folder.rows)
+                    drawEvidenceRow(ref);
+                  ImGui::TreePop();
+                }
+                ImGui::PopID();
+              }
+              ImGui::TreePop();
+            }
+            ImGui::PopID();
           }
           ImGui::TreePop();
         }
@@ -6842,10 +8361,16 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
                    " script_id=" + thumb.script_id +
                    " image_id=" + thumb.image_id + " tool=" + thumb.tool);
     std::string reason;
-    if (!RefreshEvidenceSelectionFromThumb(groupIndex, thumbIndex, true,
+    const bool loadImage = !thumb.image_path.empty();
+    if (!RefreshEvidenceSelectionFromThumb(groupIndex, thumbIndex, loadImage,
                                            reason)) {
       m_manualTest.debug_status = "EVIDENCE_SELECT_LOAD_FAIL";
       m_manualTest.debug_reason = reason;
+    } else if (!loadImage) {
+      m_manualTest.debug_status = "EVIDENCE_SELECTED_METADATA_ONLY";
+      m_manualTest.debug_reason =
+          "case metadata loaded; image remains unbound until the workflow "
+          "dataset manifest supplies it";
     }
     finishRow();
     return;

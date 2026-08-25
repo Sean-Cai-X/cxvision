@@ -105,6 +105,7 @@ bool CxTorchExecutionAdapter::BuildRuntimeRequest(const CxTorchTaskSpec& task, C
     request.task = task.task_id;
     request.device = task.requested_device;
     request.input_image = task.input_image_path.string();
+    request.dataset_root = task.dataset_root.string();
     request.manifest_path = task.manifest_path.string();
     request.case_name = task.case_id;
     request.extra_json = task.extra_json;

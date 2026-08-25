@@ -72,6 +72,7 @@ struct CxTorchTaskSpec
     std::string model_id;
     std::filesystem::path model_path;
     std::filesystem::path manifest_path;
+    std::filesystem::path dataset_root;
     std::filesystem::path input_image_path;
     std::filesystem::path template_image_path;
     std::filesystem::path output_dir;

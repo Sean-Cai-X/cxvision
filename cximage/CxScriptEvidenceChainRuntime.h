@@ -16,6 +16,8 @@ struct CxScriptEvidenceAnnotation
     double x1 = 0.0;
     double y1 = 0.0;
     bool normalized = false;
+    bool closed = false;
+    std::vector<double> points_xy;
 };
 
 struct CxScriptEvidenceDatasetImage
@@ -43,6 +45,18 @@ struct CxScriptEvidenceCase
     std::string source_case_id;
     std::string display_category;
     std::string display_group;
+    std::string workflow_id;
+    std::string workflow_stage;
+    std::string workflow_status = "pending";
+    std::string workflow_prerequisites;
+    std::string dataset_role;
+    std::string annotation_policy;
+    std::string gate_policy;
+    std::string parent_model_ref;
+    std::string child_model_ref;
+    int workflow_stage_index = 0;
+    int workflow_stage_count = 0;
+    bool dataset_frozen = false;
     std::vector<CxScriptEvidenceDatasetImage> dataset_images;
     std::vector<CxScriptEvidenceAnnotation> annotations;
     bool manual_review_required = true;

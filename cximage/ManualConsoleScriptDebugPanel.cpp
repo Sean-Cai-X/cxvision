@@ -9,6 +9,7 @@
 #include "CxUnifiedLog.h"
 
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <cstring>
 #include <unordered_set>
@@ -281,6 +282,7 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
   bool selectedEdgeAdded = false;
   bool pointConsistencyAdded = false;
   bool objectPrefilterAdded = false;
+  bool filterProfileBoundToGlobal = false;
 
   const auto insertBeforeMeasure = [&](const std::string& statement)
   {
@@ -288,6 +290,78 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
     insertPos += statement.size();
     changed = true;
   };
+
+  const auto trimArgument = [](std::string value) {
+    while (!value.empty() &&
+           std::isspace(static_cast<unsigned char>(value.front())))
+      value.erase(value.begin());
+    while (!value.empty() &&
+           std::isspace(static_cast<unsigned char>(value.back())))
+      value.pop_back();
+    return value;
+  };
+
+  const auto replaceSetterArgumentWithGlobal =
+      [&](const char* setterName, const char* globalName,
+          const char* localName) {
+        const std::string callPrefix =
+            objectName + "." + std::string(setterName) + "(";
+        bool replaced = false;
+        std::size_t searchPos = 0;
+        while ((searchPos = context.editor_text.find(callPrefix, searchPos)) !=
+               std::string::npos)
+        {
+          const std::size_t argBegin = searchPos + callPrefix.size();
+          const std::size_t closePos = context.editor_text.find(')', argBegin);
+          if (closePos == std::string::npos)
+            break;
+
+          const std::string argument =
+              trimArgument(context.editor_text.substr(argBegin,
+                                                      closePos - argBegin));
+          if (argument == globalName || argument == localName)
+          {
+            searchPos = closePos + 1;
+            continue;
+          }
+
+          std::size_t statementEnd = closePos + 1;
+          while (statementEnd < context.editor_text.size() &&
+                 context.editor_text[statementEnd] != ';' &&
+                 context.editor_text[statementEnd] != '\n' &&
+                 context.editor_text[statementEnd] != '\r')
+          {
+            ++statementEnd;
+          }
+          if (statementEnd < context.editor_text.size() &&
+              context.editor_text[statementEnd] == ';')
+          {
+            ++statementEnd;
+          }
+
+          const std::string canonicalStatement =
+              objectName + "." + std::string(setterName) + "(" +
+              std::string(globalName) + ");";
+          const std::size_t oldLength = statementEnd - searchPos;
+          context.editor_text.replace(searchPos, oldLength,
+                                      canonicalStatement);
+          if (searchPos < insertPos)
+          {
+            const std::ptrdiff_t delta =
+                static_cast<std::ptrdiff_t>(canonicalStatement.size()) -
+                static_cast<std::ptrdiff_t>(oldLength);
+            insertPos = static_cast<std::size_t>(
+                static_cast<std::ptrdiff_t>(insertPos) + delta);
+          }
+          searchPos += canonicalStatement.size();
+          changed = true;
+          replaced = true;
+        }
+        return replaced;
+      };
+
+  filterProfileBoundToGlobal = replaceSetterArgumentWithGlobal(
+      "setfilterprofile", "global_filterprofile", "filterprofile");
 
   if (context.editor_text.find(objectName + ".setscandirection(") ==
       std::string::npos)
@@ -334,9 +408,12 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
            std::string(selectedEdgeAdded ? "added" : "present") +
            ", point_consistency_call=" +
            std::string(pointConsistencyAdded ? "added" : "present") +
-           ", object_prefilter_call=" +
-           std::string(objectPrefilterAdded ? "added" : "present") +
-           "); historical script_snapshot.cxsc was not modified";
+            ", object_prefilter_call=" +
+            std::string(objectPrefilterAdded ? "added" : "present") +
+            ", filterprofile_binding=" +
+            std::string(filterProfileBoundToGlobal ? "globalized" :
+                                                   "present") +
+            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
 

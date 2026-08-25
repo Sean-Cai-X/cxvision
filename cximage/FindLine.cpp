@@ -128,6 +128,19 @@ void RecordFindLineEdgeCandidate(
         ++eval.over_length_runs;
 }
 
+bool IsFindLineNearAcceptedCandidate(
+    const FindLineMeasureInputDebug::ScanDiagnostic& diag,
+    const gp_Pnt& point,
+    double threshold)
+{
+    if (!diag.accepted)
+        return false;
+    threshold = std::min(2.0, std::max(1.0, threshold));
+    const double dx = point.X() - diag.accepted_x;
+    const double dy = point.Y() - diag.accepted_y;
+    return (dx * dx + dy * dy) <= (threshold * threshold);
+}
+
 int CountFindLineBinaryForegroundInRow(
     Image* image,
     int row,
@@ -2202,21 +2215,39 @@ void FindLine::Measure(Image& image)
                             || m_iselectedgenum == 0)
                         {
                             gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
-                            m_measurepoints_w.addpoint(apoint);
-                            ++m_lastMeasureInputDebug.scan_points_emitted;
                             auto& currentDiag =
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-                            currentDiag.accepted = true;
-                            currentDiag.accepted_x = apoint.X();
-                            currentDiag.accepted_y = apoint.Y();
-                            currentDiag.reject_reason.clear();
-                            RecordFindLineEdgeCandidate(
-                                m_lastMeasureInputDebug,
-                                icurlinenum,
-                                true,
-                                false,
-                                false,
-                                false);
+                            if (m_iselectedgenum == 0 &&
+                                IsFindLineNearAcceptedCandidate(
+                                    currentDiag,
+                                    apoint,
+                                    static_cast<double>(m_iSelectPointGap)))
+                            {
+                                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                                RecordFindLineEdgeCandidate(
+                                    m_lastMeasureInputDebug,
+                                    icurlinenum,
+                                    false,
+                                    true,
+                                    false,
+                                    false);
+                            }
+                            else
+                            {
+                                m_measurepoints_w.addpoint(apoint);
+                                ++m_lastMeasureInputDebug.scan_points_emitted;
+                                currentDiag.accepted = true;
+                                currentDiag.accepted_x = apoint.X();
+                                currentDiag.accepted_y = apoint.Y();
+                                currentDiag.reject_reason.clear();
+                                RecordFindLineEdgeCandidate(
+                                    m_lastMeasureInputDebug,
+                                    icurlinenum,
+                                    true,
+                                    false,
+                                    false,
+                                    false);
+                            }
                             edgeCandidateRecorded = true;
                             if (icurlinenum == m_iselectedgenum)
                                 break;
@@ -2310,21 +2341,39 @@ void FindLine::Measure(Image& image)
                     || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_w[inumy].getlinepoint(icurlineposition);
-                    m_measurepoints_w.addpoint(apoint);
-                    ++m_lastMeasureInputDebug.scan_points_emitted;
                     auto& currentDiag =
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-                    currentDiag.accepted = true;
-                    currentDiag.accepted_x = apoint.X();
-                    currentDiag.accepted_y = apoint.Y();
-                    currentDiag.reject_reason.clear();
-                    RecordFindLineEdgeCandidate(
-                        m_lastMeasureInputDebug,
-                        icurlinenum,
-                        true,
-                        false,
-                        false,
-                        false);
+                    if (m_iselectedgenum == 0 &&
+                        IsFindLineNearAcceptedCandidate(
+                            currentDiag,
+                            apoint,
+                            static_cast<double>(m_iSelectPointGap)))
+                    {
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            true,
+                            false,
+                            false);
+                    }
+                    else
+                    {
+                        m_measurepoints_w.addpoint(apoint);
+                        ++m_lastMeasureInputDebug.scan_points_emitted;
+                        currentDiag.accepted = true;
+                        currentDiag.accepted_x = apoint.X();
+                        currentDiag.accepted_y = apoint.Y();
+                        currentDiag.reject_reason.clear();
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            true,
+                            false,
+                            false,
+                            false);
+                    }
                     edgeCandidateRecorded = true;
                     if (icurlinenum == m_iselectedgenum)
                         break;
@@ -2485,21 +2534,39 @@ void FindLine::Measure(Image& image)
                             || m_iselectedgenum == 0)
                         {
                             gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
-                            m_measurepoints_h.addpoint(apoint);
-                            ++m_lastMeasureInputDebug.scan_points_emitted;
                             auto& currentDiag =
                                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-                            currentDiag.accepted = true;
-                            currentDiag.accepted_x = apoint.X();
-                            currentDiag.accepted_y = apoint.Y();
-                            currentDiag.reject_reason.clear();
-                            RecordFindLineEdgeCandidate(
-                                m_lastMeasureInputDebug,
-                                icurlinenum,
-                                true,
-                                false,
-                                false,
-                                false);
+                            if (m_iselectedgenum == 0 &&
+                                IsFindLineNearAcceptedCandidate(
+                                    currentDiag,
+                                    apoint,
+                                    static_cast<double>(m_iSelectPointGap)))
+                            {
+                                ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                                RecordFindLineEdgeCandidate(
+                                    m_lastMeasureInputDebug,
+                                    icurlinenum,
+                                    false,
+                                    true,
+                                    false,
+                                    false);
+                            }
+                            else
+                            {
+                                m_measurepoints_h.addpoint(apoint);
+                                ++m_lastMeasureInputDebug.scan_points_emitted;
+                                currentDiag.accepted = true;
+                                currentDiag.accepted_x = apoint.X();
+                                currentDiag.accepted_y = apoint.Y();
+                                currentDiag.reject_reason.clear();
+                                RecordFindLineEdgeCandidate(
+                                    m_lastMeasureInputDebug,
+                                    icurlinenum,
+                                    true,
+                                    false,
+                                    false,
+                                    false);
+                            }
                             edgeCandidateRecorded = true;
 
                             if (icurlinenum == m_iselectedgenum)
@@ -2595,21 +2662,39 @@ void FindLine::Measure(Image& image)
                     || m_iselectedgenum == 0)
                 {
                     gp_Pnt apoint = m_lines_h[inumy - iwsize].getlinepoint(icurlineposition);
-                    m_measurepoints_h.addpoint(apoint);
-                    ++m_lastMeasureInputDebug.scan_points_emitted;
                     auto& currentDiag =
                         m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-                    currentDiag.accepted = true;
-                    currentDiag.accepted_x = apoint.X();
-                    currentDiag.accepted_y = apoint.Y();
-                    currentDiag.reject_reason.clear();
-                    RecordFindLineEdgeCandidate(
-                        m_lastMeasureInputDebug,
-                        icurlinenum,
-                        true,
-                        false,
-                        false,
-                        false);
+                    if (m_iselectedgenum == 0 &&
+                        IsFindLineNearAcceptedCandidate(
+                            currentDiag,
+                            apoint,
+                            static_cast<double>(m_iSelectPointGap)))
+                    {
+                        ++m_lastMeasureInputDebug.scan_runs_rejected_by_selection;
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            false,
+                            true,
+                            false,
+                            false);
+                    }
+                    else
+                    {
+                        m_measurepoints_h.addpoint(apoint);
+                        ++m_lastMeasureInputDebug.scan_points_emitted;
+                        currentDiag.accepted = true;
+                        currentDiag.accepted_x = apoint.X();
+                        currentDiag.accepted_y = apoint.Y();
+                        currentDiag.reject_reason.clear();
+                        RecordFindLineEdgeCandidate(
+                            m_lastMeasureInputDebug,
+                            icurlinenum,
+                            true,
+                            false,
+                            false,
+                            false);
+                    }
                     edgeCandidateRecorded = true;
 
                     if (icurlinenum == m_iselectedgenum)

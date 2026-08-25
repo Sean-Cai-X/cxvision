@@ -853,6 +853,7 @@ struct ManifestImageItem
 
 struct TorchTrainingAnnotationShapeSnapshot
 {
+    int class_id = 0;
     std::string stable_ref;
     std::string tool_id;
     std::string owner_type;
@@ -894,7 +895,7 @@ struct TorchTrainingImageItem
     bool texture_failed = false;
     bool texture_placeholder = false;
 
-    std::string annotation_status = "unlabeled"; // unlabeled / editing / reviewed
+    std::string annotation_status = "unlabeled"; // unlabeled / draft_pending_human_review / editing
     std::string annotation_reason;
     int annotation_shape_count = 0;
     int annotation_overlay_count = 0;
@@ -923,6 +924,58 @@ struct CxEvidenceAnnotationBinding
     double x1 = 0.0;
     double y1 = 0.0;
     bool normalized = false;
+    bool closed = false;
+    std::vector<double> points_xy;
+};
+
+struct CxTorchTrainingEpochMetric
+{
+    int epoch = 0;
+    double learning_rate = 0.0;
+    double total_loss = 0.0;
+    double box_loss = 0.0;
+    double class_loss = 0.0;
+    double dfl_loss = 0.0;
+    double mask_loss = 0.0;
+    int sample_count = 0;
+    int instance_count = 0;
+    struct ParameterGroup
+    {
+        std::string name;
+        bool grad_defined = false;
+        double grad_mean = 0.0;
+        double grad_max = 0.0;
+        double grad_norm = 0.0;
+        double param_norm = 0.0;
+        double update_norm = 0.0;
+        int parameter_count = 0;
+    };
+    std::vector<ParameterGroup> parameter_groups;
+};
+
+struct CxTorchTrainingRunBinding
+{
+    bool available = false;
+    std::string status;
+    std::string task;
+    std::string dataset_source;
+    std::string dataset_summary_path;
+    std::string training_trace_path;
+    std::string optimizer;
+    std::string lr_schedule = "constant";
+    std::string loss_phase;
+    int configured_epochs = 0;
+    int completed_epochs = 0;
+    int train_sample_count = 0;
+    int train_instance_count = 0;
+    double learning_rate = 0.0;
+    double min_learning_rate = 0.0;
+    double weight_decay = 0.0;
+    double box_loss_weight = 1.0;
+    double class_loss_weight = 1.0;
+    double dfl_loss_weight = 1.0;
+    double mask_loss_weight = 1.0;
+    std::vector<CxTorchTrainingEpochMetric> epochs;
 };
 
 struct ScriptEvidenceThumb
@@ -956,6 +1009,21 @@ struct ScriptEvidenceThumb
     bool manual_review_required = true;
     bool promotion_candidate = false;
     std::string evidence_category_override;
+    std::string evidence_group_override;
+    std::string evidence_head_folder;
+    std::string evidence_case_folder;
+    std::string workflow_id;
+    std::string workflow_stage;
+    std::string workflow_status;
+    std::string workflow_prerequisites;
+    std::string dataset_role;
+    std::string annotation_policy;
+    std::string gate_policy;
+    std::string parent_model_ref;
+    std::string child_model_ref;
+    int workflow_stage_index = 0;
+    int workflow_stage_count = 0;
+    bool dataset_frozen = false;
     std::string status;
     std::string reason;
     std::string primary_object_type;
@@ -969,6 +1037,7 @@ struct ScriptEvidenceThumb
     bool texture_placeholder = false;
     std::vector<CxEvidenceDatasetImageBinding> dataset_images;
     std::vector<CxEvidenceAnnotationBinding> annotations;
+    CxTorchTrainingRunBinding training_run;
 };
 
 struct CxEvidenceEditableObjectRef
@@ -1027,6 +1096,19 @@ struct CxEvidenceSelectionSnapshot
     std::string source_case_id;
     bool manual_review_required = true;
     bool promotion_candidate = false;
+    std::string evidence_group_override;
+    std::string workflow_id;
+    std::string workflow_stage;
+    std::string workflow_status;
+    std::string workflow_prerequisites;
+    std::string dataset_role;
+    std::string annotation_policy;
+    std::string gate_policy;
+    std::string parent_model_ref;
+    std::string child_model_ref;
+    int workflow_stage_index = 0;
+    int workflow_stage_count = 0;
+    bool dataset_frozen = false;
 
     std::string status;
     std::string reason;
@@ -1039,6 +1121,7 @@ struct CxEvidenceSelectionSnapshot
     std::vector<CxEvidenceEditableObjectRef> editable_objects;
     std::vector<CxEvidenceDatasetImageBinding> dataset_images;
     std::vector<CxEvidenceAnnotationBinding> annotations;
+    CxTorchTrainingRunBinding training_run;
 };
 
 struct ScriptEvidenceRowRef
@@ -1150,7 +1233,9 @@ struct ManualTestContext
   bool show_line_gauge_scan_lines = false;
   bool show_circle_gauge_scan_lines = false;
   bool show_ellipse_gauge_scan_lines = false;
-  int findline_selected_scan_edge = 0; // 0 = all edges, 1..N = selected edge.
+  // 0 = all edges. 1..N are UI edge slots; for two-edge FindLine gauges,
+  // UI slot 2 maps to runtime -1 because the public "last edge" selector is -1.
+  int findline_selected_scan_edge = 0;
   int findline_scan_edge_count = 4;
   int findline_best_fit_edge = 0; // Runtime/manual best fitting point-set edge.
   int findline_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
@@ -1208,12 +1293,14 @@ struct ManualTestContext
   std::string torch_training_new_image_path;
   std::string torch_training_image_status = "PENDING";
   std::string torch_training_image_reason = "training image set not initialized";
+  CxTorchTrainingRunBinding torch_training_run;
 
   std::vector<EvidenceChainThumb> evidence_chain_thumbs;
   int selected_evidence_thumb = -1;
 
   std::vector<ScriptEvidenceGroup> script_evidence_groups;
   int selected_evidence_group = -1;
+  std::string script_evidence_case_filter;
   bool script_evidence_groups_dirty = true;
   unsigned long long script_evidence_groups_revision = 0;
   unsigned long long script_evidence_groups_debug_revision = 0;

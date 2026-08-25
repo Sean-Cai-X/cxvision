@@ -105,6 +105,35 @@ std::filesystem::path ResolveCxVisionRunPath(const std::string& path)
     if (requested.is_absolute())
         return requested.lexically_normal();
 
+#ifdef _WIN32
+    wchar_t exePath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+    {
+        fs::path current = fs::path(exePath).parent_path();
+        while (!current.empty())
+        {
+            const fs::path repoRoot = current / "cxvision_repo";
+            if (fs::exists(repoRoot / "CMakeLists.txt") &&
+                fs::exists(repoRoot / "cximage") &&
+                fs::exists(repoRoot / "cxparser"))
+            {
+                return (current / requested).lexically_normal();
+            }
+            if (current.filename() == "cxvision_repo" &&
+                fs::exists(current / "CMakeLists.txt") &&
+                fs::exists(current / "cximage") &&
+                fs::exists(current / "cxparser"))
+            {
+                return (current.parent_path() / requested).lexically_normal();
+            }
+            const fs::path parent = current.parent_path();
+            if (parent == current)
+                break;
+            current = parent;
+        }
+    }
+#endif
+
     // ResolveCaseDirectory(".") may return either "." or a path ending in a
     // lexical ".".  lexically_normal() can still leave an empty filename on
     // Windows, so canonicalize the existing directory before inspecting its

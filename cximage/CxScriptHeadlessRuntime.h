@@ -384,6 +384,16 @@ struct CxScriptHeadlessOptions
     std::string script_path;
     std::string image_path;
     std::string template_image_path;
+    std::string torch_dataset_root;
+    int torch_training_epochs = 3;
+    double torch_learning_rate = 1.0e-4;
+    std::string torch_lr_schedule = "constant";
+    double torch_min_learning_rate = 1.0e-6;
+    double torch_weight_decay = 0.0;
+    double torch_box_loss_weight = 1.0;
+    double torch_class_loss_weight = 1.0;
+    double torch_dfl_loss_weight = 1.0;
+    double torch_mask_loss_weight = 1.0;
     std::string output_dir;
 
     std::string globals_path;

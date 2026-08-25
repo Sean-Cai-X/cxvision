@@ -2513,6 +2513,60 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
                  ? 1
                  : 0;
 
+  applied += applyIntToken("torch_input_width", "global_torch_input_width")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_input_height", "global_torch_input_height")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_confidence_percent",
+                           "global_torch_confidence_percent")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_iou_threshold_percent",
+                           "global_torch_iou_threshold_percent")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_mask_threshold_percent",
+                           "global_torch_mask_threshold_percent")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_max_detections",
+                           "global_torch_max_detections")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_num_classes", "global_torch_num_classes")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_training_sample_count",
+                           "global_torch_training_sample_count")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_training_instance_count",
+                           "global_torch_training_instance_count")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_training_step_executed",
+                           "global_torch_training_step_executed")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_inference_ok", "global_torch_ok") ? 1 : 0;
+  applied += applyIntToken("torch_result_count", "global_torch_result_count")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_result_count_delta",
+                           "global_torch_result_count_delta")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_roi_shift_dx_px",
+                           "global_torch_roi_shift_dx_px")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("torch_roi_shift_dy_px",
+                           "global_torch_roi_shift_dy_px")
+                 ? 1
+                 : 0;
+
   applied += applyIntToken("learn_roi_x", "global_learn_roi_x") ? 1 : 0;
   applied += applyIntToken("learn_roi_y", "global_learn_roi_y") ? 1 : 0;
   applied += applyIntToken("learn_roi_w", "global_learn_roi_w") ? 1 : 0;
@@ -4490,6 +4544,8 @@ void ViewController::drawScriptAcceptancePanels() {
       ImGui::Text("param=%s", sel.parameter_summary.empty()
                                   ? "-"
                                   : sel.parameter_summary.c_str());
+      DrawEvidenceWorkflowPanel();
+      DrawTorchEvidenceTrainingPanel();
 
       if (ImGui::Button("Run Evidence Self Test L0")) {
         CxEvidenceSelfTestRequest request;

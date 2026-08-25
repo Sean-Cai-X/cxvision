@@ -1,6 +1,6 @@
 global_contract_pass = 1;
-global_contract_status = "yolov8seg_backward_smoke_closed_loop_ready";
-global_contract_conclusion = "YOLOv8-Seg class+mask backward smoke exported checkpoint and reused it through inference.";
+global_contract_status = "yolov8seg_backward_smoke_box_dfl_closed_loop_ready";
+global_contract_conclusion = "YOLOv8-Seg class+mask+box+DFL backward smoke exported checkpoint and reused it through inference.";
 
 if (global_headless_ok == 0) {
     global_contract_pass = 0;

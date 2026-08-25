@@ -12,6 +12,7 @@ public:
     void setcase(const char* value);
     void setmodel(const char* value);
     void setmanifest(const char* value);
+    void setdatasetroot(const char* value);
     void setdevice(const char* value);
     void setinputpath(const char* value);
     void settemplatepath(const char* value);

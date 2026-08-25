@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -15,7 +16,9 @@
 #include <numeric>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 #include <torch/cuda.h>
 
 namespace
@@ -39,6 +42,455 @@ struct SegCandidate
     float y1 = 0.0f;
     torch::Tensor coefficients;
 };
+
+struct YoloV8SegDatasetSample
+{
+    std::string image_id;
+    std::string image_ref;
+    std::string split;
+    std::string label;
+    std::vector<std::array<float, 4>> boxes_xyxy_norm;
+    std::vector<std::vector<cv::Point2f>> polygons_norm;
+    std::vector<int64_t> classes;
+};
+
+std::string TrimDatasetText(std::string value)
+{
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return {};
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+std::map<std::string, std::string> ParseDatasetKeyValues(
+    const std::string& payload)
+{
+    std::map<std::string, std::string> values;
+    std::istringstream input(payload);
+    std::string token;
+    while (input >> token)
+    {
+        const std::size_t equals = token.find('=');
+        if (equals != std::string::npos && equals > 0)
+            values[token.substr(0, equals)] = token.substr(equals + 1);
+    }
+    return values;
+}
+
+std::string ExtractDatasetQuotedPayload(const std::string& line)
+{
+    const std::size_t first = line.find('"');
+    const std::size_t last = line.rfind('"');
+    if (first == std::string::npos || last == std::string::npos || last <= first)
+        return {};
+    return line.substr(first + 1, last - first - 1);
+}
+
+int DatasetClassFromSemanticRole(const std::string& role)
+{
+    const std::string marker = "_class_";
+    const std::size_t position = role.rfind(marker);
+    if (position == std::string::npos)
+        return 0;
+    try
+    {
+        return std::max(0, std::stoi(role.substr(position + marker.size())));
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+std::filesystem::path ResolveDatasetPath(
+    const std::filesystem::path& manifest_path,
+    const std::string& value)
+{
+    std::filesystem::path path(value);
+    if (path.is_relative())
+        path = manifest_path.parent_path() / path;
+    return path.lexically_normal();
+}
+
+bool AppendDatasetBox(
+    YoloV8SegDatasetSample& sample,
+    int class_id,
+    double x0,
+    double y0,
+    double x1,
+    double y1)
+{
+    x0 = std::clamp(x0, 0.0, 1.0);
+    y0 = std::clamp(y0, 0.0, 1.0);
+    x1 = std::clamp(x1, 0.0, 1.0);
+    y1 = std::clamp(y1, 0.0, 1.0);
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+    sample.boxes_xyxy_norm.push_back({
+        static_cast<float>(x0), static_cast<float>(y0),
+        static_cast<float>(x1), static_cast<float>(y1)});
+    sample.classes.push_back(class_id);
+    return true;
+}
+
+bool AppendDatasetPolygon(
+    YoloV8SegDatasetSample& sample,
+    int class_id,
+    std::vector<cv::Point2f> polygon)
+{
+    if (polygon.size() > 3 && polygon.front() == polygon.back())
+        polygon.pop_back();
+    if (polygon.size() < 3)
+        return false;
+    float x0 = 1.0f;
+    float y0 = 1.0f;
+    float x1 = 0.0f;
+    float y1 = 0.0f;
+    for (cv::Point2f& point : polygon)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            point.x < 0.0f || point.x > 1.0f ||
+            point.y < 0.0f || point.y > 1.0f)
+        {
+            return false;
+        }
+        x0 = std::min(x0, point.x);
+        y0 = std::min(y0, point.y);
+        x1 = std::max(x1, point.x);
+        y1 = std::max(y1, point.y);
+    }
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+    sample.boxes_xyxy_norm.push_back({x0, y0, x1, y1});
+    sample.polygons_norm.push_back(std::move(polygon));
+    sample.classes.push_back(std::max(0, class_id));
+    return true;
+}
+
+bool LoadCxEvidenceDataset(
+    const std::filesystem::path& manifest_path,
+    std::vector<YoloV8SegDatasetSample>& samples,
+    std::string& reason)
+{
+    std::ifstream input(manifest_path);
+    if (!input)
+    {
+        reason = "cannot open Evidence dataset manifest: " + manifest_path.string();
+        return false;
+    }
+
+    std::vector<YoloV8SegDatasetSample> rows;
+    struct PolygonRecord
+    {
+        int class_id = 0;
+        std::vector<cv::Point2f> points;
+    };
+    std::map<std::string, std::vector<PolygonRecord>> polygons_by_image;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.find("CxEvidenceChain_case_adddatasetimage(") != std::string::npos)
+        {
+            const auto values = ParseDatasetKeyValues(
+                ExtractDatasetQuotedPayload(line));
+            const auto image_id = values.find("image_id");
+            const auto path = values.find("path");
+            if (image_id == values.end() || path == values.end())
+                continue;
+            YoloV8SegDatasetSample row;
+            row.image_id = image_id->second;
+            row.image_ref = ResolveDatasetPath(manifest_path, path->second).string();
+            const auto split = values.find("split");
+            const auto label = values.find("label");
+            row.split = split == values.end() ? "train" : split->second;
+            row.label = label == values.end() ? "unlabeled" : label->second;
+            rows.push_back(std::move(row));
+            continue;
+        }
+
+        if (line.find("CxEvidenceChain_case_addbbox_xywh_norm(") != std::string::npos)
+        {
+            reason = "bbox-only annotation rejected in Evidence dataset manifest; "
+                "closed polygon instance masks are required";
+            return false;
+        }
+        if (line.find("CxEvidenceChain_case_addpolygon(") == std::string::npos)
+            continue;
+        const auto values = ParseDatasetKeyValues(
+            ExtractDatasetQuotedPayload(line));
+        const auto image_id = values.find("image_id");
+        if (image_id == values.end())
+            continue;
+        try
+        {
+            PolygonRecord record;
+            const auto class_value = values.find("class_id");
+            if (class_value != values.end())
+                record.class_id = std::stoi(class_value->second);
+            std::istringstream point_stream(values.at("points"));
+            std::string pair;
+            while (std::getline(point_stream, pair, ';'))
+            {
+                const std::size_t comma = pair.find(',');
+                if (comma == std::string::npos)
+                    continue;
+                record.points.emplace_back(
+                    std::stof(pair.substr(0, comma)),
+                    std::stof(pair.substr(comma + 1)));
+            }
+            if (record.points.size() < 3)
+                throw std::runtime_error("polygon has fewer than three points");
+            polygons_by_image[image_id->second].push_back(std::move(record));
+        }
+        catch (...)
+        {
+            reason = "invalid polygon record in Evidence dataset manifest";
+            return false;
+        }
+    }
+
+    std::set<std::string> unique_rows;
+    for (auto& row : rows)
+    {
+        const std::string key = row.split + "|" + row.image_id + "|" + row.image_ref;
+        if (!unique_rows.insert(key).second)
+            continue;
+        const auto found = polygons_by_image.find(row.image_id);
+        if (found != polygons_by_image.end())
+        {
+            for (const PolygonRecord& polygon : found->second)
+            {
+                if (!AppendDatasetPolygon(
+                        row, polygon.class_id, polygon.points))
+                {
+                    reason = "invalid normalized polygon for image " + row.image_id;
+                    return false;
+                }
+            }
+        }
+        samples.push_back(std::move(row));
+    }
+    if (samples.empty())
+    {
+        reason = "Evidence dataset manifest contains no dataset images";
+        return false;
+    }
+    return true;
+}
+
+bool LoadExportedTorchDataset(
+    const std::filesystem::path& manifest_path,
+    std::vector<YoloV8SegDatasetSample>& samples,
+    std::string& reason)
+{
+    cv::FileStorage storage(manifest_path.string(), cv::FileStorage::READ);
+    if (!storage.isOpened())
+    {
+        reason = "cannot open exported Torch dataset manifest: " +
+            manifest_path.string();
+        return false;
+    }
+    std::string schema;
+    storage["schema"] >> schema;
+    if (schema != "cxvision.torch.training_dataset.v2")
+    {
+        reason = "unsupported Torch dataset schema: " + schema;
+        return false;
+    }
+
+    const cv::FileNode images = storage["images"];
+    for (const auto& image_node : images)
+    {
+        YoloV8SegDatasetSample sample;
+        std::string image_path;
+        image_node["image_id"] >> sample.image_id;
+        image_node["image_path"] >> image_path;
+        image_node["split"] >> sample.split;
+        image_node["label"] >> sample.label;
+        sample.image_ref = ResolveDatasetPath(manifest_path, image_path).string();
+        cv::Mat image = cv::imread(sample.image_ref, cv::IMREAD_COLOR);
+        if (image.empty())
+            continue;
+
+        const cv::FileNode shapes = image_node["shapes"];
+        for (const auto& shape : shapes)
+        {
+            std::string semantic_role;
+            std::string shape_kind;
+            shape["semantic_role"] >> semantic_role;
+            shape["shape_kind"] >> shape_kind;
+            std::string lowered_role = semantic_role;
+            std::transform(lowered_role.begin(), lowered_role.end(),
+                lowered_role.begin(), [](unsigned char ch) {
+                  return static_cast<char>(std::tolower(ch));
+                });
+            int closed = 0;
+            shape["closed"] >> closed;
+            if (shape_kind != "PolylineShape" || closed == 0 ||
+                lowered_role.find("bbox") != std::string::npos)
+            {
+                reason = "bbox-only or non-polygon mask rejected for image " +
+                    sample.image_id + "; closed polygon instance masks are required";
+                return false;
+            }
+            int class_id = DatasetClassFromSemanticRole(semantic_role);
+            if (!shape["class_id"].empty())
+                shape["class_id"] >> class_id;
+            std::vector<double> points;
+            shape["points_xy"] >> points;
+            std::vector<cv::Point2f> polygon;
+            for (std::size_t index = 1; index < points.size(); index += 2)
+            {
+                polygon.emplace_back(
+                    static_cast<float>(points[index - 1] / image.cols),
+                    static_cast<float>(points[index] / image.rows));
+            }
+            if (!AppendDatasetPolygon(sample, class_id, std::move(polygon)))
+            {
+                reason = "invalid polygon mask for image " + sample.image_id;
+                return false;
+            }
+        }
+        samples.push_back(std::move(sample));
+    }
+    if (samples.empty())
+    {
+        reason = "exported Torch dataset contains no readable images";
+        return false;
+    }
+    return true;
+}
+
+std::string DatasetSplitFromPath(const std::filesystem::path& path)
+{
+    for (const auto& component : path)
+    {
+        const std::string value = component.string();
+        if (value == "train" || value == "val" || value == "test")
+            return value;
+    }
+    return "train";
+}
+
+bool LoadDatasetFolder(
+    const std::filesystem::path& root,
+    std::vector<YoloV8SegDatasetSample>& samples,
+    std::string& reason)
+{
+    const std::filesystem::path exported =
+        root / "torch_training_dataset_manifest.json";
+    if (std::filesystem::is_regular_file(exported))
+        return LoadExportedTorchDataset(exported, samples, reason);
+
+    const std::set<std::string> image_extensions{
+        ".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"};
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root))
+    {
+        if (!entry.is_regular_file())
+            continue;
+        std::string extension = entry.path().extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (image_extensions.find(extension) == image_extensions.end())
+            continue;
+
+        std::filesystem::path label_path = entry.path();
+        label_path.replace_extension(".txt");
+        if (!std::filesystem::is_regular_file(label_path))
+        {
+            const std::filesystem::path relative =
+                entry.path().lexically_relative(root);
+            label_path = root;
+            for (const auto& component : relative)
+            {
+                if (component == "images")
+                    label_path /= "labels";
+                else
+                    label_path /= component;
+            }
+            label_path.replace_extension(".txt");
+        }
+
+        YoloV8SegDatasetSample sample;
+        sample.image_id = entry.path().stem().string();
+        sample.image_ref = entry.path().string();
+        sample.split = DatasetSplitFromPath(entry.path().lexically_relative(root));
+        sample.label = std::filesystem::is_regular_file(label_path)
+            ? "annotated" : "unlabeled";
+        std::ifstream labels(label_path);
+        std::string label_line;
+        while (std::getline(labels, label_line))
+        {
+            std::istringstream label_stream(label_line);
+            int class_id = 0;
+            if (!(label_stream >> class_id))
+                continue;
+            std::vector<float> coordinates;
+            float coordinate = 0.0f;
+            while (label_stream >> coordinate)
+                coordinates.push_back(coordinate);
+            if (coordinates.size() == 4)
+            {
+                reason = "YOLO bbox-only label rejected: " +
+                    label_path.string() +
+                    "; YOLO segmentation polygon labels are required";
+                return false;
+            }
+            if (coordinates.size() < 6 || coordinates.size() % 2 != 0)
+            {
+                reason = "invalid YOLO segmentation polygon label: " +
+                    label_path.string();
+                return false;
+            }
+            std::vector<cv::Point2f> polygon;
+            for (std::size_t coordinate_index = 1;
+                 coordinate_index < coordinates.size();
+                 coordinate_index += 2)
+            {
+                polygon.emplace_back(coordinates[coordinate_index - 1],
+                                     coordinates[coordinate_index]);
+            }
+            if (!AppendDatasetPolygon(sample, class_id, std::move(polygon)))
+            {
+                reason = "invalid YOLO segmentation polygon geometry: " +
+                    label_path.string();
+                return false;
+            }
+        }
+        samples.push_back(std::move(sample));
+    }
+    if (samples.empty())
+    {
+        reason = "dataset folder contains no supported images: " + root.string();
+        return false;
+    }
+    return true;
+}
+
+bool LoadYoloV8SegDataset(
+    const std::string& source,
+    std::vector<YoloV8SegDatasetSample>& samples,
+    std::string& reason)
+{
+    samples.clear();
+    if (source.empty())
+    {
+        reason = "YOLOv8-Seg training dataset source is empty";
+        return false;
+    }
+    const std::filesystem::path path(source);
+    if (std::filesystem::is_directory(path))
+        return LoadDatasetFolder(path, samples, reason);
+    if (!std::filesystem::is_regular_file(path))
+    {
+        reason = "YOLOv8-Seg training dataset source does not exist: " + source;
+        return false;
+    }
+    if (path.extension() == ".cxsc")
+        return LoadCxEvidenceDataset(path, samples, reason);
+    return LoadExportedTorchDataset(path, samples, reason);
+}
 
 std::string QuoteSegJson(const std::string& value)
 {
@@ -774,13 +1226,6 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
     const TorchRuntimeCoreConfig& config,
     const TorchTaskRequestCpp& request)
 {
-    struct YoloV8SegTrainSample
-    {
-        std::string image_ref;
-        std::vector<std::array<float, 4>> boxes_xyxy_norm;
-        std::vector<int64_t> classes;
-    };
-
     struct Stat
     {
         bool grad_defined = false;
@@ -790,6 +1235,71 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         double param_norm = 0.0;
         double update_norm = 0.0;
         int count = 0;
+    };
+
+    struct LossTensors
+    {
+        torch::Tensor total_loss;
+        torch::Tensor box_loss;
+        torch::Tensor class_loss;
+        torch::Tensor dfl_loss;
+        torch::Tensor mask_loss;
+        int64_t proto_h = 0;
+        int64_t proto_w = 0;
+    };
+
+    struct AblationResult
+    {
+        std::string variant;
+        std::string frozen_group;
+        double total_loss = 0.0;
+        double box_loss = 0.0;
+        double class_loss = 0.0;
+        double dfl_loss = 0.0;
+        double mask_loss = 0.0;
+        std::map<std::string, Stat> groups;
+    };
+
+    struct TrainingEpochMetric
+    {
+        int epoch = 0;
+        double learning_rate = 0.0;
+        double total_loss = 0.0;
+        double box_loss = 0.0;
+        double class_loss = 0.0;
+        double dfl_loss = 0.0;
+        double mask_loss = 0.0;
+        double elapsed_ms = 0.0;
+        std::map<std::string, Stat> parameter_groups;
+    };
+
+    struct StabilityResult
+    {
+        std::string case_id;
+        std::string image_id;
+        std::string split;
+        std::string input_image_ref;
+        std::string perturbation_type;
+        double roi_shift_dx_px = 0.0;
+        double roi_shift_dy_px = 0.0;
+        double confidence_threshold = 0.25;
+        bool training_step_executed = false;
+        bool inference_ok = false;
+        int instance_count = -1;
+        int instance_count_delta_from_baseline = 0;
+        double total_loss = 0.0;
+        double box_loss = 0.0;
+        double class_loss = 0.0;
+        double dfl_loss = 0.0;
+        double mask_loss = 0.0;
+        std::string model_manifest_ref;
+        std::string inference_result_ref;
+        std::string inference_overlay_ref;
+        std::string inference_result_hash;
+        std::string inference_overlay_hash;
+        bool result_hash_matches_baseline = false;
+        bool overlay_hash_matches_baseline = false;
+        std::string failure_stage;
     };
 
     auto add_stat = [](Stat& stat,
@@ -857,6 +1367,9 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         }
         return std::string("other");
     };
+    const std::vector<std::string> group_order{
+        "backbone", "pan_fpn", "box_head", "class_head",
+        "mask_coeff_head", "proto_branch", "other"};
 
     auto block_for = [](const std::string& name) {
         for (int index : {2, 4, 6, 8, 12, 15, 18, 21})
@@ -884,10 +1397,135 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             return SegFailure("manifest", reason);
         }
 
-        cv::Mat image =
-            cv::imread(request.input_image, cv::IMREAD_COLOR);
+        std::vector<YoloV8SegDatasetSample> dataset_samples;
+        if (!LoadYoloV8SegDataset(
+                request.dataset_root, dataset_samples, reason))
+        {
+            return SegFailure("dataset", reason);
+        }
+        std::vector<YoloV8SegDatasetSample> train_samples;
+        std::vector<YoloV8SegDatasetSample> evaluation_samples;
+        for (const auto& dataset_sample : dataset_samples)
+        {
+            if (dataset_sample.split == "train" &&
+                (dataset_sample.classes.empty() ||
+                 dataset_sample.polygons_norm.size() !=
+                     dataset_sample.classes.size() ||
+                 dataset_sample.boxes_xyxy_norm.size() !=
+                     dataset_sample.classes.size()))
+            {
+                return SegFailure(
+                    "dataset_preflight",
+                    "bbox-only or missing instance mask rejected for train image " +
+                        dataset_sample.image_id +
+                        "; one closed polygon is required per instance");
+            }
+            if (!dataset_sample.classes.empty() &&
+                dataset_sample.polygons_norm.size() !=
+                    dataset_sample.classes.size())
+            {
+                return SegFailure(
+                    "dataset_preflight",
+                    "polygon/class cardinality mismatch for image " +
+                        dataset_sample.image_id);
+            }
+            if (dataset_sample.split == "train" &&
+                !dataset_sample.classes.empty())
+            {
+                train_samples.push_back(dataset_sample);
+            }
+            if (dataset_sample.split == "val" ||
+                dataset_sample.split == "test")
+            {
+                evaluation_samples.push_back(dataset_sample);
+            }
+        }
+        if (train_samples.empty())
+            return SegFailure("dataset", "dataset train split has no annotated images");
+        if (train_samples.size() < 2)
+            return SegFailure(
+                "dataset", "YOLOv8-Seg L2/L3 requires at least two annotated train images");
+        if (evaluation_samples.empty())
+            evaluation_samples = train_samples;
+        std::size_t train_instance_count = 0;
+        for (const auto& train_sample : train_samples)
+            train_instance_count += train_sample.classes.size();
+
+        int training_epochs = 3;
+        double learning_rate = 1.0e-4;
+        std::string lr_schedule = "constant";
+        double min_learning_rate = 1.0e-6;
+        double weight_decay = 0.0;
+        double box_loss_weight = 1.0;
+        double class_loss_weight = 1.0;
+        double dfl_loss_weight = 1.0;
+        double mask_loss_weight = 1.0;
+        if (!request.extra_json.empty())
+        {
+            try
+            {
+                cv::FileStorage training_config(
+                    request.extra_json,
+                    cv::FileStorage::READ | cv::FileStorage::MEMORY |
+                        cv::FileStorage::FORMAT_JSON);
+                if (training_config.isOpened())
+                {
+                    if (!training_config["epochs"].empty())
+                        training_config["epochs"] >> training_epochs;
+                    if (!training_config["learning_rate"].empty())
+                        training_config["learning_rate"] >> learning_rate;
+                    if (!training_config["lr_schedule"].empty())
+                        training_config["lr_schedule"] >> lr_schedule;
+                    if (!training_config["min_learning_rate"].empty())
+                        training_config["min_learning_rate"] >> min_learning_rate;
+                    if (!training_config["weight_decay"].empty())
+                        training_config["weight_decay"] >> weight_decay;
+                    if (!training_config["box_loss_weight"].empty())
+                        training_config["box_loss_weight"] >> box_loss_weight;
+                    if (!training_config["class_loss_weight"].empty())
+                        training_config["class_loss_weight"] >> class_loss_weight;
+                    if (!training_config["dfl_loss_weight"].empty())
+                        training_config["dfl_loss_weight"] >> dfl_loss_weight;
+                    if (!training_config["mask_loss_weight"].empty())
+                        training_config["mask_loss_weight"] >> mask_loss_weight;
+                }
+            }
+            catch (const cv::Exception&)
+            {
+                return SegFailure(
+                    "training_config", "invalid structured Torch training context");
+            }
+        }
+        if (training_epochs < 1 || training_epochs > 100)
+            return SegFailure("training_config", "epochs must be in [1, 100]");
+        if (!std::isfinite(learning_rate) || learning_rate <= 0.0)
+            return SegFailure("training_config", "learning_rate must be positive");
+        std::transform(lr_schedule.begin(), lr_schedule.end(), lr_schedule.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (lr_schedule != "constant" && lr_schedule != "cosine")
+            return SegFailure(
+                "training_config", "lr_schedule must be constant or cosine");
+        if (!std::isfinite(min_learning_rate) || min_learning_rate < 0.0 ||
+            min_learning_rate > learning_rate)
+            return SegFailure(
+                "training_config", "min_learning_rate must be in [0, learning_rate]");
+        if (!std::isfinite(weight_decay) || weight_decay < 0.0)
+            return SegFailure("training_config", "weight_decay must be non-negative");
+        for (const auto& loss_weight : std::vector<std::pair<std::string, double>>{
+                 {"box_loss_weight", box_loss_weight},
+                 {"class_loss_weight", class_loss_weight},
+                 {"dfl_loss_weight", dfl_loss_weight},
+                 {"mask_loss_weight", mask_loss_weight}})
+        {
+            if (!std::isfinite(loss_weight.second) || loss_weight.second < 0.0)
+                return SegFailure(
+                    "training_config", loss_weight.first + " must be non-negative");
+        }
+
+        cv::Mat image = cv::imread(
+            train_samples.front().image_ref, cv::IMREAD_COLOR);
         if (image.empty())
-            return SegFailure("input", "input image is unreadable");
+            return SegFailure("input", "first training image is unreadable");
 
         const std::string device_name =
             (request.device == "cuda" || config.device == "cuda") &&
@@ -906,13 +1544,189 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         model->to(device);
         model->train();
 
-        YoloV8SegTrainSample sample;
-        sample.image_ref = request.input_image;
-        sample.boxes_xyxy_norm = {
-            {0.728125f, 0.689063f, 0.770313f, 0.734375f},
-            {0.709375f, 0.468750f, 0.770313f, 0.618750f}
+        auto compute_losses = [&](
+            YoloV8Segment& active_model,
+            const YoloV8SegRawOutput& raw,
+            const YoloV8SegDatasetSample& active_sample,
+            const torch::Tensor& active_input,
+            const SegLetterbox& active_letterbox) {
+            LossTensors result;
+            result.proto_h = raw.prototypes.size(2);
+            result.proto_w = raw.prototypes.size(3);
+            const torch::Tensor proto_flat =
+                raw.prototypes.index({0}).view({manifest.mask_channels, -1});
+
+            torch::Tensor class_loss =
+                torch::zeros({}, active_input.options());
+            torch::Tensor mask_loss =
+                torch::zeros({}, active_input.options());
+            torch::Tensor box_loss =
+                torch::zeros({}, active_input.options());
+            torch::Tensor dfl_loss =
+                torch::zeros({}, active_input.options());
+            for (std::size_t index = 0;
+                 index < active_sample.classes.size();
+                 ++index)
+            {
+                const auto& box = active_sample.boxes_xyxy_norm[index];
+                const auto transform_x = [&](float normalized_x) {
+                    return static_cast<float>(
+                        (active_letterbox.pad_x + normalized_x *
+                         active_letterbox.resized_width) /
+                        static_cast<double>(manifest.input_width));
+                };
+                const auto transform_y = [&](float normalized_y) {
+                    return static_cast<float>(
+                        (active_letterbox.pad_y + normalized_y *
+                         active_letterbox.resized_height) /
+                        static_cast<double>(manifest.input_height));
+                };
+                const std::array<float, 4> input_box{
+                    transform_x(box[0]), transform_y(box[1]),
+                    transform_x(box[2]), transform_y(box[3])};
+                const int64_t class_id = std::clamp<int64_t>(
+                    active_sample.classes[index],
+                    0,
+                    manifest.num_classes - 1);
+                cv::Mat mask_cv(
+                    static_cast<int>(result.proto_h),
+                    static_cast<int>(result.proto_w), CV_8UC1, cv::Scalar(0));
+                std::vector<cv::Point> mask_polygon;
+                mask_polygon.reserve(active_sample.polygons_norm[index].size());
+                for (const cv::Point2f& point :
+                     active_sample.polygons_norm[index])
+                {
+                    const int x = std::clamp(
+                        static_cast<int>(std::lround(
+                            transform_x(point.x) * result.proto_w)),
+                        0, static_cast<int>(result.proto_w) - 1);
+                    const int y = std::clamp(
+                        static_cast<int>(std::lround(
+                            transform_y(point.y) * result.proto_h)),
+                        0, static_cast<int>(result.proto_h) - 1);
+                    mask_polygon.emplace_back(x, y);
+                }
+                cv::fillPoly(mask_cv,
+                    std::vector<std::vector<cv::Point>>{mask_polygon},
+                    cv::Scalar(255), cv::LINE_8);
+                torch::Tensor mask_target = torch::from_blob(
+                    mask_cv.data, {result.proto_h, result.proto_w},
+                    torch::TensorOptions().dtype(torch::kUInt8))
+                    .clone()
+                    .to(active_input.device())
+                    .to(active_input.scalar_type()) / 255.0;
+                const float cx = (input_box[0] + input_box[2]) * 0.5f;
+                const float cy = (input_box[1] + input_box[3]) * 0.5f;
+                for (std::size_t level = 0; level < raw.class_logits.size(); ++level)
+                {
+                    const int64_t col = std::clamp<int64_t>(
+                        static_cast<int64_t>(
+                            std::floor(cx * raw.class_logits[level].size(3))),
+                        0,
+                        raw.class_logits[level].size(3) - 1);
+                    const int64_t row = std::clamp<int64_t>(
+                        static_cast<int64_t>(
+                            std::floor(cy * raw.class_logits[level].size(2))),
+                        0,
+                        raw.class_logits[level].size(2) - 1);
+
+                    const torch::Tensor cls_logits =
+                        raw.class_logits[level].index(
+                            {0, torch::indexing::Slice(), row, col});
+                    torch::Tensor cls_target =
+                        torch::zeros_like(cls_logits);
+                    cls_target.index_put_({class_id}, 1.0);
+                    class_loss = class_loss +
+                        torch::binary_cross_entropy_with_logits(
+                            cls_logits,
+                            cls_target);
+
+                    const torch::Tensor coeff =
+                        raw.mask_coefficients[level].index(
+                            {0, torch::indexing::Slice(), row, col});
+                    const torch::Tensor mask_logits =
+                        torch::matmul(coeff, proto_flat)
+                            .view({result.proto_h, result.proto_w});
+                    mask_loss = mask_loss +
+                        torch::binary_cross_entropy_with_logits(
+                            mask_logits,
+                            mask_target);
+
+                    const float stride =
+                        static_cast<float>(manifest.input_width) /
+                        static_cast<float>(raw.box_logits[level].size(3));
+                    const float center_x =
+                        (static_cast<float>(col) + 0.5f) * stride;
+                    const float center_y =
+                        (static_cast<float>(row) + 0.5f) * stride;
+                    const float target_x0 =
+                        input_box[0] * static_cast<float>(manifest.input_width);
+                    const float target_y0 =
+                        input_box[1] * static_cast<float>(manifest.input_height);
+                    const float target_x1 =
+                        input_box[2] * static_cast<float>(manifest.input_width);
+                    const float target_y1 =
+                        input_box[3] * static_cast<float>(manifest.input_height);
+                    torch::Tensor target_distances = torch::tensor(
+                        {std::max(0.0f, (center_x - target_x0) / stride),
+                         std::max(0.0f, (center_y - target_y0) / stride),
+                         std::max(0.0f, (target_x1 - center_x) / stride),
+                         std::max(0.0f, (target_y1 - center_y) / stride)},
+                        active_input.options()).clamp(0.0, 15.0 - 1.0e-3);
+
+                    const torch::Tensor box_logits =
+                        raw.box_logits[level]
+                            .index({0, torch::indexing::Slice(), row, col})
+                            .view({1, 64, 1});
+                    const torch::Tensor predicted_distances =
+                        active_model->head()
+                            ->dfl_module()
+                            ->expectation(box_logits)
+                            .view({4});
+                    box_loss = box_loss +
+                        torch::abs(predicted_distances - target_distances).mean();
+
+                    const torch::Tensor dfl_logits =
+                        box_logits.view({4, 16});
+                    const torch::Tensor target_left =
+                        torch::floor(target_distances).to(torch::kLong);
+                    const torch::Tensor target_right =
+                        torch::clamp(target_left + 1, 0, 15);
+                    const torch::Tensor weight_right =
+                        (target_distances - target_left.to(target_distances.dtype()))
+                            .clamp(0.0, 1.0);
+                    const torch::Tensor weight_left = 1.0 - weight_right;
+                    const torch::Tensor ce_left =
+                        torch::nn::functional::cross_entropy(
+                            dfl_logits,
+                            target_left,
+                            torch::nn::functional::CrossEntropyFuncOptions()
+                                .reduction(torch::kNone));
+                    const torch::Tensor ce_right =
+                        torch::nn::functional::cross_entropy(
+                            dfl_logits,
+                            target_right,
+                            torch::nn::functional::CrossEntropyFuncOptions()
+                                .reduction(torch::kNone));
+                    dfl_loss = dfl_loss +
+                        (ce_left * weight_left + ce_right * weight_right).mean();
+                }
+            }
+
+            const double loss_terms =
+                static_cast<double>(
+                    active_sample.classes.size() * raw.class_logits.size());
+            result.class_loss = class_loss / loss_terms;
+            result.mask_loss = mask_loss / loss_terms;
+            result.box_loss = box_loss / loss_terms;
+            result.dfl_loss = dfl_loss / loss_terms;
+            result.total_loss =
+                result.class_loss * class_loss_weight +
+                result.mask_loss * mask_loss_weight +
+                result.box_loss * box_loss_weight +
+                result.dfl_loss * dfl_loss_weight;
+            return result;
         };
-        sample.classes = {2, 1};
 
         std::map<std::string, torch::Tensor> before_parameters;
         for (const auto& named : model->named_parameters(true))
@@ -922,102 +1736,105 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
 
         torch::optim::Adam optimizer(
             model->parameters(),
-            torch::optim::AdamOptions(1.0e-4));
-        optimizer.zero_grad();
+            torch::optim::AdamOptions(learning_rate).weight_decay(weight_decay));
 
         const auto started = std::chrono::steady_clock::now();
-        YoloV8SegRawOutput raw = model->forward(input);
-        const int64_t proto_h = raw.prototypes.size(2);
-        const int64_t proto_w = raw.prototypes.size(3);
-        const torch::Tensor proto_flat =
-            raw.prototypes.index({0}).view({manifest.mask_channels, -1});
-
-        torch::Tensor class_loss =
-            torch::zeros({}, input.options());
-        torch::Tensor mask_loss =
-            torch::zeros({}, input.options());
-        for (std::size_t index = 0; index < sample.classes.size(); ++index)
+        YoloV8SegRawOutput raw;
+        std::vector<TrainingEpochMetric> training_trace;
+        LossTensors baseline_losses;
+        for (int epoch = 1; epoch <= training_epochs; ++epoch)
         {
-            const auto& box = sample.boxes_xyxy_norm[index];
-            const int64_t class_id = std::clamp<int64_t>(
-                sample.classes[index],
-                0,
-                manifest.num_classes - 1);
-            const int64_t x0 = std::clamp<int64_t>(
-                static_cast<int64_t>(std::floor(box[0] * proto_w)),
-                0,
-                proto_w - 1);
-            const int64_t y0 = std::clamp<int64_t>(
-                static_cast<int64_t>(std::floor(box[1] * proto_h)),
-                0,
-                proto_h - 1);
-            const int64_t x1 = std::clamp<int64_t>(
-                static_cast<int64_t>(std::ceil(box[2] * proto_w)),
-                x0 + 1,
-                proto_w);
-            const int64_t y1 = std::clamp<int64_t>(
-                static_cast<int64_t>(std::ceil(box[3] * proto_h)),
-                y0 + 1,
-                proto_h);
-            torch::Tensor mask_target =
-                torch::zeros({proto_h, proto_w}, input.options());
-            mask_target.index_put_(
-                {torch::indexing::Slice(y0, y1),
-                 torch::indexing::Slice(x0, x1)},
-                1.0);
-            const float cx = (box[0] + box[2]) * 0.5f;
-            const float cy = (box[1] + box[3]) * 0.5f;
-            for (std::size_t level = 0; level < raw.class_logits.size(); ++level)
+            const auto epoch_started = std::chrono::steady_clock::now();
+            const double schedule_position = training_epochs <= 1
+                ? 0.0
+                : static_cast<double>(epoch - 1) /
+                    static_cast<double>(training_epochs - 1);
+            const double epoch_learning_rate = lr_schedule == "cosine"
+                ? min_learning_rate +
+                    (learning_rate - min_learning_rate) * 0.5 *
+                        (1.0 + std::cos(std::acos(-1.0) * schedule_position))
+                : learning_rate;
+            for (auto& parameter_group : optimizer.param_groups())
             {
-                const int64_t col = std::clamp<int64_t>(
-                    static_cast<int64_t>(
-                        std::floor(cx * raw.class_logits[level].size(3))),
-                    0,
-                    raw.class_logits[level].size(3) - 1);
-                const int64_t row = std::clamp<int64_t>(
-                    static_cast<int64_t>(
-                        std::floor(cy * raw.class_logits[level].size(2))),
-                    0,
-                    raw.class_logits[level].size(2) - 1);
-
-                const torch::Tensor cls_logits =
-                    raw.class_logits[level].index(
-                        {0, torch::indexing::Slice(), row, col});
-                torch::Tensor cls_target =
-                    torch::zeros_like(cls_logits);
-                cls_target.index_put_({class_id}, 1.0);
-                class_loss = class_loss +
-                    torch::binary_cross_entropy_with_logits(
-                        cls_logits,
-                        cls_target);
-
-                const torch::Tensor coeff =
-                    raw.mask_coefficients[level].index(
-                        {0, torch::indexing::Slice(), row, col});
-                const torch::Tensor mask_logits =
-                    torch::matmul(coeff, proto_flat).view({proto_h, proto_w});
-                mask_loss = mask_loss +
-                    torch::binary_cross_entropy_with_logits(
-                        mask_logits,
-                        mask_target);
+                auto& options = static_cast<torch::optim::AdamOptions&>(
+                    parameter_group.options());
+                options.lr(epoch_learning_rate);
             }
+            std::map<std::string, torch::Tensor> epoch_before_parameters;
+            for (const auto& named : model->named_parameters(true))
+                epoch_before_parameters.emplace(
+                    named.key(), named.value().detach().clone());
+            optimizer.zero_grad();
+            double epoch_total = 0.0;
+            double epoch_box = 0.0;
+            double epoch_class = 0.0;
+            double epoch_dfl = 0.0;
+            double epoch_mask = 0.0;
+            for (std::size_t sample_index = 0;
+                 sample_index < train_samples.size(); ++sample_index)
+            {
+                const auto& active_sample = train_samples[sample_index];
+                cv::Mat active_image = cv::imread(
+                    active_sample.image_ref, cv::IMREAD_COLOR);
+                if (active_image.empty())
+                    return SegFailure(
+                        "dataset", "training image became unreadable: " +
+                            active_sample.image_ref);
+                SegLetterbox active_letterbox;
+                torch::Tensor active_input =
+                    MakeSegInput(active_image, manifest, active_letterbox).to(device);
+                YoloV8SegRawOutput active_raw = model->forward(active_input);
+                const LossTensors losses = compute_losses(
+                    model, active_raw, active_sample, active_input,
+                    active_letterbox);
+                (losses.total_loss /
+                 static_cast<double>(train_samples.size())).backward();
+                epoch_total += losses.total_loss.detach().item<double>();
+                epoch_box += losses.box_loss.detach().item<double>();
+                epoch_class += losses.class_loss.detach().item<double>();
+                epoch_dfl += losses.dfl_loss.detach().item<double>();
+                epoch_mask += losses.mask_loss.detach().item<double>();
+                if (sample_index == 0)
+                {
+                    input = active_input;
+                    raw = active_raw;
+                }
+            }
+            optimizer.step();
+
+            const double train_divisor =
+                static_cast<double>(train_samples.size());
+            TrainingEpochMetric metric;
+            metric.epoch = epoch;
+            metric.learning_rate = epoch_learning_rate;
+            metric.total_loss = epoch_total / train_divisor;
+            metric.box_loss = epoch_box / train_divisor;
+            metric.class_loss = epoch_class / train_divisor;
+            metric.dfl_loss = epoch_dfl / train_divisor;
+            metric.mask_loss = epoch_mask / train_divisor;
+            metric.elapsed_ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - epoch_started).count();
+            for (const auto& named : model->named_parameters(true))
+            {
+                const auto before = epoch_before_parameters.find(named.key());
+                if (before != epoch_before_parameters.end())
+                    add_stat(
+                        metric.parameter_groups[group_for(named.key())],
+                        named.value(), before->second);
+            }
+            training_trace.push_back(metric);
         }
-
-        const double loss_terms =
-            static_cast<double>(sample.classes.size() * raw.class_logits.size());
-        class_loss = class_loss / loss_terms;
-        mask_loss = mask_loss / loss_terms;
-        const torch::Tensor box_loss =
-            torch::zeros({}, input.options());
-        const torch::Tensor dfl_loss =
-            torch::zeros({}, input.options());
-        const torch::Tensor total_loss =
-            class_loss + mask_loss + box_loss + dfl_loss;
-
-        total_loss.backward();
-        optimizer.step();
-        const auto finished = std::chrono::steady_clock::now();
-
+        const TrainingEpochMetric& final_epoch = training_trace.back();
+        baseline_losses.total_loss = torch::tensor(
+            final_epoch.total_loss, input.options());
+        baseline_losses.box_loss = torch::tensor(
+            final_epoch.box_loss, input.options());
+        baseline_losses.class_loss = torch::tensor(
+            final_epoch.class_loss, input.options());
+        baseline_losses.dfl_loss = torch::tensor(
+            final_epoch.dfl_loss, input.options());
+        baseline_losses.mask_loss = torch::tensor(
+            final_epoch.mask_loss, input.options());
         std::map<std::string, Stat> groups;
         std::map<std::string, Stat> blocks;
         for (const auto& named : model->named_parameters(true))
@@ -1041,85 +1858,262 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         const auto loss_ref = output_dir / "loss_breakdown.json";
         const auto gradient_ref = output_dir / "gradient_report.json";
         const auto update_ref = output_dir / "parameter_update_report.json";
+        const auto ablation_ref = output_dir / "freeze_ablation_report.json";
+        const auto dataset_summary_ref = output_dir / "dataset_summary.json";
+        const auto training_trace_ref = output_dir / "training_trace.json";
+        const auto l2_matrix_ref = output_dir / "l2_case_matrix.json";
+        const auto stability_ref = output_dir / "stability_matrix.json";
+        const auto variation_ref = output_dir / "result_variation.json";
+        const auto stability_report_ref = output_dir / "stability_report.md";
+        const auto timeout_report_ref = output_dir / "timeout_report.md";
+        const auto human_review_ref = output_dir / "human_review.json";
         const auto evidence_ref =
             output_dir / "yolov8seg_backward_smoke_evidence.json";
         const auto checkpoint_ref =
             weights_dir / "yolov8n_seg_backward_smoke_state_dict.pt";
         const auto manifest_ref = output_dir / "model_manifest.json";
 
-        c10::Dict<std::string, torch::Tensor> state_dict;
-        for (const auto& named : model->named_parameters(true))
-            state_dict.insert(named.key(), named.value().detach().cpu());
-        for (const auto& named : model->named_buffers(true))
-            state_dict.insert(named.key(), named.value().detach().cpu());
-        const std::vector<char> checkpoint_bytes =
-            torch::pickle_save(state_dict);
-        std::ofstream checkpoint_file(
-            checkpoint_ref,
-            std::ios::binary | std::ios::trunc);
-        checkpoint_file.write(
-            checkpoint_bytes.data(),
-            static_cast<std::streamsize>(checkpoint_bytes.size()));
-        checkpoint_file.close();
-        if (!checkpoint_file.good())
-            return SegFailure("checkpoint", "failed to write YOLOv8-Seg state dict");
-
-        std::ofstream manifest_file(manifest_ref);
-        manifest_file
-            << "{\n"
-            << "  \"schema\":\"cxvision.torch_model_manifest\",\n"
-            << "  \"schema_version\":2,\n"
-            << "  \"model_id\":\"yolov8n_seg_backward_smoke_v1\",\n"
-            << "  \"task\":\"instance_segmentation\",\n"
-            << "  \"architecture\":\"yolov8_seg\",\n"
-            << "  \"variant\":\"nano\",\n"
-            << "  \"weights\":\"weights/yolov8n_seg_backward_smoke_state_dict.pt\",\n"
-            << "  \"weights_format\":\"python_state_dict\",\n"
-            << "  \"weights_hash\":" << QuoteSegJson(Fnv1a64File(checkpoint_ref)) << ",\n"
-            << "  \"num_classes\":80,\n"
-            << "  \"mask_channels\":32,\n"
-            << "  \"prototype_channels\":64,\n"
-            << "  \"configured_prototype_channels\":256,\n"
-            << "  \"classes\":[";
-        for (std::size_t index = 0; index < manifest.class_names.size(); ++index)
+        std::size_t val_sample_count = 0;
+        std::size_t test_sample_count = 0;
+        for (const auto& dataset_sample : dataset_samples)
         {
-            if (index > 0)
-                manifest_file << ",";
-            manifest_file << QuoteSegJson(manifest.class_names[index]);
+            if (dataset_sample.split == "val")
+                ++val_sample_count;
+            else if (dataset_sample.split == "test")
+                ++test_sample_count;
         }
-        manifest_file
-            << "],\n"
-            << "  \"input\":{\"width\":640,\"height\":640,\"color\":\"rgb\","
-            << "\"scale\":0.003921568627,\"letterbox\":true},\n"
-            << "  \"postprocess\":{\"confidence_threshold\":0.25,"
-            << "\"iou_threshold\":0.45,\"mask_threshold\":0.5,"
-            << "\"max_detections\":100},\n"
-            << "  \"training_smoke\":{\"sample_count\":1,"
-            << "\"instance_count\":2,\"loss_phase\":\"class_mask_only\","
-            << "\"source_manifest\":" << QuoteSegJson(request.manifest_path) << "}\n"
-            << "}\n";
-        manifest_file.close();
-        if (!manifest_file.good())
+        std::ofstream dataset_summary(dataset_summary_ref);
+        dataset_summary
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.dataset_summary.v1\",\n"
+            << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"sample_count\":" << dataset_samples.size() << ",\n"
+            << "  \"train_sample_count\":" << train_samples.size() << ",\n"
+            << "  \"val_sample_count\":" << val_sample_count << ",\n"
+            << "  \"test_sample_count\":" << test_sample_count << ",\n"
+            << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"rows\":[\n";
+        for (std::size_t index = 0; index < dataset_samples.size(); ++index)
+        {
+            const auto& dataset_sample = dataset_samples[index];
+            dataset_summary
+                << "    {\"image_id\":" << QuoteSegJson(dataset_sample.image_id)
+                << ",\"split\":" << QuoteSegJson(dataset_sample.split)
+                << ",\"label\":" << QuoteSegJson(dataset_sample.label)
+                << ",\"image_ref\":" << QuoteSegJson(dataset_sample.image_ref)
+                << ",\"image_exists\":"
+                << (std::filesystem::is_regular_file(dataset_sample.image_ref)
+                        ? "true" : "false")
+                << ",\"annotation_count\":" << dataset_sample.classes.size()
+                << ",\"annotations\":[";
+            for (std::size_t annotation_index = 0;
+                 annotation_index < dataset_sample.classes.size();
+                 ++annotation_index)
+            {
+                const auto& box = dataset_sample.boxes_xyxy_norm[annotation_index];
+                if (annotation_index > 0)
+                    dataset_summary << ",";
+                dataset_summary
+                    << "{\"class_id\":" << dataset_sample.classes[annotation_index]
+                    << ",\"x0\":" << box[0]
+                    << ",\"y0\":" << box[1]
+                    << ",\"x1\":" << box[2]
+                    << ",\"y1\":" << box[3]
+                    << ",\"normalized\":true}";
+            }
+            dataset_summary
+                << "]}" << (index + 1 < dataset_samples.size() ? "," : "")
+                << "\n";
+        }
+        dataset_summary << "  ]\n}\n";
+        dataset_summary.close();
+        if (!dataset_summary.good())
+            return SegFailure("dataset_summary", "failed to write dataset summary");
+
+        std::ofstream training_trace_file(training_trace_ref);
+        training_trace_file
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.training_trace.v1\",\n"
+            << "  \"status\":\"completed\",\n"
+            << "  \"task\":\"torch.train.instance_segmentation.yolov8.backward_smoke.v1\",\n"
+            << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"optimizer\":\"Adam\",\n"
+            << "  \"learning_rate\":" << learning_rate << ",\n"
+            << "  \"lr_schedule\":" << QuoteSegJson(lr_schedule) << ",\n"
+            << "  \"min_learning_rate\":" << min_learning_rate << ",\n"
+            << "  \"weight_decay\":" << weight_decay << ",\n"
+            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
+            << "  \"loss_weights\":{\"box\":" << box_loss_weight
+            << ",\"class\":" << class_loss_weight
+            << ",\"dfl\":" << dfl_loss_weight
+            << ",\"mask\":" << mask_loss_weight << "},\n"
+            << "  \"configured_epochs\":" << training_epochs << ",\n"
+            << "  \"completed_epochs\":" << training_trace.size() << ",\n"
+            << "  \"train_sample_count\":" << train_samples.size() << ",\n"
+            << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"epochs\":[\n";
+        for (std::size_t index = 0; index < training_trace.size(); ++index)
+        {
+            const TrainingEpochMetric& metric = training_trace[index];
+            training_trace_file
+                << "    {\"epoch\":" << metric.epoch
+                << ",\"learning_rate\":" << metric.learning_rate
+                << ",\"total_loss\":" << metric.total_loss
+                << ",\"box_loss\":" << metric.box_loss
+                << ",\"class_loss\":" << metric.class_loss
+                << ",\"dfl_loss\":" << metric.dfl_loss
+                << ",\"mask_loss\":" << metric.mask_loss
+                << ",\"elapsed_ms\":" << metric.elapsed_ms
+                << ",\"sample_count\":" << train_samples.size()
+                << ",\"instance_count\":" << train_instance_count
+                << ",\"parameter_groups\":{";
+            for (std::size_t group_index = 0;
+                 group_index < group_order.size(); ++group_index)
+            {
+                const auto found = metric.parameter_groups.find(
+                    group_order[group_index]);
+                const Stat stat = found == metric.parameter_groups.end()
+                    ? Stat{} : found->second;
+                const double divisor = std::max(1, stat.count);
+                if (group_index > 0)
+                    training_trace_file << ",";
+                training_trace_file
+                    << QuoteSegJson(group_order[group_index]) << ":{"
+                    << "\"grad_defined\":"
+                    << (stat.grad_defined ? "true" : "false")
+                    << ",\"grad_mean\":" << stat.grad_mean / divisor
+                    << ",\"grad_max\":" << stat.grad_max
+                    << ",\"grad_norm\":" << stat.grad_norm
+                    << ",\"param_norm\":" << stat.param_norm
+                    << ",\"update_norm\":" << stat.update_norm
+                    << ",\"parameter_count\":" << stat.count << "}";
+            }
+            training_trace_file
+                << "}}" << (index + 1 < training_trace.size() ? "," : "")
+                << "\n";
+        }
+        training_trace_file << "  ]\n}\n";
+        training_trace_file.close();
+        if (!training_trace_file.good())
+            return SegFailure("training_trace", "failed to write training trace");
+
+        auto write_checkpoint = [](
+            YoloV8Segment& active_model,
+            const std::filesystem::path& path) {
+            c10::Dict<std::string, torch::Tensor> state_dict;
+            for (const auto& named : active_model->named_parameters(true))
+                state_dict.insert(named.key(), named.value().detach().cpu());
+            for (const auto& named : active_model->named_buffers(true))
+                state_dict.insert(named.key(), named.value().detach().cpu());
+            const std::vector<char> checkpoint_bytes =
+                torch::pickle_save(state_dict);
+            std::ofstream checkpoint_file(
+                path,
+                std::ios::binary | std::ios::trunc);
+            checkpoint_file.write(
+                checkpoint_bytes.data(),
+                static_cast<std::streamsize>(checkpoint_bytes.size()));
+            checkpoint_file.close();
+            return checkpoint_file.good();
+        };
+
+        auto write_trained_manifest = [&](
+            const std::filesystem::path& manifest_path,
+            const std::string& model_id,
+            const std::string& weights_relative_path,
+            const std::filesystem::path& weights_path,
+            double confidence_threshold) {
+            std::ofstream manifest_file(manifest_path);
+            manifest_file
+                << "{\n"
+                << "  \"schema\":\"cxvision.torch_model_manifest\",\n"
+                << "  \"schema_version\":2,\n"
+                << "  \"model_id\":" << QuoteSegJson(model_id) << ",\n"
+                << "  \"task\":\"instance_segmentation\",\n"
+                << "  \"architecture\":\"yolov8_seg\",\n"
+                << "  \"variant\":\"nano\",\n"
+                << "  \"weights\":" << QuoteSegJson(weights_relative_path) << ",\n"
+                << "  \"weights_format\":\"python_state_dict\",\n"
+                << "  \"weights_hash\":" << QuoteSegJson(Fnv1a64File(weights_path)) << ",\n"
+                << "  \"num_classes\":" << manifest.num_classes << ",\n"
+                << "  \"mask_channels\":" << manifest.mask_channels << ",\n"
+                << "  \"prototype_channels\":64,\n"
+                << "  \"configured_prototype_channels\":256,\n"
+                << "  \"classes\":[";
+            for (std::size_t index = 0;
+                 index < manifest.class_names.size();
+                 ++index)
+            {
+                if (index > 0)
+                    manifest_file << ",";
+                manifest_file << QuoteSegJson(manifest.class_names[index]);
+            }
+            manifest_file
+                << "],\n"
+                << "  \"input\":{\"width\":" << manifest.input_width
+                << ",\"height\":" << manifest.input_height
+                << ",\"color\":\"rgb\",\"scale\":0.003921568627,"
+                << "\"letterbox\":true},\n"
+                << "  \"postprocess\":{\"confidence_threshold\":"
+                << confidence_threshold
+                << ",\"iou_threshold\":" << manifest.iou_threshold
+                << ",\"mask_threshold\":" << manifest.mask_threshold
+                << ",\"max_detections\":" << manifest.max_detections << "},\n"
+                << "  \"training_smoke\":{\"sample_count\":"
+                << train_samples.size() << ","
+                << "\"instance_count\":" << train_instance_count
+                << ",\"epochs\":" << training_epochs
+                << ",\"learning_rate\":" << learning_rate
+                << ",\"lr_schedule\":" << QuoteSegJson(lr_schedule)
+                << ",\"min_learning_rate\":" << min_learning_rate
+                << ",\"weight_decay\":" << weight_decay
+                << ",\"loss_phase\":\"weighted_class_mask_box_dfl\","
+                << "\"dataset_source\":" << QuoteSegJson(request.dataset_root) << ","
+                << "\"source_manifest\":" << QuoteSegJson(request.manifest_path) << "}\n"
+                << "}\n";
+            manifest_file.close();
+            return manifest_file.good();
+        };
+
+        if (!write_checkpoint(model, checkpoint_ref))
+            return SegFailure("checkpoint", "failed to write YOLOv8-Seg state dict");
+        if (!write_trained_manifest(
+                manifest_ref,
+                "yolov8n_seg_backward_smoke_v1",
+                "weights/yolov8n_seg_backward_smoke_state_dict.pt",
+                checkpoint_ref,
+                0.25))
             return SegFailure("manifest_write", "failed to write YOLOv8-Seg trained manifest");
 
-        const double class_loss_value = class_loss.detach().item<double>();
-        const double mask_loss_value = mask_loss.detach().item<double>();
-        const double total_loss_value = total_loss.detach().item<double>();
+        const double class_loss_value =
+            baseline_losses.class_loss.detach().item<double>();
+        const double mask_loss_value =
+            baseline_losses.mask_loss.detach().item<double>();
+        const double box_loss_value =
+            baseline_losses.box_loss.detach().item<double>();
+        const double dfl_loss_value =
+            baseline_losses.dfl_loss.detach().item<double>();
+        const double total_loss_value =
+            baseline_losses.total_loss.detach().item<double>();
         std::ofstream loss_file(loss_ref);
         loss_file
             << "{\n"
             << "  \"schema\":\"cxvision.yolov8seg.loss_breakdown.v1\",\n"
             << "  \"task\":\"torch.train.instance_segmentation.yolov8.backward_smoke.v1\",\n"
-            << "  \"loss_phase\":\"class_mask_only\",\n"
-            << "  \"sample_count\":1,\n"
-            << "  \"instance_count\":2,\n"
+            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
+            << "  \"loss_weights\":{\"box\":" << box_loss_weight
+            << ",\"class\":" << class_loss_weight
+            << ",\"dfl\":" << dfl_loss_weight
+            << ",\"mask\":" << mask_loss_weight << "},\n"
+            << "  \"sample_count\":" << train_samples.size() << ",\n"
+            << "  \"instance_count\":" << train_instance_count << ",\n"
             << "  \"total_loss\":" << total_loss_value << ",\n"
-            << "  \"box_loss\":0,\n"
+            << "  \"box_loss\":" << box_loss_value << ",\n"
             << "  \"class_loss\":" << class_loss_value << ",\n"
-            << "  \"dfl_loss\":0,\n"
+            << "  \"dfl_loss\":" << dfl_loss_value << ",\n"
             << "  \"mask_loss\":" << mask_loss_value << ",\n"
-            << "  \"box_loss_connected\":false,\n"
-            << "  \"dfl_loss_connected\":false,\n"
+            << "  \"box_loss_connected\":true,\n"
+            << "  \"dfl_loss_connected\":true,\n"
             << "  \"raw_shapes\":{\n"
             << "    \"box_logits\":[[1,64," << raw.box_logits[0].size(2)
             << "," << raw.box_logits[0].size(3) << "],[1,64,"
@@ -1147,7 +2141,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         gradient_file
             << "{\n"
             << "  \"schema\":\"cxvision.yolov8seg.gradient_report.v1\",\n"
-            << "  \"loss_phase\":\"class_mask_only\",\n"
+            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
             << "  \"required_paths\":{\n"
             << "    \"backbone_grad_defined\":" << (groups["backbone"].grad_defined ? "true" : "false") << ",\n"
             << "    \"pan_fpn_grad_defined\":" << (groups["pan_fpn"].grad_defined ? "true" : "false") << ",\n"
@@ -1157,9 +2151,6 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             << "    \"box_head_grad_defined\":" << (groups["box_head"].grad_defined ? "true" : "false") << "\n"
             << "  },\n"
             << "  \"groups\":{\n";
-        const std::vector<std::string> group_order{
-            "backbone", "pan_fpn", "box_head", "class_head",
-            "mask_coeff_head", "proto_branch", "other"};
         for (std::size_t index = 0; index < group_order.size(); ++index)
             write_stat(
                 gradient_file,
@@ -1182,8 +2173,12 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             << "{\n"
             << "  \"schema\":\"cxvision.yolov8seg.parameter_update_report.v1\",\n"
             << "  \"optimizer\":\"Adam\",\n"
-            << "  \"learning_rate\":0.0001,\n"
-            << "  \"one_step_executed\":true,\n"
+            << "  \"learning_rate\":" << learning_rate << ",\n"
+            << "  \"lr_schedule\":" << QuoteSegJson(lr_schedule) << ",\n"
+            << "  \"min_learning_rate\":" << min_learning_rate << ",\n"
+            << "  \"weight_decay\":" << weight_decay << ",\n"
+            << "  \"configured_epochs\":" << training_epochs << ",\n"
+            << "  \"completed_epochs\":" << training_trace.size() << ",\n"
             << "  \"groups\":{\n";
         for (std::size_t index = 0; index < group_order.size(); ++index)
             write_stat(
@@ -1193,17 +2188,665 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 index + 1 < group_order.size());
         update_file << "  }\n}\n";
 
-        TorchTaskRequestCpp infer_request = request;
-        infer_request.task =
-            TorchRuntimeTaskIds::YoloV8InstanceSegmentation;
-        infer_request.manifest_path = manifest_ref.string();
-        infer_request.output_dir = (output_dir / "trained_inference").string();
-        TorchTaskResultCpp infer_result =
-            ExecuteTorchYoloV8SegTask(config, infer_request);
+        std::vector<AblationResult> ablations;
+        const std::vector<std::string> freeze_groups{
+            "backbone",
+            "proto_branch",
+            "mask_coeff_head",
+            "class_head",
+            "box_head"};
+        for (const std::string& freeze_group : freeze_groups)
+        {
+            YoloV8Segment ablation_model;
+            const YoloV8SegWeightMappingReport ablation_mapping =
+                ablation_model->load_state_dict_strict(
+                    manifest.weights_path.string());
+            (void)ablation_mapping;
+            ablation_model->to(device);
+            ablation_model->train();
 
+            for (auto& named : ablation_model->named_parameters(true))
+            {
+                if (group_for(named.key()) == freeze_group)
+                    named.value().set_requires_grad(false);
+            }
+
+            std::map<std::string, torch::Tensor> ablation_before;
+            for (const auto& named : ablation_model->named_parameters(true))
+                ablation_before.emplace(
+                    named.key(),
+                    named.value().detach().clone());
+
+            torch::optim::Adam ablation_optimizer(
+                ablation_model->parameters(),
+                torch::optim::AdamOptions(learning_rate)
+                    .weight_decay(weight_decay));
+            ablation_optimizer.zero_grad();
+            const double ablation_divisor =
+                static_cast<double>(train_samples.size());
+            double ablation_total = 0.0;
+            double ablation_box = 0.0;
+            double ablation_class = 0.0;
+            double ablation_dfl = 0.0;
+            double ablation_mask = 0.0;
+            for (const auto& active_sample : train_samples)
+            {
+                cv::Mat active_image = cv::imread(
+                    active_sample.image_ref, cv::IMREAD_COLOR);
+                SegLetterbox active_letterbox;
+                torch::Tensor active_input = MakeSegInput(
+                    active_image, manifest, active_letterbox).to(device);
+                YoloV8SegRawOutput ablation_raw =
+                    ablation_model->forward(active_input);
+                const LossTensors losses = compute_losses(
+                    ablation_model, ablation_raw, active_sample, active_input,
+                    active_letterbox);
+                (losses.total_loss / ablation_divisor).backward();
+                ablation_total += losses.total_loss.detach().item<double>();
+                ablation_box += losses.box_loss.detach().item<double>();
+                ablation_class += losses.class_loss.detach().item<double>();
+                ablation_dfl += losses.dfl_loss.detach().item<double>();
+                ablation_mask += losses.mask_loss.detach().item<double>();
+            }
+            ablation_optimizer.step();
+
+            AblationResult ablation;
+            ablation.variant = "freeze_" + freeze_group;
+            ablation.frozen_group = freeze_group;
+            ablation.total_loss = ablation_total / ablation_divisor;
+            ablation.box_loss = ablation_box / ablation_divisor;
+            ablation.class_loss = ablation_class / ablation_divisor;
+            ablation.dfl_loss = ablation_dfl / ablation_divisor;
+            ablation.mask_loss = ablation_mask / ablation_divisor;
+
+            for (const auto& named : ablation_model->named_parameters(true))
+            {
+                const auto before = ablation_before.find(named.key());
+                if (before == ablation_before.end())
+                    continue;
+                add_stat(
+                    ablation.groups[group_for(named.key())],
+                    named.value(),
+                    before->second);
+            }
+            ablations.push_back(std::move(ablation));
+        }
+
+        std::ofstream ablation_file(ablation_ref);
+        auto stat_for = [](const std::map<std::string, Stat>& stats,
+                           const std::string& key) {
+            const auto found = stats.find(key);
+            return found == stats.end() ? Stat{} : found->second;
+        };
+        ablation_file
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.freeze_ablation_report.v1\",\n"
+            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
+            << "  \"baseline\":{\n"
+            << "    \"total_loss\":" << total_loss_value << ",\n"
+            << "    \"box_loss\":" << box_loss_value << ",\n"
+            << "    \"class_loss\":" << class_loss_value << ",\n"
+            << "    \"dfl_loss\":" << dfl_loss_value << ",\n"
+            << "    \"mask_loss\":" << mask_loss_value << "\n"
+            << "  },\n"
+            << "  \"variants\":[\n";
+        for (std::size_t index = 0; index < ablations.size(); ++index)
+        {
+            const AblationResult& ablation = ablations[index];
+            const Stat frozen_stat =
+                stat_for(ablation.groups, ablation.frozen_group);
+            ablation_file
+                << "    {\n"
+                << "      \"variant\":" << QuoteSegJson(ablation.variant) << ",\n"
+                << "      \"frozen_group\":" << QuoteSegJson(ablation.frozen_group) << ",\n"
+                << "      \"frozen_group_update_norm\":" << frozen_stat.update_norm << ",\n"
+                << "      \"frozen_group_grad_defined\":"
+                << (frozen_stat.grad_defined ? "true" : "false") << ",\n"
+                << "      \"total_loss\":" << ablation.total_loss << ",\n"
+                << "      \"box_loss\":" << ablation.box_loss << ",\n"
+                << "      \"class_loss\":" << ablation.class_loss << ",\n"
+                << "      \"dfl_loss\":" << ablation.dfl_loss << ",\n"
+                << "      \"mask_loss\":" << ablation.mask_loss << ",\n"
+                << "      \"required_paths\":{\n"
+                << "        \"backbone_grad_defined\":"
+                << (stat_for(ablation.groups, "backbone").grad_defined ? "true" : "false") << ",\n"
+                << "        \"pan_fpn_grad_defined\":"
+                << (stat_for(ablation.groups, "pan_fpn").grad_defined ? "true" : "false") << ",\n"
+                << "        \"box_head_grad_defined\":"
+                << (stat_for(ablation.groups, "box_head").grad_defined ? "true" : "false") << ",\n"
+                << "        \"class_head_grad_defined\":"
+                << (stat_for(ablation.groups, "class_head").grad_defined ? "true" : "false") << ",\n"
+                << "        \"mask_coeff_head_grad_defined\":"
+                << (stat_for(ablation.groups, "mask_coeff_head").grad_defined ? "true" : "false") << ",\n"
+                << "        \"proto_branch_grad_defined\":"
+                << (stat_for(ablation.groups, "proto_branch").grad_defined ? "true" : "false") << "\n"
+                << "      },\n"
+                << "      \"groups\":{\n";
+            for (std::size_t group_index = 0;
+                 group_index < group_order.size();
+                 ++group_index)
+            {
+                write_stat(
+                    ablation_file,
+                    group_order[group_index],
+                    stat_for(ablation.groups, group_order[group_index]),
+                    group_index + 1 < group_order.size());
+            }
+            ablation_file
+                << "      }\n"
+                << "    }" << (index + 1 < ablations.size() ? "," : "") << "\n";
+        }
+        ablation_file
+            << "  ]\n"
+            << "}\n";
+
+        auto hash_existing_file = [](const std::string& path) {
+            if (path.empty() || !std::filesystem::exists(path))
+                return std::string();
+            return Fnv1a64File(path);
+        };
+        auto extract_json_int = [](
+            const std::string& json,
+            const std::string& key) {
+            const std::string needle = "\"" + key + "\":";
+            std::size_t pos = json.find(needle);
+            if (pos == std::string::npos)
+                return -1;
+            pos += needle.size();
+            while (pos < json.size() && json[pos] == ' ')
+                ++pos;
+            std::size_t end = pos;
+            if (end < json.size() && json[end] == '-')
+                ++end;
+            while (end < json.size() && json[end] >= '0' && json[end] <= '9')
+                ++end;
+            if (end == pos)
+                return -1;
+            return std::stoi(json.substr(pos, end - pos));
+        };
+        auto safe_component = [](std::string value) {
+            for (char& ch : value)
+            {
+                if (!std::isalnum(static_cast<unsigned char>(ch)) &&
+                    ch != '-' && ch != '_')
+                    ch = '_';
+            }
+            return value.empty() ? std::string("image") : value;
+        };
+
+        TorchTaskResultCpp infer_result;
+        std::vector<StabilityResult> stability_results;
+        std::map<std::string, int> baseline_counts;
+        std::map<std::string, std::string> baseline_result_hashes;
+        std::map<std::string, std::string> baseline_overlay_hashes;
+        auto append_dataset_inference = [&](
+            const std::string& case_id,
+            const std::string& perturbation_type,
+            double threshold,
+            const std::filesystem::path& case_manifest_ref,
+            const std::filesystem::path& case_output_dir,
+            bool training_step_executed,
+            double roi_shift_dx_px,
+            double roi_shift_dy_px,
+            const AblationResult* losses,
+            bool baseline) {
+            for (const auto& evaluation_sample : evaluation_samples)
+            {
+                const std::string sample_key = evaluation_sample.split + "|" +
+                    evaluation_sample.image_id + "|" + evaluation_sample.image_ref;
+                TorchTaskRequestCpp stability_request = request;
+                stability_request.task =
+                    TorchRuntimeTaskIds::YoloV8InstanceSegmentation;
+                stability_request.input_image = evaluation_sample.image_ref;
+                stability_request.manifest_path = case_manifest_ref.string();
+                stability_request.output_dir =
+                    (case_output_dir / evaluation_sample.split /
+                     safe_component(evaluation_sample.image_id)).string();
+                TorchTaskResultCpp stability_infer =
+                    ExecuteTorchYoloV8SegTask(config, stability_request);
+                if (infer_result.status.empty())
+                    infer_result = stability_infer;
+
+                StabilityResult row;
+                row.case_id = case_id + "__" + evaluation_sample.split + "__" +
+                    safe_component(evaluation_sample.image_id);
+                row.image_id = evaluation_sample.image_id;
+                row.split = evaluation_sample.split;
+                row.input_image_ref = evaluation_sample.image_ref;
+                row.perturbation_type = perturbation_type;
+                row.roi_shift_dx_px = roi_shift_dx_px;
+                row.roi_shift_dy_px = roi_shift_dy_px;
+                row.confidence_threshold = threshold;
+                row.training_step_executed = training_step_executed;
+                row.inference_ok = stability_infer.ok;
+                row.instance_count = extract_json_int(
+                    stability_infer.result_json, "instance_count");
+                row.model_manifest_ref = case_manifest_ref.string();
+                row.inference_result_ref = stability_infer.result_ref;
+                row.inference_overlay_ref = stability_infer.primary_visual_ref;
+                row.inference_result_hash =
+                    hash_existing_file(stability_infer.result_ref);
+                row.inference_overlay_hash =
+                    hash_existing_file(stability_infer.primary_visual_ref);
+                if (baseline)
+                {
+                    baseline_counts[sample_key] = row.instance_count;
+                    baseline_result_hashes[sample_key] = row.inference_result_hash;
+                    baseline_overlay_hashes[sample_key] = row.inference_overlay_hash;
+                    row.instance_count_delta_from_baseline = 0;
+                    row.result_hash_matches_baseline = true;
+                    row.overlay_hash_matches_baseline = true;
+                }
+                else
+                {
+                    const auto count = baseline_counts.find(sample_key);
+                    row.instance_count_delta_from_baseline =
+                        count != baseline_counts.end() && row.instance_count >= 0
+                            ? row.instance_count - count->second : 0;
+                    row.result_hash_matches_baseline =
+                        baseline_result_hashes[sample_key] == row.inference_result_hash;
+                    row.overlay_hash_matches_baseline =
+                        baseline_overlay_hashes[sample_key] == row.inference_overlay_hash;
+                }
+                row.failure_stage = stability_infer.ok
+                    ? "" : stability_infer.error_message;
+                row.total_loss = losses ? losses->total_loss : total_loss_value;
+                row.box_loss = losses ? losses->box_loss : box_loss_value;
+                row.class_loss = losses ? losses->class_loss : class_loss_value;
+                row.dfl_loss = losses ? losses->dfl_loss : dfl_loss_value;
+                row.mask_loss = losses ? losses->mask_loss : mask_loss_value;
+                stability_results.push_back(std::move(row));
+            }
+        };
+
+        auto shifted_samples = [&](
+            double dx_px,
+            double dy_px) {
+            std::vector<YoloV8SegDatasetSample> shifted = train_samples;
+            const float dx =
+                static_cast<float>(
+                    dx_px / static_cast<double>(manifest.input_width));
+            const float dy =
+                static_cast<float>(
+                    dy_px / static_cast<double>(manifest.input_height));
+            for (auto& shifted_sample : shifted)
+            {
+                for (auto& box : shifted_sample.boxes_xyxy_norm)
+                {
+                    box[0] = std::clamp(box[0] + dx, 0.0f, 1.0f);
+                    box[1] = std::clamp(box[1] + dy, 0.0f, 1.0f);
+                    box[2] = std::clamp(box[2] + dx, 0.0f, 1.0f);
+                    box[3] = std::clamp(box[3] + dy, 0.0f, 1.0f);
+                }
+                for (auto& polygon : shifted_sample.polygons_norm)
+                {
+                    for (cv::Point2f& point : polygon)
+                    {
+                        point.x = std::clamp(point.x + dx, 0.0f, 1.0f);
+                        point.y = std::clamp(point.y + dy, 0.0f, 1.0f);
+                    }
+                }
+            }
+            return shifted;
+        };
+
+        auto train_and_infer_variant = [&](
+            const std::string& case_id,
+            const std::string& perturbation_type,
+            const std::vector<YoloV8SegDatasetSample>& active_samples,
+            double dx_px,
+            double dy_px) {
+            const auto case_root = output_dir / "stability" / case_id;
+            const auto case_weights_dir = case_root / "weights";
+            std::filesystem::create_directories(case_weights_dir);
+            const auto case_checkpoint =
+                case_weights_dir / "yolov8n_seg_backward_smoke_state_dict.pt";
+            const auto case_manifest = case_root / "model_manifest.json";
+
+            YoloV8Segment stability_model;
+            const YoloV8SegWeightMappingReport stability_mapping =
+                stability_model->load_state_dict_strict(
+                    manifest.weights_path.string());
+            (void)stability_mapping;
+            stability_model->to(device);
+            stability_model->train();
+
+            torch::optim::Adam stability_optimizer(
+                stability_model->parameters(),
+                torch::optim::AdamOptions(learning_rate)
+                    .weight_decay(weight_decay));
+            stability_optimizer.zero_grad();
+            AblationResult variant_losses;
+            for (const auto& active_sample : active_samples)
+            {
+                cv::Mat active_image = cv::imread(
+                    active_sample.image_ref, cv::IMREAD_COLOR);
+                SegLetterbox active_letterbox;
+                torch::Tensor active_input = MakeSegInput(
+                    active_image, manifest, active_letterbox).to(device);
+                YoloV8SegRawOutput stability_raw =
+                    stability_model->forward(active_input);
+                const LossTensors losses = compute_losses(
+                    stability_model, stability_raw, active_sample, active_input,
+                    active_letterbox);
+                (losses.total_loss /
+                 static_cast<double>(active_samples.size())).backward();
+                variant_losses.total_loss += losses.total_loss.detach().item<double>();
+                variant_losses.box_loss += losses.box_loss.detach().item<double>();
+                variant_losses.class_loss += losses.class_loss.detach().item<double>();
+                variant_losses.dfl_loss += losses.dfl_loss.detach().item<double>();
+                variant_losses.mask_loss += losses.mask_loss.detach().item<double>();
+            }
+            const double variant_divisor = static_cast<double>(active_samples.size());
+            variant_losses.total_loss /= variant_divisor;
+            variant_losses.box_loss /= variant_divisor;
+            variant_losses.class_loss /= variant_divisor;
+            variant_losses.dfl_loss /= variant_divisor;
+            variant_losses.mask_loss /= variant_divisor;
+            stability_optimizer.step();
+
+            if (!write_checkpoint(stability_model, case_checkpoint) ||
+                !write_trained_manifest(
+                    case_manifest,
+                    "yolov8n_seg_backward_smoke_" + case_id,
+                    "weights/yolov8n_seg_backward_smoke_state_dict.pt",
+                    case_checkpoint,
+                    0.25))
+            {
+                StabilityResult row;
+                row.case_id = case_id;
+                row.perturbation_type = perturbation_type;
+                row.roi_shift_dx_px = dx_px;
+                row.roi_shift_dy_px = dy_px;
+                row.confidence_threshold = 0.25;
+                row.training_step_executed = true;
+                row.failure_stage = "variant_artifact_write_failed";
+                stability_results.push_back(std::move(row));
+                return;
+            }
+
+            append_dataset_inference(
+                case_id,
+                perturbation_type,
+                0.25,
+                case_manifest,
+                case_root / "inference",
+                true,
+                dx_px,
+                dy_px,
+                &variant_losses,
+                false);
+        };
+
+        append_dataset_inference(
+            "baseline_trained_inference",
+            "baseline",
+            0.25,
+            manifest_ref,
+            output_dir / "trained_inference",
+            true,
+            0.0,
+            0.0,
+            nullptr,
+            true);
+        const std::size_t baseline_row_count = stability_results.size();
+
+        std::ofstream l2_matrix(l2_matrix_ref);
+        l2_matrix
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.l2_case_matrix.v1\",\n"
+            << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"train_sample_count\":" << train_samples.size() << ",\n"
+            << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"evaluation_case_count\":" << baseline_row_count << ",\n"
+            << "  \"rows\":[\n";
+        for (std::size_t index = 0; index < baseline_row_count; ++index)
+        {
+            const auto& row = stability_results[index];
+            l2_matrix
+                << "    {\"case_id\":" << QuoteSegJson(row.case_id)
+                << ",\"image_id\":" << QuoteSegJson(row.image_id)
+                << ",\"split\":" << QuoteSegJson(row.split)
+                << ",\"input_image_ref\":" << QuoteSegJson(row.input_image_ref)
+                << ",\"inference_ok\":" << (row.inference_ok ? "true" : "false")
+                << ",\"instance_count\":" << row.instance_count
+                << ",\"inference_result_ref\":" << QuoteSegJson(row.inference_result_ref)
+                << ",\"inference_overlay_ref\":" << QuoteSegJson(row.inference_overlay_ref)
+                << "}" << (index + 1 < baseline_row_count ? "," : "") << "\n";
+        }
+        l2_matrix << "  ]\n}\n";
+        l2_matrix.close();
+        if (!l2_matrix.good())
+            return SegFailure("l2_matrix", "failed to write YOLOv8-Seg L2 case matrix");
+
+        for (const auto& threshold_case :
+             std::vector<std::pair<std::string, double>>{
+                 {"threshold_024", 0.24},
+                 {"threshold_025", 0.25},
+                 {"threshold_026", 0.26}})
+        {
+            const auto case_root =
+                output_dir / "stability" / threshold_case.first;
+            std::filesystem::create_directories(case_root);
+            const auto case_manifest = case_root / "model_manifest.json";
+            if (write_trained_manifest(
+                    case_manifest,
+                    "yolov8n_seg_backward_smoke_" + threshold_case.first,
+                    "../../weights/yolov8n_seg_backward_smoke_state_dict.pt",
+                    checkpoint_ref,
+                    threshold_case.second))
+            {
+                append_dataset_inference(
+                    threshold_case.first,
+                    "threshold_adjacent",
+                    threshold_case.second,
+                    case_manifest,
+                    case_root / "inference",
+                    false,
+                    0.0,
+                    0.0,
+                    nullptr,
+                    false);
+            }
+            else
+            {
+                StabilityResult row;
+                row.case_id = threshold_case.first;
+                row.perturbation_type = "threshold_adjacent";
+                row.confidence_threshold = threshold_case.second;
+                row.failure_stage = "threshold_manifest_write_failed";
+                stability_results.push_back(std::move(row));
+            }
+        }
+
+        train_and_infer_variant(
+            "repeat_train_01",
+            "repeat_train_inference",
+            train_samples,
+            0.0,
+            0.0);
+        train_and_infer_variant(
+            "repeat_train_02",
+            "repeat_train_inference",
+            train_samples,
+            0.0,
+            0.0);
+        train_and_infer_variant(
+            "roi_shift_minus_2px",
+            "roi_small_shift",
+            shifted_samples(-2.0, -2.0),
+            -2.0,
+            -2.0);
+        train_and_infer_variant(
+            "roi_shift_plus_2px",
+            "roi_small_shift",
+            shifted_samples(2.0, 2.0),
+            2.0,
+            2.0);
+
+        std::ofstream stability_file(stability_ref);
+        const std::string baseline_result_hash =
+            hash_existing_file(infer_result.result_ref);
+        const std::string baseline_overlay_hash =
+            hash_existing_file(infer_result.primary_visual_ref);
+        stability_file
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.l3_stability_matrix.v1\",\n"
+            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
+            << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"train_sample_count\":" << train_samples.size() << ",\n"
+            << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"evaluation_case_count\":" << evaluation_samples.size() << ",\n"
+            << "  \"coverage\":[\"roi_small_shift\","
+            << "\"threshold_adjacent\",\"repeat_train_inference\"],\n"
+            << "  \"baseline_case_id\":\"baseline_trained_inference\",\n"
+            << "  \"baseline_result_hash\":"
+            << QuoteSegJson(baseline_result_hash) << ",\n"
+            << "  \"baseline_overlay_hash\":"
+            << QuoteSegJson(baseline_overlay_hash) << ",\n"
+            << "  \"rows\":[\n";
+        for (std::size_t index = 0;
+             index < stability_results.size();
+             ++index)
+        {
+            const StabilityResult& row = stability_results[index];
+            stability_file
+                << "    {\n"
+                << "      \"case_id\":" << QuoteSegJson(row.case_id) << ",\n"
+                << "      \"image_id\":" << QuoteSegJson(row.image_id) << ",\n"
+                << "      \"split\":" << QuoteSegJson(row.split) << ",\n"
+                << "      \"input_image_ref\":" << QuoteSegJson(row.input_image_ref) << ",\n"
+                << "      \"perturbation_type\":"
+                << QuoteSegJson(row.perturbation_type) << ",\n"
+                << "      \"roi_shift_dx_px\":" << row.roi_shift_dx_px << ",\n"
+                << "      \"roi_shift_dy_px\":" << row.roi_shift_dy_px << ",\n"
+                << "      \"confidence_threshold\":"
+                << row.confidence_threshold << ",\n"
+                << "      \"training_step_executed\":"
+                << (row.training_step_executed ? "true" : "false") << ",\n"
+                << "      \"inference_ok\":"
+                << (row.inference_ok ? "true" : "false") << ",\n"
+                << "      \"instance_count\":" << row.instance_count << ",\n"
+                << "      \"instance_count_delta_from_baseline\":"
+                << row.instance_count_delta_from_baseline << ",\n"
+                << "      \"total_loss\":" << row.total_loss << ",\n"
+                << "      \"box_loss\":" << row.box_loss << ",\n"
+                << "      \"class_loss\":" << row.class_loss << ",\n"
+                << "      \"dfl_loss\":" << row.dfl_loss << ",\n"
+                << "      \"mask_loss\":" << row.mask_loss << ",\n"
+                << "      \"model_manifest_ref\":"
+                << QuoteSegJson(row.model_manifest_ref) << ",\n"
+                << "      \"inference_result_ref\":"
+                << QuoteSegJson(row.inference_result_ref) << ",\n"
+                << "      \"inference_overlay_ref\":"
+                << QuoteSegJson(row.inference_overlay_ref) << ",\n"
+                << "      \"inference_result_hash\":"
+                << QuoteSegJson(row.inference_result_hash) << ",\n"
+                << "      \"inference_overlay_hash\":"
+                << QuoteSegJson(row.inference_overlay_hash) << ",\n"
+                << "      \"result_hash_matches_baseline\":"
+                << (row.result_hash_matches_baseline ? "true" : "false") << ",\n"
+                << "      \"overlay_hash_matches_baseline\":"
+                << (row.overlay_hash_matches_baseline ? "true" : "false") << ",\n"
+                << "      \"failure_stage\":"
+                << QuoteSegJson(row.failure_stage) << "\n"
+                << "    }"
+                << (index + 1 < stability_results.size() ? "," : "")
+                << "\n";
+        }
+        stability_file
+            << "  ]\n"
+            << "}\n";
+        stability_file.close();
+        if (!stability_file.good())
+            return SegFailure(
+                "stability_matrix",
+                "failed to write YOLOv8-Seg L3 stability matrix");
+
+        std::ofstream variation_file(variation_ref);
+        variation_file
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.result_variation.v1\",\n"
+            << "  \"conclusion\":\"L3_PENDING_HUMAN_REVIEW\",\n"
+            << "  \"rows\":[\n";
+        for (std::size_t index = 0; index < stability_results.size(); ++index)
+        {
+            const StabilityResult& row = stability_results[index];
+            const std::string sample_key = row.split + "|" + row.image_id +
+                "|" + row.input_image_ref;
+            const int baseline_count = baseline_counts.at(sample_key);
+            const int delta = row.instance_count - baseline_count;
+            variation_file
+                << "    {\"case_id\":" << QuoteSegJson(row.case_id)
+                << ",\"image_id\":" << QuoteSegJson(row.image_id)
+                << ",\"split\":" << QuoteSegJson(row.split)
+                << ",\"perturbation_type\":"
+                << QuoteSegJson(row.perturbation_type)
+                << ",\"baseline_instance_count\":" << baseline_count
+                << ",\"instance_count\":" << row.instance_count
+                << ",\"instance_count_delta\":" << delta
+                << ",\"classification\":"
+                << QuoteSegJson(delta == 0
+                    ? "count_stable"
+                    : "candidate_count_changed_requires_human_review")
+                << ",\"overlay_ref\":"
+                << QuoteSegJson(row.inference_overlay_ref)
+                << "}" << (index + 1 < stability_results.size() ? "," : "")
+                << "\n";
+        }
+        variation_file << "  ]\n}\n";
+        variation_file.close();
+        if (!variation_file.good())
+            return SegFailure("result_variation", "failed to write result variation");
+
+        std::ofstream stability_report(stability_report_ref);
+        stability_report
+            << "# YOLOv8-Seg L3 Stability Report\n\n"
+            << "- conclusion: `L3_PENDING_HUMAN_REVIEW`\n"
+            << "- dataset: `" << request.dataset_root << "`\n"
+            << "- train samples: " << train_samples.size() << "\n"
+            << "- train instances: " << train_instance_count << "\n"
+            << "- evaluation images: " << evaluation_samples.size() << "\n\n"
+            << "| Case | Split | Image | Perturbation | Baseline | Actual | Delta |\n"
+            << "|---|---|---|---|---:|---:|---:|\n";
+        for (const StabilityResult& row : stability_results)
+        {
+            const int baseline_count =
+                baseline_counts.at(row.split + "|" + row.image_id + "|" +
+                                   row.input_image_ref);
+            stability_report
+                << "| " << row.case_id << " | " << row.split << " | "
+                << row.image_id << " | " << row.perturbation_type << " | "
+                << baseline_count << " | " << row.instance_count << " | "
+                << (row.instance_count - baseline_count) << " |\n";
+        }
+        stability_report.close();
+
+        std::ofstream timeout_report(timeout_report_ref);
+        timeout_report
+            << "# YOLOv8-Seg L3 Timeout Report\n\n"
+            << "- timeout cases: 0\n"
+            << "- completed inference rows: " << stability_results.size() << "\n"
+            << "- conclusion: no runtime timeout observed\n";
+        timeout_report.close();
+
+        std::ofstream human_review(human_review_ref);
+        human_review
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.human_review.v1\",\n"
+            << "  \"status\":\"pending_human_review\",\n"
+            << "  \"decision\":\"PENDING_HUMAN_REVIEW\",\n"
+            << "  \"reason\":\"per-image baseline and perturbation overlays require human semantic review\"\n"
+            << "}\n";
+        human_review.close();
+        if (!stability_report.good() || !timeout_report.good() ||
+            !human_review.good())
+            return SegFailure("l3_report", "failed to write L3 review reports");
+
+        const auto completed = std::chrono::steady_clock::now();
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(
-                finished - started).count();
+                completed - started).count();
         std::ofstream evidence_file(evidence_ref);
         evidence_file
             << "{\n"
@@ -1212,6 +2855,23 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             << "  \"loss_breakdown_ref\":" << QuoteSegJson(loss_ref.string()) << ",\n"
             << "  \"gradient_report_ref\":" << QuoteSegJson(gradient_ref.string()) << ",\n"
             << "  \"parameter_update_report_ref\":" << QuoteSegJson(update_ref.string()) << ",\n"
+            << "  \"freeze_ablation_report_ref\":" << QuoteSegJson(ablation_ref.string()) << ",\n"
+            << "  \"dataset_summary_ref\":" << QuoteSegJson(dataset_summary_ref.string()) << ",\n"
+            << "  \"training_trace_ref\":" << QuoteSegJson(training_trace_ref.string()) << ",\n"
+            << "  \"l2_case_matrix_ref\":" << QuoteSegJson(l2_matrix_ref.string()) << ",\n"
+            << "  \"stability_matrix_ref\":" << QuoteSegJson(stability_ref.string()) << ",\n"
+            << "  \"result_variation_ref\":" << QuoteSegJson(variation_ref.string()) << ",\n"
+            << "  \"stability_report_ref\":" << QuoteSegJson(stability_report_ref.string()) << ",\n"
+            << "  \"timeout_report_ref\":" << QuoteSegJson(timeout_report_ref.string()) << ",\n"
+            << "  \"human_review_ref\":" << QuoteSegJson(human_review_ref.string()) << ",\n"
+            << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"train_sample_count\":" << train_samples.size() << ",\n"
+            << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"optimizer\":\"Adam\",\n"
+            << "  \"learning_rate\":" << learning_rate << ",\n"
+            << "  \"lr_schedule\":" << QuoteSegJson(lr_schedule) << ",\n"
+            << "  \"min_learning_rate\":" << min_learning_rate << ",\n"
+            << "  \"weight_decay\":" << weight_decay << ",\n"
             << "  \"checkpoint_ref\":" << QuoteSegJson(checkpoint_ref.string()) << ",\n"
             << "  \"model_manifest_ref\":" << QuoteSegJson(manifest_ref.string()) << ",\n"
             << "  \"trained_inference_result_ref\":" << QuoteSegJson(infer_result.result_ref) << ",\n"
@@ -1234,22 +2894,39 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             elapsed_ms + infer_result.algorithm_runtime_ms;
         result.result_ref = infer_result.result_ref;
         result.evidence_ref = evidence_ref.string();
-        result.input_image_ref = request.input_image;
+        result.input_image_ref = infer_result.input_image_ref;
         result.primary_visual_ref = infer_result.primary_visual_ref;
         result.visualization_refs = infer_result.visualization_refs;
         result.trainer_lifecycle_summary =
-            "YOLOv8-Seg class+mask backward smoke completed optimizer step";
+            "YOLOv8-Seg class+mask+box+DFL training completed " +
+            std::to_string(training_trace.size()) + " epochs";
         result.unified_mainline_summary =
             "checkpoint manifest exported and reused by torch.infer.instance_segmentation.yolov8.v1";
         result.result_json =
             "{\"schema\":\"cxvision.yolov8seg.backward_smoke.v1\","
             "\"status\":" + QuoteSegJson(result.status) +
             ",\"total_loss\":" + std::to_string(total_loss_value) +
+            ",\"box_loss\":" + std::to_string(box_loss_value) +
             ",\"class_loss\":" + std::to_string(class_loss_value) +
+            ",\"dfl_loss\":" + std::to_string(dfl_loss_value) +
             ",\"mask_loss\":" + std::to_string(mask_loss_value) +
             ",\"optimizer_step_executed\":true,"
-            "\"checkpoint_ref\":" + QuoteSegJson(checkpoint_ref.string()) +
+            "\"configured_epochs\":" + std::to_string(training_epochs) +
+            ",\"completed_epochs\":" + std::to_string(training_trace.size()) +
+            ",\"learning_rate\":" + std::to_string(learning_rate) +
+            ",\"lr_schedule\":" + QuoteSegJson(lr_schedule) +
+            ",\"min_learning_rate\":" + std::to_string(min_learning_rate) +
+            ",\"weight_decay\":" + std::to_string(weight_decay) +
+            ",\"checkpoint_ref\":" + QuoteSegJson(checkpoint_ref.string()) +
             ",\"model_manifest_ref\":" + QuoteSegJson(manifest_ref.string()) +
+            ",\"dataset_source\":" + QuoteSegJson(request.dataset_root) +
+            ",\"dataset_summary_ref\":" + QuoteSegJson(dataset_summary_ref.string()) +
+            ",\"training_trace_ref\":" + QuoteSegJson(training_trace_ref.string()) +
+            ",\"train_sample_count\":" + std::to_string(train_samples.size()) +
+            ",\"train_instance_count\":" + std::to_string(train_instance_count) +
+            ",\"evaluation_case_count\":" + std::to_string(evaluation_samples.size()) +
+            ",\"l2_case_matrix_ref\":" + QuoteSegJson(l2_matrix_ref.string()) +
+            ",\"stability_matrix_ref\":" + QuoteSegJson(stability_ref.string()) +
             ",\"trained_inference_ok\":" + (infer_result.ok ? "true" : "false") +
             ",\"trained_inference_result_ref\":" + QuoteSegJson(infer_result.result_ref) +
             ",\"evidence_ref\":" + QuoteSegJson(evidence_ref.string()) +

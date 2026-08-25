@@ -71,6 +71,14 @@ bool ExtractJsonBool(const std::string &source, const char *key, bool &value) {
   return true;
 }
 
+int NormalizeFindLineSelectedEdgeForRuntime(int selectedEdge, int edgeCount) {
+  const int count = std::max(1, std::min(16, edgeCount));
+  const int edge = std::max(-1, std::min(selectedEdge, count));
+  if (count == 2 && edge == 2)
+    return -1;
+  return edge;
+}
+
 bool ExtractSegmentationPromptPointArray(
     const std::string &source, const char *key,
     std::vector<ManualSegmentationPromptPoint> &points) {
@@ -426,6 +434,8 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
     context.findline_selected_scan_edge =
         std::max(-1, std::min(context.findline_selected_scan_edge,
                               context.findline_scan_edge_count));
+    const int runtimeSelectedEdge = NormalizeFindLineSelectedEdgeForRuntime(
+        context.findline_selected_scan_edge, context.findline_scan_edge_count);
     if (context.findline_edge_params.size() <
         static_cast<std::size_t>(context.findline_scan_edge_count + 1)) {
       context.findline_edge_params.resize(
@@ -435,7 +445,7 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
     InjectManualGaugeInt(context, "global_findline_edge_count",
                          context.findline_scan_edge_count);
     InjectManualGaugeInt(context, "global_findline_selected_edge",
-                         context.findline_selected_scan_edge);
+                         runtimeSelectedEdge);
     context.findline_best_fit_edge =
         std::max(0, std::min(context.findline_best_fit_edge,
                              context.findline_scan_edge_count));

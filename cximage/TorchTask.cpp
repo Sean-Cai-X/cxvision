@@ -57,6 +57,11 @@ void TorchTask::setmanifest(const char* value)
     task_.manifest_path = value;
 }
 
+void TorchTask::setdatasetroot(const char* value)
+{
+    task_.dataset_root = value == nullptr ? "" : value;
+}
+
 void TorchTask::setdevice(const char* value)
 {
     task_.requested_device = value;
@@ -106,7 +111,18 @@ void TorchTask::setrequestcontext(const char* value)
     else
     {
         task_.output_dir = context.substr(second + 1, third - second - 1);
-        task_.extra_json = context.substr(third + 1);
+        const std::size_t fourth = context.find(separator, third + 1);
+        if (fourth == std::string::npos)
+        {
+            task_.extra_json = context.substr(third + 1);
+        }
+        else
+        {
+            task_.extra_json = context.substr(third + 1, fourth - third - 1);
+            const std::string dataset_root = context.substr(fourth + 1);
+            if (!dataset_root.empty())
+                task_.dataset_root = dataset_root;
+        }
     }
 }
 

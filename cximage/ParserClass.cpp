@@ -1210,6 +1210,8 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &TorchTask::setmodel);
     m_parser.DefineClassFun("TorchTask", ptorch_task, "setmanifest",
                             &TorchTask::setmanifest);
+    m_parser.DefineClassFun("TorchTask", ptorch_task, "setdatasetroot",
+                            &TorchTask::setdatasetroot);
     m_parser.DefineClassFun("TorchTask", ptorch_task, "setdevice",
                             &TorchTask::setdevice);
     m_parser.DefineClassFun("TorchTask", ptorch_task, "setinputpath",
