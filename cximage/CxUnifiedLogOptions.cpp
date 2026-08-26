@@ -152,6 +152,12 @@ std::string DetectCxVisionRunMode(int argc, char** argv)
             return "shape_interaction";
         if (arg == "--metrology-analytics-smoke")
             return "metrology_analytics";
+        if (arg == "--mask-diagnostic-selftest")
+            return "mask_diagnostic_selftest";
+        if (arg == "--cximage-reference-candidate")
+            return "cximage_reference_candidate";
+        if (arg == "--automatic-diagnostic-closure")
+            return "automatic_diagnostic_closure";
         if (arg == "--selftest" && i + 1 < argc && argv[i + 1] != nullptr)
         {
             const std::string filter = argv[i + 1];

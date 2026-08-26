@@ -100,6 +100,74 @@
         {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/screws", "split": "train", "label": "unlabeled", "source_role": "oriented_detection_reference", "max_count": 64}
       ],
       "label_semantics": "oriented boxes pending binding"
+    },
+    {
+      "case_id": "hd_pill_body_closed_region_reference",
+      "display_name": "HD pill body closed-region segmentation audit",
+      "task": "closed_regular_region_segmentation",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_body_closed_region_reference_direct.cxsc",
+      "case_track": "C1", "annotation_contract_id": "closed_regular_object_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1",
+      "binding_status": "semantic_mask_binding_pending", "training_enabled": 0,
+      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "unbound", "source_role": "object_region_reference", "max_count": 32}],
+      "label_semantics": "folder label is not a pixel mask; closed object mask pending binding"
+    },
+    {
+      "case_id": "hd_pill_contamination_irregular_region_reference",
+      "display_name": "HD pill contamination irregular-region audit",
+      "task": "closed_irregular_region_segmentation",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_contamination_irregular_region_reference_direct.cxsc",
+      "case_track": "C2", "annotation_contract_id": "closed_irregular_defect_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1",
+      "binding_status": "semantic_mask_binding_pending", "training_enabled": 0,
+      "image_sources": [
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "ginseng_contamination", "source_role": "defect_reference", "max_count": 32},
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination", "split": "validation_candidate", "label": "magnesium_contamination", "source_role": "defect_reference", "max_count": 32},
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination", "split": "validation_candidate", "label": "mint_contamination", "source_role": "defect_reference", "max_count": 32}
+      ],
+      "label_semantics": "folder label identifies review class only; pixel defect mask pending binding"
+    },
+    {
+      "case_id": "hd_pill_bag_multi_instance_reference",
+      "display_name": "HD pill bag multi-instance segmentation audit",
+      "task": "multi_instance_segmentation",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_bag_multi_instance_reference_direct.cxsc",
+      "case_track": "C3", "annotation_contract_id": "multi_instance_mask_v1", "model_track_id": "instance_segmentation_v1", "evaluator_id": "instance_four_way_v1",
+      "binding_status": "instance_mask_binding_pending", "training_enabled": 0,
+      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "validation_candidate", "label": "unbound", "source_role": "multi_instance_reference", "max_count": 64}],
+      "label_semantics": "instance id masks and classes pending binding; bbox is not accepted as mask"
+    },
+    {
+      "case_id": "hd_pill_crack_open_boundary_reference",
+      "display_name": "HD pill crack open-boundary measurement audit",
+      "task": "open_boundary_segmentation_and_measurement",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_crack_open_boundary_reference_direct.cxsc",
+      "case_track": "O2", "annotation_contract_id": "open_boundary_measurement_v1", "model_track_id": "open_boundary_segmentation_v1", "evaluator_id": "open_boundary_four_way_v1",
+      "binding_status": "boundary_label_binding_pending", "training_enabled": 0,
+      "image_sources": [
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack", "split": "validation_candidate", "label": "ginseng_crack", "source_role": "open_boundary_reference", "max_count": 32},
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack", "split": "validation_candidate", "label": "magnesium_crack", "source_role": "open_boundary_reference", "max_count": 32},
+        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack", "split": "validation_candidate", "label": "mint_crack", "source_role": "open_boundary_reference", "max_count": 32}
+      ],
+      "label_semantics": "open polyline and endpoints pending binding; forced closed mask is forbidden"
+    },
+    {
+      "case_id": "hd_pill_fuzzy_region_learning_reference",
+      "display_name": "HD pill fuzzy region-learning audit",
+      "task": "fuzzy_region_learning",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_fuzzy_region_learning_reference_direct.cxsc",
+      "case_track": "R2", "annotation_contract_id": "fuzzy_region_membership_v1", "model_track_id": "fuzzy_region_learning_v1", "evaluator_id": "fuzzy_region_four_way_v1",
+      "binding_status": "membership_label_binding_pending", "training_enabled": 0,
+      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "unbound", "source_role": "fuzzy_region_reference", "max_count": 32}],
+      "label_semantics": "membership map and region class pending binding"
+    },
+    {
+      "case_id": "hd_pill_composite_pipeline_reference",
+      "display_name": "HD pill composite visual pipeline audit",
+      "task": "composite_visual_pipeline",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_composite_pipeline_reference_direct.cxsc",
+      "case_track": "X1", "annotation_contract_id": "composite_stage_outputs_v1", "model_track_id": "composite_pipeline_v1", "evaluator_id": "composite_stage_gate_v1",
+      "binding_status": "composite_stage_binding_pending", "training_enabled": 0,
+      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "validation_candidate", "label": "unbound", "source_role": "composite_pipeline_reference", "max_count": 64}],
+      "label_semantics": "typed stage labels and fusion provenance pending binding"
     }
   ]
 }

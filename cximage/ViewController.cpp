@@ -6646,14 +6646,6 @@ void ViewController::mainloop() {
           SetBackgroundInView(m_myView, pshowimage->getmat());
         }
       }
-      SetCxCrashBreadcrumb("mainloop:runtime_object_shortcuts");
-      m_shapex = (Shape *)m_parserOwner.GetClassObj("Shape", "ashape0");
-      m_apoints =
-          (PointsShape *)m_parserOwner.GetClassObj("PointsShape", "apoints0");
-      m_bpoints =
-          (PointsShape *)m_parserOwner.GetClassObj("PointsShape", "apoints1");
-      m_afindline =
-          (FindLine *)m_parserOwner.GetClassObj("FindLine", "afindline");
       if (opencvSW)
         Imgui_OpenCV_Window0(&opencvSW);
 
@@ -7477,10 +7469,13 @@ Shape *ViewController::indexAt(const gp_Pnt &pos) {
 }
 
 void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
-  if (ImGui::GetCurrentContext() != nullptr &&
-      ImGui::GetIO().WantCaptureMouse) {
-    if (theAction == GLFW_RELEASE)
-      isDragging = false;
+  const bool imguiCapturesMouse =
+      ImGui::GetCurrentContext() != nullptr &&
+      (ImGui::GetIO().WantCaptureMouse ||
+       ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) ||
+       ImGui::IsAnyItemHovered() || ImGui::IsAnyItemActive());
+  if (imguiCapturesMouse) {
+    isDragging = false;
     return;
   }
   if (!m_myView.IsNull()) {
@@ -7503,10 +7498,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
             m_mousePressPos.X() < m_current_window_posx + m_imguiw &&
             m_mousePressPos.Y() < m_current_window_posy + m_imguih) {
         } else {
-          m_apoints->addpoint((int)(m_mousePressPos.X() * m_dscalex),
-                              (int)(m_mousePressPos.Y() * m_dscaley));
-          m_apoints->setcolor(0, 0, 250);
-          m_apoints->setshow(1);
+          PointsShape *points = static_cast<PointsShape *>(
+              m_parserOwner.GetClassObj("PointsShape", "apoints0"));
+          if (points != nullptr) {
+            points->addpoint((int)(m_mousePressPos.X() * m_dscalex),
+                             (int)(m_mousePressPos.Y() * m_dscaley));
+            points->setcolor(0, 0, 250);
+            points->setshow(1);
+          }
         }
       } else if (true == m_ipickpoints && 1 == theButton) {
         if (m_mousePressPos.X() >= m_current_window_posx &&
@@ -7514,10 +7513,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
             m_mousePressPos.X() < m_current_window_posx + m_imguiw &&
             m_mousePressPos.Y() < m_current_window_posy + m_imguih) {
         } else {
-          m_bpoints->addpoint((int)(m_mousePressPos.X() * m_dscalex),
-                              (int)(m_mousePressPos.Y() * m_dscaley));
-          m_bpoints->setcolor(250, 0, 0);
-          m_bpoints->setshow(1);
+          PointsShape *points = static_cast<PointsShape *>(
+              m_parserOwner.GetClassObj("PointsShape", "apoints1"));
+          if (points != nullptr) {
+            points->addpoint((int)(m_mousePressPos.X() * m_dscalex),
+                             (int)(m_mousePressPos.Y() * m_dscaley));
+            points->setcolor(250, 0, 0);
+            points->setshow(1);
+          }
         }
       } else if (true == m_ipickpoints && 2 == theButton) {
         if (m_mousePressPos.X() >= m_current_window_posx &&
@@ -7525,8 +7528,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
             m_mousePressPos.X() < m_current_window_posx + m_imguiw &&
             m_mousePressPos.Y() < m_current_window_posy + m_imguih) {
         } else {
-          m_bpoints->clear();
-          m_apoints->clear();
+          PointsShape *pointsA = static_cast<PointsShape *>(
+              m_parserOwner.GetClassObj("PointsShape", "apoints0"));
+          PointsShape *pointsB = static_cast<PointsShape *>(
+              m_parserOwner.GetClassObj("PointsShape", "apoints1"));
+          if (pointsA != nullptr)
+            pointsA->clear();
+          if (pointsB != nullptr)
+            pointsB->clear();
         }
       } else if (true == m_iattachline && 0 == theButton) {
         if (m_mousePressPos.X() >= m_current_window_posx &&
@@ -7534,10 +7543,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
             m_mousePressPos.X() < m_current_window_posx + m_imguiw &&
             m_mousePressPos.Y() < m_current_window_posy + m_imguih) {
         } else {
-          m_apoints->addpoint((int)(m_mousePressPos.X() * m_dscalex),
-                              (int)(m_mousePressPos.Y() * m_dscaley));
-          m_apoints->setcolor(0, 250, 0);
-          m_apoints->setshow(8);
+          PointsShape *points = static_cast<PointsShape *>(
+              m_parserOwner.GetClassObj("PointsShape", "apoints0"));
+          if (points != nullptr) {
+            points->addpoint((int)(m_mousePressPos.X() * m_dscalex),
+                             (int)(m_mousePressPos.Y() * m_dscaley));
+            points->setcolor(0, 250, 0);
+            points->setshow(8);
+          }
         }
       }
 
@@ -7563,10 +7576,14 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
         } else if (1 == m_ibtntimes) {
           m_ibtntimes = 0;
           m_point1 = gp_Pnt(aPos.x(), aPos.y(), 0);
-          m_afindline->setlinesegment(
-              m_point0.X() * m_dscalex, m_point0.Y() * m_dscaley,
-              m_point1.X() * m_dscalex, m_point1.Y() * m_dscaley, 80);
-          m_afindline->setshow(1);
+          FindLine *findLine = static_cast<FindLine *>(
+              m_parserOwner.GetClassObj("FindLine", "afindline"));
+          if (findLine != nullptr) {
+            findLine->setlinesegment(
+                m_point0.X() * m_dscalex, m_point0.Y() * m_dscaley,
+                m_point1.X() * m_dscalex, m_point1.Y() * m_dscaley, 80);
+            findLine->setshow(1);
+          }
         }
       }
       if (m_mousePressPos.X() >= m_current_window_posx &&
@@ -7576,12 +7593,17 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
       } else if (true != m_ipickpoints)
         if (aPos.x() - m_mousePressPos.X() > 100 &&
             aPos.y() - m_mousePressPos.Y() > 100) {
-          m_shapex->settype(Shape::Rectangle);
-          m_shapex->setrect(
-              m_mousePressPos.X() * m_dscalex, m_mousePressPos.Y() * m_dscaley,
-              aPos.x() * m_dscalex - m_mousePressPos.X() * m_dscalex,
-              aPos.y() * m_dscaley - m_mousePressPos.Y() * m_dscaley);
-          m_shapex->setshow(1);
+          Shape *shape = static_cast<Shape *>(
+              m_parserOwner.GetClassObj("Shape", "ashape0"));
+          if (shape != nullptr) {
+            shape->settype(Shape::Rectangle);
+            shape->setrect(
+                m_mousePressPos.X() * m_dscalex,
+                m_mousePressPos.Y() * m_dscaley,
+                aPos.x() * m_dscalex - m_mousePressPos.X() * m_dscalex,
+                aPos.y() * m_dscaley - m_mousePressPos.Y() * m_dscaley);
+            shape->setshow(1);
+          }
         }
       isDragging = false;
     }
@@ -7610,8 +7632,15 @@ void ViewController::onMouseButton(int theButton, int theAction, int theMods) {
 }
 
 void ViewController::onMouseMove(int thePosX, int thePosY) {
-  if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+  const bool imguiCapturesMouse =
+      ImGui::GetCurrentContext() != nullptr &&
+      (ImGui::GetIO().WantCaptureMouse ||
+       ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) ||
+       ImGui::IsAnyItemHovered() || ImGui::IsAnyItemActive());
+  if (imguiCapturesMouse) {
+    isDragging = false;
     return;
+  }
   const Graphic3d_Vec2i aNewPos(thePosX, thePosY);
   if (true == isDragging) {
     if (m_mousePressPos.X() >= m_current_window_posx &&
@@ -7621,12 +7650,17 @@ void ViewController::onMouseMove(int thePosX, int thePosY) {
     } else if (false == m_ipickpoints)
       if (thePosX - m_mousePressPos.X() > 10 &&
           thePosY - m_mousePressPos.Y() > 10) {
-        m_shapex->settype(Shape::Rectangle);
-        m_shapex->setrect(
-            m_mousePressPos.X() * m_dscalex, m_mousePressPos.Y() * m_dscaley,
-            thePosX * m_dscalex - m_mousePressPos.X() * m_dscalex,
-            thePosY * m_dscaley - m_mousePressPos.Y() * m_dscaley);
-        m_shapex->setshow(1);
+        Shape *shape = static_cast<Shape *>(
+            m_parserOwner.GetClassObj("Shape", "ashape0"));
+        if (shape != nullptr) {
+          shape->settype(Shape::Rectangle);
+          shape->setrect(
+              m_mousePressPos.X() * m_dscalex,
+              m_mousePressPos.Y() * m_dscaley,
+              thePosX * m_dscalex - m_mousePressPos.X() * m_dscalex,
+              thePosY * m_dscaley - m_mousePressPos.Y() * m_dscaley);
+          shape->setshow(1);
+        }
       }
     if (0)
       if (false == ismove) {

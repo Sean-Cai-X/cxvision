@@ -8,6 +8,15 @@ struct CxPrecisionGateSnapshot
 {
     bool evaluated = false;
     bool residual_pass = false;
+    bool support_pass = false;
+    double subpixel_offset_mean = 0.0;
+    double subpixel_offset_stddev = 0.0;
+    double localization_sigma_mean_px = 0.0;
+    double residual_rmse_px = 0.0;
+    double residual_p95_px = 0.0;
+    double residual_max_px = 0.0;
+    double reliability_score = 0.0;
+
     double residual_px = 0.0;
     double residual_limit_px = 0.0;
     double support = 0.0;
@@ -19,4 +28,3 @@ struct CxPrecisionGateSnapshot
 
 CxPrecisionGateSnapshot EvaluateCxPrecisionGate(
     const CxScriptSuiteCaseResult& result);
-

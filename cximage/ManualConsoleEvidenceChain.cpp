@@ -30,6 +30,7 @@
 #include <set>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 static std::string
@@ -2289,11 +2290,88 @@ static bool LoadTorchTrainingRunBindingLocal(const std::string &tracePath,
   return run.available;
 }
 
+struct ActiveManualReviewProjectionLocal {
+  std::filesystem::path manifest_path;
+  std::unordered_set<std::string> managed_tools;
+  std::unordered_set<std::string> selected_binding_paths;
+
+  bool ManagesTool(const std::string &tool) const {
+    const std::string normalized = NormalizeEvidenceToolTypeLocal(tool);
+    return !normalized.empty() &&
+           managed_tools.find(normalized) != managed_tools.end();
+  }
+};
+
+static std::string NormalizeManualReviewProjectionPathLocal(
+    const std::filesystem::path &path) {
+  std::string value = path.lexically_normal().generic_string();
+#ifdef _WIN32
+  std::transform(
+      value.begin(), value.end(), value.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+#endif
+  return value;
+}
+
+static ActiveManualReviewProjectionLocal
+LoadActiveManualReviewProjectionLocal() {
+  ActiveManualReviewProjectionLocal projection;
+  projection.manifest_path = ResolveCxVisionRunPath(
+      "cxscript_runs/evidence_chain/active_manual_review_projection.tsv");
+
+  std::string text;
+  if (!ReadTextFile(projection.manifest_path.string(), text))
+    return projection;
+
+  std::istringstream input(text);
+  std::string line;
+  while (std::getline(input, line)) {
+    line = TrimLine(line);
+    if (line.empty() || line[0] == '#')
+      continue;
+
+    const std::size_t separator = line.find('\t');
+    if (separator == std::string::npos)
+      continue;
+
+    const std::string tool = TrimLine(line.substr(0, separator));
+    std::string bindingValue = TrimLine(line.substr(separator + 1));
+    if (tool.empty() || bindingValue.empty() || tool == "tool" ||
+        tool == "schema")
+      continue;
+
+    std::filesystem::path bindingPath(bindingValue);
+    if (bindingPath.is_relative())
+      bindingPath = projection.manifest_path.parent_path() / bindingPath;
+
+    const std::string normalizedTool =
+        NormalizeEvidenceToolTypeLocal(tool);
+    const std::string normalizedBinding =
+        NormalizeManualReviewProjectionPathLocal(bindingPath);
+    if (normalizedTool.empty() || normalizedBinding.empty())
+      continue;
+
+    projection.managed_tools.insert(normalizedTool);
+    projection.selected_binding_paths.insert(normalizedBinding);
+  }
+  return projection;
+}
+
+static bool IsSelectedManualReviewBindingLocal(
+    const ActiveManualReviewProjectionLocal &projection,
+    const std::filesystem::path &bindingPath) {
+  return projection.selected_binding_paths.find(
+             NormalizeManualReviewProjectionPathLocal(bindingPath)) !=
+         projection.selected_binding_paths.end();
+}
+
 static int AppendManualAlgorithmReviewHandoffLocal(
     ManualTestContext &context, const std::string &handoffPath,
     const std::function<std::string(const std::string &)> &resolveImagePath,
     const std::function<ScriptEvidenceGroup &(const std::string &)>
-        &findGroup) {
+        &findGroup,
+    const ActiveManualReviewProjectionLocal &projection,
+    int &suppressedManagedRows) {
   std::string text;
   if (!ReadTextFile(handoffPath, text))
     return 0;
@@ -2320,6 +2398,10 @@ static int AppendManualAlgorithmReviewHandoffLocal(
             : BuildManualReviewVisibleCaseLabelLocal(internalCaseId);
     const std::string tool = NormalizeEvidenceToolTypeLocal(
         hasReviewItemColumns ? cells[3] : cells[1]);
+    if (projection.ManagesTool(tool)) {
+      ++suppressedManagedRows;
+      continue;
+    }
     const std::string imageId = hasReviewItemColumns ? cells[4] : cells[2];
     const std::string targetId = hasReviewItemColumns ? cells[5] : cells[3];
     const std::string failureClass = hasReviewItemColumns ? cells[6] : cells[4];
@@ -2513,15 +2595,27 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   for (const auto &group : context.script_evidence_groups)
     before += static_cast<int>(group.thumbs.size());
 
+  const ActiveManualReviewProjectionLocal projection =
+      LoadActiveManualReviewProjectionLocal();
+  int suppressedManagedRows = 0;
+
   std::ostringstream scanDebug;
   scanDebug << "root\t" << root.string() << '\n';
+  scanDebug << "projection_manifest\t"
+            << projection.manifest_path.string() << '\n';
+  scanDebug << "managed_tools\t" << projection.managed_tools.size() << '\n';
+  scanDebug << "selected_bindings\t"
+            << projection.selected_binding_paths.size() << '\n';
   for (const std::string &scanError : scanErrors)
     scanDebug << "scan_error\t" << scanError << '\n';
-  scanDebug << "handoff_path\tappended_cases\n";
+  scanDebug << "handoff_path\tappended_cases\tsuppressed_managed_rows\n";
   for (const auto &handoff : handoffs) {
+    const int beforeSuppressed = suppressedManagedRows;
     const int handoffAppended = AppendManualAlgorithmReviewHandoffLocal(
-        context, handoff.string(), resolveImagePath, findGroup);
-    scanDebug << handoff.string() << '\t' << handoffAppended << '\n';
+        context, handoff.string(), resolveImagePath, findGroup, projection,
+        suppressedManagedRows);
+    scanDebug << handoff.string() << '\t' << handoffAppended << '\t'
+              << (suppressedManagedRows - beforeSuppressed) << '\n';
   }
 
   const std::filesystem::path scanDebugPath = ResolveCxVisionRunPath(
@@ -2535,8 +2629,12 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   const int appended = std::max(0, after - before);
   std::ostringstream oss;
   oss << "manual algorithm review handoffs scanned=" << handoffs.size()
-      << " appended_cases=" << appended << " root=" << root.string()
-      << " debug=" << scanDebugPath.string();
+      << " appended_cases=" << appended
+      << " suppressed_managed_rows=" << suppressedManagedRows
+      << " managed_tools=" << projection.managed_tools.size()
+      << " selected_bindings=" << projection.selected_binding_paths.size()
+      << " projection_manifest=" << projection.manifest_path.string()
+      << " root=" << root.string() << " debug=" << scanDebugPath.string();
   reason = oss.str();
   return appended;
 }
@@ -2832,7 +2930,10 @@ static void AppendSavedEvidenceCandidatesLocal(
   if (repoLocalRoot != roots.front().lexically_normal())
     roots.push_back(repoLocalRoot);
   std::error_code ec;
-
+  const ActiveManualReviewProjectionLocal projection =
+      LoadActiveManualReviewProjectionLocal();
+  int selectedBindingCount = 0;
+  int suppressedBindingCount = 0;
   std::vector<std::filesystem::path> bindings;
   for (const auto &root : roots) {
     ec.clear();
@@ -2999,6 +3100,13 @@ static void AppendSavedEvidenceCandidatesLocal(
 
     const std::string bindingTool = NormalizeEvidenceToolTypeLocal(
         ReadJsonStringFieldLocal(binding, "tool"));
+    if (projection.ManagesTool(bindingTool)) {
+      if (!IsSelectedManualReviewBindingLocal(projection, bindingPath)) {
+        ++suppressedBindingCount;
+        continue;
+      }
+      ++selectedBindingCount;
+    }
 
     bool gaugeAccepted = false;
     std::string gaugeReviewStatus;
@@ -3126,8 +3234,6 @@ static void AppendSavedEvidenceCandidatesLocal(
         candidateTool.empty() ? baseLabel : (baseLabel + " / " + candidateTool);
 
     if (reboundToOriginal) {
-      // The saved candidate has been rebound to an existing baseline row.
-      // Keep list stable by not appending a second visible row.
       seenCandidateKeys.insert(dedupKey);
       continue;
     }
@@ -3152,6 +3258,100 @@ static void AppendSavedEvidenceCandidatesLocal(
     if (!exists)
       group.thumbs.push_back(std::move(thumb));
   }
+  std::ostringstream projectionDebug;
+  projectionDebug << "manifest\t" << projection.manifest_path.string() << '\n';
+  projectionDebug << "managed_tools\t" << projection.managed_tools.size()
+                  << '\n';
+  projectionDebug << "discovered_bindings\t" << bindings.size() << '\n';
+  projectionDebug << "selected_bindings\t" << selectedBindingCount << '\n';
+  projectionDebug << "suppressed_bindings\t" << suppressedBindingCount
+                  << '\n';
+  for (const auto &root : roots)
+    projectionDebug << "scan_root\t" << root.string() << '\n';
+  const std::filesystem::path projectionDebugPath = ResolveCxVisionRunPath(
+      "cxscript_runs/evidence_chain/manual_review_projection_scan_debug.tsv");
+  WriteTextFile(projectionDebugPath, projectionDebug.str());
+}
+
+static int ApplyActiveManualReviewProjectionLocal(
+    ManualTestContext &context, std::string &reason) {
+  reason.clear();
+  const ActiveManualReviewProjectionLocal projection =
+      LoadActiveManualReviewProjectionLocal();
+  if (projection.managed_tools.empty())
+    return 0;
+
+  int before = 0;
+  int removed = 0;
+  std::vector<std::string> selectedRows;
+  for (auto &group : context.script_evidence_groups) {
+    before += static_cast<int>(group.thumbs.size());
+    const auto newEnd = std::remove_if(
+        group.thumbs.begin(), group.thumbs.end(),
+        [&](const ScriptEvidenceThumb &thumb) {
+          const bool managed =
+              projection.ManagesTool(thumb.tool) ||
+              projection.ManagesTool(group.label);
+          if (!managed)
+            return false;
+          const bool selected =
+              !thumb.evidence_binding_path.empty() &&
+              IsSelectedManualReviewBindingLocal(
+                  projection, thumb.evidence_binding_path);
+          if (!selected) {
+            ++removed;
+          } else {
+            std::ostringstream row;
+            row << NormalizeEvidenceToolTypeLocal(thumb.tool) << '\t'
+                << (thumb.script_id.empty() ? thumb.case_id : thumb.script_id)
+                << '\t' << thumb.case_id << '\t'
+                << thumb.evidence_binding_path;
+            selectedRows.push_back(row.str());
+          }
+          return !selected;
+        });
+    group.thumbs.erase(newEnd, group.thumbs.end());
+  }
+
+  context.script_evidence_groups.erase(
+      std::remove_if(
+          context.script_evidence_groups.begin(),
+          context.script_evidence_groups.end(),
+          [](const ScriptEvidenceGroup &group) {
+            return group.thumbs.empty();
+          }),
+      context.script_evidence_groups.end());
+
+  int after = 0;
+  for (const auto &group : context.script_evidence_groups)
+    after += static_cast<int>(group.thumbs.size());
+
+  std::ostringstream debug;
+  debug << "manifest\t" << projection.manifest_path.string() << '\n';
+  debug << "managed_tools\t" << projection.managed_tools.size() << '\n';
+  debug << "selected_bindings\t"
+        << projection.selected_binding_paths.size() << '\n';
+  debug << "projected_selected_rows\t" << selectedRows.size() << '\n';
+  debug << "tool\treview_item\tcase_id\tevidence_binding_path\n";
+  for (const std::string &row : selectedRows)
+    debug << row << '\n';
+  debug << "before\t" << before << '\n';
+  debug << "after\t" << after << '\n';
+  debug << "removed\t" << removed << '\n';
+  const std::filesystem::path debugPath = ResolveCxVisionRunPath(
+      "cxscript_runs/evidence_chain/manual_review_projection_apply_debug.tsv");
+  WriteTextFile(debugPath, debug.str());
+
+  std::ostringstream summary;
+  summary << "active manual review projection managed_tools="
+          << projection.managed_tools.size()
+          << " selected_bindings="
+          << projection.selected_binding_paths.size()
+          << " removed=" << removed << " remaining=" << after
+          << " manifest=" << projection.manifest_path.string()
+          << " debug=" << debugPath.string();
+  reason = summary.str();
+  return removed;
 }
 
 static bool LooksLikeCxScriptPathLocal(const std::string &value) {
@@ -3678,9 +3878,6 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             BuildDefaultEvidenceParamSummaryForScript(thumb.script_path);
       }
 
-      // Workflow cases deliberately remain unbound until their manifest
-      // supplies an image. An unrelated fallback image would make a blocked
-      // gate appear ready for review.
       if (thumb.workflow_id.empty()) {
         ApplyHDReferenceImageBindingLocal(thumb);
         AssignFallbackImageToThumb(thumb, fallbackImages,
@@ -3974,6 +4171,20 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
       m_manualTest, [&](const std::string &label) -> ScriptEvidenceGroup & {
         return findOrCreateGroup("", "", label);
       });
+
+  {
+    std::string projectionReason;
+    ApplyActiveManualReviewProjectionLocal(m_manualTest, projectionReason);
+    if (!projectionReason.empty()) {
+      if (!m_manualTest.debug_reason.empty() &&
+          m_manualTest.debug_reason != "not started") {
+        m_manualTest.debug_reason += "; ";
+      } else {
+        m_manualTest.debug_reason.clear();
+      }
+      m_manualTest.debug_reason += projectionReason;
+    }
+  }
 
   PruneFindEllipseDuplicateCasesByNameLocal(m_manualTest);
 
@@ -4752,9 +4963,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     scriptText =
         EnsureFindLineSelectedEdgeStatementLocal(resolved.tool, scriptText);
 
-    // The candidate/working script is the authoritative source for its
-    // object declarations.  Do not reuse the baseline Evidence object's
-    // declaration list after loading a saved script snapshot.
     if (resolved.is_candidate || loadWorkingRevision)
       resolved.editable_objects.clear();
     if (resolved.editable_objects.empty())
@@ -4804,11 +5012,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   ManualTestContext staged = m_manualTest;
   staged.runtime_int_vars.clear();
 
-  // Selecting an Evidence row is an input-context switch, not a runtime
-  // result replay.  Clear the previous parser runtime object snapshot and
-  // any deferred runtime shape sync before projecting the new input Gauge;
-  // otherwise the old tool (notably FastMatch) can republish stale result
-  // shapes after the new FindLine/FindCircle Gauge is shown.
   staged.runtime_objects.clear();
 
   staged.current_evidence_selection = resolved;
@@ -4848,10 +5051,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
       const std::string normalizedEvidenceTool =
           NormalizeEvidenceToolTypeLocal(resolved.tool);
       if (normalizedEvidenceTool == "TorchTask") {
-        // A Torch evidence row does not own a legacy line/circle
-        // gauge.  Reset the previous geometry context so Key
-        // Parameter Controls follows the selected Torch case instead
-        // of silently retaining the last FindLine selection.
         ManualGaugeState torchContext;
         torchContext.case_id = resolved.case_id;
         torchContext.image_id = resolved.image_id;
@@ -4939,9 +5138,6 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   } else {
     std::string lockedParamReason;
     if (!resolved.workflow_id.empty()) {
-      // Workflow metadata describes gate inputs and expected evidence. It is
-      // not a runtime-global parameter snapshot and must remain selectable
-      // before a concrete dataset/training case has been bound.
       parameterSource = "workflow_metadata";
     } else if (EvidenceSnapshotHasLockedParamSummaryLocal(resolved,
                                                           lockedParamReason)) {
@@ -5360,8 +5556,6 @@ static void ApplyEvidenceAnnotationsToTorchTrainingItemLocal(
   }
 
   item.annotation_shape_count = static_cast<int>(item.annotation_shapes.size());
-  // Evidence polygons are restored as ShapeElements.  Overlay elements are a
-  // separate collection and must not mirror the shape count.
   item.annotation_overlay_count = 0;
   item.annotation_status = item.annotation_shape_count > 0
                                ? "draft_pending_human_review"
@@ -5830,8 +6024,6 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
     std::string imageLoadReason;
     bool imageLoaded = false;
     if (imageToLoad >= 0) {
-      // The previous Image View belongs to another evidence selection.  Do
-      // not capture its annotation layer into the newly rebuilt dataset.
       m_manualTest.selected_torch_training_image = -1;
       imageLoaded = LoadTorchTrainingImageIntoAnnotationView(imageToLoad,
                                                              imageLoadReason);

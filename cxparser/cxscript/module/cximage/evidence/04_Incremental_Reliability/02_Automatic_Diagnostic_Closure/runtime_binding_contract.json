@@ -1,0 +1,7 @@
+{
+  "schema": "cxvision.parent_child_runtime_binding_contract.v1",
+  "required_model_fields": ["status", "task_id", "model_id", "manifest_path", "requested_device", "physical_output_contract"],
+  "required_pair_invariants": ["same_input_image", "same_requested_device", "distinct_output_directories", "parent_completes_before_child_starts", "physical_output_exists_before_evaluation"],
+  "forbidden": ["project_name_without_runtime_manifest", "classification_label_as_segmentation_mask", "bbox_as_mask", "shared_output_directory", "parallel_parser_execution"],
+  "training_enabled": 0
+}

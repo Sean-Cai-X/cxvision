@@ -242,7 +242,7 @@ void AttachSegmentationMaskRefs(
         ? result_dir / "mask_overlay.png"
         : std::filesystem::path(source.primary_visual_ref);
 
-    if (!std::filesystem::exists(mask_path)) {
+    if (!std::filesystem::is_regular_file(mask_path)) {
         const std::size_t separator = source.visualization_refs.find(';');
         if (separator != std::string::npos) {
             mask_path = source.visualization_refs.substr(0, separator);
@@ -251,7 +251,7 @@ void AttachSegmentationMaskRefs(
         }
     }
 
-    if (!std::filesystem::exists(mask_path)) {
+    if (!std::filesystem::is_regular_file(mask_path)) {
         return;
     }
 
@@ -264,7 +264,20 @@ void AttachSegmentationMaskRefs(
     if (std::filesystem::exists(overlay_path)) {
         mask.overlay_ref = overlay_path.string();
     }
-    target.mask = mask;
+
+    CxMaskFactsSnapshot mask_facts;
+    std::string mask_reason;
+    if (AnalyzeCxMaskFile(mask.mask_ref, mask_facts, mask_reason)) {
+        mask.width = mask_facts.width;
+        mask.height = mask_facts.height;
+        mask.foreground_ratio = mask_facts.foreground_ratio;
+        target.metrics["mask_foreground_pixels"] = mask_facts.foreground_pixels;
+        target.metrics["mask_component_count"] = mask_facts.component_count;
+        target.metrics["mask_boundary_pixels"] = mask_facts.boundary_pixels;
+        target.metrics["mask_bbox_fill_ratio"] = mask_facts.bbox_fill_ratio;
+        target.metrics["mask_touches_border"] = mask_facts.touches_border ? 1.0 : 0.0;
+        target.mask = mask;
+    }
 }
 
 } // namespace
@@ -399,6 +412,20 @@ TorchRuntimeGuiReview TorchRuntimeResultAdapter::AdaptToGuiReview(const CxInfere
     if (result.mask.has_value()) {
         const CxTorchMask& mask = result.mask.value();
         review.result_fields.push_back({"Mask Available", mask.available ? "true" : "false", ""});
+        review.result_fields.push_back({"Mask Width", std::to_string(mask.width), "px"});
+        review.result_fields.push_back({"Mask Height", std::to_string(mask.height), "px"});
+        {
+            std::ostringstream os;
+            os << std::fixed << mask.foreground_ratio;
+            review.result_fields.push_back({"Mask Foreground Ratio", os.str(), ""});
+        }
+        const auto component_it = result.metrics.find("mask_component_count");
+        if (component_it != result.metrics.end()) {
+            review.result_fields.push_back({
+                "Mask Component Count",
+                std::to_string(static_cast<int>(component_it->second)),
+                ""});
+        }
         if (!mask.mask_ref.empty()) {
             review.result_fields.push_back({"Mask Ref", mask.mask_ref, ""});
         }

@@ -250,6 +250,20 @@ std::string Trim(const std::string& str)
     const size_t last = str.find_last_not_of(" \t");
     return str.substr(first, last - first + 1);
 }
+
+bool StripNumericDeclaration(std::string& name)
+{
+    const size_t separator = name.find_first_of(" \t");
+    if (separator == std::string::npos)
+        return true;
+
+    const std::string type = name.substr(0, separator);
+    if (type != "int" && type != "double" && type != "float")
+        return false;
+
+    name = Trim(name.substr(separator + 1));
+    return !name.empty();
+}
 }
 
 bool LoadHeadlessGlobalValuesFile(
@@ -289,7 +303,7 @@ bool LoadHeadlessGlobalValuesFile(
         std::string name_part = Trim(trimmed.substr(0, eq_pos));
         std::string value_part = Trim(trimmed.substr(eq_pos + 1));
 
-        if (name_part.empty())
+        if (name_part.empty() || !StripNumericDeclaration(name_part))
         {
             reason = "invalid headless globals value at line " +
                 std::to_string(line_num) + ": " + line;

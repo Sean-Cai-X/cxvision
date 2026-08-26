@@ -399,6 +399,50 @@ bool CaptureFindCircleResult(
         tool.getpointconsistencyoutputcount();
     output.circle_point_consistency_removed_points =
         tool.getpointconsistencyremovedcount();
+
+    const FindCircleBoundaryAnalysisSnapshot boundary =
+        tool.boundaryanalysissnapshot();
+    output.boundary_analysis_status = boundary.status;
+    output.boundary_reliability_level = boundary.reliability_level;
+    output.boundary_expected_scan_count = boundary.expected_scan_count;
+    output.boundary_accepted_point_count = boundary.accepted_point_count;
+    output.boundary_interpolation_valid_count =
+        boundary.interpolation_valid_count;
+    output.boundary_fit_residual_count = boundary.fit_residual_count;
+    output.boundary_coverage_ratio = boundary.coverage_ratio;
+    output.boundary_response_mean = boundary.response_mean;
+    output.boundary_response_median = boundary.response_median;
+    output.boundary_response_cv = boundary.response_cv;
+    output.boundary_subpixel_offset_mean = boundary.subpixel_offset_mean;
+    output.boundary_subpixel_offset_stddev = boundary.subpixel_offset_stddev;
+    output.boundary_localization_sigma_mean_px =
+        boundary.localization_sigma_mean_px;
+    output.boundary_residual_rmse_px = boundary.residual_rmse_px;
+    output.boundary_residual_p95_px = boundary.residual_p95_px;
+    output.boundary_residual_max_px = boundary.residual_max_px;
+    output.boundary_outlier_ratio = boundary.outlier_ratio;
+    output.boundary_reliability_score = boundary.reliability_score;
+    output.boundary_points.clear();
+    for (const auto &point : boundary.points)
+    {
+        CxFindLineBoundaryPointEvidenceSnapshot snapshot;
+        snapshot.scan_index = point.scan_index;
+        snapshot.scan_type = 2;
+        snapshot.measured_x = point.measured_x;
+        snapshot.measured_y = point.measured_y;
+        snapshot.refined_x = point.refined_x;
+        snapshot.refined_y = point.refined_y;
+        snapshot.subpixel_offset = point.subpixel_offset;
+        snapshot.response_strength = point.response_strength;
+        snapshot.local_noise = point.local_noise;
+        snapshot.localization_sigma_px = point.localization_sigma_px;
+        snapshot.fit_residual_px = point.fit_residual_px;
+        snapshot.polarity = point.polarity;
+        snapshot.interpolation_valid = point.interpolation_valid;
+        snapshot.fit_residual_valid = point.fit_residual_valid;
+        snapshot.profile = point.profile;
+        output.boundary_points.push_back(snapshot);
+    }
     output.budget_exceeded = tool.budgetexceeded();
     if (output.has_fit_circle)
     {
@@ -416,6 +460,27 @@ bool CaptureFindCircleResult(
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
     CopyShapeElementsToSnapshots(layer, output.shapes);
+
+    if (!output.boundary_points.empty())
+    {
+        CxShapeElementSnapshot refined;
+        refined.stable_ref = output.owner_ref + ":boundary_refined_points";
+        refined.owner_type = "FindCircle";
+        refined.owner_ref = output.owner_ref;
+        refined.semantic_role = "boundary_refined_points";
+        refined.editable = false;
+        refined.result_element = true;
+        refined.shape_kind = "PointsShape";
+        for (const auto &point : output.boundary_points)
+        {
+            if (!point.interpolation_valid)
+                continue;
+            refined.points.push_back(point.refined_x);
+            refined.points.push_back(point.refined_y);
+        }
+        if (!refined.points.empty())
+            output.shapes.push_back(refined);
+    }
 
     return true;
 }

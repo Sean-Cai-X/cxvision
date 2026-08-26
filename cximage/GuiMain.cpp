@@ -9,6 +9,8 @@
 #include "CxUnifiedLogStreamBuf.h"
 #include "CxCrashLogHandler.h"
 #include "CxEvidenceSelfTestRuntime.h"
+#include "CxMaskDiagnosticSelfTest.h"
+#include "CxAutomaticDiagnosticClosure.h"
 #include "CxTorchRuntimeService.h"
 #include "CxParserRuntimeOwner.h"
 #include "CxScriptCatalogRuntime.h"
@@ -2409,8 +2411,116 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions& options)
     return loopPass ? 0 : 1;
 }
 
+int RunMaskDiagnosticSelfTestCli(int argc, char** argv)
+{
+    const std::filesystem::path outDir = CliValueAfter(argc, argv, "--out");
+    if (outDir.empty())
+    {
+        std::cout << "mask_diagnostic_selftest_ok=false\n"
+                  << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                  << "reason=--out is required\n";
+        return 2;
+    }
+    return RunCxMaskDiagnosticSelfTest(outDir);
+}
+
+int RunAutomaticDiagnosticClosureCli(int argc, char** argv)
+{
+    CxAutomaticDiagnosticClosureOptions options;
+    options.matrix_path = CliValueAfter(argc, argv, "--matrix");
+    options.output_dir = CliValueAfter(argc, argv, "--out");
+    if (options.matrix_path.empty() || options.output_dir.empty())
+    {
+        std::cout << "automatic_diagnostic_closure_ok=false\n"
+                  << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                  << "reason=--matrix and --out are required\n";
+        return 2;
+    }
+
+    CxAutomaticDiagnosticClosureResult result;
+    std::string reason;
+    const bool ran = RunCxAutomaticDiagnosticClosure(options, result, reason);
+    std::cout << "automatic_diagnostic_closure_ok=" << (ran && result.complete ? "true" : "false") << "\n"
+              << "conclusion=" << result.status << "\n"
+              << "reason=" << (result.reason.empty() ? reason : result.reason) << "\n"
+              << "discovered_rows=" << result.discovered_rows << "\n"
+              << "bound_rows=" << result.bound_rows << "\n"
+              << "executed_cases=" << result.executed_cases << "\n"
+              << "completed_cases=" << result.completed_cases << "\n"
+              << "binding_preflight=" << result.preflight_ref.string() << "\n";
+    if (!result.process_status_ref.empty())
+        std::cout << "closure_process_status=" << result.process_status_ref.string() << "\n";
+    if (!result.aggregate_ref.empty())
+        std::cout << "frozen_validation_aggregate=" << result.aggregate_ref.string() << "\n";
+    if (!result.stability_ref.empty())
+        std::cout << "stability_analysis=" << result.stability_ref.string() << "\n";
+    if (!result.promotion_gate_ref.empty())
+        std::cout << "promotion_gate=" << result.promotion_gate_ref.string() << "\n";
+
+    if (!ran)
+        return 2;
+    return result.status == "PENDING_BINDING" ? 3 : (result.complete ? 0 : 1);
+}
+
+int RunCxImageReferenceCandidateCliFromArgs(int argc, char** argv)
+{
+    CxImageReferenceCandidateCliOptions options;
+    options.image_path = CliValueAfter(argc, argv, "--image");
+    options.output_dir = CliValueAfter(argc, argv, "--out");
+
+    std::string value;
+    if (TryGetCliValue(argc, argv, "--algorithm-id", value) && !value.empty())
+        options.algorithm_id = value;
+    if (TryGetCliValue(argc, argv, "--threshold", value) && !value.empty())
+    {
+        try { options.threshold = std::stod(value); }
+        catch (...) { std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\nreason=invalid --threshold\n"; return 2; }
+    }
+
+    const char* roi_names[] = {"--roi-x0", "--roi-y0", "--roi-x1", "--roi-y1"};
+    int* roi_values[] = {&options.roi_x0, &options.roi_y0, &options.roi_x1, &options.roi_y1};
+    int roi_count = 0;
+    for (int index = 0; index < 4; ++index)
+    {
+        if (TryGetCliValue(argc, argv, roi_names[index], value) && !value.empty())
+        {
+            try { *roi_values[index] = std::stoi(value); ++roi_count; }
+            catch (...) { std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\nreason=invalid ROI value\n"; return 2; }
+        }
+    }
+    if (roi_count != 0 && roi_count != 4)
+    {
+        std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                  << "reason=ROI requires --roi-x0 --roi-y0 --roi-x1 --roi-y1\n";
+        return 2;
+    }
+    options.has_roi = roi_count == 4;
+    if (options.has_roi &&
+        (options.roi_x1 <= options.roi_x0 || options.roi_y1 <= options.roi_y0))
+    {
+        std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\nreason=ROI must have positive width and height\n";
+        return 2;
+    }
+    return RunCxImageReferenceCandidateCli(options);
+}
+
 int RunCxVisionApplication(int argc, char** argv)
 {
+    if (HasCliArg(argc, argv, "--automatic-diagnostic-closure"))
+    {
+        return RunAutomaticDiagnosticClosureCli(argc, argv);
+    }
+
+    if (HasCliArg(argc, argv, "--cximage-reference-candidate"))
+    {
+        return RunCxImageReferenceCandidateCliFromArgs(argc, argv);
+    }
+
+    if (HasCliArg(argc, argv, "--mask-diagnostic-selftest"))
+    {
+        return RunMaskDiagnosticSelfTestCli(argc, argv);
+    }
+
     if (HasCliArg(argc, argv, "--gwy-reference-smoke"))
     {
         return RunGwyReferenceInterfaceSmokeCli(argc, argv);

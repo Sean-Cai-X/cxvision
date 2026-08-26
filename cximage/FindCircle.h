@@ -4,6 +4,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "CxAlgorithmBudget.h"
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -174,6 +175,48 @@ struct CircleFeatureGraph
     int next_component_id = 0;
 };
 
+struct FindCircleBoundaryPointSnapshot
+{
+    int scan_index = -1;
+    double measured_x = 0.0;
+    double measured_y = 0.0;
+    double refined_x = 0.0;
+    double refined_y = 0.0;
+    double subpixel_offset = 0.0;
+    double response_strength = 0.0;
+    double local_noise = 0.0;
+    double localization_sigma_px = 0.0;
+    double fit_residual_px = 0.0;
+    int polarity = 0;
+    bool interpolation_valid = false;
+    bool fit_residual_valid = false;
+    std::array<double, 5> profile = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+};
+
+struct FindCircleBoundaryAnalysisSnapshot
+{
+    std::string schema = "cxvision.findcircle_boundary_analysis.v1";
+    std::string status = "NOT_ANALYZED";
+    std::string reliability_level = "UNAVAILABLE";
+    int expected_scan_count = 0;
+    int accepted_point_count = 0;
+    int interpolation_valid_count = 0;
+    int fit_residual_count = 0;
+    double coverage_ratio = 0.0;
+    double response_mean = 0.0;
+    double response_median = 0.0;
+    double response_cv = 0.0;
+    double subpixel_offset_mean = 0.0;
+    double subpixel_offset_stddev = 0.0;
+    double localization_sigma_mean_px = 0.0;
+    double residual_rmse_px = 0.0;
+    double residual_p95_px = 0.0;
+    double residual_max_px = 0.0;
+    double outlier_ratio = 0.0;
+    double reliability_score = 0.0;
+    std::vector<FindCircleBoundaryPointSnapshot> points;
+};
+
 class ICxShapeSink;
 
 class FindCircle:public Shape
@@ -333,6 +376,7 @@ public:
     {
         return m_last_measure_input_request;
     }
+    FindCircleBoundaryAnalysisSnapshot boundaryanalysissnapshot() const;
     GeomAdaptor_Curve GetCurve(gp_Pnt center_p, Standard_Real radius);
 
     gp_Pnt FindClosestPointOnCurve(GeomAdaptor_Curve myCurve,gp_Pnt externalPoint);
@@ -437,6 +481,7 @@ private:
     FindCircleMeasureGeometryRequest m_measure_geometry_request;
     FindCircleMeasureGeometryRequest m_last_measure_input_request;
     FindCircleMeasureGeometryDebug m_lastMeasureGeometryDebug;
+    FindCircleBoundaryAnalysisSnapshot m_boundaryAnalysis;
 
     bool m_measure_geometry_dirty = true;
     bool m_measure_geometry_ready = false;
@@ -460,6 +505,8 @@ private:
         const FindCircleMeasureGeometryRequest& request);
 
     void ClearMeasureState();
+
+    void BuildBoundaryAnalysisSnapshot(Image& image);
 
     void CollectCircleEdgeBandsRobust(Image& image);
     void BuildCircleFeatureGraph();

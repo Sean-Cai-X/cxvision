@@ -1,8 +1,8 @@
 CxScript Debug Snapshot
 =======================
-time: 2026-08-25T15:56:05
+time: 2026-08-26T16:34:12
 flow_block: cximage_find_circle_explore.N0
-script_path: D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\evidence_candidates\L1_line_high_contrast_002_metal_part_lower_right_edge_ok\candidate_20260809_172439\script_snapshot.cxsc
+script_path: D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\headless\run_20260826_155121_findcircle_precision_review_candidates_v2\manual_review_assets\pipe_occluded\script_snapshot.cxsc
 run_state: runtime_finished
 runtime_current_status: PENDING
 debug_status: runtime_executed
@@ -22,210 +22,141 @@ object_assignments: 0
 
 Current Result Ref
 ------------------
-name: global_line_ref
-value: runtime_object:m_line
-source_object: m_line
-result_type: FindLineResult
-status: runtime_object_available
-reason: 
-fit: (0, 0, r=0)
-avgdist: 0
-points_count: 0
-valid_points_count: 0
+name: global_circle_ref
+value: runtime_object:m_circle
+source_object: m_circle
+result_type: FindCircleResult
+status: geometry_result_available
+reason: bound to runtime object geometry result
+fit: (813.845, 696.501, r=34.8747)
+avgdist: 1.74059
+points_count: 65
+valid_points_count: 65
 
 Geometry Summary
 ----------------
-geometry: object=m_line | line_roi=(688,743)->(823,631) | scan_half_width=82 | linegap=9 | line_scan_box_xy=[740.357,806.109,875.357,694.109,770.643,567.891,635.643,679.891] | measure_points_count=21 | valid_points_count=21 | pointsw=0 | pointsh=21 | seek_points=0 | edgebands=0 | chain=0 | measure_failure_stage=result_points_available | measure_detail=Findline original Measure produced result points. | result_status= | result_reason= | image_ready=true | image_size=1280x960x3 | roi_intersects_image=true | threshold=6 | max_gradient=138 | profile_count=31 | sampled_pixels=3300 | measure_source=original_measure_pipeline | fallback_used=false | original_points=31 | original_edgebands=0 | original_chain=0 | fit_mode=1 | fit_status=geometry_result_available: LeastSquares | has_line_scan_box=true | display_version=0 | geometry_request_valid=true | geometry_ready=true | geometry_dirty=false | geometry_half_width=82 | scan_w=0 | scan_h=31 | scan_w_len=0 | scan_h_len=250 | process_w=250 | backimage_ready=true | findobject_ready=true | findobject_called=true | binary_foreground=1549 | filter_profile=0 | effective_filter_borw=21 | effective_filter_min=50 | effective_filter_max=100000 | component_total=61 | component_accepted=2 | component_rejected_min=59 | component_rejected_max=0 | component_rejected_borw=0 | result_empty_reason=
+geometry: object=m_circle | roi_circle=(813,693, inner=859, r=693) | measure_points_count=65 | valid_points_count=65 | fit_circle=(813.845,696.501, r=34.8747) | avgdist=1.74059 | has_result_measure=false | roi_outer_polyline=false | roi_inner_polyline=false | roi_segments=0 | fit_circle_polyline=false | fit_segments=0 | display_version=0 | circle_geometry_ready=false | circle_dirty=false | circle_scan_lines=65 | circle_scan_len=250 | circle_process_w=250 | circle_selected_edge=1 | circle_candidate_runs_total=149 | circle_candidate_runs_max_per_line=5 | circle_selected_edge_hits=65 | circle_selected_edge_misses=0 | circle_selected_radius_avg=34.7761 | circle_selected_radius_min=29.6672 | circle_selected_radius_max=41.5982 | circle_measure_source=original_circle_measure_pipeline | circle_failure_stage=result_points_available
 
 
 Image Overlay Summary
 ---------------------
-image overlay: green_line_roi=true | green_line_scan_box=true | blue_seek_points=0 | red_measure_points=21 | yellow_fit_line=true | fitline_pending=false | source_preview_enabled=false | manual_elements_count=0
+image overlay: green_roi_circle=true | green_roi_polyline=false | red_measure_points=65 | yellow_fit_circle=true | yellow_fit_polyline=false | source_preview_enabled=false | manual_elements_count=0
 
 
 Runtime Objects
 ---------------
-* FindLine m_line
+* FindCircle m_circle
   declared_line: 0
   exists_in_parser: true
   runtime_state: geometry_result_available
   last_runtime_status: runtime_executed
   last_method: Manual Console Pending Run
   last_update_line: 0
-  display_summary: geometry: object=m_line | line_roi=(688,743)->(823,631) | scan_half_width=82 | linegap=9 | line_scan_box_xy=[740.357,806.109,875.357,694.109,770.643,567.891,635.643,679.891] | measure_points_count=21 | valid_points_count=21 | pointsw=0 | pointsh=21 | seek_points=0 | edgebands=0 | chain=0 | measure_failure_stage=result_points_available | measure_detail=Findline original Measure produced result points. | result_status= | result_reason= | image_ready=true | image_size=1280x960x3 | roi_intersects_image=true | threshold=6 | max_gradient=138 | profile_count=31 | sampled_pixels=3300 | measure_source=original_measure_pipeline | fallback_used=false | original_points=31 | original_edgebands=0 | original_chain=0 | fit_mode=1 | fit_status=geometry_result_available: LeastSquares | has_line_scan_box=true | display_version=0 | geometry_request_valid=true | geometry_ready=true | geometry_dirty=false | geometry_half_width=82 | scan_w=0 | scan_h=31 | scan_w_len=0 | scan_h_len=250 | process_w=250 | backimage_ready=true | findobject_ready=true | findobject_called=true | binary_foreground=1549 | filter_profile=0 | effective_filter_borw=21 | effective_filter_min=50 | effective_filter_max=100000 | component_total=61 | component_accepted=2 | component_rejected_min=59 | component_rejected_max=0 | component_rejected_borw=0 | result_empty_reason=
+  display_summary: geometry: object=m_circle | roi_circle=(813,693, inner=859, r=693) | measure_points_count=65 | valid_points_count=65 | fit_circle=(813.845,696.501, r=34.8747) | avgdist=1.74059 | has_result_measure=false | roi_outer_polyline=false | roi_inner_polyline=false | roi_segments=0 | fit_circle_polyline=false | fit_segments=0 | display_version=0 | circle_geometry_ready=false | circle_dirty=false | circle_scan_lines=65 | circle_scan_len=250 | circle_process_w=250 | circle_selected_edge=1 | circle_candidate_runs_total=149 | circle_candidate_runs_max_per_line=5 | circle_selected_edge_hits=65 | circle_selected_edge_misses=0 | circle_selected_radius_avg=34.7761 | circle_selected_radius_min=29.6672 | circle_selected_radius_max=41.5982 | circle_measure_source=original_circle_measure_pipeline | circle_failure_stage=result_points_available
   visualizable: true
   stale: false
-  roi_circle: 0, 0, 0, 0
-  measure_points_count: 0
-  valid_points_count: 21
-  fit_circle: 0, 0, r=0
-  avgdist: 0
+  roi_circle: 813, 693, 859, 693
+  measure_points_count: 65
+  valid_points_count: 65
+  fit_circle: 813.845, 696.501, r=34.8747
+  avgdist: 1.74059
   display_version: 0
-  line_roi: 688, 743 -> 823, 631
-  line_scale: 82
-  linegap: 9
-  line_tool_wgap: 33
-  line_tool_hgap: 6
-  line_display_source: FindLine::getdisplaysnapshot
-  has_line_scan_box: true
-  line_scan_half_width: 82
-  line_orientation: 
-  line_dx: 0
-  line_dy: 0
-  line_length: 0
-  requested_tool_half_width: 82
-  effective_tool_half_width: 82
-  line_pointsw_count: 0
-  line_pointsh_count: 21
-  line_measure_points_count: 21
-  valid_line_points_count: 21
-  has_fit_line: true
-  fit_line: 692.977, 731.152 -> 793.689, 641.087
-  line_scan_box_xy: 740.357, 806.109 | 875.357, 694.109 | 770.643, 567.891 | 635.643, 679.891
-  line_avgdist: 0.449864
-  line_fit_mode: 1
-  line_fit_status: geometry_result_available: LeastSquares
-  line_measure_status: 
-  line_measure_hint: 
-  line_filter_min_exceeds_component_p90: false
-  line_measure_failure_hint: Findline original Measure produced result points.
-  line_seek_points_count: 0
-  line_edgeband_count: 0
-  line_chain_length: 0
-  line_profile_point_count: 0
-  line_measure_failure_stage: result_points_available
-  line_measure_image_ready: true
-  line_measure_image_size: 1280x960x3
-  line_measure_image_type: 16
-  line_measure_image_source: Findline.measure(void*) parameter
-  line_measure_roi_intersects_image: true
-  line_measure_roi_fully_inside_image: true
-  line_measure_method: 1
-  line_measure_threshold: 6
-  line_measure_linegap: 9
-  line_measure_wgap: 33
-  line_measure_hgap: 6
-  line_measure_backimage_ready: true
-  line_measure_findobject_ready: true
-  line_measure_objfilterset: 1
-  line_measure_filter_borw: 21
-  line_measure_filter_min: 50
-  line_measure_filter_max: 100000
-  line_measure_filter_profile: 0
-  line_measure_filter_explicit: false
-  line_measure_effective_filter_borw: 21
-  line_measure_effective_filter_min: 50
-  line_measure_effective_filter_max: 100000
-  line_measure_findobject_called: true
-  line_measure_findobject_skipped: false
-  line_measure_binary_foreground_pixels: 1549
-  line_measure_binary_roi: 250x33
-  line_measure_result_empty_reason: 
-  line_findobject_component_total: 61
-  line_findobject_component_accepted: 2
-  line_findobject_component_rejected_by_min: 59
-  line_findobject_component_rejected_by_max: 0
-  line_findobject_component_rejected_by_borw: 0
-  line_findobject_area_min_observed: 1
-  line_findobject_area_max_observed: 771
-  line_findobject_area_mean_observed: 24.9839
-  line_findobject_area_median: 4
-  line_findobject_area_p90: 15
-  line_measure_cc_selected_foreground: 
-  line_measure_cc_white_total: 0
-  line_measure_cc_white_accepted: 0
-  line_measure_cc_white_rejected_min: 0
-  line_measure_cc_white_area_median: 0
-  line_measure_cc_white_area_p90: 0
-  line_measure_cc_black_total: 0
-  line_measure_cc_black_accepted: 0
-  line_measure_cc_black_rejected_min: 0
-  line_measure_cc_black_area_median: 0
-  line_measure_cc_black_area_p90: 0
-  line_measure_cc_selected_total: 0
-  line_measure_cc_selected_accepted: 0
-  line_measure_cc_selected_rejected_min: 0
-  line_measure_cc_selected_area_median: 0
-  line_measure_cc_selected_area_p90: 0
-  line_measure_profile_count: 31
-  line_measure_sampled_pixel_count: 3300
-  line_measure_gray_min: 10
-  line_measure_gray_max: 203
-  line_measure_gray_mean: 64.027
-  line_measure_max_gradient: 138
-  line_measure_input_failure_stage: result_points_available
-  line_measure_input_detail: Findline original Measure produced result points.
-  line_measure_source: original_measure_pipeline
-  line_measure_fallback_allowed: false
-  line_measure_fallback_used: false
-  line_measure_original_point_count: 31
-  line_measure_original_edgeband_count: 0
-  line_measure_original_chain_length: 0
-  line_measure_original_failure_stage: 
-  line_measure_original_detail: 
-  line_measure_geometry_request_valid: true
-  line_measure_geometry_dirty: false
-  line_measure_geometry_ready: true
-  line_measure_geometry_version: 3
-  line_measure_geometry_built_version: 2
-  line_measure_geometry_half_width: 82
-  line_original_scan_w_count: 0
-  line_original_scan_h_count: 31
-  line_original_scan_w_length: 0
-  line_original_scan_h_length: 250
-  line_original_process_width: 250
-  display_version: 0
+  circle_roi_outer_polyline: false
+  circle_roi_inner_polyline: false
+  circle_roi_segment_count: 0
+  fit_circle_polyline: false
+  fit_circle_segment_count: 0
+  circle_measure_geometry_request_valid: false
+  circle_measure_geometry_dirty: false
+  circle_measure_geometry_ready: false
+  circle_measure_geometry_version: 0
+  circle_measure_geometry_built_version: 0
+  circle_scan_line_count: 65
+  circle_scan_line_length: 250
+  circle_process_width: 250
+  circle_selected_edge_index: 1
+  circle_candidate_runs_total: 149
+  circle_candidate_runs_max_per_line: 5
+  circle_selected_edge_hits: 65
+  circle_selected_edge_misses: 0
+  circle_selected_edge_radius_avg: 34.7761
+  circle_selected_edge_radius_min: 29.6672
+  circle_selected_edge_radius_max: 41.5982
+  circle_measure_image_ready: true
+  circle_measure_image_size: 2016x1512x3
+  circle_measure_backimage_ready: true
+  circle_measure_findobject_ready: true
+  circle_measure_source: original_circle_measure_pipeline
+  circle_measure_failure_stage: result_points_available
+  circle_measure_detail: FindCircle original Measure produced result points; selected_edge=1, candidate_runs_total=149, candidate_runs_max_per_line=5, selected_edge_hits=65, selected_edge_misses=0, boundary_clipped_lines=0, boundary_extended_samples=0, candidate_boundary_reject_count=4, candidate_endpoint_reject_count=0, selected_edge_radius_avg=34.776110, selected_edge_radius_min=29.667154, selected_edge_radius_max=41.598219
 
 Line Trace
 ----------
 1 [source_analyzed] Image m_image; | object=m_image | method= | params= | reason=not_executed
-2 [source_analyzed] FindLine m_line; | object=m_line | method= | params= | reason=not_executed
+2 [source_analyzed] FindCircle m_circle; | object=m_circle | method= | params= | reason=not_executed
 3 [source_analyzed]  | object= | method= | params= | reason=not_executed
 4 [source_analyzed] m_image.copyFromMat(global_matInput); | object=m_image | method=copyFromMat | params=global_matInput | reason=not_executed
 5 [source_analyzed]  | object= | method= | params= | reason=not_executed
-6 [source_analyzed] m_line.setmaxelapsedms(global_max_elapsed_ms); | object=m_line | method=setmaxelapsedms | params=global_max_elapsed_ms | reason=not_executed
-7 [source_analyzed] m_line.setmaxscanlines(global_max_scan_lines); | object=m_line | method=setmaxscanlines | params=global_max_scan_lines | reason=not_executed
-8 [source_analyzed] m_line.setmaxsamples(global_max_samples); | object=m_line | method=setmaxsamples | params=global_max_samples | reason=not_executed
+6 [source_analyzed] m_circle.setmaxelapsedms(global_max_elapsed_ms); | object=m_circle | method=setmaxelapsedms | params=global_max_elapsed_ms | reason=not_executed
+7 [source_analyzed] m_circle.setmaxscanlines(global_max_scan_lines); | object=m_circle | method=setmaxscanlines | params=global_max_scan_lines | reason=not_executed
+8 [source_analyzed] m_circle.setmaxsamples(global_max_samples); | object=m_circle | method=setmaxsamples | params=global_max_samples | reason=not_executed
 9 [source_analyzed]  | object= | method= | params= | reason=not_executed
-10 [source_analyzed] int x0 = global_roi_x0; | object=x0 | method= | params= | reason=not_executed
-11 [source_analyzed] int y0 = global_roi_y0; | object=y0 | method= | params= | reason=not_executed
-12 [source_analyzed] int x1 = global_roi_x1; | object=x1 | method= | params= | reason=not_executed
-13 [source_analyzed] int y1 = global_roi_y1; | object=y1 | method= | params= | reason=not_executed
+10 [source_analyzed] int cx = global_circle_cx; | object=cx | method= | params= | reason=not_executed
+11 [source_analyzed] int cy = global_circle_cy; | object=cy | method= | params= | reason=not_executed
+12 [source_analyzed] int px = global_circle_px; | object=px | method= | params= | reason=not_executed
+13 [source_analyzed] int py = global_circle_py; | object=py | method= | params= | reason=not_executed
 14 [source_analyzed]  | object= | method= | params= | reason=not_executed
-15 [source_analyzed] int tool_half_width = global_tool_half_width; | object=tool_half_width | method= | params= | reason=not_executed
-16 [source_analyzed] int wgap = global_wgap; | object=wgap | method= | params= | reason=not_executed
-17 [source_analyzed] int hgap = global_hgap; | object=hgap | method= | params= | reason=not_executed
-18 [source_analyzed] int linegap = global_linegap; | object=linegap | method= | params= | reason=not_executed
-19 [source_analyzed] int threshold = global_threshold; | object=threshold | method= | params= | reason=not_executed
-20 [source_analyzed] int method = global_method; | object=method | method= | params= | reason=not_executed
-21 [source_analyzed] int filterprofile = global_filterprofile; | object=filterprofile | method= | params= | reason=not_executed
-22 [source_analyzed] int selected_edge = global_findline_selected_edge; | object=selected_edge | method= | params= | reason=not_executed
-23 [source_analyzed]  | object= | method= | params= | reason=not_executed
-24 [source_analyzed] if (selected_edge < 0) | object= | method=if | params=selected_edge < 0 | reason=not_executed
-25 [source_analyzed] { | object= | method= | params= | reason=not_executed
-26 [source_analyzed] selected_edge = 0; | object= | method= | params= | reason=not_executed
-27 [source_analyzed] } | object= | method= | params= | reason=not_executed
-28 [source_analyzed]  | object= | method= | params= | reason=not_executed
-29 [source_analyzed] m_line.SetWHgap(wgap, hgap); | object=m_line | method=SetWHgap | params=wgap, hgap | reason=not_executed
-30 [source_analyzed] m_line.setlinegap(linegap); | object=m_line | method=setlinegap | params=linegap | reason=not_executed
-31 [source_analyzed] m_line.setline(x0, y0, x1, y1, tool_half_width); | object=m_line | method=setline | params=x0, y0, x1, y1, tool_half_width | reason=not_executed
-32 [source_analyzed] m_line.setmethod(method); | object=m_line | method=setmethod | params=method | reason=not_executed
-33 [source_analyzed] m_line.setthre(threshold); | object=m_line | method=setthre | params=threshold | reason=not_executed
-34 [source_analyzed]  | object= | method= | params= | reason=not_executed
-35 [source_analyzed] m_line.setfilterprofile(filterprofile); | object=m_line | method=setfilterprofile | params=filterprofile | reason=not_executed
-36 [source_analyzed] m_line.setselectedgenum(selected_edge); | object=m_line | method=setselectedgenum | params=selected_edge | reason=not_executed
-37 [source_analyzed]  | object= | method= | params= | reason=not_executed
-38 [source_analyzed] m_line.setscandirection(global_findline_scan_direction); | object=m_line | method=setscandirection | params=global_findline_scan_direction | reason=not_executed
-39 [source_analyzed] m_line.setpointconsistency(global_findline_point_consistency_enabled, global_findline_point_consistency_range); | object=m_line | method=setpointconsistency | params=global_findline_point_consistency_enabled, global_findline_point_consistency_range | reason=not_executed
-40 [source_analyzed] m_line.setobjfilter(global_findline_objfilter); | object=m_line | method=setobjfilter | params=global_findline_objfilter | reason=not_executed
-41 [source_analyzed] m_line.measure(&m_image); | object=m_line | method=measure | params=&m_image | reason=not_executed
-42 [source_analyzed] m_line.fitline(); | object=m_line | method=fitline | params= | reason=not_executed
-43 [source_analyzed]  | object= | method= | params= | reason=not_executed
-44 [source_analyzed] global_selected_method = method; | object= | method= | params= | reason=not_executed
-45 [source_analyzed] global_selected_threshold = threshold; | object= | method= | params= | reason=not_executed
-46 [source_analyzed] global_selected_linegap = linegap; | object= | method= | params= | reason=not_executed
-47 [source_analyzed] global_findline_selected_edge = selected_edge; | object= | method= | params= | reason=not_executed
-48 [source_analyzed] global_valid_points_count = m_line.getvalidpointcount(); | object=m_line | method=getvalidpointcount | params= | reason=not_executed
-49 [source_analyzed] global_has_fit_line = m_line.hasfitresult(); | object=m_line | method=hasfitresult | params= | reason=not_executed
-50 [source_analyzed] global_avgdist = m_line.getavgdist(); | object=m_line | method=getavgdist | params= | reason=not_executed
-51 [source_analyzed] global_line_ref = m_line.get_result(); | object=m_line | method=get_result | params= | reason=not_executed
+15 [source_analyzed] int method = global_method; | object=method | method= | params= | reason=not_executed
+16 [source_analyzed] int threshold = global_threshold; | object=threshold | method= | params= | reason=not_executed
+17 [source_analyzed] int gap = global_gap; | object=gap | method= | params= | reason=not_executed
+18 [source_analyzed] int linegap = global_linegap; | object=linegap | method= | params= | reason=not_executed
+19 [source_analyzed] int findsetting = global_findcircle_findsetting; | object=findsetting | method= | params= | reason=not_executed
+20 [source_analyzed] int selected_edge = global_findcircle_selected_edge; | object=selected_edge | method= | params= | reason=not_executed
+21 [source_analyzed] int inner_radius = global_circle_inner_radius; | object=inner_radius | method= | params= | reason=not_executed
+22 [source_analyzed] int outer_radius = global_circle_outer_radius; | object=outer_radius | method= | params= | reason=not_executed
+23 [source_analyzed] int arc_enabled = global_findcircle_arc_enabled; | object=arc_enabled | method= | params= | reason=not_executed
+24 [source_analyzed] int arc_start_deg = global_findcircle_arc_start_deg; | object=arc_start_deg | method= | params= | reason=not_executed
+25 [source_analyzed] int arc_end_deg = global_findcircle_arc_end_deg; | object=arc_end_deg | method= | params= | reason=not_executed
+26 [source_analyzed] int point_consistency_enabled = global_findcircle_point_consistency_enabled; | object=point_consistency_enabled | method= | params= | reason=not_executed
+27 [source_analyzed] int point_consistency_range = global_findcircle_point_consistency_range; | object=point_consistency_range | method= | params= | reason=not_executed
+28 [source_analyzed] int ring_width = 0; | object=ring_width | method= | params= | reason=not_executed
+29 [source_analyzed]  | object= | method= | params= | reason=not_executed
+30 [source_analyzed] ring_width = outer_radius - inner_radius; | object= | method= | params= | reason=not_executed
+31 [source_analyzed] if (inner_radius <= 0) { | object= | method=if | params=inner_radius <= 0 | reason=not_executed
+32 [source_analyzed]     ring_width = 0; | object= | method= | params= | reason=not_executed
+33 [source_analyzed] } | object= | method= | params= | reason=not_executed
+34 [source_analyzed] if (outer_radius <= inner_radius) { | object= | method=if | params=outer_radius <= inner_radius | reason=not_executed
+35 [source_analyzed]     ring_width = 0; | object= | method= | params= | reason=not_executed
+36 [source_analyzed] } | object= | method= | params= | reason=not_executed
+37 [source_analyzed]  | object= | method= | params= | reason=not_executed
+38 [source_analyzed] if (ring_width > 0) { | object= | method=if | params=ring_width > 0 | reason=not_executed
+39 [source_analyzed]     m_circle.setannulus(cx, cy, inner_radius, outer_radius); | object=m_circle | method=setannulus | params=cx, cy, inner_radius, outer_radius | reason=not_executed
+40 [source_analyzed] } | object= | method= | params= | reason=not_executed
+41 [source_analyzed] if (ring_width == 0) { | object= | method=if | params=ring_width == 0 | reason=not_executed
+42 [source_analyzed]     m_circle.setcircle(cx, cy, px, py); | object=m_circle | method=setcircle | params=cx, cy, px, py | reason=not_executed
+43 [source_analyzed] } | object= | method= | params= | reason=not_executed
+44 [source_analyzed] m_circle.setscanarc(arc_start_deg, arc_end_deg, arc_enabled); | object=m_circle | method=setscanarc | params=arc_start_deg, arc_end_deg, arc_enabled | reason=not_executed
+45 [source_analyzed] m_circle.Setgap(gap); | object=m_circle | method=Setgap | params=gap | reason=not_executed
+46 [source_analyzed] m_circle.setlinegap(linegap); | object=m_circle | method=setlinegap | params=linegap | reason=not_executed
+47 [source_analyzed] m_circle.setthre(threshold); | object=m_circle | method=setthre | params=threshold | reason=not_executed
+48 [source_analyzed] m_circle.setmethod(method); | object=m_circle | method=setmethod | params=method | reason=not_executed
+49 [source_analyzed] m_circle.setfindsetting(findsetting); | object=m_circle | method=setfindsetting | params=findsetting | reason=not_executed
+50 [source_analyzed] m_circle.setselectedgenum(selected_edge); | object=m_circle | method=setselectedgenum | params=selected_edge | reason=not_executed
+51 [source_analyzed] m_circle.setpointconsistency(point_consistency_enabled, point_consistency_range); | object=m_circle | method=setpointconsistency | params=point_consistency_enabled, point_consistency_range | reason=not_executed
+52 [source_analyzed]  | object= | method= | params= | reason=not_executed
+53 [source_analyzed] m_circle.measure(&m_image); | object=m_circle | method=measure | params=&m_image | reason=not_executed
+54 [source_analyzed] m_circle.fitcircle(); | object=m_circle | method=fitcircle | params= | reason=not_executed
+55 [source_analyzed]  | object= | method= | params= | reason=not_executed
+56 [source_analyzed] global_selected_method = method; | object= | method= | params= | reason=not_executed
+57 [source_analyzed] global_selected_threshold = threshold; | object= | method= | params= | reason=not_executed
+58 [source_analyzed] global_selected_linegap = linegap; | object= | method= | params= | reason=not_executed
+59 [source_analyzed] global_findcircle_selected_gap = gap; | object= | method= | params= | reason=not_executed
+60 [source_analyzed] global_valid_points_count = m_circle.getvalidpointcount(); | object=m_circle | method=getvalidpointcount | params= | reason=not_executed
+61 [source_analyzed] global_has_fit_circle = m_circle.hasfitresult(); | object=m_circle | method=hasfitresult | params= | reason=not_executed
+62 [source_analyzed] global_circle_radius = m_circle.getradius(); | object=m_circle | method=getradius | params= | reason=not_executed
+63 [source_analyzed] global_avgdist = m_circle.getavgdist(); | object=m_circle | method=getavgdist | params= | reason=not_executed
+64 [source_analyzed] global_circle_effective_annulus = m_circle.hasannulus(); | object=m_circle | method=hasannulus | params= | reason=not_executed
+65 [source_analyzed] global_circle_effective_inner_radius = m_circle.getannulusinner(); | object=m_circle | method=getannulusinner | params= | reason=not_executed
+66 [source_analyzed] global_circle_effective_outer_radius = m_circle.getannulusouter(); | object=m_circle | method=getannulusouter | params= | reason=not_executed
+67 [source_analyzed] global_circle_effective_ring_width = m_circle.getannuluswidth(); | object=m_circle | method=getannuluswidth | params= | reason=not_executed
+68 [source_analyzed] global_circle_ref = m_circle.get_result(); | object=m_circle | method=get_result | params= | reason=not_executed

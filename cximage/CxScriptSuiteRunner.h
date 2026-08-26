@@ -112,6 +112,14 @@ struct CxScriptSuiteCaseResult
     double local_support = 0.0;
     double local_mean_distance = 0.0;
     double fit_offset = 0.0;
+    double boundary_subpixel_offset_mean = 0.0;
+    double boundary_subpixel_offset_stddev = 0.0;
+    double boundary_localization_sigma_mean_px = 0.0;
+    double boundary_residual_rmse_px = 0.0;
+    double boundary_residual_p95_px = 0.0;
+    double boundary_residual_max_px = 0.0;
+    double boundary_reliability_score = 0.0;
+
 
     std::string result_status;
     std::string failure_stage;

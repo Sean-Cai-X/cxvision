@@ -56,6 +56,12 @@ std::string DeriveFailureClass(const CxScriptSuiteCaseResult& result)
             return "findline_fail_no_points";
         if (!result.has_fit_line)
             return "findline_fail_fit_degenerate";
+
+        const CxPrecisionGateSnapshot precision = EvaluateCxPrecisionGate(result);
+        if (precision.evaluated && !precision.residual_pass)
+            return "findline_fail_precision_residual";
+        if (precision.evaluated && !precision.support_pass)
+            return "findline_fail_precision_support";
         if (result.local_support > 0.0 && result.local_support < 0.6)
             return "findline_fail_low_support";
         return "findline_contract_metric_failed";
@@ -72,14 +78,11 @@ std::string DeriveFailureClass(const CxScriptSuiteCaseResult& result)
             return "findcircle_fail_no_fit_circle";
         if (result.circle_radius <= 0.0)
             return "findcircle_fail_invalid_radius";
-        if (precision.evaluated && !precision.residual_pass)
-            return "findcircle_fail_precision_residual";
         return "findcircle_contract_metric_failed";
     }
 
     return "contract_failed_unclassified";
 }
-
 std::string SuggestedActionForFailureClass(const std::string& failureClass)
 {
     static const std::map<std::string, std::string> suggestions = {
@@ -89,6 +92,9 @@ std::string SuggestedActionForFailureClass(const std::string& failureClass)
         {"findline_fail_fit_degenerate", "检查 valid point 去重、共线判断、最小点数策略"},
         {"findline_measure_points_below_fit_min", "Measure 已产生点但不足以拟合；优先检查 linegap、采样方向、最小拟合点数，不先改 FindObject"},
         {"findline_fail_low_support", "检查 ROI、采样方向、line normal、局部 evidence"},
+        {"findline_fail_precision_residual", "FindLine residual gate 已失败；优先检查亚像素点集、输入/参数/调用顺序和对象状态，不先放宽阈值"},
+        {"findline_fail_precision_support", "FindLine support gate 已失败；优先检查 boundary_coverage_ratio、ROI 覆盖和 scan 行有效性"},
+
         {"findline_fail_no_points", "检查 FindObject 分支、二值图到 scan run 的传递、ROI/方向/极性"},
         {"findline_scan_no_measure_points_after_prefilter", "FindObject 已产生/保留前景但 scan 没有输出点；优先检查 selection mask 与 scan 行带相交、ROI 方向、端点拒绝策略"},
         {"findline_fail_prefilter_foreground_not_visible_to_scan_rows", "检查预过滤前景是否落在 scan 行带内，优先看 scan_rows/evidence_overlay"},
@@ -205,7 +211,15 @@ void CxScriptSuiteReportWriter::WriteSuiteRunReportJson(
         file << "      \"precision_gate_evaluated\": " << (precision.evaluated ? "true" : "false") << ",\n";
         file << "      \"precision_residual_px\": " << precision.residual_px << ",\n";
         file << "      \"precision_residual_limit_px\": " << precision.residual_limit_px << ",\n";
-        file << "      \"precision_residual_pass\": " << (precision.residual_pass ? "true" : "false") << ",\n";
+        file << R"(      "precision_residual_pass": )" << (precision.residual_pass ? "true" : "false") << ",\n";
+        file << R"(      "precision_support_pass": )" << (precision.support_pass ? "true" : "false") << ",\n";
+        file << R"(      "precision_subpixel_offset_mean": )" << precision.subpixel_offset_mean << ",\n";
+        file << R"(      "precision_subpixel_offset_stddev": )" << precision.subpixel_offset_stddev << ",\n";
+        file << R"(      "precision_localization_sigma_mean_px": )" << precision.localization_sigma_mean_px << ",\n";
+        file << R"(      "precision_boundary_residual_rmse_px": )" << precision.residual_rmse_px << ",\n";
+        file << R"(      "precision_boundary_residual_p95_px": )" << precision.residual_p95_px << ",\n";
+        file << R"(      "precision_boundary_residual_max_px": )" << precision.residual_max_px << ",\n";
+        file << R"(      "precision_boundary_reliability_score": )" << precision.reliability_score << ",\n";
         file << "      \"local_support\": " << r.local_support << ",\n";
         file << "      \"local_mean_distance\": " << r.local_mean_distance << ",\n";
         file << "      \"fit_offset\": " << r.fit_offset << ",\n";

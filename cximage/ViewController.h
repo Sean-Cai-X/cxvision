@@ -542,16 +542,9 @@ protected:
 
     Image m_occtimage;
 
-    Shape* m_shapex;
-
     int m_ibtntimes = 0;
     gp_Pnt m_point0;
     gp_Pnt m_point1;
-
-    PointsShape* m_apoints;
-    PointsShape* m_bpoints;
-
-    FindLine* m_afindline;
 
     Shape m_shape0;
 

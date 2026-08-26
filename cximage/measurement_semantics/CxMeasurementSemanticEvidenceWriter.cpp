@@ -215,7 +215,7 @@ std::string BuildBehaviorTrace(
     out << "    {\"index\":0, \"name\":\"script_execute\", \"status\":\"" << (capture.runtime_completed ? "done" : "not_completed") << "\"},\n";
     out << "    {\"index\":1, \"name\":\"gauge_and_parameters\", \"status\":\"captured\", \"method\":" << capture.tool_method
         << ", \"threshold\":" << capture.tool_threshold
-        << ", \"gap\":" << capture.tool_linegap << "},\n";
+        << ", \"linegap\":" << capture.tool_linegap << "},\n";
     out << "    {\"index\":2, \"name\":\"sampling\", \"status\":\"captured\", \"scan_line_count\":" << capture.scan_line_count
         << ", \"sample_count\":" << capture.sample_count
         << ", \"valid_points_count\":" << capture.valid_points_count << "},\n";
@@ -250,11 +250,16 @@ std::string BuildObservations(
 }
 
 std::string BuildBoundaryAnalysis(
-    const CxScriptExecutionCapture& capture)
+    const CxScriptExecutionCapture& capture,
+    const std::string& tool)
 {
     std::ostringstream out;
     out << "{" << std::endl;
-    out << R"(  "schema": "cxvision.findline_boundary_analysis.v1",)" << std::endl;
+    const char* schema = tool == "FindCircle"
+        ? "cxvision.findcircle_boundary_analysis.v1"
+        : "cxvision.findline_boundary_analysis.v1";
+    out << R"(  "schema": ")" << schema << R"(",)" << std::endl;
+    out << R"(  "tool": ")" << JsonEscapeLocal(tool) << R"(",)" << std::endl;
     out << R"(  "status": ")" << JsonEscapeLocal(capture.boundary_analysis_status) << R"(",)" << std::endl;
     out << R"(  "reliability_level": ")" << JsonEscapeLocal(capture.boundary_reliability_level) << R"(",)" << std::endl;
     out << R"(  "expected_scan_count": )" << capture.boundary_expected_scan_count << "," << std::endl;
@@ -496,7 +501,7 @@ bool WriteMeasurementSemanticSidecars(
         { "measurement_behavior_trace.json", BuildBehaviorTrace(capture, tool) },
         { "measurement_observations.json", BuildObservations(capture, tool) },
 
-        { "boundary_analysis.json", BuildBoundaryAnalysis(capture) },
+        { "boundary_analysis.json", BuildBoundaryAnalysis(capture, tool) },
         { "measurement_relations.json", BuildRelations(capture, tool, role_counts) },
         { "measurement_feature_vector.json", BuildFeatureVector(capture, tool) },
         { "semantic_pattern_result.json", BuildSemanticPatternResult() },

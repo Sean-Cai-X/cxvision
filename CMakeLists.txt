@@ -126,7 +126,10 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CxTorchRuntimeService.cpp
   cximage/TorchRuntimeResultAdapter.cpp
   cximage/CxExecutionTypes.cpp
+  cximage/CxImageReferenceCandidateGenerator.cpp
+  cximage/CxMaskDiagnosticSelfTest.cpp
   cximage/CxTorchExecutionAdapter.cpp
+  cximage/CxAutomaticDiagnosticClosure.cpp
   cximage/CxTorchResultProjector.cpp
   cximage/TorchTask.cpp
   cximage/CxShapeInteractionRunner.cpp

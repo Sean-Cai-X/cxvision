@@ -621,6 +621,41 @@ namespace
                 try { out.fit_offset = std::stod(JsonLineValue(line)); }
                 catch (...) {}
             }
+            else if (JsonLineHasKey(line, "boundary_subpixel_offset_mean"))
+            {
+                try { out.boundary_subpixel_offset_mean = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_subpixel_offset_stddev"))
+            {
+                try { out.boundary_subpixel_offset_stddev = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_localization_sigma_mean_px"))
+            {
+                try { out.boundary_localization_sigma_mean_px = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_residual_rmse_px"))
+            {
+                try { out.boundary_residual_rmse_px = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_residual_p95_px"))
+            {
+                try { out.boundary_residual_p95_px = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_residual_max_px"))
+            {
+                try { out.boundary_residual_max_px = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
+            else if (JsonLineHasKey(line, "boundary_reliability_score"))
+            {
+                try { out.boundary_reliability_score = std::stod(JsonLineValue(line)); }
+                catch (...) {}
+            }
             else if (JsonLineHasAnyKey(line, {"actual_policy_guard", "line_policy_guard_status", "circle_policy_guard_status", "policy_guard_status", "policy_guard"}))
             {
                 out.actual_policy_guard = JsonLineValue(line);
@@ -1364,42 +1399,22 @@ namespace
 
         file << "\n";
         file << "  \"globals\": {\n";
-        if (resolved.target)
-        {
-            file << "    \"global_circle_cx\": " << resolved.target->cx << ",\n";
-            file << "    \"global_circle_cy\": " << resolved.target->cy << ",\n";
-            file << "    \"global_circle_px\": " << resolved.target->px << ",\n";
-            file << "    \"global_circle_py\": " << resolved.target->py << ",\n";
-            file << "    \"global_roi_x0\": " << resolved.target->x0 << ",\n";
-            file << "    \"global_roi_y0\": " << resolved.target->y0 << ",\n";
-            file << "    \"global_roi_x1\": " << resolved.target->x1 << ",\n";
-            file << "    \"global_roi_y1\": " << resolved.target->y1 << ",\n";
-            file << "    \"global_wgap\": " << resolved.target->wgap << ",\n";
-            file << "    \"global_hgap\": " << resolved.target->hgap << ",\n";
-            file << "    \"global_gap\": " << resolved.target->gap << ",\n";
-            file << "    \"global_linegap\": " << resolved.target->linegap << ",\n";
-            file << "    \"global_tool_half_width\": " << resolved.target->tool_half_width << ",\n";
-        }
-        if (resolved.profile)
-        {
-            file << "    \"global_method\": " << resolved.profile->method << ",\n";
-            file << "    \"global_threshold\": " << resolved.profile->threshold << ",\n";
-            file << "    \"global_gap\": " << resolved.profile->gap << ",\n";
-            file << "    \"global_linegap\": " << resolved.profile->linegap << ",\n";
-            file << "    \"global_wgap\": " << resolved.profile->wgap << ",\n";
-            file << "    \"global_hgap\": " << resolved.profile->hgap << ",\n";
-            file << "    \"global_filterprofile\": " << resolved.profile->filterprofile << "\n";
-        }
-        else
-        {
-            file << "    \"global_method\": 0,\n";
-            file << "    \"global_threshold\": 0,\n";
-            file << "    \"global_gap\": 0,\n";
-            file << "    \"global_linegap\": 0,\n";
-            file << "    \"global_wgap\": 0,\n";
-            file << "    \"global_hgap\": 0,\n";
-            file << "    \"global_filterprofile\": 0\n";
-        }
+        file << "    \"global_circle_cx\": " << result.circle_cx << ",\n";
+        file << "    \"global_circle_cy\": " << result.circle_cy << ",\n";
+        file << "    \"global_circle_px\": " << result.circle_px << ",\n";
+        file << "    \"global_circle_py\": " << result.circle_py << ",\n";
+        file << "    \"global_roi_x0\": " << result.roi_x0 << ",\n";
+        file << "    \"global_roi_y0\": " << result.roi_y0 << ",\n";
+        file << "    \"global_roi_x1\": " << result.roi_x1 << ",\n";
+        file << "    \"global_roi_y1\": " << result.roi_y1 << ",\n";
+        file << "    \"global_wgap\": " << result.effective_wgap << ",\n";
+        file << "    \"global_hgap\": " << result.effective_hgap << ",\n";
+        file << "    \"global_gap\": " << result.effective_gap << ",\n";
+        file << "    \"global_linegap\": " << result.effective_linegap << ",\n";
+        file << "    \"global_tool_half_width\": " << result.effective_tool_half_width << ",\n";
+        file << "    \"global_method\": " << result.effective_method << ",\n";
+        file << "    \"global_threshold\": " << result.effective_threshold << ",\n";
+        file << "    \"global_filterprofile\": " << result.effective_filterprofile << "\n";
         file << "  },\n";
 
         file << "\n";
@@ -1687,9 +1702,6 @@ namespace
             headless.stage25_target_id = suiteCase.target_id;
             headless.stage25_tool = script.tool;
 
-            // Profile supplies the explicit algorithm baseline. Manifest target
-            // values are applied afterwards and therefore remain authoritative
-            // for per-image gauge/scan geometry.
             if (resolved.profile)
             {
                 InjectParameterGlobals(headless, *resolved.profile);
@@ -1718,10 +1730,6 @@ namespace
                 if (resolved.target->has_threshold)
                     headless.threshold = resolved.target->threshold;
 
-                // Stage25 historically shared a Findline-oriented method=2
-                // default across every tool. FindCircle's verified direct
-                // execution branch is method=0. Preserve an explicit manifest
-                // value, otherwise select the baseline by target tool.
                 if (resolved.target->has_method)
                     headless.method = resolved.target->method;
                 else if (resolved.target->tool == "FindCircle")
@@ -2026,9 +2034,6 @@ namespace
                       << "\n" << std::flush;
         }
 
-        // The pre-contract display is useful for the optional result review
-        // gate, but its PASS/FAIL label is not final. Regenerate the same
-        // asset from the final contract facts before packaging evidence.
         if (options.export_tool_display)
         {
             out.tool_display_path =
@@ -2276,8 +2281,6 @@ bool RunCxScriptSuite(
     CxParameterProfileRuntime parameterProfiles;
     std::string catalogPath;
 
-    // Metadata documents share exactly one serial Parser owner. Copy their
-    // value snapshots, then destroy the owner before any algorithm case starts.
     {
         CxParserRuntimeOwner metadataOwner;
         if (!metadataOwner.Initialize(reason))

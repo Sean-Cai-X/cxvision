@@ -1,0 +1,42 @@
+{
+  "schema": "cxvision.model_tracks.v1",
+  "training_enabled": 0,
+  "parent_child_policy": "parent_and_child_must_share_track_annotation_contract_output_contract_and_class_mapping",
+  "model_tracks": [
+    {
+      "model_track_id": "closed_semantic_segmentation_v1",
+      "allowed_case_tracks": ["C1_closed_regular_region", "C2_closed_irregular_region"],
+      "candidate_model_families": ["deeplabv3plus", "unet_family", "edge_aware_semantic_segmentation"],
+      "parent_binding": "pending",
+      "child_binding": "pending"
+    },
+    {
+      "model_track_id": "closed_instance_segmentation_v1",
+      "allowed_case_tracks": ["C3_closed_multi_instance_region"],
+      "candidate_model_families": ["yolov8_seg", "mask_rcnn_family", "instance_segmentation_equivalent"],
+      "parent_binding": "pending",
+      "child_binding": "pending"
+    },
+    {
+      "model_track_id": "open_boundary_segmentation_v1",
+      "allowed_case_tracks": ["O2_open_complex_boundary"],
+      "candidate_model_families": ["edge_aware_segmentation", "prompt_boundary_segmentation", "boundary_probability_model"],
+      "parent_binding": "pending",
+      "child_binding": "pending"
+    },
+    {
+      "model_track_id": "fuzzy_region_model_v1",
+      "allowed_case_tracks": ["R2_fuzzy_region_learning"],
+      "candidate_model_families": ["roi_encoder_classifier", "prototype_model", "region_anomaly_model", "soft_segmentation_model"],
+      "parent_binding": "pending",
+      "child_binding": "pending"
+    },
+    {
+      "model_track_id": "composite_visual_pipeline_v1",
+      "allowed_case_tracks": ["X1_composite_visual_pipeline"],
+      "candidate_model_families": ["serial_stage_composition"],
+      "parent_binding": "pending",
+      "child_binding": "pending"
+    }
+  ]
+}

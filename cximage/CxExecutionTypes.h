@@ -59,9 +59,9 @@ enum class CxTorchTaskKind
     Classification,
     FeatureExtraction,
     TemplateDifference,
-    TrainingLifecycle,
-    PrototypeLifecycle
-};
+    TrainingLifecycle,
+    PrototypeLifecycle
+};
 
 
 struct CxTorchTaskSpec
@@ -266,3 +266,59 @@ struct CxReviewDecision
     std::string reason;
     std::string reviewer;
 };
+
+struct CxMaskFactsSnapshot
+{
+    bool evaluated = false;
+    bool loadable = false;
+    int width = 0;
+    int height = 0;
+    int foreground_pixels = 0;
+    int component_count = 0;
+    int boundary_pixels = 0;
+    int bbox_x = 0;
+    int bbox_y = 0;
+    int bbox_width = 0;
+    int bbox_height = 0;
+    double foreground_ratio = 0.0;
+    double bbox_fill_ratio = 0.0;
+    bool empty = true;
+    bool full_frame = false;
+    bool touches_border = false;
+    std::string status = "NOT_EVALUATED";
+    std::string reason;
+};
+
+struct CxMaskComparisonSnapshot
+{
+    bool evaluated = false;
+    bool dimensions_match = false;
+    CxMaskFactsSnapshot left;
+    CxMaskFactsSnapshot right;
+    int intersection_pixels = 0;
+    int union_pixels = 0;
+    double iou = 0.0;
+    double dice = 0.0;
+    double boundary_precision = 0.0;
+    double boundary_recall = 0.0;
+    double boundary_fscore = 0.0;
+    double foreground_ratio_delta = 0.0;
+    std::string status = "NOT_EVALUATED";
+    std::string reason;
+};
+
+bool AnalyzeCxMaskFile(
+    const std::string& mask_path,
+    CxMaskFactsSnapshot& snapshot,
+    std::string& reason);
+
+bool CompareCxMaskFiles(
+    const std::string& left_mask_path,
+    const std::string& right_mask_path,
+    CxMaskComparisonSnapshot& snapshot,
+    std::string& reason);
+
+bool WriteCxMaskComparisonJson(
+    const CxMaskComparisonSnapshot& snapshot,
+    const std::string& output_path,
+    std::string& reason);

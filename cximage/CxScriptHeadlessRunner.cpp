@@ -1678,6 +1678,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["boundary_residual_rmse_px"] = capture.boundary_residual_rmse_px;
     pkg.metrics["boundary_residual_p95_px"] = capture.boundary_residual_p95_px;
     pkg.metrics["boundary_residual_max_px"] = capture.boundary_residual_max_px;
+    pkg.metrics["boundary_subpixel_offset_mean"] = capture.boundary_subpixel_offset_mean;
+    pkg.metrics["boundary_subpixel_offset_stddev"] = capture.boundary_subpixel_offset_stddev;
+    pkg.metrics["boundary_localization_sigma_mean_px"] = capture.boundary_localization_sigma_mean_px;
+
     pkg.metrics["boundary_reliability_score"] = capture.boundary_reliability_score;
     const double circle_gauge_cx = readRuntimeGlobal("global_circle_cx");
     const double circle_gauge_cy = readRuntimeGlobal("global_circle_cy");
@@ -2360,6 +2364,12 @@ bool ParseCxScriptHeadlessArgs(
             options.script_path = argv[++i];
         else if (arg == "--globals" && i + 1 < argc)
             options.globals_path = argv[++i];
+        else if (arg == "--image-id" && i + 1 < argc)
+            options.image_id = argv[++i];
+        else if (arg == "--target-id" && i + 1 < argc)
+            options.target_id = argv[++i];
+        else if (arg == "--stage25-tool" && i + 1 < argc)
+            options.stage25_tool = argv[++i];
         else if (arg == "--case-name" && i + 1 < argc)
             options.case_name = argv[++i];
         else if (arg == "--out" && i + 1 < argc)
@@ -2442,9 +2452,140 @@ bool ParseCxScriptHeadlessArgs(
     return options.enabled && !options.image_path.empty() && !options.script_path.empty() && !options.output_dir.empty();
 }
 
+static bool ApplyHeadlessCandidateGlobalOverrides(
+    const CxScriptHeadlessOptions& options,
+    ManualTestContext& context,
+    std::string& reason)
+{
+    auto apply = [&](const std::map<std::string, double>& values)
+    {
+        for (const auto& entry : values)
+            context.runtime_int_vars[entry.first] =
+                static_cast<int>(std::lround(entry.second));
+    };
+
+    if (!options.globals_path.empty())
+    {
+        std::map<std::string, double> fileGlobals;
+        if (!LoadHeadlessGlobalValuesFile(options.globals_path, fileGlobals, reason))
+            return false;
+        apply(fileGlobals);
+    }
+
+    apply(options.cli_global_overrides);
+    reason.clear();
+    return true;
+}
+
+static int GetHeadlessCandidateGlobal(
+    const ManualTestContext& context,
+    const std::string& name,
+    int fallback)
+{
+    const auto found = context.runtime_int_vars.find(name);
+    return found == context.runtime_int_vars.end() ? fallback : found->second;
+}
+
+static void PopulateHeadlessCandidateGaugeFromGlobals(
+    const CxScriptHeadlessOptions& options,
+    ManualTestContext& context,
+    const std::string& tool)
+{
+    ManualGaugeState& gauge = context.current_gauge;
+    gauge.case_id = context.active_case_id;
+    gauge.image_id = context.active_image_id;
+    gauge.target_id = context.active_target_id;
+    gauge.source = "headless";
+    gauge.review_status = "pending_human_review";
+    gauge.tool = tool;
+    gauge.tool_half_width = GetHeadlessCandidateGlobal(
+        context, "global_tool_half_width", options.tool_half_width);
+    gauge.threshold = GetHeadlessCandidateGlobal(
+        context, "global_threshold", options.threshold);
+    gauge.method = GetHeadlessCandidateGlobal(
+        context, "global_method", options.method);
+    gauge.linegap = GetHeadlessCandidateGlobal(
+        context, "global_linegap", options.linegap);
+    gauge.wgap = GetHeadlessCandidateGlobal(
+        context, "global_wgap", options.wgap);
+    gauge.hgap = GetHeadlessCandidateGlobal(
+        context, "global_hgap", options.hgap);
+    gauge.gap = GetHeadlessCandidateGlobal(
+        context, "global_gap", options.gap);
+    gauge.filterprofile = GetHeadlessCandidateGlobal(
+        context, "global_filterprofile", options.filterprofile);
+
+    if (tool == "FindCircle")
+    {
+        context.findcircle_scan_edge_count = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_edge_count",
+            context.findcircle_scan_edge_count);
+        context.findcircle_selected_scan_edge = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_selected_edge",
+            context.findcircle_selected_scan_edge);
+        context.findcircle_point_consistency_enabled =
+            GetHeadlessCandidateGlobal(
+                context, "global_findcircle_point_consistency_enabled",
+                context.findcircle_point_consistency_enabled ? 1 : 0) != 0;
+        context.findcircle_point_consistency_range = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_point_consistency_range",
+            context.findcircle_point_consistency_range);
+        gauge.has_circle_gauge = true;
+        gauge.circle_cx = GetHeadlessCandidateGlobal(
+            context, "global_circle_cx", options.circle_cx);
+        gauge.circle_cy = GetHeadlessCandidateGlobal(
+            context, "global_circle_cy", options.circle_cy);
+        gauge.circle_px = GetHeadlessCandidateGlobal(
+            context, "global_circle_px", options.circle_px);
+        gauge.circle_py = GetHeadlessCandidateGlobal(
+            context, "global_circle_py", options.circle_py);
+        const double dx = static_cast<double>(gauge.circle_px - gauge.circle_cx);
+        const double dy = static_cast<double>(gauge.circle_py - gauge.circle_cy);
+        gauge.radius = static_cast<int>(std::lround(std::hypot(dx, dy)));
+        gauge.inner_radius = GetHeadlessCandidateGlobal(
+            context, "global_circle_inner_radius", 0);
+        gauge.outer_radius = GetHeadlessCandidateGlobal(
+            context, "global_circle_outer_radius", gauge.radius);
+        gauge.circle_arc_enabled = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_arc_enabled", options.findcircle_arc_enabled) != 0;
+        gauge.circle_arc_start_deg = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_arc_start_deg", options.findcircle_arc_start_deg);
+        gauge.circle_arc_end_deg = GetHeadlessCandidateGlobal(
+            context, "global_findcircle_arc_end_deg", options.findcircle_arc_end_deg);
+    }
+    else if (tool == "FindEllipse")
+    {
+        gauge.has_ellipse_gauge = true;
+        gauge.ellipse_x0 = GetHeadlessCandidateGlobal(
+            context, "global_ellipse_x0", options.ellipse_x0);
+        gauge.ellipse_y0 = GetHeadlessCandidateGlobal(
+            context, "global_ellipse_y0", options.ellipse_y0);
+        gauge.ellipse_x1 = GetHeadlessCandidateGlobal(
+            context, "global_ellipse_x1", options.ellipse_x1);
+        gauge.ellipse_y1 = GetHeadlessCandidateGlobal(
+            context, "global_ellipse_y1", options.ellipse_y1);
+        gauge.ellipse_inner_scale_percent = GetHeadlessCandidateGlobal(
+            context, "global_findellipse_inner_scale_percent",
+            options.ellipse_inner_scale_percent);
+    }
+    else
+    {
+        gauge.has_line_gauge = true;
+        gauge.line_x0 = GetHeadlessCandidateGlobal(
+            context, "global_roi_x0", options.roi_x0);
+        gauge.line_y0 = GetHeadlessCandidateGlobal(
+            context, "global_roi_y0", options.roi_y0);
+        gauge.line_x1 = GetHeadlessCandidateGlobal(
+            context, "global_roi_x1", options.roi_x1);
+        gauge.line_y1 = GetHeadlessCandidateGlobal(
+            context, "global_roi_y1", options.roi_y1);
+    }
+}
+
 bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadlessResult& result)
 {
     result = CxScriptHeadlessResult{};
+    result.exit_code = 1;
 
     std::filesystem::path output_dir(options.output_dir);
     if (!std::filesystem::exists(output_dir))
@@ -2572,20 +2713,13 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_max_scan_lines", options.max_scan_lines);
             setGlobal("global_max_samples", options.max_samples);
 
-            ManualGaugeState& gauge = candidateContext.current_gauge;
-            gauge.case_id = candidateContext.active_case_id;
-            gauge.image_id = candidateContext.active_image_id;
-            gauge.target_id = candidateContext.active_target_id;
-            gauge.source = "headless";
-            gauge.review_status = "pending_human_review";
-            gauge.tool_half_width = options.tool_half_width;
-            gauge.threshold = options.threshold;
-            gauge.method = options.method;
-            gauge.linegap = options.linegap;
-            gauge.wgap = options.wgap;
-            gauge.hgap = options.hgap;
-            gauge.gap = options.gap;
-            gauge.filterprofile = options.filterprofile;
+            std::string candidateGlobalsReason;
+            if (!ApplyHeadlessCandidateGlobalOverrides(
+                    options, candidateContext, candidateGlobalsReason))
+            {
+                candidateContext.debug_reason +=
+                    "\ncandidate globals restore failed: " + candidateGlobalsReason;
+            }
 
             std::string lowerScript = options.script_path;
             std::transform(lowerScript.begin(), lowerScript.end(), lowerScript.begin(),
@@ -2597,32 +2731,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                    lowerScript.find("rect") != std::string::npos ? "FindRect" :
                    lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
                    "FindLine");
-            gauge.tool = tool;
-            if (tool == "FindCircle")
-            {
-                gauge.has_circle_gauge = true;
-                gauge.circle_cx = options.circle_cx;
-                gauge.circle_cy = options.circle_cy;
-                gauge.circle_px = options.circle_px;
-                gauge.circle_py = options.circle_py;
-            }
-            else if (tool == "FindEllipse")
-            {
-                gauge.has_ellipse_gauge = true;
-                gauge.ellipse_x0 = options.ellipse_x0;
-                gauge.ellipse_y0 = options.ellipse_y0;
-                gauge.ellipse_x1 = options.ellipse_x1;
-                gauge.ellipse_y1 = options.ellipse_y1;
-                gauge.ellipse_inner_scale_percent = options.ellipse_inner_scale_percent;
-            }
-            else
-            {
-                gauge.has_line_gauge = true;
-                gauge.line_x0 = options.roi_x0;
-                gauge.line_y0 = options.roi_y0;
-                gauge.line_x1 = options.roi_x1;
-                gauge.line_y1 = options.roi_y1;
-            }
+            PopulateHeadlessCandidateGaugeFromGlobals(
+                options, candidateContext, tool);
 
             CxEvidenceCandidateSaveOptions candidateOptions;
             candidateOptions.root_dir = options.evidence_candidate_root.empty()
@@ -2800,7 +2910,10 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"boundary_coverage_ratio\": " << capture.boundary_coverage_ratio << ",\n";
         object_state_file << "  \"boundary_residual_rmse_px\": " << capture.boundary_residual_rmse_px << ",\n";
         object_state_file << "  \"boundary_residual_p95_px\": " << capture.boundary_residual_p95_px << ",\n";
-        object_state_file << "  \"boundary_residual_max_px\": " << capture.boundary_residual_max_px << ",\n";
+        object_state_file << R"(  "boundary_residual_max_px": )" << capture.boundary_residual_max_px << ",\n";
+        object_state_file << R"(  "boundary_subpixel_offset_mean": )" << capture.boundary_subpixel_offset_mean << ",\n";
+        object_state_file << R"(  "boundary_subpixel_offset_stddev": )" << capture.boundary_subpixel_offset_stddev << ",\n";
+        object_state_file << R"(  "boundary_localization_sigma_mean_px": )" << capture.boundary_localization_sigma_mean_px << ",\n";
         object_state_file << "  \"boundary_reliability_score\": " << capture.boundary_reliability_score << ",\n";
         object_state_file << "  \"result_rect_count\": " << capture.result_rect_count << ",\n";
         object_state_file << "  \"top1_rect_x\": " << capture.top1_rect_x << ",\n";
@@ -3204,20 +3317,13 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_max_scan_lines", options.max_scan_lines);
         setGlobal("global_max_samples", options.max_samples);
 
-        ManualGaugeState& gauge = candidateContext.current_gauge;
-        gauge.case_id = candidateContext.active_case_id;
-        gauge.image_id = candidateContext.active_image_id;
-        gauge.target_id = candidateContext.active_target_id;
-        gauge.source = "headless";
-        gauge.review_status = "pending_human_review";
-        gauge.threshold = options.threshold;
-        gauge.method = options.method;
-        gauge.linegap = options.linegap;
-        gauge.wgap = options.wgap;
-        gauge.hgap = options.hgap;
-        gauge.gap = options.gap;
-        gauge.tool_half_width = options.tool_half_width;
-        gauge.filterprofile = options.filterprofile;
+        std::string candidateGlobalsReason;
+        if (!ApplyHeadlessCandidateGlobalOverrides(
+                options, candidateContext, candidateGlobalsReason))
+        {
+            candidateContext.debug_reason +=
+                "\ncandidate globals restore failed: " + candidateGlobalsReason;
+        }
 
         std::string lowerScript = options.script_path;
         std::transform(lowerScript.begin(), lowerScript.end(), lowerScript.begin(),
@@ -3229,32 +3335,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                lowerScript.find("rect") != std::string::npos ? "FindRect" :
                lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
                "FindLine");
-        gauge.tool = tool;
-        if (tool == "FindCircle")
-        {
-            gauge.has_circle_gauge = true;
-            gauge.circle_cx = options.circle_cx;
-            gauge.circle_cy = options.circle_cy;
-            gauge.circle_px = options.circle_px;
-            gauge.circle_py = options.circle_py;
-        }
-        else if (tool == "FindEllipse")
-        {
-            gauge.has_ellipse_gauge = true;
-            gauge.ellipse_x0 = options.ellipse_x0;
-            gauge.ellipse_y0 = options.ellipse_y0;
-            gauge.ellipse_x1 = options.ellipse_x1;
-            gauge.ellipse_y1 = options.ellipse_y1;
-            gauge.ellipse_inner_scale_percent = options.ellipse_inner_scale_percent;
-        }
-        else
-        {
-            gauge.has_line_gauge = true;
-            gauge.line_x0 = options.roi_x0;
-            gauge.line_y0 = options.roi_y0;
-            gauge.line_x1 = options.roi_x1;
-            gauge.line_y1 = options.roi_y1;
-        }
+        PopulateHeadlessCandidateGaugeFromGlobals(
+            options, candidateContext, tool);
 
         CxEvidenceCandidateSaveOptions candidateOptions;
         candidateOptions.root_dir = options.evidence_candidate_root.empty()
