@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -86,6 +87,11 @@ void AddCase(
     c.tolerance = tolerance;
     c.reason = reason;
     result.cases.push_back(c);
+
+    std::cout << "metrology_smoke_case=" << case_id
+              << " status=" << (pass ? "pass" : "fail")
+              << std::endl;
+
 }
 
 template <typename Fn>
@@ -264,6 +270,19 @@ bool RunMetrologyAnalyticsSmoke(
     result = {};
     result.run_id = NewRunId();
 
+    std::error_code progressEc;
+    std::filesystem::create_directories(output_dir, progressEc);
+    std::ofstream progress(
+        output_dir / "metrology_analytics_smoke_progress.log",
+        std::ios::binary | std::ios::trunc);
+    if (progress.is_open())
+    {
+        progress << "run_id=" << result.run_id << "\n";
+        progress << "stage=run_begin\n";
+        progress.flush();
+    }
+
+
     try
     {
         CxPhysUnit pixel;
@@ -310,6 +329,52 @@ bool RunMetrologyAnalyticsSmoke(
         AddCase(result, "bimodal_skew_near_zero", "stats", std::abs(bs.skewness) < 0.08, bs.skewness, 0.0, 0.08, "symmetric bimodal skewness near zero");
         AddCase(result, "bimodal_kurtosis_negative", "stats", bs.kurtosis_excess < 0.0, bs.kurtosis_excess, -1.0, 0.0, "wide bimodal distribution has negative excess kurtosis");
         AddCase(result, "bimodal_bcdf_at_mean", "stats", Near(DistributionBcdfAtMean(bs), 0.5, 0.03), DistributionBcdfAtMean(bs), 0.5, 0.03, "symmetric bimodal BCDF around mean");
+
+        CxHeightDistribution peakDistribution;
+        peakDistribution.bin_centers =
+            {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0};
+        peakDistribution.adf =
+            {0.0, 1.0, 4.0, 3.0, 0.5, 1.0, 5.0, 0.0};
+        peakDistribution.bcdf.assign(
+            peakDistribution.adf.size(), 0.0);
+        CxHeightPeakOptions peakOptions;
+        peakOptions.max_peaks = 2;
+        peakOptions.min_prominence = 0.5;
+        peakOptions.min_distance_bins = 2;
+        peakOptions.order = CxHeightPeakOrder::Position;
+        peakOptions.background = CxHeightPeakBackground::Zero;
+        const std::vector<CxHeightPeak> detectedPeaks =
+            findHeightDistributionPeaks(peakDistribution, peakOptions);
+        AddCase(
+            result, "height_peaks_count", "height_peaks",
+            detectedPeaks.size() == 2,
+            static_cast<double>(detectedPeaks.size()), 2.0, 0.0,
+            "height distribution returns the requested two separated peaks");
+        AddCase(
+            result, "height_peaks_sub_bin_position", "height_peaks",
+            !detectedPeaks.empty() &&
+                Near(detectedPeaks.front().position, 2.25, 1e-12),
+            detectedPeaks.empty() ? 0.0 : detectedPeaks.front().position,
+            2.25, 1e-12,
+            "quadratic interpolation localizes the first peak at sub-bin precision");
+
+        CxHeightDistribution valleyDistribution;
+        valleyDistribution.bin_centers = {0.0, 1.0, 2.0, 3.0, 4.0};
+        valleyDistribution.adf = {5.0, 4.0, 1.0, 3.0, 5.0};
+        valleyDistribution.bcdf.assign(
+            valleyDistribution.adf.size(), 0.0);
+        peakOptions.max_peaks = 1;
+        peakOptions.invert = true;
+        const std::vector<CxHeightPeak> detectedValleys =
+            findHeightDistributionPeaks(valleyDistribution, peakOptions);
+        AddCase(
+            result, "height_peaks_invert_valley", "height_peaks",
+            detectedValleys.size() == 1 &&
+                Near(detectedValleys.front().curve_value, 1.0, 1e-12),
+            detectedValleys.empty() ? 0.0
+                                    : detectedValleys.front().curve_value,
+            1.0, 1e-12,
+            "invert mode detects a valley while preserving the original curve value");
 
         CxPhysUnit mm;
         mm.x_unit = CxLengthUnit::Millimeter;
@@ -479,30 +544,71 @@ bool RunMetrologyAnalyticsSmoke(
                 break;
             }
         }
-        AddCase(result, "ui_global_count", "ui_globals", uiGlobals.size() == 41, static_cast<double>(uiGlobals.size()), 41.0, 0.0, "Key Parameter Controls metrology panel exposes 41 global_metrology_* values");
+        AddCase(result, "ui_global_count", "ui_globals",
+                uiGlobals.size() == 62,
+                static_cast<double>(uiGlobals.size()), 62.0, 0.0,
+                "Key Parameter Controls metrology panel exposes 62 global_metrology_* values");
         AddCase(result, "ui_global_prefix", "ui_globals", allGlobalMetrologyPrefixed, allGlobalMetrologyPrefixed ? 1.0 : 0.0, 1.0, 0.0, "all metrology UI globals use the global_metrology_ prefix");
         AddCase(result, "ui_scan_max_lines_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1) == 256, static_cast<double>(findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1)), 256.0, 0.0, "scan profile max lines default is locked");
         AddCase(result, "ui_surface_area_method_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_surface_area_method", -1) == 1, static_cast<double>(findUiValue(uiGlobals, "global_metrology_surface_area_method", -1)), 1.0, 0.0, "area method default is four-triangle fan");
         AddCase(result, "ui_unit_defaults", "ui_globals", findUiValue(uiGlobals, "global_metrology_x_unit", -1) == 2 && findUiValue(uiGlobals, "global_metrology_y_unit", -1) == 2 && findUiValue(uiGlobals, "global_metrology_z_unit", -1) == 2, static_cast<double>(findUiValue(uiGlobals, "global_metrology_x_unit", -1)), 2.0, 0.0, "x/y/z default units are micrometer entries");
         AddCase(result, "ui_roughness_bins_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_roughness_bins", -1) == 1024, static_cast<double>(findUiValue(uiGlobals, "global_metrology_roughness_bins", -1)), 1024.0, 0.0, "ISO 1D roughness bins default is locked");
 
+        AddCase(result, "ui_peak_defaults", "ui_globals",
+                findUiValue(uiGlobals, "global_metrology_peak_max_count", -1) == 12 &&
+                    findUiValue(uiGlobals, "global_metrology_peak_order", -1) == 0 &&
+                    findUiValue(uiGlobals, "global_metrology_peak_background", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_peak_invert", -1) == 0,
+                static_cast<double>(findUiValue(uiGlobals, "global_metrology_peak_max_count", -1)),
+                12.0, 0.0,
+                "Find Peaks reliable defaults use position order and bilateral minimum background");
+        AddCase(result, "ui_curve_fit_defaults", "ui_globals",
+                findUiValue(uiGlobals, "global_metrology_curve_fit_function", -1) == 0 &&
+                    findUiValue(uiGlobals, "global_metrology_curve_fit_auto_estimate", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_curve_fit_auto_plot", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_curve_fit_full_range", -1) == 1,
+                static_cast<double>(findUiValue(uiGlobals, "global_metrology_curve_fit_function", -1)),
+                0.0, 0.0,
+                "Curve Fitting defaults use Gaussian, automatic estimate/plot and full range");
+        AddCase(result, "ui_critical_dimension_defaults", "ui_globals",
+                findUiValue(uiGlobals, "global_metrology_critical_dimension_function", -1) == 0 &&
+                    findUiValue(uiGlobals, "global_metrology_critical_dimension_auto_fit", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_critical_dimension_full_range", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_critical_dimension_draw_whole_circle", -1) == 0,
+                static_cast<double>(findUiValue(uiGlobals, "global_metrology_critical_dimension_function", -1)),
+                0.0, 0.0,
+                "Critical Dimension defaults use right-edge preset, auto fit and full range");
+
         CxMetrologyUiGlobalFields uiEdited = uiDefaults;
         uiEdited.enabled = true;
-        uiEdited.active_tab = 7;
+        uiEdited.active_tab = 10;
         uiEdited.show_scan_profile = true;
         uiEdited.surface_width = 512;
         uiEdited.enable_plane_correction = true;
         uiEdited.roughness_bins = 2048;
+        uiEdited.peak_max_count = 9;
+        uiEdited.peak_invert = true;
+        uiEdited.curve_fit_function = 1;
+        uiEdited.curve_fit_full_range = false;
+        uiEdited.critical_dimension_function = 4;
+        uiEdited.critical_dimension_draw_whole_circle = true;
         const std::vector<CxMetrologyUiGlobalPair> uiEditedGlobals =
             BuildMetrologyUiGlobalSnapshot(uiEdited);
         const bool uiEditPropagation =
             findUiValue(uiEditedGlobals, "global_metrology_enabled", -1) == 1 &&
-            findUiValue(uiEditedGlobals, "global_metrology_active_tab", -1) == 7 &&
+            findUiValue(uiEditedGlobals, "global_metrology_active_tab", -1) == 10 &&
             findUiValue(uiEditedGlobals, "global_metrology_show_scan_profile", -1) == 1 &&
             findUiValue(uiEditedGlobals, "global_metrology_surface_width", -1) == 512 &&
             findUiValue(uiEditedGlobals, "global_metrology_enable_plane_correction", -1) == 1 &&
-            findUiValue(uiEditedGlobals, "global_metrology_roughness_bins", -1) == 2048;
+            findUiValue(uiEditedGlobals, "global_metrology_roughness_bins", -1) == 2048 &&
+            findUiValue(uiEditedGlobals, "global_metrology_peak_max_count", -1) == 9 &&
+            findUiValue(uiEditedGlobals, "global_metrology_peak_invert", -1) == 1 &&
+            findUiValue(uiEditedGlobals, "global_metrology_curve_fit_function", -1) == 1 &&
+            findUiValue(uiEditedGlobals, "global_metrology_curve_fit_full_range", -1) == 0 &&
+            findUiValue(uiEditedGlobals, "global_metrology_critical_dimension_function", -1) == 4 &&
+            findUiValue(uiEditedGlobals, "global_metrology_critical_dimension_draw_whole_circle", -1) == 1;
         AddCase(result, "ui_edit_global_propagation", "ui_globals", uiEditPropagation, uiEditPropagation ? 1.0 : 0.0, 1.0, 0.0, "edited metrology UI fields propagate to global_metrology_* snapshot values");
+
 
         const CxManualConsoleAnalyticsSmokePanelContract panelContract =
             ManualConsoleAnalyticsSmokePanelContract();

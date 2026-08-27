@@ -158,11 +158,77 @@ bool SaveComparison(
     diagnostic.artifact_refs.push_back(path.string());
     return true;
 }
+
+bool LoadPrecomputedInferenceResult(
+    const CxTorchTaskSpec& task,
+    CxInferenceResult& result,
+    std::string& reason)
+{
+    result = {};
+    result.executed = true;
+    result.task_id = task.task_id;
+    result.case_id = task.case_id;
+    result.model_id = task.model_id;
+    result.model_hash = task.precomputed_model_hash;
+    result.requested_device = task.requested_device;
+    result.actual_device = "precomputed";
+    result.schema = "cxvision.precomputed_inference_result.v1";
+    result.result_ref = task.precomputed_result_ref.string();
+    result.evidence_ref = result.result_ref;
+    result.primary_visual_ref = task.precomputed_overlay_path.string();
+
+    if (task.precomputed_result_ref.empty() ||
+        !std::filesystem::is_regular_file(task.precomputed_result_ref) ||
+        task.precomputed_mask_path.empty() ||
+        !std::filesystem::is_regular_file(task.precomputed_mask_path))
+    {
+        result.ok = false;
+        result.status = "ASSET_MISSING";
+        result.failure_stage = "precomputed_inference_binding";
+        result.reason = "precomputed inference result requires physical result_ref and mask_path assets";
+        reason = result.reason;
+        return false;
+    }
+
+    CxMaskFactsSnapshot mask_facts;
+    if (!AnalyzeCxMaskFile(task.precomputed_mask_path.string(), mask_facts, reason))
+    {
+        result.ok = false;
+        result.status = mask_facts.status;
+        result.failure_stage = "precomputed_mask_analysis";
+        result.reason = reason;
+        return false;
+    }
+
+    CxTorchMask mask;
+    mask.available = true;
+    mask.mask_ref = task.precomputed_mask_path.string();
+    mask.overlay_ref = task.precomputed_overlay_path.string();
+    mask.width = mask_facts.width;
+    mask.height = mask_facts.height;
+    mask.foreground_ratio = mask_facts.foreground_ratio;
+    result.mask = mask;
+    result.metrics["mask_foreground_pixels"] = mask_facts.foreground_pixels;
+    result.metrics["mask_component_count"] = mask_facts.component_count;
+    result.metrics["mask_boundary_pixels"] = mask_facts.boundary_pixels;
+    result.metrics["mask_bbox_fill_ratio"] = mask_facts.bbox_fill_ratio;
+    result.metrics["mask_touches_border"] = mask_facts.touches_border ? 1.0 : 0.0;
+    result.artifact_refs.push_back(result.result_ref);
+    result.artifact_refs.push_back(mask.mask_ref);
+    if (!mask.overlay_ref.empty())
+        result.artifact_refs.push_back(mask.overlay_ref);
+    result.ok = true;
+    result.status = "IMPORTED_INFERENCE_RESULT_BOUND";
+    result.reason = "precomputed inference result imported for paired evaluation";
+    reason.clear();
+    return true;
+}
 } // namespace
 
 bool CxTorchExecutionAdapter::Execute(const CxTorchTaskSpec& task, CxInferenceResult& result, std::string& reason)
 {
     result = {};
+
 
     if (!ValidateCxTorchTaskSpec(task, reason)) {
         result.failure_stage = "torch_request_validation";
@@ -170,7 +236,12 @@ bool CxTorchExecutionAdapter::Execute(const CxTorchTaskSpec& task, CxInferenceRe
         return false;
     }
 
+    if (!task.precomputed_result_ref.empty() || !task.precomputed_mask_path.empty()) {
+        return LoadPrecomputedInferenceResult(task, result, reason);
+    }
+
     if (!EnsureRuntime(task, reason)) {
+
         result.failure_stage = "torch_runtime_initialize";
         result.reason = reason;
         return false;

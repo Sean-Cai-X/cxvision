@@ -21,6 +21,7 @@ namespace
 struct ClosureBinding
 {
     bool bound = false;
+    bool precomputed_result_bound = false;
     std::string status;
     std::string task_id;
     std::string model_id;
@@ -28,10 +29,18 @@ struct ClosureBinding
     std::filesystem::path dataset_root;
     std::string device = "cpu";
     std::string extra_json;
+    std::string physical_output_contract;
+    std::filesystem::path result_ref;
+    std::filesystem::path mask_path;
+    std::filesystem::path overlay_path;
+    std::filesystem::path input_image_path;
+    std::string model_hash;
+    std::string validation_reason;
 };
 
 struct ClosureSample
 {
+
     std::string case_id;
     std::filesystem::path image_path;
     std::filesystem::path label_mask_path;
@@ -57,6 +66,10 @@ struct ClosureRow
     bool binding_package_valid = false;
     std::string typed_label_kind;
     std::filesystem::path typed_label_candidate_ref;
+    std::filesystem::path typed_label_proposal_manifest;
+    bool typed_label_independent = false;
+    std::filesystem::path runtime_direction_manifest;
+    bool runtime_direction_valid = false;
     std::filesystem::path source_manifest;
     std::string source_set_id;
     ClosureBinding parent;
@@ -97,11 +110,11 @@ struct CompletedCase
     std::string row_id;
     std::string case_id;
     double parent_child_iou = 0.0;
+    bool label_available = false;
     double parent_label_iou = 0.0;
     double child_label_iou = 0.0;
     double label_delta = 0.0;
 };
-
 struct GatePolicy
 {
     int minimum_case_count = 3;
@@ -366,12 +379,76 @@ ClosureBinding ParseBinding(const cv::FileNode& node)
     if (!device.empty())
         binding.device = device;
     binding.extra_json = NodeString(node, "extra_json");
-    binding.bound = binding.status == "bound" &&
-                    !binding.task_id.empty() &&
-                    !binding.model_id.empty() &&
-                    std::filesystem::is_regular_file(binding.manifest_path);
+    binding.physical_output_contract = NodeString(node, "physical_output_contract");
+    binding.result_ref = NodeString(node, "result_ref");
+    binding.mask_path = NodeString(node, "mask_path");
+    binding.overlay_path = NodeString(node, "overlay_path");
+    binding.input_image_path = NodeString(node, "input_image_path");
+    binding.model_hash = NodeString(node, "model_hash");
     return binding;
 }
+
+void ValidateBindingManifest(ClosureBinding& binding)
+{
+    binding.bound = false;
+    binding.precomputed_result_bound = false;
+    if (binding.status == "result_bound")
+    {
+        if (binding.task_id.empty() || binding.model_id.empty() ||
+            binding.physical_output_contract.empty() ||
+            !std::filesystem::is_regular_file(binding.result_ref) ||
+            !IsReadableImage(binding.mask_path) ||
+            !std::filesystem::is_regular_file(binding.input_image_path))
+        {
+            binding.validation_reason = "precomputed result binding requires task, model, physical output contract, result_ref, mask_path, and input_image_path";
+
+            return;
+        }
+        binding.bound = true;
+        binding.precomputed_result_bound = true;
+        binding.validation_reason = "precomputed inference result and mask asset validated";
+        return;
+    }
+    if (binding.status != "bound")
+    {
+        binding.validation_reason = "binding status is not bound";
+        return;
+    }
+    if (binding.task_id.empty() || binding.model_id.empty() ||
+        binding.physical_output_contract.empty() ||
+        !std::filesystem::is_regular_file(binding.manifest_path))
+    {
+        binding.validation_reason = "required binding fields or physical manifest are missing";
+        return;
+    }
+    cv::FileStorage manifest(
+        binding.manifest_path.string(), cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+    if (!manifest.isOpened())
+    {
+        binding.validation_reason = "model manifest is not valid JSON";
+        return;
+    }
+    if (NodeString(manifest.root(), "model_id") != binding.model_id ||
+        NodeString(manifest.root(), "task") != binding.task_id ||
+        NodeString(manifest.root(), "physical_output_contract") != binding.physical_output_contract)
+    {
+        binding.validation_reason = "model id, task, or physical output contract does not match binding";
+        return;
+    }
+    std::filesystem::path weights = NodeString(manifest.root(), "weights");
+    if (weights.empty())
+        weights = NodeString(manifest.root(), "model_path");
+    if (!weights.is_absolute())
+        weights = (binding.manifest_path.parent_path() / weights).lexically_normal();
+    if (!std::filesystem::is_regular_file(weights))
+    {
+        binding.validation_reason = "model manifest does not resolve to physical weights";
+        return;
+    }
+    binding.bound = true;
+    binding.validation_reason = "model manifest and physical output contract validated";
+}
+
 
 bool LoadBindingPackage(
     const std::filesystem::path& package_path,
@@ -403,23 +480,58 @@ bool LoadBindingPackage(
     row.label_binding_status = NodeString(label_node, "status");
     row.typed_label_candidate_ref = ResolveAssetPath(
         package_path, NodeString(label_node, "candidate_reference"));
+    row.typed_label_proposal_manifest = ResolveAssetPath(
+        package_path, NodeString(label_node, "proposal_manifest"));
+    row.typed_label_independent = NodeInt(label_node, "independent_ground_truth", 0) != 0;
+    row.runtime_direction_manifest = ResolveAssetPath(
+        package_path, NodeString(package.root(), "runtime_direction_manifest"));
     row.parent = ParseBinding(package["parent_binding"]);
     row.child = ParseBinding(package["child_binding"]);
     row.parent.manifest_path = ResolveAssetPath(package_path, row.parent.manifest_path);
     row.child.manifest_path = ResolveAssetPath(package_path, row.child.manifest_path);
-    row.parent.bound = row.parent.status == "bound" && !row.parent.task_id.empty() &&
-        !row.parent.model_id.empty() && std::filesystem::is_regular_file(row.parent.manifest_path);
-    row.child.bound = row.child.status == "bound" && !row.child.task_id.empty() &&
-        !row.child.model_id.empty() && std::filesystem::is_regular_file(row.child.manifest_path);
+    row.parent.result_ref = ResolveAssetPath(package_path, row.parent.result_ref);
+    row.child.result_ref = ResolveAssetPath(package_path, row.child.result_ref);
+    row.parent.mask_path = ResolveAssetPath(package_path, row.parent.mask_path);
+    row.child.mask_path = ResolveAssetPath(package_path, row.child.mask_path);
+    row.parent.overlay_path = ResolveAssetPath(package_path, row.parent.overlay_path);
+    row.child.overlay_path = ResolveAssetPath(package_path, row.child.overlay_path);
+    row.parent.input_image_path = ResolveAssetPath(package_path, row.parent.input_image_path);
+    row.child.input_image_path = ResolveAssetPath(package_path, row.child.input_image_path);
+    ValidateBindingManifest(row.parent);
+    ValidateBindingManifest(row.child);
+    if ((row.parent.precomputed_result_bound && row.parent.input_image_path != sample.image_path) ||
+        (row.child.precomputed_result_bound && row.child.input_image_path != sample.image_path))
+    {
+        reason = "precomputed inference result input image does not match the binding sample image";
+        return false;
+    }
+
+
+    cv::FileStorage direction(row.runtime_direction_manifest.string(),
+        cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+    if (direction.isOpened() &&
+        NodeString(direction.root(), "schema") == "cxvision.parent_child_runtime_direction.v1" &&
+        NodeString(direction.root(), "case_track") == expected_track &&
+        NodeInt(direction.root(), "training_enabled", 1) == 0)
+    {
+        const cv::FileNode direction_parent = direction["parent"];
+        const cv::FileNode direction_child = direction["child"];
+        row.runtime_direction_valid =
+            NodeString(direction_parent, "task_id") == row.parent.task_id &&
+            NodeString(direction_child, "task_id") == row.child.task_id &&
+            NodeString(direction_parent, "physical_output_contract") == row.parent.physical_output_contract &&
+            NodeString(direction_child, "physical_output_contract") == row.child.physical_output_contract;
+    }
 
     const std::filesystem::path audit_path = ResolveAssetPath(
         package_path, NodeString(package.root(), "runtime_candidate_audit"));
     if (sample.case_id.empty() || row.typed_label_kind.empty() ||
         !std::filesystem::is_regular_file(sample.image_path) ||
         !std::filesystem::is_regular_file(row.typed_label_candidate_ref) ||
-        !std::filesystem::is_regular_file(audit_path))
+        !std::filesystem::is_regular_file(audit_path) ||
+        !row.runtime_direction_valid)
     {
-        reason = "single-image binding package is missing its sample, typed-label candidate, or runtime audit";
+        reason = "single-image binding package is missing or mismatches its sample, typed-label candidate, runtime direction, or runtime audit";
         return false;
     }
     if (row.label_binding_status == "bound")
@@ -433,6 +545,22 @@ bool LoadBindingPackage(
             !std::filesystem::is_regular_file(sample.label_companion_path))
         {
             reason = "bound instance label is missing its class companion asset";
+            return false;
+        }
+    }
+    if (row.label_binding_status == "auto_provisional")
+    {
+        if (!std::filesystem::is_regular_file(sample.label_mask_path) ||
+            !std::filesystem::is_regular_file(row.typed_label_proposal_manifest))
+        {
+            reason = "auto-provisional typed label is missing its physical label or proposal manifest";
+            return false;
+        }
+        if ((row.typed_label_kind == "instance_id_mask_with_class" ||
+             row.typed_label_kind == "open_boundary_polyline_with_endpoints") &&
+            !std::filesystem::is_regular_file(sample.label_companion_path))
+        {
+            reason = "auto-provisional typed label is missing its required companion asset";
             return false;
         }
     }
@@ -470,11 +598,15 @@ CxTorchTaskSpec MakeTask(
     task.output_dir = output_dir;
     task.requested_device = binding.device;
     task.extra_json = binding.extra_json;
+    task.precomputed_result_ref = binding.result_ref;
+    task.precomputed_mask_path = binding.mask_path;
+    task.precomputed_overlay_path = binding.overlay_path;
+    task.precomputed_model_hash = binding.model_hash;
     return task;
 }
-
 double Mean(const std::vector<double>& values)
 {
+
     if (values.empty())
         return 0.0;
     return std::accumulate(values.begin(), values.end(), 0.0) / values.size();
@@ -514,10 +646,16 @@ bool WritePreflight(
         const bool image_bound = !row.samples.empty() &&
             std::filesystem::is_regular_file(row.samples.front().image_path);
         const bool label_bound = row.label_binding_status == "bound" &&
+            row.typed_label_independent &&
             !row.samples.empty() &&
             std::filesystem::is_regular_file(row.samples.front().label_mask_path);
+        const bool proposal_physical = row.label_binding_status == "auto_provisional" &&
+            !row.samples.empty() &&
+            std::filesystem::is_regular_file(row.samples.front().label_mask_path) &&
+            std::filesystem::is_regular_file(row.typed_label_proposal_manifest);
         const bool contracts_valid = row.taxonomy_valid && row.annotation_contract_valid &&
-            row.model_track_valid && row.evaluator_contract_valid;
+            row.model_track_valid && row.evaluator_contract_valid &&
+            (row.binding_package_path.empty() || row.binding_package_valid);
         file << "    {\"matrix_row\": \"" << JsonEscape(row.row_id)
              << "\", \"review_item\": \"" << JsonEscape(row.review_item)
              << "\", \"implementation_phase\": " << row.implementation_phase
@@ -532,12 +670,26 @@ bool WritePreflight(
              << ", \"evaluator_contract_valid\": " << (row.evaluator_contract_valid ? "true" : "false")
              << ", \"evaluator_runtime_supported\": " << (row.evaluator_runtime_supported ? "true" : "false")
              << ", \"evaluator_runtime_status\": \"" << JsonEscape(row.evaluator_runtime_status)
-             << "\", \"image_bound\": " << (image_bound ? "true" : "false")
-             << ", \"parent_bound\": " << (row.parent.bound ? "true" : "false")
-             << ", \"child_bound\": " << (row.child.bound ? "true" : "false")
-             << ", \"dataset_label_bound\": " << (label_bound ? "true" : "false")
-             << ", \"parent_status\": \"" << JsonEscape(row.parent.status)
+             << "\", \"binding_package_ref\": \"" << JsonEscape(row.binding_package_path.string())
+             << "\", \"binding_package_valid\": " << (row.binding_package_valid ? "true" : "false")
+             << ", \"typed_label_kind\": \"" << JsonEscape(row.typed_label_kind)
+             << "\", \"typed_label_candidate_ref\": \"" << JsonEscape(row.typed_label_candidate_ref.string())
+             << "\", \"typed_label_proposal_manifest\": \"" << JsonEscape(row.typed_label_proposal_manifest.string())
+             << "\", \"runtime_direction_manifest\": \"" << JsonEscape(row.runtime_direction_manifest.string())
+             << "\", \"runtime_direction_valid\": " << (row.runtime_direction_valid ? "true" : "false")
+             << ", \"image_bound\": " << (image_bound ? "true" : "false")
+             << ", \"typed_label_proposal_physical\": " << (proposal_physical ? "true" : "false")
+             << R"(, "typed_label_independent_ground_truth": )" << (row.typed_label_independent ? "true" : "false")
+             << R"(, "parent_bound": )" << (row.parent.bound ? "true" : "false")
+             << R"(, "parent_result_bound": )" << (row.parent.precomputed_result_bound ? "true" : "false")
+             << R"(, "child_bound": )" << (row.child.bound ? "true" : "false")
+             << R"(, "child_result_bound": )" << (row.child.precomputed_result_bound ? "true" : "false")
+             << R"(, "dataset_label_bound": )" << (label_bound ? "true" : "false")
+             << R"(, "parent_status": ")" << JsonEscape(row.parent.status)
+
              << "\", \"child_status\": \"" << JsonEscape(row.child.status)
+             << "\", \"parent_validation\": \"" << JsonEscape(row.parent.validation_reason)
+             << "\", \"child_validation\": \"" << JsonEscape(row.child.validation_reason)
              << "\", \"label_status\": \"" << JsonEscape(row.label_binding_status) << "\"}"
              << (index + 1 < rows.size() ? "," : "") << "\n";
     }
@@ -562,9 +714,11 @@ bool WriteProcessStatus(
     for (const ClosureRow& row : rows)
     {
         contracts_valid = contracts_valid && row.taxonomy_valid && row.annotation_contract_valid &&
-            row.model_track_valid && row.evaluator_contract_valid;
+            row.model_track_valid && row.evaluator_contract_valid &&
+            (row.binding_package_path.empty() || row.binding_package_valid);
         images_bound = images_bound && !row.samples.empty();
-        labels_bound = labels_bound && row.label_binding_status == "bound" && !row.samples.empty();
+        labels_bound = labels_bound && row.label_binding_status == "bound" &&
+            row.typed_label_independent && !row.samples.empty();
         models_bound = models_bound && row.parent.bound && row.child.bound;
         evaluators_supported = evaluators_supported && row.evaluator_runtime_supported;
         frozen_validation_bound = frozen_validation_bound && row.explicit_frozen_validation && !row.samples.empty();
@@ -648,71 +802,168 @@ bool WriteAggregateReports(
     std::vector<double> child_label;
     std::vector<double> deltas;
     int regression_count = 0;
+    int label_case_count = 0;
     for (const CompletedCase& item : cases)
     {
         parent_child.push_back(item.parent_child_iou);
+        if (!item.label_available)
+            continue;
+        ++label_case_count;
         parent_label.push_back(item.parent_label_iou);
         child_label.push_back(item.child_label_iou);
         deltas.push_back(item.label_delta);
         if (item.label_delta < 0.0)
             ++regression_count;
     }
+
+    const bool label_coverage_complete =
+        !cases.empty() && label_case_count == static_cast<int>(cases.size());
     const double mean_parent_child = Mean(parent_child);
     const double mean_parent_label = Mean(parent_label);
     const double mean_child_label = Mean(child_label);
     const double mean_delta = Mean(deltas);
     const double child_stddev = StandardDeviation(child_label, mean_child_label);
+    const char quote = static_cast<char>(34);
+    const auto write_key = [quote](std::ofstream& file, const char* key)
+    {
+        file << "  " << quote << key << quote << ": ";
+    };
 
     result.aggregate_ref = output_dir / "frozen_validation_aggregate.json";
     std::ofstream aggregate(result.aggregate_ref, std::ios::trunc);
-    if (!aggregate) { reason = "cannot write frozen validation aggregate"; return false; }
-    aggregate << "{\n  \"schema\": \"cxvision.frozen_validation_aggregate.v1\",\n"
-              << "  \"case_count\": " << cases.size() << ",\n"
-              << "  \"mean_parent_child_iou\": " << mean_parent_child << ",\n"
-              << "  \"mean_parent_label_iou\": " << mean_parent_label << ",\n"
-              << "  \"mean_child_label_iou\": " << mean_child_label << ",\n"
-              << "  \"mean_label_iou_delta\": " << mean_delta << ",\n"
-              << "  \"regression_count\": " << regression_count << "\n}\n";
-    if (!aggregate.good()) { reason = "failed to write frozen validation aggregate"; return false; }
+    if (!aggregate)
+    {
+        reason = "cannot write frozen validation aggregate";
+        return false;
+    }
+    aggregate << "{\n";
+    write_key(aggregate, "schema");
+    aggregate << quote << "cxvision.frozen_validation_aggregate.v2" << quote << ",\n";
+    write_key(aggregate, "case_count");
+    aggregate << cases.size() << ",\n";
+    write_key(aggregate, "label_case_count");
+    aggregate << label_case_count << ",\n";
+    write_key(aggregate, "label_coverage_complete");
+    aggregate << (label_coverage_complete ? "true" : "false") << ",\n";
+    write_key(aggregate, "absolute_accuracy_claimed");
+    aggregate << (label_coverage_complete ? "true" : "false") << ",\n";
+    write_key(aggregate, "mean_parent_child_iou");
+    aggregate << mean_parent_child << ",\n";
+    write_key(aggregate, "mean_parent_label_iou");
+    if (label_case_count > 0)
+        aggregate << mean_parent_label;
+    else
+        aggregate << "null";
+    aggregate << ",\n";
+    write_key(aggregate, "mean_child_label_iou");
+    if (label_case_count > 0)
+        aggregate << mean_child_label;
+    else
+        aggregate << "null";
+    aggregate << ",\n";
+    write_key(aggregate, "mean_label_iou_delta");
+    if (label_case_count > 0)
+        aggregate << mean_delta;
+    else
+        aggregate << "null";
+    aggregate << ",\n";
+    write_key(aggregate, "regression_count");
+    aggregate << regression_count << "\n}\n";
+    if (!aggregate.good())
+    {
+        reason = "failed to write frozen validation aggregate";
+        return false;
+    }
 
     result.stability_ref = output_dir / "stability_analysis.json";
     std::ofstream stability(result.stability_ref, std::ios::trunc);
-    if (!stability) { reason = "cannot write stability analysis"; return false; }
-    stability << "{\n  \"schema\": \"cxvision.frozen_validation_stability.v1\",\n"
-              << "  \"sample_count\": " << child_label.size() << ",\n"
-              << "  \"child_label_iou_mean\": " << mean_child_label << ",\n"
-              << "  \"child_label_iou_stddev\": " << child_stddev << ",\n"
-              << "  \"stable\": " << (child_stddev <= policy.maximum_child_label_iou_stddev ? "true" : "false") << "\n}\n";
-    if (!stability.good()) { reason = "failed to write stability analysis"; return false; }
+    if (!stability)
+    {
+        reason = "cannot write stability analysis";
+        return false;
+    }
+    stability << "{\n";
+    write_key(stability, "schema");
+    stability << quote << "cxvision.frozen_validation_stability.v2" << quote << ",\n";
+    write_key(stability, "sample_count");
+    stability << label_case_count << ",\n";
+    write_key(stability, "label_coverage_complete");
+    stability << (label_coverage_complete ? "true" : "false") << ",\n";
+    write_key(stability, "child_label_iou_mean");
+    if (label_case_count > 0)
+        stability << mean_child_label;
+    else
+        stability << "null";
+    stability << ",\n";
+    write_key(stability, "child_label_iou_stddev");
+    if (label_case_count > 0)
+        stability << child_stddev;
+    else
+        stability << "null";
+    stability << ",\n";
+    write_key(stability, "stable");
+    stability << (label_coverage_complete &&
+                          child_stddev <= policy.maximum_child_label_iou_stddev
+                      ? "true"
+                      : "false")
+              << "\n}\n";
+    if (!stability.good())
+    {
+        reason = "failed to write stability analysis";
+        return false;
+    }
 
     const bool candidate =
+        label_coverage_complete &&
         static_cast<int>(cases.size()) >= policy.minimum_case_count &&
         regression_count <= policy.maximum_regression_count &&
         mean_child_label >= policy.minimum_child_label_iou &&
         mean_delta >= policy.minimum_mean_label_iou_delta &&
         child_stddev <= policy.maximum_child_label_iou_stddev;
+    const std::string gate_status = !label_coverage_complete
+        ? "PENDING_BINDING"
+        : (candidate ? "PENDING_HUMAN_REVIEW" : "FAIL");
+    const std::string gate_reason = !label_coverage_complete
+        ? "paired consistency diagnostics completed, but independent dataset label coverage is incomplete"
+        : (candidate
+               ? "automatic frozen-set checks passed; final promotion requires human confirmation"
+               : "automatic frozen-set thresholds were not satisfied");
+
     result.promotion_gate_ref = output_dir / "promotion_gate.json";
     std::ofstream gate(result.promotion_gate_ref, std::ios::trunc);
-    if (!gate) { reason = "cannot write promotion gate"; return false; }
-    gate << "{\n  \"schema\": \"cxvision.incremental_promotion_gate.v1\",\n"
-         << "  \"automatic_checks_complete\": true,\n"
-         << "  \"candidate_satisfies_thresholds\": " << (candidate ? "true" : "false") << ",\n"
-         << "  \"promotion_allowed\": false,\n"
-         << "  \"status\": \"" << (candidate ? "PENDING_HUMAN_REVIEW" : "FAIL") << "\",\n"
-         << "  \"human_review_required\": true,\n"
-         << "  \"reason\": \"" << (candidate
-                ? "automatic frozen-set checks passed; final promotion requires human confirmation"
-                : "automatic frozen-set thresholds were not satisfied") << "\"\n}\n";
-    if (!gate.good()) { reason = "failed to write promotion gate"; return false; }
+    if (!gate)
+    {
+        reason = "cannot write promotion gate";
+        return false;
+    }
+    gate << "{\n";
+    write_key(gate, "schema");
+    gate << quote << "cxvision.incremental_promotion_gate.v2" << quote << ",\n";
+    write_key(gate, "automatic_checks_complete");
+    gate << (label_coverage_complete ? "true" : "false") << ",\n";
+    write_key(gate, "label_coverage_complete");
+    gate << (label_coverage_complete ? "true" : "false") << ",\n";
+    write_key(gate, "candidate_satisfies_thresholds");
+    gate << (candidate ? "true" : "false") << ",\n";
+    write_key(gate, "promotion_allowed");
+    gate << "false,\n";
+    write_key(gate, "status");
+    gate << quote << gate_status << quote << ",\n";
+    write_key(gate, "reason");
+    gate << quote << JsonEscape(gate_reason) << quote << "\n}\n";
+    if (!gate.good())
+    {
+        reason = "failed to write promotion gate";
+        return false;
+    }
 
-    result.status = candidate ? "PENDING_HUMAN_REVIEW" : "FAIL";
-    result.reason = candidate
-        ? "frozen validation and stability checks complete; final human review required"
-        : "frozen validation promotion thresholds failed";
+    result.status = gate_status;
+    result.reason = gate_reason;
+    reason = gate_reason;
     return true;
 }
-} // namespace
 
+} // namespace
 bool RunCxAutomaticDiagnosticClosure(
     const CxAutomaticDiagnosticClosureOptions& options,
     CxAutomaticDiagnosticClosureResult& result,
@@ -822,27 +1073,45 @@ bool RunCxAutomaticDiagnosticClosure(
             row.evaluator_runtime_status = evaluator_status == contracts.evaluator_status.end()
                 ? "missing" : evaluator_status->second;
             row.evaluator_runtime_supported = row.evaluator_runtime_status == "implemented";
-            row.parent = ParseBinding(node["parent_binding"]);
-            row.child = ParseBinding(node["child_binding"]);
-            row.parent.manifest_path = ResolveAssetPath(options.matrix_path, row.parent.manifest_path);
-            row.child.manifest_path = ResolveAssetPath(options.matrix_path, row.child.manifest_path);
-            row.parent.bound = row.parent.status == "bound" &&
-                !row.parent.task_id.empty() && !row.parent.model_id.empty() &&
-                std::filesystem::is_regular_file(row.parent.manifest_path);
-            row.child.bound = row.child.status == "bound" &&
-                !row.child.task_id.empty() && !row.child.model_id.empty() &&
-                std::filesystem::is_regular_file(row.child.manifest_path);
-
-            const cv::FileNode label = node["dataset_label_mask_binding"];
-            if (label.isString())
-                row.label_binding_status = static_cast<std::string>(label);
-            else if (!label.empty())
+            row.binding_package_path = ResolveAssetPath(
+                options.matrix_path, NodeString(node, "binding_package"));
+            if (!row.binding_package_path.empty())
             {
-                row.label_binding_status = NodeString(label, "status");
-                row.label_mask_path = ResolveAssetPath(options.matrix_path, NodeString(label, "mask_path"));
+                std::string package_reason;
+                row.binding_package_valid = LoadBindingPackage(
+                    row.binding_package_path, row.case_track, row, package_reason);
+                if (!row.binding_package_valid)
+                    row.label_binding_status = "binding_package_invalid";
             }
             else
-                row.label_binding_status = "missing";
+            {
+                row.parent = ParseBinding(node["parent_binding"]);
+                row.child = ParseBinding(node["child_binding"]);
+                row.parent.manifest_path = ResolveAssetPath(options.matrix_path, row.parent.manifest_path);
+                row.child.manifest_path = ResolveAssetPath(options.matrix_path, row.child.manifest_path);
+                row.parent.result_ref = ResolveAssetPath(options.matrix_path, row.parent.result_ref);
+                row.child.result_ref = ResolveAssetPath(options.matrix_path, row.child.result_ref);
+                row.parent.mask_path = ResolveAssetPath(options.matrix_path, row.parent.mask_path);
+                row.child.mask_path = ResolveAssetPath(options.matrix_path, row.child.mask_path);
+                row.parent.overlay_path = ResolveAssetPath(options.matrix_path, row.parent.overlay_path);
+                row.child.overlay_path = ResolveAssetPath(options.matrix_path, row.child.overlay_path);
+                row.parent.input_image_path = ResolveAssetPath(options.matrix_path, row.parent.input_image_path);
+                row.child.input_image_path = ResolveAssetPath(options.matrix_path, row.child.input_image_path);
+                ValidateBindingManifest(row.parent);
+                ValidateBindingManifest(row.child);
+
+
+                const cv::FileNode label = node["dataset_label_mask_binding"];
+                if (label.isString())
+                    row.label_binding_status = static_cast<std::string>(label);
+                else if (!label.empty())
+                {
+                    row.label_binding_status = NodeString(label, "status");
+                    row.label_mask_path = ResolveAssetPath(options.matrix_path, NodeString(label, "mask_path"));
+                }
+                else
+                    row.label_binding_status = "missing";
+            }
 
             const cv::FileNode candidate = node["cximage_candidate"];
             row.candidate.algorithm_id = NodeString(candidate, "algorithm_id");
@@ -857,26 +1126,29 @@ bool RunCxAutomaticDiagnosticClosure(
                 row.candidate.roi_y1 = static_cast<int>(roi[3]);
             }
 
-            const cv::FileNode samples = node["frozen_validation_set"];
-            row.explicit_frozen_validation = samples.isSeq() && !samples.empty();
-            if (samples.isSeq())
+            if (row.binding_package_path.empty())
             {
-                for (const cv::FileNode& sample_node : samples)
+                const cv::FileNode samples = node["frozen_validation_set"];
+                row.explicit_frozen_validation = samples.isSeq() && !samples.empty();
+                if (samples.isSeq())
+                {
+                    for (const cv::FileNode& sample_node : samples)
+                    {
+                        ClosureSample sample;
+                        sample.case_id = NodeString(sample_node, "case_id");
+                        sample.image_path = ResolveAssetPath(options.matrix_path, NodeString(sample_node, "image_path"));
+                        sample.label_mask_path = ResolveAssetPath(options.matrix_path, NodeString(sample_node, "label_mask_path"));
+                        row.samples.push_back(sample);
+                    }
+                }
+                if (row.samples.empty())
                 {
                     ClosureSample sample;
-                    sample.case_id = NodeString(sample_node, "case_id");
-                    sample.image_path = ResolveAssetPath(options.matrix_path, NodeString(sample_node, "image_path"));
-                    sample.label_mask_path = ResolveAssetPath(options.matrix_path, NodeString(sample_node, "label_mask_path"));
+                    sample.case_id = row.row_id;
+                    sample.image_path = ResolveFirstManifestImage(row.source_manifest, row.source_set_id);
+                    sample.label_mask_path = row.label_mask_path;
                     row.samples.push_back(sample);
                 }
-            }
-            if (row.samples.empty())
-            {
-                ClosureSample sample;
-                sample.case_id = row.row_id;
-                sample.image_path = ResolveFirstManifestImage(row.source_manifest, row.source_set_id);
-                sample.label_mask_path = row.label_mask_path;
-                row.samples.push_back(sample);
             }
             rows.push_back(row);
         }
@@ -886,19 +1158,27 @@ bool RunCxAutomaticDiagnosticClosure(
         for (const ClosureRow& row : rows)
         {
             const bool contracts_valid = row.taxonomy_valid && row.annotation_contract_valid &&
-                row.model_track_valid && row.evaluator_contract_valid;
+                row.model_track_valid && row.evaluator_contract_valid &&
+                (row.binding_package_path.empty() || row.binding_package_valid);
             if (!contracts_valid)
                 ++invalid_contract_rows;
-            bool all_samples_bound = !row.samples.empty();
+            bool all_sample_images_bound = !row.samples.empty();
+            bool all_independent_labels_bound = !row.samples.empty();
             for (const ClosureSample& sample : row.samples)
             {
-                all_samples_bound = all_samples_bound &&
-                    std::filesystem::is_regular_file(sample.image_path) &&
+                all_sample_images_bound = all_sample_images_bound &&
+                    std::filesystem::is_regular_file(sample.image_path);
+                all_independent_labels_bound = all_independent_labels_bound &&
                     std::filesystem::is_regular_file(sample.label_mask_path);
             }
+            const bool independent_label_declared =
+                row.label_binding_status == "bound";
+            const bool independent_label_binding_valid =
+                !independent_label_declared ||
+                (row.typed_label_independent && all_independent_labels_bound);
             if (contracts_valid && row.evaluator_runtime_supported &&
                 row.parent.bound && row.child.bound &&
-                row.label_binding_status == "bound" && all_samples_bound)
+                all_sample_images_bound && independent_label_binding_valid)
                 ++result.bound_rows;
         }
 
@@ -918,7 +1198,7 @@ bool RunCxAutomaticDiagnosticClosure(
         if (result.bound_rows != result.discovered_rows || result.discovered_rows == 0)
         {
             result.status = "PENDING_BINDING";
-            result.reason = "typed evaluator runtime, parent, child, dataset label, or frozen validation asset binding is incomplete";
+            result.reason = "typed evaluator runtime, parent, child, or source image binding is incomplete";
             if (!WritePreflight(result.preflight_ref, rows, result, reason))
                 return false;
             if (!WriteProcessStatus(result.process_status_ref, process, rows, result, reason))
@@ -928,7 +1208,8 @@ bool RunCxAutomaticDiagnosticClosure(
         }
 
         result.status = "ASSET_PREFLIGHT_PASS";
-        result.reason = "all automatic diagnostic bindings are complete";
+        result.reason =
+            "paired consistency execution bindings are complete; independent labels remain optional";
         if (!WritePreflight(result.preflight_ref, rows, result, reason))
             return false;
         if (!WriteProcessStatus(result.process_status_ref, process, rows, result, reason))
@@ -940,11 +1221,17 @@ bool RunCxAutomaticDiagnosticClosure(
         {
             for (const ClosureSample& sample : row.samples)
             {
-                const std::filesystem::path case_dir = options.output_dir / "cases" / row.row_id / sample.case_id;
+                const std::filesystem::path case_dir =
+                    options.output_dir / "cases" / row.row_id / sample.case_id;
                 CxPairedInferenceRequest request;
                 request.parent_task = MakeTask(row.parent, sample, case_dir / "parent");
                 request.child_task = MakeTask(row.child, sample, case_dir / "child");
-                request.dataset_label_mask_path = sample.label_mask_path;
+                if (row.label_binding_status == "bound" &&
+                    row.typed_label_independent &&
+                    std::filesystem::is_regular_file(sample.label_mask_path))
+                {
+                    request.dataset_label_mask_path = sample.label_mask_path;
+                }
                 request.report_path = case_dir / "paired_inference_diagnostic.json";
                 request.cximage_candidate_request = row.candidate;
                 request.cximage_candidate_request->input_image_path = sample.image_path;
@@ -952,9 +1239,8 @@ bool RunCxAutomaticDiagnosticClosure(
 
                 CxPairedInferenceDiagnostic diagnostic;
                 ++result.executed_cases;
-                if (!adapter.ExecutePair(request, diagnostic, reason) || !diagnostic.complete ||
-                    !diagnostic.parent_label.has_value() || !diagnostic.child_label.has_value() ||
-                    !diagnostic.label_cximage.has_value())
+                if (!adapter.ExecutePair(request, diagnostic, reason) ||
+                    !diagnostic.complete)
                 {
                     ++result.rejected_cases;
                     result.status = diagnostic.status.empty() ? "FAIL" : diagnostic.status;
@@ -965,9 +1251,16 @@ bool RunCxAutomaticDiagnosticClosure(
                 item.row_id = row.row_id;
                 item.case_id = sample.case_id;
                 item.parent_child_iou = diagnostic.parent_child.iou;
-                item.parent_label_iou = diagnostic.parent_label->iou;
-                item.child_label_iou = diagnostic.child_label->iou;
-                item.label_delta = item.child_label_iou - item.parent_label_iou;
+                item.label_available =
+                    diagnostic.parent_label.has_value() &&
+                    diagnostic.child_label.has_value();
+                if (item.label_available)
+                {
+                    item.parent_label_iou = diagnostic.parent_label->iou;
+                    item.child_label_iou = diagnostic.child_label->iou;
+                    item.label_delta =
+                        item.child_label_iou - item.parent_label_iou;
+                }
                 completed.push_back(item);
                 ++result.completed_cases;
             }

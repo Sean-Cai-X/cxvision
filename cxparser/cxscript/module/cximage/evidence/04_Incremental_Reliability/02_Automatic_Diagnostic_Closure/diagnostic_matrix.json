@@ -13,14 +13,186 @@
     "runtime_binding_contract": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/runtime_binding_contract.json",
     "frozen_validation_contract": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/frozen_validation_contract.json"
   },
-  "execution_policy": {"runtime_order": ["cximage_reference_candidate", "parent_inference", "child_inference", "typed_evaluation", "failure_classification", "gate_advice", "evidence_publish"], "parallel_execution": false, "same_input_required": true, "single_image_promotion_allowed": false, "human_review_role": "process_audit_and_rule_extraction"},
-  "promotion_gate": {"minimum_case_count": 3, "maximum_regression_count": 0, "minimum_child_label_iou": 0.85, "minimum_mean_label_iou_delta": 0.0, "maximum_child_label_iou_stddev": 0.05},
+  "execution_policy": {
+    "runtime_order": [
+      "cximage_reference_candidate",
+      "parent_inference",
+      "child_inference",
+      "typed_evaluation",
+      "failure_classification",
+      "gate_advice",
+      "evidence_publish"
+    ],
+    "parallel_execution": false,
+    "same_input_required": true,
+    "single_image_promotion_allowed": false,
+    "human_review_role": "process_audit_and_rule_extraction"
+  },
+  "promotion_gate": {
+    "minimum_case_count": 3,
+    "maximum_regression_count": 0,
+    "minimum_child_label_iou": 0.85,
+    "minimum_mean_label_iou_delta": 0,
+    "maximum_child_label_iou_stddev": 0.05
+  },
   "rows": [
-    {"matrix_row": "hd_closed_body_audit", "review_item": "HD pill body closed-region segmentation audit", "implementation_phase": 1, "case_track": "C1", "annotation_contract_id": "closed_regular_object_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_body_closed_region_reference", "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C1/binding_manifest.json", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "full_image", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "pending_conclusion": "PENDING_BINDING"},
-    {"matrix_row": "hd_contamination_irregular_audit", "review_item": "HD pill contamination irregular-region audit", "implementation_phase": 1, "case_track": "C2", "annotation_contract_id": "closed_irregular_defect_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_contamination_irregular_region_reference", "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C2/binding_manifest.json", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "full_image", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "pending_conclusion": "PENDING_BINDING"},
-    {"matrix_row": "hd_multi_instance_audit", "review_item": "HD pill bag multi-instance segmentation audit", "implementation_phase": 1, "case_track": "C3", "annotation_contract_id": "multi_instance_mask_v1", "model_track_id": "instance_segmentation_v1", "evaluator_id": "instance_four_way_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_bag_multi_instance_reference", "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C3/binding_manifest.json", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "instance_candidate_probe", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "pending_conclusion": "PENDING_BINDING"},
-    {"matrix_row": "hd_crack_open_boundary_audit", "review_item": "HD pill crack open-boundary measurement audit", "implementation_phase": 1, "case_track": "O2", "annotation_contract_id": "open_boundary_measurement_v1", "model_track_id": "open_boundary_segmentation_v1", "evaluator_id": "open_boundary_four_way_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_crack_open_boundary_reference", "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/O2/binding_manifest.json", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "boundary_candidate_probe", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "pending_conclusion": "PENDING_BINDING"},
-    {"matrix_row": "hd_fuzzy_region_audit", "review_item": "HD pill fuzzy region-learning audit", "implementation_phase": 2, "case_track": "R2", "annotation_contract_id": "fuzzy_region_membership_v1", "model_track_id": "fuzzy_region_learning_v1", "evaluator_id": "fuzzy_region_four_way_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_fuzzy_region_learning_reference", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "region_fact_probe", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "parent_binding": "pending", "child_binding": "pending", "dataset_label_mask_binding": "pending", "pending_conclusion": "PENDING_BINDING"},
-    {"matrix_row": "hd_composite_pipeline_audit", "review_item": "HD pill composite visual pipeline audit", "implementation_phase": 3, "case_track": "X1", "annotation_contract_id": "composite_stage_outputs_v1", "model_track_id": "composite_pipeline_v1", "evaluator_id": "composite_stage_gate_v1", "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json", "source_set_id": "hd_pill_composite_pipeline_reference", "cximage_candidate": {"algorithm_id": "find_segmentation_opencv_smoke", "threshold": 0.5, "roi_policy": "stage_specific", "reference_semantics": "diagnostic_candidate_not_ground_truth"}, "parent_binding": "pending", "child_binding": "pending", "dataset_label_mask_binding": "pending", "pending_conclusion": "PENDING_BINDING"}
+    {
+      "matrix_row": "hd_closed_body_audit",
+      "review_item": "HD pill body closed-region segmentation audit",
+      "implementation_phase": 1,
+      "case_track": "C1",
+      "annotation_contract_id": "closed_regular_object_mask_v1",
+      "model_track_id": "closed_semantic_segmentation_v1",
+      "evaluator_id": "closed_mask_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_body_closed_region_reference",
+      "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C1/binding_manifest.json",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "full_image",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_contamination_irregular_audit",
+      "review_item": "HD pill contamination irregular-region audit",
+      "implementation_phase": 1,
+      "case_track": "C2",
+      "annotation_contract_id": "closed_irregular_defect_mask_v1",
+      "model_track_id": "closed_semantic_segmentation_v1",
+      "evaluator_id": "closed_mask_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_contamination_irregular_region_reference",
+      "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C2/binding_manifest.json",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "full_image",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_multi_instance_audit",
+      "review_item": "HD pill bag multi-instance segmentation audit",
+      "implementation_phase": 1,
+      "case_track": "C3",
+      "annotation_contract_id": "multi_instance_mask_v1",
+      "model_track_id": "instance_segmentation_v1",
+      "evaluator_id": "instance_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_bag_multi_instance_reference",
+      "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/C3/binding_manifest.json",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "instance_candidate_probe",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_crack_open_boundary_audit",
+      "review_item": "HD pill crack open-boundary measurement audit",
+      "implementation_phase": 1,
+      "case_track": "O2",
+      "annotation_contract_id": "open_boundary_measurement_v1",
+      "model_track_id": "open_boundary_segmentation_v1",
+      "evaluator_id": "open_boundary_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_crack_open_boundary_reference",
+      "binding_package": "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/bindings/O2/binding_manifest.json",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "boundary_candidate_probe",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_fuzzy_region_audit",
+      "review_item": "HD pill fuzzy region-learning audit",
+      "implementation_phase": 2,
+      "case_track": "R2",
+      "annotation_contract_id": "fuzzy_region_membership_v1",
+      "model_track_id": "fuzzy_region_learning_v1",
+      "evaluator_id": "fuzzy_region_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_fuzzy_region_learning_reference",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "region_fact_probe",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "parent_binding": "pending",
+      "child_binding": "pending",
+      "dataset_label_mask_binding": "pending",
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_composite_pipeline_audit",
+      "review_item": "HD pill composite visual pipeline audit",
+      "implementation_phase": 3,
+      "case_track": "X1",
+      "annotation_contract_id": "composite_stage_outputs_v1",
+      "model_track_id": "composite_pipeline_v1",
+      "evaluator_id": "composite_stage_gate_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_composite_pipeline_reference",
+      "cximage_candidate": {
+        "algorithm_id": "find_segmentation_opencv_smoke",
+        "threshold": 0.5,
+        "roi_policy": "stage_specific",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "parent_binding": "pending",
+      "child_binding": "pending",
+      "dataset_label_mask_binding": "pending",
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "line_open_regular_boundary_audit",
+      "review_item": "High-contrast line open regular-boundary audit",
+      "implementation_phase": 1,
+      "case_track": "O1",
+      "annotation_contract_id": "open_regular_boundary_measurement_v1",
+      "model_track_id": "open_regular_boundary_model_v1",
+      "evaluator_id": "open_regular_boundary_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "line_high_contrast_open_regular_boundary_reference",
+      "cximage_candidate": {
+        "algorithm_id": "findline_measurement_probe",
+        "roi_policy": "full_image",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "parent_binding": "pending",
+      "child_binding": "pending",
+      "dataset_label_binding": "pending",
+      "pending_conclusion": "PENDING_BINDING"
+    },
+    {
+      "matrix_row": "hd_roi_region_learning_audit",
+      "review_item": "HD pill ROI region-learning audit",
+      "implementation_phase": 2,
+      "case_track": "R1",
+      "annotation_contract_id": "roi_region_learning_v1",
+      "model_track_id": "roi_region_learning_v1",
+      "evaluator_id": "roi_region_learning_four_way_v1",
+      "source_manifest": "cxparser/cxscript/module/torch/hd_reference/hd_reference_image_sets.json",
+      "source_set_id": "hd_pill_roi_region_learning_reference",
+      "cximage_candidate": {
+        "algorithm_id": "roi_region_fact_probe",
+        "roi_policy": "explicit_roi_required",
+        "reference_semantics": "diagnostic_candidate_not_ground_truth"
+      },
+      "parent_binding": "pending",
+      "child_binding": "pending",
+      "dataset_label_binding": "pending",
+      "pending_conclusion": "PENDING_BINDING"
+    }
   ]
 }

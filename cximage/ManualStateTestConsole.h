@@ -1,25 +1,25 @@
 #ifndef CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 #define CXIMAGE_MANUAL_STATE_TEST_CONSOLE_H
 
-#include "ParserDebugBridge.h"
-#include "CxScriptCatalogRuntime.h"
-#include "CxParamRegressionRuntime.h"
-#include "CxScriptHeadlessRuntime.h"
 #include "CxEvidenceSelfTestRuntime.h"
+#include "CxParamRegressionRuntime.h"
+#include "CxScriptCatalogRuntime.h"
+#include "CxScriptHeadlessRuntime.h"
+#include "ParserDebugBridge.h"
+#include "metrology_analytics/CxSurfaceBasicStats.h"
 #include "metrology_analytics/tests/ManualConsoleAnalyticsSmoke.h"
 
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <fstream>
-#include <iomanip>
-#include <array>
-#include <cstdint>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
 #include <imgui.h>
-struct ScriptLineView
-{
+#include <iomanip>
+#include <string>
+#include <unordered_map>
+#include <vector>
+struct ScriptLineView {
   int line_no = 0;
   std::string statement;
   std::string module;
@@ -33,8 +33,7 @@ struct ScriptLineView
   std::string timestamp;
 };
 
-struct ScriptVariableView
-{
+struct ScriptVariableView {
   std::string type;
   std::string name;
   std::string value;
@@ -44,8 +43,7 @@ struct ScriptVariableView
   bool image_initialized = false;
 };
 
-struct ScriptObjectView
-{
+struct ScriptObjectView {
   std::string module;
   std::string type;
   std::string name;
@@ -55,478 +53,483 @@ struct ScriptObjectView
   int declared_line = 0;
 };
 
-struct RuntimeObjectView
-{
-    std::string name;
-    std::string type;
-    int declared_line = 0;
-
-    bool exists_in_parser = false;
-
-    std::string last_runtime_status = "PENDING";
-    std::string runtime_state = "PENDING";
-    std::string last_method;
-    int last_update_line = 0;
-
-    std::string display_summary;
-
-    bool visualizable = false;
-    std::string visual_source = "stale_runtime";
-    bool stale = true;
-
-    // FindEllipse ROI / measure status.  Current FindEllipse runtime exposes
-    // ROI and measurement points; fitted ellipse result is a later binding.
-    bool has_ellipse_roi = false;
-    float ellipse_cx = 0.0f;
-    float ellipse_cy = 0.0f;
-    float ellipse_rx = 0.0f;
-    float ellipse_ry = 0.0f;
-    int ellipse_inner_scale_percent = 0;
-    float ellipse_inner_rx = 0.0f;
-    float ellipse_inner_ry = 0.0f;
-    bool has_fit_ellipse = false;
-    float fit_ellipse_cx = 0.0f;
-    float fit_ellipse_cy = 0.0f;
-    float fit_ellipse_rx = 0.0f;
-    float fit_ellipse_ry = 0.0f;
-    float fit_ellipse_angle_deg = 0.0f;
-    float fit_ellipse_avgdist = 0.0f;
-    std::string ellipse_result_status;
-    std::string ellipse_result_reason;
-
-    int ellipse_scan_line_count = 0;
-    int ellipse_scan_line_length = 0;
-    int ellipse_selected_edge_index = 0;
-    int ellipse_scan_lines_cross_outside_ellipse_count = 0;
-    int ellipse_accepted_points_outside_ellipse_count = 0;
-    double ellipse_accepted_point_norm_min = 0.0;
-    double ellipse_accepted_point_norm_avg = 0.0;
-    double ellipse_accepted_point_norm_max = 0.0;
-    int ellipse_rejected_boundary_band_candidate_count = 0;
-    double ellipse_rejected_boundary_band_norm_min = 0.0;
-    double ellipse_rejected_boundary_band_norm_avg = 0.0;
-    double ellipse_rejected_boundary_band_norm_max = 0.0;
-    int ellipse_point_consistency_enabled = 0;
-    double ellipse_point_consistency_range = 0.0;
-    int ellipse_point_consistency_input_points = 0;
-    int ellipse_point_consistency_output_points = 0;
-    int ellipse_point_consistency_removed_points = 0;
-    std::string ellipse_scan_geometry_policy;
-    std::string ellipse_candidate_policy;
-
-    // setcircle(...) 参数圆
-    bool has_circle = false;
-    float circle_cx = 0.0f;
-    float circle_cy = 0.0f;
-    // The third and fourth setcircle() arguments are a boundary point,
-    // not an inner radius / radius pair.  Keep explicit coordinates for
-    // ManualGaugeState synchronization; the legacy fields below remain for
-    // existing diagnostic/report code.
-    float circle_px = 0.0f;
-    float circle_py = 0.0f;
-    float circle_inner = 0.0f;
-    float circle_radius = 0.0f;
-
-
-    // measure / FitResultMeasure 后的测量点
-    bool has_measure_points = false;
-    int measure_points_count = 0;
-    int valid_points_count = 0;
-    std::vector<float> measure_points_xy;
-
-    // fitcircle 后的拟合结果圆
-    bool has_fit_result = false;
-    float fit_cx = 0.0f;
-    float fit_cy = 0.0f;
-    float fit_radius = 0.0f;
-    float fit_avgdist = 0.0f;
-
-    bool has_result_measure = false;
-
-    // 可选：用于 summary，不强依赖算法内部接口。
-    int scan_path = 0;
-    int image_width = 0;
-    int image_height = 0;
-    int back_image_width = 0;
-    int back_image_height = 0;
-
-    // Findcircle measure budget stats
-    int circle_scan_lines_processed = 0;
-    int circle_total_samples = 0;
-    int circle_elapsed_ms = 0;
-    int circle_budget_max_scan_lines = 2048;
-    int circle_budget_max_samples = 2000000;
-    int circle_budget_max_elapsed_ms = 3000;
-
-
-    // Findline ROI center line.
-    bool has_line_roi = false;
-    float line_x0 = 0.0f;
-    float line_y0 = 0.0f;
-    float line_x1 = 0.0f;
-    float line_y1 = 0.0f;
-    float line_scale = 1.0f;
-    std::string line_orientation;
-    double line_dx = 0.0;
-    double line_dy = 0.0;
-    double line_length = 0.0;
-    double requested_tool_half_width = 0.0;
-    double effective_tool_half_width = 0.0;
-
-    // Findline scan box / scan band.
-    bool has_line_scan_box = false;
-    float line_scan_half_width = 3.0f;
-    int linegap = 3;
-    int line_tool_wgap = 0;
-    int line_tool_hgap = 0;
-    std::string line_display_source;
-    std::array<float, 8> line_scan_box_xy = {
-        0.0f, 0.0f,
-        0.0f, 0.0f,
-        0.0f, 0.0f,
-        0.0f, 0.0f
-    };
-
-    // Findline measure points.
-    bool has_line_measure_points = false;
-    std::vector<float> line_measure_points_xy;
-    int line_measure_points_count = 0;
-    int valid_line_points_count = 0;
-
-    // Raw split counts, used to determine whether tool produced w/h points.
-    int line_pointsw_count = 0;
-    int line_pointsh_count = 0;
-
-    // CircleRingGauge fields
-    bool has_ring_gauge = false;
-    double ring_outer_radius = 0.0;
-    double ring_inner_radius = 0.0;
-    double ring_thickness = 0.0;
-    double ring_center_distance = 0.0;
-    bool ring_concentric_ok = false;
-    bool ring_inside_ok = false;
-    bool ring_thickness_ok = false;
-    double ring_score = 0.0;
-    std::string ring_status;
-    std::string ring_reason;
-    std::string ring_result_ref;
-
-    // FindSegmentation runtime / torch bridge visibility.
-    std::string segmentation_backend;
-    std::string segmentation_backend_status;
-    std::string segmentation_device;
-    std::string segmentation_model_path;
-    std::string segmentation_result_ref;
-    std::string segmentation_mask_ref;
-    std::string segmentation_contour_ref;
-    std::string segmentation_overlay_ref;
-    std::string segmentation_reason;
-    int segmentation_status_code = 0;
-    int segmentation_contour_count = 0;
-    double segmentation_primary_area = 0.0;
-    bool segmentation_has_prompt_rect = false;
-    bool segmentation_has_positive_point = false;
-    bool segmentation_has_negative_point = false;
-    int segmentation_positive_x = 0;
-    int segmentation_positive_y = 0;
-    int segmentation_negative_x = 0;
-    int segmentation_negative_y = 0;
-    bool segmentation_has_boundary = false;
-    bool segmentation_has_libtorch_contract = false;
-    bool segmentation_real_mask_attach_ready = false;
-
-    // TorchTask runtime / artifact evidence visibility.
-    bool is_torch_task = false;
-    int torch_ok = 0;
-    int torch_error_code = 0;
-    int torch_result_count = 0;
-    int torch_mask_available = 0;
-    double torch_infer_ms = 0.0;
-    double torch_train_ms = 0.0;
-    double torch_total_ms = 0.0;
-    std::string torch_status;
-    std::string torch_reason;
-    std::string torch_failure_stage;
-    std::string torch_actual_device;
-    std::string torch_result_ref;
-    std::string torch_evidence_ref;
-    std::string torch_primary_visual_ref;
-    std::string torch_mask_ref;
-    std::string torch_overlay_ref;
-    std::string torch_trainer_lifecycle_summary;
-    std::string torch_unified_mainline_summary;
-
-    // Findline fit result.
-    bool has_fit_line = false;
-    float fit_line_x0 = 0.0f;
-    float fit_line_y0 = 0.0f;
-    float fit_line_x1 = 0.0f;
-    float fit_line_y1 = 0.0f;
-    float line_avgdist = 0.0f;
-
-    std::string line_fit_status;
-    std::string line_fit_mode;
-    std::string line_measure_status;
-    std::string line_measure_hint;
-    std::string line_measure_failure_hint;
-    bool line_filter_min_exceeds_component_p90 = false;
-    std::string line_result_status;
-    std::string line_result_reason;
-
-    bool has_line_seek_points = false;
-    std::vector<float> line_seek_points_xy;
-    int line_seek_points_count = 0;
-
-    int line_profile_point_count = 0;
-    int line_edgeband_count = 0;
-    int line_chain_length = 0;
-    std::string line_measure_failure_stage;
-
-    bool line_measure_image_ready = false;
-    int line_measure_image_width = 0;
-    int line_measure_image_height = 0;
-    int line_measure_image_channels = 0;
-    int line_measure_image_type = 0;
-
-    bool line_measure_roi_intersects_image = false;
-    bool line_measure_roi_fully_inside_image = false;
-
-    int line_measure_method = 0;
-    int line_measure_threshold = 0;
-    int line_measure_linegap = 0;
-    int line_measure_wgap = 0;
-    int line_measure_hgap = 0;
-
-    int line_measure_profile_count = 0;
-    int line_measure_sampled_pixel_count = 0;
-
-    double line_measure_gray_min = 0.0;
-    double line_measure_gray_max = 0.0;
-    double line_measure_gray_mean = 0.0;
-    double line_measure_max_gradient = 0.0;
-
-    std::string line_measure_image_source;
-    std::string line_measure_input_failure_stage;
-    std::string line_measure_input_detail;
-
-    bool line_measure_fallback_allowed = false;
-    bool line_measure_fallback_used = false;
-
-    std::string line_measure_source;
-    std::string line_measure_original_failure_stage;
-    std::string line_measure_original_detail;
-
-    int line_measure_original_point_count = 0;
-    int line_measure_original_edgeband_count = 0;
-    int line_measure_original_chain_length = 0;
-
-    bool line_measure_geometry_request_valid = false;
-    bool line_measure_geometry_dirty = false;
-    bool line_measure_geometry_ready = false;
-
-    std::uint64_t line_measure_geometry_version = 0;
-    std::uint64_t line_measure_geometry_built_version = 0;
-
-    double line_measure_geometry_half_width = 0.0;
-
-    int line_original_scan_w_count = 0;
-    int line_original_scan_h_count = 0;
-    int line_original_scan_w_length = 0;
-    int line_original_scan_h_length = 0;
-    int line_original_process_width = 0;
-
-    int line_scan_rows_examined = 0;
-    int line_scan_rows_with_foreground = 0;
-    int line_scan_runs_total = 0;
-    int line_scan_runs_within_length_limit = 0;
-    int line_scan_runs_over_length_limit = 0;
-    int line_scan_runs_rejected_by_selection = 0;
-    int line_scan_runs_rejected_near_endpoint = 0;
-    int line_scan_points_emitted = 0;
-    int line_point_consistency_enabled = 0;
-    double line_point_consistency_range = 0.0;
-    int line_point_consistency_input_points = 0;
-    int line_point_consistency_output_points = 0;
-    int line_point_consistency_removed_points = 0;
-    int line_selected_edge_index = 0;
-    int line_evaluated_edge_count = 0;
-    int line_best_edge_index = 0;
-    double line_best_edge_score = 0.0;
-    std::vector<CxFindLineEdgeEvaluationSnapshot> line_edge_evaluations;
-
-    bool line_measure_backimage_ready = false;
-    bool line_measure_findobject_ready = false;
-
-    int line_measure_objfilterset = 0;
-    int line_measure_filter_borw = 0;
-    int line_measure_filter_min = 0;
-    int line_measure_filter_max = 0;
-
-    int line_measure_filter_profile = 0;
-    bool line_measure_filter_explicit = false;
-
-    int line_measure_effective_filter_borw = 0;
-    int line_measure_effective_filter_min = 0;
-    int line_measure_effective_filter_max = 0;
-
-    bool line_measure_findobject_called = false;
-    bool line_measure_findobject_skipped = false;
-
-    int line_measure_binary_foreground_pixels = 0;
-    int line_measure_binary_roi_width = 0;
-    int line_measure_binary_roi_height = 0;
-
-    std::string line_measure_result_empty_reason;
-
-    int line_findobject_component_total = 0;
-    int line_findobject_component_accepted = 0;
-    int line_findobject_component_rejected_by_min = 0;
-    int line_findobject_component_rejected_by_max = 0;
-    int line_findobject_component_rejected_by_borw = 0;
-
-    int line_findobject_area_min_observed = 0;
-    int line_findobject_area_max_observed = 0;
-    double line_findobject_area_mean_observed = 0.0;
-    int line_findobject_area_min = 0;
-    int line_findobject_area_max = 0;
-    double line_findobject_area_median = 0.0;
-    double line_findobject_area_p90 = 0.0;
-
-    std::string line_measure_cc_selected_foreground;
-
-    int line_measure_cc_white_total = 0;
-    int line_measure_cc_white_accepted = 0;
-    int line_measure_cc_white_rejected_min = 0;
-    double line_measure_cc_white_area_median = 0.0;
-    double line_measure_cc_white_area_p90 = 0.0;
-
-    int line_measure_cc_black_total = 0;
-    int line_measure_cc_black_accepted = 0;
-    int line_measure_cc_black_rejected_min = 0;
-    double line_measure_cc_black_area_median = 0.0;
-    double line_measure_cc_black_area_p90 = 0.0;
-
-    int line_measure_cc_selected_total = 0;
-    int line_measure_cc_selected_accepted = 0;
-    int line_measure_cc_selected_rejected_min = 0;
-    double line_measure_cc_selected_area_median = 0.0;
-    double line_measure_cc_selected_area_p90 = 0.0;
-
-    // Findcircle display snapshot.
-    bool has_circle_roi_outer_polyline = false;
-    std::vector<float> circle_roi_outer_xy;
-    bool has_circle_roi_inner_polyline = false;
-    std::vector<float> circle_roi_inner_xy;
-    std::uint32_t circle_roi_segment_count = 0;
-
-    bool has_fit_circle_polyline = false;
-    std::vector<float> fit_circle_xy;
-    std::uint32_t fit_circle_segment_count = 0;
-
-    std::uint64_t display_version = 0;
-
-    bool circle_measure_geometry_request_valid = false;
-    bool circle_measure_geometry_dirty = false;
-    bool circle_measure_geometry_ready = false;
-
-    std::uint64_t circle_measure_geometry_version = 0;
-    std::uint64_t circle_measure_geometry_built_version = 0;
-
-    int circle_scan_line_count = 0;
-    int circle_scan_line_length = 0;
-    int circle_process_width = 0;
-    int circle_selected_edge_index = 0;
-    int circle_candidate_runs_total = 0;
-    int circle_candidate_runs_max_per_line = 0;
-    int circle_selected_edge_hits = 0;
-    int circle_selected_edge_misses = 0;
-    int circle_scan_boundary_clipped_lines = 0;
-    int circle_scan_boundary_extended_samples = 0;
-    int circle_candidate_boundary_reject_count = 0;
-    double circle_selected_edge_radius_avg = 0.0;
-    double circle_selected_edge_radius_min = 0.0;
-    double circle_selected_edge_radius_max = 0.0;
-    int circle_point_consistency_enabled = 0;
-    double circle_point_consistency_range = 0.0;
-    int circle_point_consistency_input_points = 0;
-    int circle_point_consistency_output_points = 0;
-    int circle_point_consistency_removed_points = 0;
-
-    bool circle_measure_image_ready = false;
-    int circle_measure_image_width = 0;
-    int circle_measure_image_height = 0;
-    int circle_measure_image_channels = 0;
-
-    bool circle_measure_backimage_ready = false;
-    bool circle_measure_findobject_ready = false;
-
-    int circle_object_prefilter_requested = 0;
-    int circle_object_prefilter_applied = 0;
-    int circle_object_prefilter_restored = 0;
-    int circle_object_prefilter_runs_before = 0;
-    int circle_object_prefilter_runs_after = 0;
-    int circle_object_prefilter_effective_min = 0;
-
-    std::string circle_measure_source;
-    std::string circle_measure_failure_stage;
-    std::string circle_measure_detail;
-
-    bool has_fastmatch_diagnostic = false;
-    bool fastmatch_allowed = false;
-
-    std::string fastmatch_status;
-    std::string fastmatch_reason;
-    std::string fastmatch_result_ref;
-    std::string fastmatch_policy;
-    std::string fastmatch_source_tool;
-    std::string fastmatch_profile;
-    std::string fastmatch_level;
-    int fastmatch_model_point_count = 0;
-    int fastmatch_learn_a_count = 0;
-    int fastmatch_learn_b_count = 0;
-    int fastmatch_learn_a2_count = 0;
-    int fastmatch_learn_b2_count = 0;
-    int fastmatch_learn_status_code = 0;
-    int fastmatch_pattern_a_count = 0;
-    int fastmatch_pattern_b_count = 0;
-    int fastmatch_candidate_count = 0;
-    double fastmatch_best_score = 0.0;
-    int fastmatch_learn_rect_x0 = 0;
-    int fastmatch_learn_rect_y0 = 0;
-    int fastmatch_learn_rect_x1 = 0;
-    int fastmatch_learn_rect_y1 = 0;
-    int fastmatch_match_rect_x0 = 0;
-    int fastmatch_match_rect_y0 = 0;
-    int fastmatch_match_rect_x1 = 0;
-    int fastmatch_match_rect_y1 = 0;
-
-    bool has_grid_pattern = false;
-    int grid_pattern_status_code = 0;
-    int grid_pattern_active_cell_count = 0;
-    int grid_pattern_descriptor_dim = 0;
-    int grid_pattern_level_count = 0;
-    int grid_pattern_overlay_count = 0;
-    bool grid_pattern_overlay_truncated = false;
-    double grid_pattern_elapsed_ms = 0.0;
-    std::string grid_pattern_summary;
-
-    bool has_region_pattern = false;
-    int region_pattern_status_code = 0;
-    int region_pattern_descriptor_dim = 0;
-    int region_pattern_foreground_permille = 0;
-    int region_pattern_mean_permille = 0;
-    int region_pattern_std_permille = 0;
-    int region_pattern_pooling_rows = 0;
-    int region_pattern_pooling_cols = 0;
-    int region_pattern_overlay_count = 0;
-    bool region_pattern_overlay_truncated = false;
-    double region_pattern_elapsed_ms = 0.0;
-    std::string region_pattern_summary;
-
+struct RuntimeObjectView {
+  std::string name;
+  std::string type;
+  int declared_line = 0;
+
+  bool exists_in_parser = false;
+
+  std::string last_runtime_status = "PENDING";
+  std::string runtime_state = "PENDING";
+  std::string last_method;
+  int last_update_line = 0;
+
+  std::string display_summary;
+
+  bool visualizable = false;
+  std::string visual_source = "stale_runtime";
+  bool stale = true;
+
+  // FindEllipse ROI / measure status.  Current FindEllipse runtime exposes
+  // ROI and measurement points; fitted ellipse result is a later binding.
+  bool has_ellipse_roi = false;
+  float ellipse_cx = 0.0f;
+  float ellipse_cy = 0.0f;
+  float ellipse_rx = 0.0f;
+  float ellipse_ry = 0.0f;
+  int ellipse_inner_scale_percent = 0;
+  float ellipse_inner_rx = 0.0f;
+  float ellipse_inner_ry = 0.0f;
+  bool has_fit_ellipse = false;
+  float fit_ellipse_cx = 0.0f;
+  float fit_ellipse_cy = 0.0f;
+  float fit_ellipse_rx = 0.0f;
+  float fit_ellipse_ry = 0.0f;
+  float fit_ellipse_angle_deg = 0.0f;
+  float fit_ellipse_avgdist = 0.0f;
+  std::string ellipse_result_status;
+  std::string ellipse_result_reason;
+
+  int ellipse_scan_line_count = 0;
+  int ellipse_scan_line_length = 0;
+  int ellipse_selected_edge_index = 0;
+  int ellipse_scan_lines_cross_outside_ellipse_count = 0;
+  int ellipse_accepted_points_outside_ellipse_count = 0;
+  double ellipse_accepted_point_norm_min = 0.0;
+  double ellipse_accepted_point_norm_avg = 0.0;
+  double ellipse_accepted_point_norm_max = 0.0;
+  int ellipse_rejected_boundary_band_candidate_count = 0;
+  double ellipse_rejected_boundary_band_norm_min = 0.0;
+  double ellipse_rejected_boundary_band_norm_avg = 0.0;
+  double ellipse_rejected_boundary_band_norm_max = 0.0;
+  int ellipse_point_consistency_enabled = 0;
+  double ellipse_point_consistency_range = 0.0;
+  int ellipse_point_consistency_input_points = 0;
+  int ellipse_point_consistency_output_points = 0;
+  int ellipse_point_consistency_removed_points = 0;
+  std::string ellipse_scan_geometry_policy;
+  std::string ellipse_candidate_policy;
+
+  // setcircle(...) 参数圆
+  bool has_circle = false;
+  float circle_cx = 0.0f;
+  float circle_cy = 0.0f;
+  // The third and fourth setcircle() arguments are a boundary point,
+  // not an inner radius / radius pair.  Keep explicit coordinates for
+  // ManualGaugeState synchronization; the legacy fields below remain for
+  // existing diagnostic/report code.
+  float circle_px = 0.0f;
+  float circle_py = 0.0f;
+  float circle_inner = 0.0f;
+  float circle_radius = 0.0f;
+
+  // measure / FitResultMeasure 后的测量点
+  bool has_measure_points = false;
+  int measure_points_count = 0;
+  int valid_points_count = 0;
+  std::vector<float> measure_points_xy;
+
+  // fitcircle 后的拟合结果圆
+  bool has_fit_result = false;
+  float fit_cx = 0.0f;
+  float fit_cy = 0.0f;
+  float fit_radius = 0.0f;
+  float fit_avgdist = 0.0f;
+
+  bool has_result_measure = false;
+
+  // 可选：用于 summary，不强依赖算法内部接口。
+  int scan_path = 0;
+  int image_width = 0;
+  int image_height = 0;
+  int back_image_width = 0;
+  int back_image_height = 0;
+
+  // Findcircle measure budget stats
+  int circle_scan_lines_processed = 0;
+  int circle_total_samples = 0;
+  int circle_elapsed_ms = 0;
+  int circle_budget_max_scan_lines = 2048;
+  int circle_budget_max_samples = 2000000;
+  int circle_budget_max_elapsed_ms = 3000;
+
+  // Findline ROI center line.
+  bool has_line_roi = false;
+  float line_x0 = 0.0f;
+  float line_y0 = 0.0f;
+  float line_x1 = 0.0f;
+  float line_y1 = 0.0f;
+  float line_scale = 1.0f;
+  std::string line_orientation;
+  double line_dx = 0.0;
+  double line_dy = 0.0;
+  double line_length = 0.0;
+  double requested_tool_half_width = 0.0;
+  double effective_tool_half_width = 0.0;
+
+  // Findline scan box / scan band.
+  bool has_line_scan_box = false;
+  float line_scan_half_width = 3.0f;
+  int linegap = 3;
+  int line_tool_wgap = 0;
+  int line_tool_hgap = 0;
+  std::string line_display_source;
+  std::array<float, 8> line_scan_box_xy = {0.0f, 0.0f, 0.0f, 0.0f,
+                                           0.0f, 0.0f, 0.0f, 0.0f};
+
+  // Findline measure points.
+  bool has_line_measure_points = false;
+  std::vector<float> line_measure_points_xy;
+  int line_measure_points_count = 0;
+  int valid_line_points_count = 0;
+
+  // Raw split counts, used to determine whether tool produced w/h points.
+  int line_pointsw_count = 0;
+  int line_pointsh_count = 0;
+
+  // CircleRingGauge fields
+  bool has_ring_gauge = false;
+  double ring_outer_radius = 0.0;
+  double ring_inner_radius = 0.0;
+  double ring_thickness = 0.0;
+  double ring_center_distance = 0.0;
+  bool ring_concentric_ok = false;
+  bool ring_inside_ok = false;
+  bool ring_thickness_ok = false;
+  double ring_score = 0.0;
+  std::string ring_status;
+  std::string ring_reason;
+  std::string ring_result_ref;
+
+  // FindSegmentation runtime / torch bridge visibility.
+  std::string segmentation_backend;
+  std::string segmentation_backend_status;
+  std::string segmentation_device;
+  std::string segmentation_model_path;
+  std::string segmentation_result_ref;
+  std::string segmentation_mask_ref;
+  std::string segmentation_contour_ref;
+  std::string segmentation_overlay_ref;
+  std::string segmentation_reason;
+  int segmentation_status_code = 0;
+  int segmentation_contour_count = 0;
+  double segmentation_primary_area = 0.0;
+  bool segmentation_has_prompt_rect = false;
+  bool segmentation_has_positive_point = false;
+  bool segmentation_has_negative_point = false;
+  int segmentation_positive_x = 0;
+  int segmentation_positive_y = 0;
+  int segmentation_negative_x = 0;
+  int segmentation_negative_y = 0;
+  bool segmentation_has_boundary = false;
+  bool segmentation_has_libtorch_contract = false;
+  bool segmentation_real_mask_attach_ready = false;
+
+  // TorchTask runtime / artifact evidence visibility.
+  bool is_torch_task = false;
+  int torch_ok = 0;
+  int torch_error_code = 0;
+  int torch_result_count = 0;
+  int torch_mask_available = 0;
+  double torch_infer_ms = 0.0;
+  double torch_train_ms = 0.0;
+  double torch_total_ms = 0.0;
+  std::string torch_status;
+  std::string torch_reason;
+  std::string torch_failure_stage;
+  std::string torch_actual_device;
+  std::string torch_result_ref;
+  std::string torch_evidence_ref;
+  std::string torch_primary_visual_ref;
+  std::string torch_mask_ref;
+  std::string torch_overlay_ref;
+  std::string torch_trainer_lifecycle_summary;
+  std::string torch_unified_mainline_summary;
+
+  // Findline fit result.
+  bool has_fit_line = false;
+  float fit_line_x0 = 0.0f;
+  float fit_line_y0 = 0.0f;
+  float fit_line_x1 = 0.0f;
+  float fit_line_y1 = 0.0f;
+  float line_avgdist = 0.0f;
+
+  std::string line_fit_status;
+  std::string line_fit_mode;
+  std::string line_measure_status;
+  std::string line_measure_hint;
+  std::string line_measure_failure_hint;
+  bool line_filter_min_exceeds_component_p90 = false;
+  std::string line_result_status;
+  std::string line_result_reason;
+
+  bool has_line_seek_points = false;
+  std::vector<float> line_seek_points_xy;
+  int line_seek_points_count = 0;
+
+  int line_profile_point_count = 0;
+  int line_edgeband_count = 0;
+  int line_chain_length = 0;
+  std::string line_measure_failure_stage;
+
+  bool line_measure_image_ready = false;
+  int line_measure_image_width = 0;
+  int line_measure_image_height = 0;
+  int line_measure_image_channels = 0;
+  int line_measure_image_type = 0;
+
+  bool line_measure_roi_intersects_image = false;
+  bool line_measure_roi_fully_inside_image = false;
+
+  int line_measure_method = 0;
+  int line_measure_threshold = 0;
+  int line_measure_linegap = 0;
+  int line_measure_wgap = 0;
+  int line_measure_hgap = 0;
+
+  int line_measure_profile_count = 0;
+  int line_measure_sampled_pixel_count = 0;
+
+  double line_measure_gray_min = 0.0;
+  double line_measure_gray_max = 0.0;
+  double line_measure_gray_mean = 0.0;
+  double line_measure_max_gradient = 0.0;
+
+  std::string line_measure_image_source;
+  std::string line_measure_input_failure_stage;
+  std::string line_measure_input_detail;
+
+  bool line_measure_fallback_allowed = false;
+  bool line_measure_fallback_used = false;
+
+  std::string line_measure_source;
+  std::string line_measure_original_failure_stage;
+  std::string line_measure_original_detail;
+
+  int line_measure_original_point_count = 0;
+  int line_measure_original_edgeband_count = 0;
+  int line_measure_original_chain_length = 0;
+
+  bool line_measure_geometry_request_valid = false;
+  bool line_measure_geometry_dirty = false;
+  bool line_measure_geometry_ready = false;
+
+  std::uint64_t line_measure_geometry_version = 0;
+  std::uint64_t line_measure_geometry_built_version = 0;
+
+  double line_measure_geometry_half_width = 0.0;
+
+  int line_original_scan_w_count = 0;
+  int line_original_scan_h_count = 0;
+  int line_original_scan_w_length = 0;
+  int line_original_scan_h_length = 0;
+  int line_original_process_width = 0;
+
+  int line_scan_rows_examined = 0;
+  int line_scan_rows_with_foreground = 0;
+  int line_scan_runs_total = 0;
+  int line_scan_runs_within_length_limit = 0;
+  int line_scan_runs_over_length_limit = 0;
+  int line_scan_runs_rejected_by_selection = 0;
+  int line_scan_runs_rejected_near_endpoint = 0;
+  int line_scan_points_emitted = 0;
+  int line_point_consistency_enabled = 0;
+  double line_point_consistency_range = 0.0;
+  int line_point_consistency_input_points = 0;
+  int line_point_consistency_output_points = 0;
+  int line_point_consistency_removed_points = 0;
+  int line_selected_edge_index = 0;
+  int line_evaluated_edge_count = 0;
+  int line_best_edge_index = 0;
+  double line_best_edge_score = 0.0;
+  std::vector<CxFindLineEdgeEvaluationSnapshot> line_edge_evaluations;
+
+  bool line_measure_backimage_ready = false;
+  bool line_measure_findobject_ready = false;
+
+  int line_measure_objfilterset = 0;
+  int line_measure_filter_borw = 0;
+  int line_measure_filter_min = 0;
+  int line_measure_filter_max = 0;
+
+  int line_measure_filter_profile = 0;
+  bool line_measure_filter_explicit = false;
+
+  int line_measure_effective_filter_borw = 0;
+  int line_measure_effective_filter_min = 0;
+  int line_measure_effective_filter_max = 0;
+
+  bool line_measure_findobject_called = false;
+  bool line_measure_findobject_skipped = false;
+
+  int line_measure_binary_foreground_pixels = 0;
+  int line_measure_binary_roi_width = 0;
+  int line_measure_binary_roi_height = 0;
+
+  std::string line_measure_result_empty_reason;
+
+  int line_findobject_component_total = 0;
+  int line_findobject_component_accepted = 0;
+  int line_findobject_component_rejected_by_min = 0;
+  int line_findobject_component_rejected_by_max = 0;
+  int line_findobject_component_rejected_by_borw = 0;
+
+  int line_findobject_area_min_observed = 0;
+  int line_findobject_area_max_observed = 0;
+  double line_findobject_area_mean_observed = 0.0;
+  int line_findobject_area_min = 0;
+  int line_findobject_area_max = 0;
+  double line_findobject_area_median = 0.0;
+  double line_findobject_area_p90 = 0.0;
+
+  std::string line_measure_cc_selected_foreground;
+
+  int line_measure_cc_white_total = 0;
+  int line_measure_cc_white_accepted = 0;
+  int line_measure_cc_white_rejected_min = 0;
+  double line_measure_cc_white_area_median = 0.0;
+  double line_measure_cc_white_area_p90 = 0.0;
+
+  int line_measure_cc_black_total = 0;
+  int line_measure_cc_black_accepted = 0;
+  int line_measure_cc_black_rejected_min = 0;
+  double line_measure_cc_black_area_median = 0.0;
+  double line_measure_cc_black_area_p90 = 0.0;
+
+  int line_measure_cc_selected_total = 0;
+  int line_measure_cc_selected_accepted = 0;
+  int line_measure_cc_selected_rejected_min = 0;
+  double line_measure_cc_selected_area_median = 0.0;
+  double line_measure_cc_selected_area_p90 = 0.0;
+
+  // Findcircle display snapshot.
+  bool has_circle_roi_outer_polyline = false;
+  std::vector<float> circle_roi_outer_xy;
+  bool has_circle_roi_inner_polyline = false;
+  std::vector<float> circle_roi_inner_xy;
+  std::uint32_t circle_roi_segment_count = 0;
+
+  bool has_fit_circle_polyline = false;
+  std::vector<float> fit_circle_xy;
+  std::uint32_t fit_circle_segment_count = 0;
+
+  std::uint64_t display_version = 0;
+
+  bool circle_measure_geometry_request_valid = false;
+  bool circle_measure_geometry_dirty = false;
+  bool circle_measure_geometry_ready = false;
+
+  std::uint64_t circle_measure_geometry_version = 0;
+  std::uint64_t circle_measure_geometry_built_version = 0;
+
+  int circle_scan_line_count = 0;
+  int circle_scan_line_length = 0;
+  int circle_process_width = 0;
+  int circle_selected_edge_index = 0;
+  int circle_candidate_runs_total = 0;
+  int circle_candidate_runs_max_per_line = 0;
+  int circle_selected_edge_hits = 0;
+  int circle_selected_edge_misses = 0;
+  int circle_scan_boundary_clipped_lines = 0;
+  int circle_scan_boundary_extended_samples = 0;
+  int circle_candidate_boundary_reject_count = 0;
+  double circle_selected_edge_radius_avg = 0.0;
+  double circle_selected_edge_radius_min = 0.0;
+  double circle_selected_edge_radius_max = 0.0;
+  int circle_point_consistency_enabled = 0;
+  double circle_point_consistency_range = 0.0;
+  int circle_point_consistency_input_points = 0;
+  int circle_point_consistency_output_points = 0;
+  int circle_point_consistency_removed_points = 0;
+  std::string circle_boundary_status;
+  std::string circle_boundary_reliability_level;
+  int circle_boundary_expected_scan_count = 0;
+  int circle_boundary_accepted_point_count = 0;
+  int circle_boundary_refined_point_count = 0;
+  double circle_boundary_coverage_ratio = 0.0;
+  double circle_boundary_subpixel_offset_mean = 0.0;
+  double circle_boundary_subpixel_offset_stddev = 0.0;
+  double circle_boundary_localization_sigma_mean_px = 0.0;
+  double circle_boundary_residual_rmse_px = 0.0;
+  double circle_boundary_residual_p95_px = 0.0;
+  double circle_boundary_residual_max_px = 0.0;
+  double circle_boundary_outlier_ratio = 0.0;
+  double circle_boundary_reliability_score = 0.0;
+
+  bool circle_measure_image_ready = false;
+  int circle_measure_image_width = 0;
+  int circle_measure_image_height = 0;
+  int circle_measure_image_channels = 0;
+
+  bool circle_measure_backimage_ready = false;
+  bool circle_measure_findobject_ready = false;
+
+  int circle_object_prefilter_requested = 0;
+  int circle_object_prefilter_applied = 0;
+  int circle_object_prefilter_restored = 0;
+  int circle_object_prefilter_runs_before = 0;
+  int circle_object_prefilter_runs_after = 0;
+  int circle_object_prefilter_effective_min = 0;
+
+  std::string circle_measure_source;
+  std::string circle_measure_failure_stage;
+  std::string circle_measure_detail;
+
+  bool has_fastmatch_diagnostic = false;
+  bool fastmatch_allowed = false;
+
+  std::string fastmatch_status;
+  std::string fastmatch_reason;
+  std::string fastmatch_result_ref;
+  std::string fastmatch_policy;
+  std::string fastmatch_source_tool;
+  std::string fastmatch_profile;
+  std::string fastmatch_level;
+  int fastmatch_model_point_count = 0;
+  int fastmatch_learn_a_count = 0;
+  int fastmatch_learn_b_count = 0;
+  int fastmatch_learn_a2_count = 0;
+  int fastmatch_learn_b2_count = 0;
+  int fastmatch_learn_status_code = 0;
+  int fastmatch_pattern_a_count = 0;
+  int fastmatch_pattern_b_count = 0;
+  int fastmatch_candidate_count = 0;
+  double fastmatch_best_score = 0.0;
+  int fastmatch_learn_rect_x0 = 0;
+  int fastmatch_learn_rect_y0 = 0;
+  int fastmatch_learn_rect_x1 = 0;
+  int fastmatch_learn_rect_y1 = 0;
+  int fastmatch_match_rect_x0 = 0;
+  int fastmatch_match_rect_y0 = 0;
+  int fastmatch_match_rect_x1 = 0;
+  int fastmatch_match_rect_y1 = 0;
+
+  bool has_grid_pattern = false;
+  int grid_pattern_status_code = 0;
+  int grid_pattern_active_cell_count = 0;
+  int grid_pattern_descriptor_dim = 0;
+  int grid_pattern_level_count = 0;
+  int grid_pattern_overlay_count = 0;
+  bool grid_pattern_overlay_truncated = false;
+  double grid_pattern_elapsed_ms = 0.0;
+  std::string grid_pattern_summary;
+
+  bool has_region_pattern = false;
+  int region_pattern_status_code = 0;
+  int region_pattern_descriptor_dim = 0;
+  int region_pattern_foreground_permille = 0;
+  int region_pattern_mean_permille = 0;
+  int region_pattern_std_permille = 0;
+  int region_pattern_pooling_rows = 0;
+  int region_pattern_pooling_cols = 0;
+  int region_pattern_overlay_count = 0;
+  bool region_pattern_overlay_truncated = false;
+  double region_pattern_elapsed_ms = 0.0;
+  std::string region_pattern_summary;
 };
 
-struct DebugStepSnapshot
-{
+struct DebugStepSnapshot {
   std::string script_path;
   std::string flow_block_id;
   int current_line = 0;
@@ -543,79 +546,73 @@ struct DebugStepSnapshot
   std::string reason;
 };
 
-struct ResultRefView
-{
-    std::string name;             // global_circle_ref
-    std::string value;            // runtime_object:afindcircle0
-    std::string source_object;    // afindcircle0
-    std::string result_type;      // FindcircleResult
-    std::string status = "uninitialized";
-    std::string reason;
+struct ResultRefView {
+  std::string name;          // global_circle_ref
+  std::string value;         // runtime_object:afindcircle0
+  std::string source_object; // afindcircle0
+  std::string result_type;   // FindcircleResult
+  std::string status = "uninitialized";
+  std::string reason;
 
-    float fit_cx = 0.0f;
-    float fit_cy = 0.0f;
-    float fit_radius = 0.0f;
-    float avgdist = 0.0f;
+  float fit_cx = 0.0f;
+  float fit_cy = 0.0f;
+  float fit_radius = 0.0f;
+  float avgdist = 0.0f;
 
-    int points_count = 0;
-    int valid_points_count = 0;
+  int points_count = 0;
+  int valid_points_count = 0;
 
-    int line_no = 0;
+  int line_no = 0;
 
-    // Line result fields.
-    float line_x0 = 0.0f;
-    float line_y0 = 0.0f;
-    float line_x1 = 0.0f;
-    float line_y1 = 0.0f;
-    float line_avgdist = 0.0f;
-    int line_points_count = 0;
-    int valid_line_points_count = 0;
+  // Line result fields.
+  float line_x0 = 0.0f;
+  float line_y0 = 0.0f;
+  float line_x1 = 0.0f;
+  float line_y1 = 0.0f;
+  float line_avgdist = 0.0f;
+  int line_points_count = 0;
+  int valid_line_points_count = 0;
 
-    std::string line_result_status;
-    std::string line_result_reason;
-    std::string line_measure_status;
-    std::string line_measure_hint;
-    std::string line_measure_failure_hint;
-    bool line_filter_min_exceeds_component_p90 = false;
+  std::string line_result_status;
+  std::string line_result_reason;
+  std::string line_measure_status;
+  std::string line_measure_hint;
+  std::string line_measure_failure_hint;
+  bool line_filter_min_exceeds_component_p90 = false;
 
-    std::string line_measure_source;
-    bool line_measure_fallback_used = false;
-
+  std::string line_measure_source;
+  bool line_measure_fallback_used = false;
 };
 
-enum class GaugeHandleType
-{
-    None,
-    LineP0,
-    LineP1,
-    LineCenter,
-    LineWidthPlus,
-    LineWidthMinus,
-    CircleCenter,
-    CircleRadius,
-    CircleInner,
-    CircleOuter
+enum class GaugeHandleType {
+  None,
+  LineP0,
+  LineP1,
+  LineCenter,
+  LineWidthPlus,
+  LineWidthMinus,
+  CircleCenter,
+  CircleRadius,
+  CircleInner,
+  CircleOuter
 };
 
-struct GaugeHandle
-{
-    GaugeHandleType type = GaugeHandleType::None;
-    float screen_x = 0.0f;
-    float screen_y = 0.0f;
-    float radius = 6.0f;
-    bool hovered = false;
-    bool active = false;
+struct GaugeHandle {
+  GaugeHandleType type = GaugeHandleType::None;
+  float screen_x = 0.0f;
+  float screen_y = 0.0f;
+  float radius = 6.0f;
+  bool hovered = false;
+  bool active = false;
 };
 
-struct ManualSegmentationPromptPoint
-{
+struct ManualSegmentationPromptPoint {
   std::string ref;
   int x = 0;
   int y = 0;
 };
 
-struct ManualGaugeState
-{
+struct ManualGaugeState {
   std::string case_id;
   std::string image_id;
   std::string target_id;
@@ -625,7 +622,8 @@ struct ManualGaugeState
   std::string primary_object_status = "unresolved";
 
   std::string source = "manual"; // manifest / replay / ai_suggested / manual
-  std::string review_status = "editing"; // editing / accepted / rejected / promoted
+  std::string review_status =
+      "editing"; // editing / accepted / rejected / promoted
 
   bool has_line_gauge = false;
   int line_x0 = 0;
@@ -706,8 +704,7 @@ struct ManualGaugeState
   bool accepted = false;
 };
 
-struct ManualParamRegressionState
-{
+struct ManualParamRegressionState {
   bool initialized = false;
   std::string status = "disabled";
   std::string reason = "Manual gauge must be accepted first.";
@@ -739,10 +736,12 @@ struct ManualParamRegressionState
   std::vector<std::string> exported_files;
 };
 
-struct ManualMetrologyUiState
-{
+struct ManualMetrologyUiState {
   bool enabled = false;
   int active_tab = 0;
+
+  // One-based radial/scan Gauge Line selected for detailed analytics.
+  int gauge_line_num = 1;
 
   // S1 behavior capture / scan profile preview.
   bool show_scan_profile = false;
@@ -771,9 +770,36 @@ struct ManualMetrologyUiState
   int histogram_mode = 0; // 0 ADF, 1 BCDF, 2 both
   bool histogram_log_scale = false;
 
+  int peak_max_count = 12;
+  int peak_order = 0; // 0 position, 1 prominence
+  int peak_min_prominence_permille = 20;
+  int peak_min_distance_bins = 4;
+  int peak_background = 1; // 0 zero, 1 bilateral minimum
+  bool peak_invert = false;
+
+  // Curve fitting defaults are designed to run without routine adjustment.
+  int curve_fit_source = 0;   // 0 ADF, 1 BCDF, 2 scan profile
+  int curve_fit_function = 0; // 0 Gaussian, 1 Lorentzian, 2 polynomial order 2
+  bool curve_fit_auto_estimate = true;
+  bool curve_fit_auto_plot = true;
+  bool curve_fit_full_range = true;
+  bool curve_fit_output_residual = false;
+  int curve_fit_range_start_permille = 0;
+  int curve_fit_range_end_permille = 1000;
+
+  // Critical dimension defaults mirror the first stable CD preset.
+  int critical_dimension_source = 0; // 0 scan profile, 1 ADF
+  int critical_dimension_function =
+      0; // 0 right edge, 1 left edge, 2..5 other presets
+  bool critical_dimension_auto_fit = true;
+  bool critical_dimension_full_range = true;
+  int critical_dimension_range_start_permille = 0;
+  int critical_dimension_range_end_permille = 1000;
+  bool critical_dimension_draw_whole_circle = false;
+
   // Plane correction.
   bool enable_plane_correction = false;
-  int plane_method = 1; // 0 three-points, 1 OLS, 2 Huber
+  int plane_method = 1;         // 0 three-points, 1 OLS, 2 Huber
   int plane_reference_mode = 0; // 0 whole surface, 1 ROI, 2 mask
   int plane_huber_delta_permille = 100;
 
@@ -795,345 +821,342 @@ struct ManualMetrologyUiState
   int roughness_cutoff_px = 0;
   int roughness_bins = 1024;
 
+  bool height_peak_analysis_ready = false;
+  std::string height_peak_analysis_status = "PENDING";
+  std::string height_peak_analysis_reason = "analysis not run";
+  std::string height_peak_source_ref;
+  int height_peak_grid_width = 0;
+  int height_peak_grid_height = 0;
+  int height_peak_sample_count = 0;
+  cxvision::metrology_analytics::CxSurfaceBasicStats height_peak_stats;
+  std::vector<cxvision::metrology_analytics::CxHeightPeak> height_peaks;
+  unsigned long long height_peak_analysis_revision = 0;
+
   unsigned long long edit_revision = 0;
   std::string last_summary;
 };
 
-struct EvidenceChainThumb
-{
-    std::string case_id;
-    std::string script_id;
-    std::string script_path;
-    std::string image_id;
-    std::string image_path;
-    std::string thumbnail_path;
-    std::string target_id;
-    std::string tool;
+struct EvidenceChainThumb {
+  std::string case_id;
+  std::string script_id;
+  std::string script_path;
+  std::string image_id;
+  std::string image_path;
+  std::string thumbnail_path;
+  std::string target_id;
+  std::string tool;
 
-    std::string parameter_summary;
-    std::string status;
-    std::string reason;
+  std::string parameter_summary;
+  std::string status;
+  std::string reason;
 
-    unsigned int texture_id = 0;
-    int texture_w = 0;
-    int texture_h = 0;
-    bool texture_loaded = false;
+  unsigned int texture_id = 0;
+  int texture_w = 0;
+  int texture_h = 0;
+  bool texture_loaded = false;
 };
 
-struct ManualEvidenceItem
-{
-    std::string case_id;
-    std::string level;
-    std::string image_id;
-    std::string target_id;
-    std::string tool;
+struct ManualEvidenceItem {
+  std::string case_id;
+  std::string level;
+  std::string image_id;
+  std::string target_id;
+  std::string tool;
 
-    std::string script_id;
-    std::string parameter_profile_id;
+  std::string script_id;
+  std::string parameter_profile_id;
 
-    std::string gauge_status;
-    std::string probe_status;
-    std::string contract_status;
-    std::string review_status;
+  std::string gauge_status;
+  std::string probe_status;
+  std::string contract_status;
+  std::string review_status;
 
-    std::string image_path;
-    std::string replay_package_path;
-    // Non-empty only for Case-tab rows projected from a file-driven Evidence Chain.
-    std::string source_evidence_chain_path;
-    std::string gauge_annotation_path;
+  std::string image_path;
+  std::string replay_package_path;
+  // Non-empty only for Case-tab rows projected from a file-driven Evidence
+  // Chain.
+  std::string source_evidence_chain_path;
+  std::string gauge_annotation_path;
 };
 
-struct ManifestImageItem
-{
-    std::string image_id;
-    std::string image_path;
-    std::string level;
-    std::string status;
+struct ManifestImageItem {
+  std::string image_id;
+  std::string image_path;
+  std::string level;
+  std::string status;
 };
 
-struct TorchTrainingAnnotationShapeSnapshot
-{
-    int class_id = 0;
-    std::string stable_ref;
-    std::string tool_id;
-    std::string owner_type;
-    std::string owner_ref;
-    std::string owner_binding;
-    std::string semantic_role;
-    std::string shape_kind;
-    std::string status = "editing";
-    std::vector<double> points_xy;
-    double center_x = 0.0;
-    double center_y = 0.0;
-    double radius = 0.0;
-    double inner_radius = 0.0;
-    double radius_x = 0.0;
-    double radius_y = 0.0;
-    double angle = 0.0;
-    double half_width = 0.0;
-    bool closed = false;
-    bool editable = true;
-    bool visible = true;
-    bool result_element = false;
+struct TorchTrainingAnnotationShapeSnapshot {
+  int class_id = 0;
+  std::string stable_ref;
+  std::string tool_id;
+  std::string owner_type;
+  std::string owner_ref;
+  std::string owner_binding;
+  std::string semantic_role;
+  std::string shape_kind;
+  std::string status = "editing";
+  std::vector<double> points_xy;
+  double center_x = 0.0;
+  double center_y = 0.0;
+  double radius = 0.0;
+  double inner_radius = 0.0;
+  double radius_x = 0.0;
+  double radius_y = 0.0;
+  double angle = 0.0;
+  double half_width = 0.0;
+  bool closed = false;
+  bool editable = true;
+  bool visible = true;
+  bool result_element = false;
 };
 
-struct TorchTrainingImageItem
-{
-    std::string image_id;
-    std::string image_path;
-    std::string case_id;
-    std::string target_id;
-    std::string source = "manual"; // evidence / manifest / manual
-    std::string split = "train";   // train / val / test
-    std::string label = "unlabeled"; // good / anomaly / unlabeled / pending
-    std::string status = "pending";
+struct TorchTrainingImageItem {
+  std::string image_id;
+  std::string image_path;
+  std::string case_id;
+  std::string target_id;
+  std::string source = "manual";   // evidence / manifest / manual
+  std::string split = "train";     // train / val / test
+  std::string label = "unlabeled"; // good / anomaly / unlabeled / pending
+  std::string status = "pending";
 
-    unsigned int texture_id = 0;
-    int texture_w = 0;
-    int texture_h = 0;
-    bool texture_loaded = false;
-    bool texture_failed = false;
-    bool texture_placeholder = false;
+  unsigned int texture_id = 0;
+  int texture_w = 0;
+  int texture_h = 0;
+  bool texture_loaded = false;
+  bool texture_failed = false;
+  bool texture_placeholder = false;
 
-    std::string annotation_status = "unlabeled"; // unlabeled / draft_pending_human_review / editing
-    std::string annotation_reason;
-    int annotation_shape_count = 0;
-    int annotation_overlay_count = 0;
-    std::vector<TorchTrainingAnnotationShapeSnapshot> annotation_shapes;
+  std::string annotation_status =
+      "unlabeled"; // unlabeled / draft_pending_human_review / editing
+  std::string annotation_reason;
+  int annotation_shape_count = 0;
+  int annotation_overlay_count = 0;
+  std::vector<TorchTrainingAnnotationShapeSnapshot> annotation_shapes;
 };
 
-struct CxEvidenceDatasetImageBinding
-{
-    std::string image_id;
-    std::string image_path;
-    std::string split = "train";
-    std::string label = "unlabeled";
-    std::string source = "evidence_dataset";
+struct CxEvidenceDatasetImageBinding {
+  std::string image_id;
+  std::string image_path;
+  std::string split = "train";
+  std::string label = "unlabeled";
+  std::string source = "evidence_dataset";
 };
 
-struct CxEvidenceAnnotationBinding
-{
-    std::string image_id;
-    std::string shape_kind = "RectShape";
-    std::string semantic_role = "bbox";
-    std::string owner_binding = "label_bbox";
-    std::string label = "anomaly";
-    int class_id = -1;
-    double x0 = 0.0;
-    double y0 = 0.0;
-    double x1 = 0.0;
-    double y1 = 0.0;
-    bool normalized = false;
-    bool closed = false;
-    std::vector<double> points_xy;
+struct CxEvidenceAnnotationBinding {
+  std::string image_id;
+  std::string shape_kind = "RectShape";
+  std::string semantic_role = "bbox";
+  std::string owner_binding = "label_bbox";
+  std::string label = "anomaly";
+  int class_id = -1;
+  double x0 = 0.0;
+  double y0 = 0.0;
+  double x1 = 0.0;
+  double y1 = 0.0;
+  bool normalized = false;
+  bool closed = false;
+  std::vector<double> points_xy;
 };
 
-struct CxTorchTrainingEpochMetric
-{
-    int epoch = 0;
-    double learning_rate = 0.0;
-    double total_loss = 0.0;
-    double box_loss = 0.0;
-    double class_loss = 0.0;
-    double dfl_loss = 0.0;
-    double mask_loss = 0.0;
-    int sample_count = 0;
-    int instance_count = 0;
-    struct ParameterGroup
-    {
-        std::string name;
-        bool grad_defined = false;
-        double grad_mean = 0.0;
-        double grad_max = 0.0;
-        double grad_norm = 0.0;
-        double param_norm = 0.0;
-        double update_norm = 0.0;
-        int parameter_count = 0;
-    };
-    std::vector<ParameterGroup> parameter_groups;
-};
-
-struct CxTorchTrainingRunBinding
-{
-    bool available = false;
-    std::string status;
-    std::string task;
-    std::string dataset_source;
-    std::string dataset_summary_path;
-    std::string training_trace_path;
-    std::string optimizer;
-    std::string lr_schedule = "constant";
-    std::string loss_phase;
-    int configured_epochs = 0;
-    int completed_epochs = 0;
-    int train_sample_count = 0;
-    int train_instance_count = 0;
-    double learning_rate = 0.0;
-    double min_learning_rate = 0.0;
-    double weight_decay = 0.0;
-    double box_loss_weight = 1.0;
-    double class_loss_weight = 1.0;
-    double dfl_loss_weight = 1.0;
-    double mask_loss_weight = 1.0;
-    std::vector<CxTorchTrainingEpochMetric> epochs;
-};
-
-struct ScriptEvidenceThumb
-{
-    std::string candidate_id;
-    std::string candidate_dir;
-    std::string evidence_binding_path;
-    std::string parameter_snapshot_path;
-    std::string runtime_globals_path;
-    std::string gauge_annotation_path;
-    std::string working_script_snapshot_path;
-    bool is_candidate = false;
-    bool has_saved_state = false;
-    std::string source_evidence_script_path;
-    std::string case_id;
-    std::string script_id;
-    std::string script_path;
-    std::string image_id;
-    std::string image_path;
-    std::string thumbnail_path;
-    std::string target_id;
-    std::string tool;
-    std::string parameter_summary;
-    std::string evidence_output_root;
-    std::string contract_id;
-    std::string expected_result;
-    std::string expected_policy_guard;
-    std::string evidence_level;
-    std::string evidence_case_role;
-    std::string source_case_id;
-    bool manual_review_required = true;
-    bool promotion_candidate = false;
-    std::string evidence_category_override;
-    std::string evidence_group_override;
-    std::string evidence_head_folder;
-    std::string evidence_case_folder;
-    std::string workflow_id;
-    std::string workflow_stage;
-    std::string workflow_status;
-    std::string workflow_prerequisites;
-    std::string dataset_role;
-    std::string annotation_policy;
-    std::string gate_policy;
-    std::string parent_model_ref;
-    std::string child_model_ref;
-    int workflow_stage_index = 0;
-    int workflow_stage_count = 0;
-    bool dataset_frozen = false;
-    std::string status;
-    std::string reason;
-    std::string primary_object_type;
-    std::string primary_object_name;
-    std::string primary_object_status;
-    unsigned int texture_id = 0;
-    int texture_w = 0;
-    int texture_h = 0;
-    bool texture_loaded = false;
-    bool texture_failed = false;
-    bool texture_placeholder = false;
-    std::vector<CxEvidenceDatasetImageBinding> dataset_images;
-    std::vector<CxEvidenceAnnotationBinding> annotations;
-    CxTorchTrainingRunBinding training_run;
-};
-
-struct CxEvidenceEditableObjectRef
-{
-    std::string type;
+struct CxTorchTrainingEpochMetric {
+  int epoch = 0;
+  double learning_rate = 0.0;
+  double total_loss = 0.0;
+  double box_loss = 0.0;
+  double class_loss = 0.0;
+  double dfl_loss = 0.0;
+  double mask_loss = 0.0;
+  int sample_count = 0;
+  int instance_count = 0;
+  struct ParameterGroup {
     std::string name;
-    int declared_line = 0;
+    bool grad_defined = false;
+    double grad_mean = 0.0;
+    double grad_max = 0.0;
+    double grad_norm = 0.0;
+    double param_norm = 0.0;
+    double update_norm = 0.0;
+    int parameter_count = 0;
+  };
+  std::vector<ParameterGroup> parameter_groups;
 };
 
-struct ScriptEvidenceGroup
-{
-    std::string script_id;
-    std::string script_path;
-    std::string label;
-    std::vector<ScriptEvidenceThumb> thumbs;
+struct CxTorchTrainingRunBinding {
+  bool available = false;
+  std::string status;
+  std::string task;
+  std::string dataset_source;
+  std::string dataset_summary_path;
+  std::string training_trace_path;
+  std::string optimizer;
+  std::string lr_schedule = "constant";
+  std::string loss_phase;
+  int configured_epochs = 0;
+  int completed_epochs = 0;
+  int train_sample_count = 0;
+  int train_instance_count = 0;
+  double learning_rate = 0.0;
+  double min_learning_rate = 0.0;
+  double weight_decay = 0.0;
+  double box_loss_weight = 1.0;
+  double class_loss_weight = 1.0;
+  double dfl_loss_weight = 1.0;
+  double mask_loss_weight = 1.0;
+  std::vector<CxTorchTrainingEpochMetric> epochs;
 };
 
-struct CxEvidenceSelectionSnapshot
-{
-    bool valid = false;
-
-    int group_index = -1;
-    int thumb_index = -1;
-
-    std::string case_id;
-
-    std::string candidate_id;
-    std::string candidate_dir;
-    std::string evidence_binding_path;
-    std::string parameter_snapshot_path;
-    std::string runtime_globals_path;
-    std::string gauge_annotation_path;
-    std::string working_script_snapshot_path;
-    bool is_candidate = false;
-    bool has_saved_state = false;
-    std::string source_evidence_script_path;
-
-    std::string script_id;
-    std::string script_path;
-
-    std::string image_id;
-    std::string image_path;
-
-    std::string target_id;
-    std::string tool;
-
-    std::string parameter_profile_id;
-    std::string parameter_summary;
-
-    std::string evidence_output_root;
-    std::string contract_id;
-    std::string expected_result;
-    std::string expected_policy_guard;
-    std::string evidence_level;
-    std::string evidence_case_role;
-    std::string source_case_id;
-    bool manual_review_required = true;
-    bool promotion_candidate = false;
-    std::string evidence_group_override;
-    std::string workflow_id;
-    std::string workflow_stage;
-    std::string workflow_status;
-    std::string workflow_prerequisites;
-    std::string dataset_role;
-    std::string annotation_policy;
-    std::string gate_policy;
-    std::string parent_model_ref;
-    std::string child_model_ref;
-    int workflow_stage_index = 0;
-    int workflow_stage_count = 0;
-    bool dataset_frozen = false;
-
-    std::string status;
-    std::string reason;
-
-    std::string source;
-
-    std::string primary_object_type;
-    std::string primary_object_name;
-    std::string primary_object_status;
-    std::vector<CxEvidenceEditableObjectRef> editable_objects;
-    std::vector<CxEvidenceDatasetImageBinding> dataset_images;
-    std::vector<CxEvidenceAnnotationBinding> annotations;
-    CxTorchTrainingRunBinding training_run;
+struct ScriptEvidenceThumb {
+  std::string candidate_id;
+  std::string candidate_dir;
+  std::string evidence_binding_path;
+  std::string parameter_snapshot_path;
+  std::string runtime_globals_path;
+  std::string gauge_annotation_path;
+  std::string working_script_snapshot_path;
+  bool is_candidate = false;
+  bool has_saved_state = false;
+  std::string source_evidence_script_path;
+  std::string case_id;
+  std::string script_id;
+  std::string script_path;
+  std::string image_id;
+  std::string image_path;
+  std::string thumbnail_path;
+  std::string target_id;
+  std::string tool;
+  std::string parameter_summary;
+  std::string evidence_output_root;
+  std::string contract_id;
+  std::string expected_result;
+  std::string expected_policy_guard;
+  std::string evidence_level;
+  std::string evidence_case_role;
+  std::string source_case_id;
+  bool manual_review_required = true;
+  bool promotion_candidate = false;
+  std::string evidence_category_override;
+  std::string evidence_group_override;
+  std::string evidence_head_folder;
+  std::string evidence_case_folder;
+  std::string workflow_id;
+  std::string workflow_stage;
+  std::string workflow_status;
+  std::string workflow_prerequisites;
+  std::string dataset_role;
+  std::string annotation_policy;
+  std::string gate_policy;
+  std::string parent_model_ref;
+  std::string child_model_ref;
+  int workflow_stage_index = 0;
+  int workflow_stage_count = 0;
+  bool dataset_frozen = false;
+  std::string status;
+  std::string reason;
+  std::string primary_object_type;
+  std::string primary_object_name;
+  std::string primary_object_status;
+  unsigned int texture_id = 0;
+  int texture_w = 0;
+  int texture_h = 0;
+  bool texture_loaded = false;
+  bool texture_failed = false;
+  bool texture_placeholder = false;
+  std::vector<CxEvidenceDatasetImageBinding> dataset_images;
+  std::vector<CxEvidenceAnnotationBinding> annotations;
+  CxTorchTrainingRunBinding training_run;
 };
 
-struct ScriptEvidenceRowRef
-{
-    int group_index = -1;
-    int thumb_index = -1;
-    bool is_group_header = false;
-    std::string label;
+struct CxEvidenceEditableObjectRef {
+  std::string type;
+  std::string name;
+  int declared_line = 0;
 };
 
-struct ManualFindLineEdgeParamState
-{
+struct ScriptEvidenceGroup {
+  std::string script_id;
+  std::string script_path;
+  std::string label;
+  std::vector<ScriptEvidenceThumb> thumbs;
+};
+
+struct CxEvidenceSelectionSnapshot {
+  bool valid = false;
+
+  int group_index = -1;
+  int thumb_index = -1;
+
+  std::string case_id;
+
+  std::string candidate_id;
+  std::string candidate_dir;
+  std::string evidence_binding_path;
+  std::string parameter_snapshot_path;
+  std::string runtime_globals_path;
+  std::string gauge_annotation_path;
+  std::string working_script_snapshot_path;
+  bool is_candidate = false;
+  bool has_saved_state = false;
+  std::string source_evidence_script_path;
+
+  std::string script_id;
+  std::string script_path;
+
+  std::string image_id;
+  std::string image_path;
+
+  std::string target_id;
+  std::string tool;
+
+  std::string parameter_profile_id;
+  std::string parameter_summary;
+
+  std::string evidence_output_root;
+  std::string contract_id;
+  std::string expected_result;
+  std::string expected_policy_guard;
+  std::string evidence_level;
+  std::string evidence_case_role;
+  std::string source_case_id;
+  bool manual_review_required = true;
+  bool promotion_candidate = false;
+  std::string evidence_group_override;
+  std::string workflow_id;
+  std::string workflow_stage;
+  std::string workflow_status;
+  std::string workflow_prerequisites;
+  std::string dataset_role;
+  std::string annotation_policy;
+  std::string gate_policy;
+  std::string parent_model_ref;
+  std::string child_model_ref;
+  int workflow_stage_index = 0;
+  int workflow_stage_count = 0;
+  bool dataset_frozen = false;
+
+  std::string status;
+  std::string reason;
+
+  std::string source;
+
+  std::string primary_object_type;
+  std::string primary_object_name;
+  std::string primary_object_status;
+  std::vector<CxEvidenceEditableObjectRef> editable_objects;
+  std::vector<CxEvidenceDatasetImageBinding> dataset_images;
+  std::vector<CxEvidenceAnnotationBinding> annotations;
+  CxTorchTrainingRunBinding training_run;
+};
+
+struct ScriptEvidenceRowRef {
+  int group_index = -1;
+  int thumb_index = -1;
+  bool is_group_header = false;
+  std::string label;
+};
+
+struct ManualFindLineEdgeParamState {
   bool initialized = false;
   int threshold = 20;
   int method = 0;
@@ -1143,8 +1166,7 @@ struct ManualFindLineEdgeParamState
   int filterprofile = 0;
 };
 
-struct ManualFindCircleEdgeParamState
-{
+struct ManualFindCircleEdgeParamState {
   bool initialized = false;
   int threshold = 20;
   int method = 0;
@@ -1152,8 +1174,7 @@ struct ManualFindCircleEdgeParamState
   int gap = 6;
 };
 
-struct ManualTestContext
-{
+struct ManualTestContext {
   std::string script_file_path;
   std::string image_file_path;
   std::string data_file_path;
@@ -1179,7 +1200,10 @@ struct ManualTestContext
   std::string debug_parser_output;
   std::string user_expected;
   std::string codex_task;
-  std::string forbidden_changes = "No coordinators, routers, UnifiedEntry, operator catalogs, automatic long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business logic.";
+  std::string forbidden_changes =
+      "No coordinators, routers, UnifiedEntry, operator catalogs, automatic "
+      "long-chain runs, fake PASS, Qt migration, or dev_analysis_gui business "
+      "logic.";
 
   std::string catalog_path;
   bool catalog_loaded = false;
@@ -1190,9 +1214,8 @@ struct ManualTestContext
   std::vector<CxScriptStatementView> cxparser_ext_statement_views;
   std::vector<CxScriptObjectAssignmentView> cxparser_ext_object_assignments;
   std::vector<ScriptVariableView> global_variable_views = {
-    {"Image", "global_matInput", "uninitialized", 0, "not_initialized",
-     "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg", false}
-  };
+      {"Image", "global_matInput", "uninitialized", 0, "not_initialized",
+       "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/01.jpg", false}};
   std::vector<ScriptVariableView> variable_views;
   std::vector<ScriptObjectView> object_views;
   std::vector<RuntimeObjectView> runtime_objects;
@@ -1238,20 +1261,23 @@ struct ManualTestContext
   int findline_selected_scan_edge = 0;
   int findline_scan_edge_count = 4;
   int findline_best_fit_edge = 0; // Runtime/manual best fitting point-set edge.
-  int findline_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
+  int findline_recommended_fit_edge =
+      0; // Future advisor/param regression recommendation.
   int findline_relation_edge = 0; // Future combined/related point-set edge.
-  int findline_attach_edge = 0; // Future annotation attach/binding edge.
+  int findline_attach_edge = 0;   // Future annotation attach/binding edge.
   bool findline_point_consistency_enabled = false;
-  int findline_point_consistency_range = 0; // UI materializes default to half of search half-width.
+  int findline_point_consistency_range =
+      0; // UI materializes default to half of search half-width.
   std::vector<ManualFindLineEdgeParamState> findline_edge_params;
   // 0 = accept all eligible crossings; 1..N = Nth candidate crossing on each
   // radial scan line.  This is not the angular A0/A1 scan-sector selection.
   int findcircle_selected_scan_edge = 0;
   int findcircle_scan_edge_count = 4;
   int findcircle_best_fit_edge = 0; // Runtime/manual best fitting arc.
-  int findcircle_recommended_fit_edge = 0; // Future advisor/param regression recommendation.
+  int findcircle_recommended_fit_edge =
+      0; // Future advisor/param regression recommendation.
   int findcircle_relation_edge = 0; // Future combined/related arc point-set.
-  int findcircle_attach_edge = 0; // Future annotation attach/binding arc.
+  int findcircle_attach_edge = 0;   // Future annotation attach/binding arc.
   bool findcircle_point_consistency_enabled = false;
   int findcircle_point_consistency_range = 0;
   std::vector<ManualFindCircleEdgeParamState> findcircle_edge_params;
@@ -1292,7 +1318,8 @@ struct ManualTestContext
   int selected_torch_training_image = -1;
   std::string torch_training_new_image_path;
   std::string torch_training_image_status = "PENDING";
-  std::string torch_training_image_reason = "training image set not initialized";
+  std::string torch_training_image_reason =
+      "training image set not initialized";
   CxTorchTrainingRunBinding torch_training_run;
 
   std::vector<EvidenceChainThumb> evidence_chain_thumbs;
@@ -1338,12 +1365,10 @@ struct ManualTestContext
   CxEvidenceSelfTestResult last_evidence_selftest_result;
 };
 
-void SeedDefaultManualGlobals(
-    ManualTestContext& context,
-    const std::string& scriptPath);
+void SeedDefaultManualGlobals(ManualTestContext &context,
+                              const std::string &scriptPath);
 
-struct ScriptSnippet
-{
+struct ScriptSnippet {
   std::string name;
   std::string description;
   std::string text;
@@ -1369,415 +1394,372 @@ struct ScriptSnippet
   bool expected_filter_failure = false;
 };
 
-struct ManualCatalogVisibleEntry
-{
-    std::string script_id;
-    std::string label;
-    std::string path;
-    std::string tool;
-    std::string expected_result;
-    std::string expected_policy_guard;
-    std::string contract_path;
-    std::string parameter_policy_id;
-    std::string parameter_role;
+struct ManualCatalogVisibleEntry {
+  std::string script_id;
+  std::string label;
+  std::string path;
+  std::string tool;
+  std::string expected_result;
+  std::string expected_policy_guard;
+  std::string contract_path;
+  std::string parameter_policy_id;
+  std::string parameter_role;
 };
 
-struct ManualCatalogHiddenEntry
-{
-    std::string script_id;
-    std::string label;
-    std::string path;
-    std::string tool;
-    std::string expected_result;
-    std::string hidden_reason;
-    std::string contract_path;
+struct ManualCatalogHiddenEntry {
+  std::string script_id;
+  std::string label;
+  std::string path;
+  std::string tool;
+  std::string expected_result;
+  std::string hidden_reason;
+  std::string contract_path;
 };
 
+struct ManualCatalogUiState {
+  bool loaded = false;
+  std::string catalog_path;
+  std::string load_status;
+  std::string load_reason;
 
-struct ManualCatalogUiState
-{
-    bool loaded = false;
-    std::string catalog_path;
-    std::string load_status;
-    std::string load_reason;
-
-    std::vector<ManualCatalogVisibleEntry> visible_scripts;
-    std::vector<ManualCatalogHiddenEntry> hidden_scripts;
-    std::vector<ManualCatalogHiddenEntry> advanced_scripts;
+  std::vector<ManualCatalogVisibleEntry> visible_scripts;
+  std::vector<ManualCatalogHiddenEntry> hidden_scripts;
+  std::vector<ManualCatalogHiddenEntry> advanced_scripts;
 };
 
-struct DirectCapabilityMethod
-{
+struct DirectCapabilityMethod {
   std::string name;
   std::string status;
 };
 
-struct DirectCapability
-{
+struct DirectCapability {
   std::string module;
   std::string type;
   std::string status;
   std::vector<DirectCapabilityMethod> methods;
 };
 
-bool UpdateRuntimeFindlineSetlineFromUi(
-    ManualTestContext& context,
-    const std::string& objectName,
-    float x0,
-    float y0,
-    float x1,
-    float y1,
-    float scale,
-    std::string& outReason);
+bool UpdateRuntimeFindlineSetlineFromUi(ManualTestContext &context,
+                                        const std::string &objectName, float x0,
+                                        float y0, float x1, float y1,
+                                        float scale, std::string &outReason);
 
-inline float ManualGaugeDistanceSquared(
-    float x1,
-    float y1,
-    float x2,
-    float y2)
-{
-    const float dx = x2 - x1;
-    const float dy = y2 - y1;
-    return dx * dx + dy * dy;
+inline float ManualGaugeDistanceSquared(float x1, float y1, float x2,
+                                        float y2) {
+  const float dx = x2 - x1;
+  const float dy = y2 - y1;
+  return dx * dx + dy * dy;
 }
 
-struct LineGaugeGeometry
-{
-    ImVec2 p0;
-    ImVec2 p1;
-    ImVec2 center;
-    ImVec2 tangent;
-    ImVec2 normal;
-    float length = 0.0f;
-    float half_width = 0.0f;
+struct LineGaugeGeometry {
+  ImVec2 p0;
+  ImVec2 p1;
+  ImVec2 center;
+  ImVec2 tangent;
+  ImVec2 normal;
+  float length = 0.0f;
+  float half_width = 0.0f;
 
-    ImVec2 corner0;
-    ImVec2 corner1;
-    ImVec2 corner2;
-    ImVec2 corner3;
+  ImVec2 corner0;
+  ImVec2 corner1;
+  ImVec2 corner2;
+  ImVec2 corner3;
 
-    ImVec2 w_plus;
-    ImVec2 w_minus;
+  ImVec2 w_plus;
+  ImVec2 w_minus;
 
-    bool valid = false;
+  bool valid = false;
 };
 
-struct CircleGaugeGeometry
-{
-    ImVec2 center;
-    float radius;
-    float innerRadius;
-    float outerRadius;
+struct CircleGaugeGeometry {
+  ImVec2 center;
+  float radius;
+  float innerRadius;
+  float outerRadius;
 
-    ImVec2 radiusHandle;
-    ImVec2 innerHandle;
-    ImVec2 outerHandle;
+  ImVec2 radiusHandle;
+  ImVec2 innerHandle;
+  ImVec2 outerHandle;
 };
 
-inline CircleGaugeGeometry BuildCircleGaugeGeometry(const ManualGaugeState& gauge)
-{
-    CircleGaugeGeometry geo;
+inline CircleGaugeGeometry
+BuildCircleGaugeGeometry(const ManualGaugeState &gauge) {
+  CircleGaugeGeometry geo;
 
-    geo.center = ImVec2((float)gauge.circle_cx, (float)gauge.circle_cy);
+  geo.center = ImVec2((float)gauge.circle_cx, (float)gauge.circle_cy);
 
-    geo.radius = (float)std::max(1, gauge.radius);
+  geo.radius = (float)std::max(1, gauge.radius);
 
-    const float fallbackBand = (float)std::max(1, gauge.linegap);
-    geo.innerRadius = gauge.inner_radius > 0
-        ? (float)gauge.inner_radius
-        : std::max(1.0f, geo.radius - fallbackBand);
-    geo.outerRadius = gauge.outer_radius > 0
-        ? (float)gauge.outer_radius
-        : geo.radius + fallbackBand;
+  const float fallbackBand = (float)std::max(1, gauge.linegap);
+  geo.innerRadius = gauge.inner_radius > 0
+                        ? (float)gauge.inner_radius
+                        : std::max(1.0f, geo.radius - fallbackBand);
+  geo.outerRadius = gauge.outer_radius > 0 ? (float)gauge.outer_radius
+                                           : geo.radius + fallbackBand;
 
-    if (geo.outerRadius <= geo.innerRadius)
-        geo.outerRadius = geo.innerRadius + 1.0f;
+  if (geo.outerRadius <= geo.innerRadius)
+    geo.outerRadius = geo.innerRadius + 1.0f;
 
-    geo.radiusHandle = ImVec2(geo.center.x + geo.radius, geo.center.y);
-    geo.innerHandle = ImVec2(geo.center.x + geo.innerRadius, geo.center.y);
-    geo.outerHandle = ImVec2(geo.center.x + geo.outerRadius, geo.center.y);
+  geo.radiusHandle = ImVec2(geo.center.x + geo.radius, geo.center.y);
+  geo.innerHandle = ImVec2(geo.center.x + geo.innerRadius, geo.center.y);
+  geo.outerHandle = ImVec2(geo.center.x + geo.outerRadius, geo.center.y);
 
-    return geo;
+  return geo;
 }
 
-inline LineGaugeGeometry BuildLineGaugeGeometry(const ManualGaugeState& gauge)
-{
-    LineGaugeGeometry g;
+inline LineGaugeGeometry BuildLineGaugeGeometry(const ManualGaugeState &gauge) {
+  LineGaugeGeometry g;
 
-    g.p0 = ImVec2((float)gauge.line_x0, (float)gauge.line_y0);
-    g.p1 = ImVec2((float)gauge.line_x1, (float)gauge.line_y1);
+  g.p0 = ImVec2((float)gauge.line_x0, (float)gauge.line_y0);
+  g.p1 = ImVec2((float)gauge.line_x1, (float)gauge.line_y1);
 
-    const float dx = g.p1.x - g.p0.x;
-    const float dy = g.p1.y - g.p0.y;
-    const float len = std::sqrt(dx * dx + dy * dy);
+  const float dx = g.p1.x - g.p0.x;
+  const float dy = g.p1.y - g.p0.y;
+  const float len = std::sqrt(dx * dx + dy * dy);
 
-    if (len < 1.0f)
-        return g;
-
-    g.valid = true;
-    g.length = len;
-    g.half_width = std::max(1.0f, (float)gauge.tool_half_width);
-
-    g.tangent = ImVec2(dx / len, dy / len);
-    g.normal = ImVec2(-g.tangent.y, g.tangent.x);
-
-    g.center = ImVec2(
-        (g.p0.x + g.p1.x) * 0.5f,
-        (g.p0.y + g.p1.y) * 0.5f);
-
-    g.corner0 = ImVec2(g.p0.x + g.normal.x * g.half_width,
-                       g.p0.y + g.normal.y * g.half_width);
-    g.corner1 = ImVec2(g.p1.x + g.normal.x * g.half_width,
-                       g.p1.y + g.normal.y * g.half_width);
-    g.corner2 = ImVec2(g.p1.x - g.normal.x * g.half_width,
-                       g.p1.y - g.normal.y * g.half_width);
-    g.corner3 = ImVec2(g.p0.x - g.normal.x * g.half_width,
-                       g.p0.y - g.normal.y * g.half_width);
-
-    g.w_plus = ImVec2(g.center.x + g.normal.x * g.half_width,
-                      g.center.y + g.normal.y * g.half_width);
-    g.w_minus = ImVec2(g.center.x - g.normal.x * g.half_width,
-                       g.center.y - g.normal.y * g.half_width);
-
+  if (len < 1.0f)
     return g;
+
+  g.valid = true;
+  g.length = len;
+  g.half_width = std::max(1.0f, (float)gauge.tool_half_width);
+
+  g.tangent = ImVec2(dx / len, dy / len);
+  g.normal = ImVec2(-g.tangent.y, g.tangent.x);
+
+  g.center = ImVec2((g.p0.x + g.p1.x) * 0.5f, (g.p0.y + g.p1.y) * 0.5f);
+
+  g.corner0 = ImVec2(g.p0.x + g.normal.x * g.half_width,
+                     g.p0.y + g.normal.y * g.half_width);
+  g.corner1 = ImVec2(g.p1.x + g.normal.x * g.half_width,
+                     g.p1.y + g.normal.y * g.half_width);
+  g.corner2 = ImVec2(g.p1.x - g.normal.x * g.half_width,
+                     g.p1.y - g.normal.y * g.half_width);
+  g.corner3 = ImVec2(g.p0.x - g.normal.x * g.half_width,
+                     g.p0.y - g.normal.y * g.half_width);
+
+  g.w_plus = ImVec2(g.center.x + g.normal.x * g.half_width,
+                    g.center.y + g.normal.y * g.half_width);
+  g.w_minus = ImVec2(g.center.x - g.normal.x * g.half_width,
+                     g.center.y - g.normal.y * g.half_width);
+
+  return g;
 }
 
-inline GaugeHandleType HitTestGaugeHandle(
-    const ManualGaugeState& gauge,
-    float mouse_x,
-    float mouse_y,
-    float handle_radius)
-{
-    const float r2 = handle_radius * handle_radius;
+inline GaugeHandleType HitTestGaugeHandle(const ManualGaugeState &gauge,
+                                          float mouse_x, float mouse_y,
+                                          float handle_radius) {
+  const float r2 = handle_radius * handle_radius;
 
-    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
-    {
-        if (!gauge.has_circle_gauge)
-            return GaugeHandleType::None;
+  if (gauge.tool == "Findcircle" || gauge.has_circle_gauge) {
+    if (!gauge.has_circle_gauge)
+      return GaugeHandleType::None;
 
-        if (ManualGaugeDistanceSquared(
-                (float)gauge.circle_cx,
-                (float)gauge.circle_cy,
-                mouse_x,
-                mouse_y) <= r2)
-        {
-            return GaugeHandleType::CircleCenter;
-        }
-
-        const CircleGaugeGeometry geom = BuildCircleGaugeGeometry(gauge);
-
-        if (ManualGaugeDistanceSquared(
-                geom.radiusHandle.x,
-                geom.radiusHandle.y,
-                mouse_x,
-                mouse_y) <= r2)
-        {
-            return GaugeHandleType::CircleRadius;
-        }
-
-        if (ManualGaugeDistanceSquared(
-                geom.innerHandle.x,
-                geom.innerHandle.y,
-                mouse_x,
-                mouse_y) <= r2)
-        {
-            return GaugeHandleType::CircleInner;
-        }
-
-        if (ManualGaugeDistanceSquared(
-                geom.outerHandle.x,
-                geom.outerHandle.y,
-                mouse_x,
-                mouse_y) <= r2)
-        {
-            return GaugeHandleType::CircleOuter;
-        }
-
-        return GaugeHandleType::None;
+    if (ManualGaugeDistanceSquared((float)gauge.circle_cx,
+                                   (float)gauge.circle_cy, mouse_x,
+                                   mouse_y) <= r2) {
+      return GaugeHandleType::CircleCenter;
     }
 
-    if (!gauge.has_line_gauge)
-        return GaugeHandleType::None;
+    const CircleGaugeGeometry geom = BuildCircleGaugeGeometry(gauge);
 
-    LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
-    if (!geom.valid)
-        return GaugeHandleType::None;
+    if (ManualGaugeDistanceSquared(geom.radiusHandle.x, geom.radiusHandle.y,
+                                   mouse_x, mouse_y) <= r2) {
+      return GaugeHandleType::CircleRadius;
+    }
 
-    if (ManualGaugeDistanceSquared(geom.p0.x, geom.p0.y, mouse_x, mouse_y) <= r2)
-        return GaugeHandleType::LineP0;
+    if (ManualGaugeDistanceSquared(geom.innerHandle.x, geom.innerHandle.y,
+                                   mouse_x, mouse_y) <= r2) {
+      return GaugeHandleType::CircleInner;
+    }
 
-    if (ManualGaugeDistanceSquared(geom.p1.x, geom.p1.y, mouse_x, mouse_y) <= r2)
-        return GaugeHandleType::LineP1;
-
-    if (ManualGaugeDistanceSquared(geom.center.x, geom.center.y, mouse_x, mouse_y) <= r2)
-        return GaugeHandleType::LineCenter;
-
-    if (ManualGaugeDistanceSquared(geom.w_plus.x, geom.w_plus.y, mouse_x, mouse_y) <= r2)
-        return GaugeHandleType::LineWidthPlus;
-
-    if (ManualGaugeDistanceSquared(geom.w_minus.x, geom.w_minus.y, mouse_x, mouse_y) <= r2)
-        return GaugeHandleType::LineWidthMinus;
+    if (ManualGaugeDistanceSquared(geom.outerHandle.x, geom.outerHandle.y,
+                                   mouse_x, mouse_y) <= r2) {
+      return GaugeHandleType::CircleOuter;
+    }
 
     return GaugeHandleType::None;
+  }
+
+  if (!gauge.has_line_gauge)
+    return GaugeHandleType::None;
+
+  LineGaugeGeometry geom = BuildLineGaugeGeometry(gauge);
+  if (!geom.valid)
+    return GaugeHandleType::None;
+
+  if (ManualGaugeDistanceSquared(geom.p0.x, geom.p0.y, mouse_x, mouse_y) <= r2)
+    return GaugeHandleType::LineP0;
+
+  if (ManualGaugeDistanceSquared(geom.p1.x, geom.p1.y, mouse_x, mouse_y) <= r2)
+    return GaugeHandleType::LineP1;
+
+  if (ManualGaugeDistanceSquared(geom.center.x, geom.center.y, mouse_x,
+                                 mouse_y) <= r2)
+    return GaugeHandleType::LineCenter;
+
+  if (ManualGaugeDistanceSquared(geom.w_plus.x, geom.w_plus.y, mouse_x,
+                                 mouse_y) <= r2)
+    return GaugeHandleType::LineWidthPlus;
+
+  if (ManualGaugeDistanceSquared(geom.w_minus.x, geom.w_minus.y, mouse_x,
+                                 mouse_y) <= r2)
+    return GaugeHandleType::LineWidthMinus;
+
+  return GaugeHandleType::None;
 }
 
-inline int ClampCircleRadiusToImage(
-    int cx,
-    int cy,
-    int radius,
-    int imageW,
-    int imageH)
-{
-    const int maxR = std::min(
-        std::min(cx, imageW - 1 - cx),
-        std::min(cy, imageH - 1 - cy));
-    return std::clamp(radius, 1, maxR);
+inline int ClampCircleRadiusToImage(int cx, int cy, int radius, int imageW,
+                                    int imageH) {
+  const int maxR =
+      std::min(std::min(cx, imageW - 1 - cx), std::min(cy, imageH - 1 - cy));
+  return std::clamp(radius, 1, maxR);
 }
 
-inline void DragGaugeHandle(
-    ManualGaugeState& gauge,
-    const ManualGaugeState& drag_start_gauge,
-    GaugeHandleType handle,
-    const ImVec2& mouse_image_pos,
-    const ImVec2& drag_start_mouse_image,
-    bool shift_down,
-    int imageW = 0,
-    int imageH = 0)
-{
-    if (gauge.tool == "Findcircle" || gauge.has_circle_gauge)
-    {
-        if (!gauge.has_circle_gauge)
-            return;
+inline void DragGaugeHandle(ManualGaugeState &gauge,
+                            const ManualGaugeState &drag_start_gauge,
+                            GaugeHandleType handle,
+                            const ImVec2 &mouse_image_pos,
+                            const ImVec2 &drag_start_mouse_image,
+                            bool shift_down, int imageW = 0, int imageH = 0) {
+  if (gauge.tool == "Findcircle" || gauge.has_circle_gauge) {
+    if (!gauge.has_circle_gauge)
+      return;
 
-        switch (handle)
-        {
-        case GaugeHandleType::CircleCenter:
-        {
-            const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
-            const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
-            gauge.circle_cx = drag_start_gauge.circle_cx + static_cast<int>(std::round(dx));
-            gauge.circle_cy = drag_start_gauge.circle_cy + static_cast<int>(std::round(dy));
-            gauge.circle_px = drag_start_gauge.circle_px + static_cast<int>(std::round(dx));
-            gauge.circle_py = drag_start_gauge.circle_py + static_cast<int>(std::round(dy));
-            break;
-        }
-        case GaugeHandleType::CircleRadius:
-        {
-            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
-            int r = std::max(1, static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
-
-            if (imageW > 0 && imageH > 0)
-                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
-
-            gauge.radius = r;
-            gauge.circle_px = drag_start_gauge.circle_cx + r;
-            gauge.circle_py = drag_start_gauge.circle_cy;
-
-            break;
-        }
-        case GaugeHandleType::CircleInner:
-        {
-            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
-            int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
-
-            if (imageW > 0 && imageH > 0)
-                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
-
-            const CircleGaugeGeometry startGeom =
-                BuildCircleGaugeGeometry(drag_start_gauge);
-            r = std::min(
-                r,
-                std::max(1, static_cast<int>(std::round(startGeom.outerRadius)) - 1));
-            gauge.inner_radius = std::max(1, r);
-            break;
-        }
-        case GaugeHandleType::CircleOuter:
-        {
-            float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
-            float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
-            int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
-
-            if (imageW > 0 && imageH > 0)
-                r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx, drag_start_gauge.circle_cy, r, imageW, imageH);
-
-            const CircleGaugeGeometry startGeom =
-                BuildCircleGaugeGeometry(drag_start_gauge);
-            r = std::max(
-                r,
-                static_cast<int>(std::round(startGeom.innerRadius)) + 1);
-            gauge.outer_radius = std::max(1, r);
-            break;
-        }
-        default:
-            break;
-        }
+    switch (handle) {
+    case GaugeHandleType::CircleCenter: {
+      const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
+      const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
+      gauge.circle_cx =
+          drag_start_gauge.circle_cx + static_cast<int>(std::round(dx));
+      gauge.circle_cy =
+          drag_start_gauge.circle_cy + static_cast<int>(std::round(dy));
+      gauge.circle_px =
+          drag_start_gauge.circle_px + static_cast<int>(std::round(dx));
+      gauge.circle_py =
+          drag_start_gauge.circle_py + static_cast<int>(std::round(dy));
+      break;
     }
-    else
-    {
-        if (!gauge.has_line_gauge)
-            return;
+    case GaugeHandleType::CircleRadius: {
+      float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+      float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
+      int r = std::max(
+          1, static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy))));
 
-        switch (handle)
-        {
-        case GaugeHandleType::LineP0:
-            gauge.line_x0 = static_cast<int>(std::round(mouse_image_pos.x));
-            gauge.line_y0 = static_cast<int>(std::round(mouse_image_pos.y));
-            gauge.line_x1 = drag_start_gauge.line_x1;
-            gauge.line_y1 = drag_start_gauge.line_y1;
-            break;
+      if (imageW > 0 && imageH > 0)
+        r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx,
+                                     drag_start_gauge.circle_cy, r, imageW,
+                                     imageH);
 
-        case GaugeHandleType::LineP1:
-            gauge.line_x0 = drag_start_gauge.line_x0;
-            gauge.line_y0 = drag_start_gauge.line_y0;
-            gauge.line_x1 = static_cast<int>(std::round(mouse_image_pos.x));
-            gauge.line_y1 = static_cast<int>(std::round(mouse_image_pos.y));
-            break;
+      gauge.radius = r;
+      gauge.circle_px = drag_start_gauge.circle_cx + r;
+      gauge.circle_py = drag_start_gauge.circle_cy;
 
-        case GaugeHandleType::LineCenter:
-        {
-            const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
-            const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
+      break;
+    }
+    case GaugeHandleType::CircleInner: {
+      float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+      float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
+      int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
 
-            gauge.line_x0 = drag_start_gauge.line_x0 + static_cast<int>(std::round(dx));
-            gauge.line_y0 = drag_start_gauge.line_y0 + static_cast<int>(std::round(dy));
-            gauge.line_x1 = drag_start_gauge.line_x1 + static_cast<int>(std::round(dx));
-            gauge.line_y1 = drag_start_gauge.line_y1 + static_cast<int>(std::round(dy));
-            break;
-        }
+      if (imageW > 0 && imageH > 0)
+        r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx,
+                                     drag_start_gauge.circle_cy, r, imageW,
+                                     imageH);
 
-        case GaugeHandleType::LineWidthPlus:
-        case GaugeHandleType::LineWidthMinus:
-        {
-            LineGaugeGeometry geom = BuildLineGaugeGeometry(drag_start_gauge);
-            if (!geom.valid)
-                return;
+      const CircleGaugeGeometry startGeom =
+          BuildCircleGaugeGeometry(drag_start_gauge);
+      r = std::min(
+          r,
+          std::max(1, static_cast<int>(std::round(startGeom.outerRadius)) - 1));
+      gauge.inner_radius = std::max(1, r);
+      break;
+    }
+    case GaugeHandleType::CircleOuter: {
+      float dx = mouse_image_pos.x - (float)drag_start_gauge.circle_cx;
+      float dy = mouse_image_pos.y - (float)drag_start_gauge.circle_cy;
+      int r = static_cast<int>(std::round(std::sqrt(dx * dx + dy * dy)));
 
-            const float fromCenterX = mouse_image_pos.x - geom.center.x;
-            const float fromCenterY = mouse_image_pos.y - geom.center.y;
-            const float signedDistance = fromCenterX * geom.normal.x + fromCenterY * geom.normal.y;
-            const int newHalfWidth = std::max(1, static_cast<int>(std::round(std::abs(signedDistance))));
-            gauge.tool_half_width = newHalfWidth;
+      if (imageW > 0 && imageH > 0)
+        r = ClampCircleRadiusToImage(drag_start_gauge.circle_cx,
+                                     drag_start_gauge.circle_cy, r, imageW,
+                                     imageH);
 
-            gauge.line_x0 = drag_start_gauge.line_x0;
-            gauge.line_y0 = drag_start_gauge.line_y0;
-            gauge.line_x1 = drag_start_gauge.line_x1;
-            gauge.line_y1 = drag_start_gauge.line_y1;
-            break;
-        }
+      const CircleGaugeGeometry startGeom =
+          BuildCircleGaugeGeometry(drag_start_gauge);
+      r = std::max(r, static_cast<int>(std::round(startGeom.innerRadius)) + 1);
+      gauge.outer_radius = std::max(1, r);
+      break;
+    }
+    default:
+      break;
+    }
+  } else {
+    if (!gauge.has_line_gauge)
+      return;
 
-        default:
-            break;
-        }
+    switch (handle) {
+    case GaugeHandleType::LineP0:
+      gauge.line_x0 = static_cast<int>(std::round(mouse_image_pos.x));
+      gauge.line_y0 = static_cast<int>(std::round(mouse_image_pos.y));
+      gauge.line_x1 = drag_start_gauge.line_x1;
+      gauge.line_y1 = drag_start_gauge.line_y1;
+      break;
+
+    case GaugeHandleType::LineP1:
+      gauge.line_x0 = drag_start_gauge.line_x0;
+      gauge.line_y0 = drag_start_gauge.line_y0;
+      gauge.line_x1 = static_cast<int>(std::round(mouse_image_pos.x));
+      gauge.line_y1 = static_cast<int>(std::round(mouse_image_pos.y));
+      break;
+
+    case GaugeHandleType::LineCenter: {
+      const float dx = mouse_image_pos.x - drag_start_mouse_image.x;
+      const float dy = mouse_image_pos.y - drag_start_mouse_image.y;
+
+      gauge.line_x0 =
+          drag_start_gauge.line_x0 + static_cast<int>(std::round(dx));
+      gauge.line_y0 =
+          drag_start_gauge.line_y0 + static_cast<int>(std::round(dy));
+      gauge.line_x1 =
+          drag_start_gauge.line_x1 + static_cast<int>(std::round(dx));
+      gauge.line_y1 =
+          drag_start_gauge.line_y1 + static_cast<int>(std::round(dy));
+      break;
     }
 
-    gauge.dirty = true;
-    gauge.accepted = false;
-    gauge.review_status = "editing";
+    case GaugeHandleType::LineWidthPlus:
+    case GaugeHandleType::LineWidthMinus: {
+      LineGaugeGeometry geom = BuildLineGaugeGeometry(drag_start_gauge);
+      if (!geom.valid)
+        return;
+
+      const float fromCenterX = mouse_image_pos.x - geom.center.x;
+      const float fromCenterY = mouse_image_pos.y - geom.center.y;
+      const float signedDistance =
+          fromCenterX * geom.normal.x + fromCenterY * geom.normal.y;
+      const int newHalfWidth =
+          std::max(1, static_cast<int>(std::round(std::abs(signedDistance))));
+      gauge.tool_half_width = newHalfWidth;
+
+      gauge.line_x0 = drag_start_gauge.line_x0;
+      gauge.line_y0 = drag_start_gauge.line_y0;
+      gauge.line_x1 = drag_start_gauge.line_x1;
+      gauge.line_y1 = drag_start_gauge.line_y1;
+      break;
+    }
+
+    default:
+      break;
+    }
+  }
+
+  gauge.dirty = true;
+  gauge.accepted = false;
+  gauge.review_status = "editing";
 }
 
-static constexpr const char* kCxImageCatalogPath =
+static constexpr const char *kCxImageCatalogPath =
     "cxparser/cxscript/module/cximage/catalog/cximage_catalog.cxsc";
 
 #endif

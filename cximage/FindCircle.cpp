@@ -294,6 +294,45 @@ int ExtendCircleUnwrappedBinaryForFindObject(Image *process_image,
   return extended;
 }
 
+int MergeCircleSeamTailRows(Image *process_image, int process_width,
+                            int line_count, int tail_rows) {
+  if (process_image == nullptr || process_width <= 0 || line_count <= 0 ||
+      tail_rows <= 0)
+    return 0;
+
+  cv::Mat &mat = process_image->getmat();
+  if (mat.empty())
+    return 0;
+
+  const int copy_width = std::min(process_width, mat.cols);
+  const int wrap_rows = std::min(std::max(0, tail_rows), line_count);
+  if (copy_width <= 0 || wrap_rows <= 0)
+    return 0;
+
+  int merged = 0;
+  const int channels = mat.channels();
+  for (int pad = 0; pad < wrap_rows; ++pad) {
+    const int src_row = line_count + pad;
+    const int dst_row = pad;
+    if (src_row < 0 || src_row >= mat.rows || dst_row < 0 ||
+        dst_row >= mat.rows)
+      continue;
+
+    for (int x = 0; x < copy_width; ++x) {
+      uchar *dst = mat.ptr<uchar>(dst_row) + x * channels;
+      const uchar *src = mat.ptr<uchar>(src_row) + x * channels;
+      for (int channel = 0; channel < channels; ++channel) {
+        if (src[channel] > dst[channel]) {
+          dst[channel] = src[channel];
+          ++merged;
+        }
+      }
+    }
+  }
+
+  return merged;
+}
+
 int CountCircleForegroundPixels(const cv::Mat &mat, int process_width,
                                 int line_count) {
   if (mat.empty() || process_width <= 0 || line_count <= 0)
@@ -1000,7 +1039,16 @@ void FindCircle::Measure(Image &image) {
     return;
   }
 
-  if (isize + 5 > g_pbackimage->getHeight() ||
+  // roi_7blur_gap_mud_thre_bw writes its blur result to y-1 and its binary
+  // result back to y+1. Two leading rows keep every Gauge line aligned with
+  // its final binary row; the processed block is normalized to row zero below.
+  constexpr int process_row_offset = 2;
+  const int circular_tail_rows = std::min(5, isize);
+  const int process_data_rows = isize + circular_tail_rows;
+  const int process_roi_rows = process_row_offset + process_data_rows;
+  const int process_required_rows = process_roi_rows + 2;
+
+  if (process_required_rows > g_pbackimage->getHeight() ||
       iprocessw + 3 > g_pbackimage->getWidth()) {
     m_lastMeasureGeometryDebug.failure_stage =
         "circle_scan_workspace_capacity_exceeded";
@@ -1037,12 +1085,11 @@ void FindCircle::Measure(Image &image) {
           image.getmat().channels(), m_icentx, m_icenty, m_ipax, m_ipay, isize,
           iprocessw, g_pbackimage->getWidth(), g_pbackimage->getHeight()));
 
-  
   {
     cv::Mat &backMat = g_pbackimage->getmat();
     if (!backMat.empty()) {
       const int clearWidth = std::min(iprocessw + 3, backMat.cols);
-      const int clearHeight = std::min(isize + 5, backMat.rows);
+      const int clearHeight = std::min(process_required_rows, backMat.rows);
       if (clearWidth > 0 && clearHeight > 0) {
         backMat(cv::Rect(0, 0, clearWidth, clearHeight))
             .setTo(cv::Scalar(0, 0, 0));
@@ -1077,14 +1124,15 @@ void FindCircle::Measure(Image &image) {
   };
 
   for (int i = 0; i < isize; i++) {
-    m_lines[i].linecopyex(image, *g_pbackimage, 0, i);
+    m_lines[i].linecopyex(image, *g_pbackimage, 0,
+                          process_row_offset + i);
   }
 
-  
   {
     int clipped_lines = 0;
     int extended_samples = 0;
     for (int row = 0; row < isize; ++row) {
+      const int cache_row = process_row_offset + row;
       int first_valid = -1;
       int last_valid = -1;
       for (int x = 0; x < ilineslen1; ++x) {
@@ -1095,16 +1143,14 @@ void FindCircle::Measure(Image &image) {
         last_valid = x;
       }
 
-      if (row >= 0 && row < static_cast<int>(source_valid_begin.size())) {
-        source_valid_begin[static_cast<std::size_t>(row)] = first_valid;
-        source_valid_end[static_cast<std::size_t>(row)] = last_valid;
-      }
+      source_valid_begin[static_cast<std::size_t>(row)] = first_valid;
+      source_valid_end[static_cast<std::size_t>(row)] = last_valid;
 
       if (first_valid < 0 || last_valid < first_valid) {
         for (int x = 0; x < ilineslen1; ++x) {
-          if (x >= 0 && x < g_pbackimage->getWidth() && row >= 0 &&
-              row < g_pbackimage->getHeight()) {
-            g_pbackimage->setPixel(x, row, cv::Vec3b(0, 0, 0));
+          if (x >= 0 && x < g_pbackimage->getWidth() && cache_row >= 0 &&
+              cache_row < g_pbackimage->getHeight()) {
+            g_pbackimage->setPixel(x, cache_row, cv::Vec3b(0, 0, 0));
           }
         }
         ++clipped_lines;
@@ -1112,24 +1158,23 @@ void FindCircle::Measure(Image &image) {
         continue;
       }
 
-      if (first_valid > 0 || last_valid < ilineslen1 - 1) {
+      if (first_valid > 0 || last_valid < ilineslen1 - 1)
         ++clipped_lines;
-      }
 
-      const cv::Vec3b left_value = g_pbackimage->pixel(first_valid, row);
+      const cv::Vec3b left_value =
+          g_pbackimage->pixel(first_valid, cache_row);
       for (int x = 0; x < first_valid; ++x) {
-        if (x >= 0 && x < g_pbackimage->getWidth() && row >= 0 &&
-            row < g_pbackimage->getHeight()) {
-          g_pbackimage->setPixel(x, row, left_value);
+        if (x >= 0 && x < g_pbackimage->getWidth()) {
+          g_pbackimage->setPixel(x, cache_row, left_value);
           ++extended_samples;
         }
       }
 
-      const cv::Vec3b right_value = g_pbackimage->pixel(last_valid, row);
+      const cv::Vec3b right_value =
+          g_pbackimage->pixel(last_valid, cache_row);
       for (int x = last_valid + 1; x < ilineslen1; ++x) {
-        if (x >= 0 && x < g_pbackimage->getWidth() && row >= 0 &&
-            row < g_pbackimage->getHeight()) {
-          g_pbackimage->setPixel(x, row, right_value);
+        if (x >= 0 && x < g_pbackimage->getWidth()) {
+          g_pbackimage->setPixel(x, cache_row, right_value);
           ++extended_samples;
         }
       }
@@ -1146,36 +1191,34 @@ void FindCircle::Measure(Image &image) {
     }
   }
 
-  
   {
     cv::Mat &backMat = g_pbackimage->getmat();
-    const int wrapRows = std::min(5, isize);
     const int copyWidth =
         std::min(iprocessw, backMat.empty() ? 0 : backMat.cols);
     if (!backMat.empty() && copyWidth > 0) {
-      for (int pad = 0; pad < wrapRows; ++pad) {
-        const int dstRow = isize + pad;
-        const int srcRow = pad;
-        if (srcRow < 0 || srcRow >= backMat.rows || dstRow < 0 ||
-            dstRow >= backMat.rows) {
-          continue;
-        }
+      for (int pad = 0; pad < circular_tail_rows; ++pad) {
+        const int srcRow = process_row_offset + pad;
+        const int dstRow = process_row_offset + isize + pad;
         backMat(cv::Rect(0, srcRow, copyWidth, 1))
             .copyTo(backMat(cv::Rect(0, dstRow, copyWidth, 1)));
       }
     }
   }
 
-  LogFindCircleMeasureProbe("measure_after_linecopyex", "running",
-                            "linecopyex complete; circular tail padding rows=" +
-                                std::to_string(std::min(5, isize)));
+  LogFindCircleMeasureProbe(
+      "measure_after_linecopyex", "running",
+      "linecopyex complete; row_offset=" +
+          std::to_string(process_row_offset) +
+          ", circular tail padding rows=" +
+          std::to_string(circular_tail_rows));
   if (stage_limit == 3)
     return;
 
-  LogFindCircleMeasureProbe("measure_before_backimage_roi", "running",
-                            "setroi=(0,0," + std::to_string(iprocessw + 3) +
-                                "," + std::to_string(isize + 5) + ")");
-  g_pbackimage->setroi(0, 0, iprocessw + 3, isize + 5);
+  LogFindCircleMeasureProbe(
+      "measure_before_backimage_roi", "running",
+      "setroi=(0,0," + std::to_string(iprocessw + 3) + "," +
+          std::to_string(process_roi_rows) + ")");
+  g_pbackimage->setroi(0, 0, iprocessw + 3, process_roi_rows);
   LogFindCircleMeasureProbe(
       "measure_before_blur_threshold", "running",
       "threshold=" + std::to_string(m_iThreshold) +
@@ -1184,8 +1227,32 @@ void FindCircle::Measure(Image &image) {
           ", method=" + std::to_string(m_iMethod));
   g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate,
                                           m_iSelectPointGap, m_iMethod);
-  LogFindCircleMeasureProbe("measure_after_blur_threshold", "running",
-                            "blur/threshold complete");
+
+  int normalized_rows = 0;
+  {
+    cv::Mat &backMat = g_pbackimage->getmat();
+    const int normalize_width = std::min(iprocessw + 3, backMat.cols);
+    if (!backMat.empty() && normalize_width > 0 && process_data_rows > 0 &&
+        process_row_offset + process_data_rows <= backMat.rows) {
+      cv::Mat normalized =
+          backMat(cv::Rect(0, process_row_offset, normalize_width,
+                           process_data_rows))
+              .clone();
+      normalized.copyTo(
+          backMat(cv::Rect(0, 0, normalize_width, process_data_rows)));
+      normalized_rows = process_data_rows;
+    }
+  }
+
+  const int seam_values_merged = MergeCircleSeamTailRows(
+      g_pbackimage, iprocessw, isize, circular_tail_rows);
+  LogFindCircleMeasureProbe(
+      "measure_after_blur_threshold", "running",
+      "blur/threshold complete; row_offset=" +
+          std::to_string(process_row_offset) +
+          ", normalized_rows=" + std::to_string(normalized_rows) +
+          ", seam_tail_rows=" + std::to_string(circular_tail_rows) +
+          ", merged_values=" + std::to_string(seam_values_merged));
   if (stage_limit == 4)
     return;
 
@@ -1193,7 +1260,7 @@ void FindCircle::Measure(Image &image) {
   const bool compact_domain = isize <= 24 || ilineslen1 <= 24;
   if (!compact_domain && g_pbackfindobject != nullptr &&
       ShouldApplyCircleObjectPrefilter(m_ifindset, iprocessw, isize)) {
-    const int circular_tail_rows = std::min(5, isize);
+    
     const int prefilter_width = iprocessw + 3;
     const int prefilter_rows = isize + circular_tail_rows;
     const int extended_samples = ExtendCircleUnwrappedBinaryForFindObject(
@@ -1282,6 +1349,15 @@ void FindCircle::Measure(Image &image) {
                                   std::to_string(foreground_after_prefilter) +
                                   ", effective_prefilter_used=" +
                                   std::to_string(m_last_prefilter_used));
+  }
+
+  const int post_prefilter_seam_values_merged = MergeCircleSeamTailRows(
+      g_pbackimage, iprocessw, isize, circular_tail_rows);
+  if (post_prefilter_seam_values_merged > 0) {
+    LogFindCircleMeasureProbe(
+        "measure_after_object_prefilter_seam_merge", "running",
+        "merged_values=" +
+            std::to_string(post_prefilter_seam_values_merged));
   }
 
   if (compact_domain && ShouldBypassCircleMeasurePoints()) {
@@ -1595,8 +1671,7 @@ void FindCircle::Measure(Image &image) {
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - begin_time)
                   .count());
-          std::cout << "[DEBUG MEASURE] progress elapsed_ms=" << elapsed_ms
-                    << ", valid=" << valid_points_count << "\n";
+        icolor = g_pbackimage->pixel(inumx, inumy);
           CxAlgorithmTraceScope::Emit({"FindCircle", "measure", "progress",
                                        "sampling circle edge",
                                        scan_lines_processed, total_samples,
@@ -1604,8 +1679,7 @@ void FindCircle::Measure(Image &image) {
         }
 
         
-        const int sample_y = std::min(inumy + 1, g_pbackimage->getHeight() - 1);
-        icolor = g_pbackimage->pixel(inumx, sample_y);
+        icolor = g_pbackimage->pixel(inumx, inumy);
         if ((icolor[0]) > 0) {
           if (irecordnum < 100) {
             irecordpoint[irecordnum] = inumx;
@@ -2483,13 +2557,41 @@ void FindCircle::fitcircle() {
 
   vector<cv::Point2f> vecResult;
   int isize = ClampSizeToInt(m_measurepoints.size());
+  const bool refined_points_aligned =
+      m_boundaryAnalysis.points.size() ==
+      static_cast<std::size_t>(std::max(0, isize));
+  int subpixel_fit_points = 0;
 
   for (int it = 0; it < isize; it++) {
-    int ix = RoundToInt(m_measurepoints.getx(it));
-    int iy = RoundToInt(m_measurepoints.gety(it));
-    vecResult.push_back(
-        cv::Point2f(static_cast<float>(ix), static_cast<float>(iy)));
+    const double measured_x = m_measurepoints.getx(it);
+    const double measured_y = m_measurepoints.gety(it);
+    double fit_x = measured_x;
+    double fit_y = measured_y;
+
+    if (refined_points_aligned) {
+      const FindCircleBoundaryPointSnapshot &boundary_point =
+          m_boundaryAnalysis.points[static_cast<std::size_t>(it)];
+      const double measured_delta =
+          std::hypot(boundary_point.measured_x - measured_x,
+                     boundary_point.measured_y - measured_y);
+      if (boundary_point.interpolation_valid &&
+          std::isfinite(boundary_point.refined_x) &&
+          std::isfinite(boundary_point.refined_y) &&
+          measured_delta <= 1.0) {
+        fit_x = boundary_point.refined_x;
+        fit_y = boundary_point.refined_y;
+        ++subpixel_fit_points;
+      }
+    }
+
+    vecResult.emplace_back(static_cast<float>(fit_x),
+                           static_cast<float>(fit_y));
   }
+
+  LogFindCircleMeasureProbe(
+      "fitcircle_subpixel_input", "running",
+      "input_points=" + std::to_string(vecResult.size()) +
+          ", refined_points=" + std::to_string(subpixel_fit_points));
   const int min_fit_points =
       ComputeCircleMinFitPoints(static_cast<int>(m_lines.size()));
   if (vecResult.size() < static_cast<size_t>(min_fit_points)) {
@@ -2530,6 +2632,83 @@ void FindCircle::fitcircle() {
     return;
   }
 
+  m_fitfilter_input_count = static_cast<int>(vecResult.size());
+  m_fitfilter_kept_count = m_fitfilter_input_count;
+  m_fitfilter_rejected_count = 0;
+  m_fitfilter_sigma = 0.0;
+  m_fitfilter_threshold = 0.0;
+
+  // A radial scan can hit a terminating straight edge near the ends of a
+  // visible arc. Reject only a small residual minority before the final fit;
+  // this keeps disconnected but circle-consistent arc sections available.
+  if (vecResult.size() >= static_cast<std::size_t>(std::max(6, min_fit_points))) {
+    auto median = [](std::vector<double> values) -> double {
+      if (values.empty())
+        return 0.0;
+      const std::size_t middle = values.size() / 2;
+      std::nth_element(values.begin(), values.begin() + middle, values.end());
+      const double upper = values[middle];
+      if ((values.size() & 1U) != 0U)
+        return upper;
+      std::nth_element(values.begin(), values.begin() + middle - 1,
+                       values.begin() + middle);
+      return 0.5 * (values[middle - 1] + upper);
+    };
+
+    std::vector<double> residuals;
+    residuals.reserve(vecResult.size());
+    for (const cv::Point2f &pt : vecResult) {
+      residuals.push_back(std::abs(
+          std::hypot(static_cast<double>(pt.x) - dOut_x,
+                     static_cast<double>(pt.y) - dOut_y) -
+          dradiusOut));
+    }
+
+    const double residual_median = median(residuals);
+    std::vector<double> deviations;
+    deviations.reserve(residuals.size());
+    for (double residual : residuals)
+      deviations.push_back(std::abs(residual - residual_median));
+
+    m_fitfilter_sigma = 1.4826 * median(deviations);
+    m_fitfilter_threshold =
+        std::max(1.5, residual_median + 3.0 * m_fitfilter_sigma);
+
+    std::vector<cv::Point2f> filtered;
+    filtered.reserve(vecResult.size());
+    for (std::size_t i = 0; i < vecResult.size(); ++i) {
+      if (residuals[i] <= m_fitfilter_threshold)
+        filtered.push_back(vecResult[i]);
+    }
+
+    const bool enough_inliers =
+        filtered.size() >= static_cast<std::size_t>(min_fit_points) &&
+        filtered.size() * 3 >= vecResult.size() * 2;
+    if (enough_inliers && filtered.size() < vecResult.size()) {
+      const auto [filtered_center, filtered_radius] =
+          Image::CircleFit_(filtered);
+      if (std::isfinite(filtered_center.x) &&
+          std::isfinite(filtered_center.y) &&
+          std::isfinite(filtered_radius) && filtered_radius > 0.0) {
+        vecResult.swap(filtered);
+        center = filtered_center;
+        radius = filtered_radius;
+        dOut_x = filtered_center.x;
+        dOut_y = filtered_center.y;
+        dradiusOut = filtered_radius;
+
+        m_measurepoints.clear();
+        for (const cv::Point2f &pt : vecResult)
+          m_measurepoints.addpoint(gp_Pnt(pt.x, pt.y, 0.0));
+      }
+    }
+
+    m_fitfilter_kept_count = static_cast<int>(vecResult.size());
+    m_fitfilter_rejected_count =
+        m_fitfilter_input_count - m_fitfilter_kept_count;
+    isize = ClampSizeToInt(m_measurepoints.size());
+  }
+
   m_point_consistency_input_count = static_cast<int>(vecResult.size());
   m_point_consistency_output_count = m_point_consistency_input_count;
   m_point_consistency_removed_count = 0;
@@ -2562,8 +2741,7 @@ void FindCircle::fitcircle() {
 
         m_measurepoints.clear();
         for (const cv::Point2f &pt : vecResult)
-          m_measurepoints.addpoint(static_cast<int>(std::lround(pt.x)),
-                                   static_cast<int>(std::lround(pt.y)));
+          m_measurepoints.addpoint(gp_Pnt(pt.x, pt.y, 0.0));
       }
     }
 
@@ -2583,25 +2761,16 @@ void FindCircle::fitcircle() {
   m_dresultcenty = dOut_y;
   m_dradius = radius;
 
-  gp_Pnt acenter;
-  acenter.SetX(m_dresultcentx);
-  acenter.SetY(m_dresultcenty);
-
-  GeomAdaptor_Curve acurve = GetCurve(acenter, m_dradius);
-
-  LineShape aline1;
-  double dtotaldis = 0;
-  for (int it = 0; it < isize; it++) {
-    int ix = RoundToInt(m_measurepoints.getx(it));
-    int iy = RoundToInt(m_measurepoints.gety(it));
-    gp_Pnt aexternalPoint;
-    aexternalPoint.SetX(ix);
-    aexternalPoint.SetY(iy);
-    gp_Pnt apoint = FindClosestPointOnCurve(acurve, aexternalPoint);
-    double dist = distance(aexternalPoint, apoint);
-    dtotaldis = dtotaldis + dist;
+  double dtotaldis = 0.0;
+  for (const cv::Point2f &point : vecResult) {
+    dtotaldis += std::abs(
+        std::hypot(static_cast<double>(point.x) - m_dresultcentx,
+                   static_cast<double>(point.y) - m_dresultcenty) -
+        m_dradius);
   }
-  m_avgdist = dtotaldis / isize;
+  m_avgdist = vecResult.empty()
+                  ? 0.0
+                  : dtotaldis / static_cast<double>(vecResult.size());
   if (!std::isfinite(m_avgdist)) {
     m_dresultcentx = 0.0;
     m_dresultcenty = 0.0;

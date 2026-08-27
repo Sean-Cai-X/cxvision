@@ -211,22 +211,43 @@ static void FillRuntimeObjectFromFindCircle(RuntimeObjectView &object,
       circle.getpointconsistencyoutputcount();
   object.circle_point_consistency_removed_points =
       circle.getpointconsistencyremovedcount();
+
+  const FindCircleBoundaryAnalysisSnapshot precision =
+      circle.boundaryanalysissnapshot();
+  object.circle_boundary_status = precision.status;
+  object.circle_boundary_reliability_level = precision.reliability_level;
+  object.circle_boundary_expected_scan_count = precision.expected_scan_count;
+  object.circle_boundary_accepted_point_count = precision.accepted_point_count;
+  object.circle_boundary_refined_point_count =
+      precision.interpolation_valid_count;
+  object.circle_boundary_coverage_ratio = precision.coverage_ratio;
+  object.circle_boundary_subpixel_offset_mean =
+      precision.subpixel_offset_mean;
+  object.circle_boundary_subpixel_offset_stddev =
+      precision.subpixel_offset_stddev;
+  object.circle_boundary_localization_sigma_mean_px =
+      precision.localization_sigma_mean_px;
+  object.circle_boundary_residual_rmse_px = precision.residual_rmse_px;
+  object.circle_boundary_residual_p95_px = precision.residual_p95_px;
+  object.circle_boundary_residual_max_px = precision.residual_max_px;
+  object.circle_boundary_outlier_ratio = precision.outlier_ratio;
+  object.circle_boundary_reliability_score = precision.reliability_score;
   object.circle_scan_lines_processed = debug.scan_lines_processed;
   object.circle_total_samples = debug.total_samples;
   object.circle_elapsed_ms = debug.elapsed_ms;
-  if (object.has_fit_result) {
-    object.fit_cx = static_cast<float>(circle.getresultcentx());
-    object.fit_cy = static_cast<float>(circle.getresultcenty());
-    object.fit_radius = static_cast<float>(circle.getradius());
-    object.fit_avgdist = static_cast<float>(circle.getavgdist());
-    object.runtime_state = "geometry_result_available";
-    object.last_runtime_status = "runtime_executed";
-  } else if (object.has_measure_points) {
-    object.runtime_state = "fitcircle_degenerate_after_measure_points";
-    object.last_runtime_status = "PENDING_BINDING";
-  } else {
-    object.runtime_state = "fitcircle_pending_binding";
-    object.last_runtime_status = "PENDING_BINDING";
+  if (object.has_fit_result) {
+    object.fit_cx = static_cast<float>(circle.getresultcentx());
+    object.fit_cy = static_cast<float>(circle.getresultcenty());
+    object.fit_radius = static_cast<float>(circle.getradius());
+    object.fit_avgdist = static_cast<float>(circle.getavgdist());
+    object.runtime_state = "geometry_result_available";
+    object.last_runtime_status = "runtime_executed";
+  } else if (object.has_measure_points) {
+    object.runtime_state = "fitcircle_degenerate_after_measure_points";
+    object.last_runtime_status = "PENDING_BINDING";
+  } else {
+    object.runtime_state = "fitcircle_pending_binding";
+    object.last_runtime_status = "PENDING_BINDING";
   }
 
   object.display_summary = BuildFindCircleGeometrySummary(object);
@@ -1734,6 +1755,10 @@ void ViewController::drawManualStateTestConsole() {
   }
 
   ImGui::Text("Script: %s", m_manualTest.loaded_script_path.c_str());
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::ManualScriptConsole,
+      "Manual State Test Console > script editor and debug compiler");
+
   ImGui::Text("Image: %s", m_manualTest.image_file_path.c_str());
   ImGui::Text("Run State: %s", m_manualTest.run_state.c_str());
   ImGui::Text("Debug Status: %s", m_manualTest.debug_status.c_str());
@@ -1765,6 +1790,9 @@ void ViewController::drawKeyParameterControlsWindow() {
     return;
   }
 
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::KeyParameters,
+      "Key Parameter Controls > active tool parameter controls");
   if (IsTorchContext(m_manualTest) &&
       !IsFindLineFindCircleContext(m_manualTest)) {
     std::string promptSyncReason;
@@ -1860,6 +1888,9 @@ void ViewController::drawMetrologyAnalyticsSmokeWindow() {
     return;
   }
 
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::AnalyticsSmoke,
+      "Analytics Smoke / Metrology Bridge > analytics controls");
   cxvision::metrology_analytics::DrawManualConsoleAnalyticsSmokePanel(
       m_manualTest.analytics_smoke_ui);
 
@@ -1880,6 +1911,9 @@ void ViewController::drawTorchRuntimeEvidenceWindow() {
                      "visibility.");
   ImGui::Separator();
 
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::TorchRuntimeEvidence,
+      "Torch Runtime / Evidence > runtime status and review controls");
   DrawTorchKeyStatusPanel(m_manualTest);
   ImGui::Separator();
   DrawTorchEvidenceAndReviewPanel(m_manualTest);
@@ -1896,6 +1930,9 @@ void ViewController::drawParameterTuningAndConclusionWindow() {
     return;
   }
 
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::ParameterConclusion,
+      "Parameter Tuning Map / Result Conclusion > first available control");
   if (IsFindLineFindCircleContext(m_manualTest)) {
     DrawParamTuningScatterPanel(m_manualTest);
   }

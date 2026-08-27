@@ -3878,8 +3878,8 @@ static int AppendCxScriptEvidenceChainFilesLocal(
             BuildDefaultEvidenceParamSummaryForScript(thumb.script_path);
       }
 
+      ApplyHDReferenceImageBindingLocal(thumb);
       if (thumb.workflow_id.empty()) {
-        ApplyHDReferenceImageBindingLocal(thumb);
         AssignFallbackImageToThumb(thumb, fallbackImages,
                                    fallbackImageIndexByPool);
       }
@@ -5143,22 +5143,29 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                                                           lockedParamReason)) {
       if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
               staged, resolved.parameter_summary, lockedParamReason)) {
-        return abortSelection("parameter_summary_apply",
-                              "failed to apply evidence locked parameters: " +
-                                  lockedParamReason);
+        const std::string unsupportedPrefix =
+            "no supported key=value token found in parameter summary:";
+        if (lockedParamReason.rfind(unsupportedPrefix, 0) == 0) {
+          parameterSource = "evidence_metadata";
+        } else {
+          return abortSelection(
+              "parameter_summary_apply",
+              "failed to apply evidence locked parameters: " +
+                  lockedParamReason);
+        }
+      } else {
+        SyncEvidenceLockedGlobalsToManualGaugeLocal(
+            staged, resolved.script_path, "evidence_locked",
+            resolved.primary_object_type, resolved.primary_object_name,
+            resolved.primary_object_status);
+        staged.current_evidence_selection.primary_object_type =
+            staged.current_gauge.primary_object_type;
+        staged.current_evidence_selection.primary_object_name =
+            staged.current_gauge.primary_object_name;
+        staged.current_evidence_selection.primary_object_status =
+            staged.current_gauge.primary_object_status;
+        parameterSource = "evidence_parameter_snapshot";
       }
-
-      SyncEvidenceLockedGlobalsToManualGaugeLocal(
-          staged, resolved.script_path, "evidence_locked",
-          resolved.primary_object_type, resolved.primary_object_name,
-          resolved.primary_object_status);
-      staged.current_evidence_selection.primary_object_type =
-          staged.current_gauge.primary_object_type;
-      staged.current_evidence_selection.primary_object_name =
-          staged.current_gauge.primary_object_name;
-      staged.current_evidence_selection.primary_object_status =
-          staged.current_gauge.primary_object_status;
-      parameterSource = "evidence_parameter_snapshot";
     }
   }
 
@@ -5716,6 +5723,62 @@ IsEvidenceSelectionImageSetLocal(const CxEvidenceSelectionSnapshot &sel) {
       return true;
   }
   return false;
+}
+
+struct EvidenceReferencePolicyLocal {
+  bool matched = false;
+  bool training_enabled = false;
+  std::string display_name;
+  std::string task;
+  std::string case_track;
+  std::string annotation_contract_id;
+  std::string model_track_id;
+  std::string evaluator_id;
+  std::string binding_status;
+  std::string label_semantics;
+};
+
+static EvidenceReferencePolicyLocal EvidenceReferencePolicyForSelectionLocal(
+    const CxEvidenceSelectionSnapshot &sel) {
+  EvidenceReferencePolicyLocal policy;
+  const std::filesystem::path manifestPath = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/torch/hd_reference/"
+      "hd_reference_image_sets.json");
+  cv::FileStorage storage(manifestPath.string(), cv::FileStorage::READ);
+  if (!storage.isOpened())
+    return policy;
+
+  std::string schema;
+  storage["schema"] >> schema;
+  if (schema != "cxvision.hd_reference_image_sets.v2")
+    return policy;
+
+  for (const auto &set : storage["sets"]) {
+    if (!EvidenceSelectionMatchesReferenceSetLocal(sel, set))
+      continue;
+    int trainingEnabled = 0;
+    set["training_enabled"] >> trainingEnabled;
+    set["display_name"] >> policy.display_name;
+    set["task"] >> policy.task;
+    set["case_track"] >> policy.case_track;
+    set["annotation_contract_id"] >> policy.annotation_contract_id;
+    set["model_track_id"] >> policy.model_track_id;
+    set["evaluator_id"] >> policy.evaluator_id;
+    set["binding_status"] >> policy.binding_status;
+    set["label_semantics"] >> policy.label_semantics;
+    policy.matched = true;
+    policy.training_enabled = trainingEnabled != 0;
+    return policy;
+  }
+  return policy;
+}
+
+static bool EvidenceSelectionTrainingEnabledLocal(
+    const CxEvidenceSelectionSnapshot &sel, bool &matched) {
+  const EvidenceReferencePolicyLocal policy =
+      EvidenceReferencePolicyForSelectionLocal(sel);
+  matched = policy.matched;
+  return policy.training_enabled;
 }
 
 void ViewController::CaptureCurrentTorchTrainingAnnotationState() {
@@ -7412,6 +7475,9 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     return;
   }
 
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::TorchTrainingImageSet,
+      "Torch Training Image Set > dataset actions and image rails");
   ImGui::TextWrapped(
       "Training/validation/test image rails for Torch evidence review. "
       "Click a thumbnail to load it into Image View. Labels are operator "
@@ -7431,6 +7497,213 @@ void ViewController::drawTorchTrainingImageSetWindow() {
 
   const CxTorchTrainingRunBinding &trainingRun =
       m_manualTest.torch_training_run;
+  const CxEvidenceSelectionSnapshot &chainSelection =
+      m_manualTest.current_evidence_selection;
+  const EvidenceReferencePolicyLocal chainPolicy =
+      EvidenceReferencePolicyForSelectionLocal(chainSelection);
+
+  const TorchTrainingImageItem *chainImage = nullptr;
+  if (m_manualTest.selected_torch_training_image >= 0 &&
+      m_manualTest.selected_torch_training_image <
+          static_cast<int>(m_manualTest.torch_training_images.size())) {
+    chainImage =
+        &m_manualTest.torch_training_images[static_cast<std::size_t>(
+            m_manualTest.selected_torch_training_image)];
+  }
+
+  std::string chainImagePath = chainSelection.image_path;
+  if (chainImage != nullptr && !chainImage->image_path.empty())
+    chainImagePath = chainImage->image_path;
+  std::error_code chainImageError;
+  const bool chainImageBound =
+      !chainImagePath.empty() &&
+      std::filesystem::is_regular_file(ResolveWorkspaceFile(chainImagePath),
+                                       chainImageError);
+
+  int chainTrainCount = 0;
+  int chainValCount = 0;
+  int chainTestCount = 0;
+  std::size_t chainAnnotationCount = 0;
+  for (const TorchTrainingImageItem &item :
+       m_manualTest.torch_training_images) {
+    if (item.split == "train")
+      ++chainTrainCount;
+    else if (item.split == "val")
+      ++chainValCount;
+    else if (item.split == "test")
+      ++chainTestCount;
+    chainAnnotationCount += item.annotation_shapes.size();
+  }
+  chainAnnotationCount =
+      std::max(chainAnnotationCount, chainSelection.annotations.size());
+
+  const auto chainContains = [](std::string value,
+                                const std::string &token) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) {
+                     return static_cast<char>(std::tolower(ch));
+                   });
+    return value.find(token) != std::string::npos;
+  };
+  const bool chainTrainingBlocked =
+      chainPolicy.matched && !chainPolicy.training_enabled;
+  const bool chainDatasetExported =
+      chainContains(m_manualTest.debug_status, "label_package_to_verify") ||
+      chainContains(m_manualTest.debug_status, "dataset_export_ready");
+  const bool chainBindingPending =
+      chainContains(chainPolicy.binding_status, "pending");
+  const bool chainModelBindingMissing =
+      chainSelection.parent_model_ref.empty() ||
+      chainSelection.child_model_ref.empty();
+
+  const std::string chainReferenceStatus =
+      !chainSelection.valid
+          ? "PENDING_SELECTION"
+          : (!chainPolicy.matched
+                 ? "PENDING_BINDING"
+                 : (chainImageBound ? "READY_TO_VERIFY" : "ASSET_MISSING"));
+  const std::string chainAnnotationStatus =
+      chainAnnotationCount > 0 ? "DRAFT_TO_VERIFY"
+                               : "PENDING_HUMAN_REVIEW";
+  const std::string chainDatasetStatus =
+      chainDatasetExported
+          ? "READY_TO_VERIFY"
+          : (m_manualTest.torch_training_images.empty() ? "PENDING_SYNC"
+                                                        : "STAGED");
+  const std::string chainBaseTrainingStatus =
+      chainTrainingBlocked
+          ? "BLOCKED_POLICY"
+          : (trainingRun.available
+                 ? (trainingRun.status.empty() ? "READY_TO_VERIFY"
+                                               : trainingRun.status)
+                 : "PENDING_RUN");
+  const std::string chainIncrementalStatus =
+      chainTrainingBlocked
+          ? "BLOCKED_POLICY"
+          : (!chainDatasetExported ? "PENDING_DATASET" : "PENDING_RUN");
+  const std::string chainInferenceStatus =
+      (chainBindingPending || chainModelBindingMissing)
+          ? "PENDING_BINDING"
+          : "PENDING_RUN";
+  const std::string chainClosureStatus =
+      (chainBindingPending || chainModelBindingMissing ||
+       chainContains(chainSelection.workflow_status, "pending"))
+          ? "PENDING_BINDING"
+          : "PENDING_HUMAN_REVIEW";
+
+  ImGui::SeparatorText("Evidence Model Test Chain");
+  ImGui::TextWrapped(
+      "Observed asset and runtime state only. PENDING, BLOCKED, STAGED and "
+      "draft stages have not executed the downstream model operation.");
+  if (chainPolicy.matched) {
+    ImGui::Text("track: %s | task: %s",
+                chainPolicy.case_track.empty() ? "-"
+                                               : chainPolicy.case_track.c_str(),
+                chainPolicy.task.empty() ? "-" : chainPolicy.task.c_str());
+  }
+
+  if (ImGui::BeginTable("evidence_model_test_chain", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_Resizable,
+                        ImVec2(-1.0f, 250.0f))) {
+    ImGui::TableSetupColumn("Stage", ImGuiTableColumnFlags_WidthFixed, 118.0f);
+    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 145.0f);
+    ImGui::TableSetupColumn("Evidence", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Allowed control",
+                            ImGuiTableColumnFlags_WidthFixed, 165.0f);
+    ImGui::TableHeadersRow();
+
+    const auto drawChainRow = [](const char *stage, const std::string &status,
+                                 const std::string &evidence,
+                                 const char *control) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(stage);
+      ImGui::TableSetColumnIndex(1);
+      ImVec4 statusColor(0.95f, 0.72f, 0.22f, 1.0f);
+      if (status.find("READY") != std::string::npos)
+        statusColor = ImVec4(0.36f, 0.82f, 0.49f, 1.0f);
+      else if (status.find("MISSING") != std::string::npos ||
+               status.find("FAIL") != std::string::npos)
+        statusColor = ImVec4(0.95f, 0.34f, 0.30f, 1.0f);
+      ImGui::TextColored(statusColor, "%s", status.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextWrapped("%s", evidence.empty() ? "-" : evidence.c_str());
+      ImGui::TableSetColumnIndex(3);
+      ImGui::TextWrapped("%s", control);
+    };
+
+    const std::string referenceEvidence =
+        (chainPolicy.case_track.empty() ? std::string("-")
+                                        : chainPolicy.case_track) +
+        " | " +
+        (chainImagePath.empty()
+             ? std::string("no image")
+             : std::filesystem::path(chainImagePath).filename().string());
+    const std::string annotationEvidence =
+        (chainPolicy.annotation_contract_id.empty()
+             ? std::string("contract unbound")
+             : chainPolicy.annotation_contract_id) +
+        " | shapes=" + std::to_string(chainAnnotationCount);
+    const std::string datasetEvidence =
+        "images=" +
+        std::to_string(m_manualTest.torch_training_images.size()) +
+        " | train=" + std::to_string(chainTrainCount) +
+        " val=" + std::to_string(chainValCount) +
+        " test=" + std::to_string(chainTestCount);
+    const std::string modelEvidence =
+        chainPolicy.model_track_id.empty() ? "model track unbound"
+                                           : chainPolicy.model_track_id;
+    const std::string incrementalEvidence =
+        "parent=" +
+        (chainSelection.parent_model_ref.empty()
+             ? std::string("unbound")
+             : chainSelection.parent_model_ref) +
+        " | child=" +
+        (chainSelection.child_model_ref.empty()
+             ? std::string("unbound")
+             : chainSelection.child_model_ref);
+    const std::string inferenceEvidence =
+        (chainPolicy.evaluator_id.empty() ? std::string("evaluator unbound")
+                                          : chainPolicy.evaluator_id) +
+        " | " +
+        (chainPolicy.binding_status.empty()
+             ? std::string("binding status unavailable")
+             : chainPolicy.binding_status);
+    const std::string closureEvidence =
+        (chainSelection.workflow_id.empty() ? std::string("workflow unbound")
+                                            : chainSelection.workflow_id) +
+        " | " +
+        (chainSelection.workflow_status.empty()
+             ? std::string("status unavailable")
+             : chainSelection.workflow_status);
+
+    drawChainRow("Reference image", chainReferenceStatus, referenceEvidence,
+                 "Sync Selected Evidence Case");
+    drawChainRow("Annotation", chainAnnotationStatus, annotationEvidence,
+                 "Annotation tools");
+    drawChainRow("Dataset", chainDatasetStatus, datasetEvidence,
+                 "Export Training Dataset");
+    drawChainRow("Base training", chainBaseTrainingStatus, modelEvidence,
+                 chainTrainingBlocked ? "Disabled by asset policy"
+                                      : "Training run binding");
+    drawChainRow("Incremental training", chainIncrementalStatus,
+                 incrementalEvidence,
+                 chainTrainingBlocked ? "Disabled by asset policy"
+                                      : "Train DeepLab Incremental");
+    drawChainRow("Inference", chainInferenceStatus, inferenceEvidence,
+                 chainInferenceStatus == "PENDING_BINDING"
+                     ? "No executable control"
+                     : "Run bound inference");
+    drawChainRow("Diagnostic closure", chainClosureStatus, closureEvidence,
+                 "Manual Review / Evidence");
+    ImGui::EndTable();
+  }
+
+  if (!chainPolicy.label_semantics.empty())
+    ImGui::TextWrapped("Annotation semantics: %s",
+                       chainPolicy.label_semantics.c_str());
+  ImGui::Separator();
   if (trainingRun.available &&
       ImGui::CollapsingHeader("Training Run", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::Text("status: %s", trainingRun.status.c_str());
@@ -7610,7 +7883,18 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     }
   }
   ImGui::SameLine();
-  if (ImGui::Button("Train DeepLab Incremental")) {
+  bool trainingAssetMatched = false;
+  const bool trainingAssetEnabled = EvidenceSelectionTrainingEnabledLocal(
+      m_manualTest.current_evidence_selection, trainingAssetMatched);
+  const bool trainingBlockedByAsset =
+      trainingAssetMatched && !trainingAssetEnabled;
+  if (trainingBlockedByAsset)
+    ImGui::BeginDisabled();
+  const bool runIncrementalTraining =
+      ImGui::Button("Train DeepLab Incremental");
+  if (trainingBlockedByAsset)
+    ImGui::EndDisabled();
+  if (runIncrementalTraining) {
     CaptureCurrentTorchTrainingAnnotationState();
     std::string datasetPath;
     std::string operationReason;
@@ -8325,7 +8609,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         const std::string toolHeader =
             tool.label + " (" + std::to_string(tool.rows.size()) + ")";
         ImGuiTreeNodeFlags toolFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-        if (!caseFilter.empty())
+        if (major.label == "To Verify" || !caseFilter.empty())
           toolFlags |= ImGuiTreeNodeFlags_DefaultOpen;
         if (ImGui::TreeNodeEx(toolHeader.c_str(), toolFlags)) {
           for (std::size_t hi = 0; hi < tool.head_folders.size(); ++hi) {
@@ -8338,7 +8622,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
             const std::string headHeader =
                 head.label + " (" + std::to_string(headCount) + ")";
             ImGuiTreeNodeFlags headFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-            if (!caseFilter.empty())
+            if (major.label == "To Verify" || !caseFilter.empty())
               headFlags |= ImGuiTreeNodeFlags_DefaultOpen;
             if (ImGui::TreeNodeEx(headHeader.c_str(), headFlags)) {
               for (const ScriptEvidenceRowRef &ref : head.direct_rows)
@@ -8351,7 +8635,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
                     folder.label + " (" + std::to_string(folder.rows.size()) +
                     ")";
                 ImGuiTreeNodeFlags folderFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-                if (!caseFilter.empty())
+                if (major.label == "To Verify" || !caseFilter.empty())
                   folderFlags |= ImGuiTreeNodeFlags_DefaultOpen;
                 if (ImGui::TreeNodeEx(folderHeader.c_str(), folderFlags)) {
                   for (const ScriptEvidenceRowRef &ref : folder.rows)
@@ -8374,7 +8658,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
                 "Unfoldered Cases (" + std::to_string(tool.direct_rows.size()) +
                 ")";
             ImGuiTreeNodeFlags unfolderedFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-            if (!caseFilter.empty())
+            if (major.label == "To Verify" || !caseFilter.empty())
               unfolderedFlags |= ImGuiTreeNodeFlags_DefaultOpen;
             if (ImGui::TreeNodeEx(unfolderedHeader.c_str(), unfolderedFlags)) {
               for (const ScriptEvidenceRowRef &ref : tool.direct_rows)

@@ -64,6 +64,152 @@ CxHeightDistribution BuildDistribution(const CxSurfaceField& field, double min_z
 }
 }
 
+std::vector<CxHeightPeak> findHeightDistributionPeaks(
+    const CxHeightDistribution& distribution,
+    const CxHeightPeakOptions& options)
+{
+    const std::size_t n = distribution.bin_centers.size();
+    if (distribution.adf.size() != n || distribution.bcdf.size() != n)
+        throw std::invalid_argument(
+            "height distribution vectors must have identical sizes.");
+    if (options.max_peaks <= 0 || n < 3)
+        return {};
+    if (options.min_prominence < 0.0 || options.min_distance_bins < 0)
+        throw std::invalid_argument(
+            "peak prominence and distance must be non-negative.");
+
+    const double curve_max =
+        *std::max_element(distribution.adf.begin(), distribution.adf.end());
+    std::vector<double> signal(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const double value = distribution.adf[i];
+        if (!std::isfinite(value) ||
+            !std::isfinite(distribution.bin_centers[i]))
+            throw std::invalid_argument(
+                "height distribution values must be finite.");
+        signal[i] = options.invert ? curve_max - value : value;
+    }
+
+    std::vector<CxHeightPeak> candidates;
+    for (std::size_t i = 1; i + 1 < n; ++i)
+    {
+        const double y_left = signal[i - 1];
+        const double y = signal[i];
+        const double y_right = signal[i + 1];
+        if (!(y > y_left && y >= y_right))
+            continue;
+
+        double baseline = 0.0;
+        if (options.background == CxHeightPeakBackground::BilateralMinimum)
+        {
+            const double left_min =
+                *std::min_element(signal.begin(), signal.begin() + i + 1);
+            const double right_min =
+                *std::min_element(signal.begin() + i, signal.end());
+            baseline = std::max(left_min, right_min);
+        }
+
+        const double prominence = y - baseline;
+        if (prominence < options.min_prominence || prominence <= 0.0)
+            continue;
+
+        const double denominator = y_left - 2.0 * y + y_right;
+        double sub_bin_offset = 0.0;
+        if (std::abs(denominator) > 1.0e-15)
+        {
+            sub_bin_offset =
+                0.5 * (y_left - y_right) / denominator;
+            sub_bin_offset =
+                std::max(-0.5, std::min(0.5, sub_bin_offset));
+        }
+
+        const double local_step =
+            sub_bin_offset >= 0.0
+                ? distribution.bin_centers[i + 1] -
+                      distribution.bin_centers[i]
+                : distribution.bin_centers[i] -
+                      distribution.bin_centers[i - 1];
+        const double refined_position =
+            distribution.bin_centers[i] + sub_bin_offset * local_step;
+
+        const double half_height = baseline + 0.5 * prominence;
+        std::size_t left = i;
+        while (left > 0 && signal[left] > half_height)
+            --left;
+        std::size_t right = i;
+        while (right + 1 < n && signal[right] > half_height)
+            ++right;
+
+        double area = 0.0;
+        for (std::size_t j = left; j < right; ++j)
+        {
+            const double dx =
+                distribution.bin_centers[j + 1] -
+                distribution.bin_centers[j];
+            const double a = std::max(0.0, signal[j] - baseline);
+            const double b =
+                std::max(0.0, signal[j + 1] - baseline);
+            area += 0.5 * (a + b) * std::abs(dx);
+        }
+
+        CxHeightPeak peak;
+        peak.bin_index = static_cast<int>(i);
+        peak.sub_bin_offset = sub_bin_offset;
+        peak.position = refined_position;
+        peak.curve_value = distribution.adf[i];
+        peak.prominence = prominence;
+        peak.area = area;
+        peak.width = std::abs(
+            distribution.bin_centers[right] -
+            distribution.bin_centers[left]);
+        if (peak.width <= 0.0)
+            peak.width = std::abs(local_step);
+        candidates.push_back(peak);
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const CxHeightPeak& a, const CxHeightPeak& b)
+              {
+                  if (a.prominence != b.prominence)
+                      return a.prominence > b.prominence;
+                  return a.position < b.position;
+              });
+
+    std::vector<CxHeightPeak> selected;
+    selected.reserve(std::min(
+        candidates.size(), static_cast<std::size_t>(options.max_peaks)));
+    for (const CxHeightPeak& candidate : candidates)
+    {
+        bool separated = true;
+        for (const CxHeightPeak& accepted : selected)
+        {
+            if (std::abs(candidate.bin_index - accepted.bin_index) <
+                options.min_distance_bins)
+            {
+                separated = false;
+                break;
+            }
+        }
+        if (!separated)
+            continue;
+        selected.push_back(candidate);
+        if (selected.size() >=
+            static_cast<std::size_t>(options.max_peaks))
+            break;
+    }
+
+    if (options.order == CxHeightPeakOrder::Position)
+    {
+        std::sort(selected.begin(), selected.end(),
+                  [](const CxHeightPeak& a, const CxHeightPeak& b)
+                  {
+                      return a.position < b.position;
+                  });
+    }
+    return selected;
+}
+
 CxSurfaceBasicStats computeSurfaceBasicStats(const CxSurfaceField& field, int bins_primary)
 {
     if (field.valueCount() <= 0)
@@ -121,4 +267,3 @@ CxSurfaceBasicStats computeSurfaceBasicStats(const CxSurfaceField& field, int bi
 }
 
 } // namespace cxvision::metrology_analytics
-

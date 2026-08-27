@@ -12,13 +12,48 @@
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_fruit_classification_reference_direct.cxsc",
       "binding_status": "classification_adapter_pending",
       "training_enabled": 0,
-      "selection_aliases": ["torch_resnet18_baseline_feature", "torch_resnet18_baseline_infer", "torch_resnet50_baseline_feature", "torch_resnet50_baseline_infer"],
+      "selection_aliases": [
+        "torch_resnet18_baseline_feature",
+        "torch_resnet18_baseline_infer",
+        "torch_resnet50_baseline_feature",
+        "torch_resnet50_baseline_infer"
+      ],
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn", "split": "train", "label": "apple_braeburn", "source_role": "class_folder", "max_count": 16},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_golden_delicious", "split": "train", "label": "apple_golden_delicious", "source_role": "class_folder", "max_count": 16},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_topaz", "split": "train", "label": "apple_topaz", "source_role": "class_folder", "max_count": 16},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/peach", "split": "train", "label": "peach", "source_role": "class_folder", "max_count": 16},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/pear", "split": "train", "label": "pear", "source_role": "class_folder", "max_count": 16}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_braeburn",
+          "split": "train",
+          "label": "apple_braeburn",
+          "source_role": "class_folder",
+          "max_count": 16
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_golden_delicious",
+          "split": "train",
+          "label": "apple_golden_delicious",
+          "source_role": "class_folder",
+          "max_count": 16
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/apple_topaz",
+          "split": "train",
+          "label": "apple_topaz",
+          "source_role": "class_folder",
+          "max_count": 16
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/peach",
+          "split": "train",
+          "label": "peach",
+          "source_role": "class_folder",
+          "max_count": 16
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/fruit/pear",
+          "split": "train",
+          "label": "pear",
+          "source_role": "class_folder",
+          "max_count": 16
+        }
       ],
       "label_semantics": "folder name is class label"
     },
@@ -30,9 +65,27 @@
       "binding_status": "anomaly_runtime_adapter_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good", "split": "train", "label": "good", "source_role": "normal_reference", "max_count": 64},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/logical_anomaly", "split": "test", "label": "anomaly", "source_role": "logical_anomaly", "max_count": 64},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/structural_anomaly", "split": "test", "label": "anomaly", "source_role": "structural_anomaly", "max_count": 64}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/good",
+          "split": "train",
+          "label": "good",
+          "source_role": "normal_reference",
+          "max_count": 64
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/logical_anomaly",
+          "split": "test",
+          "label": "anomaly",
+          "source_role": "logical_anomaly",
+          "max_count": 64
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/juice_bottle/structural_anomaly",
+          "split": "test",
+          "label": "anomaly",
+          "source_role": "structural_anomaly",
+          "max_count": 64
+        }
       ],
       "label_semantics": "good=normal, logical_anomaly/structural_anomaly=anomaly"
     },
@@ -44,7 +97,13 @@
       "binding_status": "ocr_label_runtime_adapter_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/dongle", "split": "train", "label": "unlabeled", "source_role": "ocr_reference", "max_count": 64}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/dongle",
+          "split": "train",
+          "label": "unlabeled",
+          "source_role": "ocr_reference",
+          "max_count": 64
+        }
       ],
       "label_semantics": "pending manual OCR text labels"
     },
@@ -56,12 +115,48 @@
       "binding_status": "semantic_mask_binding_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "train", "label": "ginseng_contamination", "source_role": "defect_class_folder", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack", "split": "train", "label": "ginseng_crack", "source_role": "defect_class_folder", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination", "split": "train", "label": "magnesium_contamination", "source_role": "defect_class_folder", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack", "split": "train", "label": "magnesium_crack", "source_role": "defect_class_folder", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination", "split": "train", "label": "mint_contamination", "source_role": "defect_class_folder", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack", "split": "train", "label": "mint_crack", "source_role": "defect_class_folder", "max_count": 32}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination",
+          "split": "train",
+          "label": "ginseng_contamination",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack",
+          "split": "train",
+          "label": "ginseng_crack",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination",
+          "split": "train",
+          "label": "magnesium_contamination",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack",
+          "split": "train",
+          "label": "magnesium_crack",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination",
+          "split": "train",
+          "label": "mint_contamination",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack",
+          "split": "train",
+          "label": "mint_crack",
+          "source_role": "defect_class_folder",
+          "max_count": 32
+        }
       ],
       "label_semantics": "product and defect folders define review labels; mask labels pending binding"
     },
@@ -73,7 +168,13 @@
       "binding_status": "instance_mask_binding_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "train", "label": "unlabeled", "source_role": "instance_segmentation_reference", "max_count": 64}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag",
+          "split": "train",
+          "label": "unlabeled",
+          "source_role": "instance_segmentation_reference",
+          "max_count": 64
+        }
       ],
       "label_semantics": "instance masks pending binding"
     },
@@ -85,7 +186,13 @@
       "binding_status": "detection_box_binding_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "train", "label": "unlabeled", "source_role": "detection_reference", "max_count": 64}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag",
+          "split": "train",
+          "label": "unlabeled",
+          "source_role": "detection_reference",
+          "max_count": 64
+        }
       ],
       "label_semantics": "detection boxes pending binding"
     },
@@ -97,7 +204,13 @@
       "binding_status": "oriented_box_binding_pending",
       "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/screws", "split": "train", "label": "unlabeled", "source_role": "oriented_detection_reference", "max_count": 64}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/screws",
+          "split": "train",
+          "label": "unlabeled",
+          "source_role": "oriented_detection_reference",
+          "max_count": 64
+        }
       ],
       "label_semantics": "oriented boxes pending binding"
     },
@@ -106,9 +219,21 @@
       "display_name": "HD pill body closed-region segmentation audit",
       "task": "closed_regular_region_segmentation",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_body_closed_region_reference_direct.cxsc",
-      "case_track": "C1", "annotation_contract_id": "closed_regular_object_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1",
-      "binding_status": "semantic_mask_binding_pending", "training_enabled": 0,
-      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "unbound", "source_role": "object_region_reference", "max_count": 32}],
+      "case_track": "C1",
+      "annotation_contract_id": "closed_regular_object_mask_v1",
+      "model_track_id": "closed_semantic_segmentation_v1",
+      "evaluator_id": "closed_mask_four_way_v1",
+      "binding_status": "semantic_mask_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "object_region_reference",
+          "max_count": 32
+        }
+      ],
       "label_semantics": "folder label is not a pixel mask; closed object mask pending binding"
     },
     {
@@ -116,12 +241,34 @@
       "display_name": "HD pill contamination irregular-region audit",
       "task": "closed_irregular_region_segmentation",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_contamination_irregular_region_reference_direct.cxsc",
-      "case_track": "C2", "annotation_contract_id": "closed_irregular_defect_mask_v1", "model_track_id": "closed_semantic_segmentation_v1", "evaluator_id": "closed_mask_four_way_v1",
-      "binding_status": "semantic_mask_binding_pending", "training_enabled": 0,
+      "case_track": "C2",
+      "annotation_contract_id": "closed_irregular_defect_mask_v1",
+      "model_track_id": "closed_semantic_segmentation_v1",
+      "evaluator_id": "closed_mask_four_way_v1",
+      "binding_status": "semantic_mask_binding_pending",
+      "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "ginseng_contamination", "source_role": "defect_reference", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination", "split": "validation_candidate", "label": "magnesium_contamination", "source_role": "defect_reference", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination", "split": "validation_candidate", "label": "mint_contamination", "source_role": "defect_reference", "max_count": 32}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination",
+          "split": "validation_candidate",
+          "label": "ginseng_contamination",
+          "source_role": "defect_reference",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/contamination",
+          "split": "validation_candidate",
+          "label": "magnesium_contamination",
+          "source_role": "defect_reference",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/contamination",
+          "split": "validation_candidate",
+          "label": "mint_contamination",
+          "source_role": "defect_reference",
+          "max_count": 32
+        }
       ],
       "label_semantics": "folder label identifies review class only; pixel defect mask pending binding"
     },
@@ -130,9 +277,21 @@
       "display_name": "HD pill bag multi-instance segmentation audit",
       "task": "multi_instance_segmentation",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_bag_multi_instance_reference_direct.cxsc",
-      "case_track": "C3", "annotation_contract_id": "multi_instance_mask_v1", "model_track_id": "instance_segmentation_v1", "evaluator_id": "instance_four_way_v1",
-      "binding_status": "instance_mask_binding_pending", "training_enabled": 0,
-      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "validation_candidate", "label": "unbound", "source_role": "multi_instance_reference", "max_count": 64}],
+      "case_track": "C3",
+      "annotation_contract_id": "multi_instance_mask_v1",
+      "model_track_id": "instance_segmentation_v1",
+      "evaluator_id": "instance_four_way_v1",
+      "binding_status": "instance_mask_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "multi_instance_reference",
+          "max_count": 64
+        }
+      ],
       "label_semantics": "instance id masks and classes pending binding; bbox is not accepted as mask"
     },
     {
@@ -140,12 +299,34 @@
       "display_name": "HD pill crack open-boundary measurement audit",
       "task": "open_boundary_segmentation_and_measurement",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_crack_open_boundary_reference_direct.cxsc",
-      "case_track": "O2", "annotation_contract_id": "open_boundary_measurement_v1", "model_track_id": "open_boundary_segmentation_v1", "evaluator_id": "open_boundary_four_way_v1",
-      "binding_status": "boundary_label_binding_pending", "training_enabled": 0,
+      "case_track": "O2",
+      "annotation_contract_id": "open_boundary_measurement_v1",
+      "model_track_id": "open_boundary_segmentation_v1",
+      "evaluator_id": "open_boundary_four_way_v1",
+      "binding_status": "boundary_label_binding_pending",
+      "training_enabled": 0,
       "image_sources": [
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack", "split": "validation_candidate", "label": "ginseng_crack", "source_role": "open_boundary_reference", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack", "split": "validation_candidate", "label": "magnesium_crack", "source_role": "open_boundary_reference", "max_count": 32},
-        {"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack", "split": "validation_candidate", "label": "mint_crack", "source_role": "open_boundary_reference", "max_count": 32}
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/crack",
+          "split": "validation_candidate",
+          "label": "ginseng_crack",
+          "source_role": "open_boundary_reference",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/magnesium/crack",
+          "split": "validation_candidate",
+          "label": "magnesium_crack",
+          "source_role": "open_boundary_reference",
+          "max_count": 32
+        },
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/mint/crack",
+          "split": "validation_candidate",
+          "label": "mint_crack",
+          "source_role": "open_boundary_reference",
+          "max_count": 32
+        }
       ],
       "label_semantics": "open polyline and endpoints pending binding; forced closed mask is forbidden"
     },
@@ -154,9 +335,21 @@
       "display_name": "HD pill fuzzy region-learning audit",
       "task": "fuzzy_region_learning",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_fuzzy_region_learning_reference_direct.cxsc",
-      "case_track": "R2", "annotation_contract_id": "fuzzy_region_membership_v1", "model_track_id": "fuzzy_region_learning_v1", "evaluator_id": "fuzzy_region_four_way_v1",
-      "binding_status": "membership_label_binding_pending", "training_enabled": 0,
-      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination", "split": "validation_candidate", "label": "unbound", "source_role": "fuzzy_region_reference", "max_count": 32}],
+      "case_track": "R2",
+      "annotation_contract_id": "fuzzy_region_membership_v1",
+      "model_track_id": "fuzzy_region_learning_v1",
+      "evaluator_id": "fuzzy_region_four_way_v1",
+      "binding_status": "membership_label_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "fuzzy_region_reference",
+          "max_count": 32
+        }
+      ],
       "label_semantics": "membership map and region class pending binding"
     },
     {
@@ -164,10 +357,66 @@
       "display_name": "HD pill composite visual pipeline audit",
       "task": "composite_visual_pipeline",
       "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_composite_pipeline_reference_direct.cxsc",
-      "case_track": "X1", "annotation_contract_id": "composite_stage_outputs_v1", "model_track_id": "composite_pipeline_v1", "evaluator_id": "composite_stage_gate_v1",
-      "binding_status": "composite_stage_binding_pending", "training_enabled": 0,
-      "image_sources": [{"path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag", "split": "validation_candidate", "label": "unbound", "source_role": "composite_pipeline_reference", "max_count": 64}],
+      "case_track": "X1",
+      "annotation_contract_id": "composite_stage_outputs_v1",
+      "model_track_id": "composite_pipeline_v1",
+      "evaluator_id": "composite_stage_gate_v1",
+      "binding_status": "composite_stage_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill_bag",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "composite_pipeline_reference",
+          "max_count": 64
+        }
+      ],
       "label_semantics": "typed stage labels and fusion provenance pending binding"
+    },
+    {
+      "case_id": "line_high_contrast_open_regular_boundary_reference",
+      "display_name": "High-contrast line open regular-boundary audit",
+      "task": "open_regular_boundary_measurement",
+      "script": "cxparser/cxscript/module/torch/hd_reference/line_high_contrast_open_regular_boundary_reference_direct.cxsc",
+      "case_track": "O1",
+      "annotation_contract_id": "open_regular_boundary_measurement_v1",
+      "model_track_id": "open_regular_boundary_model_v1",
+      "evaluator_id": "open_regular_boundary_four_way_v1",
+      "binding_status": "regular_boundary_label_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/test_images/L1_high_contrast",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "open_regular_boundary_reference",
+          "max_count": 16
+        }
+      ],
+      "label_semantics": "polyline, measurement points and endpoints pending binding; closed mask and bbox are forbidden substitutes"
+    },
+    {
+      "case_id": "hd_pill_roi_region_learning_reference",
+      "display_name": "HD pill ROI region-learning audit",
+      "task": "roi_region_learning",
+      "script": "cxparser/cxscript/module/torch/hd_reference/hd_pill_roi_region_learning_reference_direct.cxsc",
+      "case_track": "R1",
+      "annotation_contract_id": "roi_region_learning_v1",
+      "model_track_id": "roi_region_learning_v1",
+      "evaluator_id": "roi_region_learning_four_way_v1",
+      "binding_status": "roi_feature_label_binding_pending",
+      "training_enabled": 0,
+      "image_sources": [
+        {
+          "path": "D:/Codex-WorkDir/Sean_WorkDir/images/pill/ginseng/contamination",
+          "split": "validation_candidate",
+          "label": "unbound",
+          "source_role": "roi_region_learning_reference",
+          "max_count": 32
+        }
+      ],
+      "label_semantics": "ROI or polygon, region class and positive/negative role pending binding; folder label alone is not accepted"
     }
   ]
 }

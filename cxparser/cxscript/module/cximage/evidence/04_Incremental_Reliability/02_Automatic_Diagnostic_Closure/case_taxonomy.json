@@ -7,7 +7,14 @@
       "track_id": "C1_closed_regular_region",
       "topology": "closed",
       "purpose": "complete_object_partition_and_geometry_classification",
-      "geometry_subtypes": ["circle", "ellipse", "rectangle", "polygon", "capsule", "other_closed"],
+      "geometry_subtypes": [
+        "circle",
+        "ellipse",
+        "rectangle",
+        "polygon",
+        "capsule",
+        "other_closed"
+      ],
       "output_contract": "closed_binary_or_class_mask_plus_closed_contour",
       "model_direction": "closed_region_semantic_segmentation",
       "cximage_role": "shape_prior_and_geometry_measurement"
@@ -16,7 +23,11 @@
       "track_id": "C2_closed_irregular_region",
       "topology": "closed",
       "purpose": "irregular_defect_or_contamination_partition",
-      "geometry_subtypes": ["irregular_blob", "multi_component_blob", "soft_boundary_blob"],
+      "geometry_subtypes": [
+        "irregular_blob",
+        "multi_component_blob",
+        "soft_boundary_blob"
+      ],
       "output_contract": "semantic_class_mask_plus_uncertainty_when_required",
       "model_direction": "closed_region_semantic_segmentation",
       "cximage_role": "diagnostic_candidate_not_ground_truth"
@@ -25,7 +36,14 @@
       "track_id": "C3_closed_multi_instance_region",
       "topology": "closed_multi_instance",
       "purpose": "separate_touching_occluded_or_repeated_objects",
-      "geometry_subtypes": ["circle", "ellipse", "capsule", "polygon", "occluded", "truncated"],
+      "geometry_subtypes": [
+        "circle",
+        "ellipse",
+        "capsule",
+        "polygon",
+        "occluded",
+        "truncated"
+      ],
       "output_contract": "per_instance_mask_id_class_and_occlusion_state",
       "model_direction": "closed_region_instance_segmentation",
       "cximage_role": "single_instance_geometry_probe"
@@ -34,7 +52,12 @@
       "track_id": "O2_open_complex_boundary",
       "topology": "open",
       "purpose": "crack_scratch_gap_or_discontinuous_boundary_measurement",
-      "geometry_subtypes": ["polyline", "branched_crack", "discontinuous_edge", "variable_width_boundary"],
+      "geometry_subtypes": [
+        "polyline",
+        "branched_crack",
+        "discontinuous_edge",
+        "variable_width_boundary"
+      ],
       "output_contract": "open_polyline_endpoints_width_continuity_and_tolerance_band",
       "model_direction": "open_boundary_segmentation",
       "cximage_role": "boundary_measurement_and_geometry_fit"
@@ -43,7 +66,12 @@
       "track_id": "R2_fuzzy_region_learning",
       "topology": "region_with_uncertainty",
       "purpose": "roi_learning_weak_supervision_and_fuzzy_inference",
-      "geometry_subtypes": ["roi", "polygon_roi", "soft_region", "uncertainty_band"],
+      "geometry_subtypes": [
+        "roi",
+        "polygon_roi",
+        "soft_region",
+        "uncertainty_band"
+      ],
       "output_contract": "region_class_probability_soft_mask_and_uncertainty",
       "model_direction": "region_encoder_classifier_or_anomaly_model",
       "cximage_role": "region_candidate_and_hard_negative_source"
@@ -52,18 +80,81 @@
       "track_id": "X1_composite_visual_pipeline",
       "topology": "composite",
       "purpose": "combine_localization_segmentation_region_classification_and_measurement",
-      "geometry_subtypes": ["multi_stage", "multi_object", "mixed_open_closed"],
+      "geometry_subtypes": [
+        "multi_stage",
+        "multi_object",
+        "mixed_open_closed"
+      ],
       "output_contract": "stage_outputs_coordinate_transforms_and_fused_decision",
       "model_direction": "serial_composite_pipeline",
       "cximage_role": "stage_specific_reference_and_measurement"
+    },
+    {
+      "track_id": "O1_open_regular_boundary",
+      "topology": "open",
+      "purpose": "precise_line_arc_or_open_curve_boundary_measurement",
+      "geometry_subtypes": [
+        "line",
+        "arc",
+        "open_curve"
+      ],
+      "output_contract": "polyline_measurement_points_endpoints_and_confidence",
+      "model_direction": "open_regular_boundary_model",
+      "cximage_role": "boundary_measurement_and_geometry_fit"
+    },
+    {
+      "track_id": "R1_roi_region_learning",
+      "topology": "region",
+      "purpose": "learn_appearance_inside_explicit_roi",
+      "geometry_subtypes": [
+        "roi",
+        "polygon_roi"
+      ],
+      "output_contract": "roi_features_region_class_and_similarity",
+      "model_direction": "roi_encoder_classifier_or_similarity_model",
+      "cximage_role": "roi_definition_and_region_fact_source"
     }
   ],
   "case_assignments": [
-    {"case_key": "hd_pill_body_closed_region", "track_id": "C1_closed_regular_region", "implementation_phase": 1},
-    {"case_key": "hd_pill_contamination_irregular_region", "track_id": "C2_closed_irregular_region", "implementation_phase": 1},
-    {"case_key": "hd_pill_crack_open_boundary", "track_id": "O2_open_complex_boundary", "implementation_phase": 1},
-    {"case_key": "hd_pill_bag_multi_instance", "track_id": "C3_closed_multi_instance_region", "implementation_phase": 1},
-    {"case_key": "hd_pill_fuzzy_region_learning", "track_id": "R2_fuzzy_region_learning", "implementation_phase": 2},
-    {"case_key": "hd_pill_composite_pipeline", "track_id": "X1_composite_visual_pipeline", "implementation_phase": 3}
+    {
+      "case_key": "hd_pill_body_closed_region",
+      "track_id": "C1_closed_regular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "hd_pill_contamination_irregular_region",
+      "track_id": "C2_closed_irregular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "hd_pill_crack_open_boundary",
+      "track_id": "O2_open_complex_boundary",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "hd_pill_bag_multi_instance",
+      "track_id": "C3_closed_multi_instance_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "hd_pill_fuzzy_region_learning",
+      "track_id": "R2_fuzzy_region_learning",
+      "implementation_phase": 2
+    },
+    {
+      "case_key": "hd_pill_composite_pipeline",
+      "track_id": "X1_composite_visual_pipeline",
+      "implementation_phase": 3
+    },
+    {
+      "case_key": "line_high_contrast_open_regular_boundary",
+      "track_id": "O1_open_regular_boundary",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "hd_pill_roi_region_learning",
+      "track_id": "R1_roi_region_learning",
+      "implementation_phase": 2
+    }
   ]
 }

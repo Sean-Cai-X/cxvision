@@ -127,6 +127,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/TorchRuntimeResultAdapter.cpp
   cximage/CxExecutionTypes.cpp
   cximage/CxImageReferenceCandidateGenerator.cpp
+  cximage/CxTypedLabelProposalGenerator.cpp
   cximage/CxMaskDiagnosticSelfTest.cpp
   cximage/CxTorchExecutionAdapter.cpp
   cximage/CxAutomaticDiagnosticClosure.cpp

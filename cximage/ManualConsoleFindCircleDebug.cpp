@@ -189,6 +189,27 @@ void RefreshFindCircleMeasureGeometrySnapshot(
 
     object.circle_budget_max_elapsed_ms =
         dbg.budget_max_elapsed_ms;
+
+    const FindCircleBoundaryAnalysisSnapshot precision =
+        circle.boundaryanalysissnapshot();
+    object.circle_boundary_status = precision.status;
+    object.circle_boundary_reliability_level = precision.reliability_level;
+    object.circle_boundary_expected_scan_count = precision.expected_scan_count;
+    object.circle_boundary_accepted_point_count = precision.accepted_point_count;
+    object.circle_boundary_refined_point_count =
+        precision.interpolation_valid_count;
+    object.circle_boundary_coverage_ratio = precision.coverage_ratio;
+    object.circle_boundary_subpixel_offset_mean =
+        precision.subpixel_offset_mean;
+    object.circle_boundary_subpixel_offset_stddev =
+        precision.subpixel_offset_stddev;
+    object.circle_boundary_localization_sigma_mean_px =
+        precision.localization_sigma_mean_px;
+    object.circle_boundary_residual_rmse_px = precision.residual_rmse_px;
+    object.circle_boundary_residual_p95_px = precision.residual_p95_px;
+    object.circle_boundary_residual_max_px = precision.residual_max_px;
+    object.circle_boundary_outlier_ratio = precision.outlier_ratio;
+    object.circle_boundary_reliability_score = precision.reliability_score;
 }
 
 bool ResolveDebugIntToken(ManualTestContext& context, const std::string& token, int& value)
@@ -939,7 +960,7 @@ bool TryExecuteFindCircleRuntimeMethod(ManualTestContext& context,
         ? "runtime_executed"
         : object.last_runtime_status;
 
-    line.reason = "FindCircle." + call.method +
+    line.reason = "FindCircle." + call.method +
         " executed by direct runtime bridge | " + object.display_summary;
 
     line.timestamp = CurrentTimestamp();

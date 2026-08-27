@@ -2292,12 +2292,16 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     return false;
   }
 
+  bool supportedTokenPresent = false;
+
   auto applyIntToken = [&](const std::string &key,
                            const std::string &globalName) -> bool {
     const std::string pattern = key + "=";
     const std::size_t pos = parameterSummary.find(pattern);
     if (pos == std::string::npos)
       return false;
+
+    supportedTokenPresent = true;
 
     std::size_t begin = pos + pattern.size();
     std::size_t end = begin;
@@ -2329,6 +2333,8 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
     const std::size_t pos = parameterSummary.find(pattern);
     if (pos == std::string::npos)
       return false;
+
+    supportedTokenPresent = true;
 
     std::size_t cursor = pos + pattern.size();
     int values[4] = {0, 0, 0, 0};
@@ -2588,8 +2594,13 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
                  : 0;
 
   if (applied == 0) {
-    reason = "no supported key=value token found in parameter summary: " +
-             parameterSummary;
+    reason =
+        supportedTokenPresent
+            ? "supported key=value token has an invalid value in parameter "
+              "summary: " +
+                  parameterSummary
+            : "no supported key=value token found in parameter summary: " +
+                  parameterSummary;
     return false;
   }
 
@@ -4453,6 +4464,18 @@ void ViewController::drawScriptAcceptancePanels() {
       ImGui::SameLine();
     ImGui::PushID(i);
     const bool selectedBeforeClick = m_evidenceChainUiSection == i;
+
+    const AiGuiDestination sectionDestination =
+        i == 0   ? AiGuiDestination::EvidenceImageSet
+        : i == 1 ? AiGuiDestination::EvidenceCase
+        : i == 2 ? AiGuiDestination::ManualReviewEvidence
+                 : AiGuiDestination::ManualReviewDecision;
+    const char* sectionLocation =
+        i == 0   ? "Evidence Chain UI > Image Set tab/list"
+        : i == 1 ? "Evidence Chain UI > Case tab/list"
+        : i == 2 ? "Manual Review / Evidence > Evidence tab/items"
+                 : "Manual Review / Evidence > Review decision controls";
+    ApplyAiGuiFocusHere(sectionDestination, sectionLocation);
     if (selectedBeforeClick)
       ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 130, 190, 255));
     if (ImGui::Button(
@@ -4767,6 +4790,9 @@ void ViewController::drawScriptAcceptancePanels() {
   ImGui::SameLine();
   ImGui::Text("Zoom: %.0f%%  Move: middle-drag  Zoom: wheel",
               m_imageViewZoom * 100.0f);
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::ImageAnnotation,
+      "Image Evidence / Annotation Tools > annotation session toggle and tool palette");
   DrawAnnotationToolButtonStrip(true);
   ImGui::Separator();
 
@@ -5177,9 +5203,41 @@ void ViewController::drawScriptAcceptancePanels() {
                              scanIndex);
         }
       }
+      const FindCircleBoundaryAnalysisSnapshot precision =
+          circleTool->boundaryanalysissnapshot();
+      for (const FindCircleBoundaryPointSnapshot &point : precision.points) {
+        if (!point.interpolation_valid ||
+            !std::isfinite(point.measured_x) ||
+            !std::isfinite(point.measured_y) ||
+            !std::isfinite(point.refined_x) ||
+            !std::isfinite(point.refined_y)) {
+          continue;
+        }
+
+        ImU32 precisionColor = IM_COL32(80, 210, 255, 245);
+        if (point.fit_residual_valid) {
+          if (point.fit_residual_px <= 0.5)
+            precisionColor = IM_COL32(70, 235, 135, 245);
+          else if (point.fit_residual_px <= 1.0)
+            precisionColor = IM_COL32(255, 190, 60, 245);
+          else
+            precisionColor = IM_COL32(255, 85, 85, 245);
+        }
+
+        const ImVec2 raw =
+            ImageToScreenD(point.measured_x, point.measured_y);
+        const ImVec2 refined =
+            ImageToScreenD(point.refined_x, point.refined_y);
+        const float correctionLength =
+            std::hypot(refined.x - raw.x, refined.y - raw.y);
+        if (correctionLength > 0.25f)
+          drawList->AddLine(raw, refined, precisionColor, 1.4f);
+
+        drawList->AddCircle(refined, 5.5f, precisionColor, 14, 1.6f);
+        drawList->AddCircleFilled(refined, 1.5f, precisionColor);
+      }
     }
   }
-
   if (m_showTestPoints) {
     const ImU32 color = IM_COL32(255, 64, 64, 255);
     const ImVec2 points[] = {imagePos, ImVec2(imageEnd.x, imagePos.y),
@@ -6155,6 +6213,235 @@ void ViewController::initDemoScene() {
 }
 
 static ImVec2 last_window_pos = ImVec2(0, 0);
+
+const char* ViewController::AiGuiShortcutName(
+    AiGuiDestination destination) const {
+  switch (destination) {
+  case AiGuiDestination::EvidenceImageSet:
+    return "F2";
+  case AiGuiDestination::EvidenceCase:
+    return "F3";
+  case AiGuiDestination::ManualReviewEvidence:
+    return "F4";
+  case AiGuiDestination::ManualReviewDecision:
+    return "F5";
+  case AiGuiDestination::ImageAnnotation:
+    return "F6";
+  case AiGuiDestination::KeyParameters:
+    return "F7";
+  case AiGuiDestination::TorchRuntimeEvidence:
+    return "F8";
+  case AiGuiDestination::TorchTrainingImageSet:
+    return "F9";
+  case AiGuiDestination::ParameterConclusion:
+    return "F10";
+  case AiGuiDestination::ManualScriptConsole:
+    return "F11";
+  case AiGuiDestination::AnalyticsSmoke:
+    return "F12";
+  default:
+    return "-";
+  }
+}
+
+const char* ViewController::AiGuiWindowName(
+    AiGuiDestination destination) const {
+  switch (destination) {
+  case AiGuiDestination::EvidenceImageSet:
+  case AiGuiDestination::EvidenceCase:
+  case AiGuiDestination::ManualReviewEvidence:
+  case AiGuiDestination::ManualReviewDecision:
+    return "Evidence Chain UI";
+  case AiGuiDestination::ImageAnnotation:
+    return "Image View";
+  case AiGuiDestination::KeyParameters:
+    return "Key Parameter Controls";
+  case AiGuiDestination::TorchRuntimeEvidence:
+    return "Torch Runtime / Evidence";
+  case AiGuiDestination::TorchTrainingImageSet:
+    return "Torch Training Image Set";
+  case AiGuiDestination::ParameterConclusion:
+    return "Parameter Tuning Map / Result Conclusion";
+  case AiGuiDestination::ManualScriptConsole:
+    return "Manual State Test Console";
+  case AiGuiDestination::AnalyticsSmoke:
+    return "Analytics Smoke / Metrology Bridge";
+  default:
+    return "";
+  }
+}
+
+void ViewController::RequestAiGuiDestination(
+    AiGuiDestination destination) {
+  if (destination == AiGuiDestination::None)
+    return;
+
+  switch (destination) {
+  case AiGuiDestination::EvidenceImageSet:
+    m_evidenceChainUiSection = 0;
+    break;
+  case AiGuiDestination::EvidenceCase:
+    m_evidenceChainUiSection = 1;
+    break;
+  case AiGuiDestination::ManualReviewEvidence:
+    m_evidenceChainUiSection = 2;
+    if (m_manualTest.script_evidence_groups.empty())
+      m_manualTest.script_evidence_groups_dirty = true;
+    break;
+  case AiGuiDestination::ManualReviewDecision:
+    m_evidenceChainUiSection = 3;
+    break;
+  default:
+    break;
+  }
+
+  m_aiGuiPendingFocus = destination;
+  m_aiGuiCurrentDestination = destination;
+  m_aiGuiSemanticLocation =
+      std::string(AiGuiShortcutName(destination)) + " -> " +
+      AiGuiWindowName(destination) + " (focus pending)";
+  ImGui::SetWindowCollapsed(AiGuiWindowName(destination), false,
+                            ImGuiCond_Always);
+  ImGui::SetWindowFocus(AiGuiWindowName(destination));
+  m_forceRepaintFrames = std::max(m_forceRepaintFrames, 3);
+
+  CXLOG_INFO("AiGuiNavigation", "shortcut_destination_requested", "ui_event",
+             m_aiGuiSemanticLocation);
+}
+
+bool ViewController::ApplyAiGuiFocusHere(
+    AiGuiDestination destination, const char* semanticLocation) {
+  if (m_aiGuiPendingFocus != destination)
+    return false;
+
+  ImGui::SetWindowFocus();
+  ImGui::SetScrollY(0.0f);
+  ImGui::SetKeyboardFocusHere(0);
+  ImGui::SetNavCursorVisible(true);
+  m_aiGuiPendingFocus = AiGuiDestination::None;
+  m_aiGuiCurrentDestination = destination;
+  m_aiGuiSemanticLocation =
+      std::string(AiGuiShortcutName(destination)) + " -> " +
+      (semanticLocation == nullptr ? AiGuiWindowName(destination)
+                                   : semanticLocation);
+
+  CXLOG_INFO("AiGuiNavigation", "shortcut_focus_applied", "ui_event",
+             m_aiGuiSemanticLocation);
+  return true;
+}
+
+void ViewController::ProcessAiGuiShortcuts() {
+  if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+    m_showAiGuiShortcutHelp = !m_showAiGuiShortcutHelp;
+    m_aiGuiPendingFocus = AiGuiDestination::None;
+    m_aiGuiSemanticLocation =
+        m_showAiGuiShortcutHelp
+            ? "F1 -> AI GUI Shortcut Help > shortcut list"
+            : "F1 -> AI GUI Shortcut Help (closed)";
+    if (m_showAiGuiShortcutHelp) {
+      ImGui::SetWindowCollapsed("AI GUI Shortcut Help", false,
+                                ImGuiCond_Always);
+      ImGui::SetWindowFocus("AI GUI Shortcut Help");
+    }
+    m_forceRepaintFrames = std::max(m_forceRepaintFrames, 3);
+    CXLOG_INFO("AiGuiNavigation", "shortcut_help_toggled", "ui_event",
+               m_aiGuiSemanticLocation);
+  }
+
+  struct ShortcutBinding {
+    ImGuiKey key;
+    AiGuiDestination destination;
+  };
+  static const ShortcutBinding bindings[] = {
+      {ImGuiKey_F2, AiGuiDestination::EvidenceImageSet},
+      {ImGuiKey_F3, AiGuiDestination::EvidenceCase},
+      {ImGuiKey_F4, AiGuiDestination::ManualReviewEvidence},
+      {ImGuiKey_F5, AiGuiDestination::ManualReviewDecision},
+      {ImGuiKey_F6, AiGuiDestination::ImageAnnotation},
+      {ImGuiKey_F7, AiGuiDestination::KeyParameters},
+      {ImGuiKey_F8, AiGuiDestination::TorchRuntimeEvidence},
+      {ImGuiKey_F9, AiGuiDestination::TorchTrainingImageSet},
+      {ImGuiKey_F10, AiGuiDestination::ParameterConclusion},
+      {ImGuiKey_F11, AiGuiDestination::ManualScriptConsole},
+      {ImGuiKey_F12, AiGuiDestination::AnalyticsSmoke},
+  };
+
+  for (const ShortcutBinding& binding : bindings) {
+    if (ImGui::IsKeyPressed(binding.key, false)) {
+      RequestAiGuiDestination(binding.destination);
+      break;
+    }
+  }
+
+  if (m_showAiGuiShortcutHelp &&
+      ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    m_showAiGuiShortcutHelp = false;
+}
+
+void ViewController::DrawAiGuiNavigationOverlay() {
+  const ImGuiViewport* viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(
+      ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 8.0f,
+             viewport->WorkPos.y + 8.0f),
+      ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.88f);
+  const ImGuiWindowFlags statusFlags =
+      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration |
+      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+  if (ImGui::Begin("AI GUI Navigation Status", nullptr, statusFlags)) {
+    ImGui::TextUnformatted("AI GUI NAVIGATION");
+    ImGui::Text("Location: %s", m_aiGuiSemanticLocation.c_str());
+    ImGui::TextDisabled("F1 help | Tab/Shift+Tab move | Enter/Space act | Esc cancel");
+  }
+  ImGui::End();
+
+  if (!m_showAiGuiShortcutHelp)
+    return;
+
+  ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing,
+                          ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(660.0f, 520.0f), ImGuiCond_Appearing);
+  if (ImGui::Begin("AI GUI Shortcut Help", &m_showAiGuiShortcutHelp,
+                   ImGuiWindowFlags_NoCollapse)) {
+    ImGui::TextWrapped(
+        "Shortcuts navigate only: they expose the named window/page, bring it "
+        "to the front, scroll to its anchor, and focus its first actionable "
+        "control. They never run, save, accept, or reject automatically.");
+    ImGui::Separator();
+    ImGui::TextUnformatted("F2  Evidence Chain UI > Image Set list");
+    ImGui::TextUnformatted("F3  Evidence Chain UI > Case list");
+    ImGui::TextUnformatted(
+        "F4  Manual Review / Evidence > visible evidence items");
+    ImGui::TextUnformatted(
+        "F5  Manual Review / Evidence > Review decision controls");
+    ImGui::TextUnformatted(
+        "F6  Image Evidence / Annotation Tools > manifest and tool palette");
+    ImGui::TextUnformatted(
+        "F7  Key Parameter Controls > active tool parameters");
+    ImGui::TextUnformatted(
+        "F8  Torch Runtime / Evidence > runtime and review controls");
+    ImGui::TextUnformatted(
+        "F9  Torch Training Image Set > dataset actions and image rails");
+    ImGui::TextUnformatted(
+        "F10 Parameter Tuning Map / Result Conclusion");
+    ImGui::TextUnformatted(
+        "F11 Manual State Test Console > script editor/debug compiler");
+    ImGui::TextUnformatted(
+        "F12 Analytics Smoke / Metrology Bridge");
+    ImGui::Separator();
+    ImGui::TextWrapped(
+        "After arrival: Tab or Shift+Tab moves between controls; arrow keys "
+        "move inside lists; Enter activates a button or selected row; Space "
+        "toggles; Escape cancels/closes. Read the always-visible Location "
+        "line before acting.");
+    ImGui::TextWrapped(
+        "Human project analysis and decisions belong to F4/F5 Manual Review / "
+        "Evidence. Suite/dry-run views are not human review destinations.");
+  }
+  ImGui::End();
+}
+
 void ViewController::mainloop() {
   int ifirstrun = 1;
   int frameLogBudget = 8;
@@ -6173,6 +6460,8 @@ void ViewController::mainloop() {
       ImGui_ImplGlfw_NewFrame();
       ImGui::NewFrame();
       DrawCxImGuiFrameBackground();
+      ProcessAiGuiShortcuts();
+
 
       if (logThisFrame)
         CXLOG_INFO("ViewController", "mainloop_stage", "running",
@@ -6648,6 +6937,8 @@ void ViewController::mainloop() {
       }
       if (opencvSW)
         Imgui_OpenCV_Window0(&opencvSW);
+
+      DrawAiGuiNavigationOverlay();
 
       SetCxCrashBreadcrumb("mainloop:ImGui::Render");
       if (logThisFrame)

@@ -953,9 +953,9 @@ bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
           point.semantic_role = role;
           point.editable = true;
           point.visible = true;
-          point.runtime_bound = false;
-          point.result_element = false;
-          point.stale = false;
+          point.runtime_bound = false;
+          point.result_element = false;
+          point.stale = false;
           point.runtime_edit_pending = false;
         };
     auto remove_existing_prompt_points = [this, &ownerRef]() {
@@ -2510,6 +2510,10 @@ void ViewController::drawImageEvidencePanels() {
   }
 
   ImGui::Text("Annotation Tool Manifest");
+  ApplyAiGuiFocusHere(
+      AiGuiDestination::ImageAnnotation,
+      "Image Evidence / Annotation Tools > manifest path and tool palette");
+
   AnnotationInputText("Manifest path", m_annotationManifestPath);
   if (ImGui::Button("Load Tool Manifest")) {
     std::string reason;

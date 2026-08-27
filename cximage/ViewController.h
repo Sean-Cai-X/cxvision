@@ -554,6 +554,35 @@ protected:
     void ReduceView();
     void HomeView();
 private:
+    enum class AiGuiDestination {
+      None,
+      EvidenceImageSet,
+      EvidenceCase,
+      ManualReviewEvidence,
+      ManualReviewDecision,
+      ImageAnnotation,
+      KeyParameters,
+      TorchRuntimeEvidence,
+      TorchTrainingImageSet,
+      ParameterConclusion,
+      ManualScriptConsole,
+      AnalyticsSmoke
+    };
+
+    void ProcessAiGuiShortcuts();
+    void DrawAiGuiNavigationOverlay();
+    void RequestAiGuiDestination(AiGuiDestination destination);
+    bool ApplyAiGuiFocusHere(AiGuiDestination destination,
+                             const char* semanticLocation);
+    const char* AiGuiShortcutName(AiGuiDestination destination) const;
+    const char* AiGuiWindowName(AiGuiDestination destination) const;
+
+    AiGuiDestination m_aiGuiPendingFocus = AiGuiDestination::None;
+    AiGuiDestination m_aiGuiCurrentDestination = AiGuiDestination::None;
+    bool m_showAiGuiShortcutHelp = false;
+    std::string m_aiGuiSemanticLocation =
+        "No shortcut used yet; press F1 for AI GUI navigation.";
+
     void setCurrentShape(Shape* pshape);
     Shape* indexOf(const string& shapeName);
     Shape* indexAt(const gp_Pnt& pos);

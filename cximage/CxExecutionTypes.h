@@ -62,8 +62,6 @@ enum class CxTorchTaskKind
     TrainingLifecycle,
     PrototypeLifecycle
 };
-
-
 struct CxTorchTaskSpec
 {
     CxTorchTaskKind kind = CxTorchTaskKind::Unknown;
@@ -79,7 +77,15 @@ struct CxTorchTaskSpec
     std::string requested_device = "cpu";
     int timeout_ms = 0;
     std::string extra_json;
+    std::filesystem::path precomputed_result_ref;
+    std::filesystem::path precomputed_mask_path;
+    std::filesystem::path precomputed_overlay_path;
+    std::string precomputed_model_hash;
 };
+
+
+
+
 
 struct CxTorchDetection
 {

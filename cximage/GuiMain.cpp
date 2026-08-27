@@ -10,6 +10,7 @@
 #include "CxCrashLogHandler.h"
 #include "CxEvidenceSelfTestRuntime.h"
 #include "CxMaskDiagnosticSelfTest.h"
+#include "CxTypedLabelProposalGenerator.h"
 #include "CxAutomaticDiagnosticClosure.h"
 #include "CxTorchRuntimeService.h"
 #include "CxParserRuntimeOwner.h"
@@ -2506,6 +2507,15 @@ int RunCxImageReferenceCandidateCliFromArgs(int argc, char** argv)
 
 int RunCxVisionApplication(int argc, char** argv)
 {
+    if (HasCliArg(argc, argv, "--typed-label-proposal"))
+    {
+        CxTypedLabelProposalOptions options;
+        options.image_path = CliValueAfter(argc, argv, "--image");
+        options.output_dir = CliValueAfter(argc, argv, "--out");
+        options.label_kind = CliValueAfter(argc, argv, "--typed-label-kind");
+        return RunCxTypedLabelProposalCli(options);
+    }
+
     if (HasCliArg(argc, argv, "--automatic-diagnostic-closure"))
     {
         return RunAutomaticDiagnosticClosureCli(argc, argv);
