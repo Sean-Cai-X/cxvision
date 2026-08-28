@@ -2,7 +2,10 @@
 #include "CxCrashLogHandler.h"
 #include "CxFastMatchRuntimeCapture.h"
 #include "CxUnifiedLog.h"
+
+#include "FastMatch.h"
 #include "FindCircle.h"
+#include "FindEllipse.h"
 #include "FindObject.h"
 #include "LineGaugeShape.h"
 #include "ManualConsoleGauge.h"
@@ -4556,6 +4559,9 @@ void ViewController::drawScriptAcceptancePanels() {
 
       ImGui::Separator();
       ImGui::Text("Current Evidence Selection:");
+      ImGui::Text("review=%s", sel.review_item.empty()
+                                  ? "-"
+                                  : sel.review_item.c_str());
       ImGui::Text("valid=%d group=%d thumb=%d", sel.valid ? 1 : 0,
                   sel.group_index, sel.thumb_index);
       ImGui::Text("script=%s",
@@ -4953,31 +4959,243 @@ void ViewController::drawScriptAcceptancePanels() {
     }
   }
 
-  // Layer 3.5: FindLine runtime scan debug overlay.
-  //
-  // This intentionally does not create ShapeElements.  It is a read-only
-  // debug projection of the native FindLine scan geometry (m_lines_w/h)
-  // and scan diagnostics.  Keeping it here avoids the previous fragile
-  // dependency on whether the .roi_axis ShapeElement happened to be
-  // visible or drawn through the LineGauge branch.
-  if (m_manualTest.show_line_gauge_scan_lines) {
-    std::string ownerRef = m_manualTest.current_gauge.primary_object_name;
-    if (ownerRef.empty())
-      ownerRef = m_manualTest.current_result_ref.source_object;
-    if (ownerRef.empty()) {
+  // Layer 3.4: FastMatch compare_gap point-pair and tangent overlay.
+  // This is a read-only FastMatch / FindLine pattern projection, not the
+  // editable Line Gauge scan overlay.
+  {
+    const RuntimeObjectView *fastMatchObject = nullptr;
+    FastMatch *fastMatchTool = nullptr;
+    auto looksFastMatchText = [](std::string text) {
+      std::transform(text.begin(), text.end(), text.begin(),
+                     [](unsigned char c) {
+                       return static_cast<char>(std::tolower(c));
+                     });
+      return text.find("fastmatch") != std::string::npos;
+    };
+    auto findFastMatchSnapshotByName = [&](const std::string &name) {
+      if (name.empty())
+        return static_cast<const RuntimeObjectView *>(nullptr);
       for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
-        if (object.type == "FindLine") {
-          ownerRef = object.name;
+        if (object.name == name &&
+            (object.type == "FastMatch" || object.has_fastmatch_diagnostic))
+          return &object;
+      }
+      return static_cast<const RuntimeObjectView *>(nullptr);
+    };
+
+    std::vector<std::string> ownerCandidates;
+    auto addOwnerCandidate = [&](const std::string &name) {
+      if (!name.empty() && std::find(ownerCandidates.begin(),
+                                     ownerCandidates.end(), name) ==
+                               ownerCandidates.end())
+        ownerCandidates.push_back(name);
+    };
+    addOwnerCandidate(m_manualTest.current_result_ref.source_object);
+    addOwnerCandidate(m_manualTest.current_gauge.primary_object_name);
+    for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
+      if (object.type == "FastMatch" || object.has_fastmatch_diagnostic)
+        addOwnerCandidate(object.name);
+    }
+
+    for (const std::string &candidate : ownerCandidates) {
+      if (fastMatchObject == nullptr)
+        fastMatchObject = findFastMatchSnapshotByName(candidate);
+      fastMatchTool = static_cast<FastMatch *>(
+          m_parserDebugBridge.QueryClassObject("FastMatch", candidate));
+      if (fastMatchTool != nullptr)
+        break;
+    }
+    if (fastMatchObject == nullptr) {
+      for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
+        if (object.type == "FastMatch" || object.has_fastmatch_diagnostic) {
+          fastMatchObject = &object;
           break;
         }
       }
     }
 
-    FindLine *lineTool =
-        ownerRef.empty()
-            ? nullptr
-            : static_cast<FindLine *>(
-                  m_parserDebugBridge.QueryClassObject("FindLine", ownerRef));
+    const bool fastMatchContext =
+        m_manualTest.current_gauge.tool == "FastMatch" ||
+        m_manualTest.current_gauge.primary_object_type == "FastMatch" ||
+        looksFastMatchText(m_manualTest.loaded_script_path) ||
+        looksFastMatchText(m_manualTest.script_file_path) ||
+        fastMatchObject != nullptr || fastMatchTool != nullptr;
+
+    if (fastMatchContext && m_manualTest.show_fastmatch_debug_vectors) {
+      auto runtimeInt = [&](const char *key, int fallback) {
+        const auto it = m_manualTest.runtime_int_vars.find(key);
+        return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+      };
+      auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
+        return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                      imagePos.y + static_cast<float>(y) * sy);
+      };
+      auto midpoint = [](const gp_Pnt &a, const gp_Pnt &b) -> gp_Pnt {
+        return gp_Pnt((a.X() + b.X()) * 0.5, (a.Y() + b.Y()) * 0.5,
+                      (a.Z() + b.Z()) * 0.5);
+      };
+
+      const ImU32 pairColor = IM_COL32(255, 206, 64, 145);
+      const ImU32 pointAColor = IM_COL32(70, 220, 255, 235);
+      const ImU32 pointBColor = IM_COL32(255, 140, 80, 235);
+      const ImU32 tangentColor = IM_COL32(255, 80, 220, 235);
+      const ImU32 midpointColor = IM_COL32(255, 235, 80, 245);
+      const ImU32 filteredColor = IM_COL32(255, 70, 70, 235);
+      bool drewPattern = false;
+
+      if (fastMatchTool != nullptr) {
+        gp_Path &pathA = fastMatchTool->getpatternpathA();
+        gp_Path &pathB = fastMatchTool->getpatternpathB();
+        const int countA = static_cast<int>(pathA.ElementCount());
+        const int countB = static_cast<int>(pathB.ElementCount());
+        const int pairCount = std::min(countA, countB);
+        const int stride = std::max(1, pairCount / 160);
+
+        if (pairCount > 0) {
+          for (int i = 0; i < pairCount; i += stride) {
+            const gp_Pnt pa = pathA.ElementAt(i);
+            const gp_Pnt pb = pathB.ElementAt(i);
+            const gp_Pnt mid = midpoint(pa, pb);
+            const ImVec2 sa = ImageToScreenD(pa.X(), pa.Y());
+            const ImVec2 sb = ImageToScreenD(pb.X(), pb.Y());
+            const ImVec2 sm = ImageToScreenD(mid.X(), mid.Y());
+
+            if (m_manualTest.show_fastmatch_compare_gap_pairs)
+              drawList->AddLine(sa, sb, pairColor, 1.4f);
+            drawList->AddCircleFilled(sa, 2.6f, pointAColor, 10);
+            drawList->AddCircleFilled(sb, 2.6f, pointBColor, 10);
+            drawList->AddCircleFilled(sm, 2.0f, midpointColor, 10);
+
+            if (m_manualTest.show_fastmatch_keypoint_tangents &&
+                pairCount >= 2) {
+              const int prevIndex = std::max(0, i - stride);
+              const int nextIndex = std::min(pairCount - 1, i + stride);
+              if (nextIndex != prevIndex) {
+                const gp_Pnt prevMid = midpoint(pathA.ElementAt(prevIndex),
+                                                pathB.ElementAt(prevIndex));
+                const gp_Pnt nextMid = midpoint(pathA.ElementAt(nextIndex),
+                                                pathB.ElementAt(nextIndex));
+                const ImVec2 sp = ImageToScreenD(prevMid.X(), prevMid.Y());
+                const ImVec2 sn = ImageToScreenD(nextMid.X(), nextMid.Y());
+                float vx = sn.x - sp.x;
+                float vy = sn.y - sp.y;
+                const float len = std::sqrt(vx * vx + vy * vy);
+                if (len > 0.5f) {
+                  vx /= len;
+                  vy /= len;
+                  const float halfLen = 8.0f;
+                  drawList->AddLine(ImVec2(sm.x - vx * halfLen,
+                                           sm.y - vy * halfLen),
+                                    ImVec2(sm.x + vx * halfLen,
+                                           sm.y + vy * halfLen),
+                                    tangentColor, 2.0f);
+                }
+              }
+            }
+          }
+          const gp_Pnt firstMid =
+              midpoint(pathA.ElementAt(0), pathB.ElementAt(0));
+          const std::string label = "FM compare_gap pairs=" +
+                                    std::to_string(pairCount) + " A=" +
+                                    std::to_string(countA) + " B=" +
+                                    std::to_string(countB) + " stride=" +
+                                    std::to_string(stride);
+          drawList->AddText(ImageToScreenD(firstMid.X() + 8.0,
+                                           firstMid.Y() + 8.0),
+                            midpointColor, label.c_str());
+          drewPattern = true;
+        }
+
+        if (m_manualTest.show_fastmatch_filtered_points && countA != countB) {
+          auto drawUnpaired = [&](gp_Path &path, int beginIndex, int endIndex,
+                                  const char *label) {
+            const int total = std::max(0, endIndex - beginIndex);
+            const int orphanStride = std::max(1, total / 80);
+            bool placedLabel = false;
+            for (int i = beginIndex; i < endIndex; i += orphanStride) {
+              const gp_Pnt p = path.ElementAt(i);
+              const ImVec2 sp = ImageToScreenD(p.X(), p.Y());
+              drawList->AddCircleFilled(sp, 3.2f, filteredColor, 12);
+              drawList->AddCircle(sp, 5.0f, filteredColor, 12, 1.0f);
+              if (!placedLabel) {
+                drawList->AddText(ImVec2(sp.x + 7.0f, sp.y + 4.0f),
+                                  filteredColor, label);
+                placedLabel = true;
+              }
+            }
+          };
+          if (countA > pairCount)
+            drawUnpaired(pathA, pairCount, countA, "FM unpaired/filtered A");
+          if (countB > pairCount)
+            drawUnpaired(pathB, pairCount, countB, "FM unpaired/filtered B");
+          drewPattern = drewPattern || countA > 0 || countB > 0;
+        }
+      }
+
+      if (!drewPattern) {
+        int learnX = runtimeInt("global_learn_roi_x", 120);
+        int learnY = runtimeInt("global_learn_roi_y", 120);
+        int learnW = runtimeInt("global_learn_roi_w", 120);
+        int learnH = runtimeInt("global_learn_roi_h", 90);
+        if (fastMatchObject != nullptr &&
+            fastMatchObject->fastmatch_learn_rect_x1 >
+                fastMatchObject->fastmatch_learn_rect_x0 &&
+            fastMatchObject->fastmatch_learn_rect_y1 >
+                fastMatchObject->fastmatch_learn_rect_y0) {
+          learnX = fastMatchObject->fastmatch_learn_rect_x0;
+          learnY = fastMatchObject->fastmatch_learn_rect_y0;
+          learnW = fastMatchObject->fastmatch_learn_rect_x1 -
+                   fastMatchObject->fastmatch_learn_rect_x0;
+          learnH = fastMatchObject->fastmatch_learn_rect_y1 -
+                   fastMatchObject->fastmatch_learn_rect_y0;
+        }
+        const double learnCx = learnX + learnW * 0.5;
+        const double learnCy = learnY + learnH * 0.5;
+        const ImVec2 center = ImageToScreenD(learnCx, learnCy);
+        drawList->AddCircle(center, 7.0f, IM_COL32(255, 235, 80, 205), 18,
+                            1.5f);
+        drawList->AddText(ImVec2(center.x + 10.0f, center.y + 8.0f),
+                          IM_COL32(255, 235, 80, 225),
+                          "FM compare_gap pattern pending");
+      }
+    }
+  }
+
+  // Layer 3.5: FindLine runtime scan debug overlay.
+
+  // This intentionally does not create ShapeElements.  It is a read-only
+  // debug projection of the native FindLine scan geometry (m_lines_w/h)
+  // and scan diagnostics.  Keeping it here avoids the previous fragile
+  // dependency on whether the .roi_axis ShapeElement happened to be
+  // visible or drawn through the LineGauge branch.
+  if (m_manualTest.show_line_gauge_scan_lines ||
+      (m_manualTest.metrology_ui.enabled &&
+       m_manualTest.metrology_ui.show_scan_profile &&
+       (m_manualTest.current_gauge.tool == "FindLine" ||
+        m_manualTest.current_gauge.has_line_gauge))) {
+    std::string ownerRef;
+    FindLine *lineTool = nullptr;
+    std::vector<std::string> ownerCandidates;
+    auto addOwnerCandidate = [&](const std::string &name) {
+      if (!name.empty() && std::find(ownerCandidates.begin(),
+                                     ownerCandidates.end(), name) ==
+                               ownerCandidates.end())
+        ownerCandidates.push_back(name);
+    };
+    addOwnerCandidate(m_manualTest.current_result_ref.source_object);
+    addOwnerCandidate(m_manualTest.current_gauge.primary_object_name);
+    for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
+      if (object.type == "FindLine")
+        addOwnerCandidate(object.name);
+    }
+    for (const std::string &candidate : ownerCandidates) {
+      lineTool = static_cast<FindLine *>(
+          m_parserDebugBridge.QueryClassObject("FindLine", candidate));
+      if (lineTool != nullptr) {
+        ownerRef = candidate;
+        break;
+      }
+    }
 
     const int displayMethod = m_manualTest.current_gauge.method;
     const bool reverseArrow = (displayMethod & 1) != 0;
@@ -5012,38 +5230,93 @@ void ViewController::drawScriptAcceptancePanels() {
       drawList->AddLine(pTo, right, arrowColor, 1.8f);
     };
 
+    const bool drawAllLineGaugeScans =
+        m_manualTest.show_line_gauge_scan_lines;
     int scanCountW = 0;
     int scanCountH = 0;
     int diagnosticCount = 0;
     // The checkbox is an object display command, not a second UI-only
     // visibility state.  Bit 0x04 is FindLine's native scan-line show
     // bit; preserve all other object display bits.
-    if (lineTool != nullptr) {
+    if (lineTool != nullptr && drawAllLineGaugeScans) {
       const int currentShowMask = lineTool->show();
       const int requestedShowMask = currentShowMask | 0x04;
       if (requestedShowMask != currentShowMask)
         lineTool->setshow(requestedShowMask);
     }
-    if (lineTool != nullptr && (lineTool->show() & 0x04) != 0) {
+    if (lineTool != nullptr) {
       scanCountW = lineTool->getscanlinecount(0);
       scanCountH = lineTool->getscanlinecount(1);
       diagnosticCount = lineTool->getscandiagnosticcount();
+
       const int totalScanCount = scanCountW + scanCountH;
+
+      const int selectedScanOrdinal =
+          totalScanCount > 0
+              ? std::max(0, std::min(totalScanCount - 1,
+                                     m_manualTest.metrology_ui.gauge_line_num -
+                                         1))
+              : -1;
+      const std::string selectedScanLabel =
+          "Gauge Line " + std::to_string(selectedScanOrdinal + 1);
       const int arrowSourceCount =
           diagnosticCount > 0 ? diagnosticCount : totalScanCount;
       const int arrowStride = std::max(1, arrowSourceCount / 48);
 
-      // Draw the native FindLine scan segments themselves.  This
-      // mirrors FindLine::drawshape() for the ImGui Image View;
-      // it neither reconstructs a Gauge grid nor makes a copied
-      // scan-line list in ViewController.
+      auto drawProfileCursorPoint = [&](const CxShapePoint &a,
+                                        const CxShapePoint &b) {
+        const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
+        if (!metrology.profile_cursor_visible ||
+            !metrology.profile_cursor_user_dragged ||
+            metrology.profile_cursor_sample_count < 2)
+          return;
+
+        const int cursorIndex = std::max(
+            0, std::min(metrology.profile_cursor_sample_count - 1,
+                        metrology.profile_cursor_sample_index));
+        const double t = static_cast<double>(cursorIndex) /
+                         static_cast<double>(metrology.profile_cursor_sample_count - 1);
+        const CxShapePoint point{a.x + (b.x - a.x) * t,
+                                 a.y + (b.y - a.y) * t};
+        const ImVec2 p = ImageToScreenD(point.x, point.y);
+        drawList->AddCircleFilled(p, 5.0f, IM_COL32(255, 210, 64, 255), 18);
+        drawList->AddCircle(p, 7.0f, IM_COL32(30, 22, 0, 240), 18, 1.5f);
+        drawList->AddLine(ImVec2(p.x - 8.0f, p.y), ImVec2(p.x + 8.0f, p.y),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        const std::string label =
+            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+
+        drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
+                          IM_COL32(255, 226, 110, 255), label.c_str());
+      };
+
+
       auto drawActualScanLine = [&](const CxShapePoint &a,
                                     const CxShapePoint &b, ImU32 color,
                                     float thickness, int ordinal) {
-        drawList->AddLine(ImageToScreenD(a.x, a.y), ImageToScreenD(b.x, b.y),
-                          color, thickness);
-        if ((ordinal % arrowStride) == 0)
+        const bool selected = ordinal == selectedScanOrdinal;
+        const ImU32 drawColor =
+            selected ? IM_COL32(255, 64, 210, 255) : color;
+        const float drawThickness = selected ? std::max(3.0f, thickness)
+                                             : thickness;
+        const ImVec2 pa = ImageToScreenD(a.x, a.y);
+        const ImVec2 pb = ImageToScreenD(b.x, b.y);
+        drawList->AddLine(pa, pb, drawColor, drawThickness);
+        if (selected) {
+          const ImVec2 mid((pa.x + pb.x) * 0.5f + 6.0f,
+                           (pa.y + pb.y) * 0.5f + 6.0f);
+          drawList->AddCircleFilled(pa, 3.8f, drawColor, 12);
+          drawList->AddCircleFilled(pb, 3.8f, drawColor, 12);
+          drawList->AddText(mid, drawColor, selectedScanLabel.c_str());
           drawArrowHead(a, b);
+
+          drawProfileCursorPoint(a, b);
+
+        } else if (drawAllLineGaugeScans && (ordinal % arrowStride) == 0) {
+          drawArrowHead(a, b);
+        }
         return true;
       };
 
@@ -5055,8 +5328,11 @@ void ViewController::drawScriptAcceptancePanels() {
           if (!lineTool->getscanline(scanType, scanIndex, a, b))
             continue;
 
+          const int currentOrdinal = ordinal++;
+          if (!drawAllLineGaugeScans && currentOrdinal != selectedScanOrdinal)
+            continue;
           drawActualScanLine(a, b, IM_COL32(140, 230, 255, 145), 1.0f,
-                             ordinal++);
+                             currentOrdinal);
         }
       }
 
@@ -5070,6 +5346,11 @@ void ViewController::drawScriptAcceptancePanels() {
             continue;
           }
 
+          const int diagOrdinal =
+              diag.scan_type <= 0 ? diag.scan_index : scanCountW + diag.scan_index;
+          if (!drawAllLineGaugeScans && diagOrdinal != selectedScanOrdinal)
+            continue;
+
           ImU32 lineColor = IM_COL32(255, 230, 120, 115);
           float lineThickness = 1.0f;
           if (diag.accepted) {
@@ -5080,51 +5361,74 @@ void ViewController::drawScriptAcceptancePanels() {
             lineColor = IM_COL32(255, 96, 96, 170);
           }
 
-          drawActualScanLine(a, b, lineColor, lineThickness, ordinal++);
+          drawActualScanLine(a, b, lineColor, lineThickness, diagOrdinal);
 
           if (diag.accepted) {
-            const ImVec2 ap = ImageToScreenD(diag.accepted_x, diag.accepted_y);
-            drawList->AddCircleFilled(ap, 3.5f, IM_COL32(255, 235, 64, 255));
-            drawList->AddCircle(ap, 4.5f, IM_COL32(80, 40, 0, 220), 12, 1.0f);
+            int conclusionIndex = 0;
+            auto drawConclusionPoint = [&](double x, double y) {
+              const ImVec2 ap = ImageToScreenD(x, y);
+              drawList->AddCircleFilled(ap, 4.5f, IM_COL32(255, 128, 48, 255), 16);
+              drawList->AddCircle(ap, 6.0f, IM_COL32(90, 35, 0, 230), 16, 1.2f);
+              drawList->AddLine(ImVec2(ap.x - 7.0f, ap.y), ImVec2(ap.x + 7.0f, ap.y),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              drawList->AddLine(ImVec2(ap.x, ap.y - 7.0f), ImVec2(ap.x, ap.y + 7.0f),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              if (diagOrdinal == selectedScanOrdinal) {
+                const std::string label =
+                    "Conclusion " + std::to_string(++conclusionIndex);
+                drawList->AddText(ImVec2(ap.x + 8.0f, ap.y + 8.0f),
+                                  IM_COL32(255, 178, 118, 255), label.c_str());
+              }
+            };
+
+            bool usedMultiPoint = false;
+            for (std::size_t p = 0; p + 1 < diag.accepted_points_xy.size(); p += 2) {
+              drawConclusionPoint(diag.accepted_points_xy[p],
+                                  diag.accepted_points_xy[p + 1]);
+              usedMultiPoint = true;
+            }
+            if (!usedMultiPoint)
+              drawConclusionPoint(diag.accepted_x, diag.accepted_y);
           }
+
         }
       }
     }
   }
 
-  // Layer 3.6: FindCircle runtime scan debug overlay.
-  //
-  // Keep FindCircle aligned with FindLine: draw Gauge scan lines from
-  // the live tool object's internal scan-line collection.  Accepted
-  // points are calculated from the same lines, so displayed lines and
-  // result points stay on the same geometry.
-  if (m_manualTest.show_circle_gauge_scan_lines) {
-    // For FindCircle, prefer the runtime result owner over the editable
-    // Gauge owner.  Manual editing can leave current_gauge pointing at
-    // a staged/edit object, while the accepted points shown in Image
-    // View are published from the last executed runtime object.
-    std::string ownerRef = m_manualTest.current_result_ref.source_object;
-    if (ownerRef.empty())
-      ownerRef = m_manualTest.current_gauge.primary_object_name;
-    if (ownerRef.empty()) {
-      for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
-        if (object.type == "FindCircle") {
-          ownerRef = object.name;
-          break;
-        }
+  if (m_manualTest.show_circle_gauge_scan_lines ||
+      (m_manualTest.metrology_ui.enabled &&
+       m_manualTest.metrology_ui.show_scan_profile &&
+       (m_manualTest.current_gauge.tool == "FindCircle" ||
+        m_manualTest.current_gauge.has_circle_gauge))) {
+    std::string ownerRef;
+    FindCircle *circleTool = nullptr;
+    std::vector<std::string> ownerCandidates;
+    auto addOwnerCandidate = [&](const std::string &name) {
+      if (!name.empty() && std::find(ownerCandidates.begin(),
+                                     ownerCandidates.end(), name) ==
+                               ownerCandidates.end())
+        ownerCandidates.push_back(name);
+    };
+    addOwnerCandidate(m_manualTest.current_result_ref.source_object);
+    addOwnerCandidate(m_manualTest.current_gauge.primary_object_name);
+    for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
+      if (object.type == "FindCircle")
+        addOwnerCandidate(object.name);
+    }
+    for (const std::string &candidate : ownerCandidates) {
+      circleTool = static_cast<FindCircle *>(
+          m_parserDebugBridge.QueryClassObject("FindCircle", candidate));
+      if (circleTool != nullptr) {
+        ownerRef = candidate;
+        break;
       }
     }
-
-    FindCircle *circleTool =
-        ownerRef.empty()
-            ? nullptr
-            : static_cast<FindCircle *>(
-                  m_parserDebugBridge.QueryClassObject("FindCircle", ownerRef));
-
     auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
       return ImVec2(imagePos.x + static_cast<float>(x) * sx,
                     imagePos.y + static_cast<float>(y) * sy);
     };
+
 
     auto drawArrowHead = [&](CxShapePoint from, CxShapePoint to,
                              ImU32 arrowColor) {
@@ -5149,21 +5453,78 @@ void ViewController::drawScriptAcceptancePanels() {
     };
 
     if (circleTool != nullptr) {
+      const bool drawAllCircleGaugeScans =
+          m_manualTest.show_circle_gauge_scan_lines;
       const FindCircleMeasureGeometryDebug &debug =
           circleTool->lastmeasuregeometrydebug();
       const int scanCount =
           std::max(debug.scan_line_count, circleTool->getscanlinecount());
       const int diagnosticCount = circleTool->getscandiagnosticcount();
-      const int arrowStride = std::max(2, scanCount / 32);
+      const int selectableScanCount = std::max(scanCount, diagnosticCount);
+      const int selectedScanIndex =
+          selectableScanCount > 0
+              ? std::max(0, std::min(selectableScanCount - 1,
+                                     m_manualTest.metrology_ui.gauge_line_num -
+                                         1))
+              : -1;
+      const std::string selectedScanLabel =
+          "Gauge Line " + std::to_string(selectedScanIndex + 1);
+      const int arrowStride = std::max(2, std::max(1, selectableScanCount) / 32);
+
+
+      auto drawProfileCursorPoint = [&](const CxShapePoint &a,
+                                        const CxShapePoint &b) {
+        const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
+        if (!metrology.profile_cursor_visible ||
+            !metrology.profile_cursor_user_dragged ||
+            metrology.profile_cursor_sample_count < 2)
+          return;
+        const int cursorIndex = std::max(
+            0, std::min(metrology.profile_cursor_sample_count - 1,
+                        metrology.profile_cursor_sample_index));
+        const double t = static_cast<double>(cursorIndex) /
+                         static_cast<double>(metrology.profile_cursor_sample_count - 1);
+        const CxShapePoint point{a.x + (b.x - a.x) * t,
+                                 a.y + (b.y - a.y) * t};
+        const ImVec2 p = ImageToScreenD(point.x, point.y);
+        drawList->AddCircleFilled(p, 5.0f, IM_COL32(255, 210, 64, 255), 18);
+        drawList->AddCircle(p, 7.0f, IM_COL32(30, 22, 0, 240), 18, 1.5f);
+        drawList->AddLine(ImVec2(p.x - 8.0f, p.y), ImVec2(p.x + 8.0f, p.y),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        const std::string label =
+            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+        drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
+                          IM_COL32(255, 226, 110, 255), label.c_str());
+      };
+
 
       auto drawCircleScanLine = [&](const CxShapePoint &a,
                                     const CxShapePoint &b, ImU32 color,
                                     float thickness, int ordinal) {
-        drawList->AddLine(ImageToScreenD(a.x, a.y), ImageToScreenD(b.x, b.y),
-                          color, thickness);
+        const bool selected = ordinal == selectedScanIndex;
+        const ImU32 drawColor =
+            selected ? IM_COL32(255, 64, 210, 255) : color;
+        const float drawThickness = selected ? std::max(3.0f, thickness)
+                                             : thickness;
+        const ImVec2 pa = ImageToScreenD(a.x, a.y);
+        const ImVec2 pb = ImageToScreenD(b.x, b.y);
+        drawList->AddLine(pa, pb, drawColor, drawThickness);
 
-        if ((ordinal % arrowStride) == 0)
+        if (selected) {
+          const ImVec2 mid((pa.x + pb.x) * 0.5f + 6.0f,
+                           (pa.y + pb.y) * 0.5f + 6.0f);
+          drawList->AddCircleFilled(pa, 3.8f, drawColor, 12);
+          drawList->AddCircleFilled(pb, 3.8f, drawColor, 12);
+          drawList->AddText(mid, drawColor, selectedScanLabel.c_str());
+          drawArrowHead(a, b, drawColor);
+
+          drawProfileCursorPoint(a, b);
+
+        } else if (drawAllCircleGaugeScans && (ordinal % arrowStride) == 0) {
           drawArrowHead(a, b, IM_COL32(140, 230, 255, 175));
+        }
       };
 
       if (diagnosticCount > 0) {
@@ -5174,6 +5535,8 @@ void ViewController::drawScriptAcceptancePanels() {
               !circleTool->getscandiagnosticline(diag.scan_index, a, b)) {
             continue;
           }
+          if (!drawAllCircleGaugeScans && diag.scan_index != selectedScanIndex)
+            continue;
 
           ImU32 lineColor = IM_COL32(140, 230, 255, 105);
           float lineThickness = 1.0f;
@@ -5185,18 +5548,42 @@ void ViewController::drawScriptAcceptancePanels() {
             lineColor = IM_COL32(255, 96, 96, 150);
           }
 
-          drawCircleScanLine(a, b, lineColor, lineThickness, i);
+          drawCircleScanLine(a, b, lineColor, lineThickness, diag.scan_index);
 
           if (diag.accepted) {
-            const ImVec2 ap = ImageToScreenD(diag.accepted_x, diag.accepted_y);
-            drawList->AddCircleFilled(ap, 3.5f, IM_COL32(255, 235, 64, 255));
-            drawList->AddCircle(ap, 4.5f, IM_COL32(80, 40, 0, 220), 12, 1.0f);
+            int conclusionIndex = 0;
+            auto drawConclusionPoint = [&](double x, double y) {
+              const ImVec2 ap = ImageToScreenD(x, y);
+              drawList->AddCircleFilled(ap, 4.5f, IM_COL32(255, 128, 48, 255), 16);
+              drawList->AddCircle(ap, 6.0f, IM_COL32(90, 35, 0, 230), 16, 1.2f);
+              drawList->AddLine(ImVec2(ap.x - 7.0f, ap.y), ImVec2(ap.x + 7.0f, ap.y),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              drawList->AddLine(ImVec2(ap.x, ap.y - 7.0f), ImVec2(ap.x, ap.y + 7.0f),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              if (diag.scan_index == selectedScanIndex) {
+                const std::string label =
+                    "Conclusion " + std::to_string(++conclusionIndex);
+                drawList->AddText(ImVec2(ap.x + 8.0f, ap.y + 8.0f),
+                                  IM_COL32(255, 178, 118, 255), label.c_str());
+              }
+            };
+
+            bool usedMultiPoint = false;
+            for (std::size_t p = 0; p + 1 < diag.accepted_points_xy.size(); p += 2) {
+              drawConclusionPoint(diag.accepted_points_xy[p],
+                                  diag.accepted_points_xy[p + 1]);
+              usedMultiPoint = true;
+            }
+            if (!usedMultiPoint)
+              drawConclusionPoint(diag.accepted_x, diag.accepted_y);
           }
         }
       } else {
         for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex) {
           CxShapePoint a, b;
           if (!circleTool->getscanline(scanIndex, a, b))
+            continue;
+          if (!drawAllCircleGaugeScans && scanIndex != selectedScanIndex)
             continue;
 
           drawCircleScanLine(a, b, IM_COL32(140, 230, 255, 105), 1.0f,
@@ -5235,6 +5622,194 @@ void ViewController::drawScriptAcceptancePanels() {
 
         drawList->AddCircle(refined, 5.5f, precisionColor, 14, 1.6f);
         drawList->AddCircleFilled(refined, 1.5f, precisionColor);
+      }
+    }
+  }
+  if (m_manualTest.show_ellipse_gauge_scan_lines ||
+      (m_manualTest.metrology_ui.enabled &&
+       m_manualTest.metrology_ui.show_scan_profile &&
+       (m_manualTest.current_gauge.tool == "FindEllipse" ||
+        m_manualTest.current_gauge.has_ellipse_gauge))) {
+    std::string ownerRef;
+    FindEllipse *ellipseTool = nullptr;
+    std::vector<std::string> ownerCandidates;
+    auto addOwnerCandidate = [&](const std::string &name) {
+      if (!name.empty() && std::find(ownerCandidates.begin(),
+                                     ownerCandidates.end(), name) ==
+                               ownerCandidates.end())
+        ownerCandidates.push_back(name);
+    };
+    addOwnerCandidate(m_manualTest.current_result_ref.source_object);
+    addOwnerCandidate(m_manualTest.current_gauge.primary_object_name);
+    for (const RuntimeObjectView &object : m_manualTest.runtime_objects) {
+      if (object.type == "FindEllipse")
+        addOwnerCandidate(object.name);
+    }
+    for (const std::string &candidate : ownerCandidates) {
+      ellipseTool = static_cast<FindEllipse *>(
+          m_parserDebugBridge.QueryClassObject("FindEllipse", candidate));
+      if (ellipseTool != nullptr) {
+        ownerRef = candidate;
+        break;
+      }
+    }
+
+    auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
+      return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                    imagePos.y + static_cast<float>(y) * sy);
+    };
+
+    auto drawArrowHead = [&](CxShapePoint from, CxShapePoint to,
+                             ImU32 arrowColor) {
+      const ImVec2 pFrom = ImageToScreenD(from.x, from.y);
+      const ImVec2 pTo = ImageToScreenD(to.x, to.y);
+      const float vx = pTo.x - pFrom.x;
+      const float vy = pTo.y - pFrom.y;
+      const float vlen = std::sqrt(vx * vx + vy * vy);
+      if (vlen < 1.0f)
+        return;
+
+      const float ux = vx / vlen;
+      const float uy = vy / vlen;
+      const float arrowLen = 7.0f;
+      const float arrowHalf = 4.0f;
+      const ImVec2 base(pTo.x - ux * arrowLen, pTo.y - uy * arrowLen);
+      const ImVec2 left(base.x - uy * arrowHalf, base.y + ux * arrowHalf);
+      const ImVec2 right(base.x + uy * arrowHalf, base.y - ux * arrowHalf);
+      drawList->AddLine(pTo, left, arrowColor, 1.8f);
+      drawList->AddLine(pTo, right, arrowColor, 1.8f);
+    };
+
+    if (ellipseTool != nullptr) {
+      const bool drawAllEllipseGaugeScans =
+          m_manualTest.show_ellipse_gauge_scan_lines;
+      const int scanCount = ellipseTool->getscanlinecount();
+      const int diagnosticCount = ellipseTool->getscandiagnosticcount();
+      const int selectableScanCount = std::max(scanCount, diagnosticCount);
+      const int selectedScanIndex =
+          selectableScanCount > 0
+              ? std::max(0, std::min(selectableScanCount - 1,
+                                     m_manualTest.metrology_ui.gauge_line_num -
+                                         1))
+              : -1;
+      const std::string selectedScanLabel =
+          "Gauge Line " + std::to_string(selectedScanIndex + 1);
+      const int arrowStride = std::max(2, std::max(1, selectableScanCount) / 32);
+
+      auto drawProfileCursorPoint = [&](const CxShapePoint &a,
+                                        const CxShapePoint &b) {
+        const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
+        if (!metrology.profile_cursor_visible ||
+            !metrology.profile_cursor_user_dragged ||
+            metrology.profile_cursor_sample_count < 2)
+          return;
+        const int cursorIndex = std::max(
+            0, std::min(metrology.profile_cursor_sample_count - 1,
+                        metrology.profile_cursor_sample_index));
+        const double t = static_cast<double>(cursorIndex) /
+                         static_cast<double>(metrology.profile_cursor_sample_count - 1);
+        const CxShapePoint point{a.x + (b.x - a.x) * t,
+                                 a.y + (b.y - a.y) * t};
+        const ImVec2 p = ImageToScreenD(point.x, point.y);
+        drawList->AddCircleFilled(p, 5.0f, IM_COL32(255, 210, 64, 255), 18);
+        drawList->AddCircle(p, 7.0f, IM_COL32(30, 22, 0, 240), 18, 1.5f);
+        drawList->AddLine(ImVec2(p.x - 8.0f, p.y), ImVec2(p.x + 8.0f, p.y),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        const std::string label =
+            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+        drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
+                          IM_COL32(255, 226, 110, 255), label.c_str());
+      };
+
+      auto drawEllipseScanLine = [&](const CxShapePoint &a,
+                                     const CxShapePoint &b, ImU32 color,
+                                     float thickness, int ordinal) {
+        const bool selected = ordinal == selectedScanIndex;
+        const ImU32 drawColor =
+            selected ? IM_COL32(255, 64, 210, 255) : color;
+        const float drawThickness = selected ? std::max(3.0f, thickness)
+                                             : thickness;
+        const ImVec2 pa = ImageToScreenD(a.x, a.y);
+        const ImVec2 pb = ImageToScreenD(b.x, b.y);
+        drawList->AddLine(pa, pb, drawColor, drawThickness);
+
+        if (selected) {
+          const ImVec2 mid((pa.x + pb.x) * 0.5f + 6.0f,
+                           (pa.y + pb.y) * 0.5f + 6.0f);
+          drawList->AddCircleFilled(pa, 3.8f, drawColor, 12);
+          drawList->AddCircleFilled(pb, 3.8f, drawColor, 12);
+          drawList->AddText(mid, drawColor, selectedScanLabel.c_str());
+          drawArrowHead(a, b, drawColor);
+          drawProfileCursorPoint(a, b);
+        } else if (drawAllEllipseGaugeScans && (ordinal % arrowStride) == 0) {
+          drawArrowHead(a, b, IM_COL32(140, 230, 255, 175));
+        }
+      };
+
+      if (diagnosticCount > 0) {
+        for (int i = 0; i < diagnosticCount; ++i) {
+          FindEllipseMeasureGeometryDebug::ScanDiagnostic diag;
+          CxShapePoint a, b;
+          if (!ellipseTool->getscandiagnostic(i, diag) ||
+              !ellipseTool->getscandiagnosticline(diag.scan_index, a, b)) {
+            continue;
+          }
+          if (!drawAllEllipseGaugeScans && diag.scan_index != selectedScanIndex)
+            continue;
+
+          ImU32 lineColor = IM_COL32(140, 230, 255, 105);
+          float lineThickness = 1.0f;
+          if (diag.accepted) {
+            lineColor = IM_COL32(255, 235, 64, 210);
+            lineThickness = 1.4f;
+          } else if (!diag.reject_reason.empty() &&
+                     diag.reject_reason != "no_candidate") {
+            lineColor = IM_COL32(255, 96, 96, 150);
+          }
+
+          drawEllipseScanLine(a, b, lineColor, lineThickness, diag.scan_index);
+
+          if (diag.accepted) {
+            int conclusionIndex = 0;
+            auto drawConclusionPoint = [&](double x, double y) {
+              const ImVec2 ap = ImageToScreenD(x, y);
+              drawList->AddCircleFilled(ap, 4.5f, IM_COL32(255, 128, 48, 255), 16);
+              drawList->AddCircle(ap, 6.0f, IM_COL32(90, 35, 0, 230), 16, 1.2f);
+              drawList->AddLine(ImVec2(ap.x - 7.0f, ap.y), ImVec2(ap.x + 7.0f, ap.y),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              drawList->AddLine(ImVec2(ap.x, ap.y - 7.0f), ImVec2(ap.x, ap.y + 7.0f),
+                                IM_COL32(255, 230, 180, 255), 1.3f);
+              if (diag.scan_index == selectedScanIndex) {
+                const std::string label =
+                    "Conclusion " + std::to_string(++conclusionIndex);
+                drawList->AddText(ImVec2(ap.x + 8.0f, ap.y + 8.0f),
+                                  IM_COL32(255, 178, 118, 255), label.c_str());
+              }
+            };
+
+            bool usedMultiPoint = false;
+            for (std::size_t p = 0; p + 1 < diag.accepted_points_xy.size(); p += 2) {
+              drawConclusionPoint(diag.accepted_points_xy[p],
+                                  diag.accepted_points_xy[p + 1]);
+              usedMultiPoint = true;
+            }
+            if (!usedMultiPoint)
+              drawConclusionPoint(diag.accepted_x, diag.accepted_y);
+          }
+        }
+      } else {
+        for (int scanIndex = 0; scanIndex < scanCount; ++scanIndex) {
+          CxShapePoint a, b;
+          if (!ellipseTool->getscanline(scanIndex, a, b))
+            continue;
+          if (!drawAllEllipseGaugeScans && scanIndex != selectedScanIndex)
+            continue;
+
+          drawEllipseScanLine(a, b, IM_COL32(140, 230, 255, 105), 1.0f,
+                              scanIndex);
+        }
       }
     }
   }
@@ -8427,8 +9002,16 @@ void ViewController::DrawShapeElementOnImageView(const CxShapeElement &element,
     return;
   }
   if (element.owner_type == "FindEllipse" &&
-      element.semantic_role == "scan_tick" &&
-      !m_manualTest.show_ellipse_gauge_scan_lines) {
+      element.semantic_role == "scan_tick") {
+    return;
+  }
+  if (element.owner_type == "FindEllipse" &&
+      element.semantic_role == "measure_points" &&
+      (m_manualTest.show_ellipse_gauge_scan_lines ||
+       (m_manualTest.metrology_ui.enabled &&
+        m_manualTest.metrology_ui.show_scan_profile &&
+        (m_manualTest.current_gauge.tool == "FindEllipse" ||
+         m_manualTest.current_gauge.has_ellipse_gauge)))) {
     return;
   }
 

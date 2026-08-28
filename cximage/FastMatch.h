@@ -53,6 +53,9 @@ public:
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
+
+    void setscanrotation(double angle_degrees);
+    double getscanrotation() const;
     void setobjfilter(int ifindset);
     void setlearnwgap(int direction, int value);
     void setlearnhgap(int direction, int value);

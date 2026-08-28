@@ -84,6 +84,19 @@ int RoundToInt(double value)
     return static_cast<int>(std::lround(clamped));
 }
 
+void RotatePointAround(gp_Pnt& point, double center_x, double center_y, double angle_radians)
+{
+    if (!std::isfinite(angle_radians) || std::abs(angle_radians) <= 1.0e-12)
+        return;
+
+    const double dx = point.X() - center_x;
+    const double dy = point.Y() - center_y;
+    const double c = std::cos(angle_radians);
+    const double s = std::sin(angle_radians);
+    point.SetX(center_x + dx * c - dy * s);
+    point.SetY(center_y + dx * s + dy * c);
+}
+
 int ClampLongLongToInt(long long value)
 {
     const long long min_value = static_cast<long long>(std::numeric_limits<int>::min());
@@ -128,6 +141,18 @@ void RecordFindLineEdgeCandidate(
         ++eval.over_length_runs;
 }
 
+void RecordFindLineAcceptedDiagnosticPoint(
+    FindLineMeasureInputDebug::ScanDiagnostic& diag,
+    const gp_Pnt& point)
+{
+    diag.accepted = true;
+    diag.accepted_x = point.X();
+    diag.accepted_y = point.Y();
+    diag.accepted_points_xy.push_back(point.X());
+    diag.accepted_points_xy.push_back(point.Y());
+    diag.reject_reason.clear();
+}
+
 bool IsFindLineNearAcceptedCandidate(
     const FindLineMeasureInputDebug::ScanDiagnostic& diag,
     const gp_Pnt& point,
@@ -136,9 +161,17 @@ bool IsFindLineNearAcceptedCandidate(
     if (!diag.accepted)
         return false;
     threshold = std::min(2.0, std::max(1.0, threshold));
+    const double limit2 = threshold * threshold;
+    for (std::size_t i = 0; i + 1 < diag.accepted_points_xy.size(); i += 2)
+    {
+        const double dx = point.X() - diag.accepted_points_xy[i];
+        const double dy = point.Y() - diag.accepted_points_xy[i + 1];
+        if ((dx * dx + dy * dy) <= limit2)
+            return true;
+    }
     const double dx = point.X() - diag.accepted_x;
     const double dy = point.Y() - diag.accepted_y;
-    return (dx * dx + dy * dy) <= (threshold * threshold);
+    return (dx * dx + dy * dy) <= limit2;
 }
 
 int CountFindLineBinaryForegroundInRow(
@@ -501,6 +534,31 @@ void FindLine::setmeasurefallback(int mode)
 
     m_measure_fallback_mode = mode;
 }
+void FindLine::setscanrotation(double angle_degrees)
+{
+    if (!std::isfinite(angle_degrees))
+        return;
+
+    if (angle_degrees > 360.0 || angle_degrees < -360.0)
+        angle_degrees = std::fmod(angle_degrees, 360.0);
+
+    if (std::abs(m_scan_rotation_degrees - angle_degrees) <= 1.0e-9)
+        return;
+
+    m_scan_rotation_degrees = angle_degrees;
+
+    if (m_has_display_line_roi)
+    {
+        setlinesegment(m_display_line_x0, m_display_line_y0,
+            m_display_line_x1, m_display_line_y1,
+            m_display_line_scale);
+        return;
+    }
+
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange("setscanrotation_changed_before_setline");
+}
+
 void FindLine::setshow(int ishow)
 {
     if (ishow & 0x02)
@@ -674,6 +732,17 @@ void FindLine::setlinesegment(double ix0, double iy0,
         ptRect[3].SetX(ix1 + dscale * std::cos(theta));
         ptRect[3].SetY( iy1 - dscale * std::sin(theta));
     }
+    const double scan_rotation_radians = m_scan_rotation_degrees * CV_PI / 180.0;
+    if (std::abs(scan_rotation_radians) > 1.0e-12)
+    {
+        const double center_x = (ptRect[0].X() + ptRect[2].X()) * 0.5;
+        const double center_y = (ptRect[0].Y() + ptRect[2].Y()) * 0.5;
+        for (gp_Pnt& point : ptRect)
+        {
+            RotatePointAround(point, center_x, center_y, scan_rotation_radians);
+        }
+    }
+
     m_LineA.setline(RoundToInt(ptRect[0].X()), RoundToInt(ptRect[0].Y()),
         RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()));
     m_LineB.setline(RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()),
@@ -2132,10 +2201,8 @@ void FindLine::Measure(Image& image)
         ++m_lastMeasureInputDebug.scan_runs_total;
         ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
         ++m_lastMeasureInputDebug.scan_points_emitted;
-        ++diag.candidate_count;
-        diag.accepted = true;
-        diag.accepted_x = point.X();
-        diag.accepted_y = point.Y();
+        RecordFindLineAcceptedDiagnosticPoint(diag, point);
+
         diag.reject_reason.clear();
         RecordFindLineEdgeCandidate(
             m_lastMeasureInputDebug,
@@ -2236,10 +2303,8 @@ void FindLine::Measure(Image& image)
                             {
                                 m_measurepoints_w.addpoint(apoint);
                                 ++m_lastMeasureInputDebug.scan_points_emitted;
-                                currentDiag.accepted = true;
-                                currentDiag.accepted_x = apoint.X();
-                                currentDiag.accepted_y = apoint.Y();
-                                currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
                                 RecordFindLineEdgeCandidate(
                                     m_lastMeasureInputDebug,
                                     icurlinenum,
@@ -2362,10 +2427,8 @@ void FindLine::Measure(Image& image)
                     {
                         m_measurepoints_w.addpoint(apoint);
                         ++m_lastMeasureInputDebug.scan_points_emitted;
-                        currentDiag.accepted = true;
-                        currentDiag.accepted_x = apoint.X();
-                        currentDiag.accepted_y = apoint.Y();
-                        currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
                             icurlinenum,
@@ -2431,10 +2494,8 @@ void FindLine::Measure(Image& image)
             ++m_lastMeasureInputDebug.scan_points_emitted;
             auto& currentDiag =
                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-            currentDiag.accepted = true;
-            currentDiag.accepted_x = apoint.X();
-            currentDiag.accepted_y = apoint.Y();
-            currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
             RecordFindLineEdgeCandidate(
                 m_lastMeasureInputDebug,
                 lastEdgeOrdinal,
@@ -2555,10 +2616,8 @@ void FindLine::Measure(Image& image)
                             {
                                 m_measurepoints_h.addpoint(apoint);
                                 ++m_lastMeasureInputDebug.scan_points_emitted;
-                                currentDiag.accepted = true;
-                                currentDiag.accepted_x = apoint.X();
-                                currentDiag.accepted_y = apoint.Y();
-                                currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
                                 RecordFindLineEdgeCandidate(
                                     m_lastMeasureInputDebug,
                                     icurlinenum,
@@ -2683,10 +2742,8 @@ void FindLine::Measure(Image& image)
                     {
                         m_measurepoints_h.addpoint(apoint);
                         ++m_lastMeasureInputDebug.scan_points_emitted;
-                        currentDiag.accepted = true;
-                        currentDiag.accepted_x = apoint.X();
-                        currentDiag.accepted_y = apoint.Y();
-                        currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
                             icurlinenum,
@@ -2753,10 +2810,8 @@ void FindLine::Measure(Image& image)
             ++m_lastMeasureInputDebug.scan_points_emitted;
             auto& currentDiag =
                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
-            currentDiag.accepted = true;
-            currentDiag.accepted_x = apoint.X();
-            currentDiag.accepted_y = apoint.Y();
-            currentDiag.reject_reason.clear();
+                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+
             RecordFindLineEdgeCandidate(
                 m_lastMeasureInputDebug,
                 lastEdgeOrdinal,

@@ -210,10 +210,11 @@ struct FindLineMeasureInputDebug
     {
         int scan_index = -1;
         int scan_type = 0;
-        int candidate_count = 0;
         bool accepted = false;
         double accepted_x = 0.0;
         double accepted_y = 0.0;
+        std::vector<double> accepted_points_xy;
+        int candidate_count = 0;
         std::string reject_reason;
     };
 
@@ -395,6 +396,9 @@ public:
     void setscandirection(int direction);
     bool wscanenabled() const { return m_scan_direction != 2; }
     bool hscanenabled() const { return m_scan_direction != 1; }
+
+    void setscanrotation(double angle_degrees);
+    double getscanrotation() const { return m_scan_rotation_degrees; }
     int thre();
     int linegap() { return m_iSelectPointGap; }
     int objfilter() const { return m_iobjfilterset; }
@@ -634,6 +638,8 @@ private:
     // 0 keeps legacy two-axis behavior for old assets; Manual UI uses the
     // mutually exclusive modes 1=W-only and 2=H-only.
     int m_scan_direction;
+
+    double m_scan_rotation_degrees = 0.0;
 
     gp_Pnt* m_listscanorA;
     gp_Pnt* m_listcollectorA;

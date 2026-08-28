@@ -1,6 +1,9 @@
 #include "CxParameterProfileRuntime.h"
 #include "CxScriptCasePackageWriter.h"
 #include "CxUnifiedLog.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
+
 #include "ManualConsoleGauge.h"
 #include "ManualConsoleParamRegressionPanel.h"
 #include "ManualConsoleScriptDebugPanel.h"
@@ -463,9 +466,6 @@ CurrentTorchTrainingImageLocal(const ManualTestContext &context) {
 }
 
 static std::string TorchTaskFeatureLocal(const ManualTestContext &context) {
-  // A staged Torch action is the immediate execution source and therefore
-  // overrides the selected Evidence family until another Evidence row is
-  // loaded (which changes editor_source away from torch_runtime_action).
   if (context.editor_source == "torch_runtime_action") {
     const std::string actionKey = ToLowerAsciiLocal(
         context.loaded_script_path + " " + context.editor_text + " " +
@@ -485,17 +485,12 @@ static std::string TorchTaskFeatureLocal(const ManualTestContext &context) {
   if (!explicitFeature.empty())
     return explicitFeature;
 
-  // The selected Evidence case is authoritative.  Only fall back to the
-  // editor when no Evidence script/tool is selected; otherwise a previously
-  // opened training script can incorrectly seed a detection case.
   std::string source = context.current_evidence_selection.script_id + " " +
                        context.current_evidence_selection.script_path + " " +
                        context.current_evidence_selection.tool;
   if (source.find_first_not_of(" \t\r\n") == std::string::npos)
     source = context.loaded_script_path + " " + context.editor_text;
   const std::string key = ToLowerAsciiLocal(source);
-  // Training must win over model-family words such as "segmentation" in a
-  // training script name.
   if (key.find("train") != std::string::npos)
     return "training_lifecycle";
   if (key.find("instance_seg") != std::string::npos)
@@ -610,8 +605,6 @@ static void ApplyTorchParameterDefaultsLocal(ManualTestContext &context,
     epochs = 30;
     batchSize = 16;
   } else if (feature == "training_lifecycle") {
-    // The currently bound lifecycle task is deliberately a one-step smoke.
-    // It uses batch=2 internally and does not consume a multi-epoch request.
     inputWidth = 128;
     inputHeight = 128;
     epochs = 1;
@@ -976,8 +969,6 @@ static bool StageTorchUiRunLocal(ManualTestContext &context,
     ApplyTorchParameterDefaultsLocal(context, "object_detection");
   else if (action == "torch_infer_segmentation")
     ApplyTorchParameterDefaultsLocal(context, "semantic_segmentation");
-  // Freeze only after the action-specific profile has been applied.  The
-  // deferred Debug Compiler restores this snapshot before execution.
   context.pending_execution_gauge = context.current_gauge;
   context.pending_execution_globals = context.runtime_int_vars;
   context.has_pending_execution_snapshot = true;
@@ -1020,10 +1011,6 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
             ? selectedFeature
             : (evidenceFeature == "runtime_contract" ? selectedFeature
                                                      : evidenceFeature);
-    // Tiny Smoke always loads its canonical segmentation lifecycle script.
-    // It is therefore valid from any selected Torch evidence case with an
-    // image, including a detection case.  The selected case is evidence
-    // context only; it must not silently become a segmentation-quality claim.
     const bool torchActionAvailable =
         IsTorchContext(context) &&
         (!context.image_file_path.empty() ||
@@ -1114,8 +1101,6 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
 
   if (!ImGui::CollapsingHeader("Torch Inference Status",
                                ImGuiTreeNodeFlags_DefaultOpen)) {
-    // Keep the following Torch sections independent.  Collapsing inference
-    // must not hide training/prompt status from the operator.
   } else {
     ImGui::TextWrapped(
         "Read-only bridge for TorchTask / FindSegmentation runtime fields. "
@@ -2195,7 +2180,8 @@ void DrawEvidenceCaseListPanel(ManualTestContext &context) {
       for (const auto &item : context.evidence_items) {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted(item.case_id.c_str());
+        ImGui::TextUnformatted(item.review_item.empty() ? item.case_id.c_str()
+                                                       : item.review_item.c_str());
         ImGui::TableSetColumnIndex(1);
         ImGui::TextUnformatted(item.tool.c_str());
         ImGui::TableSetColumnIndex(2);
@@ -2313,11 +2299,21 @@ void DrawKeyParameterSummaryPanel(const ManualTestContext &context) {
     row("common", "threshold", g.threshold, g.source.c_str());
     row("common", "method", g.method, g.source.c_str());
     row("common", "filterprofile", g.filterprofile, g.source.c_str());
+    if (NormalizeKeyParamToolTypeLocal(g.tool) == "FastMatch" ||
+        NormalizeKeyParamToolTypeLocal(g.primary_object_type) == "FastMatch") {
+      int scanRotationDeg = 0;
+      const auto scanRotationIt =
+          context.runtime_int_vars.find("global_fastmatch_scan_rotation_deg");
+      if (scanRotationIt != context.runtime_int_vars.end())
+        scanRotationDeg = scanRotationIt->second;
+      row("fastmatch", "scan_rotation_deg", scanRotationDeg,
+          g.source.c_str());
+    }
     row("circle", "cx", g.circle_cx, g.source.c_str());
     row("circle", "cy", g.circle_cy, g.source.c_str());
     row("circle", "px", g.circle_px, g.source.c_str());
-    row("circle", "py", g.circle_py, g.source.c_str());
-    row("circle", "gap", g.gap, g.source.c_str());
+
+
     ImGui::EndTable();
   }
 }
@@ -2950,17 +2946,20 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   ManualGaugeState &gauge = context.current_gauge;
   bool edited = false;
   ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Learn Setup");
-  ImGui::TextDisabled("Maps to: setrect + setobjfilter + SetWHgap + setthre + "
-                      "setlinegap + setcomparegap.");
+  ImGui::TextDisabled("Maps to: setrect + setscanrotation + setobjfilter + "
+                      "SetWHgap + setthre + setlinegap + "
+                      "setcomparegap.");
+
 
   ImGui::TextUnformatted("shared learn params");
   ImGui::TextDisabled("FastMatch learn internally uses four directional "
                       "FindLine probes: Top, Bottom, Left, Right.");
 
   ImGui::TextUnformatted("learn_threshold");
-  ImGui::SameLine(130.0f);
-  ImGui::SetNextItemWidth(180.0f);
-  edited |= ImGui::SliderInt("##fm_learn_threshold", &gauge.threshold, 0, 255);
+  ImGui::TextDisabled("Maps to: setrect + setscanrotation + setobjfilter + "
+                      "SetWHgap + setthre + setlinegap + "
+                      "setcomparegap.");
+
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
   edited |= ImGui::InputInt("##fm_learn_threshold_value", &gauge.threshold);
@@ -3004,10 +3003,14 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
                               10, 130.0f);
   edited |= DrawRuntimeIntRow(context, "compare_gap", "global_compare_gap", 20,
                               1, 200, 130.0f);
+  edited |= DrawRuntimeIntRow(context, "scan rotation deg",
+                              "global_fastmatch_scan_rotation_deg", 0, -180,
+                              180, 130.0f);
 
-  ImGui::TextUnformatted("filterprofile");
-  ImGui::SameLine(130.0f);
-  ImGui::SetNextItemWidth(180.0f);
+  ImGui::TextDisabled("0 keeps the original orthogonal FastMatch scan. Positive "
+                      "and negative degrees rotate the four learn probe bands "
+                      "around the Learn ROI center before learn/match.");
+
   edited |=
       ImGui::SliderInt("##fm_learn_filterprofile", &gauge.filterprofile, 0, 10);
   ImGui::SameLine();
@@ -3332,6 +3335,8 @@ static void RequestFastMatchRunAction(ManualTestContext &context,
     const int minScore =
         RuntimeIntOr(context, "global_min_score", minScorePercent);
     const int findNum = RuntimeIntOr(context, "global_find_num", 1);
+    const int scanRotationDeg =
+        RuntimeIntOr(context, "global_fastmatch_scan_rotation_deg", 0);
     const std::string runMessage =
         "action=" + std::to_string(actionCode) +
         " script=" + context.loaded_script_path + " learn_roi=(" +
@@ -3344,16 +3349,17 @@ static void RequestFastMatchRunAction(ManualTestContext &context,
         " match_thre=" + std::to_string(matchThre) +
         " min_score=" + std::to_string(minScore) +
         " min_score_percent=" + std::to_string(minScorePercent) +
-        " find_num=" + std::to_string(findNum);
-    CXLOG_INFO("KeyParameterControls", "fastmatch_action_run_requested",
-               "MANUAL_RUN_REQUESTED", runMessage);
+        " find_num=" + std::to_string(findNum) +
+        " scan_rotation_deg=" + std::to_string(scanRotationDeg);
+    context.debug_reason = runMessage;
   }
 }
 
-static void
-ApplyPrimaryObjectToCurrentGauge(ManualTestContext &context,
-                                 const CxEvidenceEditableObjectRef &ref,
-                                 const char *status) {
+static void ApplyPrimaryObjectToCurrentGauge(
+    ManualTestContext &context, const CxEvidenceEditableObjectRef &ref,
+    const char *status) {
+
+
   ManualGaugeState &gauge = context.current_gauge;
   const std::string tool = NormalizeKeyParamToolTypeLocal(ref.type);
 
@@ -3581,6 +3587,24 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
               object->fastmatch_match_rect_y0, object->fastmatch_match_rect_x1,
               object->fastmatch_match_rect_y1);
 
+  const int compareGap = RuntimeIntOr(context, "global_compare_gap", 20);
+  const int pairCount = std::min(object->fastmatch_pattern_a_count,
+                                 object->fastmatch_pattern_b_count);
+  const int unpairedA = std::max(0, object->fastmatch_pattern_a_count - pairCount);
+  const int unpairedB = std::max(0, object->fastmatch_pattern_b_count - pairCount);
+  const bool learnHasPairs = pairCount > 0;
+  ImGui::Text("learn conclusion: compare_gap=%d pairs=%d unpaired(A/B)=%d/%d",
+              compareGap, pairCount, unpairedA, unpairedB);
+  ImGui::TextDisabled("compare_gap is the positive/negative A/B distance from "
+                      "keypoints; tangents are adjacent keypoint-midpoint "
+                      "vectors. Red points mean filtered/unpaired display "
+                      "state, not a promoted PASS/FAIL conclusion.");
+  if (!learnHasPairs)
+    ImGui::TextColored(ImVec4(1.0f, 0.62f, 0.25f, 1.0f),
+                       "FASTMATCH_PENDING_RESULT: learn has no drawable A/B "
+                       "point-pair package yet.");
+
+
   const ImGuiTableFlags flags =
       ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
       ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
@@ -3749,17 +3773,11 @@ static void EnsureFindCircleEdgeParamStorage(ManualTestContext &context) {
   for (int i = 1; i <= context.findcircle_scan_edge_count; ++i) {
     ManualFindCircleEdgeParamState &params =
         context.findcircle_edge_params[static_cast<std::size_t>(i)];
-    // FindCircle has one algorithm parameter set. Edge 1..N only selects the
-    // Nth eligible boundary crossing on each radial scan line; it must never
-    // select another threshold/method/gap profile. Keep the legacy per-edge
-    // storage as a compatibility mirror for saved assets and old globals.
     params = MakeFindCircleEdgeParamsFromGauge(context.current_gauge);
   }
 }
 
 static std::string FindCircleEdgeLabel(int edge) {
-  // This is the candidate-edge ordinal on every radial scan line.  It is not
-  // an angular sector; the CircleShape A0/A1 controls own that geometry.
   return edge == 0 ? "All edges" : ("Edge " + std::to_string(edge));
 }
 
@@ -5147,103 +5165,363 @@ static double SampleMetrologyScalarBilinearLocal(const cv::Mat &values,
          (1.0 - tx) * ty * v01 + tx * ty * v11;
 }
 
+static bool MetrologyRequiresRuntimeGaugeLineLocal(
+    const ManualTestContext &context) {
+  const ManualGaugeState &gauge = context.current_gauge;
+  return gauge.tool == "FindLine" || gauge.tool == "FindCircle" ||
+         gauge.tool == "FindEllipse" || gauge.has_line_gauge ||
+         gauge.has_circle_gauge || gauge.has_ellipse_gauge;
+}
+
+static void *ResolveMetrologyRuntimeObjectLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    const std::string &toolType, std::string &ownerRef) {
+  ownerRef.clear();
+  if (parserDebugBridge == nullptr)
+    return nullptr;
+
+  std::vector<std::string> candidates;
+  auto addCandidate = [&](const std::string &name) {
+    if (!name.empty() &&
+        std::find(candidates.begin(), candidates.end(), name) == candidates.end())
+      candidates.push_back(name);
+  };
+  addCandidate(context.current_result_ref.source_object);
+  addCandidate(context.current_gauge.primary_object_name);
+  for (const RuntimeObjectView &object : context.runtime_objects) {
+    if (object.type == toolType)
+      addCandidate(object.name);
+  }
+
+  for (const std::string &candidate : candidates) {
+    void *object = parserDebugBridge->QueryClassObject(toolType, candidate);
+    if (object != nullptr) {
+      ownerRef = candidate;
+      return object;
+    }
+  }
+  return nullptr;
+}
+
+static bool BuildMetrologyProfileFromRuntimeSegmentLocal(
+    const cv::Mat &values, cxvision::metrology_analytics::CxPhysUnit unit,
+    const CxShapePoint &a, const CxShapePoint &b,
+    cxvision::metrology_analytics::CxSurfaceField &field,
+    std::string &reason) {
+  const int sampleCount = field.xres();
+  const double dx = b.x - a.x;
+  const double dy = b.y - a.y;
+  const double length = std::sqrt(dx * dx + dy * dy);
+  if (sampleCount < 2 || length <= 1.0) {
+    reason = "runtime Gauge Line scan segment is too small for profile sampling";
+    return false;
+  }
+
+  for (int i = 0; i < sampleCount; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(sampleCount - 1);
+    const double x = a.x + dx * t;
+    const double y = a.y + dy * t;
+    const double value = SampleMetrologyScalarBilinearLocal(values, x, y);
+    field.setAt(i, 0, value * unit.z_scale_per_pixel);
+  }
+  return true;
+}
+
 static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
-    const ManualTestContext &context, const cv::Mat &values,
-    cxvision::metrology_analytics::CxPhysUnit unit,
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    const cv::Mat &values, cxvision::metrology_analytics::CxPhysUnit unit,
     cxvision::metrology_analytics::CxSurfaceField &field,
     std::string &sourceRef, std::string &reason) {
   using cxvision::metrology_analytics::CxSurfaceField;
   const ManualGaugeState &gauge = context.current_gauge;
   const ManualMetrologyUiState &m = context.metrology_ui;
   const int sampleCount = std::max(16, std::min(4096, m.surface_width));
-  const int lineCount = ResolveMetrologyGaugeLineCountLocal(context, m);
-  const int lineNum = std::max(1, std::min(lineCount, m.gauge_line_num));
 
   field = CxSurfaceField(sampleCount, 1, unit);
-  if ((gauge.tool == "FindCircle" || gauge.has_circle_gauge) &&
-      gauge.has_circle_gauge) {
-    const double cx = static_cast<double>(gauge.circle_cx);
-    const double cy = static_cast<double>(gauge.circle_cy);
-    const double px = static_cast<double>(gauge.circle_px);
-    const double py = static_cast<double>(gauge.circle_py);
-    const double dx = px - cx;
-    const double dy = py - cy;
-    const double radius = std::sqrt(dx * dx + dy * dy);
-    if (radius <= 1.0) {
-      reason = "FindCircle gauge radius is too small for profile sampling";
-      return false;
-    }
-    const double baseAngle = std::atan2(dy, dx);
-    const double pi = std::acos(-1.0);
-    const double angle =
-        baseAngle + 2.0 * pi * static_cast<double>(lineNum - 1) /
-                        static_cast<double>(std::max(1, lineCount));
-    const double ux = std::cos(angle);
-    const double uy = std::sin(angle);
-    const double halfSpan =
-        std::max(8.0, static_cast<double>(std::max(1, gauge.gap)) * 2.0);
-    const double r0 = std::max(0.0, radius - halfSpan);
-    const double r1 = radius + halfSpan;
-    for (int i = 0; i < sampleCount; ++i) {
-      const double t =
-          sampleCount > 1
-              ? static_cast<double>(i) / static_cast<double>(sampleCount - 1)
-              : 0.0;
-      const double r = r0 + (r1 - r0) * t;
-      const double value =
-          SampleMetrologyScalarBilinearLocal(values, cx + ux * r, cy + uy * r);
-      field.setAt(i, 0, value * unit.z_scale_per_pixel);
-    }
-    sourceRef = "runtime:gauge_line:FindCircle:num=" + std::to_string(lineNum) +
-                "/" + std::to_string(lineCount);
-    return true;
+  if (parserDebugBridge == nullptr) {
+    reason = "runtime ParserDebugBridge is not available for Gauge Line sampling";
+    return false;
   }
 
   if ((gauge.tool == "FindLine" || gauge.has_line_gauge) &&
       gauge.has_line_gauge) {
-    const double x0 = static_cast<double>(gauge.line_x0);
-    const double y0 = static_cast<double>(gauge.line_y0);
-    const double x1 = static_cast<double>(gauge.line_x1);
-    const double y1 = static_cast<double>(gauge.line_y1);
-    const double dx = x1 - x0;
-    const double dy = y1 - y0;
-    const double length = std::sqrt(dx * dx + dy * dy);
-    if (length <= 1.0) {
-      reason = "FindLine gauge length is too small for profile sampling";
+    std::string ownerRef;
+    FindLine *lineTool = static_cast<FindLine *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FindLine", ownerRef));
+    if (lineTool == nullptr) {
+      reason = "runtime FindLine object is not available for Gauge Line sampling";
       return false;
     }
-    const double nx = -dy / length;
-    const double ny = dx / length;
-    const double halfWidth =
-        static_cast<double>(std::max(0, gauge.tool_half_width));
-    const double center = lineCount > 1
-                              ? (static_cast<double>(lineNum - 1) /
-                                     static_cast<double>(lineCount - 1) -
-                                 0.5) *
-                                    2.0
-                              : 0.0;
-    const double offset = center * halfWidth;
-    for (int i = 0; i < sampleCount; ++i) {
-      const double t =
-          sampleCount > 1
-              ? static_cast<double>(i) / static_cast<double>(sampleCount - 1)
-              : 0.0;
-      const double x = x0 + dx * t + nx * offset;
-      const double y = y0 + dy * t + ny * offset;
-      const double value = SampleMetrologyScalarBilinearLocal(values, x, y);
-      field.setAt(i, 0, value * unit.z_scale_per_pixel);
+
+
+    const int scanCountW = lineTool->getscanlinecount(0);
+    const int scanCountH = lineTool->getscanlinecount(1);
+    const int totalScanCount = scanCountW + scanCountH;
+    if (totalScanCount <= 0) {
+      reason = "runtime FindLine object has no scan lines";
+      return false;
     }
-    sourceRef = "runtime:gauge_line:FindLine:num=" + std::to_string(lineNum) +
-                "/" + std::to_string(lineCount);
+
+    const int selectedOrdinal = std::max(
+        0, std::min(totalScanCount - 1, m.gauge_line_num - 1));
+    const int scanType = selectedOrdinal < scanCountW ? 0 : 1;
+    const int scanIndex =
+        scanType == 0 ? selectedOrdinal : selectedOrdinal - scanCountW;
+    CxShapePoint a, b;
+    if (!lineTool->getscanline(scanType, scanIndex, a, b)) {
+      reason = "runtime FindLine getscanline failed for selected Gauge Line";
+      return false;
+    }
+
+    if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
+                                                      reason))
+      return false;
+
+    sourceRef = "runtime:gauge_line:FindLine:object=" + ownerRef +
+                "; num=" + std::to_string(selectedOrdinal + 1) + "/" +
+                std::to_string(totalScanCount) +
+                "; scan_type=" + std::to_string(scanType) +
+                "; scan_index=" + std::to_string(scanIndex) +
+                "; source=getscanline";
+    return true;
+  }
+
+  if ((gauge.tool == "FindCircle" || gauge.has_circle_gauge) &&
+      gauge.has_circle_gauge) {
+    std::string ownerRef;
+    FindCircle *circleTool = static_cast<FindCircle *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FindCircle", ownerRef));
+    if (circleTool == nullptr) {
+      reason = "runtime FindCircle object is not available for Gauge Line sampling";
+      return false;
+    }
+
+    const int scanCount = circleTool->getscanlinecount();
+    if (scanCount <= 0) {
+      reason = "runtime FindCircle object has no scan lines";
+      return false;
+    }
+
+    const int scanIndex =
+        std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
+    CxShapePoint a, b;
+    if (!circleTool->getscanline(scanIndex, a, b)) {
+      reason = "runtime FindCircle getscanline failed for selected Gauge Line";
+      return false;
+    }
+
+    if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
+                                                      reason))
+      return false;
+
+    sourceRef = "runtime:gauge_line:FindCircle:object=" + ownerRef +
+                "; num=" + std::to_string(scanIndex + 1) + "/" +
+                std::to_string(scanCount) +
+                "; scan_index=" + std::to_string(scanIndex) +
+                "; source=getscanline";
+    return true;
+  }
+
+  if ((gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge) &&
+      gauge.has_ellipse_gauge) {
+    std::string ownerRef;
+    FindEllipse *ellipseTool = static_cast<FindEllipse *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FindEllipse", ownerRef));
+    if (ellipseTool == nullptr) {
+      reason = "runtime FindEllipse object is not available for Gauge Line sampling";
+      return false;
+    }
+
+    const int scanCount = ellipseTool->getscanlinecount();
+    if (scanCount <= 0) {
+      reason = "runtime FindEllipse object has no scan lines";
+      return false;
+    }
+
+    const int scanIndex =
+        std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
+    CxShapePoint a, b;
+    if (!ellipseTool->getscanline(scanIndex, a, b)) {
+      reason = "runtime FindEllipse getscanline failed for selected Gauge Line";
+      return false;
+    }
+
+    if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
+                                                      reason))
+      return false;
+
+    sourceRef = "runtime:gauge_line:FindEllipse:object=" + ownerRef +
+                "; num=" + std::to_string(scanIndex + 1) + "/" +
+                std::to_string(scanCount) +
+                "; scan_index=" + std::to_string(scanIndex) +
+                "; source=getscanline";
     return true;
   }
 
   reason =
-      "current gauge has no FindLine/FindCircle geometry for profile sampling";
+      "current gauge has no FindLine/FindCircle/FindEllipse runtime geometry for profile sampling";
   return false;
 }
 
-static bool AnalyzeMetrologyHeightPeaksLocal(ManualTestContext &context) {
+static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    int sampleCount) {
+  std::vector<int> samples;
+  if (sampleCount < 2 || parserDebugBridge == nullptr)
+    return samples;
+
+  auto appendUniqueProjectedPoint =
+      [&](const CxShapePoint &a, const CxShapePoint &b, double x, double y) {
+        const double dx = b.x - a.x;
+        const double dy = b.y - a.y;
+        const double len2 = dx * dx + dy * dy;
+        if (len2 <= 1.0e-9)
+          return;
+        double t = ((x - a.x) * dx + (y - a.y) * dy) / len2;
+        t = std::max(0.0, std::min(1.0, t));
+        const int sampleIndex = std::max(
+            0, std::min(sampleCount - 1,
+                        static_cast<int>(std::lround(
+                            t * static_cast<double>(sampleCount - 1)))));
+        if (std::find(samples.begin(), samples.end(), sampleIndex) ==
+            samples.end())
+          samples.push_back(sampleIndex);
+      };
+
+  const ManualGaugeState &gauge = context.current_gauge;
+  const ManualMetrologyUiState &m = context.metrology_ui;
+
+  if ((gauge.tool == "FindLine" || gauge.has_line_gauge) &&
+      gauge.has_line_gauge) {
+    std::string ownerRef;
+    FindLine *lineTool = static_cast<FindLine *>(ResolveMetrologyRuntimeObjectLocal(
+        context, parserDebugBridge, "FindLine", ownerRef));
+    if (lineTool == nullptr)
+      return samples;
+
+    const int scanCountW = lineTool->getscanlinecount(0);
+    const int scanCountH = lineTool->getscanlinecount(1);
+    const int totalScanCount = scanCountW + scanCountH;
+    if (totalScanCount <= 0)
+      return samples;
+
+    const int selectedOrdinal =
+        std::max(0, std::min(totalScanCount - 1, m.gauge_line_num - 1));
+    const int scanType = selectedOrdinal < scanCountW ? 0 : 1;
+    const int scanIndex =
+        scanType == 0 ? selectedOrdinal : selectedOrdinal - scanCountW;
+    CxShapePoint a, b;
+    if (!lineTool->getscanline(scanType, scanIndex, a, b))
+      return samples;
+
+    const int diagnosticCount = lineTool->getscandiagnosticcount();
+    for (int i = 0; i < diagnosticCount; ++i) {
+      FindLineMeasureInputDebug::ScanDiagnostic diag;
+      if (!lineTool->getscandiagnostic(i, diag) || !diag.accepted)
+        continue;
+      const int diagOrdinal = diag.scan_type <= 0 ? diag.scan_index
+                                                  : scanCountW + diag.scan_index;
+      if (diagOrdinal != selectedOrdinal)
+        continue;
+      bool usedMultiPoint = false;
+      for (std::size_t j = 0; j + 1 < diag.accepted_points_xy.size(); j += 2) {
+        appendUniqueProjectedPoint(a, b, diag.accepted_points_xy[j],
+                                   diag.accepted_points_xy[j + 1]);
+        usedMultiPoint = true;
+      }
+      if (!usedMultiPoint)
+        appendUniqueProjectedPoint(a, b, diag.accepted_x, diag.accepted_y);
+    }
+
+    std::sort(samples.begin(), samples.end());
+    return samples;
+  }
+
+  if ((gauge.tool == "FindCircle" || gauge.has_circle_gauge) &&
+      gauge.has_circle_gauge) {
+    std::string ownerRef;
+    FindCircle *circleTool = static_cast<FindCircle *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FindCircle", ownerRef));
+    if (circleTool == nullptr)
+      return samples;
+
+    const int scanCount = circleTool->getscanlinecount();
+    if (scanCount <= 0)
+      return samples;
+
+    const int selectedScanIndex =
+        std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
+    CxShapePoint a, b;
+    if (!circleTool->getscanline(selectedScanIndex, a, b))
+      return samples;
+
+    const int diagnosticCount = circleTool->getscandiagnosticcount();
+    for (int i = 0; i < diagnosticCount; ++i) {
+      FindCircleMeasureGeometryDebug::ScanDiagnostic diag;
+      if (!circleTool->getscandiagnostic(i, diag) || !diag.accepted ||
+          diag.scan_index != selectedScanIndex)
+        continue;
+      bool usedMultiPoint = false;
+      for (std::size_t j = 0; j + 1 < diag.accepted_points_xy.size(); j += 2) {
+        appendUniqueProjectedPoint(a, b, diag.accepted_points_xy[j],
+                                   diag.accepted_points_xy[j + 1]);
+        usedMultiPoint = true;
+      }
+      if (!usedMultiPoint)
+        appendUniqueProjectedPoint(a, b, diag.accepted_x, diag.accepted_y);
+    }
+
+    std::sort(samples.begin(), samples.end());
+    return samples;
+  }
+
+  if ((gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge) &&
+      gauge.has_ellipse_gauge) {
+    std::string ownerRef;
+    FindEllipse *ellipseTool = static_cast<FindEllipse *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FindEllipse", ownerRef));
+    if (ellipseTool == nullptr)
+      return samples;
+
+    const int scanCount = ellipseTool->getscanlinecount();
+    if (scanCount <= 0)
+      return samples;
+
+    const int selectedScanIndex =
+        std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
+    CxShapePoint a, b;
+    if (!ellipseTool->getscanline(selectedScanIndex, a, b))
+      return samples;
+
+    const int diagnosticCount = ellipseTool->getscandiagnosticcount();
+    for (int i = 0; i < diagnosticCount; ++i) {
+      FindEllipseMeasureGeometryDebug::ScanDiagnostic diag;
+      if (!ellipseTool->getscandiagnostic(i, diag) || !diag.accepted ||
+          diag.scan_index != selectedScanIndex)
+        continue;
+      bool usedMultiPoint = false;
+      for (std::size_t j = 0; j + 1 < diag.accepted_points_xy.size(); j += 2) {
+        appendUniqueProjectedPoint(a, b, diag.accepted_points_xy[j],
+                                   diag.accepted_points_xy[j + 1]);
+        usedMultiPoint = true;
+      }
+      if (!usedMultiPoint)
+        appendUniqueProjectedPoint(a, b, diag.accepted_x, diag.accepted_y);
+    }
+  }
+
+  std::sort(samples.begin(), samples.end());
+  return samples;
+}
+
+
+static bool AnalyzeMetrologyHeightPeaksLocal(
+    ManualTestContext &context, const ParserDebugBridge *parserDebugBridge) {
   using namespace cxvision::metrology_analytics;
   ManualMetrologyUiState &m = context.metrology_ui;
   m.height_peak_analysis_ready = false;
@@ -5317,13 +5595,22 @@ static bool AnalyzeMetrologyHeightPeaksLocal(ManualTestContext &context) {
       scalar.convertTo(sourceValues, CV_64F);
       std::string gaugeLineSourceRef;
       std::string gaugeLineReason;
-      if (BuildMetrologyGaugeLineSurfaceFieldLocal(context, sourceValues, unit,
-                                                   field, gaugeLineSourceRef,
-                                                   gaugeLineReason)) {
+      if (BuildMetrologyGaugeLineSurfaceFieldLocal(
+              context, parserDebugBridge, sourceValues, unit, field,
+              gaugeLineSourceRef, gaugeLineReason)) {
         m.height_peak_source_ref = gaugeLineSourceRef + "; image=" + imagePath;
       } else {
+        if (MetrologyRequiresRuntimeGaugeLineLocal(context)) {
+          m.height_peak_analysis_status =
+              "METROLOGY_RUNTIME_GAUGE_LINE_MISSING";
+          m.height_peak_analysis_reason = gaugeLineReason;
+          m.height_peak_source_ref = "runtime:gauge_line:unavailable; reason=" +
+                                     gaugeLineReason;
+          return false;
+        }
         const int targetWidth = std::min(requestedWidth, source.cols);
         const int targetHeight = std::min(requestedHeight, source.rows);
+
         cv::Mat resized;
         cv::resize(scalar, resized, cv::Size(targetWidth, targetHeight), 0.0,
                    0.0, cv::INTER_AREA);
@@ -5581,10 +5868,14 @@ DrawMetrologyHeightPeakResultsLocal(const ManualMetrologyUiState &m) {
 static void DrawMetrologyPreviewChartLocal(
     const char *id, const char *title, const std::vector<float> &source,
     const std::vector<float> &model, int rangeStartPermille,
-    int rangeEndPermille, const char *sourceLabel, const char *modelLabel) {
+    int rangeEndPermille, const char *sourceLabel, const char *modelLabel,
+    const std::vector<int> *conclusionSamples,
+    ManualMetrologyUiState *cursorState) {
   const ImVec2 size(std::max(320.0f, ImGui::GetContentRegionAvail().x), 210.0f);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   ImGui::InvisibleButton(id, size);
+  const bool chartHovered = ImGui::IsItemHovered();
+  const bool chartActive = ImGui::IsItemActive();
   ImDrawList *draw = ImGui::GetWindowDrawList();
   const ImVec2 end(origin.x + size.x, origin.y + size.y);
   draw->AddRectFilled(origin, end, IM_COL32(20, 24, 29, 255));
@@ -5619,6 +5910,16 @@ static void DrawMetrologyPreviewChartLocal(
     yMax = std::max(yMax, value);
   }
   const float span = std::max(1.0e-6f, yMax - yMin);
+  auto valueToScreenY = [&](float value) -> float {
+    const float ty = (value - yMin) / span;
+    return bottom - ty * (bottom - top);
+  };
+  auto sampleToScreenX = [&](int sampleIndex, int sampleCount) -> float {
+    const int clamped = std::max(0, std::min(sampleCount - 1, sampleIndex));
+    const float tx = static_cast<float>(clamped) /
+                     static_cast<float>(std::max(1, sampleCount - 1));
+    return left + tx * (right - left);
+  };
   auto drawCurve = [&](const std::vector<float> &values, ImU32 color,
                        float thickness) {
     if (values.size() < 2)
@@ -5628,33 +5929,121 @@ static void DrawMetrologyPreviewChartLocal(
     for (std::size_t i = 0; i < values.size(); ++i) {
       const float tx =
           static_cast<float>(i) / static_cast<float>(values.size() - 1);
-      const float ty = (values[i] - yMin) / span;
-      points.emplace_back(left + tx * (right - left),
-                          bottom - ty * (bottom - top));
+      points.emplace_back(left + tx * (right - left), valueToScreenY(values[i]));
     }
     draw->AddPolyline(points.data(), static_cast<int>(points.size()), color,
                       ImDrawFlags_None, thickness);
   };
 
+  const int sourceCount = static_cast<int>(source.size());
+  if (cursorState != nullptr) {
+    cursorState->profile_cursor_sample_count = sourceCount;
+    if (cursorState->profile_cursor_gauge_line_num != cursorState->gauge_line_num) {
+      cursorState->profile_cursor_gauge_line_num = cursorState->gauge_line_num;
+      cursorState->profile_cursor_user_dragged = false;
+      cursorState->profile_cursor_sample_index = -1;
+    }
+    if (sourceCount >= 2) {
+      if (!cursorState->profile_cursor_user_dragged && conclusionSamples != nullptr &&
+          !conclusionSamples->empty()) {
+        cursorState->profile_cursor_sample_index = std::max(
+            0, std::min(sourceCount - 1, conclusionSamples->front()));
+        cursorState->profile_cursor_visible = true;
+      }
+      if (cursorState->profile_cursor_sample_index < 0 ||
+          cursorState->profile_cursor_sample_index >= sourceCount) {
+        cursorState->profile_cursor_sample_index = std::max(
+            0, std::min(sourceCount - 1,
+                        static_cast<int>(std::lround(
+                            static_cast<double>(cursorState->profile_cursor_permille) *
+                            static_cast<double>(sourceCount - 1) / 1000.0))));
+      }
+      if ((chartHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ||
+          (chartActive && ImGui::IsMouseDown(ImGuiMouseButton_Left))) {
+        const float mouseX = std::max(left, std::min(right, ImGui::GetIO().MousePos.x));
+        const float tx = (mouseX - left) / std::max(1.0f, right - left);
+        cursorState->profile_cursor_sample_index = std::max(
+            0, std::min(sourceCount - 1,
+                        static_cast<int>(std::lround(
+                            static_cast<double>(tx) *
+                            static_cast<double>(sourceCount - 1)))));
+        cursorState->profile_cursor_visible = true;
+        cursorState->profile_cursor_user_dragged = true;
+      }
+      cursorState->profile_cursor_sample_index = std::max(
+          0, std::min(sourceCount - 1, cursorState->profile_cursor_sample_index));
+      cursorState->profile_cursor_permille = static_cast<int>(std::lround(
+          static_cast<double>(cursorState->profile_cursor_sample_index) * 1000.0 /
+          static_cast<double>(sourceCount - 1)));
+    } else {
+      cursorState->profile_cursor_sample_index = 0;
+      cursorState->profile_cursor_permille = 0;
+      cursorState->profile_cursor_user_dragged = false;
+    }
+  }
+
   drawCurve(source, IM_COL32(225, 230, 235, 255), 1.5f);
   drawCurve(model, IM_COL32(69, 205, 150, 255), 2.0f);
+
+  if (conclusionSamples != nullptr && sourceCount >= 2) {
+    for (std::size_t i = 0; i < conclusionSamples->size(); ++i) {
+      const int sampleIndex = std::max(
+          0, std::min(sourceCount - 1, (*conclusionSamples)[i]));
+      const float resultX = sampleToScreenX(sampleIndex, sourceCount);
+      const float resultY = valueToScreenY(source[static_cast<std::size_t>(sampleIndex)]);
+      draw->AddLine(ImVec2(resultX, top), ImVec2(resultX, bottom),
+                    IM_COL32(255, 128, 48, 255), 2.5f);
+      draw->AddCircleFilled(ImVec2(resultX, resultY), 4.5f,
+                            IM_COL32(255, 128, 48, 255), 16);
+      if (i < 3) {
+        const std::string label = "result " + std::to_string(i + 1);
+        draw->AddText(ImVec2(std::min(resultX + 6.0f, right - 78.0f),
+                             top + 20.0f + static_cast<float>(i) * 14.0f),
+                      IM_COL32(255, 178, 118, 255), label.c_str());
+      }
+    }
+  }
+
+  if (cursorState != nullptr && cursorState->profile_cursor_visible &&
+      sourceCount >= 2) {
+    const int cursorIndex = std::max(
+        0, std::min(sourceCount - 1, cursorState->profile_cursor_sample_index));
+    const float cursorX = sampleToScreenX(cursorIndex, sourceCount);
+    const float cursorY = valueToScreenY(source[static_cast<std::size_t>(cursorIndex)]);
+    draw->AddLine(ImVec2(cursorX, top), ImVec2(cursorX, bottom),
+                  IM_COL32(255, 210, 64, 220), 1.5f);
+    draw->AddCircleFilled(ImVec2(cursorX, cursorY), 3.8f,
+                          IM_COL32(255, 210, 64, 255), 16);
+    const std::string cursorLabel = cursorState->profile_cursor_user_dragged
+                                        ? "cursor " + std::to_string(cursorState->profile_cursor_permille) + "%"
+                                        : "cursor=result";
+    draw->AddText(ImVec2(std::min(cursorX + 6.0f, right - 96.0f), top + 4.0f),
+                  IM_COL32(255, 226, 110, 255), cursorLabel.c_str());
+  }
+
   draw->AddText(ImVec2(left, origin.y + 8.0f), IM_COL32(225, 230, 235, 255),
                 title);
-  draw->AddLine(ImVec2(right - 205.0f, origin.y + 16.0f),
-                ImVec2(right - 181.0f, origin.y + 16.0f),
+  draw->AddLine(ImVec2(right - 250.0f, origin.y + 16.0f),
+                ImVec2(right - 226.0f, origin.y + 16.0f),
                 IM_COL32(225, 230, 235, 255), 2.0f);
-  draw->AddText(ImVec2(right - 175.0f, origin.y + 8.0f),
+  draw->AddText(ImVec2(right - 220.0f, origin.y + 8.0f),
                 IM_COL32(190, 198, 207, 255), sourceLabel);
-  draw->AddLine(ImVec2(right - 96.0f, origin.y + 16.0f),
-                ImVec2(right - 72.0f, origin.y + 16.0f),
+  draw->AddLine(ImVec2(right - 141.0f, origin.y + 16.0f),
+                ImVec2(right - 117.0f, origin.y + 16.0f),
                 IM_COL32(69, 205, 150, 255), 2.0f);
-  draw->AddText(ImVec2(right - 66.0f, origin.y + 8.0f),
+  draw->AddText(ImVec2(right - 111.0f, origin.y + 8.0f),
                 IM_COL32(190, 198, 207, 255), modelLabel);
+  draw->AddLine(ImVec2(right - 46.0f, origin.y + 16.0f),
+                ImVec2(right - 22.0f, origin.y + 16.0f),
+                IM_COL32(255, 128, 48, 255), 2.0f);
+  draw->AddText(ImVec2(right - 94.0f, bottom + 6.0f),
+                IM_COL32(255, 178, 118, 255), "result");
   draw->AddText(ImVec2(left, bottom + 6.0f), IM_COL32(160, 170, 181, 255),
                 "0%");
   draw->AddText(ImVec2(right - 34.0f, bottom + 6.0f),
                 IM_COL32(160, 170, 181, 255), "100%");
 }
+
 static bool
 HasMetrologySelectedGaugeLineProfileLocal(const ManualMetrologyUiState &m) {
   const std::string &source = m.height_peak_source_ref;
@@ -5683,18 +6072,23 @@ BuildMetrologyPreviewSourceLocal(const ManualMetrologyUiState &m,
   return values;
 }
 
-static std::vector<float>
-BuildMetrologyLiveGaugeLineProfileLocal(const ManualTestContext &context,
-                                        std::string &sourceRef) {
+static std::vector<float> BuildMetrologyLiveGaugeLineProfileLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    std::string &sourceRef) {
   using namespace cxvision::metrology_analytics;
   sourceRef.clear();
   const std::string imagePath = ResolveMetrologyImagePathLocal(context);
-  if (imagePath.empty())
+  if (imagePath.empty()) {
+    sourceRef = "runtime:gauge_line:unavailable; reason=image path is empty";
     return {};
+  }
 
   const cv::Mat source = cv::imread(imagePath, cv::IMREAD_UNCHANGED);
-  if (source.empty())
+  if (source.empty()) {
+    sourceRef = "runtime:gauge_line:unavailable; reason=image load failed; image=" +
+                imagePath;
     return {};
+  }
 
   const ManualMetrologyUiState &m = context.metrology_ui;
   cv::Mat scalar;
@@ -5710,6 +6104,8 @@ BuildMetrologyLiveGaugeLineProfileLocal(const ManualTestContext &context,
   } else if (source.channels() == 4) {
     cv::cvtColor(source, scalar, cv::COLOR_BGRA2GRAY);
   } else {
+    sourceRef =
+        "runtime:gauge_line:unavailable; reason=unsupported image channel count";
     return {};
   }
 
@@ -5725,13 +6121,17 @@ BuildMetrologyLiveGaugeLineProfileLocal(const ManualTestContext &context,
 
   CxSurfaceField field;
   std::string reason;
-  if (!BuildMetrologyGaugeLineSurfaceFieldLocal(context, values, unit, field,
-                                                sourceRef, reason))
+  if (!BuildMetrologyGaugeLineSurfaceFieldLocal(
+          context, parserDebugBridge, values, unit, field, sourceRef, reason)) {
+    sourceRef = "runtime:gauge_line:unavailable; reason=" + reason;
     return {};
+  }
 
   const float *raw = field.rawData();
-  if (raw == nullptr || field.valueCount() < 2)
+  if (raw == nullptr || field.valueCount() < 2) {
+    sourceRef = "runtime:gauge_line:unavailable; reason=sampled profile is empty";
     return {};
+  }
 
   std::vector<float> profile(raw, raw + field.valueCount());
   const auto minmax = std::minmax_element(profile.begin(), profile.end());
@@ -5740,6 +6140,264 @@ BuildMetrologyLiveGaugeLineProfileLocal(const ManualTestContext &context,
     value = (value - *minmax.first) / span;
   sourceRef += "; image=" + imagePath;
   return profile;
+}
+
+
+static void ResolveMetrologyPreviewRangeLocal(std::size_t valueCount,
+                                              bool fullRange,
+                                              int startPermille,
+                                              int endPermille,
+                                              std::size_t &startIndex,
+                                              std::size_t &endIndex) {
+  if (valueCount < 2) {
+    startIndex = 0;
+    endIndex = 0;
+    return;
+  }
+  const int startP = fullRange ? 0 : std::max(0, std::min(999, startPermille));
+  const int endP = fullRange ? 1000 : std::max(1, std::min(1000, endPermille));
+  const std::size_t last = valueCount - 1;
+  startIndex = static_cast<std::size_t>(
+      std::floor(static_cast<double>(last) * startP / 1000.0));
+  endIndex = static_cast<std::size_t>(
+      std::ceil(static_cast<double>(last) * endP / 1000.0));
+  endIndex = std::min(last, std::max(startIndex + 1, endIndex));
+}
+
+static bool SolveMetrologyQuadraticFitLocal(double matrix[3][4],
+                                            double coeffs[3]) {
+  for (int col = 0; col < 3; ++col) {
+    int pivot = col;
+    for (int row = col + 1; row < 3; ++row) {
+      if (std::abs(matrix[row][col]) > std::abs(matrix[pivot][col]))
+        pivot = row;
+    }
+    if (std::abs(matrix[pivot][col]) < 1.0e-12)
+      return false;
+    if (pivot != col) {
+      for (int k = col; k < 4; ++k)
+        std::swap(matrix[pivot][k], matrix[col][k]);
+    }
+    const double divisor = matrix[col][col];
+    for (int k = col; k < 4; ++k)
+      matrix[col][k] /= divisor;
+    for (int row = 0; row < 3; ++row) {
+      if (row == col)
+        continue;
+      const double factor = matrix[row][col];
+      for (int k = col; k < 4; ++k)
+        matrix[row][k] -= factor * matrix[col][k];
+    }
+  }
+  coeffs[0] = matrix[0][3];
+  coeffs[1] = matrix[1][3];
+  coeffs[2] = matrix[2][3];
+  return true;
+}
+
+struct MetrologyPreviewModelLocal {
+  std::vector<float> values;
+  std::string status;
+  float primary = 0.0f;
+  float secondary = 0.0f;
+};
+
+
+static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
+    const ManualMetrologyUiState &m, const std::vector<float> &source) {
+  MetrologyPreviewModelLocal result;
+  if (!m.curve_fit_auto_plot || source.size() < 3)
+    return result;
+
+  std::size_t startIndex = 0;
+  std::size_t endIndex = 0;
+  ResolveMetrologyPreviewRangeLocal(source.size(), m.curve_fit_full_range,
+                                    m.curve_fit_range_start_permille,
+                                    m.curve_fit_range_end_permille, startIndex,
+                                    endIndex);
+  if (endIndex <= startIndex)
+    return result;
+
+  result.values.assign(source.size(), 0.0f);
+  float baseline = source[startIndex];
+  float peak = source[startIndex];
+  std::size_t peakIndex = startIndex;
+  for (std::size_t i = startIndex; i <= endIndex; ++i) {
+    baseline = std::min(baseline, source[i]);
+    if (source[i] > peak) {
+      peak = source[i];
+      peakIndex = i;
+    }
+  }
+  const double amplitude = std::max(1.0e-6, static_cast<double>(peak - baseline));
+
+  if (m.curve_fit_function == 2) {
+    double sx[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    double sy[3] = {0.0, 0.0, 0.0};
+    for (std::size_t i = startIndex; i <= endIndex; ++i) {
+      const double x = static_cast<double>(i) /
+                       static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+      const double y = static_cast<double>(source[i]);
+      double xp = 1.0;
+      for (int p = 0; p < 5; ++p) {
+        sx[p] += xp;
+        xp *= x;
+      }
+      sy[0] += y;
+      sy[1] += x * y;
+      sy[2] += x * x * y;
+    }
+    double matrix[3][4] = {{sx[0], sx[1], sx[2], sy[0]},
+                           {sx[1], sx[2], sx[3], sy[1]},
+                           {sx[2], sx[3], sx[4], sy[2]}};
+    double coeffs[3] = {0.0, 0.0, 0.0};
+    if (!SolveMetrologyQuadraticFitLocal(matrix, coeffs)) {
+      result.values.clear();
+      return result;
+    }
+    for (std::size_t i = 0; i < source.size(); ++i) {
+      const double x = static_cast<double>(i) /
+                       static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+      result.values[i] = static_cast<float>(coeffs[0] + coeffs[1] * x +
+                                            coeffs[2] * x * x);
+    }
+    result.status = "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - quadratic least squares";
+    result.primary = static_cast<float>(coeffs[1]);
+    result.secondary = static_cast<float>(coeffs[2]);
+    return result;
+  }
+
+  double weightSum = 0.0;
+  double centerSum = 0.0;
+  for (std::size_t i = startIndex; i <= endIndex; ++i) {
+    const double x = static_cast<double>(i) /
+                     static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+    const double weight = std::max(0.0, static_cast<double>(source[i] - baseline));
+    centerSum += x * weight;
+    weightSum += weight;
+  }
+  const double peakCenter = static_cast<double>(peakIndex) /
+                            static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+  const double center = weightSum > 1.0e-12 ? centerSum / weightSum : peakCenter;
+
+  double variance = 0.0;
+  for (std::size_t i = startIndex; i <= endIndex; ++i) {
+    const double x = static_cast<double>(i) /
+                     static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+    const double weight = std::max(0.0, static_cast<double>(source[i] - baseline));
+    const double dx = x - center;
+    variance += dx * dx * weight;
+  }
+  const double sigma = std::max(0.01, std::sqrt(variance / std::max(1.0e-12, weightSum)));
+  for (std::size_t i = 0; i < source.size(); ++i) {
+    const double x = static_cast<double>(i) /
+                     static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+    const double dx = (x - center) / sigma;
+    const double y = m.curve_fit_function == 1
+                         ? static_cast<double>(baseline) + amplitude / (1.0 + dx * dx)
+                         : static_cast<double>(baseline) + amplitude * std::exp(-0.5 * dx * dx);
+    result.values[i] = static_cast<float>(y);
+  }
+  result.status = m.curve_fit_function == 1
+                      ? "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - Lorentzian estimate"
+                      : "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - Gaussian estimate";
+  result.primary = static_cast<float>(center * 100.0);
+  result.secondary = static_cast<float>(sigma * 100.0);
+  return result;
+}
+
+static MetrologyPreviewModelLocal BuildMetrologyCriticalDimensionPreviewModelLocal(
+    const ManualMetrologyUiState &m, const std::vector<float> &source) {
+  MetrologyPreviewModelLocal result;
+  if (!m.critical_dimension_auto_fit || source.size() < 3)
+    return result;
+
+  std::size_t startIndex = 0;
+  std::size_t endIndex = 0;
+  ResolveMetrologyPreviewRangeLocal(source.size(), m.critical_dimension_full_range,
+                                    m.critical_dimension_range_start_permille,
+                                    m.critical_dimension_range_end_permille,
+                                    startIndex, endIndex);
+  if (endIndex <= startIndex)
+    return result;
+
+  result.values.assign(source.size(), 0.0f);
+  if (m.critical_dimension_function >= 4) {
+    const bool circleUp = m.critical_dimension_function == 5;
+    std::size_t centerIndex = startIndex;
+    float extremum = source[startIndex];
+    for (std::size_t i = startIndex; i <= endIndex; ++i) {
+      if ((circleUp && source[i] > extremum) || (!circleUp && source[i] < extremum)) {
+        extremum = source[i];
+        centerIndex = i;
+      }
+    }
+    const float edgeLevel = (source[startIndex] + source[endIndex]) * 0.5f;
+    const float amplitude = extremum - edgeLevel;
+    const double radius = static_cast<double>(
+        std::max(centerIndex - startIndex, endIndex - centerIndex));
+    for (std::size_t i = 0; i < source.size(); ++i) {
+      if (i < startIndex || i > endIndex || radius <= 1.0) {
+        result.values[i] = edgeLevel;
+        continue;
+      }
+      const double dx = static_cast<double>(i > centerIndex ? i - centerIndex
+                                                             : centerIndex - i) /
+                        radius;
+      const double cap = std::sqrt(std::max(0.0, 1.0 - dx * dx));
+      result.values[i] = edgeLevel + amplitude * static_cast<float>(cap);
+    }
+    result.status = circleUp
+                        ? "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - circle up model"
+                        : "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - circle down model";
+    result.primary = static_cast<float>(centerIndex) * 100.0f /
+                     static_cast<float>(std::max<std::size_t>(1, source.size() - 1));
+    result.secondary = std::abs(amplitude);
+    return result;
+  }
+
+  std::size_t edgeIndex = startIndex;
+  double bestScore = -DBL_MAX;
+  for (std::size_t i = startIndex + 1; i <= endIndex; ++i) {
+    const double delta = static_cast<double>(source[i]) - static_cast<double>(source[i - 1]);
+    double score = std::abs(delta);
+    if (m.critical_dimension_function == 2)
+      score = delta;
+    else if (m.critical_dimension_function == 3)
+      score = -delta;
+    else if (m.critical_dimension_function == 0)
+      score += static_cast<double>(i) * 1.0e-9;
+    else if (m.critical_dimension_function == 1)
+      score -= static_cast<double>(i) * 1.0e-9;
+    if (score > bestScore) {
+      bestScore = score;
+      edgeIndex = i;
+    }
+  }
+
+  const std::size_t leftEnd = edgeIndex > startIndex ? edgeIndex - 1 : startIndex;
+  double leftSum = 0.0;
+  double rightSum = 0.0;
+  int leftCount = 0;
+  int rightCount = 0;
+  for (std::size_t i = startIndex; i <= leftEnd; ++i) {
+    leftSum += source[i];
+    ++leftCount;
+  }
+  for (std::size_t i = edgeIndex; i <= endIndex; ++i) {
+    rightSum += source[i];
+    ++rightCount;
+  }
+  const float leftLevel = static_cast<float>(leftSum / std::max(1, leftCount));
+  const float rightLevel = static_cast<float>(rightSum / std::max(1, rightCount));
+  for (std::size_t i = 0; i < source.size(); ++i)
+    result.values[i] = i < edgeIndex ? leftLevel : rightLevel;
+
+  result.status = "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - edge/step model";
+  result.primary = static_cast<float>(edgeIndex) * 100.0f /
+                   static_cast<float>(std::max<std::size_t>(1, source.size() - 1));
+  result.secondary = rightLevel - leftLevel;
+  return result;
 }
 
 static std::vector<float>
@@ -5765,94 +6423,148 @@ BuildMetrologyPeakMarkerSourceLocal(const ManualMetrologyUiState &m,
   }
   return markers;
 }
-
-static void DrawFindPeaksPreviewLocal(const ManualTestContext &context,
-                                      const ManualMetrologyUiState &m) {
+static void DrawFindPeaksPreviewLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    ManualMetrologyUiState &m) {
   std::string sourceRef;
   std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, sourceRef);
+      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
   std::vector<float> markers;
-  const char *sourceLabel = "live profile";
+  const char *sourceLabel = "runtime Gauge Line";
 
-  if (source.empty()) {
+  if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(m, m.histogram_mode == 1 ? 1 : 0);
     sourceRef = m.height_peak_source_ref;
     markers = BuildMetrologyPeakMarkerSourceLocal(m, source);
     sourceLabel = "height distribution";
   }
 
+  const std::vector<int> conclusionSamples =
+      BuildMetrologyConclusionSampleIndicesLocal(
+          context, parserDebugBridge, static_cast<int>(source.size()));
+
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
   if (source.empty()) {
-    ImGui::TextDisabled("NO_RUNTIME_PROFILE - current Gauge Line image data is "
-                        "not available");
+    ImGui::TextDisabled("NO_RUNTIME_PROFILE - %s", sourceRef.c_str());
   } else {
     ImGui::TextDisabled("RUNTIME_GAUGE_LINE_PROFILE - %s", sourceRef.c_str());
   }
+
+
   DrawMetrologyPreviewChartLocal("find_peaks_parameter_preview",
                                  "automated graph peak location", source,
-                                 markers, 0, 1000, sourceLabel, "peaks");
+                                 markers, 0, 1000, sourceLabel, "peaks",
+                                 &conclusionSamples, &m);
+  if (m.profile_cursor_sample_count > 1) {
+    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
+                        m.profile_cursor_sample_index + 1,
+                        m.profile_cursor_sample_count,
+                        m.profile_cursor_permille);
+  }
 }
 
-static void DrawCurveFitPreviewLocal(const ManualTestContext &context,
-                                     const ManualMetrologyUiState &m) {
+static void DrawCurveFitPreviewLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    ManualMetrologyUiState &m) {
   std::string sourceRef;
+
   std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, sourceRef);
-  if (source.empty()) {
+      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
+  if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(m, m.curve_fit_source);
     sourceRef = m.height_peak_source_ref;
   }
+  const MetrologyPreviewModelLocal fit =
+      BuildMetrologyCurveFitPreviewModelLocal(m, source);
+
+  const std::vector<int> conclusionSamples =
+      BuildMetrologyConclusionSampleIndicesLocal(
+          context, parserDebugBridge, static_cast<int>(source.size()));
 
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
   if (source.empty()) {
-    ImGui::TextDisabled("NO_RUNTIME_PROFILE - curve fitting waits for selected "
-                        "Gauge Line data");
+    ImGui::TextDisabled("NO_RUNTIME_PROFILE - %s", sourceRef.c_str());
   } else {
     ImGui::TextDisabled("RUNTIME_GAUGE_LINE_PROFILE - %s", sourceRef.c_str());
-    ImGui::TextDisabled(
-        "PENDING_BINDING - runtime fitted curve is not available "
-        "yet");
+    if (fit.values.empty()) {
+      ImGui::TextDisabled("NO_FIT_PREVIEW - auto plot is off or profile range is "
+                          "insufficient");
+    } else {
+      ImGui::TextDisabled("%s", fit.status.c_str());
+      ImGui::TextDisabled("fit preview center/slope %.3f | width/curve %.3f",
+                          fit.primary, fit.secondary);
+    }
   }
   DrawMetrologyPreviewChartLocal(
       "curve_fit_parameter_preview", "Curve fitting module", source,
-      std::vector<float>{},
+      fit.values,
       m.curve_fit_full_range ? 0 : m.curve_fit_range_start_permille,
       m.curve_fit_full_range ? 1000 : m.curve_fit_range_end_permille, "source",
-      "fit");
+      "fit", &conclusionSamples, &m);
+
+  if (m.profile_cursor_sample_count > 1) {
+    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
+                        m.profile_cursor_sample_index + 1,
+                        m.profile_cursor_sample_count,
+                        m.profile_cursor_permille);
+  }
 }
 
-static void DrawCriticalDimensionPreviewLocal(const ManualTestContext &context,
-                                              const ManualMetrologyUiState &m) {
+static void DrawCriticalDimensionPreviewLocal(
+    const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
+    ManualMetrologyUiState &m) {
   std::string sourceRef;
   std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, sourceRef);
-  if (source.empty()) {
+      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
+  if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(
         m, m.critical_dimension_source == 1 ? 0 : 2);
     sourceRef = m.height_peak_source_ref;
   }
+  const MetrologyPreviewModelLocal model =
+      BuildMetrologyCriticalDimensionPreviewModelLocal(m, source);
+
+
+  const std::vector<int> conclusionSamples =
+      BuildMetrologyConclusionSampleIndicesLocal(
+          context, parserDebugBridge, static_cast<int>(source.size()));
 
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
+
   if (source.empty()) {
-    ImGui::TextDisabled("NO_RUNTIME_PROFILE - CD waits for selected Gauge Line "
-                        "data");
+    ImGui::TextDisabled("NO_RUNTIME_PROFILE - %s", sourceRef.c_str());
   } else {
     ImGui::TextDisabled("RUNTIME_GAUGE_LINE_PROFILE - %s", sourceRef.c_str());
-    ImGui::TextDisabled("PENDING_BINDING - runtime CD model/result is not "
-                        "available yet");
+    if (model.values.empty()) {
+      ImGui::TextDisabled("NO_CD_PREVIEW - auto fit is off or profile range is "
+                          "insufficient");
+    } else {
+      ImGui::TextDisabled("%s", model.status.c_str());
+      ImGui::TextDisabled("CD preview position %.3f%% | delta %.3f",
+                          model.primary, model.secondary);
+    }
   }
   DrawMetrologyPreviewChartLocal(
       "critical_dimension_parameter_preview", "Critical dimension module",
-      source, std::vector<float>{},
+      source, model.values,
       m.critical_dimension_full_range
           ? 0
           : m.critical_dimension_range_start_permille,
       m.critical_dimension_full_range ? 1000
                                       : m.critical_dimension_range_end_permille,
-      "profile", "model");
+      "profile", "model", &conclusionSamples, &m);
+
+  if (m.profile_cursor_sample_count > 1) {
+    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
+                        m.profile_cursor_sample_index + 1,
+                        m.profile_cursor_sample_count,
+                        m.profile_cursor_permille);
+  }
 }
 
-static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
+
+static bool DrawMetrologyExtensionPanel(
+    ManualTestContext &context, const ParserDebugBridge *parserDebugBridge) {
   ManualMetrologyUiState &m = context.metrology_ui;
   bool edited = false;
 
@@ -6000,7 +6712,7 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
       if (!m.enabled)
         ImGui::BeginDisabled();
       if (ImGui::Button("Analyze Current Surface"))
-        AnalyzeMetrologyHeightPeaksLocal(context);
+        AnalyzeMetrologyHeightPeaksLocal(context, parserDebugBridge);
       if (!m.enabled)
         ImGui::EndDisabled();
       ImGui::SameLine();
@@ -6026,7 +6738,7 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
 
       DrawMetrologyHeightPeakResultsLocal(m);
       if (!m.height_peak_analysis_ready)
-        DrawFindPeaksPreviewLocal(context, m);
+        DrawFindPeaksPreviewLocal(context, parserDebugBridge, m);
       ImGui::EndTabItem();
     }
 
@@ -6090,7 +6802,7 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
               std::min(1000, m.curve_fit_range_start_permille + 1);
         }
       }
-      DrawCurveFitPreviewLocal(context, m);
+      DrawCurveFitPreviewLocal(context, parserDebugBridge, m);
       ImGui::EndTabItem();
     }
 
@@ -6099,8 +6811,7 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
       ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f), "Reliable default");
       ImGui::SameLine();
       ImGui::TextDisabled("scan profile | Edge height "
-                          "(right) | auto fit | full "
-                          "range");
+                          "right | auto fit | full range");
       ImGui::SameLine();
       if (ImGui::SmallButton("Restore "
                              "Defaults##critical_"
@@ -6163,9 +6874,10 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
           m.critical_dimension_draw_whole_circle = false;
         }
       }
-      DrawCriticalDimensionPreviewLocal(context, m);
+      DrawCriticalDimensionPreviewLocal(context, parserDebugBridge, m);
       ImGui::EndTabItem();
     }
+
 
     if (ImGui::BeginTabItem("Plane Level")) {
       m.active_tab = 5;
@@ -6255,21 +6967,57 @@ static bool DrawMetrologyExtensionPanel(ManualTestContext &context) {
   return edited;
 }
 
-void DrawKeyParameterControlPanel(ManualTestContext &context) {
+
+static bool ContainsCaseInsensitiveLocal(const std::string &text,
+                                         const std::string &needle) {
+  if (needle.empty())
+    return true;
+  std::string haystack = text;
+  std::string target = needle;
+  std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(target.begin(), target.end(), target.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return haystack.find(target) != std::string::npos;
+}
+
+static bool KeyParamContextLooksFastMatchLocal(
+    const ManualTestContext &context) {
+  const ManualGaugeState &gauge = context.current_gauge;
+  if (gauge.tool == "FastMatch" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FastMatch")
+    return true;
+  if (context.runtime_int_vars.find("global_fastmatch_scan_rotation_deg") !=
+      context.runtime_int_vars.end())
+    return true;
+  if (ContainsCaseInsensitiveLocal(context.loaded_script_path, "fastmatch") ||
+      ContainsCaseInsensitiveLocal(context.script_file_path, "fastmatch") ||
+      ContainsCaseInsensitiveLocal(context.active_script_case_name,
+                                   "fastmatch"))
+    return true;
+  for (const RuntimeObjectView &object : context.runtime_objects) {
+    if (NormalizeKeyParamToolTypeLocal(object.type) == "FastMatch" ||
+        object.has_fastmatch_diagnostic ||
+        ContainsCaseInsensitiveLocal(object.fastmatch_source_tool,
+                                     "fastmatch"))
+      return true;
+  }
+  return false;
+}
+
+void DrawKeyParameterControlPanel(
+    ManualTestContext &context, const ParserDebugBridge *parserDebugBridge) {
   ManualGaugeState &gauge = context.current_gauge;
   bool gaugeEdited = false;
 
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
-  ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "%s", gauge.tool.c_str());
-  DrawPrimaryObjectSelector(context);
-  const bool isFastMatch =
-      gauge.tool == "FastMatch" ||
-      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FastMatch";
+  const bool isFastMatch = KeyParamContextLooksFastMatchLocal(context);
   const bool isFindEllipse = gauge.tool == "FindEllipse" ||
                              NormalizeKeyParamToolTypeLocal(
                                  gauge.primary_object_type) == "FindEllipse" ||
                              gauge.has_ellipse_gauge;
+
   const bool isFindRect =
       gauge.tool == "FindRect" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindRect";
@@ -6320,6 +7068,25 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
     ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.35f, 1.0f),
                        "FastMatch: learn ROI + search ROI "
                        "+ matching params");
+
+    ImGui::Checkbox("Show FastMatch debug overlay",
+                    &context.show_fastmatch_debug_vectors);
+    ImGui::SameLine();
+    ImGui::Checkbox("compare_gap point pairs",
+                    &context.show_fastmatch_compare_gap_pairs);
+    ImGui::Checkbox("keypoint tangents",
+                    &context.show_fastmatch_keypoint_tangents);
+    ImGui::SameLine();
+    ImGui::Checkbox("filtered/unpaired points",
+                    &context.show_fastmatch_filtered_points);
+    gaugeEdited |= DrawRuntimeIntRow(context, "scan rotation deg",
+                                     "global_fastmatch_scan_rotation_deg", 0,
+                                     -180, 180, 150.0f);
+    ImGui::TextDisabled("Image View colors: cyan=A side, orange=B side, "
+                        "yellow=keypoint midpoint, magenta=adjacent-point "
+                        "tangent, red=filtered/unpaired point. compare_gap is "
+                        "the A/B point-pair distance generated from keypoints.");
+
     DrawFastMatchTemplateStatusPanel(context);
   }
   if (isFindSegmentation) {
@@ -6333,6 +7100,7 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
                        "binary components -> "
                        "non-editable result boxes");
   }
+
   if (isGridPattern) {
     ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f),
                        "GridPattern: ROI -> grid cells -> "
@@ -6374,14 +7142,6 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
       const bool scanSectorToggled =
           ImGui::Checkbox("use scan sector", &gauge.circle_arc_enabled);
       circleGeometryEdited |= scanSectorToggled;
-      // A0=0/A1=360 is the canonical full
-      // circle.  When the user enables a
-      // sector from that state, create a
-      // real editable default rather than
-      // immediately feeding the full-turn
-      // values back through Apply and
-      // making the checkbox appear to
-      // bounce off.
       if (scanSectorToggled && gauge.circle_arc_enabled &&
           std::abs(gauge.circle_arc_end_deg - gauge.circle_arc_start_deg) >=
               360) {
@@ -6399,10 +7159,6 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
         ImGui::TextDisabled("signed degrees allowed");
       }
 
-      // radius is a legacy alias for
-      // outer_radius.  Keep it synchronized
-      // here so the UI never presents two
-      // independently editable radii.
       gauge.outer_radius = std::max(1, gauge.outer_radius);
       gauge.inner_radius =
           std::max(0, std::min(gauge.inner_radius, gauge.outer_radius - 1));
@@ -6415,14 +7171,6 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
       gauge.circle_py = gauge.circle_cy;
       gaugeEdited |= circleGeometryEdited;
       if (circleGeometryEdited) {
-        // Keep the editable repository
-        // CircleShape in lockstep with the
-        // controls.  The explicit Apply To
-        // Gauge button remains a visible
-        // confirmation, but changing
-        // Rin/Rout must not leave a stale
-        // single-circle drawing on the
-        // canvas.
         context.apply_gauge_to_shape_requested = true;
       }
     } else if (isFindEllipse) {
@@ -6905,7 +7653,7 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
                         "hidden for this tool.");
   }
 
-  (void)DrawMetrologyExtensionPanel(context);
+  (void)DrawMetrologyExtensionPanel(context, parserDebugBridge);
 
   if (gaugeEdited) {
     gauge.dirty = true;
@@ -6971,6 +7719,7 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
           std::to_string(gauge.ellipse_x1) + "," +
           std::to_string(gauge.ellipse_y1) + ")";
     } else if (isFastMatch || isGridPattern || isRegionPattern) {
+
       if (isRegionPattern) {
         context.last_key_parameter_edit_summary +=
             " region_roi=(" +
@@ -6982,21 +7731,13 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
             "," +
             std::to_string(RuntimeIntOr(context, "global_region_roi_h", 90)) +
             ")" + " pooling=" +
-            std::to_string(RuntimeIntOr(context,
-                                        "global_region_pooling_"
-                                        "rows",
-                                        4)) +
+            std::to_string(RuntimeIntOr(context, "global_region_pooling_rows", 4)) +
             "x" +
-            std::to_string(RuntimeIntOr(context,
-                                        "global_region_pooling_"
-                                        "cols",
-                                        4)) +
+            std::to_string(RuntimeIntOr(context, "global_region_pooling_cols", 4)) +
             " binary=" +
-            std::to_string(
-                RuntimeIntOr(context, "global_region_use_binary", 0)) +
+            std::to_string(RuntimeIntOr(context, "global_region_use_binary", 0)) +
             " threshold=" +
-            std::to_string(
-                RuntimeIntOr(context, "global_region_threshold", 128));
+            std::to_string(RuntimeIntOr(context, "global_region_threshold", 128));
       } else {
         context.last_key_parameter_edit_summary +=
             " learn_roi=(" +
@@ -7025,40 +7766,37 @@ void DrawKeyParameterControlPanel(ManualTestContext &context) {
             ")" + " match_thre=" +
             std::to_string(RuntimeIntOr(context, "global_match_thre", 10)) +
             " min_score=" +
-            std::to_string(RuntimeIntOr(context, "global_min_score",
-                                        RuntimeIntOr(context,
-                                                     "global_min_score_"
-                                                     "percent",
-                                                     65))) +
+            std::to_string(RuntimeIntOr(
+                context, "global_min_score",
+                RuntimeIntOr(context, "global_min_score_percent", 65))) +
             " min_score_percent=" +
-            std::to_string(
-                RuntimeIntOr(context, "global_min_score_percent", 65)) +
+            std::to_string(RuntimeIntOr(context, "global_min_score_percent", 65)) +
             " find_num=" +
             std::to_string(RuntimeIntOr(context, "global_find_num", 1)) +
             " action=" +
             std::to_string(RuntimeIntOr(context, "global_fastmatch_action", 0));
+
+        if (isFastMatch) {
+          context.last_key_parameter_edit_summary +=
+              " scan_rotation_deg=" +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_scan_rotation_deg", 0));
+        }
+        if (isGridPattern) {
+          context.last_key_parameter_edit_summary +=
+              " grid=" +
+              std::to_string(RuntimeIntOr(context, "global_grid_rows", 12)) +
+              "x" +
+              std::to_string(RuntimeIntOr(context, "global_grid_cols", 12)) +
+              " orientation_bins=" +
+              std::to_string(RuntimeIntOr(context,
+                                          "global_grid_orientation_bins", 8)) +
+              " fusion_mode=" +
+              std::to_string(RuntimeIntOr(context, "global_grid_fusion_mode", 2));
+        }
       }
-      if (isGridPattern) {
-        context.last_key_parameter_edit_summary +=
-            " grid=" +
-            std::to_string(RuntimeIntOr(context, "global_grid_rows", 12)) +
-            "x" +
-            std::to_string(RuntimeIntOr(context, "global_grid_cols", 12)) +
-            " levels=" +
-            std::to_string(RuntimeIntOr(context, "global_grid_levels", 3)) +
-            " orientation_bins=" +
-            std::to_string(RuntimeIntOr(context,
-                                        "global_grid_orientation_"
-                                        "bins",
-                                        8)) +
-            " fusion_mode=" +
-            std::to_string(RuntimeIntOr(context, "global_grid_fusion_mode", 2));
-      }
+
     } else if (isFindSegmentation) {
-      // Summary was fully built above.  Do
-      // not append FindLine wgap/hgap or
-      // edge-selection fields to
-      // segmentation prompt parameters.
     } else {
       context.last_key_parameter_edit_summary +=
           " wgap=" + std::to_string(gauge.wgap) +

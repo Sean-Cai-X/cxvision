@@ -183,6 +183,7 @@ bool LearnPatternThroughRectFindline(
     finder.setfilter(21, 5, 100000);
     finder.setmeasurefallback(1);
   }
+  finder.setscanrotation(source.getscanrotation());
   finder.setrect(learn_x, learn_y, learn_w, learn_h);
   finder.edgepattern(image);
 
@@ -778,6 +779,12 @@ void FastMatch::setgrid(int iw, int igrid) {
 }
 FastMatch::~FastMatch() { delete m_pgrid; }
 void FastMatch::setcomparegap(int igap) { FindLine::setcomparegap(igap); }
+
+void FastMatch::setscanrotation(double angle_degrees) {
+  FindLine::setscanrotation(angle_degrees);
+}
+
+double FastMatch::getscanrotation() const { return FindLine::getscanrotation(); }
 FastMatch::LearnDirectionParams &FastMatch::learnDirectionParams(
     int direction) {
   direction = std::max(0, std::min(3, direction));

@@ -129,6 +129,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CxImageReferenceCandidateGenerator.cpp
   cximage/CxTypedLabelProposalGenerator.cpp
   cximage/CxMaskDiagnosticSelfTest.cpp
+  cximage/CxGeometryReferenceEvaluator.cpp
+  cximage/CxPredictiveGeometryGate.cpp
   cximage/CxTorchExecutionAdapter.cpp
   cximage/CxAutomaticDiagnosticClosure.cpp
   cximage/CxTorchResultProjector.cpp

@@ -115,6 +115,41 @@
       "case_id": "hd_pill_roi_region_learning_reference",
       "track_id": "R1",
       "phase": 2
+    },
+    {
+      "case_id": "geometry_circle_closed_region_reference",
+      "track_id": "C1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_ellipse_closed_region_reference",
+      "track_id": "C1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_rectangle_closed_region_reference",
+      "track_id": "C1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_polygon_closed_region_reference",
+      "track_id": "C1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_straight_line_boundary_reference",
+      "track_id": "O1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_circular_arc_boundary_reference",
+      "track_id": "O1",
+      "phase": 1
+    },
+    {
+      "case_id": "geometry_open_curve_boundary_reference",
+      "track_id": "O1",
+      "phase": 1
     }
   ]
 }

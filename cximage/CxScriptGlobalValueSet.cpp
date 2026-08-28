@@ -194,7 +194,9 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_match_step_y"] = 10.0;
     overrides["global_match_thre"] = 10.0;
     overrides["global_fastmatch_action"] = 3.0;
+    overrides["global_fastmatch_scan_rotation_deg"] = 0.0;
     overrides["global_strategy_id"] = static_cast<double>(options.strategy_id);
+
     overrides["global_algorithm_executed"] = static_cast<double>(options.algorithm_executed);
 
     overrides["global_learn_roi_x"] = static_cast<double>(options.learn_roi_x);

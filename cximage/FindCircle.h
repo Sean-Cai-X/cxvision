@@ -48,6 +48,7 @@ struct FindCircleMeasureGeometryDebug
         bool accepted = false;
         double accepted_x = 0.0;
         double accepted_y = 0.0;
+        std::vector<double> accepted_points_xy;
         int accepted_position = -1;
         std::string reject_reason;
     };

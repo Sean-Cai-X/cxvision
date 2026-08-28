@@ -1321,6 +1321,8 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setobjfilter", &FastMatch::setobjfilter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setscanrotation", &FastMatch::setscanrotation);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setlearnwgap", &FastMatch::setlearnwgap_script);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setlearnhgap", &FastMatch::setlearnhgap_script);

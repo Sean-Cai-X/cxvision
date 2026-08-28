@@ -1463,6 +1463,8 @@ void FindCircle::Measure(Image &image) {
     if (accepted_point != nullptr) {
       diag.accepted_x = accepted_point->X();
       diag.accepted_y = accepted_point->Y();
+      diag.accepted_points_xy.push_back(accepted_point->X());
+      diag.accepted_points_xy.push_back(accepted_point->Y());
     }
     m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
   };

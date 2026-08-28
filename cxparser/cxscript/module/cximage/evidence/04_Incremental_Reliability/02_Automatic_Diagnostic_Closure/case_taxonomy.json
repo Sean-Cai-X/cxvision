@@ -155,6 +155,41 @@
       "case_key": "hd_pill_roi_region_learning",
       "track_id": "R1_roi_region_learning",
       "implementation_phase": 2
+    },
+    {
+      "case_key": "geometry_circle_closed_region",
+      "track_id": "C1_closed_regular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_ellipse_closed_region",
+      "track_id": "C1_closed_regular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_rectangle_closed_region",
+      "track_id": "C1_closed_regular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_polygon_closed_region",
+      "track_id": "C1_closed_regular_region",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_straight_line_boundary",
+      "track_id": "O1_open_regular_boundary",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_circular_arc_boundary",
+      "track_id": "O1_open_regular_boundary",
+      "implementation_phase": 1
+    },
+    {
+      "case_key": "geometry_open_curve_boundary",
+      "track_id": "O1_open_regular_boundary",
+      "implementation_phase": 1
     }
   ]
 }

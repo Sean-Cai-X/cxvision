@@ -54,6 +54,7 @@ int match_step_x = global_match_step_x;
 int match_step_y = global_match_step_y;
 int match_threshold = global_match_thre;
 int fastmatch_action = global_fastmatch_action;
+int scan_rotation_deg = global_fastmatch_scan_rotation_deg;
 
 if (min_score_percent > 0)
 {
@@ -113,6 +114,7 @@ if (match_threshold <= 0)
 }
 
 m_match.setrectxywh(learn_x, learn_y, learn_w, learn_h);
+m_match.setscanrotation(scan_rotation_deg);
 m_match.setobjfilter(objfilter);
 m_match.setwhgap(wgap, hgap);
 m_match.setthre(threshold);

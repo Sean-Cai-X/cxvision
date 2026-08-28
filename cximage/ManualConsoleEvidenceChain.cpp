@@ -3903,6 +3903,349 @@ static int AppendCxScriptEvidenceChainFilesLocal(
   return appended;
 }
 
+struct AssetCaseScanRejectionLocal {
+  std::string manifest_path;
+  std::string reason;
+};
+
+static std::string FileNodeStringLocal(const cv::FileNode &node,
+                                       const char *key) {
+  const cv::FileNode value = node[key];
+  return value.empty() ? std::string() : static_cast<std::string>(value);
+}
+
+static bool IsAssetCasePathWithinRootLocal(const std::filesystem::path &root,
+                                           const std::filesystem::path &path) {
+  std::error_code ec;
+  const std::filesystem::path canonicalRoot =
+      std::filesystem::weakly_canonical(root, ec);
+  if (ec)
+    return false;
+  const std::filesystem::path canonicalPath =
+      std::filesystem::weakly_canonical(path, ec);
+  if (ec)
+    return false;
+  const std::filesystem::path relative =
+      std::filesystem::relative(canonicalPath, canonicalRoot, ec);
+  if (ec)
+    return false;
+  const auto first = relative.begin();
+  return first == relative.end() || *first != "..";
+}
+
+static int AppendAssetDrivenEvidenceCasesLocal(
+    ManualTestContext &context,
+    const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
+    std::string &reason) {
+  const std::filesystem::path runRoot =
+      ResolveCxVisionRunPath("cxscript_runs");
+  int discovered = 0;
+  int accepted = 0;
+  std::vector<AssetCaseScanRejectionLocal> rejected;
+  std::set<std::string> identities;
+  std::set<std::string> normalizedPaths;
+
+  auto reject = [&](const std::filesystem::path &manifest,
+                    const std::string &message) {
+    rejected.push_back({manifest.string(), message});
+  };
+
+  std::vector<std::filesystem::path> scanRoots;
+  const std::filesystem::path registryPath =
+      runRoot / "_shared" / "evidence_case_roots.json";
+  std::error_code iteratorError;
+  if (!std::filesystem::is_directory(runRoot, iteratorError)) {
+    reject(runRoot, "RUN_ROOT is missing or is not a directory");
+  } else {
+    cv::FileStorage registry;
+    bool registryOpened = false;
+    bool registryParseRejected = false;
+    try {
+      registryOpened = registry.open(registryPath.string(),
+                                     cv::FileStorage::READ |
+                                         cv::FileStorage::FORMAT_JSON);
+    } catch (const cv::Exception &error) {
+      reject(registryPath,
+             "Evidence case root registry parse exception: " +
+                 std::string(error.what()));
+      registryParseRejected = true;
+    }
+    if (!registryOpened) {
+      if (!registryParseRejected)
+        reject(registryPath, "Evidence case root registry is missing or invalid");
+    } else if (FileNodeStringLocal(registry.root(), "schema") !=
+            "cxvision.evidence_case_roots.v1" ||
+        !registry["roots"].isSeq()) {
+      reject(registryPath, "Evidence case root registry is missing or invalid");
+    } else {
+      std::set<std::string> uniqueRoots;
+      for (const cv::FileNode &rootNode : registry["roots"]) {
+        const std::string relativeRoot = static_cast<std::string>(rootNode);
+        const std::filesystem::path scanRoot = runRoot / relativeRoot;
+        std::error_code rootError;
+        const std::string normalizedRoot =
+            std::filesystem::weakly_canonical(scanRoot, rootError).generic_string();
+        if (relativeRoot.empty() || rootError ||
+            !IsAssetCasePathWithinRootLocal(runRoot, scanRoot) ||
+            !std::filesystem::is_directory(scanRoot, rootError) ||
+            std::filesystem::is_symlink(scanRoot, rootError)) {
+          reject(registryPath, "registered case root is missing or unsafe: " +
+                                   relativeRoot);
+          continue;
+        }
+        if (uniqueRoots.insert(normalizedRoot).second)
+          scanRoots.push_back(scanRoot);
+      }
+    }
+  }
+
+  for (const std::filesystem::path &scanRoot : scanRoots) {
+    std::filesystem::recursive_directory_iterator iterator(
+        scanRoot, std::filesystem::directory_options::skip_permission_denied,
+        iteratorError);
+    const std::filesystem::recursive_directory_iterator end;
+    while (iterator != end) {
+      if (iteratorError) {
+        reject(scanRoot, "directory iteration failed: " + iteratorError.message());
+        iteratorError.clear();
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      const std::filesystem::directory_entry entry = *iterator;
+      std::error_code entryError;
+      if (entry.is_symlink(entryError)) {
+        if (entry.is_directory(entryError))
+          iterator.disable_recursion_pending();
+        iterator.increment(iteratorError);
+        continue;
+      }
+      if (!entry.is_regular_file(entryError) ||
+          entry.path().filename() != "case_manifest.json") {
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      ++discovered;
+      const std::filesystem::path manifestPath = entry.path();
+      const std::filesystem::path caseDirectory = manifestPath.parent_path();
+      if (!IsAssetCasePathWithinRootLocal(runRoot, manifestPath) ||
+          std::filesystem::is_symlink(caseDirectory, entryError)) {
+        reject(manifestPath, "manifest is outside RUN_ROOT or its case directory is a symlink");
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      cv::FileStorage manifest;
+      bool manifestOpened = false;
+      bool manifestParseRejected = false;
+      try {
+        manifestOpened = manifest.open(manifestPath.string(),
+                                       cv::FileStorage::READ |
+                                           cv::FileStorage::FORMAT_JSON);
+      } catch (const cv::Exception &error) {
+        reject(manifestPath,
+               "Evidence case manifest parse exception: " +
+                   std::string(error.what()));
+        manifestParseRejected = true;
+      }
+      if (!manifestOpened) {
+        if (!manifestParseRejected)
+          reject(manifestPath, "unsupported or invalid Evidence case schema");
+        iterator.increment(iteratorError);
+        continue;
+      }
+      if (FileNodeStringLocal(manifest.root(), "schema") !=
+          "cxvision.evidence_case.v1") {
+        reject(manifestPath, "unsupported Evidence case schema");
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      const std::string runId = FileNodeStringLocal(manifest.root(), "run_id");
+      std::string internalCaseId =
+          FileNodeStringLocal(manifest.root(), "internal_case_id");
+      std::string reviewItem =
+          FileNodeStringLocal(manifest.root(), "review_item");
+      if (reviewItem.empty())
+        reviewItem = FileNodeStringLocal(manifest.root(), "display_name");
+      std::error_code relativeError;
+      const std::filesystem::path relativeCase =
+          std::filesystem::relative(caseDirectory, runRoot, relativeError);
+      if (reviewItem.empty() && !relativeError)
+        reviewItem = relativeCase.generic_string();
+      if (internalCaseId.empty() && !relativeError)
+        internalCaseId = "asset_case:" + relativeCase.generic_string();
+
+      const std::string sourceRef =
+          FileNodeStringLocal(manifest.root(), "source_image");
+      const std::string labelRef =
+          FileNodeStringLocal(manifest.root(), "typed_label");
+      const std::string factsRef =
+          FileNodeStringLocal(manifest.root(), "geometry_facts_ref");
+      const std::string overlayRef =
+          FileNodeStringLocal(manifest.root(), "evidence_overlay");
+      const std::string summaryRef =
+          FileNodeStringLocal(manifest.root(), "result_summary");
+      const cv::FileNode requiredAssets = manifest["required_assets"];
+      if (runId.empty() || internalCaseId.empty() || reviewItem.empty() ||
+          sourceRef.empty() || labelRef.empty() || factsRef.empty() ||
+          overlayRef.empty() || summaryRef.empty() || !requiredAssets.isSeq()) {
+        reject(manifestPath, "mandatory identity or asset fields are missing");
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      bool assetsValid = true;
+      std::set<std::string> requiredNames;
+      for (const cv::FileNode &assetNode : requiredAssets) {
+        const std::string assetRef = static_cast<std::string>(assetNode);
+        requiredNames.insert(assetRef);
+        const std::filesystem::path assetPath = caseDirectory / assetRef;
+        if (assetRef.empty() ||
+            !IsAssetCasePathWithinRootLocal(caseDirectory, assetPath) ||
+            !IsAssetCasePathWithinRootLocal(runRoot, assetPath) ||
+            !std::filesystem::is_regular_file(assetPath, entryError) ||
+            std::filesystem::is_symlink(assetPath, entryError)) {
+          reject(manifestPath, "ASSET_MISSING or unsafe required asset: " + assetRef);
+          assetsValid = false;
+          break;
+        }
+      }
+      if (assetsValid) {
+        for (const std::string &mandatoryRef :
+             {sourceRef, labelRef, factsRef, overlayRef, summaryRef}) {
+          if (requiredNames.count(mandatoryRef) == 0) {
+            reject(manifestPath,
+                   "mandatory asset is absent from required_assets: " +
+                       mandatoryRef);
+            assetsValid = false;
+            break;
+          }
+        }
+      }
+      if (!assetsValid) {
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      const std::filesystem::path sourcePath = caseDirectory / sourceRef;
+      const std::filesystem::path labelPath = caseDirectory / labelRef;
+      const std::filesystem::path overlayPath = caseDirectory / overlayRef;
+      const std::string identity = runId + "|" + internalCaseId;
+      const std::string normalizedPath =
+          std::filesystem::weakly_canonical(caseDirectory, entryError).generic_string();
+      if (!identities.insert(identity).second) {
+        reject(manifestPath, "duplicate internal_case_id within RUN_ID");
+        iterator.increment(iteratorError);
+        continue;
+      }
+      if (!normalizedPaths.insert(normalizedPath).second) {
+        reject(manifestPath, "duplicate normalized case directory");
+        iterator.increment(iteratorError);
+        continue;
+      }
+
+      ScriptEvidenceThumb thumb;
+      thumb.case_id = internalCaseId;
+      thumb.review_item = reviewItem;
+      thumb.script_id = reviewItem;
+      thumb.image_id = internalCaseId;
+      thumb.image_path = sourcePath.string();
+      thumb.thumbnail_path = overlayPath.string();
+      thumb.target_id = FileNodeStringLocal(manifest.root(), "geometry_type");
+      thumb.tool = "GeometryReference";
+      thumb.parameter_summary =
+          "track=" + FileNodeStringLocal(manifest.root(), "case_track") +
+          " geometry=" + thumb.target_id +
+          " topology=" + FileNodeStringLocal(manifest.root(), "topology") +
+          " training_enabled=0";
+      thumb.evidence_output_root = caseDirectory.string();
+      thumb.contract_id = FileNodeStringLocal(manifest.root(), "schema");
+      thumb.expected_result = summaryRef;
+      thumb.expected_policy_guard =
+          "controlled fixture review only; production quality is not claimed";
+      thumb.evidence_level = "T0";
+      thumb.evidence_case_role = "asset_driven_geometry_reference";
+      thumb.source_case_id = internalCaseId;
+      thumb.manual_review_required = true;
+      thumb.promotion_candidate = false;
+      thumb.evidence_category_override = "To Verify";
+      thumb.evidence_head_folder = runId;
+      thumb.evidence_case_folder = reviewItem;
+      thumb.workflow_id = runId;
+      thumb.workflow_stage = "controlled_geometry_review";
+      thumb.workflow_status = "PENDING_HUMAN_REVIEW";
+      thumb.dataset_role = "controlled_validation";
+      thumb.annotation_policy =
+          FileNodeStringLocal(manifest.root(), "typed_label_kind");
+      thumb.gate_policy = "human_review_required";
+      thumb.dataset_frozen = true;
+      thumb.status = FileNodeStringLocal(manifest.root(), "binding_status");
+      thumb.reason = "asset-driven Evidence case; manifest=" + manifestPath.string() +
+                     "; typed_label=" + labelPath.string() +
+                     "; summary=" + (caseDirectory / summaryRef).string();
+      CxEvidenceDatasetImageBinding sourceBinding;
+      sourceBinding.image_id = internalCaseId;
+      sourceBinding.image_path = sourcePath.string();
+      sourceBinding.split = "controlled_validation";
+      sourceBinding.label = thumb.target_id;
+      sourceBinding.source = "evidence_case_manifest";
+      thumb.dataset_images.push_back(sourceBinding);
+
+      findGroup("Geometry Reference / Asset Cases").thumbs.push_back(thumb);
+
+      ManualEvidenceItem item;
+      item.case_id = internalCaseId;
+      item.review_item = reviewItem;
+      item.level = "T0";
+      item.image_id = internalCaseId;
+      item.target_id = thumb.target_id;
+      item.tool = thumb.tool;
+      item.script_id = reviewItem;
+      item.gauge_status = "not_applicable";
+      item.probe_status = "controlled_fixture_ready";
+      item.contract_status = "validated";
+      item.review_status = "PENDING_HUMAN_REVIEW";
+      item.image_path = sourcePath.string();
+      item.source_evidence_chain_path = manifestPath.string();
+      context.evidence_items.push_back(item);
+      ++accepted;
+
+      iterator.increment(iteratorError);
+    }
+  }
+
+  const std::filesystem::path debugPath =
+      runRoot / "evidence_chain" / "case_asset_scan_debug.json";
+  std::error_code debugError;
+  std::filesystem::create_directories(debugPath.parent_path(), debugError);
+  std::ofstream debug(debugPath, std::ios::trunc);
+  debug << "{\n"
+        << "  \"schema\": \"cxvision.evidence_case_scan.v1\",\n"
+        << "  \"root\": \"" << JsonEscape(runRoot.string()) << "\",\n"
+        << "  \"registry\": \"" << JsonEscape(registryPath.string()) << "\",\n"
+        << "  \"registered_roots\": " << scanRoots.size() << ",\n"
+        << "  \"discovered\": " << discovered << ",\n"
+        << "  \"accepted\": " << accepted << ",\n"
+        << "  \"rejected\": " << rejected.size() << ",\n"
+        << "  \"rejections\": [\n";
+  for (std::size_t index = 0; index < rejected.size(); ++index) {
+    debug << "    {\"manifest\": \""
+          << JsonEscape(rejected[index].manifest_path) << "\", \"reason\": \""
+          << JsonEscape(rejected[index].reason) << "\"}"
+          << (index + 1 == rejected.size() ? "\n" : ",\n");
+  }
+  debug << "  ]\n}\n";
+
+  std::ostringstream summary;
+  summary << "asset case scan root=" << runRoot.string()
+          << " discovered=" << discovered << " accepted=" << accepted
+          << " rejected=" << rejected.size() << " debug=" << debugPath.string();
+  reason = summary.str();
+  return accepted;
+}
+
 void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
   if (m_manualTest.script_evidence_groups_dirty == false)
     return;
@@ -4023,6 +4366,25 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
         m_manualTest.debug_reason.clear();
       }
       m_manualTest.debug_reason += evidenceChainReason;
+    }
+  }
+
+  {
+    std::string assetCaseReason;
+    AppendAssetDrivenEvidenceCasesLocal(
+        m_manualTest,
+        [&](const std::string &label) -> ScriptEvidenceGroup & {
+          return findOrCreateGroup("", "", label);
+        },
+        assetCaseReason);
+    if (!assetCaseReason.empty()) {
+      if (!m_manualTest.debug_reason.empty() &&
+          m_manualTest.debug_reason != "not started") {
+        m_manualTest.debug_reason += "; ";
+      } else {
+        m_manualTest.debug_reason.clear();
+      }
+      m_manualTest.debug_reason += assetCaseReason;
     }
   }
 
@@ -4781,6 +5143,7 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
   out.thumb_index = thumbIndex;
 
   out.case_id = thumb.case_id;
+  out.review_item = thumb.review_item;
 
   out.candidate_id = thumb.candidate_id;
   out.candidate_dir = thumb.candidate_dir;
@@ -5990,6 +6353,416 @@ bool ViewController::LoadTorchTrainingImageIntoAnnotationView(
   return true;
 }
 
+static std::string NormalizeTorchTrainingSplitLocal(std::string split) {
+  std::transform(split.begin(), split.end(), split.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  if (split.empty())
+    return "train";
+  if (split == "validation" || split == "validate" || split == "valid")
+    return "val";
+  return split;
+}
+
+static std::filesystem::path ResolveGeometryAugAssetRefLocal(
+    const std::filesystem::path &base, const std::string &ref) {
+  const std::filesystem::path path(ref);
+  return (path.is_absolute() ? path : base / path).lexically_normal();
+}
+
+static std::string GeometryAugmentationSelectionSourceLocal(std::string review) {
+  const std::size_t marker = review.find(" / ");
+  if (marker != std::string::npos)
+    review.resize(marker);
+  return review;
+}
+
+static double FileNodeDoubleLocal(const cv::FileNode &node, const char *key,
+                                  double fallback = 0.0) {
+  const cv::FileNode value = node[key];
+  return value.empty() ? fallback : static_cast<double>(value);
+}
+
+static bool ReadPointPairsLocal(const cv::FileNode &node,
+                                std::vector<double> &points) {
+  points.clear();
+  if (!node.isSeq())
+    return false;
+  for (const cv::FileNode &point : node) {
+    if (!point.isSeq() || point.size() < 2)
+      return false;
+    points.push_back(static_cast<double>(point[0]));
+    points.push_back(static_cast<double>(point[1]));
+  }
+  return points.size() >= 4;
+}
+
+static TorchTrainingAnnotationShapeSnapshot BuildGeometryAugBBoxSnapshotLocal(
+    const std::string &imageId, const std::string &geometryType,
+    const cv::FileNode &positionRoot, int classId) {
+  TorchTrainingAnnotationShapeSnapshot snap;
+  snap.class_id = classId;
+  snap.stable_ref = imageId + "_bbox_1";
+  snap.tool_id = "TorchTask";
+  snap.owner_type = "GeometryAugmentationDataset";
+  snap.owner_ref = imageId;
+  snap.owner_binding = "typed_label_bbox";
+  snap.semantic_role = "typed_label_" + geometryType;
+  snap.shape_kind = "RectShape";
+  const cv::FileNode bbox = positionRoot["bbox_xywh"];
+  if (bbox.isSeq() && bbox.size() >= 4) {
+    const double x = static_cast<double>(bbox[0]);
+    const double y = static_cast<double>(bbox[1]);
+    const double w = static_cast<double>(bbox[2]);
+    const double h = static_cast<double>(bbox[3]);
+    snap.center_x = x + w * 0.5;
+    snap.center_y = y + h * 0.5;
+    snap.radius_x = std::max(0.0, w * 0.5);
+    snap.radius_y = std::max(0.0, h * 0.5);
+    snap.points_xy = {x, y, x + w, y, x + w, y + h, x, y + h};
+  }
+  snap.closed = true;
+  snap.editable = true;
+  snap.visible = true;
+  snap.result_element = false;
+  return snap;
+}
+
+static bool BuildGeometryAugShapeSnapshotLocal(
+    const std::string &imageId, const std::string &geometryType,
+    const cv::FileNode &factsRoot,
+    TorchTrainingAnnotationShapeSnapshot &snap) {
+  snap.class_id = 0;
+  snap.stable_ref = imageId + "_geometry_1";
+  snap.tool_id = "TorchTask";
+  snap.owner_type = "GeometryAugmentationDataset";
+  snap.owner_ref = imageId;
+  snap.owner_binding = "typed_label_geometry";
+  snap.semantic_role = "typed_label_" + geometryType;
+  snap.editable = true;
+  snap.visible = true;
+  snap.result_element = false;
+
+  std::vector<double> points;
+  const cv::FileNode instances = factsRoot["instances"];
+  const cv::FileNode instance = instances.isSeq() && !instances.empty()
+                                    ? *instances.begin()
+                                    : cv::FileNode();
+  if (!instance.empty()) {
+    if (ReadPointPairsLocal(instance["vertices_xy"], points)) {
+      snap.shape_kind = "PolylineShape";
+      snap.points_xy = std::move(points);
+      int closed = 0;
+      instance["closed"] >> closed;
+      snap.closed = closed != 0;
+      return true;
+    }
+
+    const cv::FileNode center = instance["center_xy"];
+    if (center.isSeq() && center.size() >= 2) {
+      snap.center_x = static_cast<double>(center[0]);
+      snap.center_y = static_cast<double>(center[1]);
+      if (geometryType == "circle") {
+        snap.shape_kind = "CircleShape";
+        snap.radius = FileNodeDoubleLocal(instance, "radius_px", 20.0);
+        snap.closed = true;
+        return true;
+      }
+      if (geometryType == "ellipse") {
+        snap.shape_kind = "EllipseShape";
+        snap.radius_x = FileNodeDoubleLocal(instance, "radius_x_px", 30.0);
+        snap.radius_y = FileNodeDoubleLocal(instance, "radius_y_px", 20.0);
+        snap.angle = FileNodeDoubleLocal(instance, "rotation_deg", 0.0);
+        snap.closed = true;
+        return true;
+      }
+      if (geometryType == "rectangle") {
+        const double halfW = FileNodeDoubleLocal(instance, "width_px", 0.0) * 0.5;
+        const double halfH = FileNodeDoubleLocal(instance, "height_px", 0.0) * 0.5;
+        const double angle = FileNodeDoubleLocal(instance, "rotation_deg", 0.0) *
+                             3.14159265358979323846 / 180.0;
+        if (halfW > 0.0 && halfH > 0.0) {
+          snap.shape_kind = "PolylineShape";
+          snap.closed = true;
+          const double c = std::cos(angle);
+          const double s = std::sin(angle);
+          const double corners[4][2] = {{-halfW, -halfH}, {halfW, -halfH},
+                                        {halfW, halfH}, {-halfW, halfH}};
+          for (const auto &corner : corners) {
+            snap.points_xy.push_back(snap.center_x + corner[0] * c - corner[1] * s);
+            snap.points_xy.push_back(snap.center_y + corner[0] * s + corner[1] * c);
+          }
+          return true;
+        }
+      }
+    }
+  }
+
+  if (ReadPointPairsLocal(factsRoot["control_points_xy"], points)) {
+    snap.shape_kind = "PolylineShape";
+    snap.points_xy = std::move(points);
+    snap.closed = false;
+    return true;
+  }
+  if (ReadPointPairsLocal(factsRoot["endpoints_xy"], points)) {
+    snap.shape_kind = "LineShape";
+    snap.points_xy = std::move(points);
+    snap.closed = false;
+    return true;
+  }
+
+  return false;
+}
+
+int ViewController::AddGeometryAugmentationDatasetForCurrentSelection() {
+  const CxEvidenceSelectionSnapshot &sel =
+      m_manualTest.current_evidence_selection;
+  if (!sel.valid)
+    return 0;
+
+  const std::filesystem::path runRoot = ResolveCxVisionRunPath("cxscript_runs");
+  const std::filesystem::path scanRoot = runRoot / "geometry_augmentation";
+  std::error_code ec;
+  if (!std::filesystem::is_directory(scanRoot, ec))
+    return 0;
+
+  const std::string selectedReview = !sel.review_item.empty()
+                                         ? sel.review_item
+                                         : (!sel.script_id.empty() ? sel.script_id
+                                                                  : sel.case_id);
+  const std::string selectedSource =
+      GeometryAugmentationSelectionSourceLocal(selectedReview);
+
+  int datasetCount = 0;
+  int added = 0;
+  int skipped = 0;
+  int trainCount = 0;
+  int valCount = 0;
+  int testCount = 0;
+  std::set<std::string> sampleKeys;
+  std::vector<std::filesystem::path> manifests;
+
+  std::filesystem::recursive_directory_iterator iterator(
+      scanRoot, std::filesystem::directory_options::skip_permission_denied, ec);
+  const std::filesystem::recursive_directory_iterator end;
+  while (!ec && iterator != end) {
+    const std::filesystem::directory_entry entry = *iterator;
+    std::error_code entryError;
+    if (entry.is_symlink(entryError)) {
+      if (entry.is_directory(entryError))
+        iterator.disable_recursion_pending();
+      iterator.increment(ec);
+      continue;
+    }
+    if (entry.is_regular_file(entryError) &&
+        entry.path().filename() == "dataset_manifest.json") {
+      manifests.push_back(entry.path());
+    }
+    iterator.increment(ec);
+  }
+  std::sort(manifests.begin(), manifests.end());
+
+  for (const std::filesystem::path &datasetManifestPath : manifests) {
+    if (!IsAssetCasePathWithinRootLocal(runRoot, datasetManifestPath)) {
+      ++skipped;
+      continue;
+    }
+
+    cv::FileStorage dataset;
+    try {
+      if (!dataset.open(datasetManifestPath.string(),
+                        cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON)) {
+        ++skipped;
+        continue;
+      }
+    } catch (const cv::Exception &) {
+      ++skipped;
+      continue;
+    }
+    if (FileNodeStringLocal(dataset.root(), "schema") !=
+        "cxvision.geometry_augmentation_dataset.v1" ||
+        !dataset["samples"].isSeq()) {
+      ++skipped;
+      continue;
+    }
+    ++datasetCount;
+
+    const std::filesystem::path datasetRoot = datasetManifestPath.parent_path();
+    for (const cv::FileNode &sample : dataset["samples"]) {
+      const std::string casePathRef = FileNodeStringLocal(sample, "case_path");
+      if (casePathRef.empty()) {
+        ++skipped;
+        continue;
+      }
+      const std::filesystem::path caseDirectory =
+          ResolveGeometryAugAssetRefLocal(datasetRoot, casePathRef);
+      const std::filesystem::path caseManifestPath =
+          caseDirectory / "case_manifest.json";
+      std::error_code caseError;
+      if (!IsAssetCasePathWithinRootLocal(runRoot, caseDirectory) ||
+          std::filesystem::is_symlink(caseDirectory, caseError) ||
+          !std::filesystem::is_regular_file(caseManifestPath, caseError) ||
+          std::filesystem::is_symlink(caseManifestPath, caseError)) {
+        ++skipped;
+        continue;
+      }
+
+      cv::FileStorage caseManifest;
+      try {
+        if (!caseManifest.open(caseManifestPath.string(),
+                               cv::FileStorage::READ |
+                                   cv::FileStorage::FORMAT_JSON)) {
+          ++skipped;
+          continue;
+        }
+      } catch (const cv::Exception &) {
+        ++skipped;
+        continue;
+      }
+      if (FileNodeStringLocal(caseManifest.root(), "schema") !=
+          "cxvision.evidence_case.v1") {
+        ++skipped;
+        continue;
+      }
+
+      const std::string reviewItem =
+          FileNodeStringLocal(caseManifest.root(), "review_item");
+      const std::string sourceReview =
+          FileNodeStringLocal(caseManifest.root(), "source_review_item");
+      const bool sameVisibleCase =
+          !selectedReview.empty() && reviewItem == selectedReview;
+      const bool sameSourceCase =
+          !selectedSource.empty() &&
+          (sourceReview == selectedSource ||
+           reviewItem.rfind(selectedSource + " / ", 0) == 0);
+      if (!sameVisibleCase && !sameSourceCase) {
+        ++skipped;
+        continue;
+      }
+
+      const std::string runId = FileNodeStringLocal(caseManifest.root(), "run_id");
+      const std::string imageId =
+          FileNodeStringLocal(caseManifest.root(), "internal_case_id");
+      const std::string geometryType =
+          FileNodeStringLocal(caseManifest.root(), "geometry_type");
+      const std::string sourceImageRef =
+          FileNodeStringLocal(caseManifest.root(), "source_image");
+      const std::string typedLabelRef =
+          FileNodeStringLocal(caseManifest.root(), "typed_label");
+      const std::string factsRef =
+          FileNodeStringLocal(caseManifest.root(), "geometry_facts_ref");
+      const std::string positionRef =
+          FileNodeStringLocal(caseManifest.root(), "position_annotation_ref");
+      const std::string split = NormalizeTorchTrainingSplitLocal(
+          FileNodeStringLocal(caseManifest.root(), "split"));
+
+      const std::filesystem::path sourceImage =
+          ResolveGeometryAugAssetRefLocal(caseDirectory, sourceImageRef);
+      const std::filesystem::path typedLabel =
+          ResolveGeometryAugAssetRefLocal(caseDirectory, typedLabelRef);
+      const std::filesystem::path factsPath =
+          ResolveGeometryAugAssetRefLocal(caseDirectory, factsRef);
+      const std::filesystem::path positionPath =
+          ResolveGeometryAugAssetRefLocal(caseDirectory, positionRef);
+      const auto validCaseAsset = [&](const std::filesystem::path &path) {
+        std::error_code assetError;
+        return IsAssetCasePathWithinRootLocal(runRoot, path) &&
+               IsAssetCasePathWithinRootLocal(caseDirectory, path) &&
+               std::filesystem::is_regular_file(path, assetError) &&
+               !std::filesystem::is_symlink(path, assetError);
+      };
+      if (imageId.empty() || !validCaseAsset(sourceImage) ||
+          !validCaseAsset(typedLabel) || !validCaseAsset(factsPath) ||
+          !validCaseAsset(positionPath)) {
+        ++skipped;
+        continue;
+      }
+
+      const std::string sampleKey =
+          runId + "|" + imageId + "|" + sourceImage.lexically_normal().string();
+      if (!sampleKeys.insert(sampleKey).second) {
+        ++skipped;
+        continue;
+      }
+
+      AddTorchTrainingImageFromPath(
+          sourceImage.string(), imageId, split,
+          geometryType.empty() ? "pending" : geometryType,
+          runId.empty() ? "geometry_augmentation_dataset"
+                        : "geometry_augmentation_dataset:" + runId);
+
+      const int selected = m_manualTest.selected_torch_training_image;
+      if (selected >= 0 &&
+          selected < static_cast<int>(m_manualTest.torch_training_images.size())) {
+        TorchTrainingImageItem &item =
+            m_manualTest.torch_training_images[static_cast<std::size_t>(selected)];
+        item.case_id = reviewItem.empty() ? imageId : reviewItem;
+        item.target_id = geometryType;
+        item.annotation_shapes.clear();
+
+        cv::FileStorage facts;
+        cv::FileStorage position;
+        bool factsOpened = false;
+        bool positionOpened = false;
+        try {
+          factsOpened = facts.open(factsPath.string(),
+                                   cv::FileStorage::READ |
+                                       cv::FileStorage::FORMAT_JSON);
+          positionOpened = position.open(positionPath.string(),
+                                         cv::FileStorage::READ |
+                                             cv::FileStorage::FORMAT_JSON);
+        } catch (const cv::Exception &) {
+          factsOpened = false;
+          positionOpened = false;
+        }
+
+        TorchTrainingAnnotationShapeSnapshot snap;
+        if (factsOpened &&
+            BuildGeometryAugShapeSnapshotLocal(imageId, geometryType,
+                                               facts.root(), snap)) {
+          item.annotation_shapes.push_back(std::move(snap));
+        } else if (positionOpened) {
+          item.annotation_shapes.push_back(BuildGeometryAugBBoxSnapshotLocal(
+              imageId, geometryType, position.root(), 0));
+        }
+        item.annotation_shape_count =
+            static_cast<int>(item.annotation_shapes.size());
+        item.annotation_overlay_count = 1;
+        item.annotation_status =
+            item.annotation_shape_count > 0 ? "draft_pending_human_review"
+                                            : "unlabeled";
+        item.annotation_reason =
+            "typed_label=" + typedLabel.string() +
+            "; human review not recorded; training_enabled=0";
+      }
+
+      if (split == "train")
+        ++trainCount;
+      else if (split == "val")
+        ++valCount;
+      else if (split == "test")
+        ++testCount;
+      ++added;
+    }
+  }
+
+  if (added > 0) {
+    m_manualTest.torch_training_image_status =
+        "GEOMETRY_AUGMENTATION_DATASET_BOUND";
+    m_manualTest.torch_training_image_reason =
+        "asset-driven geometry augmentation image set for " + selectedReview +
+        " datasets=" + std::to_string(datasetCount) +
+        " images=" + std::to_string(added) +
+        " train=" + std::to_string(trainCount) +
+        " val=" + std::to_string(valCount) +
+        " test=" + std::to_string(testCount) +
+        " skipped=" + std::to_string(skipped) +
+        " training_enabled=0";
+  }
+  return added;
+}
+
 void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
   CxEvidenceSelectionSnapshot sel = m_manualTest.current_evidence_selection;
   if (!sel.valid)
@@ -6123,6 +6896,27 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
         " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
         (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
     CXLOG_INFO("TorchTrainingImageSet", "hd_reference_manifest_sync_complete",
+               m_manualTest.torch_training_image_status,
+               m_manualTest.torch_training_image_reason);
+    return;
+  }
+
+  const int geometryAugmentationCount =
+      AddGeometryAugmentationDatasetForCurrentSelection();
+  if (geometryAugmentationCount > 0) {
+    std::string imageLoadReason;
+    m_manualTest.selected_torch_training_image = -1;
+    const bool imageLoaded =
+        LoadTorchTrainingImageIntoAnnotationView(0, imageLoadReason);
+    const std::string manifestReason = m_manualTest.torch_training_image_reason;
+    m_manualTest.torch_training_image_status =
+        imageLoaded ? "GEOMETRY_AUGMENTATION_DATASET_BOUND"
+                    : "GEOMETRY_AUGMENTATION_IMAGE_LOAD_FAIL";
+    m_manualTest.torch_training_image_reason =
+        manifestReason +
+        " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
+        (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
+    CXLOG_INFO("TorchTrainingImageSet", "geometry_augmentation_sync_complete",
                m_manualTest.torch_training_image_status,
                m_manualTest.torch_training_image_reason);
     return;
@@ -6777,7 +7571,9 @@ static bool SaveEvidenceManualReviewLocal(const ScriptEvidenceThumb &thumb,
   }
 
   const std::string reviewItemLabel = StripEvidenceCandidateDisplaySuffixLocal(
-      thumb.script_id.empty() ? thumb.case_id : thumb.script_id);
+      thumb.review_item.empty()
+          ? (thumb.script_id.empty() ? thumb.case_id : thumb.script_id)
+          : thumb.review_item);
 
   out << "{\n"
       << "  \"schema\": \"cxvision.manual_gui_review.v1\",\n"
@@ -8428,7 +9224,9 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
       row.thumb_index = static_cast<int>(ti);
       row.is_group_header = false;
       row.label = StripEvidenceCandidateDisplaySuffixLocal(
-          thumb.script_id.empty() ? thumb.case_id : thumb.script_id);
+          thumb.review_item.empty()
+              ? (thumb.script_id.empty() ? thumb.case_id : thumb.script_id)
+              : thumb.review_item);
 
       const std::string key = uniqueCaseKey(thumb, group);
       const auto existingSlot = uniqueRowSlots.find(key);
@@ -8454,8 +9252,9 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     ScriptEvidenceThumb &thumb = group.thumbs[row.thumb_index];
     if (!caseFilter.empty()) {
       const std::string searchable =
-          toLower(thumb.case_id + " " + thumb.script_id + " " + thumb.image_id +
-                  " " + thumb.target_id + " " + thumb.tool + " " + group.label);
+          toLower(thumb.review_item + " " + thumb.case_id + " " +
+                  thumb.script_id + " " + thumb.image_id + " " +
+                  thumb.target_id + " " + thumb.tool + " " + group.label);
       if (searchable.find(caseFilter) == std::string::npos)
         continue;
     }
@@ -8782,8 +9581,12 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
 
     ImGui::TableSetColumnIndex(0);
 
+    const std::string visibleCase =
+        thumb.review_item.empty() ? thumb.case_id : thumb.review_item;
     ImGui::Text("case: %s",
-                thumb.case_id.empty() ? "(no case)" : thumb.case_id.c_str());
+                visibleCase.empty() ? "(no case)" : visibleCase.c_str());
+    if (!thumb.review_item.empty() && thumb.case_id != thumb.review_item)
+      textEllipsized("internal: ", thumb.case_id, 82);
     if (!thumb.script_id.empty() && thumb.script_id != thumb.case_id)
       textEllipsized("script: ", thumb.script_id, 82);
     textEllipsized("path: ", thumb.script_path, 82);

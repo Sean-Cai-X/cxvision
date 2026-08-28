@@ -1799,7 +1799,7 @@ void ViewController::drawKeyParameterControlsWindow() {
     SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
     DrawTorchAnnotationKeyParameterPanel(m_manualTest);
   } else if (IsFindLineFindCircleContext(m_manualTest)) {
-    DrawKeyParameterControlPanel(m_manualTest);
+    DrawKeyParameterControlPanel(m_manualTest, &m_parserDebugBridge);
     if (m_manualTest.apply_gauge_to_shape_requested) {
       m_manualTest.apply_gauge_to_shape_requested = false;
       const bool preservePendingFastMatchRun =

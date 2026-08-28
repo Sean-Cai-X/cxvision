@@ -4,6 +4,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include <string>
+#include <vector>
 class FindObject;
 class ICxShapeSink;
 
@@ -72,6 +73,21 @@ struct FindEllipseDisplaySnapshot
     int point_consistency_removed_points = 0;
 
     std::string scan_geometry_policy;
+};
+
+struct FindEllipseMeasureGeometryDebug
+{
+    struct ScanDiagnostic
+    {
+        int scan_index = -1;
+        int candidate_count = 0;
+        bool accepted = false;
+        double accepted_x = 0.0;
+        double accepted_y = 0.0;
+        std::vector<double> accepted_points_xy;
+        int accepted_position = -1;
+        std::string reject_reason;
+    };
 };
 
 struct EllipseEdgeBandCandidate
@@ -278,6 +294,14 @@ public:
     gp_Rectangle measurepointsboundingrect() { return m_measurepointsboundingRect; }
 
     bool getdisplaysnapshot(FindEllipseDisplaySnapshot& out) const;
+    int getscandiagnosticcount() const;
+    bool getscandiagnostic(int index,
+                           FindEllipseMeasureGeometryDebug::ScanDiagnostic& out) const;
+    bool getscandiagnosticline(int scan_index,
+                               CxShapePoint& p0,
+                               CxShapePoint& p1) const;
+    int getscanlinecount() const;
+    bool getscanline(int scan_index, CxShapePoint& p0, CxShapePoint& p1) const;
 
     void PublishDisplayShapes(
         ICxShapeSink& sink,
@@ -347,6 +371,7 @@ private:
     std::vector<EllipseFitCandidateSequence> m_ellipse_fit_candidate_sequences;
     int m_ellipse_best_sequence_index = -1;
     EllipseFeatureGraph m_ellipse_feature_graph;
+    std::vector<FindEllipseMeasureGeometryDebug::ScanDiagnostic> m_scan_diagnostics;
 
 };
 

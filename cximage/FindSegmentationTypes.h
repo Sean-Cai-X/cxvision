@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CxPredictiveGeometryGate.h"
 
 
 #include <opencv2/opencv.hpp>
@@ -97,6 +98,10 @@ struct FindSegmentationResult
     std::vector<FindSegmentationContour> contours;
 
     std::vector<FindSegmentationRegion> regions;
+
+    // Model-native and contour-fit geometry candidates share this value-semantic
+    // contract. Gate status is computed separately from raw inference output.
+    std::vector<CxGeometryPrimitiveHypothesis> primitive_hypotheses;
 
 
 

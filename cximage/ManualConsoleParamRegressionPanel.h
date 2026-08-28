@@ -57,7 +57,8 @@ void SyncKeyParameterUiToGauge(ManualTestContext& context);
 
 void ResetKeyParameterUiDefaults(ManualTestContext& context);
 
-void DrawKeyParameterControlPanel(ManualTestContext& context);
+void DrawKeyParameterControlPanel(ManualTestContext& context,
+                                  const ParserDebugBridge* parserDebugBridge);
 
 void DrawTorchAnnotationKeyParameterPanel(ManualTestContext& context);
 

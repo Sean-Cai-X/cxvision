@@ -232,6 +232,8 @@ private:
   void EnsureTorchTrainingImageTexture(TorchTrainingImageItem& item);
   void SyncTorchTrainingImageSetFromEvidenceSelection();
   int AddHDReferenceImageSetForCurrentSelection();
+  int AddGeometryAugmentationDatasetForCurrentSelection();
+
   void CaptureCurrentTorchTrainingAnnotationState();
   void RestoreTorchTrainingAnnotationState(
       const TorchTrainingImageItem& item);

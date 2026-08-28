@@ -751,6 +751,15 @@ struct ManualMetrologyUiState {
   int scan_profile_edge_band_index = 0;
   int scan_profile_smoothing_radius = 1;
 
+  bool profile_cursor_visible = true;
+  int profile_cursor_sample_index = -1;
+  int profile_cursor_sample_count = 0;
+  int profile_cursor_permille = 500;
+  bool profile_cursor_user_dragged = false;
+  int profile_cursor_gauge_line_num = 0;
+
+
+
   // Candidate and feature-map review.
   bool show_edge_band_candidates = false;
   int candidate_rank = 0;
@@ -858,6 +867,7 @@ struct EvidenceChainThumb {
 
 struct ManualEvidenceItem {
   std::string case_id;
+  std::string review_item;
   std::string level;
   std::string image_id;
   std::string target_id;
@@ -1019,6 +1029,7 @@ struct ScriptEvidenceThumb {
   bool has_saved_state = false;
   std::string source_evidence_script_path;
   std::string case_id;
+  std::string review_item;
   std::string script_id;
   std::string script_path;
   std::string image_id;
@@ -1088,6 +1099,7 @@ struct CxEvidenceSelectionSnapshot {
   int thumb_index = -1;
 
   std::string case_id;
+  std::string review_item;
 
   std::string candidate_id;
   std::string candidate_dir;
@@ -1248,15 +1260,18 @@ struct ManualTestContext {
   bool show_image = true;
   bool pick_points = false;
   bool test_points = false;
-  bool test_rectangle = false;
-  bool line_scan = false;
-  bool attach_line = false;
-  bool show_roi = false;
   bool show_result_overlay = false;
   bool show_line_gauge_scan_lines = false;
   bool show_circle_gauge_scan_lines = false;
   bool show_ellipse_gauge_scan_lines = false;
-  // 0 = all edges. 1..N are UI edge slots; for two-edge FindLine gauges,
+  bool show_fastmatch_debug_vectors = true;
+  bool show_fastmatch_compare_gap_pairs = true;
+  bool show_fastmatch_keypoint_tangents = true;
+  bool show_fastmatch_filtered_points = true;
+
+
+
+
   // UI slot 2 maps to runtime -1 because the public "last edge" selector is -1.
   int findline_selected_scan_edge = 0;
   int findline_scan_edge_count = 4;

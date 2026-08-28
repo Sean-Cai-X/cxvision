@@ -108,6 +108,9 @@ int global_match_step_x;
 int global_match_step_y;
 int global_match_thre;
 int global_fastmatch_action;
+int global_fastmatch_scan_rotation_deg;
+
+
 int global_learn_roi_x;
 int global_learn_roi_y;
 int global_learn_roi_w;
