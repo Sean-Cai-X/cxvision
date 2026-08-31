@@ -151,6 +151,7 @@ bool CaptureFindLineResult(
     output.tool_wgap = debug.wgap;
     output.tool_hgap = debug.hgap;
     output.tool_linegap = debug.linegap;
+    output.tool_min_edge_run_width_px = tool.minedgerunwidth();
     output.tool_input_line_x0 = tool.inputlinex0();
     output.tool_input_line_y0 = tool.inputliney0();
     output.tool_input_line_x1 = tool.inputlinex1();
@@ -161,6 +162,8 @@ bool CaptureFindLineResult(
     output.scan_runs_total = debug.scan_runs_total;
     output.scan_runs_within_length_limit = debug.scan_runs_within_length_limit;
     output.scan_runs_over_length_limit = debug.scan_runs_over_length_limit;
+    output.scan_runs_rejected_by_min_edge_width =
+        debug.scan_runs_rejected_by_min_edge_width;
     output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
     output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
     output.scan_points_emitted = debug.scan_points_emitted;
@@ -264,6 +267,21 @@ bool CaptureFindLineResult(
         snap.x1 = p1.x;
         snap.y1 = p1.y;
         snap.candidate_count = diag.candidate_count;
+        snap.binary_logical_row = diag.binary_logical_row;
+        snap.binary_sample_row = diag.binary_sample_row;
+        snap.binary_logical_foreground_count = diag.binary_logical_foreground_count;
+        snap.binary_logical_plus1_foreground_count = diag.binary_logical_plus1_foreground_count;
+        snap.binary_logical_plus2_foreground_count = diag.binary_logical_plus2_foreground_count;
+        snap.binary_sample_foreground_count = diag.binary_sample_foreground_count;
+        snap.threshold_run_count = diag.threshold_run_count;
+        snap.threshold_max_run_width = diag.threshold_max_run_width;
+        snap.min_edge_run_width_px = diag.min_edge_run_width_px;
+        snap.rejected_min_edge_run_width =
+            diag.rejected_min_edge_run_width;
+        snap.threshold_first_run_start = diag.threshold_first_run_start;
+        snap.threshold_first_run_end = diag.threshold_first_run_end;
+        snap.threshold_last_run_start = diag.threshold_last_run_start;
+        snap.threshold_last_run_end = diag.threshold_last_run_end;
         snap.accepted = diag.accepted;
         snap.accepted_x = diag.accepted_x;
         snap.accepted_y = diag.accepted_y;
@@ -832,6 +850,23 @@ bool CaptureFindSegmentationResult(
     output.segmentation_fallback_used = segmentation_result.fallback_used;
     output.segmentation_result_stage = segmentation_result.result_stage;
     output.segmentation_refinement_method = segmentation_result.refinement_method;
+    output.segmentation_requested_geometry_type = segmentation_result.requested_geometry_type;
+    output.segmentation_geometry_fit_status = segmentation_result.geometry_fit_status;
+    output.segmentation_geometry_fit_reason = segmentation_result.geometry_fit_reason;
+    output.segmentation_geometry_count =
+        static_cast<int>(segmentation_result.primitive_hypotheses.size());
+    if (!segmentation_result.primitive_hypotheses.empty()) {
+        const CxGeometryPrimitiveHypothesis& geometry =
+            segmentation_result.primitive_hypotheses.front();
+        output.segmentation_geometry_residual_px = geometry.classical_fit_residual_px;
+        output.segmentation_geometry_support = geometry.support;
+        output.segmentation_geometry_center_x = geometry.center.x;
+        output.segmentation_geometry_center_y = geometry.center.y;
+        output.segmentation_geometry_radius = geometry.radius;
+        output.segmentation_geometry_axis_x = geometry.axes.width;
+        output.segmentation_geometry_axis_y = geometry.axes.height;
+        output.segmentation_geometry_angle_deg = geometry.angle_deg;
+    }
     output.segmentation_raw_result_ref = segmentation_result.raw_result_ref;
     output.segmentation_raw_mask_ref = segmentation_result.raw_mask_ref;
     output.segmentation_raw_contour_ref = segmentation_result.raw_contour_ref;
@@ -875,6 +910,8 @@ static void MergeToolCapture(
     capture.tool_wgap = tool.tool_wgap;
     capture.tool_hgap = tool.tool_hgap;
     capture.tool_linegap = tool.tool_linegap;
+    capture.selected_min_edge_run_width_px =
+        tool.tool_min_edge_run_width_px;
     capture.tool_input_line_x0 = tool.tool_input_line_x0;
     capture.tool_input_line_y0 = tool.tool_input_line_y0;
     capture.tool_input_line_x1 = tool.tool_input_line_x1;
@@ -890,6 +927,8 @@ static void MergeToolCapture(
     capture.scan_runs_total = tool.scan_runs_total;
     capture.scan_runs_within_length_limit = tool.scan_runs_within_length_limit;
     capture.scan_runs_over_length_limit = tool.scan_runs_over_length_limit;
+    capture.scan_runs_rejected_by_min_edge_width =
+        tool.scan_runs_rejected_by_min_edge_width;
     capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
     capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
     capture.scan_points_emitted = tool.scan_points_emitted;
@@ -1149,6 +1188,24 @@ static void MergeToolCapture(
 
     if (!tool.segmentation_refinement_method.empty())
         capture.segmentation_refinement_method = tool.segmentation_refinement_method;
+
+    if (!tool.segmentation_requested_geometry_type.empty())
+        capture.segmentation_requested_geometry_type = tool.segmentation_requested_geometry_type;
+    if (!tool.segmentation_geometry_fit_status.empty())
+        capture.segmentation_geometry_fit_status = tool.segmentation_geometry_fit_status;
+    if (!tool.segmentation_geometry_fit_reason.empty())
+        capture.segmentation_geometry_fit_reason = tool.segmentation_geometry_fit_reason;
+    capture.segmentation_geometry_count += tool.segmentation_geometry_count;
+    if (tool.segmentation_geometry_count > 0) {
+        capture.segmentation_geometry_residual_px = tool.segmentation_geometry_residual_px;
+        capture.segmentation_geometry_support = tool.segmentation_geometry_support;
+        capture.segmentation_geometry_center_x = tool.segmentation_geometry_center_x;
+        capture.segmentation_geometry_center_y = tool.segmentation_geometry_center_y;
+        capture.segmentation_geometry_radius = tool.segmentation_geometry_radius;
+        capture.segmentation_geometry_axis_x = tool.segmentation_geometry_axis_x;
+        capture.segmentation_geometry_axis_y = tool.segmentation_geometry_axis_y;
+        capture.segmentation_geometry_angle_deg = tool.segmentation_geometry_angle_deg;
+    }
 
     if (!tool.segmentation_raw_result_ref.empty())
         capture.segmentation_raw_result_ref = tool.segmentation_raw_result_ref;

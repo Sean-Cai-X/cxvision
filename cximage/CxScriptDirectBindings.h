@@ -143,12 +143,24 @@ public:
     void setpromptrect(int, int, int, int) {}
     void setpoint(int, int) {}
     void setmode(int) {}
+    void setgeometrytype(mu::charpvect&) {}
+
     void segment(mu::charpvect&) {}
     void extractboundary() {}
     void buildoverlay(mu::charpvect&) {}
     int status_code() { return 0; }
     int get_contour_count() { return 0; }
     double get_primary_area() { return 0.0; }
+    int get_geometry_count() { return 0; }
+    double get_geometry_residual() { return 0.0; }
+    double get_geometry_support() { return 0.0; }
+    double get_geometry_center_x() { return 0.0; }
+    double get_geometry_center_y() { return 0.0; }
+    double get_geometry_radius() { return 0.0; }
+    double get_geometry_axis_x() { return 0.0; }
+    double get_geometry_axis_y() { return 0.0; }
+    double get_geometry_angle_deg() { return 0.0; }
+
 };
 
 inline void RegisterPendingDirectCxScriptBindings(mu::Parser& parser)

@@ -864,6 +864,9 @@ namespace
             headless.gap = profile.gap;
         if (profile.has_linegap)
             headless.linegap = profile.linegap;
+        if (profile.has_min_edge_run_width_px)
+            headless.min_edge_run_width_px =
+                profile.min_edge_run_width_px;
         if (profile.has_wgap)
             headless.wgap = profile.wgap;
         if (profile.has_hgap)
@@ -1103,6 +1106,8 @@ namespace
         packetFile << "    \"threshold\": " << result.effective_threshold << ",\n";
         packetFile << "    \"gap\": " << result.effective_gap << ",\n";
         packetFile << "    \"linegap\": " << result.effective_linegap << ",\n";
+        packetFile << "    \"min_edge_run_width_px\": "
+                   << result.effective_min_edge_run_width_px << ",\n";
         packetFile << "    \"wgap\": " << result.effective_wgap << ",\n";
         packetFile << "    \"hgap\": " << result.effective_hgap << ",\n";
         packetFile << "    \"tool_half_width\": " << result.effective_tool_half_width << ",\n";
@@ -1269,6 +1274,8 @@ namespace
         file << "  \"effective_hgap\": " << r.effective_hgap << ",\n";
         file << "  \"effective_gap\": " << r.effective_gap << ",\n";
         file << "  \"effective_linegap\": " << r.effective_linegap << ",\n";
+        file << "  \"effective_min_edge_run_width_px\": "
+             << r.effective_min_edge_run_width_px << ",\n";
         file << "  \"effective_threshold\": " << r.effective_threshold << ",\n";
         file << "  \"effective_filterprofile\": " << r.effective_filterprofile << ",\n";
         file << "  \"effective_method\": " << r.effective_method << "\n";
@@ -1411,6 +1418,8 @@ namespace
         file << "    \"global_hgap\": " << result.effective_hgap << ",\n";
         file << "    \"global_gap\": " << result.effective_gap << ",\n";
         file << "    \"global_linegap\": " << result.effective_linegap << ",\n";
+        file << "    \"global_min_edge_run_width_px\": "
+             << result.effective_min_edge_run_width_px << ",\n";
         file << "    \"global_tool_half_width\": " << result.effective_tool_half_width << ",\n";
         file << "    \"global_method\": " << result.effective_method << ",\n";
         file << "    \"global_threshold\": " << result.effective_threshold << ",\n";
@@ -1725,6 +1734,9 @@ namespace
                     headless.gap = resolved.target->gap;
                 if (resolved.target->has_linegap)
                     headless.linegap = resolved.target->linegap;
+                if (resolved.target->has_min_edge_run_width_px)
+                    headless.min_edge_run_width_px =
+                        resolved.target->min_edge_run_width_px;
                 if (resolved.target->has_tool_half_width)
                     headless.tool_half_width = resolved.target->tool_half_width;
                 if (resolved.target->has_threshold)
@@ -1809,6 +1821,8 @@ namespace
             out.effective_hgap = headless.hgap;
             out.effective_gap = headless.gap;
             out.effective_linegap = headless.linegap;
+            out.effective_min_edge_run_width_px =
+                headless.min_edge_run_width_px;
             out.effective_threshold = headless.threshold;
             out.effective_filterprofile = headless.filterprofile;
             out.effective_method = headless.method;

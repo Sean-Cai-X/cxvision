@@ -588,6 +588,12 @@ namespace
                                             target.linegap = ParseInt(text, tp);
                                             target.has_linegap = true;
                                         }
+                                        else if (tkey == "min_edge_run_width_px")
+                                        {
+                                            target.min_edge_run_width_px =
+                                                std::max(1, std::min(20, ParseInt(text, tp)));
+                                            target.has_min_edge_run_width_px = true;
+                                        }
                                         else if (tkey == "tool_half_width")
                                         {
                                             target.tool_half_width = ParseInt(text, tp);

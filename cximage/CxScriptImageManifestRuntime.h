@@ -40,6 +40,8 @@ struct CxScriptImageTargetRoi
     bool has_gap = false;
     int linegap = 6;
     bool has_linegap = false;
+    int min_edge_run_width_px = 3;
+    bool has_min_edge_run_width_px = false;
     int tool_half_width = 20;
     bool has_tool_half_width = false;
     int threshold = 20;

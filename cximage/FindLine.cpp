@@ -14,6 +14,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 
@@ -153,6 +154,93 @@ void RecordFindLineAcceptedDiagnosticPoint(
     diag.reject_reason.clear();
 }
 
+bool ShouldLogFindLineFocusedScan(int scan_index)
+{
+    return scan_index >= 18 && scan_index <= 26;
+}
+
+void LogFindLineFocusedScan(
+    const char* phase,
+    const LineShape& scan_line,
+    const FindLineMeasureInputDebug::ScanDiagnostic& diag,
+    int edge_ordinal,
+    int edge_position,
+    const gp_Pnt* accepted_point)
+{
+    if (!ShouldLogFindLineFocusedScan(diag.scan_index))
+        return;
+
+    CxShapePoint p0;
+    CxShapePoint p1;
+    if (!scan_line.exportLine(p0, p1))
+        return;
+
+    const double dx = p1.x - p0.x;
+    const double dy = p1.y - p0.y;
+    const double len2 = dx * dx + dy * dy;
+    const double len = len2 > 0.0 ? std::sqrt(len2) : 0.0;
+
+    double accepted_axis_px = -1.0;
+    double accepted_normal_px = 0.0;
+    double accepted_t = 0.0;
+    int accepted_round_x = 0;
+    int accepted_round_y = 0;
+    if (accepted_point != nullptr && len > 0.0)
+    {
+        const double px = accepted_point->X();
+        const double py = accepted_point->Y();
+        const double rel_x = px - p0.x;
+        const double rel_y = py - p0.y;
+        accepted_t = (rel_x * dx + rel_y * dy) / len2;
+        accepted_axis_px = accepted_t * len;
+        accepted_normal_px = (rel_x * dy - rel_y * dx) / len;
+        accepted_round_x = static_cast<int>(std::lround(px));
+        accepted_round_y = static_cast<int>(std::lround(py));
+    }
+
+    std::ostringstream ss;
+    ss << "scan_type=" << diag.scan_type
+       << ", scan_index0=" << diag.scan_index
+       << ", gauge_line_num1=" << (diag.scan_index + 1)
+       << ", edge_ordinal=" << edge_ordinal
+       << ", edge_position_px=" << edge_position
+       << ", line_p0=(" << p0.x << "," << p0.y << ")"
+       << ", line_p1=(" << p1.x << "," << p1.y << ")"
+       << ", line_length_px=" << len
+       << ", binary_logical_row=" << diag.binary_logical_row
+       << ", binary_sample_row=" << diag.binary_sample_row
+       << ", fg_logical=" << diag.binary_logical_foreground_count
+       << ", fg_plus1=" << diag.binary_logical_plus1_foreground_count
+       << ", fg_plus2=" << diag.binary_logical_plus2_foreground_count
+       << ", fg_sample=" << diag.binary_sample_foreground_count
+           << ", threshold_runs=" << diag.threshold_run_count
+           << ", first_run=(" << diag.threshold_first_run_start
+           << "," << diag.threshold_first_run_end << ")"
+           << ", last_run=(" << diag.threshold_last_run_start
+           << "," << diag.threshold_last_run_end << ")"
+           << ", max_run_width=" << diag.threshold_max_run_width
+           << ", min_edge_run_width_px=" << diag.min_edge_run_width_px
+           << ", rejected_min_edge_width="
+           << diag.rejected_min_edge_run_width
+           << ", candidate_count=" << diag.candidate_count
+           << ", accepted=" << (diag.accepted ? 1 : 0);
+
+    if (accepted_point != nullptr)
+    {
+        ss << ", accepted_xy=(" << accepted_point->X()
+           << "," << accepted_point->Y() << ")"
+           << ", accepted_round_xy=(" << accepted_round_x
+           << "," << accepted_round_y << ")"
+           << ", accepted_axis_px=" << accepted_axis_px
+           << ", accepted_t=" << accepted_t
+           << ", accepted_normal_px=" << accepted_normal_px
+           << ", edge_to_axis_delta_px="
+           << (edge_position >= 0 ? accepted_axis_px - edge_position : 0.0);
+    }
+
+    LogFindlineMeasureProbe(phase, "debug", ss.str());
+}
+
 bool IsFindLineNearAcceptedCandidate(
     const FindLineMeasureInputDebug::ScanDiagnostic& diag,
     const gp_Pnt& point,
@@ -172,6 +260,27 @@ bool IsFindLineNearAcceptedCandidate(
     const double dx = point.X() - diag.accepted_x;
     const double dy = point.Y() - diag.accepted_y;
     return (dx * dx + dy * dy) <= limit2;
+}
+
+bool DoesFindLinePointRemain(
+    const PointsShape& points,
+    double x,
+    double y,
+    double tolerance)
+{
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return false;
+
+    const double limit2 = tolerance * tolerance;
+    const int count = points.size();
+    for (int i = 0; i < count; ++i)
+    {
+        const double dx = points.getx(i) - x;
+        const double dy = points.gety(i) - y;
+        if ((dx * dx + dy * dy) <= limit2)
+            return true;
+    }
+    return false;
 }
 
 int CountFindLineBinaryForegroundInRow(
@@ -202,45 +311,80 @@ int ResolveFindLineBinarySampleRow(
     int scan_count,
     int line_length)
 {
+    (void)scan_index;
+    (void)scan_count;
+    (void)line_length;
     if (image == nullptr || image->getHeight() <= 0)
         return 0;
 
-    const auto clamp_row = [&](int row) -> int
+    return std::min(std::max(logical_row, 0), image->getHeight() - 1);
+}
+
+
+void PopulateFindLineBinaryScanDiagnostics(
+    Image* image,
+    FindLineMeasureInputDebug::ScanDiagnostic& diag,
+    int logical_row,
+    int scan_index,
+    int scan_count,
+    int line_length)
+{
+    diag.binary_logical_row = logical_row;
+    diag.binary_sample_row = ResolveFindLineBinarySampleRow(
+        image, logical_row, scan_index, scan_count, line_length);
+    diag.binary_logical_foreground_count =
+        CountFindLineBinaryForegroundInRow(image, logical_row, line_length);
+    diag.binary_logical_plus1_foreground_count =
+        CountFindLineBinaryForegroundInRow(image, logical_row + 1, line_length);
+    diag.binary_logical_plus2_foreground_count =
+        CountFindLineBinaryForegroundInRow(image, logical_row + 2, line_length);
+    diag.binary_sample_foreground_count = CountFindLineBinaryForegroundInRow(
+        image, diag.binary_sample_row, line_length);
+
+    if (image == nullptr || line_length <= 0 ||
+        diag.binary_sample_row < 0 || diag.binary_sample_row >= image->getHeight())
     {
-        return std::min(std::max(row, 0), image->getHeight() - 1);
-    };
+        return;
+    }
 
-    
-    int best_row = clamp_row(logical_row + 1);
-    int best_count =
-        CountFindLineBinaryForegroundInRow(image, best_row, line_length);
-
-    const bool terminal_scan =
-        scan_count > 0 &&
-        (scan_index <= 1 || scan_index >= scan_count - 2);
-    if (!terminal_scan)
-        return best_row;
-
-    const int candidates[] = {
-        logical_row,
-        logical_row + 1,
-        logical_row + 2
-    };
-    for (int candidate : candidates)
+    const int maxX = std::min(line_length, image->getWidth());
+    int runStart = -1;
+    const auto closeRun = [&](int endInclusive)
     {
-        const int row = clamp_row(candidate);
-        const int count =
-            CountFindLineBinaryForegroundInRow(image, row, line_length);
-        if (count > best_count)
+        if (runStart < 0)
+            return;
+        const int width = endInclusive - runStart + 1;
+        ++diag.threshold_run_count;
+        if (diag.threshold_first_run_start < 0)
         {
-            best_count = count;
-            best_row = row;
+            diag.threshold_first_run_start = runStart;
+            diag.threshold_first_run_end = endInclusive;
+        }
+        diag.threshold_last_run_start = runStart;
+        diag.threshold_last_run_end = endInclusive;
+        if (width > diag.threshold_max_run_width)
+            diag.threshold_max_run_width = width;
+        runStart = -1;
+    };
+
+    for (int x = 0; x < maxX; ++x)
+    {
+        const bool foreground = image->pixel(x, diag.binary_sample_row)[0] > 0;
+        if (foreground)
+        {
+            if (runStart < 0)
+                runStart = x;
+        }
+        else
+        {
+            closeRun(x - 1);
         }
     }
-    return best_row;
+    closeRun(maxX - 1);
 }
 
 bool ReadFindLineGraySample(
+
     Image& image,
     LineShape& line,
     int sample_index,
@@ -497,6 +641,7 @@ m_ifiltermin(50),
 m_ifiltermax(100000),
 m_iselectedgenum(0),
 m_ineedfixs(2),
+m_min_edge_run_width_px(3),
 m_icomparegap(2),
 m_ishowlines(1),
 m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
@@ -640,6 +785,12 @@ void FindLine::setselectedgenum(int iedgenum)
 {
     m_iselectedgenum = iedgenum;
 }
+
+void FindLine::setminedgerunwidth(int width)
+{
+    m_min_edge_run_width_px = std::max(1, std::min(20, width));
+}
+
 void FindLine::clear()
 {
     m_lines_w.clear();
@@ -743,10 +894,10 @@ void FindLine::setlinesegment(double ix0, double iy0,
         }
     }
 
-    m_LineA.setline(RoundToInt(ptRect[0].X()), RoundToInt(ptRect[0].Y()),
-        RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()));
-    m_LineB.setline(RoundToInt(ptRect[1].X()), RoundToInt(ptRect[1].Y()),
-        RoundToInt(ptRect[2].X()), RoundToInt(ptRect[2].Y()));
+    m_LineA.setline(ptRect[0].X(), ptRect[0].Y(),
+        ptRect[1].X(), ptRect[1].Y());
+    m_LineB.setline(ptRect[1].X(), ptRect[1].Y(),
+        ptRect[2].X(), ptRect[2].Y());
     m_LineA.setshow(0);
     m_LineB.setshow(0);
     for (int i = 0; i < m_lines_w.size(); i++)
@@ -799,8 +950,8 @@ void FindLine::setlinesegment(double ix0, double iy0,
     {
         m_lines_w.push_back(aline1);
         m_lines_w[i].copy(m_LineB);
-        m_lines_w[i].Move(RoundToInt(-dlineax * static_cast<double>(i)),
-            RoundToInt(-dlineay * static_cast<double>(i)));
+        m_lines_w[i].MoveBy(-dlineax * static_cast<double>(i),
+            -dlineay * static_cast<double>(i));
         m_lines_w[i].setPercent(m_dsamplerate);
         m_lines_w[i].setshow(0);
     }
@@ -808,8 +959,8 @@ void FindLine::setlinesegment(double ix0, double iy0,
     {
         m_lines_h.push_back(aline2);
         m_lines_h[i].copy(m_LineA);
-        m_lines_h[i].Move(RoundToInt(dlinebx * static_cast<double>(i)),
-            RoundToInt(dlineby * static_cast<double>(i)));
+        m_lines_h[i].MoveBy(dlinebx * static_cast<double>(i),
+            dlineby * static_cast<double>(i));
         m_lines_h[i].setPercent(m_dsamplerate);
         m_lines_h[i].setshow(0);
     }
@@ -1488,9 +1639,7 @@ void FindLine::MeasureT(void *pimage)
     }
 
     g_pbackimage->setroi(0, 0, iprocessw, binaryRoiHeight);
-
     g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
-
 }
 void FindLine::Measure(Image& image)
 {
@@ -1863,10 +2012,15 @@ void FindLine::Measure(Image& image)
         "threshold=" + std::to_string(m_iThreshold) +
             ", gamma=" + std::to_string(m_igamarate) +
             ", linegap=" + std::to_string(m_iSelectPointGap) +
+            ", min_edge_run_width_px=" +
+            std::to_string(m_min_edge_run_width_px) +
             ", method=" + std::to_string(m_iMethod));
-    g_pbackimage->roi_7blur_gap_mud_thre_bw(m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+    g_pbackimage->roi_7blur_gap_mud_thre_bw(
+        m_iThreshold, m_igamarate, m_iSelectPointGap, m_iMethod);
+
     LogFindlineMeasureProbe(
         "measure_after_blur_threshold",
+
         "running",
         "blur/threshold complete");
 
@@ -2202,6 +2356,13 @@ void FindLine::Measure(Image& image)
         ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
         ++m_lastMeasureInputDebug.scan_points_emitted;
         RecordFindLineAcceptedDiagnosticPoint(diag, point);
+        LogFindLineFocusedScan(
+            "accepted_terminal_fallback",
+            scan_line,
+            diag,
+            1,
+            position,
+            &point);
 
         diag.reject_reason.clear();
         RecordFindLineEdgeCandidate(
@@ -2221,12 +2382,22 @@ void FindLine::Measure(Image& image)
         FindLineMeasureInputDebug::ScanDiagnostic diag;
         diag.scan_index = inumy;
         diag.scan_type = 0;
+        diag.min_edge_run_width_px = m_min_edge_run_width_px;
         diag.reject_reason = selectedComponentsRejected
             ? "component_rejected"
             : "no_threshold_crossing";
+        PopulateFindLineBinaryScanDiagnostics(
+            g_pbackimage, diag, inumy, inumy, iwsize, ilineslen1);
         m_lastMeasureInputDebug.scan_diagnostics.push_back(diag);
         const std::size_t diagIndex =
             m_lastMeasureInputDebug.scan_diagnostics.size() - 1;
+        LogFindLineFocusedScan(
+            "scanline_geometry",
+            m_lines_w[inumy],
+            m_lastMeasureInputDebug.scan_diagnostics[diagIndex],
+            -1,
+            -1,
+            nullptr);
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -2257,6 +2428,18 @@ void FindLine::Measure(Image& image)
             else
             {
                 if (true == bcollectBegin
+                    && irecordnum > 0
+                    && irecordnum < m_min_edge_run_width_px)
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_by_min_edge_width;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex]
+                          .rejected_min_edge_run_width;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "min_edge_run_width_rejected";
+                }
+                else if (true == bcollectBegin
                     && irecordnum > 0
                     && irecordnum <= 70)
                 {
@@ -2304,6 +2487,13 @@ void FindLine::Measure(Image& image)
                                 m_measurepoints_w.addpoint(apoint);
                                 ++m_lastMeasureInputDebug.scan_points_emitted;
                                 RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                                LogFindLineFocusedScan(
+                                    "accepted_point",
+                                    m_lines_w[inumy],
+                                    currentDiag,
+                                    icurlinenum,
+                                    icurlineposition,
+                                    &apoint);
 
                                 RecordFindLineEdgeCandidate(
                                     m_lastMeasureInputDebug,
@@ -2383,6 +2573,19 @@ void FindLine::Measure(Image& image)
             && irecordnum > 0)
         {
             ++m_lastMeasureInputDebug.scan_runs_total;
+            if (irecordnum < m_min_edge_run_width_px)
+            {
+                ++m_lastMeasureInputDebug.scan_runs_rejected_by_min_edge_width;
+                ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex]
+                      .rejected_min_edge_run_width;
+                if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                        "min_edge_run_width_rejected";
+                irecordnum = 0;
+                bcollectBegin = false;
+            }
+            else
+            {
             ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
             if (irecordnum <= 70)
                 ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
@@ -2427,7 +2630,14 @@ void FindLine::Measure(Image& image)
                     {
                         m_measurepoints_w.addpoint(apoint);
                         ++m_lastMeasureInputDebug.scan_points_emitted;
-                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                        RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                        LogFindLineFocusedScan(
+                            "accepted_point",
+                            m_lines_w[inumy],
+                            currentDiag,
+                            icurlinenum,
+                            icurlineposition,
+                            &apoint);
 
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
@@ -2484,6 +2694,7 @@ void FindLine::Measure(Image& image)
             }
             irecordnum = 0;
             bcollectBegin = false;
+            }
         }
 
         if (m_iselectedgenum == -1 && lastEdgePosition >= 0)
@@ -2495,6 +2706,13 @@ void FindLine::Measure(Image& image)
             auto& currentDiag =
                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
                                 RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+            LogFindLineFocusedScan(
+                "accepted_last_edge",
+                m_lines_w[inumy],
+                currentDiag,
+                lastEdgeOrdinal,
+                lastEdgePosition,
+                &apoint);
 
             RecordFindLineEdgeCandidate(
                 m_lastMeasureInputDebug,
@@ -2533,12 +2751,22 @@ void FindLine::Measure(Image& image)
         FindLineMeasureInputDebug::ScanDiagnostic diag;
         diag.scan_index = inumy - iwsize;
         diag.scan_type = 1;
+        diag.min_edge_run_width_px = m_min_edge_run_width_px;
         diag.reject_reason = selectedComponentsRejected
             ? "component_rejected"
             : "no_threshold_crossing";
+        PopulateFindLineBinaryScanDiagnostics(
+            g_pbackimage, diag, inumy, inumy - iwsize, ihsize, ilineslen2);
         m_lastMeasureInputDebug.scan_diagnostics.push_back(diag);
         const std::size_t diagIndex =
             m_lastMeasureInputDebug.scan_diagnostics.size() - 1;
+        LogFindLineFocusedScan(
+            "scanline_geometry",
+            m_lines_h[inumy - iwsize],
+            m_lastMeasureInputDebug.scan_diagnostics[diagIndex],
+            -1,
+            -1,
+            nullptr);
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -2571,6 +2799,18 @@ void FindLine::Measure(Image& image)
             else
             {
                 if (true == bcollectBegin
+                    && irecordnum > 0
+                    && irecordnum < m_min_edge_run_width_px)
+                {
+                    ++m_lastMeasureInputDebug.scan_runs_total;
+                    ++m_lastMeasureInputDebug.scan_runs_rejected_by_min_edge_width;
+                    ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex]
+                          .rejected_min_edge_run_width;
+                    if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                        m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                            "min_edge_run_width_rejected";
+                }
+                else if (true == bcollectBegin
                     && irecordnum > 0
                     && irecordnum <= 70)
                 {
@@ -2617,6 +2857,13 @@ void FindLine::Measure(Image& image)
                                 m_measurepoints_h.addpoint(apoint);
                                 ++m_lastMeasureInputDebug.scan_points_emitted;
                                 RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                                LogFindLineFocusedScan(
+                                    "accepted_point",
+                                    m_lines_h[inumy - iwsize],
+                                    currentDiag,
+                                    icurlinenum,
+                                    icurlineposition,
+                                    &apoint);
 
                                 RecordFindLineEdgeCandidate(
                                     m_lastMeasureInputDebug,
@@ -2697,6 +2944,19 @@ void FindLine::Measure(Image& image)
             && irecordnum > 0)
         {
             ++m_lastMeasureInputDebug.scan_runs_total;
+            if (irecordnum < m_min_edge_run_width_px)
+            {
+                ++m_lastMeasureInputDebug.scan_runs_rejected_by_min_edge_width;
+                ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex]
+                      .rejected_min_edge_run_width;
+                if (!m_lastMeasureInputDebug.scan_diagnostics[diagIndex].accepted)
+                    m_lastMeasureInputDebug.scan_diagnostics[diagIndex].reject_reason =
+                        "min_edge_run_width_rejected";
+                irecordnum = 0;
+                bcollectBegin = false;
+            }
+            else
+            {
             ++m_lastMeasureInputDebug.scan_diagnostics[diagIndex].candidate_count;
             if (irecordnum <= 70)
                 ++m_lastMeasureInputDebug.scan_runs_within_length_limit;
@@ -2742,7 +3002,14 @@ void FindLine::Measure(Image& image)
                     {
                         m_measurepoints_h.addpoint(apoint);
                         ++m_lastMeasureInputDebug.scan_points_emitted;
-                                RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                        RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+                        LogFindLineFocusedScan(
+                            "accepted_point",
+                            m_lines_h[inumy - iwsize],
+                            currentDiag,
+                            icurlinenum,
+                            icurlineposition,
+                            &apoint);
 
                         RecordFindLineEdgeCandidate(
                             m_lastMeasureInputDebug,
@@ -2800,6 +3067,7 @@ void FindLine::Measure(Image& image)
             }
             irecordnum = 0;
             bcollectBegin = false;
+            }
         }
 
         if (m_iselectedgenum == -1 && lastEdgePosition >= 0)
@@ -2811,6 +3079,13 @@ void FindLine::Measure(Image& image)
             auto& currentDiag =
                 m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
                                 RecordFindLineAcceptedDiagnosticPoint(currentDiag, apoint);
+            LogFindLineFocusedScan(
+                "accepted_last_edge",
+                m_lines_h[inumy - iwsize],
+                currentDiag,
+                lastEdgeOrdinal,
+                lastEdgePosition,
+                &apoint);
 
             RecordFindLineEdgeCandidate(
                 m_lastMeasureInputDebug,
@@ -3813,10 +4088,10 @@ int FindLine::ApplyPointConsistencyConstraintToPoints(
     double uy,
     double nx,
     double ny,
-    double range)
+    double consistencyRange)
 {
     const int count = points.size();
-    if (count < 3 || range <= 0.0)
+    if (count < 3 || consistencyRange <= 0.0)
         return 0;
 
     std::vector<double> normalOffsets;
@@ -3853,9 +4128,7 @@ int FindLine::ApplyPointConsistencyConstraintToPoints(
 
         const double normalDelta =
             std::abs((x * nx + y * ny) - medianNormal);
-        const double chebyshevDelta =
-            std::max(0.0 * std::abs(x * ux + y * uy), normalDelta);
-        if (chebyshevDelta <= range)
+        if (normalDelta <= consistencyRange)
         {
             Standard_Real sx = static_cast<Standard_Real>(x);
             Standard_Real sy = static_cast<Standard_Real>(y);
@@ -3874,6 +4147,7 @@ int FindLine::ApplyPointConsistencyConstraintToPoints(
     }
     return removed;
 }
+
 
 void FindLine::ApplyPointConsistencyConstraint()
 {
@@ -3931,6 +4205,57 @@ void FindLine::ApplyPointConsistencyConstraint()
     m_lastMeasureInputDebug.point_consistency_output_points =
         ClampSizeToInt(m_measurepoints_w.size()) +
         ClampSizeToInt(m_measurepoints_h.size());
+}
+
+
+void FindLine::ReconcilePointConsistencyDiagnostics()
+{
+    if (m_lastMeasureInputDebug.point_consistency_enabled == 0 ||
+        m_lastMeasureInputDebug.point_consistency_removed_points <= 0)
+    {
+        return;
+    }
+
+    const double tolerance = std::max(
+        0.25,
+        std::min(1.0, m_lastMeasureInputDebug.point_consistency_range * 0.25));
+
+    for (auto& diag : m_lastMeasureInputDebug.scan_diagnostics)
+    {
+        if (!diag.accepted)
+            continue;
+
+        const PointsShape& keptPoints =
+            diag.scan_type == 0 ? m_measurepoints_w : m_measurepoints_h;
+
+        std::vector<double> keptAcceptedPoints;
+        keptAcceptedPoints.reserve(diag.accepted_points_xy.size());
+        for (std::size_t i = 0; i + 1 < diag.accepted_points_xy.size(); i += 2)
+        {
+            const double x = diag.accepted_points_xy[i];
+            const double y = diag.accepted_points_xy[i + 1];
+            if (DoesFindLinePointRemain(keptPoints, x, y, tolerance))
+            {
+                keptAcceptedPoints.push_back(x);
+                keptAcceptedPoints.push_back(y);
+            }
+        }
+
+        if (keptAcceptedPoints.empty())
+        {
+            diag.accepted = false;
+            diag.accepted_x = 0.0;
+            diag.accepted_y = 0.0;
+            diag.accepted_points_xy.clear();
+            diag.reject_reason = "point_consistency_rejected";
+            continue;
+        }
+
+        diag.accepted_points_xy.swap(keptAcceptedPoints);
+        diag.accepted_x = diag.accepted_points_xy[0];
+        diag.accepted_y = diag.accepted_points_xy[1];
+        diag.reject_reason.clear();
+    }
 }
 
 void FindLine::FitWeightedLeastSquares(FindLineMeasureProfileStats& stats)
@@ -4505,7 +4830,32 @@ void FindLine::measure(void* pimage)
         m_lastMeasureInputDebug.measure_source =
             "original_measure_pipeline_diagnostics_only";
     }
+    ApplyPointConsistencyConstraint();
+    ReconcilePointConsistencyDiagnostics();
+
+    const int filteredPointCount =
+        ClampSizeToInt(m_measurepoints_w.size()) +
+        ClampSizeToInt(m_measurepoints_h.size());
+    if (m_lastMeasureInputDebug.point_consistency_enabled != 0 &&
+        m_lastMeasureInputDebug.point_consistency_input_points > 0 &&
+        filteredPointCount <= 0)
+    {
+        m_lastMeasureInputDebug.failure_stage =
+            "point_consistency_removed_all_points";
+        m_lastMeasureInputDebug.detail =
+            "Findline point consistency rejected all measured points.";
+    }
+    else if (m_lastMeasureInputDebug.point_consistency_enabled != 0 &&
+             m_lastMeasureInputDebug.point_consistency_removed_points > 0)
+    {
+        m_lastMeasureInputDebug.detail =
+            "Findline point consistency removed " +
+            std::to_string(m_lastMeasureInputDebug.point_consistency_removed_points) +
+            " discontinuous measured point(s).";
+    }
+
     BuildBoundaryAnalysisSnapshot(*image);
+
 }
 void FindLine::ProbeDisplayRoiGrayStats(Image& image)
 {

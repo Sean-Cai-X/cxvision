@@ -59,6 +59,7 @@ struct CxParamProbeResult
     bool fit_available = false;
     double support_score = 0.0;
     double mean_distance = 0.0;
+    double fit_offset = 0.0;
 };
 
 bool RunSingleParamProbe(

@@ -23,6 +23,14 @@ bool ValidateParamRegressionPrerequisites(
 bool ApplyManualGaugeToGlobals(ManualTestContext& context, const std::string& objectName);
 bool ApplyManualGaugeToGlobals(ManualTestContext& context);
 
+void RecordManualOperationTraceEvent(
+    ManualTestContext& context,
+    const std::string& operation,
+    const std::string& status,
+    const std::string& reason);
+
+void ClearManualOperationTraceEvents(ManualTestContext& context);
+
 std::filesystem::path ManualGaugeCaseDir(const ManualTestContext& context);
 
 bool ResolveManualGaugeCaseDir(

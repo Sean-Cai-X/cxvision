@@ -233,6 +233,7 @@ private:
   void SyncTorchTrainingImageSetFromEvidenceSelection();
   int AddHDReferenceImageSetForCurrentSelection();
   int AddGeometryAugmentationDatasetForCurrentSelection();
+  bool RunGeometryAugmentationTrainingPrepFromGui(std::string& reason);
 
   void CaptureCurrentTorchTrainingAnnotationState();
   void RestoreTorchTrainingAnnotationState(

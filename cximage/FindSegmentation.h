@@ -37,6 +37,8 @@ public:
     void setpositivepointxy(int y, int x);
     void setnegativepointxy(int y, int x);
     void setmode(int mode);
+    void setgeometrytype(const char* geometry_type);
+
 
     void segment(void* image);
     void extractboundary();
@@ -50,6 +52,16 @@ public:
     int status_code();
     int get_contour_count();
     double get_primary_area();
+    int get_geometry_count();
+    double get_geometry_residual();
+    double get_geometry_support();
+    double get_geometry_center_x();
+    double get_geometry_center_y();
+    double get_geometry_radius();
+    double get_geometry_axis_x();
+    double get_geometry_axis_y();
+    double get_geometry_angle_deg();
+
     const std::string& backend() const;
     const std::string& model_path() const;
     const std::string& device() const;
@@ -86,6 +98,8 @@ private:
 
     double m_threshold = 0.5;
     int m_mode = 0;
+    std::string m_geometry_type;
+
 
     bool m_has_rect = false;
     int m_x0 = 0;

@@ -18,6 +18,8 @@ struct CxParameterProfile
     bool has_gap = false;
     int linegap = 6;
     bool has_linegap = false;
+    int min_edge_run_width_px = 3;
+    bool has_min_edge_run_width_px = false;
     int wgap = 32;
     bool has_wgap = false;
     int hgap = 8;

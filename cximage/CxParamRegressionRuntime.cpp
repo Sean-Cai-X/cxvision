@@ -13,22 +13,103 @@ namespace
 {
     std::string EscapeJson(const std::string& value)
     {
+        const char slash = static_cast<char>(92);
+        const char quote = static_cast<char>(34);
         std::string out;
         out.reserve(value.size() + 8);
         for (char ch : value)
         {
-            switch (ch)
+            switch (static_cast<unsigned char>(ch))
             {
-            case '\\': out += "\\\\"; break;
-            case '"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
+            case 92: out.push_back(slash); out.push_back(slash); break;
+            case 34: out.push_back(slash); out.push_back(quote); break;
+            case 10: out.push_back(slash); out.push_back('n'); break;
+            case 13: out.push_back(slash); out.push_back('r'); break;
+            case 9: out.push_back(slash); out.push_back('t'); break;
             default: out.push_back(ch); break;
             }
         }
         return out;
     }
+
+    std::string QuoteCliArg(const std::string& value)
+    {
+        const char slash = static_cast<char>(92);
+        const char quote = static_cast<char>(34);
+        std::string out(1, quote);
+        for (char ch : value)
+        {
+            if (ch == slash || ch == quote)
+                out.push_back(slash);
+            out.push_back(ch);
+        }
+        out.push_back(quote);
+        return out;
+    }
+
+    void AppendReplayFlag(std::ostringstream& cmd, const std::string& name)
+    {
+        cmd << " " << std::string(2, '-') << name;
+    }
+
+    void AppendReplayValue(std::ostringstream& cmd, const std::string& name, const std::string& value)
+    {
+        AppendReplayFlag(cmd, name);
+        cmd << " " << QuoteCliArg(value);
+    }
+
+    void AppendReplayValue(std::ostringstream& cmd, const std::string& name, int value)
+    {
+        AppendReplayFlag(cmd, name);
+        cmd << " " << value;
+    }
+
+    void AppendReplayValue(std::ostringstream& cmd, const std::string& name, double value)
+    {
+        AppendReplayFlag(cmd, name);
+        cmd << " " << value;
+    }
+
+    std::string BuildHeadlessReplayCommand(const CxParamEvalRecord& r)
+    {
+        const std::string replay_case = r.candidate_id + "_" + r.case_id;
+        std::ostringstream cmd;
+        cmd << "<BINARY>";
+        AppendReplayFlag(cmd, "headless");
+        AppendReplayFlag(cmd, "cxscript-headless");
+        AppendReplayValue(cmd, "image", r.image_path);
+        AppendReplayValue(cmd, "script", r.script_path);
+        AppendReplayValue(cmd, "case-name", replay_case);
+        AppendReplayValue(cmd, "out", "<REPLAY_OUT_DIR>");
+        AppendReplayValue(cmd, "max-steps", 10000);
+        AppendReplayValue(cmd, "timeout-sec", r.timeout_seconds);
+        AppendReplayValue(cmd, "stage25-tool", r.tool);
+        AppendReplayValue(cmd, "image-id", r.image_id);
+        AppendReplayValue(cmd, "target-id", r.target_id);
+        AppendReplayValue(cmd, "roi-x0", r.roi_x0);
+        AppendReplayValue(cmd, "roi-y0", r.roi_y0);
+        AppendReplayValue(cmd, "roi-x1", r.roi_x1);
+        AppendReplayValue(cmd, "roi-y1", r.roi_y1);
+        AppendReplayValue(cmd, "tool-half-width", r.tool_half_width);
+        AppendReplayValue(cmd, "method", r.method);
+        AppendReplayValue(cmd, "threshold", r.threshold);
+        AppendReplayValue(cmd, "gap", r.gap);
+        AppendReplayValue(cmd, "linegap", r.linegap);
+        AppendReplayValue(cmd, "min-edge-run-width-px",
+                          r.min_edge_run_width_px);
+        AppendReplayValue(cmd, "wgap", r.wgap);
+        AppendReplayValue(cmd, "hgap", r.hgap);
+        AppendReplayValue(cmd, "filterprofile", r.filterprofile);
+        AppendReplayValue(cmd, "samplerate", r.samplerate);
+        AppendReplayValue(cmd, "min-score", r.min_score);
+        AppendReplayValue(cmd, "find-num", r.find_num);
+        AppendReplayValue(cmd, "compare-gap", r.compare_gap);
+        AppendReplayValue(cmd, "max-elapsed-ms", r.max_elapsed_ms);
+        AppendReplayValue(cmd, "max-scan-lines", r.max_scan_lines);
+        AppendReplayValue(cmd, "max-samples", r.max_samples);
+        return cmd.str();
+    }
+
 
     CxParamRange RangeValues(
         const std::string& name,
@@ -280,6 +361,8 @@ CxParamRangeSet MakeConservativeRangeSet(const std::string& tool)
     {
         set.ranges.push_back(RangeValues("threshold", {8, 12, 20, 30}));
         set.ranges.push_back(RangeValues("linegap", {4, 6, 10, 14}));
+        set.ranges.push_back(RangeValues("min_edge_run_width_px",
+                                         {1, 3, 5}));
         set.ranges.push_back(RangeValues("wgap", {4, 8, 12}));
         set.ranges.push_back(RangeValues("hgap", {24, 32, 48}));
         set.ranges.push_back(RangeValues("filterprofile", {0, 1}));
@@ -306,6 +389,8 @@ std::vector<CxParamCandidate> GenerateBasicParamCandidates(
         c.threshold = ValueAt(ranges, "threshold", i, 20);
         c.gap = ValueAt(ranges, "gap", i, 5);
         c.linegap = ValueAt(ranges, "linegap", i, 6);
+        c.min_edge_run_width_px =
+            ValueAt(ranges, "min_edge_run_width_px", i, 3);
         c.wgap = ValueAt(ranges, "wgap", i, 8);
         c.hgap = ValueAt(ranges, "hgap", i, 32);
         c.filterprofile = ValueAt(ranges, "filterprofile", i, 1);
@@ -396,7 +481,7 @@ bool ExportParamRegressionReports(
             return false;
         }
         json << "{\n  \"candidates\": [\n";
-        csv << "candidate,source,method,threshold,gap,linegap,wgap,hgap,filterprofile,samplerate,predicted_quality,predicted_risk,selected\n";
+        csv << "candidate,source,method,threshold,gap,linegap,min_edge_run_width_px,wgap,hgap,filterprofile,samplerate,predicted_quality,predicted_risk,selected\n";
         for (std::size_t i = 0; i < candidates.size(); ++i)
         {
             const auto& c = candidates[i];
@@ -406,6 +491,8 @@ bool ExportParamRegressionReports(
                  << ",\"threshold\":" << c.threshold
                  << ",\"gap\":" << c.gap
                  << ",\"linegap\":" << c.linegap
+                 << ",\"min_edge_run_width_px\":"
+                 << c.min_edge_run_width_px
                  << ",\"wgap\":" << c.wgap
                  << ",\"hgap\":" << c.hgap
                  << ",\"filterprofile\":" << c.filterprofile
@@ -416,6 +503,7 @@ bool ExportParamRegressionReports(
                  << "}" << (i + 1 < candidates.size() ? "," : "") << "\n";
             csv << c.candidate_id << "," << c.source << "," << c.method << ","
                 << c.threshold << "," << c.gap << "," << c.linegap << ","
+                << c.min_edge_run_width_px << ","
                 << c.wgap << "," << c.hgap << "," << c.filterprofile << ","
                 << c.samplerate << "," << c.predicted_quality << ","
                 << c.predicted_risk << "," << (c.selected_for_probe ? "true" : "false") << "\n";
@@ -504,6 +592,45 @@ bool ExportParamRegressionReports(
                << " | " << r.failure_stage << " |\n";
         }
         hitJson << "  ]\n}\n";
+    }
+
+    {
+        std::ofstream tsv(root / "headless_replay_index.tsv");
+        std::ofstream md(root / "headless_replay_index.md");
+        if (!tsv.is_open() || !md.is_open())
+        {
+            reason = "failed to write headless replay index";
+            return false;
+        }
+        tsv << "lookup_key\tcandidate_id\tcase_id\timage_id\ttarget_id\ttool\timage_path\tscript_path\tcontract_path\treplay_package_path\tresult_summary_path\ttimeout_seconds\troi_x0\troi_y0\troi_x1\troi_y1\ttool_half_width\tmethod\tthreshold\tgap\tlinegap\tmin_edge_run_width_px\twgap\thgap\tfilterprofile\tsamplerate\tmin_score\tfind_num\tcompare_gap\tmax_elapsed_ms\tmax_scan_lines\tmax_samples\theadless_command" << std::endl;
+        md << "# Headless Replay Index" << std::endl << std::endl;
+        md << "- lookup_key: candidate_id::case_id" << std::endl;
+        md << "- binary_placeholder: <BINARY>" << std::endl;
+        md << "- working_directory: <REPO_ROOT>" << std::endl;
+        md << "- replay_out_placeholder: <REPLAY_OUT_DIR>" << std::endl << std::endl;
+        md << "| LookupKey | Candidate | Case | Image | Target | Script | Result | Command |" << std::endl;
+        md << "|---|---|---|---|---|---|---|---|" << std::endl;
+        for (const auto& r : records)
+        {
+            const std::string lookup = r.candidate_id + "::" + r.case_id;
+            const std::string command = BuildHeadlessReplayCommand(r);
+            tsv << lookup << '\t' << r.candidate_id << '\t' << r.case_id << '\t'
+                << r.image_id << '\t' << r.target_id << '\t' << r.tool << '\t'
+                << r.image_path << '\t' << r.script_path << '\t' << r.contract_path << '\t'
+                << r.replay_package_path << '\t' << r.result_summary_path << '\t'
+                << r.timeout_seconds << '\t' << r.roi_x0 << '\t' << r.roi_y0 << '\t'
+                << r.roi_x1 << '\t' << r.roi_y1 << '\t' << r.tool_half_width << '\t'
+                << r.method << '\t' << r.threshold << '\t' << r.gap << '\t'
+                << r.linegap << '\t' << r.min_edge_run_width_px << '\t'
+                << r.wgap << '\t' << r.hgap << '\t'
+                << r.filterprofile << '\t' << r.samplerate << '\t' << r.min_score << '\t'
+                << r.find_num << '\t' << r.compare_gap << '\t' << r.max_elapsed_ms << '\t'
+                << r.max_scan_lines << '\t' << r.max_samples << '\t' << command << std::endl;
+            md << "| " << lookup << " | " << r.candidate_id << " | "
+               << r.case_id << " | " << r.image_id << " | " << r.target_id
+               << " | " << r.script_path << " | " << r.result_summary_path
+               << " | `" << command << "` |" << std::endl;
+        }
     }
 
     {
@@ -643,13 +770,14 @@ bool ExportParamRegressionReports(
             return false;
         }
         md << "# Candidate Distribution\n\n";
-        md << "| Candidate | Source | Threshold | Gap | LineGap | WGap | HGap | Filter | Method | Risk | Selected |\n";
-        md << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
+        md << "| Candidate | Source | Threshold | Gap | LineGap | MinRunPx | WGap | HGap | Filter | Method | Risk | Selected |\n";
+        md << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
         for (const auto& c : candidates)
         {
             md << "| " << c.candidate_id << " | " << c.source << " | "
                << c.threshold << " | " << c.gap << " | " << c.linegap << " | "
-               << c.wgap << " | " << c.hgap << " | " << c.filterprofile
+               << c.min_edge_run_width_px << " | " << c.wgap << " | "
+               << c.hgap << " | " << c.filterprofile
                << " | " << c.method << " | " << c.predicted_risk << " | "
                << (c.selected_for_probe ? "yes" : "no") << " |\n";
         }
@@ -781,6 +909,8 @@ bool ExportParamRegressionReports(
             cxsc << "CxParameterProfile_setthreshold(" << picked->threshold << ");\n";
             cxsc << "CxParameterProfile_setgap(" << picked->gap << ");\n";
             cxsc << "CxParameterProfile_setlinegap(" << picked->linegap << ");\n";
+            cxsc << "CxParameterProfile_setminedgerunwidth("
+                 << picked->min_edge_run_width_px << ");\n";
             cxsc << "CxParameterProfile_setwgap(" << picked->wgap << ");\n";
             cxsc << "CxParameterProfile_sethgap(" << picked->hgap << ");\n";
             cxsc << "CxParameterProfile_setfilterprofile(" << picked->filterprofile << ");\n";

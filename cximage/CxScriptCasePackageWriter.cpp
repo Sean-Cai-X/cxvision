@@ -223,6 +223,7 @@ void AppendEvidenceCandidateStateProbeImpl(const ManualTestContext &context,
        << ",\"half_width\":" << g.tool_half_width
        << ",\"threshold\":" << g.threshold << ",\"method\":" << g.method
        << ",\"linegap\":" << g.linegap << ",\"wgap\":" << g.wgap
+       << ",\"min_edge_run_width_px\":" << g.min_edge_run_width_px
        << ",\"hgap\":" << g.hgap << ",\"filterprofile\":" << g.filterprofile
        << "},"
        << "\"globals\":{"
@@ -235,6 +236,8 @@ void AppendEvidenceCandidateStateProbeImpl(const ManualTestContext &context,
        << ",\"global_threshold\":" << globalValue("global_threshold")
        << ",\"global_method\":" << globalValue("global_method")
        << ",\"global_linegap\":" << globalValue("global_linegap")
+       << ",\"global_min_edge_run_width_px\":"
+       << globalValue("global_min_edge_run_width_px")
        << ",\"global_wgap\":" << globalValue("global_wgap")
        << ",\"global_hgap\":" << globalValue("global_hgap")
        << ",\"global_filterprofile\":" << globalValue("global_filterprofile")
@@ -278,7 +281,10 @@ void AppendEvidenceCandidateStateProbeImpl(const ManualTestContext &context,
       "candidate_id=" + candidateId + " gauge={threshold=" +
           std::to_string(g.threshold) + ",method=" + std::to_string(g.method) +
           ",linegap=" + std::to_string(g.linegap) + ",wgap=" +
-          std::to_string(g.wgap) + ",hgap=" + std::to_string(g.hgap) +
+          std::to_string(g.wgap) +
+          ",min_edge_run_width_px=" +
+          std::to_string(g.min_edge_run_width_px) + ",hgap=" +
+          std::to_string(g.hgap) +
           ",filterprofile=" + std::to_string(g.filterprofile) +
           "} globals={threshold=" +
           std::to_string(globalValue("global_threshold")) +
@@ -286,6 +292,9 @@ void AppendEvidenceCandidateStateProbeImpl(const ManualTestContext &context,
           ",method=" + std::to_string(globalValue("global_method")) +
 
           ",linegap=" + std::to_string(globalValue("global_linegap")) +
+
+          ",min_edge_run_width_px=" +
+          std::to_string(globalValue("global_min_edge_run_width_px")) +
 
           ",wgap=" + std::to_string(globalValue("global_wgap")) +
 
@@ -351,6 +360,220 @@ void AppendEvidenceCandidateStateProbeImpl(const ManualTestContext &context,
           std::to_string(globalValue("global_findline_attach_edge")) +
 
           "} reason=" + reason);
+}
+
+void AppendManualOperationTraceJsonl(
+    const ManualTestContext &context, const std::string &candidateDir,
+    const std::string &candidateId, const std::string &operation,
+    const std::string &status, const std::string &reason,
+    const std::string &caseId, const std::string &scriptId,
+    const std::string &imageId, const std::string &imagePath,
+    const std::string &targetId, const std::string &tool,
+    const std::string &sourceEvidenceScriptPath,
+    const std::string &scriptSnapshotPath,
+    const std::string &parameterSnapshotPath,
+    const std::string &runtimeGlobalsPath,
+    const std::string &gaugeAnnotationPath,
+    const std::string &resultSummaryPath, bool replayTrusted,
+    const std::string &replayWarning) {
+  if (candidateDir.empty())
+    return;
+
+  const char q = static_cast<char>(34);
+  const ManualGaugeState &g = context.current_gauge;
+  auto globalValue = [&](const char *key) -> int {
+    const auto it = context.runtime_int_vars.find(key);
+    return it == context.runtime_int_vars.end() ? -2147483647 : it->second;
+  };
+  auto writeString = [&](std::ostringstream &out, const char *key,
+                         const std::string &value) {
+    out << ',' << q << key << q << ':' << q << JsonEscape(value) << q;
+  };
+
+  std::ostringstream line;
+  line << '{' << q << "schema_version" << q << ":1";
+  writeString(line, "record_type", "manual_operation");
+  writeString(line, "candidate_id", candidateId);
+  writeString(line, "operation", operation);
+  writeString(line, "status", status);
+  writeString(line, "reason", reason);
+  writeString(line, "case_id", caseId);
+  writeString(line, "script_id", scriptId);
+  writeString(line, "image_id", imageId);
+  writeString(line, "image_path", imagePath);
+  writeString(line, "target_id", targetId);
+  writeString(line, "tool", tool);
+  writeString(line, "editor_source", context.editor_source);
+  writeString(line, "loaded_script_path", context.loaded_script_path);
+  writeString(line, "source_evidence_script_path", sourceEvidenceScriptPath);
+  writeString(line, "script_snapshot_path", scriptSnapshotPath);
+  writeString(line, "parameter_snapshot_path", parameterSnapshotPath);
+  writeString(line, "runtime_globals_path", runtimeGlobalsPath);
+  writeString(line, "gauge_annotation_path", gaugeAnnotationPath);
+  writeString(line, "result_summary_path", resultSummaryPath);
+  line << ',' << q << "replay_trusted" << q << ':'
+       << (replayTrusted ? "true" : "false");
+  writeString(line, "replay_warning", replayWarning);
+  line << ',' << q << "key_parameter_edit_revision" << q << ':'
+       << context.key_parameter_edit_revision;
+  writeString(line, "last_key_parameter_edit_summary",
+              context.last_key_parameter_edit_summary);
+  line << ',' << q << "gauge" << q << ":{" << q << "x0" << q << ':'
+       << g.line_x0 << ',' << q << "y0" << q << ':' << g.line_y0 << ','
+       << q << "x1" << q << ':' << g.line_x1 << ',' << q << "y1" << q
+       << ':' << g.line_y1 << ',' << q << "half_width" << q << ':'
+       << g.tool_half_width << ',' << q << "threshold" << q << ':'
+       << g.threshold << ',' << q << "method" << q << ':' << g.method << ','
+       << q << "linegap" << q << ':' << g.linegap << ',' << q << "wgap"
+       << q << ':' << g.wgap << ',' << q << "hgap" << q << ':' << g.hgap
+       << ',' << q << "min_edge_run_width_px" << q << ':'
+       << g.min_edge_run_width_px << ',' << q << "filterprofile" << q << ':'
+       << g.filterprofile << '}';
+  line << ',' << q << "globals" << q << ":{" << q << "global_roi_x0" << q
+       << ':' << globalValue("global_roi_x0") << ',' << q
+       << "global_roi_y0" << q << ':' << globalValue("global_roi_y0") << ','
+       << q << "global_roi_x1" << q << ':' << globalValue("global_roi_x1")
+       << ',' << q << "global_roi_y1" << q << ':'
+       << globalValue("global_roi_y1") << ',' << q
+       << "global_tool_half_width" << q << ':'
+       << globalValue("global_tool_half_width") << ',' << q
+       << "global_threshold" << q << ':' << globalValue("global_threshold")
+       << ',' << q << "global_method" << q << ':'
+       << globalValue("global_method") << ',' << q << "global_linegap" << q
+       << ':' << globalValue("global_linegap") << ',' << q
+       << "global_min_edge_run_width_px" << q << ':'
+       << globalValue("global_min_edge_run_width_px") << ',' << q
+       << "global_wgap"
+       << q << ':' << globalValue("global_wgap") << ',' << q << "global_hgap"
+       << q << ':' << globalValue("global_hgap") << ',' << q
+       << "global_filterprofile" << q << ':'
+       << globalValue("global_filterprofile") << "}}";
+
+  const std::filesystem::path path =
+      std::filesystem::path(candidateDir) / "manual_operation_trace.jsonl";
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file.is_open()) {
+    file << line.str();
+    file.put(10);
+  }
+}
+
+void AppendManualOperationTraceEventJsonl(
+    const ManualOperationTraceEvent &event, const std::string &candidateDir,
+    const std::string &candidateId, const std::string &caseId,
+    const std::string &scriptId, const std::string &imageId,
+    const std::string &imagePath, const std::string &targetId,
+    const std::string &tool, const std::string &sourceEvidenceScriptPath,
+    const std::string &scriptSnapshotPath,
+    const std::string &parameterSnapshotPath,
+    const std::string &runtimeGlobalsPath,
+    const std::string &gaugeAnnotationPath,
+    const std::string &resultSummaryPath, bool replayTrusted,
+    const std::string &replayWarning) {
+  if (candidateDir.empty())
+    return;
+
+  const char q = static_cast<char>(34);
+  const ManualGaugeState &g = event.gauge;
+  auto writeString = [&](std::ostringstream &out, const char *key,
+                         const std::string &value) {
+    out << ',' << q << key << q << ':' << q << JsonEscape(value) << q;
+  };
+  auto writeBool = [&](std::ostringstream &out, const char *key, bool value) {
+    out << ',' << q << key << q << ':' << (value ? "true" : "false");
+  };
+
+  std::ostringstream line;
+  line << '{' << q << "schema_version" << q << ":1";
+  writeString(line, "record_type", "manual_operation_event");
+  line << ',' << q << "event_sequence" << q << ':' << event.sequence;
+  writeString(line, "candidate_id", candidateId);
+  writeString(line, "operation", event.operation);
+  writeString(line, "status", event.status);
+  writeString(line, "reason", event.reason);
+  writeString(line, "event_summary", event.summary);
+  line << ',' << q << "key_parameter_edit_revision" << q << ':'
+       << event.key_parameter_edit_revision;
+  writeString(line, "case_id", caseId);
+  writeString(line, "script_id", scriptId);
+  writeString(line, "image_id", imageId);
+  writeString(line, "image_path", imagePath);
+  writeString(line, "target_id", targetId);
+  writeString(line, "tool", tool);
+  writeString(line, "event_editor_source", event.editor_source);
+  writeString(line, "event_loaded_script_path", event.loaded_script_path);
+  writeString(line, "event_selection_case_id", event.evidence_selection.case_id);
+  writeString(line, "event_selection_candidate_id",
+              event.evidence_selection.candidate_id);
+  writeString(line, "source_evidence_script_path", sourceEvidenceScriptPath);
+  writeString(line, "script_snapshot_path", scriptSnapshotPath);
+  writeString(line, "parameter_snapshot_path", parameterSnapshotPath);
+  writeString(line, "runtime_globals_path", runtimeGlobalsPath);
+  writeString(line, "gauge_annotation_path", gaugeAnnotationPath);
+  writeString(line, "result_summary_path", resultSummaryPath);
+  writeBool(line, "replay_trusted", replayTrusted);
+  writeString(line, "replay_warning", replayWarning);
+
+  line << ',' << q << "gauge" << q << ":{" << q << "tool" << q << ':' << q
+       << JsonEscape(g.tool) << q << ',' << q << "source" << q << ':' << q
+       << JsonEscape(g.source) << q << ',' << q << "review_status" << q << ':'
+       << q << JsonEscape(g.review_status) << q << ',' << q << "dirty" << q
+       << ':' << (g.dirty ? "true" : "false") << ',' << q << "x0" << q
+       << ':' << g.line_x0 << ',' << q << "y0" << q << ':' << g.line_y0
+       << ',' << q << "x1" << q << ':' << g.line_x1 << ',' << q << "y1"
+       << q << ':' << g.line_y1 << ',' << q << "half_width" << q << ':'
+       << g.tool_half_width << ',' << q << "threshold" << q << ':'
+       << g.threshold << ',' << q << "method" << q << ':' << g.method << ','
+       << q << "linegap" << q << ':' << g.linegap << ',' << q << "wgap"
+       << q << ':' << g.wgap << ',' << q << "hgap" << q << ':' << g.hgap
+       << ',' << q << "min_edge_run_width_px" << q << ':'
+       << g.min_edge_run_width_px << ',' << q << "filterprofile" << q << ':'
+       << g.filterprofile << '}';
+
+  std::vector<std::pair<std::string, int>> globals(event.globals.begin(),
+                                                   event.globals.end());
+  std::sort(globals.begin(), globals.end());
+  line << ',' << q << "globals" << q << ":{";
+  bool firstGlobal = true;
+  for (const auto &kv : globals) {
+    if (kv.first.rfind("global_", 0) != 0)
+      continue;
+    if (!firstGlobal)
+      line << ',';
+    firstGlobal = false;
+    line << q << JsonEscape(kv.first) << q << ':' << kv.second;
+  }
+  line << "}}";
+
+  const std::filesystem::path path =
+      std::filesystem::path(candidateDir) / "manual_operation_trace.jsonl";
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file.is_open()) {
+    file << line.str();
+    file.put(10);
+  }
+}
+
+void AppendPendingManualOperationTraceEventsJsonl(
+    const ManualTestContext &context, const std::string &candidateDir,
+    const std::string &candidateId, const std::string &caseId,
+    const std::string &scriptId, const std::string &imageId,
+    const std::string &imagePath, const std::string &targetId,
+    const std::string &tool, const std::string &sourceEvidenceScriptPath,
+    const std::string &scriptSnapshotPath,
+    const std::string &parameterSnapshotPath,
+    const std::string &runtimeGlobalsPath,
+    const std::string &gaugeAnnotationPath,
+    const std::string &resultSummaryPath, bool replayTrusted,
+    const std::string &replayWarning) {
+  for (const ManualOperationTraceEvent &event :
+       context.pending_manual_operation_trace_events) {
+    AppendManualOperationTraceEventJsonl(
+        event, candidateDir, candidateId, caseId, scriptId, imageId, imagePath,
+        targetId, tool, sourceEvidenceScriptPath, scriptSnapshotPath,
+        parameterSnapshotPath, runtimeGlobalsPath, gaugeAnnotationPath,
+        resultSummaryPath, replayTrusted, replayWarning);
+  }
 }
 
 std::string GenerateCandidateId() {
@@ -603,6 +826,8 @@ bool WriteGaugeSnapshotJson(const ManualGaugeState &gauge,
        << "  \"hgap\": " << gauge.hgap << ",\n"
        << "  \"gap\": " << gauge.gap << ",\n"
        << "  \"linegap\": " << gauge.linegap << ",\n"
+       << "  \"min_edge_run_width_px\": "
+       << gauge.min_edge_run_width_px << ",\n"
        << "  \"threshold\": " << gauge.threshold << ",\n"
        << "  \"filterprofile\": " << gauge.filterprofile << ",\n"
        << "  \"method\": " << gauge.method << "\n"
@@ -902,22 +1127,41 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
                "candidate_id=" + candidateId +
                    " script=" + EffectiveScriptPath(context));
   }
+  const bool filterProfileCallPresent =
+      scriptText.find("setfilterprofile(") != std::string::npos;
   const bool filterProfileBound =
-      scriptText.find("global_filterprofile") != std::string::npos &&
-      (scriptText.find("setfilterprofile(filterprofile)") !=
-           std::string::npos ||
-       scriptText.find("setfilterprofile(global_filterprofile)") !=
-           std::string::npos);
-  if (!filterProfileBound &&
-      scriptText.find("setfilterprofile(") != std::string::npos) {
-    bindingProbeReason += "; SCRIPT_BINDING_CONFLICT: setfilterprofile uses a "
-                          "literal or non-global value";
+      !filterProfileCallPresent ||
+      (scriptText.find("global_filterprofile") != std::string::npos &&
+       (scriptText.find("setfilterprofile(filterprofile)") !=
+            std::string::npos ||
+        scriptText.find("setfilterprofile(global_filterprofile)") !=
+            std::string::npos));
+  const bool filterProfileBindingConflict =
+      filterProfileCallPresent && !filterProfileBound;
+  const bool minEdgeRunWidthCallPresent =
+      scriptText.find("setminedgerunwidth(") != std::string::npos;
+  const bool minEdgeRunWidthBound =
+      !minEdgeRunWidthCallPresent ||
+      scriptText.find("setminedgerunwidth(global_min_edge_run_width_px)") !=
+          std::string::npos;
+  const bool minEdgeRunWidthBindingConflict =
+      minEdgeRunWidthCallPresent && !minEdgeRunWidthBound;
+  std::string replayWarning;
+  if (filterProfileBindingConflict)
+    replayWarning =
+        "SCRIPT_BINDING_CONFLICT: setfilterprofile uses a literal or "
+        "non-global value";
+  if (minEdgeRunWidthBindingConflict) {
+    if (!replayWarning.empty())
+      replayWarning += "; ";
+    replayWarning +=
+        "SCRIPT_BINDING_CONFLICT: setminedgerunwidth uses a literal or "
+        "non-global value";
   }
-  AppendEvidenceCandidateStateProbe(
-      context, candidateDir.string(), candidateId, "candidate_save_input",
-      filterProfileBound ? "captured" : "captured_with_binding_warning",
-      bindingProbeReason);
-
+  const bool replayTrusted =
+      !filterProfileBindingConflict && !minEdgeRunWidthBindingConflict;
+  if (!replayWarning.empty())
+    bindingProbeReason += "; " + replayWarning;
   const std::filesystem::path scriptSnapshotPath =
       candidateDir / "script_snapshot.cxsc";
   const std::filesystem::path parameterSnapshotPath =
@@ -934,6 +1178,30 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
       candidateDir / "evidence_binding.json";
   const std::filesystem::path lineTracePath = candidateDir / "line_trace.json";
   const std::filesystem::path logPath = candidateDir / "log.txt";
+  const std::filesystem::path manualOperationTracePath =
+      candidateDir / "manual_operation_trace.jsonl";
+
+
+  AppendPendingManualOperationTraceEventsJsonl(
+      context, candidateDir.string(), candidateId, caseId, scriptId, imageId,
+      imagePath, targetId, tool,
+      ResolveWorkspaceFile(sourceEvidenceScriptPath).string(),
+      scriptSnapshotPath.string(), parameterSnapshotPath.string(),
+      runtimeGlobalsPath.string(), gaugeAnnotationPath.string(),
+      resultSummaryPath.string(), replayTrusted, replayWarning);
+
+  AppendEvidenceCandidateStateProbe(
+      context, candidateDir.string(), candidateId, "candidate_save_input",
+      replayTrusted ? "captured" : "captured_with_binding_warning",
+      bindingProbeReason);
+  AppendManualOperationTraceJsonl(
+      context, candidateDir.string(), candidateId, "candidate_save_input",
+      replayTrusted ? "captured" : "captured_with_binding_warning",
+      bindingProbeReason, caseId, scriptId, imageId, imagePath, targetId, tool,
+      ResolveWorkspaceFile(sourceEvidenceScriptPath).string(),
+      scriptSnapshotPath.string(), parameterSnapshotPath.string(),
+      runtimeGlobalsPath.string(), gaugeAnnotationPath.string(),
+      resultSummaryPath.string(), replayTrusted, replayWarning);
 
   const bool preserveInputs = options.preserve_input_snapshots;
 
@@ -1003,9 +1271,21 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
       << JsonEscape(context.current_gauge.primary_object_type) << "\",\n"
       << "  \"primary_object_name\": \""
       << JsonEscape(context.current_gauge.primary_object_name) << "\",\n"
-      << "  \"primary_object_status\": \""
-      << JsonEscape(context.current_gauge.primary_object_status) << "\"\n"
-      << "}\n";
+      << "  " << static_cast<char>(34) << "primary_object_status"
+      << static_cast<char>(34) << ": " << static_cast<char>(34)
+      << JsonEscape(context.current_gauge.primary_object_status)
+      << static_cast<char>(34) << ',' << static_cast<char>(10)
+      << "  " << static_cast<char>(34) << "manual_operation_trace_path"
+      << static_cast<char>(34) << ": " << static_cast<char>(34)
+      << JsonEscape(manualOperationTracePath.string()) << static_cast<char>(34)
+      << ',' << static_cast<char>(10)
+      << "  " << static_cast<char>(34) << "replay_trusted"
+      << static_cast<char>(34) << ": " << (replayTrusted ? "true" : "false")
+      << ',' << static_cast<char>(10)
+      << "  " << static_cast<char>(34) << "replay_warning"
+      << static_cast<char>(34) << ": " << static_cast<char>(34)
+      << JsonEscape(replayWarning) << static_cast<char>(34)
+      << static_cast<char>(10) << '}' << static_cast<char>(10);
   if (!WriteTextFile(analysisStatePath, analysisJson.str())) {
     result.reason = "failed to write analysis_state.json";
     return false;
@@ -1053,8 +1333,18 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
                       : "[\"result_overlay.png\", \"evidence_overlay.png\", "
                         "\"tool_display.png\", \"object_state.json\", "
                         "\"variable_snapshot.json\"]")
-              << "\n"
-              << "}\n";
+              << ',' << static_cast<char>(10)
+              << "  " << static_cast<char>(34) << "manual_operation_trace_path"
+              << static_cast<char>(34) << ": " << static_cast<char>(34)
+              << JsonEscape(manualOperationTracePath.string()) << static_cast<char>(34)
+              << ',' << static_cast<char>(10)
+              << "  " << static_cast<char>(34) << "replay_trusted"
+              << static_cast<char>(34) << ": " << (replayTrusted ? "true" : "false")
+              << ',' << static_cast<char>(10)
+              << "  " << static_cast<char>(34) << "replay_warning"
+              << static_cast<char>(34) << ": " << static_cast<char>(34)
+              << JsonEscape(replayWarning) << static_cast<char>(34)
+              << static_cast<char>(10) << '}' << static_cast<char>(10);
   if (!WriteTextFile(resultSummaryPath, summaryJson.str())) {
     result.reason = "failed to write result_summary.json";
     return false;
@@ -1099,8 +1389,14 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
               << JsonEscape(options.linked_tool_display_path) << "\",\n"
               << "  \"runtime_globals_path\": \""
               << JsonEscape(runtimeGlobalsPath.string()) << "\",\n"
-              << "  \"line_trace_path\": \""
-              << JsonEscape(lineTracePath.string()) << "\",\n"
+              << "  " << static_cast<char>(34) << "line_trace_path"
+              << static_cast<char>(34) << ": " << static_cast<char>(34)
+              << JsonEscape(lineTracePath.string()) << static_cast<char>(34)
+              << ',' << static_cast<char>(10)
+              << "  " << static_cast<char>(34) << "manual_operation_trace_path"
+              << static_cast<char>(34) << ": " << static_cast<char>(34)
+              << JsonEscape(manualOperationTracePath.string())
+              << static_cast<char>(34) << ',' << static_cast<char>(10)
               << "  \"source\": \"manual_or_headless_analysis_save\",\n"
               << "  \"promotion_allowed\": false\n"
               << "}\n";
@@ -1135,6 +1431,18 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
       "candidate_package_written", "written",
       "script_snapshot, parameter_snapshot, runtime_globals, gauge_annotation "
       "and evidence_binding written");
+  AppendManualOperationTraceJsonl(
+      context, result.candidate_dir, result.candidate_id,
+      "candidate_package_written", "written",
+      "script_snapshot, parameter_snapshot, runtime_globals, gauge_annotation "
+      "and evidence_binding written",
+      caseId, scriptId, imageId, imagePath, targetId, tool,
+      ResolveWorkspaceFile(sourceEvidenceScriptPath).string(),
+      result.script_snapshot_path, result.parameter_snapshot_path,
+      runtimeGlobalsPath.string(), result.gauge_annotation_path,
+      result.result_summary_path, replayTrusted, replayWarning);
+
+  ClearManualOperationTraceEvents(context);
 
   if (context.current_evidence_selection.valid) {
     context.current_evidence_selection.case_id = caseId;

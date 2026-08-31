@@ -158,6 +158,8 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_hgap"] = static_cast<double>(options.hgap);
     overrides["global_gap"] = static_cast<double>(options.gap);
     overrides["global_linegap"] = static_cast<double>(options.linegap);
+    overrides["global_min_edge_run_width_px"] =
+        static_cast<double>(options.min_edge_run_width_px);
     overrides["global_threshold"] = static_cast<double>(options.threshold);
     overrides["global_segmentation_threshold_percent"] = 50.0;
     overrides["global_segmentation_mode"] = 2.0;

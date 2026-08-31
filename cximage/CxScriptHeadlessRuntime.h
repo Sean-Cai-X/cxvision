@@ -16,14 +16,28 @@ struct CxFindLineScanDiagnosticSnapshot
     double x1 = 0.0;
     double y1 = 0.0;
     int candidate_count = 0;
+    int binary_logical_row = -1;
+    int binary_sample_row = -1;
+    int binary_logical_foreground_count = 0;
+    int binary_logical_plus1_foreground_count = 0;
+    int binary_logical_plus2_foreground_count = 0;
+    int binary_sample_foreground_count = 0;
+    int threshold_run_count = 0;
+    int threshold_max_run_width = 0;
+    int min_edge_run_width_px = 1;
+    int rejected_min_edge_run_width = 0;
+    int threshold_first_run_start = -1;
+    int threshold_first_run_end = -1;
+    int threshold_last_run_start = -1;
+    int threshold_last_run_end = -1;
     bool accepted = false;
     double accepted_x = 0.0;
     double accepted_y = 0.0;
     std::string reject_reason;
 };
-
 struct CxFindLineBoundaryPointEvidenceSnapshot
 {
+
     int scan_index = -1;
     int scan_type = 0;
     double measured_x = 0.0;
@@ -72,6 +86,7 @@ struct CxScriptExecutionCapture
     int tool_wgap = 0;
     int tool_hgap = 0;
     int tool_linegap = 0;
+    int tool_min_edge_run_width_px = 0;
     double tool_input_line_x0 = 0.0;
     double tool_input_line_y0 = 0.0;
     double tool_input_line_x1 = 0.0;
@@ -88,6 +103,7 @@ struct CxScriptExecutionCapture
     int scan_runs_total = 0;
     int scan_runs_within_length_limit = 0;
     int scan_runs_over_length_limit = 0;
+    int scan_runs_rejected_by_min_edge_width = 0;
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
@@ -134,6 +150,7 @@ struct CxScriptExecutionCapture
     int selected_hgap = 0;
     int selected_linegap = 0;
     int selected_filterprofile = 0;
+    int selected_min_edge_run_width_px = 0;
 
     int valid_points_count = 0;
     bool has_fit_line = false;
@@ -295,6 +312,19 @@ struct CxScriptExecutionCapture
     std::string segmentation_result_stage;
 
     std::string segmentation_refinement_method;
+    std::string segmentation_requested_geometry_type;
+    std::string segmentation_geometry_fit_status;
+    std::string segmentation_geometry_fit_reason;
+    int segmentation_geometry_count = 0;
+    double segmentation_geometry_residual_px = 0.0;
+    double segmentation_geometry_support = 0.0;
+    double segmentation_geometry_center_x = 0.0;
+    double segmentation_geometry_center_y = 0.0;
+    double segmentation_geometry_radius = 0.0;
+    double segmentation_geometry_axis_x = 0.0;
+    double segmentation_geometry_axis_y = 0.0;
+    double segmentation_geometry_angle_deg = 0.0;
+
 
     std::string segmentation_raw_result_ref;
 
@@ -433,6 +463,7 @@ struct CxScriptHeadlessOptions
     int hgap = 8;
     int gap = 5;
     int linegap = 6;
+    int min_edge_run_width_px = 3;
     int threshold = 20;
     int method = 0;
     int filterprofile = 0;

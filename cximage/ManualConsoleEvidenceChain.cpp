@@ -2,6 +2,7 @@
 #include "CxScriptCasePackageWriter.h"
 #include "CxScriptCatalogRuntime.h"
 #include "CxScriptEvidenceChainRuntime.h"
+#include "CxGeometryReferenceEvaluator.h"
 #include "CxTorchExecutionAdapter.h"
 #include "CxUnifiedLog.h"
 #include "EllipseShape.h"
@@ -4159,6 +4160,10 @@ static int AppendAssetDrivenEvidenceCasesLocal(
           "track=" + FileNodeStringLocal(manifest.root(), "case_track") +
           " geometry=" + thumb.target_id +
           " topology=" + FileNodeStringLocal(manifest.root(), "topology") +
+          " split=" + FileNodeStringLocal(manifest.root(), "split") +
+          " variant=" + FileNodeStringLocal(manifest.root(), "variant_id") +
+          " degradation=" +
+          FileNodeStringLocal(manifest.root(), "degradation_bucket") +
           " training_enabled=0";
       thumb.evidence_output_root = caseDirectory.string();
       thumb.contract_id = FileNodeStringLocal(manifest.root(), "schema");
@@ -4176,7 +4181,18 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       thumb.workflow_id = runId;
       thumb.workflow_stage = "controlled_geometry_review";
       thumb.workflow_status = "PENDING_HUMAN_REVIEW";
-      thumb.dataset_role = "controlled_validation";
+      std::string evidenceSplit = FileNodeStringLocal(manifest.root(), "split");
+      std::transform(evidenceSplit.begin(), evidenceSplit.end(),
+                     evidenceSplit.begin(), [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                     });
+      if (evidenceSplit == "validation" || evidenceSplit == "validate" ||
+          evidenceSplit == "valid")
+        evidenceSplit = "test";
+      if (evidenceSplit != "train" && evidenceSplit != "val" &&
+          evidenceSplit != "test")
+        evidenceSplit = "test";
+      thumb.dataset_role = evidenceSplit;
       thumb.annotation_policy =
           FileNodeStringLocal(manifest.root(), "typed_label_kind");
       thumb.gate_policy = "human_review_required";
@@ -4188,7 +4204,7 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       CxEvidenceDatasetImageBinding sourceBinding;
       sourceBinding.image_id = internalCaseId;
       sourceBinding.image_path = sourcePath.string();
-      sourceBinding.split = "controlled_validation";
+      sourceBinding.split = evidenceSplit;
       sourceBinding.label = thumb.target_id;
       sourceBinding.source = "evidence_case_manifest";
       thumb.dataset_images.push_back(sourceBinding);
@@ -5392,6 +5408,9 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   staged.key_parameter_edit_revision = 0;
   staged.last_key_parameter_edit_summary =
       "evidence selection baseline: " + resolved.script_id;
+
+  staged.manual_operation_trace_sequence = 0;
+  staged.pending_manual_operation_trace_events.clear();
 
   if (!resolved.image_path.empty())
     staged.image_file_path = resolved.image_path;
@@ -6654,8 +6673,10 @@ int ViewController::AddGeometryAugmentationDatasetForCurrentSelection() {
           FileNodeStringLocal(caseManifest.root(), "geometry_facts_ref");
       const std::string positionRef =
           FileNodeStringLocal(caseManifest.root(), "position_annotation_ref");
-      const std::string split = NormalizeTorchTrainingSplitLocal(
+      std::string split = NormalizeTorchTrainingSplitLocal(
           FileNodeStringLocal(caseManifest.root(), "split"));
+      if (split == "val")
+        split = "test";
 
       const std::filesystem::path sourceImage =
           ResolveGeometryAugAssetRefLocal(caseDirectory, sourceImageRef);
@@ -6809,6 +6830,28 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
       m_manualTest, "rebuild image set from evidence case: " +
                         (sel.case_id.empty() ? sel.script_id : sel.case_id));
 
+
+  const int geometryAugmentationCount =
+      AddGeometryAugmentationDatasetForCurrentSelection();
+  if (geometryAugmentationCount > 0) {
+    std::string imageLoadReason;
+    m_manualTest.selected_torch_training_image = -1;
+    const bool imageLoaded =
+        LoadTorchTrainingImageIntoAnnotationView(0, imageLoadReason);
+    const std::string manifestReason = m_manualTest.torch_training_image_reason;
+    m_manualTest.torch_training_image_status =
+        imageLoaded ? "GEOMETRY_AUGMENTATION_DATASET_BOUND"
+                    : "GEOMETRY_AUGMENTATION_IMAGE_LOAD_FAIL";
+    m_manualTest.torch_training_image_reason =
+        manifestReason +
+        " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
+        (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
+    CXLOG_INFO("TorchTrainingImageSet", "geometry_augmentation_sync_complete",
+               m_manualTest.torch_training_image_status,
+               m_manualTest.torch_training_image_reason);
+    return;
+  }
+
   if (!sel.dataset_images.empty()) {
     int added = 0;
     int preferredImageIndex = -1;
@@ -6896,27 +6939,6 @@ void ViewController::SyncTorchTrainingImageSetFromEvidenceSelection() {
         " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
         (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
     CXLOG_INFO("TorchTrainingImageSet", "hd_reference_manifest_sync_complete",
-               m_manualTest.torch_training_image_status,
-               m_manualTest.torch_training_image_reason);
-    return;
-  }
-
-  const int geometryAugmentationCount =
-      AddGeometryAugmentationDatasetForCurrentSelection();
-  if (geometryAugmentationCount > 0) {
-    std::string imageLoadReason;
-    m_manualTest.selected_torch_training_image = -1;
-    const bool imageLoaded =
-        LoadTorchTrainingImageIntoAnnotationView(0, imageLoadReason);
-    const std::string manifestReason = m_manualTest.torch_training_image_reason;
-    m_manualTest.torch_training_image_status =
-        imageLoaded ? "GEOMETRY_AUGMENTATION_DATASET_BOUND"
-                    : "GEOMETRY_AUGMENTATION_IMAGE_LOAD_FAIL";
-    m_manualTest.torch_training_image_reason =
-        manifestReason +
-        " image_view=" + (imageLoaded ? "loaded" : "not_loaded") +
-        (imageLoadReason.empty() ? "" : " reason=" + imageLoadReason);
-    CXLOG_INFO("TorchTrainingImageSet", "geometry_augmentation_sync_complete",
                m_manualTest.torch_training_image_status,
                m_manualTest.torch_training_image_reason);
     return;
@@ -8262,6 +8284,382 @@ bool ViewController::RunTorchTrainingLabelPackageSmoke(
   return pass;
 }
 
+static std::string SanitizeRunTokenLocal(std::string value) {
+  if (value.empty())
+    value = "run";
+  for (char &ch : value) {
+    const unsigned char uch = static_cast<unsigned char>(ch);
+    if (!std::isalnum(uch) && ch != '-' && ch != '_')
+      ch = '_';
+  }
+  return value;
+}
+
+static int FileNodeIntLocal(const cv::FileNode &node, const char *key,
+                            int fallback = 0) {
+  const cv::FileNode value = node[key];
+  return value.empty() ? fallback : static_cast<int>(value);
+}
+
+static bool WriteGuiGeometryAugRuntimePlanLocal(
+    const std::filesystem::path &templatePlanPath,
+    const std::filesystem::path &planPath,
+    bool includeBrightness,
+    bool includeLocalGap,
+    bool includeJaggedCut,
+    bool includeLineBreak,
+    float trainBrightness,
+    float testBrightness,
+    int gapWidth,
+    int gapHeight,
+    int jaggedPx,
+    int lineBreakPx,
+    int requestedEpochs,
+    float requestedLearningRate,
+    int &variantCount,
+    std::string &reason) {
+  variantCount = 0;
+  cv::FileStorage templatePlan;
+  try {
+    if (!templatePlan.open(templatePlanPath.string(),
+                           cv::FileStorage::READ |
+                               cv::FileStorage::FORMAT_JSON)) {
+      reason = "cannot open augmentation plan template: " +
+               templatePlanPath.string();
+      return false;
+    }
+  } catch (const cv::Exception &ex) {
+    reason = "augmentation plan template parse exception: " +
+             std::string(ex.what());
+    return false;
+  }
+
+  const cv::FileNode root = templatePlan.root();
+  if (FileNodeStringLocal(root, "schema") !=
+          "cxvision.geometry_augmentation_plan.v1" ||
+      !root["variants"].isSeq()) {
+    reason = "unsupported augmentation plan template schema: " +
+             templatePlanPath.string();
+    return false;
+  }
+
+  std::ostringstream out;
+  out << "{\n"
+      << "  \"schema\": \"cxvision.geometry_augmentation_plan.v1\",\n"
+      << "  \"training_enabled\": 0,\n"
+      << "  \"human_review_required\": 1,\n"
+      << "  \"source_template\": \"" << JsonEscape(templatePlanPath.string())
+      << "\",\n"
+      << "  \"split_policy\": "
+         "\"gui_adjustable_train_validation_variants_for_yolov8n_"
+         "incremental_prep\",\n"
+      << "  \"ui_parameters\": {\n"
+      << "    \"primary_model_family\": \"YOLOv8-n_detection\",\n"
+      << "    \"python_training_in_process\": false,\n"
+      << "    \"include_brightness\": "
+      << (includeBrightness ? "true" : "false") << ",\n"
+      << "    \"include_local_gap\": "
+      << (includeLocalGap ? "true" : "false") << ",\n"
+      << "    \"include_jagged_cut\": "
+      << (includeJaggedCut ? "true" : "false") << ",\n"
+      << "    \"include_line_break\": "
+      << (includeLineBreak ? "true" : "false") << ",\n"
+      << "    \"train_brightness_scale\": " << trainBrightness << ",\n"
+      << "    \"validation_brightness_scale\": " << testBrightness << ",\n"
+      << "    \"gap_width_px\": " << gapWidth << ",\n"
+      << "    \"gap_height_px\": " << gapHeight << ",\n"
+      << "    \"jagged_px\": " << jaggedPx << ",\n"
+      << "    \"line_break_px\": " << lineBreakPx << ",\n"
+      << "    \"requested_epochs\": " << requestedEpochs << ",\n"
+      << "    \"requested_learning_rate\": " << requestedLearningRate << "\n"
+      << "  },\n"
+      << "  \"variants\": [\n";
+
+  bool firstVariant = true;
+  for (const cv::FileNode &variant : root["variants"]) {
+    const std::string id = FileNodeStringLocal(variant, "id");
+    const std::string suffix = FileNodeStringLocal(variant, "review_suffix");
+    const std::string split = FileNodeStringLocal(variant, "split");
+    const int seed = FileNodeIntLocal(variant, "seed", 0);
+    const cv::FileNode operations = variant["operations"];
+    if (id.empty() || suffix.empty() || split.empty() || !operations.isSeq())
+      continue;
+
+    std::ostringstream opsOut;
+    bool firstOp = true;
+    int opCount = 0;
+    for (const cv::FileNode &op : operations) {
+      const std::string type = FileNodeStringLocal(op, "type");
+      if (type.empty())
+        continue;
+      if (type == "brightness_scale" && !includeBrightness)
+        continue;
+      if (type == "local_gap" && !includeLocalGap)
+        continue;
+      if (type == "edge_jagged_cut" && !includeJaggedCut)
+        continue;
+      if (type == "line_break" && !includeLineBreak)
+        continue;
+
+      if (!firstOp)
+        opsOut << ", ";
+      firstOp = false;
+      ++opCount;
+
+      opsOut << "{\"type\": \"" << JsonEscape(type) << "\"";
+      if (type == "gaussian_blur") {
+        opsOut << ", \"kernel\": " << FileNodeIntLocal(op, "kernel", 3)
+               << ", \"sigma\": " << FileNodeDoubleLocal(op, "sigma", 1.0);
+      } else if (type == "sensor_noise") {
+        opsOut << ", \"sigma\": " << FileNodeDoubleLocal(op, "sigma", 4.0);
+      } else if (type == "rotate") {
+        opsOut << ", \"angle_deg\": "
+               << FileNodeDoubleLocal(op, "angle_deg", 0.0);
+      } else if (type == "translate_y") {
+        opsOut << ", \"offset_y_px\": "
+               << FileNodeDoubleLocal(op, "offset_y_px", 0.0);
+      } else if (type == "brightness_scale") {
+        const bool validationSplit =
+            split == "validation" || split == "val" || split == "test";
+        opsOut << ", \"scale\": "
+               << (validationSplit ? testBrightness : trainBrightness)
+               << ", \"offset\": " << FileNodeDoubleLocal(op, "offset", 0.0);
+      } else if (type == "local_gap") {
+        const bool validationSplit =
+            split == "validation" || split == "val" || split == "test";
+        opsOut << ", \"width_px\": "
+               << (validationSplit ? gapWidth + 4 : gapWidth)
+               << ", \"height_px\": "
+               << (validationSplit ? gapHeight + 4 : gapHeight)
+               << ", \"count\": " << FileNodeIntLocal(op, "count", 1);
+      } else if (type == "edge_jagged_cut") {
+        const bool validationSplit =
+            split == "validation" || split == "val" || split == "test";
+        opsOut << ", \"width_px\": "
+               << (validationSplit ? gapWidth + 6 : gapWidth)
+               << ", \"height_px\": "
+               << (validationSplit ? gapHeight + 6 : gapHeight)
+               << ", \"count\": " << FileNodeIntLocal(op, "count", 1)
+               << ", \"jagged_px\": "
+               << (validationSplit ? jaggedPx + 1 : jaggedPx);
+      } else if (type == "line_break") {
+        const bool validationSplit =
+            split == "validation" || split == "val" || split == "test";
+        const int px = validationSplit ? lineBreakPx + 4 : lineBreakPx;
+        opsOut << ", \"width_px\": " << px << ", \"height_px\": " << px
+               << ", \"count\": " << FileNodeIntLocal(op, "count", 1);
+      }
+      opsOut << "}";
+    }
+    if (opCount <= 0)
+      continue;
+
+    if (!firstVariant)
+      out << ",\n";
+    firstVariant = false;
+    ++variantCount;
+    out << "    {\n"
+        << "      \"id\": \"" << JsonEscape(id) << "\",\n"
+        << "      \"review_suffix\": \"" << JsonEscape(suffix) << "\",\n"
+        << "      \"split\": \"" << JsonEscape(split) << "\",\n"
+        << "      \"seed\": " << seed << ",\n"
+        << "      \"operations\": [" << opsOut.str() << "]\n"
+        << "    }";
+  }
+
+  out << "\n  ]\n}\n";
+  if (variantCount <= 0) {
+    reason = "augmentation template produced no enabled variants";
+    return false;
+  }
+  if (!WriteTextFile(planPath, out.str())) {
+    reason = "failed to write runtime augmentation plan: " + planPath.string();
+    return false;
+  }
+  return true;
+}
+
+bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
+    std::string &reason) {
+  reason.clear();
+  const bool anyAugmentation =
+      m_manualTest.geometry_aug_include_brightness ||
+      m_manualTest.geometry_aug_include_local_gap ||
+      m_manualTest.geometry_aug_include_jagged_cut ||
+      m_manualTest.geometry_aug_include_line_break;
+  if (!anyAugmentation) {
+    reason = "select at least one augmentation family";
+    m_manualTest.geometry_aug_run_status = "AUGMENTATION_PLAN_EMPTY";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  const std::filesystem::path referenceIndex = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/"
+      "02_Automatic_Diagnostic_Closure/geometry_reference_cases/index.json");
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(referenceIndex, ec)) {
+    reason = "geometry reference index missing: " + referenceIndex.string();
+    m_manualTest.geometry_aug_run_status = "ASSET_MISSING";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+  const std::filesystem::path augmentationPlanTemplate = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/"
+      "02_Automatic_Diagnostic_Closure/geometry_reference_cases/"
+      "geometry_augmentation_plan.json");
+  if (!std::filesystem::is_regular_file(augmentationPlanTemplate, ec)) {
+    reason =
+        "geometry augmentation plan template missing: " +
+        augmentationPlanTemplate.string();
+    m_manualTest.geometry_aug_run_status = "ASSET_MISSING";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  const float trainBrightness =
+      std::clamp(m_manualTest.geometry_aug_train_brightness_scale, 0.10f,
+                 1.20f);
+  const float testBrightness =
+      std::clamp(m_manualTest.geometry_aug_test_brightness_scale, 0.10f,
+                 1.20f);
+  const int gapWidth = std::clamp(m_manualTest.geometry_aug_gap_width_px, 2, 80);
+  const int gapHeight =
+      std::clamp(m_manualTest.geometry_aug_gap_height_px, 2, 80);
+  const int jaggedPx = std::clamp(m_manualTest.geometry_aug_jagged_px, 1, 30);
+  const int lineBreakPx =
+      std::clamp(m_manualTest.geometry_aug_line_break_px, 2, 80);
+  m_manualTest.geometry_aug_epochs =
+      std::clamp(m_manualTest.geometry_aug_epochs, 1, 1000);
+  m_manualTest.geometry_aug_learning_rate =
+      std::clamp(m_manualTest.geometry_aug_learning_rate, 0.000001f, 1.0f);
+
+  const std::string runId =
+      "run_" + SanitizeRunTokenLocal(CurrentTimestamp()) + "_gui_aug_training";
+  const std::filesystem::path outputDir =
+      ResolveCxVisionRunPath("cxscript_runs/geometry_augmentation") / runId;
+  const std::filesystem::path planDir =
+      ResolveCxVisionRunPath("cxscript_runs/geometry_augmentation_runtime_plans") /
+      runId;
+  std::filesystem::create_directories(planDir, ec);
+  if (ec) {
+    reason = "cannot create runtime augmentation plan directory: " +
+             planDir.string() + " error=" + ec.message();
+    m_manualTest.geometry_aug_run_status = "PLAN_WRITE_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  int variantCount = 0;
+  const std::filesystem::path planPath =
+      planDir / "geometry_augmentation_plan_runtime.json";
+  if (!WriteGuiGeometryAugRuntimePlanLocal(
+          augmentationPlanTemplate, planPath,
+          m_manualTest.geometry_aug_include_brightness,
+          m_manualTest.geometry_aug_include_local_gap,
+          m_manualTest.geometry_aug_include_jagged_cut,
+          m_manualTest.geometry_aug_include_line_break,
+          trainBrightness, testBrightness, gapWidth, gapHeight, jaggedPx,
+          lineBreakPx, m_manualTest.geometry_aug_epochs,
+          m_manualTest.geometry_aug_learning_rate, variantCount, reason)) {
+    m_manualTest.geometry_aug_run_status = "PLAN_WRITE_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  CxGeometryAugmentationDatasetOptions options;
+  options.reference_index_path = referenceIndex;
+  options.augmentation_plan_path = planPath;
+  options.output_dir = outputDir;
+
+  CxGeometryAugmentationDatasetResult result;
+  if (!RunCxGeometryAugmentationDataset(options, result, reason)) {
+    m_manualTest.geometry_aug_run_status =
+        result.status.empty() ? "DATASET_GENERATION_FAIL" : result.status;
+    m_manualTest.geometry_aug_run_reason = reason;
+    m_manualTest.geometry_aug_output_dir = outputDir.string();
+    m_manualTest.geometry_aug_plan_path = planPath.string();
+    return false;
+  }
+
+  const std::filesystem::path trainingRequestPath =
+      outputDir / "yolov8n_incremental_training_request.json";
+  std::ostringstream request;
+  request << "{\n"
+          << "  \"schema\": "
+             "\"cxvision.yolov8n_incremental_training_request.v1\",\n"
+          << "  \"status\": \"PENDING_EXTERNAL_YOLOV8N_TRAINING\",\n"
+          << "  \"created_at\": \"" << JsonEscape(CurrentTimestamp())
+          << "\",\n"
+          << "  \"primary_model_family\": \"YOLOv8-n_detection\",\n"
+          << "  \"model_structure_policy\": "
+             "\"reuse_base_yolov8n_without_disassembly\",\n"
+          << "  \"python_training_in_process\": false,\n"
+          << "  \"base_weight_ref\": \"libtorch_module/models/yolov8n.pt\",\n"
+          << "  \"requested_epochs\": " << m_manualTest.geometry_aug_epochs
+          << ",\n"
+          << "  \"requested_learning_rate\": "
+          << m_manualTest.geometry_aug_learning_rate << ",\n"
+          << "  \"source_case_count\": " << result.source_case_count << ",\n"
+          << "  \"variant_count\": " << variantCount << ",\n"
+          << "  \"generated_sample_count\": "
+          << result.generated_sample_count << ",\n"
+          << "  \"rejected_sample_count\": " << result.rejected_sample_count
+          << ",\n"
+          << "  \"train_sample_count\": " << result.train_sample_count
+          << ",\n"
+          << "  \"validation_sample_count\": "
+          << result.validation_sample_count << ",\n"
+          << "  \"dataset_manifest_ref\": \"dataset_manifest.json\",\n"
+          << "  \"runtime_augmentation_plan\": \""
+          << JsonEscape(planPath.string()) << "\",\n"
+          << "  \"analysis_refs\": {\n"
+          << "    \"augmentation_report_json\": \"augmentation_report.json\",\n"
+          << "    \"augmentation_report_md\": \"augmentation_report.md\",\n"
+          << "    \"geometry_training_index\": \"geometry_training_index.json\",\n"
+          << "    \"metrology_target_index\": "
+             "\"metrology_target_index.json\"\n"
+          << "  },\n"
+          << "  \"acceptance_note\": "
+             "\"GUI prepared enhanced train/validation assets and training "
+             "parameters; actual YOLOv8-n incremental training and original/"
+             "new model inference comparison remain pending.\"\n"
+          << "}\n";
+  if (!WriteTextFile(trainingRequestPath, request.str())) {
+    reason = "dataset generated but training request write failed: " +
+             trainingRequestPath.string();
+    m_manualTest.geometry_aug_run_status = "TRAINING_REQUEST_WRITE_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  m_manualTest.geometry_aug_run_status = "AUGMENTED_TRAINING_PREP_READY";
+  m_manualTest.geometry_aug_run_reason =
+      "dataset generation complete; YOLOv8-n incremental training request "
+      "prepared; actual training pending external libtorch/YOLO binding";
+  m_manualTest.geometry_aug_output_dir = outputDir.string();
+  m_manualTest.geometry_aug_plan_path = planPath.string();
+  m_manualTest.geometry_aug_dataset_manifest_path =
+      result.dataset_manifest_path.string();
+  m_manualTest.geometry_aug_training_request_path =
+      trainingRequestPath.string();
+  m_manualTest.script_evidence_groups_dirty = true;
+  m_manualTest.script_evidence_row_refs_dirty = true;
+  m_manualTest.torch_training_image_status = "AUGMENTED_TRAINING_PREP_READY";
+  m_manualTest.torch_training_image_reason =
+      "generated_sample_count=" +
+      std::to_string(result.generated_sample_count) +
+      " train=" + std::to_string(result.train_sample_count) +
+      " validation=" + std::to_string(result.validation_sample_count) +
+      " request=" + trainingRequestPath.string();
+  reason = m_manualTest.geometry_aug_run_reason;
+  CXLOG_INFO("TorchTrainingImageSet", "geometry_augmentation_training_prep",
+             "AUGMENTED_TRAINING_PREP_READY",
+             "out=" + outputDir.string() + " plan=" + planPath.string() +
+                 " request=" + trainingRequestPath.string());
+  return true;
+}
+
 void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::SetNextWindowPos(ImVec2(1380, 740), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowSize(ImVec2(720, 760), ImGuiCond_FirstUseEver);
@@ -8290,6 +8688,78 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::Text("status: %s", m_manualTest.torch_training_image_status.c_str());
   ImGui::TextWrapped("reason: %s",
                      m_manualTest.torch_training_image_reason.c_str());
+
+  if (ImGui::CollapsingHeader("Augmented YOLOv8-n Training Prep",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Checkbox("Brightness", &m_manualTest.geometry_aug_include_brightness);
+    if (m_manualTest.geometry_aug_include_brightness) {
+      ImGui::SetNextItemWidth(160.0f);
+      ImGui::SliderFloat("Train brightness scale",
+                         &m_manualTest.geometry_aug_train_brightness_scale,
+                         0.10f, 1.20f, "%.2f");
+      ImGui::SetNextItemWidth(160.0f);
+      ImGui::SliderFloat("Test brightness scale",
+                         &m_manualTest.geometry_aug_test_brightness_scale,
+                         0.10f, 1.20f, "%.2f");
+    }
+    ImGui::Checkbox("Local gap",
+                    &m_manualTest.geometry_aug_include_local_gap);
+    ImGui::SameLine();
+    ImGui::Checkbox("Jagged cut",
+                    &m_manualTest.geometry_aug_include_jagged_cut);
+    ImGui::SameLine();
+    ImGui::Checkbox("Line break",
+                    &m_manualTest.geometry_aug_include_line_break);
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::SliderInt("Gap width px", &m_manualTest.geometry_aug_gap_width_px,
+                     2, 80);
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::SliderInt("Gap height px", &m_manualTest.geometry_aug_gap_height_px,
+                     2, 80);
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::SliderInt("Jagged px", &m_manualTest.geometry_aug_jagged_px, 1,
+                     30);
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::SliderInt("Line break px",
+                     &m_manualTest.geometry_aug_line_break_px, 2, 80);
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::InputInt("Requested epochs",
+                    &m_manualTest.geometry_aug_epochs);
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::InputFloat("Requested learning rate",
+                      &m_manualTest.geometry_aug_learning_rate, 0.0001f,
+                      0.001f, "%.6f");
+
+    const bool hasAugSelection =
+        m_manualTest.geometry_aug_include_brightness ||
+        m_manualTest.geometry_aug_include_local_gap ||
+        m_manualTest.geometry_aug_include_jagged_cut ||
+        m_manualTest.geometry_aug_include_line_break;
+    if (!hasAugSelection)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Generate Augmented Train/Test Set")) {
+      std::string generationReason;
+      RunGeometryAugmentationTrainingPrepFromGui(generationReason);
+    }
+    if (!hasAugSelection)
+      ImGui::EndDisabled();
+
+    ImGui::Text("prep_status: %s",
+                m_manualTest.geometry_aug_run_status.c_str());
+    ImGui::TextWrapped("prep_reason: %s",
+                       m_manualTest.geometry_aug_run_reason.c_str());
+    if (!m_manualTest.geometry_aug_output_dir.empty())
+      ImGui::TextWrapped("output_dir: %s",
+                         m_manualTest.geometry_aug_output_dir.c_str());
+    if (!m_manualTest.geometry_aug_dataset_manifest_path.empty())
+      ImGui::TextWrapped("dataset_manifest: %s",
+                         m_manualTest.geometry_aug_dataset_manifest_path.c_str());
+    if (!m_manualTest.geometry_aug_training_request_path.empty())
+      ImGui::TextWrapped(
+          "training_request: %s",
+          m_manualTest.geometry_aug_training_request_path.c_str());
+    ImGui::Separator();
+  }
 
   const CxTorchTrainingRunBinding &trainingRun =
       m_manualTest.torch_training_run;

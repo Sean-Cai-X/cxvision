@@ -275,7 +275,10 @@ public:
     gp_Path& getpath() { return m_path; }
     SLine getline(){return m_line;}
     void setline(int ix0,int iy0,int ix1,int iy1);
+    void setline(double x0, double y0, double x1, double y1);
+    void MoveBy(double dx, double dy);
     void setshow(int ishow);
+
     void linecopy(Image&srcImage, Image&desImage);
     void linecopyex(Image&srcImage, Image&desImage,int ix,int iy);
     void crosspoint(LineShape &aline);
@@ -515,7 +518,7 @@ enum RectDirction{
     down_pure_dir = 14,
     down_cross_dir = 15,
     down_purex_dir = 16
-} ;
+} ;
 class RectsShape:public ShapeBase
 {
 public:

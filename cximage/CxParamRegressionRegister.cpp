@@ -263,6 +263,14 @@ double ParamCandidate_setlinegap(double value)
     return 0.0;
 }
 
+double ParamCandidate_setminedgerunwidth(double value)
+{
+    if (g_current_param_candidate)
+        g_current_param_candidate->min_edge_run_width_px =
+            std::max(1, std::min(20, static_cast<int>(value)));
+    return 0.0;
+}
+
 double ParamCandidate_setwgap(double value)
 {
     if (g_current_param_candidate) g_current_param_candidate->wgap = static_cast<int>(value);
@@ -348,6 +356,8 @@ void RegisterCxParamRegressionBindings(mu::Parser& parser)
     parser.DefineFun("ParamCandidate_setthreshold", (mu::fun_type1)&ParamCandidate_setthreshold);
     parser.DefineFun("ParamCandidate_setgap", (mu::fun_type1)&ParamCandidate_setgap);
     parser.DefineFun("ParamCandidate_setlinegap", (mu::fun_type1)&ParamCandidate_setlinegap);
+    parser.DefineFun("ParamCandidate_setminedgerunwidth",
+                     (mu::fun_type1)&ParamCandidate_setminedgerunwidth);
     parser.DefineFun("ParamCandidate_setwgap", (mu::fun_type1)&ParamCandidate_setwgap);
     parser.DefineFun("ParamCandidate_sethgap", (mu::fun_type1)&ParamCandidate_sethgap);
     parser.DefineFun("ParamCandidate_setfilterprofile", (mu::fun_type1)&ParamCandidate_setfilterprofile);

@@ -1,0 +1,34 @@
+{
+  "schema": "cxvision.open_boundary_geometry.v1",
+  "geometry_type": "cubic_bezier",
+  "closed": false,
+  "control_points_xy": [
+    [
+      75,
+      285
+    ],
+    [
+      155,
+      45
+    ],
+    [
+      365,
+      325
+    ],
+    [
+      415,
+      95
+    ]
+  ],
+  "endpoints_xy": [
+    [
+      75,
+      285
+    ],
+    [
+      415,
+      95
+    ]
+  ],
+  "measurement_width_px": 4
+}

@@ -1,0 +1,23 @@
+{
+  "schema": "cxvision.open_boundary_geometry.v1",
+  "geometry_type": "circular_arc",
+  "closed": false,
+  "center_xy": [
+    240,
+    190
+  ],
+  "radius_px": 125,
+  "start_angle_deg": 205,
+  "end_angle_deg": 335,
+  "endpoints_xy": [
+    [
+      126.7,
+      137.2
+    ],
+    [
+      353.3,
+      137.2
+    ]
+  ],
+  "measurement_width_px": 4
+}

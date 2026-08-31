@@ -215,12 +215,24 @@ struct FindLineMeasureInputDebug
         double accepted_y = 0.0;
         std::vector<double> accepted_points_xy;
         int candidate_count = 0;
+        int binary_logical_row = -1;
+        int binary_sample_row = -1;
+        int binary_logical_foreground_count = 0;
+        int binary_logical_plus1_foreground_count = 0;
+        int binary_logical_plus2_foreground_count = 0;
+        int binary_sample_foreground_count = 0;
+        int threshold_run_count = 0;
+        int threshold_max_run_width = 0;
+        int threshold_first_run_start = -1;
+        int threshold_first_run_end = -1;
+        int threshold_last_run_start = -1;
+        int threshold_last_run_end = -1;
+        int min_edge_run_width_px = 1;
+        int rejected_min_edge_run_width = 0;
         std::string reject_reason;
     };
-
     bool image_ptr_valid = false;
     bool image_mat_ready = false;
-
     int image_width = 0;
     int image_height = 0;
     int image_channels = 0;
@@ -294,6 +306,7 @@ struct FindLineMeasureInputDebug
     int scan_runs_over_length_limit = 0;
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
+    int scan_runs_rejected_by_min_edge_width = 0;
     int scan_points_emitted = 0;
     int point_consistency_enabled = 0;
     double point_consistency_range = 0.0;
@@ -401,6 +414,7 @@ public:
     double getscanrotation() const { return m_scan_rotation_degrees; }
     int thre();
     int linegap() { return m_iSelectPointGap; }
+    int minedgerunwidth() const { return m_min_edge_run_width_px; }
     int objfilter() const { return m_iobjfilterset; }
     double inputlinex0() const { return m_display_line_x0; }
     double inputliney0() const { return m_display_line_y0; }
@@ -489,6 +503,7 @@ public:
 
     void setlinesamplerate(double dsamplerate);
     void setlinegap(int igap);
+    void setminedgerunwidth(int width);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
@@ -658,7 +673,8 @@ private:
     int m_filter_profile = 0;
     bool m_filter_explicit = false;
     int m_findobject_strategy_id = 0;
-    int m_point_consistency_enabled = 0;
+    int m_point_consistency_enabled = 1;
+
     int m_point_consistency_range = 0;
     int m_point_consistency_removed_points = 0;
     int m_effective_filter_borw = 0;
@@ -667,6 +683,7 @@ private:
 
     int m_iselectedgenum;
     int m_ineedfixs;
+    int m_min_edge_run_width_px;
 
     int m_ncurscan;
     int m_nscansize;
@@ -703,16 +720,12 @@ private:
                                         FindLineMeasureProfileStats& stats);
     void RunFindObjectPrefilter(Image& process_image);
     void ApplyPointConsistencyConstraint();
-    int ApplyPointConsistencyConstraintToPoints(
-        PointsShape& points,
-        double ux,
-        double uy,
-        double nx,
-        double ny,
-        double range);
+    void ReconcilePointConsistencyDiagnostics();
+    int ApplyPointConsistencyConstraintToPoints(PointsShape&, double, double, double, double, double);
 
     void BuildScanProfilesRobust(Image& image, FindLineMeasureProfileStats& stats);
     void CollectEdgeBandsRobust(Image& image, FindLineMeasureProfileStats& stats);
+
     void BuildFeatureGraph(FindLineMeasureProfileStats& stats);
     void FindComponentsInGraph(FindLineMeasureProfileStats& stats);
     void SelectBestSequence(FindLineMeasureProfileStats& stats);

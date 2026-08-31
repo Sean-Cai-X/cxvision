@@ -1,0 +1,16 @@
+{
+  "schema": "cxvision.open_boundary_geometry.v1",
+  "geometry_type": "line",
+  "closed": false,
+  "endpoints_xy": [
+    [
+      90,
+      290
+    ],
+    [
+      395,
+      75
+    ]
+  ],
+  "measurement_width_px": 4
+}

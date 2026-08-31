@@ -37,6 +37,8 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
+
 #include <sstream>
 #include <vector>
 
@@ -1903,6 +1905,8 @@ void PipelineApplyTargetToCandidate(const CxScriptImageTargetRoi &target,
     candidate.gap = target.gap;
   if (target.has_linegap)
     candidate.linegap = target.linegap;
+  if (target.has_min_edge_run_width_px)
+    candidate.min_edge_run_width_px = target.min_edge_run_width_px;
   if (target.has_wgap)
     candidate.wgap = target.wgap;
   if (target.has_hgap)
@@ -2287,13 +2291,41 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions &options) {
       record.fit_available = probeResult.fit_available;
       record.support_score = probeResult.support_score;
       record.mean_distance = probeResult.mean_distance;
+      record.fit_offset = probeResult.fit_offset;
       record.failure_stage = probeResult.failure_stage;
+
       record.classification = probeResult.fit_available
                                   ? "geometry_available"
                                   : "geometry_unavailable";
       record.result_summary_path = probeResult.result_summary_path;
       record.tool_display_path = probeResult.tool_display_path;
       record.replay_package_path = probe.out_dir;
+      record.image_id = caseTask.image_id;
+      record.target_id = caseTask.target_id;
+      record.image_path = probe.image_path;
+      record.script_path = probe.script_path;
+      record.contract_path = probe.contract_path;
+      record.timeout_seconds = probe.timeout_seconds;
+      record.roi_x0 = probe.roi_x0;
+      record.roi_y0 = probe.roi_y0;
+      record.roi_x1 = probe.roi_x1;
+      record.roi_y1 = probe.roi_y1;
+      record.tool_half_width = probe.tool_half_width;
+      record.max_elapsed_ms = probe.max_elapsed_ms;
+      record.max_scan_lines = probe.max_scan_lines;
+      record.max_samples = probe.max_samples;
+      record.method = caseCandidate.method;
+      record.threshold = caseCandidate.threshold;
+      record.gap = caseCandidate.gap;
+      record.linegap = caseCandidate.linegap;
+      record.wgap = caseCandidate.wgap;
+      record.hgap = caseCandidate.hgap;
+      record.filterprofile = caseCandidate.filterprofile;
+      record.samplerate = caseCandidate.samplerate;
+      record.min_score = caseCandidate.min_score;
+      record.find_num = caseCandidate.find_num;
+      record.compare_gap = caseCandidate.compare_gap;
+
       runtime.records.push_back(record);
 
       ParamRegressionLoopRow row;
@@ -2318,6 +2350,7 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions &options) {
   }
 
   std::vector<CxParamAccuracyStats> stats;
+  std::map<std::string, int> metric_counts;
   for (const auto &record : runtime.records) {
     CxParamAccuracyStats *stat = nullptr;
     for (auto &existing : stats) {
@@ -2339,25 +2372,32 @@ int RunParamRegressionLoopCli(const EvidenceChainSelfTestCliOptions &options) {
     stat->timeout_cases += record.timeout ? 1 : 0;
     stat->geometry_pass += record.fit_available ? 1 : 0;
     stat->evidence_pass += record.points > 0 ? 1 : 0;
-    stat->avg_support_score += record.support_score;
-    stat->avg_mean_distance += record.mean_distance;
-    stat->avg_fit_offset += record.fit_offset;
+    if (record.fit_available && record.points > 0) {
+      stat->avg_support_score += record.support_score;
+      stat->avg_mean_distance += record.mean_distance;
+      stat->avg_fit_offset += record.fit_offset;
+      metric_counts[record.candidate_id] += 1;
+    }
   }
 
   for (auto &s : stats) {
     const double total =
         s.total_cases > 0 ? static_cast<double>(s.total_cases) : 1.0;
+    const int metric_count = metric_counts[s.candidate_id];
+    const double metric_total =
+        metric_count > 0 ? static_cast<double>(metric_count) : 1.0;
     s.geometry_pass_rate = static_cast<double>(s.geometry_pass) / total;
     s.evidence_pass_rate = static_cast<double>(s.evidence_pass) / total;
     s.human_accept_rate =
         s.total_cases > 0 ? static_cast<double>(s.human_accept) / total : 0.0;
-    s.avg_support_score /= total;
-    s.avg_mean_distance /= total;
-    s.avg_fit_offset /= total;
+    s.avg_support_score /= metric_total;
+    s.avg_mean_distance /= metric_total;
+    s.avg_fit_offset /= metric_total;
     const double timeout_penalty = static_cast<double>(s.timeout_cases) / total;
     s.stability_score = (s.geometry_pass_rate + s.evidence_pass_rate) * 0.5;
     s.risk_score = std::min(1.0, (1.0 - s.stability_score) + timeout_penalty);
   }
+
 
   std::string exportReason;
   const bool exportOk = ExportParamRegressionReports(

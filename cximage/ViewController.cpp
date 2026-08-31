@@ -497,6 +497,11 @@ bool stageEvidenceSelfTestScriptGlobals(
       setRequiredIntIfUsed("global_linegap", existingOr("global_linegap", 3))
           ? 1
           : 0;
+  applied += setRequiredIntIfUsed(
+                 "global_min_edge_run_width_px",
+                 existingOr("global_min_edge_run_width_px", 3))
+                 ? 1
+                 : 0;
   applied += setRequiredIntIfUsed("global_wgap", existingOr("global_wgap", 32))
                  ? 1
                  : 0;
@@ -912,6 +917,7 @@ void syncEvidenceLockedGlobalsToManualGauge(ManualTestContext &context,
   gauge.threshold = getInt("global_threshold", 20);
   gauge.method = getInt("global_method", 0);
   gauge.linegap = getInt("global_linegap", 3);
+  gauge.min_edge_run_width_px = getInt("global_min_edge_run_width_px", 3);
   gauge.wgap = getInt("global_wgap", 32);
   gauge.hgap = getInt("global_hgap", 8);
   gauge.gap = getInt("global_gap", 5);

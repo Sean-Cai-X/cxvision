@@ -653,7 +653,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     LineShape *plineshape = nullptr;
     m_parser.DefineClass("LineShape", plineshape);
     m_parser.DefineClassFun("LineShape", plineshape, "setline",
-                            &LineShape::setline);
+                            static_cast<void (LineShape::*)(
+                                double, double, double, double)>(
+                                &LineShape::setline));
     m_parser.DefineClassFun("LineShape", plineshape, "Show",
                             &LineShape::setshow);
     m_parser.DefineClassFun("LineShape", plineshape, "move", &LineShape::Move);
@@ -999,10 +1001,13 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "measureRobust", &FindLine::measureRobust);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline,
                             "setlinesample", &FindLine::setlinesamplerate);
-    m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap",
-                            &FindLine::setlinegap);
-    m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod",
-                            &FindLine::setmethod);
+  m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap",
+                          &FindLine::setlinegap);
+  m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                          "setminedgerunwidth",
+                          &FindLine::setminedgerunwidth);
+  m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod",
+                          &FindLine::setmethod);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setthre",
                             &FindLine::setthre);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setgama",
@@ -1184,6 +1189,10 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindSegmentation::setnegativepointxy);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmode",
                             &FindSegmentation::setmode);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setgeometrytype",
+                            &FindSegmentation::setgeometrytype);
+
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "segment",
                             &FindSegmentation::segment);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
@@ -1199,6 +1208,34 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
                             "get_primary_area",
                             &FindSegmentation::get_primary_area);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_count",
+                            &FindSegmentation::get_geometry_count);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_residual",
+                            &FindSegmentation::get_geometry_residual);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_support",
+                            &FindSegmentation::get_geometry_support);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_center_x",
+                            &FindSegmentation::get_geometry_center_x);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_center_y",
+                            &FindSegmentation::get_geometry_center_y);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_radius",
+                            &FindSegmentation::get_geometry_radius);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_axis_x",
+                            &FindSegmentation::get_geometry_axis_x);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_axis_y",
+                            &FindSegmentation::get_geometry_axis_y);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "get_geometry_angle_deg",
+                            &FindSegmentation::get_geometry_angle_deg);
+
 
     TorchTask *ptorch_task = nullptr;
     m_parser.DefineClass("TorchTask", ptorch_task);

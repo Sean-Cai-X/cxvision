@@ -1825,6 +1825,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
           } else {
             m_manualTest.debug_status = "shape_drag_exported";
             m_manualTest.debug_reason = exportReason;
+
+            RecordManualOperationTraceEvent(
+                m_manualTest, "annotation_shape_drag_commit",
+                gaugeApplied ? "exported" : "export_failed",
+                "ref=" + commit.stable_ref + " owner=" + commit.owner_type +
+                    " binding=" + commit.owner_binding + " reason=" +
+                    exportReason);
           }
           CXLOG_INFO("ImageAnnotationUI", "annotation_drag_export", "finished",
                      "ref=" + commit.stable_ref +

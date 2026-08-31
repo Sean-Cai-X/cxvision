@@ -675,6 +675,7 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
   set("global_threshold", 20);
   set("global_method", 0);
   set("global_linegap", 6);
+  set("global_min_edge_run_width_px", 3);
   set("global_wgap", 32);
   set("global_hgap", 8);
   set("global_tool_half_width", 32);
@@ -897,6 +898,8 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
   gauge.threshold = context.runtime_int_vars["global_threshold"];
   gauge.method = context.runtime_int_vars["global_method"];
   gauge.linegap = context.runtime_int_vars["global_linegap"];
+  gauge.min_edge_run_width_px =
+      context.runtime_int_vars["global_min_edge_run_width_px"];
 
   if (isCircleScript) {
     gauge.tool = "FindCircle";
@@ -947,6 +950,8 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     gauge.tool_half_width = context.runtime_int_vars["global_tool_half_width"];
     gauge.wgap = context.runtime_int_vars["global_wgap"];
     gauge.hgap = context.runtime_int_vars["global_hgap"];
+    gauge.min_edge_run_width_px =
+        context.runtime_int_vars["global_min_edge_run_width_px"];
   } else if (isGridPatternScript) {
     gauge.tool = "GridPatternClassTool";
     gauge.primary_object_type = "GridPatternClassTool";

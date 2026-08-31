@@ -1,4 +1,6 @@
 #include "CircleShape.h"
+#include "EllipseShape.h"
+
 #include "FindSegmentation.h"
 #include "FindSegmentationEdgeSamBackend.h"
 #include "FindSegmentationOpenCvSmokeBackend.h"
@@ -97,6 +99,11 @@ void FindSegmentation::setnegativepointxy(int y, int x) {
 }
 
 void FindSegmentation::setmode(int mode) { m_mode = mode; }
+
+void FindSegmentation::setgeometrytype(const char *geometry_type) {
+  m_geometry_type = geometry_type == nullptr ? "" : geometry_type;
+}
+
 
 void FindSegmentation::segment(void *image) {
   std::cout << "[FindSegmentation] segment begin image=" << image << "\n"
@@ -270,6 +277,10 @@ void FindSegmentation::segment(void *image) {
   if (m_result.result_stage == "not_run")
     m_result.result_stage = m_result.ok ? "raw" : "failed";
 
+  if (m_result.ok && !m_geometry_type.empty())
+    extractboundary();
+
+
   m_status = m_result.status;
   m_reason = m_result.reason;
   m_backend_diagnostic.backend =
@@ -306,7 +317,46 @@ void FindSegmentation::segment(void *image) {
             << std::flush;
 }
 
-void FindSegmentation::extractboundary() {}
+void FindSegmentation::extractboundary() {
+  m_result.primitive_hypotheses.clear();
+  m_result.requested_geometry_type = m_geometry_type;
+  m_result.geometry_fit_status = "not_run";
+  m_result.geometry_fit_reason.clear();
+
+  if (m_geometry_type.empty()) {
+    m_result.geometry_fit_status = "GEOMETRY_TYPE_REQUIRED";
+    m_result.geometry_fit_reason =
+        "setgeometrytype must be called with circle, ellipse, or line";
+    return;
+  }
+
+  const FindSegmentationContour *best = nullptr;
+  for (const FindSegmentationContour &contour : m_result.contours) {
+    if (best == nullptr || contour.area > best->area)
+      best = &contour;
+  }
+  if (best == nullptr || best->points.empty()) {
+    m_result.geometry_fit_status = "CONTOUR_EMPTY";
+    m_result.geometry_fit_reason =
+        "segmentation produced no contour for geometry fitting";
+    return;
+  }
+
+  CxSegmentationGeometryFitOptions options;
+  options.geometry_type = m_geometry_type;
+  options.tolerance_policy_ref = m_postprocess_profile.empty()
+      ? "unbound_geometry_tolerance"
+      : m_postprocess_profile;
+  CxSegmentationGeometryFitResult fit;
+  FitCxSegmentationContourGeometry(best->points, options, fit);
+  m_result.geometry_fit_status = fit.status;
+  m_result.geometry_fit_reason = fit.reason;
+  if (!fit.complete)
+    return;
+
+  m_result.primitive_hypotheses.push_back(std::move(fit.hypothesis));
+  m_result.refinement_method = "seg_contour_fit:" + m_geometry_type;
+}
 
 void FindSegmentation::buildoverlay(void *image) {
   if (image == nullptr)
@@ -339,6 +389,59 @@ int FindSegmentation::status_code() { return m_result.ok ? 1 : 0; }
 int FindSegmentation::get_contour_count() { return m_result.contour_count; }
 
 double FindSegmentation::get_primary_area() { return m_result.primary_area; }
+
+int FindSegmentation::get_geometry_count() {
+  return static_cast<int>(m_result.primitive_hypotheses.size());
+}
+
+double FindSegmentation::get_geometry_residual() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().classical_fit_residual_px;
+}
+
+double FindSegmentation::get_geometry_support() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().support;
+}
+
+double FindSegmentation::get_geometry_center_x() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().center.x;
+}
+
+double FindSegmentation::get_geometry_center_y() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().center.y;
+}
+
+double FindSegmentation::get_geometry_radius() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().radius;
+}
+
+double FindSegmentation::get_geometry_axis_x() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().axes.width;
+}
+
+double FindSegmentation::get_geometry_axis_y() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().axes.height;
+}
+
+double FindSegmentation::get_geometry_angle_deg() {
+  return m_result.primitive_hypotheses.empty()
+      ? 0.0
+      : m_result.primitive_hypotheses.front().angle_deg;
+}
+
 
 const std::string &FindSegmentation::backend() const { return m_backend; }
 
@@ -396,4 +499,34 @@ void FindSegmentation::PublishDisplayShapes(
   sink.UpsertShape(owner_ref + ".boundary_bbox", "FindSegmentation", owner_ref,
                    "boundary_bbox", "boundary_bbox", false, true,
                    std::move(rect));
+
+  if (m_result.primitive_hypotheses.empty())
+    return;
+  const CxGeometryPrimitiveHypothesis &geometry =
+      m_result.primitive_hypotheses.front();
+  std::unique_ptr<ShapeBase> geometry_shape;
+  if (geometry.geometry_type == "circle" && geometry.radius > 0.0) {
+    geometry_shape = std::make_unique<CircleShape>(
+        geometry.center.x, geometry.center.y, geometry.radius);
+  } else if (geometry.geometry_type == "ellipse" &&
+             geometry.axes.width > 0.0 && geometry.axes.height > 0.0) {
+    geometry_shape = std::make_unique<EllipseShape>(
+        geometry.center.x, geometry.center.y, geometry.axes.width,
+        geometry.axes.height, geometry.angle_deg);
+  } else if (geometry.geometry_type == "line" &&
+             geometry.ordered_points.size() == 2) {
+    auto line = std::make_unique<PolylineShape>();
+    line->addPoint(geometry.ordered_points[0].x,
+                   geometry.ordered_points[0].y);
+    line->addPoint(geometry.ordered_points[1].x,
+                   geometry.ordered_points[1].y);
+    line->close(false);
+    geometry_shape = std::move(line);
+  }
+  if (geometry_shape) {
+    sink.UpsertShape(owner_ref + ".geometry_fit", "FindSegmentation",
+                     owner_ref, "geometry_fit", geometry.geometry_type,
+                     false, true, std::move(geometry_shape));
+  }
+
 }

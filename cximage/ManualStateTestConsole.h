@@ -635,6 +635,7 @@ struct ManualGaugeState {
   int hgap = 8;
   int scan_direction = 2; // 1=W-only, 2=H-only; Manual UI is exclusive.
   int linegap = 6;
+  int min_edge_run_width_px = 3;
   int threshold = 20;
   int filterprofile = 1;
   int method = 2;
@@ -757,6 +758,8 @@ struct ManualMetrologyUiState {
   int profile_cursor_permille = 500;
   bool profile_cursor_user_dragged = false;
   int profile_cursor_gauge_line_num = 0;
+  std::string profile_cursor_source_key;
+
 
 
 
@@ -1186,6 +1189,20 @@ struct ManualFindCircleEdgeParamState {
   int gap = 6;
 };
 
+struct ManualOperationTraceEvent {
+  unsigned long long sequence = 0;
+  unsigned long long key_parameter_edit_revision = 0;
+  std::string operation;
+  std::string status;
+  std::string reason;
+  std::string summary;
+  std::string editor_source;
+  std::string loaded_script_path;
+  CxEvidenceSelectionSnapshot evidence_selection;
+  ManualGaugeState gauge;
+  std::unordered_map<std::string, int> globals;
+};
+
 struct ManualTestContext {
   std::string script_file_path;
   std::string image_file_path;
@@ -1336,6 +1353,24 @@ struct ManualTestContext {
   std::string torch_training_image_reason =
       "training image set not initialized";
   CxTorchTrainingRunBinding torch_training_run;
+  bool geometry_aug_include_brightness = true;
+  bool geometry_aug_include_local_gap = true;
+  bool geometry_aug_include_jagged_cut = true;
+  bool geometry_aug_include_line_break = true;
+  float geometry_aug_train_brightness_scale = 0.72f;
+  float geometry_aug_test_brightness_scale = 0.42f;
+  int geometry_aug_gap_width_px = 14;
+  int geometry_aug_gap_height_px = 22;
+  int geometry_aug_jagged_px = 5;
+  int geometry_aug_line_break_px = 14;
+  int geometry_aug_epochs = 50;
+  float geometry_aug_learning_rate = 0.001f;
+  std::string geometry_aug_run_status = "PENDING";
+  std::string geometry_aug_run_reason = "not generated from GUI";
+  std::string geometry_aug_output_dir;
+  std::string geometry_aug_plan_path;
+  std::string geometry_aug_dataset_manifest_path;
+  std::string geometry_aug_training_request_path;
 
   std::vector<EvidenceChainThumb> evidence_chain_thumbs;
   int selected_evidence_thumb = -1;
@@ -1370,6 +1405,9 @@ struct ManualTestContext {
   ManualGaugeState pending_execution_gauge;
   std::unordered_map<std::string, int> pending_execution_globals;
   std::string pending_execution_candidate_id;
+
+  unsigned long long manual_operation_trace_sequence = 0;
+  std::vector<ManualOperationTraceEvent> pending_manual_operation_trace_events;
 
   unsigned long long key_parameter_edit_revision = 0;
   std::string last_key_parameter_edit_summary;

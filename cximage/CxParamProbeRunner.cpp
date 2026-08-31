@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "CxParamProbeRunner.h"
 #include "CxScriptHeadlessRuntime.h"
+#include <cmath>
+
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -13,6 +15,7 @@ void InjectCandidateGlobals(
     options.threshold = candidate.threshold;
     options.gap = candidate.gap;
     options.linegap = candidate.linegap;
+    options.min_edge_run_width_px = candidate.min_edge_run_width_px;
     options.wgap = candidate.wgap;
     options.hgap = candidate.hgap;
     options.filterprofile = candidate.filterprofile;
@@ -96,9 +99,15 @@ bool RunSingleParamProbe(
 
     result.candidate_points = headless_result.valid_points_count;
     result.fit_available = headless_result.has_fit_line || headless_result.has_fit_circle;
-    result.mean_distance = headless_result.avgdist;
-    result.support_available = headless_result.support_available;
-    if (result.support_available)
+    const bool has_valid_geometry_metric =
+        result.fit_available && result.candidate_points > 0;
+    if (has_valid_geometry_metric && std::isfinite(headless_result.avgdist))
+        result.mean_distance = headless_result.avgdist;
+    if (has_valid_geometry_metric && std::isfinite(headless_result.fit_offset))
+        result.fit_offset = headless_result.fit_offset;
+    result.support_available =
+        has_valid_geometry_metric && headless_result.support_available;
+    if (result.support_available && std::isfinite(headless_result.local_support))
         result.support_score = headless_result.local_support;
 
     result.probe_ok =
@@ -108,4 +117,5 @@ bool RunSingleParamProbe(
         result.assets_complete &&
         !result.timeout;
     return result.probe_ok;
+
 }

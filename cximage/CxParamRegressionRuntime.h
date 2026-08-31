@@ -53,6 +53,7 @@ struct CxParamCandidate
     int threshold = 20;
     int gap = 5;
     int linegap = 6;
+    int min_edge_run_width_px = 3;
     int wgap = 8;
     int hgap = 32;
     int filterprofile = 1;
@@ -83,6 +84,33 @@ struct CxParamEvalRecord
     std::string result_summary_path;
     std::string tool_display_path;
     std::string replay_package_path;
+    std::string image_id;
+    std::string target_id;
+    std::string image_path;
+    std::string script_path;
+    std::string contract_path;
+    int timeout_seconds = 0;
+    int roi_x0 = 0;
+    int roi_y0 = 0;
+    int roi_x1 = 0;
+    int roi_y1 = 0;
+    int tool_half_width = 0;
+    int max_elapsed_ms = 0;
+    int max_scan_lines = 0;
+    int max_samples = 0;
+    int method = 0;
+    int threshold = 0;
+    int gap = 0;
+    int linegap = 0;
+    int min_edge_run_width_px = 0;
+    int wgap = 0;
+    int hgap = 0;
+    int filterprofile = 0;
+    int samplerate = 0;
+    double min_score = 0.0;
+    int find_num = 0;
+    int compare_gap = 0;
+
 };
 
 struct CxHitDistributionBin

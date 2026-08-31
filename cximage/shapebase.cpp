@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "FindLine.h"
 #include "Sysctl.h"
@@ -296,16 +296,21 @@ LineShape::LineShape() {
   m_path.AddPoint(m_line.EndPoint());
 }
 double LineShape::getlinedistance() {
-  int x = m_line.StartPoint().X();
-  int y = m_line.StartPoint().Y();
-  int x0 = m_line.EndPoint().X();
-  int y0 = m_line.EndPoint().Y();
+  const double x = m_line.StartPoint().X();
+  const double y = m_line.StartPoint().Y();
+  const double x0 = m_line.EndPoint().X();
+  const double y0 = m_line.EndPoint().Y();
 
   return sqrt((x - x0) * (x - x0) + (y - y0) * (y - y0));
 }
 
 void LineShape::setline(int ix0, int iy0, int ix1, int iy1) {
-  m_line.setLine(ix0, iy0, ix1, iy1);
+  setline(static_cast<double>(ix0), static_cast<double>(iy0),
+          static_cast<double>(ix1), static_cast<double>(iy1));
+}
+
+void LineShape::setline(double x0, double y0, double x1, double y1) {
+  m_line.setLine(gp_Pnt(x0, y0, 0), gp_Pnt(x1, y1, 0));
 
   gp_Path path;
   path.AddPoint(m_line.StartPoint());
@@ -313,14 +318,18 @@ void LineShape::setline(int ix0, int iy0, int ix1, int iy1) {
   m_path = path;
 }
 
-void LineShape::Move(int ix, int iy) {
+void LineShape::MoveBy(double dx, double dy) {
   const gp_Pnt start = m_line.StartPoint();
   const gp_Pnt end = m_line.EndPoint();
-  m_line.setLine(gp_Pnt(start.X() + ix, start.Y() + iy, start.Z()),
-                 gp_Pnt(end.X() + ix, end.Y() + iy, end.Z()));
+  m_line.setLine(gp_Pnt(start.X() + dx, start.Y() + dy, start.Z()),
+                 gp_Pnt(end.X() + dx, end.Y() + dy, end.Z()));
 
-  gp_Vec translationVector(ix, iy, 0);
+  gp_Vec translationVector(dx, dy, 0);
   m_path.Translate(translationVector);
+}
+
+void LineShape::Move(int ix, int iy) {
+  MoveBy(static_cast<double>(ix), static_cast<double>(iy));
 }
 void LineShape::Rotate(double dangle) {
   gp_Pnt apoint(0, 0, 0);

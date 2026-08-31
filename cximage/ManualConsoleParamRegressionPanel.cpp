@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
-#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+
 #include <cstdlib>
 #include <fstream>
 #include <random>
@@ -195,6 +197,32 @@ CxParamEvalRecord BuildManualSeedEvalRecord(const ManualTestContext &context,
   record.result_summary_path = (case_dir / "result_summary.json").string();
   record.tool_display_path = (case_dir / "tool_display.png").string();
   record.replay_package_path = (case_dir / "replay_package.json").string();
+  record.image_id = task.image_id;
+  record.target_id = task.target_id;
+  record.image_path = context.image_file_path;
+  record.script_path = context.loaded_script_path.empty() ? context.script_file_path
+                                                         : context.loaded_script_path;
+  record.timeout_seconds = context.param_regression.max_case_seconds;
+  record.roi_x0 = context.current_gauge.line_x0;
+  record.roi_y0 = context.current_gauge.line_y0;
+  record.roi_x1 = context.current_gauge.line_x1;
+  record.roi_y1 = context.current_gauge.line_y1;
+  record.tool_half_width = context.current_gauge.tool_half_width;
+  record.max_elapsed_ms = 5000;
+  record.max_scan_lines = 4096;
+  record.max_samples = 200000;
+  record.method = context.current_gauge.method;
+  record.threshold = context.current_gauge.threshold;
+  record.gap = context.current_gauge.gap;
+  record.linegap = context.current_gauge.linegap;
+  record.min_edge_run_width_px =
+      context.current_gauge.min_edge_run_width_px;
+  record.wgap = context.current_gauge.wgap;
+  record.hgap = context.current_gauge.hgap;
+  record.filterprofile = context.current_gauge.filterprofile;
+  record.samplerate = 1;
+  record.find_num = 1;
+
   return record;
 }
 
@@ -266,6 +294,8 @@ CxParamCandidate CandidateFromManualGauge(const ManualGaugeState &gauge,
   c.threshold = gauge.threshold;
   c.gap = gauge.gap;
   c.linegap = gauge.linegap;
+  c.min_edge_run_width_px =
+      std::max(1, std::min(20, gauge.min_edge_run_width_px));
   c.wgap = gauge.wgap;
   c.hgap = gauge.hgap;
   c.filterprofile = gauge.filterprofile;
@@ -351,14 +381,15 @@ bool ExportParamRegressionManualAcceptanceChecklist(
 
   file << "## Candidate Snapshot\n\n";
   file << "| Index | Candidate | Source | Selected | Method | Threshold | Gap "
-          "| LineGap | WGap | HGap | Filter | Risk |\n";
-  file << "|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+          "| LineGap | MinRunPx | WGap | HGap | Filter | Risk |\n";
+  file << "|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
   for (std::size_t i = 0; i < reg.candidates.size(); ++i) {
     const auto &c = reg.candidates[i];
     file << "| " << i << " | " << c.candidate_id << " | " << c.source << " | "
          << (c.selected_for_probe ? "yes" : "no") << " | " << c.method << " | "
          << c.threshold << " | " << c.gap << " | " << c.linegap << " | "
-         << c.wgap << " | " << c.hgap << " | " << c.filterprofile << " | "
+         << c.min_edge_run_width_px << " | " << c.wgap << " | "
+         << c.hgap << " | " << c.filterprofile << " | "
          << c.predicted_risk << " |\n";
   }
   reason.clear();
@@ -1011,12 +1042,15 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
             ? selectedFeature
             : (evidenceFeature == "runtime_contract" ? selectedFeature
                                                      : evidenceFeature);
-    const bool torchActionAvailable =
-        IsTorchContext(context) &&
-        (!context.image_file_path.empty() ||
-         !context.current_evidence_selection.image_path.empty());
-    if (!torchActionAvailable)
-      ImGui::BeginDisabled();
+    const bool torchActionInputAvailable =
+        !context.image_file_path.empty() ||
+        !context.current_evidence_selection.image_path.empty();
+    const bool torchActionAvailable = torchActionInputAvailable;
+    ImGui::TextDisabled("Torch action input: %s%s",
+                        torchActionInputAvailable ? "image_ready"
+                                                  : "image_missing",
+                        IsTorchContext(context) ? " | torch_context"
+                                                : " | stage_will_bind_torch");
     if (ImGui::Button("Train Segmentation Tiny Smoke")) {
       if (!StageTorchUiRunLocal(context,
                                 "cxparser/cxscript/module/torch/"
@@ -1027,9 +1061,9 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
         context.debug_reason = actionReason;
       }
     }
-    if (!torchActionAvailable)
-      ImGui::EndDisabled();
     ImGui::SameLine();
+    if (!torchActionAvailable)
+      ImGui::BeginDisabled();
     if (ImGui::Button("Infer Segmentation")) {
       if (!StageTorchUiRunLocal(
               context,
@@ -1052,6 +1086,8 @@ void DrawTorchKeyStatusPanel(ManualTestContext &context) {
         context.debug_reason = actionReason;
       }
     }
+    if (!torchActionAvailable)
+      ImGui::EndDisabled();
 
     if (runBusy)
       ImGui::EndDisabled();
@@ -5207,7 +5243,7 @@ static bool BuildMetrologyProfileFromRuntimeSegmentLocal(
     const cv::Mat &values, cxvision::metrology_analytics::CxPhysUnit unit,
     const CxShapePoint &a, const CxShapePoint &b,
     cxvision::metrology_analytics::CxSurfaceField &field,
-    std::string &reason) {
+    std::string &reason, double *profileLengthPx = nullptr) {
   const int sampleCount = field.xres();
   const double dx = b.x - a.x;
   const double dy = b.y - a.y;
@@ -5216,6 +5252,8 @@ static bool BuildMetrologyProfileFromRuntimeSegmentLocal(
     reason = "runtime Gauge Line scan segment is too small for profile sampling";
     return false;
   }
+  if (profileLengthPx != nullptr)
+    *profileLengthPx = length;
 
   for (int i = 0; i < sampleCount; ++i) {
     const double t = static_cast<double>(i) / static_cast<double>(sampleCount - 1);
@@ -5231,7 +5269,9 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
     const cv::Mat &values, cxvision::metrology_analytics::CxPhysUnit unit,
     cxvision::metrology_analytics::CxSurfaceField &field,
-    std::string &sourceRef, std::string &reason) {
+    std::string &sourceRef, std::string &reason,
+    double *profileLengthPx = nullptr) {
+
   using cxvision::metrology_analytics::CxSurfaceField;
   const ManualGaugeState &gauge = context.current_gauge;
   const ManualMetrologyUiState &m = context.metrology_ui;
@@ -5275,7 +5315,8 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
     }
 
     if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
-                                                      reason))
+                                                      reason, profileLengthPx))
+
       return false;
 
     sourceRef = "runtime:gauge_line:FindLine:object=" + ownerRef +
@@ -5313,7 +5354,8 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
     }
 
     if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
-                                                      reason))
+                                                      reason, profileLengthPx))
+
       return false;
 
     sourceRef = "runtime:gauge_line:FindCircle:object=" + ownerRef +
@@ -5350,7 +5392,8 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
     }
 
     if (!BuildMetrologyProfileFromRuntimeSegmentLocal(values, unit, a, b, field,
-                                                      reason))
+                                                      reason, profileLengthPx))
+
       return false;
 
     sourceRef = "runtime:gauge_line:FindEllipse:object=" + ownerRef +
@@ -5366,12 +5409,18 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
   return false;
 }
 
-static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
+struct MetrologyConclusionMarkerLocal {
+  int sample_index = 0;
+  double axis_px = 0.0;
+};
+
+static std::vector<MetrologyConclusionMarkerLocal>
+BuildMetrologyConclusionMarkersLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
     int sampleCount) {
-  std::vector<int> samples;
+  std::vector<MetrologyConclusionMarkerLocal> markers;
   if (sampleCount < 2 || parserDebugBridge == nullptr)
-    return samples;
+    return markers;
 
   auto appendUniqueProjectedPoint =
       [&](const CxShapePoint &a, const CxShapePoint &b, double x, double y) {
@@ -5382,13 +5431,22 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
           return;
         double t = ((x - a.x) * dx + (y - a.y) * dy) / len2;
         t = std::max(0.0, std::min(1.0, t));
+        const double axisPx = t * std::sqrt(len2);
         const int sampleIndex = std::max(
             0, std::min(sampleCount - 1,
                         static_cast<int>(std::lround(
                             t * static_cast<double>(sampleCount - 1)))));
-        if (std::find(samples.begin(), samples.end(), sampleIndex) ==
-            samples.end())
-          samples.push_back(sampleIndex);
+        const auto duplicate = std::find_if(
+            markers.begin(), markers.end(),
+            [&](const MetrologyConclusionMarkerLocal &marker) {
+              return std::abs(marker.axis_px - axisPx) <= 0.25;
+            });
+        if (duplicate == markers.end()) {
+          MetrologyConclusionMarkerLocal marker;
+          marker.sample_index = sampleIndex;
+          marker.axis_px = axisPx;
+          markers.push_back(marker);
+        }
       };
 
   const ManualGaugeState &gauge = context.current_gauge;
@@ -5400,13 +5458,13 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
     FindLine *lineTool = static_cast<FindLine *>(ResolveMetrologyRuntimeObjectLocal(
         context, parserDebugBridge, "FindLine", ownerRef));
     if (lineTool == nullptr)
-      return samples;
+      return markers;
 
     const int scanCountW = lineTool->getscanlinecount(0);
     const int scanCountH = lineTool->getscanlinecount(1);
     const int totalScanCount = scanCountW + scanCountH;
     if (totalScanCount <= 0)
-      return samples;
+      return markers;
 
     const int selectedOrdinal =
         std::max(0, std::min(totalScanCount - 1, m.gauge_line_num - 1));
@@ -5415,7 +5473,7 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
         scanType == 0 ? selectedOrdinal : selectedOrdinal - scanCountW;
     CxShapePoint a, b;
     if (!lineTool->getscanline(scanType, scanIndex, a, b))
-      return samples;
+      return markers;
 
     const int diagnosticCount = lineTool->getscandiagnosticcount();
     for (int i = 0; i < diagnosticCount; ++i) {
@@ -5436,8 +5494,12 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
         appendUniqueProjectedPoint(a, b, diag.accepted_x, diag.accepted_y);
     }
 
-    std::sort(samples.begin(), samples.end());
-    return samples;
+    std::sort(markers.begin(), markers.end(),
+              [](const MetrologyConclusionMarkerLocal &lhs,
+                 const MetrologyConclusionMarkerLocal &rhs) {
+                return lhs.axis_px < rhs.axis_px;
+              });
+    return markers;
   }
 
   if ((gauge.tool == "FindCircle" || gauge.has_circle_gauge) &&
@@ -5447,17 +5509,17 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
         ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
                                            "FindCircle", ownerRef));
     if (circleTool == nullptr)
-      return samples;
+      return markers;
 
     const int scanCount = circleTool->getscanlinecount();
     if (scanCount <= 0)
-      return samples;
+      return markers;
 
     const int selectedScanIndex =
         std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
     CxShapePoint a, b;
     if (!circleTool->getscanline(selectedScanIndex, a, b))
-      return samples;
+      return markers;
 
     const int diagnosticCount = circleTool->getscandiagnosticcount();
     for (int i = 0; i < diagnosticCount; ++i) {
@@ -5475,8 +5537,12 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
         appendUniqueProjectedPoint(a, b, diag.accepted_x, diag.accepted_y);
     }
 
-    std::sort(samples.begin(), samples.end());
-    return samples;
+    std::sort(markers.begin(), markers.end(),
+              [](const MetrologyConclusionMarkerLocal &lhs,
+                 const MetrologyConclusionMarkerLocal &rhs) {
+                return lhs.axis_px < rhs.axis_px;
+              });
+    return markers;
   }
 
   if ((gauge.tool == "FindEllipse" || gauge.has_ellipse_gauge) &&
@@ -5486,17 +5552,17 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
         ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
                                            "FindEllipse", ownerRef));
     if (ellipseTool == nullptr)
-      return samples;
+      return markers;
 
     const int scanCount = ellipseTool->getscanlinecount();
     if (scanCount <= 0)
-      return samples;
+      return markers;
 
     const int selectedScanIndex =
         std::max(0, std::min(scanCount - 1, m.gauge_line_num - 1));
     CxShapePoint a, b;
     if (!ellipseTool->getscanline(selectedScanIndex, a, b))
-      return samples;
+      return markers;
 
     const int diagnosticCount = ellipseTool->getscandiagnosticcount();
     for (int i = 0; i < diagnosticCount; ++i) {
@@ -5515,8 +5581,12 @@ static std::vector<int> BuildMetrologyConclusionSampleIndicesLocal(
     }
   }
 
-  std::sort(samples.begin(), samples.end());
-  return samples;
+  std::sort(markers.begin(), markers.end(),
+            [](const MetrologyConclusionMarkerLocal &lhs,
+               const MetrologyConclusionMarkerLocal &rhs) {
+              return lhs.axis_px < rhs.axis_px;
+            });
+  return markers;
 }
 
 
@@ -5865,12 +5935,31 @@ DrawMetrologyHeightPeakResultsLocal(const ManualMetrologyUiState &m) {
   }
 }
 
+static std::string FormatMetrologyAxisPixelLabelLocal(double value) {
+  char buffer[64] = {};
+  if (std::abs(value) < 10.0 && std::abs(value - std::round(value)) > 0.05)
+    std::snprintf(buffer, sizeof(buffer), "%.1f px", value);
+  else
+    std::snprintf(buffer, sizeof(buffer), "%.0f px", value);
+  return std::string(buffer);
+}
+
+static double MetrologySampleIndexToAxisPxLocal(int sampleIndex,
+                                                int sampleCount,
+                                                double axisLengthPx) {
+  if (sampleCount < 2 || axisLengthPx <= 0.0)
+    return 0.0;
+  const int clamped = std::max(0, std::min(sampleCount - 1, sampleIndex));
+  return static_cast<double>(clamped) * axisLengthPx /
+         static_cast<double>(sampleCount - 1);
+}
+
 static void DrawMetrologyPreviewChartLocal(
     const char *id, const char *title, const std::vector<float> &source,
     const std::vector<float> &model, int rangeStartPermille,
     int rangeEndPermille, const char *sourceLabel, const char *modelLabel,
-    const std::vector<int> *conclusionSamples,
-    ManualMetrologyUiState *cursorState) {
+    const std::vector<MetrologyConclusionMarkerLocal> *conclusionMarkers,
+    ManualMetrologyUiState *cursorState, double axisLengthPx = 0.0) {
   const ImVec2 size(std::max(320.0f, ImGui::GetContentRegionAvail().x), 210.0f);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   ImGui::InvisibleButton(id, size);
@@ -5920,6 +6009,19 @@ static void DrawMetrologyPreviewChartLocal(
                      static_cast<float>(std::max(1, sampleCount - 1));
     return left + tx * (right - left);
   };
+
+  const int sourceCount = static_cast<int>(source.size());
+  const double effectiveAxisLengthPx =
+      axisLengthPx > 0.0
+          ? axisLengthPx
+          : static_cast<double>(std::max(0, sourceCount - 1));
+  auto axisPxToScreenX = [&](double axisPx) -> float {
+    if (effectiveAxisLengthPx <= 0.0)
+      return left;
+    const double clamped = std::max(0.0, std::min(effectiveAxisLengthPx, axisPx));
+    const float tx = static_cast<float>(clamped / effectiveAxisLengthPx);
+    return left + tx * (right - left);
+  };
   auto drawCurve = [&](const std::vector<float> &values, ImU32 color,
                        float thickness) {
     if (values.size() < 2)
@@ -5935,20 +6037,42 @@ static void DrawMetrologyPreviewChartLocal(
                       ImDrawFlags_None, thickness);
   };
 
-  const int sourceCount = static_cast<int>(source.size());
   if (cursorState != nullptr) {
     cursorState->profile_cursor_sample_count = sourceCount;
-    if (cursorState->profile_cursor_gauge_line_num != cursorState->gauge_line_num) {
+    std::string sourceKey = std::string(id != nullptr ? id : "") +
+                            "|count=" + std::to_string(sourceCount) +
+                            "|axis_px=" + std::to_string(effectiveAxisLengthPx) +
+                            "|range=" + std::to_string(rangeStartPermille) +
+                            ":" + std::to_string(rangeEndPermille) +
+                            "|y=" + std::to_string(yMin) + ":" +
+                            std::to_string(yMax);
+    if (!source.empty()) {
+      sourceKey += "|first=" + std::to_string(source.front()) +
+                   "|last=" + std::to_string(source.back());
+    }
+    if (conclusionMarkers != nullptr && !conclusionMarkers->empty()) {
+      sourceKey += "|result_px=" + std::to_string(conclusionMarkers->front().axis_px) +
+                   "/" + std::to_string(conclusionMarkers->size());
+    } else {
+      sourceKey += "|result=none";
+    }
+    if (cursorState->profile_cursor_gauge_line_num != cursorState->gauge_line_num ||
+        cursorState->profile_cursor_source_key != sourceKey) {
       cursorState->profile_cursor_gauge_line_num = cursorState->gauge_line_num;
+      cursorState->profile_cursor_source_key = sourceKey;
       cursorState->profile_cursor_user_dragged = false;
       cursorState->profile_cursor_sample_index = -1;
     }
     if (sourceCount >= 2) {
-      if (!cursorState->profile_cursor_user_dragged && conclusionSamples != nullptr &&
-          !conclusionSamples->empty()) {
-        cursorState->profile_cursor_sample_index = std::max(
-            0, std::min(sourceCount - 1, conclusionSamples->front()));
-        cursorState->profile_cursor_visible = true;
+      if (!cursorState->profile_cursor_user_dragged) {
+        if (conclusionMarkers != nullptr && !conclusionMarkers->empty()) {
+          cursorState->profile_cursor_sample_index = std::max(
+              0, std::min(sourceCount - 1, conclusionMarkers->front().sample_index));
+          cursorState->profile_cursor_visible = true;
+        } else {
+          cursorState->profile_cursor_sample_index = -1;
+          cursorState->profile_cursor_visible = false;
+        }
       }
       if (cursorState->profile_cursor_sample_index < 0 ||
           cursorState->profile_cursor_sample_index >= sourceCount) {
@@ -5978,6 +6102,7 @@ static void DrawMetrologyPreviewChartLocal(
     } else {
       cursorState->profile_cursor_sample_index = 0;
       cursorState->profile_cursor_permille = 0;
+      cursorState->profile_cursor_visible = false;
       cursorState->profile_cursor_user_dragged = false;
     }
   }
@@ -5985,19 +6110,20 @@ static void DrawMetrologyPreviewChartLocal(
   drawCurve(source, IM_COL32(225, 230, 235, 255), 1.5f);
   drawCurve(model, IM_COL32(69, 205, 150, 255), 2.0f);
 
-  if (conclusionSamples != nullptr && sourceCount >= 2) {
-    for (std::size_t i = 0; i < conclusionSamples->size(); ++i) {
-      const int sampleIndex = std::max(
-          0, std::min(sourceCount - 1, (*conclusionSamples)[i]));
-      const float resultX = sampleToScreenX(sampleIndex, sourceCount);
+  if (conclusionMarkers != nullptr && sourceCount >= 2) {
+    for (std::size_t i = 0; i < conclusionMarkers->size(); ++i) {
+      const MetrologyConclusionMarkerLocal &marker = (*conclusionMarkers)[i];
+      const int sampleIndex = std::max(0, std::min(sourceCount - 1, marker.sample_index));
+      const float resultX = axisPxToScreenX(marker.axis_px);
       const float resultY = valueToScreenY(source[static_cast<std::size_t>(sampleIndex)]);
       draw->AddLine(ImVec2(resultX, top), ImVec2(resultX, bottom),
                     IM_COL32(255, 128, 48, 255), 2.5f);
       draw->AddCircleFilled(ImVec2(resultX, resultY), 4.5f,
                             IM_COL32(255, 128, 48, 255), 16);
       if (i < 3) {
-        const std::string label = "result " + std::to_string(i + 1);
-        draw->AddText(ImVec2(std::min(resultX + 6.0f, right - 78.0f),
+        const std::string label = "result " +
+                                  FormatMetrologyAxisPixelLabelLocal(marker.axis_px);
+        draw->AddText(ImVec2(std::min(resultX + 6.0f, right - 118.0f),
                              top + 20.0f + static_cast<float>(i) * 14.0f),
                       IM_COL32(255, 178, 118, 255), label.c_str());
       }
@@ -6008,16 +6134,24 @@ static void DrawMetrologyPreviewChartLocal(
       sourceCount >= 2) {
     const int cursorIndex = std::max(
         0, std::min(sourceCount - 1, cursorState->profile_cursor_sample_index));
-    const float cursorX = sampleToScreenX(cursorIndex, sourceCount);
+    double cursorAxisPx = MetrologySampleIndexToAxisPxLocal(
+        cursorIndex, sourceCount, effectiveAxisLengthPx);
+    if (!cursorState->profile_cursor_user_dragged && conclusionMarkers != nullptr &&
+        !conclusionMarkers->empty()) {
+      cursorAxisPx = conclusionMarkers->front().axis_px;
+    }
+    const float cursorX = axisPxToScreenX(cursorAxisPx);
     const float cursorY = valueToScreenY(source[static_cast<std::size_t>(cursorIndex)]);
     draw->AddLine(ImVec2(cursorX, top), ImVec2(cursorX, bottom),
                   IM_COL32(255, 210, 64, 220), 1.5f);
     draw->AddCircleFilled(ImVec2(cursorX, cursorY), 3.8f,
                           IM_COL32(255, 210, 64, 255), 16);
+    const std::string cursorPx = FormatMetrologyAxisPixelLabelLocal(cursorAxisPx);
     const std::string cursorLabel = cursorState->profile_cursor_user_dragged
-                                        ? "cursor " + std::to_string(cursorState->profile_cursor_permille) + "%"
-                                        : "cursor=result";
-    draw->AddText(ImVec2(std::min(cursorX + 6.0f, right - 96.0f), top + 4.0f),
+                                        ? "cursor " + cursorPx
+                                        : "cursor=result " + cursorPx;
+    draw->AddText(ImVec2(std::min(cursorX + 6.0f, right - 118.0f),
+                         std::max(top + 4.0f, cursorY - 18.0f)),
                   IM_COL32(255, 226, 110, 255), cursorLabel.c_str());
   }
 
@@ -6038,18 +6172,35 @@ static void DrawMetrologyPreviewChartLocal(
                 IM_COL32(255, 128, 48, 255), 2.0f);
   draw->AddText(ImVec2(right - 94.0f, bottom + 6.0f),
                 IM_COL32(255, 178, 118, 255), "result");
-  draw->AddText(ImVec2(left, bottom + 6.0f), IM_COL32(160, 170, 181, 255),
-                "0%");
-  draw->AddText(ImVec2(right - 34.0f, bottom + 6.0f),
-                IM_COL32(160, 170, 181, 255), "100%");
+
+  constexpr int tickCount = 5;
+  for (int i = 0; i <= tickCount; ++i) {
+    const float tx = static_cast<float>(i) / static_cast<float>(tickCount);
+    const float tickX = left + tx * (right - left);
+    draw->AddLine(ImVec2(tickX, bottom), ImVec2(tickX, bottom + 4.0f),
+                  IM_COL32(160, 170, 181, 255), 1.0f);
+    const std::string tickLabel = FormatMetrologyAxisPixelLabelLocal(
+        effectiveAxisLengthPx * static_cast<double>(i) /
+        static_cast<double>(tickCount));
+    const ImVec2 tickLabelSize = ImGui::CalcTextSize(tickLabel.c_str());
+    const float labelX = std::max(
+        left, std::min(right - tickLabelSize.x, tickX - tickLabelSize.x * 0.5f));
+    draw->AddText(ImVec2(labelX, bottom + 6.0f),
+                  IM_COL32(160, 170, 181, 255), tickLabel.c_str());
+  }
 }
 
-static bool
-HasMetrologySelectedGaugeLineProfileLocal(const ManualMetrologyUiState &m) {
+
+static bool HasMetrologySelectedGaugeLineProfileLocal(const ManualMetrologyUiState &m) {
   const std::string &source = m.height_peak_source_ref;
   return source.rfind("runtime:gauge_line:", 0) == 0 ||
          source.rfind("gauge_line:", 0) == 0;
 }
+
+static bool IsMetrologyRuntimeGaugeLineSourceLocal(const std::string &source) {
+  return source.rfind("runtime:gauge_line:", 0) == 0;
+}
+
 
 static std::vector<float>
 BuildMetrologyPreviewSourceLocal(const ManualMetrologyUiState &m,
@@ -6074,9 +6225,12 @@ BuildMetrologyPreviewSourceLocal(const ManualMetrologyUiState &m,
 
 static std::vector<float> BuildMetrologyLiveGaugeLineProfileLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
-    std::string &sourceRef) {
+    std::string &sourceRef, double *profileLengthPx = nullptr) {
   using namespace cxvision::metrology_analytics;
   sourceRef.clear();
+  if (profileLengthPx != nullptr)
+    *profileLengthPx = 0.0;
+
   const std::string imagePath = ResolveMetrologyImagePathLocal(context);
   if (imagePath.empty()) {
     sourceRef = "runtime:gauge_line:unavailable; reason=image path is empty";
@@ -6122,7 +6276,8 @@ static std::vector<float> BuildMetrologyLiveGaugeLineProfileLocal(
   CxSurfaceField field;
   std::string reason;
   if (!BuildMetrologyGaugeLineSurfaceFieldLocal(
-          context, parserDebugBridge, values, unit, field, sourceRef, reason)) {
+          context, parserDebugBridge, values, unit, field, sourceRef, reason,
+          profileLengthPx)) {
     sourceRef = "runtime:gauge_line:unavailable; reason=" + reason;
     return {};
   }
@@ -6138,9 +6293,13 @@ static std::vector<float> BuildMetrologyLiveGaugeLineProfileLocal(
   const float span = std::max(1.0e-6f, *minmax.second - *minmax.first);
   for (float &value : profile)
     value = (value - *minmax.first) / span;
+
+  if (profileLengthPx != nullptr && *profileLengthPx > 0.0)
+    sourceRef += "; length_px=" + FormatMetrologyAxisPixelLabelLocal(*profileLengthPx);
   sourceRef += "; image=" + imagePath;
   return profile;
 }
+
 
 
 static void ResolveMetrologyPreviewRangeLocal(std::size_t valueCount,
@@ -6204,7 +6363,8 @@ struct MetrologyPreviewModelLocal {
 
 
 static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
-    const ManualMetrologyUiState &m, const std::vector<float> &source) {
+    const ManualMetrologyUiState &m, const std::vector<float> &source,
+    double profileLengthPx = 0.0) {
   MetrologyPreviewModelLocal result;
   if (!m.curve_fit_auto_plot || source.size() < 3)
     return result;
@@ -6229,7 +6389,8 @@ static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
       peakIndex = i;
     }
   }
-  const double amplitude = std::max(1.0e-6, static_cast<double>(peak - baseline));
+  const double amplitude =
+      std::max(1.0e-6, static_cast<double>(peak - baseline));
 
   if (m.curve_fit_function == 2) {
     double sx[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
@@ -6261,7 +6422,8 @@ static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
       result.values[i] = static_cast<float>(coeffs[0] + coeffs[1] * x +
                                             coeffs[2] * x * x);
     }
-    result.status = "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - quadratic least squares";
+    result.status =
+        "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - quadratic least squares";
     result.primary = static_cast<float>(coeffs[1]);
     result.secondary = static_cast<float>(coeffs[2]);
     return result;
@@ -6272,7 +6434,8 @@ static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
   for (std::size_t i = startIndex; i <= endIndex; ++i) {
     const double x = static_cast<double>(i) /
                      static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
-    const double weight = std::max(0.0, static_cast<double>(source[i] - baseline));
+    const double weight =
+        std::max(0.0, static_cast<double>(source[i] - baseline));
     centerSum += x * weight;
     weightSum += weight;
   }
@@ -6284,27 +6447,36 @@ static MetrologyPreviewModelLocal BuildMetrologyCurveFitPreviewModelLocal(
   for (std::size_t i = startIndex; i <= endIndex; ++i) {
     const double x = static_cast<double>(i) /
                      static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
-    const double weight = std::max(0.0, static_cast<double>(source[i] - baseline));
+    const double weight =
+        std::max(0.0, static_cast<double>(source[i] - baseline));
     const double dx = x - center;
     variance += dx * dx * weight;
   }
-  const double sigma = std::max(0.01, std::sqrt(variance / std::max(1.0e-12, weightSum)));
+  const double sigma =
+      std::max(0.01, std::sqrt(variance / std::max(1.0e-12, weightSum)));
   for (std::size_t i = 0; i < source.size(); ++i) {
     const double x = static_cast<double>(i) /
                      static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
     const double dx = (x - center) / sigma;
-    const double y = m.curve_fit_function == 1
-                         ? static_cast<double>(baseline) + amplitude / (1.0 + dx * dx)
-                         : static_cast<double>(baseline) + amplitude * std::exp(-0.5 * dx * dx);
+    const double y =
+        m.curve_fit_function == 1
+            ? static_cast<double>(baseline) + amplitude / (1.0 + dx * dx)
+            : static_cast<double>(baseline) + amplitude * std::exp(-0.5 * dx * dx);
     result.values[i] = static_cast<float>(y);
   }
   result.status = m.curve_fit_function == 1
                       ? "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - Lorentzian estimate"
                       : "PREVIEW_DERIVED_FROM_RUNTIME_PROFILE - Gaussian estimate";
-  result.primary = static_cast<float>(center * 100.0);
-  result.secondary = static_cast<float>(sigma * 100.0);
+  const double pixelScale =
+      profileLengthPx > 0.0
+          ? profileLengthPx
+          : static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
+  result.primary = static_cast<float>(center * pixelScale);
+  result.secondary = static_cast<float>(sigma * pixelScale);
   return result;
 }
+
+
 
 static MetrologyPreviewModelLocal BuildMetrologyCriticalDimensionPreviewModelLocal(
     const ManualMetrologyUiState &m, const std::vector<float> &source) {
@@ -6399,6 +6571,65 @@ static MetrologyPreviewModelLocal BuildMetrologyCriticalDimensionPreviewModelLoc
   result.secondary = rightLevel - leftLevel;
   return result;
 }
+static std::vector<float>
+BuildMetrologyRuntimeProfilePeakMarkerSourceLocal(
+    const ManualMetrologyUiState &m,
+    const std::vector<float> &source) {
+  if (source.size() < 3)
+    return {};
+
+  const auto minmax = std::minmax_element(source.begin(), source.end());
+  const float span = std::max(1.0e-6f, *minmax.second - *minmax.first);
+  const float minProminence =
+      span * static_cast<float>(std::max(0, m.peak_min_prominence_permille)) /
+      1000.0f;
+
+  struct PeakCandidateLocal {
+    int sample_index = -1;
+    float prominence = 0.0f;
+  };
+  std::vector<PeakCandidateLocal> peaks;
+  for (std::size_t i = 1; i + 1 < source.size(); ++i) {
+    const float center = m.peak_invert ? -source[i] : source[i];
+    const float left = m.peak_invert ? -source[i - 1] : source[i - 1];
+    const float right = m.peak_invert ? -source[i + 1] : source[i + 1];
+    if (center < left || center < right)
+      continue;
+    const float prominence = center - std::max(left, right);
+    if (prominence < minProminence)
+      continue;
+    peaks.push_back({static_cast<int>(i), prominence});
+  }
+
+  std::sort(peaks.begin(), peaks.end(), [](const PeakCandidateLocal &a,
+                                           const PeakCandidateLocal &b) {
+    if (a.prominence != b.prominence)
+      return a.prominence > b.prominence;
+    return a.sample_index < b.sample_index;
+  });
+
+  std::vector<float> markers(source.size(), 0.0f);
+  const int minDistance = std::max(0, m.peak_min_distance_bins);
+  int selected = 0;
+  for (const auto &peak : peaks) {
+    bool tooClose = false;
+    for (std::size_t i = 0; i < markers.size(); ++i) {
+      if (markers[i] <= 0.0f)
+        continue;
+      if (std::abs(static_cast<int>(i) - peak.sample_index) <= minDistance) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (tooClose)
+      continue;
+    markers[static_cast<std::size_t>(peak.sample_index)] = 1.0f;
+    ++selected;
+    if (selected >= std::max(1, m.peak_max_count))
+      break;
+  }
+  return markers;
+}
 
 static std::vector<float>
 BuildMetrologyPeakMarkerSourceLocal(const ManualMetrologyUiState &m,
@@ -6423,25 +6654,31 @@ BuildMetrologyPeakMarkerSourceLocal(const ManualMetrologyUiState &m,
   }
   return markers;
 }
+
 static void DrawFindPeaksPreviewLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
     ManualMetrologyUiState &m) {
   std::string sourceRef;
-  std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
+  double profileLengthPx = 0.0;
+  std::vector<float> source = BuildMetrologyLiveGaugeLineProfileLocal(
+      context, parserDebugBridge, sourceRef, &profileLengthPx);
   std::vector<float> markers;
   const char *sourceLabel = "runtime Gauge Line";
 
   if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(m, m.histogram_mode == 1 ? 1 : 0);
     sourceRef = m.height_peak_source_ref;
+    profileLengthPx = static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
     markers = BuildMetrologyPeakMarkerSourceLocal(m, source);
     sourceLabel = "height distribution";
+  } else if (!source.empty() &&
+             IsMetrologyRuntimeGaugeLineSourceLocal(sourceRef)) {
+    markers = BuildMetrologyRuntimeProfilePeakMarkerSourceLocal(m, source);
   }
-
-  const std::vector<int> conclusionSamples =
-      BuildMetrologyConclusionSampleIndicesLocal(
+  const std::vector<MetrologyConclusionMarkerLocal> conclusionMarkers =
+      BuildMetrologyConclusionMarkersLocal(
           context, parserDebugBridge, static_cast<int>(source.size()));
+
 
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
   if (source.empty()) {
@@ -6450,16 +6687,21 @@ static void DrawFindPeaksPreviewLocal(
     ImGui::TextDisabled("RUNTIME_GAUGE_LINE_PROFILE - %s", sourceRef.c_str());
   }
 
-
   DrawMetrologyPreviewChartLocal("find_peaks_parameter_preview",
                                  "automated graph peak location", source,
                                  markers, 0, 1000, sourceLabel, "peaks",
-                                 &conclusionSamples, &m);
+                                 IsMetrologyRuntimeGaugeLineSourceLocal(sourceRef)
+                                     ? &conclusionMarkers
+
+                                     : nullptr,
+                                 &m, profileLengthPx);
   if (m.profile_cursor_sample_count > 1) {
-    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
-                        m.profile_cursor_sample_index + 1,
-                        m.profile_cursor_sample_count,
-                        m.profile_cursor_permille);
+    const double cursorPx = MetrologySampleIndexToAxisPxLocal(
+        m.profile_cursor_sample_index, m.profile_cursor_sample_count,
+        profileLengthPx);
+    ImGui::TextDisabled("cursor %s / length %s",
+                        FormatMetrologyAxisPixelLabelLocal(cursorPx).c_str(),
+                        FormatMetrologyAxisPixelLabelLocal(profileLengthPx).c_str());
   }
 }
 
@@ -6467,19 +6709,20 @@ static void DrawCurveFitPreviewLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
     ManualMetrologyUiState &m) {
   std::string sourceRef;
-
-  std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
+  double profileLengthPx = 0.0;
+  std::vector<float> source = BuildMetrologyLiveGaugeLineProfileLocal(
+      context, parserDebugBridge, sourceRef, &profileLengthPx);
   if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(m, m.curve_fit_source);
     sourceRef = m.height_peak_source_ref;
+    profileLengthPx = static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
   }
   const MetrologyPreviewModelLocal fit =
-      BuildMetrologyCurveFitPreviewModelLocal(m, source);
-
-  const std::vector<int> conclusionSamples =
-      BuildMetrologyConclusionSampleIndicesLocal(
+      BuildMetrologyCurveFitPreviewModelLocal(m, source, profileLengthPx);
+  const std::vector<MetrologyConclusionMarkerLocal> conclusionMarkers =
+      BuildMetrologyConclusionMarkersLocal(
           context, parserDebugBridge, static_cast<int>(source.size()));
+
 
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
   if (source.empty()) {
@@ -6491,22 +6734,34 @@ static void DrawCurveFitPreviewLocal(
                           "insufficient");
     } else {
       ImGui::TextDisabled("%s", fit.status.c_str());
-      ImGui::TextDisabled("fit preview center/slope %.3f | width/curve %.3f",
-                          fit.primary, fit.secondary);
+      if (m.curve_fit_function == 2) {
+        ImGui::TextDisabled("fit preview slope %.3f | curve %.3f",
+                            fit.primary, fit.secondary);
+      } else {
+        ImGui::TextDisabled("fit preview center %.1f px | width %.1f px",
+                            fit.primary, fit.secondary);
+      }
     }
   }
+
   DrawMetrologyPreviewChartLocal(
       "curve_fit_parameter_preview", "Curve fitting module", source,
       fit.values,
       m.curve_fit_full_range ? 0 : m.curve_fit_range_start_permille,
       m.curve_fit_full_range ? 1000 : m.curve_fit_range_end_permille, "source",
-      "fit", &conclusionSamples, &m);
+      "fit",
+      IsMetrologyRuntimeGaugeLineSourceLocal(sourceRef) ? &conclusionMarkers
+
+                                                       : nullptr,
+      &m, profileLengthPx);
 
   if (m.profile_cursor_sample_count > 1) {
-    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
-                        m.profile_cursor_sample_index + 1,
-                        m.profile_cursor_sample_count,
-                        m.profile_cursor_permille);
+    const double cursorPx = MetrologySampleIndexToAxisPxLocal(
+        m.profile_cursor_sample_index, m.profile_cursor_sample_count,
+        profileLengthPx);
+    ImGui::TextDisabled("cursor %s / length %s",
+                        FormatMetrologyAxisPixelLabelLocal(cursorPx).c_str(),
+                        FormatMetrologyAxisPixelLabelLocal(profileLengthPx).c_str());
   }
 }
 
@@ -6514,23 +6769,24 @@ static void DrawCriticalDimensionPreviewLocal(
     const ManualTestContext &context, const ParserDebugBridge *parserDebugBridge,
     ManualMetrologyUiState &m) {
   std::string sourceRef;
-  std::vector<float> source =
-      BuildMetrologyLiveGaugeLineProfileLocal(context, parserDebugBridge, sourceRef);
+  double profileLengthPx = 0.0;
+  std::vector<float> source = BuildMetrologyLiveGaugeLineProfileLocal(
+      context, parserDebugBridge, sourceRef, &profileLengthPx);
   if (source.empty() && !MetrologyRequiresRuntimeGaugeLineLocal(context)) {
     source = BuildMetrologyPreviewSourceLocal(
         m, m.critical_dimension_source == 1 ? 0 : 2);
     sourceRef = m.height_peak_source_ref;
+    profileLengthPx =
+        static_cast<double>(std::max<std::size_t>(1, source.size() - 1));
   }
+
   const MetrologyPreviewModelLocal model =
       BuildMetrologyCriticalDimensionPreviewModelLocal(m, source);
-
-
-  const std::vector<int> conclusionSamples =
-      BuildMetrologyConclusionSampleIndicesLocal(
+  const std::vector<MetrologyConclusionMarkerLocal> conclusionMarkers =
+      BuildMetrologyConclusionMarkersLocal(
           context, parserDebugBridge, static_cast<int>(source.size()));
 
   ImGui::Text("Gauge Line NUM %d", m.gauge_line_num);
-
   if (source.empty()) {
     ImGui::TextDisabled("NO_RUNTIME_PROFILE - %s", sourceRef.c_str());
   } else {
@@ -6544,29 +6800,38 @@ static void DrawCriticalDimensionPreviewLocal(
                           model.primary, model.secondary);
     }
   }
+
   DrawMetrologyPreviewChartLocal(
       "critical_dimension_parameter_preview", "Critical dimension module",
       source, model.values,
       m.critical_dimension_full_range
           ? 0
           : m.critical_dimension_range_start_permille,
-      m.critical_dimension_full_range ? 1000
-                                      : m.critical_dimension_range_end_permille,
-      "profile", "model", &conclusionSamples, &m);
+      m.critical_dimension_full_range
+          ? 1000
+          : m.critical_dimension_range_end_permille,
+      "profile", "model",
+      IsMetrologyRuntimeGaugeLineSourceLocal(sourceRef) ? &conclusionMarkers
+                                                       : nullptr,
+      &m, profileLengthPx);
 
   if (m.profile_cursor_sample_count > 1) {
-    ImGui::TextDisabled("cursor sample %d/%d | %d%%",
-                        m.profile_cursor_sample_index + 1,
-                        m.profile_cursor_sample_count,
-                        m.profile_cursor_permille);
+    const double cursorPx = MetrologySampleIndexToAxisPxLocal(
+        m.profile_cursor_sample_index, m.profile_cursor_sample_count,
+        profileLengthPx);
+    ImGui::TextDisabled("cursor %s / length %s",
+                        FormatMetrologyAxisPixelLabelLocal(cursorPx).c_str(),
+                        FormatMetrologyAxisPixelLabelLocal(profileLengthPx).c_str());
   }
 }
 
 
 static bool DrawMetrologyExtensionPanel(
     ManualTestContext &context, const ParserDebugBridge *parserDebugBridge) {
+
   ManualMetrologyUiState &m = context.metrology_ui;
   bool edited = false;
+
 
   ImGui::SetNextItemOpen(false, ImGuiCond_FirstUseEver);
   if (!ImGui::CollapsingHeader("Metrology Extension / Surface "
@@ -7013,6 +7278,9 @@ void DrawKeyParameterControlPanel(
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
   const bool isFastMatch = KeyParamContextLooksFastMatchLocal(context);
+  const bool isFindLine =
+      gauge.tool == "FindLine" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindLine";
   const bool isFindEllipse = gauge.tool == "FindEllipse" ||
                              NormalizeKeyParamToolTypeLocal(
                                  gauge.primary_object_type) == "FindEllipse" ||
@@ -7350,6 +7618,20 @@ void DrawKeyParameterControlPanel(
         ImGui::SetNextItemWidth(70.0f);
         gaugeEdited |= ImGui::InputInt("##lg_val", &gauge.linegap);
         gauge.linegap = std::max(0, std::min(50, gauge.linegap));
+
+        if (isFindLine) {
+          ImGui::TextUnformatted("min edge run px");
+          ImGui::SameLine(120.0f);
+          ImGui::SetNextItemWidth(140.0f);
+          gaugeEdited |= ImGui::SliderInt("##min_edge_run_width_px",
+                                          &gauge.min_edge_run_width_px, 1, 20);
+          ImGui::SameLine();
+          ImGui::SetNextItemWidth(70.0f);
+          gaugeEdited |= ImGui::InputInt("##min_edge_run_width_px_val",
+                                         &gauge.min_edge_run_width_px);
+          gauge.min_edge_run_width_px =
+              std::max(1, std::min(20, gauge.min_edge_run_width_px));
+        }
 
         const int findsettingDefault =
             (gauge.tool == "FindLine" || gauge.has_line_gauge || isFindEllipse)
@@ -7820,6 +8102,10 @@ void DrawKeyParameterControlPanel(
         "KeyParameterControls", "key_parameter_ui_edit", "edited",
         "revision=" + std::to_string(context.key_parameter_edit_revision) +
             " " + context.last_key_parameter_edit_summary);
+
+    RecordManualOperationTraceEvent(
+        context, "manual_parameter_edit", "edited",
+        context.last_key_parameter_edit_summary);
   }
 
   ImGui::Separator();
@@ -7853,7 +8139,13 @@ void DrawKeyParameterControlPanel(
     RestoreObjectPrefilterFindSettingFromStagedGlobals(
         context, "apply globals restored "
                  "staged object prefilter");
-    ApplyManualGaugeToGlobals(context);
+    if (ApplyManualGaugeToGlobals(context)) {
+      RecordManualOperationTraceEvent(
+          context, "manual_apply_to_globals", "applied",
+          context.last_key_parameter_edit_summary.empty()
+              ? "Apply To Globals button"
+              : context.last_key_parameter_edit_summary);
+    }
   }
   ImGui::SameLine();
   if (ImGui::Button("Run Script", ImVec2(btnWidth, 0))) {

@@ -80,6 +80,17 @@ double CxParameterProfile_setlinegap(double linegap)
     return 0.0;
 }
 
+double CxParameterProfile_setminedgerunwidth(double width)
+{
+    if (!g_current_parameter_profile)
+        return 0.0;
+
+    g_current_parameter_profile->min_edge_run_width_px =
+        std::max(1, std::min(20, static_cast<int>(width)));
+    g_current_parameter_profile->has_min_edge_run_width_px = true;
+    return 0.0;
+}
+
 double CxParameterProfile_setwgap(double wgap)
 {
     if (!g_current_parameter_profile)
@@ -129,6 +140,8 @@ void RegisterCxParameterProfileBindings(mu::Parser& parser)
     parser.DefineFun("CxParameterProfile_setthreshold", (mu::fun_type1)&CxParameterProfile_setthreshold);
     parser.DefineFun("CxParameterProfile_setgap", (mu::fun_type1)&CxParameterProfile_setgap);
     parser.DefineFun("CxParameterProfile_setlinegap", (mu::fun_type1)&CxParameterProfile_setlinegap);
+    parser.DefineFun("CxParameterProfile_setminedgerunwidth",
+                     (mu::fun_type1)&CxParameterProfile_setminedgerunwidth);
     parser.DefineFun("CxParameterProfile_setwgap", (mu::fun_type1)&CxParameterProfile_setwgap);
     parser.DefineFun("CxParameterProfile_sethgap", (mu::fun_type1)&CxParameterProfile_sethgap);
     parser.DefineFun("CxParameterProfile_setfilterprofile", (mu::fun_type1)&CxParameterProfile_setfilterprofile);

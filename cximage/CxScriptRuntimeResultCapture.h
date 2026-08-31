@@ -52,6 +52,7 @@ struct CxScriptToolResultCapture
     int scan_runs_total = 0;
     int scan_runs_within_length_limit = 0;
     int scan_runs_over_length_limit = 0;
+    int scan_runs_rejected_by_min_edge_width = 0;
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
@@ -64,6 +65,7 @@ struct CxScriptToolResultCapture
     int findline_evaluated_edge_count = 0;
     int findline_best_edge_index = 0;
     double findline_best_edge_score = 0.0;
+    int tool_min_edge_run_width_px = 0;
 
     std::string boundary_analysis_status;
     std::string boundary_reliability_level;
@@ -261,6 +263,19 @@ struct CxScriptToolResultCapture
     std::string segmentation_result_stage;
 
     std::string segmentation_refinement_method;
+    std::string segmentation_requested_geometry_type;
+    std::string segmentation_geometry_fit_status;
+    std::string segmentation_geometry_fit_reason;
+    int segmentation_geometry_count = 0;
+    double segmentation_geometry_residual_px = 0.0;
+    double segmentation_geometry_support = 0.0;
+    double segmentation_geometry_center_x = 0.0;
+    double segmentation_geometry_center_y = 0.0;
+    double segmentation_geometry_radius = 0.0;
+    double segmentation_geometry_axis_x = 0.0;
+    double segmentation_geometry_axis_y = 0.0;
+    double segmentation_geometry_angle_deg = 0.0;
+
 
     std::string segmentation_raw_result_ref;
 

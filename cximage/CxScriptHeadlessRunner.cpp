@@ -1591,6 +1591,8 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["tool_effective_wgap"] = capture.tool_wgap;
     pkg.metrics["tool_effective_hgap"] = capture.tool_hgap;
     pkg.metrics["tool_effective_linegap"] = capture.tool_linegap;
+    pkg.metrics["tool_effective_min_edge_run_width_px"] =
+        capture.tool_min_edge_run_width_px;
     pkg.metrics["tool_input_line_x0"] = capture.tool_input_line_x0;
     pkg.metrics["tool_input_line_y0"] = capture.tool_input_line_y0;
     pkg.metrics["tool_input_line_x1"] = capture.tool_input_line_x1;
@@ -1607,6 +1609,8 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["scan_runs_total"] = capture.scan_runs_total;
     pkg.metrics["scan_runs_within_length_limit"] = capture.scan_runs_within_length_limit;
     pkg.metrics["scan_runs_over_length_limit"] = capture.scan_runs_over_length_limit;
+    pkg.metrics["scan_runs_rejected_by_min_edge_width"] =
+        capture.scan_runs_rejected_by_min_edge_width;
     pkg.metrics["scan_runs_rejected_by_selection"] = capture.scan_runs_rejected_by_selection;
     pkg.metrics["scan_runs_rejected_near_endpoint"] = capture.scan_runs_rejected_near_endpoint;
     pkg.metrics["scan_points_emitted"] = capture.scan_points_emitted;
@@ -1631,6 +1635,8 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["selected_hgap"] = capture.selected_hgap;
     pkg.metrics["selected_linegap"] = capture.selected_linegap;
     pkg.metrics["selected_filterprofile"] = capture.selected_filterprofile;
+    pkg.metrics["selected_min_edge_run_width_px"] =
+        capture.selected_min_edge_run_width_px;
     // Keep injection and script echo separate.  A missing script echo must
     // never be reported as if the CLI/manifest failed to inject its value.
     const auto readRuntimeGlobal = [&capture](const char* name) -> double
@@ -1647,6 +1653,8 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["injected_wgap"] = readRuntimeGlobal("global_wgap");
     pkg.metrics["injected_hgap"] = readRuntimeGlobal("global_hgap");
     pkg.metrics["injected_linegap"] = readRuntimeGlobal("global_linegap");
+    pkg.metrics["injected_min_edge_run_width_px"] =
+        readRuntimeGlobal("global_min_edge_run_width_px");
     pkg.metrics["injected_filterprofile"] = readRuntimeGlobal("global_filterprofile");
     pkg.metrics["script_selected_threshold"] = capture.selected_threshold;
     pkg.metrics["script_selected_method"] = capture.selected_method;
@@ -1903,6 +1911,19 @@ CxScriptResultPackage BuildCxScriptResultPackage(
 
     pkg.facts["segmentation_refinement_method"] = capture.segmentation_refinement_method;
 
+    pkg.facts["segmentation_requested_geometry_type"] = capture.segmentation_requested_geometry_type;
+    pkg.facts["segmentation_geometry_fit_status"] = capture.segmentation_geometry_fit_status;
+    pkg.facts["segmentation_geometry_fit_reason"] = capture.segmentation_geometry_fit_reason;
+    pkg.facts["segmentation_geometry_count"] = std::to_string(capture.segmentation_geometry_count);
+    pkg.facts["segmentation_geometry_residual_px"] = std::to_string(capture.segmentation_geometry_residual_px);
+    pkg.facts["segmentation_geometry_support"] = std::to_string(capture.segmentation_geometry_support);
+    pkg.facts["segmentation_geometry_center_x"] = std::to_string(capture.segmentation_geometry_center_x);
+    pkg.facts["segmentation_geometry_center_y"] = std::to_string(capture.segmentation_geometry_center_y);
+    pkg.facts["segmentation_geometry_radius"] = std::to_string(capture.segmentation_geometry_radius);
+    pkg.facts["segmentation_geometry_axis_x"] = std::to_string(capture.segmentation_geometry_axis_x);
+    pkg.facts["segmentation_geometry_axis_y"] = std::to_string(capture.segmentation_geometry_axis_y);
+    pkg.facts["segmentation_geometry_angle_deg"] = std::to_string(capture.segmentation_geometry_angle_deg);
+
     pkg.facts["segmentation_raw_result_ref"] = capture.segmentation_raw_result_ref;
 
     pkg.facts["segmentation_raw_mask_ref"] = capture.segmentation_raw_mask_ref;
@@ -2044,7 +2065,9 @@ bool SaveFindObjectBranchEvidenceJson(
     file << "    \"threshold\": " << capture.tool_threshold << ",\n";
     file << "    \"wgap\": " << capture.tool_wgap << ",\n";
     file << "    \"hgap\": " << capture.tool_hgap << ",\n";
-    file << "    \"linegap\": " << capture.tool_linegap << "\n";
+    file << "    \"linegap\": " << capture.tool_linegap << ",\n";
+    file << "    \"min_edge_run_width_px\": "
+         << capture.tool_min_edge_run_width_px << "\n";
     file << "  },\n";
     file << "  \"findobject\": {\n";
     file << "    \"requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
@@ -2069,6 +2092,8 @@ bool SaveFindObjectBranchEvidenceJson(
     file << "    \"runs_total\": " << capture.scan_runs_total << ",\n";
     file << "    \"runs_within_length_limit\": " << capture.scan_runs_within_length_limit << ",\n";
     file << "    \"runs_over_length_limit\": " << capture.scan_runs_over_length_limit << ",\n";
+    file << "    \"runs_rejected_by_min_edge_width\": "
+         << capture.scan_runs_rejected_by_min_edge_width << ",\n";
     file << "    \"runs_rejected_by_selection\": " << capture.scan_runs_rejected_by_selection << ",\n";
     file << "    \"runs_rejected_near_endpoint\": " << capture.scan_runs_rejected_near_endpoint << ",\n";
     file << "    \"points_emitted\": " << capture.scan_points_emitted << "\n";
@@ -2209,13 +2234,41 @@ void WriteJsonFindLineScanDiagnostics(
              << "\"y0\": " << d.y0 << ", "
              << "\"x1\": " << d.x1 << ", "
              << "\"y1\": " << d.y1 << "},\n";
-        file << "      \"candidate_count\": " << d.candidate_count << ",\n";
-        file << "      \"accepted\": " << (d.accepted ? "true" : "false") << ",\n";
-        file << "      \"accepted_point\": {"
-             << "\"x\": " << d.accepted_x << ", "
-             << "\"y\": " << d.accepted_y << "},\n";
-        file << "      \"reject_reason\": \""
-             << JsonEscape(d.reject_reason) << "\"\n";
+        file << "      " << '"' << "candidate_count" << '"' << ": "
+             << d.candidate_count << ',' << '\n';
+        file << "      " << '"' << "binary_logical_row" << '"' << ": "
+             << d.binary_logical_row << ',' << '\n';
+        file << "      " << '"' << "binary_sample_row" << '"' << ": "
+             << d.binary_sample_row << ',' << '\n';
+        file << "      " << '"' << "binary_logical_foreground_count" << '"' << ": "
+             << d.binary_logical_foreground_count << ',' << '\n';
+        file << "      " << '"' << "binary_logical_plus1_foreground_count" << '"' << ": "
+             << d.binary_logical_plus1_foreground_count << ',' << '\n';
+        file << "      " << '"' << "binary_logical_plus2_foreground_count" << '"' << ": "
+             << d.binary_logical_plus2_foreground_count << ',' << '\n';
+        file << "      " << '"' << "binary_sample_foreground_count" << '"' << ": "
+             << d.binary_sample_foreground_count << ',' << '\n';
+        file << "      " << '"' << "threshold_run_count" << '"' << ": "
+             << d.threshold_run_count << ',' << '\n';
+        file << "      " << '"' << "threshold_max_run_width" << '"' << ": "
+             << d.threshold_max_run_width << ',' << '\n';
+        file << "      " << '"' << "min_edge_run_width_px" << '"' << ": "
+             << d.min_edge_run_width_px << ',' << '\n';
+        file << "      " << '"' << "rejected_min_edge_run_width" << '"' << ": "
+             << d.rejected_min_edge_run_width << ',' << '\n';
+        file << "      " << '"' << "threshold_first_run" << '"' << ": {"
+             << '"' << "start" << '"' << ": " << d.threshold_first_run_start << ", "
+             << '"' << "end" << '"' << ": " << d.threshold_first_run_end << "}," << '\n';
+        file << "      " << '"' << "threshold_last_run" << '"' << ": {"
+             << '"' << "start" << '"' << ": " << d.threshold_last_run_start << ", "
+             << '"' << "end" << '"' << ": " << d.threshold_last_run_end << "}," << '\n';
+        file << "      " << '"' << "accepted" << '"' << ": "
+             << (d.accepted ? "true" : "false") << ',' << '\n';
+        file << "      " << '"' << "accepted_point" << '"' << ": {"
+             << '"' << "x" << '"' << ": " << d.accepted_x << ", "
+             << '"' << "y" << '"' << ": " << d.accepted_y << "}," << '\n';
+        file << "      " << '"' << "reject_reason" << '"' << ": " << '"'
+             << JsonEscape(d.reject_reason) << '"' << '\n';
         file << "    }" << (next == diagnostics.end() ? "" : ",");
     }
     file << "\n  ]" << (trailing_comma ? "," : "") << "\n";
@@ -2418,6 +2471,10 @@ bool ParseCxScriptHeadlessArgs(
             options.gap = std::stoi(argv[++i]);
         else if (arg == "--linegap" && i + 1 < argc)
             options.linegap = std::stoi(argv[++i]);
+        else if ((arg == "--min-edge-run-width-px" ||
+                  arg == "--minedgerunwidth") && i + 1 < argc)
+            options.min_edge_run_width_px =
+                std::max(1, std::min(20, std::stoi(argv[++i])));
         else if (arg == "--threshold" && i + 1 < argc)
             options.threshold = std::stoi(argv[++i]);
         else if (arg == "--method" && i + 1 < argc)
@@ -2506,6 +2563,10 @@ static void PopulateHeadlessCandidateGaugeFromGlobals(
         context, "global_method", options.method);
     gauge.linegap = GetHeadlessCandidateGlobal(
         context, "global_linegap", options.linegap);
+    gauge.min_edge_run_width_px = GetHeadlessCandidateGlobal(
+        context,
+        "global_min_edge_run_width_px",
+        options.min_edge_run_width_px);
     gauge.wgap = GetHeadlessCandidateGlobal(
         context, "global_wgap", options.wgap);
     gauge.hgap = GetHeadlessCandidateGlobal(
@@ -2706,6 +2767,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_hgap", options.hgap);
             setGlobal("global_gap", options.gap);
             setGlobal("global_linegap", options.linegap);
+            setGlobal("global_min_edge_run_width_px",
+                      options.min_edge_run_width_px);
             setGlobal("global_threshold", options.threshold);
             setGlobal("global_method", options.method);
             setGlobal("global_filterprofile", options.filterprofile);
@@ -2872,12 +2935,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         variable_snapshot_file << "  \"wgap\": " << options.wgap << ",\n";
         variable_snapshot_file << "  \"hgap\": " << options.hgap << ",\n";
         variable_snapshot_file << "  \"linegap\": " << options.linegap << ",\n";
+        variable_snapshot_file << "  \"min_edge_run_width_px\": "
+                               << options.min_edge_run_width_px << ",\n";
         variable_snapshot_file << "  \"selected_threshold\": " << capture.selected_threshold << ",\n";
         variable_snapshot_file << "  \"selected_method\": " << capture.selected_method << ",\n";
         variable_snapshot_file << "  \"selected_wgap\": " << capture.selected_wgap << ",\n";
         variable_snapshot_file << "  \"selected_hgap\": " << capture.selected_hgap << ",\n";
         variable_snapshot_file << "  \"selected_linegap\": " << capture.selected_linegap << ",\n";
-        variable_snapshot_file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << "\n";
+        variable_snapshot_file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << ",\n";
+        variable_snapshot_file << "  \"selected_min_edge_run_width_px\": "
+                               << capture.selected_min_edge_run_width_px
+                               << "\n";
         variable_snapshot_file << "}\n";
         variable_snapshot_file.close();
     }
@@ -2986,6 +3054,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"scan_runs_total\": " << capture.scan_runs_total << ",\n";
         object_state_file << "  \"scan_runs_within_length_limit\": " << capture.scan_runs_within_length_limit << ",\n";
         object_state_file << "  \"scan_runs_over_length_limit\": " << capture.scan_runs_over_length_limit << ",\n";
+        object_state_file << "  \"scan_runs_rejected_by_min_edge_width\": "
+                          << capture.scan_runs_rejected_by_min_edge_width
+                          << ",\n";
         object_state_file << "  \"scan_runs_rejected_by_selection\": " << capture.scan_runs_rejected_by_selection << ",\n";
         object_state_file << "  \"scan_runs_rejected_near_endpoint\": " << capture.scan_runs_rejected_near_endpoint << ",\n";
         object_state_file << "  \"scan_points_emitted\": " << capture.scan_points_emitted << ",\n";
@@ -3036,6 +3107,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"segmentation_fallback_used\": " << (capture.segmentation_fallback_used ? "true" : "false") << ",\n";
         object_state_file << "  \"segmentation_result_stage\": \"" << JsonEscape(capture.segmentation_result_stage) << "\",\n";
         object_state_file << "  \"segmentation_refinement_method\": \"" << JsonEscape(capture.segmentation_refinement_method) << "\",\n";
+        object_state_file << "  \"segmentation_requested_geometry_type\": \"" << JsonEscape(capture.segmentation_requested_geometry_type) << "\",\n";
+        object_state_file << "  \"segmentation_geometry_fit_status\": \"" << JsonEscape(capture.segmentation_geometry_fit_status) << "\",\n";
+        object_state_file << "  \"segmentation_geometry_fit_reason\": \"" << JsonEscape(capture.segmentation_geometry_fit_reason) << "\",\n";
+        object_state_file << "  \"segmentation_geometry_count\": " << capture.segmentation_geometry_count << ",\n";
+        object_state_file << "  \"segmentation_geometry_residual_px\": " << capture.segmentation_geometry_residual_px << ",\n";
+        object_state_file << "  \"segmentation_geometry_support\": " << capture.segmentation_geometry_support << ",\n";
+        object_state_file << "  \"segmentation_geometry_center_x\": " << capture.segmentation_geometry_center_x << ",\n";
+        object_state_file << "  \"segmentation_geometry_center_y\": " << capture.segmentation_geometry_center_y << ",\n";
+        object_state_file << "  \"segmentation_geometry_radius\": " << capture.segmentation_geometry_radius << ",\n";
+        object_state_file << "  \"segmentation_geometry_axis_x\": " << capture.segmentation_geometry_axis_x << ",\n";
+        object_state_file << "  \"segmentation_geometry_axis_y\": " << capture.segmentation_geometry_axis_y << ",\n";
+        object_state_file << "  \"segmentation_geometry_angle_deg\": " << capture.segmentation_geometry_angle_deg << ",\n";
         object_state_file << "  \"segmentation_raw_result_ref\": \"" << JsonEscape(capture.segmentation_raw_result_ref) << "\",\n";
         object_state_file << "  \"segmentation_raw_mask_ref\": \"" << JsonEscape(capture.segmentation_raw_mask_ref) << "\",\n";
         object_state_file << "  \"segmentation_raw_contour_ref\": \"" << JsonEscape(capture.segmentation_raw_contour_ref) << "\",\n";
@@ -3142,6 +3225,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         log_file << "scan_runs_total: " << capture.scan_runs_total << "\n";
         log_file << "scan_runs_within_length_limit: " << capture.scan_runs_within_length_limit << "\n";
         log_file << "scan_runs_over_length_limit: " << capture.scan_runs_over_length_limit << "\n";
+        log_file << "scan_runs_rejected_by_min_edge_width: "
+                 << capture.scan_runs_rejected_by_min_edge_width << "\n";
         log_file << "scan_runs_rejected_by_selection: " << capture.scan_runs_rejected_by_selection << "\n";
         log_file << "scan_runs_rejected_near_endpoint: " << capture.scan_runs_rejected_near_endpoint << "\n";
         log_file << "scan_points_emitted: " << capture.scan_points_emitted << "\n";
@@ -3296,6 +3381,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_hgap", options.hgap);
         setGlobal("global_gap", options.gap);
         setGlobal("global_linegap", options.linegap);
+        setGlobal("global_min_edge_run_width_px",
+                  options.min_edge_run_width_px);
         setGlobal("global_threshold", options.threshold);
         setGlobal("global_method", options.method);
         setGlobal("global_filterprofile", options.filterprofile);

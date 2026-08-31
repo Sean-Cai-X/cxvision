@@ -660,6 +660,7 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
     "global_wgap",
     "global_hgap",
     "global_linegap",
+    "global_min_edge_run_width_px",
     "global_threshold",
     "global_filterprofile",
     "global_method",

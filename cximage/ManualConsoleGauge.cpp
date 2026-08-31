@@ -230,6 +230,39 @@ bool AtomicReplaceFile(const std::filesystem::path &temporary,
 }
 } // namespace
 
+void RecordManualOperationTraceEvent(ManualTestContext &context,
+                                     const std::string &operation,
+                                     const std::string &status,
+                                     const std::string &reason) {
+  ManualOperationTraceEvent event;
+  event.sequence = ++context.manual_operation_trace_sequence;
+  event.key_parameter_edit_revision = context.key_parameter_edit_revision;
+  event.operation = operation;
+  event.status = status;
+  event.reason = reason;
+  event.summary = context.last_key_parameter_edit_summary;
+  event.editor_source = context.editor_source;
+  event.loaded_script_path = context.loaded_script_path;
+  event.evidence_selection = context.current_evidence_selection;
+  event.gauge = context.current_gauge;
+  event.globals = context.runtime_int_vars;
+  context.pending_manual_operation_trace_events.push_back(std::move(event));
+  if (context.pending_manual_operation_trace_events.size() > 512) {
+    context.pending_manual_operation_trace_events.erase(
+        context.pending_manual_operation_trace_events.begin());
+  }
+  CXLOG_INFO("ManualOperationTrace", operation.c_str(), status,
+             "sequence=" +
+                 std::to_string(context.manual_operation_trace_sequence) +
+                 " revision=" +
+                 std::to_string(context.key_parameter_edit_revision) +
+                 " reason=" + reason);
+}
+
+void ClearManualOperationTraceEvents(ManualTestContext &context) {
+  context.pending_manual_operation_trace_events.clear();
+}
+
 void InjectManualGaugeInt(ManualTestContext &context, const std::string &key,
                           int value) {
   context.runtime_int_vars[key] = value;
@@ -365,6 +398,8 @@ void NormalizeManualGaugeGeometry(ManualGaugeState &gauge) {
     gauge.ellipse_inner_scale_percent =
         std::max(0, std::min(99, gauge.ellipse_inner_scale_percent));
   }
+  gauge.min_edge_run_width_px =
+      std::max(1, std::min(20, gauge.min_edge_run_width_px));
 }
 
 bool ApplyManualGaugeToGlobals(ManualTestContext &context,
@@ -405,6 +440,12 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
     InjectManualGaugeInt(context, "global_findline_scan_direction",
                          gauge.scan_direction);
     InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
+    if (gauge.tool == "FindLine") {
+      gauge.min_edge_run_width_px =
+          std::max(1, std::min(20, gauge.min_edge_run_width_px));
+      InjectManualGaugeInt(context, "global_min_edge_run_width_px",
+                           gauge.min_edge_run_width_px);
+    }
     InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
     InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
     InjectManualGaugeInt(context, "global_method", gauge.method);
@@ -1138,6 +1179,8 @@ bool SaveManualGaugeAnnotation(ManualTestContext &context,
        << "  \"scan_direction\": " << gauge.scan_direction << ",\n"
        << "  \"gap\": " << gauge.gap << ",\n"
        << "  \"linegap\": " << gauge.linegap << ",\n"
+       << "  \"min_edge_run_width_px\": " << gauge.min_edge_run_width_px
+       << ",\n"
        << "  \"threshold\": " << gauge.threshold << ",\n"
        << "  \"filterprofile\": " << gauge.filterprofile << ",\n"
        << "  \"method\": " << gauge.method << ",\n"
@@ -1268,6 +1311,7 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
                                 "scan_direction",
                                 "gap",
                                 "linegap",
+                                "min_edge_run_width_px",
                                 "threshold",
                                 "filterprofile",
                                 "method",
@@ -1314,6 +1358,7 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
                            &loaded.scan_direction,
                            &loaded.gap,
                            &loaded.linegap,
+                           &loaded.min_edge_run_width_px,
                            &loaded.threshold,
                            &loaded.filterprofile,
                            &loaded.method,
@@ -1336,6 +1381,15 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
       if (std::string(integer_keys[i]) == "scan_direction") {
         // Older accepted annotations predate the exclusive W/H
         // selector.  Keep ManualGaugeState's H-only default.
+        continue;
+      }
+      if (std::string(integer_keys[i]) == "min_edge_run_width_px") {
+        const auto it =
+            context.runtime_int_vars.find("global_min_edge_run_width_px");
+        loaded.min_edge_run_width_px =
+            it != context.runtime_int_vars.end()
+                ? std::max(1, std::min(20, it->second))
+                : 3;
         continue;
       }
       if (std::string(integer_keys[i]) == "findsetting") {

@@ -164,6 +164,7 @@ struct CxScriptSuiteCaseResult
     int effective_hgap = 0;
     int effective_gap = 0;
     int effective_linegap = 0;
+    int effective_min_edge_run_width_px = 0;
     int effective_threshold = 0;
     int effective_filterprofile = 0;
     int effective_method = 0;

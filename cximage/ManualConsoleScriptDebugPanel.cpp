@@ -283,6 +283,8 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
   bool pointConsistencyAdded = false;
   bool objectPrefilterAdded = false;
   bool filterProfileBoundToGlobal = false;
+  bool minEdgeRunWidthBoundToGlobal = false;
+  bool minEdgeRunWidthAdded = false;
 
   const auto insertBeforeMeasure = [&](const std::string& statement)
   {
@@ -362,6 +364,9 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
 
   filterProfileBoundToGlobal = replaceSetterArgumentWithGlobal(
       "setfilterprofile", "global_filterprofile", "filterprofile");
+  minEdgeRunWidthBoundToGlobal = replaceSetterArgumentWithGlobal(
+      "setminedgerunwidth", "global_min_edge_run_width_px",
+      "min_edge_run_width_px");
 
   if (context.editor_text.find(objectName + ".setscandirection(") ==
       std::string::npos)
@@ -396,6 +401,14 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
     pointConsistencyAdded = true;
   }
 
+  if (context.editor_text.find(objectName + ".setminedgerunwidth(") ==
+      std::string::npos)
+  {
+    insertBeforeMeasure(objectName +
+                        ".setminedgerunwidth(global_min_edge_run_width_px);\n");
+    minEdgeRunWidthAdded = true;
+  }
+
   if (!changed)
     return false;
 
@@ -413,6 +426,11 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
             ", filterprofile_binding=" +
             std::string(filterProfileBoundToGlobal ? "globalized" :
                                                    "present") +
+            ", min_edge_run_width_binding=" +
+            std::string(minEdgeRunWidthAdded
+                            ? "added"
+                            : (minEdgeRunWidthBoundToGlobal ? "globalized"
+                                                            : "present")) +
             "); historical script_snapshot.cxsc was not modified";
   return true;
 }
