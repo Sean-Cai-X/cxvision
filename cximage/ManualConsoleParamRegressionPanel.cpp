@@ -7619,7 +7619,7 @@ void DrawKeyParameterControlPanel(
         gaugeEdited |= ImGui::InputInt("##lg_val", &gauge.linegap);
         gauge.linegap = std::max(0, std::min(50, gauge.linegap));
 
-        if (isFindLine) {
+        if (isFindLine || isFindCircle || isFindEllipse) {
           ImGui::TextUnformatted("min edge run px");
           ImGui::SameLine(120.0f);
           ImGui::SetNextItemWidth(140.0f);

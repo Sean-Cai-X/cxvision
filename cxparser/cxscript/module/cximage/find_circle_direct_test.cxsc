@@ -11,6 +11,7 @@ int method = global_method;
 int threshold = global_threshold;
 int gap = global_gap;
 int linegap = global_linegap;
+int min_edge_run_width_px = global_min_edge_run_width_px;
 int findsetting = global_findcircle_findsetting;
 int selected_edge = global_findcircle_selected_edge;
 int inner_radius = global_circle_inner_radius;
@@ -32,6 +33,7 @@ if (outer_radius <= inner_radius) {
 
 m_circle.Setgap(gap);
 m_circle.setlinegap(linegap);
+m_circle.setminedgerunwidth(min_edge_run_width_px);
 m_circle.setthre(threshold);
 m_circle.setmethod(method);
 m_circle.setfindsetting(findsetting);

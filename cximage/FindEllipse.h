@@ -34,6 +34,7 @@ struct FindEllipseDisplaySnapshot
 
     int gap = 0;
     int linegap = 0;
+    int min_edge_run_width_px = 3;
     int threshold = 0;
     int method = 0;
     int selected_edge_index = 0;
@@ -44,6 +45,7 @@ struct FindEllipseDisplaySnapshot
 
     int scan_candidate_lines = 0;
     int scan_total_candidates = 0;
+    int rejected_min_edge_run_width_count = 0;
     int scan_accepted_points_before_gate = 0;
     double accepted_min_boundary_ratio = 0.0;
     double accepted_max_boundary_ratio = 0.0;
@@ -86,6 +88,8 @@ struct FindEllipseMeasureGeometryDebug
         double accepted_y = 0.0;
         std::vector<double> accepted_points_xy;
         int accepted_position = -1;
+        int min_edge_run_width_px = 3;
+        int rejected_min_edge_run_width = 0;
         std::string reject_reason;
     };
 };
@@ -193,6 +197,7 @@ public:
 
     void setlinesamplerate(double dsamplerate);
     void setlinegap(int igap);
+    void setminedgerunwidth(int width);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
@@ -211,6 +216,7 @@ public:
     int getdebugprefiltermaxh() const { return m_debug_prefilter_max_h; }
     int getdebugprefilterforegroundbefore() const { return m_debug_prefilter_foreground_before; }
     int getdebugprefilterforegroundafter() const { return m_debug_prefilter_foreground_after; }
+    int minedgerunwidth() const { return m_min_edge_run_width_px; }
     void setselectedgenum(int iedgenum);
     void setpointconsistency(int enabled, int range);
 
@@ -258,6 +264,7 @@ private:
     gp_Pnt* m_listcollectorA;
 
     int m_iSelectPointGap;
+    int m_min_edge_run_width_px = 3;
     int m_iMethod;
     int m_iThreshold;
     int m_igamarate;
@@ -332,6 +339,7 @@ private:
 
     int m_scan_candidate_lines = 0;
     int m_scan_total_candidates = 0;
+    int m_rejected_min_edge_run_width_count = 0;
     int m_scan_accepted_points_before_gate = 0;
     double m_accepted_boundary_ratio_sum = 0.0;
     double m_accepted_boundary_ratio_min = 999.0;

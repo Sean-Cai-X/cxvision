@@ -383,6 +383,7 @@ void RecordFindEllipseAcceptedDiagnosticPoint(
     int scan_index,
     int candidate_count,
     int accepted_position,
+    int min_edge_run_width_px,
     const gp_Pnt& point)
 {
   auto& diag = EnsureFindEllipseScanDiagnostic(diagnostics, scan_index);
@@ -393,6 +394,7 @@ void RecordFindEllipseAcceptedDiagnosticPoint(
   diag.accepted_points_xy.push_back(point.X());
   diag.accepted_points_xy.push_back(point.Y());
   diag.accepted_position = accepted_position;
+  diag.min_edge_run_width_px = min_edge_run_width_px;
   diag.reject_reason.clear();
 }
 
@@ -467,6 +469,7 @@ void FindEllipse::clear() {
   m_fit_avgdist = 0.0;
   m_scan_candidate_lines = 0;
   m_scan_total_candidates = 0;
+  m_rejected_min_edge_run_width_count = 0;
   m_scan_accepted_points_before_gate = 0;
   m_accepted_boundary_ratio_sum = 0.0;
   m_accepted_boundary_ratio_min = 999.0;
@@ -879,6 +882,9 @@ void FindEllipse::setlinesamplerate(double dsamplerate) {
   m_dsamplerate = dsamplerate;
 }
 void FindEllipse::setlinegap(int igap) { m_iSelectPointGap = igap; }
+void FindEllipse::setminedgerunwidth(int width) {
+  m_min_edge_run_width_px = std::max(1, std::min(20, width));
+}
 void FindEllipse::setmethod(int imethod) { m_iMethod = imethod; }
 void FindEllipse::setthre(int ithre) { m_iThreshold = ithre; }
 int FindEllipse::thre() { return m_iThreshold; }
@@ -935,6 +941,7 @@ void FindEllipse::Measure(Image &image) {
         << " roi=(" << m_roi_x0 << "," << m_roi_y0 << ")-(" << m_roi_x1 << ","
         << m_roi_y1 << ")"
         << " gap=" << m_igap << " linegap=" << m_iSelectPointGap
+        << " min_edge_run_width_px=" << m_min_edge_run_width_px
         << " threshold=" << m_iThreshold << " method=" << m_iMethod
         << " existing_scan_lines=" << m_lines.size();
     LogFindEllipseMeasureProbe("measure_enter", "running", oss.str());
@@ -1134,9 +1141,19 @@ void FindEllipse::Measure(Image &image) {
   for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++) {
     std::vector<int> candidate_positions;
     candidate_positions.reserve(8);
+    int line_min_edge_run_width_reject_count = 0;
     irecordpoint.clear();
     icurlinenum = 0;
     bcollectBegin = false;
+    auto record_short_edge_run = [&]() {
+      ++m_rejected_min_edge_run_width_count;
+      ++line_min_edge_run_width_reject_count;
+      auto& diag = EnsureFindEllipseScanDiagnostic(m_scan_diagnostics, inumy);
+      diag.min_edge_run_width_px = m_min_edge_run_width_px;
+      ++diag.rejected_min_edge_run_width;
+      if (!diag.accepted && diag.reject_reason.empty())
+        diag.reject_reason = "min_edge_run_width_rejected";
+    };
     for (int inumx = 0; inumx < ilineslen1; inumx++) {
       icolor = g_pbackimage->pixel(inumx, inumy);
       if ((icolor[0]) > 0) {
@@ -1144,6 +1161,10 @@ void FindEllipse::Measure(Image &image) {
         bcollectBegin = true;
       } else {
         if (true == bcollectBegin && !irecordpoint.empty() &&
+            static_cast<int>(irecordpoint.size()) <
+                m_min_edge_run_width_px) {
+          record_short_edge_run();
+        } else if (true == bcollectBegin && !irecordpoint.empty() &&
             irecordpoint.size() <= 70) {
           icurlineposition =
               m_ineedfixs + irecordpoint[(irecordpoint.size() >> 1)];
@@ -1170,7 +1191,7 @@ void FindEllipse::Measure(Image &image) {
                 m_measurepoints.addpoint(apoint);
                 RecordFindEllipseAcceptedDiagnosticPoint(
                     m_scan_diagnostics, inumy, std::max(1, icurlinenum),
-                    icurlineposition, apoint);
+                    icurlineposition, m_min_edge_run_width_px, apoint);
                 break;
               }
             }
@@ -1181,30 +1202,37 @@ void FindEllipse::Measure(Image &image) {
       }
     }
     if (true == bcollectBegin && !irecordpoint.empty()) {
-      icurlineposition = m_ineedfixs + irecordpoint[(irecordpoint.size() >> 1)];
-      icurlinenum++;
-      if (icurlinenum == m_iselectedgenum || m_iselectedgenum == 0) {
-        if (icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
-            icurlineposition > m_iSelectPointGap + 3) {
-          if (m_iselectedgenum == 0) {
-            candidate_positions.push_back(icurlineposition);
-          } else {
-            gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
-            const double norm = EllipseNorm(apoint.X(), apoint.Y(), ellipse_cx,
-                                            ellipse_cy, ellipse_rx, ellipse_ry);
-            m_accepted_point_norm_sum += norm;
-            m_accepted_point_norm_count++;
-            m_accepted_point_norm_min =
-                std::min(m_accepted_point_norm_min, norm);
-            m_accepted_point_norm_max =
-                std::max(m_accepted_point_norm_max, norm);
-            if (norm > 1.05)
-              m_accepted_points_outside_ellipse_count++;
-            m_measurepoints.addpoint(apoint);
-            RecordFindEllipseAcceptedDiagnosticPoint(
-                m_scan_diagnostics, inumy, std::max(1, icurlinenum),
-                icurlineposition, apoint);
-            break;
+      if (static_cast<int>(irecordpoint.size()) <
+          m_min_edge_run_width_px) {
+        record_short_edge_run();
+      } else {
+        icurlineposition =
+            m_ineedfixs + irecordpoint[(irecordpoint.size() >> 1)];
+        icurlinenum++;
+        if (icurlinenum == m_iselectedgenum || m_iselectedgenum == 0) {
+          if (icurlineposition < (ilineslen1 - m_iSelectPointGap - 3) &&
+              icurlineposition > m_iSelectPointGap + 3) {
+            if (m_iselectedgenum == 0) {
+              candidate_positions.push_back(icurlineposition);
+            } else {
+              gp_Pnt apoint = m_lines[inumy].getlinepoint(icurlineposition);
+              const double norm =
+                  EllipseNorm(apoint.X(), apoint.Y(), ellipse_cx, ellipse_cy,
+                              ellipse_rx, ellipse_ry);
+              m_accepted_point_norm_sum += norm;
+              m_accepted_point_norm_count++;
+              m_accepted_point_norm_min =
+                  std::min(m_accepted_point_norm_min, norm);
+              m_accepted_point_norm_max =
+                  std::max(m_accepted_point_norm_max, norm);
+              if (norm > 1.05)
+                m_accepted_points_outside_ellipse_count++;
+              m_measurepoints.addpoint(apoint);
+              RecordFindEllipseAcceptedDiagnosticPoint(
+                  m_scan_diagnostics, inumy, std::max(1, icurlinenum),
+                  icurlineposition, m_min_edge_run_width_px, apoint);
+              break;
+            }
           }
         }
       }
@@ -1287,7 +1315,7 @@ void FindEllipse::Measure(Image &image) {
       RecordFindEllipseAcceptedDiagnosticPoint(
           m_scan_diagnostics, inumy,
           static_cast<int>(candidate_positions.size()), boundary_position,
-          apoint);
+          m_min_edge_run_width_px, apoint);
 
       double boundary_ratio = best_norm;
       m_scan_accepted_points_before_gate++;
@@ -1342,6 +1370,9 @@ void FindEllipse::Measure(Image &image) {
     oss << "measure finished points=" << m_measurepoints.size()
         << " candidate_lines=" << m_scan_candidate_lines
         << " total_candidates=" << m_scan_total_candidates
+        << " min_edge_run_width_px=" << m_min_edge_run_width_px
+        << " rejected_min_edge_run_width="
+        << m_rejected_min_edge_run_width_count
         << " accepted_before_gate=" << m_scan_accepted_points_before_gate
         << " selected_edge=" << m_iselectedgenum
         << " consistency=" << m_point_consistency_enabled << "/"
@@ -1566,6 +1597,7 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot &out) const {
 
   out.gap = m_igap;
   out.linegap = m_iSelectPointGap;
+  out.min_edge_run_width_px = m_min_edge_run_width_px;
   out.threshold = m_iThreshold;
   out.method = m_iMethod;
   out.selected_edge_index = m_iselectedgenum;
@@ -1578,6 +1610,8 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot &out) const {
 
   out.scan_candidate_lines = m_scan_candidate_lines;
   out.scan_total_candidates = m_scan_total_candidates;
+  out.rejected_min_edge_run_width_count =
+      m_rejected_min_edge_run_width_count;
   out.scan_accepted_points_before_gate = m_scan_accepted_points_before_gate;
   out.accepted_min_boundary_ratio = m_scan_accepted_points_before_gate > 0
                                         ? m_accepted_boundary_ratio_min
@@ -1725,7 +1759,9 @@ void FindEllipse::PublishDisplayShapes(ICxShapeSink &sink,
 void FindEllipse::MeasureRobust(Image &image) {
   std::cout << "[DIAG] FindEllipse::MeasureRobust entry: threshold="
             << m_iThreshold << " method=" << m_iMethod
-            << " linegap=" << m_iSelectPointGap << " gamma=" << m_igamarate
+            << " linegap=" << m_iSelectPointGap
+            << " min_edge_run_width_px=" << m_min_edge_run_width_px
+            << " gamma=" << m_igamarate
             << std::endl;
 
   m_has_fit_result = false;
@@ -1737,6 +1773,7 @@ void FindEllipse::MeasureRobust(Image &image) {
 
   m_scan_candidate_lines = 0;
   m_scan_total_candidates = 0;
+  m_rejected_min_edge_run_width_count = 0;
   m_scan_accepted_points_before_gate = 0;
   m_accepted_boundary_ratio_sum = 0.0;
   m_accepted_boundary_ratio_min = 999.0;
@@ -2015,6 +2052,16 @@ void FindEllipse::CollectEllipseEdgeBandsRobust(Image &image) {
 
     auto appendCandidate = [&](int start, int end) {
       const int seg_len = end - start;
+      if (seg_len > 0 && seg_len < m_min_edge_run_width_px) {
+        ++m_rejected_min_edge_run_width_count;
+        auto& diag =
+            EnsureFindEllipseScanDiagnostic(m_scan_diagnostics, line_idx);
+        diag.min_edge_run_width_px = m_min_edge_run_width_px;
+        ++diag.rejected_min_edge_run_width;
+        if (!diag.accepted && diag.reject_reason.empty())
+          diag.reject_reason = "min_edge_run_width_rejected";
+        return;
+      }
       if (seg_len < 2)
         return;
 
@@ -2089,6 +2136,9 @@ void FindEllipse::CollectEllipseEdgeBandsRobust(Image &image) {
         << " edge_band_candidates=" << m_ellipse_edge_band_candidates.size()
         << " candidate_lines=" << m_scan_candidate_lines
         << " total_candidates=" << m_scan_total_candidates
+        << " min_edge_run_width_px=" << m_min_edge_run_width_px
+        << " rejected_min_edge_run_width="
+        << m_rejected_min_edge_run_width_count
         << " short_lines=" << short_line_count
         << " scan_buffer_oob=" << scan_buffer_out_of_range;
     LogFindEllipseMeasureProbe(
@@ -2452,7 +2502,8 @@ void FindEllipse::ConvertEllipseCandidatesToMeasurePoints() {
             m_lines[static_cast<std::size_t>(scan_index)].getlinepoint(param);
         m_measurepoints.addpoint(point);
         RecordFindEllipseAcceptedDiagnosticPoint(
-            m_scan_diagnostics, scan_index, candidate_count, param, point);
+            m_scan_diagnostics, scan_index, candidate_count, param,
+            m_min_edge_run_width_px, point);
       }
       continue;
     }
@@ -2475,7 +2526,8 @@ void FindEllipse::ConvertEllipseCandidatesToMeasurePoints() {
       m_measurepoints.addpoint(point);
       RecordFindEllipseAcceptedDiagnosticPoint(
           m_scan_diagnostics, scan_index,
-          static_cast<int>(line_candidates.size()), selected_param, point);
+          static_cast<int>(line_candidates.size()), selected_param,
+          m_min_edge_run_width_px, point);
     }
   }
 
@@ -2563,7 +2615,9 @@ void FindEllipse::ConvertEllipseSequenceToMeasurePoints(int sequence_index) {
     if (best_scan_index >= 0) {
       RecordFindEllipseAcceptedDiagnosticPoint(m_scan_diagnostics,
                                                best_scan_index, 1,
-                                               best_position, point);
+                                               best_position,
+                                               m_min_edge_run_width_px,
+                                               point);
     }
   }
 }

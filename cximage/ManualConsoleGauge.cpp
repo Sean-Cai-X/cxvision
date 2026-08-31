@@ -440,7 +440,8 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
     InjectManualGaugeInt(context, "global_findline_scan_direction",
                          gauge.scan_direction);
     InjectManualGaugeInt(context, "global_linegap", gauge.linegap);
-    if (gauge.tool == "FindLine") {
+    if (gauge.tool == "FindLine" || gauge.tool == "FindCircle" ||
+        gauge.tool == "FindEllipse") {
       gauge.min_edge_run_width_px =
           std::max(1, std::min(20, gauge.min_edge_run_width_px));
       InjectManualGaugeInt(context, "global_min_edge_run_width_px",

@@ -33,6 +33,7 @@ struct FindCircleMeasureGeometryRequest
     bool has_arc_window = false;
 
     int linegap = 0;
+    int min_edge_run_width_px = 3;
 
     double sample_rate = 1.0;
 
@@ -50,6 +51,8 @@ struct FindCircleMeasureGeometryDebug
         double accepted_y = 0.0;
         std::vector<double> accepted_points_xy;
         int accepted_position = -1;
+        int min_edge_run_width_px = 3;
+        int rejected_min_edge_run_width = 0;
         std::string reject_reason;
     };
 
@@ -69,6 +72,7 @@ struct FindCircleMeasureGeometryDebug
 
     int gap_degrees = 0;
     int linegap = 0;
+    int min_edge_run_width_px = 3;
 
     int scan_line_count = 0;
     int scan_line_length = 0;
@@ -103,6 +107,7 @@ struct FindCircleMeasureGeometryDebug
     int selected_edge_misses = 0;
     int scan_boundary_clipped_lines = 0;
     int scan_boundary_extended_samples = 0;
+    int candidate_min_edge_run_width_reject_count = 0;
     int candidate_boundary_reject_count = 0;
     int candidate_endpoint_reject_count = 0;
     double selected_edge_radius_avg = 0.0;
@@ -286,6 +291,7 @@ public:
 
     void setlinesamplerate(double dsamplerate);
     void setlinegap(int igap);
+    void setminedgerunwidth(int width);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
@@ -353,6 +359,7 @@ public:
     int getcirclepay() const { return m_ipay; }
     int getgap() const { return m_igap; }
     int getlinegap() const { return m_iSelectPointGap; }
+    int minedgerunwidth() const { return m_min_edge_run_width_px; }
     int getmethod() const { return m_iMethod; }
     int getthreshold() const { return m_iThreshold; }
     int getannulusinner();
@@ -439,6 +446,7 @@ private:
     gp_Pnt* m_listcollectorA;
 
     int m_iSelectPointGap;
+    int m_min_edge_run_width_px = 3;
     int m_iMethod;
     int m_iThreshold;
     int m_igamarate;

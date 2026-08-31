@@ -391,6 +391,7 @@ bool CaptureFindCircleResult(
     output.tool_threshold = tool.getthreshold();
     output.tool_wgap = tool.getgap();
     output.tool_linegap = tool.getlinegap();
+    output.tool_min_edge_run_width_px = tool.minedgerunwidth();
     output.tool_input_circle_cx = tool.getcirclecentx();
     output.tool_input_circle_cy = tool.getcirclecenty();
     output.tool_input_circle_px = tool.getcirclepax();
@@ -417,6 +418,39 @@ bool CaptureFindCircleResult(
         tool.getpointconsistencyoutputcount();
     output.circle_point_consistency_removed_points =
         tool.getpointconsistencyremovedcount();
+
+    const FindCircleMeasureGeometryDebug& geometry_debug =
+        tool.lastmeasuregeometrydebug();
+    output.scan_runs_rejected_by_min_edge_width =
+        geometry_debug.candidate_min_edge_run_width_reject_count;
+    output.findline_scan_diagnostics.clear();
+    for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
+    {
+        FindCircleMeasureGeometryDebug::ScanDiagnostic diag;
+        if (!tool.getscandiagnostic(i, diag))
+            continue;
+
+        CxFindLineScanDiagnosticSnapshot snap;
+        snap.scan_index = diag.scan_index;
+        snap.scan_type = 2;
+        snap.candidate_count = diag.candidate_count;
+        snap.min_edge_run_width_px = diag.min_edge_run_width_px;
+        snap.rejected_min_edge_run_width = diag.rejected_min_edge_run_width;
+        snap.accepted = diag.accepted;
+        snap.accepted_x = diag.accepted_x;
+        snap.accepted_y = diag.accepted_y;
+        snap.reject_reason = diag.reject_reason;
+        CxShapePoint p0;
+        CxShapePoint p1;
+        if (tool.getscandiagnosticline(diag.scan_index, p0, p1))
+        {
+            snap.x0 = p0.x;
+            snap.y0 = p0.y;
+            snap.x1 = p1.x;
+            snap.y1 = p1.y;
+        }
+        output.findline_scan_diagnostics.push_back(snap);
+    }
 
     const FindCircleBoundaryAnalysisSnapshot boundary =
         tool.boundaryanalysissnapshot();
@@ -522,6 +556,41 @@ bool CaptureFindEllipseResult(
     output.ellipse_radius_y = tool.getresultradiusy();
     output.ellipse_angle_deg = tool.getresultangle();
     output.avgdist = tool.getavgdist();
+    output.tool_method = snapshot.method;
+    output.tool_threshold = snapshot.threshold;
+    output.tool_wgap = snapshot.gap;
+    output.tool_linegap = snapshot.linegap;
+    output.tool_min_edge_run_width_px = tool.minedgerunwidth();
+    output.scan_runs_rejected_by_min_edge_width =
+        snapshot.rejected_min_edge_run_width_count;
+    output.findline_scan_diagnostics.clear();
+    for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
+    {
+        FindEllipseMeasureGeometryDebug::ScanDiagnostic diag;
+        if (!tool.getscandiagnostic(i, diag))
+            continue;
+
+        CxFindLineScanDiagnosticSnapshot snap;
+        snap.scan_index = diag.scan_index;
+        snap.scan_type = 3;
+        snap.candidate_count = diag.candidate_count;
+        snap.min_edge_run_width_px = diag.min_edge_run_width_px;
+        snap.rejected_min_edge_run_width = diag.rejected_min_edge_run_width;
+        snap.accepted = diag.accepted;
+        snap.accepted_x = diag.accepted_x;
+        snap.accepted_y = diag.accepted_y;
+        snap.reject_reason = diag.reject_reason;
+        CxShapePoint p0;
+        CxShapePoint p1;
+        if (tool.getscandiagnosticline(diag.scan_index, p0, p1))
+        {
+            snap.x0 = p0.x;
+            snap.y0 = p0.y;
+            snap.x1 = p1.x;
+            snap.y1 = p1.y;
+        }
+        output.findline_scan_diagnostics.push_back(snap);
+    }
     output.actual_findsetting = tool.getfindsetting();
     output.object_prefilter_requested = (tool.getfindsetting() & 0x01) != 0;
     output.object_prefilter_applied = tool.getdebugprefilterused() != 0;

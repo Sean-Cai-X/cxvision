@@ -2746,6 +2746,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     if (!hasInt("global_circle_cx") || !hasInt("global_circle_cy") ||
         !hasInt("global_circle_px") || !hasInt("global_circle_py") ||
         !hasInt("global_gap") || !hasInt("global_linegap") ||
+        !hasInt("global_min_edge_run_width_px") ||
         !hasInt("global_threshold") || !hasInt("global_method")) {
       reason = "missing required FindCircle global_* bindings";
       return false;
@@ -2774,6 +2775,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
         !hasInt("global_ellipse_x1") || !hasInt("global_ellipse_y1") ||
         !hasInt("global_findellipse_inner_scale_percent") ||
         !hasInt("global_gap") || !hasInt("global_linegap") ||
+        !hasInt("global_min_edge_run_width_px") ||
         !hasInt("global_threshold") || !hasInt("global_method")) {
       reason = "missing required FindEllipse global_* bindings";
       return false;
@@ -3296,6 +3298,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
   if (evidencePathIsFindCircle(snapshot.script_path)) {
     required = {"global_circle_cx", "global_circle_cy", "global_circle_px",
                 "global_circle_py", "global_gap",       "global_linegap",
+                "global_min_edge_run_width_px",
                 "global_threshold", "global_method"};
   } else if (evidencePathIsFindLine(snapshot.script_path)) {
     required = {"global_roi_x0", "global_roi_y0",          "global_roi_x1",
@@ -3310,6 +3313,7 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
                 "global_findellipse_inner_scale_percent",
                 "global_gap",
                 "global_linegap",
+                "global_min_edge_run_width_px",
                 "global_threshold",
                 "global_method"};
   } else if (evidencePathIsFindRect(snapshot.script_path)) {

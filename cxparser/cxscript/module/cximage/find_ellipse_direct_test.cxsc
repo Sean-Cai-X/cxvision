@@ -5,6 +5,7 @@ m_image.copyFromMat(global_matInput);
 
 int gap = global_gap;
 int linegap = global_linegap;
+int min_edge_run_width_px = global_min_edge_run_width_px;
 int threshold = global_threshold;
 int method = global_method;
 int findsetting = global_findellipse_findsetting;
@@ -21,6 +22,7 @@ m_ellipse.buildbbox();
 m_ellipse.setinnerpercent(inner_scale_percent);
 m_ellipse.setgap(gap);
 m_ellipse.setlinegap(linegap);
+m_ellipse.setminedgerunwidth(min_edge_run_width_px);
 m_ellipse.setthre(threshold);
 m_ellipse.setmethod(method);
 m_ellipse.setfindsetting(findsetting);

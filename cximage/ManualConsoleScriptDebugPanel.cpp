@@ -80,6 +80,7 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
   bool selectedEdgeAdded = false;
   bool pointConsistencyAdded = false;
   bool objectPrefilterAdded = false;
+  bool minEdgeRunWidthAdded = false;
   for (const Replacement& replacement : replacements)
   {
     std::size_t pos = 0;
@@ -207,6 +208,22 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
     }
   }
 
+  if (!objectName.empty() &&
+      context.editor_text.find(objectName + ".setminedgerunwidth(") ==
+          std::string::npos)
+  {
+    const std::size_t measurePos = context.editor_text.find(measureCall);
+    if (measurePos != std::string::npos)
+    {
+      const std::string minEdgeRunWidthCall =
+          objectName +
+          ".setminedgerunwidth(global_min_edge_run_width_px);\n";
+      context.editor_text.insert(measurePos, minEdgeRunWidthCall);
+      changed = true;
+      minEdgeRunWidthAdded = true;
+    }
+  }
+
   if (!changed)
     return false;
 
@@ -224,6 +241,8 @@ bool MigrateLegacyFindCircleCallsForRun(ManualTestContext& context,
            std::string(pointConsistencyAdded ? "added" : "present") +
            ", object_prefilter_call=" +
            std::string(objectPrefilterAdded ? "added" : "present") +
+           ", min_edge_run_width_call=" +
+           std::string(minEdgeRunWidthAdded ? "added" : "present") +
            "); historical script_snapshot.cxsc was not modified";
   return true;
 }
@@ -282,9 +301,9 @@ bool MigrateLegacyFindLineCallsForRun(ManualTestContext& context,
   bool selectedEdgeAdded = false;
   bool pointConsistencyAdded = false;
   bool objectPrefilterAdded = false;
+  bool minEdgeRunWidthAdded = false;
   bool filterProfileBoundToGlobal = false;
   bool minEdgeRunWidthBoundToGlobal = false;
-  bool minEdgeRunWidthAdded = false;
 
   const auto insertBeforeMeasure = [&](const std::string& statement)
   {

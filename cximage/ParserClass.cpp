@@ -696,6 +696,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setlinegap", &FindCircle::setlinegap);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setminedgerunwidth",
+                            &FindCircle::setminedgerunwidth);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setmethod", &FindCircle::setmethod);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setthre",
                             &FindCircle::setthre);
@@ -898,6 +901,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindEllipse::setshow);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setlinegap",
                             &FindEllipse::setlinegap);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setminedgerunwidth",
+                            &FindEllipse::setminedgerunwidth);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod",
                             &FindEllipse::setmethod);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setfindsetting",
