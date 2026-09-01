@@ -65,6 +65,12 @@ enum class CxBoundarySubpixelMode {
   ParabolicResponse = 2,
 };
 
+enum class CxBoundaryPairAnchorMode {
+  Center = 0,
+  FirstEdge = 1,
+  SecondEdge = 2,
+};
+
 struct CxBoundaryResponseConfig {
   CxBoundaryBaselineMode baseline_mode = CxBoundaryBaselineMode::Offset;
   CxBoundaryDenoiseMode denoise_mode = CxBoundaryDenoiseMode::Gaussian;
@@ -88,6 +94,8 @@ struct CxBoundaryResponseConfig {
   int min_amplitude_permille = 80;
   int pair_min_width = 2;
   int pair_max_width = 80;
+  CxBoundaryPairAnchorMode pair_anchor_mode =
+      CxBoundaryPairAnchorMode::Center;
   int reference_position_permille = 500;
   std::vector<float> reference_profile;
 };

@@ -108,6 +108,8 @@ BuildMetrologyUiGlobalSnapshot(const CxMetrologyUiGlobalFields &m) {
       m.boundary_pair_min_width);
   Add(out, "global_metrology_boundary_pair_max_width",
       m.boundary_pair_max_width);
+  Add(out, "global_metrology_boundary_pair_anchor_mode",
+      m.boundary_pair_anchor_mode);
   Add(out, "global_metrology_boundary_subpixel_mode",
       m.boundary_subpixel_mode);
   Add(out, "global_metrology_boundary_show_conditioned",
@@ -218,7 +220,9 @@ std::string BuildMetrologyUiGlobalSummary(const CxMetrologyUiGlobalFields &m) {
     << ",gate=" << m.boundary_gate_start_permille << ":"
     << m.boundary_gate_end_permille
     << ",selection=" << m.boundary_selection_mode
-    << ",reference=" << (m.boundary_reference_bound ? 1 : 0) << ")"
+    << ",pair_anchor=" << m.boundary_pair_anchor_mode
+    << ",reference=" << (m.boundary_reference_bound ? 1 : 0)
+    << "@" << m.boundary_reference_position_permille << ")"
     << " surface=" << m.surface_width << "x" << m.surface_height
     << " stride=" << m.surface_stride
     << " area_method=" << m.surface_area_method

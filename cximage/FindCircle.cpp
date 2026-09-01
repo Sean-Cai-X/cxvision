@@ -983,6 +983,16 @@ void FindCircle::setboundarynthcandidate(int nth) {
     m_measure_geometry_request.version = m_measure_geometry_version;
 }
 
+void FindCircle::setboundaryreferencepositionpermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.reference_position_permille == new_value)
+    return;
+  m_boundary_response_config.reference_position_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
 void FindCircle::setboundarysubpixel(int mode) {
   const auto new_mode = ClampEnumInt(
       mode, 0, 2,
@@ -1140,6 +1150,18 @@ void FindCircle::setboundarypairmaxwidth(int width) {
     return;
   m_boundary_response_config.pair_max_width =
       std::max(new_width, m_boundary_response_config.pair_min_width);
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarypairanchor(int anchor) {
+  const auto new_anchor = ClampEnumInt(
+      anchor, 0, 2,
+      cxvision::metrology_analytics::CxBoundaryPairAnchorMode::Center);
+  if (m_boundary_response_config.pair_anchor_mode == new_anchor)
+    return;
+  m_boundary_response_config.pair_anchor_mode = new_anchor;
   MarkCircleMeasureGeometryDirty();
   if (m_measure_geometry_request.valid)
     m_measure_geometry_request.version = m_measure_geometry_version;

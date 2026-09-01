@@ -12,6 +12,7 @@
 #include "torch_taskalignedassigner.h"
 #include "torch_util.h"
 #include "torch_detect.h"
+#include "torch_yolo_head.h"
 
 namespace F = torch::nn::functional;
 
@@ -94,13 +95,17 @@ public:
 
         for (size_t i = 0; i < preds.size(); ++i) {
             torch::Tensor pred = preds[i];
-            int64_t stride = strides_[i].item<int64_t>();
             int64_t box_channels = config_.box_channels();
 
             torch::Tensor pred_boxes = pred.slice(2, 0, box_channels);
             torch::Tensor pred_cls = pred.slice(2, box_channels, box_channels + num_classes_);
 
-            torch::Tensor decoded_boxes = decode_boxes(pred_boxes, stride);
+            const int64_t grid_size = static_cast<int64_t>(
+                std::llround(std::sqrt(static_cast<double>(pred_boxes.size(1)))));
+            TORCH_CHECK(grid_size * grid_size == pred_boxes.size(1),
+                "YOLO direct box decode requires a square feature grid");
+            torch::Tensor decoded_boxes = decode_boxes(
+                pred_boxes, grid_size, grid_size);
 
             torch::Tensor assigned_gt_inds = assigner->forward(
                 torch::sigmoid(pred_cls).unsqueeze(1),
@@ -132,7 +137,7 @@ public:
 
                 if (config_.enable_dfl) {
                     torch::Tensor pos_pred_boxes = pred_boxes.masked_select(pos_mask.unsqueeze(-1)).view({-1, config_.box_channels()});
-                    loss_dfl = loss_dfl + compute_dfl_loss(pos_pred_boxes, pos_gt_boxes, stride).sum();
+                    loss_dfl = loss_dfl + compute_dfl_loss(pos_pred_boxes, pos_gt_boxes, strides_[i].item<int64_t>()).sum();
                 }
             }
 
@@ -161,14 +166,18 @@ public:
     }
 
 private:
-    torch::Tensor decode_boxes(const torch::Tensor& pred_boxes, int64_t stride) {
+    torch::Tensor decode_boxes(
+        const torch::Tensor& pred_boxes,
+        int64_t grid_height,
+        int64_t grid_width) {
         switch (config_.decode_strategy) {
         case YoloBoxDecodeStrategy::DirectStrideScaled:
         default:
             if (!config_.enable_dfl) {
-                return pred_boxes * static_cast<float>(stride);
+                return decode_yolo_direct_boxes_normalized(
+                    pred_boxes, grid_height, grid_width);
             }
-            return decode_dfl_boxes(pred_boxes, stride);
+            return decode_dfl_boxes(pred_boxes, strides_[0].item<int64_t>());
         }
     }
 
@@ -251,25 +260,18 @@ private:
     }
 
     torch::Tensor bbox_iou(const torch::Tensor& boxes1, const torch::Tensor& boxes2, bool ciou = true) {
-        auto b1_x = boxes1.select(1, 0);
-        auto b1_y = boxes1.select(1, 1);
-        auto b1_w = boxes1.select(1, 2);
-        auto b1_h = boxes1.select(1, 3);
-
-        auto b1_x1 = b1_x - b1_w / 2.0f;
-        auto b1_y1 = b1_y - b1_h / 2.0f;
-        auto b1_x2 = b1_x + b1_w / 2.0f;
-        auto b1_y2 = b1_y + b1_h / 2.0f;
-
-        auto b2_x = boxes2.select(1, 0);
-        auto b2_y = boxes2.select(1, 1);
-        auto b2_w = boxes2.select(1, 2);
-        auto b2_h = boxes2.select(1, 3);
-
-        auto b2_x1 = b2_x - b2_w / 2.0f;
-        auto b2_y1 = b2_y - b2_h / 2.0f;
-        auto b2_x2 = b2_x + b2_w / 2.0f;
-        auto b2_y2 = b2_y + b2_h / 2.0f;
+        auto b1_x1 = boxes1.select(1, 0);
+        auto b1_y1 = boxes1.select(1, 1);
+        auto b1_x2 = boxes1.select(1, 2);
+        auto b1_y2 = boxes1.select(1, 3);
+        auto b2_x1 = boxes2.select(1, 0);
+        auto b2_y1 = boxes2.select(1, 1);
+        auto b2_x2 = boxes2.select(1, 2);
+        auto b2_y2 = boxes2.select(1, 3);
+        auto b1_w = (b1_x2 - b1_x1).clamp_min(0);
+        auto b1_h = (b1_y2 - b1_y1).clamp_min(0);
+        auto b2_w = (b2_x2 - b2_x1).clamp_min(0);
+        auto b2_h = (b2_y2 - b2_y1).clamp_min(0);
 
         auto inter_x1 = torch::max(b1_x1, b2_x1);
         auto inter_y1 = torch::max(b1_y1, b2_y1);
@@ -289,7 +291,12 @@ private:
 
             auto c_diag_sq = (c_x2 - c_x1).pow(2) + (c_y2 - c_y1).pow(2) + 1e-7f;
 
-            auto rho_sq = (b2_x - b1_x).pow(2) + (b2_y - b1_y).pow(2);
+            auto b1_center_x = (b1_x1 + b1_x2) * 0.5f;
+            auto b1_center_y = (b1_y1 + b1_y2) * 0.5f;
+            auto b2_center_x = (b2_x1 + b2_x2) * 0.5f;
+            auto b2_center_y = (b2_y1 + b2_y2) * 0.5f;
+            auto rho_sq = (b2_center_x - b1_center_x).pow(2) +
+                (b2_center_y - b1_center_y).pow(2);
 
             auto w2_h2 = b2_w / (b2_h + 1e-7f);
             auto w1_h1 = b1_w / (b1_h + 1e-7f);

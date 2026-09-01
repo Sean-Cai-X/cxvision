@@ -787,12 +787,13 @@ struct ManualMetrologyUiState {
   int boundary_hysteresis_permille = 50;
   int boundary_gate_start_permille = 0;
   int boundary_gate_end_permille = 1000;
-  int boundary_selection_mode = 0; // CxBoundarySelectionMode
+  int boundary_selection_mode = 4; // CxBoundarySelectionMode::NearestGateCenter
   int boundary_nth_candidate = 1;
   int boundary_min_plateau_width = 3;
   int boundary_min_amplitude_permille = 80;
   int boundary_pair_min_width = 2;
   int boundary_pair_max_width = 80;
+  int boundary_pair_anchor_mode = 0; // 0 center, 1 first edge, 2 second edge
   int boundary_subpixel_mode = 2;
   bool boundary_show_conditioned = true;
   bool boundary_show_response = true;
@@ -1035,6 +1036,9 @@ struct CxTorchTrainingRunBinding {
   std::string dataset_source;
   std::string dataset_summary_path;
   std::string training_trace_path;
+  std::string learning_curve_path;
+  std::string incremental_model_manifest_path;
+  std::string incremental_model_path;
   std::string optimizer;
   std::string lr_schedule = "constant";
   std::string loss_phase;
@@ -1042,6 +1046,7 @@ struct CxTorchTrainingRunBinding {
   int completed_epochs = 0;
   int train_sample_count = 0;
   int train_instance_count = 0;
+  int batches_per_epoch = 0;
   double learning_rate = 0.0;
   double min_learning_rate = 0.0;
   double weight_decay = 0.0;
@@ -1063,6 +1068,45 @@ struct CxTorchTrainingRunBinding {
       return "PENDING_EXTERNAL_TRAINING_CURVES";
     return "REAL_MULTI_EPOCH_SERIES";
   }
+};
+
+struct CxModelLineageUiNode {
+  bool accepted = false;
+  std::string model_id;
+  std::string display_name;
+  std::string node_kind;
+  std::string root_release_id;
+  std::string branch_id;
+  std::vector<std::string> parent_model_ids;
+  std::string task;
+  std::string architecture_id;
+  std::string output_contract;
+  std::vector<std::string> capabilities;
+  std::string capability_manifest_path;
+  std::string model_manifest_path;
+  std::string checkpoint_path;
+  std::string checkpoint_hash;
+  std::string checkpoint_hash_status;
+  std::string class_ontology_path;
+  std::string dataset_binding_path;
+  std::string training_plan_path;
+  std::string metric_bundle_path;
+  std::string promotion_status;
+  std::string model_node_path;
+  bool parent_selection_reviewed = false;
+  bool parent_gate_satisfied = false;
+  bool freeze_policy_reviewed = false;
+  bool inference_difference_reviewed = false;
+  std::string parent_selection_review_path;
+  std::string freeze_policy_review_path;
+  std::string inference_difference_review_path;
+  std::string gate_status;
+  std::string gate_reason;
+};
+
+struct CxModelLineageRejectedAsset {
+  std::string path;
+  std::string reason;
 };
 
 struct ScriptEvidenceThumb {
@@ -1398,6 +1442,25 @@ struct ManualTestContext {
   std::string torch_training_image_reason =
       "training image set not initialized";
   CxTorchTrainingRunBinding torch_training_run;
+  std::string model_lineage_scan_root = "cxscript_runs";
+  bool model_lineage_scan_attempted = false;
+  std::string model_lineage_scan_status = "PENDING";
+  std::string model_lineage_scan_reason =
+      "model lineage assets have not been scanned";
+  std::string model_lineage_scan_debug_path;
+  std::vector<CxModelLineageUiNode> model_lineage_nodes;
+  std::vector<CxModelLineageRejectedAsset> model_lineage_rejected;
+  int selected_model_lineage_node = -1;
+  std::string model_lineage_parent_selection_reason;
+  std::string model_lineage_parent_selection_status = "PENDING_HUMAN_REVIEW";
+  std::string model_lineage_parent_selection_message;
+  std::string model_lineage_parent_selection_review_path;
+  bool torch_training_latest_scan_attempted = false;
+  bool torch_training_process_running = false;
+  std::uintptr_t torch_training_process_handle = 0;
+  std::string torch_training_active_output_dir;
+  std::string torch_training_active_curve_path;
+  std::string torch_training_active_result_path;
   bool geometry_aug_include_brightness = true;
   bool geometry_aug_include_local_gap = true;
   bool geometry_aug_include_jagged_cut = true;

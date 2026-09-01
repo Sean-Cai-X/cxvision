@@ -3,4 +3,9 @@
 
 #include "ViewController.h"
 
+#include <string>
+
+int RunModelLineageAssetScanSmoke(const std::string &scanRoot,
+                                  const std::string &outputDirectory);
+
 #endif

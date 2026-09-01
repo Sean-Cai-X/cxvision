@@ -724,6 +724,8 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
       metrology.boundary_pair_min_width);
   set("global_metrology_boundary_pair_max_width",
       metrology.boundary_pair_max_width);
+  set("global_metrology_boundary_pair_anchor_mode",
+      metrology.boundary_pair_anchor_mode);
   set("global_metrology_boundary_subpixel_mode",
       metrology.boundary_subpixel_mode);
   set("global_metrology_boundary_show_conditioned",

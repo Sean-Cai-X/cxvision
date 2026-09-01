@@ -59,6 +59,10 @@ void Window::Close()
 // ================================================================
 Aspect_Drawable Window::NativeHandle() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return 0;
+  }
 #if defined (__APPLE__)
   return (Aspect_Drawable)glfwGetCocoaWindow (myGlfwWindow);
 #elif defined (_WIN32)
@@ -74,6 +78,10 @@ Aspect_Drawable Window::NativeHandle() const
 // ================================================================
 Aspect_RenderingContext Window::NativeGlContext() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return nullptr;
+  }
 #if defined (__APPLE__)
   return (NSOpenGLContext*)glfwGetNSGLContext (myGlfwWindow);
 #elif defined (_WIN32)
@@ -89,6 +97,10 @@ Aspect_RenderingContext Window::NativeGlContext() const
 // ================================================================
 Standard_Boolean Window::IsMapped() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return Standard_False;
+  }
   return glfwGetWindowAttrib (myGlfwWindow, GLFW_VISIBLE) != 0;
 }
 
@@ -98,6 +110,10 @@ Standard_Boolean Window::IsMapped() const
 // ================================================================
 void Window::Map() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return;
+  }
   glfwShowWindow (myGlfwWindow);
 }
 
@@ -107,6 +123,10 @@ void Window::Map() const
 // ================================================================
 void Window::Unmap() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return;
+  }
   glfwHideWindow (myGlfwWindow);
 }
 
@@ -116,6 +136,10 @@ void Window::Unmap() const
 // ================================================================
 Aspect_TypeOfResize Window::DoResize()
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return Aspect_TOR_UNKNOWN;
+  }
   if (glfwGetWindowAttrib (myGlfwWindow, GLFW_VISIBLE) == 1)
   {
     int anXPos = 0, anYPos = 0, aWidth = 0, aHeight = 0;
@@ -135,6 +159,10 @@ Aspect_TypeOfResize Window::DoResize()
 // ================================================================
 Graphic3d_Vec2i Window::CursorPosition() const
 {
+  if (myGlfwWindow == nullptr)
+  {
+    return Graphic3d_Vec2i(0, 0);
+  }
   Graphic3d_Vec2d aPos;
   glfwGetCursorPos (myGlfwWindow, &aPos.x(), &aPos.y());
   return Graphic3d_Vec2i ((int )aPos.x(), (int )aPos.y());

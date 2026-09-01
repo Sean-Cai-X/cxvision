@@ -222,10 +222,34 @@ bool PostprocessAndWriteOutput(
         for (const auto& det : detections)
         {
             BBox scaled = det;
-            scaled.x1 = (det.x1 - letterbox_info.pad_x) / letterbox_info.scale;
-            scaled.y1 = (det.y1 - letterbox_info.pad_y) / letterbox_info.scale;
-            scaled.x2 = (det.x2 - letterbox_info.pad_x) / letterbox_info.scale;
-            scaled.y2 = (det.y2 - letterbox_info.pad_y) / letterbox_info.scale;
+            const bool normalized_cpp_output =
+                manifest.weights_format == "cpp_state_dict";
+            const float model_x1 = normalized_cpp_output
+                ? det.x1 * manifest.input_width : det.x1;
+            const float model_y1 = normalized_cpp_output
+                ? det.y1 * manifest.input_height : det.y1;
+            const float model_x2 = normalized_cpp_output
+                ? det.x2 * manifest.input_width : det.x2;
+            const float model_y2 = normalized_cpp_output
+                ? det.y2 * manifest.input_height : det.y2;
+            if (manifest.letterbox)
+            {
+                scaled.x1 = (model_x1 - letterbox_info.pad_x) / letterbox_info.scale;
+                scaled.y1 = (model_y1 - letterbox_info.pad_y) / letterbox_info.scale;
+                scaled.x2 = (model_x2 - letterbox_info.pad_x) / letterbox_info.scale;
+                scaled.y2 = (model_y2 - letterbox_info.pad_y) / letterbox_info.scale;
+            }
+            else
+            {
+                const float scale_x = static_cast<float>(letterbox_info.original_width) /
+                    static_cast<float>(manifest.input_width);
+                const float scale_y = static_cast<float>(letterbox_info.original_height) /
+                    static_cast<float>(manifest.input_height);
+                scaled.x1 = model_x1 * scale_x;
+                scaled.y1 = model_y1 * scale_y;
+                scaled.x2 = model_x2 * scale_x;
+                scaled.y2 = model_y2 * scale_y;
+            }
 
             scaled.x1 = std::max(0.0f, std::min(static_cast<float>(letterbox_info.original_width - 1), scaled.x1));
             scaled.y1 = std::max(0.0f, std::min(static_cast<float>(letterbox_info.original_height - 1), scaled.y1));
@@ -411,6 +435,39 @@ TorchTaskResultCpp ExecuteTorchDetectionTask(
                 result.error_code = static_cast<int>(TorchRuntimeErrorCode::ModelLoadFailed);
                 result.status = "failed";
                 result.error_message = "failed to load cpp_archive model: " + std::string(e.what());
+                result.result_json =
+                    "{\"schema\":\"cxvision.torch.error.v1\","
+                    "\"failure_stage\":\"runtime_model_loading\","
+                    "\"reason\":\"model_load_failed\"}";
+                return result;
+            }
+        }
+        else if (manifest.weights_format == "cpp_state_dict")
+        {
+            try
+            {
+                ModelConfig model_config =
+                    ModelConfig::get_config(manifest.variant,
+                                            manifest.num_classes);
+                YOLOv8 model(model_config);
+                model->load_checkpoint(manifest.model_path.string());
+                auto start_time = std::chrono::steady_clock::now();
+                output_tensor = RunDetectionInferenceYOLOv8(
+                    model, input_tensor, config.device);
+                auto end_time = std::chrono::steady_clock::now();
+                elapsed_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        end_time - start_time).count();
+            }
+            catch (const c10::Error& e)
+            {
+                result.ok = false;
+                result.error_code =
+                    static_cast<int>(TorchRuntimeErrorCode::ModelLoadFailed);
+                result.status = "failed";
+                result.error_message =
+                    "failed to load cpp_state_dict model: " +
+                    std::string(e.what());
                 result.result_json =
                     "{\"schema\":\"cxvision.torch.error.v1\","
                     "\"failure_stage\":\"runtime_model_loading\","

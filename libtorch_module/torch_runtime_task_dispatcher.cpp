@@ -6,6 +6,7 @@
 #include "torch_runtime_edgesam_executor.h"
 #include "torch_runtime_yolov8_seg_executor.h"
 #include "torch_prototype_index.h"
+#include "torch_v8.h"
 
 TorchTaskResultCpp ExecuteTorchPrototypeLifecycleTask(
     const TorchRuntimeCoreConfig& config,
@@ -15,6 +16,9 @@ TorchTaskResultCpp ValidateTorchIncrementalPackageTask(
     const TorchRuntimeCoreConfig& config,
     const TorchTaskRequestCpp& request,
     const std::string& model_family);
+TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request);
 #include "torch_segmentation_mainline_bridge.h"
 #include "torch_test_host.h"
 #include <chrono>
@@ -1381,6 +1385,357 @@ TorchTaskResultCpp RunLegacyTorchTestHostTask(
     return result;
 }
 
+TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
+    const TorchRuntimeCoreConfig& config,
+    const TorchTaskRequestCpp& request)
+{
+    TorchTaskResultCpp result;
+    result.requested_device =
+        request.device.empty() ? config.device : request.device;
+    if (result.requested_device.empty())
+        result.requested_device = "cpu";
+
+    try
+    {
+        TORCH_CHECK(!request.dataset_root.empty(),
+            "YOLOv8 lifecycle requires dataset_root");
+        TORCH_CHECK(!request.output_dir.empty(),
+            "YOLOv8 lifecycle requires output_dir");
+        TORCH_CHECK(!request.extra_json.empty(),
+            "YOLOv8 lifecycle requires a training plan in extra_json");
+
+        cv::FileStorage plan(
+            request.extra_json,
+            cv::FileStorage::READ | cv::FileStorage::MEMORY |
+                cv::FileStorage::FORMAT_JSON);
+        TORCH_CHECK(plan.isOpened(), "YOLOv8 lifecycle training plan is invalid");
+        std::string plan_schema;
+        plan["schema"] >> plan_schema;
+        TORCH_CHECK(
+            plan_schema == "cxvision.yolov8n_cpp_training_plan.v1",
+            "YOLOv8 lifecycle training plan schema is unsupported");
+
+        int epochs = 0;
+        int batch_size = 0;
+        int input_size = 0;
+        int max_train_batches = 0;
+        int seed = 0;
+        int num_classes = 0;
+        double learning_rate = 0.0;
+        plan["epochs"] >> epochs;
+        plan["batch_size"] >> batch_size;
+        plan["input_size"] >> input_size;
+        plan["max_train_batches_per_epoch"] >> max_train_batches;
+        plan["seed"] >> seed;
+        plan["num_classes"] >> num_classes;
+        plan["learning_rate"] >> learning_rate;
+        TORCH_CHECK(epochs >= 2, "YOLOv8 lifecycle requires at least two epochs");
+        TORCH_CHECK(batch_size > 0, "YOLOv8 lifecycle batch_size must be positive");
+        TORCH_CHECK(input_size > 0 && input_size % 32 == 0,
+            "YOLOv8 lifecycle input_size must be positive and divisible by 32");
+        TORCH_CHECK(max_train_batches > 0,
+            "YOLOv8 lifecycle max_train_batches_per_epoch must be positive");
+        TORCH_CHECK(num_classes > 0, "YOLOv8 lifecycle num_classes must be positive");
+        TORCH_CHECK(learning_rate > 0.0,
+            "YOLOv8 lifecycle learning_rate must be positive");
+
+        std::vector<std::string> class_names;
+        const cv::FileNode class_nodes = plan["class_names"];
+        TORCH_CHECK(class_nodes.isSeq(),
+            "YOLOv8 lifecycle class_names must be a sequence");
+        for (const auto& node : class_nodes)
+            class_names.push_back(static_cast<std::string>(node));
+        TORCH_CHECK(static_cast<int>(class_names.size()) == num_classes,
+            "YOLOv8 lifecycle class_names count must match num_classes");
+
+        const std::filesystem::path dataset_root(request.dataset_root);
+        const std::filesystem::path train_images = dataset_root / "images" / "train";
+        const std::filesystem::path train_labels = dataset_root / "labels" / "train";
+        const std::filesystem::path val_images = dataset_root / "images" / "val";
+        const std::filesystem::path val_labels = dataset_root / "labels" / "val";
+        TORCH_CHECK(std::filesystem::is_directory(train_images),
+            "YOLOv8 lifecycle train images directory is missing");
+        TORCH_CHECK(std::filesystem::is_directory(train_labels),
+            "YOLOv8 lifecycle train labels directory is missing");
+        TORCH_CHECK(std::filesystem::is_directory(val_images),
+            "YOLOv8 lifecycle validation images directory is missing");
+        TORCH_CHECK(std::filesystem::is_directory(val_labels),
+            "YOLOv8 lifecycle validation labels directory is missing");
+
+        std::size_t train_image_count = 0;
+        std::size_t val_image_count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(train_images))
+            train_image_count += entry.is_regular_file() ? 1U : 0U;
+        for (const auto& entry : std::filesystem::directory_iterator(val_images))
+            val_image_count += entry.is_regular_file() ? 1U : 0U;
+        TORCH_CHECK(train_image_count > 0 && val_image_count > 0,
+            "YOLOv8 lifecycle dataset splits must be non-empty");
+
+        const bool use_cuda =
+            result.requested_device == "cuda" && torch::cuda::is_available();
+        const torch::Device device(use_cuda ? torch::kCUDA : torch::kCPU);
+        result.actual_device = use_cuda ? "cuda" : "cpu";
+        torch::manual_seed(seed);
+
+        ModelConfig model_config = ModelConfig::get_config("nano", num_classes);
+        YOLOv8 model(model_config);
+        model->to(device);
+
+        YoloEvalConfig eval_config;
+        eval_config.data.batch_size = batch_size;
+        eval_config.data.img_size = input_size;
+        eval_config.data.max_gt = 50;
+        eval_config.data.resize_policy = YoloResizePolicy::PlainResize;
+        eval_config.data.dataloader_workers = 0;
+        eval_config.postprocess.num_classes = num_classes;
+
+        const std::filesystem::path output_dir(request.output_dir);
+        const std::filesystem::path weights_dir = output_dir / "weights";
+        std::filesystem::create_directories(weights_dir);
+        const std::filesystem::path base_weights = weights_dir / "base_cpp_yolov8n.pt";
+        const std::filesystem::path incremental_weights =
+            weights_dir / "incremental_cpp_yolov8n.pt";
+
+        torch::serialize::OutputArchive base_archive;
+        model->save(base_archive);
+        base_archive.save_to(base_weights.string());
+
+        const auto start = std::chrono::steady_clock::now();
+        const YOLOv8Impl::ValidationSummary base_summary =
+            model->val_summary(dataset_root.string(), eval_config);
+
+        YoloDatasetConfig train_dataset_config;
+        train_dataset_config.img_size = input_size;
+        train_dataset_config.is_train = true;
+        train_dataset_config.max_gt = 50;
+        train_dataset_config.enable_hsv = false;
+        train_dataset_config.enable_flip = false;
+        train_dataset_config.resize_policy = YoloResizePolicy::PlainResize;
+        auto train_dataset =
+            YoloDataset(make_yolo_split_paths(dataset_root.string(), "train"),
+                        train_dataset_config)
+                .map(torch::data::transforms::Stack<>());
+        auto train_loader = torch::data::make_data_loader(
+            std::move(train_dataset),
+            make_yolo_loader_options(batch_size, 0));
+        torch::optim::SGD optimizer(
+            model->parameters(),
+            torch::optim::SGDOptions(learning_rate)
+                .momentum(0.9)
+                .weight_decay(0.0005));
+
+        std::vector<double> epoch_losses;
+        std::vector<int> epoch_batches;
+        const std::filesystem::path curve_csv = output_dir / "learning_curve.csv";
+        std::ofstream curve_output(curve_csv);
+        TORCH_CHECK(curve_output.good(),
+            "YOLOv8 lifecycle learning curve cannot be created");
+        curve_output << "epoch,loss,batches\n";
+        curve_output.flush();
+        double last_grad_mean = 0.0;
+        for (int epoch = 0; epoch < epochs; ++epoch)
+        {
+            static_cast<torch::nn::Module&>(*model).train(true);
+            double loss_sum = 0.0;
+            int batch_count = 0;
+            for (auto& batch : *train_loader)
+            {
+                torch::Tensor images = batch.data.to(device);
+                torch::Tensor targets = batch.target.to(device);
+                for (int64_t b = 0; b < targets.size(0); ++b)
+                    targets[b].select(1, 0).fill_(static_cast<float>(b));
+                optimizer.zero_grad();
+                auto step = model->train_step(images, targets);
+                torch::Tensor loss = std::get<0>(step);
+                TORCH_CHECK(torch::isfinite(loss).item<bool>(),
+                    "YOLOv8 lifecycle training loss is not finite");
+                loss.backward();
+                bool found_grad = false;
+                for (const auto& parameter : model->parameters())
+                {
+                    if (parameter.grad().defined())
+                    {
+                        last_grad_mean =
+                            parameter.grad().abs().mean().item<double>();
+                        found_grad = true;
+                        break;
+                    }
+                }
+                TORCH_CHECK(found_grad,
+                    "YOLOv8 lifecycle training produced no gradients");
+                optimizer.step();
+                loss_sum += loss.item<double>();
+                ++batch_count;
+                if (batch_count >= max_train_batches)
+                    break;
+            }
+            TORCH_CHECK(batch_count > 0,
+                "YOLOv8 lifecycle epoch produced no training batches");
+            epoch_losses.push_back(loss_sum / batch_count);
+            epoch_batches.push_back(batch_count);
+            curve_output << (epoch + 1) << "," << epoch_losses.back() << ","
+                         << batch_count << "\n";
+            curve_output.flush();
+        }
+        curve_output.close();
+
+        torch::serialize::OutputArchive incremental_archive;
+        model->save(incremental_archive);
+        incremental_archive.save_to(incremental_weights.string());
+        const YOLOv8Impl::ValidationSummary incremental_summary =
+            model->val_summary(dataset_root.string(), eval_config);
+        const auto end = std::chrono::steady_clock::now();
+        result.train_runtime_ms = static_cast<double>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                .count());
+        result.algorithm_runtime_ms = result.train_runtime_ms;
+
+        const std::filesystem::path comparison_path =
+            output_dir / "base_vs_incremental_inference.json";
+        const bool detection_effect_established =
+            base_summary.predicted_boxes > 0 ||
+            incremental_summary.predicted_boxes > 0;
+        {
+            std::ofstream output(comparison_path);
+            output << "{\n"
+                   << "  \"schema\": \"cxvision.yolov8n_base_incremental_comparison.v1\",\n"
+                   << "  \"validation_sample_count\": " << val_image_count << ",\n"
+                   << "  \"base\": {\"loss\": " << base_summary.loss
+                   << ", \"precision\": " << base_summary.precision
+                   << ", \"recall\": " << base_summary.recall
+                   << ", \"f1\": " << base_summary.f1
+                   << ", \"matched_iou\": " << base_summary.matched_iou
+                   << "},\n"
+                   << "  \"incremental\": {\"loss\": "
+                   << incremental_summary.loss << ", \"precision\": "
+                   << incremental_summary.precision << ", \"recall\": "
+                   << incremental_summary.recall << ", \"f1\": "
+                   << incremental_summary.f1 << ", \"matched_iou\": "
+                   << incremental_summary.matched_iou << "},\n"
+                   << "  \"delta\": {\"loss\": "
+                   << incremental_summary.loss - base_summary.loss
+                   << ", \"f1\": "
+                   << incremental_summary.f1 - base_summary.f1
+                   << ", \"matched_iou\": "
+                   << incremental_summary.matched_iou - base_summary.matched_iou
+                   << "},\n"
+                   << "  \"status\": \"CXX_YOLOV8N_INFERENCE_COMPARISON_EXECUTION_PASS\",\n"
+                   << "  \"quality_status\": \""
+                   << (detection_effect_established
+                           ? "PENDING_HUMAN_REVIEW"
+                           : "CXX_YOLOV8N_DETECTION_EFFECT_NOT_ESTABLISHED")
+                   << "\",\n"
+                   << "  \"promotion_allowed\": false\n"
+                   << "}\n";
+        }
+
+        auto write_manifest = [&](const std::filesystem::path& path,
+                                  const std::string& model_id,
+                                  const std::filesystem::path& weights) {
+            std::ofstream output(path);
+            output << "{\n"
+                   << "  \"schema\": \"cxvision.torch_model_manifest\",\n"
+                   << "  \"schema_version\": 1,\n"
+                   << "  \"model_id\": " << QuoteRuntimeTaskJsonString(model_id) << ",\n"
+                   << "  \"task\": \"detection\",\n"
+                   << "  \"architecture\": \"yolov8\",\n"
+                   << "  \"variant\": \"nano\",\n"
+                   << "  \"weights\": "
+                   << QuoteRuntimeTaskJsonString(
+                          std::filesystem::relative(weights, path.parent_path()).generic_string())
+                   << ",\n"
+                   << "  \"weights_format\": \"cpp_state_dict\",\n"
+                   << "  \"num_classes\": " << num_classes << ",\n"
+                   << "  \"classes\": [";
+            for (std::size_t i = 0; i < class_names.size(); ++i)
+            {
+                if (i != 0)
+                    output << ", ";
+                output << QuoteRuntimeTaskJsonString(class_names[i]);
+            }
+            output << "],\n"
+                   << "  \"input\": {\"width\": " << input_size
+                   << ", \"height\": " << input_size
+                   << ", \"color\": \"rgb\", \"scale\": 0.003921568627, "
+                      "\"mean\": [0.0, 0.0, 0.0], \"std\": [1.0, 1.0, 1.0], "
+                      "\"letterbox\": 0},\n"
+                   << "  \"postprocess\": {\"confidence_threshold\": 0.25, "
+                      "\"iou_threshold\": 0.45, \"max_detections\": 100}\n"
+                   << "}\n";
+        };
+        const std::filesystem::path base_manifest =
+            output_dir / "base_model_manifest.json";
+        const std::filesystem::path incremental_manifest =
+            output_dir / "incremental_model_manifest.json";
+        write_manifest(base_manifest, "cpp_yolov8n_base", base_weights);
+        write_manifest(incremental_manifest, "cpp_yolov8n_incremental",
+                       incremental_weights);
+
+        const std::filesystem::path result_path =
+            output_dir / "torch_yolov8n_training_lifecycle_result.json";
+        std::ostringstream result_json;
+        result_json << "{\n"
+                    << "  \"schema\": \"cxvision.torch.yolov8n_training_lifecycle.v1\",\n"
+                    << "  \"status\": \"CXX_YOLOV8N_TRAINING_BASIC_PASS\",\n"
+                    << "  \"learning_curve_status\": \"REAL_MULTI_EPOCH_SERIES\",\n"
+                    << "  \"inference_comparison_status\": \"CXX_YOLOV8N_INFERENCE_COMPARISON_EXECUTION_PASS\",\n"
+                    << "  \"detection_quality_status\": \""
+                    << (detection_effect_established
+                            ? "PENDING_HUMAN_REVIEW"
+                            : "CXX_YOLOV8N_DETECTION_EFFECT_NOT_ESTABLISHED")
+                    << "\",\n"
+                    << "  \"network_weights_updated\": true,\n"
+                    << "  \"epochs\": " << epochs << ",\n"
+                    << "  \"optimizer\": \"SGD\",\n"
+                    << "  \"learning_rate\": " << learning_rate << ",\n"
+                    << "  \"batches_per_epoch\": "
+                    << (epoch_batches.empty() ? 0 : epoch_batches.back()) << ",\n"
+                    << "  \"train_image_count\": " << train_image_count << ",\n"
+                    << "  \"validation_image_count\": " << val_image_count << ",\n"
+                    << "  \"last_grad_mean\": " << last_grad_mean << ",\n"
+                    << "  \"learning_curve_ref\": "
+                    << QuoteRuntimeTaskJsonString(curve_csv.string()) << ",\n"
+                    << "  \"comparison_ref\": "
+                    << QuoteRuntimeTaskJsonString(comparison_path.string()) << ",\n"
+                    << "  \"base_manifest_ref\": "
+                    << QuoteRuntimeTaskJsonString(base_manifest.string()) << ",\n"
+                    << "  \"incremental_manifest_ref\": "
+                    << QuoteRuntimeTaskJsonString(incremental_manifest.string()) << ",\n"
+                    << "  \"promotion_allowed\": false,\n"
+                    << "  \"human_review_required\": true\n"
+                    << "}\n";
+        {
+            std::ofstream output(result_path);
+            output << result_json.str();
+        }
+        result.ok = true;
+        result.error_code = 0;
+        result.status = "CXX_YOLOV8N_TRAINING_BASIC_PASS";
+        result.result_json = result_json.str();
+        result.result_ref = result_path.string();
+        result.evidence_ref = comparison_path.string();
+        result.visualization_refs =
+            curve_csv.string() + ";" + comparison_path.string();
+        result.trainer_lifecycle_summary =
+            "real multi-epoch C++ YOLOv8n optimizer lifecycle completed";
+        result.unified_mainline_summary =
+            "base and incremental checkpoints evaluated on the same validation split";
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        result.ok = false;
+        result.error_code = -1;
+        result.status = "CXX_YOLOV8N_TRAINING_FAIL";
+        result.error_message = error.what();
+        result.result_json =
+            "{\"schema\":\"cxvision.torch.yolov8n_training_lifecycle.v1\","
+            "\"status\":\"CXX_YOLOV8N_TRAINING_FAIL\","
+            "\"reason\":" + QuoteRuntimeTaskJsonString(error.what()) + "}";
+        return result;
+    }
+}
+
 TorchTaskResultCpp DispatchTorchRuntimeTask(
     const TorchRuntimeCoreConfig& config,
     const TorchTaskRequestCpp& request)
@@ -1470,6 +1825,12 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
     {
         return ValidateTorchIncrementalPackageTask(
             config, request, "yolov8");
+    }
+
+    if (request.task ==
+        TorchRuntimeTaskIds::YoloV8TrainingLifecycle)
+    {
+        return RunYoloV8TrainingLifecycleTask(config, request);
     }
 
     if (IsLegacyTestHostTask(request.task))

@@ -322,6 +322,7 @@ double EstimateNoiseSigma(const std::vector<float> &values) {
 }
 
 CxBoundaryResponseMode ChooseAutoMode(const std::vector<float> &values,
+                                      const CxBoundaryResponseConfig &config,
                                       int scale) {
   if (values.size() < 3)
     return CxBoundaryResponseMode::Auto;
@@ -336,6 +337,31 @@ CxBoundaryResponseMode ChooseAutoMode(const std::vector<float> &values,
   if (std::abs(right - left) >= 0.2f)
     return right > left ? CxBoundaryResponseMode::PositiveStep
                         : CxBoundaryResponseMode::NegativeStep;
+  const double targetPermille =
+      config.selection_mode == CxBoundarySelectionMode::NearestReference
+          ? ClampInt(config.reference_position_permille, 0, 1000)
+          : 0.5 * (ClampInt(config.gate_start_permille, 0, 1000) +
+                   ClampInt(config.gate_end_permille, 0, 1000));
+  const int targetIndex = static_cast<int>(ClampIndex(
+      static_cast<int>(std::lround(
+          targetPermille * static_cast<double>(values.size() - 1) / 1000.0)),
+      values.size()));
+  const int radius = std::max(scale * 4, static_cast<int>(values.size() / 12));
+  const int first = std::max(1, targetIndex - radius);
+  const int last =
+      std::min(static_cast<int>(gradient.size()) - 2, targetIndex + radius);
+  float localSignedStep = 0.0f;
+  for (int i = first; i <= last; ++i) {
+    const float value = gradient[static_cast<std::size_t>(i)];
+    if (std::abs(value) > std::abs(localSignedStep))
+      localSignedStep = value;
+  }
+  const double localNoise = EstimateNoiseSigma(gradient);
+  if (std::abs(localSignedStep) >=
+      std::max(0.10, localNoise * 6.0)) {
+    return localSignedStep >= 0.0f ? CxBoundaryResponseMode::PositiveStep
+                                   : CxBoundaryResponseMode::NegativeStep;
+  }
   const auto profileMinmax = std::minmax_element(values.begin(), values.end());
   const float endpointHigh = std::max(left, right);
   const float endpointLow = std::min(left, right);
@@ -472,10 +498,21 @@ void BuildPairCandidates(const std::vector<float> &gradient,
       const double width = b.position_samples - a.position_samples;
       if (width < config.pair_min_width || width > config.pair_max_width)
         continue;
-      AddCandidate(out, a.sample_index,
-                   0.5 * (a.position_samples + b.position_samples),
-                   std::min(a.score, b.score), riseFirst ? 1 : -1,
-                   config.wavelet_scale, width);
+      double position = 0.5 * (a.position_samples + b.position_samples);
+      int sampleIndex = static_cast<int>(std::lround(position));
+      int polarity = riseFirst ? 1 : -1;
+      if (config.pair_anchor_mode == CxBoundaryPairAnchorMode::FirstEdge) {
+        position = a.position_samples;
+        sampleIndex = a.sample_index;
+        polarity = riseFirst ? 1 : -1;
+      } else if (config.pair_anchor_mode ==
+                 CxBoundaryPairAnchorMode::SecondEdge) {
+        position = b.position_samples;
+        sampleIndex = b.sample_index;
+        polarity = riseFirst ? -1 : 1;
+      }
+      AddCandidate(out, sampleIndex, position, std::min(a.score, b.score),
+                   polarity, config.wavelet_scale, width);
       break;
     }
   }
@@ -615,7 +652,8 @@ EvaluateBoundaryResponse(const std::vector<float> &profile,
   const int scale = ClampInt(config.wavelet_scale, 1, 64);
   result.effective_response_mode = config.response_mode;
   if (result.effective_response_mode == CxBoundaryResponseMode::Auto)
-    result.effective_response_mode = ChooseAutoMode(result.conditioned, scale);
+    result.effective_response_mode = ChooseAutoMode(result.conditioned, config,
+                                                    scale);
 
   const std::vector<float> gradient = Gradient(result.conditioned, scale);
   const std::vector<float> curvature = Curvature(result.conditioned, scale);

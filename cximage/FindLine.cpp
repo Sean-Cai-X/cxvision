@@ -957,6 +957,17 @@ void FindLine::setboundarynthcandidate(int nth)
         "setboundarynthcandidate_changed");
 }
 
+void FindLine::setboundaryreferencepositionpermille(int permille)
+{
+    const int newValue = ClampPermille(permille);
+    if (m_boundary_response_config.reference_position_permille == newValue)
+        return;
+    m_boundary_response_config.reference_position_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryreferencepositionpermille_changed");
+}
+
 void FindLine::setboundarysubpixel(int mode)
 {
     const auto newMode = ClampEnumInt(
@@ -1139,6 +1150,21 @@ void FindLine::setboundarypairmaxwidth(int width)
     MarkMeasureGeometryDirty();
     InvalidateMeasureAndFitAfterParamChange(
         "setboundarypairmaxwidth_changed");
+}
+
+void FindLine::setboundarypairanchor(int anchor)
+{
+    const auto newAnchor = ClampEnumInt(
+        anchor,
+        0,
+        2,
+        cxvision::metrology_analytics::CxBoundaryPairAnchorMode::Center);
+    if (m_boundary_response_config.pair_anchor_mode == newAnchor)
+        return;
+    m_boundary_response_config.pair_anchor_mode = newAnchor;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarypairanchor_changed");
 }
 
 void FindLine::clear()

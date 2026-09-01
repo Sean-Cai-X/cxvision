@@ -187,6 +187,28 @@ std::vector<float> MakeStepWaveform(int samples, int edge, bool rising,
     return values;
 }
 
+std::vector<float> MakeCompetingFallingEdgesWaveform()
+{
+    std::vector<float> values(160, 0.15f);
+    for (int i = 0; i < 77; ++i)
+        values[static_cast<std::size_t>(i)] = 0.72f;
+    for (int i = 77; i < 106; ++i)
+        values[static_cast<std::size_t>(i)] = 0.25f;
+    for (int i = 106; i < 121; ++i)
+        values[static_cast<std::size_t>(i)] = 1.0f;
+    for (int i = 121; i < 160; ++i)
+        values[static_cast<std::size_t>(i)] = 0.0f;
+    return values;
+}
+
+std::vector<float> MakeInternalBrightPlateauWaveform()
+{
+    std::vector<float> values(160, 0.10f);
+    for (int i = 20; i < 82; ++i)
+        values[static_cast<std::size_t>(i)] = 0.86f;
+    return values;
+}
+
 double SelectedBoundaryPosition(const CxBoundaryResponseResult& result)
 {
     if (result.selected_candidate < 0 ||
@@ -841,6 +863,7 @@ bool RunMetrologyAnalyticsSmoke(
 
         boundaryConfig.response_mode = CxBoundaryResponseMode::Auto;
         boundaryConfig.polarity = CxBoundaryPolarity::Either;
+        boundaryConfig.selection_mode = CxBoundarySelectionMode::NearestGateCenter;
         const CxBoundaryResponseResult automaticStep =
             EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false), boundaryConfig);
         AddCase(result, "boundary_response_auto_step", "boundary_response",
@@ -851,6 +874,23 @@ bool RunMetrologyAnalyticsSmoke(
                                     CxBoundaryResponseMode::NegativeStep),
                 1.0, 0.0,
                 "automatic model recognition selects a negative step");
+
+        boundaryConfig.gate_start_permille = 420;
+        boundaryConfig.gate_end_permille = 620;
+        const CxBoundaryResponseResult automaticInternalPlateauStep =
+            EvaluateBoundaryResponse(MakeInternalBrightPlateauWaveform(),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_auto_internal_plateau_step",
+                "boundary_response",
+                automaticInternalPlateauStep.status == "PREVIEW_READY" &&
+                    automaticInternalPlateauStep.effective_response_mode ==
+                        CxBoundaryResponseMode::NegativeStep &&
+                    Near(SelectedBoundaryPosition(automaticInternalPlateauStep),
+                         81.5, 2.0),
+                SelectedBoundaryPosition(automaticInternalPlateauStep), 81.5, 2.0,
+                "automatic model recognition treats a target-side plateau edge as a negative step, not a peak");
+        boundaryConfig.gate_start_permille = 0;
+        boundaryConfig.gate_end_permille = 1000;
 
         boundaryConfig.response_mode = CxBoundaryResponseMode::NegativeStep;
         boundaryConfig.polarity = CxBoundaryPolarity::Falling;
@@ -867,6 +907,30 @@ bool RunMetrologyAnalyticsSmoke(
                 SelectedBoundaryPosition(brightnessScaledStep),
                 SelectedBoundaryPosition(fallingStep), 0.25,
                 "offset and range normalization preserve edge location under brightness scaling");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::NegativeStep;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        boundaryConfig.selection_mode = CxBoundarySelectionMode::Strongest;
+        boundaryConfig.reference_profile.clear();
+        const CxBoundaryResponseResult competingStrongest =
+            EvaluateBoundaryResponse(MakeCompetingFallingEdgesWaveform(),
+                                     boundaryConfig);
+        boundaryConfig.selection_mode = CxBoundarySelectionMode::NearestReference;
+        boundaryConfig.reference_position_permille =
+            static_cast<int>(std::lround(76.5 * 1000.0 / 159.0));
+        const CxBoundaryResponseResult competingNearestReference =
+            EvaluateBoundaryResponse(MakeCompetingFallingEdgesWaveform(),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_nearest_reference_override",
+                "boundary_response",
+                competingStrongest.status == "PREVIEW_READY" &&
+                    competingNearestReference.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(competingStrongest), 120.5, 1.0) &&
+                    Near(SelectedBoundaryPosition(competingNearestReference),
+                         76.5, 1.0),
+                SelectedBoundaryPosition(competingNearestReference), 76.5, 1.0,
+                "manual reference selection chooses the reviewed edge instead of the strongest later edge");
+        boundaryConfig.selection_mode = CxBoundarySelectionMode::Strongest;
 
         boundaryConfig.response_mode = CxBoundaryResponseMode::PositiveStep;
         boundaryConfig.polarity = CxBoundaryPolarity::Rising;
@@ -1131,11 +1195,14 @@ bool RunMetrologyAnalyticsSmoke(
                 findUiValue(uiGlobals, "global_metrology_boundary_preview_enabled", -1) == 1 &&
                     findUiValue(uiGlobals, "global_metrology_boundary_response_mode", -1) == 0 &&
                     findUiValue(uiGlobals, "global_metrology_boundary_polarity", -1) == 2 &&
+                    findUiValue(uiGlobals, "global_metrology_boundary_selection_mode", -1) ==
+                        static_cast<int>(CxBoundarySelectionMode::NearestGateCenter) &&
                     findUiValue(uiGlobals, "global_metrology_boundary_level_permille", -1) == 500 &&
                     findUiValue(uiGlobals, "global_metrology_boundary_reference_bound", -1) == 0,
-                static_cast<double>(findUiValue(uiGlobals, "global_metrology_boundary_response_mode", -1)),
-                0.0, 0.0,
-                "Boundary Trigger defaults use automatic model selection without a fabricated reference");
+                static_cast<double>(findUiValue(uiGlobals, "global_metrology_boundary_selection_mode", -1)),
+                static_cast<double>(CxBoundarySelectionMode::NearestGateCenter),
+                0.0,
+                "Boundary Trigger defaults use automatic model selection and nearest gate-center arbitration without a fabricated reference");
 
         AddCase(result, "ui_peak_defaults", "ui_globals",
                 findUiValue(uiGlobals, "global_metrology_peak_max_count", -1) == 12 &&
@@ -1201,6 +1268,7 @@ bool RunMetrologyAnalyticsSmoke(
             findUiValue(uiEditedGlobals, "global_metrology_boundary_polarity", -1) ==
                 static_cast<int>(CxBoundaryPolarity::Falling) &&
             findUiValue(uiEditedGlobals, "global_metrology_boundary_gate_start_permille", -1) == 250 &&
+            findUiValue(uiEditedGlobals, "global_metrology_boundary_reference_position_permille", -1) == 500 &&
             findUiValue(uiEditedGlobals, "global_metrology_boundary_reference_bound", -1) == 1;
         AddCase(result, "ui_edit_global_propagation", "ui_globals", uiEditPropagation, uiEditPropagation ? 1.0 : 0.0, 1.0, 0.0, "edited metrology UI fields propagate to global_metrology_* snapshot values");
 

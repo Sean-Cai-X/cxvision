@@ -234,6 +234,7 @@ private:
   int AddHDReferenceImageSetForCurrentSelection();
   int AddGeometryAugmentationDatasetForCurrentSelection();
   bool RunGeometryAugmentationTrainingPrepFromGui(std::string& reason);
+  bool RunYoloV8nIncrementalTrainingFromGui(std::string& reason);
 
   void CaptureCurrentTorchTrainingAnnotationState();
   void RestoreTorchTrainingAnnotationState(
@@ -322,7 +323,6 @@ private:
 
   //! Populate the 3D viewer with demo content.
   void initDemoScene();
-
   //! Application event loop.
   void mainloop();
 
@@ -386,6 +386,10 @@ private:
 private:
 
   Handle(Window) myOcctWindow;
+  bool m_glfwInitialized = false;
+  bool m_imguiContextInitialized = false;
+  bool m_imguiGlfwInitialized = false;
+  bool m_imguiOpenGlInitialized = false;
   Handle(V3d_CustomView) m_myView;
   Handle(AIS_InteractiveContext) myContext;
   Handle(AIS_Shape) aBox;

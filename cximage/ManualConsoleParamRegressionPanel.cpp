@@ -5122,6 +5122,7 @@ BuildMetrologyUiGlobalFieldsLocal(const ManualMetrologyUiState &m) {
       m.boundary_min_amplitude_permille;
   fields.boundary_pair_min_width = m.boundary_pair_min_width;
   fields.boundary_pair_max_width = m.boundary_pair_max_width;
+  fields.boundary_pair_anchor_mode = m.boundary_pair_anchor_mode;
   fields.boundary_subpixel_mode = m.boundary_subpixel_mode;
   fields.boundary_show_conditioned = m.boundary_show_conditioned;
   fields.boundary_show_response = m.boundary_show_response;
@@ -6202,21 +6203,39 @@ static void DrawMetrologyPreviewChartLocal(
 
   draw->AddText(ImVec2(left, origin.y + 8.0f), IM_COL32(225, 230, 235, 255),
                 title);
-  draw->AddLine(ImVec2(right - 250.0f, origin.y + 16.0f),
-                ImVec2(right - 226.0f, origin.y + 16.0f),
-                IM_COL32(225, 230, 235, 255), 2.0f);
-  draw->AddText(ImVec2(right - 220.0f, origin.y + 8.0f),
-                IM_COL32(190, 198, 207, 255), sourceLabel);
-  draw->AddLine(ImVec2(right - 141.0f, origin.y + 16.0f),
-                ImVec2(right - 117.0f, origin.y + 16.0f),
-                IM_COL32(69, 205, 150, 255), 2.0f);
-  draw->AddText(ImVec2(right - 111.0f, origin.y + 8.0f),
-                IM_COL32(190, 198, 207, 255), modelLabel);
-  draw->AddLine(ImVec2(right - 46.0f, origin.y + 16.0f),
-                ImVec2(right - 22.0f, origin.y + 16.0f),
-                IM_COL32(255, 128, 48, 255), 2.0f);
-  draw->AddText(ImVec2(right - 94.0f, bottom + 6.0f),
-                IM_COL32(255, 178, 118, 255), "result");
+  const ImVec2 sourceLabelSize = ImGui::CalcTextSize(sourceLabel);
+  const ImVec2 modelLabelSize = ImGui::CalcTextSize(modelLabel);
+  const ImVec2 resultLabelSize = ImGui::CalcTextSize("result");
+  const float legendGap = 14.0f;
+  const float sourceLegendWidth = 30.0f + sourceLabelSize.x;
+  const float modelLegendWidth = 30.0f + modelLabelSize.x;
+  const float resultLegendWidth = 30.0f + resultLabelSize.x;
+  const bool showResultLegend =
+      conclusionMarkers != nullptr && !conclusionMarkers->empty();
+  const float totalLegendWidth =
+      sourceLegendWidth + legendGap + modelLegendWidth +
+      (showResultLegend ? legendGap + resultLegendWidth : 0.0f);
+  float legendX = std::max(left, right - totalLegendWidth);
+  const float titleRight = left + ImGui::CalcTextSize(title).x + 16.0f;
+  const bool compactLegend = legendX < titleRight;
+  auto drawLegendItem = [&](const char *label, ImU32 color, float labelWidth) {
+    draw->AddLine(ImVec2(legendX, origin.y + 16.0f),
+                  ImVec2(legendX + 24.0f, origin.y + 16.0f), color, 2.0f);
+    draw->AddText(ImVec2(legendX + 30.0f, origin.y + 8.0f),
+                  IM_COL32(190, 198, 207, 255), label);
+    legendX += 30.0f + labelWidth + legendGap;
+  };
+  if (!compactLegend) {
+    drawLegendItem(sourceLabel, IM_COL32(225, 230, 235, 255),
+                   sourceLabelSize.x);
+    drawLegendItem(modelLabel, IM_COL32(69, 205, 150, 255), modelLabelSize.x);
+  } else {
+    legendX = std::max(left, right - resultLegendWidth);
+  }
+  if (showResultLegend) {
+    drawLegendItem("result", IM_COL32(255, 128, 48, 255),
+                   resultLabelSize.x);
+  }
 
   constexpr int tickCount = 5;
   for (int i = 0; i <= tickCount; ++i) {
@@ -6900,6 +6919,8 @@ BuildBoundaryResponseConfigLocal(const ManualMetrologyUiState &m) {
   config.min_amplitude_permille = m.boundary_min_amplitude_permille;
   config.pair_min_width = m.boundary_pair_min_width;
   config.pair_max_width = m.boundary_pair_max_width;
+  config.pair_anchor_mode = static_cast<CxBoundaryPairAnchorMode>(
+      std::max(0, std::min(2, m.boundary_pair_anchor_mode)));
   config.reference_position_permille =
       m.boundary_reference_position_permille;
   config.reference_profile = m.boundary_reference_profile;
@@ -6925,12 +6946,65 @@ BuildBoundaryCandidateMarkersLocal(
   return markers;
 }
 
+static bool BindBoundaryReferenceAtSampleLocal(
+    ManualMetrologyUiState &m,
+    const cxvision::metrology_analytics::CxBoundaryResponseResult &result,
+    int sampleIndex, double positionSamples, double profileLengthPx,
+    const char *labelPrefix) {
+  if (result.conditioned.size() < 2)
+    return false;
+  const int sampleCount = static_cast<int>(result.conditioned.size());
+  const int clampedSample = std::max(0, std::min(sampleCount - 1, sampleIndex));
+  const double clampedPosition =
+      std::max(0.0, std::min(static_cast<double>(sampleCount - 1),
+                             positionSamples));
+  const int halfWindow = std::max(4, m.boundary_wavelet_scale * 3);
+  const int first = std::max(0, clampedSample - halfWindow);
+  const int last = std::min(sampleCount, clampedSample + halfWindow + 1);
+  m.boundary_reference_profile.assign(result.conditioned.begin() + first,
+                                      result.conditioned.begin() + last);
+  m.boundary_reference_position_permille = static_cast<int>(std::lround(
+      clampedPosition * 1000.0 / static_cast<double>(sampleCount - 1)));
+  m.boundary_reference_position_permille =
+      std::max(0, std::min(1000, m.boundary_reference_position_permille));
+  m.boundary_reference_bound = true;
+  m.boundary_reference_mode = 1;
+  m.boundary_selection_mode = static_cast<int>(
+      cxvision::metrology_analytics::CxBoundarySelectionMode::NearestReference);
+  const double axisPx =
+      clampedPosition * profileLengthPx / static_cast<double>(sampleCount - 1);
+  m.boundary_reference_label =
+      std::string(labelPrefix != nullptr ? labelPrefix : "reference") + " @ " +
+      FormatMetrologyAxisPixelLabelLocal(axisPx);
+  return true;
+}
+
 static void DrawBoundaryCandidateTableLocal(
     const cxvision::metrology_analytics::CxBoundaryResponseResult &result,
     double profileLengthPx) {
   if (result.candidates.empty()) {
     ImGui::TextDisabled("No boundary candidates: %s", result.reason.c_str());
     return;
+  }
+  if (result.selected_candidate >= 0 &&
+      result.selected_candidate < static_cast<int>(result.candidates.size())) {
+    const auto &selected =
+        result.candidates[static_cast<std::size_t>(result.selected_candidate)];
+    const double selectedAxisPx =
+        result.conditioned.size() > 1
+            ? selected.position_samples * profileLengthPx /
+                  static_cast<double>(result.conditioned.size() - 1)
+            : selected.position_samples;
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.68f, 0.30f, 1.0f),
+        "Selected trigger #%d: %s | score %.4f | %s",
+        result.selected_candidate + 1,
+        FormatMetrologyAxisPixelLabelLocal(selectedAxisPx).c_str(),
+        selected.score,
+        selected.polarity > 0 ? "rising"
+                              : (selected.polarity < 0 ? "falling" : "either"));
+  } else {
+    ImGui::TextDisabled("No selected trigger: %s", result.reason.c_str());
   }
   if (!ImGui::BeginTable("boundary_candidate_table", 7,
                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
@@ -7084,34 +7158,54 @@ static bool DrawBoundaryTriggerPreviewLocal(
   if (m.boundary_show_scalogram)
     DrawBoundaryScalogramLocal(source, config);
 
+  const bool manualCursorReady =
+      m.profile_cursor_visible && m.profile_cursor_user_dragged &&
+      m.profile_cursor_sample_count > 1 && result.conditioned.size() > 1;
+  if (manualCursorReady && !markers.empty()) {
+    const double cursorPx = MetrologySampleIndexToAxisPxLocal(
+        m.profile_cursor_sample_index, m.profile_cursor_sample_count,
+        profileLengthPx);
+    const double selectedPx = markers.front().axis_px;
+    const double deltaPx = std::abs(cursorPx - selectedPx);
+    if (deltaPx > 2.0) {
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.72f, 0.30f, 1.0f),
+          "Manual cursor differs from selected trigger by %s.",
+          FormatMetrologyAxisPixelLabelLocal(deltaPx).c_str());
+    }
+  }
+
   DrawBoundaryCandidateTableLocal(result, profileLengthPx);
 
+  bool actionDrawn = false;
+  if (manualCursorReady) {
+    if (ImGui::Button("Bind Manual Cursor As Session Reference")) {
+      edited |= BindBoundaryReferenceAtSampleLocal(
+          m, result, m.profile_cursor_sample_index,
+          static_cast<double>(std::max(
+              0, std::min(m.profile_cursor_sample_count - 1,
+                          m.profile_cursor_sample_index))),
+          profileLengthPx, "Manual cursor");
+    }
+    actionDrawn = true;
+  }
   if (result.selected_candidate >= 0 &&
       result.selected_candidate < static_cast<int>(result.candidates.size())) {
+    if (actionDrawn)
+      ImGui::SameLine();
     if (ImGui::Button("Bind Selected Candidate As Session Reference")) {
       const auto &candidate =
           result.candidates[static_cast<std::size_t>(result.selected_candidate)];
-      const int halfWindow = std::max(4, m.boundary_wavelet_scale * 3);
-      const int first = std::max(0, candidate.sample_index - halfWindow);
-      const int last = std::min(static_cast<int>(result.conditioned.size()),
-                                candidate.sample_index + halfWindow + 1);
-      m.boundary_reference_profile.assign(result.conditioned.begin() + first,
-                                          result.conditioned.begin() + last);
-      m.boundary_reference_position_permille = static_cast<int>(std::lround(
-          candidate.position_samples * 1000.0 /
-          std::max<std::size_t>(1, result.conditioned.size() - 1)));
-      m.boundary_reference_bound = true;
-      m.boundary_reference_mode = 1;
-      m.boundary_reference_label =
-          std::string(CxBoundaryResponseModeName(result.effective_response_mode)) +
-          " @ " + FormatMetrologyAxisPixelLabelLocal(
-                        candidate.position_samples * profileLengthPx /
-                        std::max<std::size_t>(1, result.conditioned.size() - 1));
-      edited = true;
+      edited |= BindBoundaryReferenceAtSampleLocal(
+          m, result, candidate.sample_index, candidate.position_samples,
+          profileLengthPx,
+          CxBoundaryResponseModeName(result.effective_response_mode));
     }
-    ImGui::SameLine();
+    actionDrawn = true;
   }
   if (m.boundary_reference_bound) {
+    if (actionDrawn)
+      ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.62f, 1.0f), "Reference: %s",
                        m.boundary_reference_label.c_str());
     ImGui::SameLine();
@@ -7199,16 +7293,35 @@ static bool DrawMetrologyExtensionPanel(
         m.boundary_hysteresis_permille = 50;
         m.boundary_gate_start_permille = 0;
         m.boundary_gate_end_permille = 1000;
-        m.boundary_selection_mode = 0;
+        m.boundary_selection_mode = 4;
         m.boundary_nth_candidate = 1;
         m.boundary_min_plateau_width = 3;
         m.boundary_min_amplitude_permille = 80;
         m.boundary_pair_min_width = 2;
         m.boundary_pair_max_width = 80;
+        m.boundary_pair_anchor_mode = 0;
         m.boundary_subpixel_mode = 2;
         m.boundary_show_conditioned = true;
         m.boundary_show_response = true;
         m.boundary_show_scalogram = false;
+        edited = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("White Rim First Edge##boundary_trigger")) {
+        m.boundary_preview_enabled = true;
+        m.boundary_response_mode = 11;
+        m.boundary_polarity = 2;
+        m.boundary_wavelet_scale = 4;
+        m.boundary_trigger_threshold_permille = 80;
+        m.boundary_selection_mode = 4;
+        m.boundary_min_plateau_width = 8;
+        m.boundary_min_amplitude_permille = 80;
+        m.boundary_pair_min_width = 8;
+        m.boundary_pair_max_width = 96;
+        m.boundary_pair_anchor_mode = 1;
+        m.boundary_subpixel_mode = 2;
+        m.boundary_show_conditioned = true;
+        m.boundary_show_response = true;
         edited = true;
       }
 
@@ -7258,6 +7371,8 @@ static bool DrawMetrologyExtensionPanel(
           static const char *polarities[] = {"rising", "falling", "either"};
           static const char *subpixelModes[] = {
               "none", "linear crossing", "parabolic response"};
+          static const char *pairAnchorModes[] = {
+              "pair center", "first edge", "second edge"};
           edited |= DrawMetrologyComboLocal(
               "response model", m.boundary_response_mode, responseModes,
               IM_ARRAYSIZE(responseModes));
@@ -7269,6 +7384,9 @@ static bool DrawMetrologyExtensionPanel(
           edited |= DrawMetrologyComboLocal(
               "subpixel", m.boundary_subpixel_mode, subpixelModes,
               IM_ARRAYSIZE(subpixelModes));
+          edited |= DrawMetrologyComboLocal(
+              "pair anchor", m.boundary_pair_anchor_mode, pairAnchorModes,
+              IM_ARRAYSIZE(pairAnchorModes));
           if (m.boundary_response_mode == 17 &&
               !m.boundary_reference_bound)
             ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.32f, 1.0f),

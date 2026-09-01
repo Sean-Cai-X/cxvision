@@ -714,6 +714,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "setboundarynthcandidate",
                             &FindCircle::setboundarynthcandidate);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryreferencepositionpermille",
+                            &FindCircle::setboundaryreferencepositionpermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setboundarysubpixel",
                             &FindCircle::setboundarysubpixel);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
@@ -758,6 +761,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setboundarypairmaxwidth",
                             &FindCircle::setboundarypairmaxwidth);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarypairanchor",
+                            &FindCircle::setboundarypairanchor);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setmethod", &FindCircle::setmethod);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setthre",
@@ -980,6 +986,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "setboundarynthcandidate",
                             &FindEllipse::setboundarynthcandidate);
     m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryreferencepositionpermille",
+                            &FindEllipse::setboundaryreferencepositionpermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
                             "setboundarysubpixel",
                             &FindEllipse::setboundarysubpixel);
     m_parser.DefineClassFun("FindEllipse", pfindellipse,
@@ -1024,6 +1033,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun("FindEllipse", pfindellipse,
                             "setboundarypairmaxwidth",
                             &FindEllipse::setboundarypairmaxwidth);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarypairanchor",
+                            &FindEllipse::setboundarypairanchor);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod",
                             &FindEllipse::setmethod);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setfindsetting",
@@ -1148,6 +1160,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "setboundarynthcandidate",
                             &FindLine::setboundarynthcandidate);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryreferencepositionpermille",
+                            &FindLine::setboundaryreferencepositionpermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
                             "setboundarysubpixel",
                             &FindLine::setboundarysubpixel);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline,
@@ -1192,6 +1207,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(findline_type_name.data(), pfindline,
                             "setboundarypairmaxwidth",
                             &FindLine::setboundarypairmaxwidth);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarypairanchor",
+                            &FindLine::setboundarypairanchor);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod",
                             &FindLine::setmethod);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setthre",

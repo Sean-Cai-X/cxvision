@@ -141,53 +141,55 @@ inline torch::Tensor nms(const torch::Tensor& bboxes, const torch::Tensor& score
     TORCH_CHECK(iou_threshold >= 0 && iou_threshold <= 1,
         "IoU threshold must be in [0,1], got: ", iou_threshold);
 
-    torch::Tensor bboxes_float = bboxes.to(torch::kFloat);
-    torch::Tensor scores_float = scores.to(torch::kFloat);
-    torch::Device device = bboxes_float.device();
+    const torch::Device output_device = bboxes.device();
+    auto boxes_cpu = bboxes.to(torch::kCPU).to(torch::kFloat).contiguous();
+    auto scores_cpu = scores.to(torch::kCPU).to(torch::kFloat).contiguous();
+    const auto boxes_access = boxes_cpu.accessor<float, 2>();
+    const auto scores_access = scores_cpu.accessor<float, 1>();
 
-    auto [sorted_scores, sorted_idxs] = torch::sort(scores_float, 0, true);
-    bboxes_float = bboxes_float.index_select(0, sorted_idxs);
+    std::vector<int64_t> order(static_cast<size_t>(boxes_cpu.size(0)));
+    for (int64_t i = 0; i < boxes_cpu.size(0); ++i)
+        order[static_cast<size_t>(i)] = i;
+    std::sort(order.begin(), order.end(), [&](int64_t lhs, int64_t rhs) {
+        return scores_access[lhs] > scores_access[rhs];
+    });
+    if (topk > 0 && topk < static_cast<int64_t>(order.size()))
+        order.resize(static_cast<size_t>(topk));
 
-    if (topk > 0 && topk < static_cast<int64_t>(sorted_idxs.size(0))) {
-        sorted_idxs = sorted_idxs.narrow(0, 0, topk);
-        bboxes_float = bboxes_float.narrow(0, 0, topk);
-    }
-
-    torch::Tensor keep = torch::zeros({ sorted_idxs.size(0) }, torch::kBool).to(device);
-    torch::Tensor areas = (bboxes_float.select(1, 2) - bboxes_float.select(1, 0)) *
-        (bboxes_float.select(1, 3) - bboxes_float.select(1, 1));
-
-    for (int64_t i = 0; i < static_cast<int64_t>(sorted_idxs.size(0)); i++) {
-        if (likely(!keep[i].item<bool>())) {
-            keep[i] = true;
-            torch::Tensor current_bbox = bboxes_float[i].unsqueeze(0);
-            torch::Tensor current_area = areas[i].unsqueeze(0);
-
-            int64_t rest_size = static_cast<int64_t>(sorted_idxs.size(0)) - i - 1;
-            if (rest_size <= 0) break;
-
-            torch::Tensor rest_bboxes = bboxes_float.narrow(0, i + 1, rest_size);
-            torch::Tensor rest_areas = areas.narrow(0, i + 1, rest_size);
-
-            auto inter_x1 = torch::max(current_bbox.select(1, 0), rest_bboxes.select(1, 0));
-            auto inter_y1 = torch::max(current_bbox.select(1, 1), rest_bboxes.select(1, 1));
-            auto inter_x2 = torch::min(current_bbox.select(1, 2), rest_bboxes.select(1, 2));
-            auto inter_y2 = torch::min(current_bbox.select(1, 3), rest_bboxes.select(1, 3));
-
-            auto inter_w = torch::clamp(inter_x2 - inter_x1, 0);
-            auto inter_h = torch::clamp(inter_y2 - inter_y1, 0);
-            auto inter_area = inter_w * inter_h;
-
-            auto iou = inter_area / (current_area + rest_areas - inter_area + 1e-9f);
-            auto mask = iou <= iou_threshold;
-
-            auto rest_keep = keep.narrow(0, i + 1, rest_size);
-            rest_keep = rest_keep & mask.to(torch::kBool);
-            keep.narrow(0, i + 1, rest_size).copy_(rest_keep);
+    std::vector<bool> suppressed(order.size(), false);
+    std::vector<int64_t> keep;
+    keep.reserve(order.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+        if (suppressed[i])
+            continue;
+        const int64_t current = order[i];
+        keep.push_back(current);
+        const float current_area =
+            std::max(0.0f, boxes_access[current][2] - boxes_access[current][0]) *
+            std::max(0.0f, boxes_access[current][3] - boxes_access[current][1]);
+        for (size_t j = i + 1; j < order.size(); ++j) {
+            if (suppressed[j])
+                continue;
+            const int64_t candidate = order[j];
+            const float intersection_width = std::max(0.0f,
+                std::min(boxes_access[current][2], boxes_access[candidate][2]) -
+                std::max(boxes_access[current][0], boxes_access[candidate][0]));
+            const float intersection_height = std::max(0.0f,
+                std::min(boxes_access[current][3], boxes_access[candidate][3]) -
+                std::max(boxes_access[current][1], boxes_access[candidate][1]));
+            const float intersection = intersection_width * intersection_height;
+            const float candidate_area =
+                std::max(0.0f, boxes_access[candidate][2] - boxes_access[candidate][0]) *
+                std::max(0.0f, boxes_access[candidate][3] - boxes_access[candidate][1]);
+            const float union_area = current_area + candidate_area - intersection;
+            const float iou = union_area > 0.0f ? intersection / union_area : 0.0f;
+            if (iou > iou_threshold)
+                suppressed[j] = true;
         }
     }
 
-    return sorted_idxs.masked_select(keep);
+    return torch::tensor(keep, torch::TensorOptions().dtype(torch::kLong))
+        .to(output_device);
 }
 
 inline std::vector<BBox> post_process(
@@ -207,6 +209,9 @@ inline std::vector<BBox> post_process(
     auto raw_boxes = pred_batch.narrow(1, 0, config.box_channels()).unsqueeze(0);
     auto boxes = collapse_yolo_box_predictions(raw_boxes, config).squeeze(0);
     auto cls_scores = pred_batch.narrow(1, config.box_channels(), config.num_classes);
+    TORCH_CHECK(cls_scores.min().item<float>() >= 0.0f &&
+        cls_scores.max().item<float>() <= 1.0f,
+        "YOLO inference class scores must be probabilities in [0,1]");
     auto max_result = torch::max(cls_scores, 1);
     auto max_cls_scores = std::get<0>(max_result);
     auto max_cls_idxs = std::get<1>(max_result);

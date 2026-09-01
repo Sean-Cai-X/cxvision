@@ -167,12 +167,13 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_metrology_boundary_hysteresis_permille"] = 50.0;
     overrides["global_metrology_boundary_gate_start_permille"] = 0.0;
     overrides["global_metrology_boundary_gate_end_permille"] = 1000.0;
-    overrides["global_metrology_boundary_selection_mode"] = 0.0;
+    overrides["global_metrology_boundary_selection_mode"] = 4.0;
     overrides["global_metrology_boundary_nth_candidate"] = 1.0;
     overrides["global_metrology_boundary_min_plateau_width"] = 3.0;
     overrides["global_metrology_boundary_min_amplitude_permille"] = 80.0;
     overrides["global_metrology_boundary_pair_min_width"] = 2.0;
     overrides["global_metrology_boundary_pair_max_width"] = 80.0;
+    overrides["global_metrology_boundary_pair_anchor_mode"] = 0.0;
     overrides["global_metrology_boundary_subpixel_mode"] = 2.0;
     overrides["global_metrology_boundary_show_conditioned"] = 1.0;
     overrides["global_metrology_boundary_show_response"] = 1.0;

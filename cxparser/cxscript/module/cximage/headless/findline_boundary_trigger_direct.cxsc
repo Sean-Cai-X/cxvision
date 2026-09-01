@@ -38,6 +38,7 @@ if (global_metrology_boundary_preview_enabled) {
     m_line.setboundarypolarity(global_metrology_boundary_polarity);
     m_line.setboundaryselection(global_metrology_boundary_selection_mode);
     m_line.setboundarynthcandidate(global_metrology_boundary_nth_candidate);
+    m_line.setboundaryreferencepositionpermille(global_metrology_boundary_reference_position_permille);
     m_line.setboundarysubpixel(global_metrology_boundary_subpixel_mode);
     m_line.setboundarybaseline(global_metrology_boundary_baseline_mode);
     m_line.setboundarydenoise(global_metrology_boundary_denoise_mode);
@@ -53,6 +54,7 @@ if (global_metrology_boundary_preview_enabled) {
     m_line.setboundaryminamplitudepermille(global_metrology_boundary_min_amplitude_permille);
     m_line.setboundarypairminwidth(global_metrology_boundary_pair_min_width);
     m_line.setboundarypairmaxwidth(global_metrology_boundary_pair_max_width);
+    m_line.setboundarypairanchor(global_metrology_boundary_pair_anchor_mode);
 }
 
 m_line.measure(&m_image);

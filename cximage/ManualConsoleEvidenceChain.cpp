@@ -2221,6 +2221,79 @@ static bool LoadTorchTrainingRunBindingLocal(const std::string &tracePath,
     }
     std::string schema;
     storage["schema"] >> schema;
+    if (schema == "cxvision.torch.yolov8n_training_lifecycle.v1") {
+      storage["status"] >> run.status;
+      storage["epochs"] >> run.configured_epochs;
+      storage["train_image_count"] >> run.train_sample_count;
+      storage["learning_rate"] >> run.learning_rate;
+      storage["batches_per_epoch"] >> run.batches_per_epoch;
+      run.completed_epochs = run.configured_epochs;
+      run.task = "detection";
+      run.optimizer = "SGD";
+      run.dataset_source = "asset-driven YOLO dataset package";
+      run.loss_phase = "YOLOv8 detection total loss";
+      run.training_trace_path = tracePath;
+
+      std::string curveRef;
+      std::string modelManifestRef;
+      storage["learning_curve_ref"] >> curveRef;
+      storage["incremental_manifest_ref"] >> modelManifestRef;
+      const std::filesystem::path traceFile(tracePath);
+      auto resolveRef = [&](const std::string &ref) {
+        std::filesystem::path path(ref);
+        if (path.is_relative())
+          path = traceFile.parent_path() / path;
+        return path.lexically_normal();
+      };
+      const std::filesystem::path curvePath = resolveRef(curveRef);
+      run.learning_curve_path = curvePath.string();
+      run.incremental_model_manifest_path =
+          resolveRef(modelManifestRef).string();
+
+      std::ifstream curve(curvePath);
+      std::string line;
+      std::getline(curve, line);
+      while (std::getline(curve, line)) {
+        std::istringstream row(line);
+        std::string epochText;
+        std::string lossText;
+        std::string batchText;
+        if (!std::getline(row, epochText, ',') ||
+            !std::getline(row, lossText, ',') ||
+            !std::getline(row, batchText, ','))
+          continue;
+        try {
+          CxTorchTrainingEpochMetric metric;
+          metric.epoch = std::stoi(epochText);
+          metric.total_loss = std::stod(lossText);
+          metric.learning_rate = run.learning_rate;
+          metric.sample_count = run.train_sample_count;
+          run.batches_per_epoch = std::stoi(batchText);
+          run.epochs.push_back(metric);
+        } catch (const std::exception &) {
+        }
+      }
+      if (!run.incremental_model_manifest_path.empty()) {
+        cv::FileStorage manifest(run.incremental_model_manifest_path,
+                                 cv::FileStorage::READ);
+        if (manifest.isOpened()) {
+          std::string weights;
+          manifest["weights"] >> weights;
+          std::filesystem::path weightsPath(weights);
+          if (weightsPath.is_relative())
+            weightsPath = std::filesystem::path(
+                              run.incremental_model_manifest_path)
+                              .parent_path() /
+                          weightsPath;
+          run.incremental_model_path = weightsPath.lexically_normal().string();
+        }
+      }
+      run.completed_epochs = static_cast<int>(run.epochs.size());
+      run.available = !run.epochs.empty();
+      reason = "epochs=" + std::to_string(run.epochs.size()) +
+               " model=" + run.incremental_model_path;
+      return run.available;
+    }
     if (schema != "cxvision.yolov8seg.training_trace.v1") {
       reason = "unsupported training trace schema: " + schema;
       return false;
@@ -2289,6 +2362,218 @@ static bool LoadTorchTrainingRunBindingLocal(const std::string &tracePath,
 
   reason = "epochs=" + std::to_string(run.epochs.size());
   return run.available;
+}
+
+static std::filesystem::path FindLatestRegularFileLocal(
+    const std::filesystem::path &root, const std::string &fileName) {
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec) || ec)
+    return {};
+  std::filesystem::path latest;
+  std::filesystem::file_time_type latestTime{};
+  for (std::filesystem::recursive_directory_iterator it(
+           root, std::filesystem::directory_options::skip_permission_denied,
+           ec),
+       end;
+       it != end; it.increment(ec)) {
+    if (ec) {
+      ec.clear();
+      continue;
+    }
+    if (it->is_symlink(ec) || ec || !it->is_regular_file(ec) || ec ||
+        it->path().filename() != fileName)
+      continue;
+    const auto writeTime = it->last_write_time(ec);
+    if (ec) {
+      ec.clear();
+      continue;
+    }
+    if (latest.empty() || writeTime > latestTime) {
+      latest = it->path();
+      latestTime = writeTime;
+    }
+  }
+  return latest;
+}
+
+static bool LoadLatestYoloTrainingRunLocal(CxTorchTrainingRunBinding &run,
+                                           std::string &reason) {
+  const std::filesystem::path root =
+      ResolveCxVisionRunPath("cxscript_runs/yolov8n_incremental");
+  const std::filesystem::path trace = FindLatestRegularFileLocal(
+      root, "torch_yolov8n_training_lifecycle_result.json");
+  if (trace.empty()) {
+    reason = "no C++ YOLOv8-n lifecycle result found under " + root.string();
+    return false;
+  }
+  return LoadTorchTrainingRunBindingLocal(trace.string(), run, reason);
+}
+
+static bool RefreshPartialYoloTrainingCurveLocal(
+    const std::string &curvePath, CxTorchTrainingRunBinding &run) {
+  std::ifstream curve(curvePath);
+  if (!curve)
+    return false;
+  std::vector<CxTorchTrainingEpochMetric> metrics;
+  std::string line;
+  std::getline(curve, line);
+  while (std::getline(curve, line)) {
+    std::istringstream row(line);
+    std::string epochText;
+    std::string lossText;
+    std::string batchText;
+    if (!std::getline(row, epochText, ',') ||
+        !std::getline(row, lossText, ',') ||
+        !std::getline(row, batchText, ','))
+      continue;
+    try {
+      CxTorchTrainingEpochMetric metric;
+      metric.epoch = std::stoi(epochText);
+      metric.total_loss = std::stod(lossText);
+      metric.learning_rate = run.learning_rate;
+      metric.sample_count = run.train_sample_count;
+      run.batches_per_epoch = std::stoi(batchText);
+      metrics.push_back(metric);
+    } catch (const std::exception &) {
+    }
+  }
+  if (metrics.empty())
+    return false;
+  run.epochs = std::move(metrics);
+  run.completed_epochs = static_cast<int>(run.epochs.size());
+  run.available = true;
+  return true;
+}
+
+static void PollYoloTrainingProcessLocal(ManualTestContext &context) {
+#ifdef _WIN32
+  if (!context.torch_training_process_running ||
+      context.torch_training_process_handle == 0)
+    return;
+  RefreshPartialYoloTrainingCurveLocal(
+      context.torch_training_active_curve_path, context.torch_training_run);
+  HANDLE process = reinterpret_cast<HANDLE>(
+      context.torch_training_process_handle);
+  DWORD exitCode = STILL_ACTIVE;
+  if (!GetExitCodeProcess(process, &exitCode)) {
+    context.torch_training_process_running = false;
+    context.geometry_aug_run_status = "CXX_YOLOV8N_TRAINING_FAIL";
+    context.geometry_aug_run_reason = "cannot query C++ training process";
+    CloseHandle(process);
+    context.torch_training_process_handle = 0;
+    return;
+  }
+  if (exitCode == STILL_ACTIVE) {
+    context.torch_training_run.status = "CXX_YOLOV8N_TRAINING_RUNNING";
+    context.torch_training_image_status =
+        context.torch_training_run.status;
+    context.torch_training_image_reason =
+        "completed_epoch=" +
+        std::to_string(context.torch_training_run.completed_epochs) + "/" +
+        std::to_string(context.torch_training_run.configured_epochs);
+    return;
+  }
+  CloseHandle(process);
+  context.torch_training_process_handle = 0;
+  context.torch_training_process_running = false;
+  std::string reason;
+  if (exitCode == 0 && LoadTorchTrainingRunBindingLocal(
+                           context.torch_training_active_result_path,
+                           context.torch_training_run, reason)) {
+    context.geometry_aug_run_status = context.torch_training_run.status;
+    context.geometry_aug_run_reason =
+        "C++ training complete; final curve and model are bound";
+    context.torch_training_image_status = context.torch_training_run.status;
+    context.torch_training_image_reason = reason;
+  } else {
+    context.geometry_aug_run_status = "CXX_YOLOV8N_TRAINING_FAIL";
+    context.geometry_aug_run_reason =
+        "C++ training process exit code=" + std::to_string(exitCode) +
+        (reason.empty() ? std::string() : " reason=" + reason);
+  }
+#else
+  (void)context;
+#endif
+}
+
+static void DrawEpochLossCurveLocal(const char *id,
+                                    const CxTorchTrainingRunBinding &run,
+                                    std::size_t startIndex = 0,
+                                    float height = 170.0f) {
+  if (!run.HasRealMultiEpochSeries())
+    return;
+  startIndex = std::min(startIndex, run.epochs.size() - 2);
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const ImVec2 size(std::max(320.0f, ImGui::GetContentRegionAvail().x), height);
+  ImGui::InvisibleButton(id, size);
+  ImDrawList *draw = ImGui::GetWindowDrawList();
+  const float left = origin.x + 46.0f;
+  const float right = origin.x + size.x - 12.0f;
+  const float top = origin.y + 12.0f;
+  const float bottom = origin.y + size.y - 30.0f;
+  double minLoss = run.epochs[startIndex].total_loss;
+  double maxLoss = minLoss;
+  for (std::size_t i = startIndex; i < run.epochs.size(); ++i) {
+    const auto &metric = run.epochs[i];
+    minLoss = std::min(minLoss, metric.total_loss);
+    maxLoss = std::max(maxLoss, metric.total_loss);
+  }
+  if (maxLoss <= minLoss)
+    maxLoss = minLoss + 1.0;
+  const int firstEpoch = run.epochs[startIndex].epoch;
+  const int lastEpoch = run.epochs.back().epoch;
+  const int epochSpan = std::max(1, lastEpoch - firstEpoch);
+  const ImU32 axis = IM_COL32(150, 160, 172, 255);
+  const ImU32 grid = IM_COL32(75, 82, 92, 180);
+  const ImU32 curve = IM_COL32(52, 190, 132, 255);
+  draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), axis);
+  for (int tick = 0; tick <= 4; ++tick) {
+    const float t = static_cast<float>(tick) / 4.0f;
+    const float x = left + (right - left) * t;
+    draw->AddLine(ImVec2(x, top), ImVec2(x, bottom), grid);
+    const int epoch = firstEpoch +
+                      static_cast<int>(std::lround(epochSpan * t));
+    const std::string label = std::to_string(epoch);
+    draw->AddText(ImVec2(x - ImGui::CalcTextSize(label.c_str()).x * 0.5f,
+                         bottom + 4.0f),
+                  axis, label.c_str());
+  }
+  char maxLabel[32]{};
+  char minLabel[32]{};
+  std::snprintf(maxLabel, sizeof(maxLabel), "%.4g", maxLoss);
+  std::snprintf(minLabel, sizeof(minLabel), "%.4g", minLoss);
+  draw->AddText(ImVec2(origin.x, top - 5.0f), axis, maxLabel);
+  draw->AddText(ImVec2(origin.x, bottom - 7.0f), axis, minLabel);
+  draw->AddText(ImVec2((left + right) * 0.5f - 18.0f, bottom + 18.0f), axis,
+                "Epoch");
+  ImVec2 previous;
+  for (std::size_t i = startIndex; i < run.epochs.size(); ++i) {
+    const auto &metric = run.epochs[i];
+    const float x = left + (right - left) *
+                               static_cast<float>(metric.epoch - firstEpoch) /
+                               static_cast<float>(epochSpan);
+    const float y = bottom - (bottom - top) *
+                                 static_cast<float>((metric.total_loss - minLoss) /
+                                                    (maxLoss - minLoss));
+    const ImVec2 point(x, y);
+    if (i > startIndex)
+      draw->AddLine(previous, point, curve, 2.0f);
+    previous = point;
+  }
+  if (ImGui::IsItemHovered()) {
+    const float mouseX = ImGui::GetIO().MousePos.x;
+    const float ratio = std::clamp((mouseX - left) / (right - left), 0.0f, 1.0f);
+    const int targetEpoch = firstEpoch +
+                            static_cast<int>(std::lround(epochSpan * ratio));
+    const auto nearest = std::min_element(
+        run.epochs.begin() + static_cast<std::ptrdiff_t>(startIndex),
+        run.epochs.end(), [&](const auto &a, const auto &b) {
+          return std::abs(a.epoch - targetEpoch) < std::abs(b.epoch - targetEpoch);
+        });
+    ImGui::SetTooltip("Epoch %d / %d\nLoss %.7g\nBatches %d", nearest->epoch,
+                      run.configured_epochs, nearest->total_loss,
+                      run.batches_per_epoch);
+  }
 }
 
 struct ActiveManualReviewProjectionLocal {
@@ -2372,7 +2657,7 @@ static int AppendManualAlgorithmReviewHandoffLocal(
     const std::function<ScriptEvidenceGroup &(const std::string &)>
         &findGroup,
     const ActiveManualReviewProjectionLocal &projection,
-    int &suppressedManagedRows) {
+    int &projectionManagedRows) {
   std::string text;
   if (!ReadTextFile(handoffPath, text))
     return 0;
@@ -2400,8 +2685,9 @@ static int AppendManualAlgorithmReviewHandoffLocal(
     const std::string tool = NormalizeEvidenceToolTypeLocal(
         hasReviewItemColumns ? cells[3] : cells[1]);
     if (projection.ManagesTool(tool)) {
-      ++suppressedManagedRows;
-      continue;
+      // Projection is an overlay selection aid. It must not hide asset-backed
+      // handoff cases from Manual Review / Evidence.
+      ++projectionManagedRows;
     }
     const std::string imageId = hasReviewItemColumns ? cells[4] : cells[2];
     const std::string targetId = hasReviewItemColumns ? cells[5] : cells[3];
@@ -2598,7 +2884,7 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
 
   const ActiveManualReviewProjectionLocal projection =
       LoadActiveManualReviewProjectionLocal();
-  int suppressedManagedRows = 0;
+  int projectionManagedRows = 0;
 
   std::ostringstream scanDebug;
   scanDebug << "root\t" << root.string() << '\n';
@@ -2609,14 +2895,14 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
             << projection.selected_binding_paths.size() << '\n';
   for (const std::string &scanError : scanErrors)
     scanDebug << "scan_error\t" << scanError << '\n';
-  scanDebug << "handoff_path\tappended_cases\tsuppressed_managed_rows\n";
+  scanDebug << "handoff_path\tappended_cases\tprojection_managed_rows_retained\n";
   for (const auto &handoff : handoffs) {
-    const int beforeSuppressed = suppressedManagedRows;
+    const int beforeProjectionManaged = projectionManagedRows;
     const int handoffAppended = AppendManualAlgorithmReviewHandoffLocal(
         context, handoff.string(), resolveImagePath, findGroup, projection,
-        suppressedManagedRows);
+        projectionManagedRows);
     scanDebug << handoff.string() << '\t' << handoffAppended << '\t'
-              << (suppressedManagedRows - beforeSuppressed) << '\n';
+              << (projectionManagedRows - beforeProjectionManaged) << '\n';
   }
 
   const std::filesystem::path scanDebugPath = ResolveCxVisionRunPath(
@@ -2631,7 +2917,7 @@ static int AppendManualAlgorithmReviewHandoffsFromRunFoldersLocal(
   std::ostringstream oss;
   oss << "manual algorithm review handoffs scanned=" << handoffs.size()
       << " appended_cases=" << appended
-      << " suppressed_managed_rows=" << suppressedManagedRows
+      << " projection_managed_rows_retained=" << projectionManagedRows
       << " managed_tools=" << projection.managed_tools.size()
       << " selected_bindings=" << projection.selected_binding_paths.size()
       << " projection_manifest=" << projection.manifest_path.string()
@@ -2934,7 +3220,7 @@ static void AppendSavedEvidenceCandidatesLocal(
   const ActiveManualReviewProjectionLocal projection =
       LoadActiveManualReviewProjectionLocal();
   int selectedBindingCount = 0;
-  int suppressedBindingCount = 0;
+  int retainedUnselectedBindingCount = 0;
   std::vector<std::filesystem::path> bindings;
   for (const auto &root : roots) {
     ec.clear();
@@ -3103,10 +3389,10 @@ static void AppendSavedEvidenceCandidatesLocal(
         ReadJsonStringFieldLocal(binding, "tool"));
     if (projection.ManagesTool(bindingTool)) {
       if (!IsSelectedManualReviewBindingLocal(projection, bindingPath)) {
-        ++suppressedBindingCount;
-        continue;
+        ++retainedUnselectedBindingCount;
+      } else {
+        ++selectedBindingCount;
       }
-      ++selectedBindingCount;
     }
 
     bool gaugeAccepted = false;
@@ -3265,8 +3551,8 @@ static void AppendSavedEvidenceCandidatesLocal(
                   << '\n';
   projectionDebug << "discovered_bindings\t" << bindings.size() << '\n';
   projectionDebug << "selected_bindings\t" << selectedBindingCount << '\n';
-  projectionDebug << "suppressed_bindings\t" << suppressedBindingCount
-                  << '\n';
+  projectionDebug << "retained_unselected_bindings\t"
+                  << retainedUnselectedBindingCount << '\n';
   for (const auto &root : roots)
     projectionDebug << "scan_root\t" << root.string() << '\n';
   const std::filesystem::path projectionDebugPath = ResolveCxVisionRunPath(
@@ -3283,45 +3569,23 @@ static int ApplyActiveManualReviewProjectionLocal(
     return 0;
 
   int before = 0;
-  int removed = 0;
   std::vector<std::string> selectedRows;
   for (auto &group : context.script_evidence_groups) {
     before += static_cast<int>(group.thumbs.size());
-    const auto newEnd = std::remove_if(
-        group.thumbs.begin(), group.thumbs.end(),
-        [&](const ScriptEvidenceThumb &thumb) {
-          const bool managed =
-              projection.ManagesTool(thumb.tool) ||
-              projection.ManagesTool(group.label);
-          if (!managed)
-            return false;
-          const bool selected =
-              !thumb.evidence_binding_path.empty() &&
-              IsSelectedManualReviewBindingLocal(
-                  projection, thumb.evidence_binding_path);
-          if (!selected) {
-            ++removed;
-          } else {
-            std::ostringstream row;
-            row << NormalizeEvidenceToolTypeLocal(thumb.tool) << '\t'
-                << (thumb.script_id.empty() ? thumb.case_id : thumb.script_id)
-                << '\t' << thumb.case_id << '\t'
-                << thumb.evidence_binding_path;
-            selectedRows.push_back(row.str());
-          }
-          return !selected;
-        });
-    group.thumbs.erase(newEnd, group.thumbs.end());
+    for (const ScriptEvidenceThumb &thumb : group.thumbs) {
+      const bool managed =
+          projection.ManagesTool(thumb.tool) || projection.ManagesTool(group.label);
+      if (!managed || thumb.evidence_binding_path.empty() ||
+          !IsSelectedManualReviewBindingLocal(projection,
+                                             thumb.evidence_binding_path))
+        continue;
+      std::ostringstream row;
+      row << NormalizeEvidenceToolTypeLocal(thumb.tool) << '\t'
+          << (thumb.script_id.empty() ? thumb.case_id : thumb.script_id)
+          << '\t' << thumb.case_id << '\t' << thumb.evidence_binding_path;
+      selectedRows.push_back(row.str());
+    }
   }
-
-  context.script_evidence_groups.erase(
-      std::remove_if(
-          context.script_evidence_groups.begin(),
-          context.script_evidence_groups.end(),
-          [](const ScriptEvidenceGroup &group) {
-            return group.thumbs.empty();
-          }),
-      context.script_evidence_groups.end());
 
   int after = 0;
   for (const auto &group : context.script_evidence_groups)
@@ -3338,7 +3602,8 @@ static int ApplyActiveManualReviewProjectionLocal(
     debug << row << '\n';
   debug << "before\t" << before << '\n';
   debug << "after\t" << after << '\n';
-  debug << "removed\t" << removed << '\n';
+  debug << "removed\t0\n";
+  debug << "policy\tprojection_retains_asset_backed_cases\n";
   const std::filesystem::path debugPath = ResolveCxVisionRunPath(
       "cxscript_runs/evidence_chain/manual_review_projection_apply_debug.tsv");
   WriteTextFile(debugPath, debug.str());
@@ -3348,11 +3613,11 @@ static int ApplyActiveManualReviewProjectionLocal(
           << projection.managed_tools.size()
           << " selected_bindings="
           << projection.selected_binding_paths.size()
-          << " removed=" << removed << " remaining=" << after
+          << " removed=0 remaining=" << after
           << " manifest=" << projection.manifest_path.string()
           << " debug=" << debugPath.string();
   reason = summary.str();
-  return removed;
+  return 0;
 }
 
 static bool LooksLikeCxScriptPathLocal(const std::string &value) {
@@ -7411,6 +7676,10 @@ void ViewController::DrawTorchEvidenceTrainingPanel() {
                          0.0f, 1.0f)
             : 0.0f;
     ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
+    ImGui::TextWrapped("Training result: %s", run.training_trace_path.c_str());
+    if (!run.incremental_model_path.empty())
+      ImGui::TextWrapped("Incremental model: %s",
+                         run.incremental_model_path.c_str());
 
     const bool hasRealTrainingCurve = run.HasRealMultiEpochSeries();
     if (!hasRealTrainingCurve) {
@@ -7422,19 +7691,17 @@ void ViewController::DrawTorchEvidenceTrainingPanel() {
           "runtime-produced multi-epoch trace is bound.");
     }
 
-    std::vector<float> totalLoss;
     std::vector<float> learningRates;
-    totalLoss.reserve(run.epochs.size());
     learningRates.reserve(run.epochs.size());
     for (const CxTorchTrainingEpochMetric &metric : run.epochs) {
-      totalLoss.push_back(static_cast<float>(metric.total_loss));
       learningRates.push_back(static_cast<float>(metric.learning_rate));
     }
-    if (hasRealTrainingCurve && !totalLoss.empty())
-      ImGui::PlotLines("Loss by epoch", totalLoss.data(),
-                       static_cast<int>(totalLoss.size()), 0, nullptr, FLT_MAX,
-                       FLT_MAX, ImVec2(-1.0f, 80.0f));
-    if (hasRealTrainingCurve && !learningRates.empty())
+    if (hasRealTrainingCurve) {
+      ImGui::Text("Loss / Epoch (%zu curve points)", run.epochs.size());
+      DrawEpochLossCurveLocal("##evidence_loss_epoch_curve", run);
+    }
+    if (hasRealTrainingCurve && run.learning_rate > 0.0 &&
+        !learningRates.empty())
       ImGui::PlotLines("LR by epoch", learningRates.data(),
                        static_cast<int>(learningRates.size()), 0, nullptr, 0.0f,
                        FLT_MAX, ImVec2(-1.0f, 48.0f));
@@ -8676,9 +8943,703 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
   return true;
 }
 
+bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
+  reason.clear();
+  if (m_manualTest.torch_training_process_running) {
+    reason = "C++ incremental training is already running";
+    return false;
+  }
+  const std::filesystem::path workflowRoot =
+      ResolveCxVisionRunPath("cxscript_runs/yolov8n_incremental");
+  const std::filesystem::path packageManifest =
+      FindLatestRegularFileLocal(workflowRoot, "package_manifest.json");
+  const std::filesystem::path trainingPlanTemplate = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/tests/"
+      "yolov8n_cpp_detection_full_coverage_plan.json");
+  std::error_code ec;
+  if (packageManifest.empty() ||
+      !std::filesystem::is_regular_file(trainingPlanTemplate, ec) || ec) {
+    reason = "latest YOLO dataset package or C++ training plan is missing";
+    m_manualTest.geometry_aug_run_status = "ASSET_PREFLIGHT_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  wchar_t executableBuffer[MAX_PATH]{};
+  const DWORD executableLength =
+      GetModuleFileNameW(nullptr, executableBuffer, MAX_PATH);
+  if (executableLength == 0 || executableLength >= MAX_PATH) {
+    reason = "cannot resolve current GUI executable";
+    m_manualTest.geometry_aug_run_status = "ASSET_PREFLIGHT_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+  const std::filesystem::path executable(executableBuffer);
+  const std::filesystem::path runtimeDll =
+      executable.parent_path() / "libtorch_module_runtime.dll";
+  if (!std::filesystem::is_regular_file(runtimeDll, ec) || ec) {
+    reason = "Torch runtime DLL is missing beside the GUI executable";
+    m_manualTest.geometry_aug_run_status = "ASSET_PREFLIGHT_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+
+  const std::string runId =
+      "run_" + SanitizeRunTokenLocal(CurrentTimestamp()) +
+      "_gui_cxx_incremental_train";
+  const std::filesystem::path outputDir = workflowRoot / runId;
+  const std::filesystem::path planDir = ResolveCxVisionRunPath(
+      "cxscript_runs/yolov8n_training_runtime_plans") / runId;
+  std::filesystem::create_directories(planDir, ec);
+  if (ec) {
+    reason = "cannot create C++ training plan directory: " + ec.message();
+    return false;
+  }
+  m_manualTest.geometry_aug_epochs =
+      std::clamp(m_manualTest.geometry_aug_epochs, 2, 1000);
+  m_manualTest.geometry_aug_learning_rate =
+      std::clamp(m_manualTest.geometry_aug_learning_rate, 0.000001f, 1.0f);
+  cv::FileStorage templateStorage(trainingPlanTemplate.string(),
+                                   cv::FileStorage::READ);
+  int batchSize = 0;
+  int inputSize = 0;
+  int maxBatches = 0;
+  int seed = 0;
+  int numClasses = 0;
+  templateStorage["batch_size"] >> batchSize;
+  templateStorage["input_size"] >> inputSize;
+  templateStorage["max_train_batches_per_epoch"] >> maxBatches;
+  templateStorage["seed"] >> seed;
+  templateStorage["num_classes"] >> numClasses;
+  std::vector<std::string> classNames;
+  for (const auto &node : templateStorage["class_names"])
+    classNames.push_back(static_cast<std::string>(node));
+  if (!templateStorage.isOpened() || batchSize <= 0 || inputSize <= 0 ||
+      maxBatches <= 0 || numClasses <= 0 ||
+      static_cast<int>(classNames.size()) != numClasses) {
+    reason = "C++ training plan template is invalid";
+    return false;
+  }
+  const std::filesystem::path trainingPlan =
+      planDir / "yolov8n_cpp_training_plan_runtime.json";
+  std::ostringstream plan;
+  plan << "{\n"
+       << "  \"schema\": \"cxvision.yolov8n_cpp_training_plan.v1\",\n"
+       << "  \"epochs\": " << m_manualTest.geometry_aug_epochs << ",\n"
+       << "  \"batch_size\": " << batchSize << ",\n"
+       << "  \"input_size\": " << inputSize << ",\n"
+       << "  \"max_train_batches_per_epoch\": " << maxBatches << ",\n"
+       << "  \"learning_rate\": "
+       << m_manualTest.geometry_aug_learning_rate << ",\n"
+       << "  \"seed\": " << seed << ",\n"
+       << "  \"num_classes\": " << numClasses << ",\n"
+       << "  \"class_names\": [";
+  for (std::size_t i = 0; i < classNames.size(); ++i) {
+    if (i > 0)
+      plan << ", ";
+    plan << '"' << JsonEscape(classNames[i]) << '"';
+  }
+  plan << "],\n  \"human_review_required\": true,\n"
+       << "  \"promotion_allowed\": false\n}\n";
+  if (!WriteTextFile(trainingPlan.string(), plan.str())) {
+    reason = "cannot write C++ runtime training plan";
+    return false;
+  }
+
+  auto quote = [](const std::wstring &value) {
+    return L"\"" + value + L"\"";
+  };
+  std::wstring command =
+      quote(executable.wstring()) + L" --yolov8n-training-lifecycle " +
+      L"--dataset-root " + quote(packageManifest.parent_path().wstring()) +
+      L" --training-plan " + quote(trainingPlan.wstring()) + L" --out " +
+      quote(outputDir.wstring()) + L" --torch-device cuda " +
+      L"--torch-runtime-dll " + quote(runtimeDll.wstring());
+  std::vector<wchar_t> commandBuffer(command.begin(), command.end());
+  commandBuffer.push_back(L'\0');
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION processInfo{};
+  if (!CreateProcessW(nullptr, commandBuffer.data(), nullptr, nullptr, FALSE,
+                      CREATE_NO_WINDOW, nullptr,
+                      executable.parent_path().wstring().c_str(), &startup,
+                      &processInfo)) {
+    reason = "CreateProcessW failed for C++ training; error=" +
+             std::to_string(GetLastError());
+    return false;
+  }
+  CloseHandle(processInfo.hThread);
+
+  m_manualTest.geometry_aug_run_status = "CXX_YOLOV8N_TRAINING_RUNNING";
+  m_manualTest.geometry_aug_run_reason =
+      "background C++/LibTorch training started; curve refreshes per epoch";
+  m_manualTest.geometry_aug_output_dir = outputDir.string();
+  m_manualTest.geometry_aug_plan_path = trainingPlan.string();
+  m_manualTest.torch_training_process_running = true;
+  m_manualTest.torch_training_process_handle =
+      reinterpret_cast<std::uintptr_t>(processInfo.hProcess);
+  m_manualTest.torch_training_active_output_dir = outputDir.string();
+  m_manualTest.torch_training_active_curve_path =
+      (outputDir / "learning_curve.csv").string();
+  m_manualTest.torch_training_active_result_path =
+      (outputDir / "torch_yolov8n_training_lifecycle_result.json").string();
+  m_manualTest.torch_training_run = CxTorchTrainingRunBinding{};
+  m_manualTest.torch_training_run.status =
+      "CXX_YOLOV8N_TRAINING_RUNNING";
+  m_manualTest.torch_training_run.task = "detection";
+  m_manualTest.torch_training_run.optimizer = "SGD";
+  m_manualTest.torch_training_run.configured_epochs =
+      m_manualTest.geometry_aug_epochs;
+  m_manualTest.torch_training_run.learning_rate =
+      m_manualTest.geometry_aug_learning_rate;
+  const std::filesystem::path trainImages =
+      packageManifest.parent_path() / "images" / "train";
+  int trainSampleCount = 0;
+  ec.clear();
+  for (std::filesystem::directory_iterator it(trainImages, ec), end;
+       !ec && it != end; it.increment(ec))
+    trainSampleCount += it->is_regular_file(ec) && !ec ? 1 : 0;
+  m_manualTest.torch_training_run.train_sample_count = trainSampleCount;
+  m_manualTest.torch_training_run.dataset_source =
+      packageManifest.parent_path().string();
+  m_manualTest.torch_training_run.training_trace_path =
+      m_manualTest.torch_training_active_result_path;
+  m_manualTest.torch_training_run.learning_curve_path =
+      m_manualTest.torch_training_active_curve_path;
+  m_manualTest.torch_training_image_status =
+      "CXX_YOLOV8N_TRAINING_RUNNING";
+  m_manualTest.torch_training_image_reason = "completed_epoch=0/" +
+      std::to_string(m_manualTest.geometry_aug_epochs);
+  reason = m_manualTest.geometry_aug_run_reason;
+  return true;
+}
+
+static std::string ModelLineageRunTimestampLocal() {
+  std::string timestamp = CurrentTimestamp();
+  for (char &ch : timestamp) {
+    const unsigned char value = static_cast<unsigned char>(ch);
+    if (!std::isalnum(value) && ch != '-' && ch != '_')
+      ch = '_';
+  }
+  return timestamp;
+}
+
+static std::string
+ReadModelLineageStringLocal(const cv::FileNode &node, const char *key) {
+  const cv::FileNode value = node[key];
+  return value.empty() ? std::string() : static_cast<std::string>(value);
+}
+
+static std::vector<std::string>
+ReadModelLineageStringListLocal(const cv::FileNode &node, const char *key) {
+  std::vector<std::string> values;
+  const cv::FileNode sequence = node[key];
+  if (sequence.empty() || !sequence.isSeq())
+    return values;
+  for (const cv::FileNode &value : sequence)
+    values.push_back(static_cast<std::string>(value));
+  return values;
+}
+
+static bool IsPathInsideModelLineageRootLocal(
+    const std::filesystem::path &root, const std::filesystem::path &candidate) {
+  const std::filesystem::path relative = candidate.lexically_relative(root);
+  if (relative.empty())
+    return candidate == root;
+  for (const std::filesystem::path &part : relative) {
+    if (part == "..")
+      return false;
+  }
+  return !relative.is_absolute();
+}
+
+static bool ResolveModelLineageRefLocal(
+    const std::filesystem::path &scanRoot,
+    const std::filesystem::path &nodeDirectory, const std::string &ref,
+    std::string &resolved, std::string &reason) {
+  if (ref.empty()) {
+    reason = "required reference is empty";
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::path path(ref);
+  if (path.is_relative())
+    path = nodeDirectory / path;
+  path = std::filesystem::weakly_canonical(path, ec);
+  if (ec) {
+    reason = "reference cannot be canonicalized: " + ref;
+    return false;
+  }
+  if (!IsPathInsideModelLineageRootLocal(scanRoot, path)) {
+    reason = "reference is outside scan root: " + path.string();
+    return false;
+  }
+  if (!std::filesystem::is_regular_file(path, ec) || ec) {
+    reason = "ASSET_MISSING: " + path.string();
+    return false;
+  }
+  resolved = path.string();
+  return true;
+}
+
+struct ModelLineageReviewLocal {
+  std::string decision;
+  std::string path;
+};
+
+static bool LoadModelLineageReviewLocal(
+    const std::filesystem::path &path, std::string &modelId,
+    ModelLineageReviewLocal &review) {
+  cv::FileStorage storage(path.string(), cv::FileStorage::READ);
+  if (!storage.isOpened())
+    return false;
+  modelId = ReadModelLineageStringLocal(storage.root(), "model_id");
+  review.decision =
+      ReadModelLineageStringLocal(storage.root(), "human_decision");
+  review.path = path.string();
+  return !modelId.empty() && !review.decision.empty();
+}
+
+static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
+  context.model_lineage_scan_attempted = true;
+  context.model_lineage_nodes.clear();
+  context.model_lineage_rejected.clear();
+  context.selected_model_lineage_node = -1;
+
+  std::error_code ec;
+  std::filesystem::path scanRoot =
+      ResolveCxVisionRunPath(context.model_lineage_scan_root);
+  scanRoot = std::filesystem::weakly_canonical(scanRoot, ec);
+  if (ec || !std::filesystem::is_directory(scanRoot, ec)) {
+    context.model_lineage_scan_status = "ASSET_MISSING";
+    context.model_lineage_scan_reason =
+        "model lineage scan root is not a directory: " + scanRoot.string();
+    return;
+  }
+
+  std::vector<std::filesystem::path> nodePaths;
+  std::unordered_map<std::string, ModelLineageReviewLocal> parentReviews;
+  std::unordered_map<std::string, ModelLineageReviewLocal> freezeReviews;
+  std::unordered_map<std::string, ModelLineageReviewLocal> differenceReviews;
+  std::vector<std::filesystem::path> pendingDirectories{scanRoot};
+  while (!pendingDirectories.empty()) {
+    const std::filesystem::path directory = pendingDirectories.back();
+    pendingDirectories.pop_back();
+    std::error_code directoryError;
+    std::filesystem::directory_iterator entries(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryError);
+    if (directoryError) {
+      context.model_lineage_rejected.push_back(
+          {directory.string(),
+           "DIRECTORY_SCAN_FAILED: " + directoryError.message()});
+      continue;
+    }
+    for (const std::filesystem::directory_entry &entry : entries) {
+      std::error_code entryError;
+      if (entry.is_symlink(entryError))
+        continue;
+      if (entry.is_directory(entryError) && !entryError) {
+        pendingDirectories.push_back(entry.path());
+        continue;
+      }
+      if (!entry.is_regular_file(entryError) || entryError)
+        continue;
+
+      const std::string filename = entry.path().filename().string();
+      if (filename == "model_node.json") {
+        nodePaths.push_back(entry.path());
+      } else if (filename == "parent_model_selection_review.json" ||
+                 filename == "freeze_policy_review.json" ||
+                 filename == "inference_difference_review.json") {
+        std::string modelId;
+        ModelLineageReviewLocal review;
+        if (LoadModelLineageReviewLocal(entry.path(), modelId, review)) {
+          auto *reviews = &differenceReviews;
+          if (filename == "parent_model_selection_review.json")
+            reviews = &parentReviews;
+          else if (filename == "freeze_policy_review.json")
+            reviews = &freezeReviews;
+          const auto existing = reviews->find(modelId);
+          if (existing == reviews->end() ||
+              existing->second.path < review.path)
+            (*reviews)[modelId] = review;
+        }
+      }
+    }
+  }
+  std::sort(nodePaths.begin(), nodePaths.end());
+
+  std::vector<CxModelLineageUiNode> parsedNodes;
+  for (const std::filesystem::path &nodePath : nodePaths) {
+    CxModelLineageUiNode node;
+    node.model_node_path = nodePath.string();
+    std::string rejectReason;
+    cv::FileStorage storage(nodePath.string(), cv::FileStorage::READ);
+    if (!storage.isOpened()) {
+      rejectReason = "invalid JSON";
+    } else {
+      const cv::FileNode root = storage.root();
+      const std::string schema =
+          ReadModelLineageStringLocal(root, "schema");
+      node.model_id = ReadModelLineageStringLocal(root, "model_id");
+      node.display_name = ReadModelLineageStringLocal(root, "display_name");
+      node.node_kind = ReadModelLineageStringLocal(root, "node_kind");
+      node.root_release_id =
+          ReadModelLineageStringLocal(root, "root_release_id");
+      node.branch_id = ReadModelLineageStringLocal(root, "branch_id");
+      node.parent_model_ids =
+          ReadModelLineageStringListLocal(root, "parent_model_ids");
+      node.task = ReadModelLineageStringLocal(root, "task");
+      node.architecture_id =
+          ReadModelLineageStringLocal(root, "architecture_id");
+      node.output_contract =
+          ReadModelLineageStringLocal(root, "output_contract");
+      node.capabilities =
+          ReadModelLineageStringListLocal(root, "capabilities");
+      node.checkpoint_hash =
+          ReadModelLineageStringLocal(root, "checkpoint_hash");
+      node.checkpoint_hash_status =
+          ReadModelLineageStringLocal(root, "checkpoint_hash_status");
+      node.promotion_status =
+          ReadModelLineageStringLocal(root, "promotion_status");
+
+      if (schema != "cxvision.model_lineage_node.v1")
+        rejectReason = "unsupported schema";
+      else if (node.model_id.empty() || node.display_name.empty() ||
+               node.node_kind.empty() || node.root_release_id.empty() ||
+               node.task.empty() || node.architecture_id.empty() ||
+               node.output_contract.empty() || node.capabilities.empty() ||
+               node.checkpoint_hash.empty() ||
+               node.checkpoint_hash_status.empty() ||
+               node.promotion_status.empty())
+        rejectReason = "required lineage fact is empty";
+      else if (node.node_kind != "release" &&
+               node.node_kind != "incremental_candidate" &&
+               node.node_kind != "merge_candidate")
+        rejectReason = "unsupported node_kind";
+      else {
+        const cv::FileNode refs = root["refs"];
+        struct RefTarget {
+          const char *key;
+          std::string *target;
+        };
+        RefTarget targets[] = {
+            {"capability_manifest", &node.capability_manifest_path},
+            {"model_manifest", &node.model_manifest_path},
+            {"checkpoint", &node.checkpoint_path},
+            {"class_ontology", &node.class_ontology_path},
+            {"dataset_binding", &node.dataset_binding_path},
+            {"training_plan", &node.training_plan_path},
+            {"metric_bundle", &node.metric_bundle_path},
+        };
+        for (const RefTarget &target : targets) {
+          const std::string ref =
+              ReadModelLineageStringLocal(refs, target.key);
+          if (!ResolveModelLineageRefLocal(
+                  scanRoot, nodePath.parent_path(), ref, *target.target,
+                  rejectReason))
+            break;
+        }
+      }
+    }
+    if (!rejectReason.empty()) {
+      context.model_lineage_rejected.push_back(
+          {nodePath.string(), rejectReason});
+      continue;
+    }
+    parsedNodes.push_back(std::move(node));
+  }
+
+  std::unordered_map<std::string, int> idCounts;
+  for (const CxModelLineageUiNode &node : parsedNodes)
+    ++idCounts[node.model_id];
+
+  std::unordered_set<std::string> uniqueIds;
+  for (const CxModelLineageUiNode &node : parsedNodes) {
+    if (idCounts[node.model_id] == 1)
+      uniqueIds.insert(node.model_id);
+  }
+
+  for (CxModelLineageUiNode &node : parsedNodes) {
+    std::string rejectReason;
+    if (idCounts[node.model_id] > 1) {
+      rejectReason = "DUPLICATE_MODEL_ID: " + node.model_id;
+    } else if (node.node_kind == "release" &&
+               !node.parent_model_ids.empty()) {
+      rejectReason = "release node must not declare parents";
+    } else if (node.node_kind == "incremental_candidate" &&
+               node.parent_model_ids.size() != 1) {
+      rejectReason = "incremental candidate requires exactly one parent";
+    } else if (node.node_kind == "merge_candidate" &&
+               node.parent_model_ids.size() < 2) {
+      rejectReason = "merge candidate requires at least two parents";
+    } else {
+      for (const std::string &parentId : node.parent_model_ids) {
+        if (uniqueIds.find(parentId) == uniqueIds.end()) {
+          rejectReason = "PARENT_MODEL_MISSING: " + parentId;
+          break;
+        }
+      }
+    }
+    if (!rejectReason.empty()) {
+      context.model_lineage_rejected.push_back(
+          {node.model_node_path, rejectReason});
+      continue;
+    }
+    node.accepted = true;
+    const auto parentReview = parentReviews.find(node.model_id);
+    node.parent_selection_reviewed =
+        parentReview != parentReviews.end() &&
+        parentReview->second.decision == "HUMAN_CONFIRMED";
+    if (node.parent_selection_reviewed)
+      node.parent_selection_review_path = parentReview->second.path;
+
+    node.parent_gate_satisfied = node.node_kind == "release";
+    if (!node.parent_model_ids.empty()) {
+      node.parent_gate_satisfied = true;
+      for (const std::string &parentId : node.parent_model_ids) {
+        const auto review = parentReviews.find(parentId);
+        if (review == parentReviews.end() ||
+            review->second.decision != "HUMAN_CONFIRMED") {
+          node.parent_gate_satisfied = false;
+          break;
+        }
+        node.parent_selection_review_path = review->second.path;
+      }
+    }
+
+    const auto freezeReview = freezeReviews.find(node.model_id);
+    node.freeze_policy_reviewed =
+        freezeReview != freezeReviews.end() &&
+        freezeReview->second.decision == "HUMAN_CONFIRMED";
+    if (node.freeze_policy_reviewed)
+      node.freeze_policy_review_path = freezeReview->second.path;
+    const auto differenceReview = differenceReviews.find(node.model_id);
+    node.inference_difference_reviewed =
+        differenceReview != differenceReviews.end() &&
+        differenceReview->second.decision == "HUMAN_CONFIRMED";
+    if (node.inference_difference_reviewed)
+      node.inference_difference_review_path = differenceReview->second.path;
+
+    if (node.node_kind == "release") {
+      node.gate_status = node.parent_selection_reviewed
+                             ? "PARENT_READY"
+                             : "PENDING_PARENT_SELECTION";
+      node.gate_reason =
+          node.parent_selection_reviewed
+              ? "parent model selection has independent human evidence"
+              : "parent model selection review is required before branching";
+    } else if (node.parent_gate_satisfied &&
+               node.freeze_policy_reviewed &&
+               node.inference_difference_reviewed) {
+      node.gate_status = "GATE_READY";
+      node.gate_reason = "all mandatory human gates are confirmed";
+    } else {
+      node.gate_status = "PENDING_HUMAN_REVIEW";
+      node.gate_reason =
+          "parent selection, freeze execution and inference difference "
+          "reviews must all be confirmed";
+    }
+    context.model_lineage_nodes.push_back(std::move(node));
+  }
+
+  std::sort(context.model_lineage_nodes.begin(),
+            context.model_lineage_nodes.end(),
+            [](const CxModelLineageUiNode &left,
+               const CxModelLineageUiNode &right) {
+              if (left.display_name != right.display_name)
+                return left.display_name < right.display_name;
+               return left.model_id < right.model_id;
+             });
+
+  if (!context.model_lineage_nodes.empty())
+    context.selected_model_lineage_node = 0;
+
+  context.model_lineage_scan_status =
+      context.model_lineage_nodes.empty() ? "NO_VALID_MODEL_NODES"
+                                          : "MODEL_LINEAGE_SCAN_COMPLETE";
+  context.model_lineage_scan_reason =
+      "discovered=" + std::to_string(nodePaths.size()) +
+      " accepted=" + std::to_string(context.model_lineage_nodes.size()) +
+      " rejected=" + std::to_string(context.model_lineage_rejected.size());
+
+  const std::filesystem::path debugDir =
+      scanRoot / "_shared" / "model_lineage_scans" /
+      ("run_" + ModelLineageRunTimestampLocal());
+  std::filesystem::create_directories(debugDir, ec);
+  const std::filesystem::path debugPath =
+      debugDir / "model_lineage_scan_debug.json";
+  cv::FileStorage debugStorage(
+      debugPath.string(),
+      cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (debugStorage.isOpened()) {
+    debugStorage << "schema" << "cxvision.model_lineage_scan.v1";
+    debugStorage << "root" << scanRoot.string();
+    debugStorage << "discovered" << static_cast<int>(nodePaths.size());
+    debugStorage << "accepted"
+                 << static_cast<int>(context.model_lineage_nodes.size());
+    debugStorage << "rejected"
+                 << static_cast<int>(context.model_lineage_rejected.size());
+    debugStorage << "accepted_model_ids"
+                 << "[";
+    for (const CxModelLineageUiNode &node : context.model_lineage_nodes)
+      debugStorage << node.model_id;
+    debugStorage << "]";
+    debugStorage << "rejections"
+                 << "[";
+    for (const CxModelLineageRejectedAsset &rejected :
+         context.model_lineage_rejected) {
+      debugStorage << "{";
+      debugStorage << "path" << rejected.path;
+      debugStorage << "reason" << rejected.reason;
+      debugStorage << "}";
+    }
+    debugStorage << "]";
+    debugStorage.release();
+    context.model_lineage_scan_debug_path = debugPath.string();
+  }
+}
+
+int RunModelLineageAssetScanSmoke(const std::string &scanRoot,
+                                  const std::string &outputDirectory) {
+  ManualTestContext context;
+  context.model_lineage_scan_root = scanRoot;
+  RefreshModelLineageAssetsLocal(context);
+
+  const std::filesystem::path outputRoot =
+      ResolveCxVisionRunPath(outputDirectory);
+  std::error_code ec;
+  std::filesystem::create_directories(outputRoot, ec);
+  const std::filesystem::path reportPath =
+      outputRoot / "model_lineage_scan_smoke.json";
+  cv::FileStorage report(
+      reportPath.string(),
+      cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (!report.isOpened()) {
+    std::cerr << "model_lineage_scan_smoke_ok=false\n";
+    std::cerr << "reason=cannot write smoke report\n";
+    return 2;
+  }
+  report << "schema" << "cxvision.model_lineage_scan_smoke.v1";
+  report << "status" << context.model_lineage_scan_status;
+  report << "reason" << context.model_lineage_scan_reason;
+  report << "scan_debug_ref" << context.model_lineage_scan_debug_path;
+  report << "accepted" << static_cast<int>(context.model_lineage_nodes.size());
+  report << "rejected"
+         << static_cast<int>(context.model_lineage_rejected.size());
+  report << "nodes"
+         << "[";
+  for (const CxModelLineageUiNode &node : context.model_lineage_nodes) {
+    report << "{";
+    report << "model_id" << node.model_id;
+    report << "model_node_path" << node.model_node_path;
+    report << "display_name" << node.display_name;
+    report << "node_kind" << node.node_kind;
+    report << "parent_model_ids"
+           << "[";
+    for (const std::string &parentId : node.parent_model_ids)
+      report << parentId;
+    report << "]";
+    report << "task" << node.task;
+    report << "architecture_id" << node.architecture_id;
+    report << "output_contract" << node.output_contract;
+    report << "checkpoint_path" << node.checkpoint_path;
+    report << "checkpoint_hash" << node.checkpoint_hash;
+    report << "checkpoint_hash_status" << node.checkpoint_hash_status;
+    report << "gate_status" << node.gate_status;
+    report << "parent_gate_satisfied"
+           << static_cast<int>(node.parent_gate_satisfied);
+    report << "freeze_policy_reviewed"
+           << static_cast<int>(node.freeze_policy_reviewed);
+    report << "inference_difference_reviewed"
+           << static_cast<int>(node.inference_difference_reviewed);
+    report << "}";
+  }
+  report << "]";
+  report << "rejections"
+         << "[";
+  for (const CxModelLineageRejectedAsset &rejected :
+       context.model_lineage_rejected) {
+    report << "{";
+    report << "path" << rejected.path;
+    report << "reason" << rejected.reason;
+    report << "}";
+  }
+  report << "]";
+  const bool passed = !context.model_lineage_nodes.empty();
+  report << "smoke_status"
+         << (passed ? "MODEL_LINEAGE_SCAN_PASS"
+                    : "MODEL_LINEAGE_SCAN_FAIL");
+  report.release();
+
+  std::cout << "model_lineage_scan_smoke_ok="
+            << (passed ? "true" : "false") << "\n";
+  std::cout << "status=" << context.model_lineage_scan_status << "\n";
+  std::cout << context.model_lineage_scan_reason << "\n";
+  std::cout << "report=" << reportPath.string() << "\n";
+  return passed ? 0 : 1;
+}
+
+static bool WriteParentModelSelectionReviewLocal(
+    ManualTestContext &context, const CxModelLineageUiNode &node,
+    std::string &reason) {
+  const std::string selectionReason =
+      TrimLine(context.model_lineage_parent_selection_reason);
+  if (selectionReason.empty()) {
+    reason = "selection reason is required";
+    return false;
+  }
+  const std::filesystem::path scanRoot =
+      ResolveCxVisionRunPath(context.model_lineage_scan_root);
+  const std::filesystem::path reviewDir =
+      scanRoot / "model_incremental_reviews" /
+      ("run_" + ModelLineageRunTimestampLocal() + "_parent_selection");
+  std::error_code ec;
+  std::filesystem::create_directories(reviewDir, ec);
+  if (ec) {
+    reason = "cannot create review directory: " + ec.message();
+    return false;
+  }
+
+  const std::filesystem::path reviewPath =
+      reviewDir / "parent_model_selection_review.json";
+  cv::FileStorage reviewStorage(
+      reviewPath.string(),
+      cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (!reviewStorage.isOpened()) {
+    reason = "failed to write independent parent selection review";
+    return false;
+  }
+  reviewStorage << "schema" << "cxvision.parent_model_selection_review.v1";
+  reviewStorage << "model_id" << node.model_id;
+  reviewStorage << "display_name" << node.display_name;
+  reviewStorage << "task" << node.task;
+  reviewStorage << "architecture_id" << node.architecture_id;
+  reviewStorage << "output_contract" << node.output_contract;
+  reviewStorage << "selection_reason" << selectionReason;
+  reviewStorage << "human_decision" << "HUMAN_CONFIRMED";
+  reviewStorage << "automatic" << 0;
+  reviewStorage << "created_at" << CurrentTimestamp();
+  reviewStorage.release();
+  context.model_lineage_parent_selection_review_path = reviewPath.string();
+  reason = "parent selection review saved independently";
+  return true;
+}
+
 void ViewController::drawTorchTrainingImageSetWindow() {
-  ImGui::SetNextWindowPos(ImVec2(1380, 740), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(720, 760), ImGuiCond_FirstUseEver);
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  const ImVec2 workPos = viewport->WorkPos;
+  const ImVec2 workSize = viewport->WorkSize;
+  ImGui::SetNextWindowPos(
+      ImVec2(workPos.x + workSize.x * 0.5f,
+             workPos.y + workSize.y * 0.5f),
+      ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(
+      ImVec2(std::min(720.0f, std::max(420.0f, workSize.x - 32.0f)),
+             std::min(760.0f, std::max(420.0f, workSize.y - 32.0f))),
+      ImGuiCond_Appearing);
   if (!ImGui::Begin("Torch Training Image Set", nullptr,
                     ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
@@ -8688,6 +9649,17 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ApplyAiGuiFocusHere(
       AiGuiDestination::TorchTrainingImageSet,
       "Torch Training Image Set > dataset actions and image rails");
+  PollYoloTrainingProcessLocal(m_manualTest);
+  if (!m_manualTest.torch_training_latest_scan_attempted) {
+    m_manualTest.torch_training_latest_scan_attempted = true;
+    std::string loadReason;
+    if (LoadLatestYoloTrainingRunLocal(m_manualTest.torch_training_run,
+                                       loadReason)) {
+      m_manualTest.torch_training_image_status =
+          m_manualTest.torch_training_run.status;
+      m_manualTest.torch_training_image_reason = loadReason;
+    }
+  }
   ImGui::TextWrapped(
       "Training/validation/test image rails for Torch evidence review. "
       "Click a thumbnail to load it into Image View. Labels are operator "
@@ -8704,6 +9676,188 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::Text("status: %s", m_manualTest.torch_training_image_status.c_str());
   ImGui::TextWrapped("reason: %s",
                      m_manualTest.torch_training_image_reason.c_str());
+
+  if (!m_manualTest.model_lineage_scan_attempted)
+    RefreshModelLineageAssetsLocal(m_manualTest);
+  if (ImGui::CollapsingHeader("Model Lineage / Candidate Review",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::SetNextItemWidth(-120.0f);
+    InputTextString("Scan root", m_manualTest.model_lineage_scan_root);
+    ImGui::SameLine();
+    if (ImGui::Button("Refresh"))
+      RefreshModelLineageAssetsLocal(m_manualTest);
+
+    ImGui::Text("status: %s", m_manualTest.model_lineage_scan_status.c_str());
+    ImGui::Text("%s", m_manualTest.model_lineage_scan_reason.c_str());
+    if (!m_manualTest.model_lineage_scan_debug_path.empty())
+      ImGui::TextWrapped("scan report: %s",
+                         m_manualTest.model_lineage_scan_debug_path.c_str());
+
+    if (ImGui::BeginTable("model_lineage_nodes", 7,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_Resizable |
+                              ImGuiTableFlags_ScrollY,
+                          ImVec2(-1.0f, 190.0f))) {
+      ImGui::TableSetupColumn("Model", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 112.0f);
+      ImGui::TableSetupColumn("Task", ImGuiTableColumnFlags_WidthFixed, 75.0f);
+      ImGui::TableSetupColumn("Capability",
+                              ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthFixed,
+                              100.0f);
+      ImGui::TableSetupColumn("Parent", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("Gate", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+      ImGui::TableHeadersRow();
+      for (std::size_t i = 0; i < m_manualTest.model_lineage_nodes.size();
+           ++i) {
+        const CxModelLineageUiNode &node =
+            m_manualTest.model_lineage_nodes[i];
+        std::string capabilityText;
+        for (std::size_t c = 0; c < node.capabilities.size(); ++c) {
+          if (c > 0)
+            capabilityText += ", ";
+          capabilityText += node.capabilities[c];
+        }
+        std::string parentText;
+        for (std::size_t p = 0; p < node.parent_model_ids.size(); ++p) {
+          if (p > 0)
+            parentText += ", ";
+          parentText += node.parent_model_ids[p];
+        }
+        if (parentText.empty())
+          parentText = "-";
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const bool selected =
+            m_manualTest.selected_model_lineage_node == static_cast<int>(i);
+        if (ImGui::Selectable(node.display_name.c_str(), selected,
+                              ImGuiSelectableFlags_SpanAllColumns))
+          m_manualTest.selected_model_lineage_node = static_cast<int>(i);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextWrapped("%s", node.node_kind.c_str());
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextWrapped("%s", node.task.c_str());
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextWrapped("%s", capabilityText.c_str());
+        ImGui::TableSetColumnIndex(4);
+        ImGui::TextWrapped("%s",
+                           node.branch_id.empty() ? "-" : node.branch_id.c_str());
+        ImGui::TableSetColumnIndex(5);
+        ImGui::TextWrapped("%s", parentText.c_str());
+        ImGui::TableSetColumnIndex(6);
+        const bool ready = node.gate_status == "GATE_READY" ||
+                           node.gate_status == "PARENT_READY";
+        ImGui::TextColored(
+            ready ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
+                  : ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+            "%s", node.gate_status.c_str());
+      }
+      ImGui::EndTable();
+    }
+
+    if (m_manualTest.selected_model_lineage_node >= 0 &&
+        m_manualTest.selected_model_lineage_node <
+            static_cast<int>(m_manualTest.model_lineage_nodes.size())) {
+      const CxModelLineageUiNode &node =
+          m_manualTest.model_lineage_nodes[static_cast<std::size_t>(
+              m_manualTest.selected_model_lineage_node)];
+      ImGui::SeparatorText("Selected Model");
+      ImGui::Text("%s", node.display_name.c_str());
+      ImGui::TextWrapped("model_id: %s", node.model_id.c_str());
+      ImGui::TextWrapped("architecture: %s | output: %s",
+                         node.architecture_id.c_str(),
+                         node.output_contract.c_str());
+      ImGui::TextWrapped("ontology: %s",
+                         node.class_ontology_path.c_str());
+      ImGui::TextWrapped("checkpoint: %s", node.checkpoint_path.c_str());
+      ImGui::TextWrapped("checkpoint hash: %s", node.checkpoint_hash.c_str());
+      ImGui::TextWrapped("hash status: %s",
+                         node.checkpoint_hash_status.c_str());
+      ImGui::TextWrapped("promotion: %s", node.promotion_status.c_str());
+
+      if (ImGui::BeginTable("model_lineage_review_gates", 3,
+                            ImGuiTableFlags_Borders |
+                                ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Human gate",
+                                ImGuiTableColumnFlags_WidthFixed, 165.0f);
+        ImGui::TableSetupColumn("Status",
+                                ImGuiTableColumnFlags_WidthFixed, 175.0f);
+        ImGui::TableSetupColumn("Evidence",
+                                ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        const auto drawGate = [](const char *label, const char *status,
+                                 const std::string &path) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(label);
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextWrapped("%s", status);
+          ImGui::TableSetColumnIndex(2);
+          ImGui::TextWrapped("%s", path.empty() ? "-" : path.c_str());
+        };
+        const bool isRelease = node.node_kind == "release";
+        drawGate("Parent model selection",
+                 (isRelease ? node.parent_selection_reviewed
+                            : node.parent_gate_satisfied)
+                     ? "HUMAN_CONFIRMED"
+                     : "PENDING_HUMAN_REVIEW",
+                 node.parent_selection_review_path);
+        drawGate("Freeze execution",
+                 isRelease ? "NOT_APPLICABLE"
+                           : (node.freeze_policy_reviewed
+                                  ? "HUMAN_CONFIRMED"
+                                  : "PENDING_HUMAN_REVIEW"),
+                 node.freeze_policy_review_path);
+        drawGate("Inference difference",
+                 isRelease ? "NOT_APPLICABLE"
+                           : (node.inference_difference_reviewed
+                                  ? "HUMAN_CONFIRMED"
+                                  : "PENDING_HUMAN_REVIEW"),
+                 node.inference_difference_review_path);
+        ImGui::EndTable();
+      }
+
+      InputTextMultilineString(
+          "Selection reason",
+          m_manualTest.model_lineage_parent_selection_reason,
+          ImVec2(-1.0f, 55.0f));
+      if (ImGui::Button("Confirm Selected As Parent")) {
+        std::string reviewReason;
+        if (WriteParentModelSelectionReviewLocal(m_manualTest, node,
+                                                 reviewReason)) {
+          m_manualTest.model_lineage_parent_selection_status =
+              "HUMAN_CONFIRMED";
+          m_manualTest.model_lineage_parent_selection_message = reviewReason;
+          RefreshModelLineageAssetsLocal(m_manualTest);
+        } else {
+          m_manualTest.model_lineage_parent_selection_status =
+              "REVIEW_WRITE_FAILED";
+          m_manualTest.model_lineage_parent_selection_message = reviewReason;
+        }
+      }
+      ImGui::SameLine();
+      ImGui::Text("%s",
+                  m_manualTest.model_lineage_parent_selection_status.c_str());
+      if (!m_manualTest.model_lineage_parent_selection_message.empty())
+        ImGui::TextWrapped("%s",
+                           m_manualTest
+                               .model_lineage_parent_selection_message.c_str());
+      ImGui::TextWrapped("gate reason: %s", node.gate_reason.c_str());
+    }
+
+    if (!m_manualTest.model_lineage_rejected.empty() &&
+        ImGui::TreeNode("Rejected assets")) {
+      for (const CxModelLineageRejectedAsset &rejected :
+           m_manualTest.model_lineage_rejected) {
+        ImGui::BulletText("%s", rejected.reason.c_str());
+        ImGui::TextWrapped("%s", rejected.path.c_str());
+      }
+      ImGui::TreePop();
+    }
+    ImGui::Separator();
+  }
 
   if (ImGui::CollapsingHeader("Augmented YOLOv8-n Training Prep",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -8759,6 +9913,32 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     }
     if (!hasAugSelection)
       ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (m_manualTest.torch_training_process_running)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Run C++ Incremental Training")) {
+      std::string trainingReason;
+      RunYoloV8nIncrementalTrainingFromGui(trainingReason);
+    }
+    if (m_manualTest.torch_training_process_running)
+      ImGui::EndDisabled();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "Runs the asset-discovered YOLOv8-n dataset through the current "
+          "C++/LibTorch lifecycle. The GUI remains busy until training ends.");
+    ImGui::SameLine();
+    if (ImGui::Button("Reload Latest Run")) {
+      std::string loadReason;
+      if (LoadLatestYoloTrainingRunLocal(m_manualTest.torch_training_run,
+                                         loadReason)) {
+        m_manualTest.torch_training_image_status =
+            m_manualTest.torch_training_run.status;
+        m_manualTest.torch_training_image_reason = loadReason;
+      } else {
+        m_manualTest.torch_training_image_status = "TRAINING_TRACE_MISSING";
+        m_manualTest.torch_training_image_reason = loadReason;
+      }
+    }
 
     ImGui::Text("prep_status: %s",
                 m_manualTest.geometry_aug_run_status.c_str());
@@ -8779,6 +9959,61 @@ void ViewController::drawTorchTrainingImageSetWindow() {
 
   const CxTorchTrainingRunBinding &trainingRun =
       m_manualTest.torch_training_run;
+  if (trainingRun.available || m_manualTest.torch_training_process_running) {
+    ImGui::SeparatorText("Current C++ Incremental Training");
+    ImGui::Text("%s | epochs %d / %d | curve points %zu | batches/epoch %d",
+                trainingRun.status.c_str(), trainingRun.completed_epochs,
+                trainingRun.configured_epochs, trainingRun.epochs.size(),
+                trainingRun.batches_per_epoch);
+    const float liveProgress =
+        trainingRun.configured_epochs > 0
+            ? std::clamp(static_cast<float>(trainingRun.completed_epochs) /
+                             trainingRun.configured_epochs,
+                         0.0f, 1.0f)
+            : 0.0f;
+    ImGui::ProgressBar(liveProgress, ImVec2(-1.0f, 0.0f));
+    if (!trainingRun.incremental_model_path.empty())
+      ImGui::TextWrapped("Model: %s",
+                         trainingRun.incremental_model_path.c_str());
+    if (trainingRun.HasRealMultiEpochSeries() &&
+        ImGui::BeginTabBar("##training_curve_scale_tabs")) {
+      if (ImGui::BeginTabItem("Recent epochs")) {
+        const std::size_t recentStart = trainingRun.epochs.size() > 20
+                                            ? trainingRun.epochs.size() - 20
+                                            : 0;
+        ImGui::TextUnformatted("Loss / Epoch (local Y scale)");
+        DrawEpochLossCurveLocal("##training_window_recent_loss_epoch_curve",
+                                trainingRun, recentStart, 125.0f);
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Full run")) {
+        ImGui::TextUnformatted("Total Loss / Epoch");
+        DrawEpochLossCurveLocal("##training_window_primary_loss_epoch_curve",
+                                trainingRun, 0, 125.0f);
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
+    }
+    if (trainingRun.epochs.size() >= 2) {
+      int increasingSteps = 0;
+      double largestIncrease = 0.0;
+      for (std::size_t i = 1; i < trainingRun.epochs.size(); ++i) {
+        const double delta = trainingRun.epochs[i].total_loss -
+                             trainingRun.epochs[i - 1].total_loss;
+        if (delta > 0.0) {
+          ++increasingSteps;
+          largestIncrease = std::max(largestIncrease, delta);
+        }
+      }
+      ImGui::Text("Epoch fluctuation: %d upward steps / %zu transitions | "
+                  "largest increase %.6g",
+                  increasingSteps, trainingRun.epochs.size() - 1,
+                  largestIncrease);
+      ImGui::TextDisabled(
+          "Each point is the mean of all configured batches in one epoch; "
+          "the recent-epoch chart rescales the Y axis to expose small changes.");
+    }
+  }
   const CxEvidenceSelectionSnapshot &chainSelection =
       m_manualTest.current_evidence_selection;
   const EvidenceReferencePolicyLocal chainPolicy =
@@ -8862,7 +10097,11 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   const std::string chainIncrementalStatus =
       chainTrainingBlocked
           ? "BLOCKED_POLICY"
-          : (!chainDatasetExported ? "PENDING_DATASET" : "PENDING_RUN");
+          : (trainingRun.available
+                 ? (trainingRun.status.empty() ? "READY_TO_VERIFY"
+                                               : trainingRun.status)
+                 : (!chainDatasetExported ? "PENDING_DATASET"
+                                          : "PENDING_RUN"));
   const std::string chainInferenceStatus =
       (chainBindingPending || chainModelBindingMissing)
           ? "PENDING_BINDING"
@@ -8972,7 +10211,7 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     drawChainRow("Incremental training", chainIncrementalStatus,
                  incrementalEvidence,
                  chainTrainingBlocked ? "Disabled by asset policy"
-                                      : "Train DeepLab Incremental");
+                                      : "Run C++ Incremental Training");
     drawChainRow("Inference", chainInferenceStatus, inferenceEvidence,
                  chainInferenceStatus == "PENDING_BINDING"
                      ? "No executable control"
@@ -9008,6 +10247,13 @@ void ViewController::drawTorchTrainingImageSetWindow() {
                          0.0f, 1.0f)
             : 0.0f;
     ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
+    ImGui::Text("curve points: %zu | batches/epoch: %d",
+                trainingRun.epochs.size(), trainingRun.batches_per_epoch);
+    ImGui::TextWrapped("training result: %s",
+                       trainingRun.training_trace_path.c_str());
+    if (!trainingRun.incremental_model_path.empty())
+      ImGui::TextWrapped("incremental model: %s",
+                         trainingRun.incremental_model_path.c_str());
 
     const bool hasRealTrainingCurve = trainingRun.HasRealMultiEpochSeries();
     if (!hasRealTrainingCurve) {
@@ -9019,21 +10265,10 @@ void ViewController::drawTorchTrainingImageSetWindow() {
           "bind a real multi-epoch trace before plotting loss curves.");
     }
 
-    std::vector<float> totalLoss;
-    std::vector<float> maskLoss;
-    totalLoss.reserve(trainingRun.epochs.size());
-    maskLoss.reserve(trainingRun.epochs.size());
-    for (const CxTorchTrainingEpochMetric &metric : trainingRun.epochs) {
-      totalLoss.push_back(static_cast<float>(metric.total_loss));
-      maskLoss.push_back(static_cast<float>(metric.mask_loss));
-    }
-    if (hasRealTrainingCurve && !totalLoss.empty()) {
-      ImGui::PlotLines("Total loss", totalLoss.data(),
-                       static_cast<int>(totalLoss.size()), 0, nullptr, FLT_MAX,
-                       FLT_MAX, ImVec2(-1.0f, 80.0f));
-      ImGui::PlotLines("Mask loss", maskLoss.data(),
-                       static_cast<int>(maskLoss.size()), 0, nullptr, FLT_MAX,
-                       FLT_MAX, ImVec2(-1.0f, 64.0f));
+    if (hasRealTrainingCurve) {
+      ImGui::Text("Total Loss / Epoch");
+      DrawEpochLossCurveLocal("##training_window_loss_epoch_curve",
+                              trainingRun);
     }
 
     if (ImGui::BeginTable("torch_training_epoch_metrics", 7,

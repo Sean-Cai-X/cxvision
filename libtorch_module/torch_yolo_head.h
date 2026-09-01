@@ -9,6 +9,40 @@
 
 #include "torch_nnmodule.h"
 
+inline torch::Tensor decode_yolo_direct_boxes_normalized(
+    const torch::Tensor& raw_boxes,
+    int64_t grid_height,
+    int64_t grid_width) {
+    TORCH_CHECK(raw_boxes.dim() == 3 && raw_boxes.size(2) == 4,
+        "direct YOLO boxes must be [B, anchors, 4], got ", raw_boxes.sizes());
+    TORCH_CHECK(grid_height > 0 && grid_width > 0 &&
+        raw_boxes.size(1) == grid_height * grid_width,
+        "direct YOLO box grid does not match anchor count");
+
+    auto options = raw_boxes.options();
+    auto grid_y = torch::arange(grid_height, options)
+        .view({grid_height, 1})
+        .expand({grid_height, grid_width})
+        .reshape({1, -1});
+    auto grid_x = torch::arange(grid_width, options)
+        .view({1, grid_width})
+        .expand({grid_height, grid_width})
+        .reshape({1, -1});
+    auto activated = torch::sigmoid(raw_boxes);
+    auto center_x = (activated.select(2, 0) + grid_x) /
+        static_cast<double>(grid_width);
+    auto center_y = (activated.select(2, 1) + grid_y) /
+        static_cast<double>(grid_height);
+    auto width = activated.select(2, 2);
+    auto height = activated.select(2, 3);
+
+    return torch::stack({
+        (center_x - width * 0.5).clamp(0.0, 1.0),
+        (center_y - height * 0.5).clamp(0.0, 1.0),
+        (center_x + width * 0.5).clamp(0.0, 1.0),
+        (center_y + height * 0.5).clamp(0.0, 1.0)}, 2);
+}
+
 struct YoloDetectHeadConfig {
     int64_t reg_max = 16;
     int64_t min_box_channels = 16;
@@ -74,14 +108,16 @@ public:
             auto feat = x[i];
             auto box_out = cv2_layers_[i]->as<torch::nn::Sequential>()->forward(feat);
             auto cls_out = cv3_layers_[i]->as<torch::nn::Sequential>()->forward(feat);
-            auto output = torch::cat({ box_out, cls_out }, 1);
-
-            int64_t bs = output.size(0);
-            int64_t c = output.size(1);
-            int64_t h = output.size(2);
-            int64_t w = output.size(3);
-
-            preds.push_back(output.view({ bs, c, h * w }).permute({ 0, 2, 1 }).contiguous());
+            int64_t bs = box_out.size(0);
+            int64_t h = box_out.size(2);
+            int64_t w = box_out.size(3);
+            auto raw_boxes = box_out.view({bs, 4, h * w})
+                .permute({0, 2, 1}).contiguous();
+            auto boxes = decode_yolo_direct_boxes_normalized(raw_boxes, h, w);
+            auto class_probabilities = torch::sigmoid(cls_out)
+                .view({bs, num_classes_, h * w})
+                .permute({0, 2, 1}).contiguous();
+            preds.push_back(torch::cat({boxes, class_probabilities}, 2));
         }
         return torch::cat(preds, 1);
     }

@@ -18,6 +18,9 @@
 #include "CxUnifiedLog.h"
 #include "CxUnifiedLogOptions.h"
 #include "CxUnifiedLogStreamBuf.h"
+#include "CxYoloV8nGeometryAssociation.h"
+#include "CxYoloV8nPairedInference.h"
+#include "CxYoloV8nTrainingLifecycle.h"
 #include "Main.h"
 #include "ManualConsoleUtils.h"
 #include "ManualStateTestConsole.h"
@@ -41,6 +44,9 @@
 
 #include <sstream>
 #include <vector>
+
+int RunModelLineageAssetScanSmoke(const std::string &scanRoot,
+                                  const std::string &outputDirectory);
 
 namespace {
 bool HasCliArg(int argc, char **argv, const std::string &name) {
@@ -2613,6 +2619,18 @@ int RunCxImageReferenceCandidateCliFromArgs(int argc, char **argv) {
 }
 
 int RunCxVisionApplication(int argc, char **argv) {
+  if (HasCliArg(argc, argv, "--yolov8n-paired-inference"))
+    return cxvision_yolov8n_paired_inference::
+        RunYoloV8nPairedInferenceCli(argc, argv);
+
+  if (HasCliArg(argc, argv, "--yolov8n-training-lifecycle"))
+    return cxvision_yolov8n_training::RunYoloV8nTrainingLifecycleCli(argc,
+                                                                     argv);
+
+  if (HasCliArg(argc, argv, "--yolov8n-geometry-association"))
+    return cxvision_yolov8n_geometry::RunYoloV8nGeometryAssociationCli(argc,
+                                                                       argv);
+
   if (HasCliArg(argc, argv, "--predictive-geometry-gate-selftest"))
     return RunCxPredictiveGeometryGateSelfTest(
         CliValueAfter(argc, argv, "--out"));
@@ -3164,6 +3182,23 @@ int RunCxTorchRuntimeSmoke(const CxUnifiedLogOptions &options) {
 }
 
 int main(int argc, char **argv) {
+  if (HasCliArg(argc, argv, "--model-lineage-scan-smoke")) {
+    std::string scanRoot;
+    std::string outputDirectory;
+    for (int i = 1; i + 1 < argc; ++i) {
+      const std::string arg = argv[i] == nullptr ? "" : argv[i];
+      if (arg == "--model-lineage-root")
+        scanRoot = argv[++i];
+      else if (arg == "--out")
+        outputDirectory = argv[++i];
+    }
+    if (scanRoot.empty() || outputDirectory.empty()) {
+      std::cerr << "model_lineage_scan_smoke_ok=false\n";
+      std::cerr << "reason=--model-lineage-root and --out are required\n";
+      return 2;
+    }
+    return RunModelLineageAssetScanSmoke(scanRoot, outputDirectory);
+  }
   CxUnifiedLogOptions logOptions;
   std::string logReason;
 

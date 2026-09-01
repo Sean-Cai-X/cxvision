@@ -45,12 +45,13 @@ struct CxMetrologyUiGlobalFields {
   int boundary_hysteresis_permille = 50;
   int boundary_gate_start_permille = 0;
   int boundary_gate_end_permille = 1000;
-  int boundary_selection_mode = 0;
+  int boundary_selection_mode = 4;
   int boundary_nth_candidate = 1;
   int boundary_min_plateau_width = 3;
   int boundary_min_amplitude_permille = 80;
   int boundary_pair_min_width = 2;
   int boundary_pair_max_width = 80;
+  int boundary_pair_anchor_mode = 0;
   int boundary_subpixel_mode = 2;
   bool boundary_show_conditioned = true;
   bool boundary_show_response = true;

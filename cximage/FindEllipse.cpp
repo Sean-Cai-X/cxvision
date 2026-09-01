@@ -965,6 +965,9 @@ int FindEllipse::getboundaryselection() const {
 void FindEllipse::setboundarynthcandidate(int nth) {
   m_boundary_response_config.nth_candidate = std::max(1, nth);
 }
+void FindEllipse::setboundaryreferencepositionpermille(int value) {
+  m_boundary_response_config.reference_position_permille = ClampPermille(value);
+}
 void FindEllipse::setboundarysubpixel(int mode) {
   m_boundary_response_config.subpixel_mode = ClampEnumInt(
       mode, 0, 2,
@@ -1026,6 +1029,11 @@ void FindEllipse::setboundarypairmaxwidth(int width) {
   const int new_width = std::max(1, std::min(4096, width));
   m_boundary_response_config.pair_max_width =
       std::max(new_width, m_boundary_response_config.pair_min_width);
+}
+void FindEllipse::setboundarypairanchor(int anchor) {
+  m_boundary_response_config.pair_anchor_mode = ClampEnumInt(
+      anchor, 0, 2,
+      cxvision::metrology_analytics::CxBoundaryPairAnchorMode::Center);
 }
 void FindEllipse::setmethod(int imethod) { m_iMethod = imethod; }
 void FindEllipse::setthre(int ithre) { m_iThreshold = ithre; }

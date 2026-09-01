@@ -29,6 +29,9 @@ inline constexpr const char* EdgeSamIncrementalPackage =
 inline constexpr const char* YoloV8IncrementalPackage =
     "torch.train.detection.yolov8.package.v1";
 
+inline constexpr const char* YoloV8TrainingLifecycle =
+    "torch.train.detection.yolov8.lifecycle.v1";
+
 inline constexpr const char* PrototypeIncrementalLifecycle =
     "torch.incremental.prototype.lifecycle.v1";
 

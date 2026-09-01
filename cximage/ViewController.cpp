@@ -46,6 +46,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 
 #ifndef CXCORE_ENABLE_VIEWCONTROLLER_CUDA
 #define CXCORE_ENABLE_VIEWCONTROLLER_CUDA 0
@@ -217,6 +218,58 @@ std::string inferEvidenceToolFromScriptPath(const std::string &scriptPath) {
   return "";
 }
 
+std::string evidenceLowerAscii(std::string value) {
+  std::transform(
+      value.begin(), value.end(), value.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return value;
+}
+
+std::string evidenceCompactToolText(const std::string &value) {
+  std::string compact;
+  compact.reserve(value.size());
+  for (unsigned char ch : value) {
+    if (std::isalnum(ch))
+      compact.push_back(static_cast<char>(std::tolower(ch)));
+  }
+  return compact;
+}
+
+bool evidenceKnownToolFilter(const std::string &filter,
+                             std::string &canonicalTool) {
+  const std::string compact = evidenceCompactToolText(filter);
+  if (compact == "findline" || compact == "findcircle" ||
+      compact == "findellipse" || compact == "findrect" ||
+      compact == "fastmatch" || compact == "findsegmentation" ||
+      compact == "findobject" || compact == "torchtask") {
+    canonicalTool = compact;
+    return true;
+  }
+  canonicalTool.clear();
+  return false;
+}
+
+bool evidenceExplicitToolMatches(const std::string &toolText,
+                                 const std::string &canonicalTool) {
+  if (canonicalTool.empty())
+    return false;
+  return evidenceCompactToolText(toolText).find(canonicalTool) !=
+         std::string::npos;
+}
+
+void evidenceResolveGeometryToolFlags(const std::string &toolText,
+                                      const std::string &scriptPath,
+                                      bool &isFindLine, bool &isFindCircle,
+                                      bool &isFindEllipse) {
+  const bool hasExplicitTool = !evidenceCompactToolText(toolText).empty();
+  isFindLine = evidenceExplicitToolMatches(toolText, "findline") ||
+               (!hasExplicitTool && evidencePathIsFindLine(scriptPath));
+  isFindCircle = evidenceExplicitToolMatches(toolText, "findcircle") ||
+                 (!hasExplicitTool && evidencePathIsFindCircle(scriptPath));
+  isFindEllipse = evidenceExplicitToolMatches(toolText, "findellipse") ||
+                  (!hasExplicitTool && evidencePathIsFindEllipse(scriptPath));
+}
+
 bool scriptContainsIdentifier(const std::string &scriptText,
                               const std::string &identifier) {
   std::size_t pos = scriptText.find(identifier);
@@ -375,6 +428,15 @@ bool stageEvidenceSelfTestScriptGlobals(
       existingOr("global_roi_y1", std::max(roiY0 + 8, (safeHeight * 3) / 4));
   const int roiW = std::max(8, roiX1 - roiX0);
   const int roiH = std::max(8, roiY1 - roiY0);
+
+  // Older evidence packages predate these script globals. Seed stable defaults
+  // so historical cases remain reviewable without rewriting archived assets.
+  if (runtimeIntVars.find("global_min_edge_run_width_px") ==
+      runtimeIntVars.end())
+    runtimeIntVars["global_min_edge_run_width_px"] = 3;
+  if (runtimeIntVars.find("global_findcircle_findsetting") ==
+      runtimeIntVars.end())
+    runtimeIntVars["global_findcircle_findsetting"] = 0;
 
   int applied = 0;
   applied += setRequiredIntIfUsed("global_roi_x0", roiX0) ? 1 : 0;
@@ -744,6 +806,18 @@ bool stageEvidenceSelfTestScriptGlobals(
                           existingOr("global_findcircle_attach_edge", 0))
                  ? 1
                  : 0;
+  applied += setIntIfUsed("global_findcircle_arc_enabled",
+                          existingOr("global_findcircle_arc_enabled", 0))
+                 ? 1
+                 : 0;
+  applied += setIntIfUsed("global_findcircle_arc_start_deg",
+                          existingOr("global_findcircle_arc_start_deg", 0))
+                 ? 1
+                 : 0;
+  applied += setIntIfUsed("global_findcircle_arc_end_deg",
+                          existingOr("global_findcircle_arc_end_deg", 360))
+                 ? 1
+                 : 0;
   applied +=
       setIntIfUsed("global_findcircle_point_consistency_enabled",
                    existingOr("global_findcircle_point_consistency_enabled", 0))
@@ -825,6 +899,10 @@ bool stageEvidenceSelfTestScriptGlobals(
   applied += setIntIfUsed("global_selected_hgap", 0) ? 1 : 0;
   applied += setIntIfUsed("global_selected_linegap", 0) ? 1 : 0;
   applied += setIntIfUsed("global_selected_filterprofile", 0) ? 1 : 0;
+  applied += setIntIfUsed("global_actual_findsetting", 0) ? 1 : 0;
+  applied += setIntIfUsed("global_findcircle_actual_findsetting", 0) ? 1 : 0;
+  applied += setIntIfUsed("global_findcircle_actual_selected_edge", 0) ? 1 : 0;
+  applied += setIntIfUsed("global_findcircle_selected_gap", 0) ? 1 : 0;
   applied += setIntIfUsed("global_result_valid", 0) ? 1 : 0;
   applied += setIntIfUsed("global_valid_points_count", 0) ? 1 : 0;
   applied += setIntIfUsed("global_has_fit_line", 0) ? 1 : 0;
@@ -858,6 +936,13 @@ bool stageEvidenceSelfTestScriptGlobals(
   applied += setIntIfUsed("global_region_overlay_truncated", 0) ? 1 : 0;
   applied += setDoubleIfUsed("global_avgdist", 0.0) ? 1 : 0;
   applied += setDoubleIfUsed("global_circle_radius", 0.0) ? 1 : 0;
+  applied += setDoubleIfUsed("global_circle_effective_annulus", 0.0) ? 1 : 0;
+  applied += setDoubleIfUsed("global_circle_effective_inner_radius", 0.0) ? 1
+                                                                          : 0;
+  applied += setDoubleIfUsed("global_circle_effective_outer_radius", 0.0) ? 1
+                                                                          : 0;
+  applied += setDoubleIfUsed("global_circle_effective_ring_width", 0.0) ? 1
+                                                                        : 0;
   applied += setDoubleIfUsed("global_local_support", 1.0) ? 1 : 0;
 
   applied +=
@@ -895,15 +980,18 @@ bool stageEvidenceSelfTestScriptGlobals(
 
 void syncEvidenceLockedGlobalsToManualGauge(ManualTestContext &context,
                                             const std::string &scriptPath,
+                                            const std::string &toolText,
                                             const std::string &source) {
   auto getInt = [&](const std::string &key, int fallback) -> int {
     const auto it = context.runtime_int_vars.find(key);
     return it == context.runtime_int_vars.end() ? fallback : it->second;
   };
 
-  const bool isCircleScript = evidencePathIsFindCircle(scriptPath);
-  const bool isLineScript = evidencePathIsFindLine(scriptPath);
-  const bool isEllipseScript = evidencePathIsFindEllipse(scriptPath);
+  bool isLineScript = false;
+  bool isCircleScript = false;
+  bool isEllipseScript = false;
+  evidenceResolveGeometryToolFlags(toolText, scriptPath, isLineScript,
+                                   isCircleScript, isEllipseScript);
   const bool isFindSegmentationScript =
       evidencePathIsFindSegmentation(scriptPath);
   const bool isFindObjectScript = evidencePathIsFindObject(scriptPath);
@@ -1412,9 +1500,8 @@ ViewController *ViewController::toView(GLFWwindow *theWin) {
 }
 
 void ViewController::errorCallback(int theError, const char *theDescription) {
-  Message::DefaultMessenger()->Send(TCollection_AsciiString("Error") +
-                                        theError + ": " + theDescription,
-                                    Message_Fail);
+  std::cerr << "GLFW error " << theError << ": "
+            << (theDescription != nullptr ? theDescription : "") << std::endl;
 }
 
 GLuint gl_PBO, gl_Tex;
@@ -2234,8 +2321,9 @@ bool ViewController::ApplySemanticExecutionContextBeforeRun(
       return false;
     }
 
-    syncEvidenceLockedGlobalsToManualGauge(m_manualTest, context.script_path,
-                                           "semantic_evidence_locked");
+    syncEvidenceLockedGlobalsToManualGauge(
+        m_manualTest, context.script_path, context.tool,
+        "semantic_evidence_locked");
 
     if (!context.image_path.empty()) {
       const bool needLoadImage =
@@ -2407,6 +2495,18 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
   applied += applyIntToken("max_elapsed_ms", "global_max_elapsed_ms") ? 1 : 0;
   applied += applyIntToken("max_scan_lines", "global_max_scan_lines") ? 1 : 0;
   applied += applyIntToken("max_samples", "global_max_samples") ? 1 : 0;
+  applied += applyIntToken("min_edge_run_width",
+                           "global_min_edge_run_width_px")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("min_edge_run_width_px",
+                           "global_min_edge_run_width_px")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("minedgerunwidth",
+                           "global_min_edge_run_width_px")
+                 ? 1
+                 : 0;
 
   applied += applyIntToken("roi_x0", "global_roi_x0") ? 1 : 0;
   applied += applyIntToken("roi_y0", "global_roi_y0") ? 1 : 0;
@@ -2444,6 +2544,94 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
       applyIntToken("inner_radius", "global_circle_inner_radius") ? 1 : 0;
   applied +=
       applyIntToken("outer_radius", "global_circle_outer_radius") ? 1 : 0;
+  applied +=
+      applyIntToken("findcircle_findsetting", "global_findcircle_findsetting")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("circle_findsetting", "global_findcircle_findsetting") ? 1
+                                                                            : 0;
+  applied +=
+      applyIntToken("findcircle_edge_count", "global_findcircle_edge_count") ? 1
+                                                                             : 0;
+  applied +=
+      applyIntToken("circle_edge_count", "global_findcircle_edge_count") ? 1
+                                                                         : 0;
+  applied += applyIntToken("findcircle_selected_edge",
+                           "global_findcircle_selected_edge")
+                 ? 1
+                 : 0;
+  applied +=
+      applyIntToken("circle_selected_edge", "global_findcircle_selected_edge")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("findcircle_best_edge", "global_findcircle_best_edge") ? 1
+                                                                           : 0;
+  applied += applyIntToken("circle_best_edge", "global_findcircle_best_edge")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("findcircle_recommended_edge",
+                           "global_findcircle_recommended_edge")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("circle_recommended_edge",
+                           "global_findcircle_recommended_edge")
+                 ? 1
+                 : 0;
+  applied +=
+      applyIntToken("findcircle_relation_edge", "global_findcircle_relation_edge")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("circle_relation_edge", "global_findcircle_relation_edge")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("findcircle_attach_edge", "global_findcircle_attach_edge")
+          ? 1
+          : 0;
+  applied += applyIntToken("circle_attach_edge", "global_findcircle_attach_edge")
+                 ? 1
+                 : 0;
+  applied +=
+      applyIntToken("findcircle_arc_enabled", "global_findcircle_arc_enabled")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("circle_arc_enabled", "global_findcircle_arc_enabled") ? 1
+                                                                           : 0;
+  applied += applyIntToken("findcircle_arc_start_deg",
+                           "global_findcircle_arc_start_deg")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("circle_arc_start_deg",
+                           "global_findcircle_arc_start_deg")
+                 ? 1
+                 : 0;
+  applied +=
+      applyIntToken("findcircle_arc_end_deg", "global_findcircle_arc_end_deg")
+          ? 1
+          : 0;
+  applied +=
+      applyIntToken("circle_arc_end_deg", "global_findcircle_arc_end_deg") ? 1
+                                                                           : 0;
+  applied += applyIntToken("findcircle_point_consistency_enabled",
+                           "global_findcircle_point_consistency_enabled")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("circle_point_consistency_enabled",
+                           "global_findcircle_point_consistency_enabled")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("findcircle_point_consistency_range",
+                           "global_findcircle_point_consistency_range")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("circle_point_consistency_range",
+                           "global_findcircle_point_consistency_range")
+                 ? 1
+                 : 0;
 
   applied += applyIntToken("ellipse_x0", "global_ellipse_x0") ? 1 : 0;
   applied += applyIntToken("ellipse_y0", "global_ellipse_y0") ? 1 : 0;
@@ -2742,7 +2930,15 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
            m_manualTest.runtime_int_vars.end();
   };
 
-  if (evidencePathIsFindCircle(snapshot.script_path)) {
+  bool isFindLine = false;
+  bool isFindCircle = false;
+  bool isFindEllipse = false;
+  evidenceResolveGeometryToolFlags(snapshot.tool + " " +
+                                       snapshot.primary_object_type,
+                                   snapshot.script_path, isFindLine,
+                                   isFindCircle, isFindEllipse);
+
+  if (isFindCircle) {
     if (!hasInt("global_circle_cx") || !hasInt("global_circle_cy") ||
         !hasInt("global_circle_px") || !hasInt("global_circle_py") ||
         !hasInt("global_gap") || !hasInt("global_linegap") ||
@@ -2756,7 +2952,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     return true;
   }
 
-  if (evidencePathIsFindLine(snapshot.script_path)) {
+  if (isFindLine) {
     if (!hasInt("global_roi_x0") || !hasInt("global_roi_y0") ||
         !hasInt("global_roi_x1") || !hasInt("global_roi_y1") ||
         !hasInt("global_tool_half_width") || !hasInt("global_wgap") ||
@@ -2770,7 +2966,7 @@ bool ViewController::CheckEvidenceSelfTestParamBinding(
     return true;
   }
 
-  if (evidencePathIsFindEllipse(snapshot.script_path)) {
+  if (isFindEllipse) {
     if (!hasInt("global_ellipse_x0") || !hasInt("global_ellipse_y0") ||
         !hasInt("global_ellipse_x1") || !hasInt("global_ellipse_y1") ||
         !hasInt("global_findellipse_inner_scale_percent") ||
@@ -3047,8 +3243,10 @@ bool ViewController::RunEvidenceChainSelfTest(
     return false;
   }
 
-  syncEvidenceLockedGlobalsToManualGauge(m_manualTest, snapshot.script_path,
-                                         "evidence_selftest_locked");
+  syncEvidenceLockedGlobalsToManualGauge(
+      m_manualTest, snapshot.script_path,
+      snapshot.tool + " " + snapshot.primary_object_type,
+      "evidence_selftest_locked");
 
   std::string scriptTextForGlobals;
   std::string scriptGlobalReason;
@@ -3294,18 +3492,25 @@ bool ViewController::CheckEvidenceSelfTestGlobalInjection(
   };
 
   std::vector<std::string> required;
+  bool isFindLine = false;
+  bool isFindCircle = false;
+  bool isFindEllipse = false;
+  evidenceResolveGeometryToolFlags(snapshot.tool + " " +
+                                       snapshot.primary_object_type,
+                                   snapshot.script_path, isFindLine,
+                                   isFindCircle, isFindEllipse);
 
-  if (evidencePathIsFindCircle(snapshot.script_path)) {
+  if (isFindCircle) {
     required = {"global_circle_cx", "global_circle_cy", "global_circle_px",
                 "global_circle_py", "global_gap",       "global_linegap",
                 "global_min_edge_run_width_px",
                 "global_threshold", "global_method"};
-  } else if (evidencePathIsFindLine(snapshot.script_path)) {
+  } else if (isFindLine) {
     required = {"global_roi_x0", "global_roi_y0",          "global_roi_x1",
                 "global_roi_y1", "global_tool_half_width", "global_wgap",
                 "global_hgap",   "global_linegap",         "global_threshold",
                 "global_method"};
-  } else if (evidencePathIsFindEllipse(snapshot.script_path)) {
+  } else if (isFindEllipse) {
     required = {"global_ellipse_x0",
                 "global_ellipse_y0",
                 "global_ellipse_x1",
@@ -3480,11 +3685,18 @@ bool ViewController::CheckEvidenceSelfTestRuntimeObjectStage(
   }
 
   std::string expectedType;
-  if (evidencePathIsFindCircle(snapshot.script_path))
+  bool isFindLine = false;
+  bool isFindCircle = false;
+  bool isFindEllipse = false;
+  evidenceResolveGeometryToolFlags(snapshot.tool + " " +
+                                       snapshot.primary_object_type,
+                                   snapshot.script_path, isFindLine,
+                                   isFindCircle, isFindEllipse);
+  if (isFindCircle)
     expectedType = "FindCircle";
-  else if (evidencePathIsFindLine(snapshot.script_path))
+  else if (isFindLine)
     expectedType = "FindLine";
-  else if (evidencePathIsFindEllipse(snapshot.script_path))
+  else if (isFindEllipse)
     expectedType = "FindEllipse";
   else if (evidencePathIsFindRect(snapshot.script_path))
     expectedType = "FindRect";
@@ -3683,9 +3895,14 @@ bool ViewController::CheckEvidenceSelfTestResultProjectionStage(
     CxEvidenceSelfTestResult &result, std::string &reason) {
   reason.clear();
 
-  bool requiresResult = evidencePathIsFindCircle(snapshot.script_path) ||
-                        evidencePathIsFindLine(snapshot.script_path) ||
-                        evidencePathIsFindEllipse(snapshot.script_path) ||
+  bool isFindLine = false;
+  bool isFindCircle = false;
+  bool isFindEllipse = false;
+  evidenceResolveGeometryToolFlags(snapshot.tool + " " +
+                                       snapshot.primary_object_type,
+                                   snapshot.script_path, isFindLine,
+                                   isFindCircle, isFindEllipse);
+  bool requiresResult = isFindCircle || isFindLine || isFindEllipse ||
                         evidencePathIsFindRect(snapshot.script_path) ||
                         evidencePathIsFindObject(snapshot.script_path) ||
                         evidencePathIsFindSegmentation(snapshot.script_path) ||
@@ -3769,14 +3986,10 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
   request.cases.clear();
 
   int count = 0;
-  auto toLower = [](std::string value) -> std::string {
-    std::transform(
-        value.begin(), value.end(), value.begin(),
-        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value;
-  };
-
-  const std::string filter = toLower(request.tool_filter);
+  const std::string filter = evidenceLowerAscii(request.tool_filter);
+  std::string canonicalToolFilter;
+  const bool hasKnownToolFilter =
+      evidenceKnownToolFilter(filter, canonicalToolFilter);
 
   for (std::size_t gi = 0; gi < m_manualTest.script_evidence_groups.size();
        ++gi) {
@@ -3795,34 +4008,69 @@ bool ViewController::BuildEvidenceSelfTestBatchFromCurrentEvidenceRows(
         continue;
 
       if (!filter.empty()) {
-        const std::string key =
-            toLower(group.label + " " + thumb.tool + " " + thumb.script_id +
-                    " " + thumb.script_path + " " + thumb.status + " " +
-                    thumb.reason + " " + thumb.parameter_summary);
-        if (key.find(filter) == std::string::npos)
-          continue;
+        if (hasKnownToolFilter) {
+          const std::string toolKey =
+              group.label + " " + thumb.tool + " " + thumb.primary_object_type;
+          if (!evidenceExplicitToolMatches(toolKey, canonicalToolFilter))
+            continue;
+        } else {
+          const std::string key =
+              evidenceLowerAscii(group.label + " " + thumb.tool + " " +
+                                 thumb.script_id + " " + thumb.script_path +
+                                 " " + thumb.status + " " + thumb.reason +
+                                 " " + thumb.parameter_summary);
+          if (key.find(filter) == std::string::npos)
+            continue;
+        }
       }
+
+      const std::string toolText =
+          group.label + " " + thumb.tool + " " + thumb.primary_object_type;
+      const bool explicitFindLine =
+          evidenceExplicitToolMatches(toolText, "findline");
+      const bool explicitFindCircle =
+          evidenceExplicitToolMatches(toolText, "findcircle");
+      const bool explicitFindEllipse =
+          evidenceExplicitToolMatches(toolText, "findellipse");
+      const bool explicitFindRect =
+          evidenceExplicitToolMatches(toolText, "findrect");
+      const bool explicitFastMatch =
+          evidenceExplicitToolMatches(toolText, "fastmatch");
+      const bool explicitFindSegmentation =
+          evidenceExplicitToolMatches(toolText, "findsegmentation");
+      const bool hasExplicitCximageTool =
+          explicitFindLine || explicitFindCircle || explicitFindEllipse ||
+          explicitFindRect || explicitFastMatch || explicitFindSegmentation;
+
+      auto pathFallback = [&](bool (*pathCheck)(const std::string &)) -> bool {
+        if (hasExplicitCximageTool)
+          return false;
+        return pathCheck(thumb.script_path);
+      };
 
       const bool isTorchTaskCatalogScript = thumb.tool == "TorchTask";
       const bool isFindSegmentationTorchScript =
-          evidencePathIsFindSegmentation(thumb.script_path) &&
+          (explicitFindSegmentation ||
+           pathFallback(evidencePathIsFindSegmentation)) &&
           (thumb.script_path.find("libtorch") != std::string::npos ||
            thumb.script_path.find("edgesam") != std::string::npos);
 
       const bool isCximageToolScript =
-          evidencePathIsFindLine(thumb.script_path) ||
-          evidencePathIsFindCircle(thumb.script_path) ||
-          evidencePathIsFindEllipse(thumb.script_path) ||
-          evidencePathIsFindRect(thumb.script_path) ||
-          evidencePathIsFastMatch(thumb.script_path) ||
-          evidencePathIsFindSegmentation(thumb.script_path) ||
+          explicitFindLine || explicitFindCircle || explicitFindEllipse ||
+          explicitFindRect || explicitFastMatch || explicitFindSegmentation ||
+          pathFallback(evidencePathIsFindLine) ||
+          pathFallback(evidencePathIsFindCircle) ||
+          pathFallback(evidencePathIsFindEllipse) ||
+          pathFallback(evidencePathIsFindRect) ||
+          pathFallback(evidencePathIsFastMatch) ||
+          pathFallback(evidencePathIsFindSegmentation) ||
           isTorchTaskCatalogScript;
       const bool allowGenericForExplicitToolFilter =
           !filter.empty() && filter.find("torch") == std::string::npos;
 
       if (!filter.empty() && filter.find("torch") != std::string::npos &&
           !isTorchTaskCatalogScript && !isFindSegmentationTorchScript) {
-        continue;
+          continue;
       }
 
       if (!request.include_generic_scripts &&
@@ -5277,7 +5525,6 @@ void ViewController::drawScriptAcceptancePanels() {
                                         const CxShapePoint &b) {
         const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
         if (!metrology.profile_cursor_visible ||
-            !metrology.profile_cursor_user_dragged ||
             metrology.profile_cursor_sample_count < 2)
           return;
 
@@ -5296,7 +5543,9 @@ void ViewController::drawScriptAcceptancePanels() {
         drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
                           IM_COL32(255, 245, 190, 255), 1.5f);
         const std::string label =
-            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+            std::string(metrology.profile_cursor_user_dragged ? "Manual cursor "
+                                                              : "Preview cursor ") +
+            std::to_string(metrology.profile_cursor_permille) + " /1000";
 
         drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
                           IM_COL32(255, 226, 110, 255), label.c_str());
@@ -5486,7 +5735,6 @@ void ViewController::drawScriptAcceptancePanels() {
                                         const CxShapePoint &b) {
         const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
         if (!metrology.profile_cursor_visible ||
-            !metrology.profile_cursor_user_dragged ||
             metrology.profile_cursor_sample_count < 2)
           return;
         const int cursorIndex = std::max(
@@ -5504,7 +5752,9 @@ void ViewController::drawScriptAcceptancePanels() {
         drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
                           IM_COL32(255, 245, 190, 255), 1.5f);
         const std::string label =
-            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+            std::string(metrology.profile_cursor_user_dragged ? "Manual cursor "
+                                                              : "Preview cursor ") +
+            std::to_string(metrology.profile_cursor_permille) + " /1000";
         drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
                           IM_COL32(255, 226, 110, 255), label.c_str());
       };
@@ -5710,7 +5960,6 @@ void ViewController::drawScriptAcceptancePanels() {
                                         const CxShapePoint &b) {
         const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
         if (!metrology.profile_cursor_visible ||
-            !metrology.profile_cursor_user_dragged ||
             metrology.profile_cursor_sample_count < 2)
           return;
         const int cursorIndex = std::max(
@@ -5728,7 +5977,9 @@ void ViewController::drawScriptAcceptancePanels() {
         drawList->AddLine(ImVec2(p.x, p.y - 8.0f), ImVec2(p.x, p.y + 8.0f),
                           IM_COL32(255, 245, 190, 255), 1.5f);
         const std::string label =
-            "Manual cursor " + std::to_string(metrology.profile_cursor_permille) + "%";
+            std::string(metrology.profile_cursor_user_dragged ? "Manual cursor "
+                                                              : "Preview cursor ") +
+            std::to_string(metrology.profile_cursor_permille) + " /1000";
         drawList->AddText(ImVec2(p.x + 8.0f, p.y + 8.0f),
                           IM_COL32(255, 226, 110, 255), label.c_str());
       };
@@ -6190,7 +6441,15 @@ void ViewController::drawScriptAcceptancePanels() {
 void ViewController::initWindow(int theWidth, int theHeight,
                                 const char *theTitle) {
   glfwSetErrorCallback(ViewController::errorCallback);
-  glfwInit();
+  if (glfwInit() != GLFW_TRUE) {
+    throw std::runtime_error(
+        "GLFW initialization failed. OpenGL/WGL is unavailable on this "
+        "machine; install a GPU driver, avoid Remote Desktop/basic display "
+        "drivers, enable VM 3D acceleration, or run the non-GUI headless "
+        "test path.");
+  }
+  m_glfwInitialized = true;
+
   const bool toAskCoreProfile = true;
   if (toAskCoreProfile) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -6202,42 +6461,57 @@ void ViewController::initWindow(int theWidth, int theHeight,
   }
 
   myOcctWindow = new Window(theWidth, theHeight, theTitle);
-  glfwSetWindowUserPointer(myOcctWindow->getGlfwWindow(), this);
-  glfwSetWindowSizeCallback(myOcctWindow->getGlfwWindow(),
-                            ViewController::onResizeCallback);
+  GLFWwindow *glfwWindow =
+      !myOcctWindow.IsNull() ? myOcctWindow->getGlfwWindow() : nullptr;
+  if (glfwWindow == nullptr) {
+    myOcctWindow.Nullify();
+    glfwTerminate();
+    m_glfwInitialized = false;
+    throw std::runtime_error(
+        "Failed to create GLFW/OpenGL window. Required OpenGL 3.3 WGL "
+        "context is unavailable; install the vendor GPU driver, avoid "
+        "Remote Desktop/basic display drivers, enable VM 3D acceleration, "
+        "or run with the headless test path.");
+  }
 
-  glfwSetFramebufferSizeCallback(myOcctWindow->getGlfwWindow(),
+  glfwSetWindowUserPointer(glfwWindow, this);
+  glfwSetWindowSizeCallback(glfwWindow, ViewController::onResizeCallback);
+  glfwSetFramebufferSizeCallback(glfwWindow,
                                  ViewController::onFBResizeCallback);
-
-  glfwSetScrollCallback(myOcctWindow->getGlfwWindow(),
-                        ViewController::onMouseScrollCallback);
-
-  glfwSetMouseButtonCallback(myOcctWindow->getGlfwWindow(),
+  glfwSetScrollCallback(glfwWindow, ViewController::onMouseScrollCallback);
+  glfwSetMouseButtonCallback(glfwWindow,
                              ViewController::onMouseButtonCallback);
+  glfwSetCursorPosCallback(glfwWindow, ViewController::onMouseMoveCallback);
 
-  glfwSetCursorPosCallback(myOcctWindow->getGlfwWindow(),
-                           ViewController::onMouseMoveCallback);
-
-  glfwMakeContextCurrent(myOcctWindow->getGlfwWindow());
+  glfwMakeContextCurrent(glfwWindow);
   glfwSwapInterval(1);
 
   if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-    std::cerr << "Failed to initialize GLAD" << std::endl;
-    return;
+    cleanup();
+    throw std::runtime_error(
+        "Failed to initialize GLAD/OpenGL loader after creating the GLFW "
+        "window. The active display driver may not expose a usable OpenGL "
+        "context.");
   }
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  m_imguiContextInitialized = true;
   ImGuiIO &io = ImGui::GetIO();
   (void)io;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
   ImGui::StyleColorsDark();
-  ImGui_ImplGlfw_InitForOpenGL(myOcctWindow->getGlfwWindow(), true);
+  if (!ImGui_ImplGlfw_InitForOpenGL(glfwWindow, true)) {
+    cleanup();
+    throw std::runtime_error("Failed to initialize ImGui GLFW backend.");
+  }
+  m_imguiGlfwInitialized = true;
 
-  const char *glsl_version = "#version 450";
+  const char *glsl_version = "#version 330";
   ImGui_ImplOpenGL3_Init(glsl_version);
+  m_imguiOpenGlInitialized = true;
 
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
   (void)clear_color;
@@ -7557,22 +7831,46 @@ void ViewController::mainloop() {
 }
 
 void ViewController::cleanup() {
-  if (m_imageViewTexture != 0) {
-    glDeleteTextures(1, &m_imageViewTexture);
-    m_imageViewTexture = 0;
+  GLFWwindow *glfwWindow =
+      !myOcctWindow.IsNull() ? myOcctWindow->getGlfwWindow() : nullptr;
+  if (m_glfwInitialized && glfwWindow != nullptr) {
+    glfwMakeContextCurrent(glfwWindow);
+    glfwSetWindowUserPointer(glfwWindow, nullptr);
   }
+
+  if (m_glfwInitialized && m_imageViewTexture != 0) {
+    glDeleteTextures(1, &m_imageViewTexture);
+  }
+  m_imageViewTexture = 0;
+
   if (!m_myView.IsNull()) {
     m_myView->Remove();
+    m_myView.Nullify();
   }
+
+  if (m_imguiOpenGlInitialized) {
+    ImGui_ImplOpenGL3_Shutdown();
+    m_imguiOpenGlInitialized = false;
+  }
+  if (m_imguiGlfwInitialized) {
+    ImGui_ImplGlfw_Shutdown();
+    m_imguiGlfwInitialized = false;
+  }
+  if (m_imguiContextInitialized) {
+    ImGui::DestroyContext();
+    m_imguiContextInitialized = false;
+  }
+
   if (!myOcctWindow.IsNull()) {
     myOcctWindow->Close();
+    myOcctWindow.Nullify();
   }
 
-  ImGui_ImplOpenGL3_Shutdown();
-  ImGui_ImplGlfw_Shutdown();
-  ImGui::DestroyContext();
-
-  glfwTerminate();
+  if (m_glfwInitialized) {
+    glfwMakeContextCurrent(nullptr);
+    glfwTerminate();
+    m_glfwInitialized = false;
+  }
 }
 
 void ViewController::Imgui_OpenCV_Ini0() {

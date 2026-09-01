@@ -164,6 +164,7 @@ int global_metrology_boundary_min_plateau_width;
 int global_metrology_boundary_min_amplitude_permille;
 int global_metrology_boundary_pair_min_width;
 int global_metrology_boundary_pair_max_width;
+int global_metrology_boundary_pair_anchor_mode;
 int global_metrology_boundary_subpixel_mode;
 int global_metrology_boundary_show_conditioned;
 int global_metrology_boundary_show_response;

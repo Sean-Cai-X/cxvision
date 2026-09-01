@@ -225,6 +225,7 @@ public:
     void setboundaryselection(int selection);
     int getboundaryselection() const;
     void setboundarynthcandidate(int nth);
+    void setboundaryreferencepositionpermille(int permille);
     void setboundarysubpixel(int mode);
     void setboundarybaseline(int mode);
     void setboundarydenoise(int mode);
@@ -240,6 +241,7 @@ public:
     void setboundaryminamplitudepermille(int permille);
     void setboundarypairminwidth(int width);
     void setboundarypairmaxwidth(int width);
+    void setboundarypairanchor(int anchor);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
