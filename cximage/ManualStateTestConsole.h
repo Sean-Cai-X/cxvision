@@ -771,6 +771,38 @@ struct ManualMetrologyUiState {
   int feature_map_mode = 0; // 0 gradient, 1 connected component, 2 confidence
   int feature_map_normalize = 1;
 
+  // Boundary Trigger settings. Preview uses the same value semantics as the
+  // FindLine/FindCircle/FindEllipse boundary response setters; direct scripts
+  // opt in by reading the matching global_metrology_boundary_* values.
+  bool boundary_preview_enabled = true;
+  int boundary_baseline_mode = 1; // 0 none, 1 offset, 2 linear, 3 robust, 4 rolling
+  int boundary_denoise_mode = 2;  // 0 none, 1 box, 2 gaussian, 3 median, 4 SG, 5 Haar
+  int boundary_smoothing_radius = 2;
+  int boundary_baseline_window = 12;
+  int boundary_response_mode = 0; // CxBoundaryResponseMode
+  int boundary_polarity = 2;      // 0 rising, 1 falling, 2 either
+  int boundary_wavelet_scale = 4;
+  int boundary_trigger_threshold_permille = 120;
+  int boundary_level_permille = 500;
+  int boundary_hysteresis_permille = 50;
+  int boundary_gate_start_permille = 0;
+  int boundary_gate_end_permille = 1000;
+  int boundary_selection_mode = 0; // CxBoundarySelectionMode
+  int boundary_nth_candidate = 1;
+  int boundary_min_plateau_width = 3;
+  int boundary_min_amplitude_permille = 80;
+  int boundary_pair_min_width = 2;
+  int boundary_pair_max_width = 80;
+  int boundary_subpixel_mode = 2;
+  bool boundary_show_conditioned = true;
+  bool boundary_show_response = true;
+  bool boundary_show_scalogram = false;
+  int boundary_reference_mode = 0; // 0 none, 1 session reference
+  bool boundary_reference_bound = false;
+  int boundary_reference_position_permille = 500;
+  std::string boundary_reference_label;
+  std::vector<float> boundary_reference_profile;
+
   // Surface field / area / statistics.
   int surface_source = 0; // 0 image-gray, 1 segmentation-mask, 2 synthetic
   int surface_width = 256;
@@ -1018,6 +1050,19 @@ struct CxTorchTrainingRunBinding {
   double dfl_loss_weight = 1.0;
   double mask_loss_weight = 1.0;
   std::vector<CxTorchTrainingEpochMetric> epochs;
+
+  bool HasRealMultiEpochSeries() const {
+    return available && epochs.size() >= 2 && completed_epochs >= 2 &&
+           configured_epochs >= 2 && train_sample_count > 0;
+  }
+
+  std::string TrainingCurveStatus() const {
+    if (!available || epochs.empty())
+      return "CURVE_SAMPLES_MISSING";
+    if (!HasRealMultiEpochSeries())
+      return "PENDING_EXTERNAL_TRAINING_CURVES";
+    return "REAL_MULTI_EPOCH_SERIES";
+  }
 };
 
 struct ScriptEvidenceThumb {

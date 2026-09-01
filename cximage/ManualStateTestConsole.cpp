@@ -686,6 +686,59 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
   set("global_max_scan_lines", 256);
   set("global_max_samples", 4096);
 
+  const ManualMetrologyUiState &metrology = context.metrology_ui;
+  set("global_metrology_boundary_preview_enabled",
+      metrology.boundary_preview_enabled ? 1 : 0);
+  set("global_metrology_boundary_baseline_mode",
+      metrology.boundary_baseline_mode);
+  set("global_metrology_boundary_denoise_mode",
+      metrology.boundary_denoise_mode);
+  set("global_metrology_boundary_smoothing_radius",
+      metrology.boundary_smoothing_radius);
+  set("global_metrology_boundary_baseline_window",
+      metrology.boundary_baseline_window);
+  set("global_metrology_boundary_response_mode",
+      metrology.boundary_response_mode);
+  set("global_metrology_boundary_polarity", metrology.boundary_polarity);
+  set("global_metrology_boundary_wavelet_scale",
+      metrology.boundary_wavelet_scale);
+  set("global_metrology_boundary_trigger_threshold_permille",
+      metrology.boundary_trigger_threshold_permille);
+  set("global_metrology_boundary_level_permille",
+      metrology.boundary_level_permille);
+  set("global_metrology_boundary_hysteresis_permille",
+      metrology.boundary_hysteresis_permille);
+  set("global_metrology_boundary_gate_start_permille",
+      metrology.boundary_gate_start_permille);
+  set("global_metrology_boundary_gate_end_permille",
+      metrology.boundary_gate_end_permille);
+  set("global_metrology_boundary_selection_mode",
+      metrology.boundary_selection_mode);
+  set("global_metrology_boundary_nth_candidate",
+      metrology.boundary_nth_candidate);
+  set("global_metrology_boundary_min_plateau_width",
+      metrology.boundary_min_plateau_width);
+  set("global_metrology_boundary_min_amplitude_permille",
+      metrology.boundary_min_amplitude_permille);
+  set("global_metrology_boundary_pair_min_width",
+      metrology.boundary_pair_min_width);
+  set("global_metrology_boundary_pair_max_width",
+      metrology.boundary_pair_max_width);
+  set("global_metrology_boundary_subpixel_mode",
+      metrology.boundary_subpixel_mode);
+  set("global_metrology_boundary_show_conditioned",
+      metrology.boundary_show_conditioned ? 1 : 0);
+  set("global_metrology_boundary_show_response",
+      metrology.boundary_show_response ? 1 : 0);
+  set("global_metrology_boundary_show_scalogram",
+      metrology.boundary_show_scalogram ? 1 : 0);
+  set("global_metrology_boundary_reference_mode",
+      metrology.boundary_reference_mode);
+  set("global_metrology_boundary_reference_bound",
+      metrology.boundary_reference_bound ? 1 : 0);
+  set("global_metrology_boundary_reference_position_permille",
+      metrology.boundary_reference_position_permille);
+
   const bool isCircleScript =
       scriptPath.find("find_circle") != std::string::npos ||
       scriptPath.find("findcircle") != std::string::npos ||

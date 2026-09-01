@@ -187,6 +187,54 @@ int RoundToInt(double value) {
   return static_cast<int>(std::lround(clamped));
 }
 
+template <typename EnumT>
+EnumT ClampEnumInt(int value, int min_value, int max_value, EnumT fallback) {
+  if (value < min_value || value > max_value)
+    return fallback;
+  return static_cast<EnumT>(value);
+}
+
+int ClampPermille(int value) { return std::max(0, std::min(1000, value)); }
+
+gp_Pnt InterpolateEllipseLinePoint(LineShape &line, double sample_position,
+                                   int line_length) {
+  if (!std::isfinite(sample_position) || line_length <= 1)
+    return line.getlinepoint(0);
+
+  const double clamped =
+      std::max(0.0, std::min(sample_position,
+                             static_cast<double>(line_length - 1)));
+  const int lo = static_cast<int>(std::floor(clamped));
+  const int hi = std::min(line_length - 1, lo + 1);
+  const double t = clamped - static_cast<double>(lo);
+  const gp_Pnt p0 = line.getlinepoint(lo);
+  const gp_Pnt p1 = line.getlinepoint(hi);
+  return gp_Pnt(p0.X() + (p1.X() - p0.X()) * t,
+                p0.Y() + (p1.Y() - p0.Y()) * t,
+                p0.Z() + (p1.Z() - p0.Z()) * t);
+}
+
+std::vector<float> BuildEllipseGrayProfile(const cv::Mat &gray,
+                                           LineShape &scan_line,
+                                           int line_length) {
+  std::vector<float> profile;
+  if (gray.empty() || line_length <= 0)
+    return profile;
+
+  profile.reserve(static_cast<std::size_t>(line_length));
+  for (int i = 0; i < line_length; ++i) {
+    const gp_Pnt point = scan_line.getlinepoint(i);
+    const int x = RoundToInt(point.X());
+    const int y = RoundToInt(point.Y());
+    if (x < 0 || x >= gray.cols || y < 0 || y >= gray.rows) {
+      profile.push_back(0.0f);
+      continue;
+    }
+    profile.push_back(static_cast<float>(gray.at<uchar>(y, x)));
+  }
+  return profile;
+}
+
 int ClampLongLongToInt(long long value) {
   if (value < static_cast<long long>(std::numeric_limits<int>::min()))
     return std::numeric_limits<int>::min();
@@ -885,6 +933,100 @@ void FindEllipse::setlinegap(int igap) { m_iSelectPointGap = igap; }
 void FindEllipse::setminedgerunwidth(int width) {
   m_min_edge_run_width_px = std::max(1, std::min(20, width));
 }
+void FindEllipse::setboundaryresponseenabled(int enabled) {
+  m_boundary_response_enabled = enabled != 0;
+}
+void FindEllipse::setboundaryresponsemode(int mode) {
+  m_boundary_response_config.response_mode = ClampEnumInt(
+      mode, 0, 17,
+      cxvision::metrology_analytics::CxBoundaryResponseMode::Auto);
+  m_boundary_response_enabled = true;
+}
+int FindEllipse::getboundaryresponsemode() const {
+  return static_cast<int>(m_boundary_response_config.response_mode);
+}
+void FindEllipse::setboundarypolarity(int polarity) {
+  m_boundary_response_config.polarity = ClampEnumInt(
+      polarity, 0, 2,
+      cxvision::metrology_analytics::CxBoundaryPolarity::Either);
+}
+int FindEllipse::getboundarypolarity() const {
+  return static_cast<int>(m_boundary_response_config.polarity);
+}
+void FindEllipse::setboundaryselection(int selection) {
+  m_boundary_response_config.selection_mode = ClampEnumInt(
+      selection, 0, 5,
+      cxvision::metrology_analytics::CxBoundarySelectionMode::Strongest);
+  m_boundary_response_selection_explicit = true;
+}
+int FindEllipse::getboundaryselection() const {
+  return static_cast<int>(m_boundary_response_config.selection_mode);
+}
+void FindEllipse::setboundarynthcandidate(int nth) {
+  m_boundary_response_config.nth_candidate = std::max(1, nth);
+}
+void FindEllipse::setboundarysubpixel(int mode) {
+  m_boundary_response_config.subpixel_mode = ClampEnumInt(
+      mode, 0, 2,
+      cxvision::metrology_analytics::CxBoundarySubpixelMode::ParabolicResponse);
+}
+void FindEllipse::setboundarybaseline(int mode) {
+  m_boundary_response_config.baseline_mode = ClampEnumInt(
+      mode, 0, 4,
+      cxvision::metrology_analytics::CxBoundaryBaselineMode::Offset);
+}
+void FindEllipse::setboundarydenoise(int mode) {
+  m_boundary_response_config.denoise_mode = ClampEnumInt(
+      mode, 0, 5,
+      cxvision::metrology_analytics::CxBoundaryDenoiseMode::Gaussian);
+}
+void FindEllipse::setboundarysmoothingradius(int radius) {
+  m_boundary_response_config.smoothing_radius =
+      std::max(0, std::min(20, radius));
+}
+void FindEllipse::setboundarybaselinewindow(int window) {
+  m_boundary_response_config.baseline_window =
+      std::max(1, std::min(256, window));
+}
+void FindEllipse::setboundarywaveletscale(int scale) {
+  m_boundary_response_config.wavelet_scale =
+      std::max(1, std::min(64, scale));
+}
+void FindEllipse::setboundarythresholdpermille(int value) {
+  m_boundary_response_config.trigger_threshold_permille = ClampPermille(value);
+}
+void FindEllipse::setboundarylevelpermille(int value) {
+  m_boundary_response_config.level_permille = ClampPermille(value);
+}
+void FindEllipse::setboundaryhysteresispermille(int value) {
+  m_boundary_response_config.hysteresis_permille = ClampPermille(value);
+}
+void FindEllipse::setboundarygatestartpermille(int value) {
+  m_boundary_response_config.gate_start_permille = ClampPermille(value);
+}
+void FindEllipse::setboundarygateendpermille(int value) {
+  m_boundary_response_config.gate_end_permille = ClampPermille(value);
+}
+void FindEllipse::setboundaryminplateauwidth(int width) {
+  m_boundary_response_config.min_plateau_width =
+      std::max(1, std::min(256, width));
+}
+void FindEllipse::setboundaryminamplitudepermille(int value) {
+  m_boundary_response_config.min_amplitude_permille = ClampPermille(value);
+}
+void FindEllipse::setboundarypairminwidth(int width) {
+  m_boundary_response_config.pair_min_width =
+      std::max(1, std::min(1024, width));
+  if (m_boundary_response_config.pair_max_width <
+      m_boundary_response_config.pair_min_width)
+    m_boundary_response_config.pair_max_width =
+        m_boundary_response_config.pair_min_width;
+}
+void FindEllipse::setboundarypairmaxwidth(int width) {
+  const int new_width = std::max(1, std::min(4096, width));
+  m_boundary_response_config.pair_max_width =
+      std::max(new_width, m_boundary_response_config.pair_min_width);
+}
 void FindEllipse::setmethod(int imethod) { m_iMethod = imethod; }
 void FindEllipse::setthre(int ithre) { m_iThreshold = ithre; }
 int FindEllipse::thre() { return m_iThreshold; }
@@ -907,10 +1049,17 @@ void FindEllipse::Measure(Image &image) {
   m_scan_candidate_lines = 0;
   m_scan_total_candidates = 0;
   m_scan_accepted_points_before_gate = 0;
+  m_boundary_response_scan_lines_evaluated = 0;
+  m_boundary_response_candidate_count = 0;
+  m_boundary_response_points_emitted = 0;
+  m_boundary_response_rejected_no_candidate = 0;
+  m_boundary_response_rejected_endpoint = 0;
   m_accepted_boundary_ratio_sum = 0.0;
   m_accepted_boundary_ratio_min = 999.0;
   m_accepted_boundary_ratio_max = -999.0;
   m_candidate_policy = "ellipse_boundary_band_nearest_norm_loose_fallback";
+  if (m_boundary_response_enabled)
+    m_candidate_policy = "ellipse_boundary_response_profile_trigger";
 
   m_accepted_points_outside_ellipse_count = 0;
   m_accepted_point_norm_sum = 0.0;
@@ -933,6 +1082,14 @@ void FindEllipse::Measure(Image &image) {
     LogFindEllipseMeasureProbe("measure_preflight", "failed",
                                m_measure_failure_reason);
     return;
+  }
+
+  cv::Mat boundary_gray;
+  if (m_boundary_response_enabled) {
+    if (image.getmat().channels() == 1)
+      boundary_gray = image.getmat();
+    else
+      cv::cvtColor(image.getmat(), boundary_gray, cv::COLOR_BGR2GRAY);
   }
 
   {
@@ -1138,6 +1295,131 @@ void FindEllipse::Measure(Image &image) {
 
   cv::Vec3b icolor = 0;
   SetCxCrashBreadcrumb("FindEllipse::Measure:candidate_collect");
+  auto try_boundary_response_scan = [&](int scan_index) -> bool {
+    if (!m_boundary_response_enabled || boundary_gray.empty())
+      return false;
+    if (scan_index < 0 || scan_index >= isize)
+      return true;
+
+    ++m_boundary_response_scan_lines_evaluated;
+    std::vector<float> profile =
+        BuildEllipseGrayProfile(boundary_gray, m_lines[scan_index],
+                                ilineslen1);
+
+    auto config = m_boundary_response_config;
+    config.min_plateau_width =
+        std::max(config.min_plateau_width, m_min_edge_run_width_px);
+    if (!m_boundary_response_selection_explicit) {
+      if (m_iselectedgenum > 0) {
+        config.selection_mode =
+            cxvision::metrology_analytics::CxBoundarySelectionMode::Nth;
+        config.nth_candidate = m_iselectedgenum;
+      } else if (m_iselectedgenum == -1) {
+        config.selection_mode =
+            cxvision::metrology_analytics::CxBoundarySelectionMode::Last;
+      }
+    }
+
+    const cxvision::metrology_analytics::CxBoundaryResponseResult response =
+        cxvision::metrology_analytics::EvaluateBoundaryResponse(profile,
+                                                                config);
+    const int candidate_count = ClampSizeToInt(response.candidates.size());
+    m_boundary_response_candidate_count += candidate_count;
+    if (candidate_count > 0) {
+      ++m_scan_candidate_lines;
+      m_scan_total_candidates += candidate_count;
+    }
+
+    auto& diag = EnsureFindEllipseScanDiagnostic(m_scan_diagnostics,
+                                                 scan_index);
+    diag.candidate_count = candidate_count;
+    diag.min_edge_run_width_px = m_min_edge_run_width_px;
+    diag.boundary_response_used = true;
+    diag.boundary_response_mode =
+        static_cast<int>(response.effective_response_mode);
+    diag.boundary_response_candidate_count = candidate_count;
+    diag.boundary_response_selected_index = response.selected_candidate;
+    diag.boundary_response_status = response.status;
+    diag.boundary_response_reason = response.reason;
+
+    if (response.selected_candidate < 0 ||
+        response.selected_candidate >= candidate_count) {
+      ++m_boundary_response_rejected_no_candidate;
+      if (diag.reject_reason.empty())
+        diag.reject_reason = response.reason.empty()
+                                 ? "boundary_no_candidate"
+                                 : response.reason;
+      return true;
+    }
+
+    const auto& candidate =
+        response.candidates[static_cast<std::size_t>(
+            response.selected_candidate)];
+    const double sample_position = std::isfinite(candidate.position_samples)
+                                       ? candidate.position_samples
+                                       : static_cast<double>(
+                                             candidate.sample_index);
+    const int candidate_position = RoundToInt(sample_position);
+    if (candidate_position >= (ilineslen1 - m_iSelectPointGap - 3) ||
+        candidate_position <= m_iSelectPointGap + 3) {
+      ++m_boundary_response_rejected_endpoint;
+      if (diag.reject_reason.empty())
+        diag.reject_reason = "boundary_endpoint_rejected";
+      return true;
+    }
+
+    gp_Pnt apoint =
+        InterpolateEllipseLinePoint(m_lines[scan_index], sample_position,
+                                    ilineslen1);
+    const double norm =
+        EllipseNorm(apoint.X(), apoint.Y(), ellipse_cx, ellipse_cy,
+                    ellipse_rx, ellipse_ry);
+    constexpr double kBoundaryBandLooseMin = 0.45;
+    constexpr double kBoundaryBandMax = 1.08;
+    if (!std::isfinite(norm) || norm < kBoundaryBandLooseMin ||
+        norm > kBoundaryBandMax) {
+      ++m_boundary_response_rejected_endpoint;
+      ++m_rejected_boundary_band_candidate_count;
+      if (std::isfinite(norm)) {
+        m_rejected_boundary_band_norm_sum += norm;
+        m_rejected_boundary_band_norm_min =
+            std::min(m_rejected_boundary_band_norm_min, norm);
+        m_rejected_boundary_band_norm_max =
+            std::max(m_rejected_boundary_band_norm_max, norm);
+      }
+      if (diag.reject_reason.empty())
+        diag.reject_reason = "boundary_band_rejected";
+      return true;
+    }
+
+    m_accepted_point_norm_sum += norm;
+    m_accepted_point_norm_count++;
+    m_accepted_point_norm_min = std::min(m_accepted_point_norm_min, norm);
+    m_accepted_point_norm_max = std::max(m_accepted_point_norm_max, norm);
+    if (norm > 1.05)
+      m_accepted_points_outside_ellipse_count++;
+
+    m_measurepoints.addpoint(apoint);
+    ++m_boundary_response_points_emitted;
+    ++m_scan_accepted_points_before_gate;
+    m_accepted_boundary_ratio_sum += norm;
+    m_accepted_boundary_ratio_min =
+        std::min(m_accepted_boundary_ratio_min, norm);
+    m_accepted_boundary_ratio_max =
+        std::max(m_accepted_boundary_ratio_max, norm);
+
+    diag.accepted = true;
+    diag.accepted_x = apoint.X();
+    diag.accepted_y = apoint.Y();
+    diag.accepted_position = candidate_position;
+    diag.accepted_points_xy.push_back(apoint.X());
+    diag.accepted_points_xy.push_back(apoint.Y());
+    diag.boundary_response_selected_position = sample_position;
+    diag.boundary_response_selected_score = candidate.score;
+    diag.reject_reason.clear();
+    return true;
+  };
+
   for (int inumy = 0 + ifixvalue; inumy < isize - ifixvalue; inumy++) {
     std::vector<int> candidate_positions;
     candidate_positions.reserve(8);
@@ -1154,6 +1436,8 @@ void FindEllipse::Measure(Image &image) {
       if (!diag.accepted && diag.reject_reason.empty())
         diag.reject_reason = "min_edge_run_width_rejected";
     };
+    if (try_boundary_response_scan(inumy))
+      continue;
     for (int inumx = 0; inumx < ilineslen1; inumx++) {
       icolor = g_pbackimage->pixel(inumx, inumy);
       if ((icolor[0]) > 0) {
@@ -1613,6 +1897,23 @@ bool FindEllipse::getdisplaysnapshot(FindEllipseDisplaySnapshot &out) const {
   out.rejected_min_edge_run_width_count =
       m_rejected_min_edge_run_width_count;
   out.scan_accepted_points_before_gate = m_scan_accepted_points_before_gate;
+  out.boundary_response_enabled = m_boundary_response_enabled ? 1 : 0;
+  out.boundary_response_mode =
+      static_cast<int>(m_boundary_response_config.response_mode);
+  out.boundary_response_polarity =
+      static_cast<int>(m_boundary_response_config.polarity);
+  out.boundary_response_selection =
+      static_cast<int>(m_boundary_response_config.selection_mode);
+  out.boundary_response_scan_lines_evaluated =
+      m_boundary_response_scan_lines_evaluated;
+  out.boundary_response_candidate_count =
+      m_boundary_response_candidate_count;
+  out.boundary_response_points_emitted =
+      m_boundary_response_points_emitted;
+  out.boundary_response_rejected_no_candidate =
+      m_boundary_response_rejected_no_candidate;
+  out.boundary_response_rejected_endpoint =
+      m_boundary_response_rejected_endpoint;
   out.accepted_min_boundary_ratio = m_scan_accepted_points_before_gate > 0
                                         ? m_accepted_boundary_ratio_min
                                         : 0.0;

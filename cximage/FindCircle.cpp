@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <vector>
 
 namespace {
 constexpr int kEdgeDetectMinNum = 10;
@@ -65,6 +66,15 @@ int RoundToInt(double value) {
   return static_cast<int>(std::lround(clamped));
 }
 
+template <typename EnumT>
+EnumT ClampEnumInt(int value, int min_value, int max_value, EnumT fallback) {
+  if (value < min_value || value > max_value)
+    return fallback;
+  return static_cast<EnumT>(value);
+}
+
+int ClampPermille(int value) { return std::max(0, std::min(1000, value)); }
+
 gp_Pnt SamplePointOnDisplayedLine(LineShape &line, int sample_index,
                                   int line_length) {
   CxShapePoint p0;
@@ -79,6 +89,45 @@ gp_Pnt SamplePointOnDisplayedLine(LineShape &line, int sample_index,
                     static_cast<double>(sample_index) /
                         static_cast<double>(max_index)));
   return gp_Pnt(p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t, 0.0);
+}
+
+gp_Pnt InterpolatePointOnDisplayedLine(LineShape &line, double sample_position,
+                                       int line_length) {
+  if (!std::isfinite(sample_position) || line_length <= 1)
+    return SamplePointOnDisplayedLine(line, 0, line_length);
+
+  const double clamped =
+      std::max(0.0, std::min(sample_position,
+                             static_cast<double>(line_length - 1)));
+  const int lo = static_cast<int>(std::floor(clamped));
+  const int hi = std::min(line_length - 1, lo + 1);
+  const double t = clamped - static_cast<double>(lo);
+  const gp_Pnt p0 = SamplePointOnDisplayedLine(line, lo, line_length);
+  const gp_Pnt p1 = SamplePointOnDisplayedLine(line, hi, line_length);
+  return gp_Pnt(p0.X() + (p1.X() - p0.X()) * t,
+                p0.Y() + (p1.Y() - p0.Y()) * t,
+                p0.Z() + (p1.Z() - p0.Z()) * t);
+}
+
+std::vector<float> BuildCircleGrayProfile(const cv::Mat &gray,
+                                          LineShape &scan_line,
+                                          int line_length) {
+  std::vector<float> profile;
+  if (gray.empty() || line_length <= 0)
+    return profile;
+
+  profile.reserve(static_cast<std::size_t>(line_length));
+  for (int i = 0; i < line_length; ++i) {
+    const gp_Pnt point = SamplePointOnDisplayedLine(scan_line, i, line_length);
+    const int x = RoundToInt(point.X());
+    const int y = RoundToInt(point.Y());
+    if (x < 0 || x >= gray.cols || y < 0 || y >= gray.rows) {
+      profile.push_back(0.0f);
+      continue;
+    }
+    profile.push_back(static_cast<float>(gray.at<uchar>(y, x)));
+  }
+  return profile;
 }
 
 double Distance2D(double x0, double y0, double x1, double y1) {
@@ -862,6 +911,240 @@ void FindCircle::setminedgerunwidth(int width) {
   }
 }
 
+void FindCircle::setboundaryresponseenabled(int enabled) {
+  const bool new_enabled = enabled != 0;
+  if (m_boundary_response_enabled == new_enabled)
+    return;
+  m_boundary_response_enabled = new_enabled;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundaryresponsemode(int mode) {
+  const auto new_mode = ClampEnumInt(
+      mode, 0, 17,
+      cxvision::metrology_analytics::CxBoundaryResponseMode::Auto);
+  if (m_boundary_response_enabled &&
+      m_boundary_response_config.response_mode == new_mode)
+    return;
+  m_boundary_response_config.response_mode = new_mode;
+  m_boundary_response_enabled = true;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+int FindCircle::getboundaryresponsemode() const {
+  return static_cast<int>(m_boundary_response_config.response_mode);
+}
+
+void FindCircle::setboundarypolarity(int polarity) {
+  const auto new_polarity = ClampEnumInt(
+      polarity, 0, 2,
+      cxvision::metrology_analytics::CxBoundaryPolarity::Either);
+  if (m_boundary_response_config.polarity == new_polarity)
+    return;
+  m_boundary_response_config.polarity = new_polarity;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+int FindCircle::getboundarypolarity() const {
+  return static_cast<int>(m_boundary_response_config.polarity);
+}
+
+void FindCircle::setboundaryselection(int selection) {
+  const auto new_selection = ClampEnumInt(
+      selection, 0, 5,
+      cxvision::metrology_analytics::CxBoundarySelectionMode::Strongest);
+  if (m_boundary_response_selection_explicit &&
+      m_boundary_response_config.selection_mode == new_selection)
+    return;
+  m_boundary_response_config.selection_mode = new_selection;
+  m_boundary_response_selection_explicit = true;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+int FindCircle::getboundaryselection() const {
+  return static_cast<int>(m_boundary_response_config.selection_mode);
+}
+
+void FindCircle::setboundarynthcandidate(int nth) {
+  const int new_nth = std::max(1, nth);
+  if (m_boundary_response_config.nth_candidate == new_nth)
+    return;
+  m_boundary_response_config.nth_candidate = new_nth;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarysubpixel(int mode) {
+  const auto new_mode = ClampEnumInt(
+      mode, 0, 2,
+      cxvision::metrology_analytics::CxBoundarySubpixelMode::ParabolicResponse);
+  if (m_boundary_response_config.subpixel_mode == new_mode)
+    return;
+  m_boundary_response_config.subpixel_mode = new_mode;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarybaseline(int mode) {
+  const auto new_mode = ClampEnumInt(
+      mode, 0, 4,
+      cxvision::metrology_analytics::CxBoundaryBaselineMode::Offset);
+  if (m_boundary_response_config.baseline_mode == new_mode)
+    return;
+  m_boundary_response_config.baseline_mode = new_mode;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarydenoise(int mode) {
+  const auto new_mode = ClampEnumInt(
+      mode, 0, 5,
+      cxvision::metrology_analytics::CxBoundaryDenoiseMode::Gaussian);
+  if (m_boundary_response_config.denoise_mode == new_mode)
+    return;
+  m_boundary_response_config.denoise_mode = new_mode;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarysmoothingradius(int radius) {
+  const int new_radius = std::max(0, std::min(20, radius));
+  if (m_boundary_response_config.smoothing_radius == new_radius)
+    return;
+  m_boundary_response_config.smoothing_radius = new_radius;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarybaselinewindow(int window) {
+  const int new_window = std::max(1, std::min(256, window));
+  if (m_boundary_response_config.baseline_window == new_window)
+    return;
+  m_boundary_response_config.baseline_window = new_window;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarywaveletscale(int scale) {
+  const int new_scale = std::max(1, std::min(64, scale));
+  if (m_boundary_response_config.wavelet_scale == new_scale)
+    return;
+  m_boundary_response_config.wavelet_scale = new_scale;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarythresholdpermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.trigger_threshold_permille == new_value)
+    return;
+  m_boundary_response_config.trigger_threshold_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarylevelpermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.level_permille == new_value)
+    return;
+  m_boundary_response_config.level_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundaryhysteresispermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.hysteresis_permille == new_value)
+    return;
+  m_boundary_response_config.hysteresis_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarygatestartpermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.gate_start_permille == new_value)
+    return;
+  m_boundary_response_config.gate_start_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarygateendpermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.gate_end_permille == new_value)
+    return;
+  m_boundary_response_config.gate_end_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundaryminplateauwidth(int width) {
+  const int new_width = std::max(1, std::min(256, width));
+  if (m_boundary_response_config.min_plateau_width == new_width)
+    return;
+  m_boundary_response_config.min_plateau_width = new_width;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundaryminamplitudepermille(int value) {
+  const int new_value = ClampPermille(value);
+  if (m_boundary_response_config.min_amplitude_permille == new_value)
+    return;
+  m_boundary_response_config.min_amplitude_permille = new_value;
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarypairminwidth(int width) {
+  const int new_width = std::max(1, std::min(1024, width));
+  if (m_boundary_response_config.pair_min_width == new_width)
+    return;
+  m_boundary_response_config.pair_min_width = new_width;
+  if (m_boundary_response_config.pair_max_width <
+      m_boundary_response_config.pair_min_width) {
+    m_boundary_response_config.pair_max_width =
+        m_boundary_response_config.pair_min_width;
+  }
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
+void FindCircle::setboundarypairmaxwidth(int width) {
+  const int new_width = std::max(1, std::min(4096, width));
+  if (m_boundary_response_config.pair_max_width == new_width)
+    return;
+  m_boundary_response_config.pair_max_width =
+      std::max(new_width, m_boundary_response_config.pair_min_width);
+  MarkCircleMeasureGeometryDirty();
+  if (m_measure_geometry_request.valid)
+    m_measure_geometry_request.version = m_measure_geometry_version;
+}
+
 void FindCircle::setmethod(int imethod) { m_iMethod = imethod; }
 void FindCircle::setthre(int ithre) { m_iThreshold = ithre; }
 
@@ -947,12 +1230,33 @@ void FindCircle::Measure(Image &image) {
   m_lastMeasureGeometryDebug.candidate_min_edge_run_width_reject_count = 0;
   m_lastMeasureGeometryDebug.candidate_boundary_reject_count = 0;
   m_lastMeasureGeometryDebug.candidate_endpoint_reject_count = 0;
+  m_lastMeasureGeometryDebug.boundary_response_enabled =
+      m_boundary_response_enabled ? 1 : 0;
+  m_lastMeasureGeometryDebug.boundary_response_mode =
+      static_cast<int>(m_boundary_response_config.response_mode);
+  m_lastMeasureGeometryDebug.boundary_response_polarity =
+      static_cast<int>(m_boundary_response_config.polarity);
+  m_lastMeasureGeometryDebug.boundary_response_selection =
+      static_cast<int>(m_boundary_response_config.selection_mode);
+  m_lastMeasureGeometryDebug.boundary_response_scan_lines_evaluated = 0;
+  m_lastMeasureGeometryDebug.boundary_response_candidate_count = 0;
+  m_lastMeasureGeometryDebug.boundary_response_points_emitted = 0;
+  m_lastMeasureGeometryDebug.boundary_response_rejected_no_candidate = 0;
+  m_lastMeasureGeometryDebug.boundary_response_rejected_endpoint = 0;
   m_lastMeasureGeometryDebug.scan_diagnostics.clear();
 
   if (image.getmat().empty()) {
     LogFindCircleMeasureProbe("measure_image_fail", "failed",
                               "failure_stage=image_mat_empty");
     return;
+  }
+
+  cv::Mat boundary_gray;
+  if (m_boundary_response_enabled) {
+    if (image.getmat().channels() == 1)
+      boundary_gray = image.getmat();
+    else
+      cv::cvtColor(image.getmat(), boundary_gray, cv::COLOR_BGR2GRAY);
   }
 
   const gp_Rectangle roi = rect();
@@ -1548,6 +1852,130 @@ void FindCircle::Measure(Image &image) {
     return false;
   };
 
+  auto try_boundary_response_scan = [&](int scan_index) -> bool {
+    if (!m_boundary_response_enabled || boundary_gray.empty())
+      return false;
+    if (scan_index < 0 || scan_index >= iscanlines)
+      return true;
+
+    ++m_lastMeasureGeometryDebug.boundary_response_scan_lines_evaluated;
+    std::vector<float> profile = BuildCircleGrayProfile(
+        boundary_gray, m_lines[static_cast<std::size_t>(scan_index)],
+        ilineslen1);
+    total_samples += ClampSizeToInt(profile.size());
+
+    auto config = m_boundary_response_config;
+    config.min_plateau_width =
+        std::max(config.min_plateau_width, m_min_edge_run_width_px);
+    if (!m_boundary_response_selection_explicit) {
+      if (m_iselectedgenum > 0) {
+        config.selection_mode =
+            cxvision::metrology_analytics::CxBoundarySelectionMode::Nth;
+        config.nth_candidate = m_iselectedgenum;
+      } else if (m_iselectedgenum == -1) {
+        config.selection_mode =
+            cxvision::metrology_analytics::CxBoundarySelectionMode::Last;
+      }
+    }
+
+    const cxvision::metrology_analytics::CxBoundaryResponseResult response =
+        cxvision::metrology_analytics::EvaluateBoundaryResponse(profile,
+                                                                config);
+    m_lastMeasureGeometryDebug.boundary_response_candidate_count +=
+        ClampSizeToInt(response.candidates.size());
+
+    FindCircleMeasureGeometryDebug::ScanDiagnostic diag;
+    diag.scan_index = scan_index;
+    diag.candidate_count = ClampSizeToInt(response.candidates.size());
+    diag.min_edge_run_width_px = m_min_edge_run_width_px;
+    diag.boundary_response_used = true;
+    diag.boundary_response_mode =
+        static_cast<int>(response.effective_response_mode);
+    diag.boundary_response_candidate_count =
+        ClampSizeToInt(response.candidates.size());
+    diag.boundary_response_selected_index = response.selected_candidate;
+    diag.boundary_response_status = response.status;
+    diag.boundary_response_reason = response.reason;
+
+    candidate_runs_total += diag.candidate_count;
+    candidate_runs_max_per_line =
+        std::max(candidate_runs_max_per_line, diag.candidate_count);
+
+    if (response.selected_candidate < 0 ||
+        response.selected_candidate >=
+            static_cast<int>(response.candidates.size())) {
+      ++selected_edge_misses;
+      ++m_lastMeasureGeometryDebug.boundary_response_rejected_no_candidate;
+      diag.reject_reason = response.reason.empty() ? "boundary_no_candidate"
+                                                   : response.reason;
+      if (diag.reject_reason.empty())
+        diag.reject_reason = "boundary_no_candidate";
+      m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
+      return true;
+    }
+
+    const auto &candidate =
+        response.candidates[static_cast<std::size_t>(
+            response.selected_candidate)];
+    const double sample_position = std::isfinite(candidate.position_samples)
+                                       ? candidate.position_samples
+                                       : static_cast<double>(
+                                             candidate.sample_index);
+    const int candidate_position = RoundToInt(sample_position);
+
+    if (scan_index >= static_cast<int>(source_valid_begin.size())) {
+      ++selected_edge_misses;
+      ++candidate_boundary_reject_count;
+      ++m_lastMeasureGeometryDebug.boundary_response_rejected_endpoint;
+      diag.reject_reason = "boundary_scan_out_of_range";
+      m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
+      return true;
+    }
+
+    const int valid_begin =
+        source_valid_begin[static_cast<std::size_t>(scan_index)];
+    const int valid_end =
+        source_valid_end[static_cast<std::size_t>(scan_index)];
+    const int valid_length = valid_end - valid_begin + 1;
+    const int source_boundary_guard =
+        std::min(endpoint_guard, std::max(1, valid_length / 10));
+    if (valid_begin < 0 || valid_end < valid_begin ||
+        candidate_position < valid_begin + source_boundary_guard ||
+        candidate_position > valid_end - source_boundary_guard) {
+      ++selected_edge_misses;
+      ++candidate_boundary_reject_count;
+      ++candidate_endpoint_reject_count;
+      ++m_lastMeasureGeometryDebug.boundary_response_rejected_endpoint;
+      diag.reject_reason = "boundary_endpoint_rejected";
+      m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
+      return true;
+    }
+
+    gp_Pnt apoint = InterpolatePointOnDisplayedLine(
+        m_lines[static_cast<std::size_t>(scan_index)], sample_position,
+        ilineslen1);
+    m_measurepoints.addpoint(apoint);
+    record_selected_radius(apoint);
+    ++selected_edge_hits;
+    ++m_lastMeasureGeometryDebug.boundary_response_points_emitted;
+    if (scan_index >= 0 && scan_index < iscanlines) {
+      accepted_line_positions[static_cast<std::size_t>(scan_index)] =
+          candidate_position;
+    }
+    valid_points_count = m_measurepoints.size();
+
+    diag.accepted = true;
+    diag.accepted_position = candidate_position;
+    diag.accepted_x = apoint.X();
+    diag.accepted_y = apoint.Y();
+    diag.accepted_points_xy.push_back(apoint.X());
+    diag.accepted_points_xy.push_back(apoint.Y());
+    diag.boundary_response_selected_position = sample_position;
+    diag.boundary_response_selected_score = candidate.score;
+    m_lastMeasureGeometryDebug.scan_diagnostics.push_back(diag);
+    return true;
+  };
+
   if (1) {
     cv::Vec3b icolor = 0;
     for (int inumy = 0; inumy < iscanlines; inumy++) {
@@ -1571,6 +1999,14 @@ void FindCircle::Measure(Image &image) {
       bcollectBegin = false;
       idarkgapnum = 0;
       int line_min_edge_run_width_reject_count = 0;
+
+      if (try_boundary_response_scan(inumy)) {
+        if ((total_samples % 4096) == 0 && budgetExceeded()) {
+          m_measurepoints.clear();
+          return;
+        }
+        continue;
+      }
 
       struct CircleLineCandidate {
         int ordinal = 0;

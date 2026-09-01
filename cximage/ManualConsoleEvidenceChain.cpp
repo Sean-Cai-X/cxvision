@@ -7412,6 +7412,16 @@ void ViewController::DrawTorchEvidenceTrainingPanel() {
             : 0.0f;
     ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
 
+    const bool hasRealTrainingCurve = run.HasRealMultiEpochSeries();
+    if (!hasRealTrainingCurve) {
+      const std::string curveStatus = run.TrainingCurveStatus();
+      ImGui::TextColored(ImVec4(1.0f, 0.76f, 0.28f, 1.0f),
+                         "Learning curve: %s", curveStatus.c_str());
+      ImGui::TextDisabled(
+          "No effective incremental training curve is available until a "
+          "runtime-produced multi-epoch trace is bound.");
+    }
+
     std::vector<float> totalLoss;
     std::vector<float> learningRates;
     totalLoss.reserve(run.epochs.size());
@@ -7420,15 +7430,15 @@ void ViewController::DrawTorchEvidenceTrainingPanel() {
       totalLoss.push_back(static_cast<float>(metric.total_loss));
       learningRates.push_back(static_cast<float>(metric.learning_rate));
     }
-    if (!totalLoss.empty())
+    if (hasRealTrainingCurve && !totalLoss.empty())
       ImGui::PlotLines("Loss by epoch", totalLoss.data(),
                        static_cast<int>(totalLoss.size()), 0, nullptr, FLT_MAX,
                        FLT_MAX, ImVec2(-1.0f, 80.0f));
-    if (!learningRates.empty())
+    if (hasRealTrainingCurve && !learningRates.empty())
       ImGui::PlotLines("LR by epoch", learningRates.data(),
                        static_cast<int>(learningRates.size()), 0, nullptr, 0.0f,
                        FLT_MAX, ImVec2(-1.0f, 48.0f));
-    if (run.epochs.size() >= 2) {
+    if (hasRealTrainingCurve && run.epochs.size() >= 2) {
       int decreasingSteps = 0;
       for (std::size_t i = 1; i < run.epochs.size(); ++i) {
         if (run.epochs[i].total_loss < run.epochs[i - 1].total_loss)
@@ -8589,6 +8599,12 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
           << "  \"schema\": "
              "\"cxvision.yolov8n_incremental_training_request.v1\",\n"
           << "  \"status\": \"PENDING_EXTERNAL_YOLOV8N_TRAINING\",\n"
+          << "  \"training_curve_status\": "
+             "\"PENDING_EXTERNAL_TRAINING_CURVES\",\n"
+          << "  \"incremental_training_effectiveness_status\": "
+             "\"NOT_EVALUATED_NO_WEIGHT_UPDATE_EVIDENCE\",\n"
+          << "  \"inference_comparison_status\": "
+             "\"PENDING_BASE_AND_INCREMENTAL_INFERENCE\",\n"
           << "  \"created_at\": \"" << JsonEscape(CurrentTimestamp())
           << "\",\n"
           << "  \"primary_model_family\": \"YOLOv8-n_detection\",\n"
@@ -8993,6 +9009,16 @@ void ViewController::drawTorchTrainingImageSetWindow() {
             : 0.0f;
     ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
 
+    const bool hasRealTrainingCurve = trainingRun.HasRealMultiEpochSeries();
+    if (!hasRealTrainingCurve) {
+      const std::string curveStatus = trainingRun.TrainingCurveStatus();
+      ImGui::TextColored(ImVec4(1.0f, 0.76f, 0.28f, 1.0f),
+                         "learning_curve_status: %s", curveStatus.c_str());
+      ImGui::TextDisabled(
+          "Training request/prep assets do not prove incremental learning; "
+          "bind a real multi-epoch trace before plotting loss curves.");
+    }
+
     std::vector<float> totalLoss;
     std::vector<float> maskLoss;
     totalLoss.reserve(trainingRun.epochs.size());
@@ -9001,7 +9027,7 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       totalLoss.push_back(static_cast<float>(metric.total_loss));
       maskLoss.push_back(static_cast<float>(metric.mask_loss));
     }
-    if (!totalLoss.empty()) {
+    if (hasRealTrainingCurve && !totalLoss.empty()) {
       ImGui::PlotLines("Total loss", totalLoss.data(),
                        static_cast<int>(totalLoss.size()), 0, nullptr, FLT_MAX,
                        FLT_MAX, ImVec2(-1.0f, 80.0f));

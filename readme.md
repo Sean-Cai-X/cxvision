@@ -6,8 +6,8 @@
 
 > **文档版本**: v2.5
 > **对应分支**: `codex/cxcore-integration`
-> **核验日期**: 2026-08-18
-> **代码基线**: 最新公开提交 `3b260e2` — `add sam module test`
+> **核验日期**: 2026-09-01
+> **代码基线**: `codex/cxcore-integration` 当前集成分支，最近公开基线包含 `1ec79da` — `add FindLine FindCircle FindEllipse setminedgerunwidth`
 > **文档标题**: CxScript / Evidence、Multi-Model Torch、Incremental Learning、Measurement Semantics 与 Metrology Integration Baseline
 > **替代版本**: v2.4 / 2026-08-07 / `8c77433`
 
@@ -1130,6 +1130,68 @@ CxMetrologyAnalyticsSmoke
 ```
 
 其中 Observation Bridge 代码自己仍明确返回：`S3_S4_BRIDGE_DRAFT_ONLY_PENDING_S4_REVIEW`。
+
+#### 2026-09-01 Boundary Trigger / Surface Analytics 落地状态
+
+`Key Parameter Controls -> Metrology Extension / Surface Analytics` 的 Boundary Trigger 参数已经接入 FindLine、FindCircle、FindEllipse 的 direct/headless 链路。当前可以按以下执行链描述：
+
+```text
+Surface 校正
+→ Gauge Line 原始采样
+→ 波形调理：展平、去趋势、降噪、归一化
+→ 响应函数：梯度、曲率、阶跃拟合、小波、模板相关
+→ 触发语义：峰/谷、上升/下降、上拉/下拉、穿越、边缘对
+→ 候选仲裁：最强、首个、末个、第 N 个、最近参考、跨尺度稳定
+→ 亚像素定位与置信度
+→ 多扫描线几何汇聚：FindLine / FindCircle / FindEllipse
+→ 图表、图像 Overlay、拒绝原因与人工审核资产
+```
+
+当前状态是 **进入人工审核资产阶段**，不是人工验收完成。准确结论为：
+
+```text
+Boundary Trigger core models       IMPLEMENTED
+Surface Analytics UI globals       IMPLEMENTED
+FindLine direct/headless binding   IMPLEMENTED
+FindCircle direct/headless binding IMPLEMENTED
+FindEllipse direct/headless binding IMPLEMENTED
+Review assets generated            READY_FOR_HUMAN_REVIEW
+Manual GUI review                  PENDING_HUMAN_REVIEW
+Final acceptance                   NOT_ACCEPTED
+```
+
+本轮新增/补齐：
+
+- `global_metrology_boundary_*` 参数可由 Manual Console seed 到 direct script；
+- headless globals 声明补齐 Boundary Trigger 字段；
+- `findline_boundary_trigger_direct.cxsc`、`findcircle_boundary_trigger_direct.cxsc`、`findellipse_boundary_trigger_direct.cxsc` 已加入 catalog，并在 Manual/Regression 中可见；
+- `--findellipse-inner-scale-percent` / `--ellipse-inner-scale-percent` 已接入 headless options 和 `global_findellipse_inner_scale_percent`；
+- `global_metrology_boundary_preview_enabled=0` 时不会误触发 Boundary Trigger。
+
+验证记录：
+
+```text
+Build target:
+  cmake --build D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\build01 --config Release --target cxvision_imgui_acceptance
+
+Binary:
+  D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\build01\Release\cxvision_imgui_acceptance.exe
+  last_write_time = 2026-09-01 11:52:11
+
+Metrology Analytics smoke:
+  total_cases = 89
+  pass_count  = 89
+  fail_count  = 0
+  conclusion  = METROLOGY_ANALYTICS_SMOKE_PASS
+
+Direct/headless evidence:
+  cxscript_runs/headless/run_20260901_120000_boundary_trigger_direct_postbuild
+  FindLine   boundary_trigger_enabled=1 mode=8 emitted_points=31
+  FindCircle boundary_trigger_enabled=1 mode=8 emitted_points=55
+  FindEllipse boundary_trigger_enabled=1 mode=0 emitted_points=47
+```
+
+注意边界：Surface 校正、参考模板 profile 的持久化绑定和人工点击保存审核结论仍不能宣称已最终验收。后续应在固定人工 GUI 会话中复核 overlay、boundary_analysis、summary 和 handoff 条目，再把结论从 `PENDING_HUMAN_REVIEW` 推进到人工接受或拒绝。
 
 #### 2026-08-27 Key Parameter Controls 精细分析复核
 

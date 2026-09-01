@@ -2,6 +2,7 @@
 #include "metrology_analytics/CxMetrologyAnalyticsSmoke.h"
 
 #include "metrology_analytics/CxRoughness1D.h"
+#include "metrology_analytics/CxBoundaryResponse.h"
 #include "metrology_analytics/CxSurfaceAreas.h"
 #include "metrology_analytics/CxSurfaceBasicStats.h"
 #include "metrology_analytics/CxSurfaceLevelPlane.h"
@@ -12,6 +13,10 @@
 #include "metrology_analytics/CxAnalyticsObservationBridgeDraft.h"
 #include "metrology_analytics/tests/ManualConsoleAnalyticsSmoke.h"
 #include "CxCalibration.h"
+#include "FindCircle.h"
+#include "FindEllipse.h"
+#include "FindLine.h"
+#include "Image.h"
 
 #include <chrono>
 #include <cmath>
@@ -23,6 +28,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <opencv2/imgproc.hpp>
 
 namespace cxvision::metrology_analytics
 {
@@ -165,6 +171,312 @@ CxProfile1D MakeRampProfile(int samples)
     for (int i = 0; i < samples; ++i)
         p.z.push_back(static_cast<double>(i));
     return p;
+}
+
+std::vector<float> MakeStepWaveform(int samples, int edge, bool rising,
+                                    float low = 0.0f, float high = 1.0f)
+{
+    std::vector<float> values(static_cast<std::size_t>(samples), low);
+    for (int i = std::max(0, edge); i < samples; ++i)
+        values[static_cast<std::size_t>(i)] = rising ? high : low;
+    if (!rising)
+    {
+        for (int i = 0; i < std::min(samples, edge); ++i)
+            values[static_cast<std::size_t>(i)] = high;
+    }
+    return values;
+}
+
+double SelectedBoundaryPosition(const CxBoundaryResponseResult& result)
+{
+    if (result.selected_candidate < 0 ||
+        result.selected_candidate >= static_cast<int>(result.candidates.size()))
+        return -1.0;
+    return result.candidates[static_cast<std::size_t>(result.selected_candidate)]
+        .position_samples;
+}
+
+cv::Mat MakeVerticalStepImage(int width, int height, int edge_x, bool falling)
+{
+    cv::Mat image(height, width, CV_8UC3, cv::Scalar(0, 0, 0));
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            const bool left_side = x < edge_x;
+            const int value = (left_side == falling) ? 210 : 40;
+            image.at<cv::Vec3b>(y, x) =
+                cv::Vec3b(static_cast<uchar>(value),
+                          static_cast<uchar>(value),
+                          static_cast<uchar>(value));
+        }
+    }
+    cv::GaussianBlur(image, image, cv::Size(5, 5), 1.0);
+    return image;
+}
+
+cv::Mat MakeCircleStepImage(int width, int height, int cx, int cy, int radius)
+{
+    cv::Mat image(height, width, CV_8UC3, cv::Scalar(35, 35, 35));
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            const int dx = x - cx;
+            const int dy = y - cy;
+            if (dx * dx + dy * dy <= radius * radius)
+                image.at<cv::Vec3b>(y, x) = cv::Vec3b(215, 215, 215);
+        }
+    }
+    cv::GaussianBlur(image, image, cv::Size(5, 5), 1.0);
+    return image;
+}
+
+cv::Mat MakeEllipseStepImage(int width, int height, int cx, int cy, int rx, int ry)
+{
+    cv::Mat image(height, width, CV_8UC3, cv::Scalar(35, 35, 35));
+    cv::ellipse(image,
+                cv::Point(cx, cy),
+                cv::Size(rx, ry),
+                0.0,
+                0.0,
+                360.0,
+                cv::Scalar(215, 215, 215),
+                cv::FILLED);
+    cv::GaussianBlur(image, image, cv::Size(5, 5), 1.0);
+    return image;
+}
+
+bool RunFindLineBoundaryTriggerSmoke(double& observed, std::string& reason)
+{
+    Image image;
+    image.copyFromMat(MakeVerticalStepImage(128, 96, 64, true));
+
+    FindLine line;
+    line.setline(16, 48, 112, 48, 16);
+    line.SetWHgap(4, 4);
+    line.setlinegap(2);
+    line.setobjfilter(0);
+    line.setpointconsistency(0, 0);
+    line.setboundaryresponsemode(
+        static_cast<int>(CxBoundaryResponseMode::NegativeStep));
+    line.setboundarypolarity(
+        static_cast<int>(CxBoundaryPolarity::Falling));
+    line.setboundarydenoise(
+        static_cast<int>(CxBoundaryDenoiseMode::Gaussian));
+    line.setboundarysmoothingradius(1);
+    line.setboundarythresholdpermille(50);
+    line.setboundaryminamplitudepermille(20);
+    line.measure(&image);
+
+    const FindLineMeasureInputDebug& debug = line.lastmeasureinputdebug();
+    observed = static_cast<double>(debug.boundary_response_points_emitted);
+
+    if (!debug.boundary_response_enabled)
+    {
+        reason = "FindLine BoundaryResponse was not enabled";
+        return false;
+    }
+    if (debug.boundary_response_scan_rows_evaluated <= 0)
+    {
+        reason = "FindLine BoundaryResponse evaluated no scan rows";
+        return false;
+    }
+    if (debug.boundary_response_candidate_count <= 0)
+    {
+        reason = "FindLine BoundaryResponse produced no candidates";
+        return false;
+    }
+    if (debug.boundary_response_points_emitted < 2)
+    {
+        reason = "FindLine BoundaryResponse emitted fewer than two points";
+        return false;
+    }
+    if ((line.getresultpointsw().size() + line.getresultpointsh().size()) <= 0)
+    {
+        reason = "FindLine BoundaryResponse emitted diagnostics but no measure points";
+        return false;
+    }
+
+    int accepted_scan_diagnostics = 0;
+    for (int i = 0; i < line.getscandiagnosticcount(); ++i)
+    {
+        FindLineMeasureInputDebug::ScanDiagnostic diag;
+        if (line.getscandiagnostic(i, diag) &&
+            diag.boundary_response_used &&
+            diag.accepted)
+        {
+            ++accepted_scan_diagnostics;
+        }
+    }
+    if (accepted_scan_diagnostics <= 0)
+    {
+        reason = "FindLine BoundaryResponse accepted no scan diagnostic rows";
+        return false;
+    }
+
+    reason = "FindLine BoundaryResponse emits real measure points and diagnostics";
+    return true;
+}
+
+bool RunFindCircleBoundaryTriggerSmoke(double& observed, std::string& reason)
+{
+    Image image;
+    image.copyFromMat(MakeCircleStepImage(128, 128, 64, 64, 34));
+
+    FindCircle circle;
+    circle.Setgap(4);
+    circle.setcircle(64, 64, 98, 64);
+    circle.setlinegap(3);
+    circle.setfindsetting(0);
+    circle.setpointconsistency(0, 0);
+    circle.setboundaryresponsemode(
+        static_cast<int>(CxBoundaryResponseMode::NegativeStep));
+    circle.setboundarypolarity(
+        static_cast<int>(CxBoundaryPolarity::Falling));
+    circle.setboundarydenoise(
+        static_cast<int>(CxBoundaryDenoiseMode::Gaussian));
+    circle.setboundarysmoothingradius(1);
+    circle.setboundarythresholdpermille(50);
+    circle.setboundaryminamplitudepermille(20);
+    circle.setboundaryminplateauwidth(1);
+    circle.Measure(image);
+    circle.fitcircle();
+
+    const FindCircleMeasureGeometryDebug& debug =
+        circle.lastmeasuregeometrydebug();
+    observed = static_cast<double>(debug.boundary_response_points_emitted);
+
+    if (debug.boundary_response_enabled != 1)
+    {
+        reason = "FindCircle boundary response was not enabled";
+        return false;
+    }
+    if (debug.boundary_response_scan_lines_evaluated <= 0)
+    {
+        reason = "FindCircle boundary response evaluated no scan lines";
+        return false;
+    }
+    if (debug.boundary_response_candidate_count <= 0)
+    {
+        reason = "FindCircle boundary response found no candidates";
+        return false;
+    }
+    if (debug.boundary_response_points_emitted < 8)
+    {
+        reason = "FindCircle boundary response emitted too few points";
+        return false;
+    }
+    if (circle.getvalidpointcount() < 8)
+    {
+        reason = "FindCircle measure point count below fit minimum";
+        return false;
+    }
+    if (!circle.hasfitresult())
+    {
+        reason = "FindCircle boundary response did not produce fit circle";
+        return false;
+    }
+
+    const double radius_error = std::abs(circle.getradius() - 34.0);
+    if (radius_error > 4.0)
+    {
+        reason = "FindCircle boundary response radius error too large: " +
+            std::to_string(radius_error);
+        return false;
+    }
+
+    reason = "FindCircle BoundaryResponse emits radial measure points and fit";
+    return true;
+}
+
+bool RunFindEllipseBoundaryTriggerSmoke(double& observed, std::string& reason)
+{
+    Image image;
+    image.copyFromMat(MakeEllipseStepImage(160, 128, 80, 64, 42, 26));
+
+    FindEllipse ellipse;
+    ellipse.setbboxx0(38);
+    ellipse.setbboxy0(38);
+    ellipse.setbboxx1(122);
+    ellipse.setbboxy1(90);
+    ellipse.buildbbox();
+    ellipse.setinnerpercent(15);
+    ellipse.Setgap(4);
+    ellipse.setlinegap(3);
+    ellipse.setthre(8);
+    ellipse.setmethod(0);
+    ellipse.setfindsetting(0);
+    ellipse.setselectedgenum(0);
+    ellipse.setpointconsistency(0, 0);
+    ellipse.setboundaryresponsemode(
+        static_cast<int>(CxBoundaryResponseMode::NegativeStep));
+    ellipse.setboundarypolarity(
+        static_cast<int>(CxBoundaryPolarity::Falling));
+    ellipse.setboundarydenoise(
+        static_cast<int>(CxBoundaryDenoiseMode::Gaussian));
+    ellipse.setboundarysmoothingradius(1);
+    ellipse.setboundarythresholdpermille(50);
+    ellipse.setboundaryminamplitudepermille(20);
+    ellipse.setboundaryminplateauwidth(1);
+    ellipse.measure(&image);
+    ellipse.fitellipse();
+
+    FindEllipseDisplaySnapshot snapshot;
+    if (!ellipse.getdisplaysnapshot(snapshot))
+    {
+        reason = "FindEllipse display snapshot was unavailable";
+        return false;
+    }
+
+    observed = static_cast<double>(snapshot.boundary_response_points_emitted);
+
+    if (snapshot.boundary_response_enabled != 1)
+    {
+        reason = "FindEllipse boundary response was not enabled";
+        return false;
+    }
+    if (snapshot.boundary_response_scan_lines_evaluated <= 0)
+    {
+        reason = "FindEllipse boundary response evaluated no scan lines";
+        return false;
+    }
+    if (snapshot.boundary_response_candidate_count <= 0)
+    {
+        reason = "FindEllipse boundary response found no candidates";
+        return false;
+    }
+    if (snapshot.boundary_response_points_emitted < 8)
+    {
+        reason = "FindEllipse boundary response emitted too few points";
+        return false;
+    }
+    if (ellipse.getvalidpointcount() < 8)
+    {
+        reason = "FindEllipse measure point count below fit minimum";
+        return false;
+    }
+    if (ellipse.hasfitresult() == 0.0)
+    {
+        reason = "FindEllipse boundary response did not produce fit ellipse";
+        return false;
+    }
+
+    const double rx_error =
+        std::min(std::abs(ellipse.getresultradiusx() - 42.0),
+                 std::abs(ellipse.getresultradiusy() - 42.0));
+    const double ry_error =
+        std::min(std::abs(ellipse.getresultradiusx() - 26.0),
+                 std::abs(ellipse.getresultradiusy() - 26.0));
+    if (rx_error > 6.0 || ry_error > 6.0)
+    {
+        reason = "FindEllipse boundary response radius error too large: rx=" +
+            std::to_string(rx_error) + " ry=" + std::to_string(ry_error);
+        return false;
+    }
+
+    reason = "FindEllipse BoundaryResponse emits radial measure points and fit";
+    return true;
 }
 
 bool WriteSummary(const std::filesystem::path& out_dir, CxMetrologyAnalyticsSmokeResult& result, std::string& reason)
@@ -511,6 +823,268 @@ bool RunMetrologyAnalyticsSmoke(
         CxRoughness1DResult ramp = computeProfileRoughness(MakeRampProfile(10000));
         AddCase(result, "roughness_ramp_positive", "roughness", ramp.Ra > 0.0 && ramp.Rq > ramp.Ra, ramp.Rq, ramp.Ra, 0.0, "ramp roughness produces positive Ra/Rq");
 
+        CxBoundaryResponseConfig boundaryConfig;
+        boundaryConfig.baseline_mode = CxBoundaryBaselineMode::Offset;
+        boundaryConfig.denoise_mode = CxBoundaryDenoiseMode::None;
+        boundaryConfig.response_mode = CxBoundaryResponseMode::NegativeStep;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        boundaryConfig.wavelet_scale = 1;
+        boundaryConfig.trigger_threshold_permille = 100;
+        boundaryConfig.min_amplitude_permille = 100;
+        const CxBoundaryResponseResult fallingStep =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false), boundaryConfig);
+        AddCase(result, "boundary_response_falling_step", "boundary_response",
+                fallingStep.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(fallingStep), 63.5, 1.0),
+                SelectedBoundaryPosition(fallingStep), 63.5, 1.0,
+                "negative step response localizes the falling edge");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::Auto;
+        boundaryConfig.polarity = CxBoundaryPolarity::Either;
+        const CxBoundaryResponseResult automaticStep =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false), boundaryConfig);
+        AddCase(result, "boundary_response_auto_step", "boundary_response",
+                automaticStep.status == "PREVIEW_READY" &&
+                    automaticStep.effective_response_mode ==
+                        CxBoundaryResponseMode::NegativeStep,
+                static_cast<double>(automaticStep.effective_response_mode ==
+                                    CxBoundaryResponseMode::NegativeStep),
+                1.0, 0.0,
+                "automatic model recognition selects a negative step");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::NegativeStep;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+
+        const CxBoundaryResponseResult brightnessScaledStep =
+            EvaluateBoundaryResponse(
+                MakeStepWaveform(128, 64, false, 40.0f, 180.0f),
+                boundaryConfig);
+        AddCase(result, "boundary_response_brightness_invariant",
+                "boundary_response",
+                brightnessScaledStep.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(brightnessScaledStep),
+                         SelectedBoundaryPosition(fallingStep), 0.25),
+                SelectedBoundaryPosition(brightnessScaledStep),
+                SelectedBoundaryPosition(fallingStep), 0.25,
+                "offset and range normalization preserve edge location under brightness scaling");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::PositiveStep;
+        boundaryConfig.polarity = CxBoundaryPolarity::Rising;
+        const CxBoundaryResponseResult risingStep =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 48, true), boundaryConfig);
+        AddCase(result, "boundary_response_rising_step", "boundary_response",
+                risingStep.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(risingStep), 47.5, 1.0),
+                SelectedBoundaryPosition(risingStep), 47.5, 1.0,
+                "positive step response localizes the rising edge");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::RisingGradient;
+        const CxBoundaryResponseResult risingGradient =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 48, true),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_rising_gradient",
+                "boundary_response",
+                risingGradient.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(risingGradient), 47.5, 1.0),
+                SelectedBoundaryPosition(risingGradient), 47.5, 1.0,
+                "rising-gradient mode localizes the positive derivative peak");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::FallingGradient;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        const CxBoundaryResponseResult fallingGradient =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_falling_gradient",
+                "boundary_response",
+                fallingGradient.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(fallingGradient), 63.5, 1.0),
+                SelectedBoundaryPosition(fallingGradient), 63.5, 1.0,
+                "falling-gradient mode localizes the negative derivative peak");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::LevelCrossing;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        boundaryConfig.level_permille = 500;
+        boundaryConfig.subpixel_mode = CxBoundarySubpixelMode::LinearCrossing;
+        const CxBoundaryResponseResult levelCrossing =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false), boundaryConfig);
+        AddCase(result, "boundary_response_level_crossing", "boundary_response",
+                levelCrossing.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(levelCrossing), 63.5, 1e-12),
+                SelectedBoundaryPosition(levelCrossing), 63.5, 1e-12,
+                "50 percent crossing uses linear subpixel interpolation");
+
+        std::vector<float> peakWaveform(96, 0.1f);
+        peakWaveform[39] = 0.6f;
+        peakWaveform[40] = 1.0f;
+        peakWaveform[41] = 0.6f;
+        boundaryConfig.response_mode = CxBoundaryResponseMode::Peak;
+        boundaryConfig.polarity = CxBoundaryPolarity::Either;
+        boundaryConfig.subpixel_mode = CxBoundarySubpixelMode::ParabolicResponse;
+        const CxBoundaryResponseResult peakResponse =
+            EvaluateBoundaryResponse(peakWaveform, boundaryConfig);
+        AddCase(result, "boundary_response_peak", "boundary_response",
+                peakResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(peakResponse), 40.0, 1e-12),
+                SelectedBoundaryPosition(peakResponse), 40.0, 1e-12,
+                "peak trigger localizes a symmetric waveform maximum");
+
+        std::vector<float> valleyWaveform(96, 0.9f);
+        valleyWaveform[39] = 0.4f;
+        valleyWaveform[40] = 0.0f;
+        valleyWaveform[41] = 0.4f;
+        boundaryConfig.response_mode = CxBoundaryResponseMode::Valley;
+        const CxBoundaryResponseResult valleyResponse =
+            EvaluateBoundaryResponse(valleyWaveform, boundaryConfig);
+        AddCase(result, "boundary_response_valley", "boundary_response",
+                valleyResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(valleyResponse), 40.0, 1.0),
+                SelectedBoundaryPosition(valleyResponse), 40.0, 1.0,
+                "valley trigger localizes a symmetric waveform minimum");
+
+        boundaryConfig.response_mode =
+            CxBoundaryResponseMode::CurvatureZeroCrossing;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        const CxBoundaryResponseResult curvatureResponse =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_curvature_zero_crossing",
+                "boundary_response",
+                curvatureResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(curvatureResponse), 63.5, 2.0),
+                SelectedBoundaryPosition(curvatureResponse), 63.5, 2.0,
+                "curvature zero crossing is constrained by falling polarity");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::PullUp;
+        boundaryConfig.polarity = CxBoundaryPolarity::Rising;
+        const CxBoundaryResponseResult pullUpResponse =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 48, true),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_pull_up", "boundary_response",
+                pullUpResponse.status == "PREVIEW_READY",
+                pullUpResponse.status == "PREVIEW_READY" ? 1.0 : 0.0,
+                1.0, 0.0,
+                "pull-up state validates rising transition and held plateau");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::PullDown;
+        boundaryConfig.polarity = CxBoundaryPolarity::Falling;
+        const CxBoundaryResponseResult pullDownResponse =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_pull_down", "boundary_response",
+                pullDownResponse.status == "PREVIEW_READY",
+                pullDownResponse.status == "PREVIEW_READY" ? 1.0 : 0.0,
+                1.0, 0.0,
+                "pull-down state validates falling transition and held plateau");
+
+        std::vector<float> pulse(128, 0.0f);
+        for (int i = 30; i < 70; ++i)
+            pulse[static_cast<std::size_t>(i)] = 1.0f;
+        boundaryConfig.response_mode = CxBoundaryResponseMode::RiseFallPair;
+        boundaryConfig.pair_min_width = 20;
+        boundaryConfig.pair_max_width = 60;
+        const CxBoundaryResponseResult pairResponse =
+            EvaluateBoundaryResponse(pulse, boundaryConfig);
+        AddCase(result, "boundary_response_edge_pair", "boundary_response",
+                pairResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(pairResponse), 49.5, 2.0),
+                SelectedBoundaryPosition(pairResponse), 49.5, 2.0,
+                "rise-then-fall mode returns the center of a valid edge pair");
+
+        std::vector<float> valleyPulse(128, 1.0f);
+        for (int i = 30; i < 70; ++i)
+            valleyPulse[static_cast<std::size_t>(i)] = 0.0f;
+        boundaryConfig.response_mode = CxBoundaryResponseMode::FallRisePair;
+        const CxBoundaryResponseResult reversePairResponse =
+            EvaluateBoundaryResponse(valleyPulse, boundaryConfig);
+        AddCase(result, "boundary_response_reverse_edge_pair",
+                "boundary_response",
+                reversePairResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(reversePairResponse), 49.5,
+                         2.0),
+                SelectedBoundaryPosition(reversePairResponse), 49.5, 2.0,
+                "fall-then-rise mode returns the center of a valid valley pair");
+
+        boundaryConfig.response_mode = CxBoundaryResponseMode::TemplateCorrelation;
+        boundaryConfig.reference_profile =
+            MakeStepWaveform(17, 9, false);
+        const CxBoundaryResponseResult templateResponse =
+            EvaluateBoundaryResponse(MakeStepWaveform(128, 64, false),
+                                     boundaryConfig);
+        AddCase(result, "boundary_response_template_correlation",
+                "boundary_response",
+                templateResponse.status == "PREVIEW_READY" &&
+                    Near(SelectedBoundaryPosition(templateResponse), 64.0, 3.0),
+                SelectedBoundaryPosition(templateResponse), 64.0, 3.0,
+                "bound waveform template produces a localized correlation candidate");
+        boundaryConfig.reference_profile.clear();
+
+        struct BoundaryWaveletSmokeMode
+        {
+            CxBoundaryResponseMode mode;
+            const char* case_suffix;
+        };
+        const BoundaryWaveletSmokeMode waveletModes[] = {
+            {CxBoundaryResponseMode::Haar, "haar"},
+            {CxBoundaryResponseMode::Daubechies4, "daubechies4"},
+            {CxBoundaryResponseMode::Daubechies20, "daubechies20"},
+            {CxBoundaryResponseMode::DerivativeOfGaussian, "dog"}};
+        for (const BoundaryWaveletSmokeMode& item : waveletModes)
+        {
+            boundaryConfig.response_mode = item.mode;
+            boundaryConfig.polarity = CxBoundaryPolarity::Either;
+            boundaryConfig.wavelet_scale = 2;
+            const CxBoundaryResponseResult wavelet = EvaluateBoundaryResponse(
+                MakeStepWaveform(128, 64, false), boundaryConfig);
+            AddCase(result,
+                    std::string("boundary_response_wavelet_") + item.case_suffix,
+                    "boundary_response", wavelet.status == "PREVIEW_READY",
+                    wavelet.status == "PREVIEW_READY" ? 1.0 : 0.0, 1.0, 0.0,
+                    std::string(CxBoundaryResponseModeName(item.mode)) +
+                        " produces a reviewable step candidate");
+        }
+
+        double findlineBoundaryObserved = 0.0;
+        std::string findlineBoundaryReason;
+        const bool findlineBoundaryPass =
+            RunFindLineBoundaryTriggerSmoke(
+                findlineBoundaryObserved,
+                findlineBoundaryReason);
+        AddCase(result, "findline_boundary_trigger_measure_points",
+                "boundary_response",
+                findlineBoundaryPass,
+                findlineBoundaryObserved,
+                2.0,
+                0.0,
+                findlineBoundaryReason);
+
+        double findcircleBoundaryObserved = 0.0;
+        std::string findcircleBoundaryReason;
+        const bool findcircleBoundaryPass =
+            RunFindCircleBoundaryTriggerSmoke(
+                findcircleBoundaryObserved,
+                findcircleBoundaryReason);
+        AddCase(result, "findcircle_boundary_trigger_measure_points",
+                "boundary_response",
+                findcircleBoundaryPass,
+                findcircleBoundaryObserved,
+                8.0,
+                0.0,
+                findcircleBoundaryReason);
+
+        double findellipseBoundaryObserved = 0.0;
+        std::string findellipseBoundaryReason;
+        const bool findellipseBoundaryPass =
+            RunFindEllipseBoundaryTriggerSmoke(
+                findellipseBoundaryObserved,
+                findellipseBoundaryReason);
+        AddCase(result, "findellipse_boundary_trigger_measure_points",
+                "boundary_response",
+                findellipseBoundaryPass,
+                findellipseBoundaryObserved,
+                8.0,
+                0.0,
+                findellipseBoundaryReason);
+
         AddCase(result, "boundary_1x1", "boundary", CxSurfaceField(1, 1).valueCount() == 1, 1.0, 1.0, 0.0, "1x1 field is valid");
         AddThrowCase(result, "boundary_out_of_range", "boundary", [] { CxSurfaceField(1, 1).at(2, 0); });
         AddThrowCase(result, "boundary_negative_scale", "boundary", []
@@ -545,14 +1119,23 @@ bool RunMetrologyAnalyticsSmoke(
             }
         }
         AddCase(result, "ui_global_count", "ui_globals",
-                uiGlobals.size() == 62,
-                static_cast<double>(uiGlobals.size()), 62.0, 0.0,
-                "Key Parameter Controls metrology panel exposes 62 global_metrology_* values");
+                uiGlobals.size() == 89,
+                static_cast<double>(uiGlobals.size()), 89.0, 0.0,
+                "Key Parameter Controls metrology panel exposes 89 global_metrology_* values");
         AddCase(result, "ui_global_prefix", "ui_globals", allGlobalMetrologyPrefixed, allGlobalMetrologyPrefixed ? 1.0 : 0.0, 1.0, 0.0, "all metrology UI globals use the global_metrology_ prefix");
         AddCase(result, "ui_scan_max_lines_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1) == 256, static_cast<double>(findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1)), 256.0, 0.0, "scan profile max lines default is locked");
         AddCase(result, "ui_surface_area_method_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_surface_area_method", -1) == 1, static_cast<double>(findUiValue(uiGlobals, "global_metrology_surface_area_method", -1)), 1.0, 0.0, "area method default is four-triangle fan");
         AddCase(result, "ui_unit_defaults", "ui_globals", findUiValue(uiGlobals, "global_metrology_x_unit", -1) == 2 && findUiValue(uiGlobals, "global_metrology_y_unit", -1) == 2 && findUiValue(uiGlobals, "global_metrology_z_unit", -1) == 2, static_cast<double>(findUiValue(uiGlobals, "global_metrology_x_unit", -1)), 2.0, 0.0, "x/y/z default units are micrometer entries");
         AddCase(result, "ui_roughness_bins_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_roughness_bins", -1) == 1024, static_cast<double>(findUiValue(uiGlobals, "global_metrology_roughness_bins", -1)), 1024.0, 0.0, "ISO 1D roughness bins default is locked");
+        AddCase(result, "ui_boundary_trigger_defaults", "ui_globals",
+                findUiValue(uiGlobals, "global_metrology_boundary_preview_enabled", -1) == 1 &&
+                    findUiValue(uiGlobals, "global_metrology_boundary_response_mode", -1) == 0 &&
+                    findUiValue(uiGlobals, "global_metrology_boundary_polarity", -1) == 2 &&
+                    findUiValue(uiGlobals, "global_metrology_boundary_level_permille", -1) == 500 &&
+                    findUiValue(uiGlobals, "global_metrology_boundary_reference_bound", -1) == 0,
+                static_cast<double>(findUiValue(uiGlobals, "global_metrology_boundary_response_mode", -1)),
+                0.0, 0.0,
+                "Boundary Trigger defaults use automatic model selection without a fabricated reference");
 
         AddCase(result, "ui_peak_defaults", "ui_globals",
                 findUiValue(uiGlobals, "global_metrology_peak_max_count", -1) == 12 &&
@@ -592,6 +1175,12 @@ bool RunMetrologyAnalyticsSmoke(
         uiEdited.curve_fit_full_range = false;
         uiEdited.critical_dimension_function = 4;
         uiEdited.critical_dimension_draw_whole_circle = true;
+        uiEdited.boundary_response_mode =
+            static_cast<int>(CxBoundaryResponseMode::NegativeStep);
+        uiEdited.boundary_polarity =
+            static_cast<int>(CxBoundaryPolarity::Falling);
+        uiEdited.boundary_gate_start_permille = 250;
+        uiEdited.boundary_reference_bound = true;
         const std::vector<CxMetrologyUiGlobalPair> uiEditedGlobals =
             BuildMetrologyUiGlobalSnapshot(uiEdited);
         const bool uiEditPropagation =
@@ -606,7 +1195,13 @@ bool RunMetrologyAnalyticsSmoke(
             findUiValue(uiEditedGlobals, "global_metrology_curve_fit_function", -1) == 1 &&
             findUiValue(uiEditedGlobals, "global_metrology_curve_fit_full_range", -1) == 0 &&
             findUiValue(uiEditedGlobals, "global_metrology_critical_dimension_function", -1) == 4 &&
-            findUiValue(uiEditedGlobals, "global_metrology_critical_dimension_draw_whole_circle", -1) == 1;
+            findUiValue(uiEditedGlobals, "global_metrology_critical_dimension_draw_whole_circle", -1) == 1 &&
+            findUiValue(uiEditedGlobals, "global_metrology_boundary_response_mode", -1) ==
+                static_cast<int>(CxBoundaryResponseMode::NegativeStep) &&
+            findUiValue(uiEditedGlobals, "global_metrology_boundary_polarity", -1) ==
+                static_cast<int>(CxBoundaryPolarity::Falling) &&
+            findUiValue(uiEditedGlobals, "global_metrology_boundary_gate_start_permille", -1) == 250 &&
+            findUiValue(uiEditedGlobals, "global_metrology_boundary_reference_bound", -1) == 1;
         AddCase(result, "ui_edit_global_propagation", "ui_globals", uiEditPropagation, uiEditPropagation ? 1.0 : 0.0, 1.0, 0.0, "edited metrology UI fields propagate to global_metrology_* snapshot values");
 
 

@@ -112,6 +112,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/metrology_analytics/CxSurfaceLevelPlane.cpp
   cximage/metrology_analytics/CxSurfaceUnitConversion.cpp
   cximage/metrology_analytics/CxRoughness1D.cpp
+  cximage/metrology_analytics/CxBoundaryResponse.cpp
   cximage/metrology_analytics/CxMetrologyUiGlobals.cpp
   cximage/metrology_analytics/CxAnalyticsObservationBridgeDraft.cpp
   cximage/metrology_analytics/CxMetrologyReferenceReplay.cpp

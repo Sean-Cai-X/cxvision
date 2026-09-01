@@ -56,6 +56,15 @@ struct CxScriptToolResultCapture
     int scan_runs_rejected_by_selection = 0;
     int scan_runs_rejected_near_endpoint = 0;
     int scan_points_emitted = 0;
+    int boundary_trigger_enabled = 0;
+    int boundary_trigger_mode = 0;
+    int boundary_trigger_polarity = 2;
+    int boundary_trigger_selection = 0;
+    int boundary_trigger_scan_rows_evaluated = 0;
+    int boundary_trigger_candidate_count = 0;
+    int boundary_trigger_points_emitted = 0;
+    int boundary_trigger_rejected_no_candidate = 0;
+    int boundary_trigger_rejected_endpoint = 0;
     int findline_point_consistency_enabled = 0;
     double findline_point_consistency_range = 0.0;
     int findline_point_consistency_input_points = 0;

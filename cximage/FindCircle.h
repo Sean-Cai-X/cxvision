@@ -4,6 +4,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "CxAlgorithmBudget.h"
+#include "metrology_analytics/CxBoundaryResponse.h"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -53,6 +54,14 @@ struct FindCircleMeasureGeometryDebug
         int accepted_position = -1;
         int min_edge_run_width_px = 3;
         int rejected_min_edge_run_width = 0;
+        bool boundary_response_used = false;
+        int boundary_response_mode = 0;
+        int boundary_response_candidate_count = 0;
+        int boundary_response_selected_index = -1;
+        double boundary_response_selected_position = -1.0;
+        double boundary_response_selected_score = 0.0;
+        std::string boundary_response_status;
+        std::string boundary_response_reason;
         std::string reject_reason;
     };
 
@@ -110,6 +119,15 @@ struct FindCircleMeasureGeometryDebug
     int candidate_min_edge_run_width_reject_count = 0;
     int candidate_boundary_reject_count = 0;
     int candidate_endpoint_reject_count = 0;
+    int boundary_response_enabled = 0;
+    int boundary_response_mode = 0;
+    int boundary_response_polarity = 2;
+    int boundary_response_selection = 0;
+    int boundary_response_scan_lines_evaluated = 0;
+    int boundary_response_candidate_count = 0;
+    int boundary_response_points_emitted = 0;
+    int boundary_response_rejected_no_candidate = 0;
+    int boundary_response_rejected_endpoint = 0;
     double selected_edge_radius_avg = 0.0;
     double selected_edge_radius_min = 0.0;
     double selected_edge_radius_max = 0.0;
@@ -292,6 +310,30 @@ public:
     void setlinesamplerate(double dsamplerate);
     void setlinegap(int igap);
     void setminedgerunwidth(int width);
+    void setboundaryresponseenabled(int enabled);
+    int getboundaryresponseenabled() const { return m_boundary_response_enabled ? 1 : 0; }
+    void setboundaryresponsemode(int mode);
+    int getboundaryresponsemode() const;
+    void setboundarypolarity(int polarity);
+    int getboundarypolarity() const;
+    void setboundaryselection(int selection);
+    int getboundaryselection() const;
+    void setboundarynthcandidate(int nth);
+    void setboundarysubpixel(int mode);
+    void setboundarybaseline(int mode);
+    void setboundarydenoise(int mode);
+    void setboundarysmoothingradius(int radius);
+    void setboundarybaselinewindow(int window);
+    void setboundarywaveletscale(int scale);
+    void setboundarythresholdpermille(int permille);
+    void setboundarylevelpermille(int permille);
+    void setboundaryhysteresispermille(int permille);
+    void setboundarygatestartpermille(int permille);
+    void setboundarygateendpermille(int permille);
+    void setboundaryminplateauwidth(int width);
+    void setboundaryminamplitudepermille(int permille);
+    void setboundarypairminwidth(int width);
+    void setboundarypairmaxwidth(int width);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
@@ -463,6 +505,10 @@ private:
     int m_scan_arc_start_degrees = 0;
     int m_scan_arc_end_degrees = 360;
     bool m_has_scan_arc_window = false;
+    bool m_boundary_response_enabled = false;
+    bool m_boundary_response_selection_explicit = false;
+    cxvision::metrology_analytics::CxBoundaryResponseConfig
+        m_boundary_response_config;
 
     int m_ncurscan;
     int m_nscansize;

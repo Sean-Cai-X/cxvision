@@ -699,6 +699,66 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "setminedgerunwidth",
                             &FindCircle::setminedgerunwidth);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryresponseenabled",
+                            &FindCircle::setboundaryresponseenabled);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryresponsemode",
+                            &FindCircle::setboundaryresponsemode);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarypolarity",
+                            &FindCircle::setboundarypolarity);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryselection",
+                            &FindCircle::setboundaryselection);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarynthcandidate",
+                            &FindCircle::setboundarynthcandidate);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarysubpixel",
+                            &FindCircle::setboundarysubpixel);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarybaseline",
+                            &FindCircle::setboundarybaseline);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarydenoise",
+                            &FindCircle::setboundarydenoise);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarysmoothingradius",
+                            &FindCircle::setboundarysmoothingradius);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarybaselinewindow",
+                            &FindCircle::setboundarybaselinewindow);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarywaveletscale",
+                            &FindCircle::setboundarywaveletscale);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarythresholdpermille",
+                            &FindCircle::setboundarythresholdpermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarylevelpermille",
+                            &FindCircle::setboundarylevelpermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryhysteresispermille",
+                            &FindCircle::setboundaryhysteresispermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarygatestartpermille",
+                            &FindCircle::setboundarygatestartpermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarygateendpermille",
+                            &FindCircle::setboundarygateendpermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryminplateauwidth",
+                            &FindCircle::setboundaryminplateauwidth);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundaryminamplitudepermille",
+                            &FindCircle::setboundaryminamplitudepermille);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarypairminwidth",
+                            &FindCircle::setboundarypairminwidth);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
+                            "setboundarypairmaxwidth",
+                            &FindCircle::setboundarypairmaxwidth);
+    m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle,
                             "setmethod", &FindCircle::setmethod);
     m_parser.DefineClassFun(findcircle_type_name.data(), pfindcircle, "setthre",
                             &FindCircle::setthre);
@@ -904,6 +964,66 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun("FindEllipse", pfindellipse,
                             "setminedgerunwidth",
                             &FindEllipse::setminedgerunwidth);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryresponseenabled",
+                            &FindEllipse::setboundaryresponseenabled);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryresponsemode",
+                            &FindEllipse::setboundaryresponsemode);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarypolarity",
+                            &FindEllipse::setboundarypolarity);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryselection",
+                            &FindEllipse::setboundaryselection);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarynthcandidate",
+                            &FindEllipse::setboundarynthcandidate);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarysubpixel",
+                            &FindEllipse::setboundarysubpixel);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarybaseline",
+                            &FindEllipse::setboundarybaseline);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarydenoise",
+                            &FindEllipse::setboundarydenoise);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarysmoothingradius",
+                            &FindEllipse::setboundarysmoothingradius);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarybaselinewindow",
+                            &FindEllipse::setboundarybaselinewindow);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarywaveletscale",
+                            &FindEllipse::setboundarywaveletscale);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarythresholdpermille",
+                            &FindEllipse::setboundarythresholdpermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarylevelpermille",
+                            &FindEllipse::setboundarylevelpermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryhysteresispermille",
+                            &FindEllipse::setboundaryhysteresispermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarygatestartpermille",
+                            &FindEllipse::setboundarygatestartpermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarygateendpermille",
+                            &FindEllipse::setboundarygateendpermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryminplateauwidth",
+                            &FindEllipse::setboundaryminplateauwidth);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundaryminamplitudepermille",
+                            &FindEllipse::setboundaryminamplitudepermille);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarypairminwidth",
+                            &FindEllipse::setboundarypairminwidth);
+    m_parser.DefineClassFun("FindEllipse", pfindellipse,
+                            "setboundarypairmaxwidth",
+                            &FindEllipse::setboundarypairmaxwidth);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setmethod",
                             &FindEllipse::setmethod);
     m_parser.DefineClassFun("FindEllipse", pfindellipse, "setfindsetting",
@@ -1007,13 +1127,73 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "measureRobust", &FindLine::measureRobust);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline,
                             "setlinesample", &FindLine::setlinesamplerate);
-  m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap",
-                          &FindLine::setlinegap);
-  m_parser.DefineClassFun(findline_type_name.data(), pfindline,
-                          "setminedgerunwidth",
-                          &FindLine::setminedgerunwidth);
-  m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod",
-                          &FindLine::setmethod);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setlinegap",
+                            &FindLine::setlinegap);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setminedgerunwidth",
+                            &FindLine::setminedgerunwidth);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryresponseenabled",
+                            &FindLine::setboundaryresponseenabled);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryresponsemode",
+                            &FindLine::setboundaryresponsemode);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarypolarity",
+                            &FindLine::setboundarypolarity);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryselection",
+                            &FindLine::setboundaryselection);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarynthcandidate",
+                            &FindLine::setboundarynthcandidate);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarysubpixel",
+                            &FindLine::setboundarysubpixel);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarybaseline",
+                            &FindLine::setboundarybaseline);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarydenoise",
+                            &FindLine::setboundarydenoise);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarysmoothingradius",
+                            &FindLine::setboundarysmoothingradius);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarybaselinewindow",
+                            &FindLine::setboundarybaselinewindow);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarywaveletscale",
+                            &FindLine::setboundarywaveletscale);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarythresholdpermille",
+                            &FindLine::setboundarythresholdpermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarylevelpermille",
+                            &FindLine::setboundarylevelpermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryhysteresispermille",
+                            &FindLine::setboundaryhysteresispermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarygatestartpermille",
+                            &FindLine::setboundarygatestartpermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarygateendpermille",
+                            &FindLine::setboundarygateendpermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryminplateauwidth",
+                            &FindLine::setboundaryminplateauwidth);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundaryminamplitudepermille",
+                            &FindLine::setboundaryminamplitudepermille);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarypairminwidth",
+                            &FindLine::setboundarypairminwidth);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline,
+                            "setboundarypairmaxwidth",
+                            &FindLine::setboundarypairmaxwidth);
+    m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setmethod",
+                            &FindLine::setmethod);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setthre",
                             &FindLine::setthre);
     m_parser.DefineClassFun(findline_type_name.data(), pfindline, "setgama",

@@ -32,6 +32,33 @@ struct CxMetrologyUiGlobalFields {
   int feature_map_mode = 0;
   int feature_map_normalize = 1;
 
+  bool boundary_preview_enabled = true;
+  int boundary_baseline_mode = 1;
+  int boundary_denoise_mode = 2;
+  int boundary_smoothing_radius = 2;
+  int boundary_baseline_window = 12;
+  int boundary_response_mode = 0;
+  int boundary_polarity = 2;
+  int boundary_wavelet_scale = 4;
+  int boundary_trigger_threshold_permille = 120;
+  int boundary_level_permille = 500;
+  int boundary_hysteresis_permille = 50;
+  int boundary_gate_start_permille = 0;
+  int boundary_gate_end_permille = 1000;
+  int boundary_selection_mode = 0;
+  int boundary_nth_candidate = 1;
+  int boundary_min_plateau_width = 3;
+  int boundary_min_amplitude_permille = 80;
+  int boundary_pair_min_width = 2;
+  int boundary_pair_max_width = 80;
+  int boundary_subpixel_mode = 2;
+  bool boundary_show_conditioned = true;
+  bool boundary_show_response = true;
+  bool boundary_show_scalogram = false;
+  int boundary_reference_mode = 0;
+  bool boundary_reference_bound = false;
+  int boundary_reference_position_permille = 500;
+
   int surface_source = 0;
   int surface_width = 256;
   int surface_height = 256;

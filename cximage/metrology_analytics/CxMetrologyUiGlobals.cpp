@@ -47,7 +47,7 @@ CxMetrologyUiGlobalFields DefaultMetrologyUiGlobalFields() {
 std::vector<CxMetrologyUiGlobalPair>
 BuildMetrologyUiGlobalSnapshot(const CxMetrologyUiGlobalFields &m) {
   std::vector<CxMetrologyUiGlobalPair> out;
-  out.reserve(64);
+  out.reserve(96);
 
   Add(out, "global_metrology_enabled", m.enabled ? 1 : 0);
   Add(out, "global_metrology_active_tab", m.active_tab);
@@ -71,6 +71,57 @@ BuildMetrologyUiGlobalSnapshot(const CxMetrologyUiGlobalFields &m) {
   Add(out, "global_metrology_candidate_max_width", m.candidate_max_width);
   Add(out, "global_metrology_feature_map_mode", m.feature_map_mode);
   Add(out, "global_metrology_feature_map_normalize", m.feature_map_normalize);
+
+  Add(out, "global_metrology_boundary_preview_enabled",
+      m.boundary_preview_enabled ? 1 : 0);
+  Add(out, "global_metrology_boundary_baseline_mode",
+      m.boundary_baseline_mode);
+  Add(out, "global_metrology_boundary_denoise_mode", m.boundary_denoise_mode);
+  Add(out, "global_metrology_boundary_smoothing_radius",
+      m.boundary_smoothing_radius);
+  Add(out, "global_metrology_boundary_baseline_window",
+      m.boundary_baseline_window);
+  Add(out, "global_metrology_boundary_response_mode",
+      m.boundary_response_mode);
+  Add(out, "global_metrology_boundary_polarity", m.boundary_polarity);
+  Add(out, "global_metrology_boundary_wavelet_scale",
+      m.boundary_wavelet_scale);
+  Add(out, "global_metrology_boundary_trigger_threshold_permille",
+      m.boundary_trigger_threshold_permille);
+  Add(out, "global_metrology_boundary_level_permille",
+      m.boundary_level_permille);
+  Add(out, "global_metrology_boundary_hysteresis_permille",
+      m.boundary_hysteresis_permille);
+  Add(out, "global_metrology_boundary_gate_start_permille",
+      m.boundary_gate_start_permille);
+  Add(out, "global_metrology_boundary_gate_end_permille",
+      m.boundary_gate_end_permille);
+  Add(out, "global_metrology_boundary_selection_mode",
+      m.boundary_selection_mode);
+  Add(out, "global_metrology_boundary_nth_candidate",
+      m.boundary_nth_candidate);
+  Add(out, "global_metrology_boundary_min_plateau_width",
+      m.boundary_min_plateau_width);
+  Add(out, "global_metrology_boundary_min_amplitude_permille",
+      m.boundary_min_amplitude_permille);
+  Add(out, "global_metrology_boundary_pair_min_width",
+      m.boundary_pair_min_width);
+  Add(out, "global_metrology_boundary_pair_max_width",
+      m.boundary_pair_max_width);
+  Add(out, "global_metrology_boundary_subpixel_mode",
+      m.boundary_subpixel_mode);
+  Add(out, "global_metrology_boundary_show_conditioned",
+      m.boundary_show_conditioned ? 1 : 0);
+  Add(out, "global_metrology_boundary_show_response",
+      m.boundary_show_response ? 1 : 0);
+  Add(out, "global_metrology_boundary_show_scalogram",
+      m.boundary_show_scalogram ? 1 : 0);
+  Add(out, "global_metrology_boundary_reference_mode",
+      m.boundary_reference_mode);
+  Add(out, "global_metrology_boundary_reference_bound",
+      m.boundary_reference_bound ? 1 : 0);
+  Add(out, "global_metrology_boundary_reference_position_permille",
+      m.boundary_reference_position_permille);
 
   Add(out, "global_metrology_surface_source", m.surface_source);
   Add(out, "global_metrology_surface_width", m.surface_width);
@@ -161,6 +212,13 @@ std::string BuildMetrologyUiGlobalSummary(const CxMetrologyUiGlobalFields &m) {
     << " candidate(rank=" << m.candidate_rank
     << ",grad=" << m.candidate_min_gradient << ",feature=" << m.feature_map_mode
     << ")"
+    << " boundary(mode=" << m.boundary_response_mode
+    << ",polarity=" << m.boundary_polarity
+    << ",threshold=" << m.boundary_trigger_threshold_permille
+    << ",gate=" << m.boundary_gate_start_permille << ":"
+    << m.boundary_gate_end_permille
+    << ",selection=" << m.boundary_selection_mode
+    << ",reference=" << (m.boundary_reference_bound ? 1 : 0) << ")"
     << " surface=" << m.surface_width << "x" << m.surface_height
     << " stride=" << m.surface_stride
     << " area_method=" << m.surface_area_method

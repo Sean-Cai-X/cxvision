@@ -1614,6 +1614,20 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["scan_runs_rejected_by_selection"] = capture.scan_runs_rejected_by_selection;
     pkg.metrics["scan_runs_rejected_near_endpoint"] = capture.scan_runs_rejected_near_endpoint;
     pkg.metrics["scan_points_emitted"] = capture.scan_points_emitted;
+    pkg.metrics["boundary_trigger_enabled"] = capture.boundary_trigger_enabled;
+    pkg.metrics["boundary_trigger_mode"] = capture.boundary_trigger_mode;
+    pkg.metrics["boundary_trigger_polarity"] = capture.boundary_trigger_polarity;
+    pkg.metrics["boundary_trigger_selection"] = capture.boundary_trigger_selection;
+    pkg.metrics["boundary_trigger_scan_rows_evaluated"] =
+        capture.boundary_trigger_scan_rows_evaluated;
+    pkg.metrics["boundary_trigger_candidate_count"] =
+        capture.boundary_trigger_candidate_count;
+    pkg.metrics["boundary_trigger_points_emitted"] =
+        capture.boundary_trigger_points_emitted;
+    pkg.metrics["boundary_trigger_rejected_no_candidate"] =
+        capture.boundary_trigger_rejected_no_candidate;
+    pkg.metrics["boundary_trigger_rejected_endpoint"] =
+        capture.boundary_trigger_rejected_endpoint;
     pkg.metrics["findline_point_consistency_enabled"] = capture.findline_point_consistency_enabled;
     pkg.metrics["findline_point_consistency_range"] = capture.findline_point_consistency_range;
     pkg.metrics["findline_point_consistency_input_points"] = capture.findline_point_consistency_input_points;
@@ -2256,6 +2270,22 @@ void WriteJsonFindLineScanDiagnostics(
              << d.min_edge_run_width_px << ',' << '\n';
         file << "      " << '"' << "rejected_min_edge_run_width" << '"' << ": "
              << d.rejected_min_edge_run_width << ',' << '\n';
+        file << "      " << '"' << "boundary_response_used" << '"' << ": "
+             << (d.boundary_response_used ? "true" : "false") << ',' << '\n';
+        file << "      " << '"' << "boundary_response_mode" << '"' << ": "
+             << d.boundary_response_mode << ',' << '\n';
+        file << "      " << '"' << "boundary_response_candidate_count" << '"' << ": "
+             << d.boundary_response_candidate_count << ',' << '\n';
+        file << "      " << '"' << "boundary_response_selected_index" << '"' << ": "
+             << d.boundary_response_selected_index << ',' << '\n';
+        file << "      " << '"' << "boundary_response_selected_position" << '"' << ": "
+             << d.boundary_response_selected_position << ',' << '\n';
+        file << "      " << '"' << "boundary_response_selected_score" << '"' << ": "
+             << d.boundary_response_selected_score << ',' << '\n';
+        file << "      " << '"' << "boundary_response_status" << '"' << ": " << '"'
+             << JsonEscape(d.boundary_response_status) << '"' << ',' << '\n';
+        file << "      " << '"' << "boundary_response_reason" << '"' << ": " << '"'
+             << JsonEscape(d.boundary_response_reason) << '"' << ',' << '\n';
         file << "      " << '"' << "threshold_first_run" << '"' << ": {"
              << '"' << "start" << '"' << ": " << d.threshold_first_run_start << ", "
              << '"' << "end" << '"' << ": " << d.threshold_first_run_end << "}," << '\n';
@@ -2461,6 +2491,11 @@ bool ParseCxScriptHeadlessArgs(
             options.ellipse_x1 = std::stoi(argv[++i]);
         else if (arg == "--ellipse-y1" && i + 1 < argc)
             options.ellipse_y1 = std::stoi(argv[++i]);
+        else if ((arg == "--findellipse-inner-scale-percent" ||
+                  arg == "--ellipse-inner-scale-percent") &&
+                 i + 1 < argc)
+            options.ellipse_inner_scale_percent =
+                std::max(0, std::min(99, std::stoi(argv[++i])));
         else if (arg == "--tool-half-width" && i + 1 < argc)
             options.tool_half_width = std::stoi(argv[++i]);
         else if (arg == "--wgap" && i + 1 < argc)

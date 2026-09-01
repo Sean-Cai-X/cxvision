@@ -18,13 +18,13 @@
 #include <vector>
 
 
-#include <opencv2/opencv.hpp>		
+#include <opencv2/opencv.hpp>
 #include <opencv2/core/version.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
-				
+
 
 #if defined USE_AI
 #include "mlpackrun.h"
@@ -96,6 +96,67 @@ void RotatePointAround(gp_Pnt& point, double center_x, double center_y, double a
     const double s = std::sin(angle_radians);
     point.SetX(center_x + dx * c - dy * s);
     point.SetY(center_y + dx * s + dy * c);
+}
+
+template <typename EnumT>
+EnumT ClampEnumInt(int value, int min_value, int max_value, EnumT fallback)
+{
+    if (value < min_value || value > max_value)
+        return fallback;
+    return static_cast<EnumT>(value);
+}
+
+int ClampPermille(int value)
+{
+    return std::max(0, std::min(1000, value));
+}
+
+std::vector<float> BuildFindLineGrayProfile(
+    const cv::Mat& gray,
+    LineShape& scan_line,
+    int line_length)
+{
+    std::vector<float> profile;
+    if (gray.empty() || line_length <= 0)
+        return profile;
+
+    profile.reserve(static_cast<std::size_t>(line_length));
+    for (int i = 0; i < line_length; ++i)
+    {
+        const gp_Pnt point = scan_line.getlinepoint(i);
+        const int x = static_cast<int>(std::lround(point.X()));
+        const int y = static_cast<int>(std::lround(point.Y()));
+        if (x < 0 || x >= gray.cols || y < 0 || y >= gray.rows)
+        {
+            profile.push_back(0.0f);
+            continue;
+        }
+        profile.push_back(static_cast<float>(gray.at<uchar>(y, x)));
+    }
+    return profile;
+}
+
+gp_Pnt InterpolateFindLinePoint(LineShape& scan_line,
+                                double position_samples,
+                                int line_length)
+{
+    if (!std::isfinite(position_samples) || line_length <= 1)
+        return scan_line.getlinepoint(0);
+
+    const double clamped = std::max(
+        0.0,
+        std::min(position_samples, static_cast<double>(line_length - 1)));
+    const int lo = static_cast<int>(std::floor(clamped));
+    const int hi = std::min(line_length - 1, lo + 1);
+    const double t = clamped - static_cast<double>(lo);
+
+    const gp_Pnt p0 = scan_line.getlinepoint(lo);
+    const gp_Pnt p1 = scan_line.getlinepoint(hi);
+    gp_Pnt out;
+    out.SetX(p0.X() + (p1.X() - p0.X()) * t);
+    out.SetY(p0.Y() + (p1.Y() - p0.Y()) * t);
+    out.SetZ(p0.Z() + (p1.Z() - p0.Z()) * t);
+    return out;
 }
 
 int ClampLongLongToInt(long long value)
@@ -645,7 +706,7 @@ m_min_edge_run_width_px(3),
 m_icomparegap(2),
 m_ishowlines(1),
 m_measurepointsboundingRect(gp_Pnt(0,0,0),0,0)
-{ 
+{
     string strname = string("fline%1");
     setname(strname.c_str());
     m_curfindlinenum = m_curfindlinenum + 1;
@@ -713,18 +774,18 @@ void FindLine::setshow(int ishow)
     }
     if (1 == ishow)
     {
-        m_measurepoints_w.setshow(1); 
-        m_measurepoints_h.setshow(1); 
+        m_measurepoints_w.setshow(1);
+        m_measurepoints_h.setshow(1);
     }
     if (ishow & 0x04)
-    {    
+    {
         for (int i = 0; i < m_lines_w.size(); i++)
         {
             if (i == 0)
                 m_lines_w[i].setcolor(255, 255, 0);
             if (i == m_lines_w.size() - 1)
                 m_lines_w[i].setcolor(255, 0, 0);
-            m_lines_w[i].setshow(true); 
+            m_lines_w[i].setshow(true);
         }
         for (int i = 0; i < m_lines_h.size(); i++)
         {
@@ -740,13 +801,13 @@ void FindLine::setshow(int ishow)
         for (int i = 0; i < m_lines_w.size(); i++)
             m_lines_w[i].setshow(false);
         for (int i = 0; i < m_lines_h.size(); i++)
-            m_lines_h[i].setshow(false); 
+            m_lines_h[i].setshow(false);
     }
     if (ishow & 0x08)
     {
-        
+
         m_modelpoints.setshow(2);
-         
+
     }
     if (ishow & 0x10)
     {
@@ -765,8 +826,8 @@ void FindLine::setshow(int ishow)
         int isize1 = ClampSizeToInt(m_l_measure_h_seek.size());
         for (int i = 0; i < isize0; i++)
         {
-            if (m_ishowlines == i) 
-                m_l_measure_w_seek[i].setshow(1);  
+            if (m_ishowlines == i)
+                m_l_measure_w_seek[i].setshow(1);
             else
                 m_l_measure_w_seek[i].setshow(false);
 
@@ -788,7 +849,296 @@ void FindLine::setselectedgenum(int iedgenum)
 
 void FindLine::setminedgerunwidth(int width)
 {
-    m_min_edge_run_width_px = std::max(1, std::min(20, width));
+    const int newWidth = std::max(1, std::min(20, width));
+    if (newWidth == m_min_edge_run_width_px)
+        return;
+
+    m_min_edge_run_width_px = newWidth;
+
+    if (m_measure_geometry_request.valid)
+    {
+        m_measure_geometry_request.min_edge_run_width_px =
+            m_min_edge_run_width_px;
+        MarkMeasureGeometryDirty();
+        m_measure_geometry_request.version = m_measure_geometry_version;
+    }
+    else
+    {
+        MarkMeasureGeometryDirty();
+    }
+
+    InvalidateMeasureAndFitAfterParamChange(
+        "setminedgerunwidth_changed");
+}
+
+void FindLine::setboundaryresponseenabled(int enabled)
+{
+    const bool newEnabled = enabled != 0;
+    if (m_boundary_response_enabled == newEnabled)
+        return;
+    m_boundary_response_enabled = newEnabled;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryresponseenabled_changed");
+}
+
+void FindLine::setboundaryresponsemode(int mode)
+{
+    const auto newMode = ClampEnumInt(
+        mode,
+        0,
+        17,
+        cxvision::metrology_analytics::CxBoundaryResponseMode::Auto);
+    if (m_boundary_response_enabled &&
+        m_boundary_response_config.response_mode == newMode)
+        return;
+    m_boundary_response_config.response_mode = newMode;
+    m_boundary_response_enabled = true;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryresponsemode_changed");
+}
+
+int FindLine::getboundaryresponsemode() const
+{
+    return static_cast<int>(m_boundary_response_config.response_mode);
+}
+
+void FindLine::setboundarypolarity(int polarity)
+{
+    const auto newPolarity = ClampEnumInt(
+        polarity,
+        0,
+        2,
+        cxvision::metrology_analytics::CxBoundaryPolarity::Either);
+    if (m_boundary_response_config.polarity == newPolarity)
+        return;
+    m_boundary_response_config.polarity = newPolarity;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarypolarity_changed");
+}
+
+int FindLine::getboundarypolarity() const
+{
+    return static_cast<int>(m_boundary_response_config.polarity);
+}
+
+void FindLine::setboundaryselection(int selection)
+{
+    const auto newSelection = ClampEnumInt(
+        selection,
+        0,
+        5,
+        cxvision::metrology_analytics::CxBoundarySelectionMode::Strongest);
+    if (m_boundary_response_selection_explicit &&
+        m_boundary_response_config.selection_mode == newSelection)
+        return;
+    m_boundary_response_config.selection_mode = newSelection;
+    m_boundary_response_selection_explicit = true;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryselection_changed");
+}
+
+int FindLine::getboundaryselection() const
+{
+    return static_cast<int>(m_boundary_response_config.selection_mode);
+}
+
+void FindLine::setboundarynthcandidate(int nth)
+{
+    const int newNth = std::max(1, nth);
+    if (m_boundary_response_config.nth_candidate == newNth)
+        return;
+    m_boundary_response_config.nth_candidate = newNth;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarynthcandidate_changed");
+}
+
+void FindLine::setboundarysubpixel(int mode)
+{
+    const auto newMode = ClampEnumInt(
+        mode,
+        0,
+        2,
+        cxvision::metrology_analytics::CxBoundarySubpixelMode::ParabolicResponse);
+    if (m_boundary_response_config.subpixel_mode == newMode)
+        return;
+    m_boundary_response_config.subpixel_mode = newMode;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarysubpixel_changed");
+}
+
+void FindLine::setboundarybaseline(int mode)
+{
+    const auto newMode = ClampEnumInt(
+        mode,
+        0,
+        4,
+        cxvision::metrology_analytics::CxBoundaryBaselineMode::Offset);
+    if (m_boundary_response_config.baseline_mode == newMode)
+        return;
+    m_boundary_response_config.baseline_mode = newMode;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarybaseline_changed");
+}
+
+void FindLine::setboundarydenoise(int mode)
+{
+    const auto newMode = ClampEnumInt(
+        mode,
+        0,
+        5,
+        cxvision::metrology_analytics::CxBoundaryDenoiseMode::Gaussian);
+    if (m_boundary_response_config.denoise_mode == newMode)
+        return;
+    m_boundary_response_config.denoise_mode = newMode;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarydenoise_changed");
+}
+
+void FindLine::setboundarysmoothingradius(int radius)
+{
+    const int newRadius = std::max(0, std::min(20, radius));
+    if (m_boundary_response_config.smoothing_radius == newRadius)
+        return;
+    m_boundary_response_config.smoothing_radius = newRadius;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarysmoothingradius_changed");
+}
+
+void FindLine::setboundarybaselinewindow(int window)
+{
+    const int newWindow = std::max(1, std::min(256, window));
+    if (m_boundary_response_config.baseline_window == newWindow)
+        return;
+    m_boundary_response_config.baseline_window = newWindow;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarybaselinewindow_changed");
+}
+
+void FindLine::setboundarywaveletscale(int scale)
+{
+    const int newScale = std::max(1, std::min(64, scale));
+    if (m_boundary_response_config.wavelet_scale == newScale)
+        return;
+    m_boundary_response_config.wavelet_scale = newScale;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarywaveletscale_changed");
+}
+
+void FindLine::setboundarythresholdpermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.trigger_threshold_permille == newValue)
+        return;
+    m_boundary_response_config.trigger_threshold_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarythresholdpermille_changed");
+}
+
+void FindLine::setboundarylevelpermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.level_permille == newValue)
+        return;
+    m_boundary_response_config.level_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarylevelpermille_changed");
+}
+
+void FindLine::setboundaryhysteresispermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.hysteresis_permille == newValue)
+        return;
+    m_boundary_response_config.hysteresis_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryhysteresispermille_changed");
+}
+
+void FindLine::setboundarygatestartpermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.gate_start_permille == newValue)
+        return;
+    m_boundary_response_config.gate_start_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarygatestartpermille_changed");
+}
+
+void FindLine::setboundarygateendpermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.gate_end_permille == newValue)
+        return;
+    m_boundary_response_config.gate_end_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarygateendpermille_changed");
+}
+
+void FindLine::setboundaryminplateauwidth(int width)
+{
+    const int newWidth = std::max(1, std::min(256, width));
+    if (m_boundary_response_config.min_plateau_width == newWidth)
+        return;
+    m_boundary_response_config.min_plateau_width = newWidth;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryminplateauwidth_changed");
+}
+
+void FindLine::setboundaryminamplitudepermille(int value)
+{
+    const int newValue = ClampPermille(value);
+    if (m_boundary_response_config.min_amplitude_permille == newValue)
+        return;
+    m_boundary_response_config.min_amplitude_permille = newValue;
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundaryminamplitudepermille_changed");
+}
+
+void FindLine::setboundarypairminwidth(int width)
+{
+    const int newWidth = std::max(1, std::min(1024, width));
+    if (m_boundary_response_config.pair_min_width == newWidth)
+        return;
+    m_boundary_response_config.pair_min_width = newWidth;
+    if (m_boundary_response_config.pair_max_width <
+        m_boundary_response_config.pair_min_width)
+    {
+        m_boundary_response_config.pair_max_width =
+            m_boundary_response_config.pair_min_width;
+    }
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarypairminwidth_changed");
+}
+
+void FindLine::setboundarypairmaxwidth(int width)
+{
+    const int newWidth = std::max(1, std::min(4096, width));
+    if (m_boundary_response_config.pair_max_width == newWidth)
+        return;
+    m_boundary_response_config.pair_max_width =
+        std::max(newWidth, m_boundary_response_config.pair_min_width);
+    MarkMeasureGeometryDirty();
+    InvalidateMeasureAndFitAfterParamChange(
+        "setboundarypairmaxwidth_changed");
 }
 
 void FindLine::clear()
@@ -1042,7 +1392,7 @@ void FindLine::InvalidateMeasureAndFitAfterParamChange(
 }
 
 void FindLine::setrect(int ix, int iy, int iw, int ih)
-{ 
+{
     m_iwgap = PositiveGap(m_iwgap);
     m_ihgap = PositiveGap(m_ihgap);
     if (iw < 0)
@@ -1079,7 +1429,7 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
     for (int i = 0; i < m_l_measure_h_seek.size(); i++)
     {
         m_l_measure_h_seek[i].clear();
-    } 
+    }
     m_l_measure_w_seek.clear();
     m_l_measure_h_seek.clear();
 
@@ -1097,7 +1447,7 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
     const int iplinehsize = ComputeLineScanCount(static_cast<double>(ih), m_ihgap, line_h_meta);
     LineShape aline1, aline2;
     for (int i = 0; i < iplinewsize; i++)
-    { 
+    {
         m_lines_w.push_back(aline1);
         m_lines_w[i].copy(m_LineB);
         m_lines_w[i].Move(RoundToInt(static_cast<double>(m_iwgap) * static_cast<double>(i)), 0);
@@ -1105,7 +1455,7 @@ void FindLine::setrect(int ix, int iy, int iw, int ih)
         m_lines_w[i].setshow(false);
     }
     for (int i = 0; i < iplinehsize; i++)
-    { 
+    {
         m_lines_h.push_back(aline2);
         m_lines_h[i].copy(m_LineA);
         m_lines_h[i].Move(0, RoundToInt(static_cast<double>(m_ihgap) * static_cast<double>(i)));
@@ -1129,10 +1479,10 @@ void FindLine::getshape(void* pshape)
 }
 void FindLine::translate(int ix,int iy)
 {
-    Translate(gp_Vec(ix, iy, 0)); 
+    Translate(gp_Vec(ix, iy, 0));
 }
 void FindLine::Translate(const gp_Vec& translationVector)
-{ 
+{
    int ix0 = RoundToInt(translationVector.X());
    int iy0 = RoundToInt(translationVector.Y());
    getpath().Translate(translationVector);
@@ -1140,16 +1490,16 @@ void FindLine::Translate(const gp_Vec& translationVector)
     m_LineB.Move(ix0, iy0);
     LineShape aline1, aline2;
     for (int i = 0; i < m_lines_w.size(); i++)
-    { 
+    {
         m_lines_w[i].Move(ix0, iy0);
     }
     for (int i = 0; i < m_lines_h.size(); i++)
     {
         m_lines_h[i].Move(ix0, iy0);
-    } 
+    }
 }
 void FindLine::drawpattern()
-{ 
+{
     m_modelpoints.setshow(8);
     m_modelpoints.drawshape(getpath());
     m_measurepointsA.drawshape(getpath());
@@ -1191,7 +1541,7 @@ void FindLine::edgepattern(Image& image)
 
     m_measurepointsA.doublepattern(m_icomparegap, 12, m_modelpoints);
     m_measurepointsB.doublepattern(m_icomparegap, 9, m_modelpoints);
-    
+
     setselectedgenum(0);
     setmethod(1);
     Measure(image);
@@ -1614,7 +1964,7 @@ void FindLine::MeasureT(void *pimage)
         iprocessw > g_pbackimage->getWidth())
         return;
 
-    
+
     {
         cv::Mat& backMat = g_pbackimage->getmat();
         if (!backMat.empty())
@@ -1678,6 +2028,14 @@ void FindLine::Measure(Image& image)
 
     m_lastMeasureInputDebug.filter_profile = m_filter_profile;
     m_lastMeasureInputDebug.filter_explicit = m_filter_explicit;
+    m_lastMeasureInputDebug.boundary_response_enabled =
+        m_boundary_response_enabled;
+    m_lastMeasureInputDebug.boundary_response_mode =
+        static_cast<int>(m_boundary_response_config.response_mode);
+    m_lastMeasureInputDebug.boundary_response_polarity =
+        static_cast<int>(m_boundary_response_config.polarity);
+    m_lastMeasureInputDebug.boundary_response_selection =
+        static_cast<int>(m_boundary_response_config.selection_mode);
 
     m_lastMeasureInputDebug.findobject_measure_called = false;
     m_lastMeasureInputDebug.findobject_measure_skipped = false;
@@ -1970,7 +2328,7 @@ void FindLine::Measure(Image& image)
             g_pbackimage->getWidth(),
             g_pbackimage->getHeight()));
 
-    
+
     {
         cv::Mat& backMat = g_pbackimage->getmat();
         if (!backMat.empty())
@@ -2252,7 +2610,7 @@ void FindLine::Measure(Image& image)
             m_lastMeasureInputDebug.findobject_foreground_after =
                 m_lastMeasureInputDebug.findobject_foreground_before;
         }
-        
+
         {
             int comp_count = g_pbackfindobject->getdebugcomponentcount();
             int accepted = g_pbackfindobject->getdebugacceptedcount();
@@ -2267,7 +2625,7 @@ void FindLine::Measure(Image& image)
             m_lastMeasureInputDebug.findobject_component_rejected_by_borw = 0;
             m_lastMeasureInputDebug.findobject_area_max_observed = max_area;
         }
-        
+
         LogFindlineMeasureProbe(
             "measure_after_findobject_measure",
             "running",
@@ -2288,6 +2646,28 @@ void FindLine::Measure(Image& image)
                 "findobject skipped because g_pbackfindobject is null";
         }
     }
+
+    cv::Mat boundaryGray;
+    if (m_boundary_response_enabled)
+    {
+        const cv::Mat src = image.getmat();
+        if (!src.empty())
+        {
+            if (src.channels() == 1)
+            {
+                if (src.depth() == CV_8U)
+                    boundaryGray = src;
+                else
+                    src.convertTo(boundaryGray, CV_8U);
+            }
+            else
+            {
+                cv::cvtColor(src, boundaryGray, cv::COLOR_BGR2GRAY);
+            }
+        }
+    }
+    const bool boundaryResponseActive =
+        m_boundary_response_enabled && !boundaryGray.empty();
 
     int irecordpoint[100];
     int irecordnum = 0;
@@ -2321,7 +2701,7 @@ void FindLine::Measure(Image& image)
             return false;
         }
 
-        
+
         if (m_iselectedgenum != -1 &&
             m_iselectedgenum != 0 &&
             m_iselectedgenum != 1)
@@ -2375,6 +2755,139 @@ void FindLine::Measure(Image& image)
         return true;
     };
 
+    auto tryBoundaryResponseScan = [&](
+        int scan_type,
+        int line_index,
+        int line_length,
+        std::size_t diagIndex) -> bool
+    {
+        if (!boundaryResponseActive ||
+            diagIndex >= m_lastMeasureInputDebug.scan_diagnostics.size())
+            return false;
+
+        auto& diag = m_lastMeasureInputDebug.scan_diagnostics[diagIndex];
+        LineShape& scan_line = scan_type == 0
+            ? m_lines_w[line_index]
+            : m_lines_h[line_index];
+
+        ++m_lastMeasureInputDebug.boundary_response_scan_rows_evaluated;
+        diag.boundary_response_used = true;
+        diag.boundary_response_mode =
+            static_cast<int>(m_boundary_response_config.response_mode);
+
+        std::vector<float> profile =
+            BuildFindLineGrayProfile(boundaryGray, scan_line, line_length);
+        if (profile.size() < 3)
+        {
+            ++m_lastMeasureInputDebug.boundary_response_rejected_no_candidate;
+            diag.boundary_response_status = "PROFILE_EMPTY";
+            diag.boundary_response_reason = "scan profile has fewer than 3 samples";
+            diag.reject_reason = "boundary_response_profile_empty";
+            return false;
+        }
+
+        cxvision::metrology_analytics::CxBoundaryResponseConfig config =
+            m_boundary_response_config;
+        config.min_plateau_width =
+            std::max(config.min_plateau_width, m_min_edge_run_width_px);
+
+        if (!m_boundary_response_selection_explicit)
+        {
+            if (m_iselectedgenum > 0)
+            {
+                config.selection_mode =
+                    cxvision::metrology_analytics::CxBoundarySelectionMode::Nth;
+                config.nth_candidate = m_iselectedgenum;
+            }
+            else if (m_iselectedgenum == -1)
+            {
+                config.selection_mode =
+                    cxvision::metrology_analytics::CxBoundarySelectionMode::Last;
+            }
+        }
+
+        const cxvision::metrology_analytics::CxBoundaryResponseResult response =
+            cxvision::metrology_analytics::EvaluateBoundaryResponse(
+                profile,
+                config);
+
+        diag.boundary_response_mode =
+            static_cast<int>(response.effective_response_mode);
+        diag.boundary_response_status = response.status;
+        diag.boundary_response_reason = response.reason;
+        diag.boundary_response_candidate_count =
+            static_cast<int>(response.candidates.size());
+        diag.candidate_count = diag.boundary_response_candidate_count;
+        m_lastMeasureInputDebug.boundary_response_candidate_count +=
+            diag.boundary_response_candidate_count;
+
+        if (response.selected_candidate < 0 ||
+            response.selected_candidate >=
+                static_cast<int>(response.candidates.size()))
+        {
+            ++m_lastMeasureInputDebug.boundary_response_rejected_no_candidate;
+            diag.reject_reason = response.reason.empty()
+                ? "boundary_response_no_selected_candidate"
+                : response.reason;
+            return false;
+        }
+
+        const auto& candidate =
+            response.candidates[static_cast<std::size_t>(
+                response.selected_candidate)];
+        diag.boundary_response_selected_index = response.selected_candidate;
+        diag.boundary_response_selected_position = candidate.position_samples;
+        diag.boundary_response_selected_score = candidate.score;
+
+        const int roundedPosition =
+            static_cast<int>(std::lround(candidate.position_samples));
+        const bool endpointOk =
+            roundedPosition < (line_length - m_iSelectPointGap - 3) &&
+            roundedPosition > (m_iSelectPointGap + 3);
+        if (!endpointOk)
+        {
+            ++m_lastMeasureInputDebug.boundary_response_rejected_endpoint;
+            ++m_lastMeasureInputDebug.scan_runs_rejected_near_endpoint;
+            diag.reject_reason = "boundary_response_endpoint_rejected";
+            RecordFindLineEdgeCandidate(
+                m_lastMeasureInputDebug,
+                response.selected_candidate + 1,
+                false,
+                false,
+                true,
+                false);
+            return false;
+        }
+
+        gp_Pnt point = InterpolateFindLinePoint(
+            scan_line,
+            candidate.position_samples,
+            line_length);
+        if (scan_type == 0)
+            m_measurepoints_w.addpoint(point);
+        else
+            m_measurepoints_h.addpoint(point);
+
+        ++m_lastMeasureInputDebug.scan_points_emitted;
+        ++m_lastMeasureInputDebug.boundary_response_points_emitted;
+        RecordFindLineAcceptedDiagnosticPoint(diag, point);
+        LogFindLineFocusedScan(
+            "accepted_boundary_response",
+            scan_line,
+            diag,
+            response.selected_candidate + 1,
+            roundedPosition,
+            &point);
+        RecordFindLineEdgeCandidate(
+            m_lastMeasureInputDebug,
+            response.selected_candidate + 1,
+            true,
+            false,
+            false,
+            false);
+        return true;
+    };
+
     for (int inumy = 0; inumy < iwsize; inumy++)
     {
         ++m_lastMeasureInputDebug.scan_rows_examined;
@@ -2398,6 +2911,14 @@ void FindLine::Measure(Image& image)
             -1,
             -1,
             nullptr);
+        if (boundaryResponseActive)
+        {
+            rowHasForeground =
+                tryBoundaryResponseScan(0, inumy, ilineslen1, diagIndex);
+            if (rowHasForeground)
+                ++m_lastMeasureInputDebug.scan_rows_with_foreground;
+            continue;
+        }
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -2767,6 +3288,17 @@ void FindLine::Measure(Image& image)
             -1,
             -1,
             nullptr);
+        if (boundaryResponseActive)
+        {
+            rowHasForeground = tryBoundaryResponseScan(
+                1,
+                inumy - iwsize,
+                ilineslen2,
+                diagIndex);
+            if (rowHasForeground)
+                ++m_lastMeasureInputDebug.scan_rows_with_foreground;
+            continue;
+        }
         irecordnum = 0;
         icurlinenum = 0;
         bcollectBegin = false;
@@ -3168,6 +3700,30 @@ void FindLine::Measure(Image& image)
             m_lastMeasureInputDebug.detail =
                 "Findline original Measure has no valid scan geometry.";
         }
+        else if (m_lastMeasureInputDebug.boundary_response_enabled)
+        {
+            if (m_lastMeasureInputDebug.boundary_response_scan_rows_evaluated <= 0)
+            {
+                m_lastMeasureInputDebug.failure_stage =
+                    "boundary_response_not_evaluated";
+                m_lastMeasureInputDebug.detail =
+                    "Findline BoundaryResponse was enabled but no scan row was evaluated.";
+            }
+            else if (m_lastMeasureInputDebug.boundary_response_candidate_count <= 0)
+            {
+                m_lastMeasureInputDebug.failure_stage =
+                    "boundary_response_no_candidates";
+                m_lastMeasureInputDebug.detail =
+                    "Findline BoundaryResponse evaluated scan profiles but produced no candidates.";
+            }
+            else
+            {
+                m_lastMeasureInputDebug.failure_stage =
+                    "boundary_response_no_measure_points";
+                m_lastMeasureInputDebug.detail =
+                    "Findline BoundaryResponse produced candidates, but trigger gates or endpoint checks rejected them.";
+            }
+        }
         else if (m_lastMeasureInputDebug.binary_foreground_pixels == 0)
         {
             m_lastMeasureInputDebug.failure_stage =
@@ -3216,7 +3772,7 @@ void FindLine::Measure(Image& image)
         }
     }
 
-    
+
 
 }
 void FindLine::MeasureBalanced(Image& image)
@@ -4427,7 +4983,7 @@ void FindLine::SmartFilter(double dist, double filtnum)
     else if(dist>0 && filtnum>0)
     {
         m_measurepoints_h.FilterPoints(dist, filtnum);
-        m_measurepoints_w.FilterPoints(dist, filtnum); 
+        m_measurepoints_w.FilterPoints(dist, filtnum);
     }
 
 
@@ -4473,6 +5029,14 @@ void FindLine::measure(void* pimage)
         m_point_consistency_enabled != 0 ? 1 : 0;
     m_lastMeasureInputDebug.point_consistency_range =
         static_cast<double>(m_point_consistency_range);
+    m_lastMeasureInputDebug.boundary_response_enabled =
+        m_boundary_response_enabled;
+    m_lastMeasureInputDebug.boundary_response_mode =
+        static_cast<int>(m_boundary_response_config.response_mode);
+    m_lastMeasureInputDebug.boundary_response_polarity =
+        static_cast<int>(m_boundary_response_config.polarity);
+    m_lastMeasureInputDebug.boundary_response_selection =
+        static_cast<int>(m_boundary_response_config.selection_mode);
 
     m_lastMeasureInputDebug.measure_geometry_request_valid =
         m_measure_geometry_request.valid;
@@ -5232,7 +5796,7 @@ void FindLine::easycluster(int igapx, int igapy, int iclusternum)
     }
 }
 void FindLine::InflectionPoint(void* points)
-{ 
+{
     PointsShape* tpoints = (PointsShape*)points;
     if (tpoints == nullptr)
         return;
@@ -5245,7 +5809,7 @@ void FindLine::InflectionPoint(void* points)
     {
         m_measurepoints_w.FindCrossPoints(points);
         return;
-    } 
+    }
 }
 
 bool FindLine::getdisplaysnapshot(FindLineDisplaySnapshot& out) const
@@ -5904,6 +6468,8 @@ void FindLine::UpdateMeasureGeometryRequest(double x0,
     m_measure_geometry_request.wgap = m_iwgap;
     m_measure_geometry_request.hgap = m_ihgap;
     m_measure_geometry_request.linegap = m_iSelectPointGap;
+    m_measure_geometry_request.min_edge_run_width_px =
+        m_min_edge_run_width_px;
     m_measure_geometry_request.version = m_measure_geometry_version;
 
     MarkMeasureGeometryDirty();

@@ -151,7 +151,35 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_ellipse_y0"] = static_cast<double>(options.ellipse_y0);
     overrides["global_ellipse_x1"] = static_cast<double>(options.ellipse_x1);
     overrides["global_ellipse_y1"] = static_cast<double>(options.ellipse_y1);
-    overrides["global_findellipse_inner_scale_percent"] = 0.0;
+    overrides["global_findellipse_inner_scale_percent"] =
+        static_cast<double>(options.ellipse_inner_scale_percent);
+
+    overrides["global_metrology_boundary_preview_enabled"] = 1.0;
+    overrides["global_metrology_boundary_baseline_mode"] = 1.0;
+    overrides["global_metrology_boundary_denoise_mode"] = 2.0;
+    overrides["global_metrology_boundary_smoothing_radius"] = 2.0;
+    overrides["global_metrology_boundary_baseline_window"] = 12.0;
+    overrides["global_metrology_boundary_response_mode"] = 0.0;
+    overrides["global_metrology_boundary_polarity"] = 2.0;
+    overrides["global_metrology_boundary_wavelet_scale"] = 4.0;
+    overrides["global_metrology_boundary_trigger_threshold_permille"] = 120.0;
+    overrides["global_metrology_boundary_level_permille"] = 500.0;
+    overrides["global_metrology_boundary_hysteresis_permille"] = 50.0;
+    overrides["global_metrology_boundary_gate_start_permille"] = 0.0;
+    overrides["global_metrology_boundary_gate_end_permille"] = 1000.0;
+    overrides["global_metrology_boundary_selection_mode"] = 0.0;
+    overrides["global_metrology_boundary_nth_candidate"] = 1.0;
+    overrides["global_metrology_boundary_min_plateau_width"] = 3.0;
+    overrides["global_metrology_boundary_min_amplitude_permille"] = 80.0;
+    overrides["global_metrology_boundary_pair_min_width"] = 2.0;
+    overrides["global_metrology_boundary_pair_max_width"] = 80.0;
+    overrides["global_metrology_boundary_subpixel_mode"] = 2.0;
+    overrides["global_metrology_boundary_show_conditioned"] = 1.0;
+    overrides["global_metrology_boundary_show_response"] = 1.0;
+    overrides["global_metrology_boundary_show_scalogram"] = 0.0;
+    overrides["global_metrology_boundary_reference_mode"] = 0.0;
+    overrides["global_metrology_boundary_reference_bound"] = 0.0;
+    overrides["global_metrology_boundary_reference_position_permille"] = 500.0;
 
     overrides["global_tool_half_width"] = static_cast<double>(options.tool_half_width);
     overrides["global_wgap"] = static_cast<double>(options.wgap);

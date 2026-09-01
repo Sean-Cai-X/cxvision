@@ -167,6 +167,21 @@ bool CaptureFindLineResult(
     output.scan_runs_rejected_by_selection = debug.scan_runs_rejected_by_selection;
     output.scan_runs_rejected_near_endpoint = debug.scan_runs_rejected_near_endpoint;
     output.scan_points_emitted = debug.scan_points_emitted;
+    output.boundary_trigger_enabled =
+        debug.boundary_response_enabled ? 1 : 0;
+    output.boundary_trigger_mode = debug.boundary_response_mode;
+    output.boundary_trigger_polarity = debug.boundary_response_polarity;
+    output.boundary_trigger_selection = debug.boundary_response_selection;
+    output.boundary_trigger_scan_rows_evaluated =
+        debug.boundary_response_scan_rows_evaluated;
+    output.boundary_trigger_candidate_count =
+        debug.boundary_response_candidate_count;
+    output.boundary_trigger_points_emitted =
+        debug.boundary_response_points_emitted;
+    output.boundary_trigger_rejected_no_candidate =
+        debug.boundary_response_rejected_no_candidate;
+    output.boundary_trigger_rejected_endpoint =
+        debug.boundary_response_rejected_endpoint;
     output.findline_point_consistency_enabled = debug.point_consistency_enabled;
     output.findline_point_consistency_range = debug.point_consistency_range;
     output.findline_point_consistency_input_points = debug.point_consistency_input_points;
@@ -278,6 +293,18 @@ bool CaptureFindLineResult(
         snap.min_edge_run_width_px = diag.min_edge_run_width_px;
         snap.rejected_min_edge_run_width =
             diag.rejected_min_edge_run_width;
+        snap.boundary_response_used = diag.boundary_response_used;
+        snap.boundary_response_mode = diag.boundary_response_mode;
+        snap.boundary_response_candidate_count =
+            diag.boundary_response_candidate_count;
+        snap.boundary_response_selected_index =
+            diag.boundary_response_selected_index;
+        snap.boundary_response_selected_position =
+            diag.boundary_response_selected_position;
+        snap.boundary_response_selected_score =
+            diag.boundary_response_selected_score;
+        snap.boundary_response_status = diag.boundary_response_status;
+        snap.boundary_response_reason = diag.boundary_response_reason;
         snap.threshold_first_run_start = diag.threshold_first_run_start;
         snap.threshold_first_run_end = diag.threshold_first_run_end;
         snap.threshold_last_run_start = diag.threshold_last_run_start;
@@ -423,6 +450,24 @@ bool CaptureFindCircleResult(
         tool.lastmeasuregeometrydebug();
     output.scan_runs_rejected_by_min_edge_width =
         geometry_debug.candidate_min_edge_run_width_reject_count;
+    output.boundary_trigger_enabled =
+        geometry_debug.boundary_response_enabled;
+    output.boundary_trigger_mode =
+        geometry_debug.boundary_response_mode;
+    output.boundary_trigger_polarity =
+        geometry_debug.boundary_response_polarity;
+    output.boundary_trigger_selection =
+        geometry_debug.boundary_response_selection;
+    output.boundary_trigger_scan_rows_evaluated =
+        geometry_debug.boundary_response_scan_lines_evaluated;
+    output.boundary_trigger_candidate_count =
+        geometry_debug.boundary_response_candidate_count;
+    output.boundary_trigger_points_emitted =
+        geometry_debug.boundary_response_points_emitted;
+    output.boundary_trigger_rejected_no_candidate =
+        geometry_debug.boundary_response_rejected_no_candidate;
+    output.boundary_trigger_rejected_endpoint =
+        geometry_debug.boundary_response_rejected_endpoint;
     output.findline_scan_diagnostics.clear();
     for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
     {
@@ -439,6 +484,18 @@ bool CaptureFindCircleResult(
         snap.accepted = diag.accepted;
         snap.accepted_x = diag.accepted_x;
         snap.accepted_y = diag.accepted_y;
+        snap.boundary_response_used = diag.boundary_response_used;
+        snap.boundary_response_mode = diag.boundary_response_mode;
+        snap.boundary_response_candidate_count =
+            diag.boundary_response_candidate_count;
+        snap.boundary_response_selected_index =
+            diag.boundary_response_selected_index;
+        snap.boundary_response_selected_position =
+            diag.boundary_response_selected_position;
+        snap.boundary_response_selected_score =
+            diag.boundary_response_selected_score;
+        snap.boundary_response_status = diag.boundary_response_status;
+        snap.boundary_response_reason = diag.boundary_response_reason;
         snap.reject_reason = diag.reject_reason;
         CxShapePoint p0;
         CxShapePoint p1;
@@ -563,6 +620,24 @@ bool CaptureFindEllipseResult(
     output.tool_min_edge_run_width_px = tool.minedgerunwidth();
     output.scan_runs_rejected_by_min_edge_width =
         snapshot.rejected_min_edge_run_width_count;
+    output.boundary_trigger_enabled =
+        snapshot.boundary_response_enabled;
+    output.boundary_trigger_mode =
+        snapshot.boundary_response_mode;
+    output.boundary_trigger_polarity =
+        snapshot.boundary_response_polarity;
+    output.boundary_trigger_selection =
+        snapshot.boundary_response_selection;
+    output.boundary_trigger_scan_rows_evaluated =
+        snapshot.boundary_response_scan_lines_evaluated;
+    output.boundary_trigger_candidate_count =
+        snapshot.boundary_response_candidate_count;
+    output.boundary_trigger_points_emitted =
+        snapshot.boundary_response_points_emitted;
+    output.boundary_trigger_rejected_no_candidate =
+        snapshot.boundary_response_rejected_no_candidate;
+    output.boundary_trigger_rejected_endpoint =
+        snapshot.boundary_response_rejected_endpoint;
     output.findline_scan_diagnostics.clear();
     for (int i = 0; i < tool.getscandiagnosticcount(); ++i)
     {
@@ -579,6 +654,18 @@ bool CaptureFindEllipseResult(
         snap.accepted = diag.accepted;
         snap.accepted_x = diag.accepted_x;
         snap.accepted_y = diag.accepted_y;
+        snap.boundary_response_used = diag.boundary_response_used;
+        snap.boundary_response_mode = diag.boundary_response_mode;
+        snap.boundary_response_candidate_count =
+            diag.boundary_response_candidate_count;
+        snap.boundary_response_selected_index =
+            diag.boundary_response_selected_index;
+        snap.boundary_response_selected_position =
+            diag.boundary_response_selected_position;
+        snap.boundary_response_selected_score =
+            diag.boundary_response_selected_score;
+        snap.boundary_response_status = diag.boundary_response_status;
+        snap.boundary_response_reason = diag.boundary_response_reason;
         snap.reject_reason = diag.reject_reason;
         CxShapePoint p0;
         CxShapePoint p1;
@@ -1001,6 +1088,20 @@ static void MergeToolCapture(
     capture.scan_runs_rejected_by_selection = tool.scan_runs_rejected_by_selection;
     capture.scan_runs_rejected_near_endpoint = tool.scan_runs_rejected_near_endpoint;
     capture.scan_points_emitted = tool.scan_points_emitted;
+    capture.boundary_trigger_enabled = tool.boundary_trigger_enabled;
+    capture.boundary_trigger_mode = tool.boundary_trigger_mode;
+    capture.boundary_trigger_polarity = tool.boundary_trigger_polarity;
+    capture.boundary_trigger_selection = tool.boundary_trigger_selection;
+    capture.boundary_trigger_scan_rows_evaluated =
+        tool.boundary_trigger_scan_rows_evaluated;
+    capture.boundary_trigger_candidate_count =
+        tool.boundary_trigger_candidate_count;
+    capture.boundary_trigger_points_emitted =
+        tool.boundary_trigger_points_emitted;
+    capture.boundary_trigger_rejected_no_candidate =
+        tool.boundary_trigger_rejected_no_candidate;
+    capture.boundary_trigger_rejected_endpoint =
+        tool.boundary_trigger_rejected_endpoint;
     capture.findline_point_consistency_enabled = tool.findline_point_consistency_enabled;
     capture.findline_point_consistency_range = tool.findline_point_consistency_range;
     capture.findline_point_consistency_input_points = tool.findline_point_consistency_input_points;

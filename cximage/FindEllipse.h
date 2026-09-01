@@ -3,6 +3,7 @@
 #include "Shape.h"
 #include "Image.h"
 #include "shapebase.h"
+#include "metrology_analytics/CxBoundaryResponse.h"
 #include <string>
 #include <vector>
 class FindObject;
@@ -47,6 +48,15 @@ struct FindEllipseDisplaySnapshot
     int scan_total_candidates = 0;
     int rejected_min_edge_run_width_count = 0;
     int scan_accepted_points_before_gate = 0;
+    int boundary_response_enabled = 0;
+    int boundary_response_mode = 0;
+    int boundary_response_polarity = 2;
+    int boundary_response_selection = 0;
+    int boundary_response_scan_lines_evaluated = 0;
+    int boundary_response_candidate_count = 0;
+    int boundary_response_points_emitted = 0;
+    int boundary_response_rejected_no_candidate = 0;
+    int boundary_response_rejected_endpoint = 0;
     double accepted_min_boundary_ratio = 0.0;
     double accepted_max_boundary_ratio = 0.0;
     double accepted_avg_boundary_ratio = 0.0;
@@ -90,6 +100,14 @@ struct FindEllipseMeasureGeometryDebug
         int accepted_position = -1;
         int min_edge_run_width_px = 3;
         int rejected_min_edge_run_width = 0;
+        bool boundary_response_used = false;
+        int boundary_response_mode = 0;
+        int boundary_response_candidate_count = 0;
+        int boundary_response_selected_index = -1;
+        double boundary_response_selected_position = -1.0;
+        double boundary_response_selected_score = 0.0;
+        std::string boundary_response_status;
+        std::string boundary_response_reason;
         std::string reject_reason;
     };
 };
@@ -198,6 +216,30 @@ public:
     void setlinesamplerate(double dsamplerate);
     void setlinegap(int igap);
     void setminedgerunwidth(int width);
+    void setboundaryresponseenabled(int enabled);
+    int getboundaryresponseenabled() const { return m_boundary_response_enabled ? 1 : 0; }
+    void setboundaryresponsemode(int mode);
+    int getboundaryresponsemode() const;
+    void setboundarypolarity(int polarity);
+    int getboundarypolarity() const;
+    void setboundaryselection(int selection);
+    int getboundaryselection() const;
+    void setboundarynthcandidate(int nth);
+    void setboundarysubpixel(int mode);
+    void setboundarybaseline(int mode);
+    void setboundarydenoise(int mode);
+    void setboundarysmoothingradius(int radius);
+    void setboundarybaselinewindow(int window);
+    void setboundarywaveletscale(int scale);
+    void setboundarythresholdpermille(int permille);
+    void setboundarylevelpermille(int permille);
+    void setboundaryhysteresispermille(int permille);
+    void setboundarygatestartpermille(int permille);
+    void setboundarygateendpermille(int permille);
+    void setboundaryminplateauwidth(int width);
+    void setboundaryminamplitudepermille(int permille);
+    void setboundarypairminwidth(int width);
+    void setboundarypairmaxwidth(int width);
     void setmethod(int imethod);
     void setthre(int ithre);
     void setgamarate(int igama);
@@ -286,6 +328,10 @@ private:
 
     int m_iselectedgenum;
     int m_ineedfixs;
+    bool m_boundary_response_enabled = false;
+    bool m_boundary_response_selection_explicit = false;
+    cxvision::metrology_analytics::CxBoundaryResponseConfig
+        m_boundary_response_config;
 
     int m_ncurscan;
     int m_nscansize;
@@ -341,6 +387,11 @@ private:
     int m_scan_total_candidates = 0;
     int m_rejected_min_edge_run_width_count = 0;
     int m_scan_accepted_points_before_gate = 0;
+    int m_boundary_response_scan_lines_evaluated = 0;
+    int m_boundary_response_candidate_count = 0;
+    int m_boundary_response_points_emitted = 0;
+    int m_boundary_response_rejected_no_candidate = 0;
+    int m_boundary_response_rejected_endpoint = 0;
     double m_accepted_boundary_ratio_sum = 0.0;
     double m_accepted_boundary_ratio_min = 999.0;
     double m_accepted_boundary_ratio_max = -999.0;
