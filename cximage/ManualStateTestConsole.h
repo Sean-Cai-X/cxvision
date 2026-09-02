@@ -1143,6 +1143,45 @@ struct CxValidationDatasetReadiness {
   bool frozen = false;
 };
 
+struct CxModelLineageOperationSelfTestProjection {
+  bool available = false;
+  std::string status = "NO_OPERATION_SELFTEST_RECORD";
+  std::string created_at;
+  std::string report_path;
+  std::string validation_gate_status;
+  std::string validation_gate_reason;
+  std::string compare_preflight;
+  std::string augmentation_retrain_preflight;
+  int accepted_nodes = 0;
+  int rejected_nodes = 0;
+  int parameter_assets_verified = 0;
+  int parameter_assets_rejected = 0;
+  int parent_links_present = 0;
+  int parent_links_missing = 0;
+  std::string human_review_status = "PENDING_HUMAN_REVIEW";
+  bool promotion_allowed = false;
+};
+
+struct CxModelWorkflowUiNode {
+  std::string node_id;
+  std::string display_name;
+  std::string node_kind;
+  std::vector<std::string> parent_node_ids;
+  std::string asset_ref;
+  std::string result_ref;
+  std::string status;
+  std::string detail;
+};
+
+struct CxModelWorkflowProjection {
+  bool available = false;
+  std::string display_name;
+  std::string workflow_path;
+  std::string status = "NO_WORKFLOW_MANIFEST";
+  bool promotion_allowed = false;
+  std::vector<CxModelWorkflowUiNode> nodes;
+};
+
 struct ScriptEvidenceThumb {
   std::string candidate_id;
   std::string candidate_dir;
@@ -1489,12 +1528,20 @@ struct ManualTestContext {
   std::string model_lineage_parent_selection_status = "PENDING_HUMAN_REVIEW";
   std::string model_lineage_parent_selection_message;
   std::string model_lineage_parent_selection_review_path;
+  std::string model_lineage_operation_status = "PENDING_NODE_OPERATION";
+  std::string model_lineage_operation_message;
   bool model_performance_profile_scan_attempted = false;
   std::string model_performance_profile_scan_root = "cxscript_runs/yolov8n_incremental_acceptance";
   CxModelPerformanceProfile model_performance_profile;
   bool validation_dataset_scan_attempted = false;
   std::string validation_dataset_scan_root = "cxscript_runs";
   CxValidationDatasetReadiness validation_dataset;
+  bool model_lineage_operation_selftest_scan_attempted = false;
+  std::string model_lineage_operation_selftest_scan_root = "cxscript_runs";
+  CxModelLineageOperationSelfTestProjection model_lineage_operation_selftest;
+  bool model_workflow_scan_attempted = false;
+  std::string model_workflow_scan_root = "cxscript_runs";
+  CxModelWorkflowProjection model_workflow;
   bool torch_training_latest_scan_attempted = false;
   bool torch_training_process_running = false;
   std::uintptr_t torch_training_process_handle = 0;
@@ -1505,6 +1552,7 @@ struct ManualTestContext {
   bool geometry_aug_include_local_gap = true;
   bool geometry_aug_include_jagged_cut = true;
   bool geometry_aug_include_line_break = true;
+  bool geometry_aug_require_source_disjoint_validation = true;
   float geometry_aug_train_brightness_scale = 0.72f;
   float geometry_aug_test_brightness_scale = 0.42f;
   int geometry_aug_gap_width_px = 14;

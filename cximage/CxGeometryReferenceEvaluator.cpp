@@ -853,6 +853,7 @@ struct AugVariant {
 struct AugSource {
   std::string directory;
   std::string review_item;
+  std::string source_split;
   std::string case_track;
   std::string geometry_type;
   std::string topology;
@@ -1043,6 +1044,7 @@ bool ReadAugSources(const std::filesystem::path &index_path,
   for (const cv::FileNode &item : index["cases"]) {
     AugSource source;
     source.directory = NodeString(item, "directory");
+    source.source_split = NodeString(item, "source_split");
     const std::string manifest_ref = NodeString(item, "manifest");
     const std::filesystem::path manifest_path = root / manifest_ref;
     path_error.clear();
@@ -2652,6 +2654,32 @@ bool RunCxGeometryAugmentationDataset(
     return false;
   }
 
+  if (options.require_source_disjoint_validation) {
+    std::set<std::string> trainClasses;
+    std::set<std::string> validationClasses;
+    for (const AugSource &source : sources) {
+      if (source.source_split != "train" &&
+          source.source_split != "validation") {
+        result.status = "SOURCE_SPLIT_DECLARATION_REQUIRED";
+        result.reason = "each source case must declare source_split=train or "
+                        "source_split=validation before independent validation";
+        reason = result.reason;
+        return false;
+      }
+      if (source.source_split == "train")
+        trainClasses.insert(source.geometry_type);
+      else
+        validationClasses.insert(source.geometry_type);
+    }
+    if (trainClasses != validationClasses) {
+      result.status = "SOURCE_SPLIT_CLASS_COVERAGE_FAIL";
+      result.reason = "train and validation source partitions do not have "
+                      "matching class coverage";
+      reason = result.reason;
+      return false;
+    }
+  }
+
   std::error_code error;
   if (std::filesystem::exists(options.output_dir)) {
     result.status = "OUTPUT_EXISTS";
@@ -2673,6 +2701,9 @@ bool RunCxGeometryAugmentationDataset(
   rows.reserve(sources.size() * variants.size());
   for (const AugSource &source : sources) {
     for (const AugVariant &variant : variants) {
+      if (options.require_source_disjoint_validation &&
+          source.source_split != variant.split)
+        continue;
       AugRow row;
       row.review_item = source.review_item + " / " + variant.review_suffix;
       row.split = variant.split;

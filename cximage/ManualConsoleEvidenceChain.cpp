@@ -8887,6 +8887,8 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
   options.reference_index_path = referenceIndex;
   options.augmentation_plan_path = planPath;
   options.output_dir = outputDir;
+  options.require_source_disjoint_validation =
+      m_manualTest.geometry_aug_require_source_disjoint_validation;
 
   CxGeometryAugmentationDatasetResult result;
   if (!RunCxGeometryAugmentationDataset(options, result, reason)) {
@@ -9345,6 +9347,126 @@ static void RefreshModelPerformanceProfileAssetsLocal(
   context.model_performance_profile.reason = lastReason;
 }
 
+static void RefreshValidationDatasetAssetsLocal(ManualTestContext &context) {
+  context.validation_dataset_scan_attempted = true;
+  context.validation_dataset = {};
+  CxValidationDatasetReadiness &readiness = context.validation_dataset;
+  std::error_code ec;
+  const std::filesystem::path scanRoot = ResolveCxVisionRunPath(
+      context.validation_dataset_scan_root);
+  if (!std::filesystem::is_directory(scanRoot, ec) || ec) {
+    readiness.status = "VALIDATION_BLOCKED_ASSET_MISSING";
+    readiness.reason = "validation scan root is not a directory: " +
+                       scanRoot.string();
+    return;
+  }
+  std::vector<std::filesystem::path> manifests;
+  std::vector<std::filesystem::path> pending{scanRoot};
+  while (!pending.empty()) {
+    const std::filesystem::path directory = pending.back();
+    pending.pop_back();
+    std::error_code directoryError;
+    std::filesystem::directory_iterator entries(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryError);
+    if (directoryError)
+      continue;
+    for (const std::filesystem::directory_entry &entry : entries) {
+      std::error_code entryError;
+      if (entry.is_symlink(entryError))
+        continue;
+      if (entry.is_directory(entryError) && !entryError)
+        pending.push_back(entry.path());
+      else if (!entryError && entry.is_regular_file(entryError) &&
+               entry.path().filename() == "dataset_manifest.json")
+        manifests.push_back(entry.path());
+    }
+  }
+  std::sort(manifests.begin(), manifests.end());
+  for (auto manifestIt = manifests.rbegin(); manifestIt != manifests.rend();
+       ++manifestIt) {
+    cv::FileStorage storage(manifestIt->string(), cv::FileStorage::READ);
+    if (!storage.isOpened() ||
+        ReadModelLineageStringLocal(storage.root(), "schema") !=
+            "cxvision.geometry_augmentation_dataset.v1")
+      continue;
+    const cv::FileNode samples = storage.root()["samples"];
+    if (!samples.isSeq())
+      continue;
+    readiness.available = true;
+    readiness.dataset_manifest_path = manifestIt->string();
+    std::unordered_set<std::string> trainSourceHashes;
+    std::unordered_set<std::string> validationSourceHashes;
+    for (const cv::FileNode &sample : samples) {
+      const std::string split = ReadModelLineageStringLocal(sample, "split");
+      const std::string caseRef =
+          ReadModelLineageStringLocal(sample, "case_path");
+      const std::filesystem::path casePath = manifestIt->parent_path() / caseRef;
+      if (split != "train" && split != "validation")
+        continue;
+      if (split == "train")
+        ++readiness.train_sample_count;
+      else
+        ++readiness.validation_sample_count;
+      cv::FileStorage caseManifest(
+          (casePath / "case_manifest.json").string(), cv::FileStorage::READ);
+      const cv::FileNode required = caseManifest.isOpened()
+                                        ? caseManifest.root()["required_assets"]
+                                        : cv::FileNode();
+      if (!caseManifest.isOpened() || !required.isSeq()) {
+        ++readiness.missing_required_asset_count;
+        continue;
+      }
+      for (const cv::FileNode &asset : required) {
+        const std::filesystem::path assetPath =
+            casePath / static_cast<std::string>(asset);
+        std::error_code assetError;
+        if (!std::filesystem::is_regular_file(assetPath, assetError) ||
+            assetError)
+          ++readiness.missing_required_asset_count;
+      }
+      cv::FileStorage hashes((casePath / "source_hashes.json").string(),
+                             cv::FileStorage::READ);
+      const std::string sourceHash = hashes.isOpened()
+          ? ReadModelLineageStringLocal(hashes.root(), "source_image")
+          : std::string();
+      if (sourceHash.empty()) {
+        ++readiness.missing_required_asset_count;
+      } else if (split == "train") {
+        trainSourceHashes.insert(sourceHash);
+      } else {
+        validationSourceHashes.insert(sourceHash);
+      }
+    }
+    for (const std::string &hash : validationSourceHashes) {
+      if (trainSourceHashes.find(hash) != trainSourceHashes.end())
+        ++readiness.source_lineage_overlap_count;
+    }
+    readiness.frozen = readiness.validation_sample_count > 0 &&
+                       readiness.missing_required_asset_count == 0;
+    if (readiness.validation_sample_count <= 0) {
+      readiness.status = "VALIDATION_BLOCKED_NO_FROZEN_SET";
+      readiness.reason = "dataset has no validation samples";
+    } else if (readiness.missing_required_asset_count > 0) {
+      readiness.status = "VALIDATION_BLOCKED_ASSET_MISSING";
+      readiness.reason = "required validation assets are missing";
+    } else if (readiness.source_lineage_overlap_count > 0) {
+      readiness.status = "VALIDATION_BLOCKED_SOURCE_LINEAGE_OVERLAP";
+      readiness.reason =
+          "validation images share source-image lineage with training images; "
+          "controlled perturbation regression is available, independent "
+          "generalization validation is not";
+    } else {
+      readiness.status = "VALIDATION_DATASET_FROZEN_READY_FOR_INFERENCE";
+      readiness.reason =
+          "frozen validation assets are complete and source-disjoint";
+    }
+    return;
+  }
+  readiness.status = "VALIDATION_BLOCKED_NO_DATASET_MANIFEST";
+  readiness.reason = "no supported validation dataset manifest was found";
+}
+
 static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
   context.model_lineage_scan_attempted = true;
   context.model_lineage_nodes.clear();
@@ -9772,6 +9894,549 @@ static bool WriteParentModelSelectionReviewLocal(
   return true;
 }
 
+static bool ValidateModelNodeAssetsLocal(const CxModelLineageUiNode &node,
+                                         std::string &reason) {
+  struct RequiredAsset {
+    const char *label;
+    const std::string *path;
+  };
+  const RequiredAsset assets[] = {
+      {"model manifest", &node.model_manifest_path},
+      {"checkpoint", &node.checkpoint_path},
+      {"dataset binding", &node.dataset_binding_path},
+      {"training plan", &node.training_plan_path},
+      {"metric bundle", &node.metric_bundle_path},
+  };
+  for (const RequiredAsset &asset : assets) {
+    std::error_code error;
+    if (asset.path->empty() ||
+        !std::filesystem::is_regular_file(*asset.path, error) || error) {
+      reason = std::string("ASSET_MISSING: ") + asset.label;
+      return false;
+    }
+  }
+  if (node.checkpoint_hash.empty() || node.checkpoint_hash_status.empty()) {
+    reason = "CHECKPOINT_HASH_FACT_MISSING";
+    return false;
+  }
+  reason = "model composition, checkpoint, dataset, plan and metric assets are readable";
+  return true;
+}
+
+int RunModelLineageOperationSelfTest(const std::string &scanRoot,
+                                     const std::string &outputDirectory) {
+  // This is intentionally a preflight and evidence recorder.  It never writes
+  // a human review, changes a selected parent, replaces a checkpoint, or starts
+  // a training/inference job.
+  ManualTestContext context;
+  context.model_lineage_scan_root = scanRoot;
+  context.validation_dataset_scan_root = scanRoot;
+  RefreshModelLineageAssetsLocal(context);
+  RefreshValidationDatasetAssetsLocal(context);
+
+  const std::filesystem::path outputRoot =
+      ResolveCxVisionRunPath(outputDirectory);
+  std::error_code ec;
+  std::filesystem::create_directories(outputRoot, ec);
+  if (ec) {
+    std::cerr << "model_lineage_operation_selftest_ok=false\n";
+    std::cerr << "reason=cannot create output directory: " << ec.message()
+              << "\n";
+    return 2;
+  }
+
+  const std::filesystem::path reportPath =
+      outputRoot / "model_lineage_operation_selftest.json";
+  cv::FileStorage report(
+      reportPath.string(),
+      cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (!report.isOpened()) {
+    std::cerr << "model_lineage_operation_selftest_ok=false\n";
+    std::cerr << "reason=cannot write operation selftest report\n";
+    return 2;
+  }
+
+  std::unordered_set<std::string> knownModelIds;
+  for (const CxModelLineageUiNode &node : context.model_lineage_nodes)
+    knownModelIds.insert(node.model_id);
+  int assetsVerified = 0;
+  int assetsRejected = 0;
+  int parentLinksPresent = 0;
+  int parentLinksMissing = 0;
+
+  report << "schema" << "cxvision.model_lineage_operation_selftest.v1";
+  report << "created_at" << CurrentTimestamp();
+  report << "scope" << "asset-discovered model lineage and frozen validation gate";
+  report << "scan_root" << ResolveCxVisionRunPath(scanRoot).string();
+  report << "scan_status" << context.model_lineage_scan_status;
+  report << "scan_reason" << context.model_lineage_scan_reason;
+  report << "scan_debug_ref" << context.model_lineage_scan_debug_path;
+  report << "validation_gate" << "{";
+  report << "status" << context.validation_dataset.status;
+  report << "reason" << context.validation_dataset.reason;
+  report << "dataset_manifest" << context.validation_dataset.dataset_manifest_path;
+  report << "train_samples" << context.validation_dataset.train_sample_count;
+  report << "validation_samples" << context.validation_dataset.validation_sample_count;
+  report << "missing_required_assets"
+         << context.validation_dataset.missing_required_asset_count;
+  report << "source_lineage_overlap"
+         << context.validation_dataset.source_lineage_overlap_count;
+  report << "}";
+  report << "nodes" << "[";
+  for (const CxModelLineageUiNode &node : context.model_lineage_nodes) {
+    std::string assetReason;
+    const bool assetsOk = ValidateModelNodeAssetsLocal(node, assetReason);
+    if (assetsOk)
+      ++assetsVerified;
+    else
+      ++assetsRejected;
+    bool hasParent = !node.parent_model_ids.empty();
+    bool allParentsPresent = hasParent;
+    for (const std::string &parentId : node.parent_model_ids) {
+      if (knownModelIds.find(parentId) == knownModelIds.end())
+        allParentsPresent = false;
+    }
+    if (hasParent && allParentsPresent)
+      ++parentLinksPresent;
+    else if (hasParent)
+      ++parentLinksMissing;
+
+    report << "{";
+    // display_name is the same user-facing name shown in the topology, rather
+    // than an internal case identifier.
+    report << "display_name" << node.display_name;
+    report << "node_kind" << node.node_kind;
+    report << "gate_status" << node.gate_status;
+    report << "parameter_asset_check" << (assetsOk ? "PASS" : "FAIL");
+    report << "parameter_asset_reason" << assetReason;
+    report << "parent_review_preflight"
+           << (!hasParent ? "NOT_APPLICABLE_ROOT_NODE"
+                           : (allParentsPresent
+                                  ? "PARENT_AVAILABLE_FOR_HUMAN_ROLLBACK_REVIEW"
+                                  : "PARENT_ASSET_MISSING"));
+    report << "parent_count" << static_cast<int>(node.parent_model_ids.size());
+    report << "checkpoint_hash_status" << node.checkpoint_hash_status;
+    report << "}";
+  }
+  report << "]";
+
+  const bool validationReady =
+      context.validation_dataset.status ==
+      "VALIDATION_DATASET_FROZEN_READY_FOR_INFERENCE";
+  const std::string comparePreflight =
+      validationReady ? "READY_FOR_OPERATOR_COMPARE"
+                      : "BLOCKED_BY_" + context.validation_dataset.status;
+  const std::string augmentationPreflight =
+      validationReady ? "READY_FOR_OPERATOR_AUGMENTATION_RETRAIN"
+                      : "BLOCKED_BY_" + context.validation_dataset.status;
+  report << "operation_preflight" << "{";
+  report << "rollback" << "HUMAN_REVIEW_REQUIRED_NO_AUTOMATIC_PARENT_SELECTION";
+  report << "compare" << comparePreflight;
+  report << "augmentation_retrain" << augmentationPreflight;
+  report << "}";
+  report << "summary" << "{";
+  report << "accepted_nodes" << static_cast<int>(context.model_lineage_nodes.size());
+  report << "rejected_nodes" << static_cast<int>(context.model_lineage_rejected.size());
+  report << "parameter_assets_verified" << assetsVerified;
+  report << "parameter_assets_rejected" << assetsRejected;
+  report << "parent_links_present" << parentLinksPresent;
+  report << "parent_links_missing" << parentLinksMissing;
+  report << "human_review_status" << "PENDING_HUMAN_REVIEW";
+  report << "promotion_allowed" << 0;
+  report << "}";
+  const bool complete = !context.model_lineage_nodes.empty() &&
+                        assetsRejected == 0 && parentLinksMissing == 0;
+  report << "selftest_status"
+         << (complete ? "MODEL_LINEAGE_OPERATION_SELFTEST_COMPLETE_WITH_GATES"
+                      : "MODEL_LINEAGE_OPERATION_SELFTEST_FAILED");
+  report.release();
+
+  const std::filesystem::path summaryPath =
+      outputRoot / "model_lineage_operation_selftest.md";
+  std::ofstream summary(summaryPath, std::ios::out | std::ios::trunc);
+  if (summary.is_open()) {
+    summary << "# Model lineage operation self-test\n\n";
+    summary << "- Status: "
+            << (complete ? "MODEL_LINEAGE_OPERATION_SELFTEST_COMPLETE_WITH_GATES"
+                         : "MODEL_LINEAGE_OPERATION_SELFTEST_FAILED")
+            << "\n";
+    summary << "- Human review: PENDING_HUMAN_REVIEW\n";
+    summary << "- Promotion allowed: false\n";
+    summary << "- Validation gate: " << context.validation_dataset.status
+            << " — " << context.validation_dataset.reason << "\n";
+    summary << "- Compare preflight: " << comparePreflight << "\n";
+    summary << "- Augmentation/retrain preflight: " << augmentationPreflight
+            << "\n\n";
+    summary << "## User-facing model nodes\n\n";
+    for (const CxModelLineageUiNode &node : context.model_lineage_nodes) {
+      std::string assetReason;
+      const bool assetsOk = ValidateModelNodeAssetsLocal(node, assetReason);
+      summary << "- " << node.display_name << ": parameter assets "
+              << (assetsOk ? "PASS" : "FAIL") << " (" << assetReason
+              << ")\n";
+    }
+  }
+
+  std::cout << "model_lineage_operation_selftest_ok="
+            << (complete ? "true" : "false") << "\n";
+  std::cout << "status="
+            << (complete ? "MODEL_LINEAGE_OPERATION_SELFTEST_COMPLETE_WITH_GATES"
+                         : "MODEL_LINEAGE_OPERATION_SELFTEST_FAILED")
+            << "\n";
+  std::cout << "validation_gate=" << context.validation_dataset.status << "\n";
+  std::cout << "report=" << reportPath.string() << "\n";
+  std::cout << "summary=" << summaryPath.string() << "\n";
+  return complete ? 0 : 1;
+}
+
+static void RefreshModelLineageOperationSelfTestAssetsLocal(
+    ManualTestContext &context) {
+  context.model_lineage_operation_selftest_scan_attempted = true;
+  context.model_lineage_operation_selftest = {};
+  CxModelLineageOperationSelfTestProjection &projection =
+      context.model_lineage_operation_selftest;
+  const std::filesystem::path scanRoot = ResolveCxVisionRunPath(
+      context.model_lineage_operation_selftest_scan_root);
+  std::error_code ec;
+  if (!std::filesystem::is_directory(scanRoot, ec) || ec) {
+    projection.status = "OPERATION_SELFTEST_ASSET_ROOT_MISSING";
+    return;
+  }
+  std::vector<std::filesystem::path> reports;
+  std::vector<std::filesystem::path> pending{scanRoot};
+  while (!pending.empty()) {
+    const std::filesystem::path directory = pending.back();
+    pending.pop_back();
+    std::error_code directoryError;
+    std::filesystem::directory_iterator entries(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryError);
+    if (directoryError)
+      continue;
+    for (const std::filesystem::directory_entry &entry : entries) {
+      std::error_code entryError;
+      if (entry.is_symlink(entryError))
+        continue;
+      if (entry.is_directory(entryError) && !entryError)
+        pending.push_back(entry.path());
+      else if (!entryError && entry.is_regular_file(entryError) &&
+               entry.path().filename() ==
+                   "model_lineage_operation_selftest.json")
+        reports.push_back(entry.path());
+    }
+  }
+  std::sort(reports.begin(), reports.end());
+  for (auto reportIt = reports.rbegin(); reportIt != reports.rend();
+       ++reportIt) {
+    cv::FileStorage storage(reportIt->string(), cv::FileStorage::READ);
+    if (!storage.isOpened() ||
+        ReadModelLineageStringLocal(storage.root(), "schema") !=
+            "cxvision.model_lineage_operation_selftest.v1")
+      continue;
+    projection.available = true;
+    projection.report_path = reportIt->string();
+    projection.status =
+        ReadModelLineageStringLocal(storage.root(), "selftest_status");
+    projection.created_at =
+        ReadModelLineageStringLocal(storage.root(), "created_at");
+    const cv::FileNode validationGate = storage.root()["validation_gate"];
+    projection.validation_gate_status =
+        ReadModelLineageStringLocal(validationGate, "status");
+    projection.validation_gate_reason =
+        ReadModelLineageStringLocal(validationGate, "reason");
+    const cv::FileNode operationPreflight =
+        storage.root()["operation_preflight"];
+    projection.compare_preflight =
+        ReadModelLineageStringLocal(operationPreflight, "compare");
+    projection.augmentation_retrain_preflight =
+        ReadModelLineageStringLocal(operationPreflight, "augmentation_retrain");
+    const cv::FileNode summary = storage.root()["summary"];
+    summary["accepted_nodes"] >> projection.accepted_nodes;
+    summary["rejected_nodes"] >> projection.rejected_nodes;
+    summary["parameter_assets_verified"] >> projection.parameter_assets_verified;
+    summary["parameter_assets_rejected"] >> projection.parameter_assets_rejected;
+    summary["parent_links_present"] >> projection.parent_links_present;
+    summary["parent_links_missing"] >> projection.parent_links_missing;
+    projection.human_review_status =
+        ReadModelLineageStringLocal(summary, "human_review_status");
+    int promotionAllowed = 0;
+    summary["promotion_allowed"] >> promotionAllowed;
+    projection.promotion_allowed = promotionAllowed != 0;
+    return;
+  }
+}
+
+static void RefreshModelWorkflowAssetsLocal(ManualTestContext &context) {
+  context.model_workflow_scan_attempted = true;
+  context.model_workflow = {};
+  CxModelWorkflowProjection &projection = context.model_workflow;
+  const std::filesystem::path scanRoot =
+      ResolveCxVisionRunPath(context.model_workflow_scan_root);
+  std::error_code ec;
+  if (!std::filesystem::is_directory(scanRoot, ec) || ec) {
+    projection.status = "WORKFLOW_SCAN_ROOT_MISSING";
+    return;
+  }
+  std::vector<std::filesystem::path> manifests;
+  std::vector<std::filesystem::path> pending{scanRoot};
+  while (!pending.empty()) {
+    const std::filesystem::path directory = pending.back();
+    pending.pop_back();
+    std::error_code directoryError;
+    std::filesystem::directory_iterator entries(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryError);
+    if (directoryError)
+      continue;
+    for (const std::filesystem::directory_entry &entry : entries) {
+      std::error_code entryError;
+      if (entry.is_symlink(entryError))
+        continue;
+      if (entry.is_directory(entryError) && !entryError)
+        pending.push_back(entry.path());
+      else if (!entryError && entry.is_regular_file(entryError) &&
+               entry.path().filename() == "workflow_manifest.json")
+        manifests.push_back(entry.path());
+    }
+  }
+  std::sort(manifests.begin(), manifests.end());
+  for (auto manifestIt = manifests.rbegin(); manifestIt != manifests.rend();
+       ++manifestIt) {
+    cv::FileStorage storage(manifestIt->string(), cv::FileStorage::READ);
+    if (!storage.isOpened() ||
+        ReadModelLineageStringLocal(storage.root(), "schema") !=
+            "cxvision.model_workflow.v1")
+      continue;
+    const cv::FileNode nodes = storage.root()["nodes"];
+    if (!nodes.isSeq())
+      continue;
+    CxModelWorkflowProjection parsed;
+    parsed.available = true;
+    parsed.workflow_path = manifestIt->string();
+    parsed.display_name =
+        ReadModelLineageStringLocal(storage.root(), "display_name");
+    int promotionAllowed = 0;
+    storage.root()["promotion_allowed"] >> promotionAllowed;
+    parsed.promotion_allowed = promotionAllowed != 0;
+    int readyCount = 0;
+    int blockedCount = 0;
+    for (const cv::FileNode &node : nodes) {
+      CxModelWorkflowUiNode item;
+      item.node_id = ReadModelLineageStringLocal(node, "node_id");
+      item.display_name = ReadModelLineageStringLocal(node, "display_name");
+      item.node_kind = ReadModelLineageStringLocal(node, "node_kind");
+      item.parent_node_ids =
+          ReadModelLineageStringListLocal(node, "parent_node_ids");
+      const std::string assetRef = ReadModelLineageStringLocal(node, "asset_ref");
+      const std::string resultRef = ReadModelLineageStringLocal(node, "result_ref");
+      const std::string declaredStatus =
+          ReadModelLineageStringLocal(node, "declared_status");
+      const auto resolveRef = [&](const std::string &ref, std::string &output) {
+        if (ref.empty())
+          return true;
+        const std::filesystem::path resolved =
+            (manifestIt->parent_path() / ref).lexically_normal();
+        if (!IsPathInsideModelLineageRootLocal(scanRoot, resolved))
+          return false;
+        output = resolved.string();
+        return true;
+      };
+      if (!resolveRef(assetRef, item.asset_ref) ||
+          !resolveRef(resultRef, item.result_ref)) {
+        item.status = "WORKFLOW_REFERENCE_OUTSIDE_RUN_ROOT";
+      } else {
+        std::error_code assetError;
+        if (!item.asset_ref.empty() &&
+            (!std::filesystem::is_regular_file(item.asset_ref, assetError) ||
+             assetError)) {
+          item.status = "ASSET_MISSING";
+        } else if (!item.result_ref.empty()) {
+          std::error_code resultError;
+          if (!std::filesystem::is_regular_file(item.result_ref, resultError) ||
+              resultError) {
+            item.status = "RESULT_PENDING";
+          } else {
+            cv::FileStorage result(item.result_ref, cv::FileStorage::READ);
+            item.status = result.isOpened()
+                              ? ReadModelLineageStringLocal(result.root(), "status")
+                              : "RESULT_PRESENT_UNREADABLE";
+            if (item.status.empty())
+              item.status = "RESULT_PRESENT_STATUS_UNDECLARED";
+          }
+        } else if (!declaredStatus.empty()) {
+          item.status = declaredStatus;
+        } else {
+          item.status = "ASSET_READY";
+        }
+      }
+      item.detail = item.result_ref.empty() ? item.asset_ref : item.result_ref;
+      if (item.status == "ASSET_READY" ||
+          item.status.find("EXECUTION_PASS") != std::string::npos ||
+          item.status == "PENDING_HUMAN_REVIEW")
+        ++readyCount;
+      else
+        ++blockedCount;
+      if (!item.node_id.empty() && !item.display_name.empty() &&
+          !item.node_kind.empty())
+        parsed.nodes.push_back(std::move(item));
+    }
+    parsed.status = parsed.nodes.empty()
+                        ? "WORKFLOW_NODE_SCHEMA_INVALID"
+                        : (blockedCount == 0 ? "WORKFLOW_ASSETS_PROJECTED"
+                                             : "WORKFLOW_ASSET_GATES_PRESENT");
+    projection = std::move(parsed);
+    return;
+  }
+}
+
+static void DrawModelWorkflowTopologyLocal(
+    const CxModelWorkflowProjection &workflow) {
+  if (workflow.nodes.empty())
+    return;
+  std::unordered_map<std::string, std::size_t> indexById;
+  for (std::size_t index = 0; index < workflow.nodes.size(); ++index)
+    indexById[workflow.nodes[index].node_id] = index;
+  std::vector<int> depth(workflow.nodes.size(), -1);
+  std::function<int(std::size_t, std::unordered_set<std::size_t> &)> depthFor;
+  depthFor = [&](const std::size_t index,
+                 std::unordered_set<std::size_t> &trail) {
+    if (depth[index] >= 0)
+      return depth[index];
+    if (!trail.insert(index).second)
+      return 0;
+    int resolved = 0;
+    for (const std::string &parentId : workflow.nodes[index].parent_node_ids) {
+      const auto parent = indexById.find(parentId);
+      if (parent != indexById.end())
+        resolved = std::max(resolved, depthFor(parent->second, trail) + 1);
+    }
+    trail.erase(index);
+    return depth[index] = resolved;
+  };
+  int maxDepth = 0;
+  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
+    std::unordered_set<std::size_t> trail;
+    maxDepth = std::max(maxDepth, depthFor(index, trail));
+  }
+  std::vector<std::vector<std::size_t>> levels(
+      static_cast<std::size_t>(maxDepth + 1));
+  for (std::size_t index = 0; index < workflow.nodes.size(); ++index)
+    levels[static_cast<std::size_t>(depth[index])].push_back(index);
+
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const ImVec2 size(std::max(540.0f, ImGui::GetContentRegionAvail().x),
+                    std::max(255.0f, 88.0f + maxDepth * 72.0f));
+  ImGui::InvisibleButton("##configured_model_workflow_topology", size);
+  ImDrawList *draw = ImGui::GetWindowDrawList();
+  draw->AddRect(origin, origin + size, IM_COL32(112, 124, 140, 255), 4.0f);
+  std::vector<ImVec2> positions(workflow.nodes.size());
+  for (std::size_t level = 0; level < levels.size(); ++level) {
+    const std::vector<std::size_t> &members = levels[level];
+    for (std::size_t ordinal = 0; ordinal < members.size(); ++ordinal) {
+      const float ratio = static_cast<float>(ordinal + 1) /
+                          static_cast<float>(members.size() + 1);
+      positions[members[ordinal]] = ImVec2(
+          origin.x + 42.0f + (size.x - 84.0f) * ratio,
+          origin.y + size.y - 38.0f - static_cast<float>(level) * 68.0f);
+    }
+  }
+  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
+    for (const std::string &parentId : workflow.nodes[index].parent_node_ids) {
+      const auto parent = indexById.find(parentId);
+      if (parent == indexById.end())
+        continue;
+      const ImVec2 from = positions[parent->second];
+      const ImVec2 to = positions[index];
+      draw->AddBezierCubic(ImVec2(from.x, from.y - 12.0f),
+                           ImVec2(from.x, from.y - 34.0f),
+                           ImVec2(to.x, to.y + 34.0f),
+                           ImVec2(to.x, to.y + 12.0f),
+                           IM_COL32(154, 165, 181, 230), 1.6f);
+    }
+  }
+  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
+    const CxModelWorkflowUiNode &node = workflow.nodes[index];
+    const bool executionPass =
+        node.status.find("EXECUTION_PASS") != std::string::npos;
+    const bool pendingHuman = node.status == "PENDING_HUMAN_REVIEW";
+    const ImU32 color = executionPass
+                             ? IM_COL32(57, 168, 94, 255)
+                             : (pendingHuman ? IM_COL32(218, 150, 35, 255)
+                                             : IM_COL32(75, 130, 205, 255));
+    const ImVec2 point = positions[index];
+    draw->AddCircleFilled(point, 11.0f, color);
+    draw->AddCircle(point, 11.0f, IM_COL32(234, 238, 244, 255), 0, 1.5f);
+    const ImVec2 labelSize = ImGui::CalcTextSize(node.display_name.c_str());
+    draw->AddText(ImVec2(point.x - labelSize.x * 0.5f, point.y + 15.0f),
+                  IM_COL32(225, 230, 236, 255), node.display_name.c_str());
+    draw->AddText(ImVec2(point.x + 15.0f, point.y - 8.0f), color,
+                  node.status.c_str());
+  }
+  ImGui::TextDisabled(
+      "Blue: configured asset | green: executed result | amber: human decision pending. Links and labels come from workflow_manifest.json.");
+}
+
+static void DrawModelWorkflowProjectionLocal(ManualTestContext &context) {
+  ImGui::SeparatorText("Configured Model Workflow / Actual Results");
+  ImGui::SetNextItemWidth(-164.0f);
+  InputTextString("Workflow scan root", context.model_workflow_scan_root);
+  ImGui::SameLine();
+  if (ImGui::Button("Reload Workflow"))
+    RefreshModelWorkflowAssetsLocal(context);
+  const CxModelWorkflowProjection &workflow = context.model_workflow;
+  if (!workflow.available) {
+    ImGui::TextDisabled("No valid workflow manifest was discovered.");
+    return;
+  }
+  ImGui::Text("%s", workflow.display_name.c_str());
+  ImGui::TextColored(
+      workflow.status == "WORKFLOW_ASSETS_PROJECTED"
+          ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
+          : ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+      "%s | promotion: %s", workflow.status.c_str(),
+      workflow.promotion_allowed ? "not allowed by UI" : "not allowed");
+  std::unordered_map<std::string, int> distribution;
+  for (const CxModelWorkflowUiNode &node : workflow.nodes)
+    ++distribution[node.node_kind];
+  std::string distributionText;
+  for (const auto &entry : distribution) {
+    if (!distributionText.empty())
+      distributionText += " | ";
+    distributionText += entry.first + ": " + std::to_string(entry.second);
+  }
+  ImGui::Text("node distribution: %s", distributionText.c_str());
+  DrawModelWorkflowTopologyLocal(workflow);
+  if (ImGui::TreeNodeEx("##configured_model_workflow",
+                        ImGuiTreeNodeFlags_DefaultOpen,
+                        "Workflow nodes (%zu)", workflow.nodes.size())) {
+    for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
+      const CxModelWorkflowUiNode &node = workflow.nodes[index];
+      if (ImGui::TreeNodeEx(("##workflow_node_" + std::to_string(index)).c_str(),
+                            ImGuiTreeNodeFlags_DefaultOpen,
+                            "%s  [%s]", node.display_name.c_str(),
+                            node.status.c_str())) {
+        ImGui::BulletText("kind: %s", node.node_kind.c_str());
+        if (!node.parent_node_ids.empty()) {
+          std::string parents;
+          for (const std::string &parent : node.parent_node_ids) {
+            if (!parents.empty())
+              parents += ", ";
+            parents += parent;
+          }
+          ImGui::BulletText("upstream nodes: %s", parents.c_str());
+        }
+        if (!node.asset_ref.empty())
+          ImGui::TextWrapped("asset: %s", node.asset_ref.c_str());
+        if (!node.result_ref.empty())
+          ImGui::TextWrapped("result: %s", node.result_ref.c_str());
+        ImGui::TreePop();
+      }
+    }
+    ImGui::TreePop();
+  }
+  ImGui::TextDisabled("Node names, links, assets and outcomes are read from the workflow manifest; this view never creates a model version.");
+}
+
 static void DrawModelLineageTopologyLocal(ManualTestContext &context) {
   if (context.model_lineage_nodes.empty()) {
     ImGui::TextDisabled(
@@ -9984,6 +10649,10 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       m_manualTest.geometry_aug_include_local_gap ||
       m_manualTest.geometry_aug_include_jagged_cut ||
       m_manualTest.geometry_aug_include_line_break;
+  ImGui::Checkbox("Require source-disjoint validation##training_primary",
+                  &m_manualTest.geometry_aug_require_source_disjoint_validation);
+  ImGui::TextDisabled(
+      "Requires each source asset to declare train or validation; a source cannot generate both.");
   if (!hasPrimaryAugmentation)
     ImGui::BeginDisabled();
   if (ImGui::Button("Generate Augmented Train/Test Set##training_primary")) {
@@ -10056,6 +10725,77 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::TextWrapped("reason: %s",
                      m_manualTest.torch_training_image_reason.c_str());
 
+  if (!m_manualTest.validation_dataset_scan_attempted)
+    RefreshValidationDatasetAssetsLocal(m_manualTest);
+  if (!m_manualTest.model_lineage_operation_selftest_scan_attempted)
+    RefreshModelLineageOperationSelfTestAssetsLocal(m_manualTest);
+  if (!m_manualTest.model_workflow_scan_attempted)
+    RefreshModelWorkflowAssetsLocal(m_manualTest);
+  ImGui::SeparatorText("Validation Dataset / Inference Gate");
+  ImGui::SetNextItemWidth(-120.0f);
+  InputTextString("Validation scan root",
+                  m_manualTest.validation_dataset_scan_root);
+  ImGui::SameLine();
+  if (ImGui::Button("Reload Validation Assets"))
+    RefreshValidationDatasetAssetsLocal(m_manualTest);
+  const CxValidationDatasetReadiness &validationDataset =
+      m_manualTest.validation_dataset;
+  const bool validationReady =
+      validationDataset.status == "VALIDATION_DATASET_FROZEN_READY_FOR_INFERENCE";
+  ImGui::TextColored(
+      validationReady ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
+                      : ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+      "%s", validationDataset.status.c_str());
+  ImGui::Text("train: %d | validation: %d | missing assets: %d | shared source lineage: %d",
+              validationDataset.train_sample_count,
+              validationDataset.validation_sample_count,
+              validationDataset.missing_required_asset_count,
+              validationDataset.source_lineage_overlap_count);
+  ImGui::TextWrapped("%s", validationDataset.reason.c_str());
+  if (!validationDataset.dataset_manifest_path.empty())
+    ImGui::TextWrapped("dataset manifest: %s",
+                       validationDataset.dataset_manifest_path.c_str());
+  ImGui::TextDisabled(
+      "A frozen image/label/overlay set is only the data gate. Paired model inference, instance aggregation, metrics and human review remain separate gates.");
+
+  DrawModelWorkflowProjectionLocal(m_manualTest);
+
+  ImGui::SeparatorText("Latest Automated Node-Chain Record");
+  ImGui::SetNextItemWidth(-170.0f);
+  InputTextString("Operation record scan root",
+                  m_manualTest.model_lineage_operation_selftest_scan_root);
+  ImGui::SameLine();
+  if (ImGui::Button("Reload Node-Chain Record"))
+    RefreshModelLineageOperationSelfTestAssetsLocal(m_manualTest);
+  const CxModelLineageOperationSelfTestProjection &operationSelfTest =
+      m_manualTest.model_lineage_operation_selftest;
+  if (!operationSelfTest.available) {
+    ImGui::TextDisabled("No asset-backed automatic node-chain record is available yet.");
+  } else {
+    const bool selftestComplete = operationSelfTest.status ==
+        "MODEL_LINEAGE_OPERATION_SELFTEST_COMPLETE_WITH_GATES";
+    ImGui::TextColored(
+        selftestComplete ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
+                         : ImVec4(0.95f, 0.45f, 0.25f, 1.0f),
+        "%s", operationSelfTest.status.c_str());
+    ImGui::Text("nodes: %d accepted / %d rejected | parameter assets: %d pass / %d fail | parent links: %d ready / %d missing",
+                operationSelfTest.accepted_nodes,
+                operationSelfTest.rejected_nodes,
+                operationSelfTest.parameter_assets_verified,
+                operationSelfTest.parameter_assets_rejected,
+                operationSelfTest.parent_links_present,
+                operationSelfTest.parent_links_missing);
+    ImGui::Text("compare: %s | retrain: %s",
+                operationSelfTest.compare_preflight.c_str(),
+                operationSelfTest.augmentation_retrain_preflight.c_str());
+    ImGui::Text("human review: %s | promotion: not allowed",
+                operationSelfTest.human_review_status.c_str());
+    ImGui::TextWrapped("validation gate: %s — %s",
+                       operationSelfTest.validation_gate_status.c_str(),
+                       operationSelfTest.validation_gate_reason.c_str());
+    ImGui::TextWrapped("record: %s", operationSelfTest.report_path.c_str());
+  }
+
   if (!m_manualTest.model_lineage_scan_attempted)
     RefreshModelLineageAssetsLocal(m_manualTest);
   if (!m_manualTest.model_performance_profile_scan_attempted)
@@ -10074,6 +10814,82 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       "and a safe parent-model return path. It reports asset facts; it does "
       "not promote a model automatically.");
   DrawModelLineageTopologyLocal(m_manualTest);
+  ImGui::SeparatorText("Selected Node / Branch Operations");
+  const int selectedNodeIndex = m_manualTest.selected_model_lineage_node;
+  const CxModelLineageUiNode *selectedNode =
+      selectedNodeIndex >= 0 && selectedNodeIndex <
+              static_cast<int>(m_manualTest.model_lineage_nodes.size())
+          ? &m_manualTest.model_lineage_nodes[static_cast<std::size_t>(
+                selectedNodeIndex)]
+          : nullptr;
+  if (selectedNode == nullptr) {
+    ImGui::TextDisabled("Select a topology node before testing parameters or branch operations.");
+  } else {
+    ImGui::Text("Selected: %s | %s", selectedNode->display_name.c_str(),
+                selectedNode->gate_status.c_str());
+    if (ImGui::Button("Verify Node Parameter Assets")) {
+      std::string operationReason;
+      if (ValidateModelNodeAssetsLocal(*selectedNode, operationReason)) {
+        m_manualTest.model_lineage_operation_status =
+            "MODEL_NODE_PARAMETER_ASSET_PASS";
+      } else {
+        m_manualTest.model_lineage_operation_status =
+            "MODEL_NODE_PARAMETER_ASSET_FAIL";
+      }
+      m_manualTest.model_lineage_operation_message = operationReason;
+    }
+    ImGui::SameLine();
+    const bool hasParent = !selectedNode->parent_model_ids.empty();
+    if (!hasParent)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Rollback Review To Parent")) {
+      for (const std::string &parentId : selectedNode->parent_model_ids) {
+        for (std::size_t index = 0;
+             index < m_manualTest.model_lineage_nodes.size(); ++index) {
+          if (m_manualTest.model_lineage_nodes[index].model_id == parentId) {
+            m_manualTest.selected_model_lineage_node = static_cast<int>(index);
+            m_manualTest.model_lineage_operation_status =
+                "ROLLBACK_REVIEW_SELECTION_READY";
+            m_manualTest.model_lineage_operation_message =
+                "review selection returned to parent; weights are unchanged";
+            break;
+          }
+        }
+      }
+    }
+    if (!hasParent)
+      ImGui::EndDisabled();
+    ImGui::SameLine();
+    const bool validationReady = validationDataset.status ==
+        "VALIDATION_DATASET_FROZEN_READY_FOR_INFERENCE";
+    if (!validationReady)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Compare Parent / Candidate")) {
+      m_manualTest.model_lineage_operation_status =
+          "PAIRED_INFERENCE_BINDING_REQUIRED";
+      m_manualTest.model_lineage_operation_message =
+          "validation assets are ready; bind the selected package and paired inference plan";
+    }
+    if (!validationReady)
+      ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Prepare Augmentation Retrain Branch")) {
+      std::string operationReason;
+      if (RunGeometryAugmentationTrainingPrepFromGui(operationReason)) {
+        m_manualTest.model_lineage_operation_status =
+            "AUGMENTATION_RETRAIN_BRANCH_PREPARED";
+      } else {
+        m_manualTest.model_lineage_operation_status =
+            "AUGMENTATION_RETRAIN_BRANCH_BLOCKED";
+      }
+      m_manualTest.model_lineage_operation_message = operationReason;
+    }
+    ImGui::TextWrapped("operation: %s | %s",
+                       m_manualTest.model_lineage_operation_status.c_str(),
+                       m_manualTest.model_lineage_operation_message.c_str());
+    ImGui::TextDisabled(
+        "Verify checks concrete asset composition. Rollback changes review selection only. Compare and retrain require their own data and execution gates.");
+  }
   const auto compactAssetName = [](const std::string &path) {
     return path.empty() ? std::string("ASSET_MISSING")
                         : std::filesystem::path(path).filename().string();
@@ -10445,6 +11261,10 @@ void ViewController::drawTorchTrainingImageSetWindow() {
 
   if (ImGui::CollapsingHeader("Augmented YOLOv8-n Training Prep",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Checkbox("Require source-disjoint validation",
+                    &m_manualTest.geometry_aug_require_source_disjoint_validation);
+    ImGui::TextDisabled(
+        "Strict mode blocks generation unless train/validation source assets are declared and class coverage matches.");
     ImGui::Checkbox("Brightness", &m_manualTest.geometry_aug_include_brightness);
     if (m_manualTest.geometry_aug_include_brightness) {
       ImGui::SetNextItemWidth(160.0f);

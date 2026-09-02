@@ -47,6 +47,8 @@
 
 int RunModelLineageAssetScanSmoke(const std::string &scanRoot,
                                   const std::string &outputDirectory);
+int RunModelLineageOperationSelfTest(const std::string &scanRoot,
+                                     const std::string &outputDirectory);
 
 namespace {
 bool HasCliArg(int argc, char **argv, const std::string &name) {
@@ -2536,6 +2538,8 @@ int RunGeometryAugmentationDatasetCli(int argc, char **argv) {
       CliValueAfter(argc, argv, "--augmentation-plan");
   options.output_dir =
       ResolveCxVisionRunPath(CliValueAfter(argc, argv, "--out"));
+  options.require_source_disjoint_validation =
+      HasCliArg(argc, argv, "--require-source-disjoint-validation");
   if (options.reference_index_path.empty() ||
       options.augmentation_plan_path.empty() || options.output_dir.empty()) {
     std::cout << "geometry_augmentation_dataset_ok=false\n"
@@ -3182,6 +3186,23 @@ int RunCxTorchRuntimeSmoke(const CxUnifiedLogOptions &options) {
 }
 
 int main(int argc, char **argv) {
+  if (HasCliArg(argc, argv, "--model-lineage-operation-selftest")) {
+    std::string scanRoot;
+    std::string outputDirectory;
+    for (int i = 1; i + 1 < argc; ++i) {
+      const std::string arg = argv[i] == nullptr ? "" : argv[i];
+      if (arg == "--model-lineage-root")
+        scanRoot = argv[++i];
+      else if (arg == "--out")
+        outputDirectory = argv[++i];
+    }
+    if (scanRoot.empty() || outputDirectory.empty()) {
+      std::cerr << "model_lineage_operation_selftest_ok=false\n";
+      std::cerr << "reason=--model-lineage-root and --out are required\n";
+      return 2;
+    }
+    return RunModelLineageOperationSelfTest(scanRoot, outputDirectory);
+  }
   if (HasCliArg(argc, argv, "--model-lineage-scan-smoke")) {
     std::string scanRoot;
     std::string outputDirectory;

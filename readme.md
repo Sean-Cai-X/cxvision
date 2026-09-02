@@ -84,6 +84,27 @@ Source Exists
 
 ---
 
+## 0.1 2026-09-02：配置驱动模型 workflow 与人工审核入口
+
+本轮将模型谱系和验证案例收敛为运行目录资产，而不是由 C++ 根据具体模型、案例名称或运行 ID 分派。`workflow_manifest.json` 是唯一的流程定义：它声明数据版本、父模型、候选模型、验证步骤、结果引用与人工审核节点；C++ 仅扫描、校验引用并投影到 F9。
+
+当前首个受控几何 workflow 已完成一次真实双路推理：9 个由验证计划选择的案例均产生父模型/候选模型输出、overlay、候选框列表、IoU 事实与性能记录。运行结论为 `CXX_YOLOV8N_PAIRED_INFERENCE_EXECUTION_PASS`；候选模型 IoU50 命中为 9，父模型为 0。
+
+这不是模型质量接受结论：质量状态保持 `CXX_YOLOV8N_DETECTION_EFFECT_PENDING_HUMAN_REVIEW`，`promotion_allowed=false`。人工必须在 F9 的 **Configured Model Workflow / Actual Results** 查看完整节点图并审核证据后，才可形成接受、拒绝或回退决定。
+
+F9 的投影语义如下：
+
+```text
+数据版本 → 父模型 → 候选模型 → 双路验证结果 → 人工审核 / promotion 决定
+```
+
+- 蓝色节点：配置中声明且资产可读取；
+- 绿色节点：已产生执行结果；
+- 黄色节点：人工审核待定；
+- 节点名称、父子关系、引用与状态全部来自 workflow 资产，新增 workflow 或节点不需要修改 C++。
+
+---
+
 ## 1. 当前项目阶段
 
 ### 1.1 项目简介

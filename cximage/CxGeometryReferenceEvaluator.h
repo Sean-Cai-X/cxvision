@@ -28,6 +28,9 @@ struct CxGeometryAugmentationDatasetOptions {
   std::filesystem::path reference_index_path;
   std::filesystem::path augmentation_plan_path;
   std::filesystem::path output_dir;
+  // When enabled, each source asset must declare source_split=train or
+  // source_split=validation. A source may never generate both splits.
+  bool require_source_disjoint_validation = false;
 };
 
 struct CxGeometryAugmentationDatasetResult {
