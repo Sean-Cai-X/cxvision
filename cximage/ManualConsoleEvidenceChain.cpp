@@ -2499,10 +2499,37 @@ static void PollYoloTrainingProcessLocal(ManualTestContext &context) {
 static void DrawEpochLossCurveLocal(const char *id,
                                     const CxTorchTrainingRunBinding &run,
                                     std::size_t startIndex = 0,
-                                    float height = 170.0f) {
+                                    float height = 170.0f,
+                                    int fixedEpochAxisCapacity = 0,
+                                    float fixedLossAxisMaximum = 0.0f) {
   if (!run.HasRealMultiEpochSeries())
     return;
   startIndex = std::min(startIndex, run.epochs.size() - 2);
+  // This is deliberately independent from the number of received samples.
+  // A completed 50-epoch run still has an X maximum of 100 when the operator
+  // selected 100, so finished and live runs are directly comparable.
+  const int axisEpochMaximum = std::max(
+      {1, run.configured_epochs, fixedEpochAxisCapacity});
+  const int firstRecordedEpoch = run.epochs.front().epoch;
+  const int lastRecordedIndex = std::max(
+      0, run.epochs.back().epoch - firstRecordedEpoch);
+  const double observedMaximum = [&run, startIndex]() {
+    double maximum = 0.0;
+    for (std::size_t i = startIndex; i < run.epochs.size(); ++i)
+      maximum = std::max(maximum, run.epochs[i].total_loss);
+    return maximum;
+  }();
+  const double lossAxisMaximum = std::max(
+      0.001, fixedLossAxisMaximum > 0.0f
+                 ? static_cast<double>(fixedLossAxisMaximum)
+                 : observedMaximum);
+  ImGui::TextDisabled(
+      "Fixed axes: X min 0 / max %d | Y min 0 / max %.4g | recorded X 0-%d",
+      axisEpochMaximum, lossAxisMaximum, lastRecordedIndex);
+  if (observedMaximum > lossAxisMaximum)
+    ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+                       "Observed loss %.4g exceeds the fixed Y maximum; clipped at the chart edge.",
+                       observedMaximum);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   const ImVec2 size(std::max(320.0f, ImGui::GetContentRegionAvail().x), height);
   ImGui::InvisibleButton(id, size);
@@ -2511,18 +2538,11 @@ static void DrawEpochLossCurveLocal(const char *id,
   const float right = origin.x + size.x - 12.0f;
   const float top = origin.y + 12.0f;
   const float bottom = origin.y + size.y - 30.0f;
-  double minLoss = run.epochs[startIndex].total_loss;
-  double maxLoss = minLoss;
-  for (std::size_t i = startIndex; i < run.epochs.size(); ++i) {
-    const auto &metric = run.epochs[i];
-    minLoss = std::min(minLoss, metric.total_loss);
-    maxLoss = std::max(maxLoss, metric.total_loss);
-  }
-  if (maxLoss <= minLoss)
-    maxLoss = minLoss + 1.0;
-  const int firstEpoch = run.epochs[startIndex].epoch;
-  const int lastEpoch = run.epochs.back().epoch;
-  const int epochSpan = std::max(1, lastEpoch - firstEpoch);
+  const double minLoss = 0.0;
+  const double maxLoss = lossAxisMaximum;
+  // The X axis is a declared viewing capacity, not the number of samples
+  // currently received.  A live training run therefore grows from x=0 while
+  // the right-hand future range remains intentionally empty.
   const ImU32 axis = IM_COL32(150, 160, 172, 255);
   const ImU32 grid = IM_COL32(75, 82, 92, 180);
   const ImU32 curve = IM_COL32(52, 190, 132, 255);
@@ -2531,12 +2551,21 @@ static void DrawEpochLossCurveLocal(const char *id,
     const float t = static_cast<float>(tick) / 4.0f;
     const float x = left + (right - left) * t;
     draw->AddLine(ImVec2(x, top), ImVec2(x, bottom), grid);
-    const int epoch = firstEpoch +
-                      static_cast<int>(std::lround(epochSpan * t));
+    const int epoch =
+        static_cast<int>(std::lround(axisEpochMaximum * t));
     const std::string label = std::to_string(epoch);
     draw->AddText(ImVec2(x - ImGui::CalcTextSize(label.c_str()).x * 0.5f,
                          bottom + 4.0f),
                   axis, label.c_str());
+  }
+  if (lastRecordedIndex < axisEpochMaximum) {
+    const float futureStart = left + (right - left) *
+                                         static_cast<float>(lastRecordedIndex) /
+                                         static_cast<float>(axisEpochMaximum);
+    draw->AddRectFilled(ImVec2(futureStart, top), ImVec2(right, bottom),
+                        IM_COL32(16, 20, 25, 84));
+    draw->AddText(ImVec2(futureStart + 7.0f, top + 7.0f), axis,
+                  "Future range: no samples");
   }
   char maxLabel[32]{};
   char minLabel[32]{};
@@ -2550,11 +2579,13 @@ static void DrawEpochLossCurveLocal(const char *id,
   for (std::size_t i = startIndex; i < run.epochs.size(); ++i) {
     const auto &metric = run.epochs[i];
     const float x = left + (right - left) *
-                               static_cast<float>(metric.epoch - firstEpoch) /
-                               static_cast<float>(epochSpan);
-    const float y = bottom - (bottom - top) *
-                                 static_cast<float>((metric.total_loss - minLoss) /
-                                                    (maxLoss - minLoss));
+                                static_cast<float>(std::max(
+                                    0, metric.epoch - firstRecordedEpoch)) /
+                                static_cast<float>(axisEpochMaximum);
+    const float yRatio = std::clamp(
+        static_cast<float>((metric.total_loss - minLoss) / (maxLoss - minLoss)),
+        0.0f, 1.0f);
+    const float y = bottom - (bottom - top) * yRatio;
     const ImVec2 point(x, y);
     if (i > startIndex)
       draw->AddLine(previous, point, curve, 2.0f);
@@ -2563,15 +2594,22 @@ static void DrawEpochLossCurveLocal(const char *id,
   if (ImGui::IsItemHovered()) {
     const float mouseX = ImGui::GetIO().MousePos.x;
     const float ratio = std::clamp((mouseX - left) / (right - left), 0.0f, 1.0f);
-    const int targetEpoch = firstEpoch +
-                            static_cast<int>(std::lround(epochSpan * ratio));
+    const int targetEpoch =
+        static_cast<int>(std::lround(axisEpochMaximum * ratio));
+    if (targetEpoch > lastRecordedIndex) {
+      ImGui::SetTooltip("Epoch index %d / %d\nFuture epoch: no sample recorded yet",
+                        targetEpoch, axisEpochMaximum);
+      return;
+    }
     const auto nearest = std::min_element(
         run.epochs.begin() + static_cast<std::ptrdiff_t>(startIndex),
         run.epochs.end(), [&](const auto &a, const auto &b) {
-          return std::abs(a.epoch - targetEpoch) < std::abs(b.epoch - targetEpoch);
+          return std::abs((a.epoch - firstRecordedEpoch) - targetEpoch) <
+                 std::abs((b.epoch - firstRecordedEpoch) - targetEpoch);
         });
-    ImGui::SetTooltip("Epoch %d / %d\nLoss %.7g\nBatches %d", nearest->epoch,
-                      run.configured_epochs, nearest->total_loss,
+    ImGui::SetTooltip("Epoch index %d / %d (runtime epoch %d)\nLoss %.7g\nBatches %d",
+                      nearest->epoch - firstRecordedEpoch, axisEpochMaximum,
+                      nearest->epoch, nearest->total_loss,
                       run.batches_per_epoch);
   }
 }
@@ -7698,13 +7736,14 @@ void ViewController::DrawTorchEvidenceTrainingPanel() {
     }
     if (hasRealTrainingCurve) {
       ImGui::Text("Loss / Epoch (%zu curve points)", run.epochs.size());
-      DrawEpochLossCurveLocal("##evidence_loss_epoch_curve", run);
+      DrawEpochLossCurveLocal("##evidence_loss_epoch_curve", run, 0, 170.0f,
+                              m_manualTest.torch_training_epoch_axis_capacity,
+                              m_manualTest.torch_training_loss_axis_maximum);
     }
     if (hasRealTrainingCurve && run.learning_rate > 0.0 &&
         !learningRates.empty())
-      ImGui::PlotLines("LR by epoch", learningRates.data(),
-                       static_cast<int>(learningRates.size()), 0, nullptr, 0.0f,
-                       FLT_MAX, ImVec2(-1.0f, 48.0f));
+      ImGui::TextDisabled("Learning-rate samples: %zu (shown in the epoch table; no auto-scaled X-axis chart).",
+                          learningRates.size());
     if (hasRealTrainingCurve && run.epochs.size() >= 2) {
       int decreasingSteps = 0;
       for (std::size_t i = 1; i < run.epochs.size(); ++i) {
@@ -9201,6 +9240,111 @@ static bool LoadModelLineageReviewLocal(
   return !modelId.empty() && !review.decision.empty();
 }
 
+static bool LoadModelPerformanceProfileLocal(
+    const std::filesystem::path &path, CxModelPerformanceProfile &profile,
+    std::string &reason) {
+  cv::FileStorage storage(path.string(), cv::FileStorage::READ);
+  if (!storage.isOpened()) {
+    reason = "performance profile JSON cannot be opened";
+    return false;
+  }
+  const cv::FileNode root = storage.root();
+  const std::string schema = ReadModelLineageStringLocal(root, "schema");
+  if (schema != "cxvision.model_performance_profile.v1") {
+    reason = "unsupported performance profile schema";
+    return false;
+  }
+  CxModelPerformanceProfile parsed;
+  parsed.available = true;
+  parsed.status = ReadModelLineageStringLocal(root, "status");
+  parsed.profile_scope = ReadModelLineageStringLocal(root, "profile_scope");
+  parsed.requested_device =
+      ReadModelLineageStringLocal(root, "requested_device");
+  parsed.profile_path = path.string();
+  root["service_initialize_ms"] >> parsed.service_initialize_ms;
+  root["sample_count"] >> parsed.sample_count;
+  const cv::FileNode stages = root["stages"];
+  if (parsed.status.empty() || parsed.profile_scope.empty() ||
+      parsed.sample_count <= 0 || stages.empty() || !stages.isMap()) {
+    reason = "required performance profile fact is missing";
+    return false;
+  }
+  for (auto stageIt = stages.begin(); stageIt != stages.end(); ++stageIt) {
+    const cv::FileNode node = *stageIt;
+    CxModelPerformanceStage stage;
+    stage.name = node.name();
+    node["min_ms"] >> stage.min_ms;
+    node["mean_ms"] >> stage.mean_ms;
+    node["p50_ms"] >> stage.p50_ms;
+    node["p95_ms"] >> stage.p95_ms;
+    node["p99_ms"] >> stage.p99_ms;
+    node["max_ms"] >> stage.max_ms;
+    if (stage.name.empty() || stage.min_ms < 0.0 || stage.mean_ms < 0.0 ||
+        stage.p50_ms < 0.0 || stage.p95_ms < 0.0 || stage.p99_ms < 0.0 ||
+        stage.max_ms < 0.0) {
+      reason = "invalid performance stage";
+      return false;
+    }
+    parsed.stages.push_back(std::move(stage));
+  }
+  if (parsed.stages.empty()) {
+    reason = "performance profile has no stage summaries";
+    return false;
+  }
+  profile = std::move(parsed);
+  reason = "performance profile loaded";
+  return true;
+}
+
+static void RefreshModelPerformanceProfileAssetsLocal(
+    ManualTestContext &context) {
+  context.model_performance_profile_scan_attempted = true;
+  context.model_performance_profile = {};
+  std::error_code ec;
+  const std::filesystem::path scanRoot = ResolveCxVisionRunPath(
+      context.model_performance_profile_scan_root);
+  if (!std::filesystem::is_directory(scanRoot, ec) || ec) {
+    context.model_performance_profile.reason =
+        "performance scan root is not a directory: " + scanRoot.string();
+    return;
+  }
+  std::vector<std::filesystem::path> pendingDirectories{scanRoot};
+  std::vector<std::filesystem::path> profiles;
+  while (!pendingDirectories.empty()) {
+    const std::filesystem::path directory = pendingDirectories.back();
+    pendingDirectories.pop_back();
+    std::error_code directoryError;
+    std::filesystem::directory_iterator entries(
+        directory, std::filesystem::directory_options::skip_permission_denied,
+        directoryError);
+    if (directoryError)
+      continue;
+    for (const std::filesystem::directory_entry &entry : entries) {
+      std::error_code entryError;
+      if (entry.is_symlink(entryError))
+        continue;
+      if (entry.is_directory(entryError) && !entryError) {
+        pendingDirectories.push_back(entry.path());
+        continue;
+      }
+      if (!entryError && entry.is_regular_file(entryError) &&
+          entry.path().filename() == "performance_profile.json")
+        profiles.push_back(entry.path());
+    }
+  }
+  std::sort(profiles.begin(), profiles.end());
+  std::string lastReason = "no performance_profile.json asset found";
+  for (auto profileIt = profiles.rbegin(); profileIt != profiles.rend();
+       ++profileIt) {
+    CxModelPerformanceProfile profile;
+    if (LoadModelPerformanceProfileLocal(*profileIt, profile, lastReason)) {
+      context.model_performance_profile = std::move(profile);
+      return;
+    }
+  }
+  context.model_performance_profile.reason = lastReason;
+}
+
 static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
   context.model_lineage_scan_attempted = true;
   context.model_lineage_nodes.clear();
@@ -9628,6 +9772,124 @@ static bool WriteParentModelSelectionReviewLocal(
   return true;
 }
 
+static void DrawModelLineageTopologyLocal(ManualTestContext &context) {
+  if (context.model_lineage_nodes.empty()) {
+    ImGui::TextDisabled(
+        "No valid model-node assets are available for a lineage topology.");
+    return;
+  }
+
+  const std::vector<CxModelLineageUiNode> &nodes =
+      context.model_lineage_nodes;
+  std::unordered_map<std::string, std::size_t> indexById;
+  for (std::size_t index = 0; index < nodes.size(); ++index)
+    indexById[nodes[index].model_id] = index;
+
+  std::vector<int> depth(nodes.size(), -1);
+  std::function<int(std::size_t, std::unordered_set<std::size_t> &)> resolveDepth;
+  resolveDepth = [&](std::size_t index, std::unordered_set<std::size_t> &trail) {
+    if (depth[index] >= 0)
+      return depth[index];
+    if (!trail.insert(index).second)
+      return 0;  // Scanner/audit presents the invalid cycle separately.
+    int result = 0;
+    for (const std::string &parentId : nodes[index].parent_model_ids) {
+      const auto parent = indexById.find(parentId);
+      if (parent != indexById.end())
+        result = std::max(result, resolveDepth(parent->second, trail) + 1);
+    }
+    trail.erase(index);
+    depth[index] = result;
+    return result;
+  };
+
+  int maximumDepth = 0;
+  for (std::size_t index = 0; index < nodes.size(); ++index) {
+    std::unordered_set<std::size_t> trail;
+    maximumDepth = std::max(maximumDepth, resolveDepth(index, trail));
+  }
+  std::vector<std::vector<std::size_t>> levels(
+      static_cast<std::size_t>(maximumDepth + 1));
+  for (std::size_t index = 0; index < nodes.size(); ++index)
+    levels[static_cast<std::size_t>(depth[index])].push_back(index);
+
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const ImVec2 size(std::max(420.0f, ImGui::GetContentRegionAvail().x),
+                    std::max(180.0f, 110.0f + maximumDepth * 86.0f));
+  ImGui::InvisibleButton("##model_lineage_topology", size);
+  ImDrawList *draw = ImGui::GetWindowDrawList();
+  const ImU32 frame = IM_COL32(112, 124, 140, 255);
+  const ImU32 guide = IM_COL32(75, 82, 92, 125);
+  draw->AddRect(origin, origin + size, frame, 4.0f);
+  for (int level = 0; level <= maximumDepth; ++level) {
+    const float y = origin.y + size.y - 32.0f - level * 72.0f;
+    draw->AddLine(ImVec2(origin.x + 10.0f, y),
+                  ImVec2(origin.x + size.x - 10.0f, y), guide, 1.0f);
+  }
+
+  std::vector<ImVec2> positions(nodes.size());
+  for (std::size_t level = 0; level < levels.size(); ++level) {
+    const std::vector<std::size_t> &members = levels[level];
+    for (std::size_t ordinal = 0; ordinal < members.size(); ++ordinal) {
+      const float ratio = static_cast<float>(ordinal + 1) /
+                          static_cast<float>(members.size() + 1);
+      positions[members[ordinal]] = ImVec2(
+          origin.x + 26.0f + (size.x - 52.0f) * ratio,
+          origin.y + size.y - 32.0f - static_cast<float>(level) * 72.0f);
+    }
+  }
+
+  for (std::size_t child = 0; child < nodes.size(); ++child) {
+    for (const std::string &parentId : nodes[child].parent_model_ids) {
+      const auto parent = indexById.find(parentId);
+      if (parent == indexById.end())
+        continue;
+      const ImVec2 from = positions[parent->second];
+      const ImVec2 to = positions[child];
+      draw->AddBezierCubic(from, ImVec2(from.x, from.y - 38.0f),
+                           ImVec2(to.x, to.y + 38.0f), to,
+                           IM_COL32(130, 143, 161, 255), 3.0f);
+    }
+  }
+
+  const auto nodeColor = [](const CxModelLineageUiNode &node) {
+    if (node.node_kind == "release")
+      return IM_COL32(183, 91, 0, 255);
+    if (node.node_kind == "merge_candidate")
+      return IM_COL32(38, 74, 195, 255);
+    return IM_COL32(76, 154, 0, 255);
+  };
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  for (std::size_t index = 0; index < nodes.size(); ++index) {
+    const bool selected = context.selected_model_lineage_node ==
+                          static_cast<int>(index);
+    const ImVec2 position = positions[index];
+    const float radius = selected ? 11.0f : 9.0f;
+    if (selected) {
+      draw->AddTriangleFilled(ImVec2(position.x, position.y - 31.0f),
+                              ImVec2(position.x - 8.0f, position.y - 20.0f),
+                              ImVec2(position.x + 8.0f, position.y - 20.0f),
+                              IM_COL32(31, 183, 88, 255));
+      draw->AddText(ImVec2(position.x + 12.0f, position.y - 34.0f),
+                    IM_COL32(31, 183, 88, 255), "Current review");
+    }
+    draw->AddCircleFilled(position, radius, nodeColor(nodes[index]));
+    draw->AddCircle(position, radius, IM_COL32(230, 232, 235, 255), 0,
+                    selected ? 2.5f : 1.0f);
+    const std::string label = nodes[index].display_name;
+    const ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+    draw->AddText(ImVec2(position.x - labelSize.x * 0.5f,
+                          position.y + 14.0f),
+                  IM_COL32(218, 224, 232, 255), label.c_str());
+    const ImVec2 delta(mouse.x - position.x, mouse.y - position.y);
+    if (delta.x * delta.x + delta.y * delta.y <= radius * radius &&
+        ImGui::IsItemClicked(ImGuiMouseButton_Left))
+      context.selected_model_lineage_node = static_cast<int>(index);
+  }
+  ImGui::TextDisabled(
+      "Orange: release baseline | green: incremental candidate | blue: merge candidate. Click a node to inspect its evidence and gates.");
+}
+
 void ViewController::drawTorchTrainingImageSetWindow() {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   const ImVec2 workPos = viewport->WorkPos;
@@ -9666,6 +9928,123 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       "evidence, not model quality PASS.");
   ImGui::Separator();
 
+  const CxTorchTrainingRunBinding &trainingRun =
+      m_manualTest.torch_training_run;
+  ImGui::SeparatorText("Primary Training / Image Set Actions");
+  ImGui::Text("dataset: %zu images | train/val/test actions are asset-backed",
+              m_manualTest.torch_training_images.size());
+  if (ImGui::Button("Sync Selected Evidence Case##training_primary")) {
+    SyncTorchTrainingImageSetFromEvidenceSelection();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Add Current As Train##training_primary")) {
+    AddTorchTrainingImageFromPath(m_manualTest.image_file_path,
+                                  m_manualTest.active_image_id, "train",
+                                  "unlabeled", "current_image");
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Add Current As Val##training_primary")) {
+    AddTorchTrainingImageFromPath(m_manualTest.image_file_path,
+                                  m_manualTest.active_image_id, "val",
+                                  "unlabeled", "current_image");
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Add Manifest Images##training_primary")) {
+    ClearTorchTrainingImageSetForEvidenceSyncLocal(
+        m_manualTest, "manual rebuild from selected evidence manifest images");
+    int count = AddHDReferenceImageSetForCurrentSelection();
+    if (count == 0) {
+      for (const ManifestImageItem &item : m_manualTest.image_manifest_items) {
+        if (!item.image_path.empty()) {
+          AddTorchTrainingImageFromPath(item.image_path, item.image_id, "train",
+                                        "unlabeled", "manifest");
+          ++count;
+        }
+      }
+      m_manualTest.torch_training_image_status = "MANIFEST_IMAGES_ADDED";
+      m_manualTest.torch_training_image_reason =
+          "incrementally added manifest images: " + std::to_string(count);
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Export Training Dataset##training_primary")) {
+    CaptureCurrentTorchTrainingAnnotationState();
+    std::string packagePath;
+    std::string exportReason;
+    if (!ExportTorchTrainingLabelPackage(packagePath, exportReason)) {
+      m_manualTest.debug_status = "TORCH_LABEL_PACKAGE_EXPORT_FAIL";
+      m_manualTest.debug_reason = exportReason;
+    } else {
+      m_manualTest.debug_status = "TORCH_LABEL_PACKAGE_TO_VERIFY";
+      m_manualTest.debug_reason = exportReason;
+    }
+  }
+  const bool hasPrimaryAugmentation =
+      m_manualTest.geometry_aug_include_brightness ||
+      m_manualTest.geometry_aug_include_local_gap ||
+      m_manualTest.geometry_aug_include_jagged_cut ||
+      m_manualTest.geometry_aug_include_line_break;
+  if (!hasPrimaryAugmentation)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Generate Augmented Train/Test Set##training_primary")) {
+    std::string generationReason;
+    RunGeometryAugmentationTrainingPrepFromGui(generationReason);
+  }
+  if (!hasPrimaryAugmentation)
+    ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (m_manualTest.torch_training_process_running)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Run C++ Incremental Training##training_primary")) {
+    std::string trainingReason;
+    RunYoloV8nIncrementalTrainingFromGui(trainingReason);
+  }
+  if (m_manualTest.torch_training_process_running)
+    ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Reload Latest Run##training_primary")) {
+    std::string loadReason;
+    if (LoadLatestYoloTrainingRunLocal(m_manualTest.torch_training_run,
+                                       loadReason)) {
+      m_manualTest.torch_training_image_status =
+          m_manualTest.torch_training_run.status;
+      m_manualTest.torch_training_image_reason = loadReason;
+    } else {
+      m_manualTest.torch_training_image_status = "TRAINING_TRACE_MISSING";
+      m_manualTest.torch_training_image_reason = loadReason;
+    }
+  }
+  ImGui::Text("training: %s | epochs %d/%d | curve points %zu",
+              trainingRun.status.empty() ? "PENDING_RUN" : trainingRun.status.c_str(),
+              trainingRun.completed_epochs, trainingRun.configured_epochs,
+              trainingRun.epochs.size());
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(132.0f);
+  ImGui::InputInt("Fixed Epoch Axis##training_primary",
+                  &m_manualTest.torch_training_epoch_axis_capacity);
+  m_manualTest.torch_training_epoch_axis_capacity = std::max(
+      1, m_manualTest.torch_training_epoch_axis_capacity);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(112.0f);
+  ImGui::InputFloat("Loss Axis Max##training_primary",
+                    &m_manualTest.torch_training_loss_axis_maximum, 1.0f,
+                    5.0f, "%.3f");
+  m_manualTest.torch_training_loss_axis_maximum = std::max(
+      0.001f, m_manualTest.torch_training_loss_axis_maximum);
+  ImGui::TextDisabled(
+      "The horizontal axis remains 0-%d; future epochs are intentionally blank.",
+      std::max(trainingRun.configured_epochs,
+               m_manualTest.torch_training_epoch_axis_capacity));
+  if (trainingRun.HasRealMultiEpochSeries()) {
+    DrawEpochLossCurveLocal("##training_primary_fixed_epoch_curve", trainingRun,
+                            0, 112.0f,
+                            m_manualTest.torch_training_epoch_axis_capacity,
+                            m_manualTest.torch_training_loss_axis_maximum);
+  } else {
+    ImGui::TextDisabled("Loss chart is shown only for a runtime-produced multi-epoch series.");
+  }
+  ImGui::Separator();
+
   ImGui::Text("active_case: %s", m_manualTest.active_case_id.empty()
                                      ? "-"
                                      : m_manualTest.active_case_id.c_str());
@@ -9679,8 +10058,147 @@ void ViewController::drawTorchTrainingImageSetWindow() {
 
   if (!m_manualTest.model_lineage_scan_attempted)
     RefreshModelLineageAssetsLocal(m_manualTest);
-  if (ImGui::CollapsingHeader("Model Lineage / Candidate Review",
-                              ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (!m_manualTest.model_performance_profile_scan_attempted)
+    RefreshModelPerformanceProfileAssetsLocal(m_manualTest);
+  int lineageValidationImageCount = 0;
+  int lineageTestImageCount = 0;
+  for (const TorchTrainingImageItem &item : m_manualTest.torch_training_images) {
+    if (item.split == "val")
+      ++lineageValidationImageCount;
+    else if (item.split == "test")
+      ++lineageTestImageCount;
+  }
+  ImGui::SeparatorText("Model & Evidence Lineage / State Tree");
+  ImGui::TextDisabled(
+      "Use this tree to trace composition, validation evidence, human gates "
+      "and a safe parent-model return path. It reports asset facts; it does "
+      "not promote a model automatically.");
+  DrawModelLineageTopologyLocal(m_manualTest);
+  const auto compactAssetName = [](const std::string &path) {
+    return path.empty() ? std::string("ASSET_MISSING")
+                        : std::filesystem::path(path).filename().string();
+  };
+  const auto selectLineageNode = [this](std::size_t index) {
+    m_manualTest.selected_model_lineage_node = static_cast<int>(index);
+  };
+  const auto findLineageNode = [this](const std::string &modelId) {
+    for (std::size_t i = 0; i < m_manualTest.model_lineage_nodes.size(); ++i) {
+      if (m_manualTest.model_lineage_nodes[i].model_id == modelId)
+        return static_cast<int>(i);
+    }
+    return -1;
+  };
+  const CxModelPerformanceProfile &lineageProfile =
+      m_manualTest.model_performance_profile;
+  if (ImGui::TreeNodeEx("##model_evidence_tree_root",
+                        ImGuiTreeNodeFlags_DefaultOpen |
+                            ImGuiTreeNodeFlags_OpenOnArrow,
+                        "Model lineage (%zu valid, %zu rejected)",
+                        m_manualTest.model_lineage_nodes.size(),
+                        m_manualTest.model_lineage_rejected.size())) {
+    if (ImGui::TreeNodeEx("##model_evidence_tree_dataset",
+                          ImGuiTreeNodeFlags_DefaultOpen |
+                              ImGuiTreeNodeFlags_OpenOnArrow,
+                          "Data & training context")) {
+      ImGui::BulletText("Training images: %d | validation images: %d | test images: %d",
+                        trainingRun.train_sample_count,
+                        lineageValidationImageCount, lineageTestImageCount);
+      ImGui::BulletText("Training run: %s | epochs %d/%d",
+                        trainingRun.status.empty() ? "PENDING_RUN"
+                                                   : trainingRun.status.c_str(),
+                        trainingRun.completed_epochs, trainingRun.configured_epochs);
+      ImGui::BulletText("Fixed curve axis: 0-%d (display-only)",
+                        std::max(trainingRun.configured_epochs,
+                                 m_manualTest.torch_training_epoch_axis_capacity));
+      ImGui::TreePop();
+    }
+
+    for (std::size_t i = 0; i < m_manualTest.model_lineage_nodes.size(); ++i) {
+      const CxModelLineageUiNode &node = m_manualTest.model_lineage_nodes[i];
+      const bool selected =
+          m_manualTest.selected_model_lineage_node == static_cast<int>(i);
+      const ImGuiTreeNodeFlags nodeFlags =
+          ImGuiTreeNodeFlags_OpenOnArrow |
+          (selected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
+      const bool open = ImGui::TreeNodeEx(
+          ("##model_evidence_node_" + std::to_string(i)).c_str(), nodeFlags,
+          "%s  [%s]", node.display_name.c_str(), node.gate_status.c_str());
+      if (ImGui::IsItemClicked())
+        selectLineageNode(i);
+      if (!open)
+        continue;
+
+      if (ImGui::TreeNode("Composition")) {
+        ImGui::BulletText("Type: %s | task: %s | architecture: %s",
+                          node.node_kind.c_str(), node.task.c_str(),
+                          node.architecture_id.c_str());
+        ImGui::BulletText("Output contract: %s", node.output_contract.c_str());
+        ImGui::BulletText("Dataset binding: %s",
+                          compactAssetName(node.dataset_binding_path).c_str());
+        ImGui::BulletText("Training plan: %s",
+                          compactAssetName(node.training_plan_path).c_str());
+        ImGui::BulletText("Checkpoint: %s | hash: %s",
+                          compactAssetName(node.checkpoint_path).c_str(),
+                          node.checkpoint_hash_status.c_str());
+        ImGui::TreePop();
+      }
+      if (ImGui::TreeNode("Validation & evidence")) {
+        ImGui::BulletText("Metric bundle: %s",
+                          compactAssetName(node.metric_bundle_path).c_str());
+        ImGui::BulletText("Instance evidence: inspect the metric bundle and linked Evidence items before acceptance.");
+        ImGui::BulletText("Human review: %s",
+                          node.inference_difference_reviewed
+                              ? "HUMAN_CONFIRMED"
+                              : "PENDING_HUMAN_REVIEW");
+        ImGui::TreePop();
+      }
+      if (ImGui::TreeNode("Performance & gate")) {
+        ImGui::BulletText("Promotion: %s", node.promotion_status.c_str());
+        ImGui::BulletText("Parent selection: %s | freeze: %s | inference: %s",
+                          node.parent_gate_satisfied ? "READY" : "PENDING",
+                          node.freeze_policy_reviewed ? "CONFIRMED" : "PENDING",
+                          node.inference_difference_reviewed ? "CONFIRMED" : "PENDING");
+        ImGui::BulletText("Runtime profile: %s",
+                          lineageProfile.available
+                              ? lineageProfile.status.c_str()
+                              : "PENDING_PERFORMANCE_PROFILE");
+        ImGui::TreePop();
+      }
+      if (ImGui::TreeNode("Recovery / learning point")) {
+        if (node.parent_model_ids.empty()) {
+          ImGui::TextDisabled("This is a root model. It is a possible return baseline after human confirmation.");
+        } else {
+          for (const std::string &parentId : node.parent_model_ids) {
+            const int parentIndex = findLineageNode(parentId);
+            if (parentIndex >= 0) {
+              const CxModelLineageUiNode &parent =
+                  m_manualTest.model_lineage_nodes[static_cast<std::size_t>(parentIndex)];
+              if (ImGui::SmallButton(("Return to parent: " + parent.display_name +
+                                     "##lineage_parent_" + std::to_string(i) + "_" +
+                                     std::to_string(parentIndex)).c_str()))
+                m_manualTest.selected_model_lineage_node = parentIndex;
+            } else {
+              ImGui::BulletText("Parent asset is unavailable: %s", parentId.c_str());
+            }
+          }
+          ImGui::TextDisabled("Returning only changes this review selection; it never replaces a weight or promotes a model.");
+        }
+        ImGui::TreePop();
+      }
+      ImGui::TreePop();
+    }
+
+    if (!m_manualTest.model_lineage_rejected.empty() &&
+        ImGui::TreeNode("Rejected or incomplete assets")) {
+      for (const CxModelLineageRejectedAsset &rejected :
+           m_manualTest.model_lineage_rejected)
+        ImGui::BulletText("%s", rejected.reason.c_str());
+      ImGui::TreePop();
+    }
+    ImGui::TreePop();
+  }
+
+  if (ImGui::CollapsingHeader("Model Lineage Asset Audit (details)")) {
     ImGui::SetNextItemWidth(-120.0f);
     InputTextString("Scan root", m_manualTest.model_lineage_scan_root);
     ImGui::SameLine();
@@ -9859,6 +10377,72 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     ImGui::Separator();
   }
 
+  if (ImGui::CollapsingHeader("Model Performance Profile / Manual Review",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::SetNextItemWidth(-120.0f);
+    InputTextString("Performance scan root",
+                    m_manualTest.model_performance_profile_scan_root);
+    ImGui::SameLine();
+    if (ImGui::Button("Reload Performance Profile"))
+      RefreshModelPerformanceProfileAssetsLocal(m_manualTest);
+
+    const CxModelPerformanceProfile &profile =
+        m_manualTest.model_performance_profile;
+    if (!profile.available) {
+      ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+                         "PENDING_PERFORMANCE_PROFILE");
+      ImGui::TextWrapped(
+          "%s", profile.reason.empty()
+                    ? "Run asset-selected paired inference to produce performance_profile.json."
+                    : profile.reason.c_str());
+      ImGui::TextWrapped(
+          "No quality or promotion conclusion is derived from a missing profile.");
+    } else {
+      ImGui::Text("status: %s", profile.status.c_str());
+      ImGui::TextWrapped("scope: %s", profile.profile_scope.c_str());
+      ImGui::Text("device: %s | samples: %d | service init: %.3f ms",
+                  profile.requested_device.c_str(), profile.sample_count,
+                  profile.service_initialize_ms);
+      ImGui::TextWrapped("asset: %s", profile.profile_path.c_str());
+      if (ImGui::BeginTable("model_performance_profile", 7,
+                            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Stage",
+                                ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Min ms");
+        ImGui::TableSetupColumn("Mean ms");
+        ImGui::TableSetupColumn("P50 ms");
+        ImGui::TableSetupColumn("P95 ms");
+        ImGui::TableSetupColumn("P99 ms");
+        ImGui::TableSetupColumn("Max ms");
+        ImGui::TableHeadersRow();
+        for (const CxModelPerformanceStage &stage : profile.stages) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(stage.name.c_str());
+          ImGui::TableSetColumnIndex(1);
+          ImGui::Text("%.3f", stage.min_ms);
+          ImGui::TableSetColumnIndex(2);
+          ImGui::Text("%.3f", stage.mean_ms);
+          ImGui::TableSetColumnIndex(3);
+          ImGui::Text("%.3f", stage.p50_ms);
+          ImGui::TableSetColumnIndex(4);
+          ImGui::Text("%.3f", stage.p95_ms);
+          ImGui::TableSetColumnIndex(5);
+          ImGui::Text("%.3f", stage.p99_ms);
+          ImGui::TableSetColumnIndex(6);
+          ImGui::Text("%.3f", stage.max_ms);
+        }
+        ImGui::EndTable();
+      }
+      ImGui::TextWrapped(
+          "service_execute is full runtime service latency. model_forward is runtime-reported forward latency. residual_pipeline is the measured remainder (preprocess, model load, postprocess and evidence writes); it is not a guessed substage split.");
+      ImGui::TextWrapped(
+          "This profile is execution evidence only. Human review and promotion remain independent and disabled.");
+    }
+    ImGui::Separator();
+  }
+
   if (ImGui::CollapsingHeader("Augmented YOLOv8-n Training Prep",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::Checkbox("Brightness", &m_manualTest.geometry_aug_include_brightness);
@@ -9957,8 +10541,6 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     ImGui::Separator();
   }
 
-  const CxTorchTrainingRunBinding &trainingRun =
-      m_manualTest.torch_training_run;
   if (trainingRun.available || m_manualTest.torch_training_process_running) {
     ImGui::SeparatorText("Current C++ Incremental Training");
     ImGui::Text("%s | epochs %d / %d | curve points %zu | batches/epoch %d",
@@ -9975,24 +10557,12 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     if (!trainingRun.incremental_model_path.empty())
       ImGui::TextWrapped("Model: %s",
                          trainingRun.incremental_model_path.c_str());
-    if (trainingRun.HasRealMultiEpochSeries() &&
-        ImGui::BeginTabBar("##training_curve_scale_tabs")) {
-      if (ImGui::BeginTabItem("Recent epochs")) {
-        const std::size_t recentStart = trainingRun.epochs.size() > 20
-                                            ? trainingRun.epochs.size() - 20
-                                            : 0;
-        ImGui::TextUnformatted("Loss / Epoch (local Y scale)");
-        DrawEpochLossCurveLocal("##training_window_recent_loss_epoch_curve",
-                                trainingRun, recentStart, 125.0f);
-        ImGui::EndTabItem();
-      }
-      if (ImGui::BeginTabItem("Full run")) {
-        ImGui::TextUnformatted("Total Loss / Epoch");
-        DrawEpochLossCurveLocal("##training_window_primary_loss_epoch_curve",
-                                trainingRun, 0, 125.0f);
-        ImGui::EndTabItem();
-      }
-      ImGui::EndTabBar();
+    if (trainingRun.HasRealMultiEpochSeries()) {
+      ImGui::TextUnformatted("Total Loss / Epoch (full run, fixed X axis)");
+      DrawEpochLossCurveLocal("##training_window_primary_loss_epoch_curve",
+                              trainingRun, 0, 125.0f,
+                              m_manualTest.torch_training_epoch_axis_capacity,
+                              m_manualTest.torch_training_loss_axis_maximum);
     }
     if (trainingRun.epochs.size() >= 2) {
       int increasingSteps = 0;
@@ -10112,7 +10682,8 @@ void ViewController::drawTorchTrainingImageSetWindow() {
           ? "PENDING_BINDING"
           : "PENDING_HUMAN_REVIEW";
 
-  ImGui::SeparatorText("Evidence Model Test Chain");
+  if (ImGui::CollapsingHeader("Evidence Model Test Chain")) {
+  ImGui::TextWrapped("Evidence/audit detail follows the primary operation and visual panels.");
   ImGui::TextWrapped(
       "Observed asset and runtime state only. PENDING, BLOCKED, STAGED and "
       "draft stages have not executed the downstream model operation.");
@@ -10225,8 +10796,9 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     ImGui::TextWrapped("Annotation semantics: %s",
                        chainPolicy.label_semantics.c_str());
   ImGui::Separator();
+  }
   if (trainingRun.available &&
-      ImGui::CollapsingHeader("Training Run", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::CollapsingHeader("Training Run Details")) {
     ImGui::Text("status: %s", trainingRun.status.c_str());
     ImGui::Text("optimizer: %s | learning rate: %.8g",
                 trainingRun.optimizer.c_str(), trainingRun.learning_rate);
@@ -10268,7 +10840,9 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     if (hasRealTrainingCurve) {
       ImGui::Text("Total Loss / Epoch");
       DrawEpochLossCurveLocal("##training_window_loss_epoch_curve",
-                              trainingRun);
+                              trainingRun, 0, 170.0f,
+                              m_manualTest.torch_training_epoch_axis_capacity,
+                              m_manualTest.torch_training_loss_axis_maximum);
     }
 
     if (ImGui::BeginTable("torch_training_epoch_metrics", 7,
@@ -10647,8 +11221,74 @@ bool ViewController::RefreshEvidenceSelectionFromThumb(int groupIndex,
     return false;
   }
 
-  return ApplyEvidenceSelectionSnapshotToManualContext(snapshot,
-                                                       loadImageToView, reason);
+  // Applying the snapshot can rebuild script_evidence_groups.  Derive the
+  // history identity while the row is still valid, then never dereference the
+  // old group/thumb after that call.
+  const ScriptEvidenceThumb &selectedThumb = group.thumbs[thumbIndex];
+  const std::string groupLabel = group.label;
+  auto normalizeEvidenceOrigin = [](const std::string &path) {
+    if (path.empty())
+      return std::string();
+    return std::filesystem::path(path).lexically_normal().generic_string();
+  };
+  std::string origin = selectedThumb.candidate_dir;
+  if (origin.empty())
+    origin = selectedThumb.evidence_output_root;
+  if (origin.empty() && !selectedThumb.evidence_binding_path.empty())
+    origin = std::filesystem::path(selectedThumb.evidence_binding_path)
+                 .parent_path()
+                 .string();
+  if (origin.empty() && !selectedThumb.runtime_globals_path.empty())
+    origin = std::filesystem::path(selectedThumb.runtime_globals_path)
+                 .parent_path()
+                 .string();
+  if (origin.empty() && !selectedThumb.working_script_snapshot_path.empty())
+    origin = std::filesystem::path(selectedThumb.working_script_snapshot_path)
+                 .parent_path()
+                 .string();
+  if (origin.empty() && !selectedThumb.source_evidence_script_path.empty())
+    origin = std::filesystem::path(selectedThumb.source_evidence_script_path)
+                 .parent_path()
+                 .string();
+  if (origin.empty() && !selectedThumb.script_path.empty())
+    origin = std::filesystem::path(selectedThumb.script_path).parent_path().string();
+  origin = normalizeEvidenceOrigin(origin);
+  std::string key;
+  if (!selectedThumb.case_id.empty())
+    key = "case=" + selectedThumb.case_id + "|origin=" + origin;
+  else if (!selectedThumb.script_id.empty())
+    key = "script=" +
+          StripEvidenceCandidateDisplaySuffixLocal(selectedThumb.script_id) +
+          "|origin=" + origin;
+  else
+    key = "fallback=" + groupLabel + "|" + selectedThumb.image_id + "|" +
+          selectedThumb.target_id + "|" + origin;
+
+  if (!ApplyEvidenceSelectionSnapshotToManualContext(snapshot, loadImageToView,
+                                                      reason)) {
+    return false;
+  }
+
+  if (!key.empty()) {
+    auto &recent = m_manualTest.recent_evidence_case_keys;
+    recent.erase(std::remove(recent.begin(), recent.end(), key), recent.end());
+    recent.insert(recent.begin(), key);
+    if (recent.size() > 5)
+      recent.resize(5);
+
+    std::ostringstream saved;
+    saved << "# Evidence Chain recent case identities; newest first\n";
+    for (const std::string &item : recent)
+      saved << item << '\n';
+    const std::filesystem::path recentPath = ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/recent_evidence_cases.txt");
+    if (!WriteTextFile(recentPath.string(), saved.str())) {
+      CXLOG_WARN("EvidenceChain", "recent_case_save_failed", "ui_event",
+                 "path=" + recentPath.string());
+    }
+  }
+
+  return true;
 }
 
 void ViewController::SelectScriptEvidenceThumb(int groupIndex, int thumbIndex) {
@@ -10683,6 +11323,28 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
                        "No trace binding thumbnails.");
     return;
+  }
+
+  if (!m_manualTest.recent_evidence_cases_loaded) {
+    m_manualTest.recent_evidence_cases_loaded = true;
+    std::string savedRecent;
+    const std::filesystem::path recentPath = ResolveCxVisionRunPath(
+        "cxscript_runs/evidence_chain/recent_evidence_cases.txt");
+    if (ReadTextFile(recentPath.string(), savedRecent)) {
+      std::istringstream input(savedRecent);
+      std::string line;
+      while (std::getline(input, line) &&
+             m_manualTest.recent_evidence_case_keys.size() < 5) {
+        line = TrimLine(line);
+        if (line.empty() || line[0] == '#')
+          continue;
+        if (std::find(m_manualTest.recent_evidence_case_keys.begin(),
+                      m_manualTest.recent_evidence_case_keys.end(), line) ==
+            m_manualTest.recent_evidence_case_keys.end()) {
+          m_manualTest.recent_evidence_case_keys.push_back(line);
+        }
+      }
+    }
   }
 
   m_manualTest.script_evidence_thumb_load_count_this_frame = 0;
@@ -10932,15 +11594,49 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
   };
   auto uniqueCaseKey = [&](const ScriptEvidenceThumb &thumb,
                            const ScriptEvidenceGroup &group) -> std::string {
+    // A case id identifies the logical test, not one particular evidence
+    // package.  The same logical case can legitimately be present in a saved
+    // candidate and in a different headless/evidence run.  Keep those rows
+    // independently navigable; otherwise a late scan silently replaces an
+    // earlier, user-visible case in the Evidence list.
+    auto normalizeEvidenceOrigin = [](const std::string &path) {
+      if (path.empty())
+        return std::string();
+      return std::filesystem::path(path).lexically_normal().generic_string();
+    };
+
+    std::string origin = thumb.candidate_dir;
+    if (origin.empty())
+      origin = thumb.evidence_output_root;
+    if (origin.empty() && !thumb.evidence_binding_path.empty())
+      origin = std::filesystem::path(thumb.evidence_binding_path)
+                   .parent_path()
+                   .string();
+    if (origin.empty() && !thumb.runtime_globals_path.empty())
+      origin = std::filesystem::path(thumb.runtime_globals_path)
+                   .parent_path()
+                   .string();
+    if (origin.empty() && !thumb.working_script_snapshot_path.empty())
+      origin = std::filesystem::path(thumb.working_script_snapshot_path)
+                   .parent_path()
+                   .string();
+    if (origin.empty() && !thumb.source_evidence_script_path.empty())
+      origin = std::filesystem::path(thumb.source_evidence_script_path)
+                   .parent_path()
+                   .string();
+    if (origin.empty() && !thumb.script_path.empty())
+      origin = std::filesystem::path(thumb.script_path).parent_path().string();
+    origin = normalizeEvidenceOrigin(origin);
+
     if (!thumb.case_id.empty())
-      return "case=" + thumb.case_id;
+      return "case=" + thumb.case_id + "|origin=" + origin;
     if (!thumb.script_id.empty())
       return "script=" +
-             StripEvidenceCandidateDisplaySuffixLocal(thumb.script_id);
+             StripEvidenceCandidateDisplaySuffixLocal(thumb.script_id) +
+             "|origin=" + origin;
     return "fallback=" + group.label + "|" + thumb.image_id + "|" +
-           thumb.target_id + "|" + thumb.script_path;
+           thumb.target_id + "|" + origin;
   };
-
   std::vector<ScriptEvidenceRowRef> uniqueRows;
   std::unordered_map<std::string, std::size_t> uniqueRowSlots;
 
@@ -10968,6 +11664,20 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         uniqueRows[existingSlot->second] = row;
       }
     }
+  }
+
+  std::unordered_map<std::string, ScriptEvidenceRowRef> rowByIdentity;
+  for (const ScriptEvidenceRowRef &row : uniqueRows) {
+    if (row.group_index < 0 ||
+        row.group_index >=
+            static_cast<int>(m_manualTest.script_evidence_groups.size()))
+      continue;
+    const ScriptEvidenceGroup &group =
+        m_manualTest.script_evidence_groups[row.group_index];
+    if (row.thumb_index < 0 ||
+        row.thumb_index >= static_cast<int>(group.thumbs.size()))
+      continue;
+    rowByIdentity[uniqueCaseKey(group.thumbs[row.thumb_index], group)] = row;
   }
 
   for (const ScriptEvidenceRowRef &row : uniqueRows) {
@@ -11010,6 +11720,26 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     }
     findOrCreateCaseFolder(head, thumb.evidence_case_folder)
         .rows.push_back(row);
+  }
+
+  // Recent Cases is a navigation shortcut, not another evidence state.  It
+  // only references freshly scanned rows, so deleted/moved assets cannot be
+  // resurrected from history.
+  EvidenceMajorCategory &recentMajor =
+      findOrCreateMajor(-1, "Recent Cases");
+  for (const std::string &key : m_manualTest.recent_evidence_case_keys) {
+    const auto found = rowByIdentity.find(key);
+    if (found == rowByIdentity.end())
+      continue;
+    const ScriptEvidenceRowRef &row = found->second;
+    const ScriptEvidenceGroup &group =
+        m_manualTest.script_evidence_groups[row.group_index];
+    const ScriptEvidenceThumb &thumb = group.thumbs[row.thumb_index];
+    const auto toolClass = classifyTool(thumb, group);
+    EvidenceCategory &tool =
+        findOrCreateTool(recentMajor, toolClass.first, toolClass.second);
+    tool.rows.push_back(row);
+    tool.direct_rows.push_back(row);
   }
   static int classificationDebugDumpBudget = 3;
   if (classificationDebugDumpBudget > 0) {

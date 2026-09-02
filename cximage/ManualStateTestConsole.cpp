@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -48,6 +49,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <vector>
 #include <memory>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
@@ -1966,16 +1968,105 @@ void ViewController::drawTorchRuntimeEvidenceWindow() {
     return;
   }
 
-  ImGui::TextWrapped("Torch layer is separated from geometry key parameters. "
-                     "Use this window for model/runtime/artifact/prompt/review "
-                     "visibility.");
-  ImGui::Separator();
-
   ApplyAiGuiFocusHere(
       AiGuiDestination::TorchRuntimeEvidence,
       "Torch Runtime / Evidence > runtime status and review controls");
+  ImGui::SeparatorText("Primary Torch Operations / Runtime Snapshot");
   DrawTorchKeyStatusPanel(m_manualTest);
+  const CxTorchTrainingRunBinding &training = m_manualTest.torch_training_run;
+  if (training.HasRealMultiEpochSeries()) {
+    ImGui::SetNextItemWidth(132.0f);
+    ImGui::InputInt("Fixed Epoch Axis##torch_runtime_head",
+                    &m_manualTest.torch_training_epoch_axis_capacity);
+    m_manualTest.torch_training_epoch_axis_capacity = std::max(
+        1, m_manualTest.torch_training_epoch_axis_capacity);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(112.0f);
+    ImGui::InputFloat("Loss Axis Max##torch_runtime_head",
+                      &m_manualTest.torch_training_loss_axis_maximum, 1.0f,
+                      5.0f, "%.3f");
+    m_manualTest.torch_training_loss_axis_maximum = std::max(
+        0.001f, m_manualTest.torch_training_loss_axis_maximum);
+    const int axisEpochMaximum = std::max(
+        {1, training.configured_epochs,
+         m_manualTest.torch_training_epoch_axis_capacity});
+    const int firstRecordedEpoch = training.epochs.front().epoch;
+    const int lastRecordedIndex = std::max(
+        0, training.epochs.back().epoch - firstRecordedEpoch);
+    ImGui::Text("Bound training: %s | epochs %d/%d | samples %d",
+                training.status.c_str(), training.completed_epochs,
+                training.configured_epochs, training.train_sample_count);
+    const double lossAxisMaximum =
+        m_manualTest.torch_training_loss_axis_maximum;
+    ImGui::TextDisabled(
+        "Fixed axes: X min 0 / max %d | Y min 0 / max %.4g | recorded X 0-%d.",
+        axisEpochMaximum, lossAxisMaximum, lastRecordedIndex);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size(std::max(320.0f, ImGui::GetContentRegionAvail().x),
+                      112.0f);
+    ImGui::InvisibleButton("##torch_runtime_fixed_epoch_curve", size);
+    ImDrawList *draw = ImGui::GetWindowDrawList();
+    const float left = origin.x + 42.0f;
+    const float right = origin.x + size.x - 10.0f;
+    const float top = origin.y + 8.0f;
+    const float bottom = origin.y + size.y - 28.0f;
+    const double minLoss = 0.0;
+    const double maxLoss = lossAxisMaximum;
+    const ImU32 axis = IM_COL32(150, 160, 172, 255);
+    const ImU32 grid = IM_COL32(75, 82, 92, 180);
+    const ImU32 curve = IM_COL32(52, 190, 132, 255);
+    draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), axis);
+    for (int tick = 0; tick <= 4; ++tick) {
+      const float ratio = static_cast<float>(tick) / 4.0f;
+      const float x = left + (right - left) * ratio;
+      draw->AddLine(ImVec2(x, top), ImVec2(x, bottom), grid);
+      const std::string label =
+          std::to_string(static_cast<int>(std::lround(axisEpochMaximum * ratio)));
+      draw->AddText(ImVec2(x - ImGui::CalcTextSize(label.c_str()).x * 0.5f,
+                           bottom + 4.0f),
+                    axis, label.c_str());
+    }
+    if (lastRecordedIndex < axisEpochMaximum) {
+      const float futureStart = left + (right - left) *
+                                           static_cast<float>(lastRecordedIndex) /
+                                           static_cast<float>(axisEpochMaximum);
+      draw->AddRectFilled(ImVec2(futureStart, top), ImVec2(right, bottom),
+                          IM_COL32(16, 20, 25, 84));
+      draw->AddText(ImVec2(futureStart + 7.0f, top + 7.0f), axis,
+                    "Future range: no samples");
+    }
+    const std::string maxLossText = std::to_string(maxLoss);
+    const std::string minLossText = std::to_string(minLoss);
+    draw->AddText(ImVec2(origin.x, top - 4.0f), axis, maxLossText.c_str());
+    draw->AddText(ImVec2(origin.x, bottom - 7.0f), axis,
+                  minLossText.c_str());
+    draw->AddText(ImVec2(left + 4.0f, top + 4.0f), axis, "Loss (auto)");
+    draw->AddText(ImVec2((left + right) * 0.5f - 18.0f, bottom + 18.0f),
+                  axis, "Epoch");
+    ImVec2 previous;
+    for (std::size_t index = 0; index < training.epochs.size(); ++index) {
+      const CxTorchTrainingEpochMetric &metric = training.epochs[index];
+      const float x = left + (right - left) *
+                                 static_cast<float>(std::max(
+                                     0, metric.epoch - firstRecordedEpoch)) /
+                                 static_cast<float>(axisEpochMaximum);
+      const float yRatio = std::clamp(
+          static_cast<float>((metric.total_loss - minLoss) /
+                             (maxLoss - minLoss)),
+          0.0f, 1.0f);
+      const float y = bottom - (bottom - top) * yRatio;
+      const ImVec2 point(x, y);
+      if (index > 0)
+        draw->AddLine(previous, point, curve, 2.0f);
+      previous = point;
+    }
+  } else {
+    ImGui::TextDisabled(
+        "No runtime-produced multi-epoch curve is bound; action and runtime status remain available above.");
+  }
   ImGui::Separator();
+  ImGui::TextDisabled(
+      "Artifacts, prompts, contracts and review conclusions are detailed below the primary controls.");
   DrawTorchEvidenceAndReviewPanel(m_manualTest);
 
   ImGui::End();

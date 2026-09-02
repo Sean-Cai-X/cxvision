@@ -618,6 +618,13 @@ public:
         int scan_index,
         CxShapePoint& p0,
         CxShapePoint& p1) const;
+    // Maps a normalized profile position through the actual LineShape samples
+    // used by Measure(), rather than through the visible endpoint chord.
+    bool getscanlineprofilepoint(
+        int scan_type,
+        int scan_index,
+        double normalized_profile_position,
+        CxShapePoint& point);
     const FindLineMeasureInputDebug& lastmeasureinputdebug() const
     {
         return m_lastMeasureInputDebug;

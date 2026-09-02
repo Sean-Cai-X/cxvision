@@ -321,6 +321,7 @@ bool RunFindLineBoundaryTriggerSmoke(double& observed, std::string& reason)
     }
 
     int accepted_scan_diagnostics = 0;
+    double maximum_projection_error = 0.0;
     for (int i = 0; i < line.getscandiagnosticcount(); ++i)
     {
         FindLineMeasureInputDebug::ScanDiagnostic diag;
@@ -329,6 +330,24 @@ bool RunFindLineBoundaryTriggerSmoke(double& observed, std::string& reason)
             diag.accepted)
         {
             ++accepted_scan_diagnostics;
+            const int sampleCount = diag.scan_type == 0
+                ? debug.original_scan_w_length
+                : debug.original_scan_h_length;
+            CxShapePoint projected;
+            const double normalizedPosition = sampleCount > 1
+                ? diag.boundary_response_selected_position /
+                    static_cast<double>(sampleCount - 1)
+                : -1.0;
+            if (!line.getscanlineprofilepoint(
+                    diag.scan_type, diag.scan_index, normalizedPosition,
+                    projected))
+            {
+                reason = "FindLine profile-to-image projection was unavailable";
+                return false;
+            }
+            const double error = std::hypot(
+                projected.x - diag.accepted_x, projected.y - diag.accepted_y);
+            maximum_projection_error = std::max(maximum_projection_error, error);
         }
     }
     if (accepted_scan_diagnostics <= 0)
@@ -336,8 +355,15 @@ bool RunFindLineBoundaryTriggerSmoke(double& observed, std::string& reason)
         reason = "FindLine BoundaryResponse accepted no scan diagnostic rows";
         return false;
     }
+    if (maximum_projection_error > 1.0e-6)
+    {
+        reason = "FindLine profile-to-image projection diverged from accepted "
+                 "diagnostic point by " + std::to_string(maximum_projection_error);
+        return false;
+    }
 
-    reason = "FindLine BoundaryResponse emits real measure points and diagnostics";
+    reason = "FindLine BoundaryResponse emits real measure points and profile-to-image "
+             "projection matches accepted diagnostics";
     return true;
 }
 
@@ -1183,9 +1209,9 @@ bool RunMetrologyAnalyticsSmoke(
             }
         }
         AddCase(result, "ui_global_count", "ui_globals",
-                uiGlobals.size() == 89,
-                static_cast<double>(uiGlobals.size()), 89.0, 0.0,
-                "Key Parameter Controls metrology panel exposes 89 global_metrology_* values");
+                uiGlobals.size() == 90,
+                static_cast<double>(uiGlobals.size()), 90.0, 0.0,
+                "Key Parameter Controls metrology panel exposes 90 global_metrology_* values");
         AddCase(result, "ui_global_prefix", "ui_globals", allGlobalMetrologyPrefixed, allGlobalMetrologyPrefixed ? 1.0 : 0.0, 1.0, 0.0, "all metrology UI globals use the global_metrology_ prefix");
         AddCase(result, "ui_scan_max_lines_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1) == 256, static_cast<double>(findUiValue(uiGlobals, "global_metrology_scan_profile_max_lines", -1)), 256.0, 0.0, "scan profile max lines default is locked");
         AddCase(result, "ui_surface_area_method_default", "ui_globals", findUiValue(uiGlobals, "global_metrology_surface_area_method", -1) == 1, static_cast<double>(findUiValue(uiGlobals, "global_metrology_surface_area_method", -1)), 1.0, 0.0, "area method default is four-triangle fan");

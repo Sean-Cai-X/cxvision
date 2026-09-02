@@ -5973,6 +5973,40 @@ bool FindLine::getscanline(
     return line != nullptr && line->exportLine(p0, p1);
 }
 
+bool FindLine::getscanlineprofilepoint(
+    int scan_type,
+    int scan_index,
+    double normalized_profile_position,
+    CxShapePoint& point)
+{
+    LineShape* scanLine = nullptr;
+    if (scan_type == 0 && wscanenabled() && scan_index >= 0 &&
+        scan_index < static_cast<int>(m_lines_w.size()))
+    {
+        scanLine = &m_lines_w[static_cast<std::size_t>(scan_index)];
+    }
+    else if (scan_type == 1 && hscanenabled() && scan_index >= 0 &&
+             scan_index < static_cast<int>(m_lines_h.size()))
+    {
+        scanLine = &m_lines_h[static_cast<std::size_t>(scan_index)];
+    }
+    if (scanLine == nullptr || !std::isfinite(normalized_profile_position))
+        return false;
+
+    const int sampleCount = scanLine->getlinesize();
+    if (sampleCount < 2)
+        return false;
+
+    const double normalized = std::max(
+        0.0, std::min(1.0, normalized_profile_position));
+    const gp_Pnt sampled = InterpolateFindLinePoint(
+        *scanLine, normalized * static_cast<double>(sampleCount - 1),
+        sampleCount);
+    point.x = sampled.X();
+    point.y = sampled.Y();
+    return true;
+}
+
 void FindLine::setmaxelapsedms(int value)
 {
     m_budget.max_elapsed_ms = value;

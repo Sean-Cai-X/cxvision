@@ -1763,11 +1763,16 @@ GLuint UpdateTextureWithCuda(int, int) { return 0; }
 void ViewController::run() {
   int iw = 2048 / 2;
   int ih = 1536 / 2;
+  std::cerr << "[cxvision_imgui_acceptance] run OK"
+      << std::endl;
   SetCxCrashBreadcrumb("ViewController::run:begin");
   CXLOG_INFO("ViewController", "run_stage", "running", "stage=begin");
   SetCxCrashBreadcrumb("ViewController::run:initWindow");
   CXLOG_INFO("ViewController", "run_stage", "running", "stage=initWindow");
+
+ 
   initWindow(iw, ih, "glfw occt image ai");
+  
   SetCxCrashBreadcrumb("ViewController::run:initViewer");
   CXLOG_INFO("ViewController", "run_stage", "running", "stage=initViewer");
   initViewer(iw, ih);
@@ -5521,7 +5526,8 @@ void ViewController::drawScriptAcceptancePanels() {
           diagnosticCount > 0 ? diagnosticCount : totalScanCount;
       const int arrowStride = std::max(1, arrowSourceCount / 48);
 
-      auto drawProfileCursorPoint = [&](const CxShapePoint &a,
+      auto drawProfileCursorPoint = [&](int scanType, int scanIndex,
+                                        const CxShapePoint &a,
                                         const CxShapePoint &b) {
         const ManualMetrologyUiState &metrology = m_manualTest.metrology_ui;
         if (!metrology.profile_cursor_visible ||
@@ -5533,8 +5539,12 @@ void ViewController::drawScriptAcceptancePanels() {
                         metrology.profile_cursor_sample_index));
         const double t = static_cast<double>(cursorIndex) /
                          static_cast<double>(metrology.profile_cursor_sample_count - 1);
-        const CxShapePoint point{a.x + (b.x - a.x) * t,
-                                 a.y + (b.y - a.y) * t};
+        CxShapePoint point;
+        if (!lineTool->getscanlineprofilepoint(scanType, scanIndex, t, point)) {
+          // Defensive fallback only. Normal FindLine overlays use the same
+          // sampled LineShape path as the measurement result.
+          point = {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
+        }
         const ImVec2 p = ImageToScreenD(point.x, point.y);
         drawList->AddCircleFilled(p, 5.0f, IM_COL32(255, 210, 64, 255), 18);
         drawList->AddCircle(p, 7.0f, IM_COL32(30, 22, 0, 240), 18, 1.5f);
@@ -5552,7 +5562,8 @@ void ViewController::drawScriptAcceptancePanels() {
       };
 
 
-      auto drawActualScanLine = [&](const CxShapePoint &a,
+      auto drawActualScanLine = [&](int scanType, int scanIndex,
+                                    const CxShapePoint &a,
                                     const CxShapePoint &b, ImU32 color,
                                     float thickness, int ordinal) {
         const bool selected = ordinal == selectedScanOrdinal;
@@ -5571,7 +5582,7 @@ void ViewController::drawScriptAcceptancePanels() {
           drawList->AddText(mid, drawColor, selectedScanLabel.c_str());
           drawArrowHead(a, b);
 
-          drawProfileCursorPoint(a, b);
+          drawProfileCursorPoint(scanType, scanIndex, a, b);
 
         } else if (drawAllLineGaugeScans && (ordinal % arrowStride) == 0) {
           drawArrowHead(a, b);
@@ -5590,7 +5601,8 @@ void ViewController::drawScriptAcceptancePanels() {
           const int currentOrdinal = ordinal++;
           if (!drawAllLineGaugeScans && currentOrdinal != selectedScanOrdinal)
             continue;
-          drawActualScanLine(a, b, IM_COL32(140, 230, 255, 145), 1.0f,
+          drawActualScanLine(scanType, scanIndex, a, b,
+                             IM_COL32(140, 230, 255, 145), 1.0f,
                              currentOrdinal);
         }
       }
@@ -5620,7 +5632,8 @@ void ViewController::drawScriptAcceptancePanels() {
             lineColor = IM_COL32(255, 96, 96, 170);
           }
 
-          drawActualScanLine(a, b, lineColor, lineThickness, diagOrdinal);
+          drawActualScanLine(diag.scan_type, diag.scan_index, a, b,
+                             lineColor, lineThickness, diagOrdinal);
 
           if (diag.accepted) {
             int conclusionIndex = 0;

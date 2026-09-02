@@ -7133,27 +7133,39 @@ static bool DrawBoundaryTriggerPreviewLocal(
   CxBoundaryResponseConfig config = BuildBoundaryResponseConfigLocal(m);
   const CxBoundaryResponseResult result =
       EvaluateBoundaryResponse(source, config);
-  const auto markers =
+  const auto previewMarkers =
       BuildBoundaryCandidateMarkersLocal(result, profileLengthPx);
+  const auto committedMarkers = BuildMetrologyConclusionMarkersLocal(
+      context, parserDebugBridge, static_cast<int>(source.size()));
   ImGui::TextDisabled("%s | effective model: %s | noise sigma %.5f",
                       result.status.c_str(),
                       CxBoundaryResponseModeName(result.effective_response_mode),
                       result.noise_sigma);
-  ImGui::TextDisabled("Preview candidates do not replace the geometry result.");
+  if (!previewMarkers.empty()) {
+    ImGui::TextDisabled("Preview trigger: %s", FormatMetrologyAxisPixelLabelLocal(
+        previewMarkers.front().axis_px).c_str());
+  }
+  if (!committedMarkers.empty()) {
+    ImGui::TextDisabled("Committed conclusion: %s", FormatMetrologyAxisPixelLabelLocal(
+        committedMarkers.front().axis_px).c_str());
+  } else {
+    ImGui::TextDisabled("NO_COMMITTED_CONCLUSION - preview does not replace geometry.");
+  }
 
   if (m.boundary_show_conditioned) {
     DrawMetrologyPreviewChartLocal(
         "boundary_conditioned_preview", "Raw and conditioned profile", source,
         result.conditioned, m.boundary_gate_start_permille,
         m.boundary_gate_end_permille, "raw", "conditioned",
-        markers.empty() ? nullptr : &markers, &m, profileLengthPx);
+        committedMarkers.empty() ? nullptr : &committedMarkers, &m, profileLengthPx);
   }
   if (m.boundary_show_response) {
     DrawMetrologyPreviewChartLocal(
         "boundary_response_preview", "Boundary response and trigger", result.response,
         result.trigger_level, m.boundary_gate_start_permille,
         m.boundary_gate_end_permille, "response", "trigger",
-        markers.empty() ? nullptr : &markers, nullptr, profileLengthPx);
+        committedMarkers.empty() ? nullptr : &committedMarkers, nullptr,
+        profileLengthPx);
   }
   if (m.boundary_show_scalogram)
     DrawBoundaryScalogramLocal(source, config);
@@ -7161,16 +7173,16 @@ static bool DrawBoundaryTriggerPreviewLocal(
   const bool manualCursorReady =
       m.profile_cursor_visible && m.profile_cursor_user_dragged &&
       m.profile_cursor_sample_count > 1 && result.conditioned.size() > 1;
-  if (manualCursorReady && !markers.empty()) {
+  if (manualCursorReady && !committedMarkers.empty()) {
     const double cursorPx = MetrologySampleIndexToAxisPxLocal(
         m.profile_cursor_sample_index, m.profile_cursor_sample_count,
         profileLengthPx);
-    const double selectedPx = markers.front().axis_px;
+    const double selectedPx = committedMarkers.front().axis_px;
     const double deltaPx = std::abs(cursorPx - selectedPx);
     if (deltaPx > 2.0) {
       ImGui::TextColored(
           ImVec4(1.0f, 0.72f, 0.30f, 1.0f),
-          "Manual cursor differs from selected trigger by %s.",
+          "Manual cursor differs from committed conclusion by %s.",
           FormatMetrologyAxisPixelLabelLocal(deltaPx).c_str());
     }
   }

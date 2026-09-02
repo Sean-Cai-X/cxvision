@@ -1109,6 +1109,40 @@ struct CxModelLineageRejectedAsset {
   std::string reason;
 };
 
+struct CxModelPerformanceStage {
+  std::string name;
+  double min_ms = 0.0;
+  double mean_ms = 0.0;
+  double p50_ms = 0.0;
+  double p95_ms = 0.0;
+  double p99_ms = 0.0;
+  double max_ms = 0.0;
+};
+
+struct CxModelPerformanceProfile {
+  bool available = false;
+  std::string status;
+  std::string profile_scope;
+  std::string requested_device;
+  std::string profile_path;
+  double service_initialize_ms = 0.0;
+  int sample_count = 0;
+  std::vector<CxModelPerformanceStage> stages;
+  std::string reason;
+};
+
+struct CxValidationDatasetReadiness {
+  bool available = false;
+  std::string status = "PENDING_VALIDATION_DATASET_SCAN";
+  std::string reason;
+  std::string dataset_manifest_path;
+  int train_sample_count = 0;
+  int validation_sample_count = 0;
+  int missing_required_asset_count = 0;
+  int source_lineage_overlap_count = 0;
+  bool frozen = false;
+};
+
 struct ScriptEvidenceThumb {
   std::string candidate_id;
   std::string candidate_dir;
@@ -1455,6 +1489,12 @@ struct ManualTestContext {
   std::string model_lineage_parent_selection_status = "PENDING_HUMAN_REVIEW";
   std::string model_lineage_parent_selection_message;
   std::string model_lineage_parent_selection_review_path;
+  bool model_performance_profile_scan_attempted = false;
+  std::string model_performance_profile_scan_root = "cxscript_runs/yolov8n_incremental_acceptance";
+  CxModelPerformanceProfile model_performance_profile;
+  bool validation_dataset_scan_attempted = false;
+  std::string validation_dataset_scan_root = "cxscript_runs";
+  CxValidationDatasetReadiness validation_dataset;
   bool torch_training_latest_scan_attempted = false;
   bool torch_training_process_running = false;
   std::uintptr_t torch_training_process_handle = 0;
@@ -1472,6 +1512,12 @@ struct ManualTestContext {
   int geometry_aug_jagged_px = 5;
   int geometry_aug_line_break_px = 14;
   int geometry_aug_epochs = 50;
+  // Display capacity only. It never changes the training plan; it keeps the
+  // live curve's horizontal axis stable while new epochs arrive.
+  int torch_training_epoch_axis_capacity = 100;
+  // Display capacity only. Keeping the loss origin at (0, 0) makes a live
+  // polyline directly comparable to its completed run.
+  float torch_training_loss_axis_maximum = 30.0f;
   float geometry_aug_learning_rate = 0.001f;
   std::string geometry_aug_run_status = "PENDING";
   std::string geometry_aug_run_reason = "not generated from GUI";
@@ -1499,6 +1545,10 @@ struct ManualTestContext {
   int last_evidence_click_thumb = -1;
   double last_evidence_click_time = -1.0;
   std::unordered_map<std::string, std::string> evidence_category_overrides;
+  // Stable evidence identity keys, newest first.  These are persisted as
+  // navigation history and are resolved against freshly scanned assets.
+  std::vector<std::string> recent_evidence_case_keys;
+  bool recent_evidence_cases_loaded = false;
 
   CxEvidenceSelectionSnapshot current_evidence_selection;
   std::string last_evidence_candidate_id;
