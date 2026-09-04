@@ -216,6 +216,55 @@ bool PostprocessAndWriteOutput(
         post_config.num_classes = effective_num_classes;
         post_config.conf_threshold = manifest.confidence_threshold;
         post_config.iou_threshold = manifest.iou_threshold;
+
+        // Keep the inference stages auditable.  The saved tensor is the real
+        // normalized head output; the JSON files are deliberately summaries
+        // and stage projections, not reconstructed or synthetic detections.
+        const std::filesystem::path raw_tensor_path = output_dir / "raw_output.pt";
+        torch::save(normalized_output.to(torch::kCPU).contiguous(), raw_tensor_path.string());
+        const torch::Tensor raw_cpu = normalized_output.to(torch::kCPU).to(torch::kFloat);
+        std::ostringstream raw_manifest;
+        raw_manifest << "{\"schema\":\"cxvision.torch.detection.raw_output.v1\",";
+        raw_manifest << "\"tensor_ref\":" << QuoteTorchJsonString(raw_tensor_path.filename().string()) << ",";
+        raw_manifest << "\"shape\":[";
+        for (int64_t dimension = 0; dimension < raw_cpu.dim(); ++dimension) {
+            if (dimension != 0) raw_manifest << ",";
+            raw_manifest << raw_cpu.size(dimension);
+        }
+        raw_manifest << "],\"dtype\":\"float32\",\"min\":"
+                     << raw_cpu.min().item<float>() << ",\"max\":"
+                     << raw_cpu.max().item<float>() << "}";
+        WriteTorchTextArtifact(output_dir / "raw_output_manifest.json", raw_manifest.str(), reason);
+
+        const torch::Tensor raw_rows = raw_cpu[0];
+        const torch::Tensor raw_scores = raw_rows.narrow(1, post_config.box_channels(), effective_num_classes);
+        const auto raw_max = torch::max(raw_scores, 1);
+        const torch::Tensor raw_confidence = std::get<0>(raw_max);
+        const torch::Tensor raw_class = std::get<1>(raw_max);
+        const torch::Tensor threshold_indices = torch::nonzero(
+            raw_confidence > post_config.conf_threshold).flatten().to(torch::kCPU);
+        std::ostringstream threshold_candidates;
+        threshold_candidates << "{\"schema\":\"cxvision.torch.detection.threshold_candidates.v1\",";
+        threshold_candidates << "\"confidence_threshold\":" << post_config.conf_threshold << ",";
+        threshold_candidates << "\"raw_anchor_count\":" << raw_rows.size(0) << ",";
+        threshold_candidates << "\"candidate_count\":" << threshold_indices.size(0) << ",\"candidates\":[";
+        const auto raw_rows_cpu = raw_rows.contiguous();
+        const auto raw_confidence_cpu = raw_confidence.contiguous();
+        const auto raw_class_cpu = raw_class.contiguous();
+        for (int64_t candidate_index = 0; candidate_index < threshold_indices.size(0); ++candidate_index) {
+            const int64_t anchor = threshold_indices[candidate_index].item<int64_t>();
+            if (candidate_index != 0) threshold_candidates << ",";
+            threshold_candidates << "{\"anchor_index\":" << anchor
+                << ",\"model_x1\":" << raw_rows_cpu[anchor][0].item<float>()
+                << ",\"model_y1\":" << raw_rows_cpu[anchor][1].item<float>()
+                << ",\"model_x2\":" << raw_rows_cpu[anchor][2].item<float>()
+                << ",\"model_y2\":" << raw_rows_cpu[anchor][3].item<float>()
+                << ",\"confidence\":" << raw_confidence_cpu[anchor].item<float>()
+                << ",\"class_id\":" << raw_class_cpu[anchor].item<int64_t>() << "}";
+        }
+        threshold_candidates << "]}";
+        WriteTorchTextArtifact(output_dir / "threshold_candidates.json", threshold_candidates.str(), reason);
+
         auto detections = post_process(normalized_output, post_config);
 
         std::vector<BBox> scaled_detections;
@@ -304,6 +353,22 @@ bool PostprocessAndWriteOutput(
         std::filesystem::path candidate_path = output_dir / "bbox_candidate_list.json";
         WriteTorchTextArtifact(candidate_path, detections_os.str(), reason);
         bbox_candidate_list_ref = candidate_path.string();
+
+        std::ostringstream postprocess_trace;
+        postprocess_trace << "{\"schema\":\"cxvision.torch.detection.postprocess_trace.v1\",";
+        postprocess_trace << "\"confidence_threshold\":" << post_config.conf_threshold << ",";
+        postprocess_trace << "\"nms_iou_threshold\":" << post_config.iou_threshold << ",";
+        postprocess_trace << "\"max_detections\":" << manifest.max_detections << ",";
+        postprocess_trace << "\"raw_anchor_count\":" << raw_rows.size(0) << ",";
+        postprocess_trace << "\"post_threshold_candidate_count\":" << threshold_indices.size(0) << ",";
+        postprocess_trace << "\"post_nms_detection_count\":" << scaled_detections.size() << ",";
+        postprocess_trace << "\"coordinate_mapping\":{\"letterbox\":"
+            << (manifest.letterbox ? "true" : "false") << ",\"scale\":"
+            << letterbox_info.scale << ",\"pad_x\":" << letterbox_info.pad_x
+            << ",\"pad_y\":" << letterbox_info.pad_y << ",\"original_width\":"
+            << letterbox_info.original_width << ",\"original_height\":"
+            << letterbox_info.original_height << "}}";
+        WriteTorchTextArtifact(output_dir / "postprocess_trace.json", postprocess_trace.str(), reason);
 
         std::filesystem::path overlay_path = output_dir / "detection_overlay.png";
         WriteTorchImageArtifact(overlay_path, detection_overlay, reason);

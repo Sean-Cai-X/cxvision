@@ -1542,6 +1542,9 @@ struct ManualTestContext {
   bool model_workflow_scan_attempted = false;
   std::string model_workflow_scan_root = "cxscript_runs";
   CxModelWorkflowProjection model_workflow;
+  int selected_model_workflow_node = -1;
+  std::string model_workflow_operation_status = "PENDING_NODE_SELECTION";
+  std::string model_workflow_operation_message;
   bool torch_training_latest_scan_attempted = false;
   bool torch_training_process_running = false;
   std::uintptr_t torch_training_process_handle = 0;

@@ -70,7 +70,10 @@
     "per_class_metrics",
     "geometry_metrics",
     "false_positive_metrics",
-    "deployment_budget_metrics"
+    "deployment_budget_metrics",
+    "route_metrics",
+    "canonical_boundary_metrics",
+    "clamp_consistency_metrics"
   ],
   "required_computed_facts": [
     "new_domain_gain",
@@ -161,6 +164,9 @@
     "deployment_budget_complete",
     "inference_differences_resolved_or_explicitly_accepted",
     "threshold_policy_evaluated",
+    "scene_route_evaluation_complete",
+    "canonical_boundary_adapter_complete",
+    "clamp_consistency_evaluation_complete",
     "human_review_saved",
     "branch_promotion_decided"
   ],
@@ -171,6 +177,8 @@
     "same_metric_contract_used_for_parent_and_candidate",
     "no_missing_required_dataset_role",
     "no_single_case_promotion",
+    "source_disjoint_validation_complete",
+    "clamp_consistency_is_primary_geometry_gate",
     "no_automatic_human_decision",
     "promotion_is_branch_scoped"
   ],

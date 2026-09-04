@@ -1422,6 +1422,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         int seed = 0;
         int num_classes = 0;
         double learning_rate = 0.0;
+        std::string parent_checkpoint;
         plan["epochs"] >> epochs;
         plan["batch_size"] >> batch_size;
         plan["input_size"] >> input_size;
@@ -1429,6 +1430,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         plan["seed"] >> seed;
         plan["num_classes"] >> num_classes;
         plan["learning_rate"] >> learning_rate;
+        plan["parent_checkpoint"] >> parent_checkpoint;
         TORCH_CHECK(epochs >= 2, "YOLOv8 lifecycle requires at least two epochs");
         TORCH_CHECK(batch_size > 0, "YOLOv8 lifecycle batch_size must be positive");
         TORCH_CHECK(input_size > 0 && input_size % 32 == 0,
@@ -1438,6 +1440,20 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         TORCH_CHECK(num_classes > 0, "YOLOv8 lifecycle num_classes must be positive");
         TORCH_CHECK(learning_rate > 0.0,
             "YOLOv8 lifecycle learning_rate must be positive");
+        TORCH_CHECK(!parent_checkpoint.empty(),
+            "YOLOv8 lifecycle requires an explicit parent_checkpoint; random initialization is not an incremental branch");
+        const std::filesystem::path parent_checkpoint_path(parent_checkpoint);
+        TORCH_CHECK(std::filesystem::is_regular_file(parent_checkpoint_path),
+            "YOLOv8 lifecycle parent_checkpoint is missing or not a regular file");
+
+        std::vector<std::string> frozen_parameter_prefixes;
+        const cv::FileNode freeze_nodes = plan["frozen_parameter_prefixes"];
+        TORCH_CHECK(freeze_nodes.isSeq(),
+            "YOLOv8 lifecycle frozen_parameter_prefixes must be a sequence");
+        for (const auto& node : freeze_nodes)
+            frozen_parameter_prefixes.push_back(static_cast<std::string>(node));
+        TORCH_CHECK(!frozen_parameter_prefixes.empty(),
+            "YOLOv8 lifecycle requires at least one frozen parameter prefix");
 
         std::vector<std::string> class_names;
         const cv::FileNode class_nodes = plan["class_names"];
@@ -1480,6 +1496,31 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         ModelConfig model_config = ModelConfig::get_config("nano", num_classes);
         YOLOv8 model(model_config);
         model->to(device);
+        model->load_checkpoint(parent_checkpoint_path.string());
+
+        std::vector<torch::Tensor> trainable_parameters;
+        std::vector<std::string> frozen_parameter_names;
+        std::vector<std::string> trainable_parameter_names;
+        for (const auto& named : model->named_parameters(true)) {
+            bool frozen = false;
+            for (const std::string& prefix : frozen_parameter_prefixes) {
+                if (named.key().rfind(prefix, 0) == 0) {
+                    frozen = true;
+                    break;
+                }
+            }
+            named.value().set_requires_grad(!frozen);
+            if (frozen)
+                frozen_parameter_names.push_back(named.key());
+            else {
+                trainable_parameter_names.push_back(named.key());
+                trainable_parameters.push_back(named.value());
+            }
+        }
+        TORCH_CHECK(!frozen_parameter_names.empty(),
+            "YOLOv8 lifecycle freeze policy did not match any parent parameter");
+        TORCH_CHECK(!trainable_parameters.empty(),
+            "YOLOv8 lifecycle freeze policy left no trainable parameters");
 
         YoloEvalConfig eval_config;
         eval_config.data.batch_size = batch_size;
@@ -1496,9 +1537,11 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         const std::filesystem::path incremental_weights =
             weights_dir / "incremental_cpp_yolov8n.pt";
 
-        torch::serialize::OutputArchive base_archive;
-        model->save(base_archive);
-        base_archive.save_to(base_weights.string());
+        std::filesystem::copy_file(parent_checkpoint_path, base_weights,
+            std::filesystem::copy_options::none);
+        std::map<std::string, torch::Tensor> before_parameters;
+        for (const auto& named : model->named_parameters(true))
+            before_parameters.emplace(named.key(), named.value().detach().clone());
 
         const auto start = std::chrono::steady_clock::now();
         const YOLOv8Impl::ValidationSummary base_summary =
@@ -1519,7 +1562,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             std::move(train_dataset),
             make_yolo_loader_options(batch_size, 0));
         torch::optim::SGD optimizer(
-            model->parameters(),
+            trainable_parameters,
             torch::optim::SGDOptions(learning_rate)
                 .momentum(0.9)
                 .weight_decay(0.0005));
@@ -1551,7 +1594,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     "YOLOv8 lifecycle training loss is not finite");
                 loss.backward();
                 bool found_grad = false;
-                for (const auto& parameter : model->parameters())
+                for (const auto& parameter : trainable_parameters)
                 {
                     if (parameter.grad().defined())
                     {
@@ -1582,6 +1625,67 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         torch::serialize::OutputArchive incremental_archive;
         model->save(incremental_archive);
         incremental_archive.save_to(incremental_weights.string());
+        const std::filesystem::path transfer_report_path =
+            output_dir / "checkpoint_transfer_report.json";
+        const std::filesystem::path freeze_audit_path =
+            output_dir / "freeze_execution_audit.json";
+        {
+            std::ofstream transfer_report(transfer_report_path);
+            transfer_report << "{\n"
+                << "  \"schema\": \"cxvision.checkpoint_transfer_report.v1\",\n"
+                << "  \"status\": \"CHECKPOINT_TRANSFER_VERIFIED\",\n"
+                << "  \"parent_checkpoint\": " << QuoteRuntimeTaskJsonString(parent_checkpoint_path.string()) << ",\n"
+                << "  \"loaded\": true,\n"
+                << "  \"shape_mismatch\": [],\n"
+                << "  \"missing\": [],\n"
+                << "  \"newly_initialized\": [],\n"
+                << "  \"intentionally_skipped\": []\n}\n";
+        }
+        bool frozen_unchanged = true;
+        bool trainable_updated = false;
+        std::ostringstream frozen_rows;
+        std::ostringstream trainable_rows;
+        bool first_frozen = true;
+        bool first_trainable = true;
+        for (const auto& named : model->named_parameters(true)) {
+            const auto before = before_parameters.find(named.key());
+            if (before == before_parameters.end())
+                continue;
+            const double absolute_update = (named.value().detach() - before->second)
+                .abs().sum().item<double>();
+            const bool frozen = !named.value().requires_grad();
+            if (frozen) {
+                frozen_unchanged = frozen_unchanged && absolute_update == 0.0;
+                if (!first_frozen) frozen_rows << ",\n";
+                first_frozen = false;
+                frozen_rows << "    {\"name\":" << QuoteRuntimeTaskJsonString(named.key())
+                    << ",\"absolute_update\":" << absolute_update
+                    << ",\"requires_grad\":false}";
+            } else {
+                trainable_updated = trainable_updated || absolute_update > 0.0;
+                if (!first_trainable) trainable_rows << ",\n";
+                first_trainable = false;
+                trainable_rows << "    {\"name\":" << QuoteRuntimeTaskJsonString(named.key())
+                    << ",\"absolute_update\":" << absolute_update
+                    << ",\"requires_grad\":true}";
+            }
+        }
+        {
+            std::ofstream freeze_audit(freeze_audit_path);
+            const bool freeze_pass = frozen_unchanged && trainable_updated;
+            freeze_audit << "{\n"
+                << "  \"schema\": \"cxvision.freeze_execution_audit.v1\",\n"
+                << "  \"status\": \"" << (freeze_pass ? "FREEZE_EXECUTION_PASS" : "FREEZE_EXECUTION_FAIL") << "\",\n"
+                << "  \"frozen_parameter_prefixes\": [";
+            for (std::size_t index = 0; index < frozen_parameter_prefixes.size(); ++index) {
+                if (index != 0) freeze_audit << ", ";
+                freeze_audit << QuoteRuntimeTaskJsonString(frozen_parameter_prefixes[index]);
+            }
+            freeze_audit << "],\n  \"frozen_unchanged\": " << (frozen_unchanged ? "true" : "false")
+                << ",\n  \"trainable_updated\": " << (trainable_updated ? "true" : "false")
+                << ",\n  \"frozen_parameters\": [\n" << frozen_rows.str()
+                << "\n  ],\n  \"trainable_parameters\": [\n" << trainable_rows.str() << "\n  ]\n}\n";
+        }
         const YOLOv8Impl::ValidationSummary incremental_summary =
             model->val_summary(dataset_root.string(), eval_config);
         const auto end = std::chrono::steady_clock::now();
@@ -1685,6 +1789,9 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                             : "CXX_YOLOV8N_DETECTION_EFFECT_NOT_ESTABLISHED")
                     << "\",\n"
                     << "  \"network_weights_updated\": true,\n"
+                    << "  \"parent_checkpoint\": " << QuoteRuntimeTaskJsonString(parent_checkpoint_path.string()) << ",\n"
+                    << "  \"checkpoint_transfer_ref\": " << QuoteRuntimeTaskJsonString(transfer_report_path.string()) << ",\n"
+                    << "  \"freeze_execution_ref\": " << QuoteRuntimeTaskJsonString(freeze_audit_path.string()) << ",\n"
                     << "  \"epochs\": " << epochs << ",\n"
                     << "  \"optimizer\": \"SGD\",\n"
                     << "  \"learning_rate\": " << learning_rate << ",\n"

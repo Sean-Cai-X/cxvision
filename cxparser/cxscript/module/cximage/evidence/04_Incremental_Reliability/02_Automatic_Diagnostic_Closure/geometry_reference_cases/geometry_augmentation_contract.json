@@ -38,8 +38,12 @@
   },
   "split_policy": {
     "train": "training_eligible_after_human_acceptance_only",
-    "validation": "never_training_eligible",
-    "separation": "variant_ids_and_seeds_are_disjoint"
+    "validation": "never_training_eligible_and_controlled_regression_only_when_source_image_is_shared",
+    "separation": "variant_ids_and_seeds_are_disjoint",
+    "source_split_required": true,
+    "same_source_augmentation_role": "controlled_robustness_regression_only",
+    "release_validation_requirement": "source_disjoint_original_images_with_explicit_source_split",
+    "release_eligible_from_same_source_augmentation": false
   },
   "evidence_policy": {
     "publication": "atomic_after_all_mandatory_assets_exist",
@@ -51,6 +55,8 @@
     "apply_geometry_transform_without_transforming_typed_target",
     "modify_typed_label_to_simulate_photometric_interference",
     "use_validation_or_holdout_images_for_training",
+    "treat_same_source_augmentation_as_source_disjoint_validation",
+    "promote_without_explicit_source_split",
     "publish_partial_case_directories",
     "hardcode_case_or_variant_names_in_cpp"
   ]

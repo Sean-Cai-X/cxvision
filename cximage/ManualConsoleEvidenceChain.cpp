@@ -8990,6 +8990,30 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
     reason = "C++ incremental training is already running";
     return false;
   }
+  const int selectedParentIndex = m_manualTest.selected_model_lineage_node;
+  const CxModelLineageUiNode *selectedParent =
+      selectedParentIndex >= 0 && selectedParentIndex <
+              static_cast<int>(m_manualTest.model_lineage_nodes.size())
+          ? &m_manualTest.model_lineage_nodes[static_cast<std::size_t>(
+                selectedParentIndex)]
+          : nullptr;
+  if (selectedParent == nullptr || selectedParent->node_kind != "release" ||
+      !selectedParent->parent_selection_reviewed) {
+    reason = "PARENT_MODEL_SELECTION_REQUIRED: select a human-confirmed release node before creating an incremental training plan";
+    m_manualTest.geometry_aug_run_status = "PARENT_MODEL_SELECTION_REQUIRED";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+  std::error_code parentError;
+  if (selectedParent->checkpoint_path.empty() ||
+      !std::filesystem::is_regular_file(selectedParent->checkpoint_path,
+                                        parentError) ||
+      parentError) {
+    reason = "PARENT_CHECKPOINT_ASSET_MISSING";
+    m_manualTest.geometry_aug_run_status = reason;
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
   const std::filesystem::path workflowRoot =
       ResolveCxVisionRunPath("cxscript_runs/yolov8n_incremental");
   const std::filesystem::path packageManifest =
@@ -9055,9 +9079,13 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   std::vector<std::string> classNames;
   for (const auto &node : templateStorage["class_names"])
     classNames.push_back(static_cast<std::string>(node));
+  std::vector<std::string> frozenParameterPrefixes;
+  for (const auto &node : templateStorage["frozen_parameter_prefixes"])
+    frozenParameterPrefixes.push_back(static_cast<std::string>(node));
   if (!templateStorage.isOpened() || batchSize <= 0 || inputSize <= 0 ||
       maxBatches <= 0 || numClasses <= 0 ||
-      static_cast<int>(classNames.size()) != numClasses) {
+      static_cast<int>(classNames.size()) != numClasses ||
+      frozenParameterPrefixes.empty()) {
     reason = "C++ training plan template is invalid";
     return false;
   }
@@ -9072,6 +9100,19 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
        << "  \"max_train_batches_per_epoch\": " << maxBatches << ",\n"
        << "  \"learning_rate\": "
        << m_manualTest.geometry_aug_learning_rate << ",\n"
+       << "  \"parent_checkpoint\": \""
+       << JsonEscape(selectedParent->checkpoint_path) << "\",\n"
+       << "  \"parent_model_id\": \""
+       << JsonEscape(selectedParent->model_id) << "\",\n"
+       << "  \"parent_selection_review_ref\": \""
+       << JsonEscape(selectedParent->parent_selection_review_path) << "\",\n"
+       << "  \"frozen_parameter_prefixes\": [";
+  for (std::size_t i = 0; i < frozenParameterPrefixes.size(); ++i) {
+    if (i > 0)
+      plan << ", ";
+    plan << '"' << JsonEscape(frozenParameterPrefixes[i]) << '"';
+  }
+  plan << "],\n"
        << "  \"seed\": " << seed << ",\n"
        << "  \"num_classes\": " << numClasses << ",\n"
        << "  \"class_names\": [";
@@ -10289,272 +10330,251 @@ static void RefreshModelWorkflowAssetsLocal(ManualTestContext &context) {
   }
 }
 
-static void DrawModelWorkflowTopologyLocal(
-    const CxModelWorkflowProjection &workflow) {
+static std::string CompactWorkflowLabelLocal(const std::string &value,
+                                             std::size_t maximum = 26) {
+  return value.size() <= maximum ? value
+                                 : value.substr(0, maximum - 3) + "...";
+}
+
+static ImU32 WorkflowStatusColorLocal(const std::string &status,
+                                      bool structuralError) {
+  if (structuralError || status.find("MISSING") != std::string::npos ||
+      status.find("OUTSIDE") != std::string::npos ||
+      status.find("FAIL") != std::string::npos ||
+      status.find("UNREADABLE") != std::string::npos)
+    return IM_COL32(198, 70, 70, 255);
+  if (status.find("PENDING_HUMAN_REVIEW") != std::string::npos ||
+      status.find("HUMAN") != std::string::npos)
+    return IM_COL32(218, 150, 35, 255);
+  if (status.find("EXECUTION_PASS") != std::string::npos ||
+      status.find("RESULT") != std::string::npos)
+    return IM_COL32(57, 168, 94, 255);
+  return IM_COL32(75, 130, 205, 255);
+}
+
+static void DrawModelWorkflowTopologyLocal(ManualTestContext &context) {
+  const CxModelWorkflowProjection &workflow = context.model_workflow;
   if (workflow.nodes.empty())
     return;
+
   std::unordered_map<std::string, std::size_t> indexById;
-  for (std::size_t index = 0; index < workflow.nodes.size(); ++index)
-    indexById[workflow.nodes[index].node_id] = index;
+  for (std::size_t i = 0; i < workflow.nodes.size(); ++i)
+    indexById[workflow.nodes[i].node_id] = i;
   std::vector<int> depth(workflow.nodes.size(), -1);
-  std::function<int(std::size_t, std::unordered_set<std::size_t> &)> depthFor;
-  depthFor = [&](const std::size_t index,
-                 std::unordered_set<std::size_t> &trail) {
-    if (depth[index] >= 0)
+  std::vector<int> visit(workflow.nodes.size(), 0);
+  std::vector<bool> structuralError(workflow.nodes.size(), false);
+  std::function<int(std::size_t)> resolveDepth = [&](std::size_t index) {
+    if (visit[index] == 2)
       return depth[index];
-    if (!trail.insert(index).second)
+    if (visit[index] == 1) {
+      structuralError[index] = true;
       return 0;
-    int resolved = 0;
+    }
+    visit[index] = 1;
+    int result = 0;
     for (const std::string &parentId : workflow.nodes[index].parent_node_ids) {
       const auto parent = indexById.find(parentId);
-      if (parent != indexById.end())
-        resolved = std::max(resolved, depthFor(parent->second, trail) + 1);
+      if (parent == indexById.end()) {
+        structuralError[index] = true;
+        continue;
+      }
+      result = std::max(result, resolveDepth(parent->second) + 1);
+      structuralError[index] = structuralError[index] ||
+                               structuralError[parent->second];
     }
-    trail.erase(index);
-    return depth[index] = resolved;
+    visit[index] = 2;
+    return depth[index] = result;
   };
   int maxDepth = 0;
-  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
-    std::unordered_set<std::size_t> trail;
-    maxDepth = std::max(maxDepth, depthFor(index, trail));
-  }
+  for (std::size_t i = 0; i < workflow.nodes.size(); ++i)
+    maxDepth = std::max(maxDepth, resolveDepth(i));
   std::vector<std::vector<std::size_t>> levels(
       static_cast<std::size_t>(maxDepth + 1));
-  for (std::size_t index = 0; index < workflow.nodes.size(); ++index)
-    levels[static_cast<std::size_t>(depth[index])].push_back(index);
+  for (std::size_t i = 0; i < workflow.nodes.size(); ++i)
+    levels[static_cast<std::size_t>(std::max(0, depth[i]))].push_back(i);
 
+  std::size_t maximumLevelSize = 0;
+  for (const std::vector<std::size_t> &level : levels)
+    maximumLevelSize = std::max(maximumLevelSize, level.size());
+  const float columnWidth = 178.0f;
+  const float canvasWidth = 108.0f + (maxDepth + 1) * columnWidth;
+  const float canvasHeight =
+      std::max(220.0f, 55.0f + static_cast<float>(maximumLevelSize) * 54.0f);
+
+  ImGui::BeginChild("##configured_model_workflow_canvas",
+                    ImVec2(0.0f, 260.0f), true,
+                    ImGuiWindowFlags_HorizontalScrollbar);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const ImVec2 size(std::max(540.0f, ImGui::GetContentRegionAvail().x),
-                    std::max(255.0f, 88.0f + maxDepth * 72.0f));
-  ImGui::InvisibleButton("##configured_model_workflow_topology", size);
+  ImGui::InvisibleButton("##configured_model_workflow_surface",
+                         ImVec2(canvasWidth, canvasHeight));
   ImDrawList *draw = ImGui::GetWindowDrawList();
-  draw->AddRect(origin, origin + size, IM_COL32(112, 124, 140, 255), 4.0f);
+  draw->AddRectFilled(origin, origin + ImVec2(canvasWidth, canvasHeight),
+                      IM_COL32(27, 31, 38, 255), 4.0f);
+
   std::vector<ImVec2> positions(workflow.nodes.size());
   for (std::size_t level = 0; level < levels.size(); ++level) {
     const std::vector<std::size_t> &members = levels[level];
     for (std::size_t ordinal = 0; ordinal < members.size(); ++ordinal) {
       const float ratio = static_cast<float>(ordinal + 1) /
                           static_cast<float>(members.size() + 1);
-      positions[members[ordinal]] = ImVec2(
-          origin.x + 42.0f + (size.x - 84.0f) * ratio,
-          origin.y + size.y - 38.0f - static_cast<float>(level) * 68.0f);
+      positions[members[ordinal]] =
+          origin + ImVec2(38.0f + level * columnWidth,
+                           28.0f + ratio * (canvasHeight - 56.0f));
     }
   }
-  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
-    for (const std::string &parentId : workflow.nodes[index].parent_node_ids) {
+  for (std::size_t child = 0; child < workflow.nodes.size(); ++child) {
+    for (const std::string &parentId : workflow.nodes[child].parent_node_ids) {
       const auto parent = indexById.find(parentId);
       if (parent == indexById.end())
         continue;
       const ImVec2 from = positions[parent->second];
-      const ImVec2 to = positions[index];
-      draw->AddBezierCubic(ImVec2(from.x, from.y - 12.0f),
-                           ImVec2(from.x, from.y - 34.0f),
-                           ImVec2(to.x, to.y + 34.0f),
-                           ImVec2(to.x, to.y + 12.0f),
-                           IM_COL32(154, 165, 181, 230), 1.6f);
+      const ImVec2 to = positions[child];
+      draw->AddBezierCubic(from + ImVec2(9.0f, 0.0f),
+                           from + ImVec2(72.0f, 0.0f),
+                           to - ImVec2(72.0f, 0.0f),
+                           to - ImVec2(9.0f, 0.0f),
+                           IM_COL32(166, 177, 193, 235), 2.0f);
     }
   }
-  for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
-    const CxModelWorkflowUiNode &node = workflow.nodes[index];
-    const bool executionPass =
-        node.status.find("EXECUTION_PASS") != std::string::npos;
-    const bool pendingHuman = node.status == "PENDING_HUMAN_REVIEW";
-    const ImU32 color = executionPass
-                             ? IM_COL32(57, 168, 94, 255)
-                             : (pendingHuman ? IM_COL32(218, 150, 35, 255)
-                                             : IM_COL32(75, 130, 205, 255));
-    const ImVec2 point = positions[index];
-    draw->AddCircleFilled(point, 11.0f, color);
-    draw->AddCircle(point, 11.0f, IM_COL32(234, 238, 244, 255), 0, 1.5f);
-    const ImVec2 labelSize = ImGui::CalcTextSize(node.display_name.c_str());
-    draw->AddText(ImVec2(point.x - labelSize.x * 0.5f, point.y + 15.0f),
-                  IM_COL32(225, 230, 236, 255), node.display_name.c_str());
-    draw->AddText(ImVec2(point.x + 15.0f, point.y - 8.0f), color,
-                  node.status.c_str());
-  }
-  ImGui::TextDisabled(
-      "Blue: configured asset | green: executed result | amber: human decision pending. Links and labels come from workflow_manifest.json.");
-}
+  for (std::size_t i = 0; i < workflow.nodes.size(); ++i) {
+    const CxModelWorkflowUiNode &node = workflow.nodes[i];
+    const ImVec2 point = positions[i];
+    const bool selected = context.selected_model_workflow_node ==
+                          static_cast<int>(i);
+    const ImU32 color = WorkflowStatusColorLocal(node.status, structuralError[i]);
+    if (selected)
+      draw->AddCircle(point, 13.0f, IM_COL32(246, 248, 250, 255), 0, 2.0f);
+    draw->AddCircleFilled(point, 8.0f, color);
+    draw->AddCircle(point, 8.0f, IM_COL32(18, 22, 27, 255), 0, 1.0f);
+    const std::string label = CompactWorkflowLabelLocal(node.display_name, 23);
+    const std::string status = CompactWorkflowLabelLocal(node.status, 20);
+    const ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+    const ImVec2 statusSize = ImGui::CalcTextSize(status.c_str());
+    draw->AddText(point + ImVec2(-labelSize.x * 0.5f, -27.0f),
+                  IM_COL32(242, 245, 248, 255), label.c_str());
+    draw->AddText(point + ImVec2(-statusSize.x * 0.5f, 13.0f), color,
+                  status.c_str());
 
+    ImGui::SetCursorScreenPos(point - ImVec2(10.0f, 20.0f));
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::InvisibleButton("workflow_node", ImVec2(146.0f, 40.0f)))
+      context.selected_model_workflow_node = static_cast<int>(i);
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::Text("%s", node.display_name.c_str());
+      ImGui::Text("status: %s", node.status.c_str());
+      ImGui::TextWrapped("asset: %s", node.asset_ref.c_str());
+      ImGui::TextWrapped("result: %s", node.result_ref.c_str());
+      if (structuralError[i])
+        ImGui::TextColored(ImVec4(1, .35f, .35f, 1),
+                           "Graph reference is missing or cyclic.");
+      ImGui::EndTooltip();
+    }
+    ImGui::PopID();
+  }
+  ImGui::SetCursorScreenPos(origin + ImVec2(0.0f, canvasHeight));
+  // Draw edges last so branch strokes remain visible across label regions.
+  for (std::size_t child = 0; child < workflow.nodes.size(); ++child) {
+    for (const std::string &parentId : workflow.nodes[child].parent_node_ids) {
+      const auto parent = indexById.find(parentId);
+      if (parent == indexById.end())
+        continue;
+      const ImVec2 from = positions[parent->second];
+      const ImVec2 to = positions[child];
+      draw->AddBezierCubic(from + ImVec2(9.0f, 0.0f),
+                           from + ImVec2(72.0f, 0.0f),
+                           to - ImVec2(72.0f, 0.0f),
+                           to - ImVec2(9.0f, 0.0f),
+                           IM_COL32(190, 200, 214, 245), 2.4f);
+    }
+  }
+
+  ImGui::EndChild();
+  ImGui::TextDisabled("Node + text topology: left-to-right lineage with vertical branch fans. Blue: configured/readable | green: execution result | yellow: human review pending | red: invalid or missing reference.");
+}
 static void DrawModelWorkflowProjectionLocal(ManualTestContext &context) {
   ImGui::SeparatorText("Configured Model Workflow / Actual Results");
   ImGui::SetNextItemWidth(-164.0f);
   InputTextString("Workflow scan root", context.model_workflow_scan_root);
   ImGui::SameLine();
-  if (ImGui::Button("Reload Workflow"))
+  if (ImGui::Button("Reload Workflow")) {
     RefreshModelWorkflowAssetsLocal(context);
+    context.selected_model_workflow_node = -1;
+  }
   const CxModelWorkflowProjection &workflow = context.model_workflow;
   if (!workflow.available) {
     ImGui::TextDisabled("No valid workflow manifest was discovered.");
     return;
   }
   ImGui::Text("%s", workflow.display_name.c_str());
-  ImGui::TextColored(
-      workflow.status == "WORKFLOW_ASSETS_PROJECTED"
-          ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
-          : ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
-      "%s | promotion: %s", workflow.status.c_str(),
-      workflow.promotion_allowed ? "not allowed by UI" : "not allowed");
-  std::unordered_map<std::string, int> distribution;
-  for (const CxModelWorkflowUiNode &node : workflow.nodes)
-    ++distribution[node.node_kind];
-  std::string distributionText;
-  for (const auto &entry : distribution) {
-    if (!distributionText.empty())
-      distributionText += " | ";
-    distributionText += entry.first + ": " + std::to_string(entry.second);
-  }
-  ImGui::Text("node distribution: %s", distributionText.c_str());
-  DrawModelWorkflowTopologyLocal(workflow);
-  if (ImGui::TreeNodeEx("##configured_model_workflow",
-                        ImGuiTreeNodeFlags_DefaultOpen,
-                        "Workflow nodes (%zu)", workflow.nodes.size())) {
-    for (std::size_t index = 0; index < workflow.nodes.size(); ++index) {
-      const CxModelWorkflowUiNode &node = workflow.nodes[index];
-      if (ImGui::TreeNodeEx(("##workflow_node_" + std::to_string(index)).c_str(),
-                            ImGuiTreeNodeFlags_DefaultOpen,
-                            "%s  [%s]", node.display_name.c_str(),
-                            node.status.c_str())) {
-        ImGui::BulletText("kind: %s", node.node_kind.c_str());
-        if (!node.parent_node_ids.empty()) {
-          std::string parents;
-          for (const std::string &parent : node.parent_node_ids) {
-            if (!parents.empty())
-              parents += ", ";
-            parents += parent;
-          }
-          ImGui::BulletText("upstream nodes: %s", parents.c_str());
-        }
-        if (!node.asset_ref.empty())
-          ImGui::TextWrapped("asset: %s", node.asset_ref.c_str());
-        if (!node.result_ref.empty())
-          ImGui::TextWrapped("result: %s", node.result_ref.c_str());
-        ImGui::TreePop();
-      }
+  ImGui::Text("%s | promotion: not allowed by UI", workflow.status.c_str());
+  DrawModelWorkflowTopologyLocal(context);
+
+  const int selected = context.selected_model_workflow_node;
+  const CxModelWorkflowUiNode *node =
+      selected >= 0 && selected < static_cast<int>(workflow.nodes.size())
+          ? &workflow.nodes[static_cast<std::size_t>(selected)] : nullptr;
+  ImGui::SeparatorText("Selected workflow node: assets and gates");
+  if (node == nullptr) {
+    ImGui::TextDisabled("Select a node in the main topology to browse its assets.");
+  } else {
+    ImGui::Text("%s [%s]", node->display_name.c_str(), node->node_kind.c_str());
+    ImGui::Text("status: %s", node->status.c_str());
+    ImGui::TextWrapped("asset: %s", node->asset_ref.c_str());
+    ImGui::TextWrapped("result: %s", node->result_ref.c_str());
+    if (ImGui::Button("Verify Node Parameter Assets##workflow")) {
+      std::error_code ec;
+      const bool assetOk = !node->asset_ref.empty() &&
+          std::filesystem::is_regular_file(node->asset_ref, ec) && !ec;
+      context.model_workflow_operation_status =
+          assetOk ? "WORKFLOW_NODE_ASSET_READABLE" : "ASSET_MISSING";
+      context.model_workflow_operation_message =
+          "Asset readability only; it is not training, validation, human acceptance, or promotion.";
     }
-    ImGui::TreePop();
+    ImGui::SameLine();
+    const bool hasParent = !node->parent_node_ids.empty();
+    if (!hasParent)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Rollback Review To Parent##workflow")) {
+      bool parentFound = false;
+      for (const std::string &parentId : node->parent_node_ids) {
+        for (std::size_t i = 0; i < workflow.nodes.size(); ++i) {
+          if (workflow.nodes[i].node_id == parentId) {
+            context.selected_model_workflow_node = static_cast<int>(i);
+            parentFound = true;
+            break;
+          }
+        }
+        if (parentFound)
+          break;
+      }
+      context.model_workflow_operation_status =
+          parentFound ? "ROLLBACK_REVIEW_SELECTION_READY"
+                      : "PARENT_REFERENCE_MISSING";
+      context.model_workflow_operation_message =
+          parentFound ? "Browsing selection returned to an upstream node; weights and review records are unchanged."
+                      : "No referenced parent node was found in this workflow manifest.";
+    }
+    if (!hasParent)
+      ImGui::EndDisabled();
+    ImGui::TextDisabled("Rollback changes browsing focus only; Compare, Retrain, and Promote stay blocked until their separate frozen-data, evidence, and human gates are recorded.");
+    ImGui::TextWrapped("%s | %s", context.model_workflow_operation_status.c_str(),
+                       context.model_workflow_operation_message.c_str());
   }
-  ImGui::TextDisabled("Node names, links, assets and outcomes are read from the workflow manifest; this view never creates a model version.");
+  ImGui::TextDisabled("This is the only topology. Nodes, order, links, and asset references are discovered from workflow_manifest.json; this view never changes weights, review decisions, or promotion.");
 }
 
 static void DrawModelLineageTopologyLocal(ManualTestContext &context) {
+  ImGui::SeparatorText("Model node asset details");
   if (context.model_lineage_nodes.empty()) {
-    ImGui::TextDisabled(
-        "No valid model-node assets are available for a lineage topology.");
+    ImGui::TextDisabled("No valid model-node assets are available.");
     return;
   }
-
-  const std::vector<CxModelLineageUiNode> &nodes =
-      context.model_lineage_nodes;
-  std::unordered_map<std::string, std::size_t> indexById;
-  for (std::size_t index = 0; index < nodes.size(); ++index)
-    indexById[nodes[index].model_id] = index;
-
-  std::vector<int> depth(nodes.size(), -1);
-  std::function<int(std::size_t, std::unordered_set<std::size_t> &)> resolveDepth;
-  resolveDepth = [&](std::size_t index, std::unordered_set<std::size_t> &trail) {
-    if (depth[index] >= 0)
-      return depth[index];
-    if (!trail.insert(index).second)
-      return 0;  // Scanner/audit presents the invalid cycle separately.
-    int result = 0;
-    for (const std::string &parentId : nodes[index].parent_model_ids) {
-      const auto parent = indexById.find(parentId);
-      if (parent != indexById.end())
-        result = std::max(result, resolveDepth(parent->second, trail) + 1);
-    }
-    trail.erase(index);
-    depth[index] = result;
-    return result;
-  };
-
-  int maximumDepth = 0;
-  for (std::size_t index = 0; index < nodes.size(); ++index) {
-    std::unordered_set<std::size_t> trail;
-    maximumDepth = std::max(maximumDepth, resolveDepth(index, trail));
-  }
-  std::vector<std::vector<std::size_t>> levels(
-      static_cast<std::size_t>(maximumDepth + 1));
-  for (std::size_t index = 0; index < nodes.size(); ++index)
-    levels[static_cast<std::size_t>(depth[index])].push_back(index);
-
-  const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const ImVec2 size(std::max(420.0f, ImGui::GetContentRegionAvail().x),
-                    std::max(180.0f, 110.0f + maximumDepth * 86.0f));
-  ImGui::InvisibleButton("##model_lineage_topology", size);
-  ImDrawList *draw = ImGui::GetWindowDrawList();
-  const ImU32 frame = IM_COL32(112, 124, 140, 255);
-  const ImU32 guide = IM_COL32(75, 82, 92, 125);
-  draw->AddRect(origin, origin + size, frame, 4.0f);
-  for (int level = 0; level <= maximumDepth; ++level) {
-    const float y = origin.y + size.y - 32.0f - level * 72.0f;
-    draw->AddLine(ImVec2(origin.x + 10.0f, y),
-                  ImVec2(origin.x + size.x - 10.0f, y), guide, 1.0f);
-  }
-
-  std::vector<ImVec2> positions(nodes.size());
-  for (std::size_t level = 0; level < levels.size(); ++level) {
-    const std::vector<std::size_t> &members = levels[level];
-    for (std::size_t ordinal = 0; ordinal < members.size(); ++ordinal) {
-      const float ratio = static_cast<float>(ordinal + 1) /
-                          static_cast<float>(members.size() + 1);
-      positions[members[ordinal]] = ImVec2(
-          origin.x + 26.0f + (size.x - 52.0f) * ratio,
-          origin.y + size.y - 32.0f - static_cast<float>(level) * 72.0f);
-    }
-  }
-
-  for (std::size_t child = 0; child < nodes.size(); ++child) {
-    for (const std::string &parentId : nodes[child].parent_model_ids) {
-      const auto parent = indexById.find(parentId);
-      if (parent == indexById.end())
-        continue;
-      const ImVec2 from = positions[parent->second];
-      const ImVec2 to = positions[child];
-      draw->AddBezierCubic(from, ImVec2(from.x, from.y - 38.0f),
-                           ImVec2(to.x, to.y + 38.0f), to,
-                           IM_COL32(130, 143, 161, 255), 3.0f);
-    }
-  }
-
-  const auto nodeColor = [](const CxModelLineageUiNode &node) {
-    if (node.node_kind == "release")
-      return IM_COL32(183, 91, 0, 255);
-    if (node.node_kind == "merge_candidate")
-      return IM_COL32(38, 74, 195, 255);
-    return IM_COL32(76, 154, 0, 255);
-  };
-  const ImVec2 mouse = ImGui::GetIO().MousePos;
-  for (std::size_t index = 0; index < nodes.size(); ++index) {
-    const bool selected = context.selected_model_lineage_node ==
-                          static_cast<int>(index);
-    const ImVec2 position = positions[index];
-    const float radius = selected ? 11.0f : 9.0f;
-    if (selected) {
-      draw->AddTriangleFilled(ImVec2(position.x, position.y - 31.0f),
-                              ImVec2(position.x - 8.0f, position.y - 20.0f),
-                              ImVec2(position.x + 8.0f, position.y - 20.0f),
-                              IM_COL32(31, 183, 88, 255));
-      draw->AddText(ImVec2(position.x + 12.0f, position.y - 34.0f),
-                    IM_COL32(31, 183, 88, 255), "Current review");
-    }
-    draw->AddCircleFilled(position, radius, nodeColor(nodes[index]));
-    draw->AddCircle(position, radius, IM_COL32(230, 232, 235, 255), 0,
-                    selected ? 2.5f : 1.0f);
-    const std::string label = nodes[index].display_name;
-    const ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    draw->AddText(ImVec2(position.x - labelSize.x * 0.5f,
-                          position.y + 14.0f),
-                  IM_COL32(218, 224, 232, 255), label.c_str());
-    const ImVec2 delta(mouse.x - position.x, mouse.y - position.y);
-    if (delta.x * delta.x + delta.y * delta.y <= radius * radius &&
-        ImGui::IsItemClicked(ImGuiMouseButton_Left))
-      context.selected_model_lineage_node = static_cast<int>(index);
-  }
-  ImGui::TextDisabled(
-      "Orange: release baseline | green: incremental candidate | blue: merge candidate. Click a node to inspect its evidence and gates.");
+  ImGui::TextDisabled("The workflow above is the sole topology. This section lists legacy model assets for inspection only.");
+  for (const CxModelLineageUiNode &node : context.model_lineage_nodes)
+    ImGui::BulletText("%s | %s | %s", node.display_name.c_str(),
+                      node.node_kind.c_str(), node.gate_status.c_str());
 }
-
 void ViewController::drawTorchTrainingImageSetWindow() {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   const ImVec2 workPos = viewport->WorkPos;
