@@ -1,10 +1,140 @@
 #ifndef EASYOCR_H
 #define EASYOCR_H
- 
+
 #include "FastMatch.h"
 
+#include <algorithm>
+#include <filesystem>
+#include <regex>
 
-class Findobject;
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+
+class FindObject;
+
+class CxOcrStringList;
+
+class CxOcrRegex {
+public:
+    explicit CxOcrRegex(const char* pattern) : expression_(pattern) {}
+    const std::regex& expression() const { return expression_; }
+private:
+    std::regex expression_;
+};
+
+class CxOcrString : public std::string {
+public:
+    using std::string::operator=;
+    using std::string::string;
+    CxOcrString() = default;
+
+    CxOcrString(char value) : std::string(1, value) {}
+    CxOcrString(const std::string& value) : std::string(value) {}
+    CxOcrString(std::string&& value) : std::string(std::move(value)) {}
+    bool isEmpty() const { return empty(); }
+    int length() const { return static_cast<int>(size()); }
+    std::string toStdString() const { return *this; }
+    CxOcrString left(int count) const { return substr(0, static_cast<size_t>(std::max(count, 0))); }
+    CxOcrString right(int count) const { const size_t span = static_cast<size_t>(std::max(count, 0)); return substr(size() > span ? size() - span : 0); }
+    CxOcrString mid(int position, int count = -1) const { const size_t begin = static_cast<size_t>(std::max(position, 0)); if (begin >= size()) return {}; return count < 0 ? CxOcrString(substr(begin)) : CxOcrString(substr(begin, static_cast<size_t>(count))); }
+    int indexOf(const CxOcrString& value) const { const size_t pos = find(value); return pos == npos ? -1 : static_cast<int>(pos); }
+
+    template <typename Value>
+    CxOcrString arg(const Value& value) const {
+        std::ostringstream stream;
+        stream << value;
+        CxOcrString result(*this);
+        for (int placeholderIndex = 1; placeholderIndex <= 9; ++placeholderIndex) {
+            const std::string placeholder = "%" + std::to_string(placeholderIndex);
+            const size_t position = result.find(placeholder);
+            if (position != std::string::npos) {
+                result.std::string::replace(position, placeholder.size(), stream.str());
+                break;
+            }
+        }
+        return result;
+    }
+    CxOcrString& replace(const CxOcrRegex& pattern, const CxOcrString& replacement) { std::string::operator=(std::regex_replace(*this, pattern.expression(), replacement)); return *this; }
+    CxOcrStringList split(const CxOcrString& separator) const;
+
+    CxOcrStringList split(const CxOcrRegex& separator) const;
+
+    CxOcrStringList split(char separator) const;
+};
+
+class CxOcrStringList {
+public:
+    CxOcrStringList() = default;
+    CxOcrStringList(const CxOcrString& value) { values_.push_back(value); }
+    bool isEmpty() const { return values_.empty(); }
+    int size() const { return static_cast<int>(values_.size()); }
+    void clear() { values_.clear(); }
+    void append(const CxOcrString& value) { values_.push_back(value); }
+
+    void push_back(const CxOcrString& value) { values_.push_back(value); }
+    void removeAt(int index) { if (index >= 0 && index < size()) values_.erase(values_.begin() + index); }
+    const CxOcrString& at(int index) const { return values_.at(static_cast<size_t>(index)); }
+    CxOcrString& at(int index) { return values_.at(static_cast<size_t>(index)); }
+    const CxOcrString& operator[](int index) const { return values_[static_cast<size_t>(index)]; }
+    CxOcrString& operator[](int index) { return values_[static_cast<size_t>(index)]; }
+private:
+    std::vector<CxOcrString> values_;
+};
+
+inline CxOcrStringList CxOcrString::split(const CxOcrString& separator) const {
+    CxOcrStringList result;
+    if (separator.empty()) { result.append(*this); return result; }
+    size_t begin = 0;
+    while (begin <= size()) {
+        const size_t end = find(separator, begin);
+        result.append(end == npos ? substr(begin) : substr(begin, end - begin));
+        if (end == npos) break;
+        begin = end + separator.size();
+    }
+    return result;
+}
+
+namespace std {
+using String = ::CxOcrString;
+using StringList = ::CxOcrStringList;
+}
+
+inline CxOcrStringList CxOcrString::split(char separator) const {
+    return split(CxOcrString(1, separator));
+}
+
+inline CxOcrStringList CxOcrString::split(const CxOcrRegex& separator) const {
+    CxOcrStringList result;
+    std::sregex_token_iterator it(begin(), end(), separator.expression(), -1);
+    const std::sregex_token_iterator endIt;
+    for (; it != endIt; ++it) {
+        result.append(it->str());
+    }
+    return result;
+}
+
+using ImageBase = Image;
+using Findobject = FindObject;
+using fastmatch = FastMatch;
+using QRegExp = CxOcrRegex;
+
+
+class CxOcrRect {
+public:
+    CxOcrRect(const gp_Rectangle& rectangle) : rectangle_(rectangle) {}
+    int x() const { return static_cast<int>(rectangle_.TopLeft().X()); }
+    int y() const { return static_cast<int>(rectangle_.TopLeft().Y()); }
+    int width() const { return static_cast<int>(rectangle_.Width()); }
+    int height() const { return static_cast<int>(rectangle_.Height()); }
+    const gp_Rectangle& geometry() const { return rectangle_; }
+private:
+    gp_Rectangle rectangle_;
+};
+
+using Rect = CxOcrRect;
 
 typedef struct levelnode
 {
@@ -18,51 +148,29 @@ typedef struct levelvalenode
     double s_dvalue;
 }levelvaluenode;
 
-class levelnodes
-{
-    std::vector<levelvaluenode> s_nodes;
-    int m_searchsum;
+class levelnodes {
 public:
-    void setsearchnum(int inum)
-    {
-        m_searchsum = inum;
-    }
-    void addnode(levelvaluenode &node)
-    {
-        int isize = s_nodes.size();
-        if(isize<m_searchsum)
-        {
-            for(int i=0;i<isize;i++)
-            {
-                if(node.s_dvalue>s_nodes[i].s_dvalue)
-                {
-                    s_nodes.insert(i,node);
-                    return;
-                }
-            }
-            s_nodes.insert(isize,node);
-        }
-        else
-        {
-            for(int i=0;i<isize;i++)
-            {
-                if(node.s_dvalue>s_nodes[i].s_dvalue)
-                {
-                    s_nodes.insert(i,node);
-                    s_nodes.removeAt(s_nodes.size()-1);
-                    return;
-                }
-            }
-            s_nodes.insert(isize,node);
-            s_nodes.removeAt(s_nodes.size()-1);
-         }
-    }
-    std::vector<levelvaluenode> &getnodes()
-    {
-        return s_nodes;
-    }
-};
+    void setsearchnum(int inum) { m_searchsum = std::max(0, inum); }
 
+    void addnode(const levelvaluenode& node) {
+        const auto insertion = std::find_if(
+            s_nodes.begin(), s_nodes.end(),
+            [&node](const levelvaluenode& current) {
+                return node.s_dvalue > current.s_dvalue;
+            });
+        s_nodes.insert(insertion, node);
+        if (m_searchsum >= 0 &&
+            static_cast<int>(s_nodes.size()) > m_searchsum) {
+            s_nodes.pop_back();
+        }
+    }
+
+    std::vector<levelvaluenode>& getnodes() { return s_nodes; }
+
+private:
+    std::vector<levelvaluenode> s_nodes;
+    int m_searchsum = 0;
+};
 class EasyOCR: public FastMatch
 {
 public:
@@ -70,7 +178,7 @@ public:
     ~EasyOCR();
     void setshow(int ishow);
     virtual void setrect(int ix,int iy,int iw,int ih);
-    virtual void drawshape(QPainter &painter,QPalette &pal);
+    void drawshape() override;
     void setocrareasnum(int inum);
     void setocrareas(int inum,int ix,int iy,int iw,int ih);
     void setocrthre(int ithre);
@@ -210,14 +318,14 @@ private:
 
     int m_idebugrectsnum;
     int m_idebugfontnum;
-    void AreasOCR(ImageBase &image);
-    void FontSplit(ImageBase &image);
-    void ExFontSplit(ImageBase &image);
-    void StringSplit(ImageBase &image);
+    void AreasOCR(Image &image);
+    void FontSplit(Image &image);
+    void ExFontSplit(Image &image);
+    void StringSplit(Image &image);
 
-    ImageBase * g_pbackimage;
-    ImageBase * g_pbackobjectimage;
-    Findobject * g_pbackfindobject;
+    Image* g_pbackimage;
+    Image* g_pbackobjectimage;
+    FindObject* g_pbackfindobject;
     int m_image_thre;
     int m_findobj_distance;
     int m_findobj_searchtype;

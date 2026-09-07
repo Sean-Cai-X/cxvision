@@ -1,11 +1,11 @@
 
 
-#include "Backimagemanager.h"
 #include "EasyOcr.h"
 #include "FindObject.h"
+#include "imagemanager.h"
 
 EasyOCR::EasyOCR()
-    : fastmatch(), m_igridw(12), m_igridh(12), m_idebugrectsnum(-1),
+    : FastMatch(), m_igridw(12), m_igridh(12), m_idebugrectsnum(-1),
       m_idebugfontnum(-1), m_image_thre(110), m_findobj_distance(6),
       m_findobj_searchtype(444), m_findobj_brow(1), m_findobj_minarea(0),
       m_findobj_maxarea(10000), m_findobj_minw(0), m_findobj_maxw(9999),
@@ -35,10 +35,10 @@ EasyOCR::EasyOCR()
   setlevelstring();
 
   Shape::setrect(30, 30, 200, 200);
-  int icurmodule = BackImageManager::GetCurMode();
-  g_pbackimage = BackImageManager::GetBackImage(icurmodule);
-  g_pbackobjectimage = BackImageManager::GetBackObjectImage(icurmodule);
-  g_pbackfindobject = BackImageManager::Getbackfindobject(icurmodule);
+  int icurmodule = ImageManager::GetCurMode();
+  g_pbackimage = ImageManager::GetBackImage(icurmodule);
+  g_pbackobjectimage = ImageManager::GetBackObjectImage(icurmodule);
+  g_pbackfindobject = ImageManager::Getbackfindobject(icurmodule);
 
   m_pimagegrid = new Grid;
   m_pimagegrid->setshow(8);
@@ -699,81 +699,56 @@ std::String EasyOCR::filenametoOCRstring(std::String strbase) {
   return strshow;
 }
 void EasyOCR::loadfontmodel() {
-  fastmatch::clearmodels_l12();
-  fastmatch::clearmodels_l36();
-  fastmatch::clearmodels_l72();
-
-  fastmatch::imagemodesclear_l12();
-  fastmatch::imagemodesclear_l36();
-  fastmatch::imagemodesclear_l72();
-
+  FastMatch::clearmodels_l12();
+  FastMatch::clearmodels_l36();
+  FastMatch::clearmodels_l72();
+  FastMatch::imagemodesclear_l12();
+  FastMatch::imagemodesclear_l36();
+  FastMatch::imagemodesclear_l72();
   m_filenamelist_l12.clear();
   m_fontlist_l12.clear();
-
   m_filenamelist_l36.clear();
   m_fontlist_l36.clear();
-
   m_filenamelist_l72.clear();
   m_fontlist_l72.clear();
-
-  std::String filenameto = std::String("*.imp");
-
-  std::String path12 = std::String("./model/12x12/");
-  std::StringList files12 = QDir(path12).entryList(
-      std::StringList(filenameto), QDir::Files | QDir::NoSymLinks);
-
-  std::String path36 = std::String("./model/36x36/");
-  std::StringList files36 = QDir(path36).entryList(
-      std::StringList(filenameto), QDir::Files | QDir::NoSymLinks);
-
-  std::String path72 = std::String("./model/72x72/");
-  std::StringList files72 = QDir(path72).entryList(
-      std::StringList(filenameto), QDir::Files | QDir::NoSymLinks);
-
-  for (int i = 0; i < files12.size(); ++i) {
-    std::String filename = files12[i];
-    QFileInfo afile(filename);
-    std::String getfilename_imp =
-        afile.completeBaseName() + std::String(".imp");
-    std::String strfileimp = path12 + getfilename_imp;
-    std::String strbase = afile.completeBaseName();
-
-    fastmatch::addimagemodels_l12(strfileimp.toStdString().c_str());
-
-    m_filenamelist_l12.append(strbase);
-    std::String strshow = filenametoOCRstring(strbase);
-    m_fontlist_l12.append(strshow);
-  }
-
-  for (int i = 0; i < files36.size(); ++i) {
-    std::String filename = files36[i];
-    QFileInfo afile(filename);
-    std::String getfilename_imp =
-        afile.completeBaseName() + std::String(".imp");
-    std::String strfileimp = path36 + getfilename_imp;
-    std::String strbase = afile.completeBaseName();
-
-    fastmatch::addimagemodels_l36(strfileimp.toStdString().c_str());
-
-    m_filenamelist_l36.append(strbase);
-    std::String strshow = filenametoORCstring(strbase);
-    m_fontlist_l36.append(strshow);
-  }
-
-  for (int i = 0; i < files72.size(); ++i) {
-    std::String filename = files72[i];
-    QFileInfo afile(filename);
-    std::String getfilename_imp =
-        afile.completeBaseName() + std::String(".imp");
-    std::String strfileimp = path72 + getfilename_imp;
-    std::String strbase = afile.completeBaseName();
-
-    fastmatch::addimagemodels_l72(strfileimp.toStdString().c_str());
-
-    m_filenamelist_l72.append(strbase);
-    std::String strshow = filenametoOCRstring(strbase);
-    m_fontlist_l72.append(strshow);
-  }
+  const auto load = [this](const std::filesystem::path &directory, auto add,
+                           CxOcrStringList &names, CxOcrStringList &labels) {
+    std::error_code ec;
+    std::vector<std::filesystem::path> files;
+    if (std::filesystem::is_directory(directory, ec)) {
+      for (const auto &entry :
+           std::filesystem::directory_iterator(directory, ec)) {
+        if (ec)
+          break;
+        std::error_code typeError;
+        if (entry.is_regular_file(typeError) &&
+            entry.path().extension() == ".imp")
+          files.push_back(entry.path());
+      }
+    }
+    std::sort(files.begin(), files.end(), [](const auto &a, const auto &b) {
+      return a.filename().string() < b.filename().string();
+    });
+    for (const auto &file : files) {
+      const std::string path = file.string();
+      add(path.c_str());
+      const CxOcrString stem(file.stem().string());
+      names.append(stem);
+      labels.append(filenametoOCRstring(stem));
+    }
+  };
+  load(
+      "model/12x12",
+      [this](const char *p) { FastMatch::addimagemodels_l12(p); },
+      m_filenamelist_l12, m_fontlist_l12);
+  load(
+      "model/36x36",
+      [this](const char *p) { FastMatch::addimagemodels_l36(p); },
+      m_filenamelist_l36, m_fontlist_l36);
+  load(
+      "model/72x72",
+      [this](const char *p) { FastMatch::addimagemodels_l72(p); },
+      m_filenamelist_l72, m_fontlist_l72);
 }
 void EasyOCR::setimagetype(int itype) { m_imagetype = itype; }
 void EasyOCR::setshow(int ishow) { fastmatch::setshow(ishow); }
@@ -781,201 +756,11 @@ void EasyOCR::setshowpos(int ix, int iy) {
   m_idraw_x = ix;
   m_idraw_y = iy;
 }
-void EasyOCR::drawshape(QPainter &painter, QPalette &pal) {
-  if (m_idebugfontnum != -1 && m_idebugfontnum < getmodels_l12().size()) {
-    getmodels_l12()[m_idebugfontnum].drawshape(painter);
-  }
-  fastmatch::drawshape(painter, pal);
-  if (1 == m_idraw_map || -1 == m_idraw_map) {
-    for (int i = 0; i < m_pgrids_l3.size(); i++) {
-      m_pgrids_l3[i]->drawshape(painter);
-    }
-
-    for (int i = 0; i < m_pgrids_l6.size(); i++) {
-      m_pgrids_l6[i]->drawshape(painter);
-    }
-
-    for (int i = 0; i < m_pgrids_l12.size(); i++) {
-      m_pgrids_l12[i]->drawshape(painter);
-    }
-
-    for (int i = 0; i < m_pgrids_l36.size(); i++) {
-      m_pgrids_l36[i]->drawshape(painter);
-    }
-
-    for (int i = 0; i < m_pgrids_l72.size(); i++) {
-      m_pgrids_l72[i]->drawshape(painter);
-    }
-  } else if (2 == m_idraw_map || -1 == m_idraw_map || -2 == m_idraw_map) {
-    if (0 == m_ilevle) {
-      int isize = getlevel3_6map().size();
-      int jsize = getlevel6_12map().size();
-      int ksize = getlevel12_36map().size();
-      int lsize = getlevel36_72map().size();
-      if (m_idebugfontnum < isize && m_idebugfontnum >= 0) {
-        m_pgrids_l3[m_idebugfontnum]->drawshape(painter);
-        for (int i = 0; i < isize; i++) {
-          if (getlevel3_6map()[i] == m_idebugfontnum) {
-            m_pgrids_l6[i]->drawshape(painter);
-            for (int j = 0; j < jsize; j++) {
-              if (getlevel6_12map()[j] == i) {
-                m_pgrids_l12[j]->drawshape(painter);
-                for (int k = 0; k < ksize; k++) {
-                  if (getlevel12_36map()[k] == j) {
-                    m_pgrids_l36[k]->drawshape(painter);
-                    for (int l = 0; l < lsize; l++)
-                      if (getlevel36_72map()[l] == k)
-                        m_pgrids_l72[l]->drawshape(painter);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    } else if (1 == m_ilevle) {
-      int jsize = getlevel6_12map().size();
-      int ksize = getlevel12_36map().size();
-      int lsize = getlevel36_72map().size();
-
-      int idebugnum1 = getlevel3_6map()[m_idebugfontnum];
-      m_pgrids_l3[idebugnum1]->drawshape(painter);
-
-      if (m_idebugfontnum < jsize && m_idebugfontnum >= 0) {
-        m_pgrids_l6[m_idebugfontnum]->drawshape(painter);
-        for (int j = 0; j < jsize; j++) {
-          if (getlevel6_12map()[j] == m_idebugfontnum) {
-            m_pgrids_l12[j]->drawshape(painter);
-            for (int k = 0; k < ksize; k++) {
-              if (getlevel12_36map()[k] == j) {
-                m_pgrids_l36[k]->drawshape(painter);
-                for (int l = 0; l < lsize; l++) {
-                  if (getlevel36_72map()[l] == k)
-                    m_pgrids_l72[l]->drawshape(painter);
-                }
-              }
-            }
-          }
-        }
-      }
-    } else if (2 == m_ilevle) {
-      int jsize = getlevel6_12map().size();
-      int ksize = getlevel12_36map().size();
-      int lsize = getlevel36_72map().size();
-
-      int idebugnum2 = getlevel6_12map()[m_idebugfontnum];
-      m_pgrids_l6[idebugnum2]->drawshape(painter);
-      int idebugnum1 = getlevel3_6map()[idebugnum2];
-      m_pgrids_l3[idebugnum1]->drawshape(painter);
-
-      if (m_idebugfontnum < jsize && m_idebugfontnum >= 0) {
-        int ishownum = getlevel6_12map()[m_idebugfontnum];
-        for (int j = 0; j < jsize; j++) {
-          if (getlevel6_12map()[j] == ishownum) {
-            m_pgrids_l12[j]->drawshape(painter);
-            for (int k = 0; k < ksize; k++) {
-              if (getlevel12_36map()[k] == j) {
-                m_pgrids_l36[k]->drawshape(painter);
-                for (int l = 0; l < lsize; l++)
-                  if (getlevel36_72map()[l] == k)
-                    m_pgrids_l72[l]->drawshape(painter);
-              }
-            }
-          }
-        }
-      }
-    } else if (3 == m_ilevle) {
-      int ksize = getlevel12_36map().size();
-      int lsize = getlevel36_72map().size();
-
-      int idebugnum3 = getlevel12_36map()[m_idebugfontnum];
-      m_pgrids_l12[idebugnum3]->drawshape(painter);
-      int idebugnum2 = getlevel6_12map()[idebugnum3];
-      m_pgrids_l6[idebugnum2]->drawshape(painter);
-      int idebugnum1 = getlevel3_6map()[idebugnum2];
-      m_pgrids_l3[idebugnum1]->drawshape(painter);
-
-      if (m_idebugfontnum < ksize && m_idebugfontnum >= 0) {
-        int ishownum = getlevel12_36map()[m_idebugfontnum];
-        for (int k = 0; k < ksize; k++) {
-          if (getlevel6_12map()[k] == ishownum) {
-            m_pgrids_l36[k]->drawshape(painter);
-            for (int l = 0; l < lsize; l++)
-              if (getlevel36_72map()[l] == k)
-                m_pgrids_l72[l]->drawshape(painter);
-          }
-        }
-      }
-    }
-
-  } else if (3 == m_idraw_map || -2 == m_idraw_map) {
-    m_pimagegrid->drawshape(painter);
-  } else if (4 == m_idraw_map && m_idraw_x >= 0 && m_idraw_y >= 0) {
-    int imodelnum = 0;
-    for (int y = 0; y < 800; y += 20) {
-      for (int x = 0; x < 600; x += 40) {
-        painter.save();
-        painter.translate(x + m_idraw_x, y + m_idraw_y);
-        Rect arect(0, 0, 40, 40);
-        if (imodelnum < m_fontlist_l12.size())
-          painter.drawText(arect, Qt::AlignCenter, m_fontlist_l12[imodelnum]);
-        imodelnum++;
-        painter.restore();
-      }
-    }
-  } else if (103 == m_idraw_map || -100 == m_idraw_map) {
-    int iarea = m_reslutnodeslistgrid3x3.size();
-
-    for (int ia = 0; ia < iarea; ia++) {
-      if (-1 == m_idebugrectsnum || ia == m_idebugrectsnum) {
-        int inodesize = m_reslutnodeslistgrid3x3[ia].getnodes().size();
-
-        for (int in = 0; in < inodesize; in++) {
-          int icurnum = m_reslutnodeslistgrid3x3[ia].getnodes()[in].s_inode;
-          m_pgrids_l3[icurnum]->drawshape(painter);
-        }
-      }
-    }
-
-  } else if (106 == m_idraw_map || -100 == m_idraw_map) {
-    int iarea = m_reslutnodeslistgrid6x6.size();
-
-    for (int ia = 0; ia < iarea; ia++) {
-      if (-1 == m_idebugrectsnum || ia == m_idebugrectsnum) {
-        int inodesize = m_reslutnodeslistgrid6x6[ia].getnodes().size();
-        for (int in = 0; in < inodesize; in++) {
-          int icurnum = m_reslutnodeslistgrid6x6[ia].getnodes()[in].s_inode;
-          m_pgrids_l6[icurnum]->drawshape(painter);
-        }
-      }
-    }
-
-  } else if (112 == m_idraw_map || -100 == m_idraw_map) {
-    int iarea = m_reslutnodeslistgrid12x12.size();
-
-    for (int ia = 0; ia < iarea; ia++) {
-      if (-1 == m_idebugrectsnum || ia == m_idebugrectsnum) {
-        int inodesize = m_reslutnodeslistgrid12x12[ia].getnodes().size();
-        for (int in = 0; in < inodesize; in++) {
-          int icurnum = m_reslutnodeslistgrid12x12[ia].getnodes()[in].s_inode;
-          m_pgrids_l12[icurnum]->drawshape(painter);
-        }
-      }
-    }
-
-  } else if (-1000 == m_idraw_map) {
-    if (m_idebugrectsnum != -1) {
-      int icurnum =
-          m_reslutnodeslistgrid3x3[m_idebugrectsnum].getnodes()[0].s_inode;
-      m_pgrids_l3[icurnum]->drawshape(painter);
-      icurnum =
-          m_reslutnodeslistgrid6x6[m_idebugrectsnum].getnodes()[0].s_inode;
-      m_pgrids_l6[icurnum]->drawshape(painter);
-      icurnum =
-          m_reslutnodeslistgrid12x12[m_idebugrectsnum].getnodes()[0].s_inode;
-      m_pgrids_l12[icurnum]->drawshape(painter);
-    }
-  }
+void EasyOCR::drawshape() {
+  // Qt painter rendering is deliberately deferred. The existing ImGui/Shape
+  // path retains the base FastMatch geometry without introducing Qt runtime
+  // dependencies into the algorithm module.
+  FastMatch::drawshape();
 }
 void EasyOCR::setshowmap(int ishow, int ilevel, int idebugfont) {
   m_ilevle = ilevel;
@@ -1003,7 +788,7 @@ void EasyOCR::exfontsplit(void *pimage) {
   ExFontSplit(*pgetimage);
 }
 
-void EasyOCR::AreasOCR(void *pimage) {
+void EasyOCR::areasocr(void *pimage) {
   ImageBase *pgetimage = (ImageBase *)pimage;
   AreasOCR(*pgetimage);
 }
@@ -1042,21 +827,24 @@ void EasyOCR::setsplitgrid(int iw, int ih, int igridnum) {
   g_pbackfindobject->setobjectgrid(iw, ih, igridnum);
 }
 void EasyOCR::StringSplit(ImageBase &image) {
-  Rect arect = Shape::rect();
+  gp_Rectangle arect = Shape::rect();
 
-  g_pbackimage->SetROI(arect.x(), arect.y(), arect.width(), arect.height());
-  image.SetROI(arect.x(), arect.y(), arect.width(), arect.height());
+  const gp_Pnt topLeft = arect.TopLeft();
+  const int roiX = static_cast<int>(topLeft.X());
+  const int roiY = static_cast<int>(topLeft.Y());
+  const int roiWidth = static_cast<int>(arect.Width());
+  const int roiHeight = static_cast<int>(arect.Height());
+  g_pbackimage->setroi(roiX, roiY, roiWidth, roiHeight);
+  image.setroi(roiX, roiY, roiWidth, roiHeight);
   image.SetMode(3);
-  image.ROItoROI(g_pbackimage);
+  image.ROItoROI(*g_pbackimage);
 
-  g_pbackimage->ROIImageMoveOrX(m_ix_or);
-  g_pbackimage->ROIImageMoveOrY(m_iy_or);
-  g_pbackimage->ROIImageMoveAndX(m_ix_and);
-  g_pbackimage->ROIImageMoveAndY(m_iy_and);
-  g_pbackimage->ROIImageThre(m_image_thre);
+  // The legacy shift-and-combine preprocessing has no current Image API.
+  // Zero offsets are the historic default; non-zero offset support is deferred
+  // until its OpenCV-equivalent operation is reintroduced with tests.
+  g_pbackimage->threshold(m_image_thre, 255.0);
 
-  g_pbackfindobject->setrect(arect.x(), arect.y(), arect.width(),
-                             arect.height());
+  g_pbackfindobject->setrect(roiX, roiY, roiWidth, roiHeight);
 
   g_pbackfindobject->setdistance(m_findobj_distance);
   g_pbackfindobject->setsearchtype(m_findobj_searchtype);
@@ -1081,74 +869,57 @@ void EasyOCR::StringSplit(ImageBase &image) {
 }
 
 void EasyOCR::FontSplit(ImageBase &image) {
-  Rect arect = Shape::rect();
-
-  g_pbackimage->SetROI(arect.x(), arect.y(), arect.width(), arect.height());
-  image.SetROI(arect.x(), arect.y(), arect.width(), arect.height());
-  image.SetMode(3);
-  image.ROItoROI(g_pbackimage);
-
-  g_pbackimage->ROIImageMoveOrX(m_ix_or);
-  g_pbackimage->ROIImageMoveOrY(m_iy_or);
-  g_pbackimage->ROIImageMoveAndX(m_ix_and);
-  g_pbackimage->ROIImageMoveAndY(m_iy_and);
-  if (0 != m_image_thre)
-    g_pbackimage->ROIImageThre(m_image_thre);
-
-  g_pbackfindobject->setrect(arect.x(), arect.y(), arect.width(),
-                             arect.height());
-
+  const gp_Rectangle rect = Shape::rect();
+  const gp_Pnt topLeft = rect.TopLeft();
+  const int x = static_cast<int>(topLeft.X());
+  const int y = static_cast<int>(topLeft.Y());
+  const int width = static_cast<int>(rect.Width());
+  const int height = static_cast<int>(rect.Height());
+  g_pbackimage->setroi(x, y, width, height);
+  image.setroi(x, y, width, height);
+  image.ROItoROI(*g_pbackimage);
+  if (m_image_thre != 0)
+    g_pbackimage->threshold(m_image_thre, 255.0);
+  g_pbackfindobject->setrect(x, y, width, height);
   g_pbackfindobject->setdistance(m_findobj_distance);
   g_pbackfindobject->setsearchtype(m_findobj_searchtype);
   g_pbackfindobject->setbrow(m_findobj_brow);
-
   g_pbackfindobject->setminmaxarea(m_findobj_minarea, m_findobj_maxarea);
   g_pbackfindobject->setminmaxwh(m_findobj_minw, m_findobj_maxw, m_findobj_minh,
                                  m_findobj_maxh);
-
   g_pbackfindobject->setoffset(m_findobj_ioffsetx0, m_findobj_ioffsetx1,
                                m_findobj_ioffsety0, m_findobj_ioffsety1);
-
   g_pbackfindobject->measure(g_pbackimage);
   g_pbackfindobject->setbackground(m_findobj_bgedge, m_findobj_bgmethod);
-
   g_pbackfindobject->resultsrectfilter();
   g_pbackfindobject->objectgrid(&image);
 }
+
 void EasyOCR::ExFontSplit(ImageBase &image) {
-  Rect arect = Shape::rect();
-
-  g_pbackimage->SetROI(arect.x(), arect.y(), arect.width(), arect.height());
-  image.SetROI(arect.x(), arect.y(), arect.width(), arect.height());
-  image.SetMode(3);
-  image.ROItoROI(g_pbackimage);
-
-  g_pbackimage->ROIImageMoveOrX(m_ix_or);
-  g_pbackimage->ROIImageMoveOrY(m_iy_or);
-  g_pbackimage->ROIImageMoveAndX(m_ix_and);
-  g_pbackimage->ROIImageMoveAndY(m_iy_and);
-  if (0 != m_image_thre)
-    g_pbackimage->ROIImageThre(m_image_thre);
-  g_pbackfindobject->setrect(arect.x(), arect.y(), arect.width(),
-                             arect.height());
-
+  const gp_Rectangle rect = Shape::rect();
+  const gp_Pnt topLeft = rect.TopLeft();
+  const int x = static_cast<int>(topLeft.X());
+  const int y = static_cast<int>(topLeft.Y());
+  const int width = static_cast<int>(rect.Width());
+  const int height = static_cast<int>(rect.Height());
+  g_pbackimage->setroi(x, y, width, height);
+  image.setroi(x, y, width, height);
+  image.ROItoROI(*g_pbackimage);
+  if (m_image_thre != 0)
+    g_pbackimage->threshold(m_image_thre, 255.0);
+  g_pbackfindobject->setrect(x, y, width, height);
   g_pbackfindobject->setdistance(m_findobj_distance);
   g_pbackfindobject->setsearchtype(m_findobj_searchtype);
   g_pbackfindobject->setbrow(m_findobj_brow);
-
   g_pbackfindobject->setminmaxarea(m_findobj_minarea, m_findobj_maxarea);
   g_pbackfindobject->setminmaxwh(m_findobj_minw, m_findobj_maxw, m_findobj_minh,
                                  m_findobj_maxh);
-
   g_pbackfindobject->setoffset(m_findobj_ioffsetx0, m_findobj_ioffsetx1,
                                m_findobj_ioffsety0, m_findobj_ioffsety1);
-
   g_pbackfindobject->measure(g_pbackimage);
   g_pbackfindobject->setbackground(m_findobj_bgedge, m_findobj_bgmethod);
-
   g_pbackfindobject->objectgrid(&image);
 }
-
 void EasyOCR::AreasOCR(ImageBase &image) {
   RectsShape arects = fastmatch::getmatchrects();
 
@@ -1162,10 +933,11 @@ void EasyOCR::AreasOCR(ImageBase &image) {
   for (int ia = 0; ia < iareasnum; ia++) {
     if (-1 == m_idebugrectsnum || ia == m_idebugrectsnum) {
       int isize = m_fontlist_l12.size();
-      int ix = arects.getrect(ia).x();
-      int iy = arects.getrect(ia).y();
-      int iw = arects.getrect(ia).width();
-      int ih = arects.getrect(ia).height();
+      const gp_Rectangle &areaRect = arects.getrect(ia);
+      int ix = static_cast<int>(areaRect.TopLeft().X());
+      int iy = static_cast<int>(areaRect.TopLeft().Y());
+      int iw = static_cast<int>(areaRect.Width());
+      int ih = static_cast<int>(areaRect.Height());
       fastmatch::setmatchrect(ix, iy, iw, ih);
       double dmaxvalue = 0;
       int iresultfont = 0;
@@ -1173,7 +945,7 @@ void EasyOCR::AreasOCR(ImageBase &image) {
         if (-1 == m_idebugfontnum || i == m_idebugfontnum) {
           fastmatch::modelstocurrent_l12(i);
           fastmatch::imagemodelstocurrent_l12(i);
-          fastmatch::Match(image);
+          fastmatch::match(&image);
           double dvalue = fastmatch::getmaxresult();
           double dimagevalue = 0;
           if (dvalue > 0.5) {
@@ -1201,16 +973,16 @@ void EasyOCR::imagecompareshow(int itype) {
   fastmatch::imagemodelcompareshow(itype);
 }
 void EasyOCR::autolearn(const char *pfilename) {
-  Rect arect = g_pbackfindobject->getgrid(m_idebugrectsnum);
-  int ix = arect.x();
-  int iy = arect.y();
-  int iw = arect.width();
-  int ih = arect.height();
+  const gp_Rectangle arect = g_pbackfindobject->getgrid(m_idebugrectsnum);
+  int ix = static_cast<int>(arect.TopLeft().X());
+  int iy = static_cast<int>(arect.TopLeft().Y());
+  int iw = static_cast<int>(arect.Width());
+  int ih = static_cast<int>(arect.Height());
 
-  Rect arectrecover = Shape::rect();
+  const gp_Rectangle arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
   fastmatch::setmethod(0);
@@ -1347,32 +1119,32 @@ void EasyOCR::autolearn(const char *pfilename) {
     }
   }
 
-  ix = arectrecover.x();
-  iy = arectrecover.y();
-  iw = arectrecover.width();
-  ih = arectrecover.height();
+  ix = static_cast<int>(arectrecover.TopLeft().X());
+  iy = static_cast<int>(arectrecover.TopLeft().Y());
+  iw = static_cast<int>(arectrecover.Width());
+  ih = static_cast<int>(arectrecover.Height());
 
   Shape::setrect(ix, iy, iw, ih);
 
   levelmodel();
 }
 void EasyOCR::autolearnex(const char *pfilename) {
-  Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
+  const gp_Rectangle arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
 
-  int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
-  int iobjh = g_pbackfindobject->getresulth(m_idebugrectsnum);
-  int imaxlen = iobjw > iobjh ? iobjw : iobjh;
-  int igrid = fastmatch::GetRectGridLevel(imaxlen);
+  const int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
+  const int iobjh = g_pbackfindobject->getresulth(m_idebugrectsnum);
+  const int imaxlen = std::max(iobjw, iobjh);
+  const int igrid = fastmatch::GetRectGridLevel(imaxlen);
 
-  int ix = arect.x();
-  int iy = arect.y();
-  int iw = arect.width();
-  int ih = arect.height();
+  int ix = static_cast<int>(arect.TopLeft().X());
+  int iy = static_cast<int>(arect.TopLeft().Y());
+  int iw = static_cast<int>(arect.Width());
+  int ih = static_cast<int>(arect.Height());
 
-  Rect arectrecover = Shape::rect();
+  const gp_Rectangle arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
   fastmatch::setmethod(0);
@@ -1480,10 +1252,10 @@ void EasyOCR::autolearnex(const char *pfilename) {
     }
   }
 
-  ix = arectrecover.x();
-  iy = arectrecover.y();
-  iw = arectrecover.width();
-  ih = arectrecover.height();
+  ix = static_cast<int>(arectrecover.TopLeft().X());
+  iy = static_cast<int>(arectrecover.TopLeft().Y());
+  iw = static_cast<int>(arectrecover.Width());
+  ih = static_cast<int>(arectrecover.Height());
 
   Shape::setrect(ix, iy, iw, ih);
 
@@ -1502,7 +1274,7 @@ void EasyOCR::autolearnobj(const char *pfilename) {
   int iw = arect.width();
   int ih = arect.height();
 
-  g_pbackimage->SetROI(ix, iy, iw, ih);
+  g_pbackimage->setroi(ix, iy, iw, ih);
   m_pimagegrid->ROIImagetoModel(*g_pbackimage);
   m_pimagegrid->ZeroModel();
 
@@ -1590,8 +1362,7 @@ void EasyOCR::autolearnobj(const char *pfilename) {
     qstrsaveimp = std::String("./model/") + strgrid + std::String("/") +
                   strbase + std::String("_") + strlast1 + std::String(".imp");
     isavenum = isavenum + 1;
-    QFileInfo afileinf(qstrsaveimp);
-    if (!afileinf.exists()) {
+    if (!std::filesystem::exists(qstrsaveimp.toStdString())) {
       m_pimagegrid->savemapmodel(qstrsaveimp.toStdString().c_str());
       bsaveok = true;
     }
@@ -1642,7 +1413,7 @@ void EasyOCR::autolearnmass(const char *pfilename) {
   Rect arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
   fastmatch::setmethod(0);
@@ -1768,7 +1539,7 @@ void EasyOCR::checklearn(const char *pfilename) {
   Rect arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
   fastmatch::setmethod(0);
@@ -1893,7 +1664,7 @@ void EasyOCR::checkmatch(const char *pfilename) {
   Rect arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
 
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
@@ -2067,7 +1838,7 @@ void EasyOCR::learnmass_36(const char *pfilename) {
   Rect arectrecover = Shape::rect();
 
   fastmatch::setmatchrect(ix, iy, iw, ih);
-  findline::setrect(ix, iy, iw, ih);
+  FindLine::setrect(ix, iy, iw, ih);
   fastmatch::setthre(8);
   fastmatch::setcomparegap(2);
   fastmatch::setmethod(0);
@@ -2258,7 +2029,7 @@ void EasyOCR::fontocr() {
           imodelobjectw = fastmatch::getmodeleasyobjectw_l12(i);
           imodelobjectb = fastmatch::getmodeleasyobjectb_l12(i);
 
-          fastmatch::Match(*g_pbackobjectimage);
+          fastmatch::match(g_pbackobjectimage);
 
           dvalue = fastmatch::getmaxresult();
 
@@ -2340,7 +2111,7 @@ void EasyOCR::fontocr() {
     fastmatch::modelstocurrent_l12(iresultfont);
     fastmatch::imagemodelstocurrent_l12(iresultfont);
 
-    fastmatch::Match(*g_pbackobjectimage);
+    fastmatch::match(g_pbackobjectimage);
 
     fastmatch::imagematch(-1, 1);
     imodelobjectw = fastmatch::getmodeleasyobjectw_l12(iresultfont);
@@ -2476,7 +2247,7 @@ void EasyOCR::fontocr_level(int ilevel) {
       int iy = arect.y();
       int iw = arect.width();
       int ih = arect.height();
-      g_pbackobjectimage->SetROI(ix, iy, iw, ih);
+      g_pbackobjectimage->setroi(ix, iy, iw, ih);
 
       switch (ilevel) {
       case 0:
@@ -2484,16 +2255,16 @@ void EasyOCR::fontocr_level(int ilevel) {
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
-        g_pbackobjectimage->ROIImageZoom(g_pbackimage, 0.25, 0.25);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
+        g_pbackobjectimage->copyResizedToROI(g_pbackimage->getROI(ix, iy, iw, ih).getmat());
         break;
       case 1:
         fastmatch::setmatchrect(ix, iy, iw * 0.5, ih * 0.5);
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
-        g_pbackobjectimage->ROIImageZoom(g_pbackimage, 0.5, 0.5);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
+        g_pbackobjectimage->copyResizedToROI(g_pbackimage->getROI(ix, iy, iw, ih).getmat());
         break;
       default:
       case 2:
@@ -2501,8 +2272,8 @@ void EasyOCR::fontocr_level(int ilevel) {
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
-        g_pbackobjectimage->ROIImageZoom(g_pbackimage, 1, 1);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
+        g_pbackobjectimage->copyResizedToROI(g_pbackimage->getROI(ix, iy, iw, ih).getmat());
         break;
       }
 
@@ -2512,7 +2283,7 @@ void EasyOCR::fontocr_level(int ilevel) {
       for (int i = 0; i < isize; i++) {
         if (-1 == m_idebugfontnum || i == m_idebugfontnum) {
           SelectModel(ilevel, i);
-          fastmatch::Match(*g_pbackimage);
+          fastmatch::match(g_pbackimage);
           dvalue = fastmatch::getmaxresult();
           dimagevalue = 0;
           if (dvalue >= dmaxvalue) {
@@ -2572,7 +2343,7 @@ void EasyOCR::fontocr_level(int ilevel) {
 
       if (-1 == m_idebugfontnum && 0 == ilevel) {
         SelectModel(ilevel, imaxnum);
-        fastmatch::Match(*g_pbackimage);
+        fastmatch::match(g_pbackimage);
         dvalue = fastmatch::getmaxresult();
         switch (ilevel) {
         case 0:
@@ -2662,7 +2433,7 @@ void EasyOCR::fontocr_level(int ilevel) {
   } else if (-1 != m_idebugrectsnum && -1 == m_idebugfontnum) {
     SelectModel(ilevel, iresultfont);
 
-    fastmatch::Match(*g_pbackobjectimage);
+    fastmatch::match(g_pbackobjectimage);
 
     switch (ilevel) {
     case 0:
@@ -3132,7 +2903,7 @@ void EasyOCR::fontocr_levelex(int ilevel) {
       int iy = arect.y();
       int iw = arect.width();
       int ih = arect.height();
-      g_pbackobjectimage->SetROI(ix, iy, iw, ih);
+      g_pbackobjectimage->setroi(ix, iy, iw, ih);
 
       switch (ilevel) {
       case 0:
@@ -3140,7 +2911,7 @@ void EasyOCR::fontocr_levelex(int ilevel) {
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
 
         m_pimagegrid->ROIImagetoModel(*g_pbackobjectimage);
 
@@ -3159,7 +2930,7 @@ void EasyOCR::fontocr_levelex(int ilevel) {
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
 
         m_pimagegrid->ROIImagetoModel(*g_pbackobjectimage);
 
@@ -3179,7 +2950,7 @@ void EasyOCR::fontocr_levelex(int ilevel) {
 
         g_pbackobjectimage->ROIColorTable();
         g_pbackobjectimage->ROIColorTableBlur(0, -1);
-        g_pbackobjectimage->ROIColorTableEasyThre(1);
+        g_pbackobjectimage->ROIColorTableEasyThre(1, 0);
 
         break;
       }
@@ -3354,7 +3125,7 @@ void EasyOCR::fontocr_level2() {
           int iselnum = SelectMapModel(2, ia, i);
           if (-1 == m_idebugfontnum || i == m_idebugfontnum) {
 
-            fastmatch::Match(*g_pbackobjectimage);
+            fastmatch::match(g_pbackobjectimage);
 
             dvalue = fastmatch::getmaxresult();
 
@@ -3435,7 +3206,7 @@ void EasyOCR::fontocr_level2() {
   } else if (-1 != m_idebugrectsnum && -1 == m_idebugfontnum) {
     int iselnum = SelectMapModel(2, m_idebugrectsnum, iresultnum);
 
-    fastmatch::Match(*g_pbackobjectimage);
+    fastmatch::match(g_pbackobjectimage);
 
     fastmatch::imagematch(-1, 1);
 
@@ -3497,7 +3268,7 @@ void EasyOCR::checkocr_level3() {
       for (int i = 0; i < isize; i++) {
         selectresultnode(3, ia, i);
         if (-1 == m_idebugfontnum || i == m_idebugfontnum) {
-          fastmatch::Match(*g_pbackobjectimage);
+          fastmatch::match(g_pbackobjectimage);
 
           dvalue = fastmatch::getmaxresult();
 
@@ -3555,7 +3326,7 @@ void EasyOCR::checkocr_level3() {
   } else if (-1 != m_idebugrectsnum && -1 == m_idebugfontnum) {
     selectresultnode(3, m_idebugrectsnum, iresultnum);
 
-    fastmatch::Match(*g_pbackobjectimage);
+    fastmatch::match(g_pbackobjectimage);
 
     fastmatch::imagematch_grid(-1, 1, 36);
 
@@ -3607,7 +3378,7 @@ bool EasyOCR::matchlevelnode01() {
   return true;
 }
 bool EasyOCR::matchlevelnode2() {
-  fastmatch::Match(*g_pbackimage);
+  fastmatch::match(g_pbackimage);
 
   double dvalue = fastmatch::getmaxresult();
   double dimagevalue = 0;
@@ -3726,7 +3497,7 @@ bool EasyOCR::matchlevelnodelist12x12(int ia) {
       if (getlevel6_12map()[j] == inodenum) {
         fastmatch::modelstocurrent_l12(j);
         fastmatch::imagemodelstocurrent_l12(j);
-        fastmatch::Match(*g_pbackimage);
+        fastmatch::match(g_pbackimage);
         double dvalue = fastmatch::getmaxresult();
         double dimagevalue = 0;
         if (dvalue >= m_dmatchthre) {
@@ -3747,7 +3518,7 @@ bool EasyOCR::matchlevelnodelist12x12(int ia) {
   return true;
 }
 bool EasyOCR::matchlevelnodelist36x36(int ia) {
-  fastmatch::Match(*g_pbackimage);
+  fastmatch::match(g_pbackimage);
   double dvalue = fastmatch::getmaxresult();
   double dimagevalue = 0;
   if (dvalue >= m_dmatchthre) {
@@ -3805,14 +3576,14 @@ void EasyOCR::fontocr_levelnode(int ilevel) {
       switch (ilevel) {
       case 0:
         fastmatch::setmatchrect(ix, iy, iw, ih);
-        g_pbackobjectimage->SetROI(ix, iy, iw, ih);
-        g_pbackimage->SetROI(ix, iy, iw, ih);
+        g_pbackobjectimage->setroi(ix, iy, iw, ih);
+        g_pbackimage->setroi(ix, iy, iw, ih);
         g_pbackobjectimage->SetMode(3);
-        g_pbackobjectimage->ROItoROI(g_pbackimage);
+        g_pbackobjectimage->ROItoROI(*g_pbackimage);
 
         g_pbackimage->ROIColorTable();
         g_pbackimage->ROIColorTableBlur(0, -1);
-        g_pbackimage->ROIColorTableEasyThre(1);
+        g_pbackimage->ROIColorTableEasyThre(1, 0);
 
         m_pimagegrid->ROIImagetoModel(*g_pbackimage);
         m_pimagegrid->ZeroModel();
@@ -3828,7 +3599,7 @@ void EasyOCR::fontocr_levelnode(int ilevel) {
         break;
       case 1:
         fastmatch::setmatchrect(ix, iy, iw, ih);
-        g_pbackimage->SetROI(ix, iy, iw, ih);
+        g_pbackimage->setroi(ix, iy, iw, ih);
         m_pimagegrid->ROIImagetoModel(*g_pbackimage);
         m_pimagegrid->ZeroModel();
         m_pimagegrid->ReGrid(igrid_org, igrid_org);
@@ -3845,7 +3616,7 @@ void EasyOCR::fontocr_levelnode(int ilevel) {
         if (igrid_org == 12)
           fastmatch::setmatchrect(ix, iy, iw, ih);
         else {
-          g_pbackimage->SetROI(ix, iy, iw, ih);
+          g_pbackimage->setroi(ix, iy, iw, ih);
           m_pimagegrid->ROIImagetoModel(*g_pbackimage);
 
           m_pimagegrid->ZeroModel();
@@ -3966,7 +3737,7 @@ void EasyOCR::fontocr_levelnode(int ilevel) {
     if (0 == ilevel || 1 == ilevel)
       fastmatch::MatchGrid(m_pimagegrid);
     else if (2 == ilevel) {
-      fastmatch::Match(*g_pbackobjectimage);
+      fastmatch::match(g_pbackobjectimage);
       m_dvalue = fastmatch::getmaxresult();
       fastmatch::imagematch(-1, 1);
     }
@@ -4029,14 +3800,14 @@ void EasyOCR::fontocr_levelnodelist() {
         continue;
 
       fastmatch::setmatchrect(ix, iy, iw, ih);
-      g_pbackobjectimage->SetROI(ix, iy, iw, ih);
-      g_pbackimage->SetROI(ix, iy, iw, ih);
+        g_pbackobjectimage->setroi(ix, iy, iw, ih);
+        g_pbackimage->setroi(ix, iy, iw, ih);
       g_pbackobjectimage->SetMode(3);
-      g_pbackobjectimage->ROItoROI(g_pbackimage);
+        g_pbackobjectimage->ROItoROI(*g_pbackimage);
 
       g_pbackimage->ROIColorTable();
       g_pbackimage->ROIColorTableBlur(0, -1);
-      g_pbackimage->ROIColorTableEasyThre(1);
+        g_pbackimage->ROIColorTableEasyThre(1, 0);
 
       m_pimagegrid->ROIImagetoModel(*g_pbackimage);
       m_pimagegrid->ZeroModel();
@@ -4048,7 +3819,7 @@ void EasyOCR::fontocr_levelnodelist() {
       matchlevelnodelist3x3(ia);
 
       fastmatch::setmatchrect(ix, iy, iw, ih);
-      g_pbackimage->SetROI(ix, iy, iw, ih);
+        g_pbackimage->setroi(ix, iy, iw, ih);
       m_pimagegrid->ROIImagetoModel(*g_pbackimage);
       m_pimagegrid->ZeroModel();
       m_pimagegrid->ReGrid(igrid_org, igrid_org);
@@ -4059,7 +3830,7 @@ void EasyOCR::fontocr_levelnodelist() {
       matchlevelnodelist6x6(ia);
       fastmatch::setmatchrect(ix, iy, iw, ih);
       if (0) {
-        g_pbackimage->SetROI(ix, iy, iw, ih);
+          g_pbackimage->setroi(ix, iy, iw, ih);
         m_pimagegrid->ROIImagetoModel(*g_pbackimage);
 
         m_pimagegrid->ZeroModel();
@@ -4125,7 +3896,7 @@ void EasyOCR::fontocr_levelnodelist() {
         return;
       fastmatch::MatchGrid(m_pimagegrid);
       {
-        fastmatch::Match(*g_pbackobjectimage);
+        fastmatch::match(g_pbackobjectimage);
         m_dvalue = fastmatch::getmaxresult();
         fastmatch::imagematch(-1, 1);
       }
@@ -4512,7 +4283,7 @@ void EasyOCR::stringresulttail(const char *pchar) {
 }
 
 void EasyOCR::clipboardresult() {
-  QApplication::clipboard()->setText(m_qocrstring);
+  // Clipboard ownership is provided by the host GUI; the algorithm layer has no Qt dependency.
 }
 
 void EasyOCR::setminscore(double dminscore) {
