@@ -7,6 +7,7 @@
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
+#include "EasyOcr.h"
 #include "TorchTask.h"
 #include "CxTorchResultProjector.h"
 #include "ParserClass.h"
@@ -856,17 +857,118 @@ bool CaptureFindObjectResult(
     output.object_component_max_width = tool.getdebugmaxcomponentw();
     output.object_component_max_height = tool.getdebugmaxcomponenth();
     output.object_algorithm_branch = tool.getdebugalgorithmbranch();
+
+    output.findobject_measurements.clear();
+    output.findobject_measurements.reserve(tool.getmeasurements().size());
+    for (const FindObjectMeasurementSnapshot& source :
+         tool.getmeasurements())
+    {
+        CxFindObjectMeasurementEvidence measured;
+        measured.object_index = source.object_index;
+        measured.component_label = source.component_label;
+        measured.generation = source.generation;
+        measured.mask_hash = source.mask_hash;
+        measured.object_ref = source.object_ref;
+        measured.bbox_semantics = source.bbox_semantics;
+        measured.centroid_semantics = source.centroid_semantics;
+        measured.bbox_x = source.bbox_px.x;
+        measured.bbox_y = source.bbox_px.y;
+        measured.bbox_w = source.bbox_px.width;
+        measured.bbox_h = source.bbox_px.height;
+        measured.pixel_count = source.pixel_count;
+        measured.pixel_size_x = source.pixel_size_x;
+        measured.pixel_size_y = source.pixel_size_y;
+        measured.centroid_x = source.centroid_px.x;
+        measured.centroid_y = source.centroid_px.y;
+        measured.projected_area = source.projected_area;
+        measured.equivalent_side = source.equivalent_side;
+        measured.equivalent_radius = source.equivalent_radius;
+        measured.intensity_min = source.intensity_min;
+        measured.intensity_max = source.intensity_max;
+        measured.intensity_mean = source.intensity_mean;
+        measured.intensity_stddev = source.intensity_stddev;
+        measured.intensity_skewness = source.intensity_skewness;
+        measured.intensity_valid = source.intensity_valid;
+        measured.background_method = source.background_method;
+        measured.background_valid = source.background_valid;
+        measured.background_sample_count = source.background_sample_count;
+        measured.background_baseline_mean = source.background_baseline_mean;
+        measured.residual_threshold = source.residual_threshold;
+        measured.segmentation_domain = source.segmentation_domain;
+        measured.gw_pixel_perimeter = source.gw_pixel_perimeter;
+        measured.subpixel_valid = source.subpixel_valid;
+        measured.subpixel_candidate_point_count =
+            source.subpixel_candidate_point_count;
+        measured.subpixel_accepted_point_count =
+            source.subpixel_accepted_point_count;
+        measured.subpixel_rejected_low_gradient_count =
+            source.subpixel_rejected_low_gradient_count;
+        measured.subpixel_rejected_out_of_bounds_count =
+            source.subpixel_rejected_out_of_bounds_count;
+        measured.subpixel_mean_gradient = source.subpixel_mean_gradient;
+        measured.subpixel_mean_fit_residual_px =
+            source.subpixel_mean_fit_residual_px;
+        measured.subpixel_perimeter = source.subpixel_perimeter;
+        measured.subpixel_area = source.subpixel_area;
+        measured.subpixel_boundary_point_count =
+            static_cast<int>(source.subpixel_boundary.size());
+        measured.subpixel_failure_reason = source.subpixel_failure_reason;
+        measured.active_geometry_basis = source.active_geometry_basis;
+        measured.gwyddion_perimeter = source.gwyddion_perimeter;
+        measured.polygon_perimeter = source.polygon_perimeter;
+        measured.polygon_area = source.polygon_area;
+        measured.pixel_configuration_counts =
+            source.pixel_configuration_counts;
+        measured.outer_boundary_point_count =
+            static_cast<int>(source.outer_boundary.size());
+        measured.hole_count =
+            static_cast<int>(source.hole_boundaries.size());
+        measured.convex_hull_area = source.convex_hull_area;
+        measured.circularity = source.circularity;
+        measured.solidity = source.solidity;
+        measured.major_axis_length = source.major_axis_length;
+        measured.minor_axis_length = source.minor_axis_length;
+        measured.orientation_deg = source.orientation_deg;
+        measured.aspect_ratio = source.aspect_ratio;
+        measured.eccentricity = source.eccentricity;
+        measured.moment_ellipse_valid = source.moment_ellipse_valid;
+        measured.feret_max = source.feret_max;
+        measured.feret_max_angle_deg = source.feret_max_angle_deg;
+        measured.feret_min = source.feret_min;
+        measured.feret_min_angle_deg = source.feret_min_angle_deg;
+        measured.inscribed_center_x =
+            source.inscribed_circle_center_px.x;
+        measured.inscribed_center_y =
+            source.inscribed_circle_center_px.y;
+        measured.inscribed_radius = source.inscribed_circle_radius;
+        measured.inscribed_circle_valid =
+            source.inscribed_circle_valid;
+        measured.enclosing_center_x =
+            source.enclosing_circle_center_px.x;
+        measured.enclosing_center_y =
+            source.enclosing_circle_center_px.y;
+        measured.enclosing_radius = source.enclosing_circle_radius;
+        measured.enclosing_circle_valid =
+            source.enclosing_circle_valid;
+        measured.length_unit = source.length_unit;
+        measured.area_unit = source.area_unit;
+        measured.boundary_method = source.boundary_method;
+        measured.topology_policy = source.topology_policy;
+        measured.inscribed_circle_method =
+            source.inscribed_circle_method;
+        measured.status = source.status;
+        output.findobject_measurements.push_back(std::move(measured));
+    }
     output.failure_stage = output.has_result_rect ? std::string() : "result_rect";
     if (!output.has_result_rect)
         output.reason = "FindObject result unavailable";
 
     if (output.result_rect_count > 0)
     {
-        gp_Rectangle first_rect = tool.getresultrects().getrect(0);
-        output.top1_rect_x = static_cast<int>(first_rect.TopLeft().X());
-        output.top1_rect_y = static_cast<int>(first_rect.TopLeft().Y());
-        output.top1_rect_w = static_cast<int>(first_rect.Width());
-        output.top1_rect_h = static_cast<int>(first_rect.Height());
+        output.top1_rect_x = tool.getresultx(0);
+        output.top1_rect_y = tool.getresulty(0);
+        output.top1_rect_w = tool.getresultw(0);
+        output.top1_rect_h = tool.getresulth(0);
     }
     ImageAnnotationLayer layer;
     tool.PublishDisplayShapes(layer, output.owner_ref);
@@ -945,6 +1047,61 @@ bool CaptureFastMatchResult(
     output.fastmatch_candidate_replace_count = tool.getresultcandidatereplacecount();
     output.fastmatch_candidate_reject_count = tool.getresultcandidaterejectcount();
 
+    const FastMatchTemplateGeometrySnapshot &template_geometry =
+        tool.gettemplategeometry();
+    output.fastmatch_template_geometry.available = template_geometry.available;
+    output.fastmatch_template_geometry.source_object_index =
+        template_geometry.source_object_index;
+    output.fastmatch_template_geometry.source_object_ref =
+        template_geometry.source_object_ref;
+    output.fastmatch_template_geometry.bbox_x = template_geometry.bbox_px.x;
+    output.fastmatch_template_geometry.bbox_y = template_geometry.bbox_px.y;
+    output.fastmatch_template_geometry.bbox_w = template_geometry.bbox_px.width;
+    output.fastmatch_template_geometry.bbox_h = template_geometry.bbox_px.height;
+    output.fastmatch_template_geometry.centroid_x =
+        template_geometry.centroid_px.x;
+    output.fastmatch_template_geometry.centroid_y =
+        template_geometry.centroid_px.y;
+    output.fastmatch_template_geometry.projected_area =
+        template_geometry.projected_area;
+    output.fastmatch_template_geometry.major_axis_length =
+        template_geometry.major_axis_length;
+    output.fastmatch_template_geometry.minor_axis_length =
+        template_geometry.minor_axis_length;
+    output.fastmatch_template_geometry.orientation_deg =
+        template_geometry.orientation_deg;
+    output.fastmatch_template_geometry.aspect_ratio =
+        template_geometry.aspect_ratio;
+    output.fastmatch_template_geometry.solidity = template_geometry.solidity;
+    output.fastmatch_template_geometry.boundary_point_count =
+        static_cast<int>(template_geometry.normalized_boundary.size());
+    output.fastmatch_template_geometry.status = template_geometry.status;
+
+    output.fastmatch_pose_candidates.clear();
+    for (const FastMatchPoseCandidateSnapshot &source :
+         tool.getposecandidates()) {
+        CxFastMatchPoseCandidateEvidence pose;
+        pose.candidate_index = source.candidate_index;
+        pose.observed_geometry_index = source.observed_geometry_index;
+        pose.observed_geometry_ref = source.observed_geometry_ref;
+        pose.bbox_x = source.bbox_px.x;
+        pose.bbox_y = source.bbox_px.y;
+        pose.bbox_w = source.bbox_px.width;
+        pose.bbox_h = source.bbox_px.height;
+        pose.center_x = source.center_px.x;
+        pose.center_y = source.center_px.y;
+        pose.angle_deg = source.angle_deg;
+        pose.scale_x = source.scale_x;
+        pose.scale_y = source.scale_y;
+        pose.appearance_score = source.appearance_score;
+        pose.geometry_score = source.geometry_score;
+        pose.combined_score = source.combined_score;
+        pose.boundary_point_count =
+            static_cast<int>(source.transformed_boundary.size());
+        pose.status = source.status;
+        output.fastmatch_pose_candidates.push_back(std::move(pose));
+    }
+
     const int learn_point_count =
         output.fastmatch_learn_a_count +
         output.fastmatch_learn_b_count +
@@ -973,6 +1130,57 @@ bool CaptureFastMatchResult(
     tool.PublishDisplayShapes(layer, output.owner_ref);
     CopyShapeElementsToSnapshots(layer, output.shapes);
 
+    return true;
+}
+
+bool CaptureEasyOcrResult(
+    EasyOCR &tool,
+    const std::string &object_name,
+    CxScriptToolResultCapture &output) {
+    CaptureFastMatchResult(static_cast<FastMatch &>(tool), object_name, output);
+    output.type = "EasyOCR";
+    output.ocr_final_text = tool.getrecognizedtext();
+    output.ocr_failure_reason = tool.getdecodefailure();
+    output.ocr_glyph_candidates.clear();
+    for (const EasyOcrGlyphCandidateSnapshot &source :
+         tool.getglyphcandidates()) {
+        CxOcrGlyphCandidateEvidence glyph;
+        glyph.source_object_index = source.source_object_index;
+        glyph.line_index = source.line_index;
+        glyph.reading_order = source.reading_order;
+        glyph.bbox_x = source.bbox_px.x;
+        glyph.bbox_y = source.bbox_px.y;
+        glyph.bbox_w = source.bbox_px.width;
+        glyph.bbox_h = source.bbox_px.height;
+        glyph.centroid_x = source.centroid_px.x;
+        glyph.centroid_y = source.centroid_px.y;
+        glyph.orientation_deg = source.orientation_deg;
+        glyph.projected_area = source.projected_area;
+        glyph.aspect_ratio = source.aspect_ratio;
+        glyph.solidity = source.solidity;
+        glyph.label = source.label;
+        glyph.appearance_score = source.appearance_score;
+        glyph.geometry_score = source.geometry_score;
+        glyph.confidence = source.confidence;
+        glyph.source_object_ref = source.source_object_ref;
+        glyph.status = source.status;
+        output.ocr_glyph_candidates.push_back(std::move(glyph));
+    }
+
+    output.valid_points_count =
+        static_cast<int>(output.ocr_glyph_candidates.size());
+    output.algorithm_executed =
+        !output.ocr_glyph_candidates.empty() || !output.ocr_final_text.empty();
+    output.measure_completed = !output.ocr_glyph_candidates.empty();
+    if (output.algorithm_executed) {
+        output.failure_stage.clear();
+        output.reason.clear();
+    } else {
+        output.failure_stage = "ocr_decode";
+        output.reason = output.ocr_failure_reason.empty()
+                            ? "EasyOCR produced no glyph candidates or text"
+                            : output.ocr_failure_reason;
+    }
     return true;
 }
 
@@ -1276,6 +1484,19 @@ static void MergeToolCapture(
     capture.fastmatch_candidate_insert_count += tool.fastmatch_candidate_insert_count;
     capture.fastmatch_candidate_replace_count += tool.fastmatch_candidate_replace_count;
     capture.fastmatch_candidate_reject_count += tool.fastmatch_candidate_reject_count;
+
+    if (tool.fastmatch_template_geometry.available)
+        capture.fastmatch_template_geometry =
+            tool.fastmatch_template_geometry;
+    if (!tool.fastmatch_pose_candidates.empty())
+        capture.fastmatch_pose_candidates =
+            tool.fastmatch_pose_candidates;
+    if (!tool.ocr_final_text.empty())
+        capture.ocr_final_text = tool.ocr_final_text;
+    if (!tool.ocr_failure_reason.empty())
+        capture.ocr_failure_reason = tool.ocr_failure_reason;
+    if (!tool.ocr_glyph_candidates.empty())
+        capture.ocr_glyph_candidates = tool.ocr_glyph_candidates;
     capture.object_prefilter_requested = tool.object_prefilter_requested;
     capture.object_prefilter_applied = tool.object_prefilter_applied;
     capture.actual_findsetting = tool.actual_findsetting;
@@ -1298,6 +1519,9 @@ static void MergeToolCapture(
     capture.object_black_accepted_count = tool.object_black_accepted_count;
     capture.object_black_rejected_count = tool.object_black_rejected_count;
     capture.object_algorithm_branch = tool.object_algorithm_branch;
+
+    if (!tool.findobject_measurements.empty())
+        capture.findobject_measurements = tool.findobject_measurements;
     capture.fit_filter_input_count = tool.fit_filter_input_count;
     capture.fit_filter_kept_count = tool.fit_filter_kept_count;
     capture.fit_filter_rejected_count = tool.fit_filter_rejected_count;
@@ -1660,6 +1884,36 @@ bool CaptureRuntimeToolResults(
             return false;
         }
 
+        MergeToolCapture(tool_capture, capture);
+    }
+
+    const int easyocr_count = runtime.GetClassObjSum("EasyOCR");
+    for (int i = 0; i < easyocr_count; ++i)
+    {
+        EasyOCR* tool = static_cast<EasyOCR*>(
+            runtime.GetClassObj("EasyOCR", i));
+        if (tool == nullptr)
+            continue;
+        if (!captured_objects.insert(tool).second)
+            continue;
+
+        supported_object_found = true;
+        CxScriptToolResultCapture tool_capture;
+        const std::string object_name =
+            runtime.GetClassObjName("EasyOCR", i);
+        try
+        {
+            if (!CaptureEasyOcrResult(*tool, object_name, tool_capture))
+            {
+                reason = "failed to capture EasyOCR: " + object_name;
+                return false;
+            }
+        }
+        catch (...)
+        {
+            reason = "CaptureEasyOcrResult crashed for: " + object_name;
+            return false;
+        }
         MergeToolCapture(tool_capture, capture);
     }
 

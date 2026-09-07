@@ -91,6 +91,7 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FindSegmentationEdgeSamBackend.cpp
   cximage/FindObject.cpp
   cximage/FastMatch.cpp
+  cximage/EasyOcr.cpp
   cximage/FastMatchPolicy.cpp
   cximage/FastMatchGridClassAdapter.cpp
   cximage/GridPatternClassTool.cpp

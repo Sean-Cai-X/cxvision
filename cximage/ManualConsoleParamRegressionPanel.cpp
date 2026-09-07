@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
+
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -2667,6 +2669,60 @@ static bool DrawFastMatchRoiControls(ManualTestContext &context) {
                "global_search_roi_w", "global_search_roi_h", 0, 0, 640, 480);
     ImGui::EndTable();
   }
+  ImGui::SeparatorText("Template Geometry / Pose");
+  edited |= DrawRuntimeIntRow(context, "FindObject source index",
+                              "global_fastmatch_geometry_source_index", 0,
+                              0, 10000, 190.0f);
+  edited |= DrawRuntimeIntRow(context, "geometry weight percent",
+                              "global_fastmatch_geometry_weight_percent", 25,
+                              0, 100, 190.0f);
+  edited |= DrawRuntimeIntRow(context, "maximum pose candidates",
+                              "global_fastmatch_max_pose_candidates", 32,
+                              1, 1000, 190.0f);
+  ImGui::TextDisabled(
+      "Template snapshot: source object ref + normalized boundary + centroid "
+      "+ principal axes. Candidate score combines appearance and geometry.");
+  return edited;
+}
+
+static bool DrawEasyOcrControls(ManualTestContext &context) {
+  bool edited = false;
+  ImGui::SeparatorText("Detection / Component Split");
+
+  ImGui::SeparatorText("Candidate Provenance");
+  edited |= DrawRuntimeIntRow(context, "glyph source 0:auto 1:pose 2:object",
+                              "global_ocr_glyph_source", 0, 0, 2, 245.0f);
+  ImGui::TextDisabled(
+      "Auto uses FastMatch pose when available, otherwise OCR-specific "
+      "FindObject components. Area/distance apply to the object source.");
+
+
+  edited |= DrawRuntimeIntRow(context, "binary threshold",
+                              "global_ocr_threshold", 110, 0, 255, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "foreground mode",
+                              "global_ocr_foreground_mode", 1, 1, 3, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum glyph area",
+                              "global_ocr_min_area", 1, 0, 100000, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "component distance",
+                              "global_ocr_component_distance", 6, 0, 100,
+                              160.0f);
+
+  ImGui::SeparatorText("Geometry / Reading Layout");
+  edited |= DrawRuntimeIntRow(context, "layout 0:auto 1:H 2:V",
+                              "global_ocr_layout_direction", 0, 0, 2, 190.0f);
+  edited |= DrawRuntimeIntRow(context, "line overlap percent",
+                              "global_ocr_line_overlap_percent", 50, 1, 100,
+                              190.0f);
+
+  ImGui::SeparatorText("Matching / Decoding");
+  edited |= DrawRuntimeIntRow(context, "match threshold",
+                              "global_ocr_match_threshold", 3, 0, 255, 160.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum score percent",
+                              "global_ocr_min_score_percent", 50, 0, 100,
+                              180.0f);
+  ImGui::TextDisabled(
+      "Overlay: glyph bbox + main axis + reading order; object_state.json "
+      "stores source object ref, line/order, label, confidence and failure.");
   return edited;
 }
 
@@ -2979,6 +3035,113 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   ImGui::SetNextItemWidth(120.0f);
   edited |= ImGui::InputInt("minimum area", &gauge.findobject_min_area);
 
+
+  ImGui::SeparatorText("Geometry Reconstruction / Measurement");
+  ImGui::TextDisabled(
+      "Boundary: Gwyddion 2x2 pixel configuration; coordinates use a "
+      "half-open bbox and value-semantic per-object snapshots.");
+  ImGui::SetNextItemWidth(150.0f);
+  edited |= ImGui::InputDouble("pixel size X",
+                               &gauge.findobject_pixel_size_x,
+                               0.01, 0.1, "%.6f");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(150.0f);
+  edited |= ImGui::InputDouble("pixel size Y",
+                               &gauge.findobject_pixel_size_y,
+                               0.01, 0.1, "%.6f");
+  const char* connectivity_items[] = {"4-connected", "8-connected"};
+  int connectivity_index =
+      gauge.findobject_geometry_connectivity == 4 ? 0 : 1;
+  ImGui::SetNextItemWidth(150.0f);
+  if (ImGui::Combo("component topology", &connectivity_index,
+                   connectivity_items,
+                   IM_ARRAYSIZE(connectivity_items)))
+  {
+    gauge.findobject_geometry_connectivity =
+        connectivity_index == 0 ? 4 : 8;
+    edited = true;
+  }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt(
+      "selected object", &gauge.findobject_selected_measurement);
+
+  edited |= ImGui::Checkbox("boundary overlay",
+                            &gauge.findobject_show_boundary);
+  ImGui::SameLine();
+  edited |= ImGui::Checkbox("moment ellipse",
+                            &gauge.findobject_show_moment_ellipse);
+  ImGui::SameLine();
+  edited |= ImGui::Checkbox("Feret",
+                            &gauge.findobject_show_feret);
+  ImGui::SameLine();
+  edited |= ImGui::Checkbox("inscribed/enclosing circles",
+                            &gauge.findobject_show_circles);
+  ImGui::SeparatorText("Background Baseline");
+  const char* background_methods[] = {
+      "None (raw intensity)", "ROI border robust", "Morphological opening"};
+  ImGui::SetNextItemWidth(220.0f);
+  edited |= ImGui::Combo("background method",
+                         &gauge.findobject_background_method,
+                         background_methods, IM_ARRAYSIZE(background_methods));
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(120.0f);
+  edited |= ImGui::InputInt("border width px",
+                            &gauge.findobject_background_border_px);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(140.0f);
+  edited |= ImGui::InputInt("opening radius px",
+                            &gauge.findobject_background_radius_px);
+
+  ImGui::SeparatorText("Subpixel Boundary Refinement");
+  edited |= ImGui::Checkbox("enable subpixel contour",
+                            &gauge.findobject_subpixel_enabled);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(150.0f);
+  edited |= ImGui::InputDouble("minimum gradient",
+                               &gauge.findobject_subpixel_min_gradient,
+                               0.1, 1.0, "%.3f");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(150.0f);
+  edited |= ImGui::InputDouble("iso threshold",
+                               &gauge.findobject_subpixel_iso_threshold,
+                               0.1, 1.0, "%.3f");
+  const char* geometry_basis_items[] = {
+      "GW discrete baseline", "Subpixel when valid"};
+  ImGui::SetNextItemWidth(220.0f);
+  edited |= ImGui::Combo("active geometry basis",
+                         &gauge.findobject_geometry_basis,
+                         geometry_basis_items,
+                         IM_ARRAYSIZE(geometry_basis_items));
+  ImGui::TextDisabled(
+      "Topology is fixed by the binary mask. Subpixel refines coordinates; "
+      "GW values remain immutable evidence.");
+
+  ImGui::TextWrapped(
+      "Evidence outputs: intensity min/max/mean/stddev/skewness; pixel and "
+      "projected area; equivalent side/radius; Gwyddion and polygon "
+      "perimeters; closed outer/hole boundaries; convex hull, circularity "
+      "and solidity; moment major/minor axes, orientation, aspect ratio and "
+      "eccentricity; min/max Feret; maximum inscribed and minimum enclosing "
+      "circles.");
+  gauge.findobject_pixel_size_x =
+      std::max(1e-9, gauge.findobject_pixel_size_x);
+  gauge.findobject_pixel_size_y =
+      std::max(1e-9, gauge.findobject_pixel_size_y);
+  gauge.findobject_selected_measurement =
+      std::max(0, gauge.findobject_selected_measurement);
+
+  gauge.findobject_background_method =
+      std::max(0, std::min(2, gauge.findobject_background_method));
+  gauge.findobject_background_border_px =
+      std::max(1, gauge.findobject_background_border_px);
+  gauge.findobject_background_radius_px =
+      std::max(1, gauge.findobject_background_radius_px);
+  gauge.findobject_subpixel_min_gradient =
+      std::max(0.0, gauge.findobject_subpixel_min_gradient);
+  gauge.findobject_geometry_basis =
+      gauge.findobject_geometry_basis == 1 ? 1 : 0;
+
   gauge.findobject_x0 = std::max(0, gauge.findobject_x0);
   gauge.findobject_y0 = std::max(0, gauge.findobject_y0);
   gauge.findobject_x1 = std::max(gauge.findobject_x0 + 1, gauge.findobject_x1);
@@ -2990,6 +3153,44 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   gauge.findobject_min_area = std::max(1, gauge.findobject_min_area);
   gauge.threshold = gauge.findobject_threshold;
   gauge.method = gauge.findobject_foreground_mode;
+
+  InjectManualGaugeInt(
+      context, "global_object_pixel_size_x_milli",
+      static_cast<int>(std::lround(
+          gauge.findobject_pixel_size_x * 1000.0)));
+  InjectManualGaugeInt(
+      context, "global_object_pixel_size_y_milli",
+      static_cast<int>(std::lround(
+          gauge.findobject_pixel_size_y * 1000.0)));
+  InjectManualGaugeInt(context, "global_object_geometry_connectivity",
+                       gauge.findobject_geometry_connectivity);
+  InjectManualGaugeInt(context, "global_object_selected_measurement",
+                       gauge.findobject_selected_measurement);
+  InjectManualGaugeInt(context, "global_object_show_boundary",
+                       gauge.findobject_show_boundary ? 1 : 0);
+  InjectManualGaugeInt(context, "global_object_show_moment_ellipse",
+                       gauge.findobject_show_moment_ellipse ? 1 : 0);
+  InjectManualGaugeInt(context, "global_object_show_feret",
+                       gauge.findobject_show_feret ? 1 : 0);
+  InjectManualGaugeInt(context, "global_object_show_circles",
+                       gauge.findobject_show_circles ? 1 : 0);
+  InjectManualGaugeInt(context, "global_object_background_method",
+                       gauge.findobject_background_method);
+  InjectManualGaugeInt(context, "global_object_background_border_px",
+                       gauge.findobject_background_border_px);
+  InjectManualGaugeInt(context, "global_object_background_radius_px",
+                       gauge.findobject_background_radius_px);
+  InjectManualGaugeInt(context, "global_object_subpixel_enabled",
+                       gauge.findobject_subpixel_enabled ? 1 : 0);
+  InjectManualGaugeInt(
+      context, "global_object_subpixel_min_gradient_milli",
+      static_cast<int>(std::lround(
+          gauge.findobject_subpixel_min_gradient * 1000.0)));
+  InjectManualGaugeInt(
+      context, "global_object_subpixel_iso_threshold",
+      static_cast<int>(std::lround(gauge.findobject_subpixel_iso_threshold)));
+  InjectManualGaugeInt(context, "global_object_geometry_basis",
+                       gauge.findobject_geometry_basis);
   return edited;
 }
 
@@ -7868,7 +8069,13 @@ void DrawKeyParameterControlPanel(
 
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
-  const bool isFastMatch = KeyParamContextLooksFastMatchLocal(context);
+  const bool isEasyOCR =
+      NormalizeKeyParamToolTypeLocal(gauge.tool) == "EasyOCR" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "EasyOCR" ||
+      ContainsCaseInsensitiveLocal(context.loaded_script_path, "easyocr") ||
+      ContainsCaseInsensitiveLocal(context.script_file_path, "easyocr");
+  const bool isFastMatch =
+      !isEasyOCR && KeyParamContextLooksFastMatchLocal(context);
   const bool isFindLine =
       gauge.tool == "FindLine" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindLine";
@@ -7922,6 +8129,11 @@ void DrawKeyParameterControlPanel(
     gaugeEdited |= DrawFindEllipseEdgeRolePanel(context);
     DrawFindEllipseEdgeEvaluationPanel(context);
     DrawFindEllipseScanSemanticsPanel(context);
+  }
+if (isEasyOCR) {
+    ImGui::TextColored(ImVec4(0.45f, 0.88f, 0.72f, 1.0f),
+                       "EasyOCR: component split -> glyph geometry -> "
+                       "FastMatch classification -> reading-order decode");
   }
   if (isFastMatch) {
     ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.35f, 1.0f),
@@ -8133,6 +8345,11 @@ void DrawKeyParameterControlPanel(
       gaugeEdited |= DrawGridPatternRoiControls(context);
     } else if (isRegionPattern) {
       gaugeEdited |= DrawRegionPatternRoiControls(context);
+} else if (isEasyOCR) {
+      const bool ocrEdited = DrawEasyOcrControls(context);
+      gaugeEdited |= ocrEdited;
+      if (ocrEdited)
+        context.apply_gauge_to_shape_requested = true;
     } else if (isFastMatch) {
       const bool fastMatchRoiEdited = DrawFastMatchRoiControls(context);
       gaugeEdited |= fastMatchRoiEdited;
@@ -8179,6 +8396,10 @@ void DrawKeyParameterControlPanel(
         gaugeEdited |= DrawGridPatternParameterControls(context);
       } else if (isRegionPattern) {
         gaugeEdited |= DrawRegionPatternParameterControls(context);
+} else if (isEasyOCR) {
+        ImGui::TextDisabled(
+            "EasyOCR detection, geometry/layout and decoding controls are "
+            "grouped in Geometry.");
       } else if (isFastMatch) {
         gaugeEdited |= DrawFastMatchLearnParameterControls(context);
         ImGui::Separator();

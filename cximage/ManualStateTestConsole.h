@@ -691,6 +691,22 @@ struct ManualGaugeState {
   int findobject_threshold = 20;
   int findobject_min_area = 10;
 
+  double findobject_pixel_size_x = 1.0;
+  double findobject_pixel_size_y = 1.0;
+  int findobject_geometry_connectivity = 8;
+  int findobject_selected_measurement = 0;
+  bool findobject_show_boundary = true;
+  bool findobject_show_moment_ellipse = true;
+  bool findobject_show_feret = true;
+  bool findobject_show_circles = true;
+  int findobject_background_method = 0;
+  int findobject_background_border_px = 2;
+  int findobject_background_radius_px = 32;
+  bool findobject_subpixel_enabled = false;
+  double findobject_subpixel_min_gradient = 3.0;
+  double findobject_subpixel_iso_threshold = 0.0;
+  int findobject_geometry_basis = 0; // 0 GW discrete, 1 subpixel when valid.
+
   int radius = 0;
   // For FindCircle, these are absolute display radii for the auxiliary
   // inner/outer Gauge rings.  They are visual/editing aids and must not be

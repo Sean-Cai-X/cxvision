@@ -15,6 +15,7 @@ class FindObject;
 class FindRect;
 class FindSegmentation;
 class FastMatch;
+class EasyOCR;
 class TorchTask;
 
 struct CxScriptToolResultCapture
@@ -202,6 +203,12 @@ struct CxScriptToolResultCapture
     int fastmatch_candidate_replace_count = 0;
     int fastmatch_candidate_reject_count = 0;
 
+    CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
+    std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
+    std::string ocr_final_text;
+    std::string ocr_failure_reason;
+    std::vector<CxOcrGlyphCandidateEvidence> ocr_glyph_candidates;
+
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
     int actual_findsetting = 0;
@@ -224,6 +231,8 @@ struct CxScriptToolResultCapture
     int object_black_accepted_count = 0;
     int object_black_rejected_count = 0;
     std::string object_algorithm_branch;
+
+    std::vector<CxFindObjectMeasurementEvidence> findobject_measurements;
     int fit_filter_input_count = 0;
     int fit_filter_kept_count = 0;
     int fit_filter_rejected_count = 0;
@@ -361,6 +370,10 @@ bool CaptureFastMatchResult(
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 
+bool CaptureEasyOcrResult(
+    class EasyOCR& tool,
+    const std::string& object_name,
+    CxScriptToolResultCapture& output);
 bool CaptureFindSegmentationResult(
     class FindSegmentation& tool,
     const std::string& object_name,

@@ -2,10 +2,159 @@
 #define CXIMAGE_CXSCRIPT_HEADLESS_RUNTIME_H
 
 #include <array>
+
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <map>
 #include "CxRuntimeProjectionTypes.h"
+
+struct CxFindObjectMeasurementEvidence
+{
+    int object_index = -1;
+    int component_label = 0;
+    std::uint64_t generation = 0;
+    std::uint64_t mask_hash = 0;
+    std::string object_ref;
+    std::string bbox_semantics;
+    std::string centroid_semantics;
+    int bbox_x = 0;
+    int bbox_y = 0;
+    int bbox_w = 0;
+    int bbox_h = 0;
+    std::uint64_t pixel_count = 0;
+    double pixel_size_x = 1.0;
+    double pixel_size_y = 1.0;
+    double centroid_x = 0.0;
+    double centroid_y = 0.0;
+    double projected_area = 0.0;
+    double equivalent_side = 0.0;
+    double equivalent_radius = 0.0;
+    double intensity_min = 0.0;
+    double intensity_max = 0.0;
+    double intensity_mean = 0.0;
+    double intensity_stddev = 0.0;
+    double intensity_skewness = 0.0;
+    bool intensity_valid = false;
+    std::string background_method;
+    bool background_valid = false;
+    int background_sample_count = 0;
+    double background_baseline_mean = 0.0;
+    double residual_threshold = 0.0;
+    std::string segmentation_domain;
+    double gw_pixel_perimeter = 0.0;
+    bool subpixel_valid = false;
+    int subpixel_candidate_point_count = 0;
+    int subpixel_accepted_point_count = 0;
+    int subpixel_rejected_low_gradient_count = 0;
+    int subpixel_rejected_out_of_bounds_count = 0;
+    double subpixel_mean_gradient = 0.0;
+    double subpixel_mean_fit_residual_px = 0.0;
+    double subpixel_perimeter = 0.0;
+    double subpixel_area = 0.0;
+    int subpixel_boundary_point_count = 0;
+    std::string subpixel_failure_reason;
+    std::string active_geometry_basis;
+    double gwyddion_perimeter = 0.0;
+    double polygon_perimeter = 0.0;
+    double polygon_area = 0.0;
+    std::array<std::uint64_t, 16> pixel_configuration_counts = {};
+    int outer_boundary_point_count = 0;
+    int hole_count = 0;
+    double convex_hull_area = 0.0;
+    double circularity = 0.0;
+    double solidity = 0.0;
+    double major_axis_length = 0.0;
+    double minor_axis_length = 0.0;
+    double orientation_deg = 0.0;
+    double aspect_ratio = 0.0;
+    double eccentricity = 0.0;
+    bool moment_ellipse_valid = false;
+    double feret_max = 0.0;
+    double feret_max_angle_deg = 0.0;
+    double feret_min = 0.0;
+    double feret_min_angle_deg = 0.0;
+    double inscribed_center_x = 0.0;
+    double inscribed_center_y = 0.0;
+    double inscribed_radius = 0.0;
+    bool inscribed_circle_valid = false;
+    double enclosing_center_x = 0.0;
+    double enclosing_center_y = 0.0;
+    double enclosing_radius = 0.0;
+    bool enclosing_circle_valid = false;
+    std::string length_unit;
+    std::string area_unit;
+    std::string boundary_method;
+    std::string topology_policy;
+    std::string inscribed_circle_method;
+    std::string status;
+};
+
+
+struct CxFastMatchTemplateGeometryEvidence
+{
+    bool available = false;
+    int source_object_index = -1;
+    std::string source_object_ref;
+    double bbox_x = 0.0;
+    double bbox_y = 0.0;
+    double bbox_w = 0.0;
+    double bbox_h = 0.0;
+    double centroid_x = 0.0;
+    double centroid_y = 0.0;
+    double projected_area = 0.0;
+    double major_axis_length = 0.0;
+    double minor_axis_length = 0.0;
+    double orientation_deg = 0.0;
+    double aspect_ratio = 0.0;
+    double solidity = 0.0;
+    int boundary_point_count = 0;
+    std::string status;
+};
+
+struct CxFastMatchPoseCandidateEvidence
+{
+    int candidate_index = -1;
+    int observed_geometry_index = -1;
+    std::string observed_geometry_ref;
+    double bbox_x = 0.0;
+    double bbox_y = 0.0;
+    double bbox_w = 0.0;
+    double bbox_h = 0.0;
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double angle_deg = 0.0;
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    double appearance_score = 0.0;
+    double geometry_score = -1.0;
+    double combined_score = 0.0;
+    int boundary_point_count = 0;
+    std::string status;
+};
+
+struct CxOcrGlyphCandidateEvidence
+{
+    int source_object_index = -1;
+    int line_index = -1;
+    int reading_order = -1;
+    double bbox_x = 0.0;
+    double bbox_y = 0.0;
+    double bbox_w = 0.0;
+    double bbox_h = 0.0;
+    double centroid_x = 0.0;
+    double centroid_y = 0.0;
+    double orientation_deg = 0.0;
+    double projected_area = 0.0;
+    double aspect_ratio = 0.0;
+    double solidity = 0.0;
+    std::string label;
+    double appearance_score = 0.0;
+    double geometry_score = -1.0;
+    double confidence = 0.0;
+    std::string source_object_ref;
+    std::string status;
+};
 
 struct CxFindLineScanDiagnosticSnapshot
 {
@@ -260,6 +409,12 @@ struct CxScriptExecutionCapture
     int fastmatch_candidate_replace_count = 0;
     int fastmatch_candidate_reject_count = 0;
 
+    CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
+    std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
+    std::string ocr_final_text;
+    std::string ocr_failure_reason;
+    std::vector<CxOcrGlyphCandidateEvidence> ocr_glyph_candidates;
+
     bool object_prefilter_requested = false;
     bool object_prefilter_applied = false;
     int actual_findsetting = 0;
@@ -282,6 +437,8 @@ struct CxScriptExecutionCapture
     int object_black_accepted_count = 0;
     int object_black_rejected_count = 0;
     std::string object_algorithm_branch;
+
+    std::vector<CxFindObjectMeasurementEvidence> findobject_measurements;
     int fit_filter_input_count = 0;
     int fit_filter_kept_count = 0;
     int fit_filter_rejected_count = 0;

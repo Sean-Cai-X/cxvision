@@ -3,6 +3,9 @@
 #include "EasyOcr.h"
 #include "FindObject.h"
 #include "imagemanager.h"
+#include "ImageAnnotationLayer.h"
+#include "PolylineShape.h"
+#include "RectShape.h"
 
 EasyOCR::EasyOCR()
     : FastMatch(), m_igridw(12), m_igridh(12), m_idebugrectsnum(-1),
@@ -52,6 +55,391 @@ EasyOCR::~EasyOCR() {
 
 void EasyOCR::setrect(int ix, int iy, int iw, int ih) {
   Shape::setrect(ix, iy, iw, ih);
+}
+
+void EasyOCR::setlayoutdirection(int direction) {
+  m_layout_direction = std::clamp(direction, 0, 2);
+  AssignGlyphReadingOrder();
+}
+
+void EasyOCR::setlineoverlappercent(int percent) {
+  m_line_overlap_percent = std::clamp(percent, 1, 100);
+  AssignGlyphReadingOrder();
+}
+
+int EasyOCR::getglyphcandidatecount() {
+  return static_cast<int>(m_glyph_candidates.size());
+}
+
+double EasyOCR::getglyphcandidatex(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].bbox_px.x
+             : 0.0;
+}
+
+double EasyOCR::getglyphcandidatey(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].bbox_px.y
+             : 0.0;
+}
+
+double EasyOCR::getglyphcandidatew(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].bbox_px.width
+             : 0.0;
+}
+
+double EasyOCR::getglyphcandidateh(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].bbox_px.height
+             : 0.0;
+}
+
+int EasyOCR::getglyphcandidateline(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].line_index
+             : -1;
+}
+
+int EasyOCR::getglyphcandidatereadingorder(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].reading_order
+             : -1;
+}
+
+double EasyOCR::getglyphcandidateconfidence(int index) {
+  return index >= 0 && index < getglyphcandidatecount()
+             ? m_glyph_candidates[index].confidence
+             : 0.0;
+}
+
+void EasyOCR::RebuildGlyphCandidatesFromFindObject() {
+  setglyphcandidatesfromobject(g_pbackfindobject);
+}
+
+void EasyOCR::setglyphcandidatesfromobject(void *pfindobject) {
+  m_glyph_candidates.clear();
+  m_recognized_text.clear();
+  m_decode_failure.clear();
+
+  FindObject *source = static_cast<FindObject *>(pfindobject);
+  if (source == nullptr) {
+    getmatchrects().clear();
+    m_decode_failure = "findobject_source_unavailable";
+    return;
+  }
+
+  const std::vector<FindObjectMeasurementSnapshot> &measurements =
+      source->getmeasurements();
+  for (int index = 0; index < static_cast<int>(measurements.size()); ++index) {
+    const FindObjectMeasurementSnapshot &measurement = measurements[index];
+    if (measurement.status != "measured" || measurement.bbox_px.width <= 0 ||
+        measurement.bbox_px.height <= 0)
+      continue;
+
+    EasyOcrGlyphCandidateSnapshot candidate;
+    candidate.source_object_index = index;
+    candidate.bbox_px = measurement.bbox_px;
+    candidate.centroid_px = measurement.centroid_px;
+    candidate.orientation_deg = measurement.orientation_deg;
+    candidate.projected_area = measurement.projected_area;
+    candidate.aspect_ratio = measurement.bbox_px.height > 0
+                                 ? measurement.bbox_px.width /
+                                       measurement.bbox_px.height
+                                 : 0.0;
+    candidate.solidity = measurement.solidity;
+    candidate.source_object_ref = measurement.object_ref;
+    candidate.status = "segmented";
+    m_glyph_candidates.push_back(std::move(candidate));
+  }
+
+  AssignGlyphReadingOrder();
+  getmatchrects().clear();
+  if (!m_glyph_candidates.empty()) {
+    setmatchrectnum(static_cast<int>(m_glyph_candidates.size()));
+    for (int index = 0; index < getglyphcandidatecount(); ++index) {
+      const cv::Rect2d &box = m_glyph_candidates[index].bbox_px;
+      setmultimatchrect(index, static_cast<int>(box.x),
+                        static_cast<int>(box.y),
+                        std::max(1, static_cast<int>(box.width + 0.5)),
+                        std::max(1, static_cast<int>(box.height + 0.5)));
+    }
+  } else {
+    m_decode_failure = "no_glyph_candidates";
+  }
+}
+
+void EasyOCR::setglyphcandidatesfromfastmatch(void *pfastmatch) {
+  m_glyph_candidates.clear();
+  m_recognized_text.clear();
+  m_decode_failure.clear();
+
+  FastMatch *source = static_cast<FastMatch *>(pfastmatch);
+  if (source == nullptr) {
+    getmatchrects().clear();
+    m_decode_failure = "fastmatch_source_unavailable";
+    return;
+  }
+
+  const std::vector<FastMatchPoseCandidateSnapshot> &poses =
+      source->getposecandidates();
+  if (!poses.empty()) {
+    for (const FastMatchPoseCandidateSnapshot &pose : poses) {
+      if (pose.bbox_px.width <= 0 || pose.bbox_px.height <= 0)
+        continue;
+      EasyOcrGlyphCandidateSnapshot candidate;
+      candidate.source_object_index = pose.candidate_index;
+      candidate.bbox_px = pose.bbox_px;
+      candidate.centroid_px = pose.center_px;
+      candidate.orientation_deg = pose.angle_deg;
+      candidate.projected_area =
+          pose.bbox_px.width * pose.bbox_px.height;
+      candidate.aspect_ratio = pose.bbox_px.height > 0
+                                   ? pose.bbox_px.width / pose.bbox_px.height
+                                   : 0.0;
+      candidate.appearance_score = pose.appearance_score;
+      candidate.geometry_score = pose.geometry_score;
+      candidate.confidence = pose.combined_score;
+      candidate.source_object_ref =
+          !pose.observed_geometry_ref.empty()
+              ? pose.observed_geometry_ref
+              : "fastmatch_pose:" + std::to_string(pose.candidate_index);
+      candidate.status = pose.status;
+      m_glyph_candidates.push_back(std::move(candidate));
+    }
+    AssignGlyphReadingOrder();
+  } else {
+    RectsShape source_rects;
+    const int result_count = source->getresultcandidatecount();
+    for (int index = 0; index < result_count; ++index)
+      source_rects.addrect(source->getresolvedresultrect(index));
+    RebuildGlyphCandidatesFromRects(source_rects);
+  }
+
+  getmatchrects().clear();
+  if (!m_glyph_candidates.empty()) {
+    setmatchrectnum(static_cast<int>(m_glyph_candidates.size()));
+    for (int index = 0; index < getglyphcandidatecount(); ++index) {
+      const cv::Rect2d &box = m_glyph_candidates[index].bbox_px;
+      setmultimatchrect(index, static_cast<int>(box.x),
+                        static_cast<int>(box.y),
+                        std::max(1, static_cast<int>(box.width + 0.5)),
+                        std::max(1, static_cast<int>(box.height + 0.5)));
+    }
+  } else {
+    m_decode_failure = "no_glyph_candidates";
+  }
+}
+
+void EasyOCR::RebuildGlyphCandidatesFromRects(const RectsShape &rects) {
+  const std::vector<EasyOcrGlyphCandidateSnapshot> previous_candidates =
+      m_glyph_candidates;
+  m_glyph_candidates.clear();
+  m_recognized_text.clear();
+  m_decode_failure.clear();
+  for (int index = 0; index < rects.size(); ++index) {
+    const gp_Rectangle &rect = rects.getrect(index);
+    EasyOcrGlyphCandidateSnapshot candidate;
+    candidate.source_object_index = index;
+    candidate.bbox_px =
+        cv::Rect2d(rect.TopLeft().X(), rect.TopLeft().Y(), rect.Width(),
+                   rect.Height());
+    candidate.centroid_px =
+        cv::Point2d(candidate.bbox_px.x + candidate.bbox_px.width * 0.5,
+                    candidate.bbox_px.y + candidate.bbox_px.height * 0.5);
+    candidate.projected_area =
+        candidate.bbox_px.width * candidate.bbox_px.height;
+    candidate.aspect_ratio = candidate.bbox_px.height > 0
+                                 ? candidate.bbox_px.width /
+                                       candidate.bbox_px.height
+                                 : 0.0;
+    candidate.source_object_ref =
+        "fastmatch_rect:" + std::to_string(index);
+    candidate.status = "segmented";
+
+    if (index < static_cast<int>(previous_candidates.size())) {
+      const EasyOcrGlyphCandidateSnapshot &previous =
+          previous_candidates[index];
+      candidate.source_object_index = previous.source_object_index;
+      candidate.orientation_deg = previous.orientation_deg;
+      candidate.projected_area =
+          previous.projected_area > 0.0 ? previous.projected_area
+                                        : candidate.projected_area;
+      candidate.aspect_ratio =
+          previous.aspect_ratio > 0.0 ? previous.aspect_ratio
+                                      : candidate.aspect_ratio;
+      candidate.solidity = previous.solidity;
+      candidate.appearance_score = previous.appearance_score;
+      candidate.geometry_score = previous.geometry_score;
+      candidate.confidence = previous.confidence;
+      if (!previous.source_object_ref.empty())
+        candidate.source_object_ref = previous.source_object_ref;
+      if (!previous.status.empty())
+        candidate.status = previous.status;
+    }
+    m_glyph_candidates.push_back(std::move(candidate));
+  }
+  AssignGlyphReadingOrder();
+  if (m_glyph_candidates.empty())
+    m_decode_failure = "no_glyph_candidates";
+}
+
+void EasyOCR::AssignGlyphReadingOrder() {
+  if (m_glyph_candidates.empty())
+    return;
+
+  bool vertical = m_layout_direction == 2;
+  if (m_layout_direction == 0) {
+    cv::Rect2d extent = m_glyph_candidates.front().bbox_px;
+    double mean_width = 0.0;
+    double mean_height = 0.0;
+    for (const EasyOcrGlyphCandidateSnapshot &candidate :
+         m_glyph_candidates) {
+      extent |= candidate.bbox_px;
+      mean_width += candidate.bbox_px.width;
+      mean_height += candidate.bbox_px.height;
+    }
+    mean_width /= m_glyph_candidates.size();
+    mean_height /= m_glyph_candidates.size();
+    vertical = extent.height > extent.width * 1.5 &&
+               mean_height >= mean_width;
+  }
+
+  std::vector<int> pending(m_glyph_candidates.size());
+  for (int i = 0; i < static_cast<int>(pending.size()); ++i)
+    pending[i] = i;
+  std::stable_sort(pending.begin(), pending.end(), [&](int lhs, int rhs) {
+    const auto &a = m_glyph_candidates[lhs];
+    const auto &b = m_glyph_candidates[rhs];
+    if (vertical) {
+      if (a.centroid_px.x != b.centroid_px.x)
+        return a.centroid_px.x < b.centroid_px.x;
+      return a.centroid_px.y < b.centroid_px.y;
+    }
+    if (a.centroid_px.y != b.centroid_px.y)
+      return a.centroid_px.y < b.centroid_px.y;
+    return a.centroid_px.x < b.centroid_px.x;
+  });
+
+  std::vector<std::vector<int>> lines;
+  const double required_overlap =
+      static_cast<double>(m_line_overlap_percent) / 100.0;
+  for (int index : pending) {
+    const cv::Rect2d &box = m_glyph_candidates[index].bbox_px;
+    int selected_line = -1;
+    double selected_overlap = -1.0;
+    for (int line_index = 0; line_index < static_cast<int>(lines.size());
+         ++line_index) {
+      const cv::Rect2d &first_box =
+          m_glyph_candidates[lines[line_index].front()].bbox_px;
+      const double overlap =
+          vertical
+              ? std::max(0.0,
+                         std::min(box.x + box.width,
+                                  first_box.x + first_box.width) -
+                             std::max(box.x, first_box.x))
+              : std::max(0.0,
+                         std::min(box.y + box.height,
+                                  first_box.y + first_box.height) -
+                             std::max(box.y, first_box.y));
+      const double reference =
+          vertical ? std::min(box.width, first_box.width)
+                   : std::min(box.height, first_box.height);
+      const double ratio = reference > 0.0 ? overlap / reference : 0.0;
+      if (ratio >= required_overlap && ratio > selected_overlap) {
+        selected_line = line_index;
+        selected_overlap = ratio;
+      }
+    }
+    if (selected_line < 0)
+      lines.push_back({index});
+    else
+      lines[selected_line].push_back(index);
+  }
+
+  std::stable_sort(lines.begin(), lines.end(), [&](const std::vector<int> &a,
+                                                    const std::vector<int> &b) {
+    return vertical
+               ? m_glyph_candidates[a.front()].centroid_px.x <
+                     m_glyph_candidates[b.front()].centroid_px.x
+               : m_glyph_candidates[a.front()].centroid_px.y <
+                     m_glyph_candidates[b.front()].centroid_px.y;
+  });
+
+  int reading_order = 0;
+  for (int line_index = 0; line_index < static_cast<int>(lines.size());
+       ++line_index) {
+    std::stable_sort(lines[line_index].begin(), lines[line_index].end(),
+                     [&](int lhs, int rhs) {
+                       return vertical
+                                  ? m_glyph_candidates[lhs].centroid_px.y <
+                                        m_glyph_candidates[rhs].centroid_px.y
+                                  : m_glyph_candidates[lhs].centroid_px.x <
+                                        m_glyph_candidates[rhs].centroid_px.x;
+                     });
+    for (int index : lines[line_index]) {
+      m_glyph_candidates[index].line_index = line_index;
+      m_glyph_candidates[index].reading_order = reading_order++;
+    }
+  }
+}
+
+void EasyOCR::FinalizeGlyphDecodingFromLegacyResults() {
+  m_recognized_text.clear();
+  std::vector<const EasyOcrGlyphCandidateSnapshot *> ordered;
+  ordered.reserve(m_glyph_candidates.size());
+  for (EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+    if (candidate.source_object_index >= 0 &&
+        candidate.source_object_index < m_resultstrlist.size()) {
+      candidate.label =
+          m_resultstrlist[candidate.source_object_index].toStdString();
+      candidate.status = "recognized";
+    } else {
+      candidate.status = "unrecognized";
+    }
+    ordered.push_back(&candidate);
+  }
+  std::stable_sort(ordered.begin(), ordered.end(), [](const auto *lhs,
+                                                       const auto *rhs) {
+    return lhs->reading_order < rhs->reading_order;
+  });
+  for (const EasyOcrGlyphCandidateSnapshot *candidate : ordered)
+    m_recognized_text += candidate->label;
+  if (m_recognized_text.empty())
+    m_recognized_text = m_resultstring.toStdString();
+  m_qocrstring = m_recognized_text;
+  m_resultstring = m_recognized_text;
+  m_decode_failure = m_recognized_text.empty()
+                         ? "no_recognized_glyphs"
+                         : std::string();
+}
+
+void EasyOCR::PublishDisplayShapes(ICxShapeSink &sink,
+                                   const std::string &owner_ref) {
+  FastMatch::PublishDisplayShapes(sink, owner_ref);
+  for (const EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+    const std::string suffix = std::to_string(candidate.reading_order);
+    auto box = std::make_unique<RectShape>();
+    box->setRect(candidate.bbox_px.x, candidate.bbox_px.y,
+                 candidate.bbox_px.x + candidate.bbox_px.width,
+                 candidate.bbox_px.y + candidate.bbox_px.height);
+    sink.UpsertShape(owner_ref + ".glyph." + suffix, "EasyOCR", owner_ref,
+                     "glyph_candidate", candidate.status, false, true,
+                     std::move(box));
+
+    const double angle = candidate.orientation_deg * CV_PI / 180.0;
+    const double half_length =
+        0.5 * std::max(candidate.bbox_px.width, candidate.bbox_px.height);
+    auto axis = std::make_unique<PolylineShape>();
+    axis->addPoint(candidate.centroid_px.x - half_length * std::cos(angle),
+                   candidate.centroid_px.y - half_length * std::sin(angle));
+    axis->addPoint(candidate.centroid_px.x + half_length * std::cos(angle),
+                   candidate.centroid_px.y + half_length * std::sin(angle));
+    axis->close(false);
+    sink.UpsertShape(owner_ref + ".glyph_axis." + suffix, "EasyOCR",
+                     owner_ref, "glyph_candidate", "main_axis", false, true,
+                     std::move(axis));
+  }
 }
 
 std::String EasyOCR::char2string(std::String pchar) {
@@ -776,20 +1164,39 @@ void EasyOCR::setb2w(int ib2w) { fastmatch::setb2w(ib2w); }
 
 void EasyOCR::setspecshow(int ishow) { fastmatch::setspecshow(ishow); }
 void EasyOCR::stringsplit(void *pimage) {
-  ImageBase *pgetimage = (ImageBase *)pimage;
+  ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
+  if (pgetimage == nullptr || g_pbackimage == nullptr ||
+      g_pbackfindobject == nullptr) {
+    m_decode_failure = "ocr_input_or_findobject_unavailable";
+    return;
+  }
   StringSplit(*pgetimage);
 }
 void EasyOCR::fontsplit(void *pimage) {
-  ImageBase *pgetimage = (ImageBase *)pimage;
+  ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
+  if (pgetimage == nullptr || g_pbackimage == nullptr ||
+      g_pbackfindobject == nullptr) {
+    m_decode_failure = "ocr_input_or_findobject_unavailable";
+    return;
+  }
   FontSplit(*pgetimage);
 }
 void EasyOCR::exfontsplit(void *pimage) {
-  ImageBase *pgetimage = (ImageBase *)pimage;
+  ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
+  if (pgetimage == nullptr || g_pbackimage == nullptr ||
+      g_pbackfindobject == nullptr) {
+    m_decode_failure = "ocr_input_or_findobject_unavailable";
+    return;
+  }
   ExFontSplit(*pgetimage);
 }
 
 void EasyOCR::areasocr(void *pimage) {
-  ImageBase *pgetimage = (ImageBase *)pimage;
+  ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
+  if (pgetimage == nullptr) {
+    m_decode_failure = "ocr_input_unavailable";
+    return;
+  }
   AreasOCR(*pgetimage);
 }
 void EasyOCR::setdebug(int idebugrect, int idebugfont) {
@@ -855,6 +1262,7 @@ void EasyOCR::StringSplit(ImageBase &image) {
                                  m_findobj_maxh);
 
   g_pbackfindobject->measure(g_pbackimage);
+  RebuildGlyphCandidatesFromFindObject();
 
   int ix0 = g_pbackfindobject->getresultx(0);
   int iy0 = g_pbackfindobject->getresulty(0);
@@ -893,6 +1301,7 @@ void EasyOCR::FontSplit(ImageBase &image) {
   g_pbackfindobject->setbackground(m_findobj_bgedge, m_findobj_bgmethod);
   g_pbackfindobject->resultsrectfilter();
   g_pbackfindobject->objectgrid(&image);
+  RebuildGlyphCandidatesFromFindObject();
 }
 
 void EasyOCR::ExFontSplit(ImageBase &image) {
@@ -919,9 +1328,11 @@ void EasyOCR::ExFontSplit(ImageBase &image) {
   g_pbackfindobject->measure(g_pbackimage);
   g_pbackfindobject->setbackground(m_findobj_bgedge, m_findobj_bgmethod);
   g_pbackfindobject->objectgrid(&image);
+  RebuildGlyphCandidatesFromFindObject();
 }
 void EasyOCR::AreasOCR(ImageBase &image) {
   RectsShape arects = fastmatch::getmatchrects();
+  RebuildGlyphCandidatesFromRects(arects);
 
   m_resultstrlist.clear();
   m_resultstring.clear();
@@ -962,8 +1373,21 @@ void EasyOCR::AreasOCR(ImageBase &image) {
       }
       m_resultstrlist.push_back(m_fontlist_l12[iresultfont]);
       m_resultstring.append(m_fontlist_l12[iresultfont]);
+
+      for (EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+        if (candidate.source_object_index != ia)
+          continue;
+        candidate.label = m_fontlist_l12[iresultfont].toStdString();
+        candidate.appearance_score = std::clamp(dmaxvalue / 100.0, 0.0, 1.0);
+        candidate.confidence = candidate.appearance_score;
+        candidate.status = candidate.confidence >= m_dmatchthre
+                               ? "recognized"
+                               : "low_confidence";
+        break;
+      }
     }
   }
+  FinalizeGlyphDecodingFromLegacyResults();
   Shape::setname(m_resultstring.toStdString().c_str());
 }
 void EasyOCR::imagemodelshow() { fastmatch::imagemodelshow(); }
@@ -2128,7 +2552,8 @@ void EasyOCR::fontocr() {
                       .arg(imodelobjectw);
     Shape::setname(strt.toStdString().c_str());
   } else
-    Shape::setname(m_resultstring.toStdString().c_str());
+  FinalizeGlyphDecodingFromLegacyResults();
+  Shape::setname(m_resultstring.toStdString().c_str());
 }
 
 void EasyOCR::SelectModel(int ilevle, int inum) {
@@ -2480,7 +2905,8 @@ void EasyOCR::fontocr_level(int ilevel) {
 
       Shape::setname(qshowstr.toStdString().c_str());
     } else if (2 == ilevel)
-      Shape::setname(m_resultstring.toStdString().c_str());
+  FinalizeGlyphDecodingFromLegacyResults();
+  Shape::setname(m_resultstring.toStdString().c_str());
   }
 }
 int EasyOCR::imagefastmapsize(int ilevel, int inum) {
@@ -3077,7 +3503,8 @@ void EasyOCR::fontocr_levelex(int ilevel) {
       }
       Shape::setname(qshowstr.toStdString().c_str());
     } else if (2 == ilevel)
-      Shape::setname(m_resultstring.toStdString().c_str());
+  FinalizeGlyphDecodingFromLegacyResults();
+  Shape::setname(m_resultstring.toStdString().c_str());
   }
 }
 
@@ -3221,7 +3648,8 @@ void EasyOCR::fontocr_level2() {
                       .arg(m_imodelobjectw);
     Shape::setname(strt.toStdString().c_str());
   } else
-    Shape::setname(m_resultstring.toStdString().c_str());
+  FinalizeGlyphDecodingFromLegacyResults();
+  Shape::setname(m_resultstring.toStdString().c_str());
 }
 void EasyOCR::checkocr_level3() {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
@@ -3335,7 +3763,8 @@ void EasyOCR::checkocr_level3() {
 
     Shape::setname(strt.toStdString().c_str());
   } else
-    Shape::setname(m_resultstring.toStdString().c_str());
+  FinalizeGlyphDecodingFromLegacyResults();
+  Shape::setname(m_resultstring.toStdString().c_str());
 }
 
 bool EasyOCR::matchlevelnode01() {

@@ -2,6 +2,8 @@
 #define FASTMATCH_H
 #include <array>
 #include <map>
+#include <string>
+
 #include <vector>
 #include "Shape.h"
 #include "Image.h"
@@ -14,6 +16,43 @@ class Grid;
 class ICxShapeSink;
 typedef vector<int> Cluster;
 using namespace std;
+
+class FindObject;
+
+struct FastMatchTemplateGeometrySnapshot
+{
+    bool available = false;
+    int source_object_index = -1;
+    std::string source_object_ref;
+    cv::Rect2d bbox_px;
+    cv::Point2d centroid_px;
+    double projected_area = 0.0;
+    double major_axis_length = 0.0;
+    double minor_axis_length = 0.0;
+    double orientation_deg = 0.0;
+    double aspect_ratio = 0.0;
+    double solidity = 0.0;
+    std::vector<cv::Point2d> normalized_boundary;
+    std::string status = "unavailable";
+};
+
+struct FastMatchPoseCandidateSnapshot
+{
+    int candidate_index = -1;
+    int observed_geometry_index = -1;
+    std::string observed_geometry_ref;
+    cv::Rect2d bbox_px;
+    cv::Point2d center_px;
+    double angle_deg = 0.0;
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    double appearance_score = 0.0;
+    double geometry_score = -1.0;
+    double combined_score = 0.0;
+    std::vector<cv::Point2d> transformed_boundary;
+    std::string status = "unavailable";
+};
+
 
 // FastMatch Learn Probe is intentionally disabled in normal builds.
 // Headless/evidence runs must never show modal UI or block on debug probes.
@@ -73,6 +112,34 @@ public:
     void setlearncompgap_script(int value, int direction) { setlearncompgap(direction, value); }
     LearnDirectionParams effectiveLearnDirectionParams(int direction);
     bool hasExplicitLearnDirectionParams() const;
+
+    void setgeometrysourceindex(int index);
+    void setgeometryweightpercent(int percent);
+    void setmaxposecandidates(int count);
+    void settemplategeometryfromobject(void* pfindobject);
+    void cleargeometrycandidates();
+    void addgeometrycandidatesfromobject(void* pfindobject);
+    int gettemplategeometryavailable();
+    int gettemplategeometrysourceindex();
+    int gettemplateboundarypointcount();
+    double gettemplatearea();
+    double gettemplateorientation();
+    int getposecandidatecount();
+    double getposecandidatex(int index);
+    double getposecandidatey(int index);
+    double getposecandidateangle(int index);
+    double getposecandidateappearancescore(int index);
+    double getposecandidategeometryscore(int index);
+    double getposecandidatecombinedscore(int index);
+    const FastMatchTemplateGeometrySnapshot& gettemplategeometry() const
+    {
+        return m_template_geometry;
+    }
+    const std::vector<FastMatchPoseCandidateSnapshot>& getposecandidates() const
+    {
+        return m_pose_candidates;
+    }
+
     void setfilter(int ifilterborw, int ifiltermin, int ifiltermax);//21 w ,22 b
     void setselectedgenum(int iedgenum);
 
@@ -433,6 +500,13 @@ private:
     RectsShape m_matchrects;
     gp_Rectangle m_matchrect;
     gp_Rectangle m_expected_rect;
+    int m_geometry_source_object_index = 0;
+    int m_geometry_weight_percent = 25;
+    int m_max_pose_candidates = 32;
+    FastMatchTemplateGeometrySnapshot m_template_geometry;
+    std::vector<FastMatchTemplateGeometrySnapshot> m_observed_geometries;
+    std::vector<FastMatchPoseCandidateSnapshot> m_pose_candidates;
+
     int m_learn_roi_x = 0;
     int m_learn_roi_y = 0;
     int m_learn_roi_w = 0;
@@ -522,6 +596,10 @@ private:
     //  Grid *m_pgrid_l1;//6X6
 
     void Learn(Image& image);
+    void RefreshPoseCandidates();
+    void PublishGeometryDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
+
+
 
     void Learn_level0(Image& image);//5pyrDown   thre >50 
     void Learn_level1(Image& image);//5pyrDown   thre >30
@@ -612,7 +690,7 @@ public:
     void getrotateresultrectpoints(std::vector<cv::Point2f>& points);
     void ZeroPOS();
 
-    void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref);
+    virtual void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref);
     bool ApplyDisplayShapeEdit(const std::string& owner_binding, const std::string& semantic_role,
                                double x0, double y0, double x1, double y1, std::string& reason);
 };

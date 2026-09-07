@@ -1,5 +1,8 @@
 #include "CxUnifiedLog.h"
 #include "FastMatch.h"
+#include "FindObject.h"
+#include "PolylineShape.h"
+
 #include "ImageAnnotationLayer.h"
 #include "imagemanager.h"
 #include "pch.h"
@@ -740,6 +743,308 @@ void NormalizeMatchCandidates(std::vector<int> &scores,
 }
 
 int FastMatch::m_curfastmatchnum = 0;
+
+void FastMatch::setgeometrysourceindex(int index)
+{
+  m_geometry_source_object_index = std::max(0, index);
+}
+
+void FastMatch::setgeometryweightpercent(int percent)
+{
+  m_geometry_weight_percent = std::clamp(percent, 0, 100);
+}
+
+void FastMatch::setmaxposecandidates(int count)
+{
+  m_max_pose_candidates = std::max(1, count);
+}
+
+void FastMatch::settemplategeometryfromobject(void* pfindobject)
+{
+  m_template_geometry = FastMatchTemplateGeometrySnapshot();
+  FindObject* source = static_cast<FindObject*>(pfindobject);
+  if (source == nullptr)
+    return;
+  const FindObjectMeasurementSnapshot* measured =
+      source->getmeasurement(m_geometry_source_object_index);
+  if (measured == nullptr || measured->status != "measured" ||
+      measured->bbox_px.width <= 0 || measured->bbox_px.height <= 0)
+  {
+    m_template_geometry.status = "source_measurement_unavailable";
+    return;
+  }
+
+  m_template_geometry.available = true;
+  m_template_geometry.source_object_index = measured->object_index;
+  m_template_geometry.source_object_ref = measured->object_ref;
+  m_template_geometry.bbox_px = measured->bbox_px;
+  m_template_geometry.centroid_px = measured->centroid_px;
+  m_template_geometry.projected_area = measured->projected_area;
+  m_template_geometry.major_axis_length = measured->major_axis_length;
+  m_template_geometry.minor_axis_length = measured->minor_axis_length;
+  m_template_geometry.orientation_deg = measured->orientation_deg;
+  m_template_geometry.aspect_ratio = measured->aspect_ratio;
+  m_template_geometry.solidity = measured->solidity;
+  m_template_geometry.normalized_boundary.reserve(
+      measured->outer_boundary.size());
+  for (const cv::Point2d& point : measured->outer_boundary)
+  {
+    m_template_geometry.normalized_boundary.emplace_back(
+        (point.x - measured->bbox_px.x) / measured->bbox_px.width,
+        (point.y - measured->bbox_px.y) / measured->bbox_px.height);
+  }
+  m_template_geometry.status = "geometry_bound";
+}
+
+void FastMatch::cleargeometrycandidates()
+{
+  m_observed_geometries.clear();
+  m_pose_candidates.clear();
+}
+
+void FastMatch::addgeometrycandidatesfromobject(void* pfindobject)
+{
+  FindObject* source = static_cast<FindObject*>(pfindobject);
+  if (source == nullptr)
+    return;
+  m_observed_geometries.clear();
+  for (const FindObjectMeasurementSnapshot& measured :
+       source->getmeasurements())
+  {
+    if (measured.status != "measured" ||
+        measured.bbox_px.width <= 0 || measured.bbox_px.height <= 0)
+      continue;
+    FastMatchTemplateGeometrySnapshot observed;
+    observed.available = true;
+    observed.source_object_index = measured.object_index;
+    observed.source_object_ref = measured.object_ref;
+    observed.bbox_px = measured.bbox_px;
+    observed.centroid_px = measured.centroid_px;
+    observed.projected_area = measured.projected_area;
+    observed.major_axis_length = measured.major_axis_length;
+    observed.minor_axis_length = measured.minor_axis_length;
+    observed.orientation_deg = measured.orientation_deg;
+    observed.aspect_ratio = measured.aspect_ratio;
+    observed.solidity = measured.solidity;
+    observed.status = "observed_geometry";
+    m_observed_geometries.push_back(std::move(observed));
+  }
+}
+
+int FastMatch::gettemplategeometryavailable()
+{
+  return m_template_geometry.available ? 1 : 0;
+}
+
+int FastMatch::gettemplategeometrysourceindex()
+{
+  return m_template_geometry.source_object_index;
+}
+
+int FastMatch::gettemplateboundarypointcount()
+{
+  return static_cast<int>(m_template_geometry.normalized_boundary.size());
+}
+
+double FastMatch::gettemplatearea()
+{
+  return m_template_geometry.projected_area;
+}
+
+double FastMatch::gettemplateorientation()
+{
+  return m_template_geometry.orientation_deg;
+}
+
+int FastMatch::getposecandidatecount()
+{
+  return static_cast<int>(m_pose_candidates.size());
+}
+
+double FastMatch::getposecandidatex(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)].center_px.x
+             : 0.0;
+}
+
+double FastMatch::getposecandidatey(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)].center_px.y
+             : 0.0;
+}
+
+double FastMatch::getposecandidateangle(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)].angle_deg
+             : 0.0;
+}
+
+double FastMatch::getposecandidateappearancescore(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)]
+                   .appearance_score
+             : 0.0;
+}
+
+double FastMatch::getposecandidategeometryscore(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)]
+                   .geometry_score
+             : -1.0;
+}
+
+double FastMatch::getposecandidatecombinedscore(int index)
+{
+  return index >= 0 && index < getposecandidatecount()
+             ? m_pose_candidates[static_cast<std::size_t>(index)]
+                   .combined_score
+             : 0.0;
+}
+
+void FastMatch::RefreshPoseCandidates()
+{
+  m_pose_candidates.clear();
+  const int candidate_count =
+      std::min(getresultcandidatecount(), m_max_pose_candidates);
+  if (candidate_count <= 0)
+    return;
+
+  const int pair_count = std::max(
+      1, std::min(static_cast<int>(FindLine::getpatternpathA().ElementCount()),
+                  static_cast<int>(FindLine::getpatternpathB().ElementCount())));
+  for (int i = 0; i < candidate_count; ++i)
+  {
+    const gp_Rectangle result = getresolvedresultrect(i);
+    FastMatchPoseCandidateSnapshot pose;
+    pose.candidate_index = i;
+    pose.bbox_px = cv::Rect2d(result.TopLeft().X(), result.TopLeft().Y(),
+                             result.Width(), result.Height());
+    pose.center_px = cv::Point2d(
+        pose.bbox_px.x + 0.5 * pose.bbox_px.width,
+        pose.bbox_px.y + 0.5 * pose.bbox_px.height);
+    pose.appearance_score = std::clamp(
+        2.0 * static_cast<double>(m_resultnums[static_cast<std::size_t>(i)]) /
+            pair_count,
+        0.0, 1.0);
+    pose.angle_deg = m_template_geometry.available
+                         ? m_template_geometry.orientation_deg
+                         : 0.0;
+    if (i < static_cast<int>(m_rotatereslutangles.size())) {
+      pose.angle_deg = m_rotatereslutangles[static_cast<std::size_t>(i)];
+      if (pose.angle_deg > 270.0)
+        pose.angle_deg -= 360.0;
+    }
+    if (m_template_geometry.available &&
+        m_template_geometry.bbox_px.width > 0.0 &&
+        m_template_geometry.bbox_px.height > 0.0)
+    {
+      pose.scale_x =
+          pose.bbox_px.width / m_template_geometry.bbox_px.width;
+      pose.scale_y =
+          pose.bbox_px.height / m_template_geometry.bbox_px.height;
+      pose.transformed_boundary.reserve(
+          m_template_geometry.normalized_boundary.size());
+      const double centroid_normalized_x =
+          (m_template_geometry.centroid_px.x -
+           m_template_geometry.bbox_px.x) /
+          m_template_geometry.bbox_px.width;
+      const double centroid_normalized_y =
+          (m_template_geometry.centroid_px.y -
+           m_template_geometry.bbox_px.y) /
+          m_template_geometry.bbox_px.height;
+      const double rotation_radians =
+          (pose.angle_deg - m_template_geometry.orientation_deg) *
+          3.14159265358979323846 / 180.0;
+      const double cos_angle = std::cos(rotation_radians);
+      const double sin_angle = std::sin(rotation_radians);
+      for (const cv::Point2d& normalized :
+           m_template_geometry.normalized_boundary)
+      {
+        const double local_x =
+            (normalized.x - centroid_normalized_x) * pose.bbox_px.width;
+        const double local_y =
+            (normalized.y - centroid_normalized_y) * pose.bbox_px.height;
+        pose.transformed_boundary.emplace_back(
+            pose.center_px.x + local_x * cos_angle - local_y * sin_angle,
+            pose.center_px.y + local_x * sin_angle + local_y * cos_angle);
+      }
+    }
+
+    double best_geometry_score = -1.0;
+    int best_geometry_index = -1;
+    const double candidate_area =
+        std::max(1.0, pose.bbox_px.width * pose.bbox_px.height);
+    const double candidate_aspect =
+        pose.bbox_px.height > 0.0
+            ? pose.bbox_px.width / pose.bbox_px.height
+            : 0.0;
+    for (int observed_index = 0;
+         observed_index < static_cast<int>(m_observed_geometries.size());
+         ++observed_index)
+    {
+      const FastMatchTemplateGeometrySnapshot& observed =
+          m_observed_geometries[static_cast<std::size_t>(observed_index)];
+      const double dx = pose.center_px.x - observed.centroid_px.x;
+      const double dy = pose.center_px.y - observed.centroid_px.y;
+      const double diagonal = std::max(
+          1.0, std::hypot(pose.bbox_px.width, pose.bbox_px.height));
+      const double center_score =
+          std::exp(-std::hypot(dx, dy) / diagonal);
+      const double observed_area = std::max(
+          1.0, observed.bbox_px.width * observed.bbox_px.height);
+      const double area_score =
+          std::min(candidate_area, observed_area) /
+          std::max(candidate_area, observed_area);
+      const double observed_aspect =
+          observed.bbox_px.height > 0.0
+              ? observed.bbox_px.width / observed.bbox_px.height
+              : 0.0;
+      const double aspect_score =
+          candidate_aspect > 0.0 && observed_aspect > 0.0
+              ? std::min(candidate_aspect, observed_aspect) /
+                    std::max(candidate_aspect, observed_aspect)
+              : 0.0;
+      double angle_delta =
+          std::abs(pose.angle_deg - observed.orientation_deg);
+      angle_delta = std::min(angle_delta, 180.0 - angle_delta);
+      const double angle_score =
+          std::max(0.0, 1.0 - angle_delta / 90.0);
+      const double geometry_score =
+          0.45 * center_score + 0.25 * area_score +
+          0.20 * aspect_score + 0.10 * angle_score;
+      if (geometry_score > best_geometry_score)
+      {
+        best_geometry_score = geometry_score;
+        best_geometry_index = observed_index;
+      }
+    }
+    pose.observed_geometry_index = best_geometry_index;
+    if (best_geometry_index >= 0)
+      pose.observed_geometry_ref =
+          m_observed_geometries[static_cast<std::size_t>(
+              best_geometry_index)].source_object_ref;
+    pose.geometry_score = best_geometry_score;
+    pose.combined_score =
+        best_geometry_score >= 0.0
+            ? (1.0 - m_geometry_weight_percent / 100.0) *
+                      pose.appearance_score +
+                  (m_geometry_weight_percent / 100.0) *
+                      best_geometry_score
+            : pose.appearance_score;
+    pose.status = best_geometry_index >= 0
+                      ? "appearance_and_geometry"
+                      : (m_template_geometry.available
+                             ? "template_geometry_pose"
+                             : "appearance_only");
+    m_pose_candidates.push_back(std::move(pose));
+  }
+}
+
 FastMatch::FastMatch()
     : FindLine(), m_matchimage(0), m_matchmask(nullptr), m_imaxmatchnum(10),
       m_iminfindnum(-1), m_imatchthre(5), m_ispecshow(-1), m_iB2W(0),
@@ -1736,6 +2041,8 @@ void FastMatch::resultclear() {
   m_iminfindnum = -1;
   m_resultpoints.clear();
   m_resultnums.clear();
+  m_pose_candidates.clear();
+
   m_rawmatch_probe_count = 0;
   m_rawmatch_threshold_hit_count = 0;
   m_resulttolist_call_count = 0;
@@ -2070,6 +2377,8 @@ void FastMatch::MatchAB(Image &image) {
   }
 
   MatchSampleAB(image, pathA, pathB);
+  RefreshPoseCandidates();
+
 }
 void FastMatch::MatchABMore(Image &image) {
   m_matchimage = &image;
@@ -4813,6 +5122,8 @@ double FastMatch::getpatternbheight() const {
 void FastMatch::PublishDisplayShapes(ICxShapeSink &sink,
                                      const std::string &owner_ref) {
   const double learn_x = static_cast<double>(m_learn_roi_x);
+  PublishGeometryDisplayShapes(sink, owner_ref);
+
   const double learn_y = static_cast<double>(m_learn_roi_y);
   const double learn_w = static_cast<double>(m_learn_roi_w);
   const double learn_h = static_cast<double>(m_learn_roi_h);
@@ -4941,4 +5252,70 @@ bool FastMatch::ApplyDisplayShapeEdit(const std::string &owner_binding,
 
   reason = "unknown owner_binding: " + owner_binding;
   return false;
+}
+
+void FastMatch::PublishGeometryDisplayShapes(
+    ICxShapeSink &sink, const std::string &owner_ref) const {
+  if (m_template_geometry.available &&
+      !m_template_geometry.normalized_boundary.empty()) {
+    auto boundary = std::make_unique<PolylineShape>();
+    for (const cv::Point2d &normalized :
+         m_template_geometry.normalized_boundary) {
+      boundary->addPoint(
+          m_template_geometry.bbox_px.x +
+              normalized.x * m_template_geometry.bbox_px.width,
+          m_template_geometry.bbox_px.y +
+              normalized.y * m_template_geometry.bbox_px.height);
+    }
+    boundary->close(true);
+    sink.UpsertShape(owner_ref + ".template_geometry.boundary", "FastMatch",
+                     owner_ref, "template_geometry", "template_boundary",
+                     false, false, std::move(boundary));
+
+    if (m_template_geometry.major_axis_length > 0.0) {
+      const double angle =
+          m_template_geometry.orientation_deg * CV_PI / 180.0;
+      const double half_length =
+          0.5 * m_template_geometry.major_axis_length;
+      auto major_axis = std::make_unique<PolylineShape>();
+      major_axis->addPoint(
+          m_template_geometry.centroid_px.x - half_length * std::cos(angle),
+          m_template_geometry.centroid_px.y - half_length * std::sin(angle));
+      major_axis->addPoint(
+          m_template_geometry.centroid_px.x + half_length * std::cos(angle),
+          m_template_geometry.centroid_px.y + half_length * std::sin(angle));
+      major_axis->close(false);
+      sink.UpsertShape(owner_ref + ".template_geometry.major_axis",
+                       "FastMatch", owner_ref, "template_geometry",
+                       "major_axis", false, false, std::move(major_axis));
+    }
+  }
+
+  for (const FastMatchPoseCandidateSnapshot &pose : m_pose_candidates) {
+    const std::string suffix = std::to_string(pose.candidate_index);
+    if (!pose.transformed_boundary.empty()) {
+      auto boundary = std::make_unique<PolylineShape>();
+      for (const cv::Point2d &point : pose.transformed_boundary)
+        boundary->addPoint(point.x, point.y);
+      boundary->close(true);
+      sink.UpsertShape(owner_ref + ".pose_boundary." + suffix, "FastMatch",
+                       owner_ref, "pose_geometry", "candidate_boundary",
+                       false, true, std::move(boundary));
+    }
+
+    if (m_template_geometry.major_axis_length > 0.0) {
+      const double angle = pose.angle_deg * CV_PI / 180.0;
+      const double half_length =
+          0.5 * m_template_geometry.major_axis_length * pose.scale_x;
+      auto axis = std::make_unique<PolylineShape>();
+      axis->addPoint(pose.center_px.x - half_length * std::cos(angle),
+                     pose.center_px.y - half_length * std::sin(angle));
+      axis->addPoint(pose.center_px.x + half_length * std::cos(angle),
+                     pose.center_px.y + half_length * std::sin(angle));
+      axis->close(false);
+      sink.UpsertShape(owner_ref + ".pose_axis." + suffix, "FastMatch",
+                       owner_ref, "pose_geometry", "candidate_axis", false,
+                       true, std::move(axis));
+    }
+  }
 }

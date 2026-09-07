@@ -1,0 +1,147 @@
+## 四、深度链推进流程
+
+  ### D0：先闭合真正的 FindSegmentation CxScript 入口
+
+  新增资产驱动案例，显式设置：
+
+  backend = libtorch_segmentation
+  task = torch.infer.instance_segmentation.yolov8.v1
+  model_package/manifest = yolov8n_seg_coco_v1
+  geometry_type = ellipse/line/circle，按案例资产提供
+
+  同时应清理两个风险：
+
+  - FindSegmentationEdgeSamBackend.cpp 当前存在固定输出根目录；
+  - 未显式提供 manifest 时会回落到固定 DeepLab smoke manifest。
+
+  这两者都与当前 RUN_ROOT、禁止 fallback 的硬约束冲突。正式链应在缺少 manifest/model 时返回 ASSET_MISSING，不能静默改走
+  另一个模型。
+
+  ### D1：把现有后处理 OBB 做成完整基线
+
+  当前 minAreaRect 已经计算并绘制 OBB，但证据只写出了长短轴，没有完整写出：
+
+  center_x
+  center_y
+  width
+  height
+  canonical_angle_deg
+  four_vertices
+  source_instance_id
+  source_mask_ref
+  fit_residual
+  support
+
+  应先补齐这些事实，形成：
+
+  YOLO mask
+  → contour
+  → AABB
+  → postprocess OBB
+  → geometry evidence
+
+  角度必须规范化，例如矩形采用 [−90°, 90°)，并统一保证 width >= height。否则 OpenCV 的 width/height 交换会造成角度跳变。
+
+  这一阶段的结论只能叫：
+
+  YOLOV8_SEG_POSTPROCESS_OBB_PASS
+
+  不能称为“OBB 角度回归通过”。
+
+  ### D2：先评估 mask→OBB 天花板
+
+  按清晰度、旋转、尺度、遮挡、形变分层，记录：
+
+  mask IoU
+  AABB IoU
+  center error
+  major/minor axis error
+  angle error
+  contour-fit residual
+  failure rate
+  p95/p99 latency
+
+  若 mask→OBB 已满足测量要求，不必立刻增加模型头。
+
+  ### D3：只有数据证明需要时才增加原生角度回归头
+
+  推荐角度编码不要直接回归 θ，而是：
+
+  sin(2θ), cos(2θ)
+
+  因为普通矩形以 π 为周期。推理时：
+
+  θ = 0.5 * atan2(sin2θ, cos2θ)
+
+  训练损失：
+
+  L = λbox·Lbox
+    + λcls·Lcls
+    + λmask·Lmask
+    + λangle·Lperiodic
+    + λgeom·Lshape
+    + λconsistency·L(mask-derived OBB, predicted OBB)
+
+  训练启用前必须先完成现有 gate 指定的人工复核和真实模型绑定，不能从目前的 training_enabled=0 直接宣布进入训练闭环。
+
+  ## 五、两条链的最终交汇
+
+  建议统一结果结构：
+
+  ObjectStateRecord
+  ├─ identity
+  │  ├─ run_id
+  │  ├─ internal_object_id
+  │  └─ source_case_path
+  ├─ localization
+  │  ├─ proposal_source: findobject | yolov8
+  │  ├─ aabb
+  │  ├─ obb
+  │  └─ mask_ref
+  ├─ explicit_evidence
+  │  ├─ fastmatch_score
+  │  ├─ template_id
+  │  ├─ ocr_text/topk
+  │  └─ polarity/topology descriptors
+  ├─ deep_evidence
+  │  ├─ class_id/class_score
+  │  ├─ mask_quality
+  │  └─ model_id/weights_hash
+  ├─ geometry
+  │  ├─ primitive_type/parameters
+  │  ├─ contour_fit
+  │  ├─ skeleton topology
+  │  └─ coordinate/calibration frame
+  ├─ scalar_state
+  │  ├─ interior statistics
+  │  ├─ boundary contrast
+  │  └─ skeleton/profile statistics
+  └─ decision
+     ├─ agreement/disagreement
+     ├─ uncertainty
+     └─ human_review_status
+
+  现有 cximage/CxCoreAiBoundary.h:427 已经提供正确的基础方向：结构化几何/描述符送入 mlpack，图像张量任务升级到 Torch。应
+  扩展这条统一边界，而不是让 EasyOCR 直接依赖 YOLO，或让 YOLO 内部依赖 FindObject。
+
+  最终决策可以分三种：
+
+  - 两链一致：提高置信度。
+  - 显式链通过、深度链不确定：保留显式可解释结果，进入复核。
+  - 深度链通过、显式链失败：保留 mask/OBB，但标记模板证据缺失。
+  - 两链冲突：禁止自动 PASS，进入 Manual Review。
+
+  ## 六、推荐实际实施顺序
+
+  1. FindObject 真实图像单工具闭环。
+  2. FastMatch 修复 learn_points=0/-20。
+  3. FindObject 候选框以值语义驱动 FastMatch。
+  4. 抽取新的无 GUI EasyOcrRuntime，再加入 CMake。
+  5. 建立真实 YOLOv8n-Seg CxScript case，去掉默认后端/fallback 歧义。
+  6. 补齐 postprocess OBB 的中心、角度、顶点、残差证据。
+  7. 加入 mask thinning、骨架拓扑与独立标量场统计。
+  8. 让两链输出统一 ObjectStateRecord，执行一致性/冲突 gate。
+  9. 用误差数据决定是否开发模型原生角度回归头。
+  10. 最后执行 L1→L2→L3→人工 GUI→Promotion gate。
+
+ 

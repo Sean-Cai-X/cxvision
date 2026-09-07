@@ -11,6 +11,7 @@
 #include "CxScriptDirectBindings.h"
 #include "CxScriptTypeTraitsDefs.h"
 #include "CxUnifiedLog.h"
+#include "EasyOcr.h"
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
 #include "FindCircle.h"
@@ -1338,6 +1339,61 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindObject::getdebugmaxcomponentw);
     m_parser.DefineClassFun("FindObject", pfobj, "getdebugmaxcomponenth",
                             &FindObject::getdebugmaxcomponenth);
+
+    m_parser.DefineClassFun("FindObject", pfobj, "setgeometrycalibration",
+                            &FindObject::setgeometrycalibration);
+    m_parser.DefineClassFun("FindObject", pfobj, "setgeometryconnectivity",
+                            &FindObject::setgeometryconnectivity);
+    m_parser.DefineClassFun("FindObject", pfobj, "setmeasurementselection",
+                            &FindObject::setmeasurementselection);
+    m_parser.DefineClassFun("FindObject", pfobj, "setshowboundary",
+                            &FindObject::setshowboundary);
+    m_parser.DefineClassFun("FindObject", pfobj, "setshowmomentellipse",
+                            &FindObject::setshowmomentellipse);
+    m_parser.DefineClassFun("FindObject", pfobj, "setshowferet",
+                            &FindObject::setshowferet);
+    m_parser.DefineClassFun("FindObject", pfobj, "setshowgeometrycircles",
+                            &FindObject::setshowgeometrycircles);
+    m_parser.DefineClassFun("FindObject", pfobj, "setbackgroundmethod",
+                            &FindObject::setbackgroundmethod);
+    m_parser.DefineClassFun("FindObject", pfobj, "setbackgroundborderwidth",
+                            &FindObject::setbackgroundborderwidth);
+    m_parser.DefineClassFun("FindObject", pfobj, "setbackgroundmorphologyradius",
+                            &FindObject::setbackgroundmorphologyradius);
+    m_parser.DefineClassFun("FindObject", pfobj, "setsubpixelenabled",
+                            &FindObject::setsubpixelenabled);
+    m_parser.DefineClassFun("FindObject", pfobj, "setsubpixelminimumgradient",
+                            &FindObject::setsubpixelminimumgradient);
+    m_parser.DefineClassFun("FindObject", pfobj, "setsubpixelisothreshold",
+                            &FindObject::setsubpixelisothreshold);
+    m_parser.DefineClassFun("FindObject", pfobj, "setactivegeometrybasis",
+                            &FindObject::setactivegeometrybasis);
+    m_parser.DefineClassFun("FindObject", pfobj, "getmeasurementcount",
+                            &FindObject::getmeasurementcount);
+    m_parser.DefineClassFun("FindObject", pfobj, "getarea",
+                            &FindObject::getarea);
+    m_parser.DefineClassFun("FindObject", pfobj, "getperimeter",
+                            &FindObject::getperimeter);
+    m_parser.DefineClassFun("FindObject", pfobj, "getequivalentside",
+                            &FindObject::getequivalentside);
+    m_parser.DefineClassFun("FindObject", pfobj, "getcircularity",
+                            &FindObject::getcircularity);
+    m_parser.DefineClassFun("FindObject", pfobj, "getsolidity",
+                            &FindObject::getsolidity);
+    m_parser.DefineClassFun("FindObject", pfobj, "getmajoraxis",
+                            &FindObject::getmajoraxis);
+    m_parser.DefineClassFun("FindObject", pfobj, "getminoraxis",
+                            &FindObject::getminoraxis);
+    m_parser.DefineClassFun("FindObject", pfobj, "getorientation",
+                            &FindObject::getorientation);
+    m_parser.DefineClassFun("FindObject", pfobj, "getferetmax",
+                            &FindObject::getferetmax);
+    m_parser.DefineClassFun("FindObject", pfobj, "getferetmin",
+                            &FindObject::getferetmin);
+    m_parser.DefineClassFun("FindObject", pfobj, "getinscribedradius",
+                            &FindObject::getinscribedradius);
+    m_parser.DefineClassFun("FindObject", pfobj, "getenclosingradius",
+                            &FindObject::getenclosingradius);
     m_parser.DefineClassFun("FindObject", pfobj, "objectgrid",
                             &FindObject::objectgrid);
     m_parser.DefineClassFun("FindObject", pfobj, "setobjectgrid",
@@ -1543,6 +1599,61 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FastMatch::setrectxywh_script);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setrectxywh", &FastMatch::setrectxywh_script);
+
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setgeometrysourceindex",
+                            &FastMatch::setgeometrysourceindex);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setgeometryweightpercent",
+                            &FastMatch::setgeometryweightpercent);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setmaxposecandidates",
+                            &FastMatch::setmaxposecandidates);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settemplategeometryfromobject",
+                            &FastMatch::settemplategeometryfromobject);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "cleargeometrycandidates",
+                            &FastMatch::cleargeometrycandidates);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "addgeometrycandidatesfromobject",
+                            &FastMatch::addgeometrycandidatesfromobject);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettemplategeometryavailable",
+                            &FastMatch::gettemplategeometryavailable);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettemplategeometrysourceindex",
+                            &FastMatch::gettemplategeometrysourceindex);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettemplateboundarypointcount",
+                            &FastMatch::gettemplateboundarypointcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettemplatearea",
+                            &FastMatch::gettemplatearea);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettemplateorientation",
+                            &FastMatch::gettemplateorientation);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidatecount",
+                            &FastMatch::getposecandidatecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidatex",
+                            &FastMatch::getposecandidatex);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidatey",
+                            &FastMatch::getposecandidatey);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidateangle",
+                            &FastMatch::getposecandidateangle);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidateappearancescore",
+                            &FastMatch::getposecandidateappearancescore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidategeometryscore",
+                            &FastMatch::getposecandidategeometryscore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getposecandidatecombinedscore",
+                            &FastMatch::getposecandidatecombinedscore);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "Show",
                             &FastMatch::setshow);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "learn",
@@ -1851,6 +1962,76 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "shapesetroi", &FastMatch::shapesetroi);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotateresultx", &FastMatch::getrotateresultx);
+    EasyOCR *peasyocr = nullptr;
+    const std::string_view easyocr_type_name =
+        CxScriptTypeName(CxScriptTypeTraits<EasyOCR>::id);
+    m_parser.DefineClass(easyocr_type_name.data(), peasyocr);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "setrect",
+                            &EasyOCR::setrectxywh_script);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "Show",
+                            &EasyOCR::setshow);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "stringsplit",
+                            &EasyOCR::stringsplit);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "fontsplit",
+                            &EasyOCR::fontsplit);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "exfontsplit", &EasyOCR::exfontsplit);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "areasocr",
+                            &EasyOCR::areasocr);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setsplitimage", &EasyOCR::setsplitimage);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setsplitobject", &EasyOCR::setsplitobject);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setsplitobjectbg", &EasyOCR::setsplitobjectbg);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setsplitobjectoffset",
+                            &EasyOCR::setsplitobjectoffset);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setlayoutdirection",
+                            &EasyOCR::setlayoutdirection);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setlineoverlappercent",
+                            &EasyOCR::setlineoverlappercent);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setglyphcandidatesfromobject",
+                            &EasyOCR::setglyphcandidatesfromobject);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setglyphcandidatesfromfastmatch",
+                            &EasyOCR::setglyphcandidatesfromfastmatch);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setocrthre", &EasyOCR::setocrthre);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "setb2w",
+                            &EasyOCR::setb2w);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "setminscore", &EasyOCR::setminscore);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidatecount",
+                            &EasyOCR::getglyphcandidatecount);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidatex",
+                            &EasyOCR::getglyphcandidatex);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidatey",
+                            &EasyOCR::getglyphcandidatey);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidatew",
+                            &EasyOCR::getglyphcandidatew);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidateh",
+                            &EasyOCR::getglyphcandidateh);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidateline",
+                            &EasyOCR::getglyphcandidateline);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidatereadingorder",
+                            &EasyOCR::getglyphcandidatereadingorder);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "getglyphcandidateconfidence",
+                            &EasyOCR::getglyphcandidateconfidence);
+    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            "shapesetroi", &EasyOCR::shapesetroi);
+
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotateresulty", &FastMatch::getrotateresulty);
 

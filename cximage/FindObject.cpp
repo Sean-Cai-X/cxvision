@@ -3,6 +3,15 @@
 #include "findobject.h"
 #include "ImageAnnotationLayer.h"
 #include "RectShape.h"
+
+#include "CircleShape.h"
+#include "EllipseShape.h"
+#include "PolylineShape.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <unordered_map>
 #include "imagemanager.h"
 #include "occtinclude.h"
 
@@ -16,6 +25,545 @@
 #include <queue>
 
 typedef unsigned char BYTE;
+
+namespace {
+
+constexpr double kFindObjectPi = 3.14159265358979323846;
+
+double NormalizeFindObjectAngle180(double degrees)
+{
+  while (degrees < 0.0)
+    degrees += 180.0;
+  while (degrees >= 180.0)
+    degrees -= 180.0;
+  return degrees;
+}
+
+double GWPixelConfigurationPerimeter(
+    const cv::Mat &mask, double hx, double hy,
+    std::array<std::uint64_t, 16> &counts)
+{
+  cv::Mat padded;
+  cv::copyMakeBorder(mask, padded, 1, 1, 1, 1, cv::BORDER_CONSTANT,
+                     cv::Scalar(0));
+  const double diagonal = std::hypot(hx, hy);
+  std::array<double, 16> contribution = {};
+  for (const int code : {1, 2, 4, 7, 8, 11, 13, 14})
+    contribution[code] = 0.5 * diagonal;
+  contribution[3] = contribution[12] = hx;
+  contribution[6] = contribution[9] = hy;
+  contribution[5] = contribution[10] = diagonal;
+
+  double perimeter = 0.0;
+  for (int y = 0; y + 1 < padded.rows; ++y)
+  {
+    const uchar *row0 = padded.ptr<uchar>(y);
+    const uchar *row1 = padded.ptr<uchar>(y + 1);
+    for (int x = 0; x + 1 < padded.cols; ++x)
+    {
+      const int code = (row0[x] != 0 ? 1 : 0) |
+                       (row0[x + 1] != 0 ? 2 : 0) |
+                       (row1[x + 1] != 0 ? 4 : 0) |
+                       (row1[x] != 0 ? 8 : 0);
+      ++counts[code];
+      perimeter += contribution[code];
+    }
+  }
+  return perimeter;
+}
+
+void MeasureFindObjectIntensity(const cv::Mat &mask,
+                                const cv::Point &origin,
+                                const cv::Mat &source,
+                                FindObjectMeasurementSnapshot &output)
+{
+  if (source.empty() || origin.x < 0 || origin.y < 0 ||
+      origin.x + mask.cols > source.cols ||
+      origin.y + mask.rows > source.rows)
+    return;
+
+  const cv::Rect requested(origin.x, origin.y, mask.cols, mask.rows);
+  const cv::Mat source_roi = source(requested);
+  cv::Mat gray;
+  if (source_roi.channels() == 1)
+    gray = source_roi;
+  else
+    cv::cvtColor(source_roi, gray, cv::COLOR_BGR2GRAY);
+  if (gray.depth() != CV_64F)
+    gray.convertTo(gray, CV_64F);
+
+  cv::Scalar mean;
+  cv::Scalar stddev;
+  cv::meanStdDev(gray, mean, stddev, mask);
+  cv::minMaxLoc(gray, &output.intensity_min, &output.intensity_max,
+                nullptr, nullptr, mask);
+  output.intensity_mean = mean[0];
+  output.intensity_stddev = stddev[0];
+  if (stddev[0] > std::numeric_limits<double>::epsilon())
+  {
+    double third_moment = 0.0;
+    std::uint64_t count = 0;
+    for (int y = 0; y < mask.rows; ++y)
+    {
+      const uchar *mask_row = mask.ptr<uchar>(y);
+      const double *gray_row = gray.ptr<double>(y);
+      for (int x = 0; x < mask.cols; ++x)
+      {
+        if (mask_row[x] == 0)
+          continue;
+        const double z = (gray_row[x] - mean[0]) / stddev[0];
+        third_moment += z * z * z;
+        ++count;
+      }
+    }
+    if (count > 0)
+      output.intensity_skewness =
+          third_moment / static_cast<double>(count);
+  }
+  output.intensity_valid = true;
+}
+
+} // namespace
+struct FindObjectBackgroundBuild
+{
+  cv::Mat residual;
+  std::string method = "none";
+  bool valid = true;
+  int sample_count = 0;
+  double baseline_mean = 0.0;
+  bool corrected = false;
+};
+
+FindObjectBackgroundBuild BuildFindObjectBackgroundResidual(
+    const cv::Mat& channel, const FindObjectMeasurementConfig& config)
+{
+  FindObjectBackgroundBuild output;
+  if (channel.empty())
+  {
+    output.valid = false;
+    output.method = "invalid_empty_input";
+    return output;
+  }
+  cv::Mat gray;
+  channel.convertTo(gray, CV_32F);
+  if (config.background_method == FindObjectBackgroundMethod::None)
+  {
+    output.residual = gray;
+    return output;
+  }
+
+  cv::Mat baseline;
+  if (config.background_method == FindObjectBackgroundMethod::RoiBorderRobust)
+  {
+    const int border = std::max(1, std::min(
+        config.background_border_width_px, std::min(gray.rows, gray.cols) / 2));
+    std::vector<float> samples;
+    for (int y = 0; y < gray.rows; ++y)
+    {
+      const float* row = gray.ptr<float>(y);
+      for (int x = 0; x < gray.cols; ++x)
+      {
+        if (x < border || y < border || x >= gray.cols - border ||
+            y >= gray.rows - border)
+          samples.push_back(row[x]);
+      }
+    }
+    if (samples.empty())
+    {
+      output.valid = false;
+      output.method = "roi_border_robust";
+      output.residual = gray;
+      return output;
+    }
+    const std::size_t middle = samples.size() / 2U;
+    std::nth_element(samples.begin(), samples.begin() + middle, samples.end());
+    baseline = cv::Mat(gray.size(), CV_32F, cv::Scalar(samples[middle]));
+    output.method = "roi_border_robust";
+    output.sample_count = static_cast<int>(samples.size());
+  }
+  else
+  {
+    const int radius = std::max(1, config.background_morphology_radius_px);
+    const cv::Mat kernel = cv::getStructuringElement(
+        cv::MORPH_ELLIPSE, cv::Size(radius * 2 + 1, radius * 2 + 1));
+    cv::morphologyEx(gray, baseline, cv::MORPH_OPEN, kernel);
+    output.method = "morphological_opening";
+    output.sample_count = gray.rows * gray.cols;
+  }
+  output.baseline_mean = cv::mean(baseline)[0];
+  output.residual = gray - baseline;
+  output.corrected = true;
+  return output;
+}
+
+void ApplyFindObjectSubpixelRefinement(
+    const cv::Mat& source_image, const cv::Mat& component_mask,
+    const cv::Point& origin, const FindObjectMeasurementConfig& config,
+    double threshold, FindObjectMeasurementSnapshot& output)
+{
+  if (!config.subpixel_enabled)
+    return;
+  if (source_image.empty() || component_mask.empty() || origin.x < 1 ||
+      origin.y < 1 || origin.x + component_mask.cols >= source_image.cols ||
+      origin.y + component_mask.rows >= source_image.rows)
+  {
+    output.subpixel_failure_reason = "source_or_component_outside_bounds";
+    return;
+  }
+  cv::Mat source_roi = source_image(cv::Rect(
+      origin.x, origin.y, component_mask.cols, component_mask.rows));
+  cv::Mat gray;
+  if (source_roi.channels() == 1)
+    gray = source_roi;
+  else
+    cv::cvtColor(source_roi, gray, cv::COLOR_BGR2GRAY);
+  gray.convertTo(gray, CV_32F);
+
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(component_mask, contours, cv::RETR_EXTERNAL,
+                   cv::CHAIN_APPROX_NONE);
+  if (contours.empty() || contours.front().size() < 3U)
+  {
+    output.subpixel_failure_reason = "integer_contour_unavailable";
+    return;
+  }
+  double gradient_sum = 0.0;
+  for (const cv::Point& point : contours.front())
+  {
+    ++output.subpixel_candidate_point_count;
+    if (point.x <= 0 || point.y <= 0 || point.x + 1 >= gray.cols ||
+        point.y + 1 >= gray.rows)
+    {
+      ++output.subpixel_rejected_out_of_bounds_count;
+      continue;
+    }
+    const double gx = 0.5 * (gray.at<float>(point.y, point.x + 1) -
+                             gray.at<float>(point.y, point.x - 1));
+    const double gy = 0.5 * (gray.at<float>(point.y + 1, point.x) -
+                             gray.at<float>(point.y - 1, point.x));
+    const double gradient = std::hypot(gx, gy);
+    if (gradient < config.subpixel_minimum_gradient)
+    {
+      ++output.subpixel_rejected_low_gradient_count;
+      continue;
+    }
+    const double offset = std::max(-0.5, std::min(
+        0.5, (threshold - gray.at<float>(point.y, point.x)) / gradient));
+    output.subpixel_boundary.emplace_back(
+        origin.x + point.x + 0.5 + offset * gx / gradient,
+        origin.y + point.y + 0.5 + offset * gy / gradient);
+    gradient_sum += gradient;
+  }
+  output.subpixel_accepted_point_count =
+      static_cast<int>(output.subpixel_boundary.size());
+  if (output.subpixel_boundary.size() < 3U)
+  {
+    output.subpixel_failure_reason = "insufficient_valid_gradient_points";
+    return;
+  }
+  for (std::size_t i = 0; i < output.subpixel_boundary.size(); ++i)
+  {
+    const cv::Point2d& a = output.subpixel_boundary[i];
+    const cv::Point2d& b = output.subpixel_boundary[
+        (i + 1U) % output.subpixel_boundary.size()];
+    output.subpixel_perimeter += std::hypot(
+        (b.x - a.x) * output.pixel_size_x,
+        (b.y - a.y) * output.pixel_size_y);
+    output.subpixel_area += (a.x * b.y - b.x * a.y) *
+                            output.pixel_size_x * output.pixel_size_y;
+  }
+  output.subpixel_area = std::abs(output.subpixel_area) * 0.5;
+  output.subpixel_mean_gradient =
+      gradient_sum / static_cast<double>(output.subpixel_accepted_point_count);
+  output.subpixel_valid = true;
+  output.subpixel_failure_reason.clear();
+}
+
+FindObjectMeasurementSnapshot FindObject::AnalyzeGeometry(
+    const cv::Mat &component_mask, const cv::Point &mask_origin_px,
+    const cv::Mat &source_image,
+    const FindObjectMeasurementConfig &config)
+{
+  FindObjectMeasurementSnapshot output;
+  output.pixel_size_x = config.pixel_size_x > 0.0 ? config.pixel_size_x : 1.0;
+  output.pixel_size_y = config.pixel_size_y > 0.0 ? config.pixel_size_y : 1.0;
+  const bool pixel_units =
+      std::abs(output.pixel_size_x - 1.0) < 1e-12 &&
+      std::abs(output.pixel_size_y - 1.0) < 1e-12;
+  output.length_unit = pixel_units ? "px" : "calibrated";
+  output.area_unit = pixel_units ? "px^2" : "calibrated^2";
+  output.topology_policy =
+      config.connectivity == 4 ? "4_connected_foreground"
+                               : "8_connected_foreground";
+  if (component_mask.empty())
+    return output;
+
+  cv::Mat mask;
+  if (component_mask.channels() == 1)
+    mask = component_mask.clone();
+  else
+    cv::extractChannel(component_mask, mask, 0);
+  if (mask.depth() != CV_8U)
+    mask.convertTo(mask, CV_8U);
+  cv::threshold(mask, mask, 0, 255, cv::THRESH_BINARY);
+
+  std::vector<cv::Point> pixels;
+  cv::findNonZero(mask, pixels);
+  if (pixels.empty())
+    return output;
+
+  const cv::Rect local_bbox = cv::boundingRect(pixels);
+  output.bbox_px =
+      cv::Rect(mask_origin_px.x + local_bbox.x,
+               mask_origin_px.y + local_bbox.y,
+               local_bbox.width, local_bbox.height);
+  output.pixel_count = static_cast<std::uint64_t>(pixels.size());
+  const double pixel_area = output.pixel_size_x * output.pixel_size_y;
+  output.projected_area =
+      static_cast<double>(output.pixel_count) * pixel_area;
+  output.equivalent_side = std::sqrt(output.projected_area);
+  output.equivalent_radius =
+      std::sqrt(output.projected_area / kFindObjectPi);
+
+  double sum_x = 0.0;
+  double sum_y = 0.0;
+  for (const cv::Point &p : pixels)
+  {
+    sum_x += mask_origin_px.x + p.x + 0.5;
+    sum_y += mask_origin_px.y + p.y + 0.5;
+  }
+  output.centroid_px =
+      cv::Point2d(sum_x / pixels.size(), sum_y / pixels.size());
+
+  MeasureFindObjectIntensity(mask, mask_origin_px, source_image, output);
+  output.gwyddion_perimeter =
+      GWPixelConfigurationPerimeter(
+          mask, output.pixel_size_x, output.pixel_size_y,
+          output.pixel_configuration_counts);
+  output.gw_pixel_perimeter = output.gwyddion_perimeter;
+  output.boundary_method = "GW_2x2_pixel_configuration";
+
+  cv::Mat padded;
+  cv::copyMakeBorder(mask, padded, 1, 1, 1, 1, cv::BORDER_CONSTANT,
+                     cv::Scalar(0));
+  std::vector<std::vector<cv::Point>> contours;
+  std::vector<cv::Vec4i> hierarchy;
+  cv::findContours(
+      padded, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_NONE,
+      cv::Point(mask_origin_px.x - 1, mask_origin_px.y - 1));
+  int outer_index = -1;
+  double outer_area = -1.0;
+  for (int i = 0; i < static_cast<int>(contours.size()); ++i)
+  {
+    const double area = std::abs(cv::contourArea(contours[i]));
+    const bool is_outer = hierarchy.empty() || hierarchy[i][3] < 0;
+    if (is_outer && area > outer_area)
+    {
+      outer_area = area;
+      outer_index = i;
+    }
+    for (std::size_t j = 0; j < contours[i].size(); ++j)
+    {
+      const cv::Point &a = contours[i][j];
+      const cv::Point &b = contours[i][(j + 1) % contours[i].size()];
+      output.polygon_perimeter +=
+          std::hypot((b.x - a.x) * output.pixel_size_x,
+                     (b.y - a.y) * output.pixel_size_y);
+    }
+  }
+  if (outer_index >= 0)
+  {
+    for (const cv::Point &p : contours[outer_index])
+      output.outer_boundary.emplace_back(p.x, p.y);
+    output.polygon_area =
+        std::abs(cv::contourArea(contours[outer_index])) * pixel_area;
+    if (config.include_hole_boundaries && !hierarchy.empty())
+    {
+      for (int i = 0; i < static_cast<int>(contours.size()); ++i)
+      {
+        if (hierarchy[i][3] != outer_index)
+          continue;
+        std::vector<cv::Point2d> hole;
+        for (const cv::Point &p : contours[i])
+          hole.emplace_back(p.x, p.y);
+        output.hole_boundaries.push_back(std::move(hole));
+        output.polygon_area -=
+            std::abs(cv::contourArea(contours[i])) * pixel_area;
+      }
+    }
+  }
+
+  std::vector<cv::Point2f> physical_cell_corners;
+  physical_cell_corners.reserve(pixels.size() * 4);
+  for (const cv::Point &p : pixels)
+  {
+    const double cx =
+        (mask_origin_px.x + p.x + 0.5) * output.pixel_size_x;
+    const double cy =
+        (mask_origin_px.y + p.y + 0.5) * output.pixel_size_y;
+    const double hx = 0.5 * output.pixel_size_x;
+    const double hy = 0.5 * output.pixel_size_y;
+    physical_cell_corners.emplace_back(
+        static_cast<float>(cx - hx), static_cast<float>(cy - hy));
+    physical_cell_corners.emplace_back(
+        static_cast<float>(cx + hx), static_cast<float>(cy - hy));
+    physical_cell_corners.emplace_back(
+        static_cast<float>(cx + hx), static_cast<float>(cy + hy));
+    physical_cell_corners.emplace_back(
+        static_cast<float>(cx - hx), static_cast<float>(cy + hy));
+  }
+  std::vector<cv::Point2f> hull;
+  cv::convexHull(physical_cell_corners, hull);
+  if (hull.size() >= 3)
+    output.convex_hull_area = std::abs(cv::contourArea(hull));
+  if (output.gwyddion_perimeter > 0.0)
+    output.circularity =
+        4.0 * kFindObjectPi * output.projected_area /
+        (output.gwyddion_perimeter * output.gwyddion_perimeter);
+  if (output.convex_hull_area > 0.0)
+    output.solidity =
+        std::min(1.0, output.projected_area / output.convex_hull_area);
+
+  if (hull.size() >= 2)
+  {
+    double max_distance2 = -1.0;
+    for (std::size_t i = 0; i < hull.size(); ++i)
+    {
+      for (std::size_t j = i + 1; j < hull.size(); ++j)
+      {
+        const cv::Point2d delta = hull[j] - hull[i];
+        const double distance2 = delta.dot(delta);
+        if (distance2 > max_distance2)
+        {
+          max_distance2 = distance2;
+          output.feret_max_p0 = hull[i];
+          output.feret_max_p1 = hull[j];
+        }
+      }
+    }
+    if (max_distance2 >= 0.0)
+    {
+      output.feret_max = std::sqrt(max_distance2);
+      const cv::Point2d delta =
+          output.feret_max_p1 - output.feret_max_p0;
+      output.feret_max_angle_deg = NormalizeFindObjectAngle180(
+          std::atan2(delta.y, delta.x) * 180.0 / kFindObjectPi);
+    }
+
+    output.feret_min = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < hull.size(); ++i)
+    {
+      const cv::Point2d a = hull[i];
+      const cv::Point2d b = hull[(i + 1) % hull.size()];
+      const cv::Point2d edge = b - a;
+      const double length = std::hypot(edge.x, edge.y);
+      if (length <= std::numeric_limits<double>::epsilon())
+        continue;
+      const cv::Point2d normal(-edge.y / length, edge.x / length);
+      double min_projection = std::numeric_limits<double>::max();
+      double max_projection = -std::numeric_limits<double>::max();
+      for (const cv::Point2f &point : hull)
+      {
+        const double projection =
+            point.x * normal.x + point.y * normal.y;
+        min_projection = std::min(min_projection, projection);
+        max_projection = std::max(max_projection, projection);
+      }
+      const double width = max_projection - min_projection;
+      if (width < output.feret_min)
+      {
+        output.feret_min = width;
+        output.feret_min_angle_deg = NormalizeFindObjectAngle180(
+            std::atan2(edge.y, edge.x) * 180.0 / kFindObjectPi);
+      }
+    }
+    if (!std::isfinite(output.feret_min))
+      output.feret_min = 0.0;
+
+    cv::Point2f enclosing_center;
+    float enclosing_radius = 0.0f;
+    cv::minEnclosingCircle(hull, enclosing_center, enclosing_radius);
+    output.enclosing_circle_center_px =
+        cv::Point2d(enclosing_center.x / output.pixel_size_x,
+                    enclosing_center.y / output.pixel_size_y);
+    output.enclosing_circle_radius = enclosing_radius;
+    output.enclosing_circle_valid = enclosing_radius > 0.0f;
+  }
+
+  double mean_x = 0.0;
+  double mean_y = 0.0;
+  for (const cv::Point &p : pixels)
+  {
+    mean_x += (mask_origin_px.x + p.x) * output.pixel_size_x;
+    mean_y += (mask_origin_px.y + p.y) * output.pixel_size_y;
+  }
+  mean_x /= pixels.size();
+  mean_y /= pixels.size();
+  double covariance_xx = 0.0;
+  double covariance_xy = 0.0;
+  double covariance_yy = 0.0;
+  for (const cv::Point &p : pixels)
+  {
+    const double dx =
+        (mask_origin_px.x + p.x) * output.pixel_size_x - mean_x;
+    const double dy =
+        (mask_origin_px.y + p.y) * output.pixel_size_y - mean_y;
+    covariance_xx += dx * dx;
+    covariance_xy += dx * dy;
+    covariance_yy += dy * dy;
+  }
+  covariance_xx /= pixels.size();
+  covariance_xy /= pixels.size();
+  covariance_yy /= pixels.size();
+  const double trace = covariance_xx + covariance_yy;
+  const double discriminant =
+      std::sqrt(std::max(
+          0.0, (covariance_xx - covariance_yy) *
+                       (covariance_xx - covariance_yy) +
+                   4.0 * covariance_xy * covariance_xy));
+  const double lambda_major = 0.5 * (trace + discriminant);
+  const double lambda_minor = 0.5 * (trace - discriminant);
+  if (lambda_major > std::numeric_limits<double>::epsilon())
+  {
+    output.major_axis_length = 4.0 * std::sqrt(lambda_major);
+    output.minor_axis_length =
+        4.0 * std::sqrt(std::max(0.0, lambda_minor));
+    output.orientation_deg = NormalizeFindObjectAngle180(
+        0.5 * std::atan2(2.0 * covariance_xy,
+                         covariance_xx - covariance_yy) *
+        180.0 / kFindObjectPi);
+    if (output.minor_axis_length >
+        std::numeric_limits<double>::epsilon())
+      output.aspect_ratio =
+          output.major_axis_length / output.minor_axis_length;
+    output.eccentricity =
+        std::sqrt(std::max(0.0, 1.0 - lambda_minor / lambda_major));
+    output.moment_ellipse_valid = pixels.size() >= 2;
+  }
+
+  cv::Mat distance_input;
+  cv::copyMakeBorder(mask, distance_input, 1, 1, 1, 1,
+                     cv::BORDER_CONSTANT, cv::Scalar(0));
+  cv::Mat distance;
+  cv::distanceTransform(distance_input, distance, cv::DIST_L2,
+                        cv::DIST_MASK_PRECISE);
+  double max_distance = 0.0;
+  cv::Point max_location;
+  cv::minMaxLoc(distance, nullptr, &max_distance, nullptr, &max_location);
+  const double edge_distance = std::max(0.0, max_distance - 0.5);
+  output.inscribed_circle_center_px =
+      cv::Point2d(mask_origin_px.x + max_location.x - 1 + 0.5,
+                  mask_origin_px.y + max_location.y - 1 + 0.5);
+  output.inscribed_circle_radius =
+      edge_distance * std::min(output.pixel_size_x, output.pixel_size_y);
+  output.inscribed_circle_valid = edge_distance > 0.0;
+  ApplyFindObjectSubpixelRefinement(
+      source_image, mask, mask_origin_px, config,
+      config.subpixel_iso_threshold, output);
+  output.status = "measured";
+  return output;
+}
+
 
 #define HI4bit(w) static_cast<BYTE>((w >> 4) & 0x0F)
 #define LO4bit(w) static_cast<BYTE>(w & 0x0F)
@@ -199,40 +747,58 @@ void FindObject::setrect(int ix, int iy, int iw, int ih) {
 }
 void FindObject::drawshape() { Shape::drawshape(); }
 int FindObject::getresultcentx(int inum) {
-  if (inum >= 0 && inum < m_rectresults.size())
-    return m_rectresults.getrect(inum).BottomRight().X();
-  else
-    return 0;
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return static_cast<int>(std::lround(measurement->centroid_px.x));
+  if (inum >= 0 && inum < m_rectresults.size()) {
+    const gp_Rectangle rect = m_rectresults.getrect(inum);
+    return static_cast<int>(std::lround(
+        0.5 * (rect.TopLeft().X() + rect.BottomRight().X())));
+  }
+  return 0;
 }
 int FindObject::getresultcenty(int inum) {
-  if (inum >= 0 && inum < m_rectresults.size())
-    return m_rectresults.getrect(inum).BottomRight().Y();
-  else
-    return 0;
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return static_cast<int>(std::lround(measurement->centroid_px.y));
+  if (inum >= 0 && inum < m_rectresults.size()) {
+    const gp_Rectangle rect = m_rectresults.getrect(inum);
+    return static_cast<int>(std::lround(
+        0.5 * (rect.TopLeft().Y() + rect.BottomRight().Y())));
+  }
+  return 0;
 }
 int FindObject::getresultx(int inum) {
-  if (inum < m_rectresults.size() && inum >= 0)
-    return m_rectresults.getrect(inum).BottomRight().X();
-  else
-    return 0;
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return measurement->bbox_px.x;
+  if (inum >= 0 && inum < m_rectresults.size())
+    return static_cast<int>(m_rectresults.getrect(inum).TopLeft().X());
+  return 0;
 }
 int FindObject::getresulty(int inum) {
-  if (inum < m_rectresults.size() && inum >= 0)
-    return m_rectresults.getrect(inum).BottomRight().Y();
-  else
-    return 0;
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return measurement->bbox_px.y;
+  if (inum >= 0 && inum < m_rectresults.size())
+    return static_cast<int>(m_rectresults.getrect(inum).TopLeft().Y());
+  return 0;
 }
 int FindObject::getresultw(int inum) {
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return measurement->bbox_px.width;
   if (inum >= 0 && inum < m_rectresults.size())
-    return m_rectresults.getrect(inum).Width();
-  else
-    return 0;
+    return static_cast<int>(m_rectresults.getrect(inum).Width()) + 1;
+  return 0;
 }
 int FindObject::getresulth(int inum) {
+  const FindObjectMeasurementSnapshot *measurement = getmeasurement(inum);
+  if (measurement != nullptr && measurement->status == "measured")
+    return measurement->bbox_px.height;
   if (inum >= 0 && inum < m_rectresults.size())
-    return m_rectresults.getrect(inum).Height();
-  else
-    return 0;
+    return static_cast<int>(m_rectresults.getrect(inum).Height()) + 1;
+  return 0;
 }
 int FindObject::getresultsize(int inum) {
   if (inum >= 0 && inum < m_rectresults.size() &&
@@ -253,6 +819,293 @@ int FindObject::getdebugmaxcomponenth() { return m_debug_max_component_h; }
 const std::string &FindObject::getdebugalgorithmbranch() const {
   return m_debug_algorithm_branch;
 }
+void FindObject::setgeometrycalibration(double pixel_size_x,
+                                            double pixel_size_y)
+{
+  m_measurement_config.pixel_size_x =
+      pixel_size_x > 0.0 ? pixel_size_x : 1.0;
+  m_measurement_config.pixel_size_y =
+      pixel_size_y > 0.0 ? pixel_size_y : 1.0;
+}
+
+void FindObject::setgeometryconnectivity(int connectivity)
+{
+  m_measurement_config.connectivity = connectivity == 4 ? 4 : 8;
+}
+
+void FindObject::setmeasurementselection(int index)
+{
+  m_measurement_selection = std::max(0, index);
+}
+
+void FindObject::setshowboundary(int enabled)
+{
+  m_show_boundary = enabled != 0;
+}
+
+void FindObject::setshowmomentellipse(int enabled)
+{
+  m_show_moment_ellipse = enabled != 0;
+}
+
+void FindObject::setshowferet(int enabled)
+{
+  m_show_feret = enabled != 0;
+}
+
+void FindObject::setshowgeometrycircles(int enabled)
+{
+  m_show_geometry_circles = enabled != 0;
+}
+void FindObject::setbackgroundmethod(int method)
+{
+  if (method <= 0)
+    m_measurement_config.background_method = FindObjectBackgroundMethod::None;
+  else if (method == 1)
+    m_measurement_config.background_method =
+        FindObjectBackgroundMethod::RoiBorderRobust;
+  else
+    m_measurement_config.background_method =
+        FindObjectBackgroundMethod::MorphologicalOpening;
+}
+
+void FindObject::setbackgroundborderwidth(int pixels)
+{
+  m_measurement_config.background_border_width_px = std::max(1, pixels);
+}
+
+void FindObject::setbackgroundmorphologyradius(int pixels)
+{
+  m_measurement_config.background_morphology_radius_px = std::max(1, pixels);
+}
+
+void FindObject::setsubpixelenabled(int enabled)
+{
+  m_measurement_config.subpixel_enabled = enabled != 0;
+}
+
+void FindObject::setsubpixelminimumgradient(double gradient)
+{
+  m_measurement_config.subpixel_minimum_gradient = std::max(0.0, gradient);
+}
+
+void FindObject::setsubpixelisothreshold(double threshold)
+{
+  m_measurement_config.subpixel_iso_threshold = threshold;
+}
+
+void FindObject::setactivegeometrybasis(int basis)
+{
+  m_active_geometry_basis = basis == 1 ? 1 : 0;
+}
+
+int FindObject::getmeasurementcount()
+{
+  return static_cast<int>(m_measurements.size());
+}
+
+const FindObjectMeasurementSnapshot *
+FindObject::getmeasurement(int index) const
+{
+  if (index < 0 || index >= static_cast<int>(m_measurements.size()))
+    return nullptr;
+  return &m_measurements[static_cast<std::size_t>(index)];
+}
+
+double FindObject::getarea(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->projected_area : 0.0;
+}
+
+double FindObject::getperimeter(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->gwyddion_perimeter : 0.0;
+}
+
+double FindObject::getequivalentside(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->equivalent_side : 0.0;
+}
+
+double FindObject::getcircularity(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->circularity : 0.0;
+}
+
+double FindObject::getsolidity(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->solidity : 0.0;
+}
+
+double FindObject::getmajoraxis(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->major_axis_length : 0.0;
+}
+
+double FindObject::getminoraxis(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->minor_axis_length : 0.0;
+}
+
+double FindObject::getorientation(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->orientation_deg : 0.0;
+}
+
+double FindObject::getferetmax(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->feret_max : 0.0;
+}
+
+double FindObject::getferetmin(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->feret_min : 0.0;
+}
+
+double FindObject::getinscribedradius(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->inscribed_circle_radius : 0.0;
+}
+
+double FindObject::getenclosingradius(int index)
+{
+  const auto *value = getmeasurement(index);
+  return value != nullptr ? value->enclosing_circle_radius : 0.0;
+}
+void FindObject::StoreAcceptedLabelMask(
+    const cv::Mat &labels, int label, int service_id,
+    int origin_x, int origin_y)
+{
+  if (g_pmapimage == nullptr || labels.empty() ||
+      service_id <= 0 || service_id > 255)
+    return;
+  for (int y = 0; y < labels.rows; ++y)
+  {
+    const int *row = labels.ptr<int>(y);
+    for (int x = 0; x < labels.cols; ++x)
+    {
+      if (row[x] == label)
+        SetMAP_service(origin_x + x, origin_y + y, service_id);
+    }
+  }
+}
+
+void FindObject::RefreshGeometryMeasurements(Image &image)
+{
+  m_measurements.clear();
+  ++m_measurement_generation;
+
+  m_measurements.reserve(m_scanid.size());
+  const int roi_x = static_cast<int>(rect().TopLeft().X());
+  const int roi_y = static_cast<int>(rect().TopLeft().Y());
+  const int roi_w = static_cast<int>(rect().Width());
+  const int roi_h = static_cast<int>(rect().Height());
+
+  for (int object_index = 0;
+       object_index < static_cast<int>(m_scanid.size());
+       ++object_index)
+  {
+    FindObjectMeasurementSnapshot unavailable;
+    unavailable.object_index = object_index;
+    unavailable.component_label = m_scanid[object_index];
+
+    const int service_id = m_scanid[object_index];
+    if (g_pmapimage == nullptr || service_id <= 0 || service_id > 255 ||
+        roi_w <= 0 || roi_h <= 0)
+    {
+      unavailable.status = service_id > 255
+                               ? "component_label_overflow"
+                               : "component_mask_unavailable";
+      m_measurements.push_back(std::move(unavailable));
+      continue;
+    }
+
+    int min_x = roi_x + roi_w;
+    int min_y = roi_y + roi_h;
+    int max_x = roi_x - 1;
+    int max_y = roi_y - 1;
+    for (int y = roi_y; y < roi_y + roi_h; ++y)
+    {
+      for (int x = roi_x; x < roi_x + roi_w; ++x)
+      {
+        if (MAP_service(x, y) != service_id)
+          continue;
+        min_x = std::min(min_x, x);
+        min_y = std::min(min_y, y);
+        max_x = std::max(max_x, x);
+        max_y = std::max(max_y, y);
+      }
+    }
+    if (max_x < min_x || max_y < min_y)
+    {
+      unavailable.status = "component_mask_empty";
+      m_measurements.push_back(std::move(unavailable));
+      continue;
+    }
+
+    cv::Mat mask(max_y - min_y + 1, max_x - min_x + 1,
+                 CV_8UC1, cv::Scalar(0));
+    for (int y = min_y; y <= max_y; ++y)
+    {
+      uchar *row = mask.ptr<uchar>(y - min_y);
+      for (int x = min_x; x <= max_x; ++x)
+      {
+        if (MAP_service(x, y) == service_id)
+          row[x - min_x] = 255;
+      }
+    }
+
+    FindObjectMeasurementSnapshot measured =
+        AnalyzeGeometry(mask, cv::Point(min_x, min_y), image.getmat(),
+                        m_measurement_config);
+    measured.object_index = object_index;
+    measured.component_label = service_id;
+    measured.background_method = m_last_background_method;
+    measured.background_valid = m_last_background_valid;
+    measured.background_sample_count = m_last_background_sample_count;
+    measured.background_baseline_mean = m_last_background_baseline_mean;
+    measured.residual_threshold = m_last_residual_threshold;
+    measured.segmentation_domain = m_last_segmentation_domain;
+    measured.active_geometry_basis =
+        (m_active_geometry_basis == 1 && measured.subpixel_valid)
+            ? "subpixel"
+            : "gw_discrete";
+    measured.generation = m_measurement_generation;
+    std::uint64_t mask_hash = 1469598103934665603ULL;
+    for (int mask_y = 0; mask_y < mask.rows; ++mask_y)
+    {
+      const uchar* mask_row = mask.ptr<uchar>(mask_y);
+      for (int mask_x = 0; mask_x < mask.cols; ++mask_x)
+      {
+        mask_hash ^= static_cast<std::uint64_t>(mask_row[mask_x]);
+        mask_hash *= 1099511628211ULL;
+      }
+    }
+    measured.mask_hash = mask_hash;
+    measured.object_ref =
+        "findobject:g" + std::to_string(measured.generation) +
+        ":label" + std::to_string(service_id) +
+        ":bbox" + std::to_string(measured.bbox_px.x) + "," +
+        std::to_string(measured.bbox_px.y) + "," +
+        std::to_string(measured.bbox_px.width) + "," +
+        std::to_string(measured.bbox_px.height) +
+        ":mask" + std::to_string(measured.mask_hash);
+
+    m_measurements.push_back(std::move(measured));
+  }
+}
+
 bool FindObject::RefreshAlgorithmRuntimeResources(int image_width,
                                                   int image_height) {
   if (!ImageManager::EnsureAlgorithmRuntimeResources(image_width, image_height))
@@ -273,6 +1126,8 @@ void FindObject::FinalizeRegionGrowthDebugCounters() {
       (m_debug_component_count > m_debug_accepted_count)
           ? (m_debug_component_count - m_debug_accepted_count)
           : 0;
+  if (m_pgetimage != nullptr)
+    RefreshGeometryMeasurements(*m_pgetimage);
 }
 void FindObject::ObserveDebugComponent(int area, int width, int height) {
   if (area > m_debug_max_component_area) {
@@ -400,6 +1255,7 @@ void FindObject::setsearchtype(int itype) {
 void FindObject::Measure(Image &image) {
   m_debug_algorithm_branch = "region_growth";
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
     return;
   if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
@@ -946,6 +1802,7 @@ void FindObject::Measure(Image &image) {
 void FindObject::MeasureFast(Image &image) {
   m_debug_algorithm_branch = "region_growth_fast";
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
     return;
   if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
@@ -1493,7 +2350,10 @@ void FindObject::MeasureConnectedComponents(Image &image) {
                                  ? "connected_components_selection_mask"
                                  : "connected_components";
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
+    return;
+  if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
     return;
   if (image.getWidth() < rect().TopLeft().X() + rect().Width() ||
       image.getHeight() < rect().TopLeft().Y() + rect().Height())
@@ -1537,6 +2397,17 @@ void FindObject::MeasureConnectedComponents(Image &image) {
     cv::extractChannel(roi, channel, 0);
   if (channel.depth() != CV_8U)
     channel.convertTo(channel, CV_8U);
+  const FindObjectBackgroundBuild background =
+      BuildFindObjectBackgroundResidual(channel, m_measurement_config);
+  if (!background.residual.empty())
+    channel = background.residual;
+  m_last_background_method = background.method;
+  m_last_background_valid = background.valid;
+  m_last_background_sample_count = background.sample_count;
+  m_last_background_baseline_mean = background.baseline_mean;
+  m_last_residual_threshold = static_cast<double>(m_imagethre);
+  m_last_segmentation_domain =
+      background.corrected ? "background_corrected_residual" : "raw_intensity";
 
   int nScanerID = 1;
   cv::Mat selection_mask;
@@ -1607,20 +2478,25 @@ void FindObject::MeasureConnectedComponents(Image &image) {
     // Connected components must receive a real binary foreground mask.  A
     // JPEG background is often non-zero, so comparing against 0 incorrectly
     // turns the entire ROI into one white component.
-    const int foreground_threshold = std::max(0, std::min(255, m_imagethre));
+    const double foreground_threshold =
+        static_cast<double>(std::max(0, std::min(255, m_imagethre)));
     if (is_white_region) {
       cv::threshold(channel, mask, foreground_threshold, 255,
                     cv::THRESH_BINARY);
     } else {
-      cv::threshold(channel, mask, foreground_threshold, 255,
+      const double dark_threshold =
+          background.corrected ? -foreground_threshold : foreground_threshold;
+      cv::threshold(channel, mask, dark_threshold, 255,
                     cv::THRESH_BINARY_INV);
     }
+    if (mask.depth() != CV_8U)
+      mask.convertTo(mask, CV_8U);
 
     cv::Mat labels;
     cv::Mat stats;
     cv::Mat centroids;
     const int component_count = cv::connectedComponentsWithStats(
-        mask, labels, stats, centroids, 8, CV_32S);
+        mask, labels, stats, centroids, m_measurement_config.connectivity, CV_32S);
     for (int label = 1; label < component_count; ++label) {
       if (accept_component(stats.at<int>(label, cv::CC_STAT_LEFT),
                            stats.at<int>(label, cv::CC_STAT_TOP),
@@ -1630,6 +2506,8 @@ void FindObject::MeasureConnectedComponents(Image &image) {
                            cv::Point2d(centroids.at<double>(label, 0),
                                        centroids.at<double>(label, 1)),
                            is_white_region)) {
+
+        StoreAcceptedLabelMask(labels, label, nScanerID - 1, ix, iy);
         if (selection_mask_mode) {
           selection_mask.setTo(cv::Scalar(255), labels == label);
         }
@@ -1642,6 +2520,8 @@ void FindObject::MeasureConnectedComponents(Image &image) {
   if (m_iborw == 2 || m_iborw == 3 ||
       (selection_mask_mode && !select_white_mask))
     run_connected_components(false);
+
+  FinalizeRegionGrowthDebugCounters();
 
   if (selection_mask_mode) {
     for (int y = 0; y < selection_mask.rows; ++y) {
@@ -1674,7 +2554,7 @@ FindObject::DetectPeakSeeds(const cv::Mat &distance_map,
 
   cv::Mat labels, stats, centroids;
   int n_labels = cv::connectedComponentsWithStats(peak_mask, labels, stats,
-                                                  centroids, 8, CV_32S);
+                                                  centroids, m_measurement_config.connectivity, CV_32S);
 
   for (int i = 1; i < n_labels; ++i) {
     int area = stats.at<int>(i, cv::CC_STAT_AREA);
@@ -1877,7 +2757,10 @@ void FindObject::AcceptPeakComponent(int local_x, int local_y, int comp_w,
 void FindObject::MeasurePeakLocalBFS(Image &image) {
   m_debug_algorithm_branch = "peak_local_bfs_component_candidates";
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
+    return;
+  if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
     return;
 
   int iw = rect().Width();
@@ -1926,18 +2809,35 @@ void FindObject::MeasurePeakLocalBFS(Image &image) {
     cv::extractChannel(roi, channel, 0);
   if (channel.depth() != CV_8U)
     channel.convertTo(channel, CV_8U);
+  const FindObjectBackgroundBuild background =
+      BuildFindObjectBackgroundResidual(channel, m_measurement_config);
+  if (!background.residual.empty())
+    channel = background.residual;
+  m_last_background_method = background.method;
+  m_last_background_valid = background.valid;
+  m_last_background_sample_count = background.sample_count;
+  m_last_background_baseline_mean = background.baseline_mean;
+  m_last_residual_threshold = static_cast<double>(m_imagethre);
+  m_last_segmentation_domain =
+      background.corrected ? "background_corrected_residual" : "raw_intensity";
 
   const auto process_region = [&](bool is_white_region) {
     cv::Mat binary;
+    const double foreground_threshold =
+        static_cast<double>(std::max(0, std::min(255, m_imagethre)));
     if (is_white_region)
-      cv::threshold(channel, binary, 0, 255, cv::THRESH_BINARY);
+      cv::threshold(channel, binary, foreground_threshold, 255,
+                    cv::THRESH_BINARY);
     else
-      cv::threshold(channel, binary, 254, 255, cv::THRESH_BINARY_INV);
-    binary.convertTo(binary, CV_8U);
-
+      cv::threshold(channel, binary,
+                    background.corrected ? -foreground_threshold
+                                         : foreground_threshold,
+                    255, cv::THRESH_BINARY_INV);
+    if (binary.depth() != CV_8U)
+      binary.convertTo(binary, CV_8U);
     cv::Mat labels, stats, centroids;
     int n_labels = cv::connectedComponentsWithStats(binary, labels, stats,
-                                                    centroids, 8, CV_32S);
+                                                    centroids, m_measurement_config.connectivity, CV_32S);
 
     if (n_labels <= 1)
       return;
@@ -1977,8 +2877,11 @@ void FindObject::MeasurePeakLocalBFS(Image &image) {
         }
 
         if (edge_ok) {
+          const int accepted_before = m_iobjnum;
           AcceptPeakComponent(bb_x, bb_y, bb_w, bb_h, comp_area,
                               is_white_region);
+          if (m_iobjnum > accepted_before && !m_scanid.empty())
+            StoreAcceptedLabelMask(labels, i, m_scanid.back(), ix, iy);
         } else {
           m_debug_rejected_count++;
         }
@@ -1996,6 +2899,8 @@ void FindObject::MeasurePeakLocalBFS(Image &image) {
 
   if (run_black)
     process_region(false);
+
+  FinalizeRegionGrowthDebugCounters();
 }
 
 void FindObject::MeasureGrid(Grid *pgrid) {}
@@ -2114,6 +3019,7 @@ void FindObject::setminmaxarea(int imin, int imax) {
 }
 void FindObject::MeasureX(Image &image) {
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
     return;
   if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
@@ -2369,6 +3275,7 @@ void FindObject::MeasureX(Image &image) {
 
 void FindObject::MeasureXFast(Image &image) {
   m_pgetimage = &image;
+  m_measurements.clear();
   if (image.getmat().empty())
     return;
   if (!RefreshAlgorithmRuntimeResources(image.getWidth(), image.getHeight()))
@@ -2664,8 +3571,10 @@ int FindObject::getobjectgridw() { return m_icopyw; }
 int FindObject::getobjectgridh() { return m_icopyh; }
 
 void FindObject::setbackground(int iedge, int ibackgroundmethod) {
-  m_background_edge = iedge;
+  m_background_edge = std::max(1, iedge);
   m_background_method = ibackgroundmethod;
+  setbackgroundborderwidth(m_background_edge);
+  setbackgroundmethod(m_background_method);
 }
 void FindObject::resultsrectfilter() { m_rectresults.removecontains_c(); }
 void FindObject::objectgrid(void *pimage) {}
@@ -2793,13 +3702,20 @@ void FindObject::PublishDisplayShapes(
                      "setrect", "roi", true, false, std::move(roi_shape));
   }
 
-  for (int i = 0; i < m_rectresults.size(); ++i)
+  for (int i = 0; i < static_cast<int>(m_rectresults.size()); ++i)
   {
+    const FindObjectMeasurementSnapshot *measurement = getmeasurement(i);
+    const bool measured =
+        measurement != nullptr && measurement->status == "measured";
     const gp_Rectangle found = m_rectresults.getrect(i);
-    const double rx = found.TopLeft().X();
-    const double ry = found.TopLeft().Y();
-    const double rw = found.Width();
-    const double rh = found.Height();
+    const double rx =
+        measured ? measurement->bbox_px.x : found.TopLeft().X();
+    const double ry =
+        measured ? measurement->bbox_px.y : found.TopLeft().Y();
+    const double rw =
+        measured ? measurement->bbox_px.width : found.Width();
+    const double rh =
+        measured ? measurement->bbox_px.height : found.Height();
     if (rw <= 0.0 || rh <= 0.0)
       continue;
     auto result_shape = std::make_unique<RectShape>();
@@ -2807,5 +3723,91 @@ void FindObject::PublishDisplayShapes(
     sink.UpsertShape(owner_ref + ".result_rect." + std::to_string(i),
                      "FindObject", owner_ref, "result", "result",
                      false, true, std::move(result_shape));
+
+    if (!measured)
+      continue;
+    if (i != m_measurement_selection)
+      continue;
+
+    if (m_show_boundary && !measurement->outer_boundary.empty())
+    {
+      auto boundary = std::make_unique<PolylineShape>();
+      for (const cv::Point2d &point : measurement->outer_boundary)
+        boundary->addPoint(point.x, point.y);
+      boundary->close(true);
+      sink.UpsertShape(owner_ref + ".boundary." + std::to_string(i),
+                       "FindObject", owner_ref, "boundary", "boundary",
+                       false, true, std::move(boundary));
+    }
+    for (int hole_index = 0;
+         m_show_boundary &&
+         hole_index < static_cast<int>(measurement->hole_boundaries.size());
+         ++hole_index)
+    {
+      auto hole = std::make_unique<PolylineShape>();
+      for (const cv::Point2d &point :
+           measurement->hole_boundaries[hole_index])
+        hole->addPoint(point.x, point.y);
+      hole->close(true);
+      sink.UpsertShape(
+          owner_ref + ".boundary_hole." + std::to_string(i) + "." +
+              std::to_string(hole_index),
+          "FindObject", owner_ref, "boundary_hole", "boundary_hole",
+          false, true, std::move(hole));
+    }
+
+    const bool isotropic =
+        std::abs(measurement->pixel_size_x -
+                 measurement->pixel_size_y) < 1e-12;
+    if (m_show_moment_ellipse && measurement->moment_ellipse_valid && isotropic)
+    {
+      const double scale = measurement->pixel_size_x;
+      auto ellipse = std::make_unique<EllipseShape>(
+          measurement->centroid_px.x, measurement->centroid_px.y,
+          measurement->major_axis_length / scale,
+          measurement->minor_axis_length / scale,
+          measurement->orientation_deg);
+      sink.UpsertShape(owner_ref + ".moment_ellipse." + std::to_string(i),
+                       "FindObject", owner_ref, "moment_ellipse", "ellipse",
+                       false, true, std::move(ellipse));
+    }
+    if (m_show_feret && measurement->feret_max > 0.0)
+    {
+      auto feret = std::make_unique<PolylineShape>();
+      feret->addPoint(
+          measurement->feret_max_p0.x / measurement->pixel_size_x,
+          measurement->feret_max_p0.y / measurement->pixel_size_y);
+      feret->addPoint(
+          measurement->feret_max_p1.x / measurement->pixel_size_x,
+          measurement->feret_max_p1.y / measurement->pixel_size_y);
+      feret->close(false);
+      sink.UpsertShape(owner_ref + ".feret_max." + std::to_string(i),
+                       "FindObject", owner_ref, "feret_max", "line",
+                       false, true, std::move(feret));
+    }
+    if (m_show_geometry_circles && measurement->inscribed_circle_valid && isotropic)
+    {
+      auto circle = std::make_unique<CircleShape>(
+          measurement->inscribed_circle_center_px.x,
+          measurement->inscribed_circle_center_px.y,
+          measurement->inscribed_circle_radius /
+              measurement->pixel_size_x);
+      sink.UpsertShape(
+          owner_ref + ".inscribed_circle." + std::to_string(i),
+          "FindObject", owner_ref, "inscribed_circle", "circle",
+          false, true, std::move(circle));
+    }
+    if (m_show_geometry_circles && measurement->enclosing_circle_valid && isotropic)
+    {
+      auto circle = std::make_unique<CircleShape>(
+          measurement->enclosing_circle_center_px.x,
+          measurement->enclosing_circle_center_px.y,
+          measurement->enclosing_circle_radius /
+              measurement->pixel_size_x);
+      sink.UpsertShape(
+          owner_ref + ".enclosing_circle." + std::to_string(i),
+          "FindObject", owner_ref, "enclosing_circle", "circle",
+          false, true, std::move(circle));
+    }
   }
 }

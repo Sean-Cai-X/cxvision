@@ -1,0 +1,1534 @@
+
+  请理解以下gwyddion的关于晶粒测量工具（Grain Measurement Tool）的关键阐述,D:\形状的几何数学描述0.png,D:\形状的几何数学
+  描述1.png,D:\形状的几何数学描述2.png,D:\形状的几何数学描述3.png,结合当前的FindObject的测量工具的现状给出当前
+  FindObject的形状几何的重构和测量的补充的流程和具体细节
+  外形特征可以分为三大类：
+1. 晶粒形状（Grain Properties）
+这类特征描述了晶粒的几何轮廓和内部分布的统计特征。
+
+最小/最大/平均值 (Min/Max/Mean)：
+这些统计量用于描述晶粒内某一属性（如灰度值、颜色强度等）的分布范围和中心趋势。例如，平均灰度值可以代表晶粒的平均“亮度”。
+偏度 (Skewness)：
+这是一个统计学概念，衡量数据分布的不对称性。如果偏度为零，说明数据分布是完美的对称的（如一个完美的圆形）。偏度值指示了晶粒的形状是否偏向于某一侧。
+2. 面积相关属性（Area-related properties）
+这类特征直接描述了晶粒在图像中的空间大小。
+
+面积 (Area)： 最基本的特征，指晶粒所占据的像素数量。
+等效边长 (Equivalent side)： 通过将晶粒的面积转换为一个假设为正方形的边长，来提供一个直观的、可比的尺寸指标。
+表面积 (Surface area)： 适用于三维数据或高度信息数据，描述晶粒的实际表面范围。
+3. 边界相关属性（Boundary-related properties）
+这类特征描述了晶粒的轮廓复杂性和外形几何。
+
+轮廓周长 (Perimeter)： 晶粒的边界线总长度。
+边界距离 (Boundary distance)： 这类指标（如最短/最长边界距离）用于描述晶粒在二维或三维空间中的“延伸”程度和不规则性。
+对角线相关指标 (Diagonal related properties)：
+这些指标（如最小/最大对角线距离）用于衡量晶粒的最大跨度和形状的紧凑度。如果晶粒是一个紧凑的圆形，其最小/最大对角线距离会接近。
+
+边界的数学构建与计算,边界构建（Boundary Construction）,更高级的几何分析（高阶参数）
+通过拟合出的椭圆，可以提取出极其精确的几何参数，这些参数远比简单的“平均面积”更有信息量。
+关键输出： 通过拟合出的椭圆，可以确定：
+长轴和短轴的长度（Major and Minor axes）： 这两个参数直接量化了晶粒的“拉伸度”和“不规则性”。
+长轴方向（Orientation）： 椭圆的长轴相对于水平轴的角度，这给出了晶粒的取向角（Orientation）。
+像素贡献法（Pixel Configuration）： 边界的长度是通过计算构成边界的每个像素点对总长度的贡献来累加的。
+多边形近似： 最终的边界曲线通常被近似为一个多边形（Polygon），这样就可以使用传统的几何公式（如欧几里得距离）来计算它的周长、面积和各种几何参数。
+关键输出： 边界的长度（周长）、边界的几何形状参数等
+斜率相关属性（Slope-related properties）：
+倾斜度 (Inclination)： 测量晶粒表面相对于水平面的坡度。这在分析晶体生长过程中表面的粗糙度和倾斜方向时非常有用。
+曲率相关属性（Curvature-related properties）：
+曲率 (Curvature)： 测量晶粒表面在特定点上的弯曲程度。曲率可以告诉我们该点的表面是“凸起”（山峰）还是“凹陷”（盆地），这对于理解晶体生长动力学至关重要。
+曲率中心 (Curvature centre)： 描述了曲率的中心位置，这有助于定位晶粒的几何中心。
+些对于后续的物态几何描述和拟合是推进的关键
+以上参数和功能完善到FindObject,先将物态证据链路的关键证据环节完善是推进的第一步,完整了解FindObject当前功能和函数后,
+思考一下列出在当前功能基础上的扩展思路和细节流程(关键是在界面上Key Parameter controls中要将以上FindObject参数显示且提供人工调节和分析)
+
+
+当前 FindObject 本质上仍是“ROI 内二值连通域检测器”，还不是完整的“物态形状测量工具”。最合理的推进顺序是先统一对象
+  几何语义并建立逐对象测量证据，再扩展 Key Parameter Controls；否则周长、中心、椭圆和曲率会建立在当前不一致的 bbox 定义
+  上。
+
+  四张 PNG 位于 D:\ 根目录，codex-lan-agent 仍返回 path is outside allowed
+  roots，因此本轮没有绕过网关直接读取图片。下面依据你给出的图片阐述、仓库代码和 Gwyddion
+  官方定义完成方案。官方文档确认：Gwyddion
+  将投影面积、等效正方形边长、等效圆半径、凸包面积、边界长度、包围尺寸、内接圆/外接圆、Martin
+  直径、坡度、曲率和二阶矩等作为不同类别的独立量。Gwyddion Grain Analysis
+  (https://gwyddion.net/documentation/user-guide-en/grain-analysis.html)
+
+  ## 一、FindObject 当前真实能力
+
+   环节        当前实现                                               主要缺口
+  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   对象发现    原始区域增长、优化区域增长、OpenCV 连通域、Peak/BFS    分支间 bbox 与过滤语义不统一
+               多分支
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   参数        ROI、前景模式、阈值、最小/最大面积、最小/最大宽高、    UI 主要只显示 ROI、前景模式、阈值、最小面积
+               边缘过滤、搜索距离
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   对象结果    RectsShape、像素数、组件计数、最大组件面积/宽/高       没有逐对象统一结果结构
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   边界        Edge() 按每一行取最左/最右像素                         这是横向弦段集合，不是有序闭合边界
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   几何        bbox、近似中心、像素面积                               无轮廓、周长、凸包、椭圆、方向、紧凑度
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   显示        ROI 和不可编辑结果矩形                                 无边界、多边形、椭圆轴、内接/外接圆
+  ──────────  ─────────────────────────────────────────────────────  ───────────────────────────────────────────────────
+   证据        结果数、top1 bbox、组件统计、算法分支                  无逐对象 measurements、boundary、单位、有效性原因
+
+  现有主要入口可见于 cximage/FindObject.h:41，Parser 绑定位于 cximage/ParserClass.cpp:1265。
+
+  当前还存在三个 P0 级语义问题：
+
+  1. getresultcentx/y() 实际返回 BottomRight，getresultx/y()也返回 BottomRight，名称与含义明显不一致，cximage/
+     FindObject.cpp:209。
+
+  2. 区域增长使用 max-min 作为宽高；OpenCV 连通域得到的是包含端点的 width/height，当前又通过 comp_w-1 做过滤，cximage/
+     FindObject.cpp:1538。同一个物体可能因算法分支不同而出现一像素差异。
+
+  3. PublishDisplayShapes() 只投影 ROI 和结果矩形，cximage/FindObject.cpp:2779；Headless 捕获也只有聚合组件计数和 top1
+     bbox，cximage/CxScriptRuntimeResultCapture.cpp:834。
+
+  此外，MeasureGrid()、objectgrid()、关系矩形方法、drawshapex()及部分 ImageROI 方法仍为空实现，不能作为现有测量能力计
+  算。
+
+  ## 二、目标执行链
+
+  建议把所有检测算法收敛到同一条后处理链：
+
+  原图/高度图 + ROI + 检测参数
+          ↓
+  明确生成二值 mask
+          ↓
+  任一组件发现分支
+          ↓
+  统一 ComponentSnapshot
+    label + mask + bbox + pixel runs
+          ↓
+  Boundary Construction
+    外边界 + 内孔 + 等效多边形
+          ↓
+  统一 Geometry Measurement
+          ↓
+  逐对象不可变 MeasurementSnapshot
+          ↓
+  Parser getters / GUI / Headless / Evidence
+
+  关键点是：Measure、MeasureFast、MeasureConnectedComponents、MeasurePeakLocalBFS只负责产生组件，不再分别拼装结果框和过
+  滤统计。所有组件进入同一个 FinalizeComponents()，这样不同算法对同一 mask 必须得到相同测量值。
+
+  ## 三、第一阶段：统一几何定义
+
+  ### 1. 坐标和 bbox
+
+  统一使用：
+
+  - 像素索引：整数 (x,y)；
+  - 像素中心：(x+0.5,y+0.5)；
+  - bbox：半开区间 [x0,x1) × [y0,y1)；
+  - width=x1-x0=max_x-min_x+1；
+  - 质心使用 double，不得强制转整数；
+  - 物理坐标使用 origin + pixel_center × pixel_size。
+
+  保留现有错误语义 getter 作为 legacy，新增明确接口：
+
+  getresultleft(i)
+  getresulttop(i)
+  getresultwidth(i)
+  getresultheight(i)
+  getresultcenterx(i)
+  getresultcentery(i)
+
+  不建议直接改变旧 getter 行为，以免破坏已有 cxscript。
+
+  ### 2. 组件身份
+
+  每个对象建立稳定但仅限本次运行的 object_ref：
+
+  owner_ref + measurement_generation + bbox + component_mask_hash
+
+  显示名称可以是：
+
+  FindObject result 1
+  FindObject result 2
+
+  内部不得仅依赖排序后的数组序号。参数变化导致组件 mask 改变时，旧结果标记 stale=true，不得假装仍是同一个测量结果。
+
+  ## 四、测量量与数学定义
+
+  ### 1. 值分布
+
+  对原始强度或真实高度场在组件 mask 内计算：
+
+  min
+  max
+  mean
+  median
+  RMS/stddev
+  skewness
+  boundary_min
+  boundary_max
+
+  其中：
+
+  [
+  \mu_k=\frac1N\sum_i(z_i-\bar z)^k,\qquad
+  \sigma=\sqrt{\mu_2},\qquad
+  \gamma_1=\frac{\mu_3}{\mu_2^{3/2}}
+  ]
+
+  需要修正一个概念：这里的偏度描述的是灰度/高度值分布的不对称，不代表二维轮廓是否接近圆。Gwyddion也把偏度定义为高度分布
+  的三阶中心矩。Gwyddion Statistical Analysis
+  (https://www.gwyddion.net/documentation/user-guide-en/statistical-analysis.html)
+
+  二维外形不对称应另设：
+
+  shape_third_moment_x
+  shape_third_moment_y
+  Hu moments
+  reflection_asymmetry（后续）
+
+  ### 2. 面积
+
+  pixel_area          = N
+  projected_area      = N · sx · sy
+  equivalent_side     = √A
+  equivalent_radius   = √(A/π)
+  equivalent_diameter = 2√(A/π)
+  convex_hull_area
+  solidity            = A / A_hull
+
+  pixel_area作为离散 mask 的规范面积；多边形面积另记为 polygon_area，用于边界一致性检查，不能悄悄替代 pixel area。
+
+  ### 3. 边界构建与周长
+
+  输出两套明确命名的周长：
+
+  - perimeter_pixel_lut：Gwyddion 风格的 2×2 像素配置贡献法；
+  - perimeter_polygon：Marching Squares/等效多边形后的欧氏线段长度。
+
+  Gwyddion 的像素配置法按局部四像素组合累加 h/2、h、hy、hx 等贡献，并使这些贡献一一对应等效多边形线段。官方边界定义
+  (https://gwyddion.net/documentation/user-guide-en/grain-analysis.html)
+
+  同时保存：
+
+  outer_boundary
+  inner_holes[]
+  outer_perimeter
+  hole_perimeter
+  total_perimeter
+  boundary_point_count
+  polygon_simplification_error
+
+  默认测量外边界；若启用孔洞分析，则额外报告总边界长度，避免二者混淆。
+
+  ### 4. 边界距离与形态量
+
+  第一批应加入：
+
+  minimum_feret_diameter + angle
+  maximum_feret_diameter + angle
+  maximum_inscribed_radius + centre
+  minimum_enclosing_radius + centre
+  mean_boundary_radius
+  circularity = 4πA/P²
+  convexity = P_hull/P
+  rectangularity = A/(minAreaRect width·height)
+
+  实现方式：
+
+  - 凸包与 Feret 尺寸：凸包 + rotating calipers；
+  - 最大内接圆：组件 mask 的 Euclidean distance transform；
+  - 最小外接圆：minEnclosingCircle；
+  - 平均半径：从质心到等弧长重采样边界的距离均值；
+  - Martin 直径放到第二批，因为它要求对每个方向求等面积中位线，对强凹形还需累计多个内部线段。
+
+  ### 5. 等效椭圆与边界拟合椭圆
+
+  必须分开两个概念：
+
+  - equivalent_moment_ellipse：与填充区域二阶矩相同；
+  - boundary_fit_ellipse：用轮廓点拟合的椭圆。
+
+  对于填充椭圆：
+
+  [
+  a=2\sqrt{\lambda_{\max}},\qquad
+  b=2\sqrt{\lambda_{\min}}
+  ]
+
+  其中 (\lambda) 是区域二维协方差矩阵特征值。像素被视为面积单元时，应加入单个像素内部方差 sx²/12、sy²/12，而不是只对像素
+  中心做离散拟合。
+
+  输出：
+
+  major_semiaxis
+  minor_semiaxis
+  major_axis_length
+  minor_axis_length
+  orientation_deg
+  aspect_ratio
+  eccentricity
+  ellipse_valid
+  orientation_valid
+
+  近圆形 a≈b 时方向物理上不稳定，应按 Gwyddion 语义置零，并设置 orientation_valid=false，不能显示一个看似精确的随机角
+  度。仓库已有 fitEllipse 和轮廓评估代码，但位于参考评估器内部，cximage/CxGeometryReferenceEvaluator.cpp:272；建议抽出通
+  用几何模块，而不是从测试代码复制一份。
+
+  ### 6. 坡度、表面积和曲率
+
+  当前 Image 只有 cv::Mat、尺寸和类型，没有 sx/sy/z_scale/unit 元数据，cximage/Image.h:41。因此这些量必须分两级：
+
+  - 普通 RGB/灰度图：只允许显示 intensity_surface_proxy，不得称为真实表面积或物理曲率；
+  - 带标定的单通道高度图：才启用物理量。
+
+  高度图测量：
+
+  - 平均平面：最小二乘拟合 z=ax+by+c；
+  - 倾角：\theta=atan(sqrt(a²+b²))；
+  - 方位角：\phi=atan2(b,a)，同时记录图像 y 轴向下还是物理 y 轴向上；
+  - 表面积：在物理 (x,y,z) 坐标中对 mask 内网格单元三角化累加；
+  - 二次曲面：拟合
+    z=c+px+qy+½(Ax²+2Bxy+Cy²)；
+
+  - 曲率中心：解 H·[x,y]ᵀ=-[p,q]ᵀ；
+  - 主曲率和方向：由曲面在中心处的形算子特征值/特征向量得到。
+
+  还应区分：
+
+  boundary_curvature_2d
+  surface_principal_curvature_1/2
+
+  二维边界曲率需要先等弧长重采样和可调平滑窗口；否则像素锯齿会产生极大的伪曲率。
+
+  ## 五、建议的数据结构
+
+  新增值语义类型，例如：
+
+  struct FindObjectMeasurementConfig;
+  struct FindObjectBoundarySnapshot;
+  struct FindObjectValueStatistics;
+  struct FindObjectAreaMetrics;
+  struct FindObjectMomentMetrics;
+  struct FindObjectSurfaceMetrics;
+  struct FindObjectMeasurementSnapshot;
+  struct FindObjectRunSnapshot;
+
+  每项高阶指标都需要：
+
+  value
+  unit
+  status = available | unavailable | invalid
+  reason
+  method
+
+  不能用零代表“没有高度图”“椭圆点数不足”或“真实测量值恰好为零”。
+
+  FindObject 内部保存 std::vector<FindObjectMeasurementSnapshot>；运行结果捕获只能在当前 Parser Runtime 生命周期内将其复
+  制成值语义证据，不能向外暴露对象、Image 或轮廓容器裸指针。现有 m_pgetimage 持久裸指针也应删除，或至少在一次 measure 完
+  成后清空。
+
+  ## 六、Key Parameter Controls 具体布局
+
+  当前面板只提供 FindObject ROI、foreground mode、binary threshold、minimum area，cximage/
+  ManualConsoleParamRegressionPanel.cpp:2922。建议改成以下五组。
+
+  ### Detection
+
+  ROI x0/y0/x1/y1
+  Algorithm branch
+  Foreground: bright/dark/both
+  Threshold
+  Connectivity: 4/8
+  Min/max pixel area
+  Min/max bbox width/height
+  Reject edge-touching + margin
+  Morphology open/close radius
+  Fill holes
+
+  ### Boundary Construction
+
+  Boundary method: Gwyddion pixel LUT / Marching Squares
+  Topology: outer only / include holes
+  Polygon simplify epsilon
+  Boundary resample spacing
+  Boundary curvature smoothing window
+
+  ### Calibration / Surface
+
+  Pixel size X
+  Pixel size Y
+  XY unit
+  Value source: gray/B/G/R/height
+  Z scale
+  Z unit
+  Surface measurement enabled
+  Plane fit robust mode
+  Quadratic fit robust mode
+
+  缺失标定时物理列显示 N/A: calibration_missing，仍可显示 px、px²。
+
+  ### Measurement Filters
+
+  采用类似 Gwyddion 的 A/B/C 条件方式：
+
+  A = area within [...]
+  B = circularity within [...]
+  C = major/minor ratio within [...]
+  Condition = A && B && C
+
+  过滤只改变“纳入分析/导出”的选择状态，不修改原始检测结果，也不根据对象名称判断 PASS/FAIL。
+
+  ### Object Results
+
+  增加逐对象可点击表：
+
+  Object | Area | Perimeter | Eq.Side | Major | Minor |
+  Angle | Circularity | Mean | Skewness | Status
+
+  点击一行后：
+
+  - 图像窗口高亮真实闭合边界；
+  - 可切换 bbox、凸包、椭圆、主轴/次轴、Feret 线、内接圆、外接圆；
+  - 右侧详情显示全部指标、公式方法、单位和有效性；
+  - 结果 Shape 全部 editable=false；
+  - 参数修改后显示 STALE — rerun required；
+  - 只有人工点击 Apply/Run 才执行，不自动触发算法或审核决定。
+
+  ## 七、证据链第一步应生成什么
+
+  不要创建平行报告体系，应扩展现有标准资产：
+
+  - result_summary.json：聚合统计和算法状态；
+  - object_state.json：完整逐对象 measurements；
+  - result_overlay.png：bbox + boundary + selected geometry；
+  - evidence_overlay.png：带对象编号和关键尺寸；
+  - variable_snapshot.json：所有 global_* 输入；
+  - snapshot.txt：人可读摘要；
+  - log.txt：发现、接受、拒绝及每种拒绝原因；
+  - 新增 object_measurements.csv：便于人工分析；
+  - 必要时新增 label_map.png、boundary_geometry.json。
+
+  object_state.json 至少应包含：
+
+  schema_version
+  source_image_hash
+  roi
+  algorithm_branch
+  threshold/connectivity/filter params
+  calibration
+  component_label
+  object_ref
+  bbox_px
+  pixel_count
+  boundary rings
+  value metrics
+  area metrics
+  boundary metrics
+  moment ellipse
+  surface/slope/curvature metrics
+  quality flags
+  stale
+
+  任何缺失都显式记录原因，例如：
+
+  HEIGHT_FIELD_MISSING
+  CALIBRATION_MISSING
+  BOUNDARY_TOO_SHORT
+  ELLIPSE_DEGENERATE
+  SURFACE_FIT_ILL_CONDITIONED
+
+  ## 八、实施顺序
+
+  1. P0 坐标修复：统一 bbox、像素中心、宽高和 legacy getter；建立分支一致性基线。
+  2. P1 组件快照：所有算法只产生统一 label/mask/component snapshot。
+  3. P2 二维证据：边界、多边形、pixel area、周长、质心、凸包、等效尺寸。
+  4. P3 高阶二维形状：矩椭圆、方向、Feret、内接/外接圆、紧凑度、Martin 直径。
+  5. P4 UI：参数分组、对象表、点击高亮、stale 语义和不可编辑结果。
+  6. P5 Parser/Headless：新增单参数 setter、按索引 numeric getter及直接值语义捕获；不增加参数反序 adapter。
+  7. P6 高度场：加入校准元数据后实现表面积、坡度和二次曲率。
+  8. P7 验收：矩形、圆、旋转椭圆、凹形、带孔、多组件、边缘接触、单像素、非等距像素，以及解析可知的平面/二次曲面测试。
+
+  所有测试案例应由 manifest/目录资产定义，不在 C++ 中写死名称、数量或顺序。实现涉及 *.h/*.cpp、Parser、结果捕获、GUI 和
+  CMake，届时必须使用用户指定的 build01 只编译 cxvision_imgui_acceptance，再按 T0→T9 顺序验收。
+
+ 最核心的理解是：图 1 描述的并不是“边缘像素数量”，而是一套离散像素区域到连续多边形几何的转换规则。FindObject 若要达到
+  Gwyddion Grain Measurement 的级别，第一步必须保存真实组件 mask，并通过统一的边界构造器生成闭合多边形；当前的 bbox 和
+  Edge() 横向弦段不能承担这个职责。
+
+  另外三张本地图片仍被 LAN 网关判定在允许根之外，但已经找到对应的 Gwyddion 官方图： 包围尺寸
+  (https://gwyddion.net/documentation/user-guide-en/grain-bounding-dims.png)、边界配置
+  (https://gwyddion.net/documentation/user-guide-en/boundary-length.png)、内接圆/外接圆
+  (https://gwyddion.net/documentation/user-guide-en/grain-inscribed-exscribed.png)、Martin 直径
+  (https://gwyddion.net/documentation/user-guide-en/grain-martin-diameter.png)。
+
+  ## 一、图 1 的边界数学到底在做什么
+
+  设横向像素间距为 (h_x)，纵向像素间距为 (h_y)，像素对角线：
+
+  [
+  h=\sqrt{h_x^2+h_y^2}
+  ]
+
+  对二值 mask 加一圈背景 padding，然后遍历所有 2×2 像素邻域：
+
+  p00 p10
+  p01 p11
+
+  定义状态码：
+
+  [
+  code=p_{00}+2p_{10}+4p_{11}+8p_{01}
+  ]
+
+  16种状态归并为以下类别：
+
+   像素配置                                 状态码    边界贡献
+  ━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━
+   全背景、全前景                            0、15           0
+  ────────────────────  ───────────────────────────  ──────────
+   一个前景或三个前景    1、2、4、8、7、11、13、14       (h/2)
+  ────────────────────  ───────────────────────────  ──────────
+   上下两像素横向相邻                        3、12       (h_x)
+  ────────────────────  ───────────────────────────  ──────────
+   左右两像素纵向相邻                         6、9       (h_y)
+  ────────────────────  ───────────────────────────  ──────────
+   两个前景呈对角分布                        5、10         (h)
+
+  单个角点配置产生一条连接相邻边中点的斜线：
+
+  [
+  \sqrt{(h_x/2)^2+(h_y/2)^2}=h/2
+  ]
+
+  对角双前景配置产生两条这样的线，因此总贡献为 (h)。这就是图中 (b1)、(b2)：两种多边形连接方式不同，但长度相同。
+
+  图中的示例最终得到：
+
+  [
+  L=6+6\sqrt2
+  ]
+
+  这说明周长不是整数边缘像素数；水平/垂直线段和斜线段必须按真实几何长度分别计量。Gwyddion
+  官方说明也是“像素配置贡献与等效多边形线段一一对应”。官方说明
+  (https://gwyddion.net/documentation/user-guide-en/grain-analysis.html)
+
+  ### FindObject 中的具体实现
+
+  边界构建器应执行：
+
+  component label/mask
+      ↓
+  外扩一圈背景
+      ↓
+  遍历所有 2×2 状态
+      ├─ 累计 LUT 周长
+      └─ 生成半像素坐标的线段
+      ↓
+  线段端点连接
+      ↓
+  闭合 outer ring + hole rings
+      ↓
+  分类方向、面积和拓扑
+
+  建议端点用“二倍整数坐标”保存，例如：
+
+  真实坐标 x+0.5  → 内部整数 2x+1
+
+  这样相邻配置生成的端点可以精确匹配，不需要用浮点 epsilon 拼接。
+
+  证据中不能只保存最终周长，还应保存：
+
+  {
+    "method": "gwyddion_2x2_lut_v1",
+    "pixel_size_x": 1.0,
+    "pixel_size_y": 1.0,
+    "diagonal": 1.41421356237,
+    "half_diagonal_case_count": 12,
+    "diagonal_pair_case_count": 0,
+    "horizontal_case_count": 6,
+    "vertical_case_count": 0,
+    "perimeter": 14.4852813742
+  }
+
+  这样人工可以重新计算：
+
+  [
+  P=n_{1/2}\frac h2+n_dh+n_xh_x+n_yh_y
+  ]
+
+  ### 对角歧义必须显式处理
+
+  code=5/10 时，需要决定前景还是背景保持连通。当前 OpenCV 连通域固定使用 8-connectivity，cximage/FindObject.cpp:1591，因
+  此边界构建器至少要记录：
+
+  component_connectivity = 8
+  saddle_policy = foreground_8_connected
+
+  即使两种策略周长相同，其多边形拓扑也不同，会影响：
+
+  - 是否形成两个外轮廓；
+  - 是否形成孔洞；
+  - 多边形面积；
+  - 内接圆；
+  - Martin 直径；
+  - 局部曲率。
+
+  ## 二、面积与周长必须保持两种不同证据
+
+  规范面积应继续来自 mask：
+
+  [
+  A_{\text{pixel}}=N,\qquad
+  A=N h_x h_y
+  ]
+
+  等效多边形还会得到 Shoelace 面积：
+
+  [
+  A_{\text{polygon}}
+  =\frac12\left|\sum_i x_i y_{i+1}-x_{i+1}y_i\right|
+  ]
+
+  两者不能混成一个字段：
+
+  pixel_count
+  projected_area
+  polygon_area
+  area_discretization_delta
+
+  Gwyddion 风格的面积是像素覆盖面积；多边形主要负责周长、拓扑和更高阶几何。由于像素化，两种面积存在小差异是正常现象，不
+  应直接判为算法错误。
+
+  ## 三、图 1 中的体积权重
+
+  图中 3×3 权重为：
+
+  # [
+  K=
+  \begin{bmatrix}
+  1/96 & 5/48 & 1/96\
+  5/48 & 13/24 & 5/48\
+  1/96 & 5/48 & 1/96
+  \end{bmatrix}
+
+  \frac1{96}
+  \begin{bmatrix}
+  1&10&1\
+  10&52&10\
+  1&10&1
+  \end{bmatrix}
+  ]
+
+  权重和恰好为 1：
+
+  [
+  4/96+40/96+52/96=1
+  ]
+
+  它表达的不是普通均值滤波，而是：把离散高度采样点之间用三角形线性连接后，一个 mask 像素所覆盖体积由中心、上下左右和四个
+  对角高度共同贡献。
+
+  可实现为：
+
+  [
+  V=h_xh_y
+  \sum_{p\in mask}
+  \sum_{u=-1}^{1}\sum_{v=-1}^{1}
+  K_{uv},[z(p+u,v)-b(p+u,v)]
+  ]
+
+  其中 (b) 是基准面：
+
+  zero_basis：b=0
+  minimum_basis：b=grain_min
+  plane_basis：拟合平面
+  laplace_basis：周围区域 Laplace 插值
+
+  第一阶段应只做 zero_basis 和 minimum_basis。Laplace basis 需要可靠的外围背景、收敛条件和单独证据，不适合与第一版几何同
+  时加入。
+
+  必须记录：
+
+  volume_rule = gwyddion_vertex_triangular_v1
+  basis_method
+  basis_parameters
+  mask_touching_image_edge
+  neighbourhood_complete
+  volume_valid
+  invalid_reason
+
+  若对象触及图像边缘，3×3 邻域不完整，不应静默重归一化；应使用明确的边界扩展策略，或标记
+  HEIGHT_NEIGHBOURHOOD_INCOMPLETE。
+
+  ## 四、内接圆和最小外接圆
+
+  图中的两个圆并非同心，圆心也不等于质心：
+
+  - 最大内接圆：整个圆盘必须位于物体内部，包括避开孔洞；
+  - 最小外接圆：必须包含物体全部边界点；
+  - 两者中心分别为 ((x_i,y_i))、((x_e,y_e))。
+
+  ### 最大内接圆
+
+  粗定位可以使用 distance transform：
+
+  mask → anisotropic distance field → 最大值点
+
+  但 OpenCV distanceTransform 默认以像素单位工作，对 (h_x\neq h_y) 不精确。因此最终值应对等效多边形做连续精化：
+
+  [
+  R_i(c)=\min_{q\in\partial G}|c-q|
+  ]
+
+  优化目标：
+
+  [
+  R_i=\max_{c\in G}R_i(c)
+  ]
+
+  对于带孔物体，孔洞边界也必须参加最短距离计算。
+
+  ### 最小外接圆
+
+  只需对凸包顶点求最小包围圆：
+
+  [
+  G\subseteq D(c_e,R_e)
+  ]
+
+  输出和显示：
+
+  inscribed_radius
+  inscribed_center_x/y
+  circumcircle_radius
+  circumcircle_center_x/y
+
+  Shape 投影建议：
+
+  owner_ref.inscribed_disc
+  owner_ref.circumcircle
+
+  均为 editable=false。
+
+  ## 五、最小/最大包围尺寸
+
+  对于单位方向法向量：
+
+  [
+  n(\theta)=(\cos\theta,\sin\theta)
+  ]
+
+  物体在该方向的投影宽度：
+
+  [
+  D(\theta)=
+  \max_{p\in H}p\cdot n-
+  \min_{p\in H}p\cdot n
+  ]
+
+  其中 (H) 是凸包。
+
+  因此：
+
+  [
+  D_{\min}=\min_\theta D(\theta),\qquad
+  D_{\max}=\max_\theta D(\theta)
+  ]
+
+  实现使用凸包 rotating calipers，而不是逐角度暴力扫描。
+
+  需分别输出：
+
+  minimum_feret_diameter
+  minimum_feret_angle_deg
+  maximum_feret_diameter
+  maximum_feret_angle_deg
+
+  角度约定要写入 schema：
+
+  angle_origin = positive_x
+  angle_direction = counter_clockwise
+  image_y_axis = down
+  reported_range = [0,180)
+
+  UI 应同时画两组平行支撑线以及中间的尺寸线，否则“方向”很容易被误解成轮廓边方向。
+
+  ## 六、Martin 直径
+
+  Martin 直径不是最大跨度，也不是质心直径。
+
+  对方向 (\theta)：
+
+  1. 取测量线方向 (u(\theta))；
+  2. 沿法向 (n(\theta)) 移动直线；
+  3. 找到把物体面积分为完全相等两部分的位置；
+  4. 计算该直线落在物体内部的线段总长度。
+
+  对于凹形：
+
+  ────██────███────
+
+  应累加两段内部长度，而不是从第一次进入到最后一次离开的总距离。Gwyddion明确采用内部线段长度之和。Martin diameter 定义
+  (https://gwyddion.net/documentation/user-guide-en/grain-analysis.html)
+
+  具体算法：
+
+  凸包投影确定偏移搜索区间
+      ↓
+  多边形被直线裁剪
+      ↓
+  二分偏移量，直到左右面积差 < tolerance
+      ↓
+  直线与 outer/hole rings 求交
+      ↓
+  交点沿 u 排序
+      ↓
+  奇偶规则形成内部区间
+      ↓
+  减去孔洞区间并累加
+
+  随后对 ([0,180°)) 做粗采样，再在极值附近局部细化，得到最小/最大 Martin 直径与方向。
+
+  ## 七、等效椭圆不是 fitEllipse
+
+  必须同时保留两种椭圆：
+
+  ### 二阶矩等效椭圆
+
+  对每个像素中心物理坐标 (r_i) 建立协方差：
+
+  [
+  C=\frac1N\sum_i(r_i-\bar r)(r_i-\bar r)^T+
+  \begin{bmatrix}
+  h_x^2/12&0\
+  0&h_y^2/12
+  \end{bmatrix}
+  ]
+
+  第二项表示每个像素自身是一个矩形面积单元，而不是零面积点。
+
+  设特征值：
+
+  [
+  \lambda_1\geq\lambda_2
+  ]
+
+  则等效椭圆半轴：
+
+  [
+  a=2\sqrt{\lambda_1},\qquad
+  b=2\sqrt{\lambda_2}
+  ]
+
+  长轴方向由 (\lambda_1) 对应特征向量给出。
+
+  ### 边界拟合椭圆
+
+  对闭合边界点使用 fitEllipse，得到最适合边界的椭圆。它对边缘凹凸敏感，与填充区域矩椭圆不等价。
+
+  字段必须区分：
+
+  moment_ellipse_major_semiaxis
+  moment_ellipse_minor_semiaxis
+  moment_ellipse_orientation
+
+  boundary_fit_major_semiaxis
+  boundary_fit_minor_semiaxis
+  boundary_fit_orientation
+  boundary_fit_residual
+
+  接近圆形时方向不稳定，应：
+
+  orientation = 0
+  orientation_valid = false
+  reason = ELLIPSE_NEAR_ISOTROPIC
+
+  ## 八、坡度与曲率
+
+  Gwyddion
+  的曲率不是二维轮廓曲率，而是对晶粒高度表面拟合二次多项式，然后求主轴。官方规定曲率半径正号表示凹面、负号表示凸面、异号
+  表示鞍面。Gwyddion Curvature (https://gwyddion.net/documentation/user-guide-en/feature-measurement.html)
+
+  物理坐标下拟合：
+
+  [
+  z=ax^2+bxy+cy^2+dx+ey+f
+  ]
+
+  Hessian：
+
+  [
+  H=
+  \begin{bmatrix}
+  2a&b\
+  b&2c
+  \end{bmatrix}
+  ]
+
+  曲率中心：
+
+  [
+  \begin{bmatrix}x_0\y_0\end{bmatrix}
+  =-H^{-1}
+  \begin{bmatrix}d\e\end{bmatrix}
+  ]
+
+  再计算：
+
+  curvature_center_x/y/z
+  kappa_1
+  kappa_2
+  curvature_angle_1/2
+  curvature_radius_1/2
+  fit_rmse
+  condition_number
+
+  若 det(H) 太小，曲率中心会跑到极远处，应标记：
+
+  CURVATURE_FIT_ILL_CONDITIONED
+
+  二维边界曲率则另设：
+
+  [
+  \kappa(s)=
+  \frac{x'(s)y''(s)-y'(s)x''(s)}
+  {(x'(s)^2+y'(s)^2)^{3/2}}
+  ]
+
+  它要求：
+
+  闭合边界
+  → 等弧长重采样
+  → 可调平滑
+  → 一阶/二阶差分
+  → 曲率及曲率中心
+
+  两类曲率在 UI 和 JSON 中绝不能共用 curvature 一个名称。
+
+  ## 九、FindObject 第一批代码落地
+
+  建议第一批只完成二维证据闭环：
+
+  1. 新建 FindObjectMeasurementTypes.h，定义全部值语义 snapshot。
+  2. 新建 FindObjectGeometryMeasurement.cpp/.h，放置 LUT、轮廓追踪、矩、凸包、圆和 Feret 计算。
+  3. 修改 FindObject，所有算法分支统一返回 component mask/label。
+  4. 修正 bbox 语义，新增明确 getter，旧 getter 标为 legacy。
+  5. Edge()不再作为正式轮廓来源。
+  6. PublishDisplayShapes()发布：
+      - outer boundary；
+      - hole boundaries；
+      - moment ellipse；
+      - major/minor axes；
+      - Feret lines；
+      - inscribed/circumcircle；
+      - bbox。
+
+  7. CxScriptRuntimeResultCapture复制逐对象 snapshot。
+  8. object_state.json保存完整对象数组。
+  9. Key Parameter Controls 增加对象结果表与叠加层开关。
+
+  一个额外的证据要求是记录“请求参数”和“实际参数”：
+
+  {
+    "requested": {
+      "threshold": 80,
+      "minimum_area": 20
+    },
+    "applied": {
+      "threshold": 80,
+      "minimum_area": 20
+    },
+    "parameter_application_status": "MATCH"
+  }
+
+  因为当前 UI 写入 global_object_threshold，而 FindObject 连通域实际读取成员 m_imagethre；只有 cxscript 调用了
+  setroithre()才真正生效，cximage/FindObject.cpp:1580、cximage/ParserClass.cpp:1518。若两者不一致，应报告
+  PARAMETER_NOT_APPLIED。
+
+  ## 十、Key Parameter Controls 最终操作流程
+
+  选择 Evidence 中的 FindObject
+      ↓
+  选择某个可点击对象：FindObject result N
+      ↓
+  显示 Detection / Boundary / Measurement / Calibration
+      ↓
+  人工调节设置
+      ↓
+  结果立即标记 STALE，不自动运行
+      ↓
+  Apply：写入 global_* snapshot
+      ↓
+  Run Script：Parser Owner 串行执行
+      ↓
+  重新构建 mask、boundary、measurements
+      ↓
+  结果表刷新并在图像上显示几何证据
+      ↓
+  人工选择对象、查看公式/单位/有效性
+      ↓
+  保存人工审核
+
+  测量结果本身必须只读。人工调节的是阈值、连通性、边界方法、标定、拟合和平滑参数，不能直接把 area、major_axis或curvature
+  改成期望值。
+
+  ## 十一、第一阶段验收标准
+
+  第一批二维实现至少验证：
+
+  - 全部16种2×2配置逐一通过 LUT 测试；
+  - 图1示例得到 (6+6\sqrt2)；
+  - (W\times H) 实心矩形得到
+    [
+    2(W-1)h_x+2(H-1)h_y+2h
+    ]
+
+  - 非等距像素 hx != hy 正确；
+  - 对角配置两种连接策略周长相同、拓扑不同；
+  - 带孔物体内接圆不能穿过孔洞；
+  - 四种 FindObject 算法对同一最终 mask 得到相同几何；
+  - 结果框、中心、宽高不存在一像素分支差异；
+  - Key Parameter Controls 可点击对象并切换边界、椭圆和圆；
+  - object_state.json可独立复算周长；
+  - 参数修改后必须显示 STALE；
+  - C++ 不出现具体案例名、数量或顺序。
+
+  第二阶段再加入图1的体积核、表面积、坡度与曲率，因为这些必须先补齐真实高度场和 hx/hy/z_scale/unit 标定。当前普通 RGB
+  Image 不能直接把灰度曲面称为物理表面。
+
+
+后续代码、注释、证据字段中，凡是明确来源于 Gwyddion 的定义统一使用 GW，例如：
+
+  GWPixelConfigurationPerimeter(...)
+  gw_pixel_perimeter
+  gw_pixel_configuration_counts
+  gw_boundary_method = "GW_2x2_pixel_configuration"
+
+  不把普通背景建模或通用亚像素算法机械冠以 GW，以免错误暗示其数学定义来自 Gwyddion。
+
+  下面将二维流程固定为 1→5 五个可独立测试的函数层。
+
+  ## 1. 背景基准扣除
+
+  职责：从原图得到背景基准 (B) 与残差图 (R)。
+
+  enum class FindObjectBackgroundMethod {
+      None,
+      RoiBorderRobust,
+      MorphologicalOpening,
+      PolynomialSurface
+  };
+
+  struct FindObjectBackgroundConfig {
+      FindObjectBackgroundMethod method = FindObjectBackgroundMethod::None;
+      int border_width_px = 2;
+      int morphology_radius_px = 32;
+      int polynomial_order = 1;
+      double foreground_exclusion_quantile = 0.90;
+  };
+
+  struct FindObjectBackgroundEvidence {
+      std::string method;
+      bool valid = false;
+      int background_sample_count = 0;
+      double baseline_min = 0.0;
+      double baseline_max = 0.0;
+      double baseline_mean = 0.0;
+      double residual_min = 0.0;
+      double residual_max = 0.0;
+      std::string failure_reason;
+  };
+
+  bool BuildFindObjectBackgroundBaseline(
+      const cv::Mat& gray_roi,
+      const FindObjectBackgroundConfig& config,
+      cv::Mat& background_baseline,
+      cv::Mat& residual,
+      FindObjectBackgroundEvidence& evidence);
+
+  输出：
+
+  raw_gray_roi
+  background_baseline
+  residual = raw_gray_roi - background_baseline
+  background_evidence
+
+  阈值只作用于 residual。当方法为 None 时，仍生成明确证据：
+
+  method = none
+  residual = raw_gray_roi
+
+  ## 2. 残差阈值与拓扑固定
+
+  职责：由残差图生成唯一的二值 mask；这一步确定物体 ID、连通性和孔洞拓扑。
+
+  struct FindObjectSegmentationConfig {
+      int threshold = 20;
+      int foreground_mode = 1; // bright / dark / both
+      int connectivity = 8;    // 4 or 8
+      int minimum_area_px = 10;
+  };
+
+  struct FindObjectMaskEvidence {
+      std::uint64_t mask_hash = 0;
+      int foreground_pixel_count = 0;
+      int connected_component_count = 0;
+      int accepted_component_count = 0;
+      std::string threshold_domain = "background_corrected_residual";
+  };
+
+  bool BuildFindObjectBinaryMask(
+      const cv::Mat& residual,
+      const FindObjectSegmentationConfig& config,
+      cv::Mat& binary_mask,
+      cv::Mat& labels,
+      FindObjectMaskEvidence& evidence);
+
+  硬约束：
+
+  - 从这一步开始，连通域标签不可被亚像素流程重新分配；
+  - 孔洞数量、物体归属、component_label 只由该 mask 决定；
+  - mask_hash 进入每个对象证据快照。
+
+  ## 3. GW 离散几何基准测量
+
+  职责：在真实 mask 上计算可复核、稳定的离散几何事实。
+
+  struct GWDiscreteGeometryEvidence {
+      std::array<std::uint64_t, 16> gw_pixel_configuration_counts{};
+      double gw_pixel_perimeter = 0.0;
+      double pixel_cell_area = 0.0;
+      double equivalent_side = 0.0;
+      double equivalent_radius = 0.0;
+      std::vector<cv::Point2d> outer_boundary_px;
+      std::vector<std::vector<cv::Point2d>> hole_boundaries_px;
+      std::string gw_boundary_method = "GW_2x2_pixel_configuration";
+  };
+
+  GWDiscreteGeometryEvidence MeasureGWDiscreteGeometry(
+      const cv::Mat& component_mask,
+      const cv::Point& mask_origin_px,
+      double pixel_size_x,
+      double pixel_size_y);
+
+  这里固定两个不能混淆的量：
+
+  gw_pixel_perimeter
+      = GW 2×2 像素构型估计的离散周长
+
+  polygon_perimeter
+      = 整数轮廓多边形长度，仅用于轮廓表达与对照
+
+  gw_pixel_perimeter 是离散基准值，后续不能被亚像素周长覆盖。
+
+  ## 4. 亚像素边界修正
+
+  职责：在固定 mask 的边界邻域内，从残差灰度场重建连续等值线。
+
+  struct FindObjectSubpixelConfig {
+      bool enabled = false;
+      double iso_threshold = 0.0;
+      double minimum_gradient = 3.0;
+      int normal_search_radius_px = 2;
+      bool fit_local_spline = false;
+  };
+
+  struct FindObjectSubpixelEvidence {
+      bool valid = false;
+      int candidate_point_count = 0;
+      int accepted_point_count = 0;
+      int rejected_low_gradient_count = 0;
+      int rejected_out_of_bounds_count = 0;
+      double mean_gradient = 0.0;
+      double mean_fit_residual_px = 0.0;
+      double subpixel_perimeter = 0.0;
+      double subpixel_area = 0.0;
+      std::string failure_reason;
+      std::vector<cv::Point2d> contour_px;
+  };
+
+  FindObjectSubpixelEvidence RefineFindObjectBoundarySubpixel(
+      const cv::Mat& residual,
+      const cv::Mat& component_mask,
+      const cv::Point& mask_origin_px,
+      const FindObjectSubpixelConfig& config);
+
+  内部步骤：
+
+  1. 提取整数外轮廓；
+  2. 计算每个轮廓点的局部法线；
+  3. 在法线两侧寻找跨越 iso_threshold 的灰度对；
+  4. 使用线性插值定位等值点；
+  5. 剔除低梯度、饱和、越界和邻物接触点；
+  6. 生成连续轮廓；
+  7. 用 Green 公式计算 subpixel_area，用弧长累加计算 subpixel_perimeter；
+  8. 保存梯度、残差和失败原因。
+
+  关键规则：
+
+  subpixel contour 不能改变 component_label
+  subpixel contour 不能合并/拆分物体
+  subpixel contour 不能改变 hole topology
+
+  ## 5. 双轨测量融合、Shape 投影与人工复核
+
+  职责：将离散基准与亚像素结果并存，供人工明确选择。
+
+  struct FindObjectMeasurementSnapshot {
+      // identity and topology
+      int object_index = -1;
+      int component_label = 0;
+      std::uint64_t generation = 0;
+      std::uint64_t mask_hash = 0;
+
+      // background / segmentation provenance
+      FindObjectBackgroundEvidence background;
+      FindObjectMaskEvidence mask;
+
+      // immutable discrete reference
+      GWDiscreteGeometryEvidence gw_discrete;
+
+      // optional refinement
+      FindObjectSubpixelEvidence subpixel;
+
+      // selected analysis basis
+      std::string active_geometry_basis = "gw_discrete";
+  };
+
+  统一调度函数：
+
+  bool FindObject::MeasureObjectGeometryPipeline(
+      Image& image,
+      const FindObjectBackgroundConfig& background_config,
+      const FindObjectSegmentationConfig& segmentation_config,
+      const FindObjectSubpixelConfig& subpixel_config);
+
+  执行顺序：
+
+  原图 ROI
+    → BuildFindObjectBackgroundBaseline
+    → BuildFindObjectBinaryMask
+    → 连通域/对象过滤/MAP 标签固定
+    → MeasureGWDiscreteGeometry
+    → RefineFindObjectBoundarySubpixel（可选）
+    → 构造 FindObjectMeasurementSnapshot
+    → Shape 投影
+    → Runtime Capture
+    → Evidence JSON / Result Summary
+    → 人工复核
+
+  Key Parameter Controls 随之分为三组：
+
+  Background Baseline
+    method / border width / morphology radius / polynomial order
+
+  GW Discrete Geometry
+    pixel size X/Y / connectivity / selected object
+    gw boundary overlay / hole overlay
+
+  Subpixel Refinement
+    enabled / iso threshold / minimum gradient / normal search radius
+    discrete vs subpixel geometry basis
+
+  结果区必须并列显示，而不是二选一覆盖：
+
+  GW pixel perimeter
+  Subpixel perimeter
+  GW pixel-cell area
+  Subpixel contour area
+  Subpixel valid
+  Accepted/rejected contour points
+  Mean gradient
+  Mean fit residual
+  Failure reason
+
+  这样，GW 离散测量永远是可复核基准；背景扣除负责稳定“分割依据”；亚像素修正负责提高“边界位置精度”；人工则能清楚判断本次
+  结论采用哪一种几何口径。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 我理解这份方向文档的核心不是把三个工具串成“先检测、再识别”的简单调用关系，而是建立一条可追溯的几何语义链：
+
+  FindObject：把图像变成“有哪些物体、每个物体真实占哪些像素”
+        ↓
+  FastMatch：把物体的几何区域变成“可学习、可定位、可比较的模板”
+        ↓
+  EasyOCR：把有稳定几何归属的多个模板结果变成“字符/字段/读数”
+
+  这正是显式链 E0–E3 应推进的方式。当前 EasyOCR 已能编译并入，但它还没有得到可靠的、统一的几何输入；真正需要补的是 FindObject → FastMatch 的“几何契约”，然后
+  才是 FastMatch → EasyOCR 的“结构化解码”。参考方向见 Next_20260909_2.txt。
+
+  ## E0：统一坐标、物体与几何语义
+
+  这是所有后续工作的地基。当前 FindObject 不同检测分支对 bbox、宽高和中心的语义不一致；而 FastMatch、EasyOCR 一旦各自解释 ROI，就会出现“识别得到了分数但不知
+  道对应哪一个物体”的情况。
+
+  必须统一：
+
+  - 像素索引为 (x, y)，像素中心为 (x+0.5, y+0.5)。
+  - bbox 使用半开区间：[x0, x1) × [y0, y1)。
+  - width = x1-x0，height = y1-y0，避免连通域与区域增长相差一像素。
+  - 几何结果使用双精度质心、方向和长度；不能把几何中心降为整数。
+  - 区分三种空间：
+      - 原图空间 image_px；
+      - FindObject ROI 局部空间 roi_px；
+      - FastMatch 模板规范空间 template_px。
+
+  - 每次变换都保存 Transform2D：平移、缩放、旋转及其逆变换。
+
+  最终关键不是只传一个 Rect，而是传一个不可变的 ObjectGeometrySnapshot：
+
+  object_ref
+  generation
+  component_mask_hash
+  bbox_image_px
+  centroid_image_px
+  outer_boundary / holes
+  pixel_area
+  orientation / ellipse / Feret（可用时）
+  image_to_roi
+  image_to_template
+  quality_flags
+
+  object_ref 不能只用数组序号。应由本次运行的 owner、测量代次、组件 mask hash 和 bbox 组成。参数变化后旧结果必须 stale=true。
+
+  ## E1：FindObject 从“框选”升级为物体几何构建器
+
+  FindObject 的职责不是替 FastMatch 做识别，而是稳定回答：这个物体到底是什么几何区域。
+
+  统一入口应是：
+
+  Image + ROI + 检测参数
+  → binary mask
+  → 任一组件发现分支
+  → ComponentSnapshot
+  → Boundary Construction
+  → MeasurementSnapshot
+  → display / parser / evidence
+
+  所有 Measure、快速测量、OpenCV 连通域、Peak/BFS 分支，只产生组件 mask；不应各自计算 bbox、过滤和显示。随后统一进入 FinalizeComponents()。
+
+  第一批必须落地的几何量：
+
+  - pixel_area、bbox、质心；
+  - 有序闭合外边界与 holes；
+  - perimeter_pixel_lut：Gwyddion 风格 2×2 配置边界长度；
+  - perimeter_polygon：等效多边形欧氏周长；
+  - 凸包、凸包面积、solidity；
+  - 最小外接矩形、方向、长宽比；
+  - 最小/最大 Feret 直径；
+  - 最大内接圆、最小外接圆；
+  - moment ellipse：长短轴、方向、偏心率；
+  - circularity、rectangularity、convexity。
+
+  这里的关键判断是：当前 Edge() 的横向弦段不是闭合边界，不能直接用于周长、椭圆、曲率或模板形状。只有 mask → 有序边界/多边形完成后，FindObject 才具备可交给
+  FastMatch 的几何基础。
+
+  ## E2：FastMatch 从“矩形小图模板”升级为几何感知模板
+
+  FindObject 与 FastMatch 的结合点不是“把 bbox crop 给 FastMatch”这么简单，而是把物体的几何结构转成模板的学习坐标系。
+
+  每个 FastMatch 模板应有两层内容：
+
+   层        内容                                    用途
+  ━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   外观层    灰度/二值/梯度/局部纹理                 计算匹配得分
+  ────────  ──────────────────────────────────────  ──────────────────────────────
+   几何层    mask、轮廓、主轴、锚点、模板坐标变换    限制搜索、姿态归一、解释结果
+
+  建议的学习流程：
+
+  FindObject selected object
+  → ComponentSnapshot + mask + boundary
+  → 选择 canonical frame
+  → crop / mask / pad
+  → 按主轴旋转归一
+  → 按等效尺寸或 bbox 归一
+  → 生成 appearance template + geometry template
+  → 保存 TemplateGeometrySnapshot
+
+  TemplateGeometrySnapshot 至少要有：
+
+  template_id
+  source_object_ref
+  learn_bbox_image_px
+  learn_mask_hash
+  anchor_point_template_px
+  major_axis_angle
+  canonical_width / canonical_height
+  normalization transform
+  mask coverage
+  boundary descriptor / shape descriptor
+
+  其中锚点优先级应明确：
+
+  1. 用户定义锚点；
+  2. 物体质心；
+  3. 主轴交点；
+  4. bbox 中心，仅作为退化 fallback。
+
+  匹配时不要只输出 best_x / best_y / score，而应输出：
+
+  candidate_id
+  template_id
+  score_appearance
+  score_geometry
+  matched_transform(template → image)
+  matched_bbox_image_px
+  matched_mask / projected boundary
+  rotation_deg
+  scale_x / scale_y
+  overlap_iou（若有目标 mask）
+  shape_distance
+  failure_stage
+
+  这样 FastMatch 才能与 FindObject 的测量形成双向验证：
+
+  - FindObject 说“这是一块长轴 32px、方向 18° 的物体”；
+  - FastMatch 说“模板以 19°、1.02 倍尺度匹配到这里”；
+  - 两者在位置、方向、尺度、mask overlap 上应可比较；
+  - 不一致时是 geometry_mismatch，而非模糊地判作“识别失败”。
+
+  这是两者真正的交汇点：FindObject 产生 object-centric 几何；FastMatch 在同一坐标语义内学习、定位和复核该几何。
+
+  ## E3：EasyOCR 从多层模板循环提升为几何结构化解码
+
+  当前 EasyOCR 已继承并调用 FastMatch，但更多还是网格、多级模板、结果字符串的组合。增强方向不是再塞一套 OCR 网络，而是让每个字符候选都有确定的几何来源。
+
+  新的 OCR 输入单元应是 GlyphCandidate：
+
+  candidate_ref
+  source_object_ref
+  template_id
+  character_label
+  bbox_image_px
+  baseline position
+  centroid
+  orientation
+  scale
+  appearance_score
+  geometry_score
+  quality flags
+
+  EasyOCR 的三步：
+
+  1. 生成候选
+     FindObject 组件 / 规则网格 / FastMatch 候选
+         ↓
+  2. 几何归一与匹配
+     用 object mask、主轴、尺度建立候选模板坐标
+         ↓
+  3. 结构解码
+     按 reading order、基线、间距、方向、字段规则组织成字符串
+
+  其中“字符结果”必须区分为：
+
+  - recognition_score：模板外观相似度；
+  - geometry_score：大小、角度、mask、基线一致性；
+  - layout_score：与邻近字符的顺序、间距、共线性；
+  - final_score：明确的可审计组合，不得隐藏加权。
+
+  对于倾斜字符、圆周字符、仪表刻度、规则阵列，不能只按 x 排序。应由 FindObject/FastMatch 的主方向和中心线建立 reading frame：
+
+  image coordinates
+  → local baseline coordinates
+  → sort by projected baseline position
+  → split by gap / line / field
+  → decode
+
+  所以 EasyOCR 不是 FindObject 的替代品，它是最后的“符号解释层”；也不是单纯 FastMatch 的循环，而是对带几何身份的匹配候选进行组合。
+
+  ## 当前最合适的落地顺序
+
+  1. 先完成 FindObject 的 ComponentSnapshot + MeasurementSnapshot，修正 bbox/中心语义。
+  2. 实现 mask 到闭合边界、多边形、质心、面积、周长、椭圆、方向的二维测量。
+  3. 增加 ObjectGeometrySnapshot ↔ TemplateGeometrySnapshot，把 FastMatch 学习模板绑定到 FindObject 物体，而不是仅绑定矩形。
+  4. FastMatch 输出完整姿态候选和几何一致性事实。
+  5. EasyOCR 用 GlyphCandidate 替代无来源的字符循环，按几何阅读坐标系完成组字、行/字段分割。
+  6. GUI 的 Key Parameter Controls 分为 FindObject 检测/边界/测量、FastMatch 学习/搜索/姿态、EasyOCR 解码/布局三组；结果图中显示同一对象的边界、模板投影、主
+     轴和字符标签。
+
+  7. Headless 证据输出应同时含 object_state.json、模板几何、候选表、overlay、最终文本及每一步失败原因。
+
+  最重要的约束是：FindObject 的测量结果是事实层，FastMatch 是以事实层为坐标基准的学习与定位层，EasyOCR 是对这些定位结果的结构解释层。不能由 EasyOCR 根据名称
+  或固定网格反推物体，也不能让 FastMatch 的 bbox 覆盖或篡改 FindObject 的物态几何。
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  

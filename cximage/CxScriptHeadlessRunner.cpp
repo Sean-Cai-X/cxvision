@@ -889,6 +889,10 @@ static std::string InferHeadlessManualReviewTool(
     if (key.find("find_segmentation") != std::string::npos ||
         key.find("findsegmentation") != std::string::npos)
         return "FindSegmentation";
+    if (key.find("easyocr") != std::string::npos)
+        return "EasyOCR";
+    if (key.find("fastmatch") != std::string::npos)
+        return "FastMatch";
     if (key.find("torch") != std::string::npos ||
         key.find("yolo") != std::string::npos ||
         key.find("deeplab") != std::string::npos ||
@@ -902,8 +906,6 @@ static std::string InferHeadlessManualReviewTool(
         return "FindEllipse";
     if (key.find("rect") != std::string::npos)
         return "FindRect";
-    if (key.find("fastmatch") != std::string::npos)
-        return "FastMatch";
     return "FindLine";
 }
 
@@ -1836,6 +1838,28 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["findobject_black_component_count"] = capture.object_black_component_count;
     pkg.metrics["findobject_black_accepted_count"] = capture.object_black_accepted_count;
     pkg.metrics["findobject_black_rejected_count"] = capture.object_black_rejected_count;
+
+    pkg.metrics["findobject_measurement_count"] =
+        static_cast<double>(capture.findobject_measurements.size());
+    if (!capture.findobject_measurements.empty())
+    {
+        const CxFindObjectMeasurementEvidence& top =
+            capture.findobject_measurements.front();
+        pkg.metrics["findobject_top1_area"] = top.projected_area;
+        pkg.metrics["findobject_top1_perimeter"] = top.gwyddion_perimeter;
+        pkg.metrics["findobject_top1_equivalent_side"] = top.equivalent_side;
+        pkg.metrics["findobject_top1_circularity"] = top.circularity;
+        pkg.metrics["findobject_top1_solidity"] = top.solidity;
+        pkg.metrics["findobject_top1_major_axis"] = top.major_axis_length;
+        pkg.metrics["findobject_top1_minor_axis"] = top.minor_axis_length;
+        pkg.metrics["findobject_top1_orientation_deg"] = top.orientation_deg;
+        pkg.metrics["findobject_top1_feret_max"] = top.feret_max;
+        pkg.metrics["findobject_top1_feret_min"] = top.feret_min;
+        pkg.metrics["findobject_top1_inscribed_radius"] =
+            top.inscribed_radius;
+        pkg.metrics["findobject_top1_enclosing_radius"] =
+            top.enclosing_radius;
+    }
     pkg.metrics["fit_filter_input_count"] = capture.fit_filter_input_count;
     pkg.metrics["fit_filter_kept_count"] = capture.fit_filter_kept_count;
     pkg.metrics["fit_filter_rejected_count"] = capture.fit_filter_rejected_count;
@@ -2098,7 +2122,107 @@ bool SaveFindObjectBranchEvidenceJson(
     file << "    \"white_component_count\": " << capture.object_white_component_count << ",\n";
     file << "    \"white_accepted_count\": " << capture.object_white_accepted_count << ",\n";
     file << "    \"black_component_count\": " << capture.object_black_component_count << ",\n";
-    file << "    \"black_accepted_count\": " << capture.object_black_accepted_count << "\n";
+    file << R"json(    "black_accepted_count": )json"
+         << capture.object_black_accepted_count << ',' << '\n';
+    file << R"json(    "measurement_count": )json"
+         << capture.findobject_measurements.size() << ',' << '\n';
+    file << R"json(    "measurements": [)json" << '\n';
+    for (std::size_t measurement_index = 0;
+         measurement_index < capture.findobject_measurements.size();
+         ++measurement_index)
+    {
+        const CxFindObjectMeasurementEvidence& measurement =
+            capture.findobject_measurements[measurement_index];
+        file << R"json(      {"object_index": )json"
+             << measurement.object_index
+             << R"json(, "component_label": )json"
+             << measurement.component_label
+             << R"json(, "status": ")json"
+             << JsonEscape(measurement.status)
+             << R"json(", "bbox_px": [)json"
+             << measurement.bbox_x << ", " << measurement.bbox_y << ", "
+             << measurement.bbox_w << ", " << measurement.bbox_h
+             << R"json(], "pixel_count": )json" << measurement.pixel_count
+             << R"json(, "pixel_size": [)json"
+             << measurement.pixel_size_x << ", "
+             << measurement.pixel_size_y
+             << R"json(], "centroid_px": [)json"
+             << measurement.centroid_x << ", " << measurement.centroid_y
+             << R"json(], "projected_area": )json"
+             << measurement.projected_area
+             << R"json(, "equivalent_side": )json"
+             << measurement.equivalent_side
+             << R"json(, "equivalent_radius": )json"
+             << measurement.equivalent_radius
+             << R"json(, "intensity": {"min": )json"
+             << measurement.intensity_min
+             << R"json(, "max": )json" << measurement.intensity_max
+             << R"json(, "mean": )json" << measurement.intensity_mean
+             << R"json(, "stddev": )json" << measurement.intensity_stddev
+             << R"json(, "skewness": )json"
+             << measurement.intensity_skewness
+             << R"json(, "valid": )json"
+             << (measurement.intensity_valid ? "true" : "false")
+             << R"json(}, "gwyddion_perimeter": )json"
+             << measurement.gwyddion_perimeter
+             << R"json(, "polygon_perimeter": )json"
+             << measurement.polygon_perimeter
+             << R"json(, "polygon_area": )json"
+             << measurement.polygon_area
+             << R"json(, "pixel_configuration_counts": [)json";
+        for (std::size_t code = 0;
+             code < measurement.pixel_configuration_counts.size(); ++code)
+        {
+            if (code > 0)
+                file << ", ";
+            file << measurement.pixel_configuration_counts[code];
+        }
+        file << R"json(], "outer_boundary_point_count": )json"
+             << measurement.outer_boundary_point_count
+             << R"json(, "hole_count": )json" << measurement.hole_count
+             << R"json(, "convex_hull_area": )json"
+             << measurement.convex_hull_area
+             << R"json(, "circularity": )json" << measurement.circularity
+             << R"json(, "solidity": )json" << measurement.solidity
+             << R"json(, "major_axis_length": )json"
+             << measurement.major_axis_length
+             << R"json(, "minor_axis_length": )json"
+             << measurement.minor_axis_length
+             << R"json(, "orientation_deg": )json"
+             << measurement.orientation_deg
+             << R"json(, "aspect_ratio": )json" << measurement.aspect_ratio
+             << R"json(, "eccentricity": )json" << measurement.eccentricity
+             << R"json(, "feret_max": )json" << measurement.feret_max
+             << R"json(, "feret_max_angle_deg": )json"
+             << measurement.feret_max_angle_deg
+             << R"json(, "feret_min": )json" << measurement.feret_min
+             << R"json(, "feret_min_angle_deg": )json"
+             << measurement.feret_min_angle_deg
+             << R"json(, "inscribed_circle": [)json"
+             << measurement.inscribed_center_x << ", "
+             << measurement.inscribed_center_y << ", "
+             << measurement.inscribed_radius
+             << R"json(], "enclosing_circle": [)json"
+             << measurement.enclosing_center_x << ", "
+             << measurement.enclosing_center_y << ", "
+             << measurement.enclosing_radius
+             << R"json(], "boundary_method": ")json"
+             << JsonEscape(measurement.boundary_method)
+             << R"json(", "topology_policy": ")json"
+             << JsonEscape(measurement.topology_policy)
+             << R"json(", "inscribed_circle_method": ")json"
+             << JsonEscape(measurement.inscribed_circle_method)
+             << R"json(", "length_unit": ")json"
+             << JsonEscape(measurement.length_unit)
+             << R"json(", "area_unit": ")json"
+             << JsonEscape(measurement.area_unit) << R"json("})json"
+             << (measurement_index + 1 <
+                         capture.findobject_measurements.size()
+                     ? ","
+                     : "")
+             << '\n';
+    }
+    file << "    ]\n";
     file << "  },\n";
     file << "  \"findline_scan\": {\n";
     file << "    \"rows_examined\": " << capture.scan_rows_examined << ",\n";
@@ -2824,10 +2948,11 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
             const std::string tool = !options.stage25_tool.empty()
                 ? options.stage25_tool
-                : (lowerScript.find("circle") != std::string::npos ? "FindCircle" :
+                : (lowerScript.find("easyocr") != std::string::npos ? "EasyOCR" :
+                   lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
+                   lowerScript.find("circle") != std::string::npos ? "FindCircle" :
                    lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
                    lowerScript.find("rect") != std::string::npos ? "FindRect" :
-                   lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
                    "FindLine");
             PopulateHeadlessCandidateGaugeFromGlobals(
                 options, candidateContext, tool);
@@ -2956,6 +3081,19 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         line_trace_file.close();
     }
 
+    const std::map<std::string, double> parameter_snapshot =
+        BuildHeadlessGlobalOverrides(options);
+    const auto parameter_value = [&parameter_snapshot](const char* name) {
+        const auto it = parameter_snapshot.find(name);
+        return it == parameter_snapshot.end() ? 0.0 : it->second;
+    };
+    const int ocr_glyph_source = static_cast<int>(
+        parameter_value("global_ocr_glyph_source"));
+    const std::string ocr_effective_source =
+        ocr_glyph_source == 2 ? "findobject_glyph" :
+        (ocr_glyph_source == 1 || !capture.fastmatch_pose_candidates.empty())
+            ? "fastmatch_pose" : "findobject_glyph";
+
     std::ofstream variable_snapshot_file(variable_snapshot_path);
     if (variable_snapshot_file.is_open())
     {
@@ -2979,8 +3117,33 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         variable_snapshot_file << "  \"selected_linegap\": " << capture.selected_linegap << ",\n";
         variable_snapshot_file << "  \"selected_filterprofile\": " << capture.selected_filterprofile << ",\n";
         variable_snapshot_file << "  \"selected_min_edge_run_width_px\": "
-                               << capture.selected_min_edge_run_width_px
-                               << "\n";
+                               << capture.selected_min_edge_run_width_px << ",\n";
+        variable_snapshot_file << "  \"fastmatch_geometry_source_index\": "
+                               << parameter_value("global_fastmatch_geometry_source_index") << ",\n";
+        variable_snapshot_file << "  \"fastmatch_geometry_weight_percent\": "
+                               << parameter_value("global_fastmatch_geometry_weight_percent") << ",\n";
+        variable_snapshot_file << "  \"fastmatch_max_pose_candidates\": "
+                               << parameter_value("global_fastmatch_max_pose_candidates") << ",\n";
+        variable_snapshot_file << "  \"ocr_threshold\": "
+                               << parameter_value("global_ocr_threshold") << ",\n";
+        variable_snapshot_file << "  \"ocr_foreground_mode\": "
+                               << parameter_value("global_ocr_foreground_mode") << ",\n";
+        variable_snapshot_file << "  \"ocr_min_area\": "
+                               << parameter_value("global_ocr_min_area") << ",\n";
+        variable_snapshot_file << "  \"ocr_component_distance\": "
+                               << parameter_value("global_ocr_component_distance") << ",\n";
+        variable_snapshot_file << "  \"ocr_glyph_source_policy\": "
+                               << ocr_glyph_source << ",\n";
+        variable_snapshot_file << "  \"ocr_layout_direction\": "
+                               << parameter_value("global_ocr_layout_direction") << ",\n";
+        variable_snapshot_file << "  \"ocr_line_overlap_percent\": "
+                               << parameter_value("global_ocr_line_overlap_percent") << ",\n";
+        variable_snapshot_file << "  \"ocr_match_threshold\": "
+                               << parameter_value("global_ocr_match_threshold") << ",\n";
+        variable_snapshot_file << "  \"ocr_min_score_percent\": "
+                               << parameter_value("global_ocr_min_score_percent") << ",\n";
+        variable_snapshot_file << "  \"ocr_effective_source\": \""
+                               << ocr_effective_source << "\"\n";
         variable_snapshot_file << "}\n";
         variable_snapshot_file.close();
     }
@@ -3064,7 +3227,117 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fastmatch_result_to_list_count\": " << capture.fastmatch_result_to_list_count << ",\n";
         object_state_file << "  \"fastmatch_candidate_insert_count\": " << capture.fastmatch_candidate_insert_count << ",\n";
         object_state_file << "  \"fastmatch_candidate_replace_count\": " << capture.fastmatch_candidate_replace_count << ",\n";
-        object_state_file << "  \"fastmatch_candidate_reject_count\": " << capture.fastmatch_candidate_reject_count << ",\n";
+        object_state_file
+            << R"(  "fastmatch_candidate_reject_count": )"
+            << capture.fastmatch_candidate_reject_count << ','
+            << static_cast<char>(10);
+        const CxFastMatchTemplateGeometryEvidence &template_geometry =
+            capture.fastmatch_template_geometry;
+        object_state_file
+            << R"(  "fastmatch_template_geometry": {"available": )"
+            << (template_geometry.available ? "true" : "false")
+            << R"(, "source_object_index": )"
+            << template_geometry.source_object_index
+            << R"(, "source_object_ref": )" << static_cast<char>(34)
+            << JsonEscape(template_geometry.source_object_ref)
+            << static_cast<char>(34) << R"(, "bbox": [)"
+            << template_geometry.bbox_x << ", " << template_geometry.bbox_y
+            << ", " << template_geometry.bbox_w << ", "
+            << template_geometry.bbox_h << R"(], "centroid": [)"
+            << template_geometry.centroid_x << ", "
+            << template_geometry.centroid_y << R"(], "projected_area": )"
+            << template_geometry.projected_area
+            << R"(, "major_axis_length": )"
+            << template_geometry.major_axis_length
+            << R"(, "minor_axis_length": )"
+            << template_geometry.minor_axis_length
+            << R"(, "orientation_deg": )"
+            << template_geometry.orientation_deg
+            << R"(, "aspect_ratio": )" << template_geometry.aspect_ratio
+            << R"(, "solidity": )" << template_geometry.solidity
+            << R"(, "boundary_point_count": )"
+            << template_geometry.boundary_point_count
+            << R"(, "status": )" << static_cast<char>(34)
+            << JsonEscape(template_geometry.status) << static_cast<char>(34)
+            << "}," << static_cast<char>(10);
+        object_state_file << R"(  "fastmatch_pose_candidates": [)";
+        for (std::size_t index = 0;
+             index < capture.fastmatch_pose_candidates.size(); ++index) {
+            const CxFastMatchPoseCandidateEvidence &candidate =
+                capture.fastmatch_pose_candidates[index];
+            if (index > 0)
+                object_state_file << ", ";
+            object_state_file
+                << R"({"candidate_index": )" << candidate.candidate_index
+                << R"(, "observed_geometry_index": )"
+                << candidate.observed_geometry_index
+                << R"(, "observed_geometry_ref": )"
+                << static_cast<char>(34)
+                << JsonEscape(candidate.observed_geometry_ref)
+                << static_cast<char>(34) << R"(, "bbox": [)"
+                << candidate.bbox_x << ", " << candidate.bbox_y << ", "
+                << candidate.bbox_w << ", " << candidate.bbox_h
+                << R"(], "center": [)" << candidate.center_x << ", "
+                << candidate.center_y << R"(], "angle_deg": )"
+                << candidate.angle_deg << R"(, "scale_x": )"
+                << candidate.scale_x << R"(, "scale_y": )"
+                << candidate.scale_y << R"(, "appearance_score": )"
+                << candidate.appearance_score << R"(, "geometry_score": )"
+                << candidate.geometry_score << R"(, "combined_score": )"
+                << candidate.combined_score
+                << R"(, "boundary_point_count": )"
+                << candidate.boundary_point_count << R"(, "status": )"
+                << static_cast<char>(34) << JsonEscape(candidate.status)
+                << static_cast<char>(34) << '}';
+        }
+        object_state_file << "]," << static_cast<char>(10);
+        object_state_file << R"(  "ocr_glyph_source_policy": )"
+                          << ocr_glyph_source << ',' << static_cast<char>(10);
+        object_state_file << R"(  "ocr_effective_source": )"
+                          << static_cast<char>(34)
+                          << JsonEscape(ocr_effective_source)
+                          << static_cast<char>(34) << ',' << static_cast<char>(10);
+        object_state_file << R"(  "ocr_final_text": )"
+                          << static_cast<char>(34)
+                          << JsonEscape(capture.ocr_final_text)
+                          << static_cast<char>(34) << ','
+                          << static_cast<char>(10);
+        object_state_file << R"(  "ocr_failure_reason": )"
+                          << static_cast<char>(34)
+                          << JsonEscape(capture.ocr_failure_reason)
+                          << static_cast<char>(34) << ','
+                          << static_cast<char>(10);
+        object_state_file << R"(  "ocr_glyph_candidates": [)";
+        for (std::size_t index = 0;
+             index < capture.ocr_glyph_candidates.size(); ++index) {
+            const CxOcrGlyphCandidateEvidence &glyph =
+                capture.ocr_glyph_candidates[index];
+            if (index > 0)
+                object_state_file << ", ";
+            object_state_file
+                << R"({"source_object_index": )"
+                << glyph.source_object_index
+                << R"(, "source_object_ref": )" << static_cast<char>(34)
+                << JsonEscape(glyph.source_object_ref)
+                << static_cast<char>(34) << R"(, "line_index": )"
+                << glyph.line_index << R"(, "reading_order": )"
+                << glyph.reading_order << R"(, "bbox": [)" << glyph.bbox_x
+                << ", " << glyph.bbox_y << ", " << glyph.bbox_w << ", "
+                << glyph.bbox_h << R"(], "centroid": [)"
+                << glyph.centroid_x << ", " << glyph.centroid_y
+                << R"(], "orientation_deg": )" << glyph.orientation_deg
+                << R"(, "projected_area": )" << glyph.projected_area
+                << R"(, "aspect_ratio": )" << glyph.aspect_ratio
+                << R"(, "solidity": )" << glyph.solidity
+                << R"(, "label": )" << static_cast<char>(34)
+                << JsonEscape(glyph.label) << static_cast<char>(34)
+                << R"(, "appearance_score": )" << glyph.appearance_score
+                << R"(, "geometry_score": )" << glyph.geometry_score
+                << R"(, "confidence": )" << glyph.confidence
+                << R"(, "status": )" << static_cast<char>(34)
+                << JsonEscape(glyph.status) << static_cast<char>(34) << '}';
+        }
+        object_state_file << "]," << static_cast<char>(10);
         object_state_file << "  \"object_prefilter_requested\": " << (capture.object_prefilter_requested ? "true" : "false") << ",\n";
         object_state_file << "  \"object_prefilter_applied\": " << (capture.object_prefilter_applied ? "true" : "false") << ",\n";
         object_state_file << "  \"actual_findsetting\": " << capture.actual_findsetting << ",\n";
@@ -3450,13 +3723,14 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         std::string lowerScript = options.script_path;
         std::transform(lowerScript.begin(), lowerScript.end(), lowerScript.begin(),
             [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        const std::string tool = !options.stage25_tool.empty()
-            ? options.stage25_tool
-            : (lowerScript.find("circle") != std::string::npos ? "FindCircle" :
-               lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
-               lowerScript.find("rect") != std::string::npos ? "FindRect" :
-               lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
-               "FindLine");
+    const std::string tool = !options.stage25_tool.empty()
+        ? options.stage25_tool
+        : (lowerScript.find("easyocr") != std::string::npos ? "EasyOCR" :
+           lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
+           lowerScript.find("circle") != std::string::npos ? "FindCircle" :
+           lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
+           lowerScript.find("rect") != std::string::npos ? "FindRect" :
+           "FindLine");
         PopulateHeadlessCandidateGaugeFromGlobals(
             options, candidateContext, tool);
 

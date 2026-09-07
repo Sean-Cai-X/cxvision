@@ -993,6 +993,59 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
         std::max(0, std::min(255, gauge.findobject_threshold)));
     InjectManualGaugeInt(context, "global_object_min_area",
                          std::max(1, gauge.findobject_min_area));
+
+    gauge.findobject_pixel_size_x =
+        std::max(1e-9, gauge.findobject_pixel_size_x);
+    gauge.findobject_pixel_size_y =
+        std::max(1e-9, gauge.findobject_pixel_size_y);
+    gauge.findobject_geometry_connectivity =
+        gauge.findobject_geometry_connectivity == 4 ? 4 : 8;
+    gauge.findobject_selected_measurement =
+        std::max(0, gauge.findobject_selected_measurement);
+    InjectManualGaugeInt(
+        context, "global_object_pixel_size_x_milli",
+        static_cast<int>(gauge.findobject_pixel_size_x * 1000.0 + 0.5));
+    InjectManualGaugeInt(
+        context, "global_object_pixel_size_y_milli",
+        static_cast<int>(gauge.findobject_pixel_size_y * 1000.0 + 0.5));
+    InjectManualGaugeInt(context, "global_object_geometry_connectivity",
+                         gauge.findobject_geometry_connectivity);
+    InjectManualGaugeInt(context, "global_object_selected_measurement",
+                         gauge.findobject_selected_measurement);
+    InjectManualGaugeInt(context, "global_object_show_boundary",
+                         gauge.findobject_show_boundary ? 1 : 0);
+    InjectManualGaugeInt(context, "global_object_show_moment_ellipse",
+                         gauge.findobject_show_moment_ellipse ? 1 : 0);
+    InjectManualGaugeInt(context, "global_object_show_feret",
+                         gauge.findobject_show_feret ? 1 : 0);
+    InjectManualGaugeInt(context, "global_object_show_circles",
+                         gauge.findobject_show_circles ? 1 : 0);
+    gauge.findobject_background_method =
+        std::max(0, std::min(2, gauge.findobject_background_method));
+    gauge.findobject_background_border_px =
+        std::max(1, gauge.findobject_background_border_px);
+    gauge.findobject_background_radius_px =
+        std::max(1, gauge.findobject_background_radius_px);
+    gauge.findobject_subpixel_min_gradient =
+        std::max(0.0, gauge.findobject_subpixel_min_gradient);
+    gauge.findobject_geometry_basis =
+        gauge.findobject_geometry_basis == 1 ? 1 : 0;
+    InjectManualGaugeInt(context, "global_object_background_method",
+                         gauge.findobject_background_method);
+    InjectManualGaugeInt(context, "global_object_background_border_px",
+                         gauge.findobject_background_border_px);
+    InjectManualGaugeInt(context, "global_object_background_radius_px",
+                         gauge.findobject_background_radius_px);
+    InjectManualGaugeInt(context, "global_object_subpixel_enabled",
+                         gauge.findobject_subpixel_enabled ? 1 : 0);
+    InjectManualGaugeInt(
+        context, "global_object_subpixel_min_gradient_milli",
+        static_cast<int>(gauge.findobject_subpixel_min_gradient * 1000.0 + 0.5));
+    InjectManualGaugeInt(
+        context, "global_object_subpixel_iso_threshold",
+        static_cast<int>(gauge.findobject_subpixel_iso_threshold + 0.5));
+    InjectManualGaugeInt(context, "global_object_geometry_basis",
+                         gauge.findobject_geometry_basis);
     // find_object_direct_test.cxsc reads the standard cximage globals.
     // Keep them synchronized with the FindObject-specific UI fields so
     // Apply/Run uses exactly the rectangle and filtering shown in the UI.

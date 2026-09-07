@@ -6,10 +6,115 @@
 #include "Shape.h"
 #include "Image.h"
 #include "imagemanager.h"
+
+#include <array>
+#include <cstdint>
+
+enum class FindObjectBackgroundMethod
+{
+    None = 0,
+    RoiBorderRobust = 1,
+    MorphologicalOpening = 2
+};
+
+struct FindObjectMeasurementConfig
+{
+    double pixel_size_x = 1.0;
+    double pixel_size_y = 1.0;
+    int connectivity = 8;
+    bool include_hole_boundaries = true;
+    FindObjectBackgroundMethod background_method =
+        FindObjectBackgroundMethod::None;
+    int background_border_width_px = 2;
+    int background_morphology_radius_px = 32;
+    bool subpixel_enabled = false;
+    double subpixel_minimum_gradient = 3.0;
+    double subpixel_iso_threshold = 0.0;
+};
+
+struct FindObjectMeasurementSnapshot
+{
+    int object_index = -1;
+    int component_label = 0;
+    std::uint64_t generation = 0;
+    std::uint64_t mask_hash = 0;
+    std::string object_ref;
+    std::string bbox_semantics = "half_open_pixel_cells";
+    std::string centroid_semantics = "pixel_cell_centers";
+
+    cv::Rect bbox_px;
+    std::uint64_t pixel_count = 0;
+    double pixel_size_x = 1.0;
+    double pixel_size_y = 1.0;
+    std::string length_unit = "px";
+    std::string area_unit = "px^2";
+    cv::Point2d centroid_px;
+    double projected_area = 0.0;
+    double equivalent_side = 0.0;
+    double equivalent_radius = 0.0;
+    double intensity_min = 0.0;
+    double intensity_max = 0.0;
+    double intensity_mean = 0.0;
+    double intensity_stddev = 0.0;
+    double intensity_skewness = 0.0;
+    bool intensity_valid = false;
+    std::string background_method = "none";
+    bool background_valid = true;
+    int background_sample_count = 0;
+    double background_baseline_mean = 0.0;
+    double residual_threshold = 0.0;
+    std::string segmentation_domain = "raw_intensity";
+
+    double gw_pixel_perimeter = 0.0;
+
+    bool subpixel_valid = false;
+    int subpixel_candidate_point_count = 0;
+    int subpixel_accepted_point_count = 0;
+    int subpixel_rejected_low_gradient_count = 0;
+    int subpixel_rejected_out_of_bounds_count = 0;
+    double subpixel_mean_gradient = 0.0;
+    double subpixel_mean_fit_residual_px = 0.0;
+    double subpixel_perimeter = 0.0;
+    double subpixel_area = 0.0;
+    std::vector<cv::Point2d> subpixel_boundary;
+    std::string subpixel_failure_reason = "disabled";
+    std::string active_geometry_basis = "gw_discrete";
+    std::vector<cv::Point2d> outer_boundary;
+    std::vector<std::vector<cv::Point2d>> hole_boundaries;
+    double gwyddion_perimeter = 0.0;
+    double polygon_perimeter = 0.0;
+    double polygon_area = 0.0;
+    std::array<std::uint64_t, 16> pixel_configuration_counts = {};
+    double convex_hull_area = 0.0;
+    double circularity = 0.0;
+    double solidity = 0.0;
+    double major_axis_length = 0.0;
+    double minor_axis_length = 0.0;
+    double orientation_deg = 0.0;
+    double aspect_ratio = 0.0;
+    double eccentricity = 0.0;
+    bool moment_ellipse_valid = false;
+    double feret_max = 0.0;
+    double feret_max_angle_deg = 0.0;
+    cv::Point2d feret_max_p0;
+    cv::Point2d feret_max_p1;
+    double feret_min = 0.0;
+    double feret_min_angle_deg = 0.0;
+    cv::Point2d inscribed_circle_center_px;
+    double inscribed_circle_radius = 0.0;
+    bool inscribed_circle_valid = false;
+    cv::Point2d enclosing_circle_center_px;
+    double enclosing_circle_radius = 0.0;
+    bool enclosing_circle_valid = false;
+    std::string boundary_method = "gwyddion_2x2_pixel_configuration";
+    std::string topology_policy = "8_connected_foreground";
+    std::string inscribed_circle_method = "distance_transform_l2";
+    std::string status = "unavailable";
+};
+
  
 
  
-/*G_SearchPointGroup Search Matrix */
 
 typedef vector<int> vectorint;
 typedef vector<cv::Vec3b> vectorpixel;
@@ -110,6 +215,43 @@ public:
     int getdebugmaxcomponentw();
     int getdebugmaxcomponenth();
     const std::string& getdebugalgorithmbranch() const;
+
+    void setgeometrycalibration(double pixel_size_x, double pixel_size_y);
+    void setgeometryconnectivity(int connectivity);
+    void setmeasurementselection(int index);
+    void setshowboundary(int enabled);
+    void setshowmomentellipse(int enabled);
+    void setshowferet(int enabled);
+    void setshowgeometrycircles(int enabled);
+    void setbackgroundmethod(int method);
+    void setbackgroundborderwidth(int pixels);
+    void setbackgroundmorphologyradius(int pixels);
+    void setsubpixelenabled(int enabled);
+    void setsubpixelminimumgradient(double gradient);
+    void setsubpixelisothreshold(double threshold);
+    void setactivegeometrybasis(int basis);
+    int getmeasurementcount();
+    const FindObjectMeasurementSnapshot* getmeasurement(int index) const;
+    double getarea(int index);
+    double getperimeter(int index);
+    double getequivalentside(int index);
+    double getcircularity(int index);
+    double getsolidity(int index);
+    double getmajoraxis(int index);
+    double getminoraxis(int index);
+    double getorientation(int index);
+    double getferetmax(int index);
+    double getferetmin(int index);
+    double getinscribedradius(int index);
+    double getenclosingradius(int index);
+    const FindObjectMeasurementConfig& getmeasurementconfig() const
+    {
+        return m_measurement_config;
+    }
+    const std::vector<FindObjectMeasurementSnapshot>& getmeasurements() const
+    {
+        return m_measurements;
+    }
     void PublishDisplayShapes(ICxShapeSink& sink, const std::string& owner_ref) const;
     void setsearchtype(int itype);
     void setoffset(int ix0, int ix1, int iy0, int iy1);
@@ -213,6 +355,30 @@ private:
     int m_debug_max_component_w;
     int m_debug_max_component_h;
     std::string m_debug_algorithm_branch;
+
+    FindObjectMeasurementConfig m_measurement_config;
+    int m_measurement_selection = 0;
+    bool m_show_boundary = true;
+    bool m_show_moment_ellipse = true;
+    bool m_show_feret = true;
+    bool m_show_geometry_circles = true;
+    std::vector<FindObjectMeasurementSnapshot> m_measurements;
+    std::uint64_t m_measurement_generation = 0;
+    int m_active_geometry_basis = 0; // 0 = GW discrete, 1 = subpixel when valid.
+    std::string m_last_background_method = "none";
+    bool m_last_background_valid = true;
+    int m_last_background_sample_count = 0;
+    double m_last_background_baseline_mean = 0.0;
+    double m_last_residual_threshold = 0.0;
+    std::string m_last_segmentation_domain = "raw_intensity";
+
+    void RefreshGeometryMeasurements(Image& image);
+    void StoreAcceptedLabelMask(const cv::Mat& labels, int label,
+                                int service_id, int origin_x, int origin_y);
+    static FindObjectMeasurementSnapshot AnalyzeGeometry(
+        const cv::Mat& component_mask, const cv::Point& mask_origin_px,
+        const cv::Mat& source_image,
+        const FindObjectMeasurementConfig& config);
     bool RefreshAlgorithmRuntimeResources(int image_width, int image_height);
     void FinalizeRegionGrowthDebugCounters();
     void ObserveDebugComponent(int area, int width, int height);

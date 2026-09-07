@@ -25,6 +25,24 @@ private:
     std::regex expression_;
 };
 
+struct EasyOcrGlyphCandidateSnapshot {
+    int source_object_index = -1;
+    int line_index = -1;
+    int reading_order = -1;
+    cv::Rect2d bbox_px;
+    cv::Point2d centroid_px;
+    double orientation_deg = 0.0;
+    double projected_area = 0.0;
+    double aspect_ratio = 0.0;
+    double solidity = 0.0;
+    std::string label;
+    double appearance_score = 0.0;
+    double geometry_score = -1.0;
+    double confidence = 0.0;
+    std::string source_object_ref;
+    std::string status = "segmented";
+};
+
 class CxOcrString : public std::string {
 public:
     using std::string::operator=;
@@ -281,6 +299,29 @@ public:
     void stringresulthead(const char*pchar);
     void stringresulttail(const char*pchar);
     void shapesetroi(void *pshape);
+
+    void setrectxywh_script(int height, int width, int y, int x) {
+        setrect(x, y, width, height);
+    }
+    void setlayoutdirection(int direction);
+    void setlineoverlappercent(int percent);
+    void setglyphcandidatesfromobject(void* pfindobject);
+    void setglyphcandidatesfromfastmatch(void* pfastmatch);
+  int getglyphcandidatecount();
+  double getglyphcandidatex(int index);
+  double getglyphcandidatey(int index);
+  double getglyphcandidatew(int index);
+  double getglyphcandidateh(int index);
+  int getglyphcandidateline(int index);
+  int getglyphcandidatereadingorder(int index);
+  double getglyphcandidateconfidence(int index);
+    const std::vector<EasyOcrGlyphCandidateSnapshot>& getglyphcandidates() const {
+        return m_glyph_candidates;
+    }
+    const std::string& getrecognizedtext() const { return m_recognized_text; }
+    const std::string& getdecodefailure() const { return m_decode_failure; }
+    void PublishDisplayShapes(ICxShapeSink& sink,
+                              const std::string& owner_ref) override;
 private:
     int m_igridw;
     int m_igridh;
@@ -378,6 +419,17 @@ private:
     int m_exnum;
 
     std::String m_qocrstring;
+
+    int m_layout_direction = 0;
+    int m_line_overlap_percent = 50;
+    std::vector<EasyOcrGlyphCandidateSnapshot> m_glyph_candidates;
+    std::string m_recognized_text;
+    std::string m_decode_failure;
+
+    void RebuildGlyphCandidatesFromFindObject();
+    void RebuildGlyphCandidatesFromRects(const RectsShape& rects);
+    void AssignGlyphReadingOrder();
+    void FinalizeGlyphDecodingFromLegacyResults();
 };
 
 

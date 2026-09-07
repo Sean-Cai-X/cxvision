@@ -19,9 +19,25 @@ m_object.setsearchtype(global_method);
 m_object.setdistance(global_gap);
 m_object.setbrow(global_object_foreground_mode);
 m_object.setroithre(global_object_threshold);
+
+m_object.setgeometrycalibration(global_object_pixel_size_x_milli / 1000.0,
+                                global_object_pixel_size_y_milli / 1000.0);
+m_object.setgeometryconnectivity(global_object_geometry_connectivity);
+m_object.setmeasurementselection(global_object_selected_measurement);
+m_object.setshowboundary(global_object_show_boundary);
+m_object.setshowmomentellipse(global_object_show_moment_ellipse);
+m_object.setshowferet(global_object_show_feret);
+m_object.setshowgeometrycircles(global_object_show_circles);
+m_object.setbackgroundmethod(global_object_background_method);
+m_object.setbackgroundborderwidth(global_object_background_border_px);
+m_object.setbackgroundmorphologyradius(global_object_background_radius_px);
+m_object.setsubpixelenabled(global_object_subpixel_enabled);
+m_object.setsubpixelminimumgradient(global_object_subpixel_min_gradient_milli / 1000.0);
+m_object.setsubpixelisothreshold(global_object_subpixel_iso_threshold);
+m_object.setactivegeometrybasis(global_object_geometry_basis);
 m_object.setminmax(global_object_min_area, 999999);
 m_object.setminmaxwh(0, 99999, 0, 99999);
-m_object.measurecc(&m_image);
+m_object.measurecc(m_image);
 
 global_match_count = m_object.getresultobjsnum();
 global_candidate_count = m_object.getdebugcomponentcount();

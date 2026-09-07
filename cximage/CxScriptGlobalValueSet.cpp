@@ -203,6 +203,22 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_object_foreground_mode"] = 1.0;
     overrides["global_object_threshold"] = 20.0;
     overrides["global_object_min_area"] = 10.0;
+
+    overrides["global_object_pixel_size_x_milli"] = 1000.0;
+    overrides["global_object_pixel_size_y_milli"] = 1000.0;
+    overrides["global_object_geometry_connectivity"] = 8.0;
+    overrides["global_object_selected_measurement"] = 0.0;
+    overrides["global_object_show_boundary"] = 1.0;
+    overrides["global_object_show_moment_ellipse"] = 1.0;
+    overrides["global_object_show_feret"] = 1.0;
+    overrides["global_object_show_circles"] = 1.0;
+    overrides["global_object_background_method"] = 0.0;
+    overrides["global_object_background_border_px"] = 2.0;
+    overrides["global_object_background_radius_px"] = 32.0;
+    overrides["global_object_subpixel_enabled"] = 0.0;
+    overrides["global_object_subpixel_min_gradient_milli"] = 3000.0;
+    overrides["global_object_subpixel_iso_threshold"] = 0.0;
+    overrides["global_object_geometry_basis"] = 0.0;
     overrides["global_method"] = static_cast<double>(options.method);
     overrides["global_filterprofile"] = static_cast<double>(options.filterprofile);
     overrides["global_findsetting"] = 0.0;
@@ -226,6 +242,20 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_match_thre"] = 10.0;
     overrides["global_fastmatch_action"] = 3.0;
     overrides["global_fastmatch_scan_rotation_deg"] = 0.0;
+    overrides["global_fastmatch_geometry_source_index"] = 0.0;
+    overrides["global_fastmatch_geometry_weight_percent"] = 25.0;
+    overrides["global_fastmatch_max_pose_candidates"] = 32.0;
+
+    overrides["global_ocr_threshold"] = 110.0;
+    overrides["global_ocr_foreground_mode"] = 1.0;
+    overrides["global_ocr_min_area"] = 1.0;
+    overrides["global_ocr_component_distance"] = 6.0;
+
+    overrides["global_ocr_glyph_source"] = 0.0; // 0:auto, 1:FastMatch pose, 2:FindObject glyphs
+    overrides["global_ocr_layout_direction"] = 0.0;
+    overrides["global_ocr_line_overlap_percent"] = 50.0;
+    overrides["global_ocr_match_threshold"] = 3.0;
+    overrides["global_ocr_min_score_percent"] = 50.0;
     overrides["global_strategy_id"] = static_cast<double>(options.strategy_id);
 
     overrides["global_algorithm_executed"] = static_cast<double>(options.algorithm_executed);
