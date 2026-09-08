@@ -6141,6 +6141,8 @@ void ViewController::drawScriptAcceptancePanels() {
   ImGui::Checkbox("Manual State Test Console", &m_showManualStateTestConsole);
   ImGui::SameLine();
   ImGui::Checkbox("Show legacy GPU work (debug)", &m_showLegacyGpuWork);
+  ImGui::Checkbox("Business Workflow Acceptance Analysis",
+                  &m_showBusinessWorkflowPanel);
   if (m_selectedScript >= 0 &&
       m_selectedScript < static_cast<int>(m_scriptCatalog.size()))
     ImGui::TextWrapped("Selected: %s",
@@ -7710,6 +7712,10 @@ void ViewController::mainloop() {
         CXLOG_INFO("ViewController", "mainloop_stage", "running",
                    "stage=drawScriptAcceptancePanels");
       drawScriptAcceptancePanels();
+      if (m_showBusinessWorkflowPanel) {
+        SetCxCrashBreadcrumb("mainloop:CxBusinessWorkflowPanel.Draw");
+        m_businessWorkflowPanel.Draw(&m_showBusinessWorkflowPanel);
+      }
       SetCxCrashBreadcrumb("mainloop:SemanticFlowGraph.Draw");
       if (logThisFrame)
         CXLOG_INFO("ViewController", "mainloop_stage", "running",

@@ -28,6 +28,7 @@
 #include "ParserDebugBridge.h"
 #include "muParser.h"
 #include "ManualStateTestConsole.h"
+#include "CxBusinessWorkflowPanel.h"
 #include "CxEvidenceSelfTestRuntime.h"
 #include "ImageAnnotationLayer.h"
 #include "SemanticFlowGraph.h"
@@ -640,6 +641,8 @@ private:
     bool m_showLegacyGpuWork = false;
     bool m_detachablePanels = false;
     bool m_showManualStateTestConsole = true;
+    bool m_showBusinessWorkflowPanel = false;
+    CxBusinessWorkflowPanel m_businessWorkflowPanel;
     ManualTestContext m_manualTest;
     CxParserRuntimeOwner m_parserOwner;
     ImageAnnotationLayer m_annotationLayer;

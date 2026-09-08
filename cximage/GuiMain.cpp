@@ -1,4 +1,5 @@
 #include "CxAutomaticDiagnosticClosure.h"
+#include "CxBusinessWorkflowRuntime.h"
 #include "CxCrashLogHandler.h"
 #include "CxEvidenceSelfTestRuntime.h"
 #include "CxGeometryReferenceEvaluator.h"
@@ -40,6 +41,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 
 #include <sstream>
@@ -2622,7 +2624,139 @@ int RunCxImageReferenceCandidateCliFromArgs(int argc, char **argv) {
   return RunCxImageReferenceCandidateCli(options);
 }
 
+int RunBusinessWorkflowAcceptanceCli(int argc, char **argv) {
+  CxBusinessWorkflowBatchRequest request;
+
+  const auto read_required_value = [argc, argv](const std::string &name,
+                                                std::string &value) {
+    return TryGetCliValue(argc, argv, name, value) && !value.empty() &&
+           value.rfind("--", 0) != 0;
+  };
+
+  std::string case_root;
+  std::string out_dir;
+  if (!read_required_value("--business-case-root", case_root)) {
+    std::cerr << "business_workflow_parameter_status=FAIL\n"
+              << "business_workflow_parameter_reason=missing or empty "
+                 "--business-case-root\n";
+    return 2;
+  }
+  if (!read_required_value("--out", out_dir)) {
+    std::cerr << "business_workflow_parameter_status=FAIL\n"
+              << "business_workflow_parameter_reason=missing or empty "
+                 "--out\n";
+    return 2;
+  }
+  if (!read_required_value("--run-id", request.run_id)) {
+    std::cerr << "business_workflow_parameter_status=FAIL\n"
+              << "business_workflow_parameter_reason=missing or empty "
+                 "--run-id\n";
+    return 2;
+  }
+
+  request.case_root = case_root;
+  request.out_dir = out_dir;
+
+  std::string max_cases;
+  if (TryGetCliValue(argc, argv, "--max-cases", max_cases)) {
+    if (max_cases.empty() || max_cases.rfind("--", 0) == 0) {
+      std::cerr << "business_workflow_parameter_status=FAIL\n"
+                << "business_workflow_parameter_reason=--max-cases requires "
+                   "a nonnegative integer\n";
+      return 2;
+    }
+
+    std::size_t parsed_max_cases = 0;
+    for (const unsigned char ch : max_cases) {
+      if (ch < '0' || ch > '9') {
+        std::cerr
+            << "business_workflow_parameter_status=FAIL\n"
+            << "business_workflow_parameter_reason=--max-cases requires a "
+               "nonnegative integer\n";
+        return 2;
+      }
+      const std::size_t digit = static_cast<std::size_t>(ch - '0');
+      if (parsed_max_cases >
+          (std::numeric_limits<std::size_t>::max() - digit) / 10) {
+        std::cerr
+            << "business_workflow_parameter_status=FAIL\n"
+            << "business_workflow_parameter_reason=--max-cases is out of "
+               "range\n";
+        return 2;
+      }
+      parsed_max_cases = parsed_max_cases * 10 + digit;
+    }
+    request.max_cases = parsed_max_cases;
+  }
+
+  CxBusinessWorkflowBatchResult result;
+  std::string reason;
+  const bool run_completed =
+      RunCxBusinessWorkflowAcceptance(request, result, reason);
+  const bool accepted =
+      run_completed &&
+      (result.final_status == "PASS" ||
+       result.final_status == "CONTRACT_FIXTURE_PASS" ||
+       result.final_status == "BUSINESS_WORKFLOW_ACCEPTED_WITH_PENDING" ||
+       result.final_status == "ACCEPTED_WITH_PENDING");
+
+  std::cout << "business_workflow_runtime_call_status="
+            << (run_completed ? "COMPLETED" : "FAIL") << "\n"
+            << "business_workflow_acceptance_status=" << result.final_status
+            << "\n"
+            << "business_workflow_acceptance_code=" << result.final_code
+            << "\n"
+            << "business_workflow_acceptance_reason=" << result.final_reason
+            << "\n"
+            << "business_workflow_runtime_reason=" << reason << "\n"
+            << "business_workflow_run_id=" << result.run_id << "\n"
+            << "business_workflow_case_root=" << result.case_root.string()
+            << "\n"
+            << "business_workflow_out_dir=" << result.out_dir.string() << "\n"
+            << "business_workflow_scan_discovered_count="
+            << result.discovered_count << "\n"
+            << "business_workflow_scan_accepted_count=" << result.accepted_count
+            << "\n"
+            << "business_workflow_scan_rejected_count=" << result.rejected_count
+            << "\n"
+            << "business_workflow_scan_skipped_count=" << result.skipped_count
+            << "\n"
+            << "business_workflow_case_processed_count=" << result.processed_count
+            << "\n"
+            << "business_workflow_case_pass_count=" << result.pass_count << "\n"
+            << "business_workflow_contract_fixture_pass_count="
+            << result.contract_fixture_pass_count << "\n"
+            << "business_workflow_provider_execution_step_pass_count="
+            << result.provider_execution_step_pass_count << "\n"
+            << "business_workflow_case_pending_count=" << result.pending_count
+            << "\n"
+            << "business_workflow_case_fail_count=" << result.fail_count << "\n"
+            << "business_workflow_evidence_summary="
+            << result.summary_path.string() << "\n"
+            << "business_workflow_evidence_report_markdown="
+            << result.report_md_path.string() << "\n"
+            << "business_workflow_evidence_report_html="
+            << result.report_html_path.string() << "\n"
+            << "business_workflow_evidence_audit="
+            << result.audit_jsonl_path.string() << "\n"
+            << "business_workflow_evidence_scan_debug="
+            << result.scan_debug_path.string() << "\n"
+            << "business_workflow_evidence_risk_register="
+            << result.risk_register_path.string() << "\n"
+            << "business_workflow_output_error_count="
+            << result.output_errors.size() << "\n";
+  for (std::size_t index = 0; index < result.output_errors.size(); ++index) {
+    std::cout << "business_workflow_output_error_" << (index + 1) << "="
+              << result.output_errors[index] << "\n";
+  }
+
+  return accepted ? 0 : 1;
+}
+
 int RunCxVisionApplication(int argc, char **argv) {
+  if (HasCliArg(argc, argv, "--business-workflow-acceptance"))
+    return RunBusinessWorkflowAcceptanceCli(argc, argv);
+
   if (HasCliArg(argc, argv, "--yolov8n-paired-inference"))
     return cxvision_yolov8n_paired_inference::
         RunYoloV8nPairedInferenceCli(argc, argv);

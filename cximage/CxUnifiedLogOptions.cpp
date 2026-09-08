@@ -142,6 +142,8 @@ std::string DetectCxVisionRunMode(int argc, char** argv)
     {
         const std::string arg = argv[i];
 
+        if (arg == "--business-workflow-acceptance")
+            return "business_workflow_acceptance";
         if (arg == "--headless")
             return "headless";
         if (arg == "--suite")

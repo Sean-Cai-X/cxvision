@@ -170,6 +170,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/CircleShape.cpp
   cximage/EllipseShape.cpp
   cximage/PolylineShape.cpp
+  cximage/CxBusinessWorkflowPanel.cpp
+  cximage/CxBusinessWorkflowRuntime.cpp
   cximage/CxEvidenceSelfTestRuntime.cpp
 )
 

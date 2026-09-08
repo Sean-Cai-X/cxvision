@@ -136,3 +136,7 @@ AGENTS.md.bak_*
 /verification_key_parameters_pagedown.png
 /verification_key_parameters_f7_wake.png
 /tools
+!/tools/
+/tools/*
+!/tools/dev_analysis_gui/
+!/tools/dev_analysis_gui/**
