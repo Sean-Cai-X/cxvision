@@ -3505,6 +3505,48 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   edited |= DrawRuntimeIntRow(
 
       context, "find_num", "global_find_num", 1, 1, 20, 130.0f);
+
+  ImGui::SeparatorText("Affine transform search (OBB / external seed)");
+  edited |= DrawRuntimeIntRow(context, "enable affine search",
+      "global_fastmatch_transform_enabled", 0, 0, 1, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed center x",
+      "global_fastmatch_transform_center_x", 0, 0, 10000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed center y",
+      "global_fastmatch_transform_center_y", 0, 0, 10000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed half-u",
+      "global_fastmatch_transform_half_u", 0, 0, 10000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed half-v",
+      "global_fastmatch_transform_half_v", 0, 0, 10000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed angle deg",
+      "global_fastmatch_transform_angle_deg", 0, -180, 180, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed scale-x permille",
+      "global_fastmatch_transform_scale_x_permille", 1000, 1, 3000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "seed scale-y permille",
+      "global_fastmatch_transform_scale_y_permille", 1000, 1, 3000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "coarse scale range %",
+      "global_fastmatch_transform_scale_range_percent", 15, 0, 50, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "coarse angle range deg",
+      "global_fastmatch_transform_angle_range_deg", 15, 0, 90, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "coarse steps per axis",
+      "global_fastmatch_transform_coarse_steps", 3, 1, 5, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "fine scale range %",
+      "global_fastmatch_transform_fine_range_percent", 3, 0, 20, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "fine angle range deg",
+      "global_fastmatch_transform_fine_angle_range_deg", 3, 0, 30, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "maximum candidates",
+      "global_fastmatch_transform_max_candidates", 27, 1, 250, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "maximum samples",
+      "global_fastmatch_transform_max_samples", 200000, 1, 1000000, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "maximum elapsed ms",
+      "global_fastmatch_transform_max_elapsed_ms", 100, 1, 5000, 210.0f);
+  ImGui::SeparatorText("P1 shear / projective search (advanced)");
+  edited |= DrawRuntimeIntRow(context, "shear range permille",
+      "global_fastmatch_transform_shear_range_permille", 0, 0, 300, 210.0f);
+  edited |= DrawRuntimeIntRow(context, "projective range permille",
+      "global_fastmatch_transform_projective_range_permille", 0, 0, 50, 210.0f);
+  ImGui::TextDisabled("P0 scores learned A/B edge probes at the supplied seed; "
+                      "center/extent can be copied from an OBB result. 0 center "
+                      "or extent uses the current FastMatch ROI fallback.");
   return edited;
 }
 
@@ -8153,6 +8195,34 @@ if (isEasyOCR) {
     gaugeEdited |= DrawRuntimeIntRow(context, "scan rotation deg",
                                      "global_fastmatch_scan_rotation_deg", 0,
                                      -180, 180, 150.0f);
+    const int affineExecuted = RuntimeIntOr(
+        context, "global_fastmatch_transform_executed", 0);
+    if (affineExecuted != 0) {
+      const int affineConverged = RuntimeIntOr(
+          context, "global_fastmatch_transform_converged", 0);
+      const int budgetExceeded = RuntimeIntOr(
+          context, "global_fastmatch_transform_budget_exceeded", 0);
+      ImGui::SeparatorText("Affine search analysis");
+      ImGui::Text("status: %s", budgetExceeded != 0 ? "algorithm_budget_exceeded" :
+          (affineConverged != 0 ? "converged" : "score_below_threshold"));
+      ImGui::Text("candidates=%d samples=%d elapsed=%d ms",
+          RuntimeIntOr(context, "global_fastmatch_transform_candidate_count", 0),
+          RuntimeIntOr(context, "global_fastmatch_transform_sample_count", 0),
+          RuntimeIntOr(context, "global_fastmatch_transform_elapsed_ms", 0));
+      ImGui::Text("best score=%.3f scale=(%.3f, %.3f) angle=%d deg",
+          RuntimeIntOr(context, "global_fastmatch_transform_best_score_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_best_scale_x_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_best_scale_y_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_best_angle_deg", 0));
+      ImGui::Text("P1 shear=%.3f projective=(%.4f, %.4f)",
+          RuntimeIntOr(context, "global_fastmatch_transform_best_shear_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_best_projective_u_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_best_projective_v_permille", 0) / 1000.0);
+      ImGui::Text("gradient=%.3f residual=%.3fpx rigid baseline=%.3f",
+          RuntimeIntOr(context, "global_fastmatch_transform_gradient_score_permille", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_geometric_residual_milli_px", 0) / 1000.0,
+          RuntimeIntOr(context, "global_fastmatch_transform_rigid_baseline_score_permille", 0) / 1000.0);
+    }
     ImGui::TextDisabled("Image View colors: cyan=A side, orange=B side, "
                         "yellow=keypoint midpoint, magenta=adjacent-point "
                         "tangent, red=filtered/unpaired point. compare_gap is "

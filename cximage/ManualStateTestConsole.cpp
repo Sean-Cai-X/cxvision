@@ -861,6 +861,24 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_match_thre", 10);
     set("global_min_score_percent", 65);
     set("global_fastmatch_action", 3);
+    set("global_fastmatch_transform_enabled", 0);
+    set("global_fastmatch_transform_center_x", 0);
+    set("global_fastmatch_transform_center_y", 0);
+    set("global_fastmatch_transform_half_u", 0);
+    set("global_fastmatch_transform_half_v", 0);
+    set("global_fastmatch_transform_angle_deg", 0);
+    set("global_fastmatch_transform_scale_x_permille", 1000);
+    set("global_fastmatch_transform_scale_y_permille", 1000);
+    set("global_fastmatch_transform_scale_range_percent", 15);
+    set("global_fastmatch_transform_angle_range_deg", 15);
+    set("global_fastmatch_transform_coarse_steps", 3);
+    set("global_fastmatch_transform_fine_range_percent", 3);
+    set("global_fastmatch_transform_fine_angle_range_deg", 3);
+    set("global_fastmatch_transform_max_candidates", 27);
+    set("global_fastmatch_transform_max_samples", 200000);
+    set("global_fastmatch_transform_max_elapsed_ms", 100);
+    set("global_fastmatch_transform_shear_range_permille", 0);
+    set("global_fastmatch_transform_projective_range_permille", 0);
 
     // FastMatch direct scripts write these values back after learn/match.
     // CxScript assignments require their external destinations to be

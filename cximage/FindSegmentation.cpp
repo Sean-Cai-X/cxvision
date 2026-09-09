@@ -10,6 +10,7 @@
 
 #include <exception>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -31,6 +32,70 @@ std::string EscapeSegmentationJson(const std::string& value) {
       escaped.push_back(ch);
   }
   return escaped;
+}
+
+struct ContourObbOverlapMetrics {
+  double contour_raster_mask_obb_iou = 0.0;
+  double contour_raster_mask_aabb_iou = 0.0;
+  double contour_area_px = 0.0;
+  double obb_area_px = 0.0;
+  double aabb_area_px = 0.0;
+};
+
+ContourObbOverlapMetrics MeasureContourObbOverlap(
+    const std::vector<cv::Point>& contour,
+    const CxGeometryPrimitiveHypothesis& box) {
+  ContourObbOverlapMetrics metrics;
+  if (contour.size() < 3 || box.ordered_points.size() != 4)
+    return metrics;
+
+  std::vector<cv::Point> obb;
+  obb.reserve(box.ordered_points.size());
+  for (const cv::Point2d& point : box.ordered_points)
+    obb.emplace_back(cvRound(point.x), cvRound(point.y));
+  const cv::Rect contour_bounds = cv::boundingRect(contour);
+  const cv::Rect obb_bounds = cv::boundingRect(obb);
+  const cv::Rect bounds = contour_bounds | obb_bounds;
+  if (bounds.width <= 0 || bounds.height <= 0)
+    return metrics;
+
+  // Rasterize only the local union bounds; this is exact for the emitted
+  // contour representation and avoids treating a bounding-area ratio as IoU.
+  std::vector<cv::Point> local_contour;
+  std::vector<cv::Point> local_obb;
+  local_contour.reserve(contour.size());
+  local_obb.reserve(obb.size());
+  for (const cv::Point& point : contour)
+    local_contour.emplace_back(point.x - bounds.x, point.y - bounds.y);
+  for (const cv::Point& point : obb)
+    local_obb.emplace_back(point.x - bounds.x, point.y - bounds.y);
+  cv::Mat contour_mask = cv::Mat::zeros(bounds.height, bounds.width, CV_8U);
+  cv::Mat obb_mask = cv::Mat::zeros(bounds.height, bounds.width, CV_8U);
+  const std::vector<std::vector<cv::Point>> contour_polygons{local_contour};
+  cv::fillPoly(contour_mask, contour_polygons, cv::Scalar(255));
+  cv::fillConvexPoly(obb_mask, local_obb, cv::Scalar(255));
+  cv::Mat intersection_mask;
+  cv::Mat union_mask;
+  cv::bitwise_and(contour_mask, obb_mask, intersection_mask);
+  cv::bitwise_or(contour_mask, obb_mask, union_mask);
+  const double intersection = static_cast<double>(cv::countNonZero(intersection_mask));
+  const double union_count = static_cast<double>(cv::countNonZero(union_mask));
+  metrics.contour_raster_mask_obb_iou = union_count > 0.0 ? intersection / union_count : 0.0;
+
+  cv::Mat aabb_mask = cv::Mat::zeros(bounds.height, bounds.width, CV_8U);
+  const cv::Rect local_aabb(contour_bounds.x - bounds.x, contour_bounds.y - bounds.y,
+                            contour_bounds.width, contour_bounds.height);
+  cv::rectangle(aabb_mask, local_aabb, cv::Scalar(255), cv::FILLED);
+  cv::bitwise_and(contour_mask, aabb_mask, intersection_mask);
+  cv::bitwise_or(contour_mask, aabb_mask, union_mask);
+  const double aabb_intersection = static_cast<double>(cv::countNonZero(intersection_mask));
+  const double aabb_union = static_cast<double>(cv::countNonZero(union_mask));
+  metrics.contour_raster_mask_aabb_iou =
+      aabb_union > 0.0 ? aabb_intersection / aabb_union : 0.0;
+  metrics.contour_area_px = static_cast<double>(cv::countNonZero(contour_mask));
+  metrics.obb_area_px = static_cast<double>(cv::countNonZero(obb_mask));
+  metrics.aabb_area_px = static_cast<double>(cv::countNonZero(aabb_mask));
+  return metrics;
 }
 
 bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
@@ -60,7 +125,7 @@ bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
   bool any_complete = false;
   file << std::setprecision(12);
   file << "{\n"
-       << "  \"schema\": \"cx.yolov8.seg.mask_obb.v1\",\n"
+       << "  \"schema\": \"cx.yolov8.seg.mask_obb.v2\",\n"
        << "  \"algorithm\": \"mask_to_min_area_rect\",\n"
        << "  \"angle_source\": \"postprocess_not_native_angle_regression\",\n"
        << "  \"canonical_contract\": {\"angle_range_deg\": \"[-90,90)\", "
@@ -69,7 +134,10 @@ bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
   for (std::size_t index = 0; index < result.contours.size(); ++index) {
     const FindSegmentationContour& contour = result.contours[index];
     CxSegmentationGeometryFitResult fit;
+    const auto fit_started = std::chrono::steady_clock::now();
     FitCxSegmentationContourGeometry(contour.points, options, fit);
+    const double fit_elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - fit_started).count();
     if (index > 0)
       file << ",\n";
     const std::string instance_id = contour.source_instance_id.empty()
@@ -90,6 +158,8 @@ bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
     if (fit.complete) {
       any_complete = true;
       const CxGeometryPrimitiveHypothesis& box = fit.hypothesis;
+      const ContourObbOverlapMetrics overlap =
+          MeasureContourObbOverlap(contour.points, box);
       file << ", \"center_x\": " << box.center.x
            << ", \"center_y\": " << box.center.y
            << ", \"width\": " << box.axes.width
@@ -97,6 +167,19 @@ bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
            << ", \"canonical_angle_deg\": " << box.angle_deg
            << ", \"fit_residual_px\": " << box.classical_fit_residual_px
            << ", \"support\": " << box.support
+           << ", \"postprocess_elapsed_ms\": " << fit_elapsed_ms
+           << ", \"contour_raster_mask_obb_iou\": "
+           << overlap.contour_raster_mask_obb_iou
+           << ", \"contour_raster_mask_aabb_iou\": "
+           << overlap.contour_raster_mask_aabb_iou
+           << ", \"contour_raster_area_px\": " << overlap.contour_area_px
+           << ", \"obb_raster_area_px\": " << overlap.obb_area_px
+           << ", \"aabb_raster_area_px\": " << overlap.aabb_area_px
+           << ", \"reference_metrics_status\": \"REFERENCE_REQUIRED\""
+           << ", \"center_error_px\": null"
+           << ", \"major_axis_error_px\": null"
+           << ", \"minor_axis_error_px\": null"
+           << ", \"angle_error_deg\": null"
            << ", \"vertices\": [";
       for (std::size_t vertex = 0; vertex < box.ordered_points.size(); ++vertex) {
         if (vertex > 0)

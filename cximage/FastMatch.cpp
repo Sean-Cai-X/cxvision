@@ -1,5 +1,6 @@
 #include "CxUnifiedLog.h"
 #include "FastMatch.h"
+#include "FindSegmentation.h"
 #include "FindObject.h"
 #include "PolylineShape.h"
 
@@ -2380,6 +2381,439 @@ void FastMatch::MatchAB(Image &image) {
   RefreshPoseCandidates();
 
 }
+
+void FastMatch::settransformsearchenabled(int enabled) {
+  m_transform_search_config.enabled = enabled != 0;
+}
+
+void FastMatch::settransformcenter(int cx, int cy) {
+  m_transform_search_initial.cx = static_cast<double>(cx);
+  m_transform_search_initial.cy = static_cast<double>(cy);
+}
+
+void FastMatch::settransformextent(int half_u, int half_v) {
+  m_transform_search_initial.half_u = std::max(0, half_u);
+  m_transform_search_initial.half_v = std::max(0, half_v);
+}
+
+void FastMatch::settransformangle(double angle_deg) {
+  m_transform_search_initial.angle_deg = angle_deg;
+}
+
+void FastMatch::settransformscalepermille(int scale_x_permille,
+                                           int scale_y_permille) {
+  m_transform_search_initial.scale_x =
+      std::max(1, scale_x_permille) / 1000.0;
+  m_transform_search_initial.scale_y =
+      std::max(1, scale_y_permille) / 1000.0;
+}
+
+void FastMatch::settransformshearpermille(int shear_permille) {
+  m_transform_search_initial.shear = static_cast<double>(shear_permille) / 1000.0;
+}
+
+void FastMatch::settransformprojectivepermille(int projective_u_permille,
+                                                 int projective_v_permille) {
+  m_transform_search_initial.projective_u =
+      static_cast<double>(projective_u_permille) / 1000.0;
+  m_transform_search_initial.projective_v =
+      static_cast<double>(projective_v_permille) / 1000.0;
+}
+
+void FastMatch::settransformfromsegmentation(void* segmentation) {
+  FindSegmentation* source = static_cast<FindSegmentation*>(segmentation);
+  if (source == nullptr || source->get_geometry_count() <= 0)
+    return;
+  m_transform_search_initial = FastMatchTransform::fromOrientedBox(
+      source->get_geometry_center_x(), source->get_geometry_center_y(),
+      source->get_geometry_axis_x(), source->get_geometry_axis_y(),
+      source->get_geometry_angle_deg());
+}
+
+void FastMatch::settransformscalerangepercent(int percent) {
+  m_transform_search_config.scale_range_percent = std::max(0, percent);
+}
+void FastMatch::settransformanglerange(int degrees) {
+  m_transform_search_config.angle_range_deg = std::max(0, degrees);
+}
+void FastMatch::settransformcoarsesteps(int steps) {
+  m_transform_search_config.coarse_steps_per_axis = std::max(1, std::min(5, steps));
+}
+void FastMatch::settransformfinerangepercent(int percent) {
+  m_transform_search_config.fine_range_percent = std::max(0, percent);
+}
+void FastMatch::settransformfineanglerange(int degrees) {
+  m_transform_search_config.fine_angle_range_deg = std::max(0, degrees);
+}
+void FastMatch::settransformmaxcandidates(int count) {
+  m_transform_search_config.max_candidates = std::max(1, count);
+}
+void FastMatch::settransformmaxsamples(int count) {
+  m_transform_search_config.max_samples = std::max(1, count);
+}
+void FastMatch::settransformmaxelapsedms(int milliseconds) {
+  m_transform_search_config.max_elapsed_ms = std::max(1, milliseconds);
+}
+void FastMatch::settransformshearrangepermille(int permille) {
+  m_transform_search_config.shear_range_permille = std::max(0, permille);
+}
+void FastMatch::settransformprojectiverangepermille(int permille) {
+  m_transform_search_config.projective_range_permille = std::max(0, permille);
+}
+
+int FastMatch::gettransformsearchexecuted() { return m_transform_search_result.executed ? 1 : 0; }
+int FastMatch::gettransformsearchconverged() { return m_transform_search_result.converged ? 1 : 0; }
+int FastMatch::gettransformsearchbudgetexceeded() { return m_transform_search_result.budget_exceeded ? 1 : 0; }
+int FastMatch::gettransformsearchcandidatecount() { return m_transform_search_result.evaluated_candidates; }
+int FastMatch::gettransformsearchsamplecount() { return m_transform_search_result.sample_count; }
+int FastMatch::gettransformsearchelapsedms() { return m_transform_search_result.elapsed_ms; }
+double FastMatch::gettransformsearchscore() { return m_transform_search_result.best_score; }
+double FastMatch::gettransformsearchscalex() { return m_transform_search_result.best.scale_x; }
+double FastMatch::gettransformsearchscaley() { return m_transform_search_result.best.scale_y; }
+double FastMatch::gettransformsearchangle() { return m_transform_search_result.best.angle_deg; }
+double FastMatch::gettransformsearchshear() { return m_transform_search_result.best.shear; }
+double FastMatch::gettransformsearchprojectiveu() { return m_transform_search_result.best.projective_u; }
+double FastMatch::gettransformsearchprojectivev() { return m_transform_search_result.best.projective_v; }
+double FastMatch::gettransformsearchgradientscore() { return m_transform_search_result.gradient_score; }
+double FastMatch::gettransformsearchresidual() { return m_transform_search_result.geometric_residual_px; }
+double FastMatch::gettransformsearchrigidbaselinescore() { return m_transform_search_result.rigid_baseline_score; }
+void FastMatch::setrotatemaxcandidates(int count) { m_rotate_max_candidates = std::max(1, count); }
+void FastMatch::setrotatemaxelapsedms(int milliseconds) { m_rotate_max_elapsed_ms = std::max(1, milliseconds); }
+int FastMatch::getrotatebudgetexceeded() { return m_rotate_budget_exceeded ? 1 : 0; }
+int FastMatch::getrotatecandidatecount() { return m_rotate_candidate_count; }
+int FastMatch::getrotateelapsedms() {
+  return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - m_rotate_budget_start).count());
+}
+void FastMatch::resetRotateBudget() {
+  m_rotate_budget_start = std::chrono::steady_clock::now();
+  m_rotate_candidate_count = 0;
+  m_rotate_budget_exceeded = false;
+}
+bool FastMatch::consumeRotateCandidate() {
+  if (m_rotate_budget_exceeded)
+    return false;
+  if (++m_rotate_candidate_count > m_rotate_max_candidates ||
+      getrotateelapsedms() >= m_rotate_max_elapsed_ms) {
+    m_rotate_budget_exceeded = true;
+    return false;
+  }
+  return true;
+}
+
+double FastMatch::evaluateTransformCandidate(
+    Image& image, gp_Path& pathA, gp_Path& pathB,
+    const FastMatchTransform& transform, bool sparse, int& hit_count,
+    int& probe_count, double& continuity, double& gradient_score,
+    double& geometric_residual_px, bool& budget_exceeded,
+    const std::chrono::steady_clock::time_point& start) {
+  const int count = std::min(static_cast<int>(pathA.ElementCount()),
+                             static_cast<int>(pathB.ElementCount()));
+  if (count <= 0 || !transform.valid())
+    return 0.0;
+
+  const gp_Rectangle bounds = pathA.boundingRect();
+  const double base_x = bounds.TopLeft().X() + bounds.Width() * 0.5;
+  const double base_y = bounds.TopLeft().Y() + bounds.Height() * 0.5;
+  const int stride = sparse ? std::max(1, count / 8) : 1;
+  bool previous_hit = false;
+  int adjacent_hits = 0;
+  int adjacent_pairs = 0;
+  hit_count = 0;
+  probe_count = 0;
+  continuity = 0.0;
+  gradient_score = 0.0;
+  geometric_residual_px = 0.0;
+  double gradient_sum = 0.0;
+  double peak_alignment_residual_sum = 0.0;
+  std::vector<cv::Point2d> edge_peak_points;
+
+  for (int i = 0; i < count; i += stride) {
+    if (m_transform_search_result.sample_count >=
+        m_transform_search_config.max_samples) {
+      budget_exceeded = true;
+      return 0.0;
+    }
+    const int elapsed = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count());
+    if (elapsed >= m_transform_search_config.max_elapsed_ms) {
+      budget_exceeded = true;
+      return 0.0;
+    }
+    const gp_Pnt point_a = pathA.ElementAt(i);
+    const gp_Pnt point_b = pathB.ElementAt(i);
+    double ax = 0.0, ay = 0.0, bx = 0.0, by = 0.0;
+    transform.localToGlobal(point_a.X() - base_x, point_a.Y() - base_y, ax, ay);
+    transform.localToGlobal(point_b.X() - base_x, point_b.Y() - base_y, bx, by);
+    const int iax = static_cast<int>(std::lround(ax));
+    const int iay = static_cast<int>(std::lround(ay));
+    const int ibx = static_cast<int>(std::lround(bx));
+    const int iby = static_cast<int>(std::lround(by));
+    ++probe_count;
+    if (!FastMatchPointInsideImage(image, iax, iay) ||
+        !FastMatchPointInsideImage(image, ibx, iby)) {
+      previous_hit = false;
+      continue;
+    }
+    const double normal_x = bx - ax;
+    const double normal_y = by - ay;
+    const double normal_length = std::hypot(normal_x, normal_y);
+    if (normal_length <= 1e-6) {
+      previous_hit = false;
+      continue;
+    }
+    // A small normal scan supplies an actual image-gradient maximum and the
+    // sub-pixel-free geometric displacement of that maximum from mid-normal.
+    constexpr int kNormalSamples = 7;
+    double best_gradient = -1.0;
+    int best_index = 0;
+    for (int sample = 1; sample < kNormalSamples - 1; ++sample) {
+      if (++m_transform_search_result.sample_count >
+          m_transform_search_config.max_samples) {
+        budget_exceeded = true;
+        return 0.0;
+      }
+      const double t0 = static_cast<double>(sample - 1) / (kNormalSamples - 1);
+      const double t1 = static_cast<double>(sample + 1) / (kNormalSamples - 1);
+      const int x0 = static_cast<int>(std::lround(ax + normal_x * t0));
+      const int y0 = static_cast<int>(std::lround(ay + normal_y * t0));
+      const int x1 = static_cast<int>(std::lround(ax + normal_x * t1));
+      const int y1 = static_cast<int>(std::lround(ay + normal_y * t1));
+      if (!FastMatchPointInsideImage(image, x0, y0) ||
+          !FastMatchPointInsideImage(image, x1, y1))
+        continue;
+      const cv::Vec3b p0 = image.pixel(x0, y0);
+      const cv::Vec3b p1 = image.pixel(x1, y1);
+      const double g0 = 0.299 * Red(p0) + 0.587 * Green(p0) + 0.114 * Blue(p0);
+      const double g1 = 0.299 * Red(p1) + 0.587 * Green(p1) + 0.114 * Blue(p1);
+      const double gradient = std::abs(g1 - g0) /
+          std::max(1.0, normal_length * 2.0 / (kNormalSamples - 1));
+      if (gradient > best_gradient) {
+        best_gradient = gradient;
+        best_index = sample;
+      }
+    }
+    const bool hit = best_gradient >= static_cast<double>(m_imatchthre);
+    if (hit)
+      ++hit_count;
+    if (best_gradient >= 0.0) {
+      gradient_sum += best_gradient / 255.0;
+      peak_alignment_residual_sum += std::abs(best_index - (kNormalSamples - 1) * 0.5) *
+          normal_length / (kNormalSamples - 1);
+      const double peak_t = static_cast<double>(best_index) /
+          static_cast<double>(kNormalSamples - 1);
+      edge_peak_points.emplace_back(ax + normal_x * peak_t,
+                                    ay + normal_y * peak_t);
+    }
+    if (probe_count > 1) {
+      ++adjacent_pairs;
+      if (hit && previous_hit)
+        ++adjacent_hits;
+    }
+    previous_hit = hit;
+  }
+  if (probe_count == 0)
+    return 0.0;
+  continuity = adjacent_pairs == 0 ? 0.0 :
+      static_cast<double>(adjacent_hits) / static_cast<double>(adjacent_pairs);
+  gradient_score = gradient_sum / probe_count;
+  const double peak_alignment_residual = peak_alignment_residual_sum / probe_count;
+  // Total-least-squares fit of the observed gradient peaks.  The smaller
+  // eigenvalue of their covariance is the mean squared orthogonal distance to
+  // the fitted line, so its square root is a geometric fit RMSE in pixels.
+  double fit_rmse = peak_alignment_residual;
+  if (edge_peak_points.size() >= 2U) {
+    cv::Point2d mean(0.0, 0.0);
+    for (const cv::Point2d& point : edge_peak_points)
+      mean += point;
+    mean *= 1.0 / static_cast<double>(edge_peak_points.size());
+    double xx = 0.0, xy = 0.0, yy = 0.0;
+    for (const cv::Point2d& point : edge_peak_points) {
+      const double dx = point.x - mean.x;
+      const double dy = point.y - mean.y;
+      xx += dx * dx;
+      xy += dx * dy;
+      yy += dy * dy;
+    }
+    const double n = static_cast<double>(edge_peak_points.size());
+    const double trace = (xx + yy) / n;
+    const double determinant = (xx * yy - xy * xy) / (n * n);
+    const double minor = std::max(0.0, 0.5 * (trace -
+        std::sqrt(std::max(0.0, trace * trace - 4.0 * determinant))));
+    fit_rmse = std::sqrt(minor);
+  }
+  geometric_residual_px = fit_rmse + 0.25 * peak_alignment_residual;
+  const double appearance = static_cast<double>(hit_count) / probe_count;
+  const double prior = 0.02 * (std::abs(transform.scale_x - 1.0) +
+                               std::abs(transform.scale_y - 1.0)) +
+                       0.0005 * std::abs(transform.angle_deg -
+                                         m_transform_search_initial.angle_deg);
+  return std::max(0.0, (0.65 * gradient_score + 0.35 * appearance) *
+      (0.8 + 0.2 * continuity) - 0.05 * geometric_residual_px - prior);
+}
+
+void FastMatch::runTransformSearch(Image& image) {
+  resultclear();
+  m_transform_search_result = FastMatchTransformSearchResult();
+  m_transform_search_result.executed = true;
+  m_transform_search_result.initial = m_transform_search_initial;
+  if (m_transform_search_initial.cx == 0.0 && m_transform_search_initial.cy == 0.0) {
+    m_transform_search_initial.cx = m_search_roi_x + m_search_roi_w * 0.5;
+    m_transform_search_initial.cy = m_search_roi_y + m_search_roi_h * 0.5;
+  }
+  if (m_transform_search_initial.half_u <= 0.0)
+    m_transform_search_initial.half_u = std::max(1, m_learn_roi_w / 2);
+  if (m_transform_search_initial.half_v <= 0.0)
+    m_transform_search_initial.half_v = std::max(1, m_learn_roi_h / 2);
+  m_transform_search_result.initial = m_transform_search_initial;
+  m_transform_search_result.best = m_transform_search_initial;
+  gp_Path& pathA = FindLine::getpatternpathA();
+  gp_Path& pathB = FindLine::getpatternpathB();
+  if (std::min(pathA.ElementCount(), pathB.ElementCount()) <= 0) {
+    m_transform_search_result.failure_stage = "model_missing";
+    return;
+  }
+
+  const auto start = std::chrono::steady_clock::now();
+  bool budget_exceeded = false;
+  {
+    FastMatchTransform rigid = m_transform_search_initial;
+    rigid.scale_x = 1.0;
+    rigid.scale_y = 1.0;
+    rigid.shear = 0.0;
+    rigid.projective_u = 0.0;
+    rigid.projective_v = 0.0;
+    int rigidHits = 0, rigidProbes = 0;
+    double rigidContinuity = 0.0, rigidGradient = 0.0, rigidResidual = 0.0;
+    const int sampleBeforeBaseline = m_transform_search_result.sample_count;
+    m_transform_search_result.rigid_baseline_score = evaluateTransformCandidate(
+        image, pathA, pathB, rigid, true, rigidHits, rigidProbes,
+        rigidContinuity, rigidGradient, rigidResidual, budget_exceeded, start);
+    // The baseline is evidence, not a competing candidate; it must not consume
+    // the transform-search sample budget twice.
+    m_transform_search_result.sample_count = sampleBeforeBaseline;
+  }
+  const int steps = m_transform_search_config.enabled ?
+      m_transform_search_config.coarse_steps_per_axis : 1;
+  const int max_candidates = m_transform_search_config.max_candidates;
+  double best_continuity = 0.0;
+  double best_gradient = 0.0;
+  double best_residual = 0.0;
+  int best_hits = 0;
+  int best_probes = 0;
+  for (int ix = 0; ix < steps && !budget_exceeded; ++ix) {
+    for (int iy = 0; iy < steps && !budget_exceeded; ++iy) {
+      for (int ia = 0; ia < steps && !budget_exceeded; ++ia) {
+        if (m_transform_search_result.evaluated_candidates >= max_candidates)
+          break;
+        const double normalized_x = steps == 1 ? 0.0 : (2.0 * ix / (steps - 1) - 1.0);
+        const double normalized_y = steps == 1 ? 0.0 : (2.0 * iy / (steps - 1) - 1.0);
+        const double normalized_a = steps == 1 ? 0.0 : (2.0 * ia / (steps - 1) - 1.0);
+        FastMatchTransform candidate = m_transform_search_initial;
+        candidate.scale_x *= 1.0 + normalized_x *
+            m_transform_search_config.scale_range_percent / 100.0;
+        candidate.scale_y *= 1.0 + normalized_y *
+            m_transform_search_config.scale_range_percent / 100.0;
+        candidate.angle_deg += normalized_a * m_transform_search_config.angle_range_deg;
+        candidate.shear += normalized_y *
+            m_transform_search_config.shear_range_permille / 1000.0;
+        candidate.projective_u += normalized_x *
+            m_transform_search_config.projective_range_permille / 1000.0;
+        candidate.projective_v += normalized_y *
+            m_transform_search_config.projective_range_permille / 1000.0;
+        int hits = 0, probes = 0;
+        double continuity = 0.0, gradient = 0.0, residual = 0.0;
+        const double score = evaluateTransformCandidate(image, pathA, pathB,
+            candidate, true, hits, probes, continuity, gradient, residual,
+            budget_exceeded, start);
+        ++m_transform_search_result.evaluated_candidates;
+        if (score > m_transform_search_result.best_score ||
+            m_transform_search_result.evaluated_candidates == 1) {
+          m_transform_search_result.best = candidate;
+          m_transform_search_result.best_score = score;
+          best_continuity = continuity;
+          best_gradient = gradient;
+          best_residual = residual;
+          best_hits = hits;
+          best_probes = probes;
+        }
+      }
+    }
+  }
+
+  if (!budget_exceeded) {
+    const FastMatchTransform coarse_best = m_transform_search_result.best;
+    for (int ix = 0; ix < 3 && !budget_exceeded; ++ix) {
+      for (int iy = 0; iy < 3 && !budget_exceeded; ++iy) {
+        for (int ia = 0; ia < 3 && !budget_exceeded; ++ia) {
+          if (m_transform_search_result.evaluated_candidates >= max_candidates * 2)
+            break;
+          FastMatchTransform candidate = coarse_best;
+          candidate.scale_x *= 1.0 + (ix - 1) *
+              m_transform_search_config.fine_range_percent / 100.0;
+          candidate.scale_y *= 1.0 + (iy - 1) *
+              m_transform_search_config.fine_range_percent / 100.0;
+          candidate.angle_deg += (ia - 1) * m_transform_search_config.fine_angle_range_deg;
+          candidate.shear += (iy - 1) *
+              m_transform_search_config.shear_range_permille / 5000.0;
+          candidate.projective_u += (ix - 1) *
+              m_transform_search_config.projective_range_permille / 5000.0;
+          candidate.projective_v += (iy - 1) *
+              m_transform_search_config.projective_range_permille / 5000.0;
+          int hits = 0, probes = 0;
+          double continuity = 0.0, gradient = 0.0, residual = 0.0;
+          const double score = evaluateTransformCandidate(image, pathA, pathB,
+              candidate, false, hits, probes, continuity, gradient, residual,
+              budget_exceeded, start);
+          ++m_transform_search_result.evaluated_candidates;
+          if (score > m_transform_search_result.best_score) {
+            m_transform_search_result.best = candidate;
+            m_transform_search_result.best_score = score;
+            best_continuity = continuity;
+            best_gradient = gradient;
+            best_residual = residual;
+            best_hits = hits;
+            best_probes = probes;
+          }
+        }
+      }
+    }
+  }
+  m_transform_search_result.budget_exceeded = budget_exceeded;
+  m_transform_search_result.elapsed_ms = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start).count());
+  m_transform_search_result.appearance_score = best_probes == 0 ? 0.0 :
+      static_cast<double>(best_hits) / best_probes;
+  m_transform_search_result.continuity_score = best_continuity;
+  m_transform_search_result.gradient_score = best_gradient;
+  m_transform_search_result.geometric_residual_px = best_residual;
+  m_transform_search_result.converged = !budget_exceeded &&
+      m_transform_search_result.appearance_score >= m_dminscore;
+  m_transform_search_result.accepted_candidates =
+      m_transform_search_result.converged ? 1 : 0;
+  m_transform_search_result.failure_stage = budget_exceeded ? "algorithm_budget_exceeded" :
+      (m_transform_search_result.converged ? "complete" : "score_below_threshold");
+  if (m_transform_search_result.converged) {
+    const int result_score = std::max(1, static_cast<int>(
+        m_transform_search_result.appearance_score * 1000.0));
+    m_resultpoints.push_back(gp_Pnt(m_transform_search_result.best.cx,
+                                    m_transform_search_result.best.cy, 0));
+    m_resultnums.push_back(result_score);
+    m_iminfindnum = result_score;
+    RefreshPoseCandidates();
+  }
+}
+
+void FastMatch::transformmatch(void* pimage) {
+  Image* image = static_cast<Image*>(pimage);
+  if (image == nullptr) {
+    m_transform_search_result = FastMatchTransformSearchResult();
+    m_transform_search_result.failure_stage = "image_missing";
+    return;
+  }
+  runTransformSearch(*image);
+}
 void FastMatch::MatchABMore(Image &image) {
   m_matchimage = &image;
   resultclear();
@@ -4422,6 +4856,7 @@ void FastMatch::setclustergap(int ixclustergap, int iyclustergap,
 }
 void FastMatch::rotatematchAB(void *pimage) {
   Image *pgetimage = (Image *)pimage;
+  resetRotateBudget();
   RotateMatchAB(*pgetimage);
 }
 
@@ -4434,25 +4869,30 @@ void FastMatch::Setupgradeanglescale(int iangle) {
 }
 void FastMatch::rotatematchAB_upgrade(void *pimage) {
   Image *pgetimage = (Image *)pimage;
+  resetRotateBudget();
   RotateMatchAB_upgrade(*pgetimage);
 }
 
 void FastMatch::rotatematchAB05_upgrade(void *pimage) {
   Image *pgetimage = (Image *)pimage;
+  resetRotateBudget();
   RotateMatchAB05_upgrade(*pgetimage);
 }
 void FastMatch::rotatematchAB025_upgrade(void *pimage) {
   Image *pgetimage = (Image *)pimage;
+  resetRotateBudget();
   RotateMatchAB025_upgrade(*pgetimage);
 }
 
 void FastMatch::rotatematch(void *pimage) {
   Image *pgetimage = (Image *)pimage;
+  resetRotateBudget();
   RotateMatch(*pgetimage);
 }
 
 void FastMatch::RotateMatchSample(Image &image, gp_Path &path,
                                   PointsShape &modelrect, double dangle) {
+  if (!consumeRotateCandidate()) return;
   int ithre = m_imatchthre;
   int icurmodule = ImageManager::GetCurMode();
   Image *pimage = ImageManager::GetTransferImage(icurmodule);
@@ -4583,6 +5023,7 @@ void FastMatch::RotateMatchSample(Image &image, gp_Path &path,
 void FastMatch::RotateMatchSampleAB(Image &image, gp_Path &pathA,
                                     gp_Path &pathB, PointsShape &modelrect,
                                     double dangle) {
+  if (!consumeRotateCandidate()) return;
   int ithre = m_imatchthre;
   int icurmodule = ImageManager::GetCurMode();
   Image *pimage = ImageManager::GetTransferImage(icurmodule);
@@ -4716,6 +5157,7 @@ void FastMatch::RotateMatchSampleAB(Image &image, gp_Path &pathA,
 void FastMatch::RotateMatchSample_upgrade(Image &image, gp_Path &path,
                                           PointsShape &modelrect, double dangle,
                                           gp_Pnt &resultpoint) {
+  if (!consumeRotateCandidate()) return;
   int ithre = m_imatchthre;
   int icurmodule = ImageManager::GetCurMode();
   Image *pimage = ImageManager::GetTransferImage(icurmodule);

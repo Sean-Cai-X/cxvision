@@ -1,6 +1,7 @@
 #ifndef FASTMATCH_H
 #define FASTMATCH_H
 #include <array>
+#include <chrono>
 #include <map>
 #include <string>
 
@@ -9,6 +10,7 @@
 #include "Image.h"
 #include "shapebase.h"
 #include "FindLine.h"
+#include "FastMatchTransform.h"
 #include "Grid.h"
 #include <opencv2/core/mat.hpp>
 
@@ -18,6 +20,7 @@ typedef vector<int> Cluster;
 using namespace std;
 
 class FindObject;
+class FindSegmentation;
 
 struct FastMatchTemplateGeometrySnapshot
 {
@@ -219,6 +222,53 @@ public:
 
     void MatchAB(Image& image);
     void match(void* pimage);
+
+    // P0 affine search: a value-only initial transform (usually OBB-derived)
+    // is evaluated sparsely, then refined with all learned A/B probes.
+    void settransformsearchenabled(int enabled);
+    void settransformcenter(int cx, int cy);
+    void settransformextent(int half_u, int half_v);
+    void settransformangle(double angle_deg);
+    void settransformscalepermille(int scale_x_permille, int scale_y_permille);
+    void settransformshearpermille(int shear_permille);
+    void settransformprojectivepermille(int projective_u_permille, int projective_v_permille);
+    // Copies the primary OBB/geometry result from the immediately preceding
+    // FindSegmentation runtime object.  No parser object escapes its runtime.
+    void settransformfromsegmentation(void* segmentation);
+    void settransformscalerangepercent(int percent);
+    void settransformanglerange(int degrees);
+    void settransformcoarsesteps(int steps);
+    void settransformfinerangepercent(int percent);
+    void settransformfineanglerange(int degrees);
+    void settransformmaxcandidates(int count);
+    void settransformmaxsamples(int count);
+    void settransformmaxelapsedms(int milliseconds);
+    void settransformshearrangepermille(int permille);
+    void settransformprojectiverangepermille(int permille);
+    void transformmatch(void* pimage);
+    int gettransformsearchexecuted();
+    int gettransformsearchconverged();
+    int gettransformsearchbudgetexceeded();
+    int gettransformsearchcandidatecount();
+    int gettransformsearchsamplecount();
+    int gettransformsearchelapsedms();
+    double gettransformsearchscore();
+    double gettransformsearchscalex();
+    double gettransformsearchscaley();
+    double gettransformsearchangle();
+    double gettransformsearchshear();
+    double gettransformsearchprojectiveu();
+    double gettransformsearchprojectivev();
+    double gettransformsearchgradientscore();
+    double gettransformsearchresidual();
+    double gettransformsearchrigidbaselinescore();
+    void setrotatemaxcandidates(int count);
+    void setrotatemaxelapsedms(int milliseconds);
+    int getrotatebudgetexceeded();
+    int getrotatecandidatecount();
+    int getrotateelapsedms();
+    const FastMatchTransformSearchResult& gettransformsearchresult() const
+    { return m_transform_search_result; }
 
     void MatchABMore(Image& image);
     void matchmore(void* pimage);
@@ -586,6 +636,15 @@ private:
     vector<gp_Pnt> m_rawthresholdhitpoints;
     vector<int> m_rawthresholdhitscores;
 
+    FastMatchTransformSearchConfig m_transform_search_config;
+    FastMatchTransform m_transform_search_initial;
+    FastMatchTransformSearchResult m_transform_search_result;
+    int m_rotate_max_candidates = 720;
+    int m_rotate_max_elapsed_ms = 1000;
+    int m_rotate_candidate_count = 0;
+    bool m_rotate_budget_exceeded = false;
+    std::chrono::steady_clock::time_point m_rotate_budget_start;
+
     void* m_debug_last_learn_argument = nullptr;
 
     Grid* m_pgrid;//12X12
@@ -618,6 +677,14 @@ private:
     void MatchSample(Image& image, gp_Path& path);
     void MatchSampleAB(Image& image, gp_Path& pathA, gp_Path& pathB);
     void MatchSampleABMore(Image& image, gp_Path& pathA, gp_Path& pathB);
+    double evaluateTransformCandidate(Image& image, gp_Path& pathA,
+        gp_Path& pathB, const FastMatchTransform& transform, bool sparse,
+        int& hit_count, int& probe_count, double& continuity,
+        double& gradient_score, double& geometric_residual_px,
+        bool& budget_exceeded, const std::chrono::steady_clock::time_point& start);
+    void runTransformSearch(Image& image);
+    void resetRotateBudget();
+    bool consumeRotateCandidate();
 
     void MultiMatchSample(Image& image, gp_Path& path);
     void RotateMatch(Image& image);

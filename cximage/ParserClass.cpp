@@ -1710,6 +1710,117 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "modelzeroposition", &FastMatch::modelzeroposition);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "match",
                             &FastMatch::match);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformsearchenabled",
+                            &FastMatch::settransformsearchenabled);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformcenter", &FastMatch::settransformcenter);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformextent", &FastMatch::settransformextent);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformangle", &FastMatch::settransformangle);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformscalepermille",
+                            &FastMatch::settransformscalepermille);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformshearpermille",
+                            &FastMatch::settransformshearpermille);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformprojectivepermille",
+                            &FastMatch::settransformprojectivepermille);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformfromsegmentation",
+                            &FastMatch::settransformfromsegmentation);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformscalerangepercent",
+                            &FastMatch::settransformscalerangepercent);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformanglerange",
+                            &FastMatch::settransformanglerange);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformcoarsesteps",
+                            &FastMatch::settransformcoarsesteps);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformfinerangepercent",
+                            &FastMatch::settransformfinerangepercent);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformfineanglerange",
+                            &FastMatch::settransformfineanglerange);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformmaxcandidates",
+                            &FastMatch::settransformmaxcandidates);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformmaxsamples",
+                            &FastMatch::settransformmaxsamples);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformmaxelapsedms",
+                            &FastMatch::settransformmaxelapsedms);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformshearrangepermille",
+                            &FastMatch::settransformshearrangepermille);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformprojectiverangepermille",
+                            &FastMatch::settransformprojectiverangepermille);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "transformmatch", &FastMatch::transformmatch);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchexecuted",
+                            &FastMatch::gettransformsearchexecuted);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchconverged",
+                            &FastMatch::gettransformsearchconverged);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchbudgetexceeded",
+                            &FastMatch::gettransformsearchbudgetexceeded);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchcandidatecount",
+                            &FastMatch::gettransformsearchcandidatecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchsamplecount",
+                            &FastMatch::gettransformsearchsamplecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchelapsedms",
+                            &FastMatch::gettransformsearchelapsedms);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchscore",
+                            &FastMatch::gettransformsearchscore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchscalex",
+                            &FastMatch::gettransformsearchscalex);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchscaley",
+                            &FastMatch::gettransformsearchscaley);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchangle",
+                            &FastMatch::gettransformsearchangle);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchshear",
+                            &FastMatch::gettransformsearchshear);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchprojectiveu",
+                            &FastMatch::gettransformsearchprojectiveu);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchprojectivev",
+                            &FastMatch::gettransformsearchprojectivev);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchgradientscore",
+                            &FastMatch::gettransformsearchgradientscore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchresidual",
+                            &FastMatch::gettransformsearchresidual);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchrigidbaselinescore",
+                            &FastMatch::gettransformsearchrigidbaselinescore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setrotatemaxcandidates", &FastMatch::setrotatemaxcandidates);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setrotatemaxelapsedms", &FastMatch::setrotatemaxelapsedms);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getrotatebudgetexceeded", &FastMatch::getrotatebudgetexceeded);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getrotatecandidatecount", &FastMatch::getrotatecandidatecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getrotateelapsedms", &FastMatch::getrotateelapsedms);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchmore",
                             &FastMatch::matchmore);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
