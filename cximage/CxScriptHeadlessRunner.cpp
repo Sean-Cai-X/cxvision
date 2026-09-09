@@ -889,8 +889,8 @@ static std::string InferHeadlessManualReviewTool(
     if (key.find("find_segmentation") != std::string::npos ||
         key.find("findsegmentation") != std::string::npos)
         return "FindSegmentation";
-    if (key.find("easyocr") != std::string::npos)
-        return "EasyOCR";
+    if (key.find("cxtextinspect") != std::string::npos)
+        return "CxTextInspect";
     if (key.find("fastmatch") != std::string::npos)
         return "FastMatch";
     if (key.find("torch") != std::string::npos ||
@@ -2952,7 +2952,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
             const std::string tool = !options.stage25_tool.empty()
                 ? options.stage25_tool
-                : (lowerScript.find("easyocr") != std::string::npos ? "EasyOCR" :
+                : (lowerScript.find("cxtextinspect") != std::string::npos ? "CxTextInspect" :
                    lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
                    lowerScript.find("circle") != std::string::npos ? "FindCircle" :
                    lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :
@@ -3731,7 +3731,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     const std::string tool = !options.stage25_tool.empty()
         ? options.stage25_tool
-        : (lowerScript.find("easyocr") != std::string::npos ? "EasyOCR" :
+        : (lowerScript.find("cxtextinspect") != std::string::npos ? "CxTextInspect" :
            lowerScript.find("fastmatch") != std::string::npos ? "FastMatch" :
            lowerScript.find("circle") != std::string::npos ? "FindCircle" :
            lowerScript.find("ellipse") != std::string::npos ? "FindEllipse" :

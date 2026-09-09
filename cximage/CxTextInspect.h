@@ -1,5 +1,5 @@
-#ifndef EASYOCR_H
-#define EASYOCR_H
+#ifndef CXTEXTINSPECT_H
+#define CXTEXTINSPECT_H
 
 #include "FastMatch.h"
 
@@ -25,7 +25,7 @@ private:
     std::regex expression_;
 };
 
-struct EasyOcrGlyphCandidateSnapshot {
+struct CxTextInspectGlyphCandidateSnapshot {
     int source_object_index = -1;
     int line_index = -1;
     int reading_order = -1;
@@ -189,11 +189,11 @@ private:
     std::vector<levelvaluenode> s_nodes;
     int m_searchsum = 0;
 };
-class EasyOCR: public FastMatch
+class CxTextInspect: public FastMatch
 {
 public:
-    EasyOCR();
-    ~EasyOCR();
+    CxTextInspect();
+    ~CxTextInspect();
     void setshow(int ishow);
     virtual void setrect(int ix,int iy,int iw,int ih);
     void drawshape() override;
@@ -276,7 +276,7 @@ public:
     bool matchlevelnodelist36x36(int ia);
     bool matchlevelnodelist72x72(int ia);
     void fontocr_levelnodelist();
- 
+
     void resultnodelistreset(int iareasnum);
     void setresultnodelist(int ilevel,int iareanum,levelnode anode);
 
@@ -315,7 +315,7 @@ public:
   int getglyphcandidateline(int index);
   int getglyphcandidatereadingorder(int index);
   double getglyphcandidateconfidence(int index);
-    const std::vector<EasyOcrGlyphCandidateSnapshot>& getglyphcandidates() const {
+    const std::vector<CxTextInspectGlyphCandidateSnapshot>& getglyphcandidates() const {
         return m_glyph_candidates;
     }
     const std::string& getrecognizedtext() const { return m_recognized_text; }
@@ -422,7 +422,7 @@ private:
 
     int m_layout_direction = 0;
     int m_line_overlap_percent = 50;
-    std::vector<EasyOcrGlyphCandidateSnapshot> m_glyph_candidates;
+    std::vector<CxTextInspectGlyphCandidateSnapshot> m_glyph_candidates;
     std::string m_recognized_text;
     std::string m_decode_failure;
 

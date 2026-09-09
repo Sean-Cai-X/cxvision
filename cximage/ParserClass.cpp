@@ -11,7 +11,7 @@
 #include "CxScriptDirectBindings.h"
 #include "CxScriptTypeTraitsDefs.h"
 #include "CxUnifiedLog.h"
-#include "EasyOcr.h"
+#include "CxTextInspect.h"
 #include "FastMatch.h"
 #include "FastMatchDiagnostic.h"
 #include "FindCircle.h"
@@ -2075,75 +2075,75 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "shapesetroi", &FastMatch::shapesetroi);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotateresultx", &FastMatch::getrotateresultx);
-    EasyOCR *peasyocr = nullptr;
-    const std::string_view easyocr_type_name =
-        CxScriptTypeName(CxScriptTypeTraits<EasyOCR>::id);
-    m_parser.DefineClass(easyocr_type_name.data(), peasyocr);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "setrect",
-                            &EasyOCR::setrectxywh_script);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "Show",
-                            &EasyOCR::setshow);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "stringsplit",
-                            &EasyOCR::stringsplit);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "fontsplit",
-                            &EasyOCR::fontsplit);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "exfontsplit", &EasyOCR::exfontsplit);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "areasocr",
-                            &EasyOCR::areasocr);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "setsplitimage", &EasyOCR::setsplitimage);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "setsplitobject", &EasyOCR::setsplitobject);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "setsplitobjectbg", &EasyOCR::setsplitobjectbg);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+    CxTextInspect *pcxtextinspect = nullptr;
+    const std::string_view cxtextinspect_type_name =
+        CxScriptTypeName(CxScriptTypeTraits<CxTextInspect>::id);
+    m_parser.DefineClass(cxtextinspect_type_name.data(), pcxtextinspect);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "setrect",
+                            &CxTextInspect::setrectxywh_script);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "Show",
+                            &CxTextInspect::setshow);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "stringsplit",
+                            &CxTextInspect::stringsplit);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "fontsplit",
+                            &CxTextInspect::fontsplit);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "exfontsplit", &CxTextInspect::exfontsplit);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "areasocr",
+                            &CxTextInspect::areasocr);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "setsplitimage", &CxTextInspect::setsplitimage);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "setsplitobject", &CxTextInspect::setsplitobject);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "setsplitobjectbg", &CxTextInspect::setsplitobjectbg);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "setsplitobjectoffset",
-                            &EasyOCR::setsplitobjectoffset);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::setsplitobjectoffset);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "setlayoutdirection",
-                            &EasyOCR::setlayoutdirection);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::setlayoutdirection);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "setlineoverlappercent",
-                            &EasyOCR::setlineoverlappercent);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::setlineoverlappercent);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "setglyphcandidatesfromobject",
-                            &EasyOCR::setglyphcandidatesfromobject);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::setglyphcandidatesfromobject);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "setglyphcandidatesfromfastmatch",
-                            &EasyOCR::setglyphcandidatesfromfastmatch);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "setocrthre", &EasyOCR::setocrthre);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr, "setb2w",
-                            &EasyOCR::setb2w);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "setminscore", &EasyOCR::setminscore);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::setglyphcandidatesfromfastmatch);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "setocrthre", &CxTextInspect::setocrthre);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect, "setb2w",
+                            &CxTextInspect::setb2w);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "setminscore", &CxTextInspect::setminscore);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidatecount",
-                            &EasyOCR::getglyphcandidatecount);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidatecount);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidatex",
-                            &EasyOCR::getglyphcandidatex);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidatex);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidatey",
-                            &EasyOCR::getglyphcandidatey);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidatey);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidatew",
-                            &EasyOCR::getglyphcandidatew);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidatew);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidateh",
-                            &EasyOCR::getglyphcandidateh);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidateh);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidateline",
-                            &EasyOCR::getglyphcandidateline);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidateline);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidatereadingorder",
-                            &EasyOCR::getglyphcandidatereadingorder);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
+                            &CxTextInspect::getglyphcandidatereadingorder);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
                             "getglyphcandidateconfidence",
-                            &EasyOCR::getglyphcandidateconfidence);
-    m_parser.DefineClassFun(easyocr_type_name.data(), peasyocr,
-                            "shapesetroi", &EasyOCR::shapesetroi);
+                            &CxTextInspect::getglyphcandidateconfidence);
+    m_parser.DefineClassFun(cxtextinspect_type_name.data(), pcxtextinspect,
+                            "shapesetroi", &CxTextInspect::shapesetroi);
 
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotateresulty", &FastMatch::getrotateresulty);

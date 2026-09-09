@@ -1,13 +1,13 @@
 
 
-#include "EasyOcr.h"
+#include "CxTextInspect.h"
 #include "FindObject.h"
 #include "imagemanager.h"
 #include "ImageAnnotationLayer.h"
 #include "PolylineShape.h"
 #include "RectShape.h"
 
-EasyOCR::EasyOCR()
+CxTextInspect::CxTextInspect()
     : FastMatch(), m_igridw(12), m_igridh(12), m_idebugrectsnum(-1),
       m_idebugfontnum(-1), m_image_thre(110), m_findobj_distance(6),
       m_findobj_searchtype(444), m_findobj_brow(1), m_findobj_minarea(0),
@@ -48,76 +48,76 @@ EasyOCR::EasyOCR()
   m_pimagegrid->setgrid(5, 5, 64, 64, 5, 5);
 }
 
-EasyOCR::~EasyOCR() {
+CxTextInspect::~CxTextInspect() {
   delete m_pimagegrid;
   mapclear();
 }
 
-void EasyOCR::setrect(int ix, int iy, int iw, int ih) {
+void CxTextInspect::setrect(int ix, int iy, int iw, int ih) {
   Shape::setrect(ix, iy, iw, ih);
 }
 
-void EasyOCR::setlayoutdirection(int direction) {
+void CxTextInspect::setlayoutdirection(int direction) {
   m_layout_direction = std::clamp(direction, 0, 2);
   AssignGlyphReadingOrder();
 }
 
-void EasyOCR::setlineoverlappercent(int percent) {
+void CxTextInspect::setlineoverlappercent(int percent) {
   m_line_overlap_percent = std::clamp(percent, 1, 100);
   AssignGlyphReadingOrder();
 }
 
-int EasyOCR::getglyphcandidatecount() {
+int CxTextInspect::getglyphcandidatecount() {
   return static_cast<int>(m_glyph_candidates.size());
 }
 
-double EasyOCR::getglyphcandidatex(int index) {
+double CxTextInspect::getglyphcandidatex(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].bbox_px.x
              : 0.0;
 }
 
-double EasyOCR::getglyphcandidatey(int index) {
+double CxTextInspect::getglyphcandidatey(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].bbox_px.y
              : 0.0;
 }
 
-double EasyOCR::getglyphcandidatew(int index) {
+double CxTextInspect::getglyphcandidatew(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].bbox_px.width
              : 0.0;
 }
 
-double EasyOCR::getglyphcandidateh(int index) {
+double CxTextInspect::getglyphcandidateh(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].bbox_px.height
              : 0.0;
 }
 
-int EasyOCR::getglyphcandidateline(int index) {
+int CxTextInspect::getglyphcandidateline(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].line_index
              : -1;
 }
 
-int EasyOCR::getglyphcandidatereadingorder(int index) {
+int CxTextInspect::getglyphcandidatereadingorder(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].reading_order
              : -1;
 }
 
-double EasyOCR::getglyphcandidateconfidence(int index) {
+double CxTextInspect::getglyphcandidateconfidence(int index) {
   return index >= 0 && index < getglyphcandidatecount()
              ? m_glyph_candidates[index].confidence
              : 0.0;
 }
 
-void EasyOCR::RebuildGlyphCandidatesFromFindObject() {
+void CxTextInspect::RebuildGlyphCandidatesFromFindObject() {
   setglyphcandidatesfromobject(g_pbackfindobject);
 }
 
-void EasyOCR::setglyphcandidatesfromobject(void *pfindobject) {
+void CxTextInspect::setglyphcandidatesfromobject(void *pfindobject) {
   m_glyph_candidates.clear();
   m_recognized_text.clear();
   m_decode_failure.clear();
@@ -137,7 +137,7 @@ void EasyOCR::setglyphcandidatesfromobject(void *pfindobject) {
         measurement.bbox_px.height <= 0)
       continue;
 
-    EasyOcrGlyphCandidateSnapshot candidate;
+    CxTextInspectGlyphCandidateSnapshot candidate;
     candidate.source_object_index = index;
     candidate.bbox_px = measurement.bbox_px;
     candidate.centroid_px = measurement.centroid_px;
@@ -169,7 +169,7 @@ void EasyOCR::setglyphcandidatesfromobject(void *pfindobject) {
   }
 }
 
-void EasyOCR::setglyphcandidatesfromfastmatch(void *pfastmatch) {
+void CxTextInspect::setglyphcandidatesfromfastmatch(void *pfastmatch) {
   m_glyph_candidates.clear();
   m_recognized_text.clear();
   m_decode_failure.clear();
@@ -187,7 +187,7 @@ void EasyOCR::setglyphcandidatesfromfastmatch(void *pfastmatch) {
     for (const FastMatchPoseCandidateSnapshot &pose : poses) {
       if (pose.bbox_px.width <= 0 || pose.bbox_px.height <= 0)
         continue;
-      EasyOcrGlyphCandidateSnapshot candidate;
+      CxTextInspectGlyphCandidateSnapshot candidate;
       candidate.source_object_index = pose.candidate_index;
       candidate.bbox_px = pose.bbox_px;
       candidate.centroid_px = pose.center_px;
@@ -231,15 +231,15 @@ void EasyOCR::setglyphcandidatesfromfastmatch(void *pfastmatch) {
   }
 }
 
-void EasyOCR::RebuildGlyphCandidatesFromRects(const RectsShape &rects) {
-  const std::vector<EasyOcrGlyphCandidateSnapshot> previous_candidates =
+void CxTextInspect::RebuildGlyphCandidatesFromRects(const RectsShape &rects) {
+  const std::vector<CxTextInspectGlyphCandidateSnapshot> previous_candidates =
       m_glyph_candidates;
   m_glyph_candidates.clear();
   m_recognized_text.clear();
   m_decode_failure.clear();
   for (int index = 0; index < rects.size(); ++index) {
     const gp_Rectangle &rect = rects.getrect(index);
-    EasyOcrGlyphCandidateSnapshot candidate;
+    CxTextInspectGlyphCandidateSnapshot candidate;
     candidate.source_object_index = index;
     candidate.bbox_px =
         cv::Rect2d(rect.TopLeft().X(), rect.TopLeft().Y(), rect.Width(),
@@ -258,7 +258,7 @@ void EasyOCR::RebuildGlyphCandidatesFromRects(const RectsShape &rects) {
     candidate.status = "segmented";
 
     if (index < static_cast<int>(previous_candidates.size())) {
-      const EasyOcrGlyphCandidateSnapshot &previous =
+      const CxTextInspectGlyphCandidateSnapshot &previous =
           previous_candidates[index];
       candidate.source_object_index = previous.source_object_index;
       candidate.orientation_deg = previous.orientation_deg;
@@ -284,7 +284,7 @@ void EasyOCR::RebuildGlyphCandidatesFromRects(const RectsShape &rects) {
     m_decode_failure = "no_glyph_candidates";
 }
 
-void EasyOCR::AssignGlyphReadingOrder() {
+void CxTextInspect::AssignGlyphReadingOrder() {
   if (m_glyph_candidates.empty())
     return;
 
@@ -293,7 +293,7 @@ void EasyOCR::AssignGlyphReadingOrder() {
     cv::Rect2d extent = m_glyph_candidates.front().bbox_px;
     double mean_width = 0.0;
     double mean_height = 0.0;
-    for (const EasyOcrGlyphCandidateSnapshot &candidate :
+    for (const CxTextInspectGlyphCandidateSnapshot &candidate :
          m_glyph_candidates) {
       extent |= candidate.bbox_px;
       mean_width += candidate.bbox_px.width;
@@ -384,11 +384,11 @@ void EasyOCR::AssignGlyphReadingOrder() {
   }
 }
 
-void EasyOCR::FinalizeGlyphDecodingFromLegacyResults() {
+void CxTextInspect::FinalizeGlyphDecodingFromLegacyResults() {
   m_recognized_text.clear();
-  std::vector<const EasyOcrGlyphCandidateSnapshot *> ordered;
+  std::vector<const CxTextInspectGlyphCandidateSnapshot *> ordered;
   ordered.reserve(m_glyph_candidates.size());
-  for (EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+  for (CxTextInspectGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
     if (candidate.source_object_index >= 0 &&
         candidate.source_object_index < m_resultstrlist.size()) {
       candidate.label =
@@ -403,7 +403,7 @@ void EasyOCR::FinalizeGlyphDecodingFromLegacyResults() {
                                                        const auto *rhs) {
     return lhs->reading_order < rhs->reading_order;
   });
-  for (const EasyOcrGlyphCandidateSnapshot *candidate : ordered)
+  for (const CxTextInspectGlyphCandidateSnapshot *candidate : ordered)
     m_recognized_text += candidate->label;
   if (m_recognized_text.empty())
     m_recognized_text = m_resultstring.toStdString();
@@ -414,16 +414,16 @@ void EasyOCR::FinalizeGlyphDecodingFromLegacyResults() {
                          : std::string();
 }
 
-void EasyOCR::PublishDisplayShapes(ICxShapeSink &sink,
+void CxTextInspect::PublishDisplayShapes(ICxShapeSink &sink,
                                    const std::string &owner_ref) {
   FastMatch::PublishDisplayShapes(sink, owner_ref);
-  for (const EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+  for (const CxTextInspectGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
     const std::string suffix = std::to_string(candidate.reading_order);
     auto box = std::make_unique<RectShape>();
     box->setRect(candidate.bbox_px.x, candidate.bbox_px.y,
                  candidate.bbox_px.x + candidate.bbox_px.width,
                  candidate.bbox_px.y + candidate.bbox_px.height);
-    sink.UpsertShape(owner_ref + ".glyph." + suffix, "EasyOCR", owner_ref,
+    sink.UpsertShape(owner_ref + ".glyph." + suffix, "CxTextInspect", owner_ref,
                      "glyph_candidate", candidate.status, false, true,
                      std::move(box));
 
@@ -436,13 +436,13 @@ void EasyOCR::PublishDisplayShapes(ICxShapeSink &sink,
     axis->addPoint(candidate.centroid_px.x + half_length * std::cos(angle),
                    candidate.centroid_px.y + half_length * std::sin(angle));
     axis->close(false);
-    sink.UpsertShape(owner_ref + ".glyph_axis." + suffix, "EasyOCR",
+    sink.UpsertShape(owner_ref + ".glyph_axis." + suffix, "CxTextInspect",
                      owner_ref, "glyph_candidate", "main_axis", false, true,
                      std::move(axis));
   }
 }
 
-std::String EasyOCR::char2string(std::String pchar) {
+std::String CxTextInspect::char2string(std::String pchar) {
   if (std::String(pchar) == " ") {
     return std::String("space");
   } else if (std::String(pchar) == "!") {
@@ -640,7 +640,7 @@ std::String EasyOCR::char2string(std::String pchar) {
   } else
     return std::String(pchar);
 }
-std::String EasyOCR::string2char(const std::String &strchar) {
+std::String CxTextInspect::string2char(const std::String &strchar) {
   if (strchar == std::String("space")) {
     return std::String(" ");
   } else if (strchar == std::String("exclam")) {
@@ -838,7 +838,7 @@ std::String EasyOCR::string2char(const std::String &strchar) {
   } else
     return std::String(strchar);
 }
-void EasyOCR::mapclear() {
+void CxTextInspect::mapclear() {
   int isize = m_pgrids_l72.size();
   for (int i = 0; i < isize; i++) {
     Grid *pgrid = m_pgrids_l72[i];
@@ -878,7 +878,7 @@ void EasyOCR::mapclear() {
   }
   m_pgrids_l3.clear();
 }
-void EasyOCR::mapgrid() {
+void CxTextInspect::mapgrid() {
   int ilevel = m_ilevle;
   mapclear();
 
@@ -988,7 +988,7 @@ void EasyOCR::mapgrid() {
 
   m_ilevle = ilevel;
 }
-std::String EasyOCR::filenametoOCRstring(std::String strbase) {
+std::String CxTextInspect::filenametoOCRstring(std::String strbase) {
   std::String strkey;
   std::String strkey2;
   std::String strkey3;
@@ -1086,7 +1086,7 @@ std::String EasyOCR::filenametoOCRstring(std::String strbase) {
   }
   return strshow;
 }
-void EasyOCR::loadfontmodel() {
+void CxTextInspect::loadfontmodel() {
   FastMatch::clearmodels_l12();
   FastMatch::clearmodels_l36();
   FastMatch::clearmodels_l72();
@@ -1138,32 +1138,32 @@ void EasyOCR::loadfontmodel() {
       [this](const char *p) { FastMatch::addimagemodels_l72(p); },
       m_filenamelist_l72, m_fontlist_l72);
 }
-void EasyOCR::setimagetype(int itype) { m_imagetype = itype; }
-void EasyOCR::setshow(int ishow) { fastmatch::setshow(ishow); }
-void EasyOCR::setshowpos(int ix, int iy) {
+void CxTextInspect::setimagetype(int itype) { m_imagetype = itype; }
+void CxTextInspect::setshow(int ishow) { fastmatch::setshow(ishow); }
+void CxTextInspect::setshowpos(int ix, int iy) {
   m_idraw_x = ix;
   m_idraw_y = iy;
 }
-void EasyOCR::drawshape() {
+void CxTextInspect::drawshape() {
   // Qt painter rendering is deliberately deferred. The existing ImGui/Shape
   // path retains the base FastMatch geometry without introducing Qt runtime
   // dependencies into the algorithm module.
   FastMatch::drawshape();
 }
-void EasyOCR::setshowmap(int ishow, int ilevel, int idebugfont) {
+void CxTextInspect::setshowmap(int ishow, int ilevel, int idebugfont) {
   m_ilevle = ilevel;
   m_idraw_map = ishow;
   m_idebugfontnum = idebugfont;
 }
-void EasyOCR::setocrareasnum(int inum) { fastmatch::setmatchrectnum(inum); }
-void EasyOCR::setocrareas(int inum, int ix, int iy, int iw, int ih) {
+void CxTextInspect::setocrareasnum(int inum) { fastmatch::setmatchrectnum(inum); }
+void CxTextInspect::setocrareas(int inum, int ix, int iy, int iw, int ih) {
   fastmatch::setmultimatchrect(inum, ix, iy, iw, ih);
 }
-void EasyOCR::setocrthre(int ithre) { fastmatch::setmatchthre(ithre); }
-void EasyOCR::setb2w(int ib2w) { fastmatch::setb2w(ib2w); }
+void CxTextInspect::setocrthre(int ithre) { fastmatch::setmatchthre(ithre); }
+void CxTextInspect::setb2w(int ib2w) { fastmatch::setb2w(ib2w); }
 
-void EasyOCR::setspecshow(int ishow) { fastmatch::setspecshow(ishow); }
-void EasyOCR::stringsplit(void *pimage) {
+void CxTextInspect::setspecshow(int ishow) { fastmatch::setspecshow(ishow); }
+void CxTextInspect::stringsplit(void *pimage) {
   ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
   if (pgetimage == nullptr || g_pbackimage == nullptr ||
       g_pbackfindobject == nullptr) {
@@ -1172,7 +1172,7 @@ void EasyOCR::stringsplit(void *pimage) {
   }
   StringSplit(*pgetimage);
 }
-void EasyOCR::fontsplit(void *pimage) {
+void CxTextInspect::fontsplit(void *pimage) {
   ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
   if (pgetimage == nullptr || g_pbackimage == nullptr ||
       g_pbackfindobject == nullptr) {
@@ -1181,7 +1181,7 @@ void EasyOCR::fontsplit(void *pimage) {
   }
   FontSplit(*pgetimage);
 }
-void EasyOCR::exfontsplit(void *pimage) {
+void CxTextInspect::exfontsplit(void *pimage) {
   ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
   if (pgetimage == nullptr || g_pbackimage == nullptr ||
       g_pbackfindobject == nullptr) {
@@ -1191,7 +1191,7 @@ void EasyOCR::exfontsplit(void *pimage) {
   ExFontSplit(*pgetimage);
 }
 
-void EasyOCR::areasocr(void *pimage) {
+void CxTextInspect::areasocr(void *pimage) {
   ImageBase *pgetimage = static_cast<ImageBase *>(pimage);
   if (pgetimage == nullptr) {
     m_decode_failure = "ocr_input_unavailable";
@@ -1199,11 +1199,11 @@ void EasyOCR::areasocr(void *pimage) {
   }
   AreasOCR(*pgetimage);
 }
-void EasyOCR::setdebug(int idebugrect, int idebugfont) {
+void CxTextInspect::setdebug(int idebugrect, int idebugfont) {
   m_idebugrectsnum = idebugrect;
   m_idebugfontnum = idebugfont;
 }
-void EasyOCR::setsplitimage(int ithre, int ixor, int iyor, int ixand,
+void CxTextInspect::setsplitimage(int ithre, int ixor, int iyor, int ixand,
                             int iyand) {
   m_image_thre = ithre;
   m_ix_or = ixor;
@@ -1211,11 +1211,11 @@ void EasyOCR::setsplitimage(int ithre, int ixor, int iyor, int ixand,
   m_ix_and = ixand;
   m_iy_and = iyand;
 }
-void EasyOCR::setsplitobjectbg(int ibgedge, int ibgmethod) {
+void CxTextInspect::setsplitobjectbg(int ibgedge, int ibgmethod) {
   m_findobj_bgedge = ibgedge;
   m_findobj_bgmethod = ibgmethod;
 }
-void EasyOCR::setsplitobject(int idistance, int isearchtype, int ibrow,
+void CxTextInspect::setsplitobject(int idistance, int isearchtype, int ibrow,
                              int iminarea, int ibgedge) {
   m_findobj_distance = idistance;
   m_findobj_searchtype = isearchtype;
@@ -1223,17 +1223,17 @@ void EasyOCR::setsplitobject(int idistance, int isearchtype, int ibrow,
   m_findobj_minarea = iminarea;
   m_findobj_bgedge = ibgedge;
 }
-void EasyOCR::setsplitobjectoffset(int ix0, int ix1, int iy0, int iy1) {
+void CxTextInspect::setsplitobjectoffset(int ix0, int ix1, int iy0, int iy1) {
   m_findobj_ioffsetx0 = ix0;
   m_findobj_ioffsetx1 = ix1;
   m_findobj_ioffsety0 = iy0;
   m_findobj_ioffsety1 = iy1;
 }
 
-void EasyOCR::setsplitgrid(int iw, int ih, int igridnum) {
+void CxTextInspect::setsplitgrid(int iw, int ih, int igridnum) {
   g_pbackfindobject->setobjectgrid(iw, ih, igridnum);
 }
-void EasyOCR::StringSplit(ImageBase &image) {
+void CxTextInspect::StringSplit(ImageBase &image) {
   gp_Rectangle arect = Shape::rect();
 
   const gp_Pnt topLeft = arect.TopLeft();
@@ -1276,7 +1276,7 @@ void EasyOCR::StringSplit(ImageBase &image) {
   setrect(ix0, iy0, iw0 + 4, ih0 + 4);
 }
 
-void EasyOCR::FontSplit(ImageBase &image) {
+void CxTextInspect::FontSplit(ImageBase &image) {
   const gp_Rectangle rect = Shape::rect();
   const gp_Pnt topLeft = rect.TopLeft();
   const int x = static_cast<int>(topLeft.X());
@@ -1304,7 +1304,7 @@ void EasyOCR::FontSplit(ImageBase &image) {
   RebuildGlyphCandidatesFromFindObject();
 }
 
-void EasyOCR::ExFontSplit(ImageBase &image) {
+void CxTextInspect::ExFontSplit(ImageBase &image) {
   const gp_Rectangle rect = Shape::rect();
   const gp_Pnt topLeft = rect.TopLeft();
   const int x = static_cast<int>(topLeft.X());
@@ -1330,7 +1330,7 @@ void EasyOCR::ExFontSplit(ImageBase &image) {
   g_pbackfindobject->objectgrid(&image);
   RebuildGlyphCandidatesFromFindObject();
 }
-void EasyOCR::AreasOCR(ImageBase &image) {
+void CxTextInspect::AreasOCR(ImageBase &image) {
   RectsShape arects = fastmatch::getmatchrects();
   RebuildGlyphCandidatesFromRects(arects);
 
@@ -1374,7 +1374,7 @@ void EasyOCR::AreasOCR(ImageBase &image) {
       m_resultstrlist.push_back(m_fontlist_l12[iresultfont]);
       m_resultstring.append(m_fontlist_l12[iresultfont]);
 
-      for (EasyOcrGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
+      for (CxTextInspectGlyphCandidateSnapshot &candidate : m_glyph_candidates) {
         if (candidate.source_object_index != ia)
           continue;
         candidate.label = m_fontlist_l12[iresultfont].toStdString();
@@ -1390,13 +1390,13 @@ void EasyOCR::AreasOCR(ImageBase &image) {
   FinalizeGlyphDecodingFromLegacyResults();
   Shape::setname(m_resultstring.toStdString().c_str());
 }
-void EasyOCR::imagemodelshow() { fastmatch::imagemodelshow(); }
+void CxTextInspect::imagemodelshow() { fastmatch::imagemodelshow(); }
 
-void EasyOCR::imagematchshow() { fastmatch::imagematchshow(); }
-void EasyOCR::imagecompareshow(int itype) {
+void CxTextInspect::imagematchshow() { fastmatch::imagematchshow(); }
+void CxTextInspect::imagecompareshow(int itype) {
   fastmatch::imagemodelcompareshow(itype);
 }
-void EasyOCR::autolearn(const char *pfilename) {
+void CxTextInspect::autolearn(const char *pfilename) {
   const gp_Rectangle arect = g_pbackfindobject->getgrid(m_idebugrectsnum);
   int ix = static_cast<int>(arect.TopLeft().X());
   int iy = static_cast<int>(arect.TopLeft().Y());
@@ -1552,7 +1552,7 @@ void EasyOCR::autolearn(const char *pfilename) {
 
   levelmodel();
 }
-void EasyOCR::autolearnex(const char *pfilename) {
+void CxTextInspect::autolearnex(const char *pfilename) {
   const gp_Rectangle arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
 
   const int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
@@ -1685,7 +1685,7 @@ void EasyOCR::autolearnex(const char *pfilename) {
 
   levelmodel();
 }
-void EasyOCR::autolearnobj(const char *pfilename) {
+void CxTextInspect::autolearnobj(const char *pfilename) {
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
 
   int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
@@ -1798,11 +1798,11 @@ void EasyOCR::autolearnobj(const char *pfilename) {
   setlevelstring();
 }
 
-void EasyOCR::setlearngridwh(int igridwh) { m_igridwh = igridwh; }
+void CxTextInspect::setlearngridwh(int igridwh) { m_igridwh = igridwh; }
 
-void EasyOCR::string_exnum(int inum) { m_exnum = inum; }
+void CxTextInspect::string_exnum(int inum) { m_exnum = inum; }
 
-void EasyOCR::string_autolearnmass(const char *pstring) {
+void CxTextInspect::string_autolearnmass(const char *pstring) {
   std::String qstr(pstring);
   int istrnum = qstr.size();
   int igetobj = g_pbackfindobject->getresultobjsnum();
@@ -1822,7 +1822,7 @@ void EasyOCR::string_autolearnmass(const char *pstring) {
     setspecshow(-1);
   }
 }
-void EasyOCR::autolearnmass(const char *pfilename) {
+void CxTextInspect::autolearnmass(const char *pfilename) {
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
 
   int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
@@ -1946,7 +1946,7 @@ void EasyOCR::autolearnmass(const char *pfilename) {
   levelmodel();
 }
 
-void EasyOCR::checklearn(const char *pfilename) {
+void CxTextInspect::checklearn(const char *pfilename) {
 
   if (m_idebugrectsnum < 0)
     return;
@@ -2072,7 +2072,7 @@ void EasyOCR::checklearn(const char *pfilename) {
 
   levelmodel();
 }
-void EasyOCR::checkmatch(const char *pfilename) {
+void CxTextInspect::checkmatch(const char *pfilename) {
   if (m_idebugrectsnum < 0)
     return;
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
@@ -2175,7 +2175,7 @@ void EasyOCR::checkmatch(const char *pfilename) {
 
   return;
 }
-void EasyOCR::match72() {
+void CxTextInspect::match72() {
   if (m_idebugrectsnum < 0)
     return;
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
@@ -2210,7 +2210,7 @@ void EasyOCR::match72() {
       std::String(" %1 ").arg(m_dvalue) + std::String(" %1").arg(m_dmaxvalue);
   Shape::setname(strt.toStdString().c_str());
 }
-void EasyOCR::match72_matchpat() {
+void CxTextInspect::match72_matchpat() {
   if (m_idebugrectsnum < 0)
     return;
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
@@ -2236,7 +2236,7 @@ void EasyOCR::match72_matchpat() {
   std::String strt = std::String(" %1 ").arg(m_dvalue);
   Shape::setname(strt.toStdString().c_str());
 }
-void EasyOCR::match72_matchimg() {
+void CxTextInspect::match72_matchimg() {
   int imaxlen = g_pbackfindobject->getobjectgridw();
   int igrid = fastmatch::GetRectGridLevel(imaxlen);
   double dimagevalue = 0;
@@ -2247,7 +2247,7 @@ void EasyOCR::match72_matchimg() {
   std::String strt = std::String(" %1 %2").arg(m_dvalue).arg(m_dmaxvalue);
   Shape::setname(strt.toStdString().c_str());
 }
-void EasyOCR::learnmass_36(const char *pfilename) {
+void CxTextInspect::learnmass_36(const char *pfilename) {
   Rect arect = g_pbackfindobject->getgridex(m_idebugrectsnum);
 
   int iobjw = g_pbackfindobject->getresultw(m_idebugrectsnum);
@@ -2373,7 +2373,7 @@ void EasyOCR::learnmass_36(const char *pfilename) {
   levelmodel();
 }
 
-void EasyOCR::setlevelstring() {
+void CxTextInspect::setlevelstring() {
   int istrsize = m_fontlist_l12.size();
   int istrsize1 = m_fontlist_l36.size();
 
@@ -2404,7 +2404,7 @@ void EasyOCR::setlevelstring() {
     }
   }
 }
-void EasyOCR::levelmodel() {
+void CxTextInspect::levelmodel() {
   list_duplicatesmodel_l12();
   list_duplicatesmodel_l36();
   list_duplicatesmodel_l72();
@@ -2414,11 +2414,11 @@ void EasyOCR::levelmodel() {
   levelmodels_l12tol6();
   levelmodels_l6tol3();
 }
-void EasyOCR::setgrid(int iw, int igrid) { fastmatch::setgrid(iw, igrid); }
-void EasyOCR::savelevelmodel() { savelevel0_l1(); }
-void EasyOCR::setmatchvalid(double dthre) { m_dmatchthre = dthre; }
-void EasyOCR::setusingobject(int iusing) { m_icompareobject = iusing; }
-void EasyOCR::fontocr() {
+void CxTextInspect::setgrid(int iw, int igrid) { fastmatch::setgrid(iw, igrid); }
+void CxTextInspect::savelevelmodel() { savelevel0_l1(); }
+void CxTextInspect::setmatchvalid(double dthre) { m_dmatchthre = dthre; }
+void CxTextInspect::setusingobject(int iusing) { m_icompareobject = iusing; }
+void CxTextInspect::fontocr() {
   m_ilevle = 2;
   m_resultstrlist.clear();
   m_resultstring.clear();
@@ -2556,7 +2556,7 @@ void EasyOCR::fontocr() {
   Shape::setname(m_resultstring.toStdString().c_str());
 }
 
-void EasyOCR::SelectModel(int ilevle, int inum) {
+void CxTextInspect::SelectModel(int ilevle, int inum) {
   m_ilevle = ilevle;
   switch (ilevle) {
   case 0:
@@ -2594,11 +2594,11 @@ void EasyOCR::SelectModel(int ilevle, int inum) {
   }
 }
 
-void EasyOCR::selectmodel72(const char *pfilename) {
+void CxTextInspect::selectmodel72(const char *pfilename) {
   SelectNameModel(4, pfilename);
 }
 
-void EasyOCR::SelectNameModel(int ilevel, const char *pfilename) {
+void CxTextInspect::SelectNameModel(int ilevel, const char *pfilename) {
   m_ilevle = ilevel;
 
   int iselnum = 0;
@@ -2639,9 +2639,9 @@ void EasyOCR::SelectNameModel(int ilevel, const char *pfilename) {
 
   SelectModel(ilevel, iselnum);
 }
-void EasyOCR::modelmethod(int itype) { fastmatch::modelmethod(itype); }
+void CxTextInspect::modelmethod(int itype) { fastmatch::modelmethod(itype); }
 
-void EasyOCR::fontocr_level(int ilevel) {
+void CxTextInspect::fontocr_level(int ilevel) {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
 
   m_resultstrlist.clear();
@@ -2909,7 +2909,7 @@ void EasyOCR::fontocr_level(int ilevel) {
   Shape::setname(m_resultstring.toStdString().c_str());
   }
 }
-int EasyOCR::imagefastmapsize(int ilevel, int inum) {
+int CxTextInspect::imagefastmapsize(int ilevel, int inum) {
   int igetsize = 0;
   if (0 == ilevel) {
     return imagefastmodelsize(ilevel);
@@ -2943,7 +2943,7 @@ int EasyOCR::imagefastmapsize(int ilevel, int inum) {
   }
   return 0;
 }
-int EasyOCR::SelectMapModel(int ilevel, int inum, int i0) {
+int CxTextInspect::SelectMapModel(int ilevel, int inum, int i0) {
   m_ilevle = ilevel;
   int igetsize = 0;
   if (0 == ilevel) {
@@ -2997,7 +2997,7 @@ int EasyOCR::SelectMapModel(int ilevel, int inum, int i0) {
   }
   return 0;
 }
-int EasyOCR::resultnodesize(int ilevel, int iareanum) {
+int CxTextInspect::resultnodesize(int ilevel, int iareanum) {
   if (0 == ilevel) {
     return imagefastmodelsize(ilevel);
   } else {
@@ -3068,7 +3068,7 @@ int EasyOCR::resultnodesize(int ilevel, int iareanum) {
     }
   }
 }
-void EasyOCR::selectresultnode(int ilevel, int iareanum, int inum0) {
+void CxTextInspect::selectresultnode(int ilevel, int iareanum, int inum0) {
   if (m_reslutnodelist.size() <= iareanum)
     return;
   levelnode anode = m_reslutnodelist[iareanum];
@@ -3270,7 +3270,7 @@ void EasyOCR::selectresultnode(int ilevel, int iareanum, int inum0) {
     }
   }
 }
-void EasyOCR::resultnodereset(int iareasnum) {
+void CxTextInspect::resultnodereset(int iareasnum) {
   m_reslutnodelist.clear();
   for (int i = 0; i < iareasnum; i++) {
     levelnode anode;
@@ -3279,11 +3279,11 @@ void EasyOCR::resultnodereset(int iareasnum) {
     m_reslutnodelist.push_back(anode);
   }
 }
-void EasyOCR::setresultnode(int inum, levelnode inode) {
+void CxTextInspect::setresultnode(int inum, levelnode inode) {
   m_reslutnodelist[inum] = inode;
 }
 
-void EasyOCR::fontocr_levelex(int ilevel) {
+void CxTextInspect::fontocr_levelex(int ilevel) {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
 
   m_resultstrlist.clear();
@@ -3508,7 +3508,7 @@ void EasyOCR::fontocr_levelex(int ilevel) {
   }
 }
 
-void EasyOCR::fontocr_level2() {
+void CxTextInspect::fontocr_level2() {
 
   int iareasnum = g_pbackfindobject->getresultobjsnum();
   if (m_l6resultlist.size() <= 0)
@@ -3651,7 +3651,7 @@ void EasyOCR::fontocr_level2() {
   FinalizeGlyphDecodingFromLegacyResults();
   Shape::setname(m_resultstring.toStdString().c_str());
 }
-void EasyOCR::checkocr_level3() {
+void CxTextInspect::checkocr_level3() {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
 
   m_l12resultlist.clear();
@@ -3767,7 +3767,7 @@ void EasyOCR::checkocr_level3() {
   Shape::setname(m_resultstring.toStdString().c_str());
 }
 
-bool EasyOCR::matchlevelnode01() {
+bool CxTextInspect::matchlevelnode01() {
   MatchGrid(m_pimagegrid);
   double dimagevalue = fastmatch::getimagemodelreslut();
 
@@ -3806,7 +3806,7 @@ bool EasyOCR::matchlevelnode01() {
 
   return true;
 }
-bool EasyOCR::matchlevelnode2() {
+bool CxTextInspect::matchlevelnode2() {
   fastmatch::match(g_pbackimage);
 
   double dvalue = fastmatch::getmaxresult();
@@ -3858,7 +3858,7 @@ bool EasyOCR::matchlevelnode2() {
   } else
     return true;
 }
-void EasyOCR::resultnodelistreset(int iareanum) {
+void CxTextInspect::resultnodelistreset(int iareanum) {
   m_reslutnodeslistgrid3x3.clear();
   m_reslutnodeslistgrid6x6.clear();
   m_reslutnodeslistgrid12x12.clear();
@@ -3873,7 +3873,7 @@ void EasyOCR::resultnodelistreset(int iareanum) {
     m_reslutnodeslistgrid12x12.push_back(anodes);
   }
 }
-bool EasyOCR::matchlevelnodelist3x3(int ia) {
+bool CxTextInspect::matchlevelnodelist3x3(int ia) {
   int isize = imagefastmodelsize(0);
   double dimagevalue = 0;
   for (int i = 0; i < isize; i++) {
@@ -3892,7 +3892,7 @@ bool EasyOCR::matchlevelnodelist3x3(int ia) {
 
   return true;
 }
-bool EasyOCR::matchlevelnodelist6x6(int ia) {
+bool CxTextInspect::matchlevelnodelist6x6(int ia) {
   int isize = m_reslutnodeslistgrid3x3[ia].getnodes().size();
   double dimagevalue = 0;
   for (int i = 0; i < isize; i++) {
@@ -3916,7 +3916,7 @@ bool EasyOCR::matchlevelnodelist6x6(int ia) {
 
   return true;
 }
-bool EasyOCR::matchlevelnodelist12x12(int ia) {
+bool CxTextInspect::matchlevelnodelist12x12(int ia) {
   int isize = m_reslutnodeslistgrid6x6[ia].getnodes().size();
   double dimagevalue = 0;
   for (int i = 0; i < isize; i++) {
@@ -3946,7 +3946,7 @@ bool EasyOCR::matchlevelnodelist12x12(int ia) {
 
   return true;
 }
-bool EasyOCR::matchlevelnodelist36x36(int ia) {
+bool CxTextInspect::matchlevelnodelist36x36(int ia) {
   fastmatch::match(g_pbackimage);
   double dvalue = fastmatch::getmaxresult();
   double dimagevalue = 0;
@@ -3967,7 +3967,7 @@ bool EasyOCR::matchlevelnodelist36x36(int ia) {
     return true;
 }
 
-void EasyOCR::fontocr_levelnode(int ilevel) {
+void CxTextInspect::fontocr_levelnode(int ilevel) {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
   m_resultstrlist.clear();
   m_resultstring.clear();
@@ -4197,7 +4197,7 @@ void EasyOCR::fontocr_levelnode(int ilevel) {
   }
 }
 
-void EasyOCR::fontocr_levelnodelist() {
+void CxTextInspect::fontocr_levelnodelist() {
   int iareasnum = g_pbackfindobject->getresultobjsnum();
   m_resultstrlist.clear();
   m_resultstring.clear();
@@ -4356,7 +4356,7 @@ void EasyOCR::fontocr_levelnodelist() {
   }
 }
 
-void EasyOCR::shownoderesult() {
+void CxTextInspect::shownoderesult() {
   std::String qshowstr;
   int isize = m_reslutnodelist.size();
   std::String strpatA("");
@@ -4423,7 +4423,7 @@ void EasyOCR::shownoderesult() {
 
   Shape::setname(qshowstr.toStdString().c_str());
 }
-void EasyOCR::shownoderesultex() {
+void CxTextInspect::shownoderesultex() {
   std::String qshowstr;
   int isize = m_reslutnodelist.size();
   std::String strpatA("");
@@ -4535,7 +4535,7 @@ void EasyOCR::shownoderesultex() {
   m_qocrstring = qshowstr;
   Shape::setname(qshowstr.toStdString().c_str());
 }
-void EasyOCR::shownodelistresult12x12() {
+void CxTextInspect::shownodelistresult12x12() {
 
   std::String qshowstr;
   int isize = m_reslutnodeslistgrid12x12.size();
@@ -4663,7 +4663,7 @@ void EasyOCR::shownodelistresult12x12() {
   Shape::setname(qshowstr.toStdString().c_str());
 }
 
-std::String EasyOCR::ABC2string(std::String strget) {
+std::String CxTextInspect::ABC2string(std::String strget) {
   std::String strpatA;
   std::String strpatB;
 
@@ -4703,19 +4703,19 @@ std::String EasyOCR::ABC2string(std::String strget) {
   }
   return std::String("");
 }
-std::String EasyOCR::getreslultstring() { return m_qocrstring; }
-void EasyOCR::stringresulthead(const char *pchar) {
+std::String CxTextInspect::getreslultstring() { return m_qocrstring; }
+void CxTextInspect::stringresulthead(const char *pchar) {
   m_qocrstring = std::String(pchar) + m_qocrstring;
 }
-void EasyOCR::stringresulttail(const char *pchar) {
+void CxTextInspect::stringresulttail(const char *pchar) {
   m_qocrstring = m_qocrstring + std::String(pchar);
 }
 
-void EasyOCR::clipboardresult() {
+void CxTextInspect::clipboardresult() {
   // Clipboard ownership is provided by the host GUI; the algorithm layer has no Qt dependency.
 }
 
-void EasyOCR::setminscore(double dminscore) {
+void CxTextInspect::setminscore(double dminscore) {
   fastmatch::setminscore(dminscore);
 }
-void EasyOCR::shapesetroi(void *pshape) { Shape::shapesetroi(pshape); }
+void CxTextInspect::shapesetroi(void *pshape) { Shape::shapesetroi(pshape); }

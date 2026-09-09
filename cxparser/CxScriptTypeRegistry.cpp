@@ -29,8 +29,8 @@ std::string_view CxScriptTypeName(
     case CxScriptTypeId::FastMatch:
         return "FastMatch";
 
-    case CxScriptTypeId::EasyOCR:
-        return "EasyOCR";
+    case CxScriptTypeId::CxTextInspect:
+        return "CxTextInspect";
 
     case CxScriptTypeId::FastMatchDiagnostic:
         return "FastMatchDiagnostic";
@@ -92,8 +92,8 @@ ParseCanonicalCxScriptTypeName(
     if (name == "FastMatch")
         return CxScriptTypeId::FastMatch;
 
-    if (name == "EasyOCR")
-        return CxScriptTypeId::EasyOCR;
+    if (name == "CxTextInspect")
+        return CxScriptTypeId::CxTextInspect;
 
     if (name == "FastMatchDiagnostic")
         return CxScriptTypeId::FastMatchDiagnostic;

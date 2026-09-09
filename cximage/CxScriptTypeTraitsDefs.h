@@ -10,7 +10,7 @@ class FindRect;
 class FindObject;
 class FindSegmentation;
 class FastMatch;
-class EasyOCR;
+class CxTextInspect;
 class FastMatchDiagnostic;
 class CircleRingGauge;
 class GridPatternClassTool;
@@ -24,7 +24,7 @@ CXSCRIPT_TYPE_TRAITS(FindRect, FindRect)
 CXSCRIPT_TYPE_TRAITS(FindObject, FindObject)
 CXSCRIPT_TYPE_TRAITS(FindSegmentation, FindSegmentation)
 CXSCRIPT_TYPE_TRAITS(FastMatch, FastMatch)
-CXSCRIPT_TYPE_TRAITS(EasyOCR, EasyOCR)
+CXSCRIPT_TYPE_TRAITS(CxTextInspect, CxTextInspect)
 CXSCRIPT_TYPE_TRAITS(FastMatchDiagnostic, FastMatchDiagnostic)
 CXSCRIPT_TYPE_TRAITS(CircleRingGauge, CircleRingGauge)
 CXSCRIPT_TYPE_TRAITS(GridPatternClassTool, GridPatternClassTool)

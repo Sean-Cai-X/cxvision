@@ -3,7 +3,7 @@ FindObject m_template_object;
 FindObject m_search_objects;
 FindObject m_ocr_objects;
 FastMatch m_match;
-EasyOCR m_ocr;
+CxTextInspect m_ocr;
 
 m_image.copyFromMat(global_matInput);
 

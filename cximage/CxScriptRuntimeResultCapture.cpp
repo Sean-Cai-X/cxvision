@@ -7,7 +7,7 @@
 #include "FindRect.h"
 #include "FindSegmentation.h"
 #include "FastMatch.h"
-#include "EasyOcr.h"
+#include "CxTextInspect.h"
 #include "TorchTask.h"
 #include "CxTorchResultProjector.h"
 #include "ParserClass.h"
@@ -1133,16 +1133,16 @@ bool CaptureFastMatchResult(
     return true;
 }
 
-bool CaptureEasyOcrResult(
-    EasyOCR &tool,
+bool CaptureCxTextInspectResult(
+    CxTextInspect &tool,
     const std::string &object_name,
     CxScriptToolResultCapture &output) {
     CaptureFastMatchResult(static_cast<FastMatch &>(tool), object_name, output);
-    output.type = "EasyOCR";
+    output.type = "CxTextInspect";
     output.ocr_final_text = tool.getrecognizedtext();
     output.ocr_failure_reason = tool.getdecodefailure();
     output.ocr_glyph_candidates.clear();
-    for (const EasyOcrGlyphCandidateSnapshot &source :
+    for (const CxTextInspectGlyphCandidateSnapshot &source :
          tool.getglyphcandidates()) {
         CxOcrGlyphCandidateEvidence glyph;
         glyph.source_object_index = source.source_object_index;
@@ -1178,7 +1178,7 @@ bool CaptureEasyOcrResult(
     } else {
         output.failure_stage = "ocr_decode";
         output.reason = output.ocr_failure_reason.empty()
-                            ? "EasyOCR produced no glyph candidates or text"
+                            ? "CxTextInspect produced no glyph candidates or text"
                             : output.ocr_failure_reason;
     }
     return true;
@@ -1897,11 +1897,11 @@ bool CaptureRuntimeToolResults(
         MergeToolCapture(tool_capture, capture);
     }
 
-    const int easyocr_count = runtime.GetClassObjSum("EasyOCR");
-    for (int i = 0; i < easyocr_count; ++i)
+    const int cxtextinspect_count = runtime.GetClassObjSum("CxTextInspect");
+    for (int i = 0; i < cxtextinspect_count; ++i)
     {
-        EasyOCR* tool = static_cast<EasyOCR*>(
-            runtime.GetClassObj("EasyOCR", i));
+        CxTextInspect* tool = static_cast<CxTextInspect*>(
+            runtime.GetClassObj("CxTextInspect", i));
         if (tool == nullptr)
             continue;
         if (!captured_objects.insert(tool).second)
@@ -1910,18 +1910,18 @@ bool CaptureRuntimeToolResults(
         supported_object_found = true;
         CxScriptToolResultCapture tool_capture;
         const std::string object_name =
-            runtime.GetClassObjName("EasyOCR", i);
+            runtime.GetClassObjName("CxTextInspect", i);
         try
         {
-            if (!CaptureEasyOcrResult(*tool, object_name, tool_capture))
+            if (!CaptureCxTextInspectResult(*tool, object_name, tool_capture))
             {
-                reason = "failed to capture EasyOCR: " + object_name;
+                reason = "failed to capture CxTextInspect: " + object_name;
                 return false;
             }
         }
         catch (...)
         {
-            reason = "CaptureEasyOcrResult crashed for: " + object_name;
+            reason = "CaptureCxTextInspectResult crashed for: " + object_name;
             return false;
         }
         MergeToolCapture(tool_capture, capture);

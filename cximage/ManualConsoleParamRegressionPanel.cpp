@@ -2685,7 +2685,7 @@ static bool DrawFastMatchRoiControls(ManualTestContext &context) {
   return edited;
 }
 
-static bool DrawEasyOcrControls(ManualTestContext &context) {
+static bool DrawCxTextInspectControls(ManualTestContext &context) {
   bool edited = false;
   ImGui::SeparatorText("Detection / Component Split");
 
@@ -8111,13 +8111,13 @@ void DrawKeyParameterControlPanel(
 
   ImGui::TextUnformatted("Tool: ");
   ImGui::SameLine();
-  const bool isEasyOCR =
-      NormalizeKeyParamToolTypeLocal(gauge.tool) == "EasyOCR" ||
-      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "EasyOCR" ||
-      ContainsCaseInsensitiveLocal(context.loaded_script_path, "easyocr") ||
-      ContainsCaseInsensitiveLocal(context.script_file_path, "easyocr");
+  const bool isCxTextInspect =
+      NormalizeKeyParamToolTypeLocal(gauge.tool) == "CxTextInspect" ||
+      NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "CxTextInspect" ||
+      ContainsCaseInsensitiveLocal(context.loaded_script_path, "cxtextinspect") ||
+      ContainsCaseInsensitiveLocal(context.script_file_path, "cxtextinspect");
   const bool isFastMatch =
-      !isEasyOCR && KeyParamContextLooksFastMatchLocal(context);
+      !isCxTextInspect && KeyParamContextLooksFastMatchLocal(context);
   const bool isFindLine =
       gauge.tool == "FindLine" ||
       NormalizeKeyParamToolTypeLocal(gauge.primary_object_type) == "FindLine";
@@ -8172,9 +8172,9 @@ void DrawKeyParameterControlPanel(
     DrawFindEllipseEdgeEvaluationPanel(context);
     DrawFindEllipseScanSemanticsPanel(context);
   }
-if (isEasyOCR) {
+if (isCxTextInspect) {
     ImGui::TextColored(ImVec4(0.45f, 0.88f, 0.72f, 1.0f),
-                       "EasyOCR: component split -> glyph geometry -> "
+                       "CxTextInspect: component split -> glyph geometry -> "
                        "FastMatch classification -> reading-order decode");
   }
   if (isFastMatch) {
@@ -8415,8 +8415,8 @@ if (isEasyOCR) {
       gaugeEdited |= DrawGridPatternRoiControls(context);
     } else if (isRegionPattern) {
       gaugeEdited |= DrawRegionPatternRoiControls(context);
-} else if (isEasyOCR) {
-      const bool ocrEdited = DrawEasyOcrControls(context);
+} else if (isCxTextInspect) {
+      const bool ocrEdited = DrawCxTextInspectControls(context);
       gaugeEdited |= ocrEdited;
       if (ocrEdited)
         context.apply_gauge_to_shape_requested = true;
@@ -8466,9 +8466,9 @@ if (isEasyOCR) {
         gaugeEdited |= DrawGridPatternParameterControls(context);
       } else if (isRegionPattern) {
         gaugeEdited |= DrawRegionPatternParameterControls(context);
-} else if (isEasyOCR) {
+} else if (isCxTextInspect) {
         ImGui::TextDisabled(
-            "EasyOCR detection, geometry/layout and decoding controls are "
+            "CxTextInspect detection, geometry/layout and decoding controls are "
             "grouped in Geometry.");
       } else if (isFastMatch) {
         gaugeEdited |= DrawFastMatchLearnParameterControls(context);

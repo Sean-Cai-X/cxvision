@@ -18,7 +18,7 @@ enum class CxScriptTypeId : std::uint16_t
     FindSegmentation,
 
     FastMatch,
-    EasyOCR,
+    CxTextInspect,
     FastMatchDiagnostic,
     CircleRingGauge,
 

@@ -15,7 +15,7 @@ class FindObject;
 class FindRect;
 class FindSegmentation;
 class FastMatch;
-class EasyOCR;
+class CxTextInspect;
 class TorchTask;
 
 struct CxScriptToolResultCapture
@@ -372,8 +372,8 @@ bool CaptureFastMatchResult(
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 
-bool CaptureEasyOcrResult(
-    class EasyOCR& tool,
+bool CaptureCxTextInspectResult(
+    class CxTextInspect& tool,
     const std::string& object_name,
     CxScriptToolResultCapture& output);
 bool CaptureFindSegmentationResult(
