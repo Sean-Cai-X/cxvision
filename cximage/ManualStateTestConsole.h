@@ -1631,6 +1631,14 @@ struct ManualTestContext {
   std::unordered_map<std::string, int> pending_execution_globals;
   std::string pending_execution_candidate_id;
 
+  // Candidate persistence changes Evidence Chain vectors.  It must occur on
+  // the next UI frame, after the Key Parameter Controls traversal has
+  // released any row/group references that a vector reallocation can stale.
+  bool has_pending_candidate_save = false;
+  bool pending_candidate_save_requests_run = false;
+  ManualGaugeState pending_candidate_save_gauge;
+  std::unordered_map<std::string, int> pending_candidate_save_globals;
+
   unsigned long long manual_operation_trace_sequence = 0;
   std::vector<ManualOperationTraceEvent> pending_manual_operation_trace_events;
 

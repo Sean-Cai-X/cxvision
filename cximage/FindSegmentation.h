@@ -19,6 +19,7 @@ public:
     void setmodelid(const char* model_id);
     void setmodelpackage(const char* model_package_ref);
     void setmanifest(const char* manifest_path);
+    void setoutputroot(const char* output_root);
     void setpostprocessprofile(const char* postprocess_profile);
     void setparameterprofile(const char* parameter_profile_ref);
 
@@ -88,6 +89,8 @@ private:
     std::string m_model_package_ref;
 
     std::string m_manifest_path;
+
+    std::string m_output_root;
 
     std::string m_postprocess_profile;
 

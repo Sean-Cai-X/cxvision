@@ -293,6 +293,8 @@ struct CxScriptToolResultCapture
     double segmentation_geometry_axis_x = 0.0;
     double segmentation_geometry_axis_y = 0.0;
     double segmentation_geometry_angle_deg = 0.0;
+    std::string segmentation_oriented_box_evidence_ref;
+    std::string segmentation_oriented_box_conclusion;
 
 
     std::string segmentation_raw_result_ref;

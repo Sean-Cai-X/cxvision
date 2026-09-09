@@ -8,8 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <chrono>
-
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -33,7 +31,7 @@ std::string FindSegmentationTorchRuntimeDllPath() {
 }
 
 std::filesystem::path
-FindSegmentationDefaultManifestPath(const FindSegmentationInput &input) {
+ResolveFindSegmentationAssetPath(const std::string &configured_path) {
   auto resolve_existing =
       [](const std::filesystem::path &candidate) -> std::filesystem::path {
     if (candidate.empty())
@@ -77,37 +75,8 @@ FindSegmentationDefaultManifestPath(const FindSegmentationInput &input) {
     return candidate;
   };
 
-  if (!input.manifest_path.empty())
-    return resolve_existing(input.manifest_path);
-
-  if (!input.model_path.empty()) {
-    std::filesystem::path configured(input.model_path);
-    if (configured.extension() == ".json")
-      return resolve_existing(configured);
-  }
-
-  return resolve_existing("libtorch_module/testdata/manifests/"
-                          "deeplab_cpp_state_dict_smoke_v1.json");
-}
-std::filesystem::path FindSegmentationRuntimeOutputDir() {
-  std::filesystem::path root =
-      "D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless";
-
-#ifdef _WIN32
-  const DWORD pid = GetCurrentProcessId();
-#else
-  const int pid = 0;
-#endif
-
-  static unsigned long long sequence = 0;
-  const auto now = std::chrono::steady_clock::now().time_since_epoch();
-  const auto ticks =
-      std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-
-  std::ostringstream name;
-  name << "find_segmentation_libtorch_backend_" << pid << "_"
-       << ticks << "_" << (++sequence);
-  return root / name.str();
+  return configured_path.empty() ? std::filesystem::path()
+                                 : resolve_existing(configured_path);
 }
 
 bool ReadFindSegmentationTextFile(const std::filesystem::path &path,
@@ -146,6 +115,27 @@ bool ExtractFindSegmentationJsonNumber(const std::string &json,
 
   value = parsed;
   return true;
+}
+
+bool ExtractFindSegmentationJsonStringBefore(
+    const std::string &json, const std::string &key,
+    std::size_t before_position, std::string &value) {
+  value.clear();
+  const std::string needle = "\"" + key + "\"";
+  const std::size_t key_pos = json.rfind(needle, before_position);
+  if (key_pos == std::string::npos)
+    return false;
+  const std::size_t colon_pos = json.find(':', key_pos + needle.size());
+  if (colon_pos == std::string::npos || colon_pos >= before_position)
+    return false;
+  const std::size_t quote_begin = json.find('"', colon_pos + 1);
+  if (quote_begin == std::string::npos || quote_begin >= before_position)
+    return false;
+  const std::size_t quote_end = json.find('"', quote_begin + 1);
+  if (quote_end == std::string::npos || quote_end >= before_position)
+    return false;
+  value = json.substr(quote_begin + 1, quote_end - quote_begin - 1);
+  return !value.empty();
 }
 
 std::vector<double> ExtractFindSegmentationJsonNumbers(
@@ -209,6 +199,8 @@ bool ParseFindSegmentationYoloOuterContours(
         json.substr(array_begin, array_end - array_begin + 1);
 
     FindSegmentationContour contour;
+    ExtractFindSegmentationJsonStringBefore(
+        json, "stable_id", key_pos, contour.source_instance_id);
     std::size_t point_pos = 0;
     while (true) {
       const std::size_t x_key = outer_text.find("\"x\"", point_pos);
@@ -786,9 +778,55 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   output.model_id = input.model_id;
   output.model_package_ref = input.model_package_ref;
   output.manifest_path = input.manifest_path;
+  output.output_root = input.output_root;
   output.postprocess_profile = input.postprocess_profile;
   output.parameter_profile_ref = input.parameter_profile_ref;
 
+
+  if (input.task_id.empty() || input.model_id.empty() ||
+      input.model_package_ref.empty() || input.manifest_path.empty()) {
+    output.ok = false;
+    output.backend_status = "ASSET_MISSING";
+    output.status = "ASSET_MISSING";
+    output.reason =
+        "libtorch segmentation requires explicit task_id, model_id, "
+        "model_package_ref, and manifest_path";
+    reason = output.reason;
+    return false;
+  }
+  if (input.output_root.empty()) {
+    output.ok = false;
+    output.backend_status = "OUTPUT_ROOT_REQUIRED";
+    output.status = "OUTPUT_ROOT_REQUIRED";
+    output.reason =
+        "libtorch segmentation requires an explicit case-local output_root";
+    reason = output.reason;
+    return false;
+  }
+
+  const std::filesystem::path manifest_path =
+      ResolveFindSegmentationAssetPath(input.manifest_path);
+  const std::filesystem::path model_package_path =
+      ResolveFindSegmentationAssetPath(input.model_package_ref);
+  std::error_code asset_ec;
+  const bool manifest_available =
+      std::filesystem::is_regular_file(manifest_path, asset_ec) && !asset_ec;
+  asset_ec.clear();
+  const bool model_package_available =
+      std::filesystem::exists(model_package_path, asset_ec) && !asset_ec;
+  if (!manifest_available || !model_package_available) {
+    output.ok = false;
+    output.backend_status = "ASSET_MISSING";
+    output.status = "ASSET_MISSING";
+    output.reason = !manifest_available
+        ? "segmentation manifest asset is missing: " + input.manifest_path
+        : "segmentation model package asset is missing: " +
+              input.model_package_ref;
+    reason = output.reason;
+    return false;
+  }
+  output.manifest_path = manifest_path.string();
+  output.model_package_ref = model_package_path.string();
 
   const std::string runtime_dll = FindSegmentationTorchRuntimeDllPath();
 
@@ -804,13 +842,8 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
     return false;
   }
 
-  const std::filesystem::path manifest_path =
-      FindSegmentationDefaultManifestPath(input);
-  output.manifest_path = manifest_path.string();
-  if (output.task_id.empty())
-    output.task_id = "torch.infer.segmentation.deeplabv3plus.v1";
-
-  const std::filesystem::path output_dir = FindSegmentationRuntimeOutputDir();
+  const std::filesystem::path output_dir =
+      std::filesystem::path(input.output_root) / "segmentation_runtime";
   const std::filesystem::path input_image_path =
       output_dir / "find_segmentation_libtorch_input.png";
 
@@ -824,6 +857,7 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
     reason = output.reason;
     return false;
   }
+  output.output_root = output_dir.string();
 
   const cv::Rect image_bounds(0, 0, input.image.cols, input.image.rows);
   cv::Rect runtime_input_roi = image_bounds;
@@ -876,7 +910,7 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   }
   TorchRuntimeGuiConfig config;
   config.device = input.device.empty() ? "cpu" : input.device;
-  config.model_root = input.model_package_ref.empty() ? input.model_path : input.model_package_ref;
+  config.model_root = model_package_path.string();
 
   config.output_root = output_dir.string();
   config.log_level = "info";
@@ -964,9 +998,9 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
   extra << input.negative_point.y << '}';
   extra << '}';
   TorchRuntimeGuiRequest request;
-  request.task = input.task_id.empty() ? "torch.infer.segmentation.deeplabv3plus.v1" : input.task_id;
+  request.task = input.task_id;
 
-  request.case_name = "find_segmentation_libtorch_backend";
+  request.case_name = input.model_id;
   request.input_image = input_image_path.string();
   request.manifest_path = manifest_path.string();
   request.output_dir = output_dir.string();
@@ -1030,6 +1064,10 @@ bool FindSegmentationEdgeSamBackend::Run(const FindSegmentationInput &input,
 
   if (!output.contour_ref.empty())
     ParseFindSegmentationContours(output.contour_ref, output);
+  for (FindSegmentationContour &contour : output.contours) {
+    contour.source_mask_ref = output.mask_ref;
+    contour.source_contour_ref = output.contour_ref;
+  }
 
   if (output.ok && input.has_rect && !is_instance_segmentation_task) {
     const bool constrained = ApplyPromptRectConstraintToTorchSegmentationResult(

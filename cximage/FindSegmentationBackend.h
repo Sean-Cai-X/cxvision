@@ -17,6 +17,7 @@ struct FindSegmentationInput
     std::string model_id;
     std::string model_package_ref;
     std::string manifest_path;
+    std::string output_root;
     std::string postprocess_profile;
     std::string parameter_profile_ref;
 

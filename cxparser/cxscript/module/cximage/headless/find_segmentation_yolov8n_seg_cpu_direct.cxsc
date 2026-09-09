@@ -11,10 +11,12 @@ m_seg.settask("torch.infer.instance_segmentation.yolov8.v1");
 m_seg.setmodelid("yolov8n_seg_coco_v1");
 m_seg.setmodelpackage("libtorch_module/models/yolov8n_seg_coco_v1/model_manifest.json");
 m_seg.setmanifest("libtorch_module/models/yolov8n_seg_coco_v1/model_manifest.json");
+m_seg.setoutputroot(global_torch_request_context);
 m_seg.setpostprocessprofile("yolov8n_seg_instance_artifact_v1");
 m_seg.setparameterprofile("yolov8n_seg_coco_v1_findsegmentation");
 m_seg.setdevice("cpu");
 m_seg.setthreshold(threshold);
+m_seg.setgeometrytype("oriented_box");
 
 m_seg.segment(&m_image);
 m_seg.extractboundary();

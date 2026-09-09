@@ -1961,6 +1961,10 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["segmentation_geometry_axis_x"] = std::to_string(capture.segmentation_geometry_axis_x);
     pkg.facts["segmentation_geometry_axis_y"] = std::to_string(capture.segmentation_geometry_axis_y);
     pkg.facts["segmentation_geometry_angle_deg"] = std::to_string(capture.segmentation_geometry_angle_deg);
+    pkg.facts["segmentation_oriented_box_evidence_ref"] =
+        capture.segmentation_oriented_box_evidence_ref;
+    pkg.facts["segmentation_oriented_box_conclusion"] =
+        capture.segmentation_oriented_box_conclusion;
 
     pkg.facts["segmentation_raw_result_ref"] = capture.segmentation_raw_result_ref;
 
@@ -3427,6 +3431,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"segmentation_geometry_axis_x\": " << capture.segmentation_geometry_axis_x << ",\n";
         object_state_file << "  \"segmentation_geometry_axis_y\": " << capture.segmentation_geometry_axis_y << ",\n";
         object_state_file << "  \"segmentation_geometry_angle_deg\": " << capture.segmentation_geometry_angle_deg << ",\n";
+        object_state_file << "  \"segmentation_oriented_box_evidence_ref\": \"" << JsonEscape(capture.segmentation_oriented_box_evidence_ref) << "\",\n";
+        object_state_file << "  \"segmentation_oriented_box_conclusion\": \"" << JsonEscape(capture.segmentation_oriented_box_conclusion) << "\",\n";
         object_state_file << "  \"segmentation_raw_result_ref\": \"" << JsonEscape(capture.segmentation_raw_result_ref) << "\",\n";
         object_state_file << "  \"segmentation_raw_mask_ref\": \"" << JsonEscape(capture.segmentation_raw_mask_ref) << "\",\n";
         object_state_file << "  \"segmentation_raw_contour_ref\": \"" << JsonEscape(capture.segmentation_raw_contour_ref) << "\",\n";

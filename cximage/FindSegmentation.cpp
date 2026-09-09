@@ -9,8 +9,126 @@
 #include "RectShape.h"
 
 #include <exception>
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
+
+namespace {
+std::string EscapeSegmentationJson(const std::string& value) {
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (const char ch : value) {
+    if (ch == '\\' || ch == '"')
+      escaped.push_back('\\');
+    if (ch == '\n')
+      escaped += "\\n";
+    else if (ch != '\n')
+      escaped.push_back(ch);
+  }
+  return escaped;
+}
+
+bool WriteMaskToObbEvidence(const FindSegmentationResult& result,
+                            std::string& evidence_ref,
+                            std::string& conclusion,
+                            std::string& reason) {
+  evidence_ref.clear();
+  conclusion.clear();
+  if (result.output_root.empty()) {
+    reason = "oriented-box evidence requires a case-local runtime output root";
+    return false;
+  }
+
+  const std::filesystem::path evidence_path =
+      std::filesystem::path(result.output_root) / "oriented_boxes.json";
+  std::ofstream file(evidence_path);
+  if (!file) {
+    reason = "cannot write oriented-box evidence: " + evidence_path.string();
+    return false;
+  }
+
+  CxSegmentationGeometryFitOptions options;
+  options.geometry_type = "oriented_box";
+  options.tolerance_policy_ref = result.postprocess_profile.empty()
+      ? "mask_min_area_rect_default_v1"
+      : result.postprocess_profile;
+  bool any_complete = false;
+  file << std::setprecision(12);
+  file << "{\n"
+       << "  \"schema\": \"cx.yolov8.seg.mask_obb.v1\",\n"
+       << "  \"algorithm\": \"mask_to_min_area_rect\",\n"
+       << "  \"angle_source\": \"postprocess_not_native_angle_regression\",\n"
+       << "  \"canonical_contract\": {\"angle_range_deg\": \"[-90,90)\", "
+          "\"width_greater_or_equal_height\": true},\n"
+       << "  \"instances\": [\n";
+  for (std::size_t index = 0; index < result.contours.size(); ++index) {
+    const FindSegmentationContour& contour = result.contours[index];
+    CxSegmentationGeometryFitResult fit;
+    FitCxSegmentationContourGeometry(contour.points, options, fit);
+    if (index > 0)
+      file << ",\n";
+    const std::string instance_id = contour.source_instance_id.empty()
+        ? "contour_index_" + std::to_string(index)
+        : contour.source_instance_id;
+    const std::string& mask_ref = contour.source_mask_ref.empty()
+        ? result.mask_ref : contour.source_mask_ref;
+    const std::string& contour_ref = contour.source_contour_ref.empty()
+        ? result.contour_ref : contour.source_contour_ref;
+    file << "    {\"source_instance_id\": \""
+         << EscapeSegmentationJson(instance_id) << "\""
+         << ", \"source_mask_ref\": \"" << EscapeSegmentationJson(mask_ref)
+         << "\", \"source_contour_ref\": \""
+         << EscapeSegmentationJson(contour_ref) << "\""
+         << ", \"contour_point_count\": " << contour.points.size()
+         << ", \"fit_status\": \"" << EscapeSegmentationJson(fit.status)
+         << "\"";
+    if (fit.complete) {
+      any_complete = true;
+      const CxGeometryPrimitiveHypothesis& box = fit.hypothesis;
+      file << ", \"center_x\": " << box.center.x
+           << ", \"center_y\": " << box.center.y
+           << ", \"width\": " << box.axes.width
+           << ", \"height\": " << box.axes.height
+           << ", \"canonical_angle_deg\": " << box.angle_deg
+           << ", \"fit_residual_px\": " << box.classical_fit_residual_px
+           << ", \"support\": " << box.support
+           << ", \"vertices\": [";
+      for (std::size_t vertex = 0; vertex < box.ordered_points.size(); ++vertex) {
+        if (vertex > 0)
+          file << ", ";
+        file << "[" << box.ordered_points[vertex].x << ", "
+             << box.ordered_points[vertex].y << "]";
+      }
+      file << "]";
+    } else {
+      file << ", \"fit_reason\": \"" << EscapeSegmentationJson(fit.reason)
+           << "\"";
+    }
+    file << "}";
+  }
+  file << "\n  ],\n"
+       << "  \"conclusion\": \""
+       << (any_complete ? "YOLOV8_SEG_POSTPROCESS_OBB_PASS"
+                        : "YOLOV8_SEG_POSTPROCESS_OBB_PENDING")
+       << "\"\n}\n";
+  file.close();
+  if (!file) {
+    reason = "failed while writing oriented-box evidence: " + evidence_path.string();
+    return false;
+  }
+
+  evidence_ref = evidence_path.string();
+  conclusion = any_complete ? "YOLOV8_SEG_POSTPROCESS_OBB_PASS"
+                            : "YOLOV8_SEG_POSTPROCESS_OBB_PENDING";
+  reason.clear();
+  return true;
+}
+} // namespace
 
 FindSegmentation::FindSegmentation() {}
 
@@ -42,6 +160,29 @@ void FindSegmentation::setmodelpackage(const char *model_package_ref) {
 void FindSegmentation::setmanifest(const char *manifest_path) {
   if (manifest_path != nullptr)
     m_manifest_path = manifest_path;
+}
+
+void FindSegmentation::setoutputroot(const char *output_root) {
+  if (output_root == nullptr)
+    return;
+  std::string configured = output_root;
+  // Headless owns a single, already registered string context in the form
+  // case|image|output_root|metadata|dataset. Parse only its output field;
+  // ordinary callers still pass a directory directly.
+  const std::size_t first_separator = configured.find('|');
+  const std::size_t second_separator =
+      first_separator == std::string::npos ? std::string::npos
+                                           : configured.find('|', first_separator + 1);
+  const std::size_t third_separator =
+      second_separator == std::string::npos ? std::string::npos
+                                            : configured.find('|', second_separator + 1);
+  if (second_separator != std::string::npos &&
+      third_separator != std::string::npos) {
+    m_output_root = configured.substr(
+        second_separator + 1, third_separator - second_separator - 1);
+  } else {
+    m_output_root = configured;
+  }
 }
 
 void FindSegmentation::setpostprocessprofile(const char *postprocess_profile) {
@@ -118,6 +259,7 @@ void FindSegmentation::segment(void *image) {
   m_last_input_request.model_id = m_model_id;
   m_last_input_request.model_package_ref = m_model_package_ref;
   m_last_input_request.manifest_path = m_manifest_path;
+  m_last_input_request.output_root = m_output_root;
   m_last_input_request.postprocess_profile = m_postprocess_profile;
   m_last_input_request.parameter_profile_ref = m_parameter_profile_ref;
 
@@ -178,6 +320,7 @@ void FindSegmentation::segment(void *image) {
   input.model_id = m_model_id;
   input.model_package_ref = m_model_package_ref;
   input.manifest_path = m_manifest_path;
+  input.output_root = m_output_root;
   input.postprocess_profile = m_postprocess_profile;
   input.parameter_profile_ref = m_parameter_profile_ref;
 
@@ -322,11 +465,13 @@ void FindSegmentation::extractboundary() {
   m_result.requested_geometry_type = m_geometry_type;
   m_result.geometry_fit_status = "not_run";
   m_result.geometry_fit_reason.clear();
+  m_result.oriented_box_evidence_ref.clear();
+  m_result.oriented_box_conclusion.clear();
 
   if (m_geometry_type.empty()) {
     m_result.geometry_fit_status = "GEOMETRY_TYPE_REQUIRED";
     m_result.geometry_fit_reason =
-        "setgeometrytype must be called with circle, ellipse, or line";
+        "setgeometrytype must be called with circle, ellipse, oriented_box, or line";
     return;
   }
 
@@ -354,8 +499,24 @@ void FindSegmentation::extractboundary() {
   if (!fit.complete)
     return;
 
+  if (m_geometry_type == "oriented_box") {
+    fit.hypothesis.source = "yolov8_seg_mask_min_area_rect";
+    std::string evidence_reason;
+    if (!WriteMaskToObbEvidence(
+            m_result, m_result.oriented_box_evidence_ref,
+            m_result.oriented_box_conclusion, evidence_reason)) {
+      m_result.geometry_fit_status = "OBB_EVIDENCE_WRITE_FAILED";
+      m_result.geometry_fit_reason = evidence_reason;
+      return;
+    }
+    m_result.geometry_fit_status = m_result.oriented_box_conclusion;
+    m_result.geometry_fit_reason =
+        "mask-to-minAreaRect postprocess completed; this is not native angle regression";
+    m_result.refinement_method = "yolov8_seg_mask_min_area_rect";
+  }
   m_result.primitive_hypotheses.push_back(std::move(fit.hypothesis));
-  m_result.refinement_method = "seg_contour_fit:" + m_geometry_type;
+  if (m_geometry_type != "oriented_box")
+    m_result.refinement_method = "seg_contour_fit:" + m_geometry_type;
 }
 
 void FindSegmentation::buildoverlay(void *image) {

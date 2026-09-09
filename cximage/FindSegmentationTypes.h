@@ -19,6 +19,10 @@ struct FindSegmentationContour
 
     std::vector<cv::Point> points;
 
+    std::string source_instance_id;
+    std::string source_mask_ref;
+    std::string source_contour_ref;
+
     double area = 0.0;
 
     double perimeter = 0.0;
@@ -75,6 +79,8 @@ struct FindSegmentationResult
 
     std::string manifest_path;
 
+    std::string output_root;
+
     std::string postprocess_profile;
 
     std::string parameter_profile_ref;
@@ -105,6 +111,11 @@ struct FindSegmentationResult
     std::string requested_geometry_type;
     std::string geometry_fit_status = "not_run";
     std::string geometry_fit_reason;
+
+    // Path and status of the mask-to-minAreaRect OBB baseline.  It is kept
+    // separate from a model-native angle-regression result.
+    std::string oriented_box_evidence_ref;
+    std::string oriented_box_conclusion;
 
 
 
@@ -182,6 +193,8 @@ struct FindSegmentationInputSnapshot
     std::string model_package_ref;
 
     std::string manifest_path;
+
+    std::string output_root;
 
     std::string postprocess_profile;
 

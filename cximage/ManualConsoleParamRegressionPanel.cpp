@@ -8988,15 +8988,14 @@ if (isEasyOCR) {
         context, "save draft restored "
                  "staged object prefilter");
     if (ApplyManualGaugeToGlobals(context)) {
-      CxEvidenceCandidateSaveOptions options;
-      options.mode = "draft";
-      options.request_run = false;
-      CxEvidenceCandidateSaveResult result;
-      if (!SaveEvidenceCandidatePackage(context, options, result)) {
-        context.debug_status = "EVIDENCE_CANDIDATE_SAVE_"
-                               "FAILED";
-        context.debug_reason = result.reason;
-      }
+      context.pending_candidate_save_gauge = context.current_gauge;
+      context.pending_candidate_save_globals = context.runtime_int_vars;
+      context.pending_candidate_save_requests_run = false;
+      context.has_pending_candidate_save = true;
+      context.debug_status = "EVIDENCE_CANDIDATE_SAVE_QUEUED";
+      context.debug_reason =
+          "Draft save will persist after the current Key Parameter Controls "
+          "frame finishes.";
     }
   }
   ImGui::SameLine();
@@ -9015,22 +9014,14 @@ if (isEasyOCR) {
       context.pending_execution_gauge = context.current_gauge;
       context.pending_execution_globals = context.runtime_int_vars;
       context.has_pending_execution_snapshot = true;
-      CxEvidenceCandidateSaveOptions options;
-      options.mode = "run_requested";
-      options.request_run = true;
-      CxEvidenceCandidateSaveResult result;
-      if (!SaveEvidenceCandidatePackage(context, options, result)) {
-        context.debug_status = "EVIDENCE_CANDIDATE_SAVE_"
-                               "FAILED";
-        context.debug_reason = result.reason;
-      } else {
-        // This identifier is the durable
-        // run request.  Do not use the
-        // mutable Debug UI status as the
-        // only trigger for a deferred
-        // candidate run.
-        context.pending_execution_candidate_id = result.candidate_id;
-      }
+      context.pending_candidate_save_gauge = context.current_gauge;
+      context.pending_candidate_save_globals = context.runtime_int_vars;
+      context.pending_candidate_save_requests_run = true;
+      context.has_pending_candidate_save = true;
+      context.debug_status = "EVIDENCE_CANDIDATE_SAVE_AND_RUN_QUEUED";
+      context.debug_reason =
+          "Candidate save/run will persist after the current Key Parameter "
+          "Controls frame finishes.";
     }
   }
 

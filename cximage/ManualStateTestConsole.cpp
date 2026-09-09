@@ -1855,6 +1855,37 @@ void ViewController::drawKeyParameterControlsWindow() {
   ApplyAiGuiFocusHere(
       AiGuiDestination::KeyParameters,
       "Key Parameter Controls > active tool parameter controls");
+  if (m_manualTest.has_pending_candidate_save) {
+    const ManualGaugeState liveGauge = m_manualTest.current_gauge;
+    const std::unordered_map<std::string, int> liveGlobals =
+        m_manualTest.runtime_int_vars;
+    const bool requestRun = m_manualTest.pending_candidate_save_requests_run;
+    m_manualTest.current_gauge = m_manualTest.pending_candidate_save_gauge;
+    m_manualTest.runtime_int_vars = m_manualTest.pending_candidate_save_globals;
+    m_manualTest.has_pending_candidate_save = false;
+    m_manualTest.pending_candidate_save_requests_run = false;
+    m_manualTest.pending_candidate_save_globals.clear();
+
+    CxEvidenceCandidateSaveOptions options;
+    options.mode = requestRun ? "run_requested" : "draft";
+    options.request_run = requestRun;
+    CxEvidenceCandidateSaveResult result;
+    if (!SaveEvidenceCandidatePackage(m_manualTest, options, result)) {
+      m_manualTest.debug_status = "EVIDENCE_CANDIDATE_SAVE_FAILED";
+      m_manualTest.debug_reason = result.reason;
+      if (requestRun) {
+        m_manualTest.has_pending_execution_snapshot = false;
+        m_manualTest.pending_execution_globals.clear();
+        m_manualTest.pending_execution_candidate_id.clear();
+      }
+    } else if (requestRun) {
+      m_manualTest.pending_execution_candidate_id = result.candidate_id;
+      m_manualTest.run_state = "running";
+    }
+
+    m_manualTest.current_gauge = liveGauge;
+    m_manualTest.runtime_int_vars = liveGlobals;
+  }
   if (IsTorchContext(m_manualTest) &&
       !IsFindLineFindCircleContext(m_manualTest)) {
     std::string promptSyncReason;

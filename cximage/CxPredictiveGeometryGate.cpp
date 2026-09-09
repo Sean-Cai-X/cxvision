@@ -252,6 +252,85 @@ bool FitEllipseGeometry(
     return true;
 }
 
+double NormalizeAngleSigned90(double angle_deg)
+{
+    while (angle_deg >= 90.0)
+        angle_deg -= 180.0;
+    while (angle_deg < -90.0)
+        angle_deg += 180.0;
+    return angle_deg;
+}
+
+bool FitOrientedBoxGeometry(
+    const std::vector<cv::Point2d>& points,
+    const CxSegmentationGeometryFitOptions& options,
+    CxGeometryPrimitiveHypothesis& hypothesis)
+{
+    if (points.size() < 3)
+        return false;
+
+    std::vector<cv::Point2f> fit_points;
+    fit_points.reserve(points.size());
+    for (const cv::Point2d& point : points)
+        fit_points.emplace_back(
+            static_cast<float>(point.x), static_cast<float>(point.y));
+
+    const cv::RotatedRect fitted = cv::minAreaRect(fit_points);
+    double width = fitted.size.width;
+    double height = fitted.size.height;
+    double angle_deg = fitted.angle;
+    if (height > width)
+    {
+        std::swap(width, height);
+        angle_deg += 90.0;
+    }
+    if (!std::isfinite(width) || !std::isfinite(height) ||
+        width <= 0.0 || height <= 0.0)
+        return false;
+
+    // The long axis is canonical: width >= height and angle in [-90, 90).
+    angle_deg = NormalizeAngleSigned90(angle_deg);
+    const double angle_rad = angle_deg * kGeometryPi / 180.0;
+    const cv::Point2d major(std::cos(angle_rad), std::sin(angle_rad));
+    const cv::Point2d minor(-std::sin(angle_rad), std::cos(angle_rad));
+    const cv::Point2d center(fitted.center.x, fitted.center.y);
+    const double half_width = width * 0.5;
+    const double half_height = height * 0.5;
+
+    std::vector<double> residuals;
+    residuals.reserve(points.size());
+    for (const cv::Point2d& point : points)
+    {
+        const cv::Point2d delta = point - center;
+        const double local_x = std::abs(delta.dot(major));
+        const double local_y = std::abs(delta.dot(minor));
+        const double outside_x = std::max(0.0, local_x - half_width);
+        const double outside_y = std::max(0.0, local_y - half_height);
+        const double residual = outside_x > 0.0 || outside_y > 0.0
+            ? std::hypot(outside_x, outside_y)
+            : std::min(half_width - local_x, half_height - local_y);
+        residuals.push_back(residual);
+    }
+
+    double residual = 0.0;
+    double support = 0.0;
+    if (!SummarizeResiduals(
+            residuals, options.residual_limit_px, residual, support))
+        return false;
+
+    hypothesis.center = center;
+    // OBB axes carry the full canonical width and height, unlike ellipse axes.
+    hypothesis.axes = cv::Size2d(width, height);
+    hypothesis.angle_deg = angle_deg;
+    hypothesis.ordered_points = {
+        center - major * half_width - minor * half_height,
+        center + major * half_width - minor * half_height,
+        center + major * half_width + minor * half_height,
+        center - major * half_width + minor * half_height};
+    PopulateFitEvidence(options, hypothesis, residual, support);
+    return true;
+}
+
 bool FitLineGeometry(
     const std::vector<cv::Point2d>& points,
     const CxSegmentationGeometryFitOptions& options,
@@ -583,13 +662,15 @@ bool FitCxSegmentationContourGeometry(
             fitted = FitCircleGeometry(points, options, result.hypothesis);
         else if (options.geometry_type == "ellipse")
             fitted = FitEllipseGeometry(points, options, result.hypothesis);
+        else if (options.geometry_type == "oriented_box")
+            fitted = FitOrientedBoxGeometry(points, options, result.hypothesis);
         else if (options.geometry_type == "line")
             fitted = FitLineGeometry(points, options, result.hypothesis);
         else
         {
             result.status = "UNSUPPORTED_GEOMETRY_TYPE";
             result.reason =
-                "contour fitter supports circle, ellipse, and line";
+                "contour fitter supports circle, ellipse, oriented_box, and line";
             return false;
         }
     }

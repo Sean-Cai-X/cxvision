@@ -1418,6 +1418,8 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation, "setmanifest",
                             &FindSegmentation::setmanifest);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
+                            "setoutputroot", &FindSegmentation::setoutputroot);
+    m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,
                             "setpostprocessprofile",
                             &FindSegmentation::setpostprocessprofile);
     m_parser.DefineClassFun("FindSegmentation", pfindsegmentation,

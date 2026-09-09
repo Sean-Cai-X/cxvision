@@ -1217,6 +1217,10 @@ bool CaptureFindSegmentationResult(
     output.segmentation_requested_geometry_type = segmentation_result.requested_geometry_type;
     output.segmentation_geometry_fit_status = segmentation_result.geometry_fit_status;
     output.segmentation_geometry_fit_reason = segmentation_result.geometry_fit_reason;
+    output.segmentation_oriented_box_evidence_ref =
+        segmentation_result.oriented_box_evidence_ref;
+    output.segmentation_oriented_box_conclusion =
+        segmentation_result.oriented_box_conclusion;
     output.segmentation_geometry_count =
         static_cast<int>(segmentation_result.primitive_hypotheses.size());
     if (!segmentation_result.primitive_hypotheses.empty()) {
@@ -1589,6 +1593,12 @@ static void MergeToolCapture(
         capture.segmentation_geometry_fit_status = tool.segmentation_geometry_fit_status;
     if (!tool.segmentation_geometry_fit_reason.empty())
         capture.segmentation_geometry_fit_reason = tool.segmentation_geometry_fit_reason;
+    if (!tool.segmentation_oriented_box_evidence_ref.empty())
+        capture.segmentation_oriented_box_evidence_ref =
+            tool.segmentation_oriented_box_evidence_ref;
+    if (!tool.segmentation_oriented_box_conclusion.empty())
+        capture.segmentation_oriented_box_conclusion =
+            tool.segmentation_oriented_box_conclusion;
     capture.segmentation_geometry_count += tool.segmentation_geometry_count;
     if (tool.segmentation_geometry_count > 0) {
         capture.segmentation_geometry_residual_px = tool.segmentation_geometry_residual_px;
