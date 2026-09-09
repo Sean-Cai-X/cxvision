@@ -388,3 +388,76 @@ FM模型演化方向提示:
     CxTextInspect 文字/编码识别->(基础CxGeoMetry测试分支)文字模型就绪后,要合并进主模型
         ↓
     业务规则融合与 Evidence
+    
+    
+    
+    新的核心不是“FastMatch 后面再挂一个分类器”，而是把 CxGeoMetry 定义为几何对象理解层，成
+  为后续自训练复杂模型的基础分支。
+
+  OBB 目标定位
+      ↓
+  FastMatch 几何精化与计量
+      ↓
+  CxGeoMetry
+  ├─ 几何轮廓：线、圆、椭圆、多边形、孔、缺口、组合轮廓
+  ├─ 对象识别：基于轮廓、尺寸、拓扑和局部特征识别对象
+  ├─ 几何计量：位置、角度、尺度、残差、形变和公差
+  └─ 训练样本：沉淀人工确认的几何对象与困难样本
+      ↓
+  CxTextInspect
+  ├─ 复用 CxGeoMetry 的字符候选框、方向、排列和分组结果
+  ├─ 执行文字、数字、编码识别
+  └─ 文字模型成熟后，作为识别头合并进统一主模型
+      ↓
+  业务规则融合
+      ↓
+  Evidence、人工审核、训练回流与版本发布
+
+  关键边界应当这样定：
+
+  - FastMatch 负责几何搜索、参数优化、边缘精化和计量，不负责业务对象语义。
+  - CxGeoMetry 负责“这个几何轮廓是什么对象”，是当前缺失的关键分支。
+  - CxTextInspect 负责“这些几何候选对应什么字符或编码”，其结构模式与 CxGeoMetry 一致，但识别目标不同。
+  - 业务规则层负责把目标类别、几何尺寸、文字内容、工艺约束组合成最终业务判断。
+  - Evidence 贯穿每一级，而不是只保存最终 PASS/FAIL。
+
+  建议把 CxGeoMetry 的标准输出固定为：
+
+  source_obb
+  best_transform
+  contour_points
+  geometry_type
+  geometry_parameters
+  fit_residual
+  object_class
+  object_confidence
+  feature_embedding
+  measurement_values
+  uncertainty
+  model_version
+  evidence_refs
+  failure_stage
+
+  模型演化建议分三阶段：
+
+  1. 发布阶段
+     保持 OBB → FastMatch → CxGeoMetry/CxTextInspect → 业务规则 的模块化链路，各分支独立出证据，不要求统一
+     大模型立即就绪。
+
+  2. 数据积累阶段
+     人工审核 CxGeoMetry 的轮廓类型、对象类别和计量结果，同时审核 CxTextInspect 的字符框、阅读顺序和识别文
+     本，形成可信训练集。
+
+  3. 主模型融合阶段
+     将已达到质量门槛的几何识别头和文字识别头合并到共享特征骨干中：
+
+  共享视觉骨干
+  ├─ OBB 定位头
+  ├─ CxGeoMetry 几何/对象识别头
+  └─ CxTextInspect 文字识别头
+
+  这里的“合并进主模型”应理解为共享特征骨干与多任务输出头的模型融合，不是把 CxTextInspect 的业务代码直接并
+  入 OBB。FastMatch仍然保留为可解释的精化、计量和复核层。
+
+  因此，下一关键落地点应确定为：建立 CxGeoMetry 类型、Parser 接口、Key Parameter Controls、结果快照和
+  Evidence schema；先跑基础几何对象测试分支，再开始积累复杂对象自训练数据。
