@@ -1354,6 +1354,8 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             &FindObject::setshowferet);
     m_parser.DefineClassFun("FindObject", pfobj, "setshowgeometrycircles",
                             &FindObject::setshowgeometrycircles);
+    m_parser.DefineClassFun("FindObject", pfobj, "setconclusionshape",
+                            &FindObject::setconclusionshape);
     m_parser.DefineClassFun("FindObject", pfobj, "setbackgroundmethod",
                             &FindObject::setbackgroundmethod);
     m_parser.DefineClassFun("FindObject", pfobj, "setbackgroundborderwidth",

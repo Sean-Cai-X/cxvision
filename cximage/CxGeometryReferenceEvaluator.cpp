@@ -861,6 +861,8 @@ struct AugSource {
   std::filesystem::path image;
   std::filesystem::path label;
   std::filesystem::path facts;
+  std::filesystem::path anchor_policy;
+  std::filesystem::path anchor_candidates;
 };
 
 struct AugRow {
@@ -968,7 +970,8 @@ bool ReadAugPlan(const std::filesystem::path &path,
     variant.split = NodeString(node, "split");
     variant.seed = static_cast<int>(NodeDouble(node, "seed"));
     if (!AugSafeComponent(variant.id) || variant.review_suffix.empty() ||
-        (variant.split != "train" && variant.split != "validation") ||
+        (variant.split != "train" && variant.split != "validation" &&
+         variant.split != "holdout") ||
         !ids.insert(variant.id).second || !node["operations"].isSeq()) {
       reason = "augmentation variant metadata is invalid";
       return false;
@@ -994,8 +997,16 @@ bool ReadAugPlan(const std::filesystem::path &path,
            std::abs(operation.angle_deg) <= 45.0) ||
           (operation.type == "translate_y" &&
            std::abs(operation.offset_y_px) > 0.0) ||
-          (operation.type == "brightness_scale" && operation.scale > 0.05 &&
-           operation.scale <= 2.0 && std::abs(operation.offset) <= 255.0) ||
+           (operation.type == "brightness_scale" && operation.scale > 0.05 &&
+            operation.scale <= 2.0 && std::abs(operation.offset) <= 255.0) ||
+           (operation.type == "scale_scene" && operation.scale >= 0.70 &&
+            operation.scale <= 1.30) ||
+           (operation.type == "side_appearance_shift" && operation.scale > 0.25 &&
+            operation.scale <= 1.75 && std::abs(operation.offset) <= 96.0) ||
+           (operation.type == "boundary_sharpen" && operation.sigma > 0.0 &&
+            operation.scale > 0.0 && operation.scale <= 4.0) ||
+           (operation.type == "elastic_deform" && operation.kernel >= 16 &&
+            operation.sigma > 0.0 && operation.sigma <= 24.0) ||
           ((operation.type == "local_gap" ||
             operation.type == "edge_jagged_cut" ||
             operation.type == "line_break") &&
@@ -1087,6 +1098,18 @@ bool ReadAugSources(const std::filesystem::path &index_path,
     source.label = case_root / NodeString(manifest.root(), "typed_label");
     source.facts =
         case_root / NodeString(manifest.root(), "geometry_facts_ref");
+    const std::string anchor_policy_ref =
+        NodeString(manifest.root(), "anchor_policy_ref");
+    const std::string anchor_candidates_ref =
+        NodeString(manifest.root(), "anchor_candidates_ref");
+    if (anchor_policy_ref.empty() != anchor_candidates_ref.empty()) {
+      reason = "reference anchor assets must provide policy and candidates together";
+      return false;
+    }
+    if (!anchor_policy_ref.empty()) {
+      source.anchor_policy = case_root / anchor_policy_ref;
+      source.anchor_candidates = case_root / anchor_candidates_ref;
+    }
 
     for (const std::filesystem::path *asset :
          {&source.image, &source.label, &source.facts}) {
@@ -1100,6 +1123,17 @@ bool ReadAugSources(const std::filesystem::path &index_path,
     }
     if (source.review_item.empty() || source.geometry_type.empty()) {
       reason = "reference case required identity fields are missing";
+      return false;
+    }
+    if ((!source.anchor_policy.empty() &&
+         (!IsWithinRoot(root, source.anchor_policy) ||
+          !std::filesystem::is_regular_file(source.anchor_policy, path_error) ||
+          std::filesystem::is_symlink(source.anchor_policy, path_error))) ||
+        (!source.anchor_candidates.empty() &&
+         (!IsWithinRoot(root, source.anchor_candidates) ||
+          !std::filesystem::is_regular_file(source.anchor_candidates, path_error) ||
+          std::filesystem::is_symlink(source.anchor_candidates, path_error)))) {
+      reason = "reference anchor asset is missing or unsafe";
       return false;
     }
     sources.push_back(std::move(source));
@@ -1117,18 +1151,107 @@ bool AugVariantHasStructuralDefect(const AugVariant &variant) {
   return false;
 }
 
-bool AugVariantHasPhotometricShift(const AugVariant &variant) {
+bool AugVariantCanChangeVisibleBoundaryExtent(const AugVariant &variant) {
   for (const AugOperation &operation : variant.operations) {
-    if (operation.type == "gaussian_blur" ||
-        operation.type == "sensor_noise" ||
-        operation.type == "brightness_scale")
+    if (operation.type == "local_gap" || operation.type == "edge_jagged_cut" ||
+        operation.type == "line_break" || operation.type == "rotate" ||
+        operation.type == "scale_scene" || operation.type == "elastic_deform")
       return true;
   }
   return false;
 }
 
+bool AugVariantHasPhotometricShift(const AugVariant &variant) {
+  for (const AugOperation &operation : variant.operations) {
+    if (operation.type == "gaussian_blur" ||
+         operation.type == "sensor_noise" ||
+         operation.type == "brightness_scale" ||
+         operation.type == "side_appearance_shift" ||
+         operation.type == "boundary_sharpen")
+      return true;
+  }
+  return false;
+}
+
+bool ApplySideAppearanceShift(cv::Mat &image, const cv::Mat &label,
+                              const AugOperation &operation,
+                              std::string &reason) {
+  if (image.empty() || label.empty() || image.size() != label.size()) {
+    reason = "side appearance shift needs matching image and boundary label";
+    return false;
+  }
+  cv::Mat barrier;
+  cv::dilate(label, barrier, cv::getStructuringElement(cv::MORPH_ELLIPSE,
+      cv::Size(5, 5)));
+  cv::Mat passable;
+  cv::threshold(barrier, passable, 0, 255, cv::THRESH_BINARY_INV);
+  cv::Mat top = passable.clone();
+  cv::floodFill(top, cv::Point(image.cols / 2, 0), cv::Scalar(128));
+  top = top == 128;
+  // For an open boundary, the remaining passable pixels are the opposite
+  // image side. For a closed boundary, they are the enclosed material region.
+  cv::Mat bottom;
+  cv::bitwise_and(passable, ~top, bottom);
+  if (cv::countNonZero(top) == 0 || cv::countNonZero(bottom) == 0) {
+    reason = "side appearance shift could not resolve two boundary sides";
+    return false;
+  }
+  cv::Mat upper, lower;
+  image.convertTo(upper, image.type(), operation.scale, operation.offset);
+  image.convertTo(lower, image.type(), 2.0 - operation.scale, -operation.offset);
+  upper.copyTo(image, top);
+  lower.copyTo(image, bottom);
+  return true;
+}
+
+bool ApplyBoundarySharpen(cv::Mat &image, const cv::Mat &label,
+                          const AugOperation &operation,
+                          std::string &reason) {
+  if (image.empty() || label.empty() || image.size() != label.size()) {
+    reason = "boundary sharpen needs matching image and boundary label";
+    return false;
+  }
+  cv::Mat blurred, sharpened, band;
+  cv::GaussianBlur(image, blurred, cv::Size(), operation.sigma, operation.sigma);
+  cv::addWeighted(image, 1.0 + operation.scale, blurred, -operation.scale,
+                  0.0, sharpened);
+  cv::dilate(label, band, cv::getStructuringElement(cv::MORPH_ELLIPSE,
+      cv::Size(9, 9)));
+  sharpened.copyTo(image, band);
+  return true;
+}
+
+bool ApplyElasticDeform(cv::Mat &image, cv::Mat &label, cv::Mat &latent_label,
+                        const AugOperation &operation, int seed,
+                        std::string &reason) {
+  if (image.empty() || label.empty() || latent_label.empty()) {
+    reason = "elastic deformation needs image and both boundary labels";
+    return false;
+  }
+  cv::Mat map_x(image.size(), CV_32FC1), map_y(image.size(), CV_32FC1);
+  const float amplitude = static_cast<float>(operation.sigma);
+  const float wavelength = static_cast<float>(operation.kernel);
+  const float phase_x = static_cast<float>((seed % 97) * 0.071);
+  const float phase_y = static_cast<float>((seed % 89) * 0.083);
+  for (int y = 0; y < image.rows; ++y) {
+    for (int x = 0; x < image.cols; ++x) {
+      map_x.at<float>(y, x) = static_cast<float>(x) + amplitude *
+          std::sin(static_cast<float>(y) / wavelength + phase_x);
+      map_y.at<float>(y, x) = static_cast<float>(y) + amplitude *
+          std::sin(static_cast<float>(x) / wavelength + phase_y);
+    }
+  }
+  cv::remap(image, image, map_x, map_y, cv::INTER_LINEAR,
+            cv::BORDER_REPLICATE);
+  cv::remap(label, label, map_x, map_y, cv::INTER_NEAREST,
+            cv::BORDER_CONSTANT, cv::Scalar(0));
+  cv::remap(latent_label, latent_label, map_x, map_y, cv::INTER_NEAREST,
+            cv::BORDER_CONSTANT, cv::Scalar(0));
+  return true;
+}
+
 std::string AugDegradationBucket(const AugVariant &variant) {
-  const bool structural = AugVariantHasStructuralDefect(variant);
+  const bool structural = AugVariantCanChangeVisibleBoundaryExtent(variant);
   const bool photometric = AugVariantHasPhotometricShift(variant);
   if (structural && photometric)
     return "photometric_and_structural_defect";
@@ -1240,10 +1363,12 @@ bool ApplyAugCutMask(cv::Mat &image, cv::Mat &label,
 
 bool ApplyAugVariant(const cv::Mat &source_image, const cv::Mat &source_label,
                      const AugVariant &variant, cv::Mat &image, cv::Mat &label,
+                     cv::Mat &latent_label,
                      cv::Matx33d &matrix, double &rotation_deg,
                      std::string &reason) {
   image = source_image.clone();
   label = source_label.clone();
+  latent_label = source_label.clone();
   matrix = cv::Matx33d::eye();
   rotation_deg = 0.0;
   const cv::Rect corner(0, 0, std::min(8, image.cols), std::min(8, image.rows));
@@ -1272,6 +1397,22 @@ bool ApplyAugVariant(const cv::Mat &source_image, const cv::Mat &source_label,
                       operation.offset);
       continue;
     }
+    if (operation.type == "side_appearance_shift") {
+      if (!ApplySideAppearanceShift(image, latent_label, operation, reason))
+        return false;
+      continue;
+    }
+    if (operation.type == "boundary_sharpen") {
+      if (!ApplyBoundarySharpen(image, latent_label, operation, reason))
+        return false;
+      continue;
+    }
+    if (operation.type == "elastic_deform") {
+      if (!ApplyElasticDeform(image, label, latent_label, operation,
+                              variant.seed, reason))
+        return false;
+      continue;
+    }
     if (operation.type == "local_gap" ||
         operation.type == "edge_jagged_cut" ||
         operation.type == "line_break") {
@@ -1290,6 +1431,11 @@ bool ApplyAugVariant(const cv::Mat &source_image, const cv::Mat &source_label,
     } else if (operation.type == "translate_y") {
       affine = (cv::Mat_<double>(2, 3) << 1.0, 0.0, 0.0, 0.0, 1.0,
                 operation.offset_y_px);
+    } else if (operation.type == "scale_scene") {
+      affine = cv::getRotationMatrix2D(
+          cv::Point2f(static_cast<float>(image.cols - 1) * 0.5f,
+                      static_cast<float>(image.rows - 1) * 0.5f), 0.0,
+          operation.scale);
     } else {
       reason = "unsupported augmentation operation reached execution";
       return false;
@@ -1297,10 +1443,13 @@ bool ApplyAugVariant(const cv::Mat &source_image, const cv::Mat &source_label,
     cv::warpAffine(image, image, affine, image.size(), cv::INTER_LINEAR,
                    cv::BORDER_CONSTANT, background);
     cv::warpAffine(label, label, affine, label.size(), cv::INTER_NEAREST,
-                   cv::BORDER_CONSTANT, cv::Scalar(0));
+                    cv::BORDER_CONSTANT, cv::Scalar(0));
+    cv::warpAffine(latent_label, latent_label, affine, latent_label.size(),
+                    cv::INTER_NEAREST, cv::BORDER_CONSTANT, cv::Scalar(0));
     matrix = AugMatrix(affine) * matrix;
   }
   cv::threshold(label, label, 0, 255, cv::THRESH_BINARY);
+  cv::threshold(latent_label, latent_label, 0, 255, cv::THRESH_BINARY);
   return true;
 }
 
@@ -1355,6 +1504,11 @@ bool WriteAugFacts(const AugSource &source,
              << NodeDouble(instance, "rotation_deg") + rotation_deg;
     if (!instance["vertices_xy"].empty())
       AugWritePoints(output, "vertices_xy", instance["vertices_xy"], matrix);
+    if (!instance["control_points_xy"].empty())
+      AugWritePoints(output, "control_points_xy",
+                     instance["control_points_xy"], matrix);
+    if (!instance["tension"].empty())
+      output << "tension" << NodeDouble(instance, "tension");
     output << "closed" << 1;
     output << "}"
            << "]";
@@ -1408,7 +1562,9 @@ bool WriteAugPosition(const std::filesystem::path &path,
   output << "topology" << source.topology;
   output << "split" << variant.split;
   output << "typed_label"
-         << "typed_label.png";
+          << "typed_label.png";
+  output << "latent_boundary_map"
+         << "latent_boundary_map.png";
   output << "bbox_xywh"
          << "[" << bounds.x << bounds.y << bounds.width << bounds.height << "]";
   output << "centroid_xy"
@@ -1501,7 +1657,7 @@ bool WriteAugTrainingTarget(const std::filesystem::path &directory,
   row.difficulty_bucket = AugDifficultyBucket(variant);
   row.degradation_bucket = AugDegradationBucket(variant);
   row.visible_ratio = retained_ratio;
-  const bool structural = AugVariantHasStructuralDefect(variant);
+  const bool structural = AugVariantCanChangeVisibleBoundaryExtent(variant);
   row.identifiable =
       bounds.area() > 0 &&
       (structural ? retained_ratio >= 0.70 : retained_ratio >= 0.985) &&
@@ -1524,7 +1680,7 @@ bool WriteAugTrainingTarget(const std::filesystem::path &directory,
   output << "visibility_ratio" << retained_ratio;
   output << "degradation" << row.degradation_bucket;
   output << "partial_visibility"
-         << (AugVariantHasStructuralDefect(variant) ? 1 : 0);
+          << (AugVariantCanChangeVisibleBoundaryExtent(variant) ? 1 : 0);
   output << "identifiable" << (row.identifiable ? 1 : 0);
   output << "rejection_reason"
          << (row.identifiable ? "" : "GEOMETRY_NOT_IDENTIFIABLE");
@@ -1756,6 +1912,144 @@ bool WriteAugReviewAssets(const std::filesystem::path &directory,
   return true;
 }
 
+bool WriteAugAnchorProjection(const std::filesystem::path &directory,
+                              const AugSource &source,
+                              const AugVariant &variant,
+                              const cv::Matx33d &matrix) {
+  if (source.anchor_policy.empty() || source.anchor_candidates.empty())
+    return true;
+  const bool requires_reselection =
+      AugVariantCanChangeVisibleBoundaryExtent(variant);
+  cv::FileStorage output((directory / "anchor_projection.json").string(),
+                         cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (!output.isOpened())
+    return false;
+  output << "schema" << "cxvision.boundary_anchor_projection.v1";
+  output << "source_anchor_policy_ref" << "boundary_anchor_policy.json";
+  output << "source_anchor_candidates_ref" << "source_anchor_candidates.json";
+  output << "projection_matrix" << "[";
+  for (int row = 0; row < 3; ++row)
+    output << "[" << matrix(row, 0) << matrix(row, 1) << matrix(row, 2) << "]";
+  output << "]";
+  output << "projection_status"
+         << (requires_reselection ? "REQUIRES_POST_AUGMENTATION_ANCHOR_RESELECTION"
+                                  : "SOURCE_ANCHOR_CONTEXT_PRESERVED");
+  output << "automatic_anchor_selection_allowed" << 0;
+  output << "reason"
+         << (requires_reselection
+                 ? "gap, crop, rotation, scale, or non-affine deformation can change anchor visibility"
+                 : "photometric-only variation preserves source anchor context");
+  output.release();
+  return true;
+}
+
+bool WriteImageDrivenGeometryHeadProbe(const std::filesystem::path &directory,
+                                      const AugSource &source,
+                                      const cv::Mat &image,
+                                      const cv::Mat &truth_label) {
+  cv::FileStorage output((directory / "image_geometry_head_probe.json").string(),
+                         cv::FileStorage::WRITE | cv::FileStorage::FORMAT_JSON);
+  if (!output.isOpened())
+    return false;
+  output << "schema" << "cxvision.image_geometry_head_probe.v1";
+  output << "review_input" << "source_image.png";
+  output << "prediction_source" << "image_pixels_only";
+  output << "evaluation_truth_ref" << "typed_label.png";
+  output << "roi_source" << "FULL_IMAGE_CONTROLLED_TEST_ONLY";
+  output << "end_to_end_detector_roi_accepted" << 0;
+  output << "geometry_type" << source.geometry_type;
+  if ((source.geometry_type != "ellipse" && source.geometry_type != "polygon") ||
+      image.empty() || truth_label.empty()) {
+    output << "status" << "NOT_EXECUTED_FOR_THIS_GEOMETRY_TYPE";
+    output.release();
+    return true;
+  }
+
+  cv::Mat gray;
+  cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+  cv::Mat binary;
+  cv::threshold(gray, binary, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+  cv::morphologyEx(binary, binary, cv::MORPH_CLOSE,
+                   cv::getStructuringElement(cv::MORPH_ELLIPSE,
+                                             cv::Size(5, 5)));
+  std::vector<std::vector<cv::Point>> contours;
+  const auto select_interior_contour = [&image](const cv::Mat &candidate,
+                                                 std::vector<std::vector<cv::Point>> &out) {
+    cv::findContours(candidate, out, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+    int selected = -1;
+    double best_area = 0.0;
+    for (std::size_t index = 0; index < out.size(); ++index) {
+      const cv::Rect bounds = cv::boundingRect(out[index]);
+      const bool touches_border = bounds.x <= 0 || bounds.y <= 0 ||
+                                  bounds.x + bounds.width >= image.cols ||
+                                  bounds.y + bounds.height >= image.rows;
+      const double area = std::abs(cv::contourArea(out[index]));
+      if (!touches_border && area > best_area) {
+        best_area = area;
+        selected = static_cast<int>(index);
+      }
+    }
+    return selected;
+  };
+  int selected = select_interior_contour(binary, contours);
+  std::string segmentation_polarity = "otsu_bright_region";
+  if (selected < 0) {
+    cv::Mat inverse;
+    cv::bitwise_not(binary, inverse);
+    selected = select_interior_contour(inverse, contours);
+    segmentation_polarity = "otsu_inverse_region";
+  }
+  if (selected < 0) {
+    cv::Mat smoothed, edges;
+    cv::GaussianBlur(gray, smoothed, cv::Size(5, 5), 1.1);
+    cv::Canny(smoothed, edges, 28.0, 84.0, 3, true);
+    cv::morphologyEx(edges, edges, cv::MORPH_CLOSE,
+                     cv::getStructuringElement(cv::MORPH_ELLIPSE,
+                                               cv::Size(9, 9)));
+    selected = select_interior_contour(edges, contours);
+    segmentation_polarity = "canny_edge_closed_contour";
+  }
+  if (selected < 0 || contours[static_cast<std::size_t>(selected)].size() < 5) {
+    output << "status" << "IMAGE_CONTOUR_NOT_FOUND";
+    output.release();
+    return true;
+  }
+
+  const std::vector<cv::Point> &contour = contours[static_cast<std::size_t>(selected)];
+  output << "segmentation_polarity" << segmentation_polarity;
+  cv::Mat predicted_boundary = cv::Mat::zeros(truth_label.size(), CV_8UC1);
+  int vertex_count = 0;
+  if (source.geometry_type == "ellipse") {
+    const cv::RotatedRect ellipse = cv::fitEllipse(contour);
+    cv::ellipse(predicted_boundary, ellipse, cv::Scalar(255), 2, cv::LINE_AA);
+    output << "center_xy" << "[" << ellipse.center.x << ellipse.center.y << "]";
+    output << "axes_radius_xy" << "[" << ellipse.size.width * 0.5
+           << ellipse.size.height * 0.5 << "]";
+    output << "angle_deg" << ellipse.angle;
+  } else {
+    std::vector<cv::Point> approximation;
+    cv::approxPolyDP(contour, approximation, 0.015 * cv::arcLength(contour, true),
+                     true);
+    if (approximation.size() < 3) {
+      output << "status" << "IMAGE_POLYGON_APPROXIMATION_FAILED";
+      output.release();
+      return true;
+    }
+    vertex_count = static_cast<int>(approximation.size());
+    cv::polylines(predicted_boundary, approximation, true, cv::Scalar(255), 2,
+                  cv::LINE_AA);
+    output << "vertex_count" << vertex_count;
+  }
+  const double prediction_to_truth_px =
+      DistanceToMask(truth_label, NonZeroPoints(predicted_boundary));
+  output << "mean_prediction_to_truth_boundary_px" << prediction_to_truth_px;
+  output << "status" << "IMAGE_DRIVEN_GEOMETRY_HEAD_EXECUTED_CONTROLLED_ROI_ONLY";
+  output << "geometry_claim_status"
+         << "NOT_END_TO_END_UNTIL_ACCEPTED_DETECTOR_ROI_AND_RUNTIME_RECEIPT";
+  output.release();
+  return true;
+}
+
 bool WriteAugManifest(const std::filesystem::path &directory,
                       const AugSource &source, const AugVariant &variant,
                       const std::string &review_item) {
@@ -1788,7 +2082,7 @@ bool WriteAugManifest(const std::filesystem::path &directory,
   output << "variant_id" << variant.id;
   output << "degradation_bucket" << AugDegradationBucket(variant);
   output << "partial_visibility"
-         << (AugVariantHasStructuralDefect(variant) ? 1 : 0);
+         << (AugVariantCanChangeVisibleBoundaryExtent(variant) ? 1 : 0);
   output << "source_image"
          << "source_image.png";
   output << "input_image"
@@ -1805,10 +2099,16 @@ bool WriteAugManifest(const std::filesystem::path &directory,
          << "training_target.json";
   output << "mask_geometry_fit_ref"
          << "mask_geometry_fit.json";
+  output << "image_geometry_head_probe_ref" << "image_geometry_head_probe.json";
   output << "metrology_target_ref"
          << "metrology_target.json";
   output << "tolerance_contract_ref"
          << "geometry_typed_contracts.json";
+  if (!source.anchor_policy.empty() && !source.anchor_candidates.empty()) {
+    output << "anchor_policy_ref" << "boundary_anchor_policy.json";
+    output << "anchor_candidates_source_ref" << "source_anchor_candidates.json";
+    output << "anchor_projection_ref" << "anchor_projection.json";
+  }
   output << "evidence_overlay"
          << "evidence_overlay.png";
   output << "result_summary"
@@ -1819,15 +2119,22 @@ bool WriteAugManifest(const std::filesystem::path &directory,
   output << "binding_status"
          << "PENDING_HUMAN_REVIEW";
   output << "required_assets"
-         << "["
+          << "["
          << "source_image.png"
-         << "typed_label.png"
+          << "typed_label.png"
+          << "latent_boundary_map.png"
          << "geometry_facts.json"
-         << "training_target.json"
-         << "mask_geometry_fit.json"
-         << "metrology_target.json"
-         << "geometry_typed_contracts.json"
-         << "source_geometry_facts.json"
+           << "training_target.json"
+           << "mask_geometry_fit.json"
+           << "image_geometry_head_probe.json"
+           << "metrology_target.json"
+           << "geometry_typed_contracts.json";
+  if (!source.anchor_policy.empty() && !source.anchor_candidates.empty()) {
+    output << "boundary_anchor_policy.json"
+           << "source_anchor_candidates.json"
+           << "anchor_projection.json";
+  }
+  output
          << "source_geometry_facts.json"
          << "source_hashes.json"
          << "evidence_overlay.png"
@@ -1886,6 +2193,13 @@ bool WriteAugMetrologyTarget(const std::filesystem::path &sample_path,
   target << "clear_degraded_pair_status"
          << "PENDING_REAL_SCENE_CLEAR_DEGRADED_PAIR_REVIEW";
   target << "assignment_status" << "PENDING_YOLOV8N_INFERENCE_EVIDENCE";
+  target << "detector_claim_status" << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
+  target << "geometry_inference_executed" << 0;
+  target << "geometry_claim_status" << "PENDING_GEOMETRY_HEAD_BINDING";
+  target << "allowed_conclusion"
+         << "detector robustness only; no ellipse, polygon, or other geometry parameter conclusion";
+  target << "forbidden_conclusion"
+         << "rotation_or_scale_geometry_pass_without_geometry_head_receipt";
   target << "instance_geometry_loss_status"
          << "PENDING_MODEL_PREDICTION_ASSIGNMENT";
   target << "model_output_uncertainty_status"
@@ -1919,9 +2233,11 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
 
   cv::Mat image;
   cv::Mat label;
+  cv::Mat latent_label;
   cv::Matx33d matrix;
   double rotation_deg = 0.0;
   if (!ApplyAugVariant(source_image, source_label, variant, image, label,
+                       latent_label,
                        matrix, rotation_deg, reason))
     return false;
 
@@ -1934,7 +2250,12 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
   const double retained_ratio = std::min(
       1.0, static_cast<double>(after_pixels) / before_pixels);
   const bool structural_defect = AugVariantHasStructuralDefect(variant);
-  const double min_retained_ratio = structural_defect ? 0.70 : 0.985;
+  const bool visible_extent_change =
+      AugVariantCanChangeVisibleBoundaryExtent(variant);
+  // Open boundaries intentionally meet image edges.  Scene rotation, scale,
+  // and non-affine deformation alter their raster length or crop edge entry
+  // points; this is a visibility fact, not evidence corruption.
+  const double min_retained_ratio = visible_extent_change ? 0.70 : 0.985;
   if (retained_ratio < min_retained_ratio) {
     reason = "geometric augmentation clips more than 1.5 percent of the label";
     return false;
@@ -1956,7 +2277,7 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
   const cv::Point2d centroid(after.m10 / after.m00, after.m01 / after.m00);
   const double centroid_error =
       cv::norm(cv::Point2d(affine_centroid.x, affine_centroid.y) - centroid);
-  const double max_centroid_error = structural_defect ? 24.0 : 2.0;
+  const double max_centroid_error = visible_extent_change ? 24.0 : 2.0;
   if (centroid_error > max_centroid_error) {
     reason =
         "label centroid differs from affine position truth by more than allowed";
@@ -1983,10 +2304,13 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
 
   const std::filesystem::path image_path = temporary_path / "source_image.png";
   const std::filesystem::path label_path = temporary_path / "typed_label.png";
+  const std::filesystem::path latent_label_path =
+      temporary_path / "latent_boundary_map.png";
   const std::filesystem::path overlay_path =
       temporary_path / "evidence_overlay.png";
   if (!cv::imwrite(image_path.string(), image) ||
-      !cv::imwrite(label_path.string(), label)) {
+      !cv::imwrite(label_path.string(), label) ||
+      !cv::imwrite(latent_label_path.string(), latent_label)) {
     std::filesystem::remove_all(temporary_path, error);
     reason = "cannot write augmented image or typed label";
     return false;
@@ -2018,6 +2342,17 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
         temporary_path / "geometry_typed_contracts.json",
         std::filesystem::copy_options::overwrite_existing, error);
   }
+  if (!error && !source.anchor_policy.empty() &&
+      !source.anchor_candidates.empty()) {
+    std::filesystem::copy_file(source.anchor_policy,
+        temporary_path / "boundary_anchor_policy.json",
+        std::filesystem::copy_options::overwrite_existing, error);
+    if (!error) {
+      std::filesystem::copy_file(source.anchor_candidates,
+          temporary_path / "source_anchor_candidates.json",
+          std::filesystem::copy_options::overwrite_existing, error);
+    }
+  }
   const std::string review_item =
       source.review_item + " / " + variant.review_suffix;
   if (error ||
@@ -2027,7 +2362,9 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
                         variant, matrix, bounds, source_centroid,
                         affine_centroid, centroid, retained_ratio,
                         centroid_error, image.cols, image.rows) ||
-      !WriteAugMaskGeometryFit(temporary_path, source, label, row) ||
+       !WriteAugMaskGeometryFit(temporary_path, source, label, row) ||
+       !WriteAugAnchorProjection(temporary_path, source, variant, matrix) ||
+       !WriteImageDrivenGeometryHeadProbe(temporary_path, source, image, label) ||
       !WriteAugTrainingTarget(temporary_path, source, variant, bounds,
                               rotation_deg, retained_ratio, centroid_error,
                               image.cols, image.rows, row) ||
@@ -2044,10 +2381,12 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
   }
 
   const char *mandatory[] = {
-      "source_image.png",           "typed_label.png",
+       "source_image.png",           "typed_label.png",
+      "latent_boundary_map.png",
       "geometry_facts.json",        "position_annotation.json",
       "training_target.json",       "mask_geometry_fit.json",
-      "metrology_target.json",
+       "metrology_target.json",
+       "image_geometry_head_probe.json",
       "geometry_typed_contracts.json",
       "source_geometry_facts.json", "source_hashes.json",
       "evidence_overlay.png",       "result_summary.json",
@@ -2057,6 +2396,17 @@ bool WriteAugSample(const CxGeometryAugmentationDatasetOptions &options,
       std::filesystem::remove_all(temporary_path, error);
       reason = std::string("ASSET_MISSING: ") + name;
       return false;
+    }
+  }
+  if (!source.anchor_policy.empty() && !source.anchor_candidates.empty()) {
+    for (const char *name : {"boundary_anchor_policy.json",
+                             "source_anchor_candidates.json",
+                             "anchor_projection.json"}) {
+      if (!std::filesystem::is_regular_file(temporary_path / name)) {
+        std::filesystem::remove_all(temporary_path, error);
+        reason = std::string("ASSET_MISSING: ") + name;
+        return false;
+      }
     }
   }
 
@@ -2078,14 +2428,17 @@ bool WriteAugMetrologyChainArtifacts(
   int generated_samples = 0;
   int train_samples = 0;
   int validation_samples = 0;
+  int holdout_samples = 0;
   for (const AugRow &row : rows) {
     if (row.status != "GENERATED")
       continue;
     ++generated_samples;
     if (row.split == "train")
       ++train_samples;
-    else
+    else if (row.split == "validation")
       ++validation_samples;
+    else if (row.split == "holdout")
+      ++holdout_samples;
   }
 
   cv::FileStorage chain((options.output_dir / "metrology_chain_manifest.json").string(),
@@ -2124,6 +2477,7 @@ bool WriteAugMetrologyChainArtifacts(
   chain << "generated_sample_count" << generated_samples;
   chain << "train_sample_count" << train_samples;
   chain << "validation_sample_count" << validation_samples;
+  chain << "holdout_sample_count" << holdout_samples;
   chain << "human_review_required" << 1;
   chain << "training_enabled" << 0;
   chain << "promotion_allowed" << 0;
@@ -2160,6 +2514,8 @@ bool WriteAugMetrologyChainArtifacts(
     target_index << "training_eligible"
                  << (row.split == "train" && row.identifiable ? 1 : 0);
     target_index << "assignment_status" << "PENDING_YOLOV8N_INFERENCE_EVIDENCE";
+    target_index << "geometry_claim_status"
+                 << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
     target_index << "}";
   }
   target_index << "]";
@@ -2212,6 +2568,8 @@ bool WriteAugMetrologyChainArtifacts(
              << "[" << "TP" << "FP" << "FN" << "AMBIGUOUS" << "]";
   assignment << "status" << "PENDING_YOLOV8N_INFERENCE_EVIDENCE";
   assignment << "model_executed" << 0;
+  assignment << "geometry_claim_status"
+             << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
   assignment.release();
 
   cv::FileStorage loss(
@@ -2466,6 +2824,9 @@ bool WriteAugGeometryContracts(
     return false;
   contract << "schema" << "cxvision.geometry_head_training_contract.v1";
   contract << "binding_status" << "PENDING_GEOMETRY_HEAD_BINDING";
+  contract << "detector_only_geometry_claim_status"
+           << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
+  contract << "forbid_geometry_pass_without_runtime_receipt" << 1;
   contract << "input_feature_source"
            << "segmentation_backbone_or_mask_feature_map";
   contract << "teacher_signal"
@@ -2527,6 +2888,8 @@ bool WriteAugReports(const CxGeometryAugmentationDatasetOptions &options,
            << "geometry_head_training_contract.json";
   manifest << "human_review_ref" << "human_review.json";
   manifest << "primary_model_family" << "YOLOv8-n_detection";
+  manifest << "geometry_claim_status"
+           << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
   manifest << "training_execution_mode"
            << "external_incremental_training_evidence_only";
   manifest << "python_training_in_process" << 0;
@@ -2540,6 +2903,7 @@ bool WriteAugReports(const CxGeometryAugmentationDatasetOptions &options,
   manifest << "rejected_sample_count" << result.rejected_sample_count;
   manifest << "train_sample_count" << result.train_sample_count;
   manifest << "validation_sample_count" << result.validation_sample_count;
+  manifest << "holdout_sample_count" << result.holdout_sample_count;
   manifest << "samples"
            << "[";
   for (const AugRow &row : rows) {
@@ -2558,6 +2922,8 @@ bool WriteAugReports(const CxGeometryAugmentationDatasetOptions &options,
     manifest << "metrology_target_ref" << "metrology_target.json";
     manifest << "model_assignment_status"
              << "PENDING_YOLOV8N_INFERENCE_EVIDENCE";
+    manifest << "geometry_claim_status"
+             << "DETECTION_ONLY_GEOMETRY_UNCONFIRMED";
     manifest << "size_bucket" << row.size_bucket;
     manifest << "angle_bucket" << row.angle_bucket;
     manifest << "difficulty_bucket" << row.difficulty_bucket;
@@ -2587,6 +2953,7 @@ bool WriteAugReports(const CxGeometryAugmentationDatasetOptions &options,
   report << "rejected_sample_count" << result.rejected_sample_count;
   report << "train_sample_count" << result.train_sample_count;
   report << "validation_sample_count" << result.validation_sample_count;
+  report << "holdout_sample_count" << result.holdout_sample_count;
   report << "rows"
          << "[";
   for (const AugRow &row : rows) {
@@ -2615,6 +2982,7 @@ bool WriteAugReports(const CxGeometryAugmentationDatasetOptions &options,
   markdown << "- Rejected: " << result.rejected_sample_count << "\n";
   markdown << "- Train: " << result.train_sample_count << "\n";
   markdown << "- Validation: " << result.validation_sample_count << "\n";
+  markdown << "- Holdout: " << result.holdout_sample_count << "\n";
   markdown << "- Training enabled: false\n";
   markdown << "- Human review: required\n\n";
   markdown << "| Evidence item | Split | Geometry | Variant | Status |\n";
@@ -2657,24 +3025,31 @@ bool RunCxGeometryAugmentationDataset(
   if (options.require_source_disjoint_validation) {
     std::set<std::string> trainClasses;
     std::set<std::string> validationClasses;
+    std::set<std::string> holdoutClasses;
     for (const AugSource &source : sources) {
       if (source.source_split != "train" &&
-          source.source_split != "validation") {
+          source.source_split != "validation" &&
+          source.source_split != "holdout") {
         result.status = "SOURCE_SPLIT_DECLARATION_REQUIRED";
-        result.reason = "each source case must declare source_split=train or "
-                        "source_split=validation before independent validation";
+        result.reason = "each source case must declare source_split=train, "
+                        "source_split=validation, or source_split=holdout "
+                        "before independent validation";
         reason = result.reason;
         return false;
       }
       if (source.source_split == "train")
         trainClasses.insert(source.geometry_type);
-      else
+      else if (source.source_split == "validation")
         validationClasses.insert(source.geometry_type);
+      else
+        holdoutClasses.insert(source.geometry_type);
     }
-    if (trainClasses != validationClasses) {
+    if (trainClasses.empty() || validationClasses.empty() ||
+        holdoutClasses.empty() || trainClasses != validationClasses ||
+        trainClasses != holdoutClasses) {
       result.status = "SOURCE_SPLIT_CLASS_COVERAGE_FAIL";
-      result.reason = "train and validation source partitions do not have "
-                      "matching class coverage";
+      result.reason = "train, validation, and holdout source partitions must "
+                      "be non-empty and have matching class coverage";
       reason = result.reason;
       return false;
     }
@@ -2699,11 +3074,13 @@ bool RunCxGeometryAugmentationDataset(
   result.variant_count = static_cast<int>(variants.size());
   std::vector<AugRow> rows;
   rows.reserve(sources.size() * variants.size());
+  int expected = 0;
   for (const AugSource &source : sources) {
     for (const AugVariant &variant : variants) {
       if (options.require_source_disjoint_validation &&
           source.source_split != variant.split)
         continue;
+      ++expected;
       AugRow row;
       row.review_item = source.review_item + " / " + variant.review_suffix;
       row.split = variant.split;
@@ -2715,8 +3092,10 @@ bool RunCxGeometryAugmentationDataset(
         ++result.generated_sample_count;
         if (variant.split == "train")
           ++result.train_sample_count;
-        else
+        else if (variant.split == "validation")
           ++result.validation_sample_count;
+        else if (variant.split == "holdout")
+          ++result.holdout_sample_count;
       } else {
         row.status = "REJECTED";
         row.reason = sample_reason;
@@ -2726,7 +3105,6 @@ bool RunCxGeometryAugmentationDataset(
     }
   }
 
-  const int expected = result.source_case_count * result.variant_count;
   result.complete = result.rejected_sample_count == 0 &&
                     result.generated_sample_count == expected;
   result.status = result.complete ? "DATASET_GENERATION_COMPLETE"

@@ -29,12 +29,15 @@ struct YoloPostProcessConfig {
     int64_t num_classes = 80;
     bool use_dfl = false;
     int64_t reg_max = 16;
+    int64_t max_detections = 100;
+    bool class_agnostic_nms = false;
 
     void validate() const {
         TORCH_CHECK(conf_threshold >= 0.0f && conf_threshold <= 1.0f, "conf_threshold must be in [0,1]");
         TORCH_CHECK(iou_threshold >= 0.0f && iou_threshold <= 1.0f, "iou_threshold must be in [0,1]");
         TORCH_CHECK(num_classes > 0, "num_classes must be positive");
         TORCH_CHECK(reg_max > 0, "reg_max must be positive");
+        TORCH_CHECK(max_detections > 0, "max_detections must be positive");
     }
 
     int64_t box_channels() const {
@@ -252,6 +255,29 @@ inline std::vector<BBox> post_process(
             bbox.cls = cls;
             final_bboxes.push_back(bbox);
         }
+    }
+
+    std::sort(final_bboxes.begin(), final_bboxes.end(),
+        [](const BBox& lhs, const BBox& rhs) { return lhs.score > rhs.score; });
+    if (config.class_agnostic_nms) {
+        std::vector<BBox> deduplicated;
+        deduplicated.reserve(final_bboxes.size());
+        for (const BBox& candidate : final_bboxes) {
+            bool duplicate = false;
+            for (const BBox& selected : deduplicated) {
+                if (bbox_iou_xyxy(candidate, selected) > config.iou_threshold) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate)
+                deduplicated.push_back(candidate);
+            if (static_cast<int64_t>(deduplicated.size()) >= config.max_detections)
+                break;
+        }
+        final_bboxes = std::move(deduplicated);
+    } else if (static_cast<int64_t>(final_bboxes.size()) > config.max_detections) {
+        final_bboxes.resize(static_cast<std::size_t>(config.max_detections));
     }
 
     return final_bboxes;

@@ -1909,6 +1909,7 @@ void ViewController::drawKeyParameterControlsWindow() {
     std::string promptSyncReason;
     SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);
     DrawTorchAnnotationKeyParameterPanel(m_manualTest);
+    DrawGeometryAutoTuneParametersPanel(m_manualTest);
   } else if (IsFindLineFindCircleContext(m_manualTest)) {
     DrawKeyParameterControlPanel(m_manualTest, &m_parserDebugBridge);
     if (m_manualTest.apply_gauge_to_shape_requested) {
@@ -2022,6 +2023,7 @@ void ViewController::drawTorchRuntimeEvidenceWindow() {
       "Torch Runtime / Evidence > runtime status and review controls");
   ImGui::SeparatorText("Primary Torch Operations / Runtime Snapshot");
   DrawTorchKeyStatusPanel(m_manualTest);
+  DrawGeometryAutoTuneEvidencePanel(m_manualTest);
   const CxTorchTrainingRunBinding &training = m_manualTest.torch_training_run;
   if (training.HasRealMultiEpochSeries()) {
     ImGui::SetNextItemWidth(132.0f);
@@ -2136,6 +2138,7 @@ void ViewController::drawParameterTuningAndConclusionWindow() {
   if (IsFindLineFindCircleContext(m_manualTest)) {
     DrawParamTuningScatterPanel(m_manualTest);
   }
+  DrawGeometryAutoTuneDiagnosticsPanel(m_manualTest);
   DrawConclusionSummaryPanel(m_manualTest);
 
   ImGui::End();

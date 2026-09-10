@@ -28,6 +28,7 @@ m_object.setshowboundary(global_object_show_boundary);
 m_object.setshowmomentellipse(global_object_show_moment_ellipse);
 m_object.setshowferet(global_object_show_feret);
 m_object.setshowgeometrycircles(global_object_show_circles);
+m_object.setconclusionshape(global_object_conclusion_shape);
 m_object.setbackgroundmethod(global_object_background_method);
 m_object.setbackgroundborderwidth(global_object_background_border_px);
 m_object.setbackgroundmorphologyradius(global_object_background_radius_px);

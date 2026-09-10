@@ -107,6 +107,14 @@ bool LoadTorchModelManifest(
         post_node["confidence_threshold"] >> manifest.confidence_threshold;
         post_node["iou_threshold"] >> manifest.iou_threshold;
         post_node["max_detections"] >> manifest.max_detections;
+        const cv::FileNode class_agnostic_node =
+            post_node["class_agnostic_nms"];
+        if (!class_agnostic_node.empty())
+        {
+            int class_agnostic_nms = 0;
+            class_agnostic_node >> class_agnostic_nms;
+            manifest.class_agnostic_nms = class_agnostic_nms != 0;
+        }
         post_node["mask_threshold"] >> manifest.mask_threshold;
     }
 

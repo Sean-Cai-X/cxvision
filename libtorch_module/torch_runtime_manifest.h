@@ -37,6 +37,7 @@ struct TorchModelManifest
     float confidence_threshold = 0.25f;
     float iou_threshold = 0.45f;
     int max_detections = 100;
+    bool class_agnostic_nms = false;
     int mask_channels = 0;
     int prototype_channels = 0;
     int configured_prototype_channels = 0;

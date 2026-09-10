@@ -68,4 +68,10 @@ void DrawTorchKeyStatusPanel(ManualTestContext& context);
 
 void DrawTorchEvidenceAndReviewPanel(const ManualTestContext& context);
 
+void DrawGeometryAutoTuneParametersPanel(ManualTestContext& context);
+
+void DrawGeometryAutoTuneDiagnosticsPanel(ManualTestContext& context);
+
+void DrawGeometryAutoTuneEvidencePanel(ManualTestContext& context);
+
 #endif

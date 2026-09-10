@@ -857,6 +857,11 @@ void FindObject::setshowgeometrycircles(int enabled)
 {
   m_show_geometry_circles = enabled != 0;
 }
+
+void FindObject::setconclusionshape(int shape)
+{
+  m_conclusion_shape = std::max(0, std::min(4, shape));
+}
 void FindObject::setbackgroundmethod(int method)
 {
   if (method <= 0)
@@ -3718,15 +3723,17 @@ void FindObject::PublishDisplayShapes(
         measured ? measurement->bbox_px.height : found.Height();
     if (rw <= 0.0 || rh <= 0.0)
       continue;
-    auto result_shape = std::make_unique<RectShape>();
-    result_shape->setRect(rx, ry, rx + rw, ry + rh);
-    sink.UpsertShape(owner_ref + ".result_rect." + std::to_string(i),
-                     "FindObject", owner_ref, "result", "result",
-                     false, true, std::move(result_shape));
+    if (m_conclusion_shape == 1) {
+      auto result_shape = std::make_unique<RectShape>();
+      result_shape->setRect(rx, ry, rx + rw, ry + rh);
+      sink.UpsertShape(owner_ref + ".result_rect." + std::to_string(i),
+                       "FindObject", owner_ref, "result", "result",
+                       false, true, std::move(result_shape));
+    }
 
     if (!measured)
       continue;
-    if (i != m_measurement_selection)
+    if (m_measurement_selection >= 0 && i != m_measurement_selection)
       continue;
 
     if (m_show_boundary && !measurement->outer_boundary.empty())
@@ -3785,7 +3792,7 @@ void FindObject::PublishDisplayShapes(
                        "FindObject", owner_ref, "feret_max", "line",
                        false, true, std::move(feret));
     }
-    if (m_show_geometry_circles && measurement->inscribed_circle_valid && isotropic)
+    if (m_conclusion_shape == 3 && measurement->inscribed_circle_valid && isotropic)
     {
       auto circle = std::make_unique<CircleShape>(
           measurement->inscribed_circle_center_px.x,
@@ -3797,7 +3804,7 @@ void FindObject::PublishDisplayShapes(
           "FindObject", owner_ref, "inscribed_circle", "circle",
           false, true, std::move(circle));
     }
-    if (m_show_geometry_circles && measurement->enclosing_circle_valid && isotropic)
+    if (m_conclusion_shape == 4 && measurement->enclosing_circle_valid && isotropic)
     {
       auto circle = std::make_unique<CircleShape>(
           measurement->enclosing_circle_center_px.x,

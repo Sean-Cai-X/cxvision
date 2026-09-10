@@ -3,12 +3,14 @@
 #include "CxCrashLogHandler.h"
 #include "CxEvidenceSelfTestRuntime.h"
 #include "CxGeometryReferenceEvaluator.h"
+#include "CxGeometryIncrementalAutoTune.h"
 #include "CxMaskDiagnosticSelfTest.h"
 #include "CxParamProbeRunner.h"
 #include "CxParamRegressionRuntime.h"
 #include "CxParserRuntimeOwner.h"
 #include "CxPredictiveGeometryGate.h"
 #include "CxScriptCatalogRuntime.h"
+#include "CxScriptEvidenceChainRuntime.h"
 #include "CxScriptGeometryFrameProbe.h"
 #include "CxScriptImageManifestRuntime.h"
 #include "CxScriptSuiteRunner.h"
@@ -53,6 +55,8 @@ int RunModelLineageOperationSelfTest(const std::string &scanRoot,
                                      const std::string &outputDirectory);
 
 namespace {
+int RunEvidenceConfigurationProjectionSmokeCli(int argc, char **argv);
+
 bool HasCliArg(int argc, char **argv, const std::string &name) {
   for (int i = 1; i < argc; ++i) {
     if (argv[i] != nullptr && name == argv[i])
@@ -2567,6 +2571,7 @@ int RunGeometryAugmentationDatasetCli(int argc, char **argv) {
             << "train_sample_count=" << result.train_sample_count << "\n"
             << "validation_sample_count=" << result.validation_sample_count
             << "\n"
+            << "holdout_sample_count=" << result.holdout_sample_count << "\n"
             << "dataset_manifest=" << result.dataset_manifest_path.string()
             << "\n"
             << "report_json=" << result.report_json_path.string() << "\n"
@@ -2754,12 +2759,19 @@ int RunBusinessWorkflowAcceptanceCli(int argc, char **argv) {
 }
 
 int RunCxVisionApplication(int argc, char **argv) {
+  if (HasCliArg(argc, argv, "--evidence-configuration-projection-smoke"))
+    return RunEvidenceConfigurationProjectionSmokeCli(argc, argv);
+
   if (HasCliArg(argc, argv, "--business-workflow-acceptance"))
     return RunBusinessWorkflowAcceptanceCli(argc, argv);
 
   if (HasCliArg(argc, argv, "--yolov8n-paired-inference"))
     return cxvision_yolov8n_paired_inference::
         RunYoloV8nPairedInferenceCli(argc, argv);
+
+  if (HasCliArg(argc, argv, "--geometry-incremental-auto-tune"))
+    return cxvision_geometry_auto_tune::RunGeometryIncrementalAutoTuneCli(
+        argc, argv);
 
   if (HasCliArg(argc, argv, "--yolov8n-training-lifecycle"))
     return cxvision_yolov8n_training::RunYoloV8nTrainingLifecycleCli(argc,
@@ -3416,3 +3428,89 @@ int main(int argc, char **argv) {
 
   return exitCode;
 }
+namespace {
+int RunEvidenceConfigurationProjectionSmokeCli(int argc, char **argv) {
+  std::string scriptPath;
+  std::string outputDirectory;
+  for (int index = 1; index + 1 < argc; ++index) {
+    if (std::string(argv[index]) == "--evidence-chain-script") {
+      scriptPath = argv[index + 1];
+    } else if (std::string(argv[index]) == "--out") {
+      outputDirectory = argv[index + 1];
+    }
+  }
+  if (scriptPath.empty()) {
+    std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+              << "reason=--evidence-chain-script is required\n";
+    return 2;
+  }
+  CxScriptEvidenceChainRuntime chain;
+  std::string reason;
+  if (!LoadCxScriptEvidenceChainFile(scriptPath, chain, reason)) {
+    std::cout << "conclusion=EVIDENCE_CONFIGURATION_PROJECTION_FAIL\n"
+              << "reason=" << reason << "\n";
+    return 1;
+  }
+  int complete = 0;
+  int missing = 0;
+  for (const CxScriptEvidenceCase &item : chain.cases) {
+    const std::string *references[] = {
+        &item.training_config_ref, &item.model_manifest_ref,
+        &item.inference_config_ref, &item.quality_policy_ref,
+        &item.ontology_ref, &item.failure_samples_ref};
+    bool caseComplete = true;
+    for (const std::string *reference : references) {
+      std::error_code ec;
+      if (reference->empty() ||
+          !std::filesystem::is_regular_file(*reference, ec) || ec) {
+        caseComplete = false;
+        ++missing;
+      }
+    }
+    complete += caseComplete ? 1 : 0;
+  }
+  const bool pass = !chain.cases.empty() &&
+                    complete == static_cast<int>(chain.cases.size()) &&
+                    missing == 0;
+  if (!outputDirectory.empty()) {
+    std::error_code ec;
+    if (std::filesystem::exists(outputDirectory, ec)) {
+      std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                << "reason=output directory already exists; use a new RUN_ID\n";
+      return 2;
+    }
+    std::filesystem::create_directories(outputDirectory, ec);
+    if (ec) {
+      std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                << "reason=output directory cannot be created\n";
+      return 2;
+    }
+    std::ofstream report(std::filesystem::path(outputDirectory) /
+                         "g08_configuration_projection_report.json");
+    report << "{\n"
+           << "  \"schema\": \"cxvision.evidence_configuration_projection.v1\",\n"
+           << "  \"status\": \""
+           << (pass ? "EVIDENCE_CONFIGURATION_PROJECTION_PASS"
+                    : "EVIDENCE_CONFIGURATION_PROJECTION_FAIL")
+           << "\",\n"
+           << "  \"source_script\": \"" << PipelineJsonEscape(scriptPath)
+           << "\",\n"
+           << "  \"chain_id\": \"" << PipelineJsonEscape(chain.chain_id)
+           << "\",\n"
+           << "  \"case_count\": " << chain.cases.size() << ",\n"
+           << "  \"complete_configuration_case_count\": " << complete
+           << ",\n"
+           << "  \"missing_configuration_reference_count\": " << missing
+           << "\n}\n";
+  }
+  std::cout << "conclusion="
+            << (pass ? "EVIDENCE_CONFIGURATION_PROJECTION_PASS"
+                     : "EVIDENCE_CONFIGURATION_PROJECTION_FAIL")
+            << "\nchain_id=" << chain.chain_id
+            << "\ncase_count=" << chain.cases.size()
+            << "\ncomplete_configuration_case_count=" << complete
+            << "\nmissing_configuration_reference_count=" << missing
+            << "\nreason=" << reason << "\n";
+  return pass ? 0 : 1;
+}
+} // namespace

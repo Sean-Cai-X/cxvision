@@ -7,7 +7,12 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <unordered_map>
+#include <cmath>
+#include <array>
+#include <opencv2/core.hpp>
 #include "torch_data_augmenter.h"
+#include "torch_geometry_roi_head.h"
 
 namespace fs = std::filesystem;
 
@@ -20,12 +25,21 @@ struct YoloDatasetConfig {
     bool enable_flip = true;
     YoloResizePolicy resize_policy = YoloResizePolicy::PlainResize;
     int letterbox_pad_value = 114;
+    bool geometry_targets_enabled = false;
+    int geometry_polygon_vertex_count = 8;
+    std::string geometry_target_dir;
 
     void validate() const {
         TORCH_CHECK(img_size > 0, "img_size must be positive");
         TORCH_CHECK(max_gt > 0, "max_gt must be positive");
         TORCH_CHECK(letterbox_pad_value >= 0 && letterbox_pad_value <= 255,
             "letterbox_pad_value must be in [0, 255]");
+        TORCH_CHECK(!geometry_targets_enabled || geometry_polygon_vertex_count >= 3,
+            "geometry_polygon_vertex_count must be at least three when geometry targets are enabled");
+        TORCH_CHECK(!geometry_targets_enabled || !geometry_target_dir.empty(),
+            "geometry_target_dir is required when geometry targets are enabled");
+        TORCH_CHECK(!geometry_targets_enabled || !enable_flip,
+            "geometry targets currently require enable_flip=false until sidecar geometry transforms are implemented");
     }
 };
 
@@ -143,6 +157,11 @@ public:
 
         std::vector<Annotation> anns = label_loader_.load_labels(label_path);
 
+        const std::vector<GeometrySidecarTarget> geometry_targets =
+            config_.geometry_targets_enabled
+                ? load_geometry_targets(fs::path(img_path).stem().string(), anns.size())
+                : std::vector<GeometrySidecarTarget>{};
+
         std::vector<std::vector<float>> labels;
         for (const auto& ann : anns) {
             labels.push_back({ (float)ann.class_id, ann.x1, ann.y1, ann.x2, ann.y2 });
@@ -174,7 +193,11 @@ public:
             .to(torch::kFloat32)
             .div_(255.0f);
 
-        torch::Tensor target_tensor = torch::full({ config_.max_gt, 6 }, -1.0f, torch::kFloat32);
+        const int64_t target_columns = config_.geometry_targets_enabled
+            ? GeometryRoiTargetLayout::total_columns(config_.geometry_polygon_vertex_count)
+            : GeometryRoiTargetLayout::DetectorColumns;
+        torch::Tensor target_tensor = torch::full(
+            { config_.max_gt, target_columns }, -1.0f, torch::kFloat32);
 
         int count = 0;
         for (const auto& l : labels) {
@@ -185,6 +208,23 @@ public:
             target_tensor[count][3] = l[2];
             target_tensor[count][4] = l[3];
             target_tensor[count][5] = l[4];
+            if (config_.geometry_targets_enabled) {
+                const GeometrySidecarTarget& geometry = geometry_targets.at(count);
+                target_tensor[count][GeometryRoiTargetLayout::Kind] =
+                    static_cast<float>(geometry.kind);
+                target_tensor[count][GeometryRoiTargetLayout::RoiX1] = geometry.roi[0];
+                target_tensor[count][GeometryRoiTargetLayout::RoiY1] = geometry.roi[1];
+                target_tensor[count][GeometryRoiTargetLayout::RoiX2] = geometry.roi[2];
+                target_tensor[count][GeometryRoiTargetLayout::RoiY2] = geometry.roi[3];
+                for (int64_t item = 0; item < GeometryRoiTargetLayout::EllipseColumns; ++item)
+                    target_tensor[count][GeometryRoiTargetLayout::Ellipse + item] =
+                        geometry.ellipse_parameters.at(static_cast<size_t>(item));
+                for (int64_t item = 0; item < config_.geometry_polygon_vertex_count * 2; ++item)
+                    target_tensor[count][GeometryRoiTargetLayout::polygon_offset() + item] =
+                        geometry.polygon_vertices.at(static_cast<size_t>(item));
+                target_tensor[count][GeometryRoiTargetLayout::continuity_offset(
+                    config_.geometry_polygon_vertex_count)] = geometry.boundary_continuity;
+            }
             count++;
         }
 
@@ -196,6 +236,85 @@ public:
     }
 
 private:
+    struct GeometrySidecarTarget {
+        int kind = 0;
+        std::array<float, 4> roi{};
+        std::array<float, 6> ellipse_parameters{};
+        std::vector<float> polygon_vertices;
+        float boundary_continuity = 0.0f;
+    };
+
+    static float read_finite_number(const cv::FileNode& node, const char* field) {
+        double value = 0.0;
+        TORCH_CHECK(!node.empty(), "geometry sidecar is missing ", field);
+        node >> value;
+        TORCH_CHECK(std::isfinite(value), "geometry sidecar field is not finite: ", field);
+        return static_cast<float>(value);
+    }
+
+    std::vector<GeometrySidecarTarget> load_geometry_targets(
+        const std::string& image_stem, size_t expected_count) const {
+        const fs::path sidecar_path = fs::path(config_.geometry_target_dir) / (image_stem + ".json");
+        TORCH_CHECK(fs::is_regular_file(sidecar_path),
+            "geometry sidecar is missing for image: ", image_stem);
+        cv::FileStorage sidecar(sidecar_path.string(), cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+        TORCH_CHECK(sidecar.isOpened(), "geometry sidecar cannot be parsed: ", sidecar_path.string());
+        std::string schema;
+        sidecar["schema"] >> schema;
+        TORCH_CHECK(schema == "cxvision.geometry_roi_target_sidecar.v1",
+            "geometry sidecar schema is unsupported: ", sidecar_path.string());
+        const cv::FileNode instances = sidecar["instances"];
+        TORCH_CHECK(instances.isSeq(), "geometry sidecar instances must be an array: ", sidecar_path.string());
+        TORCH_CHECK(instances.size() == expected_count,
+            "geometry sidecar instance count must match YOLO label count: ", sidecar_path.string());
+        std::vector<GeometrySidecarTarget> targets(expected_count);
+        std::vector<bool> seen(expected_count, false);
+        for (const auto& instance : instances) {
+            int instance_index = -1;
+            instance["instance_index"] >> instance_index;
+            TORCH_CHECK(instance_index >= 0 && static_cast<size_t>(instance_index) < expected_count &&
+                    !seen[static_cast<size_t>(instance_index)],
+                "geometry sidecar instance_index must be unique and within label range: ", sidecar_path.string());
+            seen[static_cast<size_t>(instance_index)] = true;
+            std::string kind;
+            instance["geometry_kind"] >> kind;
+            GeometrySidecarTarget target;
+            if (kind == "ellipse") target.kind = 1;
+            else if (kind == "polygon") target.kind = 2;
+            else TORCH_CHECK(false, "geometry sidecar geometry_kind must be ellipse or polygon: ", sidecar_path.string());
+            const cv::FileNode roi = instance["roi"];
+            TORCH_CHECK(roi.isSeq() && roi.size() == 4,
+                "geometry sidecar roi must be [x1,y1,x2,y2]");
+            for (int component = 0; component < 4; ++component) {
+                target.roi[static_cast<size_t>(component)] = read_finite_number(roi[component], "roi");
+                TORCH_CHECK(target.roi[static_cast<size_t>(component)] >= 0.0f &&
+                        target.roi[static_cast<size_t>(component)] <= 1.0f,
+                    "geometry sidecar ROI must be normalized to [0,1]");
+            }
+            TORCH_CHECK(target.roi[2] > target.roi[0] && target.roi[3] > target.roi[1],
+                "geometry sidecar ROI must have positive area");
+            const cv::FileNode ellipse = instance["ellipse_parameters"];
+            TORCH_CHECK(ellipse.isSeq() && ellipse.size() == 6,
+                "geometry sidecar ellipse_parameters must be [cx,cy,rx,ry,sin2a,cos2a]");
+            for (int component = 0; component < 6; ++component)
+                target.ellipse_parameters[static_cast<size_t>(component)] =
+                    read_finite_number(ellipse[component], "ellipse_parameters");
+            const cv::FileNode polygon = instance["polygon_vertices"];
+            TORCH_CHECK(polygon.isSeq() && polygon.size() == config_.geometry_polygon_vertex_count * 2,
+                "geometry sidecar polygon_vertices count must equal 2*geometry_polygon_vertex_count");
+            target.polygon_vertices.reserve(static_cast<size_t>(polygon.size()));
+            for (const auto& coordinate : polygon)
+                target.polygon_vertices.push_back(read_finite_number(coordinate, "polygon_vertices"));
+            target.boundary_continuity = read_finite_number(instance["boundary_continuity"], "boundary_continuity");
+            TORCH_CHECK(target.boundary_continuity >= 0.0f && target.boundary_continuity <= 1.0f,
+                "geometry sidecar boundary_continuity must be in [0,1]");
+            targets[static_cast<size_t>(instance_index)] = std::move(target);
+        }
+        for (bool present : seen)
+            TORCH_CHECK(present, "geometry sidecar is missing an instance_index");
+        return targets;
+    }
+
     std::tuple<cv::Mat, std::vector<std::vector<float>>> letterbox_image_and_labels(
         const cv::Mat& img,
         const std::vector<std::vector<float>>& labels) const {

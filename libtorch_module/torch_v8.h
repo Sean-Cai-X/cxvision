@@ -10,12 +10,14 @@
 
 #include <fstream>
 #include <stdexcept>
+#include <chrono>
 
 #include "torch_modelconfig.h"
 #include "torch_backbone.h"
 #include "torch_pan.h"
 #include "torch_v8loss.h"
 #include "torch_yolo_head.h"
+#include "torch_geometry_roi_head.h"
 
 #include <torch/csrc/serialization.h>
 
@@ -98,15 +100,20 @@ inline void maybe_save_yolo_checkpoint(
 struct YoloModelBuildConfig {
     YoloDetectHeadConfig head;
     YoloLossConfig loss;
+    GeometryRoiHeadConfig geometry_head;
+    GeometryRoiLossConfig geometry_loss;
 };
 
 struct YoloEvalConfig {
     YoloValidationConfig data;
     YoloPostProcessConfig postprocess;
+    float match_iou_threshold = 0.5f;
 
     void validate() const {
         data.validate();
         postprocess.validate();
+        TORCH_CHECK(match_iou_threshold >= 0.0f && match_iou_threshold <= 1.0f,
+            "eval match_iou_threshold must be in [0,1]");
         TORCH_CHECK(postprocess.num_classes > 0, "eval postprocess num_classes must be positive");
     }
 };
@@ -169,6 +176,13 @@ public:
             YOLOv8Detect(config.num_classes, backbone_out_ch, config.strides, build_config_.head));
 
         loss_fn_ = register_module("loss_fn", YOLOv8Loss(config.num_classes, build_config_.loss));
+        if (build_config_.geometry_head.enabled) {
+            geometry_head_ = register_module("geometry_roi_head",
+                GeometryRoiHead(backbone_out_ch.at(0), build_config_.geometry_head));
+            geometry_loss_fn_ = register_module("geometry_roi_loss",
+                GeometryRoiLoss(build_config_.geometry_head.polygon_vertex_count,
+                    build_config_.geometry_loss));
+        }
     }
 
     std::vector<char> get_the_bytes(const std::string& path) {
@@ -365,6 +379,109 @@ public:
         std::map<int64_t, ClassStats> per_class;
     };
 
+    struct GeometryRoiValidationSummary {
+        int64_t instance_count = 0;
+        int64_t ellipse_count = 0;
+        int64_t polygon_count = 0;
+        double ellipse_parameter_mae_px = 0.0;
+        double polygon_vertex_mae_px = 0.0;
+        double continuity_brier = 0.0;
+        double continuity_accuracy = 0.0;
+        double ellipse_predictive_variance = 0.0;
+        double polygon_predictive_variance = 0.0;
+        double inference_ms = 0.0;
+        std::string roi_source = "TEACHER_SIDECAR_ROI";
+        std::string claim_status =
+            "TEACHER_ROI_GEOMETRY_HEAD_EVALUATED_NOT_END_TO_END";
+    };
+
+    GeometryRoiValidationSummary geometry_roi_val_summary(
+        const std::string& data_path, const std::string& split,
+        YoloDatasetConfig dataset_config) {
+        TORCH_CHECK(geometry_head_enabled(),
+            "geometry ROI evaluation requires an enabled geometry head");
+        TORCH_CHECK(!split.empty(), "geometry ROI evaluation split must not be empty");
+        dataset_config.is_train = false;
+        dataset_config.enable_hsv = false;
+        dataset_config.enable_flip = false;
+        dataset_config.geometry_targets_enabled = true;
+        dataset_config.geometry_polygon_vertex_count =
+            build_config_.geometry_head.polygon_vertex_count;
+        dataset_config.validate();
+        torch::NoGradGuard no_grad;
+        torch::nn::Module::eval();
+        const torch::Device device = this->parameters().begin()->device();
+        auto dataset = YoloDataset(make_yolo_split_paths(data_path, split), dataset_config)
+            .map(torch::data::transforms::Stack<>());
+        auto data_loader = torch::data::make_data_loader(
+            std::move(dataset), make_yolo_loader_options(dataset_config.max_gt > 0 ?
+                std::min<int>(dataset_config.max_gt, 16) : 1, 0));
+        GeometryRoiValidationSummary summary;
+        double ellipse_parameter_sum = 0.0;
+        double polygon_vertex_sum = 0.0;
+        double continuity_brier_sum = 0.0;
+        double continuity_correct_sum = 0.0;
+        double ellipse_variance_sum = 0.0;
+        double polygon_variance_sum = 0.0;
+        const auto start = std::chrono::steady_clock::now();
+        for (auto& batch : *data_loader) {
+            const torch::Tensor images = batch.data.to(device);
+            const torch::Tensor batch_targets = batch.target.to(device);
+            const GeometryRoiTargets targets = geometry_roi_targets_from_batch(
+                batch_targets, build_config_.geometry_head.polygon_vertex_count);
+            const auto backbone_outs = backbone_->forward(images);
+            const auto neck_outs = pan_->forward(backbone_outs);
+            const GeometryRoiPrediction prediction =
+                geometry_head_->forward(neck_outs.at(0), targets.rois);
+            const torch::Tensor kind = targets.kind;
+            const torch::Tensor ellipse_mask = kind == 1;
+            const torch::Tensor polygon_mask = kind == 2;
+            if (ellipse_mask.any().item<bool>()) {
+                const torch::Tensor error = (prediction.ellipse_parameters.index({ellipse_mask}) -
+                    targets.ellipse_parameters.index({ellipse_mask})).abs().mean();
+                ellipse_parameter_sum += error.item<double>() * dataset_config.img_size *
+                    ellipse_mask.sum().item<int64_t>();
+                ellipse_variance_sum += torch::exp(prediction.log_variance.index({ellipse_mask})
+                    .select(1, 0)).mean().item<double>() * ellipse_mask.sum().item<int64_t>();
+                summary.ellipse_count += ellipse_mask.sum().item<int64_t>();
+            }
+            if (polygon_mask.any().item<bool>()) {
+                const torch::Tensor delta = prediction.polygon_vertices.index({polygon_mask}) -
+                    targets.polygon_vertices.index({polygon_mask});
+                const torch::Tensor point_error = torch::sqrt(torch::pow(delta.reshape({-1, 2}), 2)
+                    .sum(1)).mean();
+                polygon_vertex_sum += point_error.item<double>() * dataset_config.img_size *
+                    polygon_mask.sum().item<int64_t>();
+                polygon_variance_sum += torch::exp(prediction.log_variance.index({polygon_mask})
+                    .select(1, 1)).mean().item<double>() * polygon_mask.sum().item<int64_t>();
+                summary.polygon_count += polygon_mask.sum().item<int64_t>();
+            }
+            const torch::Tensor probability = torch::sigmoid(prediction.boundary_continuity_logits);
+            const torch::Tensor continuity = targets.boundary_continuity.reshape({-1, 1});
+            const int64_t count = continuity.size(0);
+            continuity_brier_sum += torch::pow(probability - continuity, 2).sum().item<double>();
+            continuity_correct_sum += ((probability >= 0.5) == (continuity >= 0.5))
+                .sum().item<double>();
+            summary.instance_count += count;
+        }
+        const auto end = std::chrono::steady_clock::now();
+        summary.inference_ms = static_cast<double>(std::chrono::duration_cast<
+            std::chrono::milliseconds>(end - start).count());
+        if (summary.ellipse_count > 0) {
+            summary.ellipse_parameter_mae_px = ellipse_parameter_sum / summary.ellipse_count;
+            summary.ellipse_predictive_variance = ellipse_variance_sum / summary.ellipse_count;
+        }
+        if (summary.polygon_count > 0) {
+            summary.polygon_vertex_mae_px = polygon_vertex_sum / summary.polygon_count;
+            summary.polygon_predictive_variance = polygon_variance_sum / summary.polygon_count;
+        }
+        if (summary.instance_count > 0) {
+            summary.continuity_brier = continuity_brier_sum / summary.instance_count;
+            summary.continuity_accuracy = continuity_correct_sum / summary.instance_count;
+        }
+        return summary;
+    }
+
     ValidationSummary val_summary(const std::string& data_path, const YoloEvalConfig& eval_config) {
         eval_config.validate();
 
@@ -430,7 +547,8 @@ public:
         }
 
         auto detection_summary = summarize_yolo_detections(all_detections, summary.target_boxes);
-        auto match_summary = summarize_yolo_matches(all_detections, all_targets, eval_config.postprocess.iou_threshold);
+        auto match_summary = summarize_yolo_matches(
+            all_detections, all_targets, eval_config.match_iou_threshold);
         summary.avg_confidence = detection_summary.avg_confidence;
         summary.predicted_boxes = detection_summary.predicted_boxes;
         summary.target_boxes = detection_summary.target_boxes;
@@ -482,6 +600,34 @@ public:
         return loss_fn_->forward(preds, targets);
     }
 
+    // This path is deliberately explicit.  A plan must provide a real geometry
+    // target manifest and pass its decoded targets here; bbox-only YOLO labels
+    // are not silently converted into ellipse or polygon targets.
+    std::tuple<torch::Tensor, std::unordered_map<std::string, float>>
+        train_step_with_geometry(torch::Tensor imgs, torch::Tensor targets,
+                                 const GeometryRoiTargets& geometry_targets) {
+        TORCH_CHECK(geometry_head_ && geometry_loss_fn_,
+            "geometry ROI training was requested but the geometry head is disabled");
+        auto backbone_outs = backbone_->forward(imgs);
+        auto neck_outs = pan_->forward(backbone_outs);
+        auto preds = head_->forward_train(neck_outs);
+        auto detector = loss_fn_->forward(
+            preds, targets.slice(2, 0, GeometryRoiTargetLayout::DetectorColumns));
+        const GeometryRoiPrediction geometry_prediction =
+            geometry_head_->forward(neck_outs.at(0), geometry_targets.rois);
+        auto geometry = geometry_loss_fn_->forward(geometry_prediction, geometry_targets);
+        torch::Tensor total = std::get<0>(detector) + std::get<0>(geometry);
+        auto metrics = std::get<1>(detector);
+        for (const auto& item : std::get<1>(geometry)) metrics[item.first] = item.second;
+        metrics["total_loss"] = total.item<float>();
+        return std::make_tuple(total, std::move(metrics));
+    }
+
+    bool geometry_head_enabled() const {
+        return static_cast<bool>(geometry_head_) &&
+            static_cast<bool>(geometry_loss_fn_);
+    }
+
     const ModelConfig& get_config() const { return config_; }
     const YoloModelBuildConfig& get_build_config() const { return build_config_; }
 
@@ -501,6 +647,8 @@ private:
     PAN pan_{ nullptr };
     YOLOv8Detect head_{ nullptr };
     YOLOv8Loss loss_fn_{ nullptr };
+    GeometryRoiHead geometry_head_{ nullptr };
+    GeometryRoiLoss geometry_loss_fn_{ nullptr };
 };
 TORCH_MODULE(YOLOv8);
 

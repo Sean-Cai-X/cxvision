@@ -520,6 +520,9 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
   const bool runRequestedByKeyParameterControls =
       context.debug_action == "Key Parameter Controls Run Script" &&
       context.debug_status == "MANUAL_RUN_REQUESTED";
+  const bool runRequestedByEvidenceSelection =
+      context.pending_evidence_selection_rehydrate &&
+      context.debug_status == "EVIDENCE_SELECTION_REHYDRATE_QUEUED";
   const bool runRequestedByFastMatchAction =
       context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
       context.debug_action == "FastMatch Learn" ||
@@ -530,6 +533,7 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
       context.debug_status == "TORCH_ACTION_RUN_REQUESTED";
   const bool usePendingExecutionSnapshot =
       (runRequestedByCandidateSave || runRequestedByKeyParameterControls ||
+       runRequestedByEvidenceSelection ||
        runRequestedByFastMatchAction) &&
       context.has_pending_execution_snapshot;
   const bool useStagedTorchSnapshot =
@@ -554,6 +558,7 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
 
   auto clearPendingSnapshot = [&context]() {
     context.has_pending_execution_snapshot = false;
+    context.pending_evidence_selection_rehydrate = false;
     context.pending_execution_globals.clear();
     context.pending_execution_candidate_id.clear();
     context.last_evidence_candidate_id.clear();
@@ -1005,6 +1010,10 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.debug_action == "Key Parameter Controls Run Script" &&
       context.debug_status == "MANUAL_RUN_REQUESTED" &&
       context.has_pending_execution_snapshot;
+  const bool deferredEvidenceSelectionRun =
+      context.pending_evidence_selection_rehydrate &&
+      context.debug_status == "EVIDENCE_SELECTION_REHYDRATE_QUEUED" &&
+      context.has_pending_execution_snapshot;
   const bool deferredFastMatchRun =
       (context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
        context.debug_action == "FastMatch Learn" ||
@@ -1017,6 +1026,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.has_pending_execution_snapshot;
   const bool hasDeferredRun =
       deferredCandidateSaveRun || deferredKeyParameterRun ||
+      deferredEvidenceSelectionRun ||
       deferredFastMatchRun || deferredTorchRun;
   const bool debugCompilerOpen =
       ImGui::CollapsingHeader("Debug Compiler", ImGuiTreeNodeFlags_DefaultOpen);
@@ -1059,6 +1069,9 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
   const bool runRequestedByKeyParameterControls =
       context.debug_action == "Key Parameter Controls Run Script" &&
       context.debug_status == "MANUAL_RUN_REQUESTED";
+  const bool runRequestedByEvidenceSelection =
+      context.pending_evidence_selection_rehydrate &&
+      context.debug_status == "EVIDENCE_SELECTION_REHYDRATE_QUEUED";
   const bool runRequestedByFastMatchAction =
       context.debug_status == "FASTMATCH_RUN_REQUESTED" ||
       context.debug_action == "FastMatch Learn" ||
@@ -1069,6 +1082,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.debug_status == "TORCH_ACTION_RUN_REQUESTED";
   const bool usePendingExecutionSnapshot =
       (runRequestedByCandidateSave || runRequestedByKeyParameterControls ||
+       runRequestedByEvidenceSelection ||
        runRequestedByFastMatchAction) &&
       context.has_pending_execution_snapshot;
   const bool runButtonClicked = ImGui::Button("Run", ImVec2(btnWidth, 0));
@@ -1081,9 +1095,10 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       context.has_pending_execution_snapshot;
 
   if (runButtonClicked ||
-      runRequestedByCandidateSave ||
-      runRequestedByKeyParameterControls ||
-      runRequestedByFastMatchAction ||
+       runRequestedByCandidateSave ||
+       runRequestedByKeyParameterControls ||
+       runRequestedByEvidenceSelection ||
+       runRequestedByFastMatchAction ||
       runRequestedByTorchAction)
   {
     SetCxCrashBreadcrumb("drawManualStateTestConsole:DebugCompiler:Run:begin");
@@ -1470,6 +1485,7 @@ void ViewController::DrawScriptDebugCompilerBlock(ManualTestContext& context)
       if (usePendingExecutionSnapshot || useStagedTorchSnapshot)
       {
         context.has_pending_execution_snapshot = false;
+        context.pending_evidence_selection_rehydrate = false;
         context.pending_execution_globals.clear();
         context.pending_execution_candidate_id.clear();
         context.last_evidence_candidate_id.clear();

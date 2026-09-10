@@ -265,6 +265,45 @@ double CxEvidenceChain_case_setworkflow(const char* value)
     return 0.0;
 }
 
+double CxEvidenceChain_case_setadmission(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    const auto values = ParseEvidenceKeyValueListLocal(value);
+    g_current_evidence_case->admission_status =
+        GetEvidenceKvLocal(values, "status", "REFERENCE_ONLY");
+    g_current_evidence_case->admission_reason =
+        GetEvidenceKvLocal(values, "reason");
+    g_current_evidence_case->dataset_summary_ref =
+        GetEvidenceKvLocal(values, "dataset_summary");
+    g_current_evidence_case->training_receipt_ref =
+        GetEvidenceKvLocal(values, "training_receipt");
+    g_current_evidence_case->candidate_artifact_ref =
+        GetEvidenceKvLocal(values, "candidate_artifact");
+    g_current_evidence_case->evaluation_report_ref =
+        GetEvidenceKvLocal(values, "evaluation_report");
+    g_current_evidence_case->evidence_bundle_ref =
+        GetEvidenceKvLocal(values, "evidence_bundle");
+    g_current_evidence_case->rollback_model_ref =
+        GetEvidenceKvLocal(values, "rollback_model");
+    g_current_evidence_case->quality_conclusion_ref =
+        GetEvidenceKvLocal(values, "quality_conclusion");
+    g_current_evidence_case->training_config_ref =
+        GetEvidenceKvLocal(values, "training_config");
+    g_current_evidence_case->model_manifest_ref =
+        GetEvidenceKvLocal(values, "model_manifest");
+    g_current_evidence_case->inference_config_ref =
+        GetEvidenceKvLocal(values, "inference_config");
+    g_current_evidence_case->quality_policy_ref =
+        GetEvidenceKvLocal(values, "quality_policy");
+    g_current_evidence_case->ontology_ref =
+        GetEvidenceKvLocal(values, "ontology");
+    g_current_evidence_case->failure_samples_ref =
+        GetEvidenceKvLocal(values, "failure_samples");
+    return 0.0;
+}
+
 double CxEvidenceChain_case_adddatasetimage(const char* value)
 {
     if (!g_current_evidence_case)
@@ -388,6 +427,7 @@ void RegisterCxScriptEvidenceChainBindings(mu::Parser& parser)
     parser.DefineFun("CxEvidenceChain_case_setcategory", (mu::strfun_type1)&CxEvidenceChain_case_setcategory);
     parser.DefineFun("CxEvidenceChain_case_setgroup", (mu::strfun_type1)&CxEvidenceChain_case_setgroup);
     parser.DefineFun("CxEvidenceChain_case_setworkflow", (mu::strfun_type1)&CxEvidenceChain_case_setworkflow);
+    parser.DefineFun("CxEvidenceChain_case_setadmission", (mu::strfun_type1)&CxEvidenceChain_case_setadmission);
     parser.DefineFun("CxEvidenceChain_case_adddatasetimage", (mu::strfun_type1)&CxEvidenceChain_case_adddatasetimage);
     parser.DefineFun("CxEvidenceChain_case_addbbox_xywh_norm", (mu::strfun_type1)&CxEvidenceChain_case_addbbox_xywh_norm);
     parser.DefineFun("CxEvidenceChain_case_addpolygon", (mu::strfun_type1)&CxEvidenceChain_case_addpolygon);

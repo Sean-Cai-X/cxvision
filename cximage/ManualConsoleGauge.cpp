@@ -209,6 +209,36 @@ void ApplySegmentationPromptFallbacksFromGlobals(ManualTestContext &context,
   SyncSegmentationLegacyPointFromLists(loaded);
 }
 
+// Candidate packages written before the FindObject-specific gauge schema was
+// introduced still contain the authoritative ROI in runtime_globals.json.
+// Restore only from that candidate-local snapshot; never borrow the ROI from
+// the currently selected Evidence row.
+void ApplyFindObjectGaugeFallbacksFromGlobals(ManualTestContext &context,
+                                              ManualGaugeState &loaded) {
+  auto readInt = [&context](const std::string &key, int fallback) {
+    const auto it = context.runtime_int_vars.find(key);
+    return it == context.runtime_int_vars.end() ? fallback : it->second;
+  };
+
+  loaded.has_findobject_roi = true;
+  loaded.findobject_x0 =
+      readInt("global_roi_x0", readInt("global_roi_x", loaded.findobject_x0));
+  loaded.findobject_y0 =
+      readInt("global_roi_y0", readInt("global_roi_y", loaded.findobject_y0));
+  const int roiWidth = readInt("global_roi_width", 0);
+  const int roiHeight = readInt("global_roi_height", 0);
+  loaded.findobject_x1 =
+      readInt("global_roi_x1", loaded.findobject_x0 + roiWidth);
+  loaded.findobject_y1 =
+      readInt("global_roi_y1", loaded.findobject_y0 + roiHeight);
+  loaded.findobject_foreground_mode = readInt(
+      "global_object_foreground_mode", readInt("global_method", loaded.method));
+  loaded.findobject_threshold = readInt(
+      "global_object_threshold", readInt("global_threshold", loaded.threshold));
+  loaded.findobject_min_area =
+      readInt("global_object_min_area", loaded.findobject_min_area);
+}
+
 bool AtomicReplaceFile(const std::filesystem::path &temporary,
                        const std::filesystem::path &destination,
                        std::string &reason) {
@@ -1011,7 +1041,8 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
     InjectManualGaugeInt(context, "global_object_geometry_connectivity",
                          gauge.findobject_geometry_connectivity);
     InjectManualGaugeInt(context, "global_object_selected_measurement",
-                         gauge.findobject_selected_measurement);
+                         gauge.findobject_show_all_conclusions
+                             ? -1 : gauge.findobject_selected_measurement);
     InjectManualGaugeInt(context, "global_object_show_boundary",
                          gauge.findobject_show_boundary ? 1 : 0);
     InjectManualGaugeInt(context, "global_object_show_moment_ellipse",
@@ -1020,6 +1051,8 @@ bool ApplyManualGaugeToGlobals(ManualTestContext &context) {
                          gauge.findobject_show_feret ? 1 : 0);
     InjectManualGaugeInt(context, "global_object_show_circles",
                          gauge.findobject_show_circles ? 1 : 0);
+    InjectManualGaugeInt(context, "global_object_conclusion_shape",
+                         std::max(0, std::min(4, gauge.findobject_conclusion_shape)));
     gauge.findobject_background_method =
         std::max(0, std::min(2, gauge.findobject_background_method));
     gauge.findobject_background_border_px =
@@ -1418,6 +1451,7 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
                            &loaded.method,
                            &loaded.findsetting};
   bool segmentationFallbackApplied = false;
+  bool findObjectFallbackApplied = false;
   for (std::size_t i = 0; i < std::size(integer_keys); ++i) {
     if (!ExtractJsonInt(source, integer_keys[i], *integer_values[i])) {
       if (std::string(integer_keys[i]) == "ellipse_inner_scale_percent") {
@@ -1481,6 +1515,14 @@ static bool LoadManualGaugeAnnotationFromPathImpl(
       }
       if (std::string(integer_keys[i]).find("findobject_") == 0 &&
           !loaded.has_findobject_roi && loaded.tool != "FindObject") {
+        continue;
+      }
+      if (std::string(integer_keys[i]).find("findobject_") == 0 &&
+          loaded.tool == "FindObject") {
+        if (!findObjectFallbackApplied) {
+          ApplyFindObjectGaugeFallbacksFromGlobals(context, loaded);
+          findObjectFallbackApplied = true;
+        }
         continue;
       }
       if (std::string(integer_keys[i]).find("circle_arc_") == 0) {

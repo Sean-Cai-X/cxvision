@@ -69,7 +69,22 @@ public:
 
             torch::Tensor cls_scores = pd_scores[b].gather(1, gt_labels_expand);
 
+            // A task-aligned candidate is only valid when its decoded anchor
+            // centre lies inside the GT box.  Without this constraint, top-k
+            // selected distant anchors whose tiny non-zero metric later became
+            // high-confidence duplicate detections.
+            const torch::Tensor anchor_centers_x =
+                (pd_bboxes[b].select(1, 0) + pd_bboxes[b].select(1, 2)) * 0.5f;
+            const torch::Tensor anchor_centers_y =
+                (pd_bboxes[b].select(1, 1) + pd_bboxes[b].select(1, 3)) * 0.5f;
+            const torch::Tensor inside_gt =
+                (anchor_centers_x.unsqueeze(1) >= gt_bboxes_b.select(1, 0).unsqueeze(0)) &
+                (anchor_centers_x.unsqueeze(1) <= gt_bboxes_b.select(1, 2).unsqueeze(0)) &
+                (anchor_centers_y.unsqueeze(1) >= gt_bboxes_b.select(1, 1).unsqueeze(0)) &
+                (anchor_centers_y.unsqueeze(1) <= gt_bboxes_b.select(1, 3).unsqueeze(0));
+            const torch::Tensor valid_candidate = inside_gt & (iou > 0.0f);
             torch::Tensor metric = torch::pow(cls_scores, alpha_) * torch::pow(iou, beta_);
+            metric = torch::where(valid_candidate, metric, torch::full_like(metric, -1.0f));
 
             int64_t k = std::min(topk_, num_anchors);
             auto topk_res = torch::topk(metric, k, 0, true);
@@ -77,7 +92,7 @@ public:
             torch::Tensor topk_idxs = std::get<1>(topk_res);
 
             torch::Tensor mask_topk = torch::zeros_like(metric, torch::kBool);
-            mask_topk.scatter_(0, topk_idxs, true);
+            mask_topk.scatter_(0, topk_idxs, topk_metrics > 1e-9f);
 
 
             torch::Tensor sum_mask = mask_topk.sum(1);

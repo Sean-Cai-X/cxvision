@@ -216,6 +216,8 @@ bool PostprocessAndWriteOutput(
         post_config.num_classes = effective_num_classes;
         post_config.conf_threshold = manifest.confidence_threshold;
         post_config.iou_threshold = manifest.iou_threshold;
+        post_config.max_detections = manifest.max_detections;
+        post_config.class_agnostic_nms = manifest.class_agnostic_nms;
 
         // Keep the inference stages auditable.  The saved tensor is the real
         // normalized head output; the JSON files are deliberately summaries
@@ -359,6 +361,8 @@ bool PostprocessAndWriteOutput(
         postprocess_trace << "\"confidence_threshold\":" << post_config.conf_threshold << ",";
         postprocess_trace << "\"nms_iou_threshold\":" << post_config.iou_threshold << ",";
         postprocess_trace << "\"max_detections\":" << manifest.max_detections << ",";
+        postprocess_trace << "\"class_agnostic_nms\":"
+            << (post_config.class_agnostic_nms ? "true" : "false") << ",";
         postprocess_trace << "\"raw_anchor_count\":" << raw_rows.size(0) << ",";
         postprocess_trace << "\"post_threshold_candidate_count\":" << threshold_indices.size(0) << ",";
         postprocess_trace << "\"post_nms_detection_count\":" << scaled_detections.size() << ",";

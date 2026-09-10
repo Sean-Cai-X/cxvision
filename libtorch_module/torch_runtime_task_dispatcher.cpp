@@ -1422,6 +1422,31 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         int seed = 0;
         int num_classes = 0;
         double learning_rate = 0.0;
+        int assignment_topk = 0;
+        double classification_focal_gamma = -1.0;
+        int use_assignment_quality_targets = -1;
+        int validation_interval = 0;
+        int early_stop_patience = 0;
+        int minimum_complete_epochs = 0;
+        double minimum_f1_delta = -1.0;
+        int restore_best_validation_checkpoint = -1;
+        double postprocess_confidence_threshold = -1.0;
+        double postprocess_iou_threshold = -1.0;
+        int postprocess_max_detections = 0;
+        int postprocess_class_agnostic_nms = -1;
+        double evaluation_match_iou_threshold = -1.0;
+        int global_multiscale_assignment = -1;
+        int geometry_roi_head_enabled = 0;
+        int geometry_roi_hidden_channels = 64;
+        int geometry_roi_pooled_size = 4;
+        int geometry_roi_polygon_vertex_count = 8;
+        double geometry_roi_parameter_weight = 1.0;
+        double geometry_roi_contour_weight = 1.0;
+        double geometry_roi_continuity_weight = 0.5;
+        double geometry_roi_uncertainty_weight = 0.25;
+        double geometry_roi_continuity_positive_weight = 1.0;
+        double geometry_roi_calibration_weight = 0.1;
+        std::string geometry_target_manifest;
         std::string parent_checkpoint;
         plan["epochs"] >> epochs;
         plan["batch_size"] >> batch_size;
@@ -1431,15 +1456,103 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         plan["num_classes"] >> num_classes;
         plan["learning_rate"] >> learning_rate;
         plan["parent_checkpoint"] >> parent_checkpoint;
+        auto read_required_int = [&](const char* key, int& value) {
+            const cv::FileNode node = plan[key];
+            TORCH_CHECK(!node.empty(), "YOLOv8 lifecycle training plan is missing required field: ", key);
+            node >> value;
+        };
+        auto read_required_double = [&](const char* key, double& value) {
+            const cv::FileNode node = plan[key];
+            TORCH_CHECK(!node.empty(), "YOLOv8 lifecycle training plan is missing required field: ", key);
+            node >> value;
+        };
+        read_required_int("assignment_topk", assignment_topk);
+        read_required_double("classification_focal_gamma", classification_focal_gamma);
+        read_required_int("use_assignment_quality_targets", use_assignment_quality_targets);
+        read_required_int("validation_interval", validation_interval);
+        read_required_int("early_stop_patience", early_stop_patience);
+        read_required_int("minimum_complete_epochs", minimum_complete_epochs);
+        read_required_double("minimum_f1_delta", minimum_f1_delta);
+        read_required_int("restore_best_validation_checkpoint", restore_best_validation_checkpoint);
+        read_required_double("postprocess_confidence_threshold", postprocess_confidence_threshold);
+        read_required_double("postprocess_iou_threshold", postprocess_iou_threshold);
+        read_required_int("postprocess_max_detections", postprocess_max_detections);
+        read_required_int("postprocess_class_agnostic_nms", postprocess_class_agnostic_nms);
+        read_required_double("evaluation_match_iou_threshold", evaluation_match_iou_threshold);
+        read_required_int("global_multiscale_assignment", global_multiscale_assignment);
+        auto read_optional_int = [&](const char* key, int& value) {
+            const cv::FileNode node = plan[key];
+            if (!node.empty()) node >> value;
+        };
+        auto read_optional_double = [&](const char* key, double& value) {
+            const cv::FileNode node = plan[key];
+            if (!node.empty()) node >> value;
+        };
+        read_optional_int("geometry_roi_head_enabled", geometry_roi_head_enabled);
+        read_optional_int("geometry_roi_hidden_channels", geometry_roi_hidden_channels);
+        read_optional_int("geometry_roi_pooled_size", geometry_roi_pooled_size);
+        read_optional_int("geometry_roi_polygon_vertex_count", geometry_roi_polygon_vertex_count);
+        read_optional_double("geometry_roi_parameter_weight", geometry_roi_parameter_weight);
+        read_optional_double("geometry_roi_contour_weight", geometry_roi_contour_weight);
+        read_optional_double("geometry_roi_continuity_weight", geometry_roi_continuity_weight);
+        read_optional_double("geometry_roi_uncertainty_weight", geometry_roi_uncertainty_weight);
+        read_optional_double("geometry_roi_continuity_positive_weight", geometry_roi_continuity_positive_weight);
+        read_optional_double("geometry_roi_calibration_weight", geometry_roi_calibration_weight);
+        if (!plan["geometry_target_manifest"].empty())
+            plan["geometry_target_manifest"] >> geometry_target_manifest;
         TORCH_CHECK(epochs >= 2, "YOLOv8 lifecycle requires at least two epochs");
         TORCH_CHECK(batch_size > 0, "YOLOv8 lifecycle batch_size must be positive");
         TORCH_CHECK(input_size > 0 && input_size % 32 == 0,
             "YOLOv8 lifecycle input_size must be positive and divisible by 32");
-        TORCH_CHECK(max_train_batches > 0,
-            "YOLOv8 lifecycle max_train_batches_per_epoch must be positive");
+        TORCH_CHECK(max_train_batches >= 0,
+            "YOLOv8 lifecycle max_train_batches_per_epoch must be non-negative; zero means full dataset");
         TORCH_CHECK(num_classes > 0, "YOLOv8 lifecycle num_classes must be positive");
         TORCH_CHECK(learning_rate > 0.0,
             "YOLOv8 lifecycle learning_rate must be positive");
+        TORCH_CHECK(assignment_topk > 0,
+            "YOLOv8 lifecycle assignment_topk must be positive");
+        TORCH_CHECK(classification_focal_gamma >= 0.0,
+            "YOLOv8 lifecycle classification_focal_gamma must be non-negative");
+        TORCH_CHECK(validation_interval > 0,
+            "YOLOv8 lifecycle validation_interval must be positive");
+        TORCH_CHECK(early_stop_patience > 0,
+            "YOLOv8 lifecycle early_stop_patience must be positive");
+        TORCH_CHECK(minimum_complete_epochs >= 2 && minimum_complete_epochs <= epochs,
+            "YOLOv8 lifecycle minimum_complete_epochs must be in [2, epochs]");
+        TORCH_CHECK(minimum_f1_delta >= 0.0,
+            "YOLOv8 lifecycle minimum_f1_delta must be non-negative");
+        TORCH_CHECK(postprocess_confidence_threshold >= 0.0 && postprocess_confidence_threshold <= 1.0,
+            "YOLOv8 lifecycle postprocess_confidence_threshold must be in [0,1]");
+        TORCH_CHECK(postprocess_iou_threshold >= 0.0 && postprocess_iou_threshold <= 1.0,
+            "YOLOv8 lifecycle postprocess_iou_threshold must be in [0,1]");
+        TORCH_CHECK(postprocess_max_detections > 0,
+            "YOLOv8 lifecycle postprocess_max_detections must be positive");
+        TORCH_CHECK(use_assignment_quality_targets == 0 || use_assignment_quality_targets == 1,
+            "YOLOv8 lifecycle use_assignment_quality_targets must be 0 or 1");
+        TORCH_CHECK(postprocess_class_agnostic_nms == 0 || postprocess_class_agnostic_nms == 1,
+            "YOLOv8 lifecycle postprocess_class_agnostic_nms must be 0 or 1");
+        TORCH_CHECK(evaluation_match_iou_threshold >= 0.0 && evaluation_match_iou_threshold <= 1.0,
+            "YOLOv8 lifecycle evaluation_match_iou_threshold must be in [0,1]");
+        TORCH_CHECK(global_multiscale_assignment == 0 || global_multiscale_assignment == 1,
+            "YOLOv8 lifecycle global_multiscale_assignment must be 0 or 1");
+        TORCH_CHECK(geometry_roi_head_enabled == 0 || geometry_roi_head_enabled == 1,
+            "YOLOv8 lifecycle geometry_roi_head_enabled must be 0 or 1");
+        TORCH_CHECK(geometry_roi_hidden_channels > 0,
+            "YOLOv8 lifecycle geometry_roi_hidden_channels must be positive");
+        TORCH_CHECK(geometry_roi_pooled_size >= 2,
+            "YOLOv8 lifecycle geometry_roi_pooled_size must be at least two");
+        TORCH_CHECK(geometry_roi_polygon_vertex_count >= 3,
+            "YOLOv8 lifecycle geometry_roi_polygon_vertex_count must be at least three");
+        TORCH_CHECK(geometry_roi_parameter_weight >= 0.0 && geometry_roi_contour_weight >= 0.0 &&
+                geometry_roi_continuity_weight >= 0.0 && geometry_roi_uncertainty_weight >= 0.0 &&
+                geometry_roi_calibration_weight >= 0.0,
+            "YOLOv8 lifecycle geometry ROI loss weights must be non-negative");
+        TORCH_CHECK(geometry_roi_continuity_positive_weight > 0.0,
+            "YOLOv8 lifecycle geometry_roi_continuity_positive_weight must be positive");
+        TORCH_CHECK(geometry_roi_head_enabled == 0 || !geometry_target_manifest.empty(),
+            "YOLOv8 lifecycle geometry ROI head requires geometry_target_manifest; bbox-only labels are insufficient");
+        TORCH_CHECK(restore_best_validation_checkpoint != 0,
+            "YOLOv8 lifecycle requires validation-best checkpoint restoration");
         TORCH_CHECK(!parent_checkpoint.empty(),
             "YOLOv8 lifecycle requires an explicit parent_checkpoint; random initialization is not an incremental branch");
         const std::filesystem::path parent_checkpoint_path(parent_checkpoint);
@@ -1463,6 +1576,19 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             class_names.push_back(static_cast<std::string>(node));
         TORCH_CHECK(static_cast<int>(class_names.size()) == num_classes,
             "YOLOv8 lifecycle class_names count must match num_classes");
+        std::vector<float> class_loss_weights;
+        const cv::FileNode class_weight_nodes = plan["class_loss_weights"];
+        TORCH_CHECK(class_weight_nodes.isSeq(),
+            "YOLOv8 lifecycle class_loss_weights must be a sequence");
+        for (const auto& node : class_weight_nodes) {
+            double value = 0.0;
+            node >> value;
+            TORCH_CHECK(value > 0.0 && std::isfinite(value),
+                "YOLOv8 lifecycle class_loss_weights must be finite and positive");
+            class_loss_weights.push_back(static_cast<float>(value));
+        }
+        TORCH_CHECK(static_cast<int>(class_loss_weights.size()) == num_classes,
+            "YOLOv8 lifecycle class_loss_weights count must match num_classes");
 
         const std::filesystem::path dataset_root(request.dataset_root);
         const std::filesystem::path train_images = dataset_root / "images" / "train";
@@ -1487,6 +1613,44 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         TORCH_CHECK(train_image_count > 0 && val_image_count > 0,
             "YOLOv8 lifecycle dataset splits must be non-empty");
 
+        std::filesystem::path geometry_train_target_dir;
+        std::filesystem::path geometry_validation_target_dir;
+        std::filesystem::path geometry_holdout_target_dir;
+        if (geometry_roi_head_enabled != 0) {
+            const std::filesystem::path manifest_path =
+                std::filesystem::absolute(std::filesystem::path(geometry_target_manifest));
+            TORCH_CHECK(std::filesystem::is_regular_file(manifest_path),
+                "geometry_target_manifest is missing or not a regular file");
+            cv::FileStorage geometry_manifest(manifest_path.string(),
+                cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON);
+            TORCH_CHECK(geometry_manifest.isOpened(),
+                "geometry_target_manifest cannot be parsed");
+            std::string geometry_schema;
+            std::string train_target_dir_text;
+            std::string validation_target_dir_text;
+            std::string holdout_target_dir_text;
+            geometry_manifest["schema"] >> geometry_schema;
+            geometry_manifest["train_target_dir"] >> train_target_dir_text;
+            geometry_manifest["validation_target_dir"] >> validation_target_dir_text;
+            geometry_manifest["holdout_target_dir"] >> holdout_target_dir_text;
+            TORCH_CHECK(geometry_schema == "cxvision.geometry_roi_target_manifest.v1",
+                "geometry_target_manifest schema is unsupported");
+            TORCH_CHECK(!train_target_dir_text.empty() && !validation_target_dir_text.empty() &&
+                    !holdout_target_dir_text.empty(),
+                "geometry_target_manifest must declare train_target_dir, validation_target_dir and holdout_target_dir");
+            const auto resolve_geometry_dir = [&](const std::string& text) {
+                const std::filesystem::path path(text);
+                return path.is_absolute() ? path : manifest_path.parent_path() / path;
+            };
+            geometry_train_target_dir = resolve_geometry_dir(train_target_dir_text);
+            geometry_validation_target_dir = resolve_geometry_dir(validation_target_dir_text);
+            geometry_holdout_target_dir = resolve_geometry_dir(holdout_target_dir_text);
+            TORCH_CHECK(std::filesystem::is_directory(geometry_train_target_dir) &&
+                    std::filesystem::is_directory(geometry_validation_target_dir) &&
+                    std::filesystem::is_directory(geometry_holdout_target_dir),
+                "geometry target sidecar directories are missing");
+        }
+
         const bool use_cuda =
             result.requested_device == "cuda" && torch::cuda::is_available();
         const torch::Device device(use_cuda ? torch::kCUDA : torch::kCPU);
@@ -1494,9 +1658,51 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         torch::manual_seed(seed);
 
         ModelConfig model_config = ModelConfig::get_config("nano", num_classes);
-        YOLOv8 model(model_config);
+        YoloModelBuildConfig build_config;
+        build_config.loss.topk = assignment_topk;
+        build_config.loss.fl_gamma = static_cast<float>(classification_focal_gamma);
+        build_config.loss.use_assignment_quality_targets =
+            use_assignment_quality_targets != 0;
+        build_config.loss.global_multiscale_assignment =
+            global_multiscale_assignment != 0;
+        build_config.loss.class_loss_weights = class_loss_weights;
+        build_config.geometry_head.enabled = geometry_roi_head_enabled != 0;
+        build_config.geometry_head.hidden_channels = geometry_roi_hidden_channels;
+        build_config.geometry_head.pooled_size = geometry_roi_pooled_size;
+        build_config.geometry_head.polygon_vertex_count = geometry_roi_polygon_vertex_count;
+        build_config.geometry_loss.parameter_weight = static_cast<float>(geometry_roi_parameter_weight);
+        build_config.geometry_loss.contour_weight = static_cast<float>(geometry_roi_contour_weight);
+        build_config.geometry_loss.continuity_weight = static_cast<float>(geometry_roi_continuity_weight);
+        build_config.geometry_loss.uncertainty_weight = static_cast<float>(geometry_roi_uncertainty_weight);
+        build_config.geometry_loss.continuity_positive_weight =
+            static_cast<float>(geometry_roi_continuity_positive_weight);
+        build_config.geometry_loss.calibration_weight =
+            static_cast<float>(geometry_roi_calibration_weight);
+        YOLOv8 model(model_config, build_config);
         model->to(device);
-        model->load_checkpoint(parent_checkpoint_path.string());
+        if (geometry_roi_head_enabled == 0) {
+            model->load_checkpoint(parent_checkpoint_path.string());
+        } else {
+            // Parent checkpoints predate the geometry branch.  Load the mature
+            // detector into its matching architecture, then copy matching
+            // detector tensors; the geometry head remains explicitly new.
+            YoloModelBuildConfig detector_only_config = build_config;
+            detector_only_config.geometry_head.enabled = false;
+            YOLOv8 parent_model(model_config, detector_only_config);
+            parent_model->to(device);
+            parent_model->load_checkpoint(parent_checkpoint_path.string());
+            torch::NoGradGuard no_grad;
+            const auto parent_parameters = parent_model->named_parameters(true);
+            const auto parent_buffers = parent_model->named_buffers(true);
+            for (const auto& named : model->named_parameters(true)) {
+                if (const auto parent = parent_parameters.find(named.key()))
+                    named.value().copy_(*parent);
+            }
+            for (const auto& named : model->named_buffers(true)) {
+                if (const auto parent = parent_buffers.find(named.key()))
+                    named.value().copy_(*parent);
+            }
+        }
 
         std::vector<torch::Tensor> trainable_parameters;
         std::vector<std::string> frozen_parameter_names;
@@ -1529,6 +1735,15 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         eval_config.data.resize_policy = YoloResizePolicy::PlainResize;
         eval_config.data.dataloader_workers = 0;
         eval_config.postprocess.num_classes = num_classes;
+        eval_config.postprocess.conf_threshold =
+            static_cast<float>(postprocess_confidence_threshold);
+        eval_config.postprocess.iou_threshold =
+            static_cast<float>(postprocess_iou_threshold);
+        eval_config.postprocess.max_detections = postprocess_max_detections;
+        eval_config.postprocess.class_agnostic_nms =
+            postprocess_class_agnostic_nms != 0;
+        eval_config.match_iou_threshold =
+            static_cast<float>(evaluation_match_iou_threshold);
 
         const std::filesystem::path output_dir(request.output_dir);
         const std::filesystem::path weights_dir = output_dir / "weights";
@@ -1536,6 +1751,10 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         const std::filesystem::path base_weights = weights_dir / "base_cpp_yolov8n.pt";
         const std::filesystem::path incremental_weights =
             weights_dir / "incremental_cpp_yolov8n.pt";
+        const std::filesystem::path final_epoch_weights =
+            weights_dir / "final_epoch_cpp_yolov8n.pt";
+        const std::filesystem::path best_validation_weights =
+            weights_dir / "best_validation_cpp_yolov8n.pt";
 
         std::filesystem::copy_file(parent_checkpoint_path, base_weights,
             std::filesystem::copy_options::none);
@@ -1554,6 +1773,9 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         train_dataset_config.enable_hsv = false;
         train_dataset_config.enable_flip = false;
         train_dataset_config.resize_policy = YoloResizePolicy::PlainResize;
+        train_dataset_config.geometry_targets_enabled = geometry_roi_head_enabled != 0;
+        train_dataset_config.geometry_polygon_vertex_count = geometry_roi_polygon_vertex_count;
+        train_dataset_config.geometry_target_dir = geometry_train_target_dir.string();
         auto train_dataset =
             YoloDataset(make_yolo_split_paths(dataset_root.string(), "train"),
                         train_dataset_config)
@@ -1568,18 +1790,47 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 .weight_decay(0.0005));
 
         std::vector<double> epoch_losses;
+        std::vector<double> epoch_box_losses;
+        std::vector<double> epoch_classification_losses;
+        std::vector<double> epoch_distribution_focal_losses;
+        std::vector<double> epoch_geometry_parameter_losses;
+        std::vector<double> epoch_geometry_contour_losses;
+        std::vector<double> epoch_geometry_topology_losses;
+        std::vector<double> epoch_geometry_uncertainty_losses;
+        std::vector<double> epoch_geometry_calibration_losses;
         std::vector<int> epoch_batches;
         const std::filesystem::path curve_csv = output_dir / "learning_curve.csv";
         std::ofstream curve_output(curve_csv);
         TORCH_CHECK(curve_output.good(),
             "YOLOv8 lifecycle learning curve cannot be created");
-        curve_output << "epoch,loss,batches\n";
+        curve_output << "epoch,total_loss,box_loss,classification_loss,dfl_loss,"
+                        "geometry_parameter_loss,geometry_contour_loss,"
+                        "geometry_topology_loss,geometry_uncertainty_loss,geometry_calibration_loss,batches\n";
         curve_output.flush();
+        struct EpochValidationRecord {
+            int epoch = 0;
+            YOLOv8Impl::ValidationSummary summary;
+            bool selected = false;
+        };
+        std::vector<EpochValidationRecord> validation_history;
+        double best_validation_f1 = -1.0;
+        int best_validation_epoch = 0;
+        int validation_checks_without_improvement = 0;
+        bool early_stopped = false;
+        int completed_epochs = 0;
         double last_grad_mean = 0.0;
         for (int epoch = 0; epoch < epochs; ++epoch)
         {
             static_cast<torch::nn::Module&>(*model).train(true);
             double loss_sum = 0.0;
+            double box_loss_sum = 0.0;
+            double classification_loss_sum = 0.0;
+            double dfl_loss_sum = 0.0;
+            double geometry_parameter_loss_sum = 0.0;
+            double geometry_contour_loss_sum = 0.0;
+            double geometry_topology_loss_sum = 0.0;
+            double geometry_uncertainty_loss_sum = 0.0;
+            double geometry_calibration_loss_sum = 0.0;
             int batch_count = 0;
             for (auto& batch : *train_loader)
             {
@@ -1588,8 +1839,17 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 for (int64_t b = 0; b < targets.size(0); ++b)
                     targets[b].select(1, 0).fill_(static_cast<float>(b));
                 optimizer.zero_grad();
-                auto step = model->train_step(images, targets);
+                auto step = geometry_roi_head_enabled != 0
+                    ? model->train_step_with_geometry(images, targets,
+                        geometry_roi_targets_from_batch(targets,
+                            geometry_roi_polygon_vertex_count))
+                    : model->train_step(images, targets);
                 torch::Tensor loss = std::get<0>(step);
+                const auto& loss_items = std::get<1>(step);
+                auto metric_value = [&](const char* key) {
+                    const auto found = loss_items.find(key);
+                    return found == loss_items.end() ? 0.0 : static_cast<double>(found->second);
+                };
                 TORCH_CHECK(torch::isfinite(loss).item<bool>(),
                     "YOLOv8 lifecycle training loss is not finite");
                 loss.backward();
@@ -1608,23 +1868,168 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     "YOLOv8 lifecycle training produced no gradients");
                 optimizer.step();
                 loss_sum += loss.item<double>();
+                box_loss_sum += metric_value("box_loss");
+                classification_loss_sum += metric_value("cls_loss");
+                dfl_loss_sum += metric_value("dfl_loss");
+                geometry_parameter_loss_sum += metric_value("geometry_roi_parameter_loss");
+                geometry_contour_loss_sum += metric_value("geometry_roi_contour_loss");
+                geometry_topology_loss_sum += metric_value("geometry_roi_topology_loss");
+                geometry_uncertainty_loss_sum += metric_value("geometry_roi_uncertainty_loss");
+                geometry_calibration_loss_sum += metric_value("geometry_roi_calibration_loss");
                 ++batch_count;
-                if (batch_count >= max_train_batches)
+                if (max_train_batches > 0 && batch_count >= max_train_batches)
                     break;
             }
             TORCH_CHECK(batch_count > 0,
                 "YOLOv8 lifecycle epoch produced no training batches");
             epoch_losses.push_back(loss_sum / batch_count);
+            epoch_box_losses.push_back(box_loss_sum / batch_count);
+            epoch_classification_losses.push_back(classification_loss_sum / batch_count);
+            epoch_distribution_focal_losses.push_back(dfl_loss_sum / batch_count);
+            epoch_geometry_parameter_losses.push_back(geometry_parameter_loss_sum / batch_count);
+            epoch_geometry_contour_losses.push_back(geometry_contour_loss_sum / batch_count);
+            epoch_geometry_topology_losses.push_back(geometry_topology_loss_sum / batch_count);
+            epoch_geometry_uncertainty_losses.push_back(geometry_uncertainty_loss_sum / batch_count);
+            epoch_geometry_calibration_losses.push_back(geometry_calibration_loss_sum / batch_count);
             epoch_batches.push_back(batch_count);
             curve_output << (epoch + 1) << "," << epoch_losses.back() << ","
+                         << epoch_box_losses.back() << ","
+                         << epoch_classification_losses.back() << ","
+                         << epoch_distribution_focal_losses.back() << ","
+                         << epoch_geometry_parameter_losses.back() << ","
+                         << epoch_geometry_contour_losses.back() << ","
+                         << epoch_geometry_topology_losses.back() << ","
+                         << epoch_geometry_uncertainty_losses.back() << ","
+                         << epoch_geometry_calibration_losses.back() << ","
                          << batch_count << "\n";
             curve_output.flush();
+            completed_epochs = epoch + 1;
+
+            const bool validation_due =
+                completed_epochs % validation_interval == 0 || completed_epochs == epochs;
+            if (validation_due) {
+                const YOLOv8Impl::ValidationSummary epoch_summary =
+                    model->val_summary(dataset_root.string(), eval_config);
+                const bool improved = best_validation_epoch == 0 ||
+                    epoch_summary.f1 > best_validation_f1 + minimum_f1_delta;
+                validation_history.push_back(
+                    EpochValidationRecord{completed_epochs, epoch_summary, improved});
+                if (improved) {
+                    best_validation_f1 = epoch_summary.f1;
+                    best_validation_epoch = completed_epochs;
+                    validation_checks_without_improvement = 0;
+                    torch::serialize::OutputArchive best_archive;
+                    model->save(best_archive);
+                    best_archive.save_to(best_validation_weights.string());
+                } else {
+                    ++validation_checks_without_improvement;
+                    if (completed_epochs >= minimum_complete_epochs &&
+                        validation_checks_without_improvement >= early_stop_patience) {
+                        early_stopped = true;
+                        break;
+                    }
+                }
+            }
         }
         curve_output.close();
+
+        torch::serialize::OutputArchive final_epoch_archive;
+        model->save(final_epoch_archive);
+        final_epoch_archive.save_to(final_epoch_weights.string());
+        TORCH_CHECK(best_validation_epoch > 0 &&
+            std::filesystem::is_regular_file(best_validation_weights),
+            "YOLOv8 lifecycle did not produce a validation-best checkpoint");
+        model->load_checkpoint(best_validation_weights.string());
+
+        const std::filesystem::path geometry_validation_report_path =
+            output_dir / "geometry_roi_fixed_validation.json";
+        const std::filesystem::path geometry_holdout_report_path =
+            output_dir / "geometry_roi_holdout.json";
+        if (geometry_roi_head_enabled != 0) {
+            auto evaluate_geometry_split = [&](const std::string& split,
+                                               const std::filesystem::path& sidecar_dir,
+                                               const std::filesystem::path& report_path) {
+                YoloDatasetConfig geometry_config;
+                geometry_config.img_size = input_size;
+                geometry_config.is_train = false;
+                geometry_config.max_gt = 50;
+                geometry_config.enable_hsv = false;
+                geometry_config.enable_flip = false;
+                geometry_config.resize_policy = YoloResizePolicy::PlainResize;
+                geometry_config.geometry_targets_enabled = true;
+                geometry_config.geometry_polygon_vertex_count = geometry_roi_polygon_vertex_count;
+                geometry_config.geometry_target_dir = sidecar_dir.string();
+                const auto summary = model->geometry_roi_val_summary(
+                    dataset_root.string(), split, geometry_config);
+                std::ofstream output(report_path);
+                output << "{\n"
+                    << "  \"schema\": \"cxvision.geometry_roi_fixed_evaluation.v1\",\n"
+                    << "  \"split\": " << QuoteRuntimeTaskJsonString(split) << ",\n"
+                    << "  \"status\": \"TEACHER_ROI_GEOMETRY_EVALUATION_COMPLETE\",\n"
+                    << "  \"roi_source\": " << QuoteRuntimeTaskJsonString(summary.roi_source) << ",\n"
+                    << "  \"claim_status\": " << QuoteRuntimeTaskJsonString(summary.claim_status) << ",\n"
+                    << "  \"instance_count\": " << summary.instance_count << ",\n"
+                    << "  \"ellipse_count\": " << summary.ellipse_count << ",\n"
+                    << "  \"polygon_count\": " << summary.polygon_count << ",\n"
+                    << "  \"ellipse_parameter_mae_px\": " << summary.ellipse_parameter_mae_px << ",\n"
+                    << "  \"polygon_vertex_mae_px\": " << summary.polygon_vertex_mae_px << ",\n"
+                    << "  \"continuity_brier\": " << summary.continuity_brier << ",\n"
+                    << "  \"continuity_accuracy\": " << summary.continuity_accuracy << ",\n"
+                    << "  \"ellipse_predictive_variance\": " << summary.ellipse_predictive_variance << ",\n"
+                    << "  \"polygon_predictive_variance\": " << summary.polygon_predictive_variance << ",\n"
+                    << "  \"inference_ms\": " << summary.inference_ms << ",\n"
+                    << "  \"promotion_allowed\": false\n}\n";
+            };
+            evaluate_geometry_split("val", geometry_validation_target_dir,
+                geometry_validation_report_path);
+            evaluate_geometry_split("holdout", geometry_holdout_target_dir,
+                geometry_holdout_report_path);
+        }
 
         torch::serialize::OutputArchive incremental_archive;
         model->save(incremental_archive);
         incremental_archive.save_to(incremental_weights.string());
+        const std::filesystem::path checkpoint_selection_path =
+            output_dir / "checkpoint_selection_report.json";
+        {
+            std::ofstream selection(checkpoint_selection_path);
+            selection << "{\n"
+                << "  \"schema\": \"cxvision.yolov8_checkpoint_selection.v1\",\n"
+                << "  \"status\": \"VALIDATION_BEST_CHECKPOINT_SELECTED\",\n"
+                << "  \"requested_epochs\": " << epochs << ",\n"
+                << "  \"completed_epochs\": " << completed_epochs << ",\n"
+                << "  \"validation_interval\": " << validation_interval << ",\n"
+                << "  \"early_stop_patience\": " << early_stop_patience << ",\n"
+                << "  \"minimum_complete_epochs\": " << minimum_complete_epochs << ",\n"
+                << "  \"minimum_f1_delta\": " << minimum_f1_delta << ",\n"
+                << "  \"early_stopped\": " << (early_stopped ? "true" : "false") << ",\n"
+                << "  \"best_epoch\": " << best_validation_epoch << ",\n"
+                << "  \"best_f1\": " << best_validation_f1 << ",\n"
+                << "  \"restore_best\": "
+                << (restore_best_validation_checkpoint != 0 ? "true" : "false") << ",\n"
+                << "  \"selected_checkpoint\": "
+                << QuoteRuntimeTaskJsonString(incremental_weights.string()) << ",\n"
+                << "  \"best_checkpoint\": "
+                << QuoteRuntimeTaskJsonString(best_validation_weights.string()) << ",\n"
+                << "  \"final_epoch_checkpoint\": "
+                << QuoteRuntimeTaskJsonString(final_epoch_weights.string()) << ",\n"
+                << "  \"validation_history\": [\n";
+            for (std::size_t index = 0; index < validation_history.size(); ++index) {
+                const auto& row = validation_history[index];
+                selection << "    {\"epoch\":" << row.epoch
+                    << ",\"loss\":" << row.summary.loss
+                    << ",\"precision\":" << row.summary.precision
+                    << ",\"recall\":" << row.summary.recall
+                    << ",\"f1\":" << row.summary.f1
+                    << ",\"matched_iou\":" << row.summary.matched_iou
+                    << ",\"became_best\":" << (row.selected ? "true" : "false")
+                    << ",\"selected\":"
+                    << (row.epoch == best_validation_epoch ? "true" : "false") << "}";
+                if (index + 1 != validation_history.size()) selection << ",";
+                selection << "\n";
+            }
+            selection << "  ]\n}\n";
+        }
         const std::filesystem::path transfer_report_path =
             output_dir / "checkpoint_transfer_report.json";
         const std::filesystem::path freeze_audit_path =
@@ -1638,8 +2043,14 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 << "  \"loaded\": true,\n"
                 << "  \"shape_mismatch\": [],\n"
                 << "  \"missing\": [],\n"
-                << "  \"newly_initialized\": [],\n"
-                << "  \"intentionally_skipped\": []\n}\n";
+                << "  \"newly_initialized\": "
+                << (geometry_roi_head_enabled != 0
+                    ? "[\"geometry_roi_head\"]"
+                    : "[]") << ",\n"
+                << "  \"intentionally_skipped\": "
+                << (geometry_roi_head_enabled != 0
+                    ? "[\"parent_checkpoint_has_no_geometry_roi_head\"]"
+                    : "[]") << "\n}\n";
         }
         bool frozen_unchanged = true;
         bool trainable_updated = false;
@@ -1763,8 +2174,25 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                    << ", \"color\": \"rgb\", \"scale\": 0.003921568627, "
                       "\"mean\": [0.0, 0.0, 0.0], \"std\": [1.0, 1.0, 1.0], "
                       "\"letterbox\": 0},\n"
-                   << "  \"postprocess\": {\"confidence_threshold\": 0.25, "
-                      "\"iou_threshold\": 0.45, \"max_detections\": 100}\n"
+                   << "  \"postprocess\": {\"confidence_threshold\": "
+                   << postprocess_confidence_threshold
+                   << ", \"iou_threshold\": " << postprocess_iou_threshold
+                   << ", \"max_detections\": " << postprocess_max_detections
+                   << ", \"class_agnostic_nms\": "
+                   << (postprocess_class_agnostic_nms != 0 ? "true" : "false")
+                   << "},\n"
+                   << "  \"geometry_roi_head\": {\"enabled\": "
+                   << (geometry_roi_head_enabled != 0 ? "true" : "false")
+                   << ", \"feature_source\": \"neck_p3_roi\""
+                   << ", \"target_manifest\": "
+                   << QuoteRuntimeTaskJsonString(geometry_target_manifest)
+                   << ", \"pooled_size\": " << geometry_roi_pooled_size
+                   << ", \"polygon_vertex_count\": " << geometry_roi_polygon_vertex_count
+                   << ", \"target_binding_status\": \""
+                   << (geometry_roi_head_enabled != 0
+                       ? "TRAIN_BATCH_SIDECAR_BINDING_ACTIVE"
+                       : "DISABLED_BY_PLAN")
+                   << "\"}\n"
                    << "}\n";
         };
         const std::filesystem::path base_manifest =
@@ -1792,9 +2220,61 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     << "  \"parent_checkpoint\": " << QuoteRuntimeTaskJsonString(parent_checkpoint_path.string()) << ",\n"
                     << "  \"checkpoint_transfer_ref\": " << QuoteRuntimeTaskJsonString(transfer_report_path.string()) << ",\n"
                     << "  \"freeze_execution_ref\": " << QuoteRuntimeTaskJsonString(freeze_audit_path.string()) << ",\n"
+                    << "  \"requested_epochs\": " << epochs << ",\n"
                     << "  \"epochs\": " << epochs << ",\n"
+                    << "  \"completed_epochs\": " << completed_epochs << ",\n"
+                    << "  \"early_stopped\": " << (early_stopped ? "true" : "false") << ",\n"
+                    << "  \"best_validation_epoch\": " << best_validation_epoch << ",\n"
+                    << "  \"best_validation_f1\": " << best_validation_f1 << ",\n"
                     << "  \"optimizer\": \"SGD\",\n"
                     << "  \"learning_rate\": " << learning_rate << ",\n"
+                    << "  \"assignment_topk\": " << assignment_topk << ",\n"
+                    << "  \"global_multiscale_assignment\": "
+                    << (global_multiscale_assignment != 0 ? "true" : "false") << ",\n"
+                    << "  \"class_loss_weights\": [";
+        for (std::size_t index = 0; index < class_loss_weights.size(); ++index) {
+            if (index != 0) result_json << ", ";
+            result_json << class_loss_weights[index];
+        }
+        result_json << "],\n"
+                    << "  \"classification_focal_gamma\": " << classification_focal_gamma << ",\n"
+                    << "  \"layer_loss_curve_columns\": [\"total_loss\", \"box_loss\", \"classification_loss\", \"dfl_loss\", \"geometry_parameter_loss\", \"geometry_contour_loss\", \"geometry_topology_loss\", \"geometry_uncertainty_loss\", \"geometry_calibration_loss\"],\n"
+                    << "  \"geometry_roi_head\": {\n"
+                    << "    \"enabled\": " << (geometry_roi_head_enabled != 0 ? "true" : "false") << ",\n"
+                    << "    \"feature_source\": \"neck_p3_roi\",\n"
+                    << "    \"geometry_target_manifest\": " << QuoteRuntimeTaskJsonString(geometry_target_manifest) << ",\n"
+                    << "    \"target_binding_status\": \""
+                    << (geometry_roi_head_enabled != 0
+                        ? "TRAIN_BATCH_SIDECAR_BINDING_ACTIVE"
+                        : "DISABLED_BY_PLAN") << "\",\n"
+                    << "    \"hidden_channels\": " << geometry_roi_hidden_channels << ",\n"
+                    << "    \"pooled_size\": " << geometry_roi_pooled_size << ",\n"
+                    << "    \"polygon_vertex_count\": " << geometry_roi_polygon_vertex_count << ",\n"
+                    << "    \"loss_weights\": {\"parameter\": " << geometry_roi_parameter_weight
+                    << ", \"contour\": " << geometry_roi_contour_weight
+                    << ", \"continuity\": " << geometry_roi_continuity_weight
+                    << ", \"uncertainty\": " << geometry_roi_uncertainty_weight
+                    << ", \"calibration\": " << geometry_roi_calibration_weight << "},\n"
+                    << "    \"continuity_positive_weight\": " << geometry_roi_continuity_positive_weight << "\n"
+                    << "  },\n"
+                    << "  \"geometry_fixed_validation_ref\": "
+                    << QuoteRuntimeTaskJsonString(geometry_roi_head_enabled != 0
+                        ? geometry_validation_report_path.string() : std::string()) << ",\n"
+                    << "  \"geometry_holdout_ref\": "
+                    << QuoteRuntimeTaskJsonString(geometry_roi_head_enabled != 0
+                        ? geometry_holdout_report_path.string() : std::string()) << ",\n"
+                    << "  \"use_assignment_quality_targets\": "
+                    << (use_assignment_quality_targets != 0 ? "true" : "false") << ",\n"
+                    << "  \"postprocess_confidence_threshold\": "
+                    << postprocess_confidence_threshold << ",\n"
+                    << "  \"postprocess_iou_threshold\": "
+                    << postprocess_iou_threshold << ",\n"
+                    << "  \"postprocess_max_detections\": "
+                    << postprocess_max_detections << ",\n"
+                    << "  \"postprocess_class_agnostic_nms\": "
+                    << (postprocess_class_agnostic_nms != 0 ? "true" : "false") << ",\n"
+                    << "  \"evaluation_match_iou_threshold\": "
+                    << evaluation_match_iou_threshold << ",\n"
                     << "  \"batches_per_epoch\": "
                     << (epoch_batches.empty() ? 0 : epoch_batches.back()) << ",\n"
                     << "  \"train_image_count\": " << train_image_count << ",\n"
@@ -1804,6 +2284,8 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     << QuoteRuntimeTaskJsonString(curve_csv.string()) << ",\n"
                     << "  \"comparison_ref\": "
                     << QuoteRuntimeTaskJsonString(comparison_path.string()) << ",\n"
+                    << "  \"checkpoint_selection_ref\": "
+                    << QuoteRuntimeTaskJsonString(checkpoint_selection_path.string()) << ",\n"
                     << "  \"base_manifest_ref\": "
                     << QuoteRuntimeTaskJsonString(base_manifest.string()) << ",\n"
                     << "  \"incremental_manifest_ref\": "
@@ -1822,9 +2304,10 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         result.result_ref = result_path.string();
         result.evidence_ref = comparison_path.string();
         result.visualization_refs =
-            curve_csv.string() + ";" + comparison_path.string();
+            curve_csv.string() + ";" + comparison_path.string() + ";" +
+            checkpoint_selection_path.string();
         result.trainer_lifecycle_summary =
-            "real multi-epoch C++ YOLOv8n optimizer lifecycle completed";
+            "real multi-epoch C++ YOLOv8n optimizer lifecycle completed with validation-best checkpoint selection";
         result.unified_mainline_summary =
             "base and incremental checkpoints evaluated on the same validation split";
         return result;

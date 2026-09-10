@@ -25,6 +25,8 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
+#include <map>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -2451,6 +2453,17 @@ void DrawConclusionSummaryPanel(const ManualTestContext &context) {
 void SyncKeyParameterUiToGauge(ManualTestContext &context) {
   ManualGaugeState &g = context.current_gauge;
   ManualParamRegressionState &ui = context.param_regression;
+  if (g.tool == "FindObject") {
+    // The generic tuning controls do not own FindObject's ROI.  In
+    // particular, changing foreground polarity must not rehydrate or write
+    // global_roi_* through this shared line/circle synchronization path.
+    g.findobject_foreground_mode = std::max(1, std::min(3, ui.edge_mode));
+    g.findobject_threshold = std::max(0, std::min(255, ui.contrast_percent));
+    g.threshold = g.findobject_threshold;
+    g.method = g.findobject_foreground_mode;
+    g.dirty = true;
+    return;
+  }
   g.threshold = ui.contrast_percent;
   g.linegap = ui.measure_order;
   g.filterprofile = ui.enable_filter ? 1 : 0;
@@ -3034,6 +3047,10 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(120.0f);
   edited |= ImGui::InputInt("minimum area", &gauge.findobject_min_area);
+  ImGui::SeparatorText("Result Conclusion");
+  const char* conclusionItems[] = {"Object contour (centroid)", "Bounding rectangle (box center)", "Moment ellipse (centroid)", "Maximum inscribed circle (circle center)", "Minimum enclosing circle (circle center)"};
+  ImGui::SetNextItemWidth(320.0f);
+  edited |= ImGui::Combo("conclusion shape", &gauge.findobject_conclusion_shape, conclusionItems, IM_ARRAYSIZE(conclusionItems));
 
 
   ImGui::SeparatorText("Geometry Reconstruction / Measurement");
@@ -3065,6 +3082,9 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   ImGui::SetNextItemWidth(120.0f);
   edited |= ImGui::InputInt(
       "selected object", &gauge.findobject_selected_measurement);
+  ImGui::SameLine();
+  edited |= ImGui::Checkbox("show all same-type conclusions",
+                            &gauge.findobject_show_all_conclusions);
 
   edited |= ImGui::Checkbox("boundary overlay",
                             &gauge.findobject_show_boundary);
@@ -3151,6 +3171,10 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   gauge.findobject_threshold =
       std::max(0, std::min(255, gauge.findobject_threshold));
   gauge.findobject_min_area = std::max(1, gauge.findobject_min_area);
+  gauge.findobject_conclusion_shape = std::max(0, std::min(4, gauge.findobject_conclusion_shape));
+  gauge.findobject_show_boundary = gauge.findobject_conclusion_shape == 0;
+  gauge.findobject_show_moment_ellipse = gauge.findobject_conclusion_shape == 2;
+  gauge.findobject_show_circles = gauge.findobject_conclusion_shape >= 3;
   gauge.threshold = gauge.findobject_threshold;
   gauge.method = gauge.findobject_foreground_mode;
 
@@ -3165,7 +3189,8 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
   InjectManualGaugeInt(context, "global_object_geometry_connectivity",
                        gauge.findobject_geometry_connectivity);
   InjectManualGaugeInt(context, "global_object_selected_measurement",
-                       gauge.findobject_selected_measurement);
+                       gauge.findobject_show_all_conclusions
+                           ? -1 : gauge.findobject_selected_measurement);
   InjectManualGaugeInt(context, "global_object_show_boundary",
                        gauge.findobject_show_boundary ? 1 : 0);
   InjectManualGaugeInt(context, "global_object_show_moment_ellipse",
@@ -3174,6 +3199,7 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
                        gauge.findobject_show_feret ? 1 : 0);
   InjectManualGaugeInt(context, "global_object_show_circles",
                        gauge.findobject_show_circles ? 1 : 0);
+  InjectManualGaugeInt(context, "global_object_conclusion_shape", gauge.findobject_conclusion_shape);
   InjectManualGaugeInt(context, "global_object_background_method",
                        gauge.findobject_background_method);
   InjectManualGaugeInt(context, "global_object_background_border_px",
@@ -9210,4 +9236,408 @@ void DrawParamTuningScatterPanel(ManualTestContext &context) {
               static_cast<int>(reg.candidates.size()),
               CountSelectedParamCandidates(context),
               reg.selected_candidate_index);
+}
+
+namespace {
+
+static std::filesystem::path GeometryAutoTunePolicyPathLocal() {
+  return ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/evidence/"
+      "torch_geometry_incremental_auto_tune_policy_v1.json");
+}
+
+static std::filesystem::path GeometryAutoTuneOntologyPathLocal() {
+  return ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/evidence/"
+      "torch_geometry_ontology_frozen.json");
+}
+
+static std::string GeometryAutoTuneDoubleListLocal(const cv::FileNode &node) {
+  std::ostringstream text;
+  bool first = true;
+  if (!node.isSeq())
+    return "ASSET_MISSING";
+  for (const cv::FileNode &item : node) {
+    double value = 0.0;
+    item >> value;
+    if (!first)
+      text << ", ";
+    first = false;
+    text << std::setprecision(4) << value;
+  }
+  return first ? "ASSET_MISSING" : text.str();
+}
+
+static std::string GeometryAutoTuneIntListLocal(const cv::FileNode &node) {
+  std::ostringstream text;
+  bool first = true;
+  if (!node.isSeq())
+    return "ASSET_MISSING";
+  for (const cv::FileNode &item : node) {
+    int value = 0;
+    item >> value;
+    if (!first)
+      text << ", ";
+    first = false;
+    text << value;
+  }
+  return first ? "ASSET_MISSING" : text.str();
+}
+
+static bool LoadGeometryAutoTunePolicyLocal(ManualTestContext &context,
+                                            bool reset_values,
+                                            std::string &reason) {
+  const std::filesystem::path policyPath = GeometryAutoTunePolicyPathLocal();
+  const std::filesystem::path ontologyPath = GeometryAutoTuneOntologyPathLocal();
+  cv::FileStorage policy(policyPath.string(), cv::FileStorage::READ);
+  cv::FileStorage ontology(ontologyPath.string(), cv::FileStorage::READ);
+  if (!policy.isOpened() || !ontology.isOpened()) {
+    reason = "AUTO_TUNE_POLICY_OR_ONTOLOGY_ASSET_MISSING";
+    return false;
+  }
+  const std::string policySchema = static_cast<std::string>(policy["schema"]);
+  const std::string ontologySchema = static_cast<std::string>(ontology["schema"]);
+  const std::string requiredOntology =
+      static_cast<std::string>(policy["required_ontology_schema"]);
+  int requiredClassCount = 0;
+  int sourceTopK = 0;
+  double sourceConfidence = 0.0;
+  double matchIou = 0.0;
+  policy["required_class_count"] >> requiredClassCount;
+  policy["source_profile_topk"] >> sourceTopK;
+  policy["source_profile_confidence_threshold"] >> sourceConfidence;
+  policy["match_iou_threshold"] >> matchIou;
+  const cv::FileNode confidenceCandidates =
+      policy["confidence_threshold_candidates"];
+  const cv::FileNode topkCandidates = policy["topk_candidates"];
+  const cv::FileNode classes = ontology["classes"];
+  if (policySchema != "cxvision.torch_geometry_incremental_auto_tune_policy.v1" ||
+      ontologySchema != requiredOntology || requiredClassCount <= 0 ||
+      !confidenceCandidates.isSeq() || !topkCandidates.isSeq() ||
+      !classes.isSeq() || static_cast<int>(classes.size()) != requiredClassCount ||
+      sourceTopK <= 0 || sourceConfidence < 0.0 || sourceConfidence > 1.0 ||
+      matchIou <= 0.0 || matchIou > 1.0) {
+    reason = "AUTO_TUNE_POLICY_SCHEMA_OR_CLASS_MAPPING_INVALID";
+    return false;
+  }
+  if (reset_values || !context.geometry_auto_tune_policy_loaded) {
+    context.yolo_training_postprocess_confidence_threshold =
+        static_cast<float>(sourceConfidence);
+    context.geometry_auto_tune_topk_per_roi = sourceTopK;
+    context.geometry_auto_tune_match_iou_threshold =
+        static_cast<float>(matchIou);
+    context.geometry_auto_tune_max_trials =
+        static_cast<int>(confidenceCandidates.size() * topkCandidates.size());
+  }
+  context.geometry_auto_tune_policy_loaded = true;
+  context.geometry_auto_tune_policy_source = policyPath.string();
+  context.geometry_auto_tune_ontology_source = ontologyPath.string();
+  reason = "versioned auto-tune policy and frozen seven-class ontology loaded";
+  return true;
+}
+
+static bool LoadGeometryAutoTuneSummaryLocal(ManualTestContext &context,
+                                             std::string &reason) {
+  const std::filesystem::path root =
+      ResolveCxVisionRunPath(context.geometry_auto_tune_scan_root);
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec) || ec) {
+    reason = "AUTO_TUNE_EVIDENCE_ROOT_MISSING: " + root.string();
+    return false;
+  }
+  std::filesystem::path latest;
+  std::filesystem::file_time_type latestTime{};
+  for (std::filesystem::recursive_directory_iterator it(
+           root, std::filesystem::directory_options::skip_permission_denied,
+           ec), end;
+       !ec && it != end; it.increment(ec)) {
+    std::error_code itemError;
+    if (it->is_symlink(itemError)) {
+      if (it->is_directory(itemError))
+        it.disable_recursion_pending();
+      continue;
+    }
+    if (itemError || !it->is_regular_file(itemError) ||
+        it->path().filename() != "auto_tune_summary.json")
+      continue;
+    cv::FileStorage summary(it->path().string(), cv::FileStorage::READ);
+    const std::string schema = summary.isOpened()
+                                   ? static_cast<std::string>(summary["schema"])
+                                   : std::string();
+    if (schema != "cxvision.torch_geometry_auto_tune_summary.v1")
+      continue;
+    const auto writeTime = std::filesystem::last_write_time(it->path(), itemError);
+    if (!itemError && (latest.empty() || writeTime > latestTime)) {
+      latest = it->path();
+      latestTime = writeTime;
+    }
+  }
+  if (ec || latest.empty()) {
+    reason = ec ? "AUTO_TUNE_EVIDENCE_SCAN_FAILED: " + ec.message()
+                : "AUTO_TUNE_EVIDENCE_MISSING";
+    return false;
+  }
+  cv::FileStorage summary(latest.string(), cv::FileStorage::READ);
+  const cv::FileNode profile = summary["selection_profile"];
+  const cv::FileNode validation = summary["validation"];
+  const cv::FileNode holdout = summary["holdout"];
+  const cv::FileNode validationCandidate = validation["candidate"];
+  const cv::FileNode holdoutCandidate = holdout["candidate"];
+  context.geometry_auto_tune_summary_path = latest.string();
+  context.geometry_auto_tune_status = static_cast<std::string>(summary["status"]);
+  context.geometry_auto_tune_quality_state =
+      static_cast<std::string>(summary["quality_state"]);
+  context.geometry_auto_tune_production_state =
+      static_cast<std::string>(summary["production_admission_state"]);
+  double selectedConfidence = 0.0;
+  profile["confidence_threshold"] >> selectedConfidence;
+  profile["topk_per_roi"] >> context.geometry_auto_tune_selected_topk;
+  validationCandidate["f1"] >> context.geometry_auto_tune_validation_f1;
+  holdoutCandidate["f1"] >> context.geometry_auto_tune_holdout_f1;
+  context.geometry_auto_tune_selected_confidence =
+      static_cast<float>(selectedConfidence);
+  if (context.geometry_auto_tune_status.empty() ||
+      context.geometry_auto_tune_quality_state.empty() ||
+      context.geometry_auto_tune_production_state.empty() ||
+      context.geometry_auto_tune_selected_topk <= 0) {
+    reason = "AUTO_TUNE_SUMMARY_REQUIRED_FACT_MISSING";
+    return false;
+  }
+  context.geometry_auto_tune_reason =
+      "latest asset-driven auto-tune summary loaded";
+  reason = context.geometry_auto_tune_reason;
+  return true;
+}
+
+static void RefreshGeometryAutoTuneEvidenceLocal(ManualTestContext &context) {
+  std::string reason;
+  if (!LoadGeometryAutoTuneSummaryLocal(context, reason)) {
+    context.geometry_auto_tune_status = "AUTO_TUNE_NOT_RUN";
+    context.geometry_auto_tune_quality_state = "PENDING";
+    context.geometry_auto_tune_production_state = "REFERENCE_ONLY";
+    context.geometry_auto_tune_reason = reason;
+    context.geometry_auto_tune_summary_path.clear();
+  }
+}
+
+static ImVec4 GeometryAutoTuneStatusColorLocal(const std::string &status) {
+  if (status.find("PASS") != std::string::npos ||
+      status.find("COMPLETE") != std::string::npos)
+    return ImVec4(0.36f, 0.82f, 0.49f, 1.0f);
+  if (status.find("FAIL") != std::string::npos ||
+      status.find("REJECT") != std::string::npos)
+    return ImVec4(0.95f, 0.34f, 0.30f, 1.0f);
+  return ImVec4(1.0f, 0.72f, 0.25f, 1.0f);
+}
+
+} // namespace
+
+void DrawGeometryAutoTuneParametersPanel(ManualTestContext &context) {
+  std::string reason;
+  if (!context.geometry_auto_tune_policy_loaded)
+    LoadGeometryAutoTunePolicyLocal(context, false, reason);
+  if (!ImGui::CollapsingHeader("Geometry Auto-Tune Parameters",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+  ImGui::TextDisabled(
+      "JSON policy is authoritative. The cfg projection is read-only and never a second configuration source.");
+  if (!context.geometry_auto_tune_policy_loaded) {
+    ImGui::TextColored(ImVec4(0.95f, 0.34f, 0.30f, 1.0f), "%s", reason.c_str());
+    return;
+  }
+  if (ImGui::Button("Reload Auto-Tune Defaults")) {
+    if (!LoadGeometryAutoTunePolicyLocal(context, true, reason)) {
+      context.geometry_auto_tune_reason = reason;
+    } else {
+      context.geometry_auto_tune_reason = reason;
+      context.debug_status = "AUTO_TUNE_DEFAULTS_RELOADED";
+      context.debug_reason = reason;
+    }
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("requested values remain drafts until headless snapshot export");
+  cv::FileStorage policy(context.geometry_auto_tune_policy_source,
+                         cv::FileStorage::READ);
+  cv::FileStorage ontology(context.geometry_auto_tune_ontology_source,
+                           cv::FileStorage::READ);
+  if (!policy.isOpened() || !ontology.isOpened()) {
+    ImGui::TextColored(ImVec4(0.95f, 0.34f, 0.30f, 1.0f),
+                       "AUTO_TUNE_PARAMETER_ASSET_MISSING");
+    return;
+  }
+  ImGui::TextWrapped("Policy: %s", context.geometry_auto_tune_policy_source.c_str());
+  ImGui::TextWrapped("Ontology: %s", context.geometry_auto_tune_ontology_source.c_str());
+  if (ImGui::BeginTable("geometry_auto_tune_request", 3,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Parameter", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+    ImGui::TableSetupColumn("Requested", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    ImGui::TableSetupColumn("Source / search space", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+    ImGui::TableHeadersRow();
+    const auto row = [](const char *name, const char *source) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(name);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextWrapped("%s", source);
+    };
+    row("confidence_threshold", "policy confidence_threshold_candidates");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputFloat("##geometry_auto_confidence",
+                      &context.yolo_training_postprocess_confidence_threshold,
+                      0.0f, 0.0f, "%.4f");
+    ImGui::TableSetColumnIndex(2);
+    ImGui::TextWrapped("%s", GeometryAutoTuneDoubleListLocal(
+                                       policy["confidence_threshold_candidates"]).c_str());
+    row("topk_per_roi", "policy topk_candidates");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputInt("##geometry_auto_topk", &context.geometry_auto_tune_topk_per_roi);
+    ImGui::TableSetColumnIndex(2);
+    ImGui::TextWrapped("%s", GeometryAutoTuneIntListLocal(
+                                       policy["topk_candidates"]).c_str());
+    row("match_iou_threshold", "policy fixed match threshold");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputFloat("##geometry_auto_match_iou",
+                      &context.geometry_auto_tune_match_iou_threshold,
+                      0.0f, 0.0f, "%.4f");
+    ImGui::TableSetColumnIndex(2);
+    double matchIou = 0.0;
+    policy["match_iou_threshold"] >> matchIou;
+    ImGui::Text("%.4f", matchIou);
+    row("max_detections", "training plan runtime parameter");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputInt("##geometry_auto_max_det",
+                    &context.yolo_training_postprocess_max_detections);
+    ImGui::TableSetColumnIndex(2);
+    ImGui::TextDisabled("candidate lists are bounded before Top-K selection");
+    row("maximum_trials", "derived confidence candidates x top-k candidates");
+    ImGui::TableSetColumnIndex(1);
+    ImGui::Text("%d", context.geometry_auto_tune_max_trials);
+    ImGui::EndTable();
+  }
+  if (ImGui::CollapsingHeader("Frozen Seven-Class Ontology")) {
+    const cv::FileNode classes = ontology["classes"];
+    if (ImGui::BeginTable("geometry_auto_tune_classes", 3,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 45.0f);
+      ImGui::TableSetupColumn("Class", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("Display", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableHeadersRow();
+      for (const cv::FileNode &node : classes) {
+        int id = -1;
+        node["id"] >> id;
+        const std::string name = static_cast<std::string>(node["name"]);
+        const std::string display = static_cast<std::string>(node["display_name"]);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", id);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(name.c_str());
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(display.c_str());
+      }
+      ImGui::EndTable();
+    }
+    ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+                       "Historical rectangle assets require an explicit closed_curve migration receipt.");
+  }
+}
+
+void DrawGeometryAutoTuneDiagnosticsPanel(ManualTestContext &context) {
+  if (!ImGui::CollapsingHeader("Geometry Auto-Tune Execution Rail",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+  if (ImGui::Button("Reload Run Evidence##geometry_auto_tune_map"))
+    RefreshGeometryAutoTuneEvidenceLocal(context);
+  ImGui::SameLine();
+  ImGui::TextColored(GeometryAutoTuneStatusColorLocal(context.geometry_auto_tune_status),
+                     "%s", context.geometry_auto_tune_status.c_str());
+  ImGui::TextWrapped(
+      "Selection is validation-only. Holdout is confirmation-only and cannot reorder threshold or Top-K trials.");
+  if (context.geometry_auto_tune_summary_path.empty()) {
+    ImGui::TextDisabled("%s", context.geometry_auto_tune_reason.c_str());
+    return;
+  }
+  cv::FileStorage summary(context.geometry_auto_tune_summary_path,
+                          cv::FileStorage::READ);
+  cv::FileStorage policy(context.geometry_auto_tune_policy_source,
+                         cv::FileStorage::READ);
+  const cv::FileNode stages = summary["stages"];
+  if (!summary.isOpened() || !stages.isSeq()) {
+    ImGui::TextColored(ImVec4(0.95f, 0.34f, 0.30f, 1.0f),
+                       "AUTO_TUNE_STAGE_EVIDENCE_INVALID");
+    return;
+  }
+  if (ImGui::BeginTable("geometry_auto_tune_stages", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp,
+                        ImVec2(-1.0f, 215.0f))) {
+    ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 34.0f);
+    ImGui::TableSetupColumn("Stage", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+    ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableHeadersRow();
+    for (const cv::FileNode &node : stages) {
+      int order = -1;
+      node["order"] >> order;
+      const std::string id = static_cast<std::string>(node["id"]);
+      const std::string status = static_cast<std::string>(node["status"]);
+      const std::string action = static_cast<std::string>(node["action"]);
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("%d", order);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextUnformatted(id.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextColored(GeometryAutoTuneStatusColorLocal(status), "%s",
+                         status.c_str());
+      ImGui::TableSetColumnIndex(3);
+      ImGui::TextWrapped("%s", action.c_str());
+    }
+    ImGui::EndTable();
+  }
+  ImGui::Text("Validation F1 %.6f | Holdout F1 %.6f | profile conf %.4f / Top-K %d",
+              context.geometry_auto_tune_validation_f1,
+              context.geometry_auto_tune_holdout_f1,
+              context.geometry_auto_tune_selected_confidence,
+              context.geometry_auto_tune_selected_topk);
+  ImGui::TextDisabled(
+      "Recipe-generated stages request a new candidate training run; they do not alter the active checkpoint.");
+}
+
+void DrawGeometryAutoTuneEvidencePanel(ManualTestContext &context) {
+  if (!ImGui::CollapsingHeader("Geometry Auto-Tune / Evidence Receipt",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+  if (ImGui::Button("Reload Run Evidence##geometry_auto_tune_evidence"))
+    RefreshGeometryAutoTuneEvidenceLocal(context);
+  if (context.geometry_auto_tune_summary_path.empty())
+    RefreshGeometryAutoTuneEvidenceLocal(context);
+  ImGui::Text("status: %s", context.geometry_auto_tune_status.c_str());
+  ImGui::TextColored(
+      GeometryAutoTuneStatusColorLocal(context.geometry_auto_tune_quality_state),
+      "quality_state: %s", context.geometry_auto_tune_quality_state.c_str());
+  ImGui::TextColored(
+      GeometryAutoTuneStatusColorLocal(context.geometry_auto_tune_production_state),
+      "production_admission_state: %s",
+      context.geometry_auto_tune_production_state.c_str());
+  ImGui::Text("promotion_allowed: false | active_allowed: false");
+  ImGui::TextWrapped("summary: %s",
+                     context.geometry_auto_tune_summary_path.empty()
+                         ? context.geometry_auto_tune_reason.c_str()
+                         : context.geometry_auto_tune_summary_path.c_str());
+  if (!context.geometry_auto_tune_summary_path.empty()) {
+    ImGui::Text("effective profile: confidence %.4f | Top-K %d | validation F1 %.6f | holdout F1 %.6f",
+                context.geometry_auto_tune_selected_confidence,
+                context.geometry_auto_tune_selected_topk,
+                context.geometry_auto_tune_validation_f1,
+                context.geometry_auto_tune_holdout_f1);
+    ImGui::TextDisabled(
+        "Open the evidence directory for requested_config, effective_config, confusion_matrix, next_training_recipe and evidence_index receipts.");
+  }
 }

@@ -695,10 +695,12 @@ struct ManualGaugeState {
   double findobject_pixel_size_y = 1.0;
   int findobject_geometry_connectivity = 8;
   int findobject_selected_measurement = 0;
+  bool findobject_show_all_conclusions = false;
   bool findobject_show_boundary = true;
   bool findobject_show_moment_ellipse = true;
   bool findobject_show_feret = true;
   bool findobject_show_circles = true;
+  int findobject_conclusion_shape = 0;
   int findobject_background_method = 0;
   int findobject_background_border_px = 2;
   int findobject_background_radius_px = 32;
@@ -1070,6 +1072,17 @@ struct CxTorchTrainingRunBinding {
   double class_loss_weight = 1.0;
   double dfl_loss_weight = 1.0;
   double mask_loss_weight = 1.0;
+  bool early_stopped = false;
+  int best_validation_epoch = 0;
+  double best_validation_f1 = 0.0;
+  int assignment_topk = 0;
+  double classification_focal_gamma = 0.0;
+  bool use_assignment_quality_targets = false;
+  double postprocess_confidence_threshold = 0.0;
+  double postprocess_iou_threshold = 0.0;
+  int postprocess_max_detections = 0;
+  bool postprocess_class_agnostic_nms = false;
+  std::string checkpoint_selection_path;
   std::vector<CxTorchTrainingEpochMetric> epochs;
 
   bool HasRealMultiEpochSeries() const {
@@ -1244,6 +1257,21 @@ struct ScriptEvidenceThumb {
   int workflow_stage_index = 0;
   int workflow_stage_count = 0;
   bool dataset_frozen = false;
+  std::string admission_status = "REFERENCE_ONLY";
+  std::string admission_reason;
+  std::string dataset_summary_ref;
+  std::string training_receipt_ref;
+  std::string candidate_artifact_ref;
+  std::string evaluation_report_ref;
+  std::string evidence_bundle_ref;
+  std::string rollback_model_ref;
+  std::string quality_conclusion_ref;
+  std::string training_config_ref;
+  std::string model_manifest_ref;
+  std::string inference_config_ref;
+  std::string quality_policy_ref;
+  std::string ontology_ref;
+  std::string failure_samples_ref;
   std::string status;
   std::string reason;
   std::string primary_object_type;
@@ -1327,6 +1355,21 @@ struct CxEvidenceSelectionSnapshot {
   int workflow_stage_index = 0;
   int workflow_stage_count = 0;
   bool dataset_frozen = false;
+  std::string admission_status = "REFERENCE_ONLY";
+  std::string admission_reason;
+  std::string dataset_summary_ref;
+  std::string training_receipt_ref;
+  std::string candidate_artifact_ref;
+  std::string evaluation_report_ref;
+  std::string evidence_bundle_ref;
+  std::string rollback_model_ref;
+  std::string quality_conclusion_ref;
+  std::string training_config_ref;
+  std::string model_manifest_ref;
+  std::string inference_config_ref;
+  std::string quality_policy_ref;
+  std::string ontology_ref;
+  std::string failure_samples_ref;
 
   std::string status;
   std::string reason;
@@ -1578,14 +1621,70 @@ struct ManualTestContext {
   int geometry_aug_gap_height_px = 22;
   int geometry_aug_jagged_px = 5;
   int geometry_aug_line_break_px = 14;
-  int geometry_aug_epochs = 50;
+  int geometry_aug_epochs = 0;
   // Display capacity only. It never changes the training plan; it keeps the
   // live curve's horizontal axis stable while new epochs arrive.
   int torch_training_epoch_axis_capacity = 100;
   // Display capacity only. Keeping the loss origin at (0, 0) makes a live
   // polyline directly comparable to its completed run.
   float torch_training_loss_axis_maximum = 30.0f;
-  float geometry_aug_learning_rate = 0.001f;
+  float geometry_aug_learning_rate = 0.0f;
+  bool yolo_training_tuning_loaded = false;
+  std::string yolo_training_tuning_source;
+  int yolo_training_batch_size = 0;
+  int yolo_training_input_size = 0;
+  int yolo_training_max_batches_per_epoch = 0;
+  int yolo_training_seed = 0;
+  int yolo_training_assignment_topk = 0;
+  float yolo_training_classification_focal_gamma = 0.0f;
+  bool yolo_training_use_assignment_quality_targets = false;
+  bool yolo_training_global_multiscale_assignment = false;
+  std::vector<std::string> yolo_training_class_names;
+  std::vector<float> yolo_training_class_loss_weights;
+  int yolo_training_validation_interval = 0;
+  int yolo_training_early_stop_patience = 0;
+  int yolo_training_minimum_complete_epochs = 0;
+  float yolo_training_minimum_f1_delta = 0.0f;
+  bool yolo_training_restore_best_validation_checkpoint = false;
+  float yolo_training_postprocess_confidence_threshold = 0.0f;
+  float yolo_training_postprocess_iou_threshold = 0.0f;
+  int yolo_training_postprocess_max_detections = 0;
+  bool yolo_training_postprocess_class_agnostic_nms = false;
+  float yolo_training_evaluation_match_iou_threshold = 0.0f;
+  // Geometry ROI head parameters are case-external controls.  They are loaded
+  // from the selected versioned training plan, can be drafted in the UI, and
+  // are echoed into every runtime plan/receipt; they never enable geometry
+  // training without a sidecar target manifest.
+  bool yolo_training_geometry_roi_head_enabled = false;
+  int yolo_training_geometry_roi_hidden_channels = 64;
+  int yolo_training_geometry_roi_pooled_size = 4;
+  int yolo_training_geometry_roi_polygon_vertex_count = 8;
+  float yolo_training_geometry_roi_parameter_weight = 1.0f;
+  float yolo_training_geometry_roi_contour_weight = 1.0f;
+  float yolo_training_geometry_roi_continuity_weight = 0.5f;
+  float yolo_training_geometry_roi_uncertainty_weight = 0.25f;
+  float yolo_training_geometry_roi_continuity_positive_weight = 1.0f;
+  float yolo_training_geometry_roi_calibration_weight = 0.1f;
+  std::string yolo_training_geometry_target_manifest;
+  // Geometry auto-tune is a separate, evidence-driven inference profile
+  // search. Defaults are loaded from its versioned policy asset; the GUI
+  // exposes the requested profile but never promotes a model automatically.
+  bool geometry_auto_tune_policy_loaded = false;
+  std::string geometry_auto_tune_policy_source;
+  std::string geometry_auto_tune_ontology_source;
+  int geometry_auto_tune_topk_per_roi = 0;
+  int geometry_auto_tune_max_trials = 0;
+  float geometry_auto_tune_match_iou_threshold = 0.0f;
+  std::string geometry_auto_tune_scan_root = "cxscript_runs";
+  std::string geometry_auto_tune_summary_path;
+  std::string geometry_auto_tune_status = "AUTO_TUNE_NOT_RUN";
+  std::string geometry_auto_tune_quality_state = "PENDING";
+  std::string geometry_auto_tune_production_state = "REFERENCE_ONLY";
+  std::string geometry_auto_tune_reason = "no auto-tune evidence loaded";
+  float geometry_auto_tune_selected_confidence = 0.0f;
+  int geometry_auto_tune_selected_topk = 0;
+  float geometry_auto_tune_validation_f1 = 0.0f;
+  float geometry_auto_tune_holdout_f1 = 0.0f;
   std::string geometry_aug_run_status = "PENDING";
   std::string geometry_aug_run_reason = "not generated from GUI";
   std::string geometry_aug_output_dir;
@@ -1627,6 +1726,11 @@ struct ManualTestContext {
   // execution path must consume this frozen copy rather than re-reading a
   // possibly reseeded current_gauge/runtime_int_vars pair.
   bool has_pending_execution_snapshot = false;
+  // A saved Evidence case restores only value-semantic input state.  The
+  // parser-owned objects from the previously selected case must never be
+  // reused, so the Debug Compiler consumes this flag on the next UI pass and
+  // recreates them through the normal serial execution path.
+  bool pending_evidence_selection_rehydrate = false;
   ManualGaugeState pending_execution_gauge;
   std::unordered_map<std::string, int> pending_execution_globals;
   std::string pending_execution_candidate_id;

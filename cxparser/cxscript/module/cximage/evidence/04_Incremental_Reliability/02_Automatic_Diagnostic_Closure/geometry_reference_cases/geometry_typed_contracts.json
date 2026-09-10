@@ -63,6 +63,16 @@
       "tolerance": {"boundary_distance_px": 2.0, "vertex_error_px": 3.0, "closedness_required": true}
     },
     {
+      "geometry_type": "closed_curve",
+      "case_track": "C1",
+      "topology": "closed",
+      "typed_label_kind": "binary_mask",
+      "parameters": ["ordered_closed_spline_or_polyline", "continuity", "enclosed_region"],
+      "variable_length_output": true,
+      "primary_metrics": ["chamfer_distance_px", "closedness", "inside_outside_consistency"],
+      "tolerance": {"chamfer_distance_px": 2.0, "closedness_required": true, "inside_outside_consistency_required": true}
+    },
+    {
       "geometry_type": "line",
       "case_track": "O1",
       "topology": "open",

@@ -4,31 +4,34 @@
   "closed": false,
   "control_points_xy": [
     [
-      75,
-      285
+      0,
+      282
     ],
     [
-      155,
-      45
+      138,
+      62
     ],
     [
-      365,
-      325
+      338,
+      292
     ],
     [
-      415,
-      95
+      479,
+      92
     ]
   ],
   "endpoints_xy": [
     [
-      75,
-      285
+      0,
+      282
     ],
     [
-      415,
-      95
+      479,
+      92
     ]
   ],
-  "measurement_width_px": 4
+  "measurement_width_px": 3,
+  "boundary_scene_semantics": "interface_between_two_regions",
+  "visible_boundary_truth": "02_visible_boundary_map_v2.bmp",
+  "latent_boundary_truth": "02_visible_boundary_map_v2.bmp"
 }

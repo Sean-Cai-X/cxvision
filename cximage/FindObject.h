@@ -223,6 +223,7 @@ public:
     void setshowmomentellipse(int enabled);
     void setshowferet(int enabled);
     void setshowgeometrycircles(int enabled);
+    void setconclusionshape(int shape);
     void setbackgroundmethod(int method);
     void setbackgroundborderwidth(int pixels);
     void setbackgroundmorphologyradius(int pixels);
@@ -362,6 +363,7 @@ private:
     bool m_show_moment_ellipse = true;
     bool m_show_feret = true;
     bool m_show_geometry_circles = true;
+    int m_conclusion_shape = 0;
     std::vector<FindObjectMeasurementSnapshot> m_measurements;
     std::uint64_t m_measurement_generation = 0;
     int m_active_geometry_basis = 0; // 0 = GW discrete, 1 = subpixel when valid.

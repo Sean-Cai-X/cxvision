@@ -895,8 +895,9 @@ static std::string ReadSemicolonFieldLocal(const std::string &fields,
 
 static bool
 ValidateCandidateGaugeAnnotationLocal(const std::filesystem::path &gaugePath,
-                                      const std::string &bindingTool,
-                                      std::string &reason) {
+                                       const std::string &bindingTool,
+                                       const std::filesystem::path &runtimeGlobalsPath,
+                                       std::string &reason) {
   std::string text;
   if (gaugePath.empty() || !ReadTextFile(gaugePath.string(), text)) {
     reason = "gauge_annotation.json is missing";
@@ -917,8 +918,16 @@ ValidateCandidateGaugeAnnotationLocal(const std::filesystem::path &gaugePath,
         !ReadJsonIntFieldLocal(text, "findobject_y0", y0) ||
         !ReadJsonIntFieldLocal(text, "findobject_x1", x1) ||
         !ReadJsonIntFieldLocal(text, "findobject_y1", y1)) {
-      reason = "FindObject ROI gauge fields are incomplete";
-      return false;
+      std::string runtimeGlobals;
+      if (runtimeGlobalsPath.empty() ||
+          !ReadTextFile(runtimeGlobalsPath.string(), runtimeGlobals) ||
+          !ReadJsonIntFieldLocal(runtimeGlobals, "global_roi_x0", x0) ||
+          !ReadJsonIntFieldLocal(runtimeGlobals, "global_roi_y0", y0) ||
+          !ReadJsonIntFieldLocal(runtimeGlobals, "global_roi_x1", x1) ||
+          !ReadJsonIntFieldLocal(runtimeGlobals, "global_roi_y1", y1)) {
+        reason = "FindObject ROI gauge fields are incomplete";
+        return false;
+      }
     }
     if (x0 == x1 || y0 == y1) {
       reason = "FindObject ROI must have positive width and height";
@@ -2227,7 +2236,26 @@ static bool LoadTorchTrainingRunBindingLocal(const std::string &tracePath,
       storage["train_image_count"] >> run.train_sample_count;
       storage["learning_rate"] >> run.learning_rate;
       storage["batches_per_epoch"] >> run.batches_per_epoch;
-      run.completed_epochs = run.configured_epochs;
+      storage["completed_epochs"] >> run.completed_epochs;
+      int earlyStopped = 0;
+      int qualityTargets = 0;
+      int classAgnosticNms = 0;
+      storage["early_stopped"] >> earlyStopped;
+      storage["best_validation_epoch"] >> run.best_validation_epoch;
+      storage["best_validation_f1"] >> run.best_validation_f1;
+      storage["assignment_topk"] >> run.assignment_topk;
+      storage["classification_focal_gamma"] >>
+          run.classification_focal_gamma;
+      storage["use_assignment_quality_targets"] >> qualityTargets;
+      storage["postprocess_confidence_threshold"] >>
+          run.postprocess_confidence_threshold;
+      storage["postprocess_iou_threshold"] >> run.postprocess_iou_threshold;
+      storage["postprocess_max_detections"] >> run.postprocess_max_detections;
+      storage["postprocess_class_agnostic_nms"] >> classAgnosticNms;
+      storage["checkpoint_selection_ref"] >> run.checkpoint_selection_path;
+      run.early_stopped = earlyStopped != 0;
+      run.use_assignment_quality_targets = qualityTargets != 0;
+      run.postprocess_class_agnostic_nms = classAgnosticNms != 0;
       run.task = "detection";
       run.optimizer = "SGD";
       run.dataset_source = "asset-driven YOLO dataset package";
@@ -2288,7 +2316,8 @@ static bool LoadTorchTrainingRunBindingLocal(const std::string &tracePath,
           run.incremental_model_path = weightsPath.lexically_normal().string();
         }
       }
-      run.completed_epochs = static_cast<int>(run.epochs.size());
+      if (run.completed_epochs <= 0)
+        run.completed_epochs = static_cast<int>(run.epochs.size());
       run.available = !run.epochs.empty();
       reason = "epochs=" + std::to_string(run.epochs.size()) +
                " model=" + run.incremental_model_path;
@@ -3440,6 +3469,8 @@ static void AppendSavedEvidenceCandidatesLocal(
     {
       const std::string gaugePath =
           ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
+      const std::string runtimeGlobalsPath =
+          ReadJsonStringFieldLocal(binding, "runtime_globals_path");
       std::string gaugeText;
       if (!gaugePath.empty() && ReadTextFile(gaugePath, gaugeText)) {
         ReadJsonBoolFieldLocal(gaugeText, "accepted", gaugeAccepted);
@@ -3447,7 +3478,8 @@ static void AppendSavedEvidenceCandidatesLocal(
             ReadJsonStringFieldLocal(gaugeText, "review_status");
       }
       candidateGaugeValid = ValidateCandidateGaugeAnnotationLocal(
-          gaugePath, bindingTool, candidateGaugeInvalidReason);
+          gaugePath, bindingTool, runtimeGlobalsPath,
+          candidateGaugeInvalidReason);
     }
     const bool humanConfirmed = candidateGaugeValid && gaugeAccepted &&
                                 gaugeReviewStatus == "manual_accepted";
@@ -4141,6 +4173,21 @@ static int AppendCxScriptEvidenceChainFilesLocal(
       thumb.workflow_stage_index = c.workflow_stage_index;
       thumb.workflow_stage_count = c.workflow_stage_count;
       thumb.dataset_frozen = c.dataset_frozen;
+      thumb.admission_status = c.admission_status;
+      thumb.admission_reason = c.admission_reason;
+      thumb.dataset_summary_ref = c.dataset_summary_ref;
+      thumb.training_receipt_ref = c.training_receipt_ref;
+      thumb.candidate_artifact_ref = c.candidate_artifact_ref;
+      thumb.evaluation_report_ref = c.evaluation_report_ref;
+      thumb.evidence_bundle_ref = c.evidence_bundle_ref;
+      thumb.rollback_model_ref = c.rollback_model_ref;
+      thumb.quality_conclusion_ref = c.quality_conclusion_ref;
+      thumb.training_config_ref = c.training_config_ref;
+      thumb.model_manifest_ref = c.model_manifest_ref;
+      thumb.inference_config_ref = c.inference_config_ref;
+      thumb.quality_policy_ref = c.quality_policy_ref;
+      thumb.ontology_ref = c.ontology_ref;
+      thumb.failure_samples_ref = c.failure_samples_ref;
       thumb.status =
           c.manual_review_required ? "pending_human_review" : "ready";
       thumb.reason = "cxscript evidence chain: " + chain.chain_id +
@@ -5514,6 +5561,21 @@ bool ViewController::BuildEvidenceSnapshotFromThumb(
   out.workflow_stage_index = thumb.workflow_stage_index;
   out.workflow_stage_count = thumb.workflow_stage_count;
   out.dataset_frozen = thumb.dataset_frozen;
+  out.admission_status = thumb.admission_status;
+  out.admission_reason = thumb.admission_reason;
+  out.dataset_summary_ref = thumb.dataset_summary_ref;
+  out.training_receipt_ref = thumb.training_receipt_ref;
+  out.candidate_artifact_ref = thumb.candidate_artifact_ref;
+  out.evaluation_report_ref = thumb.evaluation_report_ref;
+  out.evidence_bundle_ref = thumb.evidence_bundle_ref;
+  out.rollback_model_ref = thumb.rollback_model_ref;
+  out.quality_conclusion_ref = thumb.quality_conclusion_ref;
+  out.training_config_ref = thumb.training_config_ref;
+  out.model_manifest_ref = thumb.model_manifest_ref;
+  out.inference_config_ref = thumb.inference_config_ref;
+  out.quality_policy_ref = thumb.quality_policy_ref;
+  out.ontology_ref = thumb.ontology_ref;
+  out.failure_samples_ref = thumb.failure_samples_ref;
 
   out.status = thumb.status;
   out.reason = thumb.reason;
@@ -5914,16 +5976,36 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
     }
   }
 
-  staged.debug_action = "Apply Evidence Selection";
-  staged.debug_status = loadImageToView ? "EVIDENCE_SELECTION_READY_WITH_IMAGE"
-                                        : "EVIDENCE_SELECTION_READY";
-  staged.debug_reason =
+  const std::string selectionReason =
       "script=" + resolved.script_id + " image=" + resolved.image_id +
       " image_path=" + resolved.image_path + " target=" + resolved.target_id +
       " parameter_source=" + parameterSource +
       ((resolved.is_candidate || loadWorkingRevision)
            ? " candidate_id=" + resolved.candidate_id
            : " baseline_evidence=true");
+  staged.debug_action = "Apply Evidence Selection";
+  staged.debug_status = loadImageToView ? "EVIDENCE_SELECTION_READY_WITH_IMAGE"
+                                        : "EVIDENCE_SELECTION_READY";
+  staged.debug_reason = selectionReason;
+
+  if (loadWorkingRevision) {
+    // Case switching clears parser-owned runtime objects above.  Restore the
+    // saved value state and ask the existing Debug Compiler path to recreate
+    // the runtime on the next frame; never retain pointers from another case.
+    staged.pending_execution_gauge = staged.current_gauge;
+    staged.pending_execution_globals = staged.runtime_int_vars;
+    staged.has_pending_execution_snapshot = true;
+    staged.pending_evidence_selection_rehydrate = true;
+    staged.debug_action = "Restore Saved Evidence Case";
+    staged.debug_status = "EVIDENCE_SELECTION_REHYDRATE_QUEUED";
+    staged.debug_reason = selectionReason +
+                          " | saved values restored; runtime rehydrate queued";
+    staged.run_state = "running";
+    CXLOG_INFO("EvidenceChain", "evidence_selection_rehydrate_queued",
+               "queued", "case_id=" + resolved.case_id +
+                   " script_id=" + resolved.script_id +
+                   " candidate_id=" + resolved.candidate_id);
+  }
 
   const bool shouldSyncTrainingImageSet =
       IsEvidenceSelectionImageSetLocal(resolved) ||
@@ -7517,6 +7599,37 @@ void ViewController::DrawTorchTrainingImageRail(const char *split,
   ImGui::EndChild();
 }
 
+static void DrawControlledCaseConfigurationAssetLocal(
+    const char *label, const std::string &reference) {
+  if (reference.empty()) {
+    ImGui::TextDisabled("%s: ASSET_MISSING", label);
+    return;
+  }
+  ImGui::TextWrapped("%s: %s", label, reference.c_str());
+  const std::string treeId = std::string(label) + "##controlled_case_config";
+  if (!ImGui::TreeNode(treeId.c_str()))
+    return;
+  std::string content;
+  if (!ReadTextFile(reference, content)) {
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.25f, 1.0f),
+                       "CONFIG_ASSET_READ_FAIL");
+  } else {
+    constexpr std::size_t kMaximumVisibleBytes = 16384;
+    const bool truncated = content.size() > kMaximumVisibleBytes;
+    if (truncated)
+      content.resize(kMaximumVisibleBytes);
+    ImGui::BeginChild((treeId + "_content").c_str(), ImVec2(-1.0f, 180.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::TextUnformatted(content.c_str());
+    ImGui::EndChild();
+    if (truncated)
+      ImGui::TextDisabled("Display truncated at %zu bytes; the path above is the authoritative asset.",
+                          kMaximumVisibleBytes);
+  }
+  ImGui::TreePop();
+}
+
 void ViewController::DrawEvidenceWorkflowPanel() {
   const CxEvidenceSelectionSnapshot &selection =
       m_manualTest.current_evidence_selection;
@@ -7632,6 +7745,48 @@ void ViewController::DrawEvidenceWorkflowPanel() {
                      "Promotion: %s",
                      promotionAllowed ? "ALLOWED_BY_RECORDED_GATES"
                                       : "BLOCKED");
+
+  if (NormalizeEvidenceToolTypeLocal(selection.tool) == "TorchTask") {
+    ImGui::Separator();
+    ImGui::Text("Controlled-case admission: %s",
+                selection.admission_status.empty()
+                    ? "REFERENCE_ONLY"
+                    : selection.admission_status.c_str());
+    if (!selection.admission_reason.empty())
+      ImGui::TextWrapped("Reason: %s", selection.admission_reason.c_str());
+    const auto drawAdmissionReference = [](const char *label,
+                                           const std::string &reference) {
+      if (!reference.empty())
+        ImGui::TextWrapped("%s: %s", label, reference.c_str());
+    };
+    drawAdmissionReference("Dataset summary", selection.dataset_summary_ref);
+    drawAdmissionReference("Training provider receipt",
+                           selection.training_receipt_ref);
+    drawAdmissionReference("Candidate artifact",
+                           selection.candidate_artifact_ref);
+    drawAdmissionReference("Evaluation report",
+                           selection.evaluation_report_ref);
+    drawAdmissionReference("Evidence bundle", selection.evidence_bundle_ref);
+    drawAdmissionReference("Rollback model", selection.rollback_model_ref);
+    drawAdmissionReference("Quality conclusion",
+                           selection.quality_conclusion_ref);
+    ImGui::SeparatorText("Asset-driven Parameters / Configuration");
+    DrawControlledCaseConfigurationAssetLocal("Training config",
+                                               selection.training_config_ref);
+    DrawControlledCaseConfigurationAssetLocal("Model manifest",
+                                               selection.model_manifest_ref);
+    DrawControlledCaseConfigurationAssetLocal("Inference config",
+                                               selection.inference_config_ref);
+    DrawControlledCaseConfigurationAssetLocal("Quality policy",
+                                               selection.quality_policy_ref);
+    DrawControlledCaseConfigurationAssetLocal("Label ontology",
+                                               selection.ontology_ref);
+    DrawControlledCaseConfigurationAssetLocal("Failure samples",
+                                               selection.failure_samples_ref);
+    ImGui::TextDisabled(
+        "APPROVED and ACTIVE always require recorded human authorization; "
+        "the asset declaration alone cannot promote or activate a model.");
+  }
 
   if (ImGui::BeginTable("evidence_reliability_workflow", 5,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
@@ -8984,6 +9139,315 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
   return true;
 }
 
+static bool LoadYoloTrainingTuningFromPlanLocal(
+    ManualTestContext &context, const std::filesystem::path &planPath,
+    std::string &reason) {
+  reason.clear();
+  cv::FileStorage storage(planPath.string(), cv::FileStorage::READ);
+  if (!storage.isOpened()) {
+    reason = "YOLO training parameter asset cannot be opened: " +
+             planPath.string();
+    return false;
+  }
+  auto requireInt = [&](const char *name, int &value) {
+    const cv::FileNode node = storage[name];
+    if (node.empty()) {
+      reason = std::string("TRAINING_PARAMETER_MISSING: ") + name;
+      return false;
+    }
+    node >> value;
+    return true;
+  };
+  auto requireFloat = [&](const char *name, float &value) {
+    const cv::FileNode node = storage[name];
+    if (node.empty()) {
+      reason = std::string("TRAINING_PARAMETER_MISSING: ") + name;
+      return false;
+    }
+    double parsed = 0.0;
+    node >> parsed;
+    value = static_cast<float>(parsed);
+    return true;
+  };
+  auto optionalInt = [&](const char *name, int &value) {
+    const cv::FileNode node = storage[name];
+    if (!node.empty()) node >> value;
+  };
+  auto optionalFloat = [&](const char *name, float &value) {
+    const cv::FileNode node = storage[name];
+    if (!node.empty()) {
+      double parsed = 0.0;
+      node >> parsed;
+      value = static_cast<float>(parsed);
+    }
+  };
+  int qualityTargets = 0;
+  int globalAssignment = 0;
+  int restoreBest = 0;
+  int classAgnosticNms = 0;
+  if (!requireInt("epochs", context.geometry_aug_epochs) ||
+      !requireInt("batch_size", context.yolo_training_batch_size) ||
+      !requireInt("input_size", context.yolo_training_input_size) ||
+      !requireInt("max_train_batches_per_epoch",
+                  context.yolo_training_max_batches_per_epoch) ||
+      !requireFloat("learning_rate", context.geometry_aug_learning_rate) ||
+      !requireInt("seed", context.yolo_training_seed) ||
+      !requireInt("assignment_topk", context.yolo_training_assignment_topk) ||
+      !requireFloat("classification_focal_gamma",
+                    context.yolo_training_classification_focal_gamma) ||
+      !requireInt("use_assignment_quality_targets", qualityTargets) ||
+      !requireInt("global_multiscale_assignment", globalAssignment) ||
+      !requireInt("validation_interval",
+                  context.yolo_training_validation_interval) ||
+      !requireInt("early_stop_patience",
+                  context.yolo_training_early_stop_patience) ||
+      !requireInt("minimum_complete_epochs",
+                  context.yolo_training_minimum_complete_epochs) ||
+      !requireFloat("minimum_f1_delta",
+                    context.yolo_training_minimum_f1_delta) ||
+      !requireInt("restore_best_validation_checkpoint", restoreBest) ||
+      !requireFloat("postprocess_confidence_threshold",
+                    context.yolo_training_postprocess_confidence_threshold) ||
+      !requireFloat("postprocess_iou_threshold",
+                    context.yolo_training_postprocess_iou_threshold) ||
+      !requireInt("postprocess_max_detections",
+                  context.yolo_training_postprocess_max_detections) ||
+      !requireInt("postprocess_class_agnostic_nms", classAgnosticNms) ||
+      !requireFloat("evaluation_match_iou_threshold",
+                    context.yolo_training_evaluation_match_iou_threshold)) {
+    return false;
+  }
+  context.yolo_training_class_names.clear();
+  context.yolo_training_class_loss_weights.clear();
+  const cv::FileNode classNames = storage["class_names"];
+  const cv::FileNode classWeights = storage["class_loss_weights"];
+  if (!classNames.isSeq() || !classWeights.isSeq() ||
+      classNames.size() != classWeights.size() || classNames.empty()) {
+    reason = "TRAINING_PARAMETER_INVALID: class_names/class_loss_weights";
+    return false;
+  }
+  for (const auto &node : classNames)
+    context.yolo_training_class_names.push_back(static_cast<std::string>(node));
+  for (const auto &node : classWeights) {
+    double value = 0.0;
+    node >> value;
+    if (!(value > 0.0) || !std::isfinite(value)) {
+      reason = "TRAINING_PARAMETER_INVALID: class_loss_weights";
+      return false;
+    }
+    context.yolo_training_class_loss_weights.push_back(
+        static_cast<float>(value));
+  }
+  context.yolo_training_use_assignment_quality_targets = qualityTargets != 0;
+  context.yolo_training_global_multiscale_assignment = globalAssignment != 0;
+  context.yolo_training_restore_best_validation_checkpoint = restoreBest != 0;
+  context.yolo_training_postprocess_class_agnostic_nms =
+      classAgnosticNms != 0;
+  int geometryHeadEnabled = context.yolo_training_geometry_roi_head_enabled ? 1 : 0;
+  optionalInt("geometry_roi_head_enabled", geometryHeadEnabled);
+  context.yolo_training_geometry_roi_head_enabled = geometryHeadEnabled != 0;
+  optionalInt("geometry_roi_hidden_channels",
+              context.yolo_training_geometry_roi_hidden_channels);
+  optionalInt("geometry_roi_pooled_size",
+              context.yolo_training_geometry_roi_pooled_size);
+  optionalInt("geometry_roi_polygon_vertex_count",
+              context.yolo_training_geometry_roi_polygon_vertex_count);
+  optionalFloat("geometry_roi_parameter_weight",
+                context.yolo_training_geometry_roi_parameter_weight);
+  optionalFloat("geometry_roi_contour_weight",
+                context.yolo_training_geometry_roi_contour_weight);
+  optionalFloat("geometry_roi_continuity_weight",
+                context.yolo_training_geometry_roi_continuity_weight);
+  optionalFloat("geometry_roi_uncertainty_weight",
+                context.yolo_training_geometry_roi_uncertainty_weight);
+  optionalFloat("geometry_roi_continuity_positive_weight",
+                context.yolo_training_geometry_roi_continuity_positive_weight);
+  optionalFloat("geometry_roi_calibration_weight",
+                context.yolo_training_geometry_roi_calibration_weight);
+  const cv::FileNode geometryTargetManifest = storage["geometry_target_manifest"];
+  context.yolo_training_geometry_target_manifest = geometryTargetManifest.empty()
+      ? std::string() : static_cast<std::string>(geometryTargetManifest);
+  context.yolo_training_tuning_loaded = true;
+  context.yolo_training_tuning_source = planPath.string();
+  reason = "YOLO training parameters loaded from versioned plan asset";
+  return true;
+}
+
+static void DrawYoloTrainingTuningControlsLocal(
+    ManualTestContext &context, const std::filesystem::path &planPath,
+    const char *id) {
+  ImGui::PushID(id);
+  if (!context.yolo_training_tuning_loaded) {
+    std::string loadReason;
+    LoadYoloTrainingTuningFromPlanLocal(context, planPath, loadReason);
+  }
+  if (!ImGui::CollapsingHeader("YOLO Loss / Assignment / Validation Controls",
+                               ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::PopID();
+    return;
+  }
+  ImGui::TextWrapped("Defaults: %s",
+                     context.yolo_training_tuning_source.empty()
+                         ? "ASSET_MISSING"
+                         : context.yolo_training_tuning_source.c_str());
+  ImGui::TextDisabled(
+      "Edits are runtime-plan drafts. Run exports every displayed value and the result receipt echoes the effective configuration.");
+  if (ImGui::Button("Reload Defaults From Plan Asset")) {
+    std::string loadReason;
+    if (!LoadYoloTrainingTuningFromPlanLocal(context, planPath, loadReason)) {
+      context.geometry_aug_run_status = "TRAINING_PARAMETER_ASSET_FAIL";
+      context.geometry_aug_run_reason = loadReason;
+    }
+  }
+
+  auto inputInt = [](const char *label, const char *fieldId, int &value) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(label);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputInt(fieldId, &value);
+  };
+  auto inputFloat = [](const char *label, const char *fieldId, float &value,
+                       const char *format) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(label);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputFloat(fieldId, &value, 0.0f, 0.0f, format);
+  };
+  auto inputBool = [](const char *label, const char *fieldId, bool &value) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(label);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::Checkbox(fieldId, &value);
+  };
+  if (ImGui::BeginTable("training_tuning", 2,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Parameter", ImGuiTableColumnFlags_WidthStretch,
+                            1.7f);
+    ImGui::TableSetupColumn("Runtime plan value",
+                            ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    ImGui::TableHeadersRow();
+    inputInt("epochs", "##epochs", context.geometry_aug_epochs);
+    inputInt("batch_size", "##batch_size", context.yolo_training_batch_size);
+    inputInt("input_size", "##input_size", context.yolo_training_input_size);
+    inputInt("max_train_batches_per_epoch", "##max_batches",
+             context.yolo_training_max_batches_per_epoch);
+    inputFloat("learning_rate", "##learning_rate",
+               context.geometry_aug_learning_rate, "%.8f");
+    inputInt("seed", "##seed", context.yolo_training_seed);
+    inputInt("assignment_topk", "##assignment_topk",
+             context.yolo_training_assignment_topk);
+    inputFloat("classification_focal_gamma", "##focal_gamma",
+               context.yolo_training_classification_focal_gamma, "%.4f");
+    inputBool("use_assignment_quality_targets", "##quality_targets",
+              context.yolo_training_use_assignment_quality_targets);
+    inputBool("global_multiscale_assignment", "##global_assignment",
+              context.yolo_training_global_multiscale_assignment);
+    for (std::size_t index = 0;
+         index < context.yolo_training_class_loss_weights.size(); ++index) {
+      const std::string label =
+          "class_loss_weight[" + std::to_string(index) + "] " +
+          (index < context.yolo_training_class_names.size()
+               ? context.yolo_training_class_names[index]
+               : std::string("ASSET_NAME_MISSING"));
+      const std::string field = "##class_weight_" + std::to_string(index);
+      inputFloat(label.c_str(), field.c_str(),
+                 context.yolo_training_class_loss_weights[index], "%.4f");
+    }
+    inputInt("validation_interval", "##validation_interval",
+             context.yolo_training_validation_interval);
+    inputInt("early_stop_patience", "##early_stop_patience",
+             context.yolo_training_early_stop_patience);
+    inputInt("minimum_complete_epochs", "##minimum_complete_epochs",
+             context.yolo_training_minimum_complete_epochs);
+    inputFloat("minimum_f1_delta", "##minimum_f1_delta",
+               context.yolo_training_minimum_f1_delta, "%.6f");
+    inputBool("restore_best_validation_checkpoint", "##restore_best",
+              context.yolo_training_restore_best_validation_checkpoint);
+    inputFloat("postprocess_confidence_threshold", "##confidence_threshold",
+               context.yolo_training_postprocess_confidence_threshold,
+               "%.4f");
+    inputFloat("postprocess_iou_threshold", "##iou_threshold",
+               context.yolo_training_postprocess_iou_threshold, "%.4f");
+    inputInt("postprocess_max_detections", "##max_detections",
+             context.yolo_training_postprocess_max_detections);
+    inputBool("postprocess_class_agnostic_nms", "##class_agnostic_nms",
+              context.yolo_training_postprocess_class_agnostic_nms);
+    inputFloat("evaluation_match_iou_threshold", "##evaluation_match_iou",
+               context.yolo_training_evaluation_match_iou_threshold, "%.4f");
+    ImGui::EndTable();
+  }
+  if (ImGui::CollapsingHeader("Geometry ROI Head / Case-External Controls",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::TextDisabled(
+        "ROI-sidecar supervision only. BBox labels never synthesize geometry targets.");
+    ImGui::Checkbox("geometry_roi_head_enabled##geometry_roi",
+                    &context.yolo_training_geometry_roi_head_enabled);
+    ImGui::SetNextItemWidth(-1.0f);
+    InputTextString("geometry_target_manifest##geometry_roi",
+                    context.yolo_training_geometry_target_manifest);
+    if (ImGui::BeginTable("geometry_roi_tuning", 2,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("Geometry parameter", ImGuiTableColumnFlags_WidthStretch, 1.7f);
+      ImGui::TableSetupColumn("Runtime plan value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+      ImGui::TableHeadersRow();
+      inputInt("geometry_roi_hidden_channels", "##geometry_roi_hidden",
+               context.yolo_training_geometry_roi_hidden_channels);
+      inputInt("geometry_roi_pooled_size", "##geometry_roi_pool",
+               context.yolo_training_geometry_roi_pooled_size);
+      inputInt("geometry_roi_polygon_vertex_count", "##geometry_roi_vertices",
+               context.yolo_training_geometry_roi_polygon_vertex_count);
+      inputFloat("geometry_roi_parameter_weight", "##geometry_roi_parameter_weight",
+                 context.yolo_training_geometry_roi_parameter_weight, "%.4f");
+      inputFloat("geometry_roi_contour_weight", "##geometry_roi_contour_weight",
+                 context.yolo_training_geometry_roi_contour_weight, "%.4f");
+      inputFloat("geometry_roi_continuity_weight", "##geometry_roi_continuity_weight",
+                 context.yolo_training_geometry_roi_continuity_weight, "%.4f");
+      inputFloat("geometry_roi_uncertainty_weight", "##geometry_roi_uncertainty_weight",
+                 context.yolo_training_geometry_roi_uncertainty_weight, "%.4f");
+      inputFloat("geometry_roi_continuity_positive_weight", "##geometry_roi_positive_weight",
+                 context.yolo_training_geometry_roi_continuity_positive_weight, "%.4f");
+      inputFloat("geometry_roi_calibration_weight", "##geometry_roi_calibration_weight",
+                 context.yolo_training_geometry_roi_calibration_weight, "%.4f");
+      ImGui::EndTable();
+    }
+  }
+  ImGui::PopID();
+}
+
+static void DrawYoloTrainingFeedbackLocal(
+    const CxTorchTrainingRunBinding &run, const char *id) {
+  if (!run.available)
+    return;
+  ImGui::PushID(id);
+  if (ImGui::CollapsingHeader("Effective Training / Checkpoint Feedback",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("epochs: %d/%d | early_stop: %s | best: epoch %d, F1 %.6f",
+                run.completed_epochs, run.configured_epochs,
+                run.early_stopped ? "yes" : "no", run.best_validation_epoch,
+                run.best_validation_f1);
+    ImGui::Text(
+        "assignment_topk: %d | focal_gamma: %.4f | quality_targets: %s",
+        run.assignment_topk, run.classification_focal_gamma,
+        run.use_assignment_quality_targets ? "on" : "off");
+    ImGui::Text(
+        "postprocess: conf %.4f | IoU %.4f | max %d | class-agnostic NMS %s",
+        run.postprocess_confidence_threshold, run.postprocess_iou_threshold,
+        run.postprocess_max_detections,
+        run.postprocess_class_agnostic_nms ? "on" : "off");
+    if (!run.checkpoint_selection_path.empty())
+      ImGui::TextWrapped("checkpoint selection: %s",
+                         run.checkpoint_selection_path.c_str());
+  }
+  ImGui::PopID();
+}
+
 bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   reason.clear();
   if (m_manualTest.torch_training_process_running) {
@@ -9060,21 +9524,16 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
     reason = "cannot create C++ training plan directory: " + ec.message();
     return false;
   }
-  m_manualTest.geometry_aug_epochs =
-      std::clamp(m_manualTest.geometry_aug_epochs, 2, 1000);
-  m_manualTest.geometry_aug_learning_rate =
-      std::clamp(m_manualTest.geometry_aug_learning_rate, 0.000001f, 1.0f);
+  if (!m_manualTest.yolo_training_tuning_loaded &&
+      !LoadYoloTrainingTuningFromPlanLocal(
+          m_manualTest, trainingPlanTemplate, reason)) {
+    m_manualTest.geometry_aug_run_status = "TRAINING_PARAMETER_ASSET_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
   cv::FileStorage templateStorage(trainingPlanTemplate.string(),
                                    cv::FileStorage::READ);
-  int batchSize = 0;
-  int inputSize = 0;
-  int maxBatches = 0;
-  int seed = 0;
   int numClasses = 0;
-  templateStorage["batch_size"] >> batchSize;
-  templateStorage["input_size"] >> inputSize;
-  templateStorage["max_train_batches_per_epoch"] >> maxBatches;
-  templateStorage["seed"] >> seed;
   templateStorage["num_classes"] >> numClasses;
   std::vector<std::string> classNames;
   for (const auto &node : templateStorage["class_names"])
@@ -9082,8 +9541,7 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   std::vector<std::string> frozenParameterPrefixes;
   for (const auto &node : templateStorage["frozen_parameter_prefixes"])
     frozenParameterPrefixes.push_back(static_cast<std::string>(node));
-  if (!templateStorage.isOpened() || batchSize <= 0 || inputSize <= 0 ||
-      maxBatches <= 0 || numClasses <= 0 ||
+  if (!templateStorage.isOpened() || numClasses <= 0 ||
       static_cast<int>(classNames.size()) != numClasses ||
       frozenParameterPrefixes.empty()) {
     reason = "C++ training plan template is invalid";
@@ -9095,11 +9553,76 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   plan << "{\n"
        << "  \"schema\": \"cxvision.yolov8n_cpp_training_plan.v1\",\n"
        << "  \"epochs\": " << m_manualTest.geometry_aug_epochs << ",\n"
-       << "  \"batch_size\": " << batchSize << ",\n"
-       << "  \"input_size\": " << inputSize << ",\n"
-       << "  \"max_train_batches_per_epoch\": " << maxBatches << ",\n"
+       << "  \"batch_size\": " << m_manualTest.yolo_training_batch_size << ",\n"
+       << "  \"input_size\": " << m_manualTest.yolo_training_input_size << ",\n"
+       << "  \"max_train_batches_per_epoch\": "
+       << m_manualTest.yolo_training_max_batches_per_epoch << ",\n"
        << "  \"learning_rate\": "
        << m_manualTest.geometry_aug_learning_rate << ",\n"
+       << "  \"assignment_topk\": "
+       << m_manualTest.yolo_training_assignment_topk << ",\n"
+       << "  \"classification_focal_gamma\": "
+       << m_manualTest.yolo_training_classification_focal_gamma << ",\n"
+       << "  \"use_assignment_quality_targets\": "
+       << (m_manualTest.yolo_training_use_assignment_quality_targets ? 1 : 0)
+       << ",\n"
+       << "  \"global_multiscale_assignment\": "
+       << (m_manualTest.yolo_training_global_multiscale_assignment ? 1 : 0)
+       << ",\n"
+       << "  \"class_loss_weights\": [";
+  for (std::size_t i = 0;
+       i < m_manualTest.yolo_training_class_loss_weights.size(); ++i) {
+    if (i > 0)
+      plan << ", ";
+    plan << m_manualTest.yolo_training_class_loss_weights[i];
+  }
+  plan << "],\n"
+       << "  \"validation_interval\": "
+       << m_manualTest.yolo_training_validation_interval << ",\n"
+       << "  \"early_stop_patience\": "
+       << m_manualTest.yolo_training_early_stop_patience << ",\n"
+       << "  \"minimum_complete_epochs\": "
+       << m_manualTest.yolo_training_minimum_complete_epochs << ",\n"
+       << "  \"minimum_f1_delta\": "
+       << m_manualTest.yolo_training_minimum_f1_delta << ",\n"
+       << "  \"restore_best_validation_checkpoint\": "
+       << (m_manualTest.yolo_training_restore_best_validation_checkpoint ? 1
+                                                                         : 0)
+       << ",\n"
+       << "  \"postprocess_confidence_threshold\": "
+       << m_manualTest.yolo_training_postprocess_confidence_threshold
+       << ",\n"
+       << "  \"postprocess_iou_threshold\": "
+       << m_manualTest.yolo_training_postprocess_iou_threshold << ",\n"
+       << "  \"postprocess_max_detections\": "
+       << m_manualTest.yolo_training_postprocess_max_detections << ",\n"
+       << "  \"postprocess_class_agnostic_nms\": "
+       << (m_manualTest.yolo_training_postprocess_class_agnostic_nms ? 1 : 0)
+       << ",\n"
+       << "  \"evaluation_match_iou_threshold\": "
+       << m_manualTest.yolo_training_evaluation_match_iou_threshold << ",\n"
+       << "  \"geometry_roi_head_enabled\": "
+       << (m_manualTest.yolo_training_geometry_roi_head_enabled ? 1 : 0) << ",\n"
+       << "  \"geometry_target_manifest\": \""
+       << JsonEscape(m_manualTest.yolo_training_geometry_target_manifest) << "\",\n"
+       << "  \"geometry_roi_hidden_channels\": "
+       << m_manualTest.yolo_training_geometry_roi_hidden_channels << ",\n"
+       << "  \"geometry_roi_pooled_size\": "
+       << m_manualTest.yolo_training_geometry_roi_pooled_size << ",\n"
+       << "  \"geometry_roi_polygon_vertex_count\": "
+       << m_manualTest.yolo_training_geometry_roi_polygon_vertex_count << ",\n"
+       << "  \"geometry_roi_parameter_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_parameter_weight << ",\n"
+       << "  \"geometry_roi_contour_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_contour_weight << ",\n"
+       << "  \"geometry_roi_continuity_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_continuity_weight << ",\n"
+       << "  \"geometry_roi_uncertainty_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_uncertainty_weight << ",\n"
+       << "  \"geometry_roi_continuity_positive_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_continuity_positive_weight << ",\n"
+       << "  \"geometry_roi_calibration_weight\": "
+       << m_manualTest.yolo_training_geometry_roi_calibration_weight << ",\n"
        << "  \"parent_checkpoint\": \""
        << JsonEscape(selectedParent->checkpoint_path) << "\",\n"
        << "  \"parent_model_id\": \""
@@ -9113,7 +9636,7 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
     plan << '"' << JsonEscape(frozenParameterPrefixes[i]) << '"';
   }
   plan << "],\n"
-       << "  \"seed\": " << seed << ",\n"
+       << "  \"seed\": " << m_manualTest.yolo_training_seed << ",\n"
        << "  \"num_classes\": " << numClasses << ",\n"
        << "  \"class_names\": [";
   for (std::size_t i = 0; i < classNames.size(); ++i) {
@@ -10613,6 +11136,13 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       "evidence, not model quality PASS.");
   ImGui::Separator();
 
+  const std::filesystem::path yoloTrainingDefaults = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/tests/"
+      "yolov8n_cpp_detection_full_coverage_plan.json");
+  DrawYoloTrainingTuningControlsLocal(
+      m_manualTest, yoloTrainingDefaults, "torch_training_image_set");
+  ImGui::Separator();
+
   const CxTorchTrainingRunBinding &trainingRun =
       m_manualTest.torch_training_run;
   ImGui::SeparatorText("Primary Training / Image Set Actions");
@@ -10707,6 +11237,7 @@ void ViewController::drawTorchTrainingImageSetWindow() {
               trainingRun.status.empty() ? "PENDING_RUN" : trainingRun.status.c_str(),
               trainingRun.completed_epochs, trainingRun.configured_epochs,
               trainingRun.epochs.size());
+  DrawYoloTrainingFeedbackLocal(trainingRun, "training_image_set_feedback");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(132.0f);
   ImGui::InputInt("Fixed Epoch Axis##training_primary",
@@ -10744,6 +11275,32 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   ImGui::Text("status: %s", m_manualTest.torch_training_image_status.c_str());
   ImGui::TextWrapped("reason: %s",
                      m_manualTest.torch_training_image_reason.c_str());
+
+  const CxEvidenceSelectionSnapshot &controlledSelection =
+      m_manualTest.current_evidence_selection;
+  if (controlledSelection.valid &&
+      NormalizeEvidenceToolTypeLocal(controlledSelection.tool) == "TorchTask") {
+    ImGui::SeparatorText("Selected Controlled Case Parameters / Configuration");
+    ImGui::Text("admission: %s",
+                controlledSelection.admission_status.empty()
+                    ? "REFERENCE_ONLY"
+                    : controlledSelection.admission_status.c_str());
+    DrawControlledCaseConfigurationAssetLocal(
+        "Training config", controlledSelection.training_config_ref);
+    DrawControlledCaseConfigurationAssetLocal(
+        "Model manifest", controlledSelection.model_manifest_ref);
+    DrawControlledCaseConfigurationAssetLocal(
+        "Inference config", controlledSelection.inference_config_ref);
+    DrawControlledCaseConfigurationAssetLocal(
+        "Quality policy", controlledSelection.quality_policy_ref);
+    DrawControlledCaseConfigurationAssetLocal(
+        "Label ontology", controlledSelection.ontology_ref);
+    DrawControlledCaseConfigurationAssetLocal(
+        "Failure samples", controlledSelection.failure_samples_ref);
+    if (!controlledSelection.rollback_model_ref.empty())
+      ImGui::TextWrapped("Rollback model: %s",
+                         controlledSelection.rollback_model_ref.c_str());
+  }
 
   if (!m_manualTest.validation_dataset_scan_attempted)
     RefreshValidationDatasetAssetsLocal(m_manualTest);
@@ -11316,13 +11873,11 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     ImGui::SetNextItemWidth(120.0f);
     ImGui::SliderInt("Line break px",
                      &m_manualTest.geometry_aug_line_break_px, 2, 80);
-    ImGui::SetNextItemWidth(120.0f);
-    ImGui::InputInt("Requested epochs",
-                    &m_manualTest.geometry_aug_epochs);
-    ImGui::SetNextItemWidth(140.0f);
-    ImGui::InputFloat("Requested learning rate",
-                      &m_manualTest.geometry_aug_learning_rate, 0.0001f,
-                      0.001f, "%.6f");
+    const std::filesystem::path yoloTrainingDefaults = ResolveWorkspaceFile(
+        "cxparser/cxscript/module/cximage/tests/"
+        "yolov8n_cpp_detection_full_coverage_plan.json");
+    DrawYoloTrainingTuningControlsLocal(
+        m_manualTest, yoloTrainingDefaults, "torch_runtime_evidence");
 
     const bool hasAugSelection =
         m_manualTest.geometry_aug_include_brightness ||
@@ -11387,6 +11942,8 @@ void ViewController::drawTorchTrainingImageSetWindow() {
                 trainingRun.status.c_str(), trainingRun.completed_epochs,
                 trainingRun.configured_epochs, trainingRun.epochs.size(),
                 trainingRun.batches_per_epoch);
+    DrawYoloTrainingFeedbackLocal(trainingRun,
+                                  "torch_runtime_training_feedback");
     const float liveProgress =
         trainingRun.configured_epochs > 0
             ? std::clamp(static_cast<float>(trainingRun.completed_epochs) /

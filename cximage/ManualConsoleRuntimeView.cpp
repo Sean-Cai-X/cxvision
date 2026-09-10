@@ -379,6 +379,16 @@ std::string BuildGeometrySummary(const RuntimeObjectView& object)
         return BuildFindRectGeometrySummary(object);
     if (object.type == "FindSegmentation")
         return BuildFindSegmentationGeometrySummary(object);
+    if (object.type == "FindObject")
+    {
+        std::ostringstream ss;
+        ss << "geometry: object=" << object.name
+           << " | tool=find_object"
+           << " | result_rects=" << object.measure_points_count
+           << " | accepted_components=" << object.valid_points_count
+           << " | runtime_state=" << object.runtime_state;
+        return ss.str();
+    }
     if (object.type == "TorchTask")
         return BuildTorchTaskRuntimeSummary(object);
     if (object.type == "FastMatch")
@@ -584,6 +594,16 @@ std::string BuildOverlaySummary(const ManualTestContext& context,
            << (object.region_pattern_overlay_truncated ? "true" : "false")
            << " | source_preview_enabled="
            << (context.source_preview_enabled ? "true" : "false");
+        return ss.str();
+    }
+    if (object.type == "FindObject")
+    {
+        std::ostringstream ss;
+        ss << "image overlay: component_rectangles="
+           << object.valid_points_count
+           << " | source_preview_enabled="
+           << (context.source_preview_enabled ? "true" : "false")
+           << " | manual_elements_count=" << context.manual_elements_count;
         return ss.str();
     }
 

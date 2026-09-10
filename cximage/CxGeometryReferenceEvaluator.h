@@ -28,8 +28,9 @@ struct CxGeometryAugmentationDatasetOptions {
   std::filesystem::path reference_index_path;
   std::filesystem::path augmentation_plan_path;
   std::filesystem::path output_dir;
-  // When enabled, each source asset must declare source_split=train or
-  // source_split=validation. A source may never generate both splits.
+  // When enabled, each source asset must declare source_split=train,
+  // source_split=validation, or source_split=holdout. A source may never
+  // generate more than one split.
   bool require_source_disjoint_validation = false;
 };
 
@@ -43,6 +44,7 @@ struct CxGeometryAugmentationDatasetResult {
   int rejected_sample_count = 0;
   int train_sample_count = 0;
   int validation_sample_count = 0;
+  int holdout_sample_count = 0;
   std::filesystem::path dataset_manifest_path;
   std::filesystem::path report_json_path;
   std::filesystem::path report_markdown_path;

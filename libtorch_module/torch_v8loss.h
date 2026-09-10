@@ -30,6 +30,9 @@ struct YoloLossConfig {
     int64_t reg_max = 16;
     YoloBoxDecodeStrategy decode_strategy = YoloBoxDecodeStrategy::DirectStrideScaled;
     bool enable_dfl = false;
+    bool use_assignment_quality_targets = true;
+    bool global_multiscale_assignment = true;
+    std::vector<float> class_loss_weights;
 
     void validate(int64_t num_classes) const {
         TORCH_CHECK(num_classes > 0, "num_classes must be positive");
@@ -39,6 +42,12 @@ struct YoloLossConfig {
         TORCH_CHECK(fl_gamma >= 0.0f, "fl_gamma must be non-negative");
         TORCH_CHECK(topk > 0, "topk must be positive");
         TORCH_CHECK(reg_max > 0, "reg_max must be positive");
+        TORCH_CHECK(class_loss_weights.empty() ||
+            static_cast<int64_t>(class_loss_weights.size()) == num_classes,
+            "class_loss_weights must be empty or match num_classes");
+        for (const float weight : class_loss_weights)
+            TORCH_CHECK(weight > 0.0f && std::isfinite(weight),
+                "class_loss_weights must contain finite positive values");
     }
 
     int64_t box_channels() const {
@@ -86,12 +95,85 @@ public:
         torch::Tensor loss_cls = torch::zeros({ 1 }, device);
         torch::Tensor loss_dfl = torch::zeros({ 1 }, device);
         torch::Tensor total_num_pos = torch::zeros({ 1 }, device);
+        torch::Tensor total_cls_target_weight = torch::zeros({ 1 }, device);
 
         int64_t batch_size = targets.size(0);
 
         torch::Tensor gt_labels = targets.select(2, 1).to(torch::kLong);
         torch::Tensor gt_bboxes = targets.slice(2, 2, 6);
         torch::Tensor mask_gt = (targets.select(2, 1) >= 0).to(torch::kFloat32);
+
+        // Direct normalized boxes from every detection scale share the same
+        // coordinate space.  Assign them once as one anchor population so the
+        // configured top-k is global rather than being multiplied by P3/P4/P5.
+        // DFL keeps the existing per-scale path because its raw distances are
+        // stride-specific and need to remain paired with their source scale.
+        if (config_.global_multiscale_assignment && !config_.enable_dfl) {
+            std::vector<torch::Tensor> decoded_scales;
+            std::vector<torch::Tensor> class_scales;
+            decoded_scales.reserve(preds.size());
+            class_scales.reserve(preds.size());
+            for (const torch::Tensor& pred : preds) {
+                const int64_t box_channels = config_.box_channels();
+                const torch::Tensor pred_boxes = pred.slice(2, 0, box_channels);
+                const torch::Tensor pred_cls =
+                    pred.slice(2, box_channels, box_channels + num_classes_);
+                const int64_t grid_size = static_cast<int64_t>(
+                    std::llround(std::sqrt(static_cast<double>(pred_boxes.size(1)))));
+                TORCH_CHECK(grid_size * grid_size == pred_boxes.size(1),
+                    "YOLO direct box decode requires a square feature grid");
+                decoded_scales.push_back(
+                    decode_boxes(pred_boxes, grid_size, grid_size));
+                class_scales.push_back(pred_cls);
+            }
+            const torch::Tensor decoded_boxes = torch::cat(decoded_scales, 1);
+            const torch::Tensor pred_cls = torch::cat(class_scales, 1);
+            const torch::Tensor assigned_gt_inds = assigner->forward(
+                torch::sigmoid(pred_cls).unsqueeze(1), decoded_boxes.unsqueeze(1),
+                gt_labels.unsqueeze(-1), gt_bboxes, mask_gt.unsqueeze(-1));
+            const torch::Tensor pos_mask = assigned_gt_inds > 0;
+            torch::Tensor assignment_quality = torch::zeros_like(
+                assigned_gt_inds, assigned_gt_inds.options().dtype(pred_cls.dtype()));
+            total_num_pos = pos_mask.sum();
+            if (total_num_pos.item<float>() > 0) {
+                const torch::Tensor pos_decoded_boxes = decoded_boxes
+                    .masked_select(pos_mask.unsqueeze(-1)).view({-1, 4});
+                const auto batch_idx = torch::arange(batch_size, device)
+                    .view({-1, 1}).expand_as(assigned_gt_inds);
+                const auto valid_batch_idx = batch_idx.masked_select(pos_mask);
+                const auto valid_gt_idx = assigned_gt_inds.masked_select(pos_mask)
+                    .to(torch::kLong) - 1;
+                const auto flat_indices = valid_batch_idx * gt_bboxes.size(1) +
+                    valid_gt_idx;
+                const torch::Tensor pos_gt_boxes = gt_bboxes.view({-1, 4})
+                    .index_select(0, flat_indices);
+                const torch::Tensor iou =
+                    bbox_iou(pos_decoded_boxes, pos_gt_boxes, true);
+                loss_box = (1.0f - iou).sum();
+                const torch::Tensor quality = config_.use_assignment_quality_targets
+                    ? bbox_iou(pos_decoded_boxes, pos_gt_boxes, false)
+                          .detach().clamp(0.0f, 1.0f)
+                    : torch::ones({pos_decoded_boxes.size(0)}, pred_cls.options());
+                assignment_quality.masked_scatter_(pos_mask, quality);
+                total_cls_target_weight = quality.sum();
+            }
+            loss_cls = compute_cls_loss_vectorized(
+                pred_cls, gt_labels, assigned_gt_inds, pos_mask,
+                assignment_quality).sum();
+            const torch::Tensor num_pos_safe = torch::max(
+                total_num_pos, torch::tensor(1.0f, device));
+            loss_box = (loss_box / num_pos_safe) * config_.box_weight;
+            const torch::Tensor cls_weight_safe = torch::max(
+                total_cls_target_weight, torch::tensor(1.0f, device));
+            loss_cls = (loss_cls / cls_weight_safe) * config_.cls_weight;
+            const torch::Tensor total_loss = loss_box + loss_cls;
+            return std::make_tuple(total_loss,
+                std::unordered_map<std::string, float>{
+                    {"box_loss", loss_box.item<float>()},
+                    {"cls_loss", loss_cls.item<float>()},
+                    {"dfl_loss", 0.0f},
+                    {"total_loss", total_loss.item<float>()}});
+        }
 
         for (size_t i = 0; i < preds.size(); ++i) {
             torch::Tensor pred = preds[i];
@@ -116,6 +198,8 @@ public:
             );
 
             torch::Tensor pos_mask = assigned_gt_inds > 0;
+            torch::Tensor assignment_quality = torch::zeros_like(
+                assigned_gt_inds, assigned_gt_inds.options().dtype(pred_cls.dtype()));
             torch::Tensor num_pos_scale = pos_mask.sum();
             total_num_pos += num_pos_scale;
 
@@ -135,6 +219,12 @@ public:
                 torch::Tensor iou = bbox_iou(pos_decoded_boxes, pos_gt_boxes, true);
                 loss_box = loss_box + (1.0f - iou).sum();
 
+                const torch::Tensor quality = config_.use_assignment_quality_targets
+                    ? bbox_iou(pos_decoded_boxes, pos_gt_boxes, false).detach().clamp(0.0f, 1.0f)
+                    : torch::ones({pos_decoded_boxes.size(0)}, pred_cls.options());
+                assignment_quality.masked_scatter_(pos_mask, quality);
+                total_cls_target_weight += quality.sum();
+
                 if (config_.enable_dfl) {
                     torch::Tensor pos_pred_boxes = pred_boxes.masked_select(pos_mask.unsqueeze(-1)).view({-1, config_.box_channels()});
                     loss_dfl = loss_dfl + compute_dfl_loss(pos_pred_boxes, pos_gt_boxes, strides_[i].item<int64_t>()).sum();
@@ -142,7 +232,8 @@ public:
             }
 
             torch::Tensor scale_cls_loss = compute_cls_loss_vectorized(
-                pred_cls, gt_labels, assigned_gt_inds, pos_mask);
+                pred_cls, gt_labels, assigned_gt_inds, pos_mask,
+                assignment_quality);
 
             loss_cls = loss_cls + scale_cls_loss.sum();
         }
@@ -150,7 +241,9 @@ public:
         torch::Tensor num_pos_safe = torch::max(total_num_pos, torch::tensor(1.0f, device));
 
         loss_box = (loss_box / num_pos_safe) * config_.box_weight;
-        loss_cls = (loss_cls / num_pos_safe) * config_.cls_weight;
+        torch::Tensor cls_weight_safe = torch::max(
+            total_cls_target_weight, torch::tensor(1.0f, device));
+        loss_cls = (loss_cls / cls_weight_safe) * config_.cls_weight;
         loss_dfl = (loss_dfl / num_pos_safe) * config_.dfl_weight;
 
         torch::Tensor total_loss = loss_box + loss_cls + loss_dfl;
@@ -234,7 +327,8 @@ private:
         const torch::Tensor& pred_cls,
         const torch::Tensor& gt_labels,
         const torch::Tensor& assigned_gt_inds,
-        const torch::Tensor& pos_mask)
+        const torch::Tensor& pos_mask,
+        const torch::Tensor& assignment_quality)
     {
         torch::Tensor target_one_hot = torch::zeros_like(pred_cls);
 
@@ -245,7 +339,8 @@ private:
 
             auto one_hot = F::one_hot(target_cls_ids, num_classes_).to(pred_cls.dtype());
 
-            target_one_hot = one_hot * pos_mask.unsqueeze(-1);
+            target_one_hot = one_hot * pos_mask.unsqueeze(-1) *
+                assignment_quality.unsqueeze(-1);
         }
 
         auto bce_options = F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone);
@@ -254,6 +349,13 @@ private:
         if (config_.fl_gamma > 0.0f) {
             torch::Tensor pt = torch::exp(-loss);
             loss = (1.0f - pt).pow(config_.fl_gamma) * loss;
+        }
+
+        if (!config_.class_loss_weights.empty()) {
+            const torch::Tensor weights = torch::tensor(
+                config_.class_loss_weights, pred_cls.options())
+                .view({1, 1, num_classes_});
+            loss = loss * weights;
         }
 
         return loss;

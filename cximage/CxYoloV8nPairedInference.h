@@ -241,15 +241,20 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
   int max_per_family = 0;
   int max_total = 0;
   std::string selection_mode;
+  std::string target_split;
   plan["max_cases_per_signal_family"] >> max_per_family;
   plan["max_total_cases"] >> max_total;
   plan["selection_mode"] >> selection_mode;
+  plan["target_split"] >> target_split;
+  if (target_split.empty())
+    target_split = "validation";
   const cv::FileNode family_nodes = plan["signal_families"];
   const cv::FileNode sample_nodes = package["samples"];
   if (!plan.isOpened() || !package.isOpened() ||
       plan_schema != "cxvision.yolov8n_cpp_comparison_plan.v1" ||
       !family_nodes.isSeq() || !sample_nodes.isSeq() || max_per_family <= 0 ||
-      max_total <= 0) {
+      max_total <= 0 ||
+      (target_split != "validation" && target_split != "holdout")) {
     std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
               << "reason=paired inference plan or package schema is invalid\n";
     return 2;
@@ -271,7 +276,7 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
     node["geometry_type"] >> geometry_type;
     node["image"] >> image_ref;
     node["label"] >> label_ref;
-    if (split != "validation" || review_item.empty() ||
+    if (split != target_split || review_item.empty() ||
         geometry_type.empty() || image_ref.empty() || label_ref.empty())
       continue;
     const fs::path image_path = package_root / fs::path(image_ref);
@@ -348,6 +353,10 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
   int total_incremental_detections = 0;
   int total_base_matches = 0;
   int total_incremental_matches = 0;
+  int total_base_false_alarm_cases = 0;
+  int total_incremental_false_alarm_cases = 0;
+  double total_base_match_confidence = 0.0;
+  double total_incremental_match_confidence = 0.0;
   std::map<std::string, std::array<double, 4>> group_metrics;
   std::vector<RuntimeProfileSample> profile_samples;
   for (std::size_t i = 0; i < selected.size(); ++i) {
@@ -407,6 +416,16 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
     total_incremental_detections += incremental_metrics.detection_count;
     total_base_matches += base_metrics.matched_iou50 ? 1 : 0;
     total_incremental_matches += incremental_metrics.matched_iou50 ? 1 : 0;
+    total_base_false_alarm_cases +=
+        base_metrics.detection_count > (base_metrics.matched_iou50 ? 1 : 0) ? 1 : 0;
+    total_incremental_false_alarm_cases +=
+        incremental_metrics.detection_count >
+                (incremental_metrics.matched_iou50 ? 1 : 0)
+            ? 1
+            : 0;
+    total_base_match_confidence += base_metrics.best_same_class_confidence;
+    total_incremental_match_confidence +=
+        incremental_metrics.best_same_class_confidence;
     auto &family_metrics = group_metrics["family:" + item.family];
     family_metrics[0] += 1.0;
     family_metrics[1] += incremental_metrics.detection_count > 0 ? 1.0 : 0.0;
@@ -437,6 +456,10 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
          << base_metrics.best_same_class_iou
          << ", \"incremental_best_same_class_iou\": "
          << incremental_metrics.best_same_class_iou
+         << ", \"base_best_same_class_confidence\": "
+         << base_metrics.best_same_class_confidence
+         << ", \"incremental_best_same_class_confidence\": "
+         << incremental_metrics.best_same_class_confidence
          << ", \"base_iou50_match\": "
          << (base_metrics.matched_iou50 ? "true" : "false")
          << ", \"incremental_iou50_match\": "
@@ -527,6 +550,17 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
           : (total_incremental_matches > 0
                  ? "CXX_YOLOV8N_DETECTION_EFFECT_PARTIAL"
                  : "CXX_YOLOV8N_DETECTION_EFFECT_NOT_ESTABLISHED");
+  const double selected_count = static_cast<double>(selected.size());
+  const double base_precision = total_base_detections > 0
+                                    ? static_cast<double>(total_base_matches) /
+                                          total_base_detections
+                                    : 0.0;
+  const double candidate_precision = total_incremental_detections > 0
+                                         ? static_cast<double>(total_incremental_matches) /
+                                               total_incremental_detections
+                                         : 0.0;
+  const double base_recall = total_base_matches / selected_count;
+  const double candidate_recall = total_incremental_matches / selected_count;
   std::ostringstream groups;
   bool first_group = true;
   for (const auto &entry : group_metrics) {
@@ -548,6 +582,7 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
          << "  \"schema\": \"cxvision.yolov8n_cpp_paired_inference.v1\",\n"
          << "  \"status\": \"" << status << "\",\n"
          << "  \"quality_status\": \"" << quality_status << "\",\n"
+         << "  \"evaluation_split\": \"" << target_split << "\",\n"
          << "  \"selected_case_count\": " << selected.size() << ",\n"
          << "  \"total_base_detections\": " << total_base_detections
          << ",\n"
@@ -557,6 +592,23 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
          << ",\n"
          << "  \"total_incremental_iou50_matches\": "
          << total_incremental_matches << ",\n"
+         << "  \"metrics\": {\n"
+         << "    \"base_precision\": " << base_precision << ",\n"
+         << "    \"base_recall\": " << base_recall << ",\n"
+         << "    \"base_miss_rate\": " << (1.0 - base_recall) << ",\n"
+         << "    \"base_false_alarm_case_rate\": "
+         << total_base_false_alarm_cases / selected_count << ",\n"
+         << "    \"base_mean_match_confidence\": "
+         << total_base_match_confidence / selected_count << ",\n"
+         << "    \"candidate_precision\": " << candidate_precision << ",\n"
+         << "    \"candidate_recall\": " << candidate_recall << ",\n"
+         << "    \"candidate_miss_rate\": " << (1.0 - candidate_recall)
+         << ",\n"
+         << "    \"candidate_false_alarm_case_rate\": "
+         << total_incremental_false_alarm_cases / selected_count << ",\n"
+         << "    \"candidate_mean_match_confidence\": "
+         << total_incremental_match_confidence / selected_count << "\n"
+         << "  },\n"
          << "  \"performance_profile_ref\": \""
          << Escape(performance_profile_path.string()) << "\",\n"
          << "  \"promotion_allowed\": false,\n"

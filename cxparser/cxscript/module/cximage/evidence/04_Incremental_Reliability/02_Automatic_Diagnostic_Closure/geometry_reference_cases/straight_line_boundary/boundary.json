@@ -4,13 +4,16 @@
   "closed": false,
   "endpoints_xy": [
     [
-      90,
-      290
+      0,
+      286
     ],
     [
-      395,
-      75
+      479,
+      72
     ]
   ],
-  "measurement_width_px": 4
+  "measurement_width_px": 3,
+  "boundary_scene_semantics": "interface_between_two_regions",
+  "visible_boundary_truth": "02_visible_boundary_map_v2.bmp",
+  "latent_boundary_truth": "02_visible_boundary_map_v2.bmp"
 }

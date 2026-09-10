@@ -57,6 +57,23 @@ struct CxScriptEvidenceCase
     int workflow_stage_index = 0;
     int workflow_stage_count = 0;
     bool dataset_frozen = false;
+    // Controlled Torch-case admission is declared by Evidence assets.  These
+    // references are evidence facts, not permissions to promote a model.
+    std::string admission_status = "REFERENCE_ONLY";
+    std::string admission_reason;
+    std::string dataset_summary_ref;
+    std::string training_receipt_ref;
+    std::string candidate_artifact_ref;
+    std::string evaluation_report_ref;
+    std::string evidence_bundle_ref;
+    std::string rollback_model_ref;
+    std::string quality_conclusion_ref;
+    std::string training_config_ref;
+    std::string model_manifest_ref;
+    std::string inference_config_ref;
+    std::string quality_policy_ref;
+    std::string ontology_ref;
+    std::string failure_samples_ref;
     std::vector<CxScriptEvidenceDatasetImage> dataset_images;
     std::vector<CxScriptEvidenceAnnotation> annotations;
     bool manual_review_required = true;
