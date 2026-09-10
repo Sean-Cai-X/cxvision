@@ -1666,6 +1666,22 @@ struct ManualTestContext {
   float yolo_training_geometry_roi_continuity_positive_weight = 1.0f;
   float yolo_training_geometry_roi_calibration_weight = 0.1f;
   std::string yolo_training_geometry_target_manifest;
+  // Affine channel controls describe the asset-generation contract. They are
+  // exported with the runtime plan and must match the selected sidecar
+  // dataset; compound is evaluation-only and cannot be selected for training.
+  int yolo_training_affine_channel_mode = 0; // 0=rotation, 1=scale, 2=compound evaluation
+  float yolo_training_rotation_train_positive_deg = 7.0f;
+  float yolo_training_rotation_train_negative_deg = -8.0f;
+  float yolo_training_rotation_validation_deg = 14.0f;
+  float yolo_training_rotation_holdout_deg = -18.0f;
+  float yolo_training_scale_train_down = 0.88f;
+  float yolo_training_scale_train_up = 1.12f;
+  float yolo_training_scale_validation = 0.90f;
+  float yolo_training_scale_holdout = 1.24f;
+  float yolo_training_compound_validation_scale = 0.90f;
+  float yolo_training_compound_validation_rotation_deg = 11.0f;
+  float yolo_training_compound_holdout_scale = 1.16f;
+  float yolo_training_compound_holdout_rotation_deg = -16.0f;
   // Geometry auto-tune is a separate, evidence-driven inference profile
   // search. Defaults are loaded from its versioned policy asset; the GUI
   // exposes the requested profile but never promotes a model automatically.

@@ -55,10 +55,12 @@ struct GeometryRoiTargets {
     torch::Tensor ellipse_parameters;
     torch::Tensor polygon_vertices;
     torch::Tensor boundary_continuity;
+    torch::Tensor affine_channel;
 
     bool defined() const {
         return rois.defined() && kind.defined() && ellipse_parameters.defined() &&
-            polygon_vertices.defined() && boundary_continuity.defined();
+            polygon_vertices.defined() && boundary_continuity.defined() &&
+            affine_channel.defined();
     }
 
     void validate(int64_t polygon_vertex_count) const {
@@ -75,6 +77,8 @@ struct GeometryRoiTargets {
             "geometry ROI polygon vertices must be [N,2*polygon_vertex_count]");
         TORCH_CHECK(boundary_continuity.numel() == rois.size(0),
             "geometry ROI boundary continuity must contain one value per ROI");
+        TORCH_CHECK(affine_channel.numel() == rois.size(0),
+            "geometry ROI affine channel must contain one value per ROI");
     }
 };
 
@@ -95,8 +99,11 @@ struct GeometryRoiTargetLayout {
     static int64_t continuity_offset(int64_t polygon_vertex_count) {
         return polygon_offset() + polygon_vertex_count * 2;
     }
-    static int64_t total_columns(int64_t polygon_vertex_count) {
+    static int64_t affine_channel_offset(int64_t polygon_vertex_count) {
         return continuity_offset(polygon_vertex_count) + 1;
+    }
+    static int64_t total_columns(int64_t polygon_vertex_count) {
+        return affine_channel_offset(polygon_vertex_count) + 1;
     }
 };
 
@@ -119,7 +126,8 @@ inline GeometryRoiTargets geometry_roi_targets_from_batch(
             GeometryRoiTargetLayout::Ellipse + GeometryRoiTargetLayout::EllipseColumns),
         selected.slice(1, GeometryRoiTargetLayout::polygon_offset(),
             GeometryRoiTargetLayout::continuity_offset(polygon_vertex_count)),
-        selected.select(1, GeometryRoiTargetLayout::continuity_offset(polygon_vertex_count))};
+        selected.select(1, GeometryRoiTargetLayout::continuity_offset(polygon_vertex_count)),
+        selected.select(1, GeometryRoiTargetLayout::affine_channel_offset(polygon_vertex_count))};
 }
 
 struct GeometryRoiPrediction {

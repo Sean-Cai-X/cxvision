@@ -1447,6 +1447,13 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         double geometry_roi_continuity_positive_weight = 1.0;
         double geometry_roi_calibration_weight = 0.1;
         std::string geometry_target_manifest;
+        std::string affine_training_channel = "rotation";
+        double rotation_train_positive_deg = 7.0, rotation_train_negative_deg = -8.0;
+        double rotation_validation_deg = 14.0, rotation_holdout_deg = -18.0;
+        double scale_train_down = 0.88, scale_train_up = 1.12;
+        double scale_validation = 0.90, scale_holdout = 1.24;
+        double compound_validation_scale = 0.90, compound_validation_rotation_deg = 11.0;
+        double compound_holdout_scale = 1.16, compound_holdout_rotation_deg = -16.0;
         std::string parent_checkpoint;
         plan["epochs"] >> epochs;
         plan["batch_size"] >> batch_size;
@@ -1488,6 +1495,10 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             const cv::FileNode node = plan[key];
             if (!node.empty()) node >> value;
         };
+        auto read_optional_string = [&](const char* key, std::string& value) {
+            const cv::FileNode node = plan[key];
+            if (!node.empty()) node >> value;
+        };
         read_optional_int("geometry_roi_head_enabled", geometry_roi_head_enabled);
         read_optional_int("geometry_roi_hidden_channels", geometry_roi_hidden_channels);
         read_optional_int("geometry_roi_pooled_size", geometry_roi_pooled_size);
@@ -1498,6 +1509,19 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         read_optional_double("geometry_roi_uncertainty_weight", geometry_roi_uncertainty_weight);
         read_optional_double("geometry_roi_continuity_positive_weight", geometry_roi_continuity_positive_weight);
         read_optional_double("geometry_roi_calibration_weight", geometry_roi_calibration_weight);
+        read_optional_string("affine_training_channel", affine_training_channel);
+        read_optional_double("rotation_train_positive_deg", rotation_train_positive_deg);
+        read_optional_double("rotation_train_negative_deg", rotation_train_negative_deg);
+        read_optional_double("rotation_validation_deg", rotation_validation_deg);
+        read_optional_double("rotation_holdout_deg", rotation_holdout_deg);
+        read_optional_double("scale_train_down", scale_train_down);
+        read_optional_double("scale_train_up", scale_train_up);
+        read_optional_double("scale_validation", scale_validation);
+        read_optional_double("scale_holdout", scale_holdout);
+        read_optional_double("compound_validation_scale", compound_validation_scale);
+        read_optional_double("compound_validation_rotation_deg", compound_validation_rotation_deg);
+        read_optional_double("compound_holdout_scale", compound_holdout_scale);
+        read_optional_double("compound_holdout_rotation_deg", compound_holdout_rotation_deg);
         if (!plan["geometry_target_manifest"].empty())
             plan["geometry_target_manifest"] >> geometry_target_manifest;
         TORCH_CHECK(epochs >= 2, "YOLOv8 lifecycle requires at least two epochs");
@@ -1551,6 +1575,17 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             "YOLOv8 lifecycle geometry_roi_continuity_positive_weight must be positive");
         TORCH_CHECK(geometry_roi_head_enabled == 0 || !geometry_target_manifest.empty(),
             "YOLOv8 lifecycle geometry ROI head requires geometry_target_manifest; bbox-only labels are insufficient");
+        TORCH_CHECK(affine_training_channel == "rotation" || affine_training_channel == "scale",
+            "YOLOv8 lifecycle affine_training_channel must be rotation or scale; compound is evaluation-only");
+        TORCH_CHECK(std::abs(rotation_train_positive_deg) <= 45.0 && std::abs(rotation_train_negative_deg) <= 45.0 &&
+                    std::abs(rotation_validation_deg) <= 45.0 && std::abs(rotation_holdout_deg) <= 45.0 &&
+                    std::abs(compound_validation_rotation_deg) <= 45.0 && std::abs(compound_holdout_rotation_deg) <= 45.0,
+            "YOLOv8 lifecycle affine rotation values must be within [-45,45]");
+        TORCH_CHECK(scale_train_down >= 0.70 && scale_train_down <= 1.30 && scale_train_up >= 0.70 && scale_train_up <= 1.30 &&
+                    scale_validation >= 0.70 && scale_validation <= 1.30 && scale_holdout >= 0.70 && scale_holdout <= 1.30 &&
+                    compound_validation_scale >= 0.70 && compound_validation_scale <= 1.30 &&
+                    compound_holdout_scale >= 0.70 && compound_holdout_scale <= 1.30,
+            "YOLOv8 lifecycle affine scale values must be within [0.70,1.30]");
         TORCH_CHECK(restore_best_validation_checkpoint != 0,
             "YOLOv8 lifecycle requires validation-best checkpoint restoration");
         TORCH_CHECK(!parent_checkpoint.empty(),
@@ -1567,6 +1602,13 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             frozen_parameter_prefixes.push_back(static_cast<std::string>(node));
         TORCH_CHECK(!frozen_parameter_prefixes.empty(),
             "YOLOv8 lifecycle requires at least one frozen parameter prefix");
+        const auto matches_frozen_prefix = [&](const std::string& name) {
+            for (const std::string& prefix : frozen_parameter_prefixes) {
+                if (name == prefix || name.rfind(prefix + ".", 0) == 0)
+                    return true;
+            }
+            return false;
+        };
 
         std::vector<std::string> class_names;
         const cv::FileNode class_nodes = plan["class_names"];
@@ -1708,13 +1750,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         std::vector<std::string> frozen_parameter_names;
         std::vector<std::string> trainable_parameter_names;
         for (const auto& named : model->named_parameters(true)) {
-            bool frozen = false;
-            for (const std::string& prefix : frozen_parameter_prefixes) {
-                if (named.key().rfind(prefix, 0) == 0) {
-                    frozen = true;
-                    break;
-                }
-            }
+            const bool frozen = matches_frozen_prefix(named.key());
             named.value().set_requires_grad(!frozen);
             if (frozen)
                 frozen_parameter_names.push_back(named.key());
@@ -1761,6 +1797,11 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         std::map<std::string, torch::Tensor> before_parameters;
         for (const auto& named : model->named_parameters(true))
             before_parameters.emplace(named.key(), named.value().detach().clone());
+        std::map<std::string, torch::Tensor> before_frozen_buffers;
+        for (const auto& named : model->named_buffers(true)) {
+            if (matches_frozen_prefix(named.key()))
+                before_frozen_buffers.emplace(named.key(), named.value().detach().clone());
+        }
 
         const auto start = std::chrono::steady_clock::now();
         const YOLOv8Impl::ValidationSummary base_summary =
@@ -1822,6 +1863,13 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         for (int epoch = 0; epoch < epochs; ++epoch)
         {
             static_cast<torch::nn::Module&>(*model).train(true);
+            // requires_grad=false does not stop BatchNorm running-stat updates.
+            // A frozen module must stay in eval mode so a geometry-only phase
+            // cannot silently alter the mature detector through buffers.
+            for (const auto& named : model->named_modules()) {
+                if (matches_frozen_prefix(named.key()))
+                    named.value()->eval();
+            }
             double loss_sum = 0.0;
             double box_loss_sum = 0.0;
             double classification_loss_sum = 0.0;
@@ -2053,11 +2101,14 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     : "[]") << "\n}\n";
         }
         bool frozen_unchanged = true;
+        bool frozen_buffers_unchanged = true;
         bool trainable_updated = false;
         std::ostringstream frozen_rows;
         std::ostringstream trainable_rows;
         bool first_frozen = true;
         bool first_trainable = true;
+        std::ostringstream frozen_buffer_rows;
+        bool first_frozen_buffer = true;
         for (const auto& named : model->named_parameters(true)) {
             const auto before = before_parameters.find(named.key());
             if (before == before_parameters.end())
@@ -2081,9 +2132,21 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     << ",\"requires_grad\":true}";
             }
         }
+        for (const auto& named : model->named_buffers(true)) {
+            const auto before = before_frozen_buffers.find(named.key());
+            if (before == before_frozen_buffers.end())
+                continue;
+            const double absolute_update = (named.value().detach() - before->second)
+                .abs().sum().item<double>();
+            frozen_buffers_unchanged = frozen_buffers_unchanged && absolute_update == 0.0;
+            if (!first_frozen_buffer) frozen_buffer_rows << ",\n";
+            first_frozen_buffer = false;
+            frozen_buffer_rows << "    {\"name\":" << QuoteRuntimeTaskJsonString(named.key())
+                << ",\"absolute_update\":" << absolute_update << "}";
+        }
         {
             std::ofstream freeze_audit(freeze_audit_path);
-            const bool freeze_pass = frozen_unchanged && trainable_updated;
+            const bool freeze_pass = frozen_unchanged && frozen_buffers_unchanged && trainable_updated;
             freeze_audit << "{\n"
                 << "  \"schema\": \"cxvision.freeze_execution_audit.v1\",\n"
                 << "  \"status\": \"" << (freeze_pass ? "FREEZE_EXECUTION_PASS" : "FREEZE_EXECUTION_FAIL") << "\",\n"
@@ -2093,8 +2156,10 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 freeze_audit << QuoteRuntimeTaskJsonString(frozen_parameter_prefixes[index]);
             }
             freeze_audit << "],\n  \"frozen_unchanged\": " << (frozen_unchanged ? "true" : "false")
+                << ",\n  \"frozen_buffers_unchanged\": " << (frozen_buffers_unchanged ? "true" : "false")
                 << ",\n  \"trainable_updated\": " << (trainable_updated ? "true" : "false")
                 << ",\n  \"frozen_parameters\": [\n" << frozen_rows.str()
+                << "\n  ],\n  \"frozen_buffers\": [\n" << frozen_buffer_rows.str()
                 << "\n  ],\n  \"trainable_parameters\": [\n" << trainable_rows.str() << "\n  ]\n}\n";
         }
         const YOLOv8Impl::ValidationSummary incremental_summary =
@@ -2256,6 +2321,22 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     << ", \"uncertainty\": " << geometry_roi_uncertainty_weight
                     << ", \"calibration\": " << geometry_roi_calibration_weight << "},\n"
                     << "    \"continuity_positive_weight\": " << geometry_roi_continuity_positive_weight << "\n"
+                    << "  },\n"
+                    << "  \"affine_channel\": {\n"
+                    << "    \"effective_training_channel\": " << QuoteRuntimeTaskJsonString(affine_training_channel) << ",\n"
+                    << "    \"compound_policy\": \"EVALUATION_ONLY_NOT_TRAINABLE\",\n"
+                    << "    \"rotation_deg\": {\"train_positive\": " << rotation_train_positive_deg
+                    << ", \"train_negative\": " << rotation_train_negative_deg
+                    << ", \"validation\": " << rotation_validation_deg
+                    << ", \"holdout\": " << rotation_holdout_deg << "},\n"
+                    << "    \"scale\": {\"train_down\": " << scale_train_down
+                    << ", \"train_up\": " << scale_train_up
+                    << ", \"validation\": " << scale_validation
+                    << ", \"holdout\": " << scale_holdout << "},\n"
+                    << "    \"compound_unseen\": {\"validation_scale\": " << compound_validation_scale
+                    << ", \"validation_rotation_deg\": " << compound_validation_rotation_deg
+                    << ", \"holdout_scale\": " << compound_holdout_scale
+                    << ", \"holdout_rotation_deg\": " << compound_holdout_rotation_deg << "}\n"
                     << "  },\n"
                     << "  \"geometry_fixed_validation_ref\": "
                     << QuoteRuntimeTaskJsonString(geometry_roi_head_enabled != 0

@@ -224,6 +224,8 @@ public:
                         geometry.polygon_vertices.at(static_cast<size_t>(item));
                 target_tensor[count][GeometryRoiTargetLayout::continuity_offset(
                     config_.geometry_polygon_vertex_count)] = geometry.boundary_continuity;
+                target_tensor[count][GeometryRoiTargetLayout::affine_channel_offset(
+                    config_.geometry_polygon_vertex_count)] = static_cast<float>(geometry.affine_channel);
             }
             count++;
         }
@@ -242,6 +244,7 @@ private:
         std::array<float, 6> ellipse_parameters{};
         std::vector<float> polygon_vertices;
         float boundary_continuity = 0.0f;
+        int affine_channel = 0; // 0=unclassified, 1=rotation, 2=scale, 3=compound
     };
 
     static float read_finite_number(const cv::FileNode& node, const char* field) {
@@ -263,6 +266,15 @@ private:
         sidecar["schema"] >> schema;
         TORCH_CHECK(schema == "cxvision.geometry_roi_target_sidecar.v1",
             "geometry sidecar schema is unsupported: ", sidecar_path.string());
+        std::string affine_channel_name;
+        if (!sidecar["affine_channel"].empty())
+            sidecar["affine_channel"] >> affine_channel_name;
+        int affine_channel = 0;
+        if (affine_channel_name == "rotation") affine_channel = 1;
+        else if (affine_channel_name == "scale") affine_channel = 2;
+        else if (affine_channel_name == "compound") affine_channel = 3;
+        else TORCH_CHECK(affine_channel_name.empty(),
+            "geometry sidecar affine_channel must be rotation, scale, or compound: ", sidecar_path.string());
         const cv::FileNode instances = sidecar["instances"];
         TORCH_CHECK(instances.isSeq(), "geometry sidecar instances must be an array: ", sidecar_path.string());
         TORCH_CHECK(instances.size() == expected_count,
@@ -279,6 +291,7 @@ private:
             std::string kind;
             instance["geometry_kind"] >> kind;
             GeometrySidecarTarget target;
+            target.affine_channel = affine_channel;
             if (kind == "ellipse") target.kind = 1;
             else if (kind == "polygon") target.kind = 2;
             else TORCH_CHECK(false, "geometry sidecar geometry_kind must be ellipse or polygon: ", sidecar_path.string());

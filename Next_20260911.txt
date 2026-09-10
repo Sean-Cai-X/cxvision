@@ -1,0 +1,1755 @@
+当前 “Torch controlled training” Evidence 状态是：链路与资产投影已存在，但尚不构成训练质量或模型推广验
+  收，整体应保持 PENDING_HUMAN_REVIEW。
+
+  - 可点击节点：Torch Incremental Training Evidence Case、Incremental Training + Inference Closed Loop、Torch Training
+    Image Set。
+
+  - 数据集：DeepPCB UI smoke 集。仅 2 张带标签输入图，共 15 个 bbox；另有 2 张无标注 template 图。训练/验证/测试轨道复用
+    了相同源图，因而不是独立评估集。
+
+  - ROI / 标签：主 Evidence case 使用整图 ROI（0–639）；标签为 anomaly，bbox 的 class_id 为 0–5。DeepLab 生命周期会把
+    bbox 转为弱监督 mask；这不能作为真实实例分割训练标签。
+
+  - 分类语义：当前 label 是本地异常/缺陷标记，但 YOLOv8-seg 训练输出仍使用 COCO-80 类表，二者没有被证明存在可审计的类别
+    映射，不能声称已完成业务分类语义闭环。
+
+  - 训练：DeepLab CPU 生命周期实际跑通，1 epoch、2 图、权重与 manifest 已导出；但 foreground_iou=0，所以只能说明优化、导
+    出、推理资产链路通，不说明模型有效。
+
+  - 推理闭环：DeepLab run 有 mask 和 overlay 同 run 目录引用，属于“可执行闭环”。YOLOv8-seg 的 2026-08-25 L3 输出中，所有
+    训练后推理项 inference_ok=false，因创建 instance_masks 目录失败，结果/overlay 引用为空；该闭环未完成。
+
+  - 模型谱系：最新谱系审计发现 2 个有效节点、7 个拒绝节点；增量候选存在父节点，checkpoint SHA-256 已验证。但验证集与训练
+    集有 7 项 source-lineage overlap，比较、增强重训被阻断，promotion_allowed=0。
+
+  关键证据：
+
+  - cxparser/cxscript/module/cximage/evidence/torch_runtime_ui_evidence_chain.cxsc
+  - cxparser/cxscript/module/cximage/evidence/TORCH_RUNTIME_UI_EVIDENCE_CASES.md
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/manual_torch_ui/run-20260817-174347-p9504/
+    torch_train_lifecycle_direct_test/torch_training_lifecycle_result.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/manual_torch_ui/run-20260817-174347-p9504/
+    torch_train_lifecycle_direct_test/torch_training_dataset_split_summary.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260825_1555_yolov8seg_gallery_annotation_training_trace/
+    T3_yolov8seg_gallery_annotation_training_trace_deeppcb/dataset_summary.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260825_1555_yolov8seg_gallery_annotation_training_trace/
+    T3_yolov8seg_gallery_annotation_training_trace_deeppcb/stability_matrix.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/model_lineage_operation_tests/
+    run_20260902_174500_auto_node_chain/model_lineage_operation_selftest.json
+
+  本轮未修改代码、资产或运行测试。
+  
+  
+当前需要推进要求如下  :
+  Torch 受控案例
+  → 数据/标注/ROI 完整性确认
+  → 可重放训练集与数据摘要
+  → 真实 Torch 训练
+  → 候选模型制品与签名回执
+  → 固定验证集评估
+  → 基线/困难样本/保留集回归
+  → 模型质量结论
+  → 生产候选证据包
+  → 可投入生产的批准结论
+
+  每个案例至少应形成以下交付物：
+
+  - case_id 与 Torch track，例如 C1、O1。
+  - 图片、ROI、标注、类别及数据集摘要。
+  - 训练配置、父模型、运行时和制品摘要。
+  - 真实训练日志、Provider 回执及模型制品路径。
+  - 固定验证集与 holdout 集结果。
+  - 历史基线、困难样本和新增样本对比结果。
+  - 准确率、漏检率、误检率、置信度、推理耗时等指标。
+  - 失败/不确定样本清单与处理结论。
+  - 是否可成为 Candidate、是否达到 Approved、是否允许 Active 的明确状态。
+  - 版本化证据包与可回滚模型版本。
+
+  生产准入建议至少满足：
+
+   状态              语义
+  ━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   REFERENCE_ONLY    仅案例/资产存在，不能导入生产
+  ────────────────  ──────────────────────────────────
+   TRAINING_READY    数据、ROI、标注和数据摘要完整
+  ────────────────  ──────────────────────────────────
+   CANDIDATE         真实训练已完成，有可追溯模型制品
+  ────────────────  ──────────────────────────────────
+   EVALUATED         固定验证、困难样本和回归已完成
+  ────────────────  ──────────────────────────────────
+   APPROVED          指标达标、退化受控、证据完整
+  ────────────────  ──────────────────────────────────
+   ACTIVE            已被明确批准，可服务外部推理
+  ────────────────  ──────────────────────────────────
+   REJECTED          质量、运行时或证据不满足要求
+
+
+
+当前主线不是“从零训练一个 Torch 模型”，而是：
+
+  已通过的 OBB + YOLOv8 parent baseline
+    → 几何头增量训练 child candidate
+    → 固定集 / 困难集 / holdout 对比
+    → 谱系、签名、回滚与证据包
+    → 人工 APPROVED
+    → 明确授权后 ACTIVE
+
+  几何头必须被视为模型能力扩展，而不是用独立 smoke 结果替代成熟 parent 的模型质量。
+
+   状态              本主线的准入条件                                   禁止事项
+  ━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   REFERENCE_ONLY    只有案例、图像或几何标签资产                       不训练、不导入生产
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   TRAINING_READY    已冻结可重放数据集；ROI、几何标签、类别语义、训    不以 train 图复用作 val/holdout；不以 bbox 替代
+                     练/val/holdout 划分完整且 source-disjoint          要求的 mask/polyline
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   CANDIDATE         基于已通过 parent 真实增量训练；有 Provider 回     不接受随机初始化、固定输出或仅有限 loss
+                     执、训练日志、child 权重、SHA-256、manifest、父
+                     模型和冻结策略
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   EVALUATED         固定验证集、历史基线、困难集、新增样本、holdout    任何必测集缺失或推理失败均不得进入
+                     均执行；输出准确率、漏检、误检、置信度、耗时、
+                     失败清单
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   APPROVED          指标达到该 track 的冻结阈值；相对 parent 的退化    不自动批准
+                     在容限内；证据包完整；人工签署批准
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   ACTIVE            已批准候选被明确选择为外部推理版本；保留 parent    不由训练程序自动激活
+                     与回滚路径
+  ────────────────  ─────────────────────────────────────────────────  ─────────────────────────────────────────────────
+   REJECTED          数据、运行时、质量、签名或证据不满足要求           不得覆盖历史候选或 parent
+
+  推进细则如下。
+
+  1. 受控案例建档
+
+  每个可点击案例都由资产定义，至少声明：
+
+  display_name
+  case_id / case_track，例如 C1、O1
+  task 与几何头输出契约
+  parent_model_id + parent checkpoint hash
+  ROI 定义与坐标系
+  标注类型、类别 ontology、标注版本
+  训练、fixed validation、困难集、holdout 的资产清单
+  指标阈值和相对 parent 的容许退化
+
+  C1 的标注必须是闭区域 mask/多边形语义；O1 必须是开放 polyline、端点、测量点等边界语义。不得互相降级替代。
+
+  2. TRAINING_READY 门禁
+
+  系统生成不可变的数据摘要，记录每张图的 hash、来源 lineage、ROI、标签/几何标注 hash、split、类别和标注版本。
+
+  硬规则：
+
+  - train、fixed validation、holdout 必须 source-disjoint；
+  - 困难样本集独立标记，但可同时是固定评估的一部分；
+  - 每张训练样本必须满足该 track 的 ROI 与标签契约；
+  - 输出 dataset_summary.json、dataset_manifest.json、split_audit.json、annotation_audit.json；
+  - 任一资产缺失、重复 source lineage、标签类型不符，状态保持 REFERENCE_ONLY 或转 REJECTED，不能训练。
+
+  3. 真实增量训练与 CANDIDATE
+
+  训练必须从成熟 OBB + YOLOv8 parent 加载，而非随机权重。Provider 回执至少要记录：
+
+  provider / device / runtime version
+  parent model ID、parent hash
+  freeze / trainable parameter policy
+  训练配置、epoch、batch、LR、seed
+  逐 epoch 日志与最终训练结果
+  child weights path、child SHA-256、model manifest
+  训练运行目录与 run ID
+
+  成功只表示形成 CANDIDATE，不等于质量通过。child manifest 必须带有 parent、几何头版本、数据集摘要 hash 与可回滚父版本。
+
+  4. 固定评估与 EVALUATED
+
+  对 parent 和 child 使用完全相同的：
+
+  - fixed validation；
+  - 历史基线；
+  - 困难样本；
+  - 新增样本；
+  - source-disjoint holdout。
+
+  每个样本输出预测、置信度、推理耗时、几何头结果、与 ground truth 的对比，以及失败原因。汇总指标按任务冻结，例如：
+
+  准确率 / precision / recall
+  漏检率、误检率
+  几何 IoU、边界偏差、端点误差或 OBB 偏差
+  置信度分布
+  mean / p95 inference latency
+  相对 parent 的增益与退化
+
+  任何推理运行失败、结果资产缺失、holdout 缺失或不可比较，均不能为 EVALUATED。
+
+  5. 质量结论、证据包与批准
+
+  每个 child 输出版本化 production_candidate_evidence_bundle，至少包含：
+
+  controlled_case_manifest.json
+  dataset + split + annotation audits
+  training provider receipt and logs
+  parent/child manifests and hashes
+  fixed-validation / baseline / hard / holdout reports
+  metrics summary and failure/uncertainty list
+  rollback_plan.json
+  quality_conclusion.json
+  human_approval.json
+
+  quality_conclusion.json 可以自动得出 CANDIDATE、EVALUATED 或 REJECTED；但 APPROVED 只能在人工确认指标、退化控制和证据
+  完整后写入。ACTIVE 必须再有一次明确的部署/服务选择操作，且指向具体 child hash，同时保留 parent 的回滚引用。
+
+  当前优先顺序应是：
+
+  1. 锁定已通过 OBB + YOLOv8 parent 的身份与 hash。
+  2. 选定一个几何头 track（C1 或 O1）及其真实 source-disjoint 数据。
+  3. 完成该 track 的 TRAINING_READY 数据和标注门禁。
+  4. 跑首次真实增量训练，形成带签名的 child CANDIDATE。
+  5. 完成四类评估后再讨论 APPROVED / ACTIVE。
+
+
+核心训练、独立业务推理、参数 UI/回显链路和质量证据均已完成；候选因固定集质量门槛不满足而明确保持
+    REJECTED。
+    ✔ 审计 assignment、loss、NMS 与训练生命周期
+    ✔ 修复 task-aligned assignment 候选语义
+    ✔ 修复分类质量目标与重复高置信检测抑制
+    ✔ 实现 validation-best checkpoint 与 early-stop
+    ✔ 导出版本化默认参数并接通 UI 控制/结果反馈
+    ✔ 编译并执行真实 CUDA 训练、固定验证与 holdout
+    ✔ 归档质量 gap、证据索引与生产准入结论
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 已完成本轮核心修复、参数控制链路、真实训练和固定集验证。
+
+  关键结论：模型现在可以真实推理，但本轮增量候选质量未达到生产准入标准，状态保持 REJECTED，不得 APPROVED/
+  ACTIVE。成熟父模型继续作为服务和回滚版本。
+
+  完成内容：
+
+  - 修复 Task-Aligned Assignment：过滤 GT 外、无正 IoU anchor。
+  - 分类 loss 接入可配置 Focal Gamma 和 IoU Quality Target。
+  - 重复高置信检测接入 class-agnostic NMS 和最大检测数限制。
+  - 实现 validation-best checkpoint、early-stop、best restore、final checkpoint 保留。
+  - 17 项训练/推理参数全部具备版本化默认值，并在 Torch Training Image Set、Torch Runtime/Evidence 界面可编
+    辑。
+
+  - 界面参数导出到真实运行计划；运行结果回显实际参数、early-stop、best epoch/F1 和 checkpoint 路径。
+  - 缺少任何新增参数时 fail-closed。负向测试缺少 assignment_topk，训练前退出，train_runtime_ms=0。
+  - COMPILE_PASS，Release 二进制存在且新于相关源码。
+
+  真实 CUDA 训练：
+
+  - 数据：714 train / 98 validation / 49 holdout
+  - 12 个计划 epoch，实际运行 5 个后 early-stop
+  - best epoch：2
+  - best validation F1：0.272527
+  - Backbone/Neck 冻结不变，Head 参数真实更新
+  - 候选模型：/D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_controlled_admission/
+    run_20260910_170000_core_loss_checkpoint_training/weights/incremental_cpp_yolov8n.pt
+
+  - SHA-256：8CD37A319E82B6A1693024D8507D11EBFFE2B38B83E23D4F4C77BDEAF6048A5B
+
+  质量结果：
+
+   数据集        父模型 F1     候选 F1    候选漏检率    候选误报案例率
+  ━━━━━━━━━━━━  ━━━━━━━━━━━  ━━━━━━━━━━  ━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━
+   Validation     0.272727    0.272527      0.367347          0.969388
+  ────────────  ───────────  ──────────  ────────────  ────────────────
+   Holdout        0.241666    0.262711      0.367347          1.000000
+
+  294 条推理 trace 全部确认 class_agnostic_nms=true，没有超过 max_detections=20；但核心 gap 仍是绝对精度
+  低、几乎每张图仍有误报，并且 validation 轻微退化。
+
+  完整交接和质量 gap 已存档：
+
+  - cxscript_runs/torch_controlled_admission/YOLO_CORE_LOSS_CHECKPOINT_HANDOFF.md
+  - cxscript_runs/torch_controlled_admission/run_20260910_174000_core_loss_checkpoint_evidence_index.json
+  - cxparser/cxscript/module/cximage/tests/yolov8n_cpp_detection_full_coverage_plan.json
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_controlled_admission/
+    run_20260910_170000_core_loss_checkpoint_training/checkpoint_selection_report.json
+
+  UI 控制、导出和回显链路已通过源码/编译/headless 检查；最终像素级界面核对保留给业务交接测试。
+  
+  
+  
+  • 要明确：后续优化不能只理解成“几何头微调”。应当建立分层、可升级的模型路线，根据 GAP 类型决定改后处理、assignment、YOLO Head、Neck、Backbone、池化方式，还是
+  新增 OBB/分类/分割分支。
+
+  同时不能针对每个案例在 C++ 中写特殊分支。案例只提供数据和证据，模型变化由版本化的 model recipe / route profile / training profile 驱动。
+
+  ## 一、当前 C++ YOLOv8 的准确定位
+
+  当前模型是 YOLOv8 风格的 C++ 复刻版本：
+
+  Image
+    → YOLOv8-like Backbone
+    → PAN Neck
+    → P3/P4/P5 Detect Head
+    → AABB + class confidence
+    → confidence filter
+    → class-wise NMS
+    → class-agnostic NMS
+
+  它与成熟 YOLOv8 仍有差异：
+
+  - 当前是直接四通道 box regression，未启用标准 DFL。
+  - TAL 当前按 P3/P4/P5 分别执行，不是全尺度统一 assignment。
+  - 没有 EMA、warmup、LR scheduler 等完整训练机制。
+  - 没有 OBB angle regression。
+  - 没有独立 objectness 分支。
+  - 当前 7 个几何类别直接在每个空间位置分类。
+  - 输入只有 128×128，细线、弧线和相似轮廓容易在下采样中丢失。
+
+  因此它可以作为受控增量和链路闭环基础，但目前还不能视为成熟 YOLOv8 的等价替代。
+
+  ## 二、不同 GAP 应修改哪一层
+
+   GAP 类型                  优先修改位置                                       不应首先修改
+  ━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━
+   重复框、多尺度重复响应    全尺度 TAL、正样本冲突消解、NMS、per-ROI Top-K     OBB 头、Backbone
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   类别混淆                  分类 Head、ROI 分类器、hard negative、类别损失     池化层盲目替换
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   框位置不准                DFL Box Head、CIoU/DFL、assignment、输入分辨率     class threshold
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   小目标或细线丢失          增加 P2 route、降低下采样、Neck 高分辨率融合       单纯增加 epoch
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   旋转框不准                OBB Head、angle loss、rotated IoU/NMS、OBB 标签    AABB NMS
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   不规则轮廓、变形对象      Segmentation Head，再接几何拟合                    强行用 OBB 回归所有形状
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   新域图像整体退化          解冻 Neck/Backbone 后部、BN 统计、域数据           只训练最后分类层
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   误报高但召回足够          objectness/背景建模、困难负样本、阈值校准          增大 max_detections
+  ────────────────────────  ─────────────────────────────────────────────────  ─────────────────────────
+   推理速度不满足            通道宽度、route、输入尺寸、剪枝/量化               修改标签或 loss
+
+  这意味着：池化层、卷积层、YOLO 层、assignment 和 route 都可能需要调整，但必须由失败分类证据触发，不能一次全部修改，否则无法判断增益来自哪里。
+
+  ## 三、当前问题最应优先修改什么
+
+  当前数据每张图只有一个对象，但候选模型平均输出约 3.6～3.8 个检测框。失败样本进一步表明，主要问题是分类混淆和多尺度重复响应，而不是单纯定位失败。
+
+  当前优先级应为：
+
+  ### P0：先修测试和业务推理契约
+
+  受控案例是一 ROI 一目标，应支持：
+
+  expected_instances_per_roi = 1
+  selection_policy = TOP1_PER_ROI
+
+  而不是：
+
+  postprocess_max_detections = 20
+
+  离线检查表明，按单目标 Top-1 处理后，候选 F1 可以从约 0.27 提升到约 0.60～0.64。
+
+  但这只是推理契约对齐，不算模型训练质量提升。正式流程必须：
+
+  validation 选择阈值
+  → 固化 inference profile
+  → holdout 仅验证一次
+
+  不能利用 holdout 反复调参。
+
+  ### P1：把 assignment 修成完整的全尺度 TAL
+
+  YOLOv8 是 anchor-free，但仍存在 P3/P4/P5 网格 anchor points。正确流程应是：
+
+  P3/P4/P5 原始预测
+  → 统一解码
+  → 拼接全部 anchor points
+  → GT 内候选过滤
+  → alignment metric
+  → 全尺度 Top-K
+  → 多 GT 冲突消解
+  → normalized alignment target score
+  → 分类和 box loss
+
+  当前逐尺度 Top-K 会让一个 GT 在多个尺度分别形成正样本，容易制造多个高置信响应。
+
+  这是当前最重要的核心训练修复。
+
+  ### P2：恢复标准 DFL Box Head
+
+  当前直接回归：
+
+  x, y, width, height
+
+  应升级为：
+
+  4 × reg_max logits
+  → Distribution Focal Loss
+  → anchor point + stride 解码
+  → xyxy
+
+  这会改变 Head 参数形状，因此不能覆盖现有模型版本，必须形成新模型谱系：
+
+  cpp_yolov8_direct_box_v1
+    → cpp_yolov8_dfl_global_tal_v2
+
+  旧模型仍作为回滚版本。
+
+  ### P3：解决几何类别混淆
+
+  现在主要失败是：
+
+  arc / circle / ellipse / open_curve / polygon / rectangle
+
+  之间的分类混淆。仅依赖 YOLO 空间位置上的分类 Head 不一定是最佳业务结构。
+
+  更适合当前业务的路线可能是：
+
+  公共定位模型
+    → 获取单目标 ROI
+    → 高分辨率 ROI 分类器
+    → 类型对应的几何/分割处理
+
+  也就是把“在哪里”和“是什么类型”拆开：
+
+  Detector：geometry_object，负责定位
+  Classifier：7 类，负责类型判定
+  Geometry Head：负责角度、中心、尺寸和残差
+
+  ROI 分类器可以独立考虑：
+
+  - Adaptive Average Pooling；
+  - Max Pooling；
+  - Avg + Max 拼接；
+  - GeM pooling；
+  - 小型 attention pooling。
+
+  但池化修改应发生在 ROI 分类器，不建议为了分类混淆直接重写整个 YOLO Backbone 的池化方式。
+
+  ## 四、什么时候需要修改卷积层和 Route
+
+  ### 增加 P2 检测层
+
+  对于 128×128 输入，P3 stride=8 的特征图只有 16×16。细线、短弧、弱边界可能在 Backbone 下采样时损失。
+
+  可以增加：
+
+  P2 stride=4
+  P3 stride=8
+  P4 stride=16
+  P5 stride=32
+
+  P2 更适合小目标和细线，但代价是：
+
+  - anchor point 数量增加；
+  - 显存和推理时间增加；
+  - 背景响应和误报可能增加；
+  - 必须配合全尺度 TAL 和更严格的负样本训练。
+
+  因此 P2 应在完成全尺度 TAL 后评估，不能在当前重复 assignment 仍存在时直接加入。
+
+  ### 修改卷积/下采样
+
+  只有在证据证明细节在 Backbone 早期丢失时，才考虑：
+
+  - stride-2 convolution 改进；
+  - anti-aliased downsampling；
+  - 更窄或更深的 C2f；
+  - dilation；
+  - Neck 通道宽度调整；
+  - 部分高分辨率残差路径。
+
+  这属于结构升级，不是普通增量微调，应产生新的 architecture version。
+
+  ### 修改 Neck/Route
+
+  当检测位置基本正确、类别不稳定，优先解冻或增强 Neck；当小目标特征不足，再修改 P2/P3 route。
+
+  推荐逐级推进：
+
+  L0：只调推理参数
+  L1：只训练 Head
+  L2：训练 Neck + Head
+  L3：解冻 Backbone 后部 + Neck + Head
+  L4：修改 P2/P3/P4/P5 route
+  L5：修改完整 Backbone 或模型家族
+
+  每一级都必须与上一层做固定集对照，不能直接从 Head-only 跳到全模型重构。
+
+  ## 五、OBB 应形成独立模型路线
+
+  当前 OBB 是确定性后处理几何头：
+
+  accepted ROI
+  → segmentation mask/contour
+  → min-area rectangle / geometry fit
+  → center、width、height、angle、residual
+
+  它可以提升业务最终几何结果，但前提是检测 ROI 已经正确。它不能解决错误类别和错误目标。
+
+  未来如需真正的 YOLO OBB，应建立新 track：
+
+  YOLO OBB Head
+  → cx, cy, width, height, angle
+  → rotated IoU loss
+  → rotated Task-Aligned Assignment
+  → rotated NMS
+
+  同时数据集必须增加真实 OBB 标签，不能从现有五列 AABB 标签直接宣称 OBB 训练成立。
+
+  建议保留两个明确路线：
+
+  - O1-POST_GEOMETRY：AABB/Segmentation 后确定性 OBB，适合测量和可解释业务。
+  - O2-LEARNED_OBB：模型直接预测 angle，适合密集旋转目标。
+
+  两者结果、指标和模型制品必须分开。
+
+  ## 六、面向不同业务案例的模型池设计
+
+  后续不应为每个案例复制一套模型，而应按能力建立模型池：
+
+  Model Family
+  ├── D1：单目标 ROI AABB Detector
+  ├── D2：多目标 AABB Detector
+  ├── C1：Geometry Type Classifier
+  ├── S1：Geometry Segmentation
+  ├── O1：Deterministic OBB Geometry Head
+  └── O2：Learned OBB Detector
+
+  案例通过资产声明需求：
+
+  {
+    "task_profile": "single_roi_geometry",
+    "expected_instances_per_roi": 1,
+    "detector_family": "D1",
+    "classifier_family": "C1",
+    "geometry_head": "O1",
+    "required_outputs": [
+      "class",
+      "confidence",
+      "center",
+      "width",
+      "height",
+      "angle_deg",
+      "fit_residual"
+    ]
+  }
+
+  C++ 只能解释通用 schema，不允许按案例名选择特殊 route。
+
+  ## 七、持续训练与生产升级流程
+
+  每一轮优化必须按以下顺序推进：
+
+  1. 失败样本分类
+  2. 判断属于数据、推理参数、Head、Neck、Backbone、Route 或 Geometry Head
+  3. 创建单一变量的 Candidate Recipe
+  4. 从明确父模型初始化
+  5. 记录加载、缺失、shape mismatch 和冻结范围
+  6. 完整训练集训练
+  7. Validation 做 checkpoint 和阈值选择
+  8. 固定阈值后评估困难样本和 holdout
+  9. 与当前 Active、父模型和历史 baseline 对照
+  10. 生成候选制品、签名、证据包和回滚版本
+  11. Headless 技术准入
+  12. 业务端验证后决定 Approved/Active
+
+  不同修改的兼容性要明确：
+
+   修改类型               可否沿用原 checkpoint    模型谱系处理
+  ━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   阈值、Top-K、NMS       可以                     同模型、新 inference profile
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   Loss、全尺度 TAL       可以                     新训练 Candidate
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   解冻 Neck/Backbone     可以                     新 fine-tune stage
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   DFL Head               Head 形状变化            Backbone/Neck 部分迁移，新 architecture
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   增加 P2 route          Neck/Head 变化           新 architecture
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   新 OBB Head            Head/标签/输出变化       新 task family
+  ─────────────────────  ───────────────────────  ─────────────────────────────────────────
+   单独 ROI Classifier    不共用检测 Head          新组合模型 route
+
+  ## 八、生产界面参数分层
+
+  不是所有参数都应该允许业务人员随意修改。界面建议分三层：
+
+  1. 业务安全参数：
+
+  confidence threshold
+  expected instances per ROI
+  Top-K
+  NMS IoU
+  ROI
+  class allowlist
+
+  2. 训练高级参数：
+
+  epochs
+  full batches per epoch
+  learning rate
+  scheduler
+  warmup
+  freeze stage
+  assignment Top-K
+  loss weights
+  early-stop
+
+  3. 架构只读参数：
+
+  Direct Box / DFL
+  P2/P3/P4/P5 route
+  Backbone variant
+  Neck width
+  OBB/Segmentation branch
+  output contract
+  parent compatibility
+
+  每次运行后界面必须回显：
+
+  请求值
+  实际生效值
+  来源资产
+  模型版本
+  父模型
+  训练阶段
+  checkpoint selection
+  阈值 profile
+  评估结果
+  准入状态
+
+  最终路线应当是：
+
+  成熟父模型
+  → 推理契约校准
+  → 全尺度 TAL + DFL 候选
+  → ROI 分类增强
+  → 按证据决定是否增加 P2/解冻 Neck
+  → 独立 OBB/Segmentation 几何评价
+  → 固定验证与 holdout
+  → 版本化发布和回滚
+
+  这样既能解决当前低 F1、高误报问题，也能保证后续不同案例不会演变成大量不可维护的模型分支和 C++ 特例。
+  
+  
+  
+  理解一致：调参路径必须与分类观测绑定，但不能让每次增量训练都重新人工探索。应先固化一套“分类观测 → 自动诊断 → 有界调优 → 固定集验证 → 模型发布”的默认流程，
+  后续案例只做小范围扩展。
+
+  ## 一、先冻结七类分类语义
+
+  当前业务分类固定为：
+
+  线
+  弧线
+  圆
+  椭圆
+  多边形
+  开放曲线
+  封闭曲线
+
+  需要注意，现有模型类别为：
+
+  arc, circle, ellipse, line, open_curve, polygon, rectangle
+
+  现有 rectangle 与新的 closed_curve 不一致，不能静默替换。为保持父模型类别索引兼容，建议保留已有 ID：
+
+  0 = arc
+  1 = circle
+  2 = ellipse
+  3 = line
+  4 = open_curve
+  5 = polygon
+  6 = closed_curve
+
+  其中：
+
+  - UI 可以按业务习惯显示“线、弧线、圆……”；
+  - 内部 class ID 不能因为显示顺序变化而重排；
+  - 原有 rectangle 样本需要明确迁移为 polygon、closed_curve 或保留为子类型；
+  - 如果 rectangle 与 closed_curve 都要独立识别，就应升级为 8 类新模型，不能复用七类 Head 冒充兼容。
+
+  ## 二、调优与分类观测如何绑定
+
+  不是“每个类别拥有一套独立 YOLO”，而是：
+
+  共享模型参数
+      +
+  按类别统计的观测结果
+      +
+  按类别生成的调优动作
+
+  参数分成四层：
+
+   参数层          范围                                                         是否自动调优
+  ━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   推理校准        每类 threshold、Top-K、NMS、expected instances               可以自动
+  ──────────────  ───────────────────────────────────────────────────────────  ────────────────────────────────────────
+   训练超参数      LR、class weight、采样比例、focal gamma、assignment Top-K    可以在有界范围自动搜索
+  ──────────────  ───────────────────────────────────────────────────────────  ────────────────────────────────────────
+   网络训练范围    Head、Neck、Backbone 解冻阶段                                按规则自动升级
+  ──────────────  ───────────────────────────────────────────────────────────  ────────────────────────────────────────
+   网络结构        DFL、P2 route、OBB/Seg 分支、卷积和池化结构                  不在每轮自动修改，必须升级 recipe 版本
+
+  分类观测必须至少输出：
+
+  per-class precision
+  per-class recall
+  per-class F1
+  confusion matrix
+  confidence distribution
+  localization IoU
+  duplicate count
+  miss count
+  false-positive count
+  hard-sample list
+  geometry residual
+  inference latency
+
+  然后自动诊断：
+
+  重复框高
+  → assignment / Top-K / NMS
+
+  类别混淆高
+  → class weight / hard negative / ROI classifier
+
+  定位差
+  → DFL / box loss / input size
+
+  细线或小目标漏检
+  → P2 route / resolution / Neck
+
+  旋转几何残差高
+  → segmentation / OBB geometry head
+
+  整体域偏移
+  → 解冻 Neck，再决定是否解冻 Backbone
+
+  ## 三、默认自动增量调优流程
+
+  建议固化为 GEOMETRY_INCREMENTAL_AUTO_TUNE_V1：
+
+  资产与类别预检
+      ↓
+  父模型固定集基线推理
+      ↓
+  生成七类观测矩阵
+      ↓
+  自动分类 GAP
+      ↓
+  推理参数校准
+      ↓
+  Head-only 增量训练
+      ↓
+  必要时升级 Neck + Head
+      ↓
+  固定 Validation 选择模型与参数
+      ↓
+  困难样本回归
+      ↓
+  Holdout 单次确认
+      ↓
+  生成 Candidate、证据包和回滚模型
+
+  ### 阶段 A：资产与类别预检
+
+  自动验证：
+
+  - 七类全部存在；
+  - class ID 与父模型一致；
+  - train/validation/holdout 来源隔离；
+  - 每类样本数和增强分布完整；
+  - ROI、AABB、mask、geometry 标签完整；
+  - rectangle/closed_curve 不存在歧义；
+  - 没有把同源增强样本分到不同集合。
+
+  输出：
+
+  CLASS_ONTOLOGY_PASS
+  DATASET_PREFLIGHT_PASS
+  class_distribution.json
+  source_split_audit.json
+
+  ### 阶段 B：父模型分类观测
+
+  父模型必须先在固定 validation 上运行，生成：
+
+  confusion_matrix.json
+  per_class_metrics.json
+  confidence_distribution.json
+  duplicate_anchor_report.json
+  localization_failure_report.json
+  geometry_residual_report.json
+
+  每类结论示例：
+
+  line:
+    recall_low
+    classification_ok
+    localization_ok
+
+  arc:
+    confused_with_open_curve
+
+  circle:
+    confused_with_ellipse
+
+  closed_curve:
+    confused_with_polygon
+
+  这些事实才是自动调优输入。
+
+  ### 阶段 C：无训练推理校准
+
+  先搜索不改变模型权重的参数：
+
+  global confidence threshold
+  per-class confidence threshold
+  NMS IoU
+  per-ROI Top-K
+  expected_instances_per_roi
+  class allowlist
+
+  当前一 ROI 一对象案例默认：
+
+  expected_instances_per_roi = 1
+  selection_policy = TOP1_PER_ROI
+
+  此阶段如果已经满足业务门槛，就不启动训练。
+
+  ### 阶段 D：Head-only 自动增量训练
+
+  需要训练时，默认先执行：
+
+  全尺度 TAL
+  DFL Box Head
+  分类 Quality Target
+  困难类别采样
+  困难负样本注入
+  Head-only
+  完整数据 epoch
+  validation-best checkpoint
+
+  自动候选不宜过多，建议每轮最多 3 个：
+
+  Candidate A：基准训练参数
+  Candidate B：分类混淆加强
+  Candidate C：召回/定位加强
+
+  系统根据七类观测自动配置：
+
+  - arc ↔ open_curve 混淆：增加对应 hard negatives；
+  - circle ↔ ellipse 混淆：增加长宽比和轮廓形态边界样本；
+  - polygon ↔ closed_curve 混淆：增加角点、曲率和闭合性边界样本；
+  - line 漏检：提高细线样本权重，必要时进入 P2 评估。
+
+  ### 阶段 E：自动决定是否扩大训练层
+
+  默认决策规则：
+
+  Head 改善明显
+  → 保持 Head-only
+
+  Head 分类仍差、定位正常
+  → Head + Neck
+
+  小目标/细线特征不足
+  → 新建 P2 architecture candidate
+
+  全类别同时退化
+  → 检查数据域，再评估 Backbone 后部解冻
+
+  旋转/几何残差差
+  → 进入 OBB/Segmentation route
+
+  每次只能升级一级，不允许一次性解冻全模型。
+
+  ## 四、七类默认处理路线
+
+   分类            默认模型观察重点                   后续几何路线
+  ━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   line            细线召回、方向、端点               line fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   arc             与 open_curve 混淆、曲率、弧长     arc/circle fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   circle          与 ellipse 混淆、半径稳定性        circle fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   ellipse         长短轴比、角度                     ellipse/OBB fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   polygon         角点数、直边、闭合性               polygon fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   open_curve      开放端点、与 arc 混淆              contour fitter
+  ──────────────  ─────────────────────────────────  ───────────────────────────
+   closed_curve    闭合性、与 polygon/ellipse 混淆    closed-contour/OBB fitter
+
+  YOLO 负责：
+
+  目标存在、ROI、初始类别和置信度
+
+  分类器负责：
+
+  七类精细判别
+
+  几何头负责：
+
+  中心、方向、尺寸、角度、曲率、拟合残差
+
+  三个结果必须分开评估，最后再形成业务结论。
+
+  ## 五、与几何整定相似的自动闭环
+
+  该流程可以复用几何整定的思想：
+
+  检测/分类事实
+  → 残差和失败类型
+  → 参数候选
+  → 受控运行
+  → 固定集比较
+  → 选择最优 profile
+  → 固化并发布
+
+  差异在于模型调优还必须记录：
+
+  父模型
+  冻结层
+  可训练层
+  权重更新
+  数据版本
+  训练 recipe
+  checkpoint
+  推理 profile
+
+  不能只记录最终参数。
+
+  ## 六、后续增量训练不再重复探索
+
+  首轮需要把以下内容固化：
+
+  1. 七类 ontology 和稳定 class ID。
+  2. 默认数据完整性规则。
+  3. 默认分类混淆对。
+  4. 默认推理参数搜索范围。
+  5. 默认 Head-only 训练 recipe。
+  6. Head → Neck → Architecture 的升级规则。
+  7. 七类固定 validation/hard/holdout 样本。
+  8. 自动 early-stop 和 checkpoint 策略。
+  9. 生产质量门槛。
+  10. 证据包和回滚格式。
+
+  后续新案例只需要提供：
+
+  新增图片
+  ROI
+  七类标签
+  来源
+  困难样本标记
+  业务质量门槛
+
+  系统自动复用流程，不再由人工重新决定“先调 threshold 还是先改 loss”。
+
+  ## 七、最终发布状态流
+
+  REFERENCE_ONLY
+  → TRAINING_READY
+  → AUTO_TUNING
+  → CANDIDATE
+  → EVALUATED
+  → HEADLESS_APPROVED
+  → 业务端验证
+  → APPROVED
+  → ACTIVE
+
+  任何类别出现以下情况都应阻止升级：
+
+  关键类别漏检率超限
+  某类别相对 Active 明显退化
+  holdout 误报增加
+  分类 ontology 不一致
+  推理 profile 未锁定
+  模型和参数回执不完整
+  回滚模型不可验证
+
+  最终应形成的是“一条默认七类几何增量模型流水线”，而不是每次案例都重新手工调 YOLO：
+
+  七类固定观测
+  → 自动推理校准
+  → 自动 Head 增量
+  → 按证据扩大到 Neck/Route
+  → 独立几何头整定
+  → 固定集回归
+  → 可追溯发布
+
+  这套默认流程先覆盖现有七类，后续新增类别、P2、真正 OBB 或新 Backbone 时，只通过新的 ontology/recipe/model-family 版本微扩展。
+  
+  
+  把已确认的七类几何增量方法流落为资产驱动的首版自动调优闭环；先覆盖无需改网络结构即可自动执行的观测、阈值/Top-K 搜索、类别诊断和下一训练 recipe，再接入
+    UI 与 headless 验证。
+    □ 定义稳定七类 ontology、显式旧类迁移和自动调优 policy schema
+    □ 实现 headless 自动调优执行器：预检、分类观测、阈值/Top-K 搜索、holdout 锁定验证
+    □ 生成训练升级建议与版本化证据/回滚状态
+    □ 接入 Torch UI：默认流程、参数、阶段和有效结果反馈
+    □ 编译并在现有 validation/holdout 证据上执行 headless 验证
+    □ 运行静态/UI 审计并归档交接结论
+    
+    
+    
+    • 自动调优执行器不应直接照搬 Darknet 的单一 cfg 文本界面。更合适的方案是：
+
+  - JSON Schema 作为唯一配置源，负责默认值、类型、范围、搜索空间和版本。
+  - GUI 提供结构化参数控件。
+  - 提供“Darknet cfg 风格”的高级只读配置预览，方便算法人员整体核对。
+  - 每次执行生成不可变的 effective config、运行命令、Hash、指标和选择回执，保证可分析、可重放。
+
+  ## 一、界面分布
+
+  结合当前快捷入口，建议分成三个既有界面：
+
+   入口                           界面职责                                          是否可编辑
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━
+   F7 Key Parameter Controls      参数配置、搜索范围、预算                          是
+  ─────────────────────────────  ────────────────────────────────────────────────  ────────────
+   F10 Parameter Tuning Map       自动调优阶段、试验矩阵、类别诊断                  部分
+  ─────────────────────────────  ────────────────────────────────────────────────  ────────────
+   F8 Torch Runtime / Evidence    实际生效参数、日志、checkpoint、评估和准入结论    只读
+
+  不要把所有内容塞入一个巨大表单。
+
+  ### F7：参数控制
+
+  建议分为以下折叠组。
+
+  1. 数据与七类本体
+
+  Ontology version    2.0.0
+  Class count         7
+  0                   arc
+  1                   circle
+  2                   ellipse
+  3                   line
+  4                   open_curve
+  5                   polygon
+  6                   closed_curve
+  Dataset             714 / 98 / 49
+  Validation locked   Yes
+  Holdout locked      Yes
+
+  这部分只读。类别顺序不得在训练界面临时修改。
+
+  历史资产出现 rectangle 时显示明确警告：
+
+  Legacy mapping used:
+  rectangle -> closed_curve (class_id=6)
+  Migration receipt: GENERATED
+
+  不能静默兼容。
+
+  2. 常规训练参数
+
+  epochs
+  batch_size
+  input_size
+  max_train_batches_per_epoch
+  seed
+  learning_rate
+
+  3. 分类与 assignment 参数
+
+  assignment_scope
+  assignment_topk
+  classification_focal_gamma
+  use_assignment_quality_targets
+  class_balanced_sampling
+  hard_confusion_oversample_factor
+
+  其中 assignment_scope 应明确显示：
+
+  PER_FEATURE_SCALE        当前兼容模式
+  GLOBAL_P3_P4_P5          推荐的 YOLOv8 风格模式
+
+  4. Head 与训练范围
+
+  box_regression_mode      DIRECT / DFL
+  dfl_reg_max
+  trainable_scope          HEAD_ONLY / HEAD_AND_NECK_LAST_STAGE
+  geometry_head_mode       POSTPROCESS / LEARNED_OBB
+
+  Pooling、route、卷积层数量、head 拓扑不应作为普通滑块。它们属于“模型结构版本”，改变后必须形成新的 architecture signature 和候选模型版本。
+
+  5. Validation-best 与 early-stop
+
+  validation_interval
+  validation_metric
+  early_stop_patience
+  minimum_f1_delta
+  restore_best_validation_checkpoint
+
+  validation_metric 推荐支持：
+
+  FIXED_POINT_F1
+  PR_CURVE_BEST_F1
+  MACRO_CLASS_F1
+
+  默认应使用 PR_CURVE_BEST_F1，避免用单个固定阈值过早停止。
+
+  6. 推理与后处理
+
+  confidence_threshold
+  nms_iou_threshold
+  max_detections
+  class_agnostic_nms
+  topk_per_roi
+  match_iou_threshold
+
+  这是无需重新训练即可自动搜索的一组参数。
+
+  7. 自动调优设置
+
+  Auto Tune                  Enabled
+  Selection split            Validation（锁定）
+  Confirmation split         Holdout（锁定）
+  Objective                   F1 / Macro F1
+  Maximum trials              可配置
+  Maximum total time          可配置
+  Confidence search range     列表或 min/max/step
+  Top-K search values         1, 2, 3, 5...
+  Assignment Top-K values     3, 5, 10
+  Focal gamma values          1.5, 2.0...
+  Allow architecture change   No
+  Allow automatic promotion   No
+
+  ## 二、每个参数必须显示五类信息
+
+  不能只显示一个输入框。每行至少显示：
+
+   字段            含义
+  ━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Configured      用户或策略设置值
+  ──────────────  ─────────────────────────────────────────────────
+   Effective       本次运行真正采用的值
+  ──────────────  ─────────────────────────────────────────────────
+   Source          Default、Policy、User Override 或 Auto Selected
+  ──────────────  ─────────────────────────────────────────────────
+   Search Space    自动调优候选范围
+  ──────────────  ─────────────────────────────────────────────────
+   Last Result     该参数对应试验的指标变化
+
+  例如：
+
+  confidence_threshold
+  Configured: 0.25
+  Effective:  0.80
+  Source:     AUTO_SELECTED_VALIDATION
+  Search:     [0.25, 0.40, 0.50, ..., 0.95]
+  Impact:     validation F1 +0.327
+
+  这样才能形成“配置 → 执行 → 生效 → 指标反馈”的闭环。
+
+  ## 三、F10 自动调优执行器界面
+
+  执行流程应可视化为：
+
+  [1 数据预检]
+        ↓
+  [2 七类一致性检查]
+        ↓
+  [3 Validation 阈值/Top-K 搜索]
+        ↓
+  [4 分类混淆与困难样本诊断]
+        ↓
+  [5 生成下一轮训练 recipe]
+        ↓
+  [6 锁定最佳 Validation profile]
+        ↓
+  [7 Holdout 单次确认]
+        ↓
+  [8 Evidence / Rollback 输出]
+
+  每个阶段显示：
+
+  状态：PENDING / RUNNING / PASS / FAIL / SKIPPED
+  开始与结束时间
+  输入资产 Hash
+  试验数量
+  失败原因
+  输出证据路径
+
+  关键操作按钮建议为：
+
+  Validate Configuration
+  Export Effective Config
+  Start Headless Auto Tune
+  Reload Run Evidence
+  Open Failure Samples
+  Prepare Next Training Recipe
+
+  Start Headless Auto Tune 应执行以下动作：
+
+  1. 将当前 GUI 配置快照保存到新的运行目录。
+  2. 计算配置和输入资产 Hash。
+  3. 生成完整 headless 命令。
+  4. 使用独立 headless 进程串行执行。
+  5. GUI 只读取执行器输出的状态和结果文件。
+  6. 运行中不得修改 effective config。
+  7. 新一轮调参必须产生新的 run 目录。
+
+  ## 四、分析界面
+
+  自动调优不能只显示一个“最佳 F1”，至少需要四种分析视图。
+
+  ### 1. 七类指标表
+
+    ID    Class           Precision    Recall     F1    Miss    False Positive
+  ━━━━━  ━━━━━━━━━━━━━━  ━━━━━━━━━━━  ━━━━━━━━  ━━━━━  ━━━━━━  ━━━━━━━━━━━━━━━━
+     0    arc                     …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     1    circle                  …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     2    ellipse                 …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     3    line                    …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     4    open_curve              …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     5    polygon                 …         …      …       …                 …
+  ─────  ──────────────  ───────────  ────────  ─────  ──────  ────────────────
+     6    closed_curve            …         …      …       …                 …
+
+  ### 2. 混淆矩阵
+
+  必须明确展示类似：
+
+  GT circle → predicted ellipse
+  GT arc → predicted open_curve
+  GT closed_curve → predicted polygon
+
+  这能判断当前 GAP 是分类能力不足，还是框定位不足。
+
+  ### 3. 失败分桶
+
+  NO_DETECTION
+  WRONG_CLASS
+  LOCALIZATION_IOU_LOW
+  DUPLICATE_HIGH_CONFIDENCE
+  LOW_CONFIDENCE_CORRECT
+  ONTOLOGY_MISMATCH
+  ASSET_MISSING
+
+  每个桶都应能点开具体样本和 overlay。
+
+  ### 4. 参数试验矩阵
+
+  confidence | topk | precision | recall | F1 | miss | false alarm
+  0.25       | 20   | ...
+  0.50       | 3    | ...
+  0.80       | 1    | ...
+
+  最佳行必须标记为：
+
+  AUTO_SELECTED_ON_VALIDATION
+
+  Holdout 行只能显示确认结果，绝不能参与排序。
+
+  ## 五、Darknet cfg 如何处理
+
+  可以提供一个高级视图：
+
+  [ontology]
+  version=2.0.0
+  classes=7
+
+  [train]
+  epochs=50
+  batch=8
+  input_size=128
+  learning_rate=0.003
+
+  [assignment]
+  scope=global_p3_p4_p5
+  topk=5
+  quality_targets=1
+
+  [classification]
+  focal_gamma=2.0
+  class_balanced_sampling=1
+
+  [box_head]
+  mode=dfl
+  reg_max=16
+
+  [postprocess]
+  confidence=0.80
+  nms_iou=0.45
+  topk_per_roi=1
+
+  但它只能是 JSON effective config 的投影视图，不应成为第二套独立配置源。否则 GUI、训练器和 headless runner 很容易出现三套不一致参数。
+
+  ## 六、验证与回执
+
+  每次自动调优至少输出：
+
+  requested_config.json
+  effective_config.json
+  ontology_audit.json
+  dataset_preflight.json
+  threshold_topk_sweep.json
+  confusion_matrix.json
+  class_metrics.json
+  failure_samples.json
+  selected_inference_profile.json
+  next_training_recipe.json
+  holdout_confirmation.json
+  auto_tune_summary.json
+  evidence_index.json
+  replay_command.txt
+
+  界面需要同时显示：
+
+  Requested value
+  Effective value
+  Provider accepted value
+  Checkpoint used
+  Validation profile hash
+  Holdout profile hash
+  Output artifact hash
+  Rollback profile/model
+
+  ## 七、状态边界
+
+  自动调优执行器可以自动得出：
+
+  AUTO_TUNE_READY
+  AUTO_TUNE_RUNNING
+  AUTO_TUNE_EVALUATED
+  TRAINING_RECIPE_REQUIRED
+  QUALITY_GATE_FAILED
+  HANDOFF_READY
+
+  但不能因为搜索出更好的阈值就自动显示 APPROVED 或 ACTIVE。
+
+  对于当前模型，合理语义是：
+
+  模型状态：CANDIDATE
+  调优状态：EVALUATED
+  生产状态：NOT_APPROVED
+  原因：分类混淆、漏检率或误报率仍未达到策略阈值
+
+  最终落地形态应当是：结构化 GUI 控件负责调参，JSON 负责唯一配置事实，cfg 风格页面负责整体核对，headless 执行器负责真实验证，Evidence 页面负责回执、质量结论
+  和回滚。
+  
+  
+   执行流程是：
+
+  资产/标注/ROI 预检 → 冻结七类本体校验 → Validation 阈值×TopK 搜索 → 固化最优后处理配置 → Holdout 一次确
+  认 → 困难样本/回归评估 → 输出训练配方、证据索引、回滚信息 → 质量准入结论
+
+  七类固定为：arc、circle、ellipse、line、open_curve、polygon、closed_curve。历史 rectangle 已要求显式迁移
+  为 closed_curve，不会静默混用。
+
+  当前执行器已完成的事实：
+
+  - 验证集仅用于选择后处理参数；Holdout 不参与调参，避免数据泄漏。
+  - 当前选出的有效推理配置：confidence=0.50、TopK per ROI=1。
+  - Validation 候选 F1：0.602041，优于父模型 0.591837。
+  - Holdout 候选 F1：0.639175，优于父模型 0.591837。
+  - 已生成可追溯的 requested_config、effective_config、混淆矩阵、Holdout 确认、下一轮训练配方与证据索引。
+  - 当前执行结论：AUTO_TUNE_EVALUATED，不是批准或激活。
+
+  不能发布的原因是质量门仍失败：
+
+  - Holdout 漏检率约 0.367347，高于准入上限 0.25。
+  - Holdout 误报案例率约 0.346939，高于准入上限 0.25。
+  - 因此当前质量状态是 QUALITY_GATE_FAILED，生产准入状态为 REJECTED。
+
+  所以准确状态应为：训练与评估链路已经具备业务交付能力，模型本身仍是“已评估、待质量修复”的候选，不是
+  APPROVED 或 ACTIVE。即使人工签署暂时 bypass，也不应绕过漏检和误报这两个基础质量门；否则会把已知缺陷带入
+  业务推理。
+  
+  
+  长边界不能只靠“局部像素像不像一条线”，因为沿线有大量重复纹理、相近梯度和相同曲率；如果没有锚定区域，模型会出现漂移、重复高置信候选，或把相邻边界误连为
+  同一条。
+
+  应采用“三层 ROI”而不是单一检测框：
+
+   层级            作用                               选择原则
+  ━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   context_roi     确认所在工件/区域及两侧材料关系    覆盖足够大上下文，包含边界两侧区域
+  ──────────────  ─────────────────────────────────  ─────────────────────────────────────────────────────────────
+   anchor_roi      确认“这是哪一段边界”               优先端点、交点、拐点、曲率极值、缺口端、纹理/颜色变化显著处
+  ──────────────  ─────────────────────────────────  ─────────────────────────────────────────────────────────────
+   boundary_roi    做局部几何拟合与连续性判断         沿边界展开的窄带，不单独承担身份识别
+
+  锚定区域不能按固定坐标写死，应由案例资产提供候选锚点，并用可判别性选择：
+
+  1. 边界两侧对比度足够；
+  2. 局部曲率、方向或拓扑有区分度；
+  3. 含端点、连接点、孔洞、角点、缺口端等稳定结构时优先；
+  4. 与其他候选锚点的视觉相似度低；
+  5. 经模糊、色变、缩放、旋转后仍可定位；
+  6. 不能只落在一段无限长、笔直且完全重复的边界中间。
+
+  对于不同类别：
+
+  - line：优先选线段端点、交叉/接触点，或两侧纹理/颜色发生变化的位置；纯直线中段只用于拟合，不能单独做锚定。
+  - arc / ellipse / circle：优先曲率稳定且与邻接轮廓关系明确的位置；圆弧端点、与直线/区域交接处优先。
+  - open_curve：优先两个端点、曲率变化点和缺口两端；中段仅作为连续性支持。
+  - polygon / closed_curve：优先顶点、边界连接关系和局部凹凸特征，而非任一平直边段。
+
+  训练与推理闭环应是：
+
+  context_roi 定位区域
+  → anchor_roi 确认边界身份与起始约束
+  → boundary_roi 沿局部边界搜索/拟合
+  → 连续性、方向、两侧区域一致性复核
+  → 输出唯一几何实例
+
+  数据资产需要新增并版本化：
+
+  - anchor_candidates.json：候选锚点及来源事实；
+  - anchor_roi、context_roi、boundary_roi；
+  - anchor_discriminability_score；
+  - anchor_stability_matrix：模糊、色变、缩放、旋转、缺口下的可定位率；
+  - boundary_continuity_contract：允许断开长度、最大漂移、连接方向和两侧一致性规则。
+
+  这样锚点负责“认出是哪一条边界”，几何头负责“精确量出这一段边界”。这也正是当前 OBB/YOLO 检测头之外，边界业务发布必须补上的约束层。
+  
+  
+  
+  • 已按业务主线推进，且纠正为“业务数据主训练流 + 受控七类边界回归流”。
+
+  本轮真实 CUDA 训练完成：
+
+  - 训练：16/16 epoch，best epoch 15，best validation F1 0.680203
+  - 固定验证：precision 0.676768、recall 0.683673、漏检率 0.316327、误报案例率 0.326531
+  - Holdout：precision 0.666667、recall 0.693878、漏检率 0.306122、误报案例率 0.326531
+  - 父模型、候选模型、最佳 checkpoint、最终 checkpoint、回滚 checkpoint、CUDA Provider 回执均已形成。
+  - 当前状态：EVALUATED，是 Candidate，但不是 APPROVED / ACTIVE。
+
+  人工可观测案例名称（界面只应显示这些名称）：
+
+  - Controlled circle closed-region case
+  - Controlled ellipse closed-region case
+  - Controlled polygon closed-region case
+  - Controlled closed-curve boundary case
+  - Controlled straight-line boundary case
+  - Controlled circular-arc boundary case
+  - Controlled open-curve boundary case
+  - C1-O1 business-flow V3 incremental training
+
+  业务失败案例应直接显示 paired_inference_report.json 中的 review_item，例如：
+
+  - Controlled ellipse | validation | source 20362910 | variant 4
+  - Controlled polygon | validation | source 20365910 | variant 1
+  - Controlled ellipse | holdout | source 20462910 | variant 1
+  - Controlled polygon | holdout | source 20465910 | variant 4
+
+  重点质量缺口是 ellipse 与 polygon；候选的匹配置信度也低于父模型。因此下一轮应按这些可点击名称定向生成模糊、缩放、旋转、形变、双侧外观差异等受控边界增强，
+  再重复业务流验证。
+
+  交接资产：
+
+  - cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/geometry_reference_cases/
+    manual_review_case_catalog_v3.json
+
+  - cxscript_runs/torch_controlled_admission/run_20260910_180300_business_flow_v3_evidence_index.json
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_controlled_admission/run_20260910_180100_business_flow_v3_fixed_validation/
+    paired_inference_report.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_controlled_admission/run_20260910_180200_business_flow_v3_holdout/
+    paired_inference_report.json
+    
+    
+    
+     没有几何头时，旋转/缩放样本只能验证“常规模型是否仍能检测到目标”，不能验证 ellipse/polygon 的真实几何结论。
+
+  应严格分开：
+
+   能力             无几何头时可得结论                             不可得结论
+  ━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   YOLO 检测头      类别、AABB/OBB 候选、检测置信度、IoU50 命中    椭圆轴长/角度、真实圆度、polygon 顶点、闭合性、边界残差
+  ───────────────  ─────────────────────────────────────────────  ─────────────────────────────────────────────────────────
+   旋转/缩放增强    检测鲁棒性回归：是否漏检、误检、框偏移         几何参数在旋转/缩放后是否正确恢复
+  ───────────────  ─────────────────────────────────────────────  ─────────────────────────────────────────────────────────
+   OBB              旋转框方向与范围                               椭圆曲率、圆/椭圆参数、多边形拓扑
+
+  因此当前训练结果应解释为：
+
+  - 业务检测候选在旋转、缩放、形变样本上有改善；
+  - 这是检测层的 EVALUATED 结论；
+  - ellipse/polygon 的几何测量、参数恢复、边界闭合质量仍是 PENDING_GEOMETRY_HEAD_BINDING；
+  - 不能把 AABB/OBB 命中或 F1 改善说成“椭圆/多边形几何推理通过”。
+
+  正确推进顺序应是：
+
+  先：常规模型检测鲁棒性
+    → 只评估分类、检出、误检、漏检、AABB/OBB IoU
+
+  再：几何头真实接入
+    → ellipse / polygon 的参数监督与实际推理
+
+  最后：融合结论
+    → 检测候选有效
+    + 几何拟合有效
+    + 锚点与 ROI 一致
+    = 才可输出业务几何结论
+
+  在几何头未接入前，旋转/缩放的业务输出应标为：
+
+  DETECTION_ONLY_GEOMETRY_UNCONFIRMED
+
+  而不是几何成功，更不能据此批准生产。
+  
+  
+   需要，而且应当分成两条协同但不混淆的链路。
+
+   层级          作用                                    训练/回归目标
+  ━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   检测头        找到目标、分类、给出候选 ROI            classification、box/DFL、assignment、置信度
+  ────────────  ──────────────────────────────────────  ───────────────────────────────────────────────────
+   几何回归头    在 ROI 内恢复形状参数                   ellipse 参数、polygon 轮廓/顶点、闭合性、拟合残差
+  ────────────  ──────────────────────────────────────  ───────────────────────────────────────────────────
+   拟合分析器    对几何头输出做约束、补全和可信度评估    边界连续性、锚点一致性、残差、可解释失败原因
+
+  不能只做后处理拟合。原因是：
+
+  - 纯拟合只能在检测 ROI 正确且边界可见时工作；
+  - 当前 break + sharpen 失败表明需要模型学习“缺口两侧仍属于同一几何体”的特征，而不是仅靠阈值/轮廓；
+  - 纯检测损失不会直接优化 ellipse 轴长、旋转角、polygon 拓扑或断边连续性。
+
+  建议的实际结构：
+
+  Backbone / Neck 特征
+    ├─ YOLO 检测头：class + box + confidence
+    └─ Geometry ROI Head：
+         ROI feature / mask / contour feature
+         ├─ 类型与闭合性分支
+         ├─ 参数回归分支
+         ├─ 拟合残差与不确定性分支
+         └─ anchor continuity 分支
+
+  逐层损失应这样设计：
+
+  L_total =
+    L_detection
+  + λ_geo · L_geometry_parameter
+  + λ_contour · L_contour_distance
+  + λ_topology · L_closedness_or_continuity
+  + λ_anchor · L_anchor_consistency
+  + λ_residual · L_fit_residual
+  + λ_uncertainty · L_calibration
+
+  针对类别：
+
+  - ellipse：cx, cy, log(rx), log(ry), sin(2θ), cos(2θ)。用参数回归 + contour Chamfer + 拟合残差；角度用 sin/cos 避免 0°/180°跳变。
+  - polygon：不要只回归普通 AABB。应回归固定数目的重采样轮廓点、或距离场/轮廓 mask，再附加闭合性和角点保持损失。
+  - break + sharpen：使用锚点两侧的边界 embedding/方向一致性损失，训练“断点可补全但不能臆造”的能力；同时输出 continuity confidence。
+
+  调优顺序不能一开始全网解冻：
+
+  1. 冻结 backbone，只训练 geometry ROI head 与检测 head 后段。
+  2. 若 ellipse/polygon 的验证残差仍高，再解冻 neck 的高分辨率层。
+  3. 仅当业务 holdout 证明特征失配时，才评审解冻 backbone 后段。
+  4. 每一步都必须同时看业务固定集、困难模拟集、holdout；任何普通类退化立即回滚。
+
+  当前状态很明确：
+
+  - 已有检测头训练与像素几何拟合探针；
+  - 缺少“可训练 geometry ROI head + 参数损失 + anchor continuity 损失”的真实训练闭环；
+  - 因此下一步应实现该回归头和逐层损失，而不是继续单独调 YOLO 分类/box loss。
+  
+  
+  固定几何评估已落地并完成真实 CUDA 回放。结论很明确：训练链路成立，但回归质量不达标，不能成为业务 Candidate。
+
+   指标                固定验证     Holdout
+  ━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━  ━━━━━━━━━━
+   ellipse 参数 MAE    54.78 px    56.61 px
+  ──────────────────  ──────────  ──────────
+   polygon 顶点 MAE    94.83 px    94.81 px
+  ──────────────────  ──────────  ──────────
+   连续性 Brier           0.249       0.252
+  ──────────────────  ──────────  ──────────
+   连续性准确率            0.50        0.50
+  ──────────────────  ──────────  ──────────
+   几何头耗时             76 ms       40 ms
+
+  证据：
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_181000_geometry_fixed_eval_40epoch/
+    geometry_roi_fixed_validation.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_181000_geometry_fixed_eval_40epoch/geometry_roi_holdout.json
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_181000_geometry_fixed_eval_40epoch/
+    torch_yolov8n_training_lifecycle_result.json
+
+  这套评估使用教师 sidecar ROI，因此已验证“几何回归头本身”；尚不是检测 ROI 驱动的端到端结论。
+
+  下一轮质量修复方向已确定：
+
+  1. 几何头改为保留 ROI 的空间特征池化，不能只做全局平均池化。
+  2. ellipse 的中心/半径、polygon 顶点采用有界输出与参数化约束。
+  3. 连续性改为类别均衡损失，并增加置信度校准。
+  4. 再执行 30–50 epoch 的固定验证与 holdout 回归。
+
+  当前状态：EVALUATED / REJECTED_FOR_PROMOTION，不是 APPROVED 或 ACTIVE。
+  
+  
+  结果表明 ROI 分支本身显著改善：验证/holdout 的 ellipse MAE、polygon 顶点 MAE 都降到原来的约 12%–27%，连续性 Brier 也下降。但检测固定验证 F1 从上一轮受控的
+  1.0 降为 0.75，说明共享 Neck 的联训产生检测回归；因此本轮只能作为“几何头有效、整体候选未获准”的证据，不能升为业务发布模型。接着我会做计划—结果字段完整性检
+  查并归档该结论。
+  
+  • 隔离轮暴露了一个真实缺口：尽管参数被冻结，检测 F1 仍改变。原因不是权重更新，而是训练态 BatchNorm 的 running mean/variance 仍会更新；现有冻结审计只覆盖
+  parameters，未覆盖 buffers。这正是“冻结不等于基线不变”的问题。我将修复为冻结模块在每个训练 batch 强制 eval，并把 buffers 纳入冻结审计后再重跑。
+  
+  • 冻结语义已修复并编译通过：每个 epoch 先进入训练态，再把匹配冻结前缀的模块强制切回 eval；审计新增 frozen_buffers_unchanged。这会阻止 BatchNorm 统计漂移。现
+  在执行修复后的隔离复测。
+  
+  
+  ，并修复了关键冻结缺口。
+
+  - 发现并修复：requires_grad=false 不会冻结 BatchNorm 的运行统计，导致“参数未变、检测输出仍变”。
+  - 现在冻结模块会在每个 epoch 强制 eval()，并审计 frozen_buffers_unchanged。
+  - 隔离阶段计划默认冻结范围已改为 backbone, neck, head；仅 geometry_roi_head 训练。
+  - 修复后真实 CUDA 回归已完成，检测验证输出在各 epoch 保持一致，证明成熟检测器不再被几何训练漂移污染。
+
+  本轮输出：
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/plans/
+    run_20260910_184000_geometry_head_isolated_buffer_locked_40epoch_plan.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_184000_geometry_head_isolated_buffer_locked_40epoch/
+    torch_yolov8n_training_lifecycle_result.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_184000_geometry_head_isolated_buffer_locked_40epoch/
+    freeze_execution_audit.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_184000_geometry_head_isolated_buffer_locked_40epoch/
+    geometry_roi_fixed_validation.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_184000_geometry_head_isolated_buffer_locked_40epoch/
+    geometry_roi_holdout.json
+
+  当前状态仍是 EVALUATED / promotion_allowed=false：检测基线已受保护；下一步应读取本轮几何 MAE 与 holdout，决定是否以此隔离版本作为几何候选，或再进行受控
+  Neck 解冻。
+ 第二阶段完成：冻结 Backbone 与检测 Head，仅允许 Neck + Geometry ROI Head 更新。
+
+  结果：
+
+  - 检测 F1：恢复至 0.75
+  - 冻结参数与 Buffer：均保持不变
+  - Holdout 几何：ellipse 15.82 px、polygon 39.74 px
+  - 连续性：Brier 0.2486、accuracy 0.5
+
+  结论：该策略证明可在保护检测 Head 的同时恢复检测质量，但几何质量明显弱于上一轮全联训版本（ellipse 6.68 px、polygon 22.04 px），连续性也未改善。因此仍为
+  EVALUATED，不可 APPROVED/ACTIVE。
+
+  下一步应保留两个可回滚候选：
+
+  - 几何优先：上一轮全联训模型，几何质量最佳，但需处理检测回归。
+  - 检测保护：本轮 Neck 受控模型，检测 F1 0.75，但几何精度不足。
+
+  证据：/D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/run_20260910_185000_geometry_neck_adaptation_40epoch/
+  torch_yolov8n_training_lifecycle_result.json · /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260910_185000_geometry_neck_adaptation_40epoch/freeze_execution_audit.json · /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/
+  torch_geometry_roi/run_20260910_185000_geometry_neck_adaptation_40epoch/geometry_roi_fixed_validation.json · /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/
+  cxscript_runs/torch_geometry_roi/run_20260910_185000_geometry_neck_adaptation_40epoch/geometry_roi_holdout.json
+
+
+当前三通道不是让线上推理同时跑三个完整 YOLO，而是把“旋转适应、缩放适应、组合压力”拆成离线训练/评估路径。线上候选仍应只加载一个已批准模型；三通道负责决定它
+  是否足够稳健，组合通道不进入训练、只揭示旋转×缩放的退化。现在我读取两条通道的真实几何误差、时延和模型制品，给出可执行的优化与速度结论。
+  
+  
+  当前三通道不是让线上推理同时跑三个完整 YOLO，而是把“旋转适应、缩放适应、组合压力”拆成离线训练/评估路径。线上候选仍应只加载一个已批准模型；三通道负责决定它
+  是否足够稳健，组合通道不进入训练、只揭示旋转×缩放的退化。现在我读取两条通道的真实几何误差、时延和模型制品，给出可执行的优化与速度结论。
+
+• Ran 2 commands · ctrl + t to view transcript
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 三个通道是离线训练/评估通道，不是线上同时跑三个 YOLO 模型。
+
+   通道        训练作用                 推理作用
+  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Rotation    学习旋转不变性           直接单次前向，不逐角度旋转图片
+  ──────────  ───────────────────────  ────────────────────────────────────
+   Scale       学习缩放不变性           直接单次前向，不建立尺度金字塔循环
+  ──────────  ───────────────────────  ────────────────────────────────────
+   Compound    旋转×缩放未见压力验证    不参与训练，不作为线上模型分支
+
+  当前线上目标结构应是：
+
+  YOLO 检测 → 检测 ROI → Geometry ROI Head → 几何/连续性/置信度结果
+
+  不是：
+
+  旋转模型 + 缩放模型 + 组合模型 三次完整推理。
+
+  FastMatch 的 RotateModel 是“规范模板 + 旋转候选姿态 + 几何/外观合成评分”的搜索范式；当前 YOLO 几何头借鉴它的“旋转与尺度独立建模”原则，但不在推理阶段进行多
+  角度候选扫描。因此，合格候选未来只应有一次检测前向和一次 ROI 几何头计算，推理复杂度仍接近单模型 O(1)。
+
+  本轮真实训练结果：
+
+  - Rotation 通道：30 个实际 epoch，冻结 Backbone/Neck/Detection Head 均通过，Geometry Head 参数真实更新。
+      - Teacher-ROI 几何头：验证 21 ms；holdout 35 ms。
+      - 验证 ellipse MAE 38.79 px、polygon MAE 40.89 px、连续性准确率 0。
+
+  - Scale 通道：30 个实际 epoch，冻结审计通过，Geometry Head 参数真实更新。
+      - Teacher-ROI 几何头：验证 21 ms；holdout 41 ms。
+      - 验证 ellipse MAE 27.78 px、polygon MAE 36.82 px、连续性准确率 0。
+
+  速度结论：当前只有 Geometry Head 的 teacher-ROI 时延，不能冒充完整端到端业务推理时延；检测基线比较尚未输出毫秒级 latency。质量结论也明确：两条独立通道均为
+  CANDIDATE / EVALUATED 前的训练证据，连续性预测失败、几何误差仍高，不能 Approved 或 Active。
+
+  优化方向应分两层：
+
+  1. 保持单次线上推理：不引入三模型并行、不引入逐角度扫描。
+  2. 先提升离线质量：增加每个通道的角度/尺度分桶样本，分别优化 ellipse 参数回归和 polygon 顶点回归；连续性标签需要加入真实断裂与连续边界的均衡样本。仅当旋
+     转、缩放各自达标后，才允许用组合通道做压力回归与合并候选验证。
+
+  三通道数据与训练计划已建立，组合通道被硬性排除在训练集之外。
+  
+   我会把三通道的选择、旋转角度档位、缩放倍率档位以及组合压力档位放入现有 Torch 参数面板，并让它们随运行计划导出；训练前可见、可调、可回读。为保证这次界面改
+  动与现有参数面板一致，我会使用项目的前端界面规范。
+  
+  界面层已经接入：在现有 F8/F9 的 Torch 参数区新增 “Affine Training Channels / Dataset Contract”。它包含三通道选择、训练/验证/holdout 的旋转角与缩放倍率、组
+  合压力参数，并明确提示“修改后必须重新生成 sidecar 数据集”；若选择组合通道，GUI 启动训练会被硬阻断。运行计划和训练回执也将回显这些有效参数。现在编译验证。
+  
+  
+  旋转+组合、缩放+组合两轮真实训练均已完成。当前固定验证已经包含组合未见样本，但结果文件仍只给聚合指标，不能单独证明组合通道的退化量；这是下一处证据缺口。我
+  会把 sidecar 的通道标识传入几何评估，输出 single-axis 与 compound 的分账结果。
+
+• Ran 5 commands · ctrl + t to view transcript
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 已完成组合压力通道的真实闭环训练。
+
+  - Rotation + Compound：
+      - 4 train / 4 validation / 4 holdout
+      - compound 样本：4；进入训练：0
+      - 30 epoch，FREEZE_EXECUTION_PASS
+      - 聚合 validation F1：0.210526
+
+  - Scale + Compound：
+      - 4 train / 4 validation / 4 holdout
+      - compound 样本：4；进入训练：0
+      - 30 epoch，FREEZE_EXECUTION_PASS
+      - 聚合 validation F1：0.210526
+
+  当前确认的质量问题：
+
+  - 连续性准确率仍为 0。
+  - Rotation+Compound：验证 ellipse/polygon MAE 为 45.35 / 38.76 px。
+  - Scale+Compound：验证 ellipse/polygon MAE 为 38.91 / 36.73 px。
+  - 因此两条均不可进入 APPROVED 或 ACTIVE。
+
+  同时发现下一项证据缺口：固定验证报告目前混合输出单轴和 compound 的聚合指标，尚不能量化“组合扰动相对单轴扰动的退化”。下一步应将 affine_channel 写入 sidecar
+  target，并让几何评估按 rotation / scale / compound 分账输出。
+  
+   开始补齐通道分账证据：把 rotation / scale / compound 作为 sidecar 的事实字段写入 batch target，并由 Geometry ROI 评估分别计算单轴与组合通道指标，避免把组
+  合压力退化掩盖在聚合均值中。

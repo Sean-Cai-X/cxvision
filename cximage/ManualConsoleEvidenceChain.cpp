@@ -8787,6 +8787,19 @@ static bool WriteGuiGeometryAugRuntimePlanLocal(
     int lineBreakPx,
     int requestedEpochs,
     float requestedLearningRate,
+    int affineChannelMode,
+    float rotationTrainPositiveDeg,
+    float rotationTrainNegativeDeg,
+    float rotationValidationDeg,
+    float rotationHoldoutDeg,
+    float scaleTrainDown,
+    float scaleTrainUp,
+    float scaleValidation,
+    float scaleHoldout,
+    float compoundValidationScale,
+    float compoundValidationRotationDeg,
+    float compoundHoldoutScale,
+    float compoundHoldoutRotationDeg,
     int &variantCount,
     std::string &reason) {
   variantCount = 0;
@@ -8842,7 +8855,10 @@ static bool WriteGuiGeometryAugRuntimePlanLocal(
       << "    \"jagged_px\": " << jaggedPx << ",\n"
       << "    \"line_break_px\": " << lineBreakPx << ",\n"
       << "    \"requested_epochs\": " << requestedEpochs << ",\n"
-      << "    \"requested_learning_rate\": " << requestedLearningRate << "\n"
+      << "    \"requested_learning_rate\": " << requestedLearningRate << ",\n"
+      << "    \"affine_training_channel\": \""
+      << (affineChannelMode == 0 ? "rotation" : affineChannelMode == 1 ? "scale" : "compound") << "\",\n"
+      << "    \"compound_policy\": \"evaluation_only_not_trainable\"\n"
       << "  },\n"
       << "  \"variants\": [\n";
 
@@ -8854,6 +8870,15 @@ static bool WriteGuiGeometryAugRuntimePlanLocal(
     const int seed = FileNodeIntLocal(variant, "seed", 0);
     const cv::FileNode operations = variant["operations"];
     if (id.empty() || suffix.empty() || split.empty() || !operations.isSeq())
+      continue;
+    const bool rotationChannel = id.rfind("rotation_", 0) == 0;
+    const bool scaleChannel = id.rfind("scale_", 0) == 0;
+    const bool compoundChannel = id.rfind("compound_", 0) == 0;
+    const bool affineVariant = rotationChannel || scaleChannel || compoundChannel;
+    if (affineVariant &&
+        !((affineChannelMode == 0 && (rotationChannel || compoundChannel)) ||
+          (affineChannelMode == 1 && (scaleChannel || compoundChannel)) ||
+          (affineChannelMode == 2 && compoundChannel)))
       continue;
 
     std::ostringstream opsOut;
@@ -8884,8 +8909,18 @@ static bool WriteGuiGeometryAugRuntimePlanLocal(
       } else if (type == "sensor_noise") {
         opsOut << ", \"sigma\": " << FileNodeDoubleLocal(op, "sigma", 4.0);
       } else if (type == "rotate") {
-        opsOut << ", \"angle_deg\": "
-               << FileNodeDoubleLocal(op, "angle_deg", 0.0);
+        double angle = FileNodeDoubleLocal(op, "angle_deg", 0.0);
+        if (rotationChannel) {
+          if (split == "train")
+            angle = id.find("neg") != std::string::npos
+                        ? rotationTrainNegativeDeg : rotationTrainPositiveDeg;
+          else if (split == "validation") angle = rotationValidationDeg;
+          else if (split == "holdout") angle = rotationHoldoutDeg;
+        } else if (compoundChannel) {
+          angle = split == "holdout" ? compoundHoldoutRotationDeg
+                                      : compoundValidationRotationDeg;
+        }
+        opsOut << ", \"angle_deg\": " << angle;
       } else if (type == "translate_y") {
         opsOut << ", \"offset_y_px\": "
                << FileNodeDoubleLocal(op, "offset_y_px", 0.0);
@@ -8919,6 +8954,19 @@ static bool WriteGuiGeometryAugRuntimePlanLocal(
         const int px = validationSplit ? lineBreakPx + 4 : lineBreakPx;
         opsOut << ", \"width_px\": " << px << ", \"height_px\": " << px
                << ", \"count\": " << FileNodeIntLocal(op, "count", 1);
+      } else if (type == "scale_scene") {
+        double scale = FileNodeDoubleLocal(op, "scale", 1.0);
+        if (scaleChannel) {
+          if (split == "train")
+            scale = id.find("down") != std::string::npos ? scaleTrainDown
+                                                            : scaleTrainUp;
+          else if (split == "validation") scale = scaleValidation;
+          else if (split == "holdout") scale = scaleHoldout;
+        } else if (compoundChannel) {
+          scale = split == "holdout" ? compoundHoldoutScale
+                                      : compoundValidationScale;
+        }
+        opsOut << ", \"scale\": " << scale;
       }
       opsOut << "}";
     }
@@ -8957,7 +9005,8 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
       m_manualTest.geometry_aug_include_brightness ||
       m_manualTest.geometry_aug_include_local_gap ||
       m_manualTest.geometry_aug_include_jagged_cut ||
-      m_manualTest.geometry_aug_include_line_break;
+      m_manualTest.geometry_aug_include_line_break ||
+      m_manualTest.yolo_training_geometry_roi_head_enabled;
   if (!anyAugmentation) {
     reason = "select at least one augmentation family";
     m_manualTest.geometry_aug_run_status = "AUGMENTATION_PLAN_EMPTY";
@@ -8966,8 +9015,9 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
   }
 
   const std::filesystem::path referenceIndex = ResolveWorkspaceFile(
-      "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/"
-      "02_Automatic_Diagnostic_Closure/geometry_reference_cases/index.json");
+      m_manualTest.yolo_training_geometry_roi_head_enabled
+          ? "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/geometry_reference_cases/boundary_seven_class_reference_index_v3.json"
+          : "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/geometry_reference_cases/index.json");
   std::error_code ec;
   if (!std::filesystem::is_regular_file(referenceIndex, ec)) {
     reason = "geometry reference index missing: " + referenceIndex.string();
@@ -8976,9 +9026,9 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
     return false;
   }
   const std::filesystem::path augmentationPlanTemplate = ResolveWorkspaceFile(
-      "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/"
-      "02_Automatic_Diagnostic_Closure/geometry_reference_cases/"
-      "geometry_augmentation_plan.json");
+      m_manualTest.yolo_training_geometry_roi_head_enabled
+          ? "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/geometry_reference_cases/boundary_seven_class_three_channel_plan_v1.json"
+          : "cxparser/cxscript/module/cximage/evidence/04_Incremental_Reliability/02_Automatic_Diagnostic_Closure/geometry_reference_cases/geometry_augmentation_plan.json");
   if (!std::filesystem::is_regular_file(augmentationPlanTemplate, ec)) {
     reason =
         "geometry augmentation plan template missing: " +
@@ -9032,7 +9082,21 @@ bool ViewController::RunGeometryAugmentationTrainingPrepFromGui(
           m_manualTest.geometry_aug_include_line_break,
           trainBrightness, testBrightness, gapWidth, gapHeight, jaggedPx,
           lineBreakPx, m_manualTest.geometry_aug_epochs,
-          m_manualTest.geometry_aug_learning_rate, variantCount, reason)) {
+          m_manualTest.geometry_aug_learning_rate,
+          m_manualTest.yolo_training_affine_channel_mode,
+          m_manualTest.yolo_training_rotation_train_positive_deg,
+          m_manualTest.yolo_training_rotation_train_negative_deg,
+          m_manualTest.yolo_training_rotation_validation_deg,
+          m_manualTest.yolo_training_rotation_holdout_deg,
+          m_manualTest.yolo_training_scale_train_down,
+          m_manualTest.yolo_training_scale_train_up,
+          m_manualTest.yolo_training_scale_validation,
+          m_manualTest.yolo_training_scale_holdout,
+          m_manualTest.yolo_training_compound_validation_scale,
+          m_manualTest.yolo_training_compound_validation_rotation_deg,
+          m_manualTest.yolo_training_compound_holdout_scale,
+          m_manualTest.yolo_training_compound_holdout_rotation_deg,
+          variantCount, reason)) {
     m_manualTest.geometry_aug_run_status = "PLAN_WRITE_FAIL";
     m_manualTest.geometry_aug_run_reason = reason;
     return false;
@@ -9181,6 +9245,10 @@ static bool LoadYoloTrainingTuningFromPlanLocal(
       value = static_cast<float>(parsed);
     }
   };
+  auto optionalString = [&](const char *name, std::string &value) {
+    const cv::FileNode node = storage[name];
+    if (!node.empty()) node >> value;
+  };
   int qualityTargets = 0;
   int globalAssignment = 0;
   int restoreBest = 0;
@@ -9267,6 +9335,27 @@ static bool LoadYoloTrainingTuningFromPlanLocal(
   const cv::FileNode geometryTargetManifest = storage["geometry_target_manifest"];
   context.yolo_training_geometry_target_manifest = geometryTargetManifest.empty()
       ? std::string() : static_cast<std::string>(geometryTargetManifest);
+  std::string affineChannel = "rotation";
+  optionalString("affine_training_channel", affineChannel);
+  if (affineChannel == "rotation") context.yolo_training_affine_channel_mode = 0;
+  else if (affineChannel == "scale") context.yolo_training_affine_channel_mode = 1;
+  else if (affineChannel == "compound") context.yolo_training_affine_channel_mode = 2;
+  else {
+    reason = "TRAINING_PARAMETER_INVALID: affine_training_channel";
+    return false;
+  }
+  optionalFloat("rotation_train_positive_deg", context.yolo_training_rotation_train_positive_deg);
+  optionalFloat("rotation_train_negative_deg", context.yolo_training_rotation_train_negative_deg);
+  optionalFloat("rotation_validation_deg", context.yolo_training_rotation_validation_deg);
+  optionalFloat("rotation_holdout_deg", context.yolo_training_rotation_holdout_deg);
+  optionalFloat("scale_train_down", context.yolo_training_scale_train_down);
+  optionalFloat("scale_train_up", context.yolo_training_scale_train_up);
+  optionalFloat("scale_validation", context.yolo_training_scale_validation);
+  optionalFloat("scale_holdout", context.yolo_training_scale_holdout);
+  optionalFloat("compound_validation_scale", context.yolo_training_compound_validation_scale);
+  optionalFloat("compound_validation_rotation_deg", context.yolo_training_compound_validation_rotation_deg);
+  optionalFloat("compound_holdout_scale", context.yolo_training_compound_holdout_scale);
+  optionalFloat("compound_holdout_rotation_deg", context.yolo_training_compound_holdout_rotation_deg);
   context.yolo_training_tuning_loaded = true;
   context.yolo_training_tuning_source = planPath.string();
   reason = "YOLO training parameters loaded from versioned plan asset";
@@ -9418,6 +9507,55 @@ static void DrawYoloTrainingTuningControlsLocal(
       ImGui::EndTable();
     }
   }
+  if (ImGui::CollapsingHeader("Affine Training Channels / Dataset Contract",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    static const char *channelNames[] = {
+        "Rotation only (trainable)", "Scale only (trainable)",
+        "Compound scale + rotation (evaluation only)"};
+    ImGui::TextDisabled(
+        "These values define the dataset-generation contract. Change them, regenerate the sidecar dataset, then train.");
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::Combo("affine_training_channel##affine_channel",
+                 &context.yolo_training_affine_channel_mode, channelNames,
+                 IM_ARRAYSIZE(channelNames));
+    if (context.yolo_training_affine_channel_mode == 2)
+      ImGui::TextColored(ImVec4(0.90f, 0.70f, 0.10f, 1.0f),
+                         "COMPOUND_EVALUATION_ONLY: this channel must not enter training.");
+    if (ImGui::BeginTable("affine_channel_tuning", 2,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("Dataset contract parameter",
+                              ImGuiTableColumnFlags_WidthStretch, 1.7f);
+      ImGui::TableSetupColumn("Requested value",
+                              ImGuiTableColumnFlags_WidthStretch, 1.0f);
+      ImGui::TableHeadersRow();
+      inputFloat("rotation_train_positive_deg", "##rotation_train_positive",
+                 context.yolo_training_rotation_train_positive_deg, "%.2f");
+      inputFloat("rotation_train_negative_deg", "##rotation_train_negative",
+                 context.yolo_training_rotation_train_negative_deg, "%.2f");
+      inputFloat("rotation_validation_deg", "##rotation_validation",
+                 context.yolo_training_rotation_validation_deg, "%.2f");
+      inputFloat("rotation_holdout_deg", "##rotation_holdout",
+                 context.yolo_training_rotation_holdout_deg, "%.2f");
+      inputFloat("scale_train_down", "##scale_train_down",
+                 context.yolo_training_scale_train_down, "%.3f");
+      inputFloat("scale_train_up", "##scale_train_up",
+                 context.yolo_training_scale_train_up, "%.3f");
+      inputFloat("scale_validation", "##scale_validation",
+                 context.yolo_training_scale_validation, "%.3f");
+      inputFloat("scale_holdout", "##scale_holdout",
+                 context.yolo_training_scale_holdout, "%.3f");
+      inputFloat("compound_validation_scale", "##compound_validation_scale",
+                 context.yolo_training_compound_validation_scale, "%.3f");
+      inputFloat("compound_validation_rotation_deg", "##compound_validation_rotation",
+                 context.yolo_training_compound_validation_rotation_deg, "%.2f");
+      inputFloat("compound_holdout_scale", "##compound_holdout_scale",
+                 context.yolo_training_compound_holdout_scale, "%.3f");
+      inputFloat("compound_holdout_rotation_deg", "##compound_holdout_rotation",
+                 context.yolo_training_compound_holdout_rotation_deg, "%.2f");
+      ImGui::EndTable();
+    }
+  }
   ImGui::PopID();
 }
 
@@ -9531,6 +9669,12 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
     m_manualTest.geometry_aug_run_reason = reason;
     return false;
   }
+  if (m_manualTest.yolo_training_affine_channel_mode == 2) {
+    reason = "COMPOUND_EVALUATION_ONLY: select rotation or scale for training; compound scale+rotation is an unseen validation/holdout channel";
+    m_manualTest.geometry_aug_run_status = "COMPOUND_TRAINING_BLOCKED";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
   cv::FileStorage templateStorage(trainingPlanTemplate.string(),
                                    cv::FileStorage::READ);
   int numClasses = 0;
@@ -9549,6 +9693,10 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   }
   const std::filesystem::path trainingPlan =
       planDir / "yolov8n_cpp_training_plan_runtime.json";
+  const char *affineChannel =
+      m_manualTest.yolo_training_affine_channel_mode == 0 ? "rotation" :
+      m_manualTest.yolo_training_affine_channel_mode == 1 ? "scale" :
+      "compound";
   std::ostringstream plan;
   plan << "{\n"
        << "  \"schema\": \"cxvision.yolov8n_cpp_training_plan.v1\",\n"
@@ -9623,6 +9771,20 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
        << m_manualTest.yolo_training_geometry_roi_continuity_positive_weight << ",\n"
        << "  \"geometry_roi_calibration_weight\": "
        << m_manualTest.yolo_training_geometry_roi_calibration_weight << ",\n"
+       << "  \"affine_training_channel\": \"" << affineChannel << "\",\n"
+       << "  \"affine_channel_semantics\": \"single_axis_training; compound_scale_rotation_reserved_for_unseen_evaluation\",\n"
+       << "  \"rotation_train_positive_deg\": " << m_manualTest.yolo_training_rotation_train_positive_deg << ",\n"
+       << "  \"rotation_train_negative_deg\": " << m_manualTest.yolo_training_rotation_train_negative_deg << ",\n"
+       << "  \"rotation_validation_deg\": " << m_manualTest.yolo_training_rotation_validation_deg << ",\n"
+       << "  \"rotation_holdout_deg\": " << m_manualTest.yolo_training_rotation_holdout_deg << ",\n"
+       << "  \"scale_train_down\": " << m_manualTest.yolo_training_scale_train_down << ",\n"
+       << "  \"scale_train_up\": " << m_manualTest.yolo_training_scale_train_up << ",\n"
+       << "  \"scale_validation\": " << m_manualTest.yolo_training_scale_validation << ",\n"
+       << "  \"scale_holdout\": " << m_manualTest.yolo_training_scale_holdout << ",\n"
+       << "  \"compound_validation_scale\": " << m_manualTest.yolo_training_compound_validation_scale << ",\n"
+       << "  \"compound_validation_rotation_deg\": " << m_manualTest.yolo_training_compound_validation_rotation_deg << ",\n"
+       << "  \"compound_holdout_scale\": " << m_manualTest.yolo_training_compound_holdout_scale << ",\n"
+       << "  \"compound_holdout_rotation_deg\": " << m_manualTest.yolo_training_compound_holdout_rotation_deg << ",\n"
        << "  \"parent_checkpoint\": \""
        << JsonEscape(selectedParent->checkpoint_path) << "\",\n"
        << "  \"parent_model_id\": \""
