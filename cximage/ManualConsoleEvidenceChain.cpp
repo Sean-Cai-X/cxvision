@@ -10111,7 +10111,16 @@ static void RefreshValidationDatasetAssetsLocal(ManualTestContext &context) {
   std::sort(manifests.begin(), manifests.end());
   for (auto manifestIt = manifests.rbegin(); manifestIt != manifests.rend();
        ++manifestIt) {
-    cv::FileStorage storage(manifestIt->string(), cv::FileStorage::READ);
+    cv::FileStorage storage;
+    try {
+      storage.open(manifestIt->string(), cv::FileStorage::READ |
+                                          cv::FileStorage::FORMAT_JSON);
+    } catch (const cv::Exception &) {
+      // Evidence assets are independently produced.  A malformed or
+      // unsupported historical dataset manifest is a rejected candidate, not
+      // a GUI-startup failure.
+      continue;
+    }
     if (!storage.isOpened() ||
         ReadModelLineageStringLocal(storage.root(), "schema") !=
             "cxvision.geometry_augmentation_dataset.v1")

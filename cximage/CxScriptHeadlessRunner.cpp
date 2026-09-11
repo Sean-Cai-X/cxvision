@@ -3347,6 +3347,12 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << (transform_search.executed ? "true" : "false")
             << R"(, "converged": )" << (transform_search.converged ? "true" : "false")
             << R"(, "budget_exceeded": )" << (transform_search.budget_exceeded ? "true" : "false")
+            << R"(, "calibration_applied": )" << (transform_search.calibration_applied ? "true" : "false")
+            << R"(, "calibration_snapshot_hash": ")" << JsonEscape(transform_search.calibration_snapshot_hash)
+            << R"(", "calibration_source_ref": ")" << JsonEscape(transform_search.calibration_source_ref)
+            << R"(", "calibration_coordinate_frame_id": ")" << JsonEscape(transform_search.calibration_coordinate_frame_id)
+            << R"(", "calibration_xy_unit": ")" << JsonEscape(transform_search.calibration_xy_unit)
+            << R"(", "calibration_reprojection_rmse_px": )" << transform_search.calibration_reprojection_rmse_px
             << R"(, "seed_available": )" << (transform_search.seed_available ? "true" : "false")
             << R"(, "seed_source": ")" << JsonEscape(transform_search.seed_source)
             << R"(", "seed_model_id": ")" << JsonEscape(transform_search.seed_model_id)
@@ -3368,6 +3374,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << R"(, "shear": )" << transform_search.best_shear
             << R"(, "projective_u": )" << transform_search.best_projective_u
             << R"(, "projective_v": )" << transform_search.best_projective_v
+            << R"(, "physical_cx": )" << transform_search.best_physical_cx
+            << R"(, "physical_cy": )" << transform_search.best_physical_cy
             << R"(}, "best_score": )" << transform_search.best_score
             << R"(, "appearance_score": )" << transform_search.appearance_score
             << R"(, "continuity_score": )" << transform_search.continuity_score

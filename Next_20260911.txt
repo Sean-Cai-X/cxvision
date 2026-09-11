@@ -1769,3 +1769,23 @@
   5. GUI 直接显示策略来源、参数前后值、七类样本配比、问题标签、轮次指标与回退原因。
 
   外部脚本产物仅保留为开发期对照证据，不能作为可发布系统的执行依赖。
+
+下一步是补齐 package schema 的 target_mask 来源字段，并让 C++ Runtime 使用真实 mask 生成硬负样本；这是解除当前
+  MASK_PROVENANCE_REQUIRED 的正确方式。不会用 bbox 或外部图像脚本替代 mask。
+
+• Ran 2 commands · ctrl + t to view transcript
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 本步确认了真正需要补的系统接口，不是继续调参：
+
+  - 当前 C++ Runtime 已能内部组装 train=714、validation=98、holdout=49，并完整记录来源哈希。
+  - 但旧 package schema 只含 image + bbox label，不含 target_mask。
+  - 受控原始案例实际已有 typed_label.png / latent_boundary_map.png，只是没有被纳入 package manifest。
+  - 因此下一项实现应是 C++ 的“Geometry Augmentation Manifest → Torch Package”桥接器：把每个案例的真实边界 mask 一并物化
+    为 target_mask，并写入 package digest。
+
+  随后 C++ 数据策略执行器才能在 mask 存在时生成可验证的 target-erased hard negative、混淆上下文和数据增强，而不是停在
+  MASK_PROVENANCE_REQUIRED。
+
+  本轮内部执行已验证且保持 training_allowed=false、promotion_allowed=false；未绕过该质量门。

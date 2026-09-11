@@ -844,11 +844,18 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_search_roi_h", 480);
     set("global_compare_gap", 20);
     set("global_objfilter", 1);
-    set("global_fastmatch_learn_shared", 1);
+    // A paired directional default prevents Top/Bottom and Left/Right edge
+    // responses from being pooled into a double-image template. Horizontal
+    // edges use a narrow vertical normal; vertical edges use a narrow
+    // horizontal normal.
+    set("global_fastmatch_learn_shared", 0);
     for (int dir = 0; dir < 4; ++dir) {
       const std::string suffix = "_" + std::to_string(dir);
-      set(("global_fastmatch_learn_wgap" + suffix).c_str(), 32);
-      set(("global_fastmatch_learn_hgap" + suffix).c_str(), 8);
+      const bool horizontal_edge = dir < 2;
+      set(("global_fastmatch_learn_wgap" + suffix).c_str(),
+          horizontal_edge ? 8 : 2);
+      set(("global_fastmatch_learn_hgap" + suffix).c_str(),
+          horizontal_edge ? 2 : 8);
       set(("global_fastmatch_learn_method" + suffix).c_str(), 0);
       set(("global_fastmatch_learn_threshold" + suffix).c_str(), 20);
       set(("global_fastmatch_learn_linegap" + suffix).c_str(), 6);
@@ -879,6 +886,21 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_fastmatch_transform_max_elapsed_ms", 100);
     set("global_fastmatch_transform_shear_range_permille", 0);
     set("global_fastmatch_transform_projective_range_permille", 0);
+    // Manual calibration override is test-only.  A production measurement
+    // must bind an externally frozen CxCalibration receipt instead.
+    set("global_fastmatch_calibration_test_enabled", 0);
+    set("global_fastmatch_calibration_scale_x_ppm", 1000000);
+    set("global_fastmatch_calibration_scale_y_ppm", 1000000);
+    set("global_fastmatch_calibration_offset_x_milliunit", 0);
+    set("global_fastmatch_calibration_offset_y_milliunit", 0);
+    set("global_fastmatch_calibration_rotation_millideg", 0);
+    set("global_fastmatch_calibration_shear_x_ppm", 0);
+    set("global_fastmatch_calibration_shear_y_ppm", 0);
+    set("global_fastmatch_calibration_reprojection_rmse_milli_px", 0);
+    set("global_fastmatch_transform_calibration_applied", 0);
+    set("global_fastmatch_transform_calibration_reprojection_rmse_milli_px", -1000);
+    set("global_fastmatch_transform_best_physical_cx_milliunit", 0);
+    set("global_fastmatch_transform_best_physical_cy_milliunit", 0);
 
     // FastMatch direct scripts write these values back after learn/match.
     // CxScript assignments require their external destinations to be

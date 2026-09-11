@@ -77,6 +77,24 @@ public:
         int compare_gap = -1;
     };
 
+    struct NormalTraceLearnConfig
+    {
+        bool enabled = false;
+        int domain_overlap_radius_px = 3;
+        int normal_angle_tolerance_deg = 20;
+        int min_gradient = 20;
+        int dijkstra_max_nodes = 4096;
+        int dijkstra_gradient_cost_weight_permille = 700;
+        int dijkstra_turn_cost_weight_permille = 200;
+        int dijkstra_gap_cost_weight_permille = 100;
+        int dijkstra_max_trace_gap_px = 3;
+        int trace_min_length_px = 20;
+        int normal_pair_offset_px = 6;
+        int normal_polarity = 0;
+        int corner_rejection_radius_px = 4;
+        int tangent_sample_step_px = 2;
+    };
+
     FastMatch();
     ~FastMatch();
 
@@ -116,6 +134,20 @@ public:
     void setlearncompgap_script(int value, int direction) { setlearncompgap(direction, value); }
     LearnDirectionParams effectiveLearnDirectionParams(int direction);
     bool hasExplicitLearnDirectionParams() const;
+    void setnormaltraceenabled(int enabled);
+    void setnormaltraceparams(int overlap_radius_px, int min_gradient,
+                              int max_nodes, int pair_offset_px);
+    void setnormaltracecosts(int gradient_weight_permille,
+                             int turn_weight_permille,
+                             int gap_weight_permille,
+                             int max_trace_gap_px);
+    void setnormaltracegeometry(int normal_angle_tolerance_deg,
+                                int trace_min_length_px,
+                                int normal_polarity,
+                                int corner_rejection_radius_px,
+                                int tangent_sample_step_px);
+    const NormalTraceLearnConfig& getnormaltraceconfig() const
+    { return m_normal_trace_config; }
 
     void setgeometrysourceindex(int index);
     void setgeometryweightpercent(int percent);
@@ -243,6 +275,23 @@ public:
     // retains ownership; FastMatch never keeps a calibration object pointer.
     bool bindcalibrationsnapshot(const CxCalibrationSnapshot& snapshot);
     void clearcalibrationsnapshot();
+    // Key-parameter test controls.  These build a value-only calibration
+    // receipt inside FastMatch and deliberately identify it as a manual test
+    // override; production code must bind a frozen CxCalibrationSnapshot.
+    void setcalibrationtestenabled(int enabled);
+    void setcalibrationtestxytransform(double scale_x, double scale_y,
+                                       double offset_x, double offset_y,
+                                       double rotation_deg,
+                                       double shear_x, double shear_y);
+    // CxScript's native seven-int method path; scale/shear are ppm, offsets
+    // are milli-units and rotation is milli-degrees.
+    void setcalibrationtestxytransformscaled(int scale_x_ppm, int scale_y_ppm,
+                                             int offset_x_milliunit,
+                                             int offset_y_milliunit,
+                                             int rotation_millideg,
+                                             int shear_x_ppm,
+                                             int shear_y_ppm);
+    void setcalibrationtestreprojectionrmse(double reprojection_rmse_px);
     void settransformscalerangepercent(int percent);
     void settransformanglerange(int degrees);
     void settransformcoarsesteps(int steps);
@@ -267,6 +316,10 @@ public:
     double gettransformsearchshear();
     double gettransformsearchprojectiveu();
     double gettransformsearchprojectivev();
+    int gettransformsearchcalibrationapplied();
+    double gettransformsearchcalibrationreprojectionrmse();
+    double gettransformsearchphysicalcx();
+    double gettransformsearchphysicalcy();
     double gettransformsearchgradientscore();
     double gettransformsearchresidual();
     double gettransformsearchrigidbaselinescore();
@@ -584,6 +637,7 @@ private:
     int m_fastmatch_learn_b2_count = 0;
     int m_fastmatch_learn_status_code = 0;
     std::array<LearnDirectionParams, 4> m_learn_direction_params;
+    NormalTraceLearnConfig m_normal_trace_config;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;
@@ -654,6 +708,8 @@ private:
     FastMatchTransformSeedEvidence m_transform_seed_evidence;
     CxCalibrationAdapter m_calibration_adapter;
     bool m_calibration_bound = false;
+    CxCalibration m_calibration_test_override;
+    bool m_calibration_test_override_enabled = false;
     int m_rotate_max_candidates = 720;
     int m_rotate_max_elapsed_ms = 1000;
     int m_rotate_max_probes = 200000;

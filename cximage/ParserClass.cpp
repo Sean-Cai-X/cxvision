@@ -1716,6 +1716,14 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "settransformsearchenabled",
                             &FastMatch::settransformsearchenabled);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setnormaltraceenabled", &FastMatch::setnormaltraceenabled);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setnormaltraceparams", &FastMatch::setnormaltraceparams);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setnormaltracecosts", &FastMatch::setnormaltracecosts);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setnormaltracegeometry", &FastMatch::setnormaltracegeometry);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformcenter", &FastMatch::settransformcenter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformextent", &FastMatch::settransformextent);
@@ -1736,6 +1744,15 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformfromtorch",
                             &FastMatch::settransformfromtorch);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setcalibrationtestenabled",
+                            &FastMatch::setcalibrationtestenabled);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setcalibrationtestxytransformscaled",
+                            &FastMatch::setcalibrationtestxytransformscaled);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setcalibrationtestreprojectionrmse",
+                            &FastMatch::setcalibrationtestreprojectionrmse);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformscalerangepercent",
                             &FastMatch::settransformscalerangepercent);
@@ -1807,6 +1824,18 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "gettransformsearchprojectivev",
                             &FastMatch::gettransformsearchprojectivev);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchcalibrationapplied",
+                            &FastMatch::gettransformsearchcalibrationapplied);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchcalibrationreprojectionrmse",
+                            &FastMatch::gettransformsearchcalibrationreprojectionrmse);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchphysicalcx",
+                            &FastMatch::gettransformsearchphysicalcx);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "gettransformsearchphysicalcy",
+                            &FastMatch::gettransformsearchphysicalcy);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "gettransformsearchgradientscore",
                             &FastMatch::gettransformsearchgradientscore);

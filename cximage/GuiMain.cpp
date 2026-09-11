@@ -4,6 +4,7 @@
 #include "CxEvidenceSelfTestRuntime.h"
 #include "CxGeometryReferenceEvaluator.h"
 #include "CxGeometryIncrementalAutoTune.h"
+#include "CxGeometryYoloMaskPackage.h"
 #include "CxMaskDiagnosticSelfTest.h"
 #include "CxParamProbeRunner.h"
 #include "CxParamRegressionRuntime.h"
@@ -2771,6 +2772,14 @@ int RunCxVisionApplication(int argc, char **argv) {
 
   if (HasCliArg(argc, argv, "--geometry-incremental-auto-tune"))
     return cxvision_geometry_auto_tune::RunGeometryIncrementalAutoTuneCli(
+        argc, argv);
+
+  if (HasCliArg(argc, argv, "--controlled-data-strategy-assembly"))
+    return cxvision_geometry_auto_tune::RunControlledDataStrategyAssemblyCli(
+        argc, argv);
+
+  if (HasCliArg(argc, argv, "--geometry-yolo-mask-package"))
+    return cxvision_geometry_yolo_mask_package::RunGeometryYoloMaskPackageCli(
         argc, argv);
 
   if (HasCliArg(argc, argv, "--yolov8n-training-lifecycle"))

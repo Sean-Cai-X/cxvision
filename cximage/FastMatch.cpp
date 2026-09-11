@@ -1380,6 +1380,11 @@ void FastMatch::Learn(Image &image) {
   m_fastmatch_learn_a2_count = 0;
   m_fastmatch_learn_b2_count = 0;
 
+  // The legacy directional implementation is axis-aligned and constructs
+  // symmetric pairs directly from scan hits.  It must not be enabled until
+  // the domain-deduplication -> Dijkstra trace -> local-normal pipeline owns
+  // its pairing semantics; otherwise rotated parts produce crossed/double
+  // image templates.
   const bool use_directional_learn = false;
   if (hasExplicitLearnDirectionParams()) {
     CXLOG_INFO("FastMatch", "learn_boundary_directional_skipped", "running",
@@ -2384,6 +2389,36 @@ void FastMatch::MatchAB(Image &image) {
 
 }
 
+void FastMatch::setnormaltraceenabled(int enabled) {
+  m_normal_trace_config.enabled = enabled != 0;
+}
+void FastMatch::setnormaltraceparams(int overlap_radius_px, int min_gradient,
+                                     int max_nodes, int pair_offset_px) {
+  m_normal_trace_config.domain_overlap_radius_px = std::clamp(overlap_radius_px, 0, 64);
+  m_normal_trace_config.min_gradient = std::clamp(min_gradient, 1, 255);
+  m_normal_trace_config.dijkstra_max_nodes = std::clamp(max_nodes, 32, 200000);
+  m_normal_trace_config.normal_pair_offset_px = std::clamp(pair_offset_px, 1, 128);
+}
+void FastMatch::setnormaltracecosts(int gradient_weight_permille,
+                                    int turn_weight_permille,
+                                    int gap_weight_permille,
+                                    int max_trace_gap_px) {
+  m_normal_trace_config.dijkstra_gradient_cost_weight_permille = std::clamp(gradient_weight_permille, 0, 10000);
+  m_normal_trace_config.dijkstra_turn_cost_weight_permille = std::clamp(turn_weight_permille, 0, 10000);
+  m_normal_trace_config.dijkstra_gap_cost_weight_permille = std::clamp(gap_weight_permille, 0, 10000);
+  m_normal_trace_config.dijkstra_max_trace_gap_px = std::clamp(max_trace_gap_px, 1, 64);
+}
+void FastMatch::setnormaltracegeometry(int normal_angle_tolerance_deg,
+                                       int trace_min_length_px, int normal_polarity,
+                                       int corner_rejection_radius_px,
+                                       int tangent_sample_step_px) {
+  m_normal_trace_config.normal_angle_tolerance_deg = std::clamp(normal_angle_tolerance_deg, 1, 90);
+  m_normal_trace_config.trace_min_length_px = std::clamp(trace_min_length_px, 2, 10000);
+  m_normal_trace_config.normal_polarity = std::clamp(normal_polarity, -1, 1);
+  m_normal_trace_config.corner_rejection_radius_px = std::clamp(corner_rejection_radius_px, 0, 128);
+  m_normal_trace_config.tangent_sample_step_px = std::clamp(tangent_sample_step_px, 1, 64);
+}
+
 void FastMatch::settransformsearchenabled(int enabled) {
   m_transform_search_config.enabled = enabled != 0;
 }
@@ -2480,6 +2515,54 @@ void FastMatch::clearcalibrationsnapshot() {
   m_calibration_bound = false;
 }
 
+void FastMatch::setcalibrationtestenabled(int enabled) {
+  m_calibration_test_override_enabled = enabled != 0;
+  if (!m_calibration_test_override_enabled) {
+    clearcalibrationsnapshot();
+    return;
+  }
+
+  m_calibration_test_override.reset();
+  m_calibration_test_override.setmetadata("manual_key_parameter_override",
+                                          "manual", "manual", "manual");
+  m_calibration_test_override.setcoordinateframe("calibrated_plane");
+  m_calibration_test_override.setsource("manual_key_parameter_override");
+  m_calibration_test_override.setunits("unit", "unit", "pixel");
+}
+
+void FastMatch::setcalibrationtestxytransform(double scale_x, double scale_y,
+                                              double offset_x, double offset_y,
+                                              double rotation_deg,
+                                              double shear_x, double shear_y) {
+  if (!m_calibration_test_override_enabled)
+    return;
+  m_calibration_test_override.setxytransformex(scale_x, scale_y, offset_x,
+                                                offset_y, rotation_deg,
+                                                shear_x, shear_y);
+  bindcalibrationsnapshot(m_calibration_test_override.snapshot());
+}
+
+void FastMatch::setcalibrationtestxytransformscaled(
+    int scale_x_ppm, int scale_y_ppm, int offset_x_milliunit,
+    int offset_y_milliunit, int rotation_millideg, int shear_x_ppm,
+    int shear_y_ppm) {
+  setcalibrationtestxytransform(
+      static_cast<double>(scale_x_ppm) / 1000000.0,
+      static_cast<double>(scale_y_ppm) / 1000000.0,
+      static_cast<double>(offset_x_milliunit) / 1000.0,
+      static_cast<double>(offset_y_milliunit) / 1000.0,
+      static_cast<double>(rotation_millideg) / 1000.0,
+      static_cast<double>(shear_x_ppm) / 1000000.0,
+      static_cast<double>(shear_y_ppm) / 1000000.0);
+}
+
+void FastMatch::setcalibrationtestreprojectionrmse(double reprojection_rmse_px) {
+  if (!m_calibration_test_override_enabled)
+    return;
+  m_calibration_test_override.setreprojectionrmse(reprojection_rmse_px);
+  bindcalibrationsnapshot(m_calibration_test_override.snapshot());
+}
+
 void FastMatch::settransformscalerangepercent(int percent) {
   m_transform_search_config.scale_range_percent = std::max(0, percent);
 }
@@ -2524,6 +2607,18 @@ double FastMatch::gettransformsearchangle() { return m_transform_search_result.b
 double FastMatch::gettransformsearchshear() { return m_transform_search_result.best.shear; }
 double FastMatch::gettransformsearchprojectiveu() { return m_transform_search_result.best.projective_u; }
 double FastMatch::gettransformsearchprojectivev() { return m_transform_search_result.best.projective_v; }
+int FastMatch::gettransformsearchcalibrationapplied() {
+  return m_transform_search_result.calibration_applied ? 1 : 0;
+}
+double FastMatch::gettransformsearchcalibrationreprojectionrmse() {
+  return m_transform_search_result.calibration_reprojection_rmse_px;
+}
+double FastMatch::gettransformsearchphysicalcx() {
+  return m_transform_search_result.best_physical_cx;
+}
+double FastMatch::gettransformsearchphysicalcy() {
+  return m_transform_search_result.best_physical_cy;
+}
 double FastMatch::gettransformsearchgradientscore() { return m_transform_search_result.gradient_score; }
 double FastMatch::gettransformsearchresidual() { return m_transform_search_result.geometric_residual_px; }
 double FastMatch::gettransformsearchrigidbaselinescore() { return m_transform_search_result.rigid_baseline_score; }

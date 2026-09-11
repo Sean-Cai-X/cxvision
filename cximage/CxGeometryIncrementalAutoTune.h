@@ -2,6 +2,8 @@
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/photo.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -106,6 +108,7 @@ struct PackageSample {
   std::string canonical_geometry_type;
   fs::path image_path;
   fs::path label_path;
+  fs::path target_mask_path;
   bool alias_used = false;
 };
 
@@ -627,6 +630,12 @@ inline bool LoadPackageSamples(
     return false;
   }
   const cv::FileNode root = storage.root();
+  const std::string schema = ReadString(root, "schema");
+  if (schema != "cxvision.yolov8n_aabb_package.v1" &&
+      schema != "cxvision.yolov8n_aabb_mask_package.v1") {
+    reason = "package schema is unsupported";
+    return false;
+  }
   const cv::FileNode package_classes = root["classes"];
   if (!package_classes.isSeq() ||
       static_cast<int>(package_classes.size()) != policy.required_class_count) {
@@ -663,6 +672,9 @@ inline bool LoadPackageSamples(
                                          ReadString(node, "image"));
     sample.label_path = ResolveReference(manifest_path,
                                          ReadString(node, "label"));
+    const std::string target_mask = ReadString(node, "target_mask");
+    if (!target_mask.empty())
+      sample.target_mask_path = ResolveReference(manifest_path, target_mask);
     if (sample.review_item.empty() || sample.split.empty() ||
         sample.canonical_geometry_type.empty() ||
         !IsRegularFile(sample.image_path) || !IsRegularFile(sample.label_path)) {
@@ -1136,8 +1148,8 @@ inline bool AssembleControlledDataStrategy(
   std::error_code ec;
   fs::create_directories(dataset_dir / "images" / "train", ec);
   fs::create_directories(dataset_dir / "labels" / "train", ec);
-  fs::create_directories(dataset_dir / "images" / "validation", ec);
-  fs::create_directories(dataset_dir / "labels" / "validation", ec);
+  fs::create_directories(dataset_dir / "images" / "val", ec);
+  fs::create_directories(dataset_dir / "labels" / "val", ec);
   fs::create_directories(dataset_dir / "images" / "holdout", ec);
   fs::create_directories(dataset_dir / "labels" / "holdout", ec);
   if (ec) {
@@ -1157,6 +1169,8 @@ inline bool AssembleControlledDataStrategy(
   int train_count = 0;
   int validation_count = 0;
   int holdout_count = 0;
+  int hard_negative_count = 0;
+  bool all_train_masks_available = true;
   std::ostringstream rows;
   bool first = true;
   for (std::size_t index = 0; index < ordered.size(); ++index) {
@@ -1166,7 +1180,9 @@ inline bool AssembleControlledDataStrategy(
       destination_split = "train";
       ++train_count;
     } else if (sample.split == policy.selection_split) {
-      destination_split = "validation";
+      // Torch's detector lifecycle consumes `val`; the receipt continues to
+      // use the semantic term validation so the evaluation contract is clear.
+      destination_split = "val";
       ++validation_count;
     } else if (sample.split == policy.confirmation_split) {
       destination_split = "holdout";
@@ -1188,6 +1204,36 @@ inline bool AssembleControlledDataStrategy(
       reason = "cannot copy controlled label asset: " + ec.message();
       return false;
     }
+    if (destination_split == "train" && hard_negative_required) {
+      if (!IsRegularFile(sample.target_mask_path)) {
+        all_train_masks_available = false;
+      } else {
+        const cv::Mat image = cv::imread(image_target.string(), cv::IMREAD_COLOR);
+        const cv::Mat mask = cv::imread(sample.target_mask_path.string(), cv::IMREAD_GRAYSCALE);
+        if (image.empty() || mask.empty() || image.size() != mask.size()) {
+          all_train_masks_available = false;
+        } else {
+          cv::Mat binary_mask;
+          cv::threshold(mask, binary_mask, 0, 255, cv::THRESH_BINARY);
+          cv::Mat erased;
+          cv::inpaint(image, binary_mask, erased, 3.0, cv::INPAINT_TELEA);
+          const fs::path negative_image = dataset_dir / "images" / "train" /
+              (std::to_string(index) + "_target_erased_" + sample.image_path.filename().string());
+          const fs::path negative_label = dataset_dir / "labels" / "train" /
+              (std::to_string(index) + "_target_erased.txt");
+          if (!cv::imwrite(negative_image.string(), erased)) {
+            reason = "cannot write C++ generated hard negative";
+            return false;
+          }
+          std::ofstream empty_label(negative_label);
+          if (!empty_label.good()) {
+            reason = "cannot write C++ generated hard-negative label";
+            return false;
+          }
+          ++hard_negative_count;
+        }
+      }
+    }
     if (!first)
       rows << ",";
     first = false;
@@ -1207,16 +1253,33 @@ inline bool AssembleControlledDataStrategy(
     reason = "controlled data strategy has an empty required split";
     return false;
   }
-  const bool masks_available = false; // package schema exposes bbox labels only.
+  const bool masks_available = !hard_negative_required || all_train_masks_available;
+  const bool training_allowed = !hard_negative_required ||
+      (all_train_masks_available && hard_negative_count == train_count);
+  std::ostringstream dataset_manifest;
+  dataset_manifest << "{\"schema\":\"cxvision.torch_controlled_data_strategy_dataset.v1\""
+                   << ",\"training_split\":\"train\",\"validation_split\":\"val\""
+                   << ",\"holdout_split\":\"holdout\""
+                   << ",\"train_positive_count\":" << train_count
+                   << ",\"hard_negative_count\":" << hard_negative_count
+                   << ",\"validation_count\":" << validation_count
+                   << ",\"holdout_count\":" << holdout_count
+                   << ",\"training_allowed\":" << (training_allowed ? "true" : "false")
+                   << ",\"promotion_allowed\":false}";
+  if (!WriteJson(dataset_dir, "package_manifest.json", dataset_manifest.str(), reason))
+    return false;
   std::ostringstream receipt;
   receipt << "{\"schema\":\"cxvision.torch_controlled_data_strategy_receipt.v1\""
           << ",\"executor\":\"CXX_RUNTIME\""
-          << ",\"status\":\"DATA_ASSEMBLY_PARTIAL_MASK_PROVENANCE_REQUIRED\""
+          << ",\"status\":\""
+          << (training_allowed ? "DATA_ASSEMBLY_COMPLETE" :
+              "DATA_ASSEMBLY_PARTIAL_MASK_PROVENANCE_REQUIRED") << "\""
           << ",\"training_split\":\"train\""
-          << ",\"immutable_evaluation_splits\":[\"validation\",\"holdout\"]"
+          << ",\"immutable_evaluation_splits\":[\"val\",\"holdout\"]"
           << ",\"evaluation_to_training_copy_forbidden\":true"
           << ",\"external_script_execution_allowed\":false"
           << ",\"train_positive_count\":" << train_count
+          << ",\"hard_negative_count\":" << hard_negative_count
           << ",\"validation_count\":" << validation_count
           << ",\"holdout_count\":" << holdout_count
           << ",\"hard_negative_mining_required\":"
@@ -1228,8 +1291,11 @@ inline bool AssembleControlledDataStrategy(
           << ",\"target_mask_provenance_available\":"
           << (masks_available ? "true" : "false")
           << ",\"hard_negative_generation_status\":\""
-          << (hard_negative_required ? "BLOCKED_TARGET_MASK_PROVENANCE_REQUIRED" : "NOT_REQUIRED")
-          << "\",\"training_allowed\":false,\"promotion_allowed\":false"
+          << (!hard_negative_required ? "NOT_REQUIRED" :
+              training_allowed ? "CXX_INPAINT_TARGET_ERASURE_COMPLETE" :
+              "BLOCKED_TARGET_MASK_PROVENANCE_REQUIRED")
+          << "\",\"training_allowed\":" << (training_allowed ? "true" : "false")
+          << ",\"promotion_allowed\":false"
           << ",\"samples\":[" << rows.str() << "]}";
   return WriteJson(output_dir, "data_strategy_assembly.json", receipt.str(), reason);
 }
@@ -1775,6 +1841,42 @@ inline int RunGeometryIncrementalAutoTuneCli(int argc, char **argv) {
             << "\nholdout_candidate_f1=" << selected_holdout_candidate.f1
             << "\nevidence_summary="
             << (output_dir / "auto_tune_summary.json").string() << "\n";
+  return 0;
+}
+
+inline int RunControlledDataStrategyAssemblyCli(int argc, char **argv) {
+  const fs::path package_path = ArgValue(argc, argv, "--package-manifest");
+  const fs::path ontology_path = ArgValue(argc, argv, "--ontology");
+  const fs::path policy_path = ArgValue(argc, argv, "--auto-tune-policy");
+  const fs::path output_dir = ArgValue(argc, argv, "--out");
+  const std::string hard_negative_text = ArgValue(argc, argv, "--hard-negative-required");
+  if (!IsRegularFile(package_path) || !IsRegularFile(ontology_path) ||
+      !IsRegularFile(policy_path) ||
+      (hard_negative_text != "0" && hard_negative_text != "1")) {
+    std::cout << "conclusion=DATA_STRATEGY_PREFLIGHT_FAIL\n";
+    return 2;
+  }
+  std::string reason;
+  if (!OutputDirectoryReady(output_dir, reason)) {
+    std::cout << "conclusion=DATA_STRATEGY_PREFLIGHT_FAIL\nreason=" << reason << "\n";
+    return 2;
+  }
+  Ontology ontology;
+  Policy policy;
+  std::unordered_map<std::string, PackageSample> samples;
+  int alias_count = 0;
+  if (!LoadOntology(ontology_path, ontology, reason) ||
+      !LoadPolicy(policy_path, policy, reason) ||
+      !LoadPackageSamples(package_path, ontology, policy, samples, alias_count,
+                          reason) ||
+      !AssembleControlledDataStrategy(output_dir, samples, policy,
+                                      hard_negative_text == "1", false, false,
+                                      reason)) {
+    std::cout << "conclusion=DATA_STRATEGY_ASSEMBLY_FAIL\nreason=" << reason << "\n";
+    return 1;
+  }
+  std::cout << "conclusion=DATA_STRATEGY_ASSEMBLY_COMPLETE\nreceipt="
+            << (output_dir / "data_strategy_assembly.json").string() << "\n";
   return 0;
 }
 

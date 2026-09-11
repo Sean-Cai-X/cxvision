@@ -3570,6 +3570,30 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_transform_shear_range_permille", 0, 0, 300, 210.0f);
   edited |= DrawRuntimeIntRow(context, "projective range permille",
       "global_fastmatch_transform_projective_range_permille", 0, 0, 50, 210.0f);
+  ImGui::SeparatorText("Calibration to physical plane (test override)");
+  edited |= DrawRuntimeIntRow(context, "enable test calibration",
+      "global_fastmatch_calibration_test_enabled", 0, 0, 1, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "physical scale x ppm",
+      "global_fastmatch_calibration_scale_x_ppm", 1000000, 1, 100000000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "physical scale y ppm",
+      "global_fastmatch_calibration_scale_y_ppm", 1000000, 1, 100000000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "physical offset x milli-unit",
+      "global_fastmatch_calibration_offset_x_milliunit", 0, -1000000, 1000000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "physical offset y milli-unit",
+      "global_fastmatch_calibration_offset_y_milliunit", 0, -1000000, 1000000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "plane rotation milli-deg",
+      "global_fastmatch_calibration_rotation_millideg", 0, -180000, 180000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "plane shear x ppm",
+      "global_fastmatch_calibration_shear_x_ppm", 0, -500000, 500000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "plane shear y ppm",
+      "global_fastmatch_calibration_shear_y_ppm", 0, -500000, 500000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "reprojection RMSE milli-px",
+      "global_fastmatch_calibration_reprojection_rmse_milli_px", 0, 0, 100000, 250.0f);
+  ImGui::TextDisabled("ppm = physical units/pixel x 1,000,000; milli-unit and "
+                      "milli-deg preserve decimal adjustment in CxScript. "
+                      "This override is TEST ONLY: evidence marks its source "
+                      "as manual_key_parameter_override and it cannot close "
+                      "a production calibration receipt.");
   ImGui::TextDisabled("P0 scores learned A/B edge probes at the supplied seed; "
                       "center/extent can be copied from an OBB result. 0 center "
                       "or extent uses the current FastMatch ROI fallback.");
@@ -8248,6 +8272,22 @@ if (isCxTextInspect) {
           RuntimeIntOr(context, "global_fastmatch_transform_gradient_score_permille", 0) / 1000.0,
           RuntimeIntOr(context, "global_fastmatch_transform_geometric_residual_milli_px", 0) / 1000.0,
           RuntimeIntOr(context, "global_fastmatch_transform_rigid_baseline_score_permille", 0) / 1000.0);
+      const int calibrationApplied = RuntimeIntOr(
+          context, "global_fastmatch_transform_calibration_applied", 0);
+      ImGui::Text("calibration: %s  physical center=(%.3f, %.3f) unit",
+          calibrationApplied != 0 ? "applied" : "not applied",
+          RuntimeIntOr(context,
+              "global_fastmatch_transform_best_physical_cx_milliunit", 0) / 1000.0,
+          RuntimeIntOr(context,
+              "global_fastmatch_transform_best_physical_cy_milliunit", 0) / 1000.0);
+      const int calibrationRmseMilliPx = RuntimeIntOr(context,
+          "global_fastmatch_transform_calibration_reprojection_rmse_milli_px", -1000);
+      if (calibrationRmseMilliPx >= 0) {
+        ImGui::Text("calibration reprojection RMSE=%.3f px",
+                    calibrationRmseMilliPx / 1000.0);
+      } else {
+        ImGui::TextDisabled("calibration reprojection RMSE: not supplied");
+      }
     }
     ImGui::TextDisabled("Image View colors: cyan=A side, orange=B side, "
                         "yellow=keypoint midpoint, magenta=adjacent-point "
