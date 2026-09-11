@@ -2009,6 +2009,34 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 geometry_config.geometry_target_dir = sidecar_dir.string();
                 const auto summary = model->geometry_roi_val_summary(
                     dataset_root.string(), split, geometry_config);
+                std::ostringstream channel_metrics_json;
+                channel_metrics_json << "{";
+                bool first_channel = true;
+                for (const auto& channel : summary.per_affine_channel) {
+                    const char* channel_name = "unclassified";
+                    switch (channel.first) {
+                    case 1: channel_name = "rotation"; break;
+                    case 2: channel_name = "scale"; break;
+                    case 3: channel_name = "compound"; break;
+                    default: break;
+                    }
+                    const auto& metrics = channel.second;
+                    if (!first_channel) channel_metrics_json << ",";
+                    first_channel = false;
+                    channel_metrics_json << "\n    " << QuoteRuntimeTaskJsonString(channel_name) << ": {"
+                        << "\"channel_id\": " << channel.first
+                        << ", \"instance_count\": " << metrics.instance_count
+                        << ", \"ellipse_count\": " << metrics.ellipse_count
+                        << ", \"polygon_count\": " << metrics.polygon_count
+                        << ", \"ellipse_parameter_mae_px\": " << metrics.ellipse_parameter_mae_px
+                        << ", \"polygon_vertex_mae_px\": " << metrics.polygon_vertex_mae_px
+                        << ", \"continuity_brier\": " << metrics.continuity_brier
+                        << ", \"continuity_accuracy\": " << metrics.continuity_accuracy
+                        << ", \"ellipse_predictive_variance\": " << metrics.ellipse_predictive_variance
+                        << ", \"polygon_predictive_variance\": " << metrics.polygon_predictive_variance
+                        << ", \"latency_scope\": \"SHARED_SPLIT_FORWARD_NOT_ADDITIVE\"}";
+                }
+                channel_metrics_json << "\n  }";
                 std::ofstream output(report_path);
                 output << "{\n"
                     << "  \"schema\": \"cxvision.geometry_roi_fixed_evaluation.v1\",\n"
@@ -2026,6 +2054,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                     << "  \"ellipse_predictive_variance\": " << summary.ellipse_predictive_variance << ",\n"
                     << "  \"polygon_predictive_variance\": " << summary.polygon_predictive_variance << ",\n"
                     << "  \"inference_ms\": " << summary.inference_ms << ",\n"
+                    << "  \"affine_channel_metrics\": " << channel_metrics_json.str() << ",\n"
                     << "  \"promotion_allowed\": false\n}\n";
             };
             evaluate_geometry_split("val", geometry_validation_target_dir,

@@ -1,4 +1,4 @@
-﻿#ifndef TORCH_V8_H
+#ifndef TORCH_V8_H
 #define TORCH_V8_H
 
 #include <torch/torch.h>
@@ -379,6 +379,39 @@ public:
         std::map<int64_t, ClassStats> per_class;
     };
 
+    struct GeometryRoiChannelMetrics {
+        int64_t instance_count = 0;
+        int64_t ellipse_count = 0;
+        int64_t polygon_count = 0;
+        double ellipse_parameter_mae_px = 0.0;
+        double polygon_vertex_mae_px = 0.0;
+        double continuity_brier = 0.0;
+        double continuity_accuracy = 0.0;
+        double ellipse_predictive_variance = 0.0;
+        double polygon_predictive_variance = 0.0;
+        double ellipse_parameter_sum = 0.0;
+        double polygon_vertex_sum = 0.0;
+        double continuity_brier_sum = 0.0;
+        double continuity_correct_sum = 0.0;
+        double ellipse_variance_sum = 0.0;
+        double polygon_variance_sum = 0.0;
+
+        void finalize() {
+            if (ellipse_count > 0) {
+                ellipse_parameter_mae_px = ellipse_parameter_sum / ellipse_count;
+                ellipse_predictive_variance = ellipse_variance_sum / ellipse_count;
+            }
+            if (polygon_count > 0) {
+                polygon_vertex_mae_px = polygon_vertex_sum / polygon_count;
+                polygon_predictive_variance = polygon_variance_sum / polygon_count;
+            }
+            if (instance_count > 0) {
+                continuity_brier = continuity_brier_sum / instance_count;
+                continuity_accuracy = continuity_correct_sum / instance_count;
+            }
+        }
+    };
+
     struct GeometryRoiValidationSummary {
         int64_t instance_count = 0;
         int64_t ellipse_count = 0;
@@ -390,23 +423,21 @@ public:
         double ellipse_predictive_variance = 0.0;
         double polygon_predictive_variance = 0.0;
         double inference_ms = 0.0;
+        std::map<int64_t, GeometryRoiChannelMetrics> per_affine_channel;
         std::string roi_source = "TEACHER_SIDECAR_ROI";
-        std::string claim_status =
-            "TEACHER_ROI_GEOMETRY_HEAD_EVALUATED_NOT_END_TO_END";
+        std::string claim_status = "TEACHER_ROI_GEOMETRY_HEAD_EVALUATED_NOT_END_TO_END";
     };
 
     GeometryRoiValidationSummary geometry_roi_val_summary(
         const std::string& data_path, const std::string& split,
         YoloDatasetConfig dataset_config) {
-        TORCH_CHECK(geometry_head_enabled(),
-            "geometry ROI evaluation requires an enabled geometry head");
+        TORCH_CHECK(geometry_head_enabled(), "geometry ROI evaluation requires an enabled geometry head");
         TORCH_CHECK(!split.empty(), "geometry ROI evaluation split must not be empty");
         dataset_config.is_train = false;
         dataset_config.enable_hsv = false;
         dataset_config.enable_flip = false;
         dataset_config.geometry_targets_enabled = true;
-        dataset_config.geometry_polygon_vertex_count =
-            build_config_.geometry_head.polygon_vertex_count;
+        dataset_config.geometry_polygon_vertex_count = build_config_.geometry_head.polygon_vertex_count;
         dataset_config.validate();
         torch::NoGradGuard no_grad;
         torch::nn::Module::eval();
@@ -417,13 +448,42 @@ public:
             std::move(dataset), make_yolo_loader_options(dataset_config.max_gt > 0 ?
                 std::min<int>(dataset_config.max_gt, 16) : 1, 0));
         GeometryRoiValidationSummary summary;
-        double ellipse_parameter_sum = 0.0;
-        double polygon_vertex_sum = 0.0;
-        double continuity_brier_sum = 0.0;
-        double continuity_correct_sum = 0.0;
-        double ellipse_variance_sum = 0.0;
-        double polygon_variance_sum = 0.0;
+        GeometryRoiChannelMetrics total_metrics;
         const auto start = std::chrono::steady_clock::now();
+
+        auto accumulate_metrics = [&](GeometryRoiChannelMetrics& metrics, const torch::Tensor& mask,
+                                      const GeometryRoiPrediction& prediction, const GeometryRoiTargets& targets) {
+            if (!mask.any().item<bool>()) return;
+            const torch::Tensor kind = targets.kind;
+            const torch::Tensor ellipse_mask = mask & (kind == 1);
+            const torch::Tensor polygon_mask = mask & (kind == 2);
+            if (ellipse_mask.any().item<bool>()) {
+                const int64_t count = ellipse_mask.sum().item<int64_t>();
+                const torch::Tensor error = (prediction.ellipse_parameters.index({ellipse_mask}) -
+                    targets.ellipse_parameters.index({ellipse_mask})).abs().mean();
+                metrics.ellipse_parameter_sum += error.item<double>() * dataset_config.img_size * count;
+                metrics.ellipse_variance_sum += torch::exp(prediction.log_variance.index({ellipse_mask})
+                    .select(1, 0)).mean().item<double>() * count;
+                metrics.ellipse_count += count;
+            }
+            if (polygon_mask.any().item<bool>()) {
+                const int64_t count = polygon_mask.sum().item<int64_t>();
+                const torch::Tensor delta = prediction.polygon_vertices.index({polygon_mask}) -
+                    targets.polygon_vertices.index({polygon_mask});
+                const torch::Tensor point_error = torch::sqrt(torch::pow(delta.reshape({-1, 2}), 2).sum(1)).mean();
+                metrics.polygon_vertex_sum += point_error.item<double>() * dataset_config.img_size * count;
+                metrics.polygon_variance_sum += torch::exp(prediction.log_variance.index({polygon_mask})
+                    .select(1, 1)).mean().item<double>() * count;
+                metrics.polygon_count += count;
+            }
+            const torch::Tensor probability = torch::sigmoid(prediction.boundary_continuity_logits.index({mask}));
+            const torch::Tensor continuity = targets.boundary_continuity.index({mask}).reshape({-1, 1});
+            const int64_t count = continuity.size(0);
+            metrics.continuity_brier_sum += torch::pow(probability - continuity, 2).sum().item<double>();
+            metrics.continuity_correct_sum += ((probability >= 0.5) == (continuity >= 0.5)).sum().item<double>();
+            metrics.instance_count += count;
+        };
+
         for (auto& batch : *data_loader) {
             const torch::Tensor images = batch.data.to(device);
             const torch::Tensor batch_targets = batch.target.to(device);
@@ -431,56 +491,33 @@ public:
                 batch_targets, build_config_.geometry_head.polygon_vertex_count);
             const auto backbone_outs = backbone_->forward(images);
             const auto neck_outs = pan_->forward(backbone_outs);
-            const GeometryRoiPrediction prediction =
-                geometry_head_->forward(neck_outs.at(0), targets.rois);
-            const torch::Tensor kind = targets.kind;
-            const torch::Tensor ellipse_mask = kind == 1;
-            const torch::Tensor polygon_mask = kind == 2;
-            if (ellipse_mask.any().item<bool>()) {
-                const torch::Tensor error = (prediction.ellipse_parameters.index({ellipse_mask}) -
-                    targets.ellipse_parameters.index({ellipse_mask})).abs().mean();
-                ellipse_parameter_sum += error.item<double>() * dataset_config.img_size *
-                    ellipse_mask.sum().item<int64_t>();
-                ellipse_variance_sum += torch::exp(prediction.log_variance.index({ellipse_mask})
-                    .select(1, 0)).mean().item<double>() * ellipse_mask.sum().item<int64_t>();
-                summary.ellipse_count += ellipse_mask.sum().item<int64_t>();
+            const GeometryRoiPrediction prediction = geometry_head_->forward(neck_outs.at(0), targets.rois);
+            accumulate_metrics(total_metrics, torch::ones_like(targets.kind, torch::kBool), prediction, targets);
+            const torch::Tensor affine_channel = targets.affine_channel.to(torch::kLong);
+            for (const int64_t channel_id : {0, 1, 2, 3}) {
+                const torch::Tensor channel_mask = affine_channel == channel_id;
+                if (channel_mask.any().item<bool>()) {
+                    accumulate_metrics(summary.per_affine_channel[channel_id], channel_mask, prediction, targets);
+                }
             }
-            if (polygon_mask.any().item<bool>()) {
-                const torch::Tensor delta = prediction.polygon_vertices.index({polygon_mask}) -
-                    targets.polygon_vertices.index({polygon_mask});
-                const torch::Tensor point_error = torch::sqrt(torch::pow(delta.reshape({-1, 2}), 2)
-                    .sum(1)).mean();
-                polygon_vertex_sum += point_error.item<double>() * dataset_config.img_size *
-                    polygon_mask.sum().item<int64_t>();
-                polygon_variance_sum += torch::exp(prediction.log_variance.index({polygon_mask})
-                    .select(1, 1)).mean().item<double>() * polygon_mask.sum().item<int64_t>();
-                summary.polygon_count += polygon_mask.sum().item<int64_t>();
-            }
-            const torch::Tensor probability = torch::sigmoid(prediction.boundary_continuity_logits);
-            const torch::Tensor continuity = targets.boundary_continuity.reshape({-1, 1});
-            const int64_t count = continuity.size(0);
-            continuity_brier_sum += torch::pow(probability - continuity, 2).sum().item<double>();
-            continuity_correct_sum += ((probability >= 0.5) == (continuity >= 0.5))
-                .sum().item<double>();
-            summary.instance_count += count;
         }
         const auto end = std::chrono::steady_clock::now();
         summary.inference_ms = static_cast<double>(std::chrono::duration_cast<
             std::chrono::milliseconds>(end - start).count());
-        if (summary.ellipse_count > 0) {
-            summary.ellipse_parameter_mae_px = ellipse_parameter_sum / summary.ellipse_count;
-            summary.ellipse_predictive_variance = ellipse_variance_sum / summary.ellipse_count;
-        }
-        if (summary.polygon_count > 0) {
-            summary.polygon_vertex_mae_px = polygon_vertex_sum / summary.polygon_count;
-            summary.polygon_predictive_variance = polygon_variance_sum / summary.polygon_count;
-        }
-        if (summary.instance_count > 0) {
-            summary.continuity_brier = continuity_brier_sum / summary.instance_count;
-            summary.continuity_accuracy = continuity_correct_sum / summary.instance_count;
-        }
+        total_metrics.finalize();
+        summary.instance_count = total_metrics.instance_count;
+        summary.ellipse_count = total_metrics.ellipse_count;
+        summary.polygon_count = total_metrics.polygon_count;
+        summary.ellipse_parameter_mae_px = total_metrics.ellipse_parameter_mae_px;
+        summary.polygon_vertex_mae_px = total_metrics.polygon_vertex_mae_px;
+        summary.continuity_brier = total_metrics.continuity_brier;
+        summary.continuity_accuracy = total_metrics.continuity_accuracy;
+        summary.ellipse_predictive_variance = total_metrics.ellipse_predictive_variance;
+        summary.polygon_predictive_variance = total_metrics.polygon_predictive_variance;
+        for (auto& channel : summary.per_affine_channel) channel.second.finalize();
         return summary;
     }
+
 
     ValidationSummary val_summary(const std::string& data_path, const YoloEvalConfig& eval_config) {
         eval_config.validate();

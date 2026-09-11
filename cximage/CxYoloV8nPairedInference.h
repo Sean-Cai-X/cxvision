@@ -38,9 +38,21 @@ struct Case {
 
 struct DetectionMetrics {
   int detection_count = 0;
+  int target_overlap_count = 0;
+  int same_class_target_overlap_count = 0;
+  int cross_class_target_overlap_count = 0;
+  int background_detection_count = 0;
+  int top_class_id = -1;
+  int target_class_id = -1;
   double best_same_class_iou = 0.0;
   double best_same_class_confidence = 0.0;
+  double best_any_class_iou = 0.0;
+  double top_confidence = 0.0;
   bool matched_iou50 = false;
+  bool exact_single_correct = false;
+  bool duplicate_response = false;
+  bool cross_class_competition = false;
+  bool top_class_correct = false;
 };
 
 // Every timing is taken around the real runtime service call.  The residual is
@@ -155,6 +167,7 @@ inline DetectionMetrics EvaluateDetections(const fs::path &detections_path,
   double cx = 0.0, cy = 0.0, width = 0.0, height = 0.0;
   if (image.empty() || !(label >> target_class >> cx >> cy >> width >> height))
     return metrics;
+  metrics.target_class_id = target_class;
   const double target_x1 = (cx - width * 0.5) * image.cols;
   const double target_y1 = (cy - height * 0.5) * image.rows;
   const double target_x2 = (cx + width * 0.5) * image.cols;
@@ -177,8 +190,10 @@ inline DetectionMetrics EvaluateDetections(const fs::path &detections_path,
     node["x2"] >> x2;
     node["y2"] >> y2;
     node["confidence"] >> confidence;
-    if (class_id != target_class)
-      continue;
+    if (confidence > metrics.top_confidence) {
+      metrics.top_confidence = confidence;
+      metrics.top_class_id = class_id;
+    }
     const double intersection_x1 = std::max(x1, target_x1);
     const double intersection_y1 = std::max(y1, target_y1);
     const double intersection_x2 = std::min(x2, target_x2);
@@ -190,12 +205,32 @@ inline DetectionMetrics EvaluateDetections(const fs::path &detections_path,
         std::max(0.0, x2 - x1) * std::max(0.0, y2 - y1);
     const double union_area = target_area + detection_area - intersection;
     const double iou = union_area > 0.0 ? intersection / union_area : 0.0;
+    metrics.best_any_class_iou = std::max(metrics.best_any_class_iou, iou);
+    if (iou >= 0.5) {
+      ++metrics.target_overlap_count;
+      if (class_id == target_class)
+        ++metrics.same_class_target_overlap_count;
+      else
+        ++metrics.cross_class_target_overlap_count;
+    } else {
+      ++metrics.background_detection_count;
+    }
+    if (class_id != target_class)
+      continue;
     if (iou > metrics.best_same_class_iou) {
       metrics.best_same_class_iou = iou;
       metrics.best_same_class_confidence = confidence;
     }
   }
   metrics.matched_iou50 = metrics.best_same_class_iou >= 0.5;
+  metrics.duplicate_response = metrics.same_class_target_overlap_count > 1;
+  metrics.cross_class_competition =
+      metrics.cross_class_target_overlap_count > 0;
+  metrics.top_class_correct =
+      metrics.top_class_id >= 0 && metrics.top_class_id == target_class;
+  metrics.exact_single_correct =
+      metrics.detection_count == 1 && metrics.matched_iou50 &&
+      metrics.top_class_correct;
   return metrics;
 }
 
@@ -209,6 +244,26 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
   const fs::path comparison_plan =
       ArgValue(argc, argv, "--comparison-plan");
   const fs::path output_dir = ArgValue(argc, argv, "--out");
+  std::string candidate_postprocess_override =
+      ArgValue(argc, argv, "--candidate-postprocess-json");
+  const fs::path candidate_postprocess_file =
+      ArgValue(argc, argv, "--candidate-postprocess-file");
+  if (!candidate_postprocess_file.empty()) {
+    std::ifstream input(candidate_postprocess_file, std::ios::binary);
+    if (!input) {
+      std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                << "reason=candidate postprocess policy file cannot be read\n";
+      return 2;
+    }
+    candidate_postprocess_override.assign(
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>());
+    if (candidate_postprocess_override.empty()) {
+      std::cout << "conclusion=ASSET_PREFLIGHT_FAIL\n"
+                << "reason=candidate postprocess policy file is empty\n";
+      return 2;
+    }
+  }
   const std::string requested_device =
       ArgValue(argc, argv, "--torch-device").empty()
           ? "cpu"
@@ -355,6 +410,14 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
   int total_incremental_matches = 0;
   int total_base_false_alarm_cases = 0;
   int total_incremental_false_alarm_cases = 0;
+  int total_incremental_exact_single_correct_cases = 0;
+  int total_incremental_duplicate_cases = 0;
+  int total_incremental_cross_class_cases = 0;
+  int total_incremental_background_fp_cases = 0;
+  int total_incremental_miss_cases = 0;
+  int total_incremental_target_overlap_boxes = 0;
+  int total_incremental_cross_class_overlap_boxes = 0;
+  int total_incremental_background_boxes = 0;
   double total_base_match_confidence = 0.0;
   double total_incremental_match_confidence = 0.0;
   std::map<std::string, std::array<double, 4>> group_metrics;
@@ -377,6 +440,8 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
       request.manifest_path = manifest.string();
       request.case_name = item.review_item;
       request.output_dir = out.string();
+      if (std::string(model_role) == "candidate")
+        request.extra_json = candidate_postprocess_override;
       std::string execute_reason;
       const auto execute_started = std::chrono::steady_clock::now();
       const bool ok = service.Execute(request, response, execute_reason);
@@ -423,6 +488,22 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
                 (incremental_metrics.matched_iou50 ? 1 : 0)
             ? 1
             : 0;
+    total_incremental_exact_single_correct_cases +=
+        incremental_metrics.exact_single_correct ? 1 : 0;
+    total_incremental_duplicate_cases +=
+        incremental_metrics.duplicate_response ? 1 : 0;
+    total_incremental_cross_class_cases +=
+        incremental_metrics.cross_class_competition ? 1 : 0;
+    total_incremental_background_fp_cases +=
+        incremental_metrics.background_detection_count > 0 ? 1 : 0;
+    total_incremental_miss_cases +=
+        incremental_metrics.matched_iou50 ? 0 : 1;
+    total_incremental_target_overlap_boxes +=
+        incremental_metrics.target_overlap_count;
+    total_incremental_cross_class_overlap_boxes +=
+        incremental_metrics.cross_class_target_overlap_count;
+    total_incremental_background_boxes +=
+        incremental_metrics.background_detection_count;
     total_base_match_confidence += base_metrics.best_same_class_confidence;
     total_incremental_match_confidence +=
         incremental_metrics.best_same_class_confidence;
@@ -452,6 +533,24 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
          << base_metrics.detection_count
          << ", \"incremental_detection_count\": "
          << incremental_metrics.detection_count
+         << ", \"incremental_target_overlap_count\": "
+         << incremental_metrics.target_overlap_count
+         << ", \"incremental_same_class_target_overlap_count\": "
+         << incremental_metrics.same_class_target_overlap_count
+         << ", \"incremental_cross_class_target_overlap_count\": "
+         << incremental_metrics.cross_class_target_overlap_count
+         << ", \"incremental_background_detection_count\": "
+         << incremental_metrics.background_detection_count
+         << ", \"incremental_top_class_id\": "
+         << incremental_metrics.top_class_id
+         << ", \"incremental_target_class_id\": "
+         << incremental_metrics.target_class_id
+         << ", \"incremental_exact_single_correct\": "
+         << (incremental_metrics.exact_single_correct ? "true" : "false")
+         << ", \"incremental_duplicate_response\": "
+         << (incremental_metrics.duplicate_response ? "true" : "false")
+         << ", \"incremental_cross_class_competition\": "
+         << (incremental_metrics.cross_class_competition ? "true" : "false")
          << ", \"base_best_same_class_iou\": "
          << base_metrics.best_same_class_iou
          << ", \"incremental_best_same_class_iou\": "
@@ -541,6 +640,77 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
   }
   performance_profile << "  ],\n  \"promotion_allowed\": false\n}\n";
 
+  const double incremental_mean_boxes_per_image =
+      selected.empty() ? 0.0
+                       : static_cast<double>(total_incremental_detections) /
+                             static_cast<double>(selected.size());
+  const double incremental_exact_single_correct_rate =
+      selected.empty() ? 0.0
+                       : static_cast<double>(
+                             total_incremental_exact_single_correct_cases) /
+                             static_cast<double>(selected.size());
+  const double incremental_duplicate_response_rate =
+      selected.empty() ? 0.0
+                       : static_cast<double>(total_incremental_duplicate_cases) /
+                             static_cast<double>(selected.size());
+  const double incremental_cross_class_competition_rate =
+      selected.empty() ? 0.0
+                       : static_cast<double>(total_incremental_cross_class_cases) /
+                             static_cast<double>(selected.size());
+  const double incremental_background_fp_case_rate =
+      selected.empty() ? 0.0
+                       : static_cast<double>(total_incremental_background_fp_cases) /
+                             static_cast<double>(selected.size());
+  const double incremental_miss_rate =
+      selected.empty() ? 0.0
+                       : static_cast<double>(total_incremental_miss_cases) /
+                             static_cast<double>(selected.size());
+  std::string primary_issue = "CONTRACT_SATISFIED";
+  if (total_incremental_background_fp_cases > 0)
+    primary_issue = "BACKGROUND_FALSE_POSITIVE";
+  else if (total_incremental_cross_class_cases > 0)
+    primary_issue = "CROSS_CLASS_COMPETITION";
+  else if (total_incremental_duplicate_cases > 0)
+    primary_issue = "NEARBY_DUPLICATE_RESPONSE";
+  else if (total_incremental_miss_cases > 0)
+    primary_issue = "MISS";
+  const fs::path contract_observation_path =
+      output_dir / "detection_contract_observation.json";
+  std::ofstream contract_observation(contract_observation_path);
+  contract_observation
+      << "{\n"
+      << "  \"schema\": \"cxvision.detection_contract_observation.v1\",\n"
+      << "  \"contract_scope\": \"single_target_observation_only\",\n"
+      << "  \"raw_feature_level_evidence\": "
+         "\"NOT_AVAILABLE_IN_FINAL_DETECTIONS_ONLY\",\n"
+      << "  \"multiscale_duplicate_claim\": "
+         "\"NOT_ESTABLISHED_FROM_FINAL_DETECTIONS_ONLY\",\n"
+      << "  \"expected_targets_per_image\": 1,\n"
+      << "  \"selected_image_count\": " << selected.size() << ",\n"
+      << "  \"candidate_mean_boxes_per_image\": "
+      << incremental_mean_boxes_per_image << ",\n"
+      << "  \"candidate_exact_single_correct_rate\": "
+      << incremental_exact_single_correct_rate << ",\n"
+      << "  \"candidate_duplicate_response_rate\": "
+      << incremental_duplicate_response_rate << ",\n"
+      << "  \"candidate_cross_class_competition_rate\": "
+      << incremental_cross_class_competition_rate << ",\n"
+      << "  \"candidate_background_fp_case_rate\": "
+      << incremental_background_fp_case_rate << ",\n"
+      << "  \"candidate_miss_rate\": " << incremental_miss_rate << ",\n"
+      << "  \"candidate_target_overlap_boxes\": "
+      << total_incremental_target_overlap_boxes << ",\n"
+      << "  \"candidate_cross_class_overlap_boxes\": "
+      << total_incremental_cross_class_overlap_boxes << ",\n"
+      << "  \"candidate_background_boxes\": "
+      << total_incremental_background_boxes << ",\n"
+      << "  \"primary_issue\": \"" << primary_issue << "\",\n"
+      << "  \"localization_gate_enabled\": "
+      << (incremental_exact_single_correct_rate == 1.0 ? "true" : "false")
+      << ",\n"
+      << "  \"promotion_allowed\": false\n"
+      << "}\n";
+
   const std::string status =
       all_ok ? "CXX_YOLOV8N_PAIRED_INFERENCE_EXECUTION_PASS"
              : "CXX_YOLOV8N_PAIRED_INFERENCE_FAIL";
@@ -607,10 +777,25 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
          << "    \"candidate_false_alarm_case_rate\": "
          << total_incremental_false_alarm_cases / selected_count << ",\n"
          << "    \"candidate_mean_match_confidence\": "
-         << total_incremental_match_confidence / selected_count << "\n"
+         << total_incremental_match_confidence / selected_count << ",\n"
+         << "    \"candidate_mean_boxes_per_image\": "
+         << incremental_mean_boxes_per_image << ",\n"
+         << "    \"candidate_exact_single_correct_rate\": "
+         << incremental_exact_single_correct_rate << ",\n"
+         << "    \"candidate_duplicate_response_rate\": "
+         << incremental_duplicate_response_rate << ",\n"
+         << "    \"candidate_cross_class_competition_rate\": "
+         << incremental_cross_class_competition_rate << ",\n"
+         << "    \"candidate_background_fp_case_rate\": "
+         << incremental_background_fp_case_rate << ",\n"
+         << "    \"candidate_contract_miss_rate\": "
+         << incremental_miss_rate << "\n"
          << "  },\n"
          << "  \"performance_profile_ref\": \""
          << Escape(performance_profile_path.string()) << "\",\n"
+         << "  \"detection_contract_observation_ref\": \""
+         << Escape(contract_observation_path.string()) << "\",\n"
+         << "  \"primary_issue\": \"" << primary_issue << "\",\n"
          << "  \"promotion_allowed\": false,\n"
          << "  \"groups\": [\n" << groups.str() << "\n  ],\n"
          << "  \"cases\": [\n" << rows.str() << "\n  ]\n}\n";

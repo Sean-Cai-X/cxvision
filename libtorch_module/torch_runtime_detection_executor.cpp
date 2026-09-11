@@ -26,6 +26,47 @@ struct LetterboxResult {
     int original_height;
 };
 
+bool ApplyDetectionPostprocessOverrides(
+    const std::string& extra_json,
+    TorchModelManifest& manifest,
+    std::string& reason)
+{
+    if (extra_json.empty())
+        return true;
+    cv::FileStorage overrides(
+        extra_json,
+        cv::FileStorage::READ | cv::FileStorage::MEMORY |
+            cv::FileStorage::FORMAT_JSON);
+    const cv::FileNode postprocess = overrides["postprocess"];
+    if (!overrides.isOpened() || postprocess.empty() || !postprocess.isMap())
+    {
+        reason =
+            "detection request extra_json must contain a postprocess JSON object";
+        return false;
+    }
+    const cv::FileNode confidence = postprocess["confidence_threshold"];
+    const cv::FileNode iou = postprocess["iou_threshold"];
+    const cv::FileNode max_detections = postprocess["max_detections"];
+    const cv::FileNode class_agnostic = postprocess["class_agnostic_nms"];
+    if (!confidence.empty())
+        confidence >> manifest.confidence_threshold;
+    if (!iou.empty())
+        iou >> manifest.iou_threshold;
+    if (!max_detections.empty())
+        max_detections >> manifest.max_detections;
+    if (!class_agnostic.empty())
+        manifest.class_agnostic_nms = static_cast<int>(class_agnostic) != 0;
+    if (manifest.confidence_threshold < 0.0f ||
+        manifest.confidence_threshold > 1.0f ||
+        manifest.iou_threshold < 0.0f || manifest.iou_threshold > 1.0f ||
+        manifest.max_detections <= 0)
+    {
+        reason = "detection postprocess override is outside the accepted bounds";
+        return false;
+    }
+    return true;
+}
+
 LetterboxResult LetterboxImage(const cv::Mat& image, int target_width, int target_height)
 {
     LetterboxResult result;
@@ -454,6 +495,21 @@ TorchTaskResultCpp ExecuteTorchDetectionTask(
                 "{\"schema\":\"cxvision.torch.error.v1\","
                 "\"failure_stage\":\"runtime_manifest_validation\","
                 "\"reason\":\"" + reason + "\"}";
+            return result;
+        }
+        if (!ApplyDetectionPostprocessOverrides(
+                request.extra_json, manifest, reason))
+        {
+            result.ok = false;
+            result.error_code = static_cast<int>(
+                TorchRuntimeErrorCode::ManifestInvalid);
+            result.status = "failed";
+            result.error_message =
+                "invalid detection postprocess override: " + reason;
+            result.result_json =
+                "{\"schema\":\"cxvision.torch.error.v1\","
+                "\"failure_stage\":\"runtime_postprocess_override\","
+                "\"reason\":\"invalid_postprocess_override\"}";
             return result;
         }
 

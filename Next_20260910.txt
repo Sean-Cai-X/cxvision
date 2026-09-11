@@ -461,3 +461,918 @@ FM模型演化方向提示:
 
   因此，下一关键落地点应确定为：建立 CxGeoMetry 类型、Parser 接口、Key Parameter Controls、结果快照和
   Evidence schema；先跑基础几何对象测试分支，再开始积累复杂对象自训练数据。
+  
+  
+  述当前的torch模型yolov8的net 层convolutional层 route层 pool层 yolo层的参数流程(Head、Neck、
+    Backbone DFL、P2 route、OBB/Seg 分支、卷积和池化结构   解冻阶段 每类 threshold、Top-K、NMS、expected instances LR、
+    class weight、采样比例、focal gamma、assignment Top-K )如何与CxGeoMetry(FastMatch,CxTextInspect)做个对齐,也就是
+    说,CxGeoMetry(FastMatch,CxTextInspect)的当前双显式网络结构如何进一步模型化演进的思路 ,当前要回答的不是如何将yolov8加几何头,而是
+  CxGeoMetry(FastMatch,CxTextInspect)的模型演化这个方向的理解
+
+
+• 理解重点应该反过来：不是给 YOLOv8 增加一个几何头，而是认识到 FastMatch + CxTextInspect 本身已经形成了一套“手工构建的多尺度显式网络”。下一步是把这套网络从
+  散落的 C++ 容器和固定路由，演化成可版本化、可训练、可校准的 CxGeoMetry 模型体系。
+
+  ## 1. 当前 FastMatch 已经具备显式多尺度网络雏形
+
+  这些成员并不是普通缓存，而是三种不同性质的数据。
+
+  ### 模型原型层
+
+  vector<PointsShape> m_models_l72;
+  vector<PointsShape> m_models_l36;
+  vector<PointsShape> m_models_l12;
+  vector<PointsShape> m_models_l6;
+  vector<PointsShape> m_models_l3;
+
+  它们相当于不同分辨率下的几何原型库：
+
+  - l72：保留较丰富的局部细节、边缘和纹理结构；
+  - l36/l12/l6：逐步压缩局部结构；
+  - l3：表达最粗粒度的整体类别或结构摘要。
+
+  如果这些数字确实表示网格尺寸，那么它天然支持两条推理路径：
+
+  观测编码：L72 → L36 → L12 → L6 → L3
+  细节逐步压缩，形成全局对象假设
+
+  候选验证：L3 → L6 → L12 → L36 → L72
+  从粗类别出发，逐级检查更细的局部结构
+
+  这已经不是普通模板匹配，而是一种显式的粗到精特征金字塔。
+
+  ### 快速编码层
+
+  typedef vector<int> IMAGEFASTMODEL;
+
+  vector<IMAGEFASTMODEL> m_imagefastmodels_l72;
+  vector<IMAGEFASTMODEL> m_imagefastmodels_l36;
+  vector<IMAGEFASTMODEL> m_imagefastmodels_l12;
+  vector<IMAGEFASTMODEL> m_imagefastmodels_l6;
+  vector<IMAGEFASTMODEL> m_imagefastmodels_l3;
+
+  这部分可以理解为原始 PointsShape 的离散化或索引化表达。
+
+  其作用接近神经网络中的“特征张量”，但它不是连续浮点特征，而是人工编码的稀疏整数特征：
+
+  PointsShape 几何原型
+          ↓ 编码
+  IMAGEFASTMODEL 离散特征
+          ↓ 索引/比较
+  候选模型集合
+
+  它的优势是可解释、CPU 友好、容易定位失败节点；不足是相似度、编码权重和跨尺度关系主要依赖人工规则。
+
+  ### 对象语义层
+
+  vector<easyobj> m_easyobjectmodels_l72;
+  vector<easyobj> m_easyobjectmodels_l36;
+  vector<easyobj> m_easyobjectmodels_l12;
+  vector<easyobj> m_easyobjectmodels_l6;
+  vector<easyobj> m_easyobjectmodels_l3;
+
+  这已经接近一个显式的多尺度对象分类模型：
+
+  - PointsShape 表达几何结构；
+  - IMAGEFASTMODEL 表达快速检索特征；
+  - easyobj 表达对象原型、类别或对象属性；
+  - m_imagefastmatchlist 保存最终候选路径。
+
+  所以 FastMatch 当前的模型链可以概括为：
+
+  几何原型
+    ↓
+  离散特征编码
+    ↓
+  多尺度候选检索
+    ↓
+  对象原型匹配
+    ↓
+  最终候选列表
+
+  ## 2. route、NMS、Top-K 已经存在，只是还没有被模型化
+
+  这些映射：
+
+  map<int, int> m_mapl3_l6;
+  map<int, int> m_mapl6_l12;
+  map<int, int> m_mapl12_l36;
+  map<int, int> m_mapl36_l72;
+
+  本质是显式的跨层 route：
+
+  L3 节点
+    ↓ m_mapl3_l6
+  L6 节点
+    ↓ m_mapl6_l12
+  L12 节点
+    ↓ m_mapl12_l36
+  L36 节点
+    ↓ m_mapl36_l72
+  L72 节点
+
+  它们与 YOLO Neck 的概念有相似处：都在连接不同尺度的特征。但机制完全不同：
+
+  - YOLO Neck 用卷积、上采样、下采样和 concat 融合连续特征；
+  - FastMatch 用明确的整数映射连接离散模型节点。
+
+  而这些成员：
+
+  vector<int> m_duplicates_list_l72;
+  vector<int> m_duplicates_list_l36;
+  vector<int> m_duplicates_list_l12;
+
+  就是显式网络中的重复候选抑制机制，与 NMS 的业务目的相近：
+
+  多个模型命中同一结构
+          ↓
+  重复关系检测
+          ↓
+  保留代表模型或最高分模型
+
+  m_imagefastmatchlist 则相当于最终的 Top-K 候选队列或 beam。
+
+  因此对应关系可以明确为：
+
+   YOLO/深度模型概念      FastMatch 当前结构                   本质区别
+  ━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Backbone 多尺度特征    m_models_l*、m_imagefastmodels_l*    人工几何编码，而非卷积学习
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   Pool/下采样            L72 向 L3 的结构压缩                 规则化聚合，而非池化算子
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   Neck/Route             m_mapl3_l6 等跨层映射                确定性索引，而非特征融合
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   Head                   m_easyobjectmodels_l*                原型匹配，而非参数化分类头
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   Top-K                  m_imagefastmatchlist                 显式候选列表
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   NMS                    m_duplicates_list_l*                 模型重复关系，而非框 IoU 抑制
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   P2 高分辨率分支        L72/L36 细粒度模型                   几何网格细节，不是卷积特征层
+  ─────────────────────  ───────────────────────────────────  ───────────────────────────────
+   DFL                    当前没有严格对应物                   可由多节点参数分布演进实现
+
+  imagemodelstocurrent_l72(i) 等函数，则相当于“激活某层某个模型并将其切换为当前推理模型”。它是显式模型选择器，而不是神经网络意义上的 forward layer。
+
+  问题在于当前每层都有独立函数和独立成员，层级被固定在 C++ 结构里，还没有形成统一的模型图。
+
+  ## 3. CxTextInspect 是第二套显式推理网络
+
+  std::vector<levelnodes> m_reslutnodeslistgrid3x3;
+  std::vector<levelnodes> m_reslutnodeslistgrid6x6;
+  std::vector<levelnodes> m_reslutnodeslistgrid12x12;
+  std::vector<levelnodes> m_reslutnodeslistgrid36x36;
+  std::vector<levelnodes> m_reslutnodeslistgrid72x72;
+
+  这部分和 FastMatch 模型库的性质不同。
+
+  - FastMatch 的 m_models_l* 是相对稳定的模型原型；
+  - CxTextInspect 的 m_reslutnodeslistgrid* 更接近当前图像产生的运行时结果节点；
+  - 多层 levelnodes 共同形成字符分类或解码的候选图；
+  - 一条从低维节点到高维节点的有效路径，可以代表一个字符或对象的逐级确认过程。
+
+  因此当前“双显式网络”实际是：
+
+  FastMatch：模型原型图
+  ├─ 多尺度 PointsShape
+  ├─ 多尺度 IMAGEFASTMODEL
+  ├─ 多尺度 easyobj
+  ├─ 跨尺度 route
+  └─ 重复抑制与候选列表
+
+  CxTextInspect：结果假设图
+  ├─ 3x3 候选节点
+  ├─ 6x6 候选节点
+  ├─ 12x12 候选节点
+  ├─ 36x36 候选节点
+  └─ 72x72 候选节点
+
+  前者回答：
+
+  > 当前图像和哪个已知几何/对象模型匹配？
+
+  后者回答：
+
+  > 这些逐级匹配节点组合后，最可能形成哪个字符、编码或文字序列？
+
+  这两类数据不能直接混成一个容器。模型化时必须分开：
+
+  Immutable Model Graph
+  模型原型、特征编码、跨层关系、类别定义、校准参数
+
+  Runtime Observation Graph
+  当前图像在各尺度生成的观测特征
+
+  Runtime Result Graph
+  匹配节点、候选路径、分数、淘汰原因、最终结果
+
+  这一区分是后续模型发布、训练和 Evidence 闭环的基础。
+
+  ## 4. CxGeoMetry 的模型化方向
+
+  目标不是把这些结构改写成卷积网络，而是先统一为数据驱动的多尺度模型图：
+
+  struct CxGeoMetryLevelModel
+  {
+      int level_id;
+      int grid_size;
+
+      std::vector<PointsShape> geometry_models;
+      std::vector<IMAGEFASTMODEL> encoded_models;
+      std::vector<easyobj> object_models;
+
+      std::vector<int> duplicate_groups;
+
+      double default_threshold;
+      int top_k;
+  };
+
+  struct CxGeoMetryRoute
+  {
+      int source_level;
+      int source_node;
+      int target_level;
+      int target_node;
+
+      double transition_weight;
+      double calibration_score;
+  };
+
+  struct CxGeoMetryModel
+  {
+      std::vector<CxGeoMetryLevelModel> levels;
+      std::vector<CxGeoMetryRoute> routes;
+
+      std::string model_id;
+      std::string semantic_version;
+      std::string feature_schema_version;
+      std::string class_schema_hash;
+      std::string training_receipt;
+  };
+
+  这样，当前硬编码的：
+
+  imagemodelstocurrent_l3()
+  imagemodelstocurrent_l6()
+  imagemodelstocurrent_l12()
+  imagemodelstocurrent_l36()
+  imagemodelstocurrent_l72()
+
+  会演化成统一执行器：
+
+  activateModel(level_id, model_id)
+  routeCandidates(source_level, target_level)
+  evaluateLevel(level_id, observations)
+
+  新增、删除或调整层级，原则上通过模型资产完成，而不需要继续增加新的 C++ 成员和函数。
+
+  ## 5. 真正的学习应发生在现有显式网络内部
+
+  第一阶段不需要学习新的图像 Backbone。应先学习当前显式网络中最有价值、风险最低的参数。
+
+  ### 第一层：评分校准
+
+  当前固定分数演化为：
+
+  score =
+      w_shape       × 几何相似度
+    + w_gradient    × 梯度一致性
+    + w_topology    × 拓扑一致性
+    + w_parent      × 上层节点支持度
+    + w_child       × 下层细节验证度
+    - w_residual    × 拟合残差
+    - w_duplicate   × 重复候选惩罚
+
+  训练首先学习这些权重和每类 threshold，而不是修改 FastMatch 的边缘推进核心。
+
+  ### 第二层：跨尺度 route 学习
+
+  当前：
+
+  map<int, int>
+
+  只能表达一对一确定映射。
+
+  未来应允许：
+
+  一个 L3 节点
+  ├─ 0.72 → L6 节点 A
+  ├─ 0.21 → L6 节点 B
+  └─ 0.07 → L6 节点 C
+
+  即把硬映射演化成带权图：
+
+  map<int, vector<RouteCandidate>>
+
+  这相当于显式网络自己的 assignment Top-K 和 beam search。
+
+  ### 第三层：原型自动增量
+
+  人工确认的 Evidence 可以驱动：
+
+  - 新增新的 PointsShape 原型；
+  - 合并重复模型；
+  - 调整类别内部原型数量；
+  - 更新 easyobj 对象原型；
+  - 建立或修正跨层 route；
+  - 记录困难负样本；
+  - 生成新模型版本。
+
+  这才是 CxGeoMetry 的“自训练”：
+
+  人工接受 Evidence
+      ↓
+  提取各层几何特征
+      ↓
+  与现有原型比较
+  ├─ 足够接近：更新原型统计
+  ├─ 属于类内新形态：新增子原型
+  ├─ 与其他原型重复：进入合并候选
+  └─ 类别不确定：保留为困难样本
+      ↓
+  生成候选模型包
+      ↓
+  L1/L2/L3 回归
+      ↓
+  人工批准发布
+
+  ## 6. DFL 在 CxGeoMetry 中的正确对应
+
+  不能直接说 FastMatch 已经有 DFL，但当前多层候选结构很适合演化成“分布式参数估计”。
+
+  例如角度不再只保留一个值：
+
+  angle:
+    -2° : 0.05
+    -1° : 0.20
+     0° : 0.48
+    +1° : 0.22
+    +2° : 0.05
+
+  尺度、圆半径、边缘位置和字符类别同样可以保存离散候选分布。
+
+  最终输出：
+
+  parameter_value = Σ bin_value × bin_probability
+  uncertainty     = distribution variance
+
+  对应关系是：
+
+  - YOLO DFL：框边距离的离散概率分布；
+  - CxGeoMetry Distribution Fit：几何参数、姿态或节点路径的离散分布。
+
+  这样可以把当前的 Top-K 候选提升为带置信区间的计量结果，同时仍保留每个候选节点的证据。
+
+  ## 7. YOLO 训练参数在 CxGeoMetry 中不是照搬，而是重新解释
+
+   参数                  CxGeoMetry 中的意义
+  ━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   每类 threshold        每对象类、每几何类、每尺度节点的接受阈值
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   Top-K                 每层保留的原型候选数和跨层 route 数
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   NMS                   重复几何原型、重复对象候选和重叠结果抑制
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   expected instances    对象数量先验及 Evidence 异常检查
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   LR                    仅用于可学习评分器、embedding 或概率路由；纯显式模型可使用原型更新率
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   class weight          稀有几何对象、困难字符和高风险类别权重
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   采样比例              正常、困难、负样本、不同工位和不同光照的数据配比
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   focal gamma           降低大量简单匹配样本影响，强调困难对象和近似对象
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   assignment Top-K      一个样本允许关联多个相邻原型或多条跨层路径
+  ────────────────────  ──────────────────────────────────────────────────────────────────────
+   解冻阶段              分阶段开放评分、路由、原型和特征编码的学习能力
+
+  CxGeoMetry 自身的“解冻”建议定义为：
+
+  F0：全部冻结
+  只运行现有 FastMatch/CxTextInspect，收集 Evidence
+
+  F1：校准层解冻
+  只学习每类 threshold、score weight、Top-K 和置信度映射
+
+  F2：route 层解冻
+  学习 L3↔L6↔L12↔L36↔L72 的多候选转移概率
+
+  F3：prototype 层解冻
+  允许新增、合并和更新 PointsShape/easyobj 原型
+
+  F4：descriptor 层解冻
+  引入小型可学习 embedding，改善近似轮廓和复杂对象区分
+
+  F5：Geo/Text 联合校准
+  共享几何矫正、局部特征和不确定度，但保持两个业务解码器
+
+  ## 8. 最终 CxGeoMetry 模型形态
+
+  最终结构应当是：
+
+  CxGeoMetry Model Package
+  │
+  ├─ Shared Explicit Feature Pyramid
+  │  ├─ L72 几何细节
+  │  ├─ L36
+  │  ├─ L12
+  │  ├─ L6
+  │  └─ L3 全局结构
+  │
+  ├─ Geometry Model Graph
+  │  ├─ PointsShape prototypes
+  │  ├─ IMAGEFASTMODEL encodings
+  │  ├─ easyobj object prototypes
+  │  ├─ weighted cross-level routes
+  │  └─ geometry/measurement decoder
+  │
+  ├─ Text Model Graph
+  │  ├─ glyph prototypes
+  │  ├─ per-level result-node matching
+  │  ├─ reading-order transitions
+  │  └─ text/code decoder
+  │
+  ├─ Calibration
+  │  ├─ per-class threshold
+  │  ├─ Top-K/NMS
+  │  ├─ expected instances
+  │  └─ uncertainty mapping
+  │
+  └─ Lineage
+     ├─ immutable manifest
+     ├─ semantic version
+     ├─ class schema
+     ├─ training dataset receipt
+     ├─ validation Evidence
+     └─ promotion decision
+
+  所以，CxGeoMetry 的核心演化路线应定为：
+
+  当前硬编码多尺度容器
+      ↓
+  统一多尺度模型图
+      ↓
+  评分和 threshold 校准
+      ↓
+  跨层 route 概率化
+      ↓
+  原型增量学习
+      ↓
+  小型可学习特征编码
+      ↓
+  FastMatch 几何解码 + CxTextInspect 文字解码
+      ↓
+  统一版本化模型包和 Evidence 闭环
+
+  这条路线保留了现有 FastMatch/CxTextInspect 最有价值的资产：多尺度原型、明确路由、逐层结果节点和完整可解释性；模型化发生在它们内部，而不是依赖 YOLOv8 再增
+  加一个外部几何头。
+
+
+› 就以上我的理解的关键是当前结构的CPU,GPU模型标准化对齐,也就是如何将当前的多尺度原型、明确路由、逐层结果节点和完整可解释性如何使用CUDA或SYCL的功能化指令对
+  齐,也就是算法libtorch化
+
+  
+  ：算法 libtorch 化不等于把现有 C++ 循环机械换成 Tensor。真正需要标准化的是“模型资产、张量布局、跨层路由、候选状态和算子边界”，然后让同一套算
+  子分别落到 CPU、CUDA，以及可选的 SYCL/XPU 后端。我会按这个层次解释，并核对当前 PyTorch 官方后端能力，避免把 CUDA 与 SYCL 混成同一条编译链。
+
+◦ Searching the web
+
+• Searched the web for site:pytorch.org/docs stable C++ frontend LibTorch CUDA tensors custom operators dispatcher device agnostic ...
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 你的理解是对的。CxGeoMetry 模型演化的下一关键，不是先设计新的卷积网络，而是完成一次：
+
+  > 从 C++ 对象网络，转换为设备无关的张量计算图。
+
+  也就是把现有多尺度原型、route、候选节点、重复抑制和评分流程，统一表达成 libtorch/ATen Tensor + Functional Operators。之后同一个算法入口才能根据 device 分
+  发到 CPU、CUDA 或 XPU/SYCL。
+
+  PyTorch C++ Frontend 本身支持 CPU/GPU Tensor、自动微分、神经网络模块、优化器和模型序列化；自定义算子可以通过 Dispatcher 分别注册 CPU、CUDA
+  等后端实现。PyTorch C++ Frontend (https://docs.pytorch.org/cppdocs/frontend.html)、Torch Library API
+  (https://docs.pytorch.org/cppdocs/api/library/index.html)
+
+  ## 一、当前结构到 Tensor 模型的对齐
+
+  最核心的对应关系是：
+
+   当前 FastMatch/CxTextInspect       libtorch 化表达
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   vector<PointsShape> m_models_l*    打包的原型点 Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   vector<IMAGEFASTMODEL>             离散描述子/Embedding Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   m_easyobjectmodels_l*              类别、对象属性、原型参数 Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   m_mapl3_l6 等                      CSR/COO 跨层路由 Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   m_duplicates_list_l*               duplicate group / suppression Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   m_reslutnodeslistgrid*             当前图像的候选节点状态 Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   m_imagefastmatchlist               Top-K candidate index Tensor
+  ─────────────────────────────────  ──────────────────────────────────────
+   imagemodelstocurrent_l*()          index_select/gather 模型激活算子
+
+  例如 PointsShape 不能直接搬到 GPU，应打包为连续 Tensor：
+
+  model_points      [total_points, 2]  float32
+  model_offsets     [model_count + 1]  int64
+  model_level       [model_count]      int32
+  model_class       [model_count]      int32
+  model_descriptor  [model_count, D]   float32/int8
+  model_prior       [model_count]      float32
+
+  由于每个模型点数不同，使用：
+
+  points + offsets
+
+  表达变长数据，而不是：
+
+  vector<Tensor>
+
+  否则每个候选都会产生一次 CPU/GPU 调度和同步，GPU 性能反而会下降。
+
+  跨层 route 可表示成：
+
+  route_row_ptr      [source_count + 1] int64
+  route_target       [edge_count]       int32
+  route_weight       [edge_count]       float32
+  route_level_pair   [edge_count, 2]    int32
+
+  这使当前一对一的：
+
+  map<int, int>
+
+  可以演化成一个节点对应多个加权目标：
+
+  L3 node 12
+  ├─ 0.72 → L6 node 41
+  ├─ 0.21 → L6 node 45
+  └─ 0.07 → L6 node 38
+
+  ## 二、先 Functional 化，再 CUDA 化
+
+  正确顺序不是直接写 CUDA kernel，而是先把有状态方法改造成纯算子：
+
+  旧结构：
+  修改 m_current_model
+  修改 m_matchlist
+  修改 m_resultnodes
+  读取内部状态输出结果
+
+  新结构：
+  outputs = operator(inputs, model_tensors, config)
+
+  目标计算图：
+
+  image + ROI + initial transform
+            ↓
+  cxgeometry::sample_pyramid
+            ↓
+  cxgeometry::encode_observations
+            ↓
+  cxgeometry::match_prototypes
+            ↓
+  cxgeometry::route_candidates
+            ↓
+  cxgeometry::suppress_duplicates
+            ↓
+  cxgeometry::fit_primitives
+            ↓
+  ├─ GeometryResult
+  └─ TextCandidateGraph → cxtextinspect::decode
+
+  建议拆成以下算子：
+
+  sample_pyramid()
+  encode_points()
+  match_prototypes()
+  route_topk()
+  suppress_duplicates()
+  refine_transform()
+  fit_geometry()
+  decode_text_graph()
+  build_evidence_trace()
+
+  然后通过 PyTorch Dispatcher 注册：
+
+  TORCH_LIBRARY(cxgeometry, m)
+  {
+      m.def("match_prototypes(...) -> (...)");
+      m.def("route_topk(...) -> (...)");
+      m.def("fit_geometry(...) -> (...)");
+  }
+
+  TORCH_LIBRARY_IMPL(cxgeometry, CPU, m)
+  {
+      m.impl("match_prototypes", match_prototypes_cpu);
+  }
+
+  TORCH_LIBRARY_IMPL(cxgeometry, CUDA, m)
+  {
+      m.impl("match_prototypes", match_prototypes_cuda);
+  }
+
+  上层只调用：
+
+  torch::Tensor result =
+      torch::ops::cxgeometry::match_prototypes(...);
+
+  不需要在 FastMatch 业务代码里散布：
+
+  if (cuda)
+  if (xpu)
+  if (cpu)
+
+  这就是 CPU/GPU 标准化对齐的核心。
+
+  ## 三、哪些功能适合优先搬到 CUDA
+
+  适合 GPU 的是“大批量、同结构、数据并行”部分：
+
+  - 多 ROI、多候选的仿射/投影采样；
+  - Sobel、梯度方向和局部描述子；
+  - 多模型与多观测的批量相似度；
+  - 点集距离、Chamfer 类距离；
+  - route 的 gather/scatter；
+  - 分段 reduction；
+  - Top-K 和重复候选抑制；
+  - 批量角度、尺度、位置评分；
+  - 多候选小矩阵拟合。
+
+  不适合第一阶段搬到 GPU 的部分：
+
+  - Parser/CxScript 对象管理；
+  - Evidence JSON 和图片导出；
+  - 模型 manifest、receipt、版本检查；
+  - 业务规则；
+  - 单个候选的复杂分支控制；
+  - 人工审核状态；
+  - 极少量点的最终 double 亚像素拟合。
+
+  合理的第一阶段链路是：
+
+  CPU：Parser 和流程控制
+    ↓
+  GPU：图像采样、梯度、描述子、批量候选评分
+    ↓
+  GPU：route、Top-K、重复抑制
+    ↓
+  CPU 或 GPU：最终几何拟合
+    ↓
+  CPU：结果快照、Evidence 和业务规则
+
+  如果一个 ROI 只有几个候选，GPU kernel 启动和数据传输成本可能比 CPU 计算还大。因此必须保留 CPU 路径，并按候选数、ROI 面积和批量大小选择设备。
+
+  ## 四、FastMatch 与 CxTextInspect 的 libtorch 化关系
+
+  两者应共享底层 Tensor 金字塔和 route 引擎，但保持不同解码器：
+
+  CxGeoMetryTensorPyramid
+  ├─ L72
+  ├─ L36
+  ├─ L12
+  ├─ L6
+  └─ L3
+         ↓
+  Shared Prototype Matching + Route Graph
+         ↓
+  ├─ FastMatch Geometry Decoder
+  │  ├─ pose
+  │  ├─ affine/projective transform
+  │  ├─ contour
+  │  ├─ primitive parameters
+  │  └─ fit residual
+  │
+  └─ CxTextInspect Decoder
+     ├─ glyph candidates
+     ├─ line/group structure
+     ├─ reading order
+     ├─ character posterior
+     └─ final text/code
+
+  因此“文字模型合并进主模型”不是删除 CxTextInspect，而是：
+
+  - 共用 CxGeoMetryTensorPyramid；
+  - 共用原型匹配与跨层 route；
+  - 几何与文字使用独立 decoder；
+  - 共享训练资产、模型版本和 Evidence schema。
+
+  ## 五、从显式算法到可训练模型
+
+  libtorch 化应分四层进行。
+
+  ### P0：Tensor 等价化
+
+  不改变算法结果，只把容器打包成 Tensor：
+
+  vector/map/object
+        ↓
+  packed tensors
+
+  验证要求：
+
+  - CPU Tensor 结果与旧 C++ 结果一致；
+  - 候选数量一致；
+  - Top-K 索引一致；
+  - duplicate 淘汰一致；
+  - 最优模型一致；
+  - 拟合参数和残差满足规定误差。
+
+  此阶段不引入训练。
+
+  ### P1：CUDA 批处理
+
+  将热点算子注册为 CUDA 实现：
+
+  CPU reference implementation
+  CUDA optimized implementation
+
+  要求两条路径使用完全相同的：
+
+  - 模型 Tensor；
+  - route Tensor；
+  - threshold；
+  - Top-K；
+  - 预算；
+  - Evidence 字段。
+
+  ### P2：可学习评分和 route
+
+  先学习风险较低的参数：
+
+  score weights
+  route weights
+  class calibration
+  prototype priors
+  confidence mapping
+
+  例如：
+
+  score =
+      w_shape × shape_score
+    + w_gradient × gradient_score
+    + w_topology × topology_score
+    + w_route × route_consistency
+    - w_residual × fit_residual
+
+  FastMatch 的真实几何结果作为监督信号，人工接受 Evidence 作为可信标签。
+
+  ### P3：学习型描述子
+
+  保留显式几何网络，引入小型 Tensor 模块：
+
+  局部边缘/点集
+        ↓
+  CxGeoMetryDescriptorNet
+        ↓
+  embedding
+        ↓
+  原型相似度 + 显式 route + 几何拟合
+
+  此时才真正使用：
+
+  - LR；
+  - class weight；
+  - focal gamma；
+  - hard-negative sampling；
+  - assignment Top-K；
+  - 分阶段解冻。
+
+  最终不是纯 CNN，也不是纯模板，而是：
+
+  Learned Descriptor
+          +
+  Explicit Prototype Graph
+          +
+  Deterministic Geometry Refinement
+
+  ## 六、CUDA 与 SYCL 不能视为同一个后端
+
+  CUDA 对应 NVIDIA GPU，标准设备名是：
+
+  torch::kCUDA
+
+  Intel GPU 在 PyTorch 中对应：
+
+  xpu
+
+  而不是通用的 sycl device。当前官方 torch.xpu 已提供 Intel GPU 支持，并能接入外部 SYCL queue。PyTorch XPU API
+  (https://docs.pytorch.org/docs/stable/xpu.html)、Intel GPU Getting Started (https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html)
+
+  因此设备接口应定义为：
+
+  device_policy = auto | cpu | cuda | xpu
+
+  实现策略分两层：
+
+  1. 尽量使用 ATen 标准算子
+     同一份 Tensor 代码由 PyTorch 分发到 CPU、CUDA 或 XPU。
+
+  2. 只有性能热点才写定制 kernel
+     分别实现 CPU、CUDA、XPU。
+
+  需要注意：Intel 的 DPC++ 自定义扩展示例使用 -fsycl 和单独的 XPU/IPEX 构建链，而且其当前扩展文档仍明确标注部分 DPC++ Extension 路径只支持 Linux。Intel
+  DPC++ Extension (https://intel.github.io/intel-extension-for-pytorch/xpu/latest/tutorials/features/DPC%2B%2B_Extension.html)
+
+  所以当前 Windows + NVIDIA 环境的合理优先级是：
+
+  P0：CPU ATen
+  P1：CUDA
+  P2：保持 XPU-compatible 的算子边界
+  P3：在独立 Intel 环境验证 SYCL/XPU kernel
+
+  不能要求同一个 .cu 文件同时编译成 SYCL，也不应让 CUDA/SYCL 条件宏侵入 FastMatch 核心。
+
+  ## 七、完整可解释性如何保留
+
+  GPU 化最容易丢掉的是 Evidence。每个算子不能只返回最终 score，还要返回追踪 Tensor：
+
+  candidate_id
+  source_model_id
+  level_id
+  parent_candidate_id
+  route_id
+  shape_score
+  gradient_score
+  topology_score
+  fit_residual
+  duplicate_group
+  accepted
+  rejection_code
+  best_transform
+
+  执行完成后，只把压缩后的 trace Tensor 回收到 CPU：
+
+  GPU 大规模计算
+        ↓
+  Top-K 压缩
+        ↓
+  小规模 Evidence Trace
+        ↓
+  CPU JSON / overlay / manual review
+
+  禁止在每个候选或每层中间调用 .cpu()，否则会形成大量 GPU 同步点。
+
+  设备证据还应增加：
+
+  requested_device
+  actual_device
+  operator_backend
+  operator_schema_version
+  model_version
+  dtype
+  deterministic_mode
+  fallback_occurred
+  fallback_reason
+  kernel_elapsed_ms
+  transfer_elapsed_ms
+
+  ## 八、Parser 串行约束仍然可以保持
+
+  CUDA kernel 可以在一个 case 内部并行，但不能改变现有 Parser 边界：
+
+  Case A：
+  Parser Compile
+  → GPU operators
+  → synchronize
+  → capture values
+  → export Evidence
+  → cleanup
+
+  Case B：
+  完成 A 后才允许开始
+
+  GPU 异步执行不等于允许 Parser case 并行。结果捕获前必须同步，工具对象仍然不能跨 Runtime 保存。
+
+  ## 九、最终目标
+
+  最终应形成三层：
+
+  CxGeoMetryModel
+  模型资产层
+  ├─ packed prototype tensors
+  ├─ route tensors
+  ├─ class/calibration tensors
+  └─ immutable manifest/receipt
+
+  CxGeoMetryOps
+  设备算子层
+  ├─ CPU kernels
+  ├─ CUDA kernels
+  └─ XPU/SYCL kernels（可选独立后端）
+
+  CxGeoMetryRuntime
+  业务执行层
+  ├─ FastMatch geometry decoder
+  ├─ CxTextInspect decoder
+  ├─ budgets
+  ├─ Evidence
+  └─ CPU fallback
+
+  一句话定调：
+
+  > libtorch 化不是把 FastMatch 改造成 YOLO，而是把 FastMatch/CxTextInspect 的显式多尺度网络变成 Tensor 化模型图，把计算热点变成可由 CPU、CUDA、XPU 分发的函
+  > 数式算子，再逐步让评分、route 和描述子具备训练能力；几何拟合、候选路径和 Evidence 继续保持显式可解释。
