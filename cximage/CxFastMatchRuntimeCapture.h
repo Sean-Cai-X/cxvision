@@ -26,6 +26,10 @@ struct CxFastMatchRuntimeCapture
     int object_learn_a2_count = 0;
     int object_learn_b2_count = 0;
     int object_learn_status_code = 0;
+    int object_normal_trace_candidate_count = 0;
+    int object_normal_trace_deduplicated_count = 0;
+    int object_normal_trace_point_count = 0;
+    int object_normal_trace_pair_count = 0;
 
     bool global_model_found = false;
     bool global_learn_a_found = false;

@@ -1796,3 +1796,42 @@ FM模型演化方向提示:
   - 法向对数量、法向角度统计；
   - 连续性/极性/角点拒绝数量；
   - 最终 A/B 对数与模型覆盖率。
+  
+  已推进到 Normal-Trace Learn 第一版：
+
+  - 新增：领域梯度候选去重、ROI 内 Dijkstra 主描痕、局部梯度法向 A/B 成对采样。
+  - 不再使用 doublepattern() 生成镜像对，避免旋转目标出现横向交叉/重影。
+  - 默认仍走旧 Learn；只有界面显式开启 enable normal-trace Learn 才启用新路径，失败自动回退。
+  - 修正 Directional Learn 表格：共享参数不再每帧覆盖四方向真实参数。
+  - 增加证据计数：原始领域点、去重后节点、描痕点、法向采样对数；已接入 CxScript 输出与 Runtime Capture。
+
+  本轮重新编译正在执行中；此前主算法实现已编译通过，当前是因新增 CxScript 证据 getter 触发全量依赖重编译。
+  
+  • 实现上已经分成三层，互不遮挡：
+
+  1. Show FastMatch Learn Result：显示 A/B 模板，但用保存的原图 Learn 原点反投影；
+  2. Show four-edge FindLine scan ticks：显示 FastMatch 内部真实 FindLine 扫描线；
+  3. Top / Bottom / Left / Right：按 ROI 一侧筛选并显示对应接受结论点与数量。
+
+  现在进行编译验证。
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 已按你的要求完成实现方向：
+
+  - 新增 Key Parameter Controls：
+      - Show FastMatch Learn Result
+      - Show four-edge FindLine scan ticks
+      - Top / Bottom / Left / Right 四方向选择
+
+  - Tick 直接读取 FastMatch 继承的 FindLine 实时扫描线；
+  - 橙色结论点按所选 ROI 边筛选，Image View 标注该边的 tick 与结论数量；
+  - Learn Result 可单独隐藏，不影响扫描线、其它测量或证据图层。
+
+  同时处理了零点模板显示问题：
+
+  - 匹配内部仍使用零点归一化模板；
+  - modelzeroposition() 记录归一化前的原图锚点；
+  - Image View 只在绘制时加回该锚点，所以模板显示回原图 Learn 位置，不会再显示在 (0,0) 附近，也不会改变匹配数据。
+
+  当前全量编译仍在进行中；本轮修改触及公共状态头文件，因此会重编译相关依赖。

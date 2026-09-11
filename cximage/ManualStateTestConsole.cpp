@@ -861,6 +861,8 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
       set(("global_fastmatch_learn_linegap" + suffix).c_str(), 6);
       set(("global_fastmatch_learn_objfilter" + suffix).c_str(), 1);
       set(("global_fastmatch_learn_compare_gap" + suffix).c_str(), 20);
+      set(("global_fastmatch_learn_edge_count" + suffix).c_str(), 2);
+      set(("global_fastmatch_learn_selected_edge" + suffix).c_str(), 0);
     }
     set("global_find_num", 1);
     set("global_match_step_x", 10);
@@ -886,6 +888,11 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_fastmatch_transform_max_elapsed_ms", 100);
     set("global_fastmatch_transform_shear_range_permille", 0);
     set("global_fastmatch_transform_projective_range_permille", 0);
+    set("global_fastmatch_normaltrace_enabled", 0);
+    set("global_fastmatch_normaltrace_overlap_radius_px", 3);
+    set("global_fastmatch_normaltrace_min_gradient", 20);
+    set("global_fastmatch_normaltrace_max_nodes", 4096);
+    set("global_fastmatch_normaltrace_pair_offset_px", 6);
     // Manual calibration override is test-only.  A production measurement
     // must bind an externally frozen CxCalibration receipt instead.
     set("global_fastmatch_calibration_test_enabled", 0);
@@ -1475,6 +1482,20 @@ void ViewController::RefreshRuntimeObjectTable(
     object.fastmatch_learn_a2_count = matcher->getlearna2count();
     object.fastmatch_learn_b2_count = matcher->getlearnb2count();
     object.fastmatch_learn_status_code = matcher->getlearnstatuscode();
+    for (int direction = 0; direction < 4; ++direction) {
+      const FastMatch::DirectionalProbeEvidence& probe =
+          matcher->getdirectionalprobeevidence(direction);
+      object.fastmatch_directional_probe_scans[static_cast<std::size_t>(direction)] =
+          probe.scan_line_count;
+      object.fastmatch_directional_probe_raw[static_cast<std::size_t>(direction)] =
+          probe.raw_result_count;
+      object.fastmatch_directional_probe_accepted[static_cast<std::size_t>(direction)] =
+          probe.accepted_side_count;
+      object.fastmatch_directional_probe_diagnostics[static_cast<std::size_t>(direction)] =
+          probe.diagnostic_count;
+      object.fastmatch_directional_probe_status[static_cast<std::size_t>(direction)] =
+          probe.status;
+    }
     object.fastmatch_pattern_a_count = matcher->getpatternapointcount();
     object.fastmatch_pattern_b_count = matcher->getpatternbpointcount();
     object.fastmatch_candidate_count = matcher->getresultcandidatecount();

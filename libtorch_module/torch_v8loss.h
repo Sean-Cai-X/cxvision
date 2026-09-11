@@ -335,7 +335,14 @@ private:
         if (pos_mask.any().item<bool>()) {
             auto gather_inds = (assigned_gt_inds - 1).clamp_min(0).to(torch::kLong);
 
-            auto target_cls_ids = gt_labels.gather(1, gather_inds);
+            // Padded GT rows use class -1.  `gather_inds` is intentionally
+            // evaluated for every anchor before `pos_mask` is applied, so
+            // clamp those non-positive rows to a harmless in-range class for
+            // one_hot; the following pos_mask makes their target exactly zero.
+            // This preserves the negative/background contract rather than
+            // fabricating a class label for padding.
+            auto target_cls_ids = gt_labels.gather(1, gather_inds)
+                .clamp(0, num_classes_ - 1);
 
             auto one_hot = F::one_hot(target_cls_ids, num_classes_).to(pred_cls.dtype());
 

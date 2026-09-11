@@ -1696,6 +1696,12 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setlearncompgap",
                             &FastMatch::setlearncompgap_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnedgecount",
+                            &FastMatch::setlearnedgecount_script);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setlearnselectededge",
+                            &FastMatch::setlearnselectededge_script);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "setfilter",
                             &FastMatch::setfilter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "savemodel",
@@ -2095,6 +2101,18 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getlearnstatuscode",
                             &FastMatch::getlearnstatuscode);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getnormaltracecandidatecount",
+                            &FastMatch::getnormaltracecandidatecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getnormaltracededuplicatedcount",
+                            &FastMatch::getnormaltracededuplicatedcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getnormaltracepointcount",
+                            &FastMatch::getnormaltracepointcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getnormaltracepaircount",
+                            &FastMatch::getnormaltracepaircount);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getmaxresult", &FastMatch::getmaxresult);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,

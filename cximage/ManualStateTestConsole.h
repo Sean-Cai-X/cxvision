@@ -492,6 +492,11 @@ struct RuntimeObjectView {
   int fastmatch_learn_a2_count = 0;
   int fastmatch_learn_b2_count = 0;
   int fastmatch_learn_status_code = 0;
+  std::array<int, 4> fastmatch_directional_probe_scans{};
+  std::array<int, 4> fastmatch_directional_probe_raw{};
+  std::array<int, 4> fastmatch_directional_probe_accepted{};
+  std::array<int, 4> fastmatch_directional_probe_diagnostics{};
+  std::array<std::string, 4> fastmatch_directional_probe_status{};
   int fastmatch_pattern_a_count = 0;
   int fastmatch_pattern_b_count = 0;
   int fastmatch_candidate_count = 0;
@@ -1502,10 +1507,18 @@ struct ManualTestContext {
   bool show_line_gauge_scan_lines = false;
   bool show_circle_gauge_scan_lines = false;
   bool show_ellipse_gauge_scan_lines = false;
-  bool show_fastmatch_debug_vectors = true;
-  bool show_fastmatch_compare_gap_pairs = true;
-  bool show_fastmatch_keypoint_tangents = true;
-  bool show_fastmatch_filtered_points = true;
+  // Image input is immutable.  FastMatch diagnostics are opt-in render-only
+  // layers drawn by ImGui; they must never be confused with source pixels.
+  bool show_fastmatch_debug_vectors = false;
+  // Independent FastMatch Learn display layers.  Keeping the result layer
+  // separate lets an operator inspect FindLine scans and conclusion points
+  // without the learned A/B model obscuring other Image View overlays.
+  bool show_fastmatch_learn_result = false;
+  bool show_fastmatch_learn_scan_ticks = false;
+  int fastmatch_selected_learn_edge = 0; // Top, Bottom, Left, Right.
+  bool show_fastmatch_compare_gap_pairs = false;
+  bool show_fastmatch_keypoint_tangents = false;
+  bool show_fastmatch_filtered_points = false;
 
 
 

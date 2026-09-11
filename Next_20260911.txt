@@ -1789,3 +1789,27 @@
   MASK_PROVENANCE_REQUIRED。
 
   本轮内部执行已验证且保持 training_allowed=false、promotion_allowed=false；未绕过该质量门。
+  
+   已完成真实 C++/Torch 增量训练闭环的核心修复与首轮运行。
+
+  - COMPILE_PASS：主程序和 Torch runtime 已更新。
+  - 受控数据：28 正样本 + 28 C++ 掩膜擦除困难负样本；固定验证 14，holdout 21。
+  - 标签契约：每个正样本只有一个目标标签，但类别 ID 覆盖七类；空标签仅用于困难负样本。
+  - 修复了两项真实运行时缺口：
+      - 父 checkpoint 加载后设备未迁移，导致 CPU 输入/CUDA 权重冲突；
+      - padding 标签 -1 进入分类 one-hot，导致训练崩溃。
+
+  - 真实训练完成：50 计划 epoch，实际 34 epoch，满足最少 30；early-stop 正常触发。
+  - validation-best：第 26 epoch，F1 0.965517；父模型同一固定验证集 F1 0.047619。
+  - 生成了父模型、best、final、incremental 权重，以及训练曲线、冻结审计、checkpoint 选择报告和模型制品清单。
+
+  关键证据位于：
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_165300_controlled_l1_single_target_real_training/torch_yolov8n_training_lifecycle_result.json
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_165300_controlled_l1_single_target_real_training/checkpoint_selection_report.json
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_165300_controlled_l1_single_target_real_training/incremental_model_manifest.json
+
+  当前状态只能是 CANDIDATE：真实训练与制品已具备，但锁定 holdout、困难样本回归和生产质量门尚未完成，不能进入 EVALUATED、
+  APPROVED 或 ACTIVE。下一步应在同一 C++ 生命周期中补齐 parent/candidate 的锁定 holdout 对比与数量/类别契约报告。

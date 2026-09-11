@@ -326,11 +326,13 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
     std::string geometry_type;
     std::string image_ref;
     std::string label_ref;
+    std::string source_case_ref;
     node["split"] >> split;
     node["review_item"] >> review_item;
     node["geometry_type"] >> geometry_type;
     node["image"] >> image_ref;
     node["label"] >> label_ref;
+    node["source_case_ref"] >> source_case_ref;
     if (split != target_split || review_item.empty() ||
         geometry_type.empty() || image_ref.empty() || label_ref.empty())
       continue;
@@ -339,13 +341,28 @@ inline int RunYoloV8nPairedInferenceCli(int argc, char **argv) {
     if (!fs::is_regular_file(image_path, ec) || ec ||
         !fs::is_regular_file(label_path, ec) || ec)
       continue;
-    if (NodeBool(node["rotation_signal"]))
+    // Signal flags are preferred.  Asset packages created from the controlled
+    // geometry manifest carry the same semantics in source_case_ref instead;
+    // use that schema field as a generic fallback, never a case-name table.
+    const std::string signal_text = source_case_ref.empty()
+        ? review_item : source_case_ref;
+    std::string normalized_signal;
+    for (const unsigned char ch : signal_text)
+      normalized_signal += static_cast<char>(std::tolower(ch));
+    const bool rotation_signal = NodeBool(node["rotation_signal"]) ||
+        normalized_signal.find("rotation") != std::string::npos;
+    const bool scale_signal = NodeBool(node["scale_signal"]) ||
+        normalized_signal.find("scale") != std::string::npos;
+    const bool deformation_signal = NodeBool(node["deformation_signal"]) ||
+        normalized_signal.find("compound") != std::string::npos ||
+        normalized_signal.find("deformation") != std::string::npos;
+    if (rotation_signal)
       candidates["rotation"].push_back(
           {review_item, geometry_type, "rotation", image_path, label_path});
-    if (NodeBool(node["scale_signal"]))
+    if (scale_signal)
       candidates["scale"].push_back(
           {review_item, geometry_type, "scale", image_path, label_path});
-    if (NodeBool(node["deformation_signal"]))
+    if (deformation_signal)
       candidates["deformation"].push_back(
           {review_item, geometry_type, "deformation", image_path, label_path});
   }

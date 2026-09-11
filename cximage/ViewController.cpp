@@ -5283,12 +5283,13 @@ void ViewController::drawScriptAcceptancePanels() {
         looksFastMatchText(m_manualTest.loaded_script_path) ||
         looksFastMatchText(m_manualTest.script_file_path) ||
         fastMatchObject != nullptr || fastMatchTool != nullptr;
+    auto runtimeInt = [&](const char *key, int fallback) {
+      const auto it = m_manualTest.runtime_int_vars.find(key);
+      return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
+    };
 
-    if (fastMatchContext && m_manualTest.show_fastmatch_debug_vectors) {
-      auto runtimeInt = [&](const char *key, int fallback) {
-        const auto it = m_manualTest.runtime_int_vars.find(key);
-        return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
-      };
+    if (fastMatchContext && m_manualTest.show_fastmatch_debug_vectors &&
+        m_manualTest.show_fastmatch_learn_result) {
       auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
         return ImVec2(imagePos.x + static_cast<float>(x) * sx,
                       imagePos.y + static_cast<float>(y) * sy);
@@ -5307,6 +5308,8 @@ void ViewController::drawScriptAcceptancePanels() {
       bool drewPattern = false;
 
       if (fastMatchTool != nullptr) {
+        const double learnOriginX = fastMatchTool->getlearnmodeloriginx();
+        const double learnOriginY = fastMatchTool->getlearnmodeloriginy();
         gp_Path &pathA = fastMatchTool->getpatternpathA();
         gp_Path &pathB = fastMatchTool->getpatternpathB();
         const int countA = static_cast<int>(pathA.ElementCount());
@@ -5319,9 +5322,12 @@ void ViewController::drawScriptAcceptancePanels() {
             const gp_Pnt pa = pathA.ElementAt(i);
             const gp_Pnt pb = pathB.ElementAt(i);
             const gp_Pnt mid = midpoint(pa, pb);
-            const ImVec2 sa = ImageToScreenD(pa.X(), pa.Y());
-            const ImVec2 sb = ImageToScreenD(pb.X(), pb.Y());
-            const ImVec2 sm = ImageToScreenD(mid.X(), mid.Y());
+            const ImVec2 sa = ImageToScreenD(pa.X() + learnOriginX,
+                                              pa.Y() + learnOriginY);
+            const ImVec2 sb = ImageToScreenD(pb.X() + learnOriginX,
+                                              pb.Y() + learnOriginY);
+            const ImVec2 sm = ImageToScreenD(mid.X() + learnOriginX,
+                                              mid.Y() + learnOriginY);
 
             if (m_manualTest.show_fastmatch_compare_gap_pairs)
               drawList->AddLine(sa, sb, pairColor, 1.4f);
@@ -5338,8 +5344,8 @@ void ViewController::drawScriptAcceptancePanels() {
                                                 pathB.ElementAt(prevIndex));
                 const gp_Pnt nextMid = midpoint(pathA.ElementAt(nextIndex),
                                                 pathB.ElementAt(nextIndex));
-                const ImVec2 sp = ImageToScreenD(prevMid.X(), prevMid.Y());
-                const ImVec2 sn = ImageToScreenD(nextMid.X(), nextMid.Y());
+                const ImVec2 sp = ImageToScreenD(prevMid.X() + learnOriginX, prevMid.Y() + learnOriginY);
+                const ImVec2 sn = ImageToScreenD(nextMid.X() + learnOriginX, nextMid.Y() + learnOriginY);
                 float vx = sn.x - sp.x;
                 float vy = sn.y - sp.y;
                 const float len = std::sqrt(vx * vx + vy * vy);
@@ -5363,8 +5369,8 @@ void ViewController::drawScriptAcceptancePanels() {
                                     std::to_string(countA) + " B=" +
                                     std::to_string(countB) + " stride=" +
                                     std::to_string(stride);
-          drawList->AddText(ImageToScreenD(firstMid.X() + 8.0,
-                                           firstMid.Y() + 8.0),
+          drawList->AddText(ImageToScreenD(firstMid.X() + learnOriginX + 8.0,
+                                           firstMid.Y() + learnOriginY + 8.0),
                             midpointColor, label.c_str());
           drewPattern = true;
         }
@@ -5377,7 +5383,8 @@ void ViewController::drawScriptAcceptancePanels() {
             bool placedLabel = false;
             for (int i = beginIndex; i < endIndex; i += orphanStride) {
               const gp_Pnt p = path.ElementAt(i);
-              const ImVec2 sp = ImageToScreenD(p.X(), p.Y());
+              const ImVec2 sp = ImageToScreenD(p.X() + learnOriginX,
+                                                p.Y() + learnOriginY);
               drawList->AddCircleFilled(sp, 3.2f, filteredColor, 12);
               drawList->AddCircle(sp, 5.0f, filteredColor, 12, 1.0f);
               if (!placedLabel) {
@@ -5421,6 +5428,40 @@ void ViewController::drawScriptAcceptancePanels() {
                           IM_COL32(255, 235, 80, 225),
                           "FM compare_gap pattern pending");
       }
+    }
+    // Each directional tab owns an isolated FindLine Probe. Project only the
+    // selected probe's captured lines and accepted points; do not filter one
+    // global FastMatch edgepattern and present it as four independent runs.
+    if (fastMatchContext && m_manualTest.show_fastmatch_learn_scan_ticks &&
+        fastMatchTool != nullptr) {
+      auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
+        return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                      imagePos.y + static_cast<float>(y) * sy);
+      };
+      const int selectedEdge = std::clamp(m_manualTest.fastmatch_selected_learn_edge, 0, 3);
+      const char* edgeName[] = {"Top", "Bottom", "Left", "Right"};
+      int learnX = runtimeInt("global_learn_roi_x", 0);
+      int learnY = runtimeInt("global_learn_roi_y", 0);
+      const ImU32 tickColor = IM_COL32(100, 215, 255, 125);
+      const ImU32 conclusionColor = IM_COL32(255, 142, 58, 255);
+      const FastMatch::DirectionalProbeEvidence& probe =
+          fastMatchTool->getdirectionalprobeevidence(selectedEdge);
+      for (const FastMatch::DirectionalProbeScanLine& line : probe.scan_lines) {
+        drawList->AddLine(ImageToScreenD(line.p0.x, line.p0.y),
+                          ImageToScreenD(line.p1.x, line.p1.y), tickColor,
+                          1.0f);
+      }
+      for (const CxShapePoint& point : probe.accepted_points) {
+        const ImVec2 p = ImageToScreenD(point.x, point.y);
+        drawList->AddCircleFilled(p, 4.5f, conclusionColor, 16);
+        drawList->AddCircle(p, 6.0f, IM_COL32(80, 32, 0, 230), 16, 1.2f);
+      }
+      const ImVec2 label = ImageToScreenD(learnX, learnY - 10.0);
+      const std::string text = std::string("FM ") + edgeName[selectedEdge] +
+          " probe scans=" + std::to_string(probe.scan_line_count) +
+          " accepted=" + std::to_string(probe.accepted_side_count) +
+          " status=" + probe.status;
+      drawList->AddText(label, conclusionColor, text.c_str());
     }
   }
 

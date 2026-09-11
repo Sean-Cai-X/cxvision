@@ -76,6 +76,14 @@ bool CaptureFastMatchRuntime(
         matcher->getlearnb2count();
     capture.object_learn_status_code =
         matcher->getlearnstatuscode();
+    capture.object_normal_trace_candidate_count =
+        matcher->getnormaltracecandidatecount();
+    capture.object_normal_trace_deduplicated_count =
+        matcher->getnormaltracededuplicatedcount();
+    capture.object_normal_trace_point_count =
+        matcher->getnormaltracepointcount();
+    capture.object_normal_trace_pair_count =
+        matcher->getnormaltracepaircount();
     capture.last_learn_argument =
         matcher->debuglastlearnargument();
 

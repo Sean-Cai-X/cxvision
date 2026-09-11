@@ -1,3 +1,12 @@
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#include <commdlg.h>
+
 #include "CircleShape.h"
 #include "CxScriptCasePackageWriter.h"
 #include "CxScriptCatalogRuntime.h"
@@ -18,6 +27,7 @@
 #include <glad/glad.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -596,9 +606,45 @@ static void ApplyHDReferenceImageBindingLocal(ScriptEvidenceThumb &thumb) {
 static bool SelectEvidenceImageFileFromDialogLocal(std::string &outPath,
                                                    std::string &reason) {
   outPath.clear();
-  reason = "file dialog is disabled in this build; use Bind Current Image View "
-           "or Use First Manifest Image";
-  return false;
+  // Loading a test image is deliberately a read-only UI transaction. The
+  // common dialog returns a path only; callers decode it into the Image View
+  // and never write source pixels, manifests, or Evidence assets.
+  std::array<char, MAX_PATH> fileName{};
+  OPENFILENAMEA dialog{};
+  dialog.lStructSize = sizeof(dialog);
+  dialog.hwndOwner = ::GetActiveWindow();
+  dialog.lpstrFilter =
+      "Supported images (*.bmp;*.png;*.jpg;*.jpeg;*.tif;*.tiff)\0"
+      "*.bmp;*.png;*.jpg;*.jpeg;*.tif;*.tiff\0"
+      "All files (*.*)\0*.*\0\0";
+  dialog.lpstrFile = fileName.data();
+  dialog.nMaxFile = static_cast<DWORD>(fileName.size());
+  dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST |
+                 OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+  dialog.lpstrTitle = "Load Evidence Image (read-only)";
+
+  if (!::GetOpenFileNameA(&dialog)) {
+    const DWORD dialogError = ::CommDlgExtendedError();
+    if (dialogError == 0) {
+      reason = "image selection cancelled by operator";
+    } else {
+      reason = "image selection dialog failed, error=" +
+               std::to_string(static_cast<unsigned long>(dialogError));
+    }
+    return false;
+  }
+
+  const std::filesystem::path selected(fileName.data());
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(selected, ec)) {
+    reason = "selected path is not a readable regular file: " +
+             selected.string();
+    return false;
+  }
+
+  outPath = selected.lexically_normal().string();
+  reason = "operator selected read-only image: " + outPath;
+  return true;
 }
 
 static bool IsEvidenceEditableToolTypeLocal(const std::string &type) {
@@ -13669,6 +13715,12 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
       ImGui::IsMouseHoveringRect(rowMin, rowMax, false);
   const bool rowBoundsClicked =
       rowBoundsHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  // The child table/image is drawn above the invisible button. Use the same
+  // canonical visual row bounds for the context click, otherwise a
+  // right-click over the thumbnail can be swallowed by the table item and
+  // appears to do nothing.
+  const bool rowBoundsRightClicked =
+      rowBoundsHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
   if (rowBoundsClicked) {
     const double now = ImGui::GetTime();
     const bool sameRow = m_manualTest.last_evidence_click_group == groupIndex &&
@@ -13719,7 +13771,12 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
     return;
   }
 
-  if (rowRightClicked) {
+  if (rowRightClicked || rowBoundsRightClicked) {
+    CXLOG_INFO("EvidenceChain", "evidence_thumb_context_open", "ui_event",
+               "group_index=" + std::to_string(groupIndex) +
+                   " thumb_index=" + std::to_string(thumbIndex) +
+                   " script_id=" + thumb.script_id +
+                   " image_path=" + thumb.image_path);
     ImGui::OpenPopup("evidence_row_context");
   }
 
@@ -13863,8 +13920,13 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
       std::string selectedPath;
       std::string dialogReason;
       if (!SelectEvidenceImageFileFromDialogLocal(selectedPath, dialogReason)) {
-        m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECT_CANCEL";
+        m_manualTest.debug_status =
+            dialogReason == "image selection cancelled by operator"
+                ? "EVIDENCE_IMAGE_SELECT_CANCEL"
+                : "EVIDENCE_IMAGE_SELECT_DIALOG_FAIL";
         m_manualTest.debug_reason = dialogReason;
+        CXLOG_WARN("EvidenceChain", "evidence_image_select", "not_loaded",
+                   "script_id=" + thumb.script_id + " reason=" + dialogReason);
       } else {
         const std::string selectedScriptId = thumb.script_id;
         thumb.image_path = selectedPath;
@@ -13879,9 +13941,17 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
                                                reason)) {
           m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECT_FAIL";
           m_manualTest.debug_reason = reason;
+          CXLOG_ERROR("EvidenceChain", "evidence_image_select", "load_fail",
+                      "script_id=" + selectedScriptId +
+                          " image_path=" + selectedPath + " reason=" + reason);
         } else {
           m_manualTest.debug_status = "EVIDENCE_IMAGE_SELECTED";
-          m_manualTest.debug_reason = selectedScriptId + " -> " + selectedPath;
+          m_manualTest.debug_reason = selectedScriptId + " -> " + selectedPath +
+              " (read-only Image View load; source image unchanged)";
+          CXLOG_INFO("EvidenceChain", "evidence_image_select", "loaded",
+                     "script_id=" + selectedScriptId +
+                         " image_path=" + selectedPath +
+                         " source_mutated=false");
         }
         rowStateReplaced = true;
       }

@@ -12,12 +12,182 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
+#include <queue>
 #include <opencv2/imgproc.hpp>
 #if defined USE_AI
 #include "mlpackrun.h"
 #endif
 
 namespace {
+struct NormalTraceCandidate {
+  cv::Point point;
+  cv::Point2f normal;
+  float gradient = 0.0f;
+};
+
+std::vector<NormalTraceCandidate> BuildNormalTraceDomain(
+    const cv::Mat& gray, const cv::Rect& roi, int minGradient,
+    int overlapRadius, int& rawCount) {
+  rawCount = 0;
+  cv::Mat gx, gy;
+  cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+  cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
+  std::vector<NormalTraceCandidate> candidates;
+  const cv::Rect bounded = roi & cv::Rect(0, 0, gray.cols, gray.rows);
+  for (int y = bounded.y + 1; y < bounded.br().y - 1; ++y) {
+    for (int x = bounded.x + 1; x < bounded.br().x - 1; ++x) {
+      const float dx = gx.at<float>(y, x);
+      const float dy = gy.at<float>(y, x);
+      const float magnitude = std::hypot(dx, dy);
+      if (magnitude < static_cast<float>(minGradient))
+        continue;
+      ++rawCount;
+      const float inv = 1.0f / std::max(1e-6f, magnitude);
+      candidates.push_back({cv::Point(x, y), cv::Point2f(dx * inv, dy * inv), magnitude});
+    }
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [](const NormalTraceCandidate& a, const NormalTraceCandidate& b) {
+              return a.gradient > b.gradient;
+            });
+  std::vector<NormalTraceCandidate> retained;
+  const int radius2 = std::max(0, overlapRadius * overlapRadius);
+  for (const NormalTraceCandidate& candidate : candidates) {
+    bool overlaps = false;
+    for (const NormalTraceCandidate& kept : retained) {
+      const int dx = candidate.point.x - kept.point.x;
+      const int dy = candidate.point.y - kept.point.y;
+      if (dx * dx + dy * dy <= radius2) { overlaps = true; break; }
+    }
+    if (!overlaps)
+      retained.push_back(candidate);
+  }
+  return retained;
+}
+
+// Build one bounded, minimum-cost edge trace inside the learn domain.  This is
+// deliberately a local operation: the learnt model is made from one coherent
+// trace and its local normals, never from global X/Y scans or doublepattern().
+bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
+                               int learn_y, int learn_w, int learn_h,
+                               PointsShape &out_pattern, int &raw_count,
+                               int &deduplicated_count, int &trace_count,
+                               int &pair_count) {
+  raw_count = deduplicated_count = trace_count = pair_count = 0;
+  cv::Mat source_mat = image.getmat();
+  if (source_mat.empty()) return false;
+  cv::Mat gray;
+  if (source_mat.channels() == 1) gray = source_mat;
+  else cv::cvtColor(source_mat, gray, cv::COLOR_BGR2GRAY);
+  if (gray.empty()) return false;
+
+  const FastMatch::NormalTraceLearnConfig &cfg = source.getnormaltraceconfig();
+  const cv::Rect roi = cv::Rect(learn_x, learn_y, std::max(1, learn_w),
+                                std::max(1, learn_h)) &
+                       cv::Rect(0, 0, gray.cols, gray.rows);
+  if (roi.width < 3 || roi.height < 3) return false;
+  std::vector<NormalTraceCandidate> domain = BuildNormalTraceDomain(
+      gray, roi, std::max(1, cfg.min_gradient),
+      std::max(0, cfg.domain_overlap_radius_px), raw_count);
+  if (domain.empty()) return false;
+  if (static_cast<int>(domain.size()) > std::max(16, cfg.dijkstra_max_nodes))
+    domain.resize(static_cast<size_t>(std::max(16, cfg.dijkstra_max_nodes)));
+  deduplicated_count = static_cast<int>(domain.size());
+  if (domain.size() < 2) return false;
+
+  // Use the strongest point and the most distant retained point as explicit
+  // endpoints.  Dijkstra then decides the physically plausible path by image
+  // gradient cost, instead of joining arbitrary symmetric scan hits.
+  const cv::Point start = domain.front().point;
+  cv::Point end = start;
+  double best_distance2 = -1.0;
+  for (const NormalTraceCandidate &candidate : domain) {
+    const double dx = candidate.point.x - start.x;
+    const double dy = candidate.point.y - start.y;
+    const double distance2 = dx * dx + dy * dy;
+    if (distance2 > best_distance2) { best_distance2 = distance2; end = candidate.point; }
+  }
+  if (best_distance2 < static_cast<double>(cfg.trace_min_length_px) *
+                           static_cast<double>(cfg.trace_min_length_px)) return false;
+
+  cv::Mat gx, gy;
+  cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+  cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
+  const int width = roi.width, height = roi.height;
+  const int count = width * height;
+  const auto index_of = [width, &roi](int x, int y) { return (y - roi.y) * width + (x - roi.x); };
+  const int start_index = index_of(start.x, start.y), end_index = index_of(end.x, end.y);
+  std::vector<float> distance(static_cast<size_t>(count), std::numeric_limits<float>::infinity());
+  std::vector<int> previous(static_cast<size_t>(count), -1);
+  using QueueNode = std::pair<float, int>;
+  std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<QueueNode>> queue;
+  distance[start_index] = 0.0f; queue.push({0.0f, start_index});
+  const int dx8[8] = {1,1,0,-1,-1,-1,0,1};
+  const int dy8[8] = {0,1,1,1,0,-1,-1,-1};
+  const float gradient_weight = std::max(1, cfg.dijkstra_gradient_cost_weight_permille) / 1000.0f;
+  const float gap_weight = std::max(0, cfg.dijkstra_gap_cost_weight_permille) / 1000.0f;
+  while (!queue.empty()) {
+    const auto [current_distance, current] = queue.top(); queue.pop();
+    if (current_distance != distance[current]) continue;
+    if (current == end_index) break;
+    const int local_x = current % width, local_y = current / width;
+    for (int k = 0; k < 8; ++k) {
+      const int nx = local_x + dx8[k], ny = local_y + dy8[k];
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const int next = ny * width + nx;
+      const float mag = std::hypot(gx.at<float>(roi.y + ny, roi.x + nx),
+                                   gy.at<float>(roi.y + ny, roi.x + nx));
+      const float step = std::sqrt(static_cast<float>(dx8[k] * dx8[k] + dy8[k] * dy8[k]));
+      const float cost = gradient_weight * (255.0f / std::max(1.0f, mag)) + gap_weight * step;
+      const float alternative = current_distance + cost;
+      if (alternative < distance[next]) { distance[next] = alternative; previous[next] = current; queue.push({alternative, next}); }
+    }
+  }
+  if (previous[end_index] < 0) return false;
+  std::vector<cv::Point> trace;
+  for (int at = end_index; at >= 0; at = previous[at]) {
+    trace.emplace_back(roi.x + at % width, roi.y + at / width);
+    if (at == start_index) break;
+  }
+  std::reverse(trace.begin(), trace.end());
+  trace_count = static_cast<int>(trace.size());
+  if (trace_count < std::max(2, cfg.trace_min_length_px)) return false;
+
+  out_pattern = PointsShape();
+  const int step = std::max(1, cfg.tangent_sample_step_px);
+  const float angular_limit = std::sin(static_cast<float>(std::clamp(cfg.normal_angle_tolerance_deg, 1, 89)) *
+                                       static_cast<float>(CV_PI / 180.0));
+  for (int i = step; i + step < trace_count; i += step) {
+    const cv::Point &p = trace[static_cast<size_t>(i)];
+    cv::Point2f tangent(static_cast<float>(trace[static_cast<size_t>(i + step)].x - trace[static_cast<size_t>(i - step)].x),
+                         static_cast<float>(trace[static_cast<size_t>(i + step)].y - trace[static_cast<size_t>(i - step)].y));
+    const float tangent_length = std::sqrt(tangent.dot(tangent));
+    const float nx0 = gx.at<float>(p.y, p.x), ny0 = gy.at<float>(p.y, p.x);
+    const float normal_length = std::hypot(nx0, ny0);
+    if (tangent_length < 1.0f || normal_length < static_cast<float>(cfg.min_gradient)) continue;
+    tangent *= 1.0f / tangent_length;
+    cv::Point2f normal(nx0 / normal_length, ny0 / normal_length);
+    // A true edge normal must be perpendicular to the trace tangent.
+    if (std::abs(normal.dot(tangent)) > angular_limit) continue;
+    if (cfg.normal_polarity < 0) normal *= -1.0f;
+    const int offset = std::max(1, cfg.normal_pair_offset_px);
+    const cv::Point2f a(static_cast<float>(p.x) + normal.x * offset,
+                        static_cast<float>(p.y) + normal.y * offset);
+    const cv::Point2f b(static_cast<float>(p.x) - normal.x * offset,
+                        static_cast<float>(p.y) - normal.y * offset);
+    if (a.x < 0 || a.y < 0 || b.x < 0 || b.y < 0 ||
+        a.x >= gray.cols || b.x >= gray.cols || a.y >= gray.rows || b.y >= gray.rows) continue;
+    Standard_Real ax = static_cast<Standard_Real>(std::lround(a.x));
+    Standard_Real ay = static_cast<Standard_Real>(std::lround(a.y));
+    Standard_Real bx = static_cast<Standard_Real>(std::lround(b.x));
+    Standard_Real by = static_cast<Standard_Real>(std::lround(b.y));
+    out_pattern.addpointa(ax, ay);
+    out_pattern.addpointb(bx, by);
+    ++pair_count;
+  }
+  return pair_count >= 2 && out_pattern.ABsize() > 0;
+}
 bool FastMatchPointInsideImage(const Image &image, int x, int y) {
   return x >= 0 && y >= 0 && x < image.getWidth() && y < image.getHeight();
 }
@@ -1123,6 +1293,9 @@ FastMatch::LearnDirectionParams FastMatch::effectiveLearnDirectionParams(
   params.linegap = std::max(1, params.linegap);
   params.objfilter = std::max(0, params.objfilter);
   params.compare_gap = std::max(1, params.compare_gap);
+  params.edge_count = std::clamp(params.edge_count, 1, 16);
+  params.selected_edge =
+      std::clamp(params.selected_edge, -1, params.edge_count);
   return params;
 }
 
@@ -1163,6 +1336,144 @@ void FastMatch::setlearnobjfilter(int direction, int value) {
 
 void FastMatch::setlearncompgap(int direction, int value) {
   learnDirectionParams(direction).compare_gap = std::max(1, value);
+}
+
+void FastMatch::setlearnedgecount(int direction, int value) {
+  LearnDirectionParams& params = learnDirectionParams(direction);
+  params.edge_count = std::clamp(value, 1, 16);
+  params.selected_edge =
+      std::clamp(params.selected_edge, -1, params.edge_count);
+}
+
+void FastMatch::setlearnselectededge(int direction, int value) {
+  LearnDirectionParams& params = learnDirectionParams(direction);
+  params.selected_edge = std::clamp(value, -1, std::max(1, params.edge_count));
+}
+
+const FastMatch::DirectionalProbeEvidence&
+FastMatch::getdirectionalprobeevidence(int direction) const {
+  static const DirectionalProbeEvidence kNotRun{};
+  if (direction < 0 || direction >=
+                           static_cast<int>(m_directional_probe_evidence.size())) {
+    return kNotRun;
+  }
+  return m_directional_probe_evidence[static_cast<std::size_t>(direction)];
+}
+
+int FastMatch::getdirectionalprobeacceptedcount(int direction) const {
+  return getdirectionalprobeevidence(direction).accepted_side_count;
+}
+
+int FastMatch::getdirectionalprobescanlinecount(int direction) const {
+  return getdirectionalprobeevidence(direction).scan_line_count;
+}
+
+int FastMatch::getdirectionalprobediagnosticcount(int direction) const {
+  return getdirectionalprobeevidence(direction).diagnostic_count;
+}
+
+int FastMatch::getdirectionalprobestatuscode(int direction) const {
+  const DirectionalProbeEvidence& evidence =
+      getdirectionalprobeevidence(direction);
+  if (!evidence.executed)
+    return 0;
+  return evidence.accepted_side_count > 0 ? 2 : 1;
+}
+
+void FastMatch::runDirectionalFindLineProbes(Image& image) {
+  m_directional_probe_evidence = {};
+  const int roiX = m_learn_roi_x;
+  const int roiY = m_learn_roi_y;
+  const int roiW = std::max(1, m_learn_roi_w);
+  const int roiH = std::max(1, m_learn_roi_h);
+  const double centerX = static_cast<double>(roiX) + roiW * 0.5;
+  const double centerY = static_cast<double>(roiY) + roiH * 0.5;
+
+  if (image.getmat().empty()) {
+    for (int direction = 0; direction < 4; ++direction) {
+      DirectionalProbeEvidence& evidence =
+          m_directional_probe_evidence[static_cast<std::size_t>(direction)];
+      evidence.direction = direction;
+      evidence.status = "IMAGE_EMPTY";
+      evidence.reason = "directional FindLine Probe skipped: image is empty";
+    }
+    return;
+  }
+
+  for (int direction = 0; direction < 4; ++direction) {
+    DirectionalProbeEvidence& evidence =
+        m_directional_probe_evidence[static_cast<std::size_t>(direction)];
+    evidence.direction = direction;
+    evidence.params = effectiveLearnDirectionParams(direction);
+    evidence.scan_type = direction < 2 ? 0 : 1;
+
+    FindLine probe;
+    probe.SetWHgap(evidence.params.wgap, evidence.params.hgap);
+    probe.setcomparegap(evidence.params.compare_gap);
+    probe.setthre(evidence.params.threshold);
+    probe.setlinegap(evidence.params.linegap);
+    probe.setmethod(evidence.params.method);
+    probe.setobjfilter(evidence.params.objfilter);
+    // Match FindLine's public Point Column semantics: 0 selects all
+    // candidates, a positive value selects the Nth edge, and -1 selects the
+    // last candidate.  The legacy FindLine two-edge compatibility maps Edge
+    // 2 to Last; preserve that behavior for the FastMatch probe as well.
+    int runtimeSelectedEdge = evidence.params.selected_edge;
+    if (evidence.params.edge_count == 2 && runtimeSelectedEdge == 2)
+      runtimeSelectedEdge = -1;
+    probe.setselectedgenum(runtimeSelectedEdge);
+    probe.setscanrotation(getscanrotation());
+    probe.setrect(roiX, roiY, roiW, roiH);
+    probe.Measure(image);
+    probe.SmartFilter(-1, -1);
+
+    const PointsShape& resultPoints = evidence.scan_type == 0
+                                          ? probe.getresultpointsw()
+                                          : probe.getresultpointsh();
+    std::vector<CxShapePoint> rawPoints;
+    resultPoints.exportPoints(rawPoints);
+    evidence.raw_result_count = static_cast<int>(rawPoints.size());
+    for (const CxShapePoint& point : rawPoints) {
+      const bool isSelectedSide =
+          direction == 0 ? point.y <= centerY :
+          direction == 1 ? point.y >= centerY :
+          direction == 2 ? point.x <= centerX : point.x >= centerX;
+      if (isSelectedSide)
+        evidence.accepted_points.push_back(point);
+    }
+    evidence.accepted_side_count =
+        static_cast<int>(evidence.accepted_points.size());
+    evidence.diagnostic_count = probe.getscandiagnosticcount();
+    evidence.scan_line_count = probe.getscanlinecount(evidence.scan_type);
+
+    constexpr int kMaximumRenderedScanLines = 128;
+    const int stride = std::max(1, evidence.scan_line_count /
+                                       kMaximumRenderedScanLines);
+    for (int scanIndex = 0; scanIndex < evidence.scan_line_count;
+         scanIndex += stride) {
+      CxShapePoint p0;
+      CxShapePoint p1;
+      if (probe.getscanline(evidence.scan_type, scanIndex, p0, p1))
+        evidence.scan_lines.push_back({p0, p1});
+    }
+
+    evidence.executed = true;
+    evidence.status = evidence.accepted_side_count > 0
+                          ? "EXECUTED_ACCEPTED"
+                          : "EXECUTED_NO_SIDE_ACCEPT";
+    evidence.reason = "isolated FindLine Probe; template composition remains "
+                      "owned by FastMatch Learn";
+    CXLOG_INFO("FastMatch", "directional_findline_probe", evidence.status,
+               "direction=" + std::to_string(direction) +
+                   " scan_type=" + std::to_string(evidence.scan_type) +
+                   " scans=" + std::to_string(evidence.scan_line_count) +
+                   " raw=" + std::to_string(evidence.raw_result_count) +
+                   " accepted=" +
+                   std::to_string(evidence.accepted_side_count) +
+                   " selected_edge=" + std::to_string(runtimeSelectedEdge) +
+                   " diagnostics=" +
+                   std::to_string(evidence.diagnostic_count));
+  }
 }
 
 void FastMatch::setfindnum(int ifindnum) {
@@ -1379,6 +1690,41 @@ void FastMatch::Learn(Image &image) {
   m_fastmatch_learn_b_count = 0;
   m_fastmatch_learn_a2_count = 0;
   m_fastmatch_learn_b2_count = 0;
+  m_normal_trace_candidate_count = 0;
+  m_normal_trace_deduplicated_count = 0;
+  m_normal_trace_point_count = 0;
+  m_normal_trace_pair_count = 0;
+
+  // Run four isolated FindLine measurements before any template composition.
+  // Their evidence is used by the per-side UI tabs and never mutates the
+  // legacy FastMatch template; this avoids turning a diagnostic probe into a
+  // hidden source of A/B double-image artifacts.
+  runDirectionalFindLineProbes(image);
+
+  if (m_normal_trace_config.enabled) {
+    PointsShape normal_trace_pattern;
+    if (LearnPatternByNormalTrace(
+            image, *this, input_learn_roi_x, input_learn_roi_y,
+            input_learn_roi_w, input_learn_roi_h, normal_trace_pattern,
+            m_normal_trace_candidate_count, m_normal_trace_deduplicated_count,
+            m_normal_trace_point_count, m_normal_trace_pair_count)) {
+      FindLine::setpattern(normal_trace_pattern);
+      m_fastmatch_learn_status_code = 33;
+      modelzeroposition();
+      gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
+      m_imodelwith = static_cast<int>(learned_rect.Width());
+      m_imodelheigh = static_cast<int>(learned_rect.Height());
+      CXLOG_INFO("FastMatch", "learn_normal_trace", "complete",
+                 "domain=" + std::to_string(m_normal_trace_candidate_count) +
+                 " trace=" + std::to_string(m_normal_trace_point_count) +
+                 " pairs=" + std::to_string(m_normal_trace_pair_count));
+      return;
+    }
+    CXLOG_WARN("FastMatch", "learn_normal_trace", "fallback",
+               "domain=" + std::to_string(m_normal_trace_candidate_count) +
+               " trace=" + std::to_string(m_normal_trace_point_count) +
+               " pairs=" + std::to_string(m_normal_trace_pair_count));
+  }
 
   // The legacy directional implementation is axis-aligned and constructs
   // symmetric pairs directly from scan hits.  It must not be enabled until
@@ -1388,7 +1734,7 @@ void FastMatch::Learn(Image &image) {
   const bool use_directional_learn = false;
   if (hasExplicitLearnDirectionParams()) {
     CXLOG_INFO("FastMatch", "learn_boundary_directional_skipped", "running",
-               "explicit directional learn params are applied to edgepattern; boundary point-pair learn is disabled for normal FastMatch Learn");
+               "directional learn parameters are captured but legacy Learn still uses one shared edgepattern pass; isolated per-direction probe execution is disabled");
   }
   if (use_directional_learn) {
     PointsShape directional_pattern;
@@ -1600,7 +1946,15 @@ void FastMatch::Learn_level4(Image &image) {
   m_imodelwith = static_cast<int>(arect1.Width());
   m_imodelheigh = static_cast<int>(arect1.Height());
 }
-void FastMatch::modelzeroposition() { FindLine::patternzeroposition(); }
+void FastMatch::modelzeroposition() {
+  // Keep the native zero-origin template exactly as the matcher expects, but
+  // preserve its pre-normalization translation for Image View diagnostics.
+  // Rendering must never mutate m_modelpoints just to make a debug layer.
+  const gp_Rectangle model_rect = FindLine::patternboundingrectAB();
+  m_learn_model_origin_x = model_rect.TopLeft().X();
+  m_learn_model_origin_y = model_rect.TopLeft().Y();
+  FindLine::patternzeroposition();
+}
 void FastMatch::rotatemodelzeropositionAB() {
   const int isize = static_cast<int>(
       std::min(m_models_rotate.size(), m_models_rotaterects.size()));

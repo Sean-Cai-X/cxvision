@@ -1724,6 +1724,10 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
         model->to(device);
         if (geometry_roi_head_enabled == 0) {
             model->load_checkpoint(parent_checkpoint_path.string());
+            // InputArchive restores the device stored in the parent archive.
+            // Re-apply the run device after loading so a CUDA parent can be
+            // incrementally trained in a CPU-controlled lifecycle.
+            model->to(device);
         } else {
             // Parent checkpoints predate the geometry branch.  Load the mature
             // detector into its matching architecture, then copy matching
@@ -1733,6 +1737,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             YOLOv8 parent_model(model_config, detector_only_config);
             parent_model->to(device);
             parent_model->load_checkpoint(parent_checkpoint_path.string());
+            parent_model->to(device);
             torch::NoGradGuard no_grad;
             const auto parent_parameters = parent_model->named_parameters(true);
             const auto parent_buffers = parent_model->named_buffers(true);
@@ -1744,6 +1749,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
                 if (const auto parent = parent_buffers.find(named.key()))
                     named.value().copy_(*parent);
             }
+            model->to(device);
         }
 
         std::vector<torch::Tensor> trainable_parameters;
@@ -1988,6 +1994,7 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
             std::filesystem::is_regular_file(best_validation_weights),
             "YOLOv8 lifecycle did not produce a validation-best checkpoint");
         model->load_checkpoint(best_validation_weights.string());
+        model->to(device);
 
         const std::filesystem::path geometry_validation_report_path =
             output_dir / "geometry_roi_fixed_validation.json";

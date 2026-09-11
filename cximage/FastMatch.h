@@ -75,6 +75,34 @@ public:
         int linegap = -1;
         int objfilter = -1;
         int compare_gap = -1;
+        int edge_count = 2;
+        int selected_edge = 0; // 0=all, -1=last, positive=Nth candidate.
+    };
+
+    // A directional probe is a real, isolated FindLine measurement used to
+    // diagnose one physical side of the Learn ROI.  It deliberately keeps
+    // evidence separate from the legacy FastMatch edgepattern template so a
+    // four-tab review can never pretend that one global scan was four runs.
+    struct DirectionalProbeScanLine
+    {
+        CxShapePoint p0;
+        CxShapePoint p1;
+    };
+
+    struct DirectionalProbeEvidence
+    {
+        int direction = 0; // 0=Top, 1=Bottom, 2=Left, 3=Right.
+        LearnDirectionParams params;
+        int scan_type = 0; // FindLine W=0 for Top/Bottom, H=1 for Left/Right.
+        int scan_line_count = 0;
+        int raw_result_count = 0;
+        int accepted_side_count = 0;
+        int diagnostic_count = 0;
+        bool executed = false;
+        std::string status = "NOT_RUN";
+        std::string reason;
+        std::vector<DirectionalProbeScanLine> scan_lines;
+        std::vector<CxShapePoint> accepted_points;
     };
 
     struct NormalTraceLearnConfig
@@ -125,6 +153,8 @@ public:
     void setlearnlinegap(int direction, int value);
     void setlearnobjfilter(int direction, int value);
     void setlearncompgap(int direction, int value);
+    void setlearnedgecount(int direction, int value);
+    void setlearnselectededge(int direction, int value);
     void setlearnwgap_script(int value, int direction) { setlearnwgap(direction, value); }
     void setlearnhgap_script(int value, int direction) { setlearnhgap(direction, value); }
     void setlearnmethod_script(int value, int direction) { setlearnmethod(direction, value); }
@@ -132,8 +162,15 @@ public:
     void setlearnlinegap_script(int value, int direction) { setlearnlinegap(direction, value); }
     void setlearnobjfilter_script(int value, int direction) { setlearnobjfilter(direction, value); }
     void setlearncompgap_script(int value, int direction) { setlearncompgap(direction, value); }
+    void setlearnedgecount_script(int value, int direction) { setlearnedgecount(direction, value); }
+    void setlearnselectededge_script(int value, int direction) { setlearnselectededge(direction, value); }
     LearnDirectionParams effectiveLearnDirectionParams(int direction);
     bool hasExplicitLearnDirectionParams() const;
+    const DirectionalProbeEvidence& getdirectionalprobeevidence(int direction) const;
+    int getdirectionalprobeacceptedcount(int direction) const;
+    int getdirectionalprobescanlinecount(int direction) const;
+    int getdirectionalprobediagnosticcount(int direction) const;
+    int getdirectionalprobestatuscode(int direction) const;
     void setnormaltraceenabled(int enabled);
     void setnormaltraceparams(int overlap_radius_px, int min_gradient,
                               int max_nodes, int pair_offset_px);
@@ -148,6 +185,14 @@ public:
                                 int tangent_sample_step_px);
     const NormalTraceLearnConfig& getnormaltraceconfig() const
     { return m_normal_trace_config; }
+    int getnormaltracecandidatecount() { return m_normal_trace_candidate_count; }
+    int getnormaltracededuplicatedcount() { return m_normal_trace_deduplicated_count; }
+    int getnormaltracepointcount() { return m_normal_trace_point_count; }
+    int getnormaltracepaircount() { return m_normal_trace_pair_count; }
+    // Model points are normalized for matching.  These values retain the
+    // original-image translation needed by the Image View debug projection.
+    double getlearnmodeloriginx() { return m_learn_model_origin_x; }
+    double getlearnmodeloriginy() { return m_learn_model_origin_y; }
 
     void setgeometrysourceindex(int index);
     void setgeometryweightpercent(int percent);
@@ -535,6 +580,7 @@ public:
     void savelevel0_l1();
 private:
     LearnDirectionParams& learnDirectionParams(int direction);
+    void runDirectionalFindLineProbes(Image& image);
 
     int m_istyle;
     Image* g_pmodelimage;
@@ -637,7 +683,14 @@ private:
     int m_fastmatch_learn_b2_count = 0;
     int m_fastmatch_learn_status_code = 0;
     std::array<LearnDirectionParams, 4> m_learn_direction_params;
+    std::array<DirectionalProbeEvidence, 4> m_directional_probe_evidence;
     NormalTraceLearnConfig m_normal_trace_config;
+    int m_normal_trace_candidate_count = 0;
+    int m_normal_trace_deduplicated_count = 0;
+    int m_normal_trace_point_count = 0;
+    int m_normal_trace_pair_count = 0;
+    double m_learn_model_origin_x = 0.0;
+    double m_learn_model_origin_y = 0.0;
 
     int m_imatchrectnum;
     vector<gp_Pnt> m_resultpoints;

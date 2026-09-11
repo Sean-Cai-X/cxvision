@@ -1880,4 +1880,195 @@ inline int RunControlledDataStrategyAssemblyCli(int argc, char **argv) {
   return 0;
 }
 
+// Converts a reviewed, editable training-template asset into one immutable
+// execution plan for the controlled dataset.  This deliberately owns no
+// parameter defaults: every tunable value originates in the supplied template
+// or in the policy/dataset evidence, so the same values can be projected in UI
+// and reproduced by the headless Torch lifecycle.
+inline int RunControlledL1TrainingPlanCli(int argc, char **argv) {
+  const fs::path dataset_root = ArgValue(argc, argv, "--dataset-root");
+  const fs::path template_path = ArgValue(argc, argv, "--training-template");
+  const fs::path parent_checkpoint = ArgValue(argc, argv, "--parent-checkpoint");
+  const fs::path ontology_path = ArgValue(argc, argv, "--ontology");
+  const fs::path policy_path = ArgValue(argc, argv, "--auto-tune-policy");
+  const fs::path output_dir = ArgValue(argc, argv, "--out");
+  const std::string geometry_head =
+      ArgValue(argc, argv, "--geometry-roi-head-enabled");
+  if (!fs::is_directory(dataset_root) || !IsRegularFile(template_path) ||
+      !IsRegularFile(parent_checkpoint) || !IsRegularFile(ontology_path) ||
+      !IsRegularFile(policy_path) ||
+      (geometry_head != "0" && geometry_head != "1")) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n";
+    return 2;
+  }
+  std::string reason;
+  if (!OutputDirectoryReady(output_dir, reason)) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\nreason="
+              << reason << "\n";
+    return 2;
+  }
+  Ontology ontology;
+  Policy policy;
+  if (!LoadOntology(ontology_path, ontology, reason) ||
+      !LoadPolicy(policy_path, policy, reason)) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\nreason="
+              << reason << "\n";
+    return 2;
+  }
+  cv::FileStorage dataset_storage((dataset_root / "package_manifest.json").string(),
+                                  cv::FileStorage::READ);
+  const cv::FileNode dataset = dataset_storage.root();
+  if (!dataset_storage.isOpened() ||
+      ReadString(dataset, "schema") !=
+          "cxvision.torch_controlled_data_strategy_dataset.v1" ||
+      !ReadBool(dataset, "training_allowed", false) ||
+      ReadBool(dataset, "promotion_allowed", true) ||
+      ReadString(dataset, "training_split") != "train" ||
+      ReadString(dataset, "validation_split") != "val" ||
+      ReadString(dataset, "holdout_split") != "holdout") {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+              << "reason=controlled dataset manifest is not training-eligible\n";
+    return 2;
+  }
+  int train_positive_count = 0, hard_negative_count = 0;
+  int validation_count = 0, holdout_count = 0;
+  dataset["train_positive_count"] >> train_positive_count;
+  dataset["hard_negative_count"] >> hard_negative_count;
+  dataset["validation_count"] >> validation_count;
+  dataset["holdout_count"] >> holdout_count;
+  if (train_positive_count <= 0 || validation_count <= 0 || holdout_count <= 0 ||
+      !fs::is_directory(dataset_root / "images" / "train") ||
+      !fs::is_directory(dataset_root / "images" / "val") ||
+      !fs::is_directory(dataset_root / "images" / "holdout")) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+              << "reason=controlled dataset split assets are incomplete\n";
+    return 2;
+  }
+  cv::FileStorage template_storage(template_path.string(), cv::FileStorage::READ);
+  const cv::FileNode plan_template = template_storage.root();
+  if (!template_storage.isOpened() ||
+      ReadString(plan_template, "schema") != "cxvision.yolov8n_cpp_training_plan.v1") {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+              << "reason=training template schema is invalid\n";
+    return 2;
+  }
+  const std::vector<std::string> required_scalars = {
+      "epochs", "batch_size", "input_size", "max_train_batches_per_epoch",
+      "learning_rate", "assignment_topk", "classification_focal_gamma",
+      "use_assignment_quality_targets", "global_multiscale_assignment",
+      "validation_interval", "early_stop_patience", "minimum_complete_epochs",
+      "minimum_f1_delta", "restore_best_validation_checkpoint",
+      "postprocess_confidence_threshold", "postprocess_iou_threshold",
+      "postprocess_max_detections", "postprocess_class_agnostic_nms",
+      "evaluation_match_iou_threshold", "seed", "num_classes"};
+  for (const std::string &key : required_scalars) {
+    if (plan_template[key].empty()) {
+      std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+                << "reason=training template missing field:" << key << "\n";
+      return 2;
+    }
+  }
+  int num_classes = 0;
+  plan_template["num_classes"] >> num_classes;
+  std::vector<std::string> class_names;
+  std::vector<std::string> frozen_prefixes;
+  std::vector<double> class_weights;
+  LoadStringList(plan_template["class_names"], class_names);
+  LoadStringList(plan_template["frozen_parameter_prefixes"], frozen_prefixes);
+  LoadDoubleList(plan_template["class_loss_weights"], class_weights);
+  if (num_classes != policy.required_class_count ||
+      num_classes != static_cast<int>(ontology.classes.size()) ||
+      class_names.size() != ontology.classes.size() || frozen_prefixes.empty() ||
+      class_weights.size() != ontology.classes.size()) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+              << "reason=template class or freeze contract disagrees with frozen ontology\n";
+    return 2;
+  }
+  for (std::size_t index = 0; index < ontology.classes.size(); ++index) {
+    if (class_names[index] != ontology.classes[index].name) {
+      std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_PREFLIGHT_FAIL\n"
+                << "reason=template class order disagrees with frozen ontology\n";
+      return 2;
+    }
+  }
+  std::ostringstream plan;
+  plan << std::setprecision(12)
+       << "{\"schema\":\"cxvision.yolov8n_cpp_training_plan.v1\"";
+  for (const std::string &key : required_scalars) {
+    const cv::FileNode node = plan_template[key];
+    plan << ",\"" << key << "\":";
+    if (key == "learning_rate" || key == "classification_focal_gamma" ||
+        key == "minimum_f1_delta" ||
+        key == "postprocess_confidence_threshold" ||
+        key == "postprocess_iou_threshold" ||
+        key == "evaluation_match_iou_threshold") {
+      double value = 0.0;
+      node >> value;
+      plan << value;
+    } else {
+      int value = 0;
+      node >> value;
+      plan << value;
+    }
+  }
+  plan << ",\"class_loss_weights\":[";
+  for (std::size_t index = 0; index < class_weights.size(); ++index) {
+    if (index > 0) plan << ',';
+    plan << class_weights[index];
+  }
+  plan << "],\"frozen_parameter_prefixes\":[";
+  for (std::size_t index = 0; index < frozen_prefixes.size(); ++index) {
+    if (index > 0) plan << ',';
+    plan << '\"' << JsonEscape(frozen_prefixes[index]) << '\"';
+  }
+  plan << "],\"class_names\":[";
+  for (std::size_t index = 0; index < ontology.classes.size(); ++index) {
+    if (index > 0) plan << ',';
+    plan << '\"' << JsonEscape(ontology.classes[index].name) << '\"';
+  }
+  plan << "],\"geometry_roi_head_enabled\":" << geometry_head
+       << ",\"parent_checkpoint\":\""
+       << JsonEscape(parent_checkpoint.string()) << "\""
+       << ",\"controlled_dataset_manifest\":\""
+       << JsonEscape((dataset_root / "package_manifest.json").string()) << "\""
+       << ",\"training_template_ref\":\""
+       << JsonEscape(template_path.string()) << "\""
+       << ",\"auto_tune_policy_ref\":\""
+       << JsonEscape(policy_path.string()) << "\""
+       << ",\"ontology_ref\":\"" << JsonEscape(ontology_path.string()) << "\""
+       << ",\"controlled_train_positive_count\":" << train_positive_count
+       << ",\"controlled_hard_negative_count\":" << hard_negative_count
+       << ",\"fixed_validation_count\":" << validation_count
+       << ",\"locked_holdout_count\":" << holdout_count
+       << ",\"selection_split\":\"" << JsonEscape(policy.selection_split) << "\""
+       << ",\"confirmation_split\":\"" << JsonEscape(policy.confirmation_split) << "\""
+       << ",\"human_review_required\":true,\"promotion_allowed\":false"
+       << ",\"active_allowed\":false,\"external_script_execution_allowed\":false} ";
+  if (!WriteJson(output_dir, "yolov8n_cpp_training_plan.json", plan.str(), reason)) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_WRITE_FAIL\nreason="
+              << reason << "\n";
+    return 1;
+  }
+  std::ostringstream receipt;
+  receipt << "{\"schema\":\"cxvision.torch_controlled_training_plan_receipt.v1\""
+          << ",\"executor\":\"CXX_RUNTIME\""
+          << ",\"status\":\"TRAINING_PLAN_READY\""
+          << ",\"parent_checkpoint_digest\":\"" << FileDigest(parent_checkpoint) << "\""
+          << ",\"dataset_manifest_digest\":\""
+          << FileDigest(dataset_root / "package_manifest.json") << "\""
+          << ",\"template_digest\":\"" << FileDigest(template_path) << "\""
+          << ",\"geometry_roi_head_enabled\":" << geometry_head
+          << ",\"promotion_allowed\":false,\"active_allowed\":false}";
+  if (!WriteJson(output_dir, "controlled_training_plan_receipt.json", receipt.str(), reason)) {
+    std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_WRITE_FAIL\nreason="
+              << reason << "\n";
+    return 1;
+  }
+  std::cout << "conclusion=CONTROLLED_TRAINING_PLAN_READY\ntraining_plan="
+            << (output_dir / "yolov8n_cpp_training_plan.json").string()
+            << "\nreceipt=" << (output_dir / "controlled_training_plan_receipt.json").string()
+            << "\n";
+  return 0;
+}
+
 } // namespace cxvision_geometry_auto_tune

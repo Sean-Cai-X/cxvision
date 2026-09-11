@@ -3307,8 +3307,9 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   int shared = RuntimeIntOr(context, "global_fastmatch_learn_shared", 1);
   shared = shared != 0 ? 1 : 0;
   bool sharedBool = shared != 0;
-  if (ImGui::Checkbox("Use one shared learn parameter set for 4 directions",
-                      &sharedBool)) {
+  const bool sharedModeChanged = ImGui::Checkbox(
+      "Use one shared learn parameter set for 4 directions", &sharedBool);
+  if (sharedModeChanged) {
     shared = sharedBool ? 1 : 0;
     InjectManualGaugeInt(context, "global_fastmatch_learn_shared", shared);
     edited = true;
@@ -3343,8 +3344,14 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
         compareGap);
   };
 
-  if (shared != 0 ||
-      ImGui::Button("Copy Shared Learn Params To 4 Directions")) {
+  // Copy is an explicit write operation.  The old per-frame copy made the
+  // directional table look valid while silently replacing its real values
+  // with the shared values, which is exactly the misleading UI state that
+  // caused paired Top/Bottom and Left/Right values to disappear.
+  const bool copySharedNow =
+      (sharedModeChanged && shared != 0) ||
+      ImGui::Button("Copy Shared Learn Params To 4 Directions");
+  if (copySharedNow) {
     for (int dir = 0; dir < 4; ++dir) {
       seedDirection(dir, gauge.threshold, gauge.method, gauge.linegap,
                     gauge.wgap, gauge.hgap, sharedObjfilter, sharedCompareGap);
@@ -3353,87 +3360,167 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
       edited = true;
   }
 
-  if (ImGui::CollapsingHeader(
-          "Directional Learn Params (Top / Bottom / Left / Right)",
-          shared != 0 ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
-    ImGui::TextDisabled("Sparse controls are indexed by direction. Same values "
-                        "may stay folded as shared.");
-    if (ImGui::BeginTable("fastmatch_directional_learn_params", 8,
-                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                              ImGuiTableFlags_SizingStretchProp)) {
-      ImGui::TableSetupColumn("Direction");
-      ImGui::TableSetupColumn("threshold");
-      ImGui::TableSetupColumn("method");
-      ImGui::TableSetupColumn("linegap");
-      ImGui::TableSetupColumn("wgap");
-      ImGui::TableSetupColumn("hgap");
-      ImGui::TableSetupColumn("objfilter");
-      ImGui::TableSetupColumn("compare");
-      ImGui::TableHeadersRow();
+  ImGui::SameLine();
+  if (ImGui::Button("Restore Exterior-Edge Directional Defaults")) {
+    // These are deliberately paired normal windows, not a copied 8 x 8
+    // square.  Top/Bottom scan horizontal bodies and need a narrow vertical
+    // normal; Left/Right scan vertical bodies and need a narrow horizontal
+    // normal.  This is an explicit user action so an existing tuned context
+    // is never silently overwritten during a frame.
+    shared = 0;
+    InjectManualGaugeInt(context, "global_fastmatch_learn_shared", 0);
+    seedDirection(0, gauge.threshold, gauge.method, gauge.linegap, 8, 2,
+                  sharedObjfilter, sharedCompareGap);
+    seedDirection(1, gauge.threshold, gauge.method, gauge.linegap, 8, 2,
+                  sharedObjfilter, sharedCompareGap);
+    seedDirection(2, gauge.threshold, gauge.method, gauge.linegap, 2, 8,
+                  sharedObjfilter, sharedCompareGap);
+    seedDirection(3, gauge.threshold, gauge.method, gauge.linegap, 2, 8,
+                  sharedObjfilter, sharedCompareGap);
+    edited = true;
+  }
+  ImGui::TextDisabled("Exterior edge default: Top/Bottom wgap=8 hgap=2; Left/Right wgap=2 hgap=8.");
 
-      for (int dir = 0; dir < 4; ++dir) {
-        const std::string suffix = "_" + std::to_string(dir);
-        std::string thresholdKey = "global_fastmatch_learn_threshold" + suffix;
-        std::string methodKey = "global_fastmatch_learn_method" + suffix;
-        std::string linegapKey = "global_fastmatch_learn_linegap" + suffix;
-        std::string wgapKey = "global_fastmatch_learn_wgap" + suffix;
-        std::string hgapKey = "global_fastmatch_learn_hgap" + suffix;
-        std::string objfilterKey = "global_fastmatch_learn_objfilter" + suffix;
-        std::string compareKey = "global_fastmatch_learn_compare_gap" + suffix;
+  ImGui::SeparatorText("Directional FindLine Probes");
+  ImGui::TextDisabled(
+      "Each tab owns one FastMatch direction configuration. The active tab "
+      "also selects the matching Image View diagnostic bucket.");
+  if (shared != 0) {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
+        "Shared mode is active: change a tab only after disabling shared mode "
+        "or explicitly copy the shared baseline.");
+  }
 
-        int threshold = RuntimeIntOr(context, thresholdKey, gauge.threshold);
-        int method = RuntimeIntOr(context, methodKey, gauge.method);
-        int linegap = RuntimeIntOr(context, linegapKey, gauge.linegap);
-        int wgap = RuntimeIntOr(context, wgapKey, gauge.wgap);
-        int hgap = RuntimeIntOr(context, hgapKey, gauge.hgap);
-        int objfilter = RuntimeIntOr(context, objfilterKey, sharedObjfilter);
-        int compareGap = RuntimeIntOr(context, compareKey, sharedCompareGap);
+  if (ImGui::BeginTabBar("fastmatch_directional_findline_tabs")) {
+    for (int dir = 0; dir < 4; ++dir) {
+      if (!ImGui::BeginTabItem(directionLabels[dir]))
+        continue;
 
-        threshold = std::max(0, std::min(255, threshold));
-        method = std::max(0, std::min(3, method));
-        linegap = std::max(1, std::min(200, linegap));
-        wgap = std::max(1, std::min(500, wgap));
-        hgap = std::max(1, std::min(500, hgap));
-        objfilter = std::max(0, std::min(10, objfilter));
-        compareGap = std::max(1, std::min(500, compareGap));
+      // A selected tab is the one visualized by the independent Image View
+      // diagnostic layer. This is intentionally not a hidden write to any of
+      // the other three directional parameter buckets.
+      context.fastmatch_selected_learn_edge = dir;
+      const std::string suffix = "_" + std::to_string(dir);
+      const std::string thresholdKey =
+          "global_fastmatch_learn_threshold" + suffix;
+      const std::string methodKey = "global_fastmatch_learn_method" + suffix;
+      const std::string linegapKey =
+          "global_fastmatch_learn_linegap" + suffix;
+      const std::string wgapKey = "global_fastmatch_learn_wgap" + suffix;
+      const std::string hgapKey = "global_fastmatch_learn_hgap" + suffix;
+      const std::string objfilterKey =
+          "global_fastmatch_learn_objfilter" + suffix;
+      const std::string compareKey =
+          "global_fastmatch_learn_compare_gap" + suffix;
+      const std::string edgeCountKey =
+          "global_fastmatch_learn_edge_count" + suffix;
+      const std::string selectedEdgeKey =
+          "global_fastmatch_learn_selected_edge" + suffix;
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted(directionLabels[dir]);
+      int threshold = RuntimeIntOr(context, thresholdKey, gauge.threshold);
+      int method = RuntimeIntOr(context, methodKey, gauge.method);
+      int linegap = RuntimeIntOr(context, linegapKey, gauge.linegap);
+      int wgap = RuntimeIntOr(context, wgapKey, gauge.wgap);
+      int hgap = RuntimeIntOr(context, hgapKey, gauge.hgap);
+      int objfilter = RuntimeIntOr(context, objfilterKey, sharedObjfilter);
+      int compareGap = RuntimeIntOr(context, compareKey, sharedCompareGap);
+      int edgeCount = RuntimeIntOr(context, edgeCountKey, 2);
+      int selectedEdge = RuntimeIntOr(context, selectedEdgeKey, 0);
 
-        auto drawCellInt = [&](const char *id, int &value, int minValue,
-                               int maxValue) {
-          ImGui::SetNextItemWidth(-FLT_MIN);
-          bool changed = ImGui::InputInt(id, &value, 0, 0);
-          value = std::max(minValue, std::min(maxValue, value));
-          return changed;
-        };
+      threshold = std::clamp(threshold, 0, 255);
+      method = std::clamp(method, 0, 3);
+      linegap = std::clamp(linegap, 1, 200);
+      wgap = std::clamp(wgap, 1, 500);
+      hgap = std::clamp(hgap, 1, 500);
+      objfilter = std::clamp(objfilter, 0, 10);
+      compareGap = std::clamp(compareGap, 1, 500);
+      edgeCount = std::clamp(edgeCount, 1, 16);
+      selectedEdge = std::clamp(selectedEdge, -1, edgeCount);
 
-        ImGui::TableSetColumnIndex(1);
-        edited |= drawCellInt(("##" + thresholdKey).c_str(), threshold, 0, 255);
-        ImGui::TableSetColumnIndex(2);
-        edited |= drawCellInt(("##" + methodKey).c_str(), method, 0, 3);
-        ImGui::TableSetColumnIndex(3);
-        edited |= drawCellInt(("##" + linegapKey).c_str(), linegap, 1, 200);
-        ImGui::TableSetColumnIndex(4);
-        edited |= drawCellInt(("##" + wgapKey).c_str(), wgap, 1, 500);
-        ImGui::TableSetColumnIndex(5);
-        edited |= drawCellInt(("##" + hgapKey).c_str(), hgap, 1, 500);
-        ImGui::TableSetColumnIndex(6);
-        edited |= drawCellInt(("##" + objfilterKey).c_str(), objfilter, 0, 10);
-        ImGui::TableSetColumnIndex(7);
-        edited |= drawCellInt(("##" + compareKey).c_str(), compareGap, 1, 500);
-
-        InjectManualGaugeInt(context, thresholdKey.c_str(), threshold);
-        InjectManualGaugeInt(context, methodKey.c_str(), method);
-        InjectManualGaugeInt(context, linegapKey.c_str(), linegap);
-        InjectManualGaugeInt(context, wgapKey.c_str(), wgap);
-        InjectManualGaugeInt(context, hgapKey.c_str(), hgap);
-        InjectManualGaugeInt(context, objfilterKey.c_str(), objfilter);
-        InjectManualGaugeInt(context, compareKey.c_str(), compareGap);
+      ImGui::PushID(dir);
+      ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.0f, 1.0f),
+                         "FindLine Probe Parameters");
+      ImGui::TextDisabled(
+          "Maps to FastMatch setlearn* for this direction; no value is "
+          "copied to another tab automatically.");
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
+          "Legacy Learn is still one shared edgepattern pass. Per-tab "
+          "execution and per-tab evidence become active with the isolated "
+          "probe backend; do not treat the current legacy result as four "
+          "independent FindLine runs.");
+      edited |= DrawRuntimeIntRow(context, "threshold", thresholdKey.c_str(),
+                                  threshold, 0, 255, 170.0f);
+      edited |= DrawRuntimeIntRow(context, "method", methodKey.c_str(),
+                                  method, 0, 3, 170.0f);
+      edited |= DrawRuntimeIntRow(context, "linegap", linegapKey.c_str(),
+                                  linegap, 1, 200, 170.0f);
+      edited |= DrawRuntimeIntRow(context, "wgap", wgapKey.c_str(), wgap,
+                                  1, 500, 170.0f);
+      edited |= DrawRuntimeIntRow(context, "hgap", hgapKey.c_str(), hgap,
+                                  1, 500, 170.0f);
+      edited |= DrawRuntimeIntRow(context, "object prefilter",
+                                  objfilterKey.c_str(), objfilter, 0, 10,
+                                  170.0f);
+      edited |= DrawRuntimeIntRow(context, "compare gap", compareKey.c_str(),
+                                  compareGap, 1, 500, 170.0f);
+      ImGui::SeparatorText("Detection Edge / Point Column");
+      ImGui::TextDisabled(
+          "Choose the candidate ordinal for this directional FindLine Probe: "
+          "0=All, N=Nth edge, -1=Last edge.");
+      edited |= DrawRuntimeIntRow(context, "edge count", edgeCountKey.c_str(),
+                                  edgeCount, 1, 16, 170.0f);
+      std::string selectedEdgeLabel =
+          selectedEdge == 0 ? "All edges" :
+          selectedEdge == -1 ? "Last edge" :
+          "Edge " + std::to_string(selectedEdge);
+      ImGui::TextUnformatted("selected edge");
+      ImGui::SameLine(170.0f);
+      ImGui::SetNextItemWidth(180.0f);
+      if (ImGui::BeginCombo("##fastmatch_probe_selected_edge",
+                            selectedEdgeLabel.c_str())) {
+        if (ImGui::Selectable("All edges", selectedEdge == 0)) {
+          selectedEdge = 0;
+          edited = true;
+        }
+        for (int edge = 1; edge <= edgeCount; ++edge) {
+          const std::string label = "Edge " + std::to_string(edge);
+          if (ImGui::Selectable(label.c_str(), selectedEdge == edge)) {
+            selectedEdge = edge;
+            edited = true;
+          }
+        }
+        ImGui::Separator();
+        if (ImGui::Selectable("Last edge", selectedEdge == -1)) {
+          selectedEdge = -1;
+          edited = true;
+        }
+        ImGui::EndCombo();
       }
-      ImGui::EndTable();
+      selectedEdge = std::clamp(selectedEdge, -1, edgeCount);
+      InjectManualGaugeInt(context, selectedEdgeKey.c_str(), selectedEdge);
+      if (edgeCount == 2 && selectedEdge == 2) {
+        ImGui::TextDisabled(
+            "Compatibility mapping: Edge 2 is executed as Last edge for this "
+            "two-edge FindLine Probe.");
+      }
+
+      const bool horizontalEdge = dir < 2;
+      ImGui::TextDisabled(
+          "%s normal default: wgap=%d hgap=%d. These values are saved for "
+          "this probe and are not visual-only.",
+          horizontalEdge ? "Vertical" : "Horizontal",
+          horizontalEdge ? 8 : 2, horizontalEdge ? 2 : 8);
+      ImGui::Checkbox("Show this probe's FindLine scan ticks",
+                      &context.show_fastmatch_learn_scan_ticks);
+      ImGui::TextDisabled(
+          "The probe display is isolated; FastMatch Learn / Match controls "
+          "remain outside this tab bar.");
+      ImGui::PopID();
+      ImGui::EndTabItem();
     }
+    ImGui::EndTabBar();
   }
   return edited;
 }
@@ -3597,6 +3684,20 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   ImGui::TextDisabled("P0 scores learned A/B edge probes at the supplied seed; "
                       "center/extent can be copied from an OBB result. 0 center "
                       "or extent uses the current FastMatch ROI fallback.");
+  ImGui::SeparatorText("Normal-trace Learn (domain -> Dijkstra -> normal pair)");
+  edited |= DrawRuntimeIntRow(context, "enable normal-trace Learn",
+      "global_fastmatch_normaltrace_enabled", 0, 0, 1, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "domain overlap radius px",
+      "global_fastmatch_normaltrace_overlap_radius_px", 3, 0, 64, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum gradient",
+      "global_fastmatch_normaltrace_min_gradient", 20, 1, 255, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "Dijkstra maximum nodes",
+      "global_fastmatch_normaltrace_max_nodes", 4096, 32, 200000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "normal pair offset px",
+      "global_fastmatch_normaltrace_pair_offset_px", 6, 1, 128, 250.0f);
+  ImGui::TextDisabled("Disabled until the full domain-deduplication and Dijkstra "
+                      "trace implementation is active; this prevents axis-aligned "
+                      "pairing from entering production Learn.");
   return edited;
 }
 
@@ -3920,6 +4021,38 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
               object->fastmatch_learn_a_count, object->fastmatch_learn_b_count,
               object->fastmatch_learn_a2_count,
               object->fastmatch_learn_b2_count);
+  ImGui::TextUnformatted("Directional FindLine Probe Evidence");
+  ImGui::TextDisabled("One isolated Measure + SmartFilter run per tab. These "
+                      "counts are evidence; they are not inferred from the "
+                      "legacy FastMatch template.");
+  const char* probeNames[] = {"Top", "Bottom", "Left", "Right"};
+  if (ImGui::BeginTable("fastmatch_directional_probe_evidence", 5,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Probe");
+    ImGui::TableSetupColumn("Scans");
+    ImGui::TableSetupColumn("Raw");
+    ImGui::TableSetupColumn("Accepted side");
+    ImGui::TableSetupColumn("Status");
+    ImGui::TableHeadersRow();
+    for (int direction = 0; direction < 4; ++direction) {
+      const std::size_t index = static_cast<std::size_t>(direction);
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(probeNames[direction]);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d", object->fastmatch_directional_probe_scans[index]);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%d", object->fastmatch_directional_probe_raw[index]);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%d", object->fastmatch_directional_probe_accepted[index]);
+      ImGui::TableSetColumnIndex(4);
+      const std::string& status =
+          object->fastmatch_directional_probe_status[index];
+      ImGui::TextUnformatted(status.empty() ? "NOT_RUN" : status.c_str());
+    }
+    ImGui::EndTable();
+  }
   ImGui::Text("template patterns: A=%d B=%d", object->fastmatch_pattern_a_count,
               object->fastmatch_pattern_b_count);
   ImGui::Text("match candidates=%d best_score=%.3f",
@@ -8231,9 +8364,22 @@ if (isCxTextInspect) {
     ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.35f, 1.0f),
                        "FastMatch: learn ROI + search ROI "
                        "+ matching params");
+    ImGui::TextDisabled("Image View source is read-only. The controls below are temporary render layers and are never written into the test image.");
 
     ImGui::Checkbox("Show FastMatch debug overlay",
                     &context.show_fastmatch_debug_vectors);
+    ImGui::SameLine();
+    ImGui::Checkbox("Show FastMatch Learn Result",
+                    &context.show_fastmatch_learn_result);
+    ImGui::Checkbox("Show four-edge FindLine scan ticks",
+                    &context.show_fastmatch_learn_scan_ticks);
+    ImGui::SameLine();
+    const char* fastMatchLearnEdges[] = {"Top", "Bottom", "Left", "Right"};
+    const int activeProbe = std::clamp(context.fastmatch_selected_learn_edge,
+                                       0, 3);
+    ImGui::TextDisabled("active probe: %s (select its tab below)",
+                        fastMatchLearnEdges[activeProbe]);
+    ImGui::TextDisabled("Ticks and orange conclusion points are projected into the active directional bucket; use its tab to keep parameter tuning and visual analysis aligned.");
     ImGui::SameLine();
     ImGui::Checkbox("compare_gap point pairs",
                     &context.show_fastmatch_compare_gap_pairs);
