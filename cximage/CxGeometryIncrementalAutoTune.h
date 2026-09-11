@@ -1122,6 +1122,118 @@ inline bool OutputDirectoryReady(const fs::path &directory,
   return true;
 }
 
+// This is deliberately a C++ runtime assembly step, not a scripting hook.
+// It materializes only the package-owned training split and copies frozen
+// evaluation assets into distinct read-only split directories.  It does not
+// fabricate hard negatives when the package lacks a verifiable target mask.
+inline bool AssembleControlledDataStrategy(
+    const fs::path &output_dir,
+    const std::unordered_map<std::string, PackageSample> &samples,
+    const Policy &policy, const bool hard_negative_required,
+    const bool confusion_context_required,
+    const bool missed_positive_variant_required, std::string &reason) {
+  const fs::path dataset_dir = output_dir / "controlled_data_strategy";
+  std::error_code ec;
+  fs::create_directories(dataset_dir / "images" / "train", ec);
+  fs::create_directories(dataset_dir / "labels" / "train", ec);
+  fs::create_directories(dataset_dir / "images" / "validation", ec);
+  fs::create_directories(dataset_dir / "labels" / "validation", ec);
+  fs::create_directories(dataset_dir / "images" / "holdout", ec);
+  fs::create_directories(dataset_dir / "labels" / "holdout", ec);
+  if (ec) {
+    reason = "cannot create controlled data strategy directories: " + ec.message();
+    return false;
+  }
+
+  std::vector<const PackageSample *> ordered;
+  ordered.reserve(samples.size());
+  for (const auto &entry : samples)
+    ordered.push_back(&entry.second);
+  std::sort(ordered.begin(), ordered.end(),
+            [](const PackageSample *left, const PackageSample *right) {
+              return left->image_path.generic_string() < right->image_path.generic_string();
+            });
+
+  int train_count = 0;
+  int validation_count = 0;
+  int holdout_count = 0;
+  std::ostringstream rows;
+  bool first = true;
+  for (std::size_t index = 0; index < ordered.size(); ++index) {
+    const PackageSample &sample = *ordered[index];
+    std::string destination_split;
+    if (sample.split == "train") {
+      destination_split = "train";
+      ++train_count;
+    } else if (sample.split == policy.selection_split) {
+      destination_split = "validation";
+      ++validation_count;
+    } else if (sample.split == policy.confirmation_split) {
+      destination_split = "holdout";
+      ++holdout_count;
+    } else {
+      continue;
+    }
+    const std::string stem = std::to_string(index) + "_" + sample.image_path.filename().string();
+    const fs::path image_target = dataset_dir / "images" / destination_split / stem;
+    const fs::path label_target = dataset_dir / "labels" / destination_split /
+                                  (std::to_string(index) + "_" + sample.label_path.filename().string());
+    fs::copy_file(sample.image_path, image_target, fs::copy_options::none, ec);
+    if (ec) {
+      reason = "cannot copy controlled image asset: " + ec.message();
+      return false;
+    }
+    fs::copy_file(sample.label_path, label_target, fs::copy_options::none, ec);
+    if (ec) {
+      reason = "cannot copy controlled label asset: " + ec.message();
+      return false;
+    }
+    if (!first)
+      rows << ",";
+    first = false;
+    rows << "{\"review_item\":\"" << JsonEscape(sample.review_item)
+         << "\",\"split\":\"" << JsonEscape(destination_split)
+         << "\",\"geometry_type\":\""
+         << JsonEscape(sample.canonical_geometry_type)
+         << "\",\"image\":\""
+         << JsonEscape(image_target.lexically_relative(dataset_dir).generic_string())
+         << "\",\"label\":\""
+         << JsonEscape(label_target.lexically_relative(dataset_dir).generic_string())
+         << "\",\"source_image_digest\":\"" << FileDigest(sample.image_path)
+         << "\",\"source_label_digest\":\"" << FileDigest(sample.label_path)
+         << "\"}";
+  }
+  if (train_count == 0 || validation_count == 0 || holdout_count == 0) {
+    reason = "controlled data strategy has an empty required split";
+    return false;
+  }
+  const bool masks_available = false; // package schema exposes bbox labels only.
+  std::ostringstream receipt;
+  receipt << "{\"schema\":\"cxvision.torch_controlled_data_strategy_receipt.v1\""
+          << ",\"executor\":\"CXX_RUNTIME\""
+          << ",\"status\":\"DATA_ASSEMBLY_PARTIAL_MASK_PROVENANCE_REQUIRED\""
+          << ",\"training_split\":\"train\""
+          << ",\"immutable_evaluation_splits\":[\"validation\",\"holdout\"]"
+          << ",\"evaluation_to_training_copy_forbidden\":true"
+          << ",\"external_script_execution_allowed\":false"
+          << ",\"train_positive_count\":" << train_count
+          << ",\"validation_count\":" << validation_count
+          << ",\"holdout_count\":" << holdout_count
+          << ",\"hard_negative_mining_required\":"
+          << (hard_negative_required ? "true" : "false")
+          << ",\"confusion_context_required\":"
+          << (confusion_context_required ? "true" : "false")
+          << ",\"missed_positive_variant_required\":"
+          << (missed_positive_variant_required ? "true" : "false")
+          << ",\"target_mask_provenance_available\":"
+          << (masks_available ? "true" : "false")
+          << ",\"hard_negative_generation_status\":\""
+          << (hard_negative_required ? "BLOCKED_TARGET_MASK_PROVENANCE_REQUIRED" : "NOT_REQUIRED")
+          << "\",\"training_allowed\":false,\"promotion_allowed\":false"
+          << ",\"samples\":[" << rows.str() << "]}";
+  return WriteJson(output_dir, "data_strategy_assembly.json", receipt.str(), reason);
+}
+
 inline std::string RequestedConfigJson(const fs::path &ontology_path,
                                        const fs::path &policy_path,
                                        const fs::path &package_path,
@@ -1446,6 +1558,24 @@ inline int RunGeometryIncrementalAutoTuneCli(int argc, char **argv) {
   const bool duplicate_dominant =
       selected_validation_candidate.raw_detections_per_case >
       static_cast<double>(policy.expected_instances_per_roi);
+  int train_source_case_count = 0;
+  for (const auto &sample : samples) {
+    if (sample.second.split == "train")
+      ++train_source_case_count;
+  }
+  const bool hard_negative_mining_required =
+      selected_validation_candidate.false_alarm_case_rate > 0.0;
+  const bool confusion_context_required =
+      selected_validation_candidate.wrong_class_count > 0;
+  const bool missed_positive_variant_required =
+      selected_validation_candidate.miss_rate > 0.0;
+  if (!AssembleControlledDataStrategy(
+          output_dir, samples, policy, hard_negative_mining_required,
+          confusion_context_required, missed_positive_variant_required,
+          reason)) {
+    std::cout << "conclusion=AUTO_TUNE_OUTPUT_FAIL\nreason=" << reason << "\n";
+    return 1;
+  }
   std::ostringstream recipe;
   recipe << std::setprecision(9)
          << "{\"schema\":\"cxvision.torch_geometry_next_training_recipe.v1\""
@@ -1457,6 +1587,21 @@ inline int RunGeometryIncrementalAutoTuneCli(int argc, char **argv) {
          << (classification_dominant ? "true" : "false")
          << ",\"duplicate_high_confidence_priority\":"
          << (duplicate_dominant ? "true" : "false")
+         << ",\"data_strategy\":{\"executor\":\"CXX_RUNTIME_REQUIRED\""
+         << ",\"training_split_only\":true"
+         << ",\"immutable_evaluation_splits\":[\""
+         << JsonEscape(policy.selection_split) << "\",\""
+         << JsonEscape(policy.confirmation_split) << "\"]"
+         << ",\"evaluation_to_training_copy_forbidden\":true"
+         << ",\"controlled_train_source_case_count\":"
+         << train_source_case_count
+         << ",\"hard_negative_mining_required\":"
+         << (hard_negative_mining_required ? "true" : "false")
+         << ",\"confusion_context_required\":"
+         << (confusion_context_required ? "true" : "false")
+         << ",\"missed_positive_variant_required\":"
+         << (missed_positive_variant_required ? "true" : "false")
+         << ",\"external_script_execution_allowed\":false}"
          << ",\"observed_validation_wrong_class_count\":"
          << selected_validation_candidate.wrong_class_count
          << ",\"observed_validation_localization_failure_count\":"
@@ -1592,7 +1737,8 @@ inline int RunGeometryIncrementalAutoTuneCli(int argc, char **argv) {
       "threshold_topk_sweep.json", "effective_config.json",
       "classification_observation.json", "confusion_matrix.json",
       "holdout_confirmation.json", "next_training_recipe.json",
-      "effective_config_projection.cfg", "auto_tune_summary.json"};
+      "data_strategy_assembly.json", "effective_config_projection.cfg",
+      "auto_tune_summary.json"};
   std::ostringstream index;
   index << "{\"schema\":\"cxvision.torch_geometry_auto_tune_evidence_index.v1\""
         << ",\"status\":\"EVIDENCE_INDEX_COMPLETE\""

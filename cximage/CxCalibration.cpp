@@ -68,6 +68,8 @@ std::string SnapshotHash(const CxCalibrationSnapshot& s)
     h = Fnv1aAppend(h, StableNumber(s.uncertainty.z_scale_uncertainty));
     h = Fnv1aAppend(h, StableNumber(s.uncertainty.z_repeatability_std));
     h = Fnv1aAppend(h, StableNumber(s.uncertainty.z_linearity_error));
+    h = Fnv1aAppend(h, StableNumber(s.reprojection_rmse_px));
+    h = Fnv1aAppend(h, s.has_reprojection_rmse ? "1" : "0");
 
     std::ostringstream out;
     out << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << h;
@@ -260,6 +262,25 @@ void CxCalibration::setuncertainty(
     m_snapshot.has_uncertainty =
         m_snapshot.uncertainty.has_xy_uncertainty || m_snapshot.uncertainty.has_z_uncertainty;
     m_snapshot.uncertainty.status = ClassifyUncertainty(m_snapshot);
+    m_status_code = CxCalibrationStatusCode::Empty;
+    markReadyIfPossible();
+}
+
+void CxCalibration::setreprojectionrmse(double reprojection_rmse_px)
+{
+    if (!finite(reprojection_rmse_px) || reprojection_rmse_px < 0.0)
+    {
+        m_snapshot.reprojection_rmse_px = -1.0;
+        m_snapshot.has_reprojection_rmse = false;
+        m_snapshot.status = "INVALID_INPUT";
+        m_snapshot.reason = "invalid reprojection RMSE";
+        m_status_code = CxCalibrationStatusCode::InvalidInput;
+        updateSnapshotHash();
+        return;
+    }
+
+    m_snapshot.reprojection_rmse_px = reprojection_rmse_px;
+    m_snapshot.has_reprojection_rmse = true;
     m_status_code = CxCalibrationStatusCode::Empty;
     markReadyIfPossible();
 }
@@ -528,6 +549,8 @@ bool CxCalibrationAdapter::bind(const CxCalibrationSnapshot& snapshot)
             snapshot.uncertainty.z_repeatability_std,
             snapshot.uncertainty.z_linearity_error);
     }
+    if (snapshot.has_reprojection_rmse)
+        m_calibration.setreprojectionrmse(snapshot.reprojection_rmse_px);
     m_bound_snapshot = m_calibration.snapshot();
     return ready();
 }

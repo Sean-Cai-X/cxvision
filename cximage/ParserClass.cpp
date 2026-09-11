@@ -1734,6 +1734,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "settransformfromsegmentation",
                             &FastMatch::settransformfromsegmentation);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "settransformfromtorch",
+                            &FastMatch::settransformfromtorch);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformscalerangepercent",
                             &FastMatch::settransformscalerangepercent);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
@@ -1818,9 +1821,17 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setrotatemaxelapsedms", &FastMatch::setrotatemaxelapsedms);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setrotatemaxprobes", &FastMatch::setrotatemaxprobes);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setrotatemaxsamples", &FastMatch::setrotatemaxsamples);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotatebudgetexceeded", &FastMatch::getrotatebudgetexceeded);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotatecandidatecount", &FastMatch::getrotatecandidatecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getrotateprobecount", &FastMatch::getrotateprobecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getrotatesamplecount", &FastMatch::getrotatesamplecount);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getrotateelapsedms", &FastMatch::getrotateelapsedms);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch, "matchmore",

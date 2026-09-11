@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 // Value-only transform used by the affine FastMatch search.  It deliberately
 // has no Image/Shape ownership, so it can also be supplied by an OBB adapter.
@@ -97,12 +98,35 @@ struct FastMatchTransformSearchConfig
     int projective_range_permille = 0;
 };
 
+struct FastMatchTransformSeedEvidence
+{
+    bool available = false;
+    std::string source = "manual";
+    std::string model_id;
+    int detection_index = -1;
+    int class_id = -1;
+    double confidence = 0.0;
+    std::string angle_convention;
+    std::string reason;
+};
+
 struct FastMatchTransformSearchResult
 {
     bool executed = false;
     bool converged = false;
     bool budget_exceeded = false;
     bool fallback_to_rigid = false;
+    // Bound by value from CxCalibration.  Search always remains in pixel
+    // coordinates; this receipt only establishes output metrology provenance.
+    bool calibration_applied = false;
+    std::string calibration_snapshot_hash;
+    std::string calibration_source_ref;
+    std::string calibration_coordinate_frame_id;
+    std::string calibration_xy_unit;
+    double calibration_reprojection_rmse_px = -1.0;
+    double best_physical_cx = 0.0;
+    double best_physical_cy = 0.0;
+    FastMatchTransformSeedEvidence seed;
     FastMatchTransform initial;
     FastMatchTransform best;
     double best_score = 0.0;

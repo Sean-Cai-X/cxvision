@@ -1753,3 +1753,19 @@
   
    开始补齐通道分账证据：把 rotation / scale / compound 作为 sidecar 的事实字段写入 batch target，并由 Geometry ROI 评估分别计算单轴与组合通道指标，避免把组
   合压力退化掩盖在聚合均值中。
+  
+  
+  
+  - CxGeometryIncrementalAutoTune.h：C++ 受控自整定执行器，含验证选择、holdout 确认、策略回执与禁止自动晋级。
+  - ManualConsoleParamRegressionPanel.cpp：已有策略参数、七类 ontology、执行轨、证据回执的 GUI 投影。
+  - ManualConsoleEvidenceChain.cpp：训练参数已从界面写入 Runtime 计划，包括 assignment、focal loss、NMS、early-stop、best checkpoint、ROI 与仿射通道。
+
+  后续会按这个内部骨架实现 Detection L1，而不是继续扩展外部脚本：
+
+  1. 将 L0 诊断结果作为 Runtime 输入事实。
+  2. C++ 内部策略匹配生成数据策略、训练策略、参数包。
+  3. C++ 内部组装受控 train-only 数据、硬负样本与增强资产；验证/holdout 强制只读。
+  4. Runtime 执行训练、验证、holdout、回退，并写版本化 receipt。
+  5. GUI 直接显示策略来源、参数前后值、七类样本配比、问题标签、轮次指标与回退原因。
+
+  外部脚本产物仅保留为开发期对照证据，不能作为可发布系统的执行依赖。

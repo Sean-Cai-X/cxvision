@@ -202,9 +202,15 @@ struct CxScriptToolResultCapture
     int fastmatch_candidate_insert_count = 0;
     int fastmatch_candidate_replace_count = 0;
     int fastmatch_candidate_reject_count = 0;
+    bool fastmatch_rotate_budget_exceeded = false;
+    int fastmatch_rotate_candidate_count = 0;
+    int fastmatch_rotate_probe_count = 0;
+    int fastmatch_rotate_sample_count = 0;
+    int fastmatch_rotate_elapsed_ms = 0;
 
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
+    CxFastMatchTransformSearchEvidence fastmatch_transform_search;
     std::string ocr_final_text;
     std::string ocr_failure_reason;
     std::vector<CxOcrGlyphCandidateEvidence> ocr_glyph_candidates;

@@ -1818,6 +1818,43 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["fastmatch_candidate_insert_count"] = capture.fastmatch_candidate_insert_count;
     pkg.metrics["fastmatch_candidate_replace_count"] = capture.fastmatch_candidate_replace_count;
     pkg.metrics["fastmatch_candidate_reject_count"] = capture.fastmatch_candidate_reject_count;
+    pkg.metrics["fastmatch_rotate_budget_exceeded"] =
+        capture.fastmatch_rotate_budget_exceeded ? 1.0 : 0.0;
+    pkg.metrics["fastmatch_rotate_candidate_count"] = capture.fastmatch_rotate_candidate_count;
+    pkg.metrics["fastmatch_rotate_probe_count"] = capture.fastmatch_rotate_probe_count;
+    pkg.metrics["fastmatch_rotate_sample_count"] = capture.fastmatch_rotate_sample_count;
+    pkg.metrics["fastmatch_rotate_elapsed_ms"] = capture.fastmatch_rotate_elapsed_ms;
+    const CxFastMatchTransformSearchEvidence& transform_search =
+        capture.fastmatch_transform_search;
+    pkg.metrics["fastmatch_transform_executed"] = transform_search.executed ? 1.0 : 0.0;
+    pkg.metrics["fastmatch_transform_converged"] = transform_search.converged ? 1.0 : 0.0;
+    pkg.metrics["fastmatch_transform_budget_exceeded"] = transform_search.budget_exceeded ? 1.0 : 0.0;
+    pkg.metrics["fastmatch_transform_best_score"] = transform_search.best_score;
+    pkg.metrics["fastmatch_transform_gradient_score"] = transform_search.gradient_score;
+    pkg.metrics["fastmatch_transform_continuity_score"] = transform_search.continuity_score;
+    pkg.metrics["fastmatch_transform_geometric_residual_px"] = transform_search.geometric_residual_px;
+    pkg.metrics["fastmatch_transform_rigid_baseline_score"] = transform_search.rigid_baseline_score;
+    pkg.metrics["fastmatch_transform_evaluated_candidates"] = transform_search.evaluated_candidates;
+    pkg.metrics["fastmatch_transform_sample_count"] = transform_search.sample_count;
+    pkg.metrics["fastmatch_transform_elapsed_ms"] = transform_search.elapsed_ms;
+    pkg.metrics["fastmatch_transform_calibration_applied"] =
+        transform_search.calibration_applied ? 1.0 : 0.0;
+    pkg.metrics["fastmatch_transform_calibration_reprojection_rmse_px"] =
+        transform_search.calibration_reprojection_rmse_px;
+    pkg.metrics["fastmatch_transform_best_physical_cx"] = transform_search.best_physical_cx;
+    pkg.metrics["fastmatch_transform_best_physical_cy"] = transform_search.best_physical_cy;
+    pkg.facts["fastmatch_transform_seed_source"] = transform_search.seed_source;
+    pkg.facts["fastmatch_transform_seed_model_id"] = transform_search.seed_model_id;
+    pkg.facts["fastmatch_transform_seed_angle_convention"] = transform_search.seed_angle_convention;
+    pkg.facts["fastmatch_transform_failure_stage"] = transform_search.failure_stage;
+    pkg.facts["fastmatch_transform_calibration_snapshot_hash"] =
+        transform_search.calibration_snapshot_hash;
+    pkg.facts["fastmatch_transform_calibration_source_ref"] =
+        transform_search.calibration_source_ref;
+    pkg.facts["fastmatch_transform_calibration_coordinate_frame_id"] =
+        transform_search.calibration_coordinate_frame_id;
+    pkg.facts["fastmatch_transform_calibration_xy_unit"] =
+        transform_search.calibration_xy_unit;
 
     pkg.metrics["actual_findsetting"] = capture.actual_findsetting;
     pkg.metrics["object_filter_borw"] = capture.object_filter_borw;
@@ -3235,6 +3272,14 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << R"(  "fastmatch_candidate_reject_count": )"
             << capture.fastmatch_candidate_reject_count << ','
             << static_cast<char>(10);
+        object_state_file
+            << R"(  "fastmatch_rotate_budget": {"exceeded": )"
+            << (capture.fastmatch_rotate_budget_exceeded ? "true" : "false")
+            << R"(, "candidate_count": )" << capture.fastmatch_rotate_candidate_count
+            << R"(, "probe_count": )" << capture.fastmatch_rotate_probe_count
+            << R"(, "sample_count": )" << capture.fastmatch_rotate_sample_count
+            << R"(, "elapsed_ms": )" << capture.fastmatch_rotate_elapsed_ms
+            << R"(},)" << static_cast<char>(10);
         const CxFastMatchTemplateGeometryEvidence &template_geometry =
             capture.fastmatch_template_geometry;
         object_state_file
@@ -3295,6 +3340,46 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                 << static_cast<char>(34) << '}';
         }
         object_state_file << "]," << static_cast<char>(10);
+        const CxFastMatchTransformSearchEvidence& transform_search =
+            capture.fastmatch_transform_search;
+        object_state_file
+            << R"(  "fastmatch_transform_search": {"executed": )"
+            << (transform_search.executed ? "true" : "false")
+            << R"(, "converged": )" << (transform_search.converged ? "true" : "false")
+            << R"(, "budget_exceeded": )" << (transform_search.budget_exceeded ? "true" : "false")
+            << R"(, "seed_available": )" << (transform_search.seed_available ? "true" : "false")
+            << R"(, "seed_source": ")" << JsonEscape(transform_search.seed_source)
+            << R"(", "seed_model_id": ")" << JsonEscape(transform_search.seed_model_id)
+            << R"(", "seed_detection_index": )" << transform_search.seed_detection_index
+            << R"(, "seed_class_id": )" << transform_search.seed_class_id
+            << R"(, "seed_confidence": )" << transform_search.seed_confidence
+            << R"(, "seed_angle_convention": ")" << JsonEscape(transform_search.seed_angle_convention)
+            << R"(", "seed_reason": ")" << JsonEscape(transform_search.seed_reason)
+            << R"(", "initial": {"cx": )" << transform_search.initial_cx
+            << R"(, "cy": )" << transform_search.initial_cy
+            << R"(, "angle_deg": )" << transform_search.initial_angle_deg
+            << R"(, "scale_x": )" << transform_search.initial_scale_x
+            << R"(, "scale_y": )" << transform_search.initial_scale_y
+            << R"(}, "best": {"cx": )" << transform_search.best_cx
+            << R"(, "cy": )" << transform_search.best_cy
+            << R"(, "angle_deg": )" << transform_search.best_angle_deg
+            << R"(, "scale_x": )" << transform_search.best_scale_x
+            << R"(, "scale_y": )" << transform_search.best_scale_y
+            << R"(, "shear": )" << transform_search.best_shear
+            << R"(, "projective_u": )" << transform_search.best_projective_u
+            << R"(, "projective_v": )" << transform_search.best_projective_v
+            << R"(}, "best_score": )" << transform_search.best_score
+            << R"(, "appearance_score": )" << transform_search.appearance_score
+            << R"(, "continuity_score": )" << transform_search.continuity_score
+            << R"(, "gradient_score": )" << transform_search.gradient_score
+            << R"(, "geometric_residual_px": )" << transform_search.geometric_residual_px
+            << R"(, "rigid_baseline_score": )" << transform_search.rigid_baseline_score
+            << R"(, "evaluated_candidates": )" << transform_search.evaluated_candidates
+            << R"(, "accepted_candidates": )" << transform_search.accepted_candidates
+            << R"(, "sample_count": )" << transform_search.sample_count
+            << R"(, "elapsed_ms": )" << transform_search.elapsed_ms
+            << R"(, "failure_stage": ")" << JsonEscape(transform_search.failure_stage)
+            << R"("},)" << static_cast<char>(10);
         object_state_file << R"(  "ocr_glyph_source_policy": )"
                           << ocr_glyph_source << ',' << static_cast<char>(10);
         object_state_file << R"(  "ocr_effective_source": )"

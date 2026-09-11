@@ -1,8 +1,10 @@
 #include "TorchRuntimeResultAdapter.h"
+#include <cmath>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <filesystem>
+#include <initializer_list>
 #include <sstream>
 
 namespace
@@ -69,6 +71,67 @@ bool ExtractTorchAdapterJsonNumber(
     return true;
 }
 
+bool ExtractTorchAdapterJsonNumberAny(
+    const std::string& json,
+    const std::initializer_list<const char*>& keys,
+    double& value)
+{
+    for (const char* key : keys)
+    {
+        if (key != nullptr && ExtractTorchAdapterJsonNumber(json, key, value))
+            return true;
+    }
+    return false;
+}
+
+// OBB receipts must carry an explicit angle unit. A bare `angle` is rejected
+// so radians and degrees cannot be silently mixed at the FastMatch boundary.
+bool AttachOrientedBoxGeometry(
+    const std::string& json,
+    CxTorchDetection& detection)
+{
+    double center_x = 0.0;
+    double center_y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    double angle = 0.0;
+    if (!ExtractTorchAdapterJsonNumberAny(json, {"cx", "center_x"}, center_x) ||
+        !ExtractTorchAdapterJsonNumberAny(json, {"cy", "center_y"}, center_y) ||
+        !ExtractTorchAdapterJsonNumberAny(json, {"w", "width", "obb_width"}, width) ||
+        !ExtractTorchAdapterJsonNumberAny(json, {"h", "height", "obb_height"}, height) ||
+        !std::isfinite(center_x) || !std::isfinite(center_y) ||
+        !std::isfinite(width) || !std::isfinite(height) ||
+        width <= 0.0 || height <= 0.0)
+    {
+        return false;
+    }
+
+    bool angle_is_radians = false;
+    if (!ExtractTorchAdapterJsonNumberAny(json,
+            {"angle_deg", "rotation_deg", "theta_deg"}, angle))
+    {
+        if (!ExtractTorchAdapterJsonNumberAny(json,
+                {"angle_rad", "rotation_rad", "theta_rad"}, angle))
+            return false;
+        angle_is_radians = true;
+    }
+
+    if (!std::isfinite(angle))
+        return false;
+
+    constexpr double kRadiansToDegrees = 57.2957795130823208768;
+    detection.oriented_box_available = true;
+    detection.oriented_center_x = center_x;
+    detection.oriented_center_y = center_y;
+    detection.oriented_width = width;
+    detection.oriented_height = height;
+    detection.oriented_angle_deg = angle_is_radians ? angle * kRadiansToDegrees : angle;
+    detection.oriented_angle_convention = angle_is_radians
+        ? "image_clockwise_radians_converted_to_degrees"
+        : "image_clockwise_degrees";
+    return true;
+}
+
 void AttachDetectionResults(
     const TorchRuntimeGuiResult& source,
     const CxTorchTaskSpec& task,
@@ -116,6 +179,7 @@ void AttachDetectionResults(
     if (array_end == std::string::npos)
         return;
 
+    int source_index = 0;
     std::size_t object_pos = json.find('{', array_begin);
     while (object_pos != std::string::npos && object_pos < array_end)
     {
@@ -138,16 +202,28 @@ void AttachDetectionResults(
             ExtractTorchAdapterJsonNumber(object_json, "x2", x2) &&
             ExtractTorchAdapterJsonNumber(object_json, "y2", y2);
 
-        if (has_box)
+        CxTorchDetection detection;
+        detection.source_index = source_index;
+        const bool has_oriented_box = AttachOrientedBoxGeometry(object_json, detection);
+        if (has_box || has_oriented_box)
         {
             ExtractTorchAdapterJsonNumber(object_json, "confidence", confidence);
             ExtractTorchAdapterJsonNumber(object_json, "class_id", class_id);
 
-            CxTorchDetection detection;
-            detection.x = x1;
-            detection.y = y1;
-            detection.width = x2 - x1;
-            detection.height = y2 - y1;
+            if (has_box)
+            {
+                detection.x = x1;
+                detection.y = y1;
+                detection.width = x2 - x1;
+                detection.height = y2 - y1;
+            }
+            else
+            {
+                detection.x = detection.oriented_center_x - detection.oriented_width * 0.5;
+                detection.y = detection.oriented_center_y - detection.oriented_height * 0.5;
+                detection.width = detection.oriented_width;
+                detection.height = detection.oriented_height;
+            }
             detection.confidence = confidence;
             detection.class_id = static_cast<int>(class_id);
 
@@ -155,6 +231,7 @@ void AttachDetectionResults(
                 target.detections.push_back(detection);
         }
 
+        ++source_index;
         object_pos = json.find('{', object_end + 1);
     }
 }

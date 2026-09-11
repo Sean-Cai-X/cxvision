@@ -226,6 +226,56 @@ struct CxFindLineEdgeEvaluationSnapshot
     bool fit_possible = false;
 };
 
+// Value-only transform-search receipt.  This remains independent of the
+// FastMatch runtime object so evidence can outlive the parser session.
+struct CxFastMatchTransformSearchEvidence
+{
+    bool executed = false;
+    bool converged = false;
+    bool budget_exceeded = false;
+    bool fallback_to_rigid = false;
+    bool calibration_applied = false;
+    std::string calibration_snapshot_hash;
+    std::string calibration_source_ref;
+    std::string calibration_coordinate_frame_id;
+    std::string calibration_xy_unit;
+    double calibration_reprojection_rmse_px = -1.0;
+    double best_physical_cx = 0.0;
+    double best_physical_cy = 0.0;
+    bool seed_available = false;
+    std::string seed_source;
+    std::string seed_model_id;
+    int seed_detection_index = -1;
+    int seed_class_id = -1;
+    double seed_confidence = 0.0;
+    std::string seed_angle_convention;
+    std::string seed_reason;
+    double initial_cx = 0.0;
+    double initial_cy = 0.0;
+    double initial_angle_deg = 0.0;
+    double initial_scale_x = 1.0;
+    double initial_scale_y = 1.0;
+    double best_cx = 0.0;
+    double best_cy = 0.0;
+    double best_angle_deg = 0.0;
+    double best_scale_x = 1.0;
+    double best_scale_y = 1.0;
+    double best_shear = 0.0;
+    double best_projective_u = 0.0;
+    double best_projective_v = 0.0;
+    double best_score = 0.0;
+    double appearance_score = 0.0;
+    double continuity_score = 0.0;
+    double gradient_score = 0.0;
+    double geometric_residual_px = 0.0;
+    double rigid_baseline_score = 0.0;
+    int evaluated_candidates = 0;
+    int accepted_candidates = 0;
+    int sample_count = 0;
+    int elapsed_ms = 0;
+    std::string failure_stage = "not_run";
+};
+
 struct CxScriptExecutionCapture
 {
     bool script_compiled = false;
@@ -408,9 +458,15 @@ struct CxScriptExecutionCapture
     int fastmatch_candidate_insert_count = 0;
     int fastmatch_candidate_replace_count = 0;
     int fastmatch_candidate_reject_count = 0;
+    bool fastmatch_rotate_budget_exceeded = false;
+    int fastmatch_rotate_candidate_count = 0;
+    int fastmatch_rotate_probe_count = 0;
+    int fastmatch_rotate_sample_count = 0;
+    int fastmatch_rotate_elapsed_ms = 0;
 
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
+    CxFastMatchTransformSearchEvidence fastmatch_transform_search;
     std::string ocr_final_text;
     std::string ocr_failure_reason;
     std::vector<CxOcrGlyphCandidateEvidence> ocr_glyph_candidates;

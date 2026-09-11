@@ -89,6 +89,7 @@ struct CxTorchTaskSpec
 
 struct CxTorchDetection
 {
+    int source_index = -1;
     int class_id = -1;
     std::string class_name;
     double confidence = 0.0;
@@ -96,6 +97,16 @@ struct CxTorchDetection
     double y = 0.0;
     double width = 0.0;
     double height = 0.0;
+
+    // A regular detection remains an axis-aligned proposal.  Only an
+    // explicitly tagged oriented box may seed a FastMatchTransform.
+    bool oriented_box_available = false;
+    double oriented_center_x = 0.0;
+    double oriented_center_y = 0.0;
+    double oriented_width = 0.0;
+    double oriented_height = 0.0;
+    double oriented_angle_deg = 0.0;
+    std::string oriented_angle_convention;
 };
 
 struct CxTorchMask

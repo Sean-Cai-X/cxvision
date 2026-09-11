@@ -1,6 +1,8 @@
 #include "CxUnifiedLog.h"
 #include "FastMatch.h"
+#include "CxTorchResultProjector.h"
 #include "FindSegmentation.h"
+#include "TorchTask.h"
 #include "FindObject.h"
 #include "PolylineShape.h"
 
@@ -2422,12 +2424,60 @@ void FastMatch::settransformprojectivepermille(int projective_u_permille,
 
 void FastMatch::settransformfromsegmentation(void* segmentation) {
   FindSegmentation* source = static_cast<FindSegmentation*>(segmentation);
-  if (source == nullptr || source->get_geometry_count() <= 0)
+  m_transform_seed_evidence = FastMatchTransformSeedEvidence();
+  m_transform_seed_evidence.source = "segmentation_oriented_box";
+  if (source == nullptr || source->get_geometry_count() <= 0) {
+    m_transform_seed_evidence.reason = "segmentation has no oriented geometry";
     return;
+  }
   m_transform_search_initial = FastMatchTransform::fromOrientedBox(
       source->get_geometry_center_x(), source->get_geometry_center_y(),
       source->get_geometry_axis_x(), source->get_geometry_axis_y(),
       source->get_geometry_angle_deg());
+  m_transform_seed_evidence.available = m_transform_search_initial.valid();
+  m_transform_seed_evidence.angle_convention = "image_clockwise_degrees";
+  if (!m_transform_seed_evidence.available)
+    m_transform_seed_evidence.reason = "segmentation geometry produced an invalid transform";
+}
+
+void FastMatch::settransformfromtorch(void* torch_task) {
+  m_transform_seed_evidence = FastMatchTransformSeedEvidence();
+  m_transform_seed_evidence.source = "torch_obb";
+  TorchTask* source = static_cast<TorchTask*>(torch_task);
+  if (source == nullptr) {
+    m_transform_seed_evidence.reason = "TorchTask is null";
+    return;
+  }
+
+  int detection_index = -1;
+  int class_id = -1;
+  double confidence = 0.0;
+  std::string angle_convention;
+  std::string reason;
+  if (!CxTorchResultProjector::TryBuildFastMatchTransform(
+          source->GetInferenceResult(), m_transform_search_initial,
+          detection_index, class_id, confidence, angle_convention, reason)) {
+    m_transform_seed_evidence.reason = reason;
+    return;
+  }
+
+  const CxInferenceResult& inference = source->GetInferenceResult();
+  m_transform_seed_evidence.available = true;
+  m_transform_seed_evidence.model_id = inference.model_id;
+  m_transform_seed_evidence.detection_index = detection_index;
+  m_transform_seed_evidence.class_id = class_id;
+  m_transform_seed_evidence.confidence = confidence;
+  m_transform_seed_evidence.angle_convention = angle_convention;
+}
+
+bool FastMatch::bindcalibrationsnapshot(const CxCalibrationSnapshot& snapshot) {
+  m_calibration_bound = m_calibration_adapter.bind(snapshot);
+  return m_calibration_bound;
+}
+
+void FastMatch::clearcalibrationsnapshot() {
+  m_calibration_adapter.reset();
+  m_calibration_bound = false;
 }
 
 void FastMatch::settransformscalerangepercent(int percent) {
@@ -2479,21 +2529,43 @@ double FastMatch::gettransformsearchresidual() { return m_transform_search_resul
 double FastMatch::gettransformsearchrigidbaselinescore() { return m_transform_search_result.rigid_baseline_score; }
 void FastMatch::setrotatemaxcandidates(int count) { m_rotate_max_candidates = std::max(1, count); }
 void FastMatch::setrotatemaxelapsedms(int milliseconds) { m_rotate_max_elapsed_ms = std::max(1, milliseconds); }
+void FastMatch::setrotatemaxprobes(int count) { m_rotate_max_probes = std::max(1, count); }
+void FastMatch::setrotatemaxsamples(int count) { m_rotate_max_samples = std::max(1, count); }
 int FastMatch::getrotatebudgetexceeded() { return m_rotate_budget_exceeded ? 1 : 0; }
 int FastMatch::getrotatecandidatecount() { return m_rotate_candidate_count; }
+int FastMatch::getrotateprobecount() { return m_rotate_probe_count; }
+int FastMatch::getrotatesamplecount() { return m_rotate_sample_count; }
 int FastMatch::getrotateelapsedms() {
+  if (!m_rotate_budget_active)
+    return 0;
   return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - m_rotate_budget_start).count());
 }
 void FastMatch::resetRotateBudget() {
   m_rotate_budget_start = std::chrono::steady_clock::now();
+  m_rotate_budget_active = true;
   m_rotate_candidate_count = 0;
+  m_rotate_probe_count = 0;
+  m_rotate_sample_count = 0;
   m_rotate_budget_exceeded = false;
 }
 bool FastMatch::consumeRotateCandidate() {
   if (m_rotate_budget_exceeded)
     return false;
   if (++m_rotate_candidate_count > m_rotate_max_candidates ||
+      getrotateelapsedms() >= m_rotate_max_elapsed_ms) {
+    m_rotate_budget_exceeded = true;
+    return false;
+  }
+  return true;
+}
+bool FastMatch::consumeRotateProbe(int sample_cost) {
+  if (m_rotate_budget_exceeded)
+    return false;
+  ++m_rotate_probe_count;
+  m_rotate_sample_count += std::max(1, sample_cost);
+  if (m_rotate_probe_count > m_rotate_max_probes ||
+      m_rotate_sample_count > m_rotate_max_samples ||
       getrotateelapsedms() >= m_rotate_max_elapsed_ms) {
     m_rotate_budget_exceeded = true;
     return false;
@@ -2656,10 +2728,26 @@ void FastMatch::runTransformSearch(Image& image) {
   resultclear();
   m_transform_search_result = FastMatchTransformSearchResult();
   m_transform_search_result.executed = true;
+  m_transform_search_result.seed = m_transform_seed_evidence;
+  if (m_calibration_bound && m_calibration_adapter.ready()) {
+    const CxCalibrationSnapshot& calibration = m_calibration_adapter.snapshot();
+    m_transform_search_result.calibration_applied = true;
+    m_transform_search_result.calibration_snapshot_hash = calibration.snapshot_hash;
+    m_transform_search_result.calibration_source_ref = calibration.source_ref;
+    m_transform_search_result.calibration_coordinate_frame_id = calibration.coordinate_frame_id;
+    m_transform_search_result.calibration_xy_unit = calibration.xy_unit;
+    if (calibration.has_reprojection_rmse)
+      m_transform_search_result.calibration_reprojection_rmse_px =
+          calibration.reprojection_rmse_px;
+  }
   m_transform_search_result.initial = m_transform_search_initial;
   if (m_transform_search_initial.cx == 0.0 && m_transform_search_initial.cy == 0.0) {
     m_transform_search_initial.cx = m_search_roi_x + m_search_roi_w * 0.5;
     m_transform_search_initial.cy = m_search_roi_y + m_search_roi_h * 0.5;
+    if (!m_transform_search_result.seed.available) {
+      m_transform_search_result.seed.source = "search_roi_fallback";
+      m_transform_search_result.seed.reason = "no external transform seed";
+    }
   }
   if (m_transform_search_initial.half_u <= 0.0)
     m_transform_search_initial.half_u = std::max(1, m_learn_roi_w / 2);
@@ -2788,6 +2876,12 @@ void FastMatch::runTransformSearch(Image& image) {
   m_transform_search_result.continuity_score = best_continuity;
   m_transform_search_result.gradient_score = best_gradient;
   m_transform_search_result.geometric_residual_px = best_residual;
+  if (m_transform_search_result.calibration_applied) {
+    const cv::Point2d physical_center = m_calibration_adapter.pixelToPhysical(
+        m_transform_search_result.best.cx, m_transform_search_result.best.cy);
+    m_transform_search_result.best_physical_cx = physical_center.x;
+    m_transform_search_result.best_physical_cy = physical_center.y;
+  }
   m_transform_search_result.converged = !budget_exceeded &&
       m_transform_search_result.appearance_score >= m_dminscore;
   m_transform_search_result.accepted_candidates =
@@ -4932,6 +5026,8 @@ void FastMatch::RotateMatchSample(Image &image, gp_Path &path,
 
   for (iy = iy0; iy < iy1;) {
     for (ix = ix0; ix < ix1;) {
+      if (!consumeRotateProbe(std::max(1, icount / 2)))
+        goto RotateMatchSampleDone;
       int imovx = ix;
       int imovy = iy;
 
@@ -4998,6 +5094,7 @@ void FastMatch::RotateMatchSample(Image &image, gp_Path &path,
     iy += igapy;
   }
 
+RotateMatchSampleDone:
   resultsort();
   m_resultrects.clear();
   int icountresult = static_cast<int>(m_resultnums.size());
@@ -5069,6 +5166,8 @@ void FastMatch::RotateMatchSampleAB(Image &image, gp_Path &pathA,
 
   for (iy = iy0; iy < iy1;) {
     for (ix = ix0; ix < ix1;) {
+      if (!consumeRotateProbe(std::max(1, icount1)))
+        goto RotateMatchSampleABDone;
       int imovx = ix;
       int imovy = iy;
 
@@ -5131,6 +5230,7 @@ void FastMatch::RotateMatchSampleAB(Image &image, gp_Path &pathA,
     iy += igapy;
   }
 
+RotateMatchSampleABDone:
   resultsort();
   m_resultrects.clear();
   int icountresult = static_cast<int>(m_resultnums.size());
@@ -5193,6 +5293,8 @@ void FastMatch::RotateMatchSample_upgrade(Image &image, gp_Path &path,
 
   for (iy = iy0; iy < iy1;) {
     for (ix = ix0; ix < ix1;) {
+      if (!consumeRotateProbe(std::max(1, icount / 2)))
+        return;
       int imovx = ix;
       int imovy = iy;
       icalnum = 0;

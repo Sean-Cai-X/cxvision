@@ -1046,6 +1046,68 @@ bool CaptureFastMatchResult(
     output.fastmatch_candidate_insert_count = tool.getresultcandidateinsertcount();
     output.fastmatch_candidate_replace_count = tool.getresultcandidatereplacecount();
     output.fastmatch_candidate_reject_count = tool.getresultcandidaterejectcount();
+    output.fastmatch_rotate_budget_exceeded = tool.getrotatebudgetexceeded() != 0;
+    output.fastmatch_rotate_candidate_count = tool.getrotatecandidatecount();
+    output.fastmatch_rotate_probe_count = tool.getrotateprobecount();
+    output.fastmatch_rotate_sample_count = tool.getrotatesamplecount();
+    output.fastmatch_rotate_elapsed_ms = tool.getrotateelapsedms();
+
+    const FastMatchTransformSearchResult& transform_search =
+        tool.gettransformsearchresult();
+    CxFastMatchTransformSearchEvidence& transform_evidence =
+        output.fastmatch_transform_search;
+    transform_evidence.executed = transform_search.executed;
+    transform_evidence.converged = transform_search.converged;
+    transform_evidence.budget_exceeded = transform_search.budget_exceeded;
+    transform_evidence.fallback_to_rigid = transform_search.fallback_to_rigid;
+    transform_evidence.calibration_applied = transform_search.calibration_applied;
+    transform_evidence.calibration_snapshot_hash = transform_search.calibration_snapshot_hash;
+    transform_evidence.calibration_source_ref = transform_search.calibration_source_ref;
+    transform_evidence.calibration_coordinate_frame_id =
+        transform_search.calibration_coordinate_frame_id;
+    transform_evidence.calibration_xy_unit = transform_search.calibration_xy_unit;
+    transform_evidence.calibration_reprojection_rmse_px =
+        transform_search.calibration_reprojection_rmse_px;
+    transform_evidence.best_physical_cx = transform_search.best_physical_cx;
+    transform_evidence.best_physical_cy = transform_search.best_physical_cy;
+    transform_evidence.seed_available = transform_search.seed.available;
+    transform_evidence.seed_source = transform_search.seed.source;
+    transform_evidence.seed_model_id = transform_search.seed.model_id;
+    transform_evidence.seed_detection_index = transform_search.seed.detection_index;
+    transform_evidence.seed_class_id = transform_search.seed.class_id;
+    transform_evidence.seed_confidence = transform_search.seed.confidence;
+    transform_evidence.seed_angle_convention = transform_search.seed.angle_convention;
+    transform_evidence.seed_reason = transform_search.seed.reason;
+    transform_evidence.initial_cx = transform_search.initial.cx;
+    transform_evidence.initial_cy = transform_search.initial.cy;
+    transform_evidence.initial_angle_deg = transform_search.initial.angle_deg;
+    transform_evidence.initial_scale_x = transform_search.initial.scale_x;
+    transform_evidence.initial_scale_y = transform_search.initial.scale_y;
+    transform_evidence.best_cx = transform_search.best.cx;
+    transform_evidence.best_cy = transform_search.best.cy;
+    transform_evidence.best_angle_deg = transform_search.best.angle_deg;
+    transform_evidence.best_scale_x = transform_search.best.scale_x;
+    transform_evidence.best_scale_y = transform_search.best.scale_y;
+    transform_evidence.best_shear = transform_search.best.shear;
+    transform_evidence.best_projective_u = transform_search.best.projective_u;
+    transform_evidence.best_projective_v = transform_search.best.projective_v;
+    transform_evidence.best_score = transform_search.best_score;
+    transform_evidence.appearance_score = transform_search.appearance_score;
+    transform_evidence.continuity_score = transform_search.continuity_score;
+    transform_evidence.gradient_score = transform_search.gradient_score;
+    transform_evidence.geometric_residual_px = transform_search.geometric_residual_px;
+    transform_evidence.rigid_baseline_score = transform_search.rigid_baseline_score;
+    transform_evidence.evaluated_candidates = transform_search.evaluated_candidates;
+    transform_evidence.accepted_candidates = transform_search.accepted_candidates;
+    transform_evidence.sample_count = transform_search.sample_count;
+    transform_evidence.elapsed_ms = transform_search.elapsed_ms;
+    transform_evidence.failure_stage = transform_search.failure_stage;
+    if (transform_evidence.executed)
+    {
+        output.algorithm_executed = true;
+        output.budget_exceeded = output.budget_exceeded || transform_evidence.budget_exceeded;
+        output.elapsed_ms = std::max(output.elapsed_ms, transform_evidence.elapsed_ms);
+    }
 
     const FastMatchTemplateGeometrySnapshot &template_geometry =
         tool.gettemplategeometry();
@@ -1108,7 +1170,9 @@ bool CaptureFastMatchResult(
         output.fastmatch_learn_a2_count +
         output.fastmatch_learn_b2_count;
 
-    if (learn_point_count <= 0)
+    if (transform_evidence.executed && !transform_evidence.converged)
+        output.failure_stage = transform_evidence.failure_stage;
+    else if (learn_point_count <= 0)
         output.failure_stage = "learn_points";
     else if (output.model_point_count <= 0)
         output.failure_stage = "model_points";
@@ -1117,7 +1181,8 @@ bool CaptureFastMatchResult(
 
     if (!output.failure_stage.empty())
         output.reason =
-            "FastMatch result unavailable: learn_points=" +
+            "FastMatch result unavailable: failure_stage=" + output.failure_stage +
+            ", learn_points=" +
             std::to_string(learn_point_count) +
             ", learn_status_code=" +
             std::to_string(output.fastmatch_learn_status_code) +
@@ -1488,6 +1553,13 @@ static void MergeToolCapture(
     capture.fastmatch_candidate_insert_count += tool.fastmatch_candidate_insert_count;
     capture.fastmatch_candidate_replace_count += tool.fastmatch_candidate_replace_count;
     capture.fastmatch_candidate_reject_count += tool.fastmatch_candidate_reject_count;
+    capture.fastmatch_rotate_budget_exceeded =
+        capture.fastmatch_rotate_budget_exceeded || tool.fastmatch_rotate_budget_exceeded;
+    capture.fastmatch_rotate_candidate_count += tool.fastmatch_rotate_candidate_count;
+    capture.fastmatch_rotate_probe_count += tool.fastmatch_rotate_probe_count;
+    capture.fastmatch_rotate_sample_count += tool.fastmatch_rotate_sample_count;
+    capture.fastmatch_rotate_elapsed_ms = std::max(
+        capture.fastmatch_rotate_elapsed_ms, tool.fastmatch_rotate_elapsed_ms);
 
     if (tool.fastmatch_template_geometry.available)
         capture.fastmatch_template_geometry =
@@ -1495,6 +1567,8 @@ static void MergeToolCapture(
     if (!tool.fastmatch_pose_candidates.empty())
         capture.fastmatch_pose_candidates =
             tool.fastmatch_pose_candidates;
+    if (tool.fastmatch_transform_search.executed)
+        capture.fastmatch_transform_search = tool.fastmatch_transform_search;
     if (!tool.ocr_final_text.empty())
         capture.ocr_final_text = tool.ocr_final_text;
     if (!tool.ocr_failure_reason.empty())

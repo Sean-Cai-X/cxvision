@@ -11,6 +11,7 @@
 #include "shapebase.h"
 #include "FindLine.h"
 #include "FastMatchTransform.h"
+#include "CxCalibration.h"
 #include "Grid.h"
 #include <opencv2/core/mat.hpp>
 
@@ -235,6 +236,13 @@ public:
     // Copies the primary OBB/geometry result from the immediately preceding
     // FindSegmentation runtime object.  No parser object escapes its runtime.
     void settransformfromsegmentation(void* segmentation);
+    // Copies the highest-confidence explicit OBB from a TorchTask result.
+    // Plain axis-aligned detections are intentionally rejected.
+    void settransformfromtorch(void* torch_task);
+    // Business-layer binding: copy a frozen calibration receipt.  The caller
+    // retains ownership; FastMatch never keeps a calibration object pointer.
+    bool bindcalibrationsnapshot(const CxCalibrationSnapshot& snapshot);
+    void clearcalibrationsnapshot();
     void settransformscalerangepercent(int percent);
     void settransformanglerange(int degrees);
     void settransformcoarsesteps(int steps);
@@ -264,8 +272,12 @@ public:
     double gettransformsearchrigidbaselinescore();
     void setrotatemaxcandidates(int count);
     void setrotatemaxelapsedms(int milliseconds);
+    void setrotatemaxprobes(int count);
+    void setrotatemaxsamples(int count);
     int getrotatebudgetexceeded();
     int getrotatecandidatecount();
+    int getrotateprobecount();
+    int getrotatesamplecount();
     int getrotateelapsedms();
     const FastMatchTransformSearchResult& gettransformsearchresult() const
     { return m_transform_search_result; }
@@ -639,10 +651,18 @@ private:
     FastMatchTransformSearchConfig m_transform_search_config;
     FastMatchTransform m_transform_search_initial;
     FastMatchTransformSearchResult m_transform_search_result;
+    FastMatchTransformSeedEvidence m_transform_seed_evidence;
+    CxCalibrationAdapter m_calibration_adapter;
+    bool m_calibration_bound = false;
     int m_rotate_max_candidates = 720;
     int m_rotate_max_elapsed_ms = 1000;
+    int m_rotate_max_probes = 200000;
+    int m_rotate_max_samples = 2000000;
     int m_rotate_candidate_count = 0;
+    int m_rotate_probe_count = 0;
+    int m_rotate_sample_count = 0;
     bool m_rotate_budget_exceeded = false;
+    bool m_rotate_budget_active = false;
     std::chrono::steady_clock::time_point m_rotate_budget_start;
 
     void* m_debug_last_learn_argument = nullptr;
@@ -685,6 +705,7 @@ private:
     void runTransformSearch(Image& image);
     void resetRotateBudget();
     bool consumeRotateCandidate();
+    bool consumeRotateProbe(int sample_cost);
 
     void MultiMatchSample(Image& image, gp_Path& path);
     void RotateMatch(Image& image);

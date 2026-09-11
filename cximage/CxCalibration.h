@@ -110,6 +110,10 @@ struct CxCalibrationSnapshot
     bool has_xy_transform = false;
     bool has_z_scale = false;
     bool has_uncertainty = false;
+    // Camera/grid calibration quality, expressed in image pixels.  A negative
+    // value means the receipt has no independently measured reprojection RMSE.
+    double reprojection_rmse_px = -1.0;
+    bool has_reprojection_rmse = false;
 
     std::string x_unit = "pixel";
     std::string y_unit = "pixel";
@@ -157,6 +161,7 @@ public:
                         double z_scale_uncertainty,
                         double z_repeatability_std,
                         double z_linearity_error);
+    void setreprojectionrmse(double reprojection_rmse_px);
 
     bool hasxytransform() const;
     bool haszscale() const;

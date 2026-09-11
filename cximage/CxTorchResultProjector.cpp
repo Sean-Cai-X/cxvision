@@ -129,6 +129,67 @@ bool CxTorchResultProjector::Project(
     return !shapes.empty();
 }
 
+bool CxTorchResultProjector::TryBuildFastMatchTransform(
+    const CxInferenceResult& inference_result,
+    FastMatchTransform& transform,
+    int& detection_index,
+    int& class_id,
+    double& confidence,
+    std::string& angle_convention,
+    std::string& reason)
+{
+    transform = FastMatchTransform();
+    detection_index = -1;
+    class_id = -1;
+    confidence = 0.0;
+    angle_convention.clear();
+    reason.clear();
+
+    if (!inference_result.executed || !inference_result.ok)
+    {
+        reason = "torch inference result is not successful";
+        return false;
+    }
+
+    const CxTorchDetection* best = nullptr;
+    for (const CxTorchDetection& candidate : inference_result.detections)
+    {
+        if (!candidate.oriented_box_available ||
+            !(candidate.oriented_width > 0.0) ||
+            !(candidate.oriented_height > 0.0) ||
+            !std::isfinite(candidate.oriented_center_x) ||
+            !std::isfinite(candidate.oriented_center_y) ||
+            !std::isfinite(candidate.oriented_angle_deg))
+        {
+            continue;
+        }
+        if (best == nullptr || candidate.confidence > best->confidence)
+            best = &candidate;
+    }
+
+    if (best == nullptr)
+    {
+        reason = "no explicit oriented Torch detection is available";
+        return false;
+    }
+
+    transform = FastMatchTransform::fromOrientedBox(
+        best->oriented_center_x, best->oriented_center_y,
+        best->oriented_width, best->oriented_height,
+        best->oriented_angle_deg);
+    if (!transform.valid())
+    {
+        reason = "Torch oriented box produced an invalid FastMatch transform";
+        return false;
+    }
+
+    detection_index = best->source_index;
+    class_id = best->class_id;
+    confidence = best->confidence;
+    angle_convention = best->oriented_angle_convention;
+    return true;
+}
+
 void CxTorchResultProjector::ProjectDetections(
     const std::vector<CxTorchDetection>& detections,
     const std::string& owner_type,
