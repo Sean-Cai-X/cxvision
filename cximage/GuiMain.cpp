@@ -2782,6 +2782,10 @@ int RunCxVisionApplication(int argc, char **argv) {
     return cxvision_geometry_auto_tune::RunControlledL1TrainingPlanCli(
         argc, argv);
 
+  if (HasCliArg(argc, argv, "--controlled-candidate-bundle"))
+    return cxvision_geometry_auto_tune::RunControlledCandidateBundleCli(
+        argc, argv);
+
   if (HasCliArg(argc, argv, "--geometry-yolo-mask-package"))
     return cxvision_geometry_yolo_mask_package::RunGeometryYoloMaskPackageCli(
         argc, argv);

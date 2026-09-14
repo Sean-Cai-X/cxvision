@@ -1052,6 +1052,63 @@ bool CaptureFastMatchResult(
     output.fastmatch_rotate_sample_count = tool.getrotatesamplecount();
     output.fastmatch_rotate_elapsed_ms = tool.getrotateelapsedms();
 
+    const FastMatch::NormalTraceEvidence& normal_trace =
+        tool.getnormaltraceevidence();
+    CxFastMatchNormalTraceEvidence& normal_trace_capture =
+        output.fastmatch_normal_trace;
+    normal_trace_capture.executed = normal_trace.executed;
+    normal_trace_capture.succeeded = normal_trace.succeeded;
+    normal_trace_capture.reason = normal_trace.reason;
+    normal_trace_capture.candidate_count = tool.getnormaltracecandidatecount();
+    normal_trace_capture.deduplicated_count =
+        tool.getnormaltracededuplicatedcount();
+    normal_trace_capture.trace_point_count = tool.getnormaltracepointcount();
+    normal_trace_capture.normal_pair_count = tool.getnormaltracepaircount();
+    normal_trace_capture.directional_side_count =
+        normal_trace.directional_side_count;
+    normal_trace_capture.trace_segment_count = normal_trace.trace_segment_count;
+    normal_trace_capture.closure_error_px = normal_trace.closure_error_px;
+    normal_trace_capture.max_consecutive_gap_px =
+        normal_trace.max_consecutive_gap_px;
+    normal_trace_capture.gradient_coverage = normal_trace.gradient_coverage;
+    normal_trace_capture.normal_pair_findline_bound_count =
+        normal_trace.normal_pair_findline_bound_count;
+    normal_trace_capture.normal_pair_binding_miss_count =
+        normal_trace.normal_pair_binding_miss_count;
+    normal_trace_capture.normal_pair_corner_rejected_count =
+        normal_trace.normal_pair_corner_rejected_count;
+    normal_trace_capture.loop_erased_point_count =
+        normal_trace.loop_erased_point_count;
+    normal_trace_capture.normal_pair_counts_by_direction =
+        normal_trace.normal_pair_counts_by_direction;
+    normal_trace_capture.domain_deduplicated_counts =
+        normal_trace.domain_deduplicated_counts;
+    normal_trace_capture.compressed_keypoint_counts =
+        normal_trace.compressed_keypoint_counts;
+    normal_trace_capture.ann_edge_counts = normal_trace.ann_edge_counts;
+    normal_trace_capture.ann_component_counts = normal_trace.ann_component_counts;
+    normal_trace_capture.ann_selected_point_counts =
+        normal_trace.ann_selected_point_counts;
+    normal_trace_capture.ann_selected_coverage =
+        normal_trace.ann_selected_coverage;
+    const auto copy_normal_trace_points = [](const auto& source, auto& target) {
+        target.clear();
+        target.reserve(source.size());
+        for (const auto& point : source)
+            target.push_back({point.x, point.y});
+    };
+    copy_normal_trace_points(
+        normal_trace.dijkstra_trace_points,
+        normal_trace_capture.dijkstra_trace_points);
+    copy_normal_trace_points(
+        normal_trace.normal_pair_a,
+        normal_trace_capture.normal_pair_a);
+    copy_normal_trace_points(
+        normal_trace.normal_pair_b,
+        normal_trace_capture.normal_pair_b);
+    if (normal_trace.executed)
+        output.algorithm_executed = true;
+
     const FastMatchTransformSearchResult& transform_search =
         tool.gettransformsearchresult();
     CxFastMatchTransformSearchEvidence& transform_evidence =
@@ -1172,7 +1229,9 @@ bool CaptureFastMatchResult(
 
     if (transform_evidence.executed && !transform_evidence.converged)
         output.failure_stage = transform_evidence.failure_stage;
-    else if (learn_point_count <= 0)
+    else if (normal_trace.executed && !normal_trace.succeeded)
+        output.failure_stage = "normal_trace";
+    else if (!normal_trace.succeeded && learn_point_count <= 0)
         output.failure_stage = "learn_points";
     else if (output.model_point_count <= 0)
         output.failure_stage = "model_points";
@@ -1560,6 +1619,9 @@ static void MergeToolCapture(
     capture.fastmatch_rotate_sample_count += tool.fastmatch_rotate_sample_count;
     capture.fastmatch_rotate_elapsed_ms = std::max(
         capture.fastmatch_rotate_elapsed_ms, tool.fastmatch_rotate_elapsed_ms);
+
+    if (tool.fastmatch_normal_trace.executed)
+        capture.fastmatch_normal_trace = tool.fastmatch_normal_trace;
 
     if (tool.fastmatch_template_geometry.available)
         capture.fastmatch_template_geometry =

@@ -893,6 +893,28 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
     set("global_fastmatch_normaltrace_min_gradient", 20);
     set("global_fastmatch_normaltrace_max_nodes", 4096);
     set("global_fastmatch_normaltrace_pair_offset_px", 6);
+    set("global_fastmatch_normaltrace_gradient_weight_permille", 700);
+    set("global_fastmatch_normaltrace_turn_weight_permille", 200);
+    set("global_fastmatch_normaltrace_gap_weight_permille", 100);
+    set("global_fastmatch_normaltrace_max_trace_gap_px", 3);
+    set("global_fastmatch_normaltrace_knn_neighbors", 6);
+    set("global_fastmatch_normaltrace_ann_radius_px", 32);
+    set("global_fastmatch_normaltrace_ann_tangent_deviation_deg", 35);
+    set("global_fastmatch_normaltrace_ann_normal_deviation_deg", 35);
+    set("global_fastmatch_normaltrace_ann_min_component_points", 4);
+    set("global_fastmatch_normaltrace_ann_min_component_coverage_percent", 55);
+    set("global_fastmatch_normaltrace_angle_tolerance_deg", 20);
+    set("global_fastmatch_normaltrace_min_length_px", 20);
+    set("global_fastmatch_normaltrace_polarity", 0);
+    set("global_fastmatch_normaltrace_corner_rejection_px", 4);
+    set("global_fastmatch_normaltrace_tangent_step_px", 2);
+    set("global_fastmatch_normaltrace_anchor_radius_px", 24);
+    set("global_fastmatch_normaltrace_xy_compression_bin_px", 4);
+    set("global_fastmatch_normaltrace_min_keypoints_per_domain", 4);
+    set("global_normal_trace_candidate_count", 0);
+    set("global_normal_trace_deduplicated_count", 0);
+    set("global_normal_trace_point_count", 0);
+    set("global_normal_trace_pair_count", 0);
     // Manual calibration override is test-only.  A production measurement
     // must bind an externally frozen CxCalibration receipt instead.
     set("global_fastmatch_calibration_test_enabled", 0);
@@ -1493,11 +1515,58 @@ void ViewController::RefreshRuntimeObjectTable(
           probe.accepted_side_count;
       object.fastmatch_directional_probe_diagnostics[static_cast<std::size_t>(direction)] =
           probe.diagnostic_count;
+      object.fastmatch_directional_probe_edge_count[static_cast<std::size_t>(direction)] =
+          probe.params.edge_count;
+      object.fastmatch_directional_probe_selected_edge[static_cast<std::size_t>(direction)] =
+          probe.params.selected_edge;
+      object.fastmatch_directional_probe_runtime_selected_edge[static_cast<std::size_t>(direction)] =
+          probe.runtime_selected_edge;
       object.fastmatch_directional_probe_status[static_cast<std::size_t>(direction)] =
           probe.status;
     }
     object.fastmatch_pattern_a_count = matcher->getpatternapointcount();
     object.fastmatch_pattern_b_count = matcher->getpatternbpointcount();
+    object.fastmatch_normal_trace_domain_count =
+        matcher->getnormaltracecandidatecount();
+    object.fastmatch_normal_trace_deduplicated_count =
+        matcher->getnormaltracededuplicatedcount();
+    object.fastmatch_normal_trace_path_count = matcher->getnormaltracepointcount();
+    object.fastmatch_normal_trace_pair_count = matcher->getnormaltracepaircount();
+    const FastMatch::NormalTraceEvidence &normalTraceEvidence =
+        matcher->getnormaltraceevidence();
+    object.fastmatch_normal_trace_side_count =
+        normalTraceEvidence.directional_side_count;
+    object.fastmatch_normal_trace_segment_count =
+        normalTraceEvidence.trace_segment_count;
+    object.fastmatch_normal_trace_closure_error_px =
+        normalTraceEvidence.closure_error_px;
+    object.fastmatch_normal_trace_max_consecutive_gap_px =
+        normalTraceEvidence.max_consecutive_gap_px;
+    object.fastmatch_normal_trace_gradient_coverage =
+        normalTraceEvidence.gradient_coverage;
+    object.fastmatch_normal_trace_findline_bound_pairs =
+        normalTraceEvidence.normal_pair_findline_bound_count;
+    object.fastmatch_normal_trace_binding_misses =
+        normalTraceEvidence.normal_pair_binding_miss_count;
+    object.fastmatch_normal_trace_corner_rejected =
+        normalTraceEvidence.normal_pair_corner_rejected_count;
+    object.fastmatch_normal_trace_loop_erased_points =
+        normalTraceEvidence.loop_erased_point_count;
+    object.fastmatch_normal_trace_pair_direction_counts =
+        normalTraceEvidence.normal_pair_counts_by_direction;
+    object.fastmatch_normal_trace_domain_counts =
+        normalTraceEvidence.domain_deduplicated_counts;
+    object.fastmatch_normal_trace_keypoint_counts =
+        normalTraceEvidence.compressed_keypoint_counts;
+    object.fastmatch_normal_trace_ann_edge_counts =
+        normalTraceEvidence.ann_edge_counts;
+    object.fastmatch_normal_trace_ann_component_counts =
+        normalTraceEvidence.ann_component_counts;
+    object.fastmatch_normal_trace_ann_selected_counts =
+        normalTraceEvidence.ann_selected_point_counts;
+    object.fastmatch_normal_trace_ann_coverage =
+        normalTraceEvidence.ann_selected_coverage;
+    object.fastmatch_normal_trace_reason = normalTraceEvidence.reason;
     object.fastmatch_candidate_count = matcher->getresultcandidatecount();
     object.fastmatch_best_score = matcher->getresultbestscore();
     object.fastmatch_learn_rect_x0 = matcher->getlearnrectx0();

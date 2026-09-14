@@ -835,7 +835,7 @@ void FindObject::setgeometryconnectivity(int connectivity)
 
 void FindObject::setmeasurementselection(int index)
 {
-  m_measurement_selection = std::max(0, index);
+  m_measurement_selection = index < -1 ? -1 : index;
 }
 
 void FindObject::setshowboundary(int enabled)
@@ -3712,29 +3712,26 @@ void FindObject::PublishDisplayShapes(
     const FindObjectMeasurementSnapshot *measurement = getmeasurement(i);
     const bool measured =
         measurement != nullptr && measurement->status == "measured";
+    if (!measured)
+      continue;
+    if (m_measurement_selection >= 0 && i != m_measurement_selection)
+      continue;
+
     const gp_Rectangle found = m_rectresults.getrect(i);
-    const double rx =
-        measured ? measurement->bbox_px.x : found.TopLeft().X();
-    const double ry =
-        measured ? measurement->bbox_px.y : found.TopLeft().Y();
-    const double rw =
-        measured ? measurement->bbox_px.width : found.Width();
-    const double rh =
-        measured ? measurement->bbox_px.height : found.Height();
+    const double rx = measurement->bbox_px.x;
+    const double ry = measurement->bbox_px.y;
+    const double rw = measurement->bbox_px.width;
+    const double rh = measurement->bbox_px.height;
     if (rw <= 0.0 || rh <= 0.0)
       continue;
-    if (m_conclusion_shape == 1) {
+    if (m_conclusion_shape == 1)
+    {
       auto result_shape = std::make_unique<RectShape>();
       result_shape->setRect(rx, ry, rx + rw, ry + rh);
       sink.UpsertShape(owner_ref + ".result_rect." + std::to_string(i),
                        "FindObject", owner_ref, "result", "result",
                        false, true, std::move(result_shape));
     }
-
-    if (!measured)
-      continue;
-    if (m_measurement_selection >= 0 && i != m_measurement_selection)
-      continue;
 
     if (m_show_boundary && !measurement->outer_boundary.empty())
     {

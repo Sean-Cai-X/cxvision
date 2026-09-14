@@ -9,6 +9,7 @@
 #include "CxUnifiedLog.h"
 
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <cstring>
@@ -16,6 +17,86 @@
 
 namespace
 {
+bool FastMatchScriptSupportsNormalTrace(const std::string& scriptText)
+{
+  return scriptText.find("fastmatch_normal_trace_binding_version: 2") !=
+             std::string::npos &&
+         scriptText.find("setnormaltraceenabled") != std::string::npos &&
+         scriptText.find("setnormaltraceparams") != std::string::npos &&
+         scriptText.find("setnormaltracedomain") != std::string::npos &&
+         scriptText.find("setnormaltraceknn") != std::string::npos &&
+         scriptText.find("setnormaltraceann") != std::string::npos;
+}
+
+std::string NewFastMatchBindingUpgradeCandidateId()
+{
+  const auto now = std::chrono::system_clock::now();
+  const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now.time_since_epoch()).count();
+  return "fastmatch_script_binding_upgrade_" + std::to_string(milliseconds);
+}
+
+bool CreateNewFastMatchBindingUpgradeRun(ManualTestContext& context)
+{
+  const std::filesystem::path scriptPath = ResolveWorkspaceFile(
+      "cxparser/cxscript/module/cximage/fastmatch_direct_test.cxsc");
+  std::string scriptText;
+  if (scriptPath.empty() || !std::filesystem::exists(scriptPath) ||
+      !ReadTextFile(scriptPath.string(), scriptText) || scriptText.empty())
+  {
+    context.debug_action = "Create New FastMatch CxScript Run";
+    context.debug_status = "FASTMATCH_SCRIPT_BINDING_MISSING";
+    context.debug_reason = "current FastMatch CxScript is missing or unreadable";
+    RecordManualOperationTraceEvent(context, "create_fastmatch_script_run",
+                                    "failed", context.debug_reason);
+    return false;
+  }
+  if (!FastMatchScriptSupportsNormalTrace(scriptText))
+  {
+    context.debug_action = "Create New FastMatch CxScript Run";
+    context.debug_status = "FASTMATCH_SCRIPT_BINDING_MISSING";
+    context.debug_reason = "current FastMatch CxScript does not expose the required Normal-Trace setters";
+    RecordManualOperationTraceEvent(context, "create_fastmatch_script_run",
+                                    "failed", context.debug_reason);
+    return false;
+  }
+
+  context.editor_text = scriptText;
+  context.loaded_script_path = scriptPath.string();
+  context.script_file_path = scriptPath.string();
+  context.editor_source = "fastmatch_current_workspace_new_run";
+  context.editor_dirty = false;
+  context.debug_action = "Create New FastMatch CxScript Run";
+  context.debug_status = "FASTMATCH_NEW_RUN_CREATING";
+  context.debug_reason =
+      "creating a new Evidence run from the current workspace FastMatch CxScript; "
+      "the previously selected Evidence snapshot remains immutable";
+  RecordManualOperationTraceEvent(context, "create_fastmatch_script_run",
+                                  "creating", context.debug_reason);
+
+  CxEvidenceCandidateSaveOptions options;
+  options.candidate_id = NewFastMatchBindingUpgradeCandidateId();
+  options.mode = "fastmatch_script_binding_upgrade";
+  options.request_run = false;
+  options.source_evidence_script_path_override = scriptPath.string();
+  CxEvidenceCandidateSaveResult result;
+  if (!SaveEvidenceCandidatePackage(context, options, result))
+  {
+    context.debug_action = "Create New FastMatch CxScript Run";
+    context.debug_status = "FASTMATCH_NEW_RUN_FAILED";
+    context.debug_reason = result.reason;
+    return false;
+  }
+
+  context.debug_action = "Create New FastMatch CxScript Run";
+  context.debug_status = "FASTMATCH_NEW_RUN_READY";
+  context.debug_reason =
+      "new Evidence run created from current workspace FastMatch CxScript: " +
+      result.candidate_dir +
+      "; the prior Evidence snapshot, test image, parameters, approval, and history were not modified";
+  return true;
+}
+
 // A catalog/flow script is a file-backed asset.  When the editor has not been
 // changed by the operator, execute the current file content rather than a
 // stale copy retained from an earlier catalog load.  This is especially
@@ -510,6 +591,11 @@ bool MigrateLegacyFindSegmentationPromptCallsForRun(
 }
 } // namespace
 
+bool PrepareCurrentFastMatchScriptRun(ManualTestContext& context)
+{
+  return CreateNewFastMatchBindingUpgradeRun(context);
+}
+
 bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
                                                   const char* trigger)
 {
@@ -565,6 +651,75 @@ bool ViewController::ConsumePendingManualScriptRun(ManualTestContext& context,
     context.last_evidence_candidate_dir.clear();
     context.last_evidence_candidate_reason.clear();
   };
+
+  // Historical Evidence snapshots are immutable and may contain an older
+  // FastMatch Normal-Trace binding order.  Migration belongs to the execution
+  // boundary, not Evidence loading and not a separate prerequisite button.
+  // Only an explicit Learn action (1 or 3) may create a compatible candidate;
+  // Match (2) must never hide an implicit Learn.
+  const auto pendingActionIt =
+      frozenGlobals.find("global_fastmatch_action");
+  const int pendingFastMatchAction =
+      pendingActionIt == frozenGlobals.end() ? 0 : pendingActionIt->second;
+  const auto pendingNormalTraceIt =
+      frozenGlobals.find("global_fastmatch_normaltrace_enabled");
+  const bool pendingNormalTraceEnabled =
+      pendingNormalTraceIt != frozenGlobals.end() &&
+      pendingNormalTraceIt->second != 0;
+  const bool explicitLearnRequest =
+      (runRequestedByFastMatchAction || runRequestedByKeyParameterControls ||
+       runRequestedByCandidateSave) &&
+      (pendingFastMatchAction == 1 || pendingFastMatchAction == 3);
+  const bool staleFastMatchBinding =
+      context.editor_text.find("FastMatch") != std::string::npos &&
+      !FastMatchScriptSupportsNormalTrace(context.editor_text);
+  if (explicitLearnRequest && pendingNormalTraceEnabled &&
+      staleFastMatchBinding)
+  {
+    if (context.editor_dirty)
+    {
+      context.run_state = "failed";
+      context.debug_status = "FASTMATCH_COMPATIBILITY_EDIT_CONFLICT";
+      context.debug_reason =
+          "the loaded historical script has unsaved editor changes; save or "
+          "discard them before automatic compatibility migration";
+      clearPendingSnapshot();
+      CXLOG_ERROR(
+          "ManualConsole",
+          "fastmatch_compatibility_auto_migration",
+          "edit_conflict",
+          context.debug_reason);
+      return true;
+    }
+    const std::string requestedAction = context.debug_action;
+    if (!CreateNewFastMatchBindingUpgradeRun(context))
+    {
+      context.run_state = "failed";
+      clearPendingSnapshot();
+      CXLOG_ERROR(
+          "ManualConsole",
+          "fastmatch_compatibility_auto_migration",
+          "failed",
+          context.debug_reason);
+      return true;
+    }
+    context.debug_action = requestedAction;
+    context.debug_status = "FASTMATCH_RUN_REQUESTED";
+    context.debug_reason +=
+        "; compatibility=auto_migrated_before_learn";
+    RecordManualOperationTraceEvent(
+        context,
+        "fastmatch_compatibility_auto_migration",
+        "ready",
+        "current workspace CxScript staged for explicit Learn; original "
+        "Evidence and source image remain immutable");
+    CXLOG_INFO(
+        "ManualConsole",
+        "fastmatch_compatibility_auto_migration",
+        "ready",
+        "action=" + std::to_string(pendingFastMatchAction) +
+            " script=" + context.loaded_script_path);
+  }
 
   if (context.editor_text.empty())
   {
@@ -970,6 +1125,27 @@ void ViewController::DrawScriptEditorBlock(ManualTestContext& context)
     ImGui::TextWrapped("Loaded: %s", context.loaded_script_path.c_str());
 
   ImGui::EndChild();
+
+  const bool isFastMatchScript =
+      context.editor_text.find("FastMatch") != std::string::npos;
+  const bool normalTraceBindingMissing =
+      isFastMatchScript && !FastMatchScriptSupportsNormalTrace(context.editor_text);
+  if (normalTraceBindingMissing &&
+      ImGui::CollapsingHeader("Script Compatibility", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    ImGui::TextColored(ImVec4(1.0f, 0.43f, 0.35f, 1.0f),
+                       "SCRIPT_BINDING_MISSING");
+    ImGui::TextWrapped(
+        "The selected Evidence script predates the Normal-Trace CxScript API. "
+        "This is not a FastMatch algorithm parameter and cannot be fixed in Key Parameter Controls.");
+    ImGui::TextDisabled(
+        "Learn or Learn + Match will automatically create a NEW compatible "
+        "candidate run from the current workspace FastMatch CxScript.");
+    ImGui::TextDisabled(
+        "Loading stays read-only and does not edit the selected Evidence "
+        "snapshot, test image, saved parameters, review state, or history. "
+        "Match never performs this migration or an implicit Learn.");
+  }
 
   // Keep the script editor as a bounded edit area.  Using (-1, -1) here makes
   // the multiline editor consume all remaining parent space, so long scripts

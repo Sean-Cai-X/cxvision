@@ -2071,4 +2071,206 @@ inline int RunControlledL1TrainingPlanCli(int argc, char **argv) {
   return 0;
 }
 
+inline int RunControlledCandidateBundleCli(int argc, char **argv) {
+  const fs::path model_manifest = ArgValue(argc, argv, "--model-manifest");
+  const fs::path checkpoint = ArgValue(argc, argv, "--checkpoint");
+  const fs::path rollback_checkpoint = ArgValue(argc, argv, "--rollback-checkpoint");
+  const fs::path training_strategy = ArgValue(argc, argv, "--training-strategy");
+  const fs::path postprocess_profile = ArgValue(argc, argv, "--postprocess-profile");
+  const fs::path validation_report = ArgValue(argc, argv, "--validation-report");
+  const fs::path holdout_report = ArgValue(argc, argv, "--holdout-report");
+  const fs::path policy_path = ArgValue(argc, argv, "--auto-tune-policy");
+  const fs::path output_dir = ArgValue(argc, argv, "--out");
+  const std::vector<fs::path> required = {
+      model_manifest, checkpoint, rollback_checkpoint, training_strategy,
+      postprocess_profile, validation_report, holdout_report, policy_path};
+  for (const fs::path &path : required) {
+    if (!IsRegularFile(path)) {
+      std::cout << "conclusion=CANDIDATE_BUNDLE_PREFLIGHT_FAIL\nreason=missing asset:"
+                << path.string() << "\n";
+      return 2;
+    }
+  }
+  std::string reason;
+  if (!OutputDirectoryReady(output_dir, reason)) {
+    std::cout << "conclusion=CANDIDATE_BUNDLE_PREFLIGHT_FAIL\nreason=" << reason << "\n";
+    return 2;
+  }
+  Policy policy;
+  if (!LoadPolicy(policy_path, policy, reason)) {
+    std::cout << "conclusion=CANDIDATE_BUNDLE_PREFLIGHT_FAIL\nreason=" << reason << "\n";
+    return 2;
+  }
+  auto read_report = [](const fs::path &path, std::string &split,
+                         double &precision, double &recall, double &miss_rate,
+                         double &false_alarm_rate, double &single_rate,
+                         int &case_count,
+                         std::vector<std::string> &failure_rows) {
+    cv::FileStorage storage(path.string(), cv::FileStorage::READ);
+    if (!storage.isOpened()) return false;
+    const cv::FileNode root = storage.root();
+    if (ReadString(root, "schema") != "cxvision.yolov8n_cpp_paired_inference.v1" ||
+        ReadString(root, "status") != "CXX_YOLOV8N_PAIRED_INFERENCE_EXECUTION_PASS")
+      return false;
+    split = ReadString(root, "evaluation_split");
+    root["selected_case_count"] >> case_count;
+    const cv::FileNode metrics = root["metrics"];
+    metrics["candidate_precision"] >> precision;
+    metrics["candidate_recall"] >> recall;
+    metrics["candidate_miss_rate"] >> miss_rate;
+    metrics["candidate_false_alarm_case_rate"] >> false_alarm_rate;
+    metrics["candidate_exact_single_correct_rate"] >> single_rate;
+    const cv::FileNode cases = root["cases"];
+    if (!cases.isSeq())
+      return false;
+    for (const cv::FileNode &node : cases) {
+      const bool incremental_ok = ReadBool(node, "incremental_ok");
+      const bool exact_single_correct =
+          ReadBool(node, "incremental_exact_single_correct");
+      const bool iou50_match = ReadBool(node, "incremental_iou50_match");
+      if (incremental_ok && exact_single_correct && iou50_match)
+        continue;
+      int detection_count = 0, background_count = 0, cross_class_count = 0;
+      int top_class_id = -1, target_class_id = -1;
+      double best_iou = 0.0, best_confidence = 0.0;
+      node["incremental_detection_count"] >> detection_count;
+      node["incremental_background_detection_count"] >> background_count;
+      node["incremental_cross_class_target_overlap_count"] >> cross_class_count;
+      node["incremental_top_class_id"] >> top_class_id;
+      node["incremental_target_class_id"] >> target_class_id;
+      node["incremental_best_same_class_iou"] >> best_iou;
+      node["incremental_best_same_class_confidence"] >> best_confidence;
+      std::ostringstream row;
+      row << std::setprecision(9)
+          << "{\"review_item\":\"" << JsonEscape(ReadString(node, "review_item"))
+          << "\",\"split\":\"" << JsonEscape(split)
+          << "\",\"geometry_type\":\"" << JsonEscape(ReadString(node, "geometry_type"))
+          << "\",\"signal_family\":\"" << JsonEscape(ReadString(node, "signal_family"))
+          << "\",\"input_image\":\"" << JsonEscape(ReadString(node, "input_image"))
+          << "\",\"incremental_overlay\":\"" << JsonEscape(ReadString(node, "incremental_overlay"))
+          << "\",\"incremental_candidates\":\"" << JsonEscape(ReadString(node, "incremental_candidates"))
+          << "\",\"detection_count\":" << detection_count
+          << ",\"background_detection_count\":" << background_count
+          << ",\"cross_class_overlap_count\":" << cross_class_count
+          << ",\"top_class_id\":" << top_class_id
+          << ",\"target_class_id\":" << target_class_id
+          << ",\"best_same_class_iou\":" << best_iou
+          << ",\"best_same_class_confidence\":" << best_confidence
+          << ",\"failure_reasons\":[";
+      bool first_reason = true;
+      const auto add_reason = [&row, &first_reason](const char *value) {
+        if (!first_reason) row << ',';
+        first_reason = false;
+        row << '"' << value << '"';
+      };
+      if (!incremental_ok) add_reason("inference_execution_failed");
+      if (!exact_single_correct) add_reason("single_target_contract_failed");
+      if (!iou50_match) add_reason("iou50_match_failed");
+      if (background_count > 0) add_reason("background_false_positive");
+      if (cross_class_count > 0) add_reason("cross_class_competition");
+      row << "]}";
+      failure_rows.push_back(row.str());
+    }
+    return case_count > 0;
+  };
+  std::string validation_split, holdout_split;
+  double val_precision = 0, val_recall = 0, val_miss = 1, val_fa = 1, val_single = 0;
+  double hold_precision = 0, hold_recall = 0, hold_miss = 1, hold_fa = 1, hold_single = 0;
+  int validation_count = 0, holdout_count = 0;
+  std::vector<std::string> validation_failures, holdout_failures;
+  if (!read_report(validation_report, validation_split, val_precision, val_recall,
+                   val_miss, val_fa, val_single, validation_count,
+                   validation_failures) ||
+       !read_report(holdout_report, holdout_split, hold_precision, hold_recall,
+                    hold_miss, hold_fa, hold_single, holdout_count,
+                    holdout_failures) ||
+      validation_split != policy.selection_split ||
+      holdout_split != policy.confirmation_split) {
+    std::cout << "conclusion=CANDIDATE_BUNDLE_PREFLIGHT_FAIL\n"
+              << "reason=evaluation reports violate split contract\n";
+    return 2;
+  }
+  const bool quality_gate =
+      hold_miss <= policy.maximum_holdout_miss_rate &&
+      hold_fa <= policy.maximum_holdout_false_alarm_case_rate;
+  const double val_f1 = val_precision + val_recall > 0
+      ? 2.0 * val_precision * val_recall / (val_precision + val_recall) : 0.0;
+  const double hold_f1 = hold_precision + hold_recall > 0
+      ? 2.0 * hold_precision * hold_recall / (hold_precision + hold_recall) : 0.0;
+  std::ostringstream failure_samples;
+  failure_samples << "{\"schema\":\"cxvision.torch_candidate_failure_samples.v1\""
+                  << ",\"status\":\"FAILURE_SAMPLES_RECORDED\""
+                  << ",\"validation_report_ref\":\"" << JsonEscape(validation_report.string())
+                  << "\",\"holdout_report_ref\":\"" << JsonEscape(holdout_report.string())
+                  << "\",\"failure_count\":"
+                  << (validation_failures.size() + holdout_failures.size())
+                  << ",\"uncertainty_rule\":\"NOT_DEFINED_BY_CURRENT_POLICY\""
+                  << ",\"handling_conclusion\":\"FEED_BACK_TO_DATA_AND_TRAINING_STRATEGY\""
+                  << ",\"samples\":[";
+  bool first_failure = true;
+  for (const std::string &row : validation_failures) {
+    if (!first_failure) failure_samples << ',';
+    first_failure = false;
+    failure_samples << row;
+  }
+  for (const std::string &row : holdout_failures) {
+    if (!first_failure) failure_samples << ',';
+    first_failure = false;
+    failure_samples << row;
+  }
+  failure_samples << "]}";
+  if (!WriteJson(output_dir, "failure_samples.json", failure_samples.str(), reason)) {
+    std::cout << "conclusion=CANDIDATE_BUNDLE_WRITE_FAIL\nreason=" << reason << "\n";
+    return 1;
+  }
+  std::ostringstream bundle;
+  bundle << std::setprecision(9)
+         << "{\"schema\":\"cxvision.torch_incremental_candidate_bundle.v1\""
+         << ",\"status\":\"" << (quality_gate ? "EVALUATED" : "REJECTED") << "\""
+         << ",\"published_with_incremental_strategy\":true"
+         << ",\"candidate_allowed\":" << (quality_gate ? "true" : "false")
+         << ",\"approved\":false,\"active_allowed\":false"
+         << ",\"human_business_review_required\":true"
+         << ",\"holdout_reused_after_diagnostic_feedback\":true"
+         << ",\"fresh_business_acceptance_required\":true"
+         << ",\"model\":{\"manifest_ref\":\"" << JsonEscape(model_manifest.string())
+         << "\",\"checkpoint_ref\":\"" << JsonEscape(checkpoint.string())
+         << "\",\"checkpoint_digest\":\"" << FileDigest(checkpoint) << "\"}"
+         << ",\"incremental_strategy\":{\"training_strategy_ref\":\""
+         << JsonEscape(training_strategy.string()) << "\",\"postprocess_profile_ref\":\""
+         << JsonEscape(postprocess_profile.string()) << "\",\"policy_ref\":\""
+         << JsonEscape(policy_path.string())
+         << "\",\"feedback_loop\":[\"classify_problem\",\"select_strategy_asset\","
+            "\"materialize_controlled_dataset\",\"train_from_parent\","
+            "\"select_validation_best\",\"run_regression_holdout\","
+            "\"accept_or_rollback\"]}"
+          << ",\"evaluation\":{\"validation\":{\"report_ref\":\""
+          << JsonEscape(validation_report.string()) << "\",\"case_count\":" << validation_count
+         << ",\"f1\":" << val_f1 << ",\"miss_rate\":" << val_miss
+         << ",\"false_alarm_case_rate\":" << val_fa
+         << ",\"exact_single_correct_rate\":" << val_single << "}"
+          << ",\"holdout_regression\":{\"report_ref\":\""
+          << JsonEscape(holdout_report.string()) << "\",\"case_count\":" << holdout_count
+         << ",\"f1\":" << hold_f1 << ",\"miss_rate\":" << hold_miss
+         << ",\"false_alarm_case_rate\":" << hold_fa
+          << ",\"exact_single_correct_rate\":" << hold_single << "}}"
+          << ",\"quality_gate\":{\"passed\":" << (quality_gate ? "true" : "false")
+          << ",\"maximum_holdout_miss_rate\":" << policy.maximum_holdout_miss_rate
+          << ",\"maximum_holdout_false_alarm_case_rate\":"
+          << policy.maximum_holdout_false_alarm_case_rate << "}"
+          << ",\"failure_samples_ref\":\""
+          << JsonEscape((output_dir / "failure_samples.json").string()) << "\""
+         << ",\"rollback\":{\"checkpoint_ref\":\""
+         << JsonEscape(rollback_checkpoint.string()) << "\",\"checkpoint_digest\":\""
+         << FileDigest(rollback_checkpoint) << "\",\"automatic_on_gate_failure\":true}}";
+  if (!WriteJson(output_dir, "candidate_bundle.json", bundle.str(), reason)) {
+    std::cout << "conclusion=CANDIDATE_BUNDLE_WRITE_FAIL\nreason=" << reason << "\n";
+    return 1;
+  }
+  std::cout << "conclusion=CANDIDATE_BUNDLE_COMPLETE\nstatus="
+            << (quality_gate ? "EVALUATED" : "REJECTED")
+            << "\nbundle=" << (output_dir / "candidate_bundle.json").string() << "\n";
+  return 0;
+}
+
 } // namespace cxvision_geometry_auto_tune

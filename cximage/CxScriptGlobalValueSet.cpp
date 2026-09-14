@@ -245,6 +245,32 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_fastmatch_geometry_source_index"] = 0.0;
     overrides["global_fastmatch_geometry_weight_percent"] = 25.0;
     overrides["global_fastmatch_max_pose_candidates"] = 32.0;
+    // Robust Normal-Trace defaults are identical in GUI and Headless. ANN
+    // spatial connectivity owns re-clustering; tangent/normal tolerances are
+    // Dijkstra soft-cost preferences rather than connectivity gates.
+    overrides["global_fastmatch_normaltrace_enabled"] = 0.0;
+    overrides["global_fastmatch_normaltrace_overlap_radius_px"] = 3.0;
+    overrides["global_fastmatch_normaltrace_min_gradient"] = 20.0;
+    overrides["global_fastmatch_normaltrace_max_nodes"] = 4096.0;
+    overrides["global_fastmatch_normaltrace_pair_offset_px"] = 6.0;
+    overrides["global_fastmatch_normaltrace_gradient_weight_permille"] = 700.0;
+    overrides["global_fastmatch_normaltrace_turn_weight_permille"] = 200.0;
+    overrides["global_fastmatch_normaltrace_gap_weight_permille"] = 100.0;
+    overrides["global_fastmatch_normaltrace_max_trace_gap_px"] = 3.0;
+    overrides["global_fastmatch_normaltrace_knn_neighbors"] = 6.0;
+    overrides["global_fastmatch_normaltrace_ann_radius_px"] = 32.0;
+    overrides["global_fastmatch_normaltrace_ann_tangent_deviation_deg"] = 35.0;
+    overrides["global_fastmatch_normaltrace_ann_normal_deviation_deg"] = 35.0;
+    overrides["global_fastmatch_normaltrace_ann_min_component_points"] = 4.0;
+    overrides["global_fastmatch_normaltrace_ann_min_component_coverage_percent"] = 55.0;
+    overrides["global_fastmatch_normaltrace_angle_tolerance_deg"] = 20.0;
+    overrides["global_fastmatch_normaltrace_min_length_px"] = 20.0;
+    overrides["global_fastmatch_normaltrace_polarity"] = 0.0;
+    overrides["global_fastmatch_normaltrace_corner_rejection_px"] = 4.0;
+    overrides["global_fastmatch_normaltrace_tangent_step_px"] = 2.0;
+    overrides["global_fastmatch_normaltrace_anchor_radius_px"] = 24.0;
+    overrides["global_fastmatch_normaltrace_xy_compression_bin_px"] = 4.0;
+    overrides["global_fastmatch_normaltrace_min_keypoints_per_domain"] = 4.0;
 
     overrides["global_ocr_threshold"] = 110.0;
     overrides["global_ocr_foreground_mode"] = 1.0;

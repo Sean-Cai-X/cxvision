@@ -208,6 +208,8 @@ struct CxScriptToolResultCapture
     int fastmatch_rotate_sample_count = 0;
     int fastmatch_rotate_elapsed_ms = 0;
 
+    CxFastMatchNormalTraceEvidence fastmatch_normal_trace;
+
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
     CxFastMatchTransformSearchEvidence fastmatch_transform_search;

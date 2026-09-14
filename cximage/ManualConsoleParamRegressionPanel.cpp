@@ -26,12 +26,14 @@
 #include <cstdlib>
 #include <fstream>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <random>
 #include <sstream>
 #include <vector>
 
 static std::string NormalizeKeyParamToolTypeLocal(const std::string &type);
+static bool FastMatchScriptSupportsNormalTrace(const ManualTestContext &context);
 
 static void SyncSegmentationLegacyPointFromLists(ManualGaugeState &gauge) {
   gauge.has_segmentation_positive_point =
@@ -3361,12 +3363,11 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   }
 
   ImGui::SameLine();
-  if (ImGui::Button("Restore Exterior-Edge Directional Defaults")) {
-    // These are deliberately paired normal windows, not a copied 8 x 8
-    // square.  Top/Bottom scan horizontal bodies and need a narrow vertical
-    // normal; Left/Right scan vertical bodies and need a narrow horizontal
-    // normal.  This is an explicit user action so an existing tuned context
-    // is never silently overwritten during a frame.
+  if (ImGui::Button("Apply Exterior-Edge Starter Profile")) {
+    // This is an optional starting preset, never an implicit FastMatch
+    // default.  A trained template owns its own saved per-direction values
+    // through the Evidence Candidate runtime_globals/parameter_snapshot.
+    // Top/Bottom scan horizontal bodies and Left/Right scan vertical bodies.
     shared = 0;
     InjectManualGaugeInt(context, "global_fastmatch_learn_shared", 0);
     seedDirection(0, gauge.threshold, gauge.method, gauge.linegap, 8, 2,
@@ -3377,14 +3378,24 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
                   sharedObjfilter, sharedCompareGap);
     seedDirection(3, gauge.threshold, gauge.method, gauge.linegap, 2, 8,
                   sharedObjfilter, sharedCompareGap);
+    for (int dir = 0; dir < 4; ++dir) {
+      const std::string suffix = "_" + std::to_string(dir);
+      InjectManualGaugeInt(
+          context, ("global_fastmatch_learn_edge_count" + suffix).c_str(), 2);
+      InjectManualGaugeInt(
+          context, ("global_fastmatch_learn_selected_edge" + suffix).c_str(),
+          1);
+    }
     edited = true;
   }
-  ImGui::TextDisabled("Exterior edge default: Top/Bottom wgap=8 hgap=2; Left/Right wgap=2 hgap=8.");
+  ImGui::TextDisabled("Starter Profile only: paired normal windows plus Edge 1 for each physical side. Adjust freely, then Save Template Defaults to persist.");
 
-  ImGui::SeparatorText("Directional FindLine Probes");
+  if (ImGui::CollapsingHeader("FastMatch Directional Edge Template",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+  ImGui::Indent(12.0f);
   ImGui::TextDisabled(
-      "Each tab owns one FastMatch direction configuration. The active tab "
-      "also selects the matching Image View diagnostic bucket.");
+      "Four independent FastMatch template sides. FindLine is the probe "
+      "implementation, not a separate parameter profile.");
   if (shared != 0) {
     ImGui::TextColored(
         ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
@@ -3440,16 +3451,18 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
 
       ImGui::PushID(dir);
       ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.0f, 1.0f),
-                         "FindLine Probe Parameters");
+                         "FastMatch Direction Parameters");
       ImGui::TextDisabled(
-          "Maps to FastMatch setlearn* for this direction; no value is "
-          "copied to another tab automatically.");
+          "Saved with this FastMatch template side; no value is copied to "
+          "another direction automatically.");
       ImGui::TextColored(
           ImVec4(1.0f, 0.75f, 0.20f, 1.0f),
-          "Legacy Learn is still one shared edgepattern pass. Per-tab "
-          "execution and per-tab evidence become active with the isolated "
-          "probe backend; do not treat the current legacy result as four "
-          "independent FindLine runs.");
+          "Learn composes all four physical sides. Full edge retains each "
+          "accepted side candidate; Edge N or Last selects one candidate "
+          "per Gauge Line for that direction.");
+      if (ImGui::CollapsingHeader("Sampling & Detection",
+                                  ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Indent(10.0f);
       edited |= DrawRuntimeIntRow(context, "threshold", thresholdKey.c_str(),
                                   threshold, 0, 255, 170.0f);
       edited |= DrawRuntimeIntRow(context, "method", methodKey.c_str(),
@@ -3465,14 +3478,21 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
                                   170.0f);
       edited |= DrawRuntimeIntRow(context, "compare gap", compareKey.c_str(),
                                   compareGap, 1, 500, 170.0f);
-      ImGui::SeparatorText("Detection Edge / Point Column");
+      ImGui::Unindent(10.0f);
+      }
+      if (ImGui::CollapsingHeader("Point Column & Model Contribution",
+                                  ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Indent(10.0f);
       ImGui::TextDisabled(
           "Choose the candidate ordinal for this directional FindLine Probe: "
-          "0=All, N=Nth edge, -1=Last edge.");
+          "0=Full edge, N=Nth edge, -1=Last edge.");
+      ImGui::TextDisabled(
+          "Top/Left count from FindLine's scan start. Bottom/Right count "
+          "from the physical outer side (Edge 1 maps internally to Last). ");
       edited |= DrawRuntimeIntRow(context, "edge count", edgeCountKey.c_str(),
                                   edgeCount, 1, 16, 170.0f);
       std::string selectedEdgeLabel =
-          selectedEdge == 0 ? "All edges" :
+          selectedEdge == 0 ? "Full edge" :
           selectedEdge == -1 ? "Last edge" :
           "Edge " + std::to_string(selectedEdge);
       ImGui::TextUnformatted("selected edge");
@@ -3480,7 +3500,7 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
       ImGui::SetNextItemWidth(180.0f);
       if (ImGui::BeginCombo("##fastmatch_probe_selected_edge",
                             selectedEdgeLabel.c_str())) {
-        if (ImGui::Selectable("All edges", selectedEdge == 0)) {
+        if (ImGui::Selectable("Full edge", selectedEdge == 0)) {
           selectedEdge = 0;
           edited = true;
         }
@@ -3505,22 +3525,29 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
             "Compatibility mapping: Edge 2 is executed as Last edge for this "
             "two-edge FindLine Probe.");
       }
+      ImGui::Unindent(10.0f);
+      }
 
       const bool horizontalEdge = dir < 2;
+      if (ImGui::CollapsingHeader("Diagnostic Display")) {
+      ImGui::Indent(10.0f);
       ImGui::TextDisabled(
           "%s normal default: wgap=%d hgap=%d. These values are saved for "
           "this probe and are not visual-only.",
           horizontalEdge ? "Vertical" : "Horizontal",
           horizontalEdge ? 8 : 2, horizontalEdge ? 2 : 8);
-      ImGui::Checkbox("Show this probe's FindLine scan ticks",
+      ImGui::Checkbox("Show this direction's scan ticks",
                       &context.show_fastmatch_learn_scan_ticks);
       ImGui::TextDisabled(
-          "The probe display is isolated; FastMatch Learn / Match controls "
-          "remain outside this tab bar.");
+          "Image View shows only this FastMatch direction diagnostic.");
+      ImGui::Unindent(10.0f);
+      }
       ImGui::PopID();
       ImGui::EndTabItem();
     }
     ImGui::EndTabBar();
+  }
+  ImGui::Unindent(12.0f);
   }
   return edited;
 }
@@ -3593,7 +3620,9 @@ static bool DrawRegionPatternParameterControls(ManualTestContext &context) {
 
 static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   bool edited = false;
-  ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Match Test Setup");
+  if (ImGui::CollapsingHeader("FastMatch Match Evaluation",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+  ImGui::Indent(12.0f);
   ImGui::TextDisabled("Maps to: setmatchrect + matchstepgap + setmatchthre + "
                       "setminscore + setfindnum.");
 
@@ -3618,8 +3647,12 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   edited |= DrawRuntimeIntRow(
 
       context, "find_num", "global_find_num", 1, 1, 20, 130.0f);
+  ImGui::Unindent(12.0f);
+  }
 
-  ImGui::SeparatorText("Affine transform search (OBB / external seed)");
+  if (ImGui::CollapsingHeader("Affine Transform Search (OBB / external seed)",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+  ImGui::Indent(12.0f);
   edited |= DrawRuntimeIntRow(context, "enable affine search",
       "global_fastmatch_transform_enabled", 0, 0, 1, 210.0f);
   edited |= DrawRuntimeIntRow(context, "seed center x",
@@ -3652,12 +3685,18 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_transform_max_samples", 200000, 1, 1000000, 210.0f);
   edited |= DrawRuntimeIntRow(context, "maximum elapsed ms",
       "global_fastmatch_transform_max_elapsed_ms", 100, 1, 5000, 210.0f);
-  ImGui::SeparatorText("P1 shear / projective search (advanced)");
+  ImGui::Unindent(12.0f);
+  }
+  if (ImGui::CollapsingHeader("P1 Shear / Projective Search (advanced)")) {
+  ImGui::Indent(12.0f);
   edited |= DrawRuntimeIntRow(context, "shear range permille",
       "global_fastmatch_transform_shear_range_permille", 0, 0, 300, 210.0f);
   edited |= DrawRuntimeIntRow(context, "projective range permille",
       "global_fastmatch_transform_projective_range_permille", 0, 0, 50, 210.0f);
-  ImGui::SeparatorText("Calibration to physical plane (test override)");
+  ImGui::Unindent(12.0f);
+  }
+  if (ImGui::CollapsingHeader("Calibration to Physical Plane (test override)")) {
+  ImGui::Indent(12.0f);
   edited |= DrawRuntimeIntRow(context, "enable test calibration",
       "global_fastmatch_calibration_test_enabled", 0, 0, 1, 250.0f);
   edited |= DrawRuntimeIntRow(context, "physical scale x ppm",
@@ -3684,9 +3723,35 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   ImGui::TextDisabled("P0 scores learned A/B edge probes at the supplied seed; "
                       "center/extent can be copied from an OBB result. 0 center "
                       "or extent uses the current FastMatch ROI fallback.");
-  ImGui::SeparatorText("Normal-trace Learn (domain -> Dijkstra -> normal pair)");
-  edited |= DrawRuntimeIntRow(context, "enable normal-trace Learn",
-      "global_fastmatch_normaltrace_enabled", 0, 0, 1, 250.0f);
+  ImGui::Unindent(12.0f);
+  }
+  if (ImGui::CollapsingHeader("Normal-Trace Learn (domain -> ANN cluster -> Dijkstra -> normal pair)")) {
+  ImGui::Indent(12.0f);
+  bool normalTraceEnabled =
+      RuntimeIntOr(context, "global_fastmatch_normaltrace_enabled", 0) != 0;
+  if (ImGui::Checkbox("Enable Normal-Trace Learn", &normalTraceEnabled)) {
+    InjectManualGaugeInt(context, "global_fastmatch_normaltrace_enabled",
+                         normalTraceEnabled ? 1 : 0);
+    edited = true;
+  }
+  const bool scriptSupportsNormalTrace = FastMatchScriptSupportsNormalTrace(context);
+  if (!normalTraceEnabled) {
+    ImGui::TextColored(ImVec4(0.90f, 0.70f, 0.12f, 1.0f),
+                       "NORMAL_TRACE_DISABLED: enable this option, then click Learn.");
+  } else if (!scriptSupportsNormalTrace) {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.43f, 0.35f, 1.0f),
+        "SCRIPT_BINDING_STALE: this saved script uses an older Normal-Trace parameter order.");
+    ImGui::TextWrapped(
+        "This is a CxScript compatibility block, not a FastMatch parameter. "
+        "Learn and Learn + Match automatically create a compatible candidate "
+        "run before execution. Loading this Evidence remains read-only; its "
+        "script snapshot, test image, parameters, review state, and history "
+        "remain unchanged.");
+  } else {
+    ImGui::TextColored(ImVec4(0.30f, 0.82f, 0.58f, 1.0f),
+                       "READY: Learn will run domain -> ANN cluster -> Dijkstra -> normal pairs.");
+  }
   edited |= DrawRuntimeIntRow(context, "domain overlap radius px",
       "global_fastmatch_normaltrace_overlap_radius_px", 3, 0, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "minimum gradient",
@@ -3695,9 +3760,69 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_max_nodes", 4096, 32, 200000, 250.0f);
   edited |= DrawRuntimeIntRow(context, "normal pair offset px",
       "global_fastmatch_normaltrace_pair_offset_px", 6, 1, 128, 250.0f);
-  ImGui::TextDisabled("Disabled until the full domain-deduplication and Dijkstra "
-                      "trace implementation is active; this prevents axis-aligned "
-                      "pairing from entering production Learn.");
+  ImGui::SeparatorText("Dijkstra Path Costs");
+  edited |= DrawRuntimeIntRow(context, "gradient cost weight permille",
+      "global_fastmatch_normaltrace_gradient_weight_permille", 700, 0, 10000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "turn cost weight permille",
+      "global_fastmatch_normaltrace_turn_weight_permille", 200, 0, 10000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "gap cost weight permille",
+      "global_fastmatch_normaltrace_gap_weight_permille", 100, 0, 10000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "keypoint neighbour maximum gap px",
+      "global_fastmatch_normaltrace_max_trace_gap_px", 3, 1, 64, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "ANN nearest candidates",
+      "global_fastmatch_normaltrace_knn_neighbors", 6, 1, 32, 250.0f);
+  ImGui::SeparatorText("ANN Domain Connectivity");
+  edited |= DrawRuntimeIntRow(context, "ANN base radius px (adaptive up to 2x)",
+      "global_fastmatch_normaltrace_ann_radius_px", 32, 6, 256, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "tangent soft-cost tolerance deg",
+      "global_fastmatch_normaltrace_ann_tangent_deviation_deg", 35, 1, 89, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "normal soft-cost tolerance deg",
+      "global_fastmatch_normaltrace_ann_normal_deviation_deg", 35, 1, 89, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum component points",
+      "global_fastmatch_normaltrace_ann_min_component_points", 4, 2, 256, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum component coverage %",
+      "global_fastmatch_normaltrace_ann_min_component_coverage_percent", 55, 1, 100, 250.0f);
+  ImGui::SeparatorText("Anchor Neighbourhood and XY Compression");
+  edited |= DrawRuntimeIntRow(context, "anchor neighbourhood radius px",
+      "global_fastmatch_normaltrace_anchor_radius_px", 24, 4, 256, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "local XY compression bin px",
+      "global_fastmatch_normaltrace_xy_compression_bin_px", 4, 1, 64, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "minimum keypoints per direction",
+      "global_fastmatch_normaltrace_min_keypoints_per_domain", 4, 2, 256, 250.0f);
+  ImGui::SeparatorText("Normal Pair Geometry");
+  edited |= DrawRuntimeIntRow(context, "normal angle tolerance deg",
+      "global_fastmatch_normaltrace_angle_tolerance_deg", 20, 1, 90, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "closed trace minimum length px",
+      "global_fastmatch_normaltrace_min_length_px", 20, 2, 10000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "normal polarity (-1/0/1)",
+      "global_fastmatch_normaltrace_polarity", 0, -1, 1, 250.0f);
+  ImGui::TextDisabled(
+      "Polarity: 0 inherits each direction's FindLine Detection Edge and "
+      "selected conclusion point; +1 follows Gauge Line direction; -1 uses "
+      "the opposite direction.");
+  edited |= DrawRuntimeIntRow(context, "corner rejection radius px",
+      "global_fastmatch_normaltrace_corner_rejection_px", 4, 0, 64, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "tangent sample step px",
+      "global_fastmatch_normaltrace_tangent_step_px", 2, 1, 64, 250.0f);
+  ImGui::SeparatorText("Trace Evidence Overlay (render-only)");
+  ImGui::Checkbox("Show de-duplicated domain",
+                  &context.show_fastmatch_normal_trace_domain);
+  ImGui::SameLine();
+  ImGui::Checkbox("Show ANN selected component",
+                  &context.show_fastmatch_normal_trace_ann_component);
+  ImGui::Checkbox("Show Dijkstra trace",
+                  &context.show_fastmatch_normal_trace_path);
+  ImGui::SameLine();
+  ImGui::Checkbox("Show normal A/B pairs",
+                  &context.show_fastmatch_normal_trace_pairs);
+  ImGui::TextDisabled("FindLine supplies directional anchors. Each anchor "
+                      "neighbourhood is de-duplicated and compressed in local "
+                      "u/v, ANN spatially re-clusters it, and Dijkstra runs only "
+                      "on the selected component. Tangent/normal values are soft "
+                      "costs by default, not brittle connectivity gates. Overlays "
+                      "never modify the input image.");
+  ImGui::Unindent(12.0f);
+  }
   return edited;
 }
 
@@ -3795,9 +3920,22 @@ static void RequestFastMatchRunAction(ManualTestContext &context,
         " min_score=" + std::to_string(minScore) +
         " min_score_percent=" + std::to_string(minScorePercent) +
         " find_num=" + std::to_string(findNum) +
-        " scan_rotation_deg=" + std::to_string(scanRotationDeg);
+        " scan_rotation_deg=" + std::to_string(scanRotationDeg) +
+        " normal_trace_enabled=" +
+        std::to_string(RuntimeIntOr(
+            context, "global_fastmatch_normaltrace_enabled", 0));
     context.debug_reason = runMessage;
   }
+}
+
+static bool FastMatchScriptSupportsNormalTrace(const ManualTestContext &context) {
+  return context.editor_text.find("fastmatch_normal_trace_binding_version: 2") !=
+             std::string::npos &&
+         context.editor_text.find("setnormaltraceenabled") != std::string::npos &&
+         context.editor_text.find("setnormaltraceparams") != std::string::npos &&
+         context.editor_text.find("setnormaltracedomain") != std::string::npos &&
+         context.editor_text.find("setnormaltraceknn") != std::string::npos &&
+         context.editor_text.find("setnormaltraceann") != std::string::npos;
 }
 
 static void ApplyPrimaryObjectToCurrentGauge(
@@ -4017,22 +4155,84 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
   ImGui::Text("model_points=%d learn_status=%d",
               object->fastmatch_model_point_count,
               object->fastmatch_learn_status_code);
+  if (object->fastmatch_normal_trace_domain_count > 0 ||
+      object->fastmatch_normal_trace_path_count > 0 ||
+      !object->fastmatch_normal_trace_reason.empty()) {
+    ImGui::TextUnformatted("Normal-Trace Evidence");
+    ImGui::Text("domain raw=%d | retained=%d | Dijkstra path=%d | normal pairs=%d",
+                object->fastmatch_normal_trace_domain_count,
+                object->fastmatch_normal_trace_deduplicated_count,
+                object->fastmatch_normal_trace_path_count,
+                object->fastmatch_normal_trace_pair_count);
+    ImGui::Text("directional sides=%d/4 | trace segments=%d/4 | closure=%.2f px | max step=%.2f px | gradient coverage=%.1f%%",
+                object->fastmatch_normal_trace_side_count,
+                object->fastmatch_normal_trace_segment_count,
+                object->fastmatch_normal_trace_closure_error_px,
+                object->fastmatch_normal_trace_max_consecutive_gap_px,
+                object->fastmatch_normal_trace_gradient_coverage * 100.0);
+    ImGui::Text(
+        "FindLine-bound pairs=%d | binding misses=%d | corner rejected=%d | loop erased=%d",
+        object->fastmatch_normal_trace_findline_bound_pairs,
+        object->fastmatch_normal_trace_binding_misses,
+        object->fastmatch_normal_trace_corner_rejected,
+        object->fastmatch_normal_trace_loop_erased_points);
+    ImGui::Text("pair bindings Top/Bottom/Left/Right=%d/%d/%d/%d",
+                object->fastmatch_normal_trace_pair_direction_counts[0],
+                object->fastmatch_normal_trace_pair_direction_counts[1],
+                object->fastmatch_normal_trace_pair_direction_counts[2],
+                object->fastmatch_normal_trace_pair_direction_counts[3]);
+    ImGui::Text("Top domain/key=%d/%d | Bottom=%d/%d | Left=%d/%d | Right=%d/%d",
+                object->fastmatch_normal_trace_domain_counts[0],
+                object->fastmatch_normal_trace_keypoint_counts[0],
+                object->fastmatch_normal_trace_domain_counts[1],
+                object->fastmatch_normal_trace_keypoint_counts[1],
+                object->fastmatch_normal_trace_domain_counts[2],
+                object->fastmatch_normal_trace_keypoint_counts[2],
+                object->fastmatch_normal_trace_domain_counts[3],
+                object->fastmatch_normal_trace_keypoint_counts[3]);
+    static const char *directionNames[4] = {"Top", "Bottom", "Left", "Right"};
+    for (int direction = 0; direction < 4; ++direction) {
+      ImGui::Text("%s ANN edges=%d components=%d selected=%d coverage=%.1f%%",
+                  directionNames[direction],
+                  object->fastmatch_normal_trace_ann_edge_counts[direction],
+                  object->fastmatch_normal_trace_ann_component_counts[direction],
+                  object->fastmatch_normal_trace_ann_selected_counts[direction],
+                  object->fastmatch_normal_trace_ann_coverage[direction] * 100.0);
+    }
+    const bool normalTraceComplete =
+        object->fastmatch_normal_trace_reason == "NORMAL_TRACE_COMPLETE" &&
+        object->fastmatch_normal_trace_side_count == 4 &&
+        object->fastmatch_normal_trace_segment_count == 4 &&
+        object->fastmatch_normal_trace_closure_error_px >= 0.0 &&
+        object->fastmatch_normal_trace_closure_error_px <= 1.5 &&
+        object->fastmatch_normal_trace_max_consecutive_gap_px >= 0.0 &&
+        object->fastmatch_normal_trace_max_consecutive_gap_px <= 1.5;
+    ImGui::TextColored(
+        normalTraceComplete
+            ? ImVec4(0.36f, 0.88f, 0.56f, 1.0f)
+            : ImVec4(1.0f, 0.58f, 0.30f, 1.0f),
+        "trace conclusion: %s", object->fastmatch_normal_trace_reason.c_str());
+  }
+  if (object->fastmatch_learn_status_code == 34)
+    ImGui::TextColored(ImVec4(0.45f, 0.90f, 0.55f, 1.0f),
+                       "Learn source: selected directional Point Column normal pairs");
   ImGui::Text("learn sets: A=%d B=%d A2=%d B2=%d",
               object->fastmatch_learn_a_count, object->fastmatch_learn_b_count,
               object->fastmatch_learn_a2_count,
               object->fastmatch_learn_b2_count);
   ImGui::TextUnformatted("Directional FindLine Probe Evidence");
-  ImGui::TextDisabled("One isolated Measure + SmartFilter run per tab. These "
-                      "counts are evidence; they are not inferred from the "
-                      "legacy FastMatch template.");
+  ImGui::TextDisabled("One isolated Measure + SmartFilter run per tab. If a "
+                      "tab chooses Edge N or Last, its accepted points are "
+                      "the normal-pair source for Learn status 34.");
   const char* probeNames[] = {"Top", "Bottom", "Left", "Right"};
-  if (ImGui::BeginTable("fastmatch_directional_probe_evidence", 5,
+  if (ImGui::BeginTable("fastmatch_directional_probe_evidence", 6,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupColumn("Probe");
     ImGui::TableSetupColumn("Scans");
     ImGui::TableSetupColumn("Raw");
     ImGui::TableSetupColumn("Accepted side");
+    ImGui::TableSetupColumn("Point Column");
     ImGui::TableSetupColumn("Status");
     ImGui::TableHeadersRow();
     for (int direction = 0; direction < 4; ++direction) {
@@ -4047,6 +4247,25 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
       ImGui::TableSetColumnIndex(3);
       ImGui::Text("%d", object->fastmatch_directional_probe_accepted[index]);
       ImGui::TableSetColumnIndex(4);
+      const int selected =
+          object->fastmatch_directional_probe_selected_edge[index];
+      const int edgeCount =
+          object->fastmatch_directional_probe_edge_count[index];
+      if (selected == 0)
+        ImGui::TextUnformatted("Full edge");
+      else if (selected < 0)
+        ImGui::TextUnformatted("Last");
+      else
+        ImGui::Text("%d / %d", selected, edgeCount);
+      const int runtimeSelected =
+          object->fastmatch_directional_probe_runtime_selected_edge[index];
+      const std::string runtimeLabel =
+          runtimeSelected == -1 ? "reverse last" :
+          runtimeSelected == 0 ? "all" :
+          "native " + std::to_string(runtimeSelected);
+      ImGui::SameLine();
+      ImGui::TextDisabled("(%s)", runtimeLabel.c_str());
+      ImGui::TableSetColumnIndex(5);
       const std::string& status =
           object->fastmatch_directional_probe_status[index];
       ImGui::TextUnformatted(status.empty() ? "NOT_RUN" : status.c_str());
@@ -5483,6 +5702,16 @@ ResolveMetrologyGaugeLineCountLocal(const ManualTestContext &context,
     const RuntimeObjectView *object = FindCurrentFindLineObject(context);
     if (object != nullptr && object->line_scan_rows_examined > 0)
       count = object->line_scan_rows_examined;
+  } else if (context.current_gauge.tool == "FastMatch" ||
+             context.current_gauge.primary_object_type == "FastMatch") {
+    const RuntimeObjectView *object = FindCurrentFastMatchObject(context);
+    const int direction = std::max(0, std::min(
+        3, context.fastmatch_selected_learn_edge));
+    if (object != nullptr &&
+        object->fastmatch_directional_probe_scans[
+            static_cast<std::size_t>(direction)] > 0)
+      count = object->fastmatch_directional_probe_scans[
+          static_cast<std::size_t>(direction)];
   }
   return std::max(1, std::min(4096, count));
 }
@@ -5503,6 +5732,23 @@ DrawMetrologyGaugeLineSelectorLocal(const ManualTestContext &context,
   }
   ImGui::TextDisabled("Selected Gauge Line: NUM %d / %d", m.gauge_line_num,
                       lineCount);
+  if (context.current_gauge.tool == "FastMatch" ||
+      context.current_gauge.primary_object_type == "FastMatch") {
+    static const char *kDirectionNames[] = {"Top", "Bottom", "Left", "Right"};
+    const int direction = std::max(0, std::min(
+        3, context.fastmatch_selected_learn_edge));
+    ImGui::TextDisabled("FastMatch probe: %s (select its Directional FindLine tab)",
+                        kDirectionNames[direction]);
+    ImGui::TextColored(ImVec4(1.0f, 0.91f, 0.28f, 1.0f),
+                       "Yellow: selected Gauge Line %d", m.gauge_line_num);
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.30f, 0.96f, 0.57f, 1.0f),
+                       "Green: accepted model point");
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(1.0f, 0.34f, 0.34f, 1.0f),
+                       "Red: no accepted point");
+    ImGui::TextDisabled("Cyan lines are all FastMatch scan ticks; the waveform and image highlight use the same one-based Gauge Line NUM.");
+  }
   return edited;
 }
 static cxvision::metrology_analytics::CxMetrologyUiGlobalFields
@@ -5677,7 +5923,8 @@ static bool MetrologyRequiresRuntimeGaugeLineLocal(
     const ManualTestContext &context) {
   const ManualGaugeState &gauge = context.current_gauge;
   return gauge.tool == "FindLine" || gauge.tool == "FindCircle" ||
-         gauge.tool == "FindEllipse" || gauge.has_line_gauge ||
+         gauge.tool == "FindEllipse" || gauge.tool == "FastMatch" ||
+         gauge.primary_object_type == "FastMatch" || gauge.has_line_gauge ||
          gauge.has_circle_gauge || gauge.has_ellipse_gauge;
 }
 
@@ -5753,6 +6000,44 @@ static bool BuildMetrologyGaugeLineSurfaceFieldLocal(
   if (parserDebugBridge == nullptr) {
     reason = "runtime ParserDebugBridge is not available for Gauge Line sampling";
     return false;
+  }
+
+  if (gauge.tool == "FastMatch" ||
+      gauge.primary_object_type == "FastMatch") {
+    std::string ownerRef;
+    FastMatch *fastMatch = static_cast<FastMatch *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FastMatch", ownerRef));
+    if (fastMatch == nullptr) {
+      reason = "runtime FastMatch object is not available for Gauge Line sampling";
+      return false;
+    }
+    const int direction = std::max(0, std::min(
+        3, context.fastmatch_selected_learn_edge));
+    const FastMatch::DirectionalProbeEvidence &probe =
+        fastMatch->getdirectionalprobeevidence(direction);
+    if (!probe.executed || probe.scan_lines.empty()) {
+      reason = "selected FastMatch directional FindLine Probe has no retained scan lines";
+      return false;
+    }
+    const int scanIndex = std::max(
+        0, std::min(static_cast<int>(probe.scan_lines.size()) - 1,
+                    m.gauge_line_num - 1));
+    const FastMatch::DirectionalProbeScanLine &segment =
+        probe.scan_lines[static_cast<std::size_t>(scanIndex)];
+    if (!BuildMetrologyProfileFromRuntimeSegmentLocal(
+            values, unit, segment.p0, segment.p1, field, reason,
+            profileLengthPx))
+      return false;
+
+    static const char *kDirectionNames[] = {"Top", "Bottom", "Left", "Right"};
+    sourceRef = "runtime:gauge_line:FastMatch:object=" + ownerRef +
+                "; direction=" + kDirectionNames[direction] +
+                "; num=" + std::to_string(scanIndex + 1) + "/" +
+                std::to_string(probe.scan_lines.size()) +
+                "; scan_type=" + std::to_string(probe.scan_type) +
+                "; source=directional_findline_probe";
+    return true;
   }
 
   if ((gauge.tool == "FindLine" || gauge.has_line_gauge) &&
@@ -5923,6 +6208,40 @@ BuildMetrologyConclusionMarkersLocal(
 
   const ManualGaugeState &gauge = context.current_gauge;
   const ManualMetrologyUiState &m = context.metrology_ui;
+
+  if (gauge.tool == "FastMatch" ||
+      gauge.primary_object_type == "FastMatch") {
+    std::string ownerRef;
+    FastMatch *fastMatch = static_cast<FastMatch *>(
+        ResolveMetrologyRuntimeObjectLocal(context, parserDebugBridge,
+                                           "FastMatch", ownerRef));
+    if (fastMatch == nullptr)
+      return markers;
+    const int direction = std::max(0, std::min(
+        3, context.fastmatch_selected_learn_edge));
+    const FastMatch::DirectionalProbeEvidence &probe =
+        fastMatch->getdirectionalprobeevidence(direction);
+    if (!probe.executed || probe.scan_lines.empty())
+      return markers;
+    const int scanIndex = std::max(
+        0, std::min(static_cast<int>(probe.scan_lines.size()) - 1,
+                    m.gauge_line_num - 1));
+    const FastMatch::DirectionalProbeScanLine &segment =
+        probe.scan_lines[static_cast<std::size_t>(scanIndex)];
+
+    // FastMatch preserves the selected candidate by scan index.  Do not use
+    // a nearest-point heuristic here: a neighbouring Gauge Line can be close
+    // in pixel space but belongs to a different Point Column decision.
+    if (scanIndex < static_cast<int>(probe.selected_point_valid_by_scan.size()) &&
+        probe.selected_point_valid_by_scan[static_cast<std::size_t>(scanIndex)] != 0 &&
+        scanIndex < static_cast<int>(probe.selected_point_by_scan.size())) {
+      const CxShapePoint &point =
+          probe.selected_point_by_scan[static_cast<std::size_t>(scanIndex)];
+      appendUniqueProjectedPoint(segment.p0, segment.p1,
+                                 point.x, point.y);
+    }
+    return markers;
+  }
 
   if ((gauge.tool == "FindLine" || gauge.has_line_gauge) &&
       gauge.has_line_gauge) {
@@ -6426,6 +6745,31 @@ static double MetrologySampleIndexToAxisPxLocal(int sampleIndex,
          static_cast<double>(sampleCount - 1);
 }
 
+static std::string FormatMetrologyYAxisValueLocal(float value) {
+  char buffer[48] = {};
+  const float magnitude = std::abs(value);
+  if (magnitude >= 100.0f)
+    std::snprintf(buffer, sizeof(buffer), "%.0f", value);
+  else if (magnitude >= 10.0f)
+    std::snprintf(buffer, sizeof(buffer), "%.1f", value);
+  else if (magnitude >= 0.1f)
+    std::snprintf(buffer, sizeof(buffer), "%.2f", value);
+  else
+    std::snprintf(buffer, sizeof(buffer), "%.4f", value);
+  return std::string(buffer);
+}
+
+static float NiceMetrologyAxisStepLocal(float desiredStep) {
+  if (!std::isfinite(desiredStep) || desiredStep <= 0.0f)
+    return 1.0f;
+  const float scale = std::pow(10.0f, std::floor(std::log10(desiredStep)));
+  const float normalized = desiredStep / scale;
+  const float rounded = normalized <= 1.0f ? 1.0f :
+                        normalized <= 2.0f ? 2.0f :
+                        normalized <= 5.0f ? 5.0f : 10.0f;
+  return rounded * scale;
+}
+
 static void DrawMetrologyPreviewChartLocal(
     const char *id, const char *title, const std::vector<float> &source,
     const std::vector<float> &model, int rangeStartPermille,
@@ -6442,14 +6786,13 @@ static void DrawMetrologyPreviewChartLocal(
   draw->AddRectFilled(origin, end, IM_COL32(20, 24, 29, 255));
   draw->AddRect(origin, end, IM_COL32(105, 115, 125, 255));
 
-  const float left = origin.x + 42.0f;
+  // Reserve enough width for signed, non-integer response values.  This is
+  // shared by FindLine and FastMatch because both use the same Gauge profile
+  // chart, so the vertical scale is never an implicit pixel-only value.
+  const float left = origin.x + 72.0f;
   const float right = origin.x + size.x - 14.0f;
   const float top = origin.y + 30.0f;
   const float bottom = origin.y + size.y - 28.0f;
-  for (int i = 0; i <= 4; ++i) {
-    const float y = top + (bottom - top) * i / 4.0f;
-    draw->AddLine(ImVec2(left, y), ImVec2(right, y), IM_COL32(62, 70, 79, 180));
-  }
 
   const float rangeLeft =
       left + (right - left) * std::max(0, std::min(1000, rangeStartPermille)) /
@@ -6460,8 +6803,8 @@ static void DrawMetrologyPreviewChartLocal(
   draw->AddRectFilled(ImVec2(rangeLeft, top), ImVec2(rangeRight, bottom),
                       IM_COL32(72, 104, 132, 36));
 
-  float yMin = 0.0f;
-  float yMax = 1.0f;
+  float yMin = 0.0f; // Keep a visible zero reference for intensity/response.
+  float yMax = 0.0f;
   for (float value : source) {
     yMin = std::min(yMin, value);
     yMax = std::max(yMax, value);
@@ -6470,7 +6813,44 @@ static void DrawMetrologyPreviewChartLocal(
     yMin = std::min(yMin, value);
     yMax = std::max(yMax, value);
   }
+  const float rawSpan = yMax - yMin;
+  const float padding = rawSpan > 1.0e-6f
+      ? rawSpan * 0.05f
+      : std::max(1.0f, std::abs(yMax) * 0.10f);
+  yMin -= padding;
+  yMax += padding;
+  const float yStep = NiceMetrologyAxisStepLocal((yMax - yMin) / 4.0f);
+  yMin = std::floor(yMin / yStep) * yStep;
+  yMax = std::ceil(yMax / yStep) * yStep;
+  if (yMax - yMin < yStep) {
+    yMin -= yStep * 2.0f;
+    yMax += yStep * 2.0f;
+  }
   const float span = std::max(1.0e-6f, yMax - yMin);
+  constexpr int yTickCount = 4;
+  for (int i = 0; i <= yTickCount; ++i) {
+    const float value = yMax - span * static_cast<float>(i) /
+                                static_cast<float>(yTickCount);
+    const float y = top + (bottom - top) * static_cast<float>(i) /
+                              static_cast<float>(yTickCount);
+    const bool zeroReference = std::abs(value) <= yStep * 0.001f;
+    const ImU32 gridColor = zeroReference ? IM_COL32(116, 130, 145, 220)
+                                           : IM_COL32(62, 70, 79, 180);
+    draw->AddLine(ImVec2(left, y), ImVec2(right, y), gridColor,
+                  zeroReference ? 1.4f : 1.0f);
+    draw->AddLine(ImVec2(left - 4.0f, y), ImVec2(left, y),
+                  IM_COL32(160, 170, 181, 255), 1.0f);
+    const std::string label = FormatMetrologyYAxisValueLocal(value);
+    const ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+    draw->AddText(ImVec2(left - 7.0f - labelSize.x, y - labelSize.y * 0.5f),
+                  zeroReference ? IM_COL32(205, 214, 223, 255)
+                                : IM_COL32(160, 170, 181, 255),
+                  label.c_str());
+  }
+  draw->AddLine(ImVec2(left, top), ImVec2(left, bottom),
+                IM_COL32(160, 170, 181, 220), 1.0f);
+  draw->AddText(ImVec2(origin.x + 7.0f, top - 15.0f),
+                IM_COL32(160, 170, 181, 255), "Y");
   auto valueToScreenY = [&](float value) -> float {
     const float ty = (value - yMin) / span;
     return bottom - ty * (bottom - top);
@@ -9204,8 +9584,25 @@ if (isCxTextInspect) {
 
   ImGui::Separator();
   if (isFastMatch) {
+    ImGui::TextDisabled(
+        "Template defaults are the four directional values saved in this "
+        "candidate's runtime_globals and parameter_snapshot. Loading the "
+        "candidate restores them; no directional value is fixed in code.");
+  }
+  if (isFastMatch) {
     ImGui::TextUnformatted("FastMatch Actions");
     const float fmBtnWidth = (ImGui::GetContentRegionAvail().x - 20.0f) / 3.0f;
+    const bool normalTraceBindingBlocked =
+        RuntimeIntOr(context, "global_fastmatch_normaltrace_enabled", 0) != 0 &&
+        !FastMatchScriptSupportsNormalTrace(context);
+    if (normalTraceBindingBlocked) {
+      ImGui::TextColored(
+          ImVec4(0.90f, 0.70f, 0.12f, 1.0f),
+          "Compatibility migration is pending and will run automatically on Learn.");
+      ImGui::TextDisabled(
+          "Evidence loading stays read-only. Match does not create a model or "
+          "silently run Learn.");
+    }
     ImGui::PushID("fastmatch_actions");
     if (ImGui::Button("Learn", ImVec2(fmBtnWidth, 0)))
       RequestFastMatchRunAction(context, 1, "FastMatch Learn");
@@ -9262,10 +9659,15 @@ if (isCxTextInspect) {
     }
   }
 
-  if (ImGui::Button("Save Draft Candidate", ImVec2(btnWidth, 0))) {
+  const char *saveDraftLabel = isFastMatch
+      ? "Save Template Defaults"
+      : "Save Draft Candidate";
+  if (ImGui::Button(saveDraftLabel, ImVec2(btnWidth, 0))) {
     gauge.dirty = true;
     gauge.review_status = "editing";
-    context.debug_action = "Save Evidence Candidate";
+    context.debug_action = isFastMatch
+        ? "Save FastMatch Template Defaults"
+        : "Save Evidence Candidate";
     RestoreObjectPrefilterFindSettingFromStagedGlobals(
         context, "save draft restored "
                  "staged object prefilter");
@@ -9276,15 +9678,23 @@ if (isCxTextInspect) {
       context.has_pending_candidate_save = true;
       context.debug_status = "EVIDENCE_CANDIDATE_SAVE_QUEUED";
       context.debug_reason =
-          "Draft save will persist after the current Key Parameter Controls "
-          "frame finishes.";
+          isFastMatch
+              ? "Template defaults will persist to the active candidate "
+                "runtime_globals and parameter_snapshot after this frame."
+              : "Draft save will persist after the current Key Parameter "
+                "Controls frame finishes.";
     }
   }
   ImGui::SameLine();
-  if (ImGui::Button("Save And Run Candidate", ImVec2(btnWidth, 0))) {
+  const char *saveAndRunLabel = isFastMatch
+      ? "Save Defaults + Run"
+      : "Save And Run Candidate";
+  if (ImGui::Button(saveAndRunLabel, ImVec2(btnWidth, 0))) {
     gauge.dirty = true;
     gauge.review_status = "editing";
-    context.debug_action = "Save And Run Evidence Candidate";
+    context.debug_action = isFastMatch
+        ? "Save FastMatch Defaults And Run"
+        : "Save And Run Evidence Candidate";
     RestoreObjectPrefilterFindSettingFromStagedGlobals(
         context, "save and run restored "
                  "staged object prefilter");
@@ -9307,7 +9717,8 @@ if (isCxTextInspect) {
     }
   }
 
-  if (ImGui::Button("Reset", ImVec2(btnWidth, 0))) {
+  const char *resetLabel = isFastMatch ? "Reset Generic UI" : "Reset";
+  if (ImGui::Button(resetLabel, ImVec2(btnWidth, 0))) {
     ResetKeyParameterUiDefaults(context);
     SyncKeyParameterUiToGauge(context);
   }
@@ -9616,6 +10027,485 @@ static ImVec4 GeometryAutoTuneStatusColorLocal(const std::string &status) {
   return ImVec4(1.0f, 0.72f, 0.25f, 1.0f);
 }
 
+struct GeometryCandidateMetricLocal {
+  std::string report_ref;
+  int case_count = 0;
+  double f1 = 0.0;
+  double miss_rate = 0.0;
+  double false_alarm_case_rate = 0.0;
+  double exact_single_correct_rate = 0.0;
+};
+
+struct GeometryCandidateBundleLocal {
+  bool available = false;
+  std::string path;
+  std::string status;
+  bool published_with_incremental_strategy = false;
+  bool candidate_allowed = false;
+  bool approved = false;
+  bool active_allowed = false;
+  bool human_business_review_required = false;
+  bool holdout_reused_after_diagnostic_feedback = false;
+  bool fresh_business_acceptance_required = false;
+  std::string model_manifest_ref;
+  std::string model_checkpoint_ref;
+  std::string model_checkpoint_digest;
+  std::string training_strategy_ref;
+  std::string postprocess_profile_ref;
+  std::string policy_ref;
+  std::vector<std::string> feedback_loop;
+  GeometryCandidateMetricLocal validation;
+  GeometryCandidateMetricLocal holdout;
+  bool quality_gate_passed = false;
+  double maximum_holdout_miss_rate = 0.0;
+  double maximum_holdout_false_alarm_case_rate = 0.0;
+  std::string failure_samples_ref;
+  std::string rollback_checkpoint_ref;
+  std::string rollback_checkpoint_digest;
+  bool rollback_automatic_on_gate_failure = false;
+  bool postprocess_profile_available = false;
+  std::string postprocess_profile_id;
+  std::string postprocess_problem_class;
+  double postprocess_confidence_threshold = 0.0;
+  double postprocess_iou_threshold = 0.0;
+  int postprocess_max_detections = 0;
+  bool postprocess_class_agnostic_nms = false;
+  std::string postprocess_selection_split;
+  bool postprocess_holdout_used_for_selection = false;
+};
+
+static bool GeometryCandidateBoolLocal(const cv::FileNode &node,
+                                       bool fallback = false) {
+  if (node.empty())
+    return fallback;
+  int value = fallback ? 1 : 0;
+  node >> value;
+  return value != 0;
+}
+
+static std::string GeometryCandidateStringLocal(const cv::FileNode &node) {
+  return node.empty() ? std::string() : static_cast<std::string>(node);
+}
+
+static std::filesystem::path GeometryCandidateResolveRefLocal(
+    const std::filesystem::path &bundlePath, const std::string &reference) {
+  if (reference.empty())
+    return {};
+  std::filesystem::path resolved(reference);
+  if (resolved.is_relative())
+    resolved = bundlePath.parent_path() / resolved;
+  return resolved.lexically_normal();
+}
+
+static void GeometryCandidateReadMetricLocal(
+    const cv::FileNode &node, GeometryCandidateMetricLocal &metric) {
+  node["case_count"] >> metric.case_count;
+  metric.report_ref = GeometryCandidateStringLocal(node["report_ref"]);
+  node["f1"] >> metric.f1;
+  node["miss_rate"] >> metric.miss_rate;
+  node["false_alarm_case_rate"] >> metric.false_alarm_case_rate;
+  node["exact_single_correct_rate"] >> metric.exact_single_correct_rate;
+}
+
+static bool LoadLatestGeometryCandidateBundleLocal(
+    const std::string &scanRoot, GeometryCandidateBundleLocal &bundle,
+    std::string &reason) {
+  bundle = GeometryCandidateBundleLocal{};
+  const std::filesystem::path root = ResolveCxVisionRunPath(scanRoot);
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec) || ec) {
+    reason = "CANDIDATE_BUNDLE_ROOT_MISSING: " + root.string();
+    return false;
+  }
+
+  std::filesystem::path latest;
+  std::filesystem::file_time_type latestTime{};
+  std::filesystem::recursive_directory_iterator iterator(
+      root, std::filesystem::directory_options::skip_permission_denied, ec);
+  const std::filesystem::recursive_directory_iterator end;
+  while (iterator != end) {
+    if (ec) {
+      ec.clear();
+      iterator.increment(ec);
+      continue;
+    }
+    std::error_code itemError;
+    if (iterator->is_symlink(itemError)) {
+      if (!itemError && iterator->is_directory(itemError))
+        iterator.disable_recursion_pending();
+    } else if (!itemError && iterator->is_regular_file(itemError) &&
+               iterator->path().filename() == "candidate_bundle.json") {
+      cv::FileStorage candidate(iterator->path().string(),
+                                cv::FileStorage::READ);
+      const std::string schema =
+          candidate.isOpened()
+              ? GeometryCandidateStringLocal(candidate["schema"])
+              : std::string();
+      if (schema == "cxvision.torch_incremental_candidate_bundle.v1") {
+        const auto writeTime = iterator->last_write_time(itemError);
+        if (!itemError && (latest.empty() || writeTime > latestTime)) {
+          latest = iterator->path();
+          latestTime = writeTime;
+        }
+      }
+    }
+    iterator.increment(ec);
+  }
+  if (latest.empty()) {
+    reason = "CANDIDATE_BUNDLE_MISSING_UNDER: " + root.string();
+    return false;
+  }
+
+  cv::FileStorage storage(latest.string(), cv::FileStorage::READ);
+  if (!storage.isOpened() ||
+      GeometryCandidateStringLocal(storage["schema"]) !=
+          "cxvision.torch_incremental_candidate_bundle.v1") {
+    reason = "CANDIDATE_BUNDLE_SCHEMA_INVALID: " + latest.string();
+    return false;
+  }
+  bundle.path = latest.string();
+  bundle.status = GeometryCandidateStringLocal(storage["status"]);
+  bundle.published_with_incremental_strategy = GeometryCandidateBoolLocal(
+      storage["published_with_incremental_strategy"]);
+  bundle.candidate_allowed =
+      GeometryCandidateBoolLocal(storage["candidate_allowed"]);
+  bundle.approved = GeometryCandidateBoolLocal(storage["approved"]);
+  bundle.active_allowed =
+      GeometryCandidateBoolLocal(storage["active_allowed"]);
+  bundle.human_business_review_required = GeometryCandidateBoolLocal(
+      storage["human_business_review_required"]);
+  bundle.holdout_reused_after_diagnostic_feedback = GeometryCandidateBoolLocal(
+      storage["holdout_reused_after_diagnostic_feedback"]);
+  bundle.fresh_business_acceptance_required = GeometryCandidateBoolLocal(
+      storage["fresh_business_acceptance_required"]);
+
+  const cv::FileNode model = storage["model"];
+  bundle.model_manifest_ref =
+      GeometryCandidateStringLocal(model["manifest_ref"]);
+  bundle.model_checkpoint_ref =
+      GeometryCandidateStringLocal(model["checkpoint_ref"]);
+  bundle.model_checkpoint_digest =
+      GeometryCandidateStringLocal(model["checkpoint_digest"]);
+
+  const cv::FileNode strategy = storage["incremental_strategy"];
+  bundle.training_strategy_ref =
+      GeometryCandidateStringLocal(strategy["training_strategy_ref"]);
+  bundle.postprocess_profile_ref =
+      GeometryCandidateStringLocal(strategy["postprocess_profile_ref"]);
+  bundle.policy_ref = GeometryCandidateStringLocal(strategy["policy_ref"]);
+  const cv::FileNode feedbackLoop = strategy["feedback_loop"];
+  if (feedbackLoop.isSeq()) {
+    for (const cv::FileNode &stage : feedbackLoop)
+      bundle.feedback_loop.push_back(GeometryCandidateStringLocal(stage));
+  }
+
+  const cv::FileNode evaluation = storage["evaluation"];
+  GeometryCandidateReadMetricLocal(evaluation["validation"],
+                                   bundle.validation);
+  GeometryCandidateReadMetricLocal(evaluation["holdout_regression"],
+                                   bundle.holdout);
+  const cv::FileNode qualityGate = storage["quality_gate"];
+  bundle.quality_gate_passed = GeometryCandidateBoolLocal(qualityGate["passed"]);
+  qualityGate["maximum_holdout_miss_rate"] >> bundle.maximum_holdout_miss_rate;
+  qualityGate["maximum_holdout_false_alarm_case_rate"] >>
+      bundle.maximum_holdout_false_alarm_case_rate;
+  bundle.failure_samples_ref =
+      GeometryCandidateStringLocal(storage["failure_samples_ref"]);
+
+  const cv::FileNode rollback = storage["rollback"];
+  bundle.rollback_checkpoint_ref =
+      GeometryCandidateStringLocal(rollback["checkpoint_ref"]);
+  bundle.rollback_checkpoint_digest =
+      GeometryCandidateStringLocal(rollback["checkpoint_digest"]);
+  bundle.rollback_automatic_on_gate_failure = GeometryCandidateBoolLocal(
+      rollback["automatic_on_gate_failure"]);
+
+  const auto resolveStoredReference = [&latest](std::string &reference) {
+    reference = GeometryCandidateResolveRefLocal(latest, reference).string();
+  };
+  resolveStoredReference(bundle.model_manifest_ref);
+  resolveStoredReference(bundle.model_checkpoint_ref);
+  resolveStoredReference(bundle.training_strategy_ref);
+  resolveStoredReference(bundle.postprocess_profile_ref);
+  resolveStoredReference(bundle.policy_ref);
+  resolveStoredReference(bundle.rollback_checkpoint_ref);
+  resolveStoredReference(bundle.validation.report_ref);
+  resolveStoredReference(bundle.holdout.report_ref);
+  resolveStoredReference(bundle.failure_samples_ref);
+
+  const std::filesystem::path profilePath = GeometryCandidateResolveRefLocal(
+      latest, bundle.postprocess_profile_ref);
+  cv::FileStorage profile(profilePath.string(), cv::FileStorage::READ);
+  if (profile.isOpened() &&
+      GeometryCandidateStringLocal(profile["schema"]) ==
+          "cxvision.yolov8n_postprocess_profile.v1") {
+    const cv::FileNode postprocess = profile["postprocess"];
+    bundle.postprocess_profile_available = true;
+    bundle.postprocess_profile_id =
+        GeometryCandidateStringLocal(profile["profile_id"]);
+    bundle.postprocess_problem_class =
+        GeometryCandidateStringLocal(profile["problem_class"]);
+    postprocess["confidence_threshold"] >>
+        bundle.postprocess_confidence_threshold;
+    postprocess["iou_threshold"] >> bundle.postprocess_iou_threshold;
+    postprocess["max_detections"] >> bundle.postprocess_max_detections;
+    bundle.postprocess_class_agnostic_nms = GeometryCandidateBoolLocal(
+        postprocess["class_agnostic_nms"]);
+    bundle.postprocess_selection_split =
+        GeometryCandidateStringLocal(profile["selection_split"]);
+    bundle.postprocess_holdout_used_for_selection = GeometryCandidateBoolLocal(
+        profile["holdout_used_for_selection"]);
+  }
+
+  const bool requiredFactsPresent =
+      !bundle.status.empty() && !bundle.model_manifest_ref.empty() &&
+      !bundle.model_checkpoint_ref.empty() &&
+      !bundle.model_checkpoint_digest.empty() &&
+      !bundle.training_strategy_ref.empty() &&
+      !bundle.postprocess_profile_ref.empty() && !bundle.policy_ref.empty() &&
+      !bundle.rollback_checkpoint_ref.empty() &&
+      !bundle.rollback_checkpoint_digest.empty() &&
+      !bundle.feedback_loop.empty() && bundle.validation.case_count > 0 &&
+      bundle.holdout.case_count > 0 && !bundle.validation.report_ref.empty() &&
+      !bundle.holdout.report_ref.empty() && !bundle.failure_samples_ref.empty();
+  if (!requiredFactsPresent) {
+    reason = "CANDIDATE_BUNDLE_REQUIRED_FACT_MISSING: " + latest.string();
+    return false;
+  }
+  bundle.available = true;
+  reason = bundle.postprocess_profile_available
+               ? "latest candidate bundle and effective postprocess profile loaded"
+               : "candidate bundle loaded; postprocess profile ASSET_MISSING";
+  return true;
+}
+
+static bool GeometryCandidateRegularFileLocal(const std::string &reference) {
+  std::error_code ec;
+  return !reference.empty() &&
+         std::filesystem::is_regular_file(std::filesystem::path(reference), ec) &&
+         !ec;
+}
+
+static void DrawGeometryCandidateAssetRowLocal(const char *role,
+                                               const std::string &reference) {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::TextUnformatted(role);
+  ImGui::TableSetColumnIndex(1);
+  const bool available = GeometryCandidateRegularFileLocal(reference);
+  ImGui::TextColored(available ? ImVec4(0.36f, 0.82f, 0.49f, 1.0f)
+                               : ImVec4(0.95f, 0.34f, 0.30f, 1.0f),
+                     "%s", available ? "AVAILABLE" : "ASSET_MISSING");
+  ImGui::TableSetColumnIndex(2);
+  ImGui::TextWrapped("%s", reference.empty() ? "ASSET_MISSING"
+                                             : reference.c_str());
+}
+
+static void DrawGeometryCandidateBundleLocal(ManualTestContext &context) {
+  static GeometryCandidateBundleLocal bundle;
+  static std::string loadReason = "candidate bundle not scanned";
+  static std::string loadedScanRoot;
+  static bool scanAttempted = false;
+
+  if (!scanAttempted || loadedScanRoot != context.geometry_auto_tune_scan_root) {
+    scanAttempted = true;
+    loadedScanRoot = context.geometry_auto_tune_scan_root;
+    LoadLatestGeometryCandidateBundleLocal(loadedScanRoot, bundle, loadReason);
+  }
+
+  if (!ImGui::CollapsingHeader("Production Candidate / Strategy / Rollback",
+                               ImGuiTreeNodeFlags_DefaultOpen))
+    return;
+  if (ImGui::Button("Reload Candidate Bundle##geometry_candidate_bundle")) {
+    LoadLatestGeometryCandidateBundleLocal(
+        context.geometry_auto_tune_scan_root, bundle, loadReason);
+  }
+  ImGui::SameLine();
+  ImGui::TextColored(GeometryAutoTuneStatusColorLocal(
+                         bundle.available ? bundle.status : "ASSET_MISSING"),
+                     "%s", bundle.available ? bundle.status.c_str()
+                                             : "ASSET_MISSING");
+  if (!bundle.available) {
+    ImGui::TextWrapped("%s", loadReason.c_str());
+    return;
+  }
+
+  ImGui::TextWrapped("Evidence item: %s", bundle.path.c_str());
+  if (ImGui::BeginTable("geometry_candidate_admission", 2,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Admission fact", ImGuiTableColumnFlags_WidthStretch,
+                            1.7f);
+    ImGui::TableSetupColumn("Recorded value",
+                            ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    ImGui::TableHeadersRow();
+    const auto boolRow = [](const char *label, bool value,
+                            const ImVec4 &trueColor,
+                            const ImVec4 &falseColor) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(label);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextColored(value ? trueColor : falseColor, "%s",
+                         value ? "true" : "false");
+    };
+    const ImVec4 green(0.36f, 0.82f, 0.49f, 1.0f);
+    const ImVec4 amber(1.0f, 0.72f, 0.25f, 1.0f);
+    const ImVec4 red(0.95f, 0.34f, 0.30f, 1.0f);
+    boolRow("published_with_incremental_strategy",
+            bundle.published_with_incremental_strategy, green, red);
+    boolRow("candidate_allowed", bundle.candidate_allowed, green, red);
+    boolRow("approved", bundle.approved, green, amber);
+    boolRow("active_allowed", bundle.active_allowed, green, amber);
+    boolRow("human_business_review_required",
+            bundle.human_business_review_required, amber, green);
+    boolRow("fresh_business_acceptance_required",
+            bundle.fresh_business_acceptance_required, amber, green);
+    ImGui::EndTable();
+  }
+  if (bundle.holdout_reused_after_diagnostic_feedback) {
+    ImGui::TextColored(
+        ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+        "HOLDOUT_REUSED_FOR_REGRESSION: not a fresh blind acceptance split.");
+  }
+
+  if (ImGui::CollapsingHeader("Candidate Model Artifact",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("checkpoint_digest: %s",
+                bundle.model_checkpoint_digest.c_str());
+    if (ImGui::BeginTable("geometry_candidate_model_assets", 3,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("Role", ImGuiTableColumnFlags_WidthFixed, 145.0f);
+      ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+      ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableHeadersRow();
+      DrawGeometryCandidateAssetRowLocal("model_manifest",
+                                         bundle.model_manifest_ref);
+      DrawGeometryCandidateAssetRowLocal("candidate_checkpoint",
+                                         bundle.model_checkpoint_ref);
+      ImGui::EndTable();
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Incremental Self-Tuning Strategy",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::BeginTable("geometry_candidate_strategy_assets", 3,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("Role", ImGuiTableColumnFlags_WidthFixed, 145.0f);
+      ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+      ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableHeadersRow();
+      DrawGeometryCandidateAssetRowLocal("training_strategy",
+                                         bundle.training_strategy_ref);
+      DrawGeometryCandidateAssetRowLocal("postprocess_profile",
+                                         bundle.postprocess_profile_ref);
+      DrawGeometryCandidateAssetRowLocal("auto_tune_policy",
+                                         bundle.policy_ref);
+      ImGui::EndTable();
+    }
+    if (bundle.postprocess_profile_available) {
+      ImGui::Text(
+          "effective postprocess: conf %.4f | IoU %.4f | max %d | class-agnostic NMS %s",
+          bundle.postprocess_confidence_threshold,
+          bundle.postprocess_iou_threshold, bundle.postprocess_max_detections,
+          bundle.postprocess_class_agnostic_nms ? "on" : "off");
+      ImGui::Text("profile: %s | problem: %s | selection_split: %s",
+                  bundle.postprocess_profile_id.c_str(),
+                  bundle.postprocess_problem_class.c_str(),
+                  bundle.postprocess_selection_split.c_str());
+      ImGui::Text("holdout_used_for_selection: %s",
+                  bundle.postprocess_holdout_used_for_selection ? "true"
+                                                                : "false");
+    } else {
+      ImGui::TextColored(ImVec4(0.95f, 0.34f, 0.30f, 1.0f),
+                         "POSTPROCESS_PROFILE_ASSET_MISSING");
+    }
+    if (ImGui::BeginTable("geometry_candidate_feedback_loop", 2,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 34.0f);
+      ImGui::TableSetupColumn("Published feedback stage",
+                              ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableHeadersRow();
+      for (std::size_t index = 0; index < bundle.feedback_loop.size(); ++index) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%d", static_cast<int>(index + 1));
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(bundle.feedback_loop[index].c_str());
+      }
+      ImGui::EndTable();
+    }
+  }
+
+  if (ImGui::CollapsingHeader("Locked Evaluation",
+                              ImGuiTreeNodeFlags_DefaultOpen) &&
+      ImGui::BeginTable("geometry_candidate_evaluation", 6,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Split", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+    ImGui::TableSetupColumn("Cases", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+    ImGui::TableSetupColumn("F1");
+    ImGui::TableSetupColumn("Miss rate");
+    ImGui::TableSetupColumn("False-alarm case rate");
+    ImGui::TableSetupColumn("Exact single correct");
+    ImGui::TableHeadersRow();
+    const auto metricRow = [](const char *split,
+                              const GeometryCandidateMetricLocal &metric) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(split);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d", metric.case_count);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%.6f", metric.f1);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%.6f", metric.miss_rate);
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%.6f", metric.false_alarm_case_rate);
+      ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%.6f", metric.exact_single_correct_rate);
+    };
+    metricRow("validation (selection)", bundle.validation);
+    metricRow("holdout (regression)", bundle.holdout);
+    ImGui::EndTable();
+  }
+  ImGui::Text("quality gate: %s | miss <= %.6f | false-alarm case <= %.6f",
+              bundle.quality_gate_passed ? "passed" : "failed",
+              bundle.maximum_holdout_miss_rate,
+              bundle.maximum_holdout_false_alarm_case_rate);
+  if (ImGui::BeginTable("geometry_candidate_evaluation_assets", 3,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Role", ImGuiTableColumnFlags_WidthFixed, 145.0f);
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableHeadersRow();
+    DrawGeometryCandidateAssetRowLocal("validation_report",
+                                       bundle.validation.report_ref);
+    DrawGeometryCandidateAssetRowLocal("holdout_report",
+                                       bundle.holdout.report_ref);
+    DrawGeometryCandidateAssetRowLocal("failure_samples",
+                                       bundle.failure_samples_ref);
+    ImGui::EndTable();
+  }
+
+  if (ImGui::CollapsingHeader("Rollback Receipt",
+                              ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Text("checkpoint_digest: %s",
+                bundle.rollback_checkpoint_digest.c_str());
+    ImGui::Text("automatic_on_gate_failure: %s",
+                bundle.rollback_automatic_on_gate_failure ? "true" : "false");
+    ImGui::TextWrapped("checkpoint: %s",
+                       bundle.rollback_checkpoint_ref.c_str());
+  }
+  ImGui::TextColored(
+      ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+      "EVALUATED is not APPROVED or ACTIVE. Business acceptance remains external.");
+}
+
 } // namespace
 
 void DrawGeometryAutoTuneParametersPanel(ManualTestContext &context) {
@@ -9826,4 +10716,5 @@ void DrawGeometryAutoTuneEvidencePanel(ManualTestContext &context) {
     ImGui::TextDisabled(
         "Open the evidence directory for requested_config, effective_config, confusion_matrix, next_training_recipe and evidence_index receipts.");
   }
+  DrawGeometryCandidateBundleLocal(context);
 }

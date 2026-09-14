@@ -94,6 +94,9 @@ public:
         int direction = 0; // 0=Top, 1=Bottom, 2=Left, 3=Right.
         LearnDirectionParams params;
         int scan_type = 0; // FindLine W=0 for Top/Bottom, H=1 for Left/Right.
+        // FindLine ordinal after translating FastMatch's physical-side
+        // Point Column semantics (Bottom/Right count from the reverse end).
+        int runtime_selected_edge = 0;
         int scan_line_count = 0;
         int raw_result_count = 0;
         int accepted_side_count = 0;
@@ -102,6 +105,12 @@ public:
         std::string status = "NOT_RUN";
         std::string reason;
         std::vector<DirectionalProbeScanLine> scan_lines;
+        // The single selected point remains the waveform/conclusion anchor.
+        // Full edge can retain multiple physical candidates per Gauge Line,
+        // so template composition reads accepted_points_by_scan instead.
+        std::vector<CxShapePoint> selected_point_by_scan;
+        std::vector<unsigned char> selected_point_valid_by_scan;
+        std::vector<std::vector<CxShapePoint>> accepted_points_by_scan;
         std::vector<CxShapePoint> accepted_points;
     };
 
@@ -116,11 +125,58 @@ public:
         int dijkstra_turn_cost_weight_permille = 200;
         int dijkstra_gap_cost_weight_permille = 100;
         int dijkstra_max_trace_gap_px = 3;
+        // Forward-only KNN graph degree after local XY compression. This
+        // reconnects a physical edge when one or more compression bins have
+        // no retained point, without allowing a trace to reverse direction.
+        int dijkstra_knn_neighbors = 6;
+        int ann_search_radius_px = 32;
+        int ann_tangent_deviation_deg = 35;
+        int ann_normal_deviation_deg = 35;
+        int ann_min_component_points = 4;
+        int ann_min_component_coverage_percent = 55;
         int trace_min_length_px = 20;
         int normal_pair_offset_px = 6;
         int normal_polarity = 0;
         int corner_rejection_radius_px = 4;
         int tangent_sample_step_px = 2;
+        int anchor_neighborhood_radius_px = 24;
+        int xy_compression_bin_px = 4;
+        int min_keypoints_per_domain = 4;
+    };
+
+    struct NormalTraceEvidence
+    {
+        bool executed = false;
+        bool succeeded = false;
+        std::string reason = "NOT_RUN";
+        int directional_side_count = 0;
+        int trace_segment_count = 0;
+        double closure_error_px = -1.0;
+        double max_consecutive_gap_px = -1.0;
+        double gradient_coverage = 0.0;
+        int normal_pair_findline_bound_count = 0;
+        int normal_pair_binding_miss_count = 0;
+        int normal_pair_corner_rejected_count = 0;
+        int loop_erased_point_count = 0;
+        std::array<int, 4> normal_pair_counts_by_direction{};
+        std::array<int, 4> domain_deduplicated_counts{};
+        std::array<int, 4> compressed_keypoint_counts{};
+        // ANN is the neighbourhood re-clustering stage.  These facts prove
+        // that Dijkstra consumed the selected ANN component rather than the
+        // unclassified compressed point cloud.
+        std::array<int, 4> ann_edge_counts{};
+        std::array<int, 4> ann_component_counts{};
+        std::array<int, 4> ann_selected_point_counts{};
+        std::array<double, 4> ann_selected_coverage{};
+        // Retained after domain overlap de-duplication; raw count is exposed
+        // separately so the display stays bounded.
+        std::vector<CxShapePoint> domain_points;
+        std::array<std::vector<CxShapePoint>, 4> domain_points_by_direction;
+        std::array<std::vector<CxShapePoint>, 4> compressed_points_by_direction;
+        std::array<std::vector<CxShapePoint>, 4> ann_selected_points_by_direction;
+        std::vector<CxShapePoint> dijkstra_trace_points;
+        std::vector<CxShapePoint> normal_pair_a;
+        std::vector<CxShapePoint> normal_pair_b;
     };
 
     FastMatch();
@@ -178,17 +234,27 @@ public:
                              int turn_weight_permille,
                              int gap_weight_permille,
                              int max_trace_gap_px);
+    void setnormaltraceknn(int forward_neighbor_count);
+    void setnormaltraceann(int search_radius_px, int tangent_deviation_deg,
+                           int normal_deviation_deg,
+                           int min_component_points,
+                           int min_component_coverage_percent);
     void setnormaltracegeometry(int normal_angle_tolerance_deg,
                                 int trace_min_length_px,
                                 int normal_polarity,
                                 int corner_rejection_radius_px,
                                 int tangent_sample_step_px);
+    void setnormaltracedomain(int anchor_neighborhood_radius_px,
+                              int xy_compression_bin_px,
+                              int min_keypoints_per_domain);
     const NormalTraceLearnConfig& getnormaltraceconfig() const
     { return m_normal_trace_config; }
     int getnormaltracecandidatecount() { return m_normal_trace_candidate_count; }
     int getnormaltracededuplicatedcount() { return m_normal_trace_deduplicated_count; }
     int getnormaltracepointcount() { return m_normal_trace_point_count; }
     int getnormaltracepaircount() { return m_normal_trace_pair_count; }
+    const NormalTraceEvidence& getnormaltraceevidence() const
+    { return m_normal_trace_evidence; }
     // Model points are normalized for matching.  These values retain the
     // original-image translation needed by the Image View debug projection.
     double getlearnmodeloriginx() { return m_learn_model_origin_x; }
@@ -689,6 +755,7 @@ private:
     int m_normal_trace_deduplicated_count = 0;
     int m_normal_trace_point_count = 0;
     int m_normal_trace_pair_count = 0;
+    NormalTraceEvidence m_normal_trace_evidence;
     double m_learn_model_origin_x = 0.0;
     double m_learn_model_origin_y = 0.0;
 

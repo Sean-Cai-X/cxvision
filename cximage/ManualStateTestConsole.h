@@ -496,9 +496,33 @@ struct RuntimeObjectView {
   std::array<int, 4> fastmatch_directional_probe_raw{};
   std::array<int, 4> fastmatch_directional_probe_accepted{};
   std::array<int, 4> fastmatch_directional_probe_diagnostics{};
+  std::array<int, 4> fastmatch_directional_probe_edge_count{};
+  std::array<int, 4> fastmatch_directional_probe_selected_edge{};
+  std::array<int, 4> fastmatch_directional_probe_runtime_selected_edge{};
   std::array<std::string, 4> fastmatch_directional_probe_status{};
   int fastmatch_pattern_a_count = 0;
   int fastmatch_pattern_b_count = 0;
+  int fastmatch_normal_trace_domain_count = 0;
+  int fastmatch_normal_trace_deduplicated_count = 0;
+  int fastmatch_normal_trace_path_count = 0;
+  int fastmatch_normal_trace_pair_count = 0;
+  int fastmatch_normal_trace_side_count = 0;
+  int fastmatch_normal_trace_segment_count = 0;
+  double fastmatch_normal_trace_closure_error_px = -1.0;
+  double fastmatch_normal_trace_max_consecutive_gap_px = -1.0;
+  double fastmatch_normal_trace_gradient_coverage = 0.0;
+  int fastmatch_normal_trace_findline_bound_pairs = 0;
+  int fastmatch_normal_trace_binding_misses = 0;
+  int fastmatch_normal_trace_corner_rejected = 0;
+  int fastmatch_normal_trace_loop_erased_points = 0;
+  std::array<int, 4> fastmatch_normal_trace_pair_direction_counts{};
+  std::array<int, 4> fastmatch_normal_trace_domain_counts{};
+  std::array<int, 4> fastmatch_normal_trace_keypoint_counts{};
+  std::array<int, 4> fastmatch_normal_trace_ann_edge_counts{};
+  std::array<int, 4> fastmatch_normal_trace_ann_component_counts{};
+  std::array<int, 4> fastmatch_normal_trace_ann_selected_counts{};
+  std::array<double, 4> fastmatch_normal_trace_ann_coverage{};
+  std::string fastmatch_normal_trace_reason;
   int fastmatch_candidate_count = 0;
   double fastmatch_best_score = 0.0;
   int fastmatch_learn_rect_x0 = 0;
@@ -1519,6 +1543,10 @@ struct ManualTestContext {
   bool show_fastmatch_compare_gap_pairs = false;
   bool show_fastmatch_keypoint_tangents = false;
   bool show_fastmatch_filtered_points = false;
+  bool show_fastmatch_normal_trace_domain = false;
+  bool show_fastmatch_normal_trace_ann_component = false;
+  bool show_fastmatch_normal_trace_path = false;
+  bool show_fastmatch_normal_trace_pairs = false;
 
 
 

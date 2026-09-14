@@ -133,6 +133,42 @@ struct CxFastMatchPoseCandidateEvidence
     std::string status;
 };
 
+struct CxFastMatchNormalTracePointEvidence
+{
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct CxFastMatchNormalTraceEvidence
+{
+    bool executed = false;
+    bool succeeded = false;
+    std::string reason = "NOT_RUN";
+    int candidate_count = 0;
+    int deduplicated_count = 0;
+    int trace_point_count = 0;
+    int normal_pair_count = 0;
+    int directional_side_count = 0;
+    int trace_segment_count = 0;
+    double closure_error_px = -1.0;
+    double max_consecutive_gap_px = -1.0;
+    double gradient_coverage = 0.0;
+    int normal_pair_findline_bound_count = 0;
+    int normal_pair_binding_miss_count = 0;
+    int normal_pair_corner_rejected_count = 0;
+    int loop_erased_point_count = 0;
+    std::array<int, 4> normal_pair_counts_by_direction{};
+    std::array<int, 4> domain_deduplicated_counts{};
+    std::array<int, 4> compressed_keypoint_counts{};
+    std::array<int, 4> ann_edge_counts{};
+    std::array<int, 4> ann_component_counts{};
+    std::array<int, 4> ann_selected_point_counts{};
+    std::array<double, 4> ann_selected_coverage{};
+    std::vector<CxFastMatchNormalTracePointEvidence> dijkstra_trace_points;
+    std::vector<CxFastMatchNormalTracePointEvidence> normal_pair_a;
+    std::vector<CxFastMatchNormalTracePointEvidence> normal_pair_b;
+};
+
 struct CxOcrGlyphCandidateEvidence
 {
     int source_object_index = -1;
@@ -463,6 +499,8 @@ struct CxScriptExecutionCapture
     int fastmatch_rotate_probe_count = 0;
     int fastmatch_rotate_sample_count = 0;
     int fastmatch_rotate_elapsed_ms = 0;
+
+    CxFastMatchNormalTraceEvidence fastmatch_normal_trace;
 
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;

@@ -702,6 +702,8 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
     "global_fastmatch_learn_linegap_0",
     "global_fastmatch_learn_objfilter_0",
     "global_fastmatch_learn_compare_gap_0",
+    "global_fastmatch_learn_edge_count_0",
+    "global_fastmatch_learn_selected_edge_0",
     "global_fastmatch_learn_wgap_1",
     "global_fastmatch_learn_hgap_1",
     "global_fastmatch_learn_method_1",
@@ -709,6 +711,8 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
     "global_fastmatch_learn_linegap_1",
     "global_fastmatch_learn_objfilter_1",
     "global_fastmatch_learn_compare_gap_1",
+    "global_fastmatch_learn_edge_count_1",
+    "global_fastmatch_learn_selected_edge_1",
     "global_fastmatch_learn_wgap_2",
     "global_fastmatch_learn_hgap_2",
     "global_fastmatch_learn_method_2",
@@ -716,13 +720,17 @@ ParserDebugBridge::SnapshotRuntimeVariables() const
     "global_fastmatch_learn_linegap_2",
     "global_fastmatch_learn_objfilter_2",
     "global_fastmatch_learn_compare_gap_2",
+    "global_fastmatch_learn_edge_count_2",
+    "global_fastmatch_learn_selected_edge_2",
     "global_fastmatch_learn_wgap_3",
     "global_fastmatch_learn_hgap_3",
     "global_fastmatch_learn_method_3",
     "global_fastmatch_learn_threshold_3",
     "global_fastmatch_learn_linegap_3",
     "global_fastmatch_learn_objfilter_3",
-    "global_fastmatch_learn_compare_gap_3"
+    "global_fastmatch_learn_compare_gap_3",
+    "global_fastmatch_learn_edge_count_3",
+    "global_fastmatch_learn_selected_edge_3"
   };
   std::vector<ParserDebugVariableSnapshot> snapshots;
   for (const char* name : names)

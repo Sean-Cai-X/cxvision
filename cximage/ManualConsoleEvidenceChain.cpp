@@ -1223,6 +1223,67 @@ ResolveEvidencePacketPathFromSummaryLocal(const std::string &runtimeSummary) {
   }
 }
 
+static bool IsDerivedEvidenceRenderPathLocal(const std::string &value) {
+  if (value.empty())
+    return false;
+  std::string name = std::filesystem::path(value).filename().string();
+  std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return name == "evidence_overlay.png" || name == "result_overlay.png" ||
+         name == "tool_display.png" || name == "roi_preview.png";
+}
+
+static std::string ResolveRunnableImagePathLocal(
+    const std::filesystem::path &metadataPath, const std::string &value) {
+  if (value.empty() || IsDerivedEvidenceRenderPathLocal(value))
+    return {};
+  std::filesystem::path path(value);
+  if (path.is_relative()) {
+    const std::filesystem::path relativeToMetadata =
+        metadataPath.parent_path() / path;
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(relativeToMetadata, ec))
+      path = relativeToMetadata;
+    else
+      path = ResolveWorkspaceFile(path.string());
+  }
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec) ||
+      IsDerivedEvidenceRenderPathLocal(path.string()))
+    return {};
+  return path.lexically_normal().string();
+}
+
+static std::string ResolveOriginalImageFromRunDirectoryLocal(
+    const std::filesystem::path &directory) {
+  const std::filesystem::path semanticInput =
+      directory / "measurement_semantic_input.json";
+  std::string text;
+  if (ReadTextFile(semanticInput.string(), text)) {
+    const std::string resolved = ResolveRunnableImagePathLocal(
+        semanticInput, ReadJsonStringFieldLocal(text, "image_path"));
+    if (!resolved.empty())
+      return resolved;
+  }
+
+  const std::filesystem::path snapshot = directory / "snapshot.txt";
+  if (ReadTextFile(snapshot.string(), text)) {
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+      const std::string prefix = "image:";
+      if (line.rfind(prefix, 0) != 0)
+        continue;
+      const std::string resolved = ResolveRunnableImagePathLocal(
+          snapshot, TrimLine(line.substr(prefix.size())));
+      if (!resolved.empty())
+        return resolved;
+    }
+  }
+  return {};
+}
+
 static std::string ResolveOriginalImagePathFromEvidencePacketLocal(
     const std::string &runtimeSummary) {
   const std::string evidencePacket =
@@ -1231,10 +1292,15 @@ static std::string ResolveOriginalImagePathFromEvidencePacketLocal(
     return {};
 
   std::string text;
-  if (!ReadTextFile(evidencePacket, text))
-    return {};
+  if (ReadTextFile(evidencePacket, text)) {
+    const std::string resolved = ResolveRunnableImagePathLocal(
+        evidencePacket, ReadJsonStringFieldLocal(text, "path"));
+    if (!resolved.empty())
+      return resolved;
+  }
 
-  return ReadJsonStringFieldLocal(text, "path");
+  return ResolveOriginalImageFromRunDirectoryLocal(
+      std::filesystem::path(runtimeSummary).parent_path());
 }
 
 static void ResolvePrimaryEditableObjectLocal(
@@ -2826,8 +2892,11 @@ static int AppendManualAlgorithmReviewHandoffLocal(
     thumb.image_id = imageId;
     thumb.image_path =
         ResolveOriginalImagePathFromEvidencePacketLocal(runtimeSummary);
-    if (thumb.image_path.empty())
-      thumb.image_path = resolveImagePath(imageId);
+    if (thumb.image_path.empty()) {
+      const std::string manifestImage = resolveImagePath(imageId);
+      if (!IsDerivedEvidenceRenderPathLocal(manifestImage))
+        thumb.image_path = manifestImage;
+    }
     auto firstExistingImage = [](const std::vector<std::string> &paths) {
       for (const std::string &path : paths) {
         std::error_code ec;
@@ -2838,8 +2907,6 @@ static int AppendManualAlgorithmReviewHandoffLocal(
     };
     const std::string reviewImage = firstExistingImage(
         {evidenceOverlay, resultOverlay, roiPreview, toolDisplay});
-    if (thumb.image_path.empty())
-      thumb.image_path = reviewImage;
     thumb.thumbnail_path = firstExistingImage(
         {roiPreview, evidenceOverlay, resultOverlay, toolDisplay});
     thumb.target_id = targetId;
@@ -5731,6 +5798,19 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   };
 
   CxEvidenceSelectionSnapshot resolved = snapshot;
+  if (IsDerivedEvidenceRenderPathLocal(resolved.image_path)) {
+    const std::string originalImage = ResolveOriginalImageFromRunDirectoryLocal(
+        std::filesystem::path(resolved.image_path).parent_path());
+    if (originalImage.empty()) {
+      return abortSelection(
+          "derived_image_rejected",
+          "Evidence overlay is review-only and no immutable source image could be resolved");
+    }
+    CXLOG_INFO("EvidenceChain", "execution_image_remapped", "source_resolved",
+               "review_image=" + resolved.image_path +
+                   " execution_image=" + originalImage);
+    resolved.image_path = originalImage;
+  }
   const bool loadWorkingRevision =
       !resolved.is_candidate && resolved.has_saved_state;
   if (loadWorkingRevision && resolved.working_script_snapshot_path.empty()) {
@@ -5773,7 +5853,7 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   cv::Mat stagedImage;
   std::filesystem::path resolvedImagePath;
   if (loadImageToView) {
-    std::string imagePathForLoad = snapshot.image_path;
+    std::string imagePathForLoad = resolved.image_path;
     if (imagePathForLoad.empty() && !snapshot.image_id.empty())
       imagePathForLoad = ResolveImagePathFromManifest(snapshot.image_id);
     if (imagePathForLoad.empty() && !snapshot.image_id.empty())

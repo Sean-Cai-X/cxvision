@@ -1813,3 +1813,135 @@
 
   当前状态只能是 CANDIDATE：真实训练与制品已具备，但锁定 holdout、困难样本回归和生产质量门尚未完成，不能进入 EVALUATED、
   APPROVED 或 ACTIVE。下一步应在同一 C++ 生命周期中补齐 parent/candidate 的锁定 holdout 对比与数量/类别契约报告。
+  
+  锁定 holdout 已完成，结论是 REJECTED，不能进入 APPROVED 或 ACTIVE。
+
+  - 21 个 holdout 样本，父/候选均真实推理完成。
+  - 候选 IoU≥0.5 匹配：17/21；召回 0.8095，漏检率 0.1905，满足 25% 漏检上限。
+  - 候选精度 0.4722，但误报案例率 0.4762，超过 25% 上限。
+  - 单目标精确正确率仅 0.5238；平均 1.714 框/图，仍未满足“单目标应单框”的数量契约。
+  - 主要问题：BACKGROUND_FALSE_POSITIVE；另有少量跨类竞争与重复响应。
+  - 最弱类别是 line：3 个 holdout 仅命中 1 个；open_curve 仅命中 2 个。ellipse、polygon、closed_curve 表现较好。
+  - 候选 CPU 模型前向中位数约 18 ms，完整服务调用中位数约 72.1 ms。
+
+  证据：
+
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_170400_controlled_l1_locked_holdout/paired_inference_report.json
+
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_170400_controlled_l1_locked_holdout/detection_contract_observation.json
+
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+  run_20260911_170400_controlled_l1_locked_holdout/performance_profile.json
+
+  下一轮自整定应优先匹配“背景误报抑制 + line/open_curve 困难样本补强”策略包；不启用 OBB/几何头，也不先调定位精度。
+  
+  明确。后续模型发布不只是交付权重，而是发布“模型 + 增量自整定策略闭环”。
+
+  每个发布版本应绑定：
+
+  - 父模型与可回滚权重版本。
+  - 适用问题类型：背景误报、多框、类别混淆、细线漏检、尺度/旋转退化等。
+  - 数据策略函数：困难负样本、类别重采样、少样本增强、边界扰动。
+  - 训练策略函数：冻结层级、学习率、损失权重、训练轮次、早停条件。
+  - 参数策略函数：置信度、NMS、最大检测数、assignment top-k 等 validation 驱动的步进范围。
+  - 固定验证、holdout、困难样本回归集及对应门槛。
+  - 自动迭代、收益校验、回退与终止规则。
+  - 完整证据包、运行日志、制品哈希、失败样本清单与人工审批状态。
+
+  业务反馈进入后，系统先归类问题，再选择策略包执行新的受控增量；验证收益后才允许形成新 Candidate。没有收益自动回退父版
+  本；holdout 或质量门失败则保持 REJECTED。只有证据完整、指标达标且人工明确批准，才允许进入 ACTIVE。
+
+
+• 第二轮策略资产已落地为独立、可审计模板：
+
+  /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cxparser/cxscript/module/cximage/tests/
+  yolov8n_cpp_detection_background_fp_line_open_curve_plan.json
+
+  核心变化：
+
+  - postprocess_max_detections=1：把单目标数量契约直接纳入候选推理限制。
+  - 置信度阈值 0.40：优先压制背景误报。
+  - line 类权重升至 1.65，open_curve 升至 1.45。
+  - 学习率降至 0.0015，基于第一轮 validation-best 做稳定微调。
+  - 仍为 30–50 epoch、冻结 backbone、几何头关闭、人工审核与自动提升禁止。
+
+  下一步可直接由 C++ 计划生成器使用该策略资产、以第一轮 validation-best 权重作为父模型，创建第二轮真实训练候选。
+  
+  • 当前结论：
+
+  - 第一轮已证明 C++/Torch 受控训练、父模型继承、冻结策略、validation-best、早停、制品回滚、固定 holdout 成对推理均可真
+    实运行。
+
+  - 第一轮训练集 validation-best F1 达 0.9655，但独立 holdout 只有 17/21 正确匹配，平均 1.71 框/图、误报案例率 47.62%。
+  - 因此当前模型不是生产可发布模型，准入状态应为 REJECTED；权重可保留为可回滚候选证据，但不得 APPROVED 或 ACTIVE。
+  - 根因已明确：主要是背景误报；其次是 line 与 open_curve 的召回/类别稳定性。不是 OBB 或几何回归精度问题，所以当前仍不启
+    用几何头。
+
+  后续推进：
+
+  1. 完成正在执行的第二轮：以第一轮 validation-best 为父模型，增强 line/open_curve 分类权重，降低学习率，限制单图最大输
+     出为 1，并收紧置信度。
+
+  2. 固定 validation 仅用于选择第二轮 best checkpoint 和后处理参数。
+  3. 对第二轮 best 执行一次 locked holdout 回归，比较父模型、第一轮、第二轮：
+      - 单图平均框数应接近 1；
+      - 误报案例率需降至 ≤25%；
+      - 漏检率需保持 ≤25%；
+      - line/open_curve 必须不再是系统性失败类。
+
+  4. 若 holdout 达标，状态推进到 EVALUATED，仍等待人工业务复核；若未达标，自动回退第一轮父版本并转入下一策略包。
+  5. 通过人工业务复核和证据完整性检查后，才允许 APPROVED，最后由明确发布决定进入 ACTIVE。
+
+  长期发布方式固定为“权重 + 自整定策略包 + 数据策略 + 训练策略 + 参数搜索边界 + 固定评估集 + 回滚版本 + 证据包”，而不是
+  单独发布一个模型文件。
+  
+  
+  已完成研判并落地为系统内版本化候选包，当前状态为 EVALUATED，不是 APPROVED/ACTIVE。
+
+  关键结论：
+
+  - 第二轮重训练发生明显退化：
+      - Validation F1：0.80
+      - Holdout 召回：42.86%
+      - 漏检率：57.14%
+      - 第二轮权重已判定不可采用，回滚到第一轮 validation-best。
+
+  - 第一轮 best 权重配合单目标后处理策略：
+      - Validation：14/14，F1 1.0，单框正确率 100%
+      - Holdout 回归：16/21，F1 0.7619
+      - 漏检率：23.81%
+      - 误报案例率：23.81%
+      - 平均框数：1.0
+      - 重复响应率：0
+
+  - 当前通过既定的 25% 基础门槛，但 holdout 已在此前诊断中使用，因此仍要求业务侧新数据验收，不能直接批准生产。
+
+  候选包已绑定：
+
+  - 候选模型 checkpoint 与哈希
+  - 训练策略
+  - 单目标后处理 profile
+  - validation 与 holdout 回归证据
+  - 自整定反馈流程
+  - 父模型回滚 checkpoint 与哈希
+  - approved=false
+  - active_allowed=false
+
+  主要交付物：
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+    run_20260911_180000_incremental_candidate_bundle/candidate_bundle.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+    run_20260911_174500_round1_best_single_target_validation/paired_inference_report.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/torch_geometry_roi/
+    run_20260911_175000_round1_best_single_target_holdout_regression/paired_inference_report.json
+
+  - /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cxparser/cxscript/module/cximage/evidence/
+    yolov8n_single_target_postprocess_profile_v1.json
+
+  COMPILE_PASS，新二进制时间为 17:28:51。下一层是把该候选包及其训练、后处理、回滚参数投影到 Torch/自动调优界面，并等待业
+  务侧新样本验收后决定 APPROVED 和 ACTIVE。

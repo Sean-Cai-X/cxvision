@@ -11,4 +11,6 @@ std::string InferCurrentTemplatePath(const ManualTestContext& context);
 
 int CountSelectedParamCandidates(const ManualTestContext& context);
 
+bool PrepareCurrentFastMatchScriptRun(ManualTestContext& context);
+
 #endif

@@ -1064,9 +1064,11 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
 
   const std::string scriptPath = EffectiveScriptPath(context);
   const std::string sourceEvidenceScriptPath =
-      context.current_evidence_selection.source_evidence_script_path.empty()
-          ? scriptPath
-          : context.current_evidence_selection.source_evidence_script_path;
+      !options.source_evidence_script_path_override.empty()
+          ? options.source_evidence_script_path_override
+          : (context.current_evidence_selection.source_evidence_script_path.empty()
+                 ? scriptPath
+                 : context.current_evidence_selection.source_evidence_script_path);
   const std::string scriptId = EffectiveScriptId(context);
   const std::string imageId = EffectiveImageId(context);
   const std::string targetId = EffectiveTargetId(context);

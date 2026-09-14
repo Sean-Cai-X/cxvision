@@ -1835,3 +1835,233 @@ FM模型演化方向提示:
   - Image View 只在绘制时加回该锚点，所以模板显示回原图 Learn 位置，不会再显示在 (0,0) 附近，也不会改变匹配数据。
 
   当前全量编译仍在进行中；本轮修改触及公共状态头文件，因此会重编译相关依赖。
+  
+  
+  这里不能把 FindLine 当成“四条直线拟合器”。它的职责只是提供四个方向上的可信锚点和边缘选择依据。
+
+  截图中边界少一半的直接原因是：当前实现只取“最强点 → 最远点”运行一次 Dijkstra。对于闭合边界，两个端点之间天然存在两条半环，最短路只会返回其中一条。
+
+  正确演化应当是：
+
+  四方向 FindLine 锚点
+          ↓
+  锚点邻域内的梯度候选分类
+          ↓
+  各方向独立去重
+          ↓
+  局部坐标 X/Y 轴向压缩
+          ↓
+  形成稀疏关键描点图
+          ↓
+  带方向顺序约束的闭环 Dijkstra
+          ↓
+  局部切线与法向
+          ↓
+  生成 A/B 对称采样点
+
+  关键区别如下：
+
+   阶段        正确语义
+  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   FindLine    提供方向、边序号、极性和可信锚点，不输出最终直线
+  ──────────  ────────────────────────────────────────────────────────
+   邻域分类    将梯度点分配到 Top/Bottom/Left/Right 锚点邻域
+  ──────────  ────────────────────────────────────────────────────────
+   去重        在每个邻域内去重，不能用全局最强梯度压掉其他边
+  ──────────  ────────────────────────────────────────────────────────
+   XY 压缩     Top/Bottom 沿局部 X 压缩；Left/Right 沿局部 Y 压缩
+  ──────────  ────────────────────────────────────────────────────────
+   关键描点    每个轴向桶保留少量最佳候选，而不是拟合成直线
+  ──────────  ────────────────────────────────────────────────────────
+   Dijkstra    在稀疏描点图上寻找经过四类邻域的闭合路径
+  ──────────  ────────────────────────────────────────────────────────
+   法向        根据最终曲线的局部切线计算，可保留曲边、畸变和透视变化
+
+  这里的“XY”必须是旋转后局部坐标 u/v，不能直接使用原图全局 x/y，否则目标旋转后会再次发生方向错位。
+
+  Dijkstra 的节点应至少携带：
+
+  pixel position
+  direction class
+  x/y compression bin
+  gradient magnitude
+  gradient normal
+  anchor distance
+  polarity
+  source scan index
+
+  图边只连接相邻桶、相邻方向交接区中的节点。代价函数应包含：
+
+  inverse gradient
+  spatial gap
+  turn angle
+  anchor deviation
+  polarity mismatch
+  domain-transition penalty
+
+  闭合成功不能再仅以 pairs >= 2 判断，必须同时满足：
+
+  - 四个方向邻域都有有效描点；
+  - 每个方向达到最低覆盖率；
+  - 最大断点距离没有超限；
+  - 四个方向按顺序完成交接；
+  - 首尾闭合误差合格；
+  - 法向有效比例合格。
+
+  因此结论应增加：
+
+  domain raw/deduplicated/compressed counts
+  Top/Bottom/Left/Right coverage
+  largest trace gap
+  anchor adherence
+  closure error
+  normal valid ratio
+  failure direction/stage
+
+  只有上述条件成立，才能输出 NORMAL_TRACE_COMPLETE。
+
+  第三张图的按钮应理解为：
+
+  Use Current Script for Next Run
+
+  - 只把仓库中的最新 FastMatch 脚本加载成下一次运行的工作副本；
+  - 不修改已保存的 Evidence 脚本快照；
+  - 不修改测试图片；
+  - 不修改参数、审核状态或历史证据；
+  - 仅在旧 Evidence 脚本缺少 Normal-Trace 接口时需要使用。
+
+  此前提出的“四直线拟合 + 四角点”方案过度刚性，不应进入最终算法。尚未编译的这部分草案需要撤掉，后续应按“邻域分类—分域去重—局部 XY 压缩—稀疏闭环
+  Dijkstra”落实。
+  
+  
+  • 本轮已完成“ANN 重聚类 → Dijkstra 连续描线 → 法向 A/B pairs”的算法与证据收口。
+
+  - ANN 四方向均重新聚类成功：components=1,1,1,1
+  - ANN 选中点：Top 243、Bottom 232、Left 154、Right 168
+  - Dijkstra 连续描线：895 点
+  - 最大相邻步长：1.414214 px
+  - 超过 1.5 px 的断点：0
+  - 首尾闭合误差：0 px
+  - 法向对称点：A/B 各 368 点
+  - 梯度覆盖率：100%
+  - 最终结论：NORMAL_TRACE_COMPLETE
+
+  Evidence Case 英文名称：
+
+  Normal Trace ANN Dijkstra Normal Pairs
+
+  主要证据：
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_150000_normal_trace_final/Normal Trace ANN Dijkstra Normal Pairs/
+    line_trace.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_150000_normal_trace_final/Normal Trace ANN Dijkstra Normal Pairs/
+    result_summary.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_150000_normal_trace_final/Normal Trace ANN Dijkstra Normal Pairs/
+    object_state.json
+
+  界面也已调整：
+
+  - Key Parameter Controls → FastMatch Actions 直接提供 Learn / Match / Learn + Match。
+  - 旧 CxScript 可直接点击 Create Compatible Run + Learn。
+  - 不再需要进入 Manual State Test Console 才能执行 Learn。
+  - Normal-Trace Evidence 显示 closure、max step、梯度覆盖和四方向 ANN 数据。
+  - 默认参数已通过当前样本，不需要人工调参；人工参数仅用于困难样本。
+ 
+ 
+ • 把鲁棒性约束落在三处，而不是继续增加形状假设：
+
+  - ANN 建图时，长跨越必须同时满足切向一致与法向一致；近邻只允许较宽松的角度容差。
+  - 连通分量不再只按“跨度最大、点最多”选择，还必须有足够的 FindLine 锚点支撑，并惩罚平均锚点偏离。
+  - Dijkstra 的首尾节点与四角拼接都落在锚点走廊内；拼接后再核验每个方向的锚点覆盖，不能只凭闭合就报 COMPLETE。
+
+  这些约束对矩形、曲边、局部缺口都成立，不依赖固定 1/3 或凸性。
+  
+  
+  已完成本轮鲁棒性收口，固定“末端/起始 1/3”方案已移除，不再依赖单一矩形或凸形假设。
+
+  当前处理链调整为：
+
+  FindLine directional anchors
+          ↓
+  Anchor-neighborhood classification
+          ↓
+  XY-bin candidate competition
+          ↓
+  ANN topology filtering
+          ↓
+  Anchor-supported component selection
+          ↓
+  Forward-bin multi-source Dijkstra
+          ↓
+  Global four-segment cycle selection
+          ↓
+  Loop erasure
+          ↓
+  FindLine-polarity-bound A/B pairs
+
+  关键改进：
+
+  - 同一 XY 压缩桶内的候选点只参与竞争，不允许互相连边，消除周期性横向折返。
+  - ANN 长距离边必须同时满足切向、法向和锚点走廊约束。
+  - 连通分量不再只看跨度和点数，同时评价 FindLine 锚点支持率及平均锚点偏差。
+  - Dijkstra 使用首桶多源、末桶多目标，不再依赖任意数组端点。
+  - 四角连接使用全局一致性选择，并验证四个方向的实际锚点覆盖。
+  - 最终轨迹执行 loop-erasure；只删除回到同一像素形成的自回路，不平滑或拉直合法曲线。
+  - A/B 极性继续绑定各方向 FindLine 的 Detection Edge 和结论点。
+
+  验证结果：
+
+  - COMPILE_PASS
+  - 二进制：D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/build01/Release/cxvision_imgui_acceptance.exe
+  - 编译时间：2026-09-14 16:30:39
+  - Evidence 案例名称：Robust Multi Evidence Normal Trace
+  - Evidence 目录：D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_163200_robust_multi_evidence_normal_trace/Robust Multi
+    Evidence Normal Trace
+
+  Headless 结果：
+
+  - NORMAL_TRACE_COMPLETE
+  - 四段轨迹：4/4
+  - 轨迹点：889
+  - Loop-erased：8 点
+  - A→B→A 即时反转：0
+  - 内部重复访问：0
+  - 闭合误差：0 px
+  - 最大相邻步长：1.41421 px
+  - 梯度覆盖率：100%
+  - A/B pairs：294
+  - FindLine-bound pairs：294
+
+  loop_erased_point_count 已进入：
+
+  - line_trace.json
+  - object_state.json
+  - Headless metrics
+  - 算法日志
+  - Manual State Test Console 状态
+  - Key Parameter Controls 的 Normal-Trace 分析结论区
+
+  人工调参仍通过现有参数控制：
+
+  - ANN Search Radius
+  - ANN Tangent Deviation
+  - ANN Normal Deviation
+  - ANN Minimum Component Points
+  - ANN Minimum Component Coverage
+  - Anchor Neighborhood Radius
+  - XY Compression Bin
+  - KNN Neighbors
+  - Gradient / Turn / Gap Cost
+  - Maximum Trace Gap
+
+  需要注意：Headless 回归输入仍是历史 Evidence overlay，不是干净原始测量图，因此这里只能确认执行链、拓扑约束和 Evidence 输出正确。最终图像效果仍需在 GUI 中
+  手动载入原始测试图，分别查看：
+
+  - Dijkstra Trace
+  - Normal A/B Pairs
+  - Learn Conclusions
+  - Shape/ROI 控件
+
+  其中白色 K0/K1... 圆点和连线是 Shape/ROI 交互层；青色细线才是 Dijkstra Trace，绿色/品红点才是 A/B 结果。

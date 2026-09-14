@@ -5308,6 +5308,9 @@ void ViewController::drawScriptAcceptancePanels() {
       bool drewPattern = false;
 
       if (fastMatchTool != nullptr) {
+        const bool selectedColumnLearn =
+            fastMatchObject != nullptr &&
+            fastMatchObject->fastmatch_learn_status_code == 34;
         const double learnOriginX = fastMatchTool->getlearnmodeloriginx();
         const double learnOriginY = fastMatchTool->getlearnmodeloriginy();
         gp_Path &pathA = fastMatchTool->getpatternpathA();
@@ -5329,13 +5332,22 @@ void ViewController::drawScriptAcceptancePanels() {
             const ImVec2 sm = ImageToScreenD(mid.X() + learnOriginX,
                                               mid.Y() + learnOriginY);
 
-            if (m_manualTest.show_fastmatch_compare_gap_pairs)
-              drawList->AddLine(sa, sb, pairColor, 1.4f);
-            drawList->AddCircleFilled(sa, 2.6f, pointAColor, 10);
-            drawList->AddCircleFilled(sb, 2.6f, pointBColor, 10);
-            drawList->AddCircleFilled(sm, 2.0f, midpointColor, 10);
+            if (selectedColumnLearn) {
+              // Edge N / Last denotes the physical boundary crossing.  A/B
+              // are internal contrast samples for FastMatch, not additional
+              // detected edges, so project only their midpoint in this mode.
+              drawList->AddCircleFilled(sm, 3.2f, midpointColor, 12);
+              drawList->AddCircle(sm, 4.8f, pointBColor, 12, 1.0f);
+            } else {
+              if (m_manualTest.show_fastmatch_compare_gap_pairs)
+                drawList->AddLine(sa, sb, pairColor, 1.4f);
+              drawList->AddCircleFilled(sa, 2.6f, pointAColor, 10);
+              drawList->AddCircleFilled(sb, 2.6f, pointBColor, 10);
+              drawList->AddCircleFilled(sm, 2.0f, midpointColor, 10);
+            }
 
-            if (m_manualTest.show_fastmatch_keypoint_tangents &&
+            if (!selectedColumnLearn &&
+                m_manualTest.show_fastmatch_keypoint_tangents &&
                 pairCount >= 2) {
               const int prevIndex = std::max(0, i - stride);
               const int nextIndex = std::min(pairCount - 1, i + stride);
@@ -5364,7 +5376,9 @@ void ViewController::drawScriptAcceptancePanels() {
           }
           const gp_Pnt firstMid =
               midpoint(pathA.ElementAt(0), pathB.ElementAt(0));
-          const std::string label = "FM compare_gap pairs=" +
+          const std::string label = std::string(selectedColumnLearn
+                                      ? "FM selected Point Column samples="
+                                      : "FM compare_gap pairs=") +
                                     std::to_string(pairCount) + " A=" +
                                     std::to_string(countA) + " B=" +
                                     std::to_string(countB) + " stride=" +
@@ -5444,24 +5458,248 @@ void ViewController::drawScriptAcceptancePanels() {
       int learnY = runtimeInt("global_learn_roi_y", 0);
       const ImU32 tickColor = IM_COL32(100, 215, 255, 125);
       const ImU32 conclusionColor = IM_COL32(255, 142, 58, 255);
+      const ImU32 selectedGaugeColor = IM_COL32(255, 232, 72, 255);
+      const ImU32 selectedAcceptedColor = IM_COL32(75, 245, 145, 255);
+      const ImU32 selectedMissingColor = IM_COL32(255, 86, 86, 255);
       const FastMatch::DirectionalProbeEvidence& probe =
           fastMatchTool->getdirectionalprobeevidence(selectedEdge);
-      for (const FastMatch::DirectionalProbeScanLine& line : probe.scan_lines) {
+      const ManualMetrologyUiState& metrology = m_manualTest.metrology_ui;
+      // Gauge Line NUM is a diagnostic selection, not an algorithm enable
+      // switch.  Keep the image-side highlight live whenever FastMatch scan
+      // ticks are visible; otherwise the waveform selector can advance while
+      // the image remains on an indistinguishable cyan-only scan set.
+      const int selectedGaugeIndex = probe.scan_lines.empty()
+          ? -1
+          : std::max(0, std::min(static_cast<int>(probe.scan_lines.size()) - 1,
+                                 metrology.gauge_line_num - 1));
+      const int scanRenderStride = std::max(
+          1, static_cast<int>(probe.scan_lines.size()) / 128);
+      for (std::size_t scanIndex = 0; scanIndex < probe.scan_lines.size();
+           scanIndex += static_cast<std::size_t>(scanRenderStride)) {
+        const FastMatch::DirectionalProbeScanLine& line =
+            probe.scan_lines[scanIndex];
         drawList->AddLine(ImageToScreenD(line.p0.x, line.p0.y),
                           ImageToScreenD(line.p1.x, line.p1.y), tickColor,
                           1.0f);
+      }
+      // The highlighted line is the exact segment consumed by the Gauge
+      // waveform.  It is deliberately drawn after the cyan scan ticks so an
+      // operator can identify the one-based Gauge Line NUM without guessing.
+      if (selectedGaugeIndex >= 0 &&
+          selectedGaugeIndex < static_cast<int>(probe.scan_lines.size())) {
+        const FastMatch::DirectionalProbeScanLine& selectedLine =
+            probe.scan_lines[static_cast<std::size_t>(selectedGaugeIndex)];
+        const ImVec2 a = ImageToScreenD(selectedLine.p0.x, selectedLine.p0.y);
+        const ImVec2 b = ImageToScreenD(selectedLine.p1.x, selectedLine.p1.y);
+        drawList->AddLine(a, b, selectedGaugeColor, 3.0f);
+        const bool selectedAccepted =
+            static_cast<std::size_t>(selectedGaugeIndex) <
+                probe.selected_point_valid_by_scan.size() &&
+            probe.selected_point_valid_by_scan[
+                static_cast<std::size_t>(selectedGaugeIndex)] != 0 &&
+            static_cast<std::size_t>(selectedGaugeIndex) <
+                probe.selected_point_by_scan.size();
+        const ImVec2 labelAnchor = ImVec2((a.x + b.x) * 0.5f + 8.0f,
+                                          (a.y + b.y) * 0.5f - 12.0f);
+        const std::string gaugeLabel =
+            "GL " + std::to_string(selectedGaugeIndex + 1) + "/" +
+            std::to_string(probe.scan_line_count) +
+            (selectedAccepted ? "  ACCEPTED" : "  NO ACCEPTED POINT");
+        drawList->AddRectFilled(ImVec2(labelAnchor.x - 4.0f,
+                                       labelAnchor.y - 3.0f),
+                                ImVec2(labelAnchor.x +
+                                           ImGui::CalcTextSize(gaugeLabel.c_str()).x +
+                                           5.0f,
+                                       labelAnchor.y + 16.0f),
+                                IM_COL32(16, 20, 24, 215), 2.0f);
+        drawList->AddText(labelAnchor,
+                          selectedAccepted ? selectedAcceptedColor
+                                           : selectedMissingColor,
+                          gaugeLabel.c_str());
+        if (selectedAccepted) {
+          const CxShapePoint& point = probe.selected_point_by_scan[
+              static_cast<std::size_t>(selectedGaugeIndex)];
+          const ImVec2 p = ImageToScreenD(point.x, point.y);
+          drawList->AddCircleFilled(p, 6.5f, selectedAcceptedColor, 16);
+          drawList->AddCircle(p, 8.5f, IM_COL32(10, 52, 30, 255), 16, 1.6f);
+        } else {
+          const ImVec2 midpoint((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+          drawList->AddLine(ImVec2(midpoint.x - 6.0f, midpoint.y - 6.0f),
+                            ImVec2(midpoint.x + 6.0f, midpoint.y + 6.0f),
+                            selectedMissingColor, 2.0f);
+          drawList->AddLine(ImVec2(midpoint.x - 6.0f, midpoint.y + 6.0f),
+                            ImVec2(midpoint.x + 6.0f, midpoint.y - 6.0f),
+                            selectedMissingColor, 2.0f);
+        }
       }
       for (const CxShapePoint& point : probe.accepted_points) {
         const ImVec2 p = ImageToScreenD(point.x, point.y);
         drawList->AddCircleFilled(p, 4.5f, conclusionColor, 16);
         drawList->AddCircle(p, 6.0f, IM_COL32(80, 32, 0, 230), 16, 1.2f);
       }
+      if (metrology.enabled && metrology.show_scan_profile &&
+          metrology.profile_cursor_visible &&
+          metrology.profile_cursor_sample_count > 1 &&
+          !probe.scan_lines.empty()) {
+        const int profileScanIndex = std::max(
+            0, std::min(static_cast<int>(probe.scan_lines.size()) - 1,
+                        metrology.gauge_line_num - 1));
+        const FastMatch::DirectionalProbeScanLine& profileLine =
+            probe.scan_lines[static_cast<std::size_t>(profileScanIndex)];
+        const int profileSampleIndex = std::max(
+            0, std::min(metrology.profile_cursor_sample_count - 1,
+                        metrology.profile_cursor_sample_index));
+        const double t = static_cast<double>(profileSampleIndex) /
+                         static_cast<double>(metrology.profile_cursor_sample_count - 1);
+        const CxShapePoint profilePoint{
+            profileLine.p0.x + (profileLine.p1.x - profileLine.p0.x) * t,
+            profileLine.p0.y + (profileLine.p1.y - profileLine.p0.y) * t};
+        const ImVec2 cursor = ImageToScreenD(profilePoint.x, profilePoint.y);
+        drawList->AddCircleFilled(cursor, 5.0f, IM_COL32(255, 210, 64, 255), 18);
+        drawList->AddCircle(cursor, 7.0f, IM_COL32(30, 22, 0, 240), 18, 1.5f);
+        drawList->AddLine(ImVec2(cursor.x - 8.0f, cursor.y),
+                          ImVec2(cursor.x + 8.0f, cursor.y),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+        drawList->AddLine(ImVec2(cursor.x, cursor.y - 8.0f),
+                          ImVec2(cursor.x, cursor.y + 8.0f),
+                          IM_COL32(255, 245, 190, 255), 1.5f);
+      }
       const ImVec2 label = ImageToScreenD(learnX, learnY - 10.0);
       const std::string text = std::string("FM ") + edgeName[selectedEdge] +
           " probe scans=" + std::to_string(probe.scan_line_count) +
           " accepted=" + std::to_string(probe.accepted_side_count) +
+          (selectedGaugeIndex >= 0
+               ? " | Gauge Line " + std::to_string(selectedGaugeIndex + 1) +
+                     "/" + std::to_string(probe.scan_line_count)
+               : "") +
           " status=" + probe.status;
       drawList->AddText(label, conclusionColor, text.c_str());
+    }
+    if (fastMatchContext && fastMatchTool != nullptr &&
+        (m_manualTest.show_fastmatch_normal_trace_domain ||
+         m_manualTest.show_fastmatch_normal_trace_ann_component ||
+         m_manualTest.show_fastmatch_normal_trace_path ||
+         m_manualTest.show_fastmatch_normal_trace_pairs)) {
+      // Normal-trace diagnostics are a read-only evidence layer: retained
+      // domain -> Dijkstra path -> local-normal A/B samples. They never
+      // create ShapeElements or write into the source test image.
+      const FastMatch::NormalTraceEvidence& evidence =
+          fastMatchTool->getnormaltraceevidence();
+      auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
+        return ImVec2(imagePos.x + static_cast<float>(x) * sx,
+                      imagePos.y + static_cast<float>(y) * sy);
+      };
+      if (m_manualTest.show_fastmatch_normal_trace_domain) {
+        const ImU32 domainColors[4] = {
+            IM_COL32(255, 190, 75, 145), IM_COL32(95, 225, 255, 145),
+            IM_COL32(255, 115, 210, 145), IM_COL32(125, 235, 145, 145)};
+        const ImU32 keypointColors[4] = {
+            IM_COL32(255, 230, 100, 255), IM_COL32(95, 235, 255, 255),
+            IM_COL32(255, 130, 220, 255), IM_COL32(135, 245, 155, 255)};
+        for (int direction = 0; direction < 4; ++direction) {
+          const std::vector<CxShapePoint>& domainPoints =
+              evidence.domain_points_by_direction[direction];
+          const int stride = std::max(
+              1, static_cast<int>(domainPoints.size()) / 180);
+          for (std::size_t i = 0; i < domainPoints.size();
+               i += static_cast<std::size_t>(stride)) {
+            const CxShapePoint& point = domainPoints[i];
+            drawList->AddCircleFilled(ImageToScreenD(point.x, point.y), 2.2f,
+                                      domainColors[direction], 8);
+          }
+          for (const CxShapePoint& point :
+               evidence.compressed_points_by_direction[direction]) {
+            const ImVec2 p = ImageToScreenD(point.x, point.y);
+            drawList->AddRectFilled(ImVec2(p.x - 2.6f, p.y - 2.6f),
+                                    ImVec2(p.x + 2.6f, p.y + 2.6f),
+                                    keypointColors[direction]);
+          }
+        }
+      }
+      if (m_manualTest.show_fastmatch_normal_trace_ann_component) {
+        const ImU32 selectedColors[4] = {
+            IM_COL32(255, 225, 80, 255), IM_COL32(80, 235, 255, 255),
+            IM_COL32(255, 105, 220, 255), IM_COL32(100, 255, 135, 255)};
+        for (int direction = 0; direction < 4; ++direction) {
+          for (const CxShapePoint &point :
+               evidence.ann_selected_points_by_direction[direction]) {
+            const ImVec2 p = ImageToScreenD(point.x, point.y);
+            drawList->AddCircle(p, 4.3f, selectedColors[direction], 10, 1.8f);
+          }
+        }
+      }
+      if (m_manualTest.show_fastmatch_normal_trace_path &&
+          evidence.dijkstra_trace_points.size() >= 2) {
+        ImVec2 previous = ImageToScreenD(evidence.dijkstra_trace_points.front().x,
+                                         evidence.dijkstra_trace_points.front().y);
+        for (std::size_t i = 1; i < evidence.dijkstra_trace_points.size(); ++i) {
+          const CxShapePoint& point = evidence.dijkstra_trace_points[i];
+          const ImVec2 current = ImageToScreenD(point.x, point.y);
+          drawList->AddLine(previous, current, IM_COL32(8, 18, 24, 225), 3.2f);
+          drawList->AddLine(previous, current, IM_COL32(40, 225, 255, 255),
+                            1.25f);
+          previous = current;
+        }
+      }
+      if (m_manualTest.show_fastmatch_normal_trace_pairs) {
+        const std::size_t count = std::min(evidence.normal_pair_a.size(),
+                                           evidence.normal_pair_b.size());
+        // Keep key normals legible; the complete A/B arrays remain available
+        // in runtime evidence and line_trace.json.
+        const int stride = std::max(1, static_cast<int>(count) / 72);
+        for (std::size_t i = 0; i < count; i += static_cast<std::size_t>(stride)) {
+          const CxShapePoint& a = evidence.normal_pair_a[i];
+          const CxShapePoint& b = evidence.normal_pair_b[i];
+          const ImVec2 pa = ImageToScreenD(a.x, a.y);
+          const ImVec2 pb = ImageToScreenD(b.x, b.y);
+          drawList->AddLine(pa, pb, IM_COL32(12, 14, 18, 235), 3.0f);
+          drawList->AddLine(pa, pb, IM_COL32(255, 226, 74, 255), 1.15f);
+          drawList->AddCircleFilled(pa, 3.2f, IM_COL32(65, 235, 135, 255), 10);
+          drawList->AddCircle(pa, 3.2f, IM_COL32(8, 18, 24, 255), 10, 1.0f);
+          drawList->AddCircleFilled(pb, 3.2f, IM_COL32(255, 85, 205, 255), 10);
+          drawList->AddCircle(pb, 3.2f, IM_COL32(8, 18, 24, 255), 10, 1.0f);
+        }
+      }
+      const int learnX = runtimeInt("global_learn_roi_x", 0);
+      const int learnY = runtimeInt("global_learn_roi_y", 0);
+      int annComponents = 0;
+      int annSelected = 0;
+      for (int direction = 0; direction < 4; ++direction) {
+        annComponents += evidence.ann_component_counts[direction];
+        annSelected += evidence.ann_selected_point_counts[direction];
+      }
+      const std::string label =
+          evidence.reason == "NORMAL_TRACE_DISABLED" ||
+                  evidence.reason == "NOT_RUN"
+              ? "Normal trace NOT_RUN: enable Normal-Trace Learn, then click Learn"
+               : "Normal trace: domain=" +
+                    std::to_string(evidence.domain_points.size()) +
+                    " ANN=" + std::to_string(annSelected) + "/" +
+                    std::to_string(annComponents) + " path=" +
+                    std::to_string(evidence.dijkstra_trace_points.size()) +
+                    " pairs=" + std::to_string(evidence.normal_pair_a.size()) +
+                    " segments=" +
+                    std::to_string(evidence.trace_segment_count) + "/4 closed=" +
+                    std::string(evidence.closure_error_px >= 0.0 &&
+                                        evidence.closure_error_px <= 1.5
+                                    ? "yes"
+                                    : "no") +
+                    " coverage=" +
+                    std::to_string(static_cast<int>(std::lround(
+                        evidence.gradient_coverage * 100.0))) +
+                    "% " + evidence.reason;
+      drawList->AddText(ImageToScreenD(learnX, learnY - 28.0),
+                        evidence.succeeded ? IM_COL32(90, 235, 170, 255)
+                                           : IM_COL32(255, 135, 95, 255),
+                        label.c_str());
+      if (evidence.succeeded &&
+          (m_manualTest.show_fastmatch_normal_trace_path ||
+           m_manualTest.show_fastmatch_normal_trace_pairs)) {
+        drawList->AddText(
+            ImageToScreenD(learnX, learnY - 44.0),
+            IM_COL32(245, 245, 230, 255),
+            "Trace cyan | Normal yellow | A green | B magenta");
+      }
     }
   }
 

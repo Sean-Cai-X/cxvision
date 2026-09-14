@@ -1,6 +1,9 @@
 Image m_image;
 FastMatch m_match;
 
+// fastmatch_normal_trace_binding_version: 2
+// Version 2 follows the confirmed fixed-int Param_int_N dispatch order.
+
 m_image.copyFromMat(global_matInput);
 
 int learn_x = global_learn_roi_x;
@@ -220,10 +223,36 @@ m_match.settransformmaxelapsedms(transform_max_elapsed_ms);
 m_match.settransformshearrangepermille(transform_shear_range_permille);
 m_match.settransformprojectiverangepermille(transform_projective_range_permille);
 m_match.setnormaltraceenabled(global_fastmatch_normaltrace_enabled);
-m_match.setnormaltraceparams(global_fastmatch_normaltrace_overlap_radius_px,
-    global_fastmatch_normaltrace_min_gradient,
+// Fixed-int CxScript member dispatch stores arguments in source order and
+// invokes Param_int_N in reverse. Keep FastMatch's C++ API unchanged and list
+// the source arguments in dispatch order so the C++ object receives the
+// operator-facing order documented in Key Parameter Controls.
+m_match.setnormaltraceparams(global_fastmatch_normaltrace_pair_offset_px,
     global_fastmatch_normaltrace_max_nodes,
-    global_fastmatch_normaltrace_pair_offset_px);
+    global_fastmatch_normaltrace_min_gradient,
+    global_fastmatch_normaltrace_overlap_radius_px);
+m_match.setnormaltracecosts(
+    global_fastmatch_normaltrace_max_trace_gap_px,
+    global_fastmatch_normaltrace_gap_weight_permille,
+    global_fastmatch_normaltrace_turn_weight_permille,
+    global_fastmatch_normaltrace_gradient_weight_permille);
+m_match.setnormaltraceknn(global_fastmatch_normaltrace_knn_neighbors);
+m_match.setnormaltraceann(
+    global_fastmatch_normaltrace_ann_min_component_coverage_percent,
+    global_fastmatch_normaltrace_ann_min_component_points,
+    global_fastmatch_normaltrace_ann_normal_deviation_deg,
+    global_fastmatch_normaltrace_ann_tangent_deviation_deg,
+    global_fastmatch_normaltrace_ann_radius_px);
+m_match.setnormaltracegeometry(
+    global_fastmatch_normaltrace_tangent_step_px,
+    global_fastmatch_normaltrace_corner_rejection_px,
+    global_fastmatch_normaltrace_polarity,
+    global_fastmatch_normaltrace_min_length_px,
+    global_fastmatch_normaltrace_angle_tolerance_deg);
+m_match.setnormaltracedomain(
+    global_fastmatch_normaltrace_min_keypoints_per_domain,
+    global_fastmatch_normaltrace_xy_compression_bin_px,
+    global_fastmatch_normaltrace_anchor_radius_px);
 m_match.setcalibrationtestenabled(calibration_test_enabled);
 if (calibration_test_enabled == 1)
 {

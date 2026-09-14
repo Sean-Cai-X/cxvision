@@ -1741,6 +1741,38 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.metrics["fastmatch_learn_a2_count"] = capture.fastmatch_learn_a2_count;
     pkg.metrics["fastmatch_learn_b2_count"] = capture.fastmatch_learn_b2_count;
     pkg.metrics["fastmatch_learn_status_code"] = capture.fastmatch_learn_status_code;
+    pkg.metrics["fastmatch_normal_trace_candidate_count"] =
+        capture.fastmatch_normal_trace.candidate_count;
+    pkg.metrics["fastmatch_normal_trace_deduplicated_count"] =
+        capture.fastmatch_normal_trace.deduplicated_count;
+    pkg.metrics["fastmatch_normal_trace_point_count"] =
+        capture.fastmatch_normal_trace.trace_point_count;
+    pkg.metrics["fastmatch_normal_trace_pair_count"] =
+        capture.fastmatch_normal_trace.normal_pair_count;
+    pkg.metrics["fastmatch_normal_trace_directional_side_count"] =
+        capture.fastmatch_normal_trace.directional_side_count;
+    pkg.metrics["fastmatch_normal_trace_segment_count"] =
+        capture.fastmatch_normal_trace.trace_segment_count;
+    pkg.metrics["fastmatch_normal_trace_closure_error_px"] =
+        capture.fastmatch_normal_trace.closure_error_px;
+    pkg.metrics["fastmatch_normal_trace_max_consecutive_gap_px"] =
+        capture.fastmatch_normal_trace.max_consecutive_gap_px;
+    pkg.metrics["fastmatch_normal_trace_gradient_coverage"] =
+        capture.fastmatch_normal_trace.gradient_coverage;
+    pkg.metrics["fastmatch_normal_trace_findline_bound_pairs"] =
+        capture.fastmatch_normal_trace.normal_pair_findline_bound_count;
+    pkg.metrics["fastmatch_normal_trace_binding_misses"] =
+        capture.fastmatch_normal_trace.normal_pair_binding_miss_count;
+    pkg.metrics["fastmatch_normal_trace_corner_rejected"] =
+        capture.fastmatch_normal_trace.normal_pair_corner_rejected_count;
+    pkg.metrics["fastmatch_normal_trace_loop_erased_points"] =
+        capture.fastmatch_normal_trace.loop_erased_point_count;
+    pkg.facts["fastmatch_normal_trace_executed"] =
+        capture.fastmatch_normal_trace.executed ? "true" : "false";
+    pkg.facts["fastmatch_normal_trace_succeeded"] =
+        capture.fastmatch_normal_trace.succeeded ? "true" : "false";
+    pkg.facts["fastmatch_normal_trace_reason"] =
+        capture.fastmatch_normal_trace.reason;
     pkg.metrics["candidate_count"] = capture.candidate_count;
     pkg.metrics["best_score"] = capture.best_score;
     pkg.metrics["rendered_measure_points_count"] = capture.rendered_measure_points_count;
@@ -3115,9 +3147,92 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     std::ofstream line_trace_file(line_trace_path);
     if (line_trace_file.is_open())
     {
+        const auto write_point_array = [&line_trace_file](
+            const char* name,
+            const std::vector<CxFastMatchNormalTracePointEvidence>& points,
+            bool comma) {
+            line_trace_file << "  \"" << name << "\": [";
+            for (std::size_t i = 0; i < points.size(); ++i)
+            {
+                if (i != 0)
+                    line_trace_file << ",";
+                line_trace_file << "[" << points[i].x << "," << points[i].y << "]";
+            }
+            line_trace_file << "]" << (comma ? "," : "") << "\n";
+        };
+        const auto write_int4 = [&line_trace_file](
+            const char* name,
+            const std::array<int, 4>& values) {
+            line_trace_file << "  \"" << name << "\": ["
+                << values[0] << "," << values[1] << ","
+                << values[2] << "," << values[3] << "],\n";
+        };
+        const auto write_double4 = [&line_trace_file](
+            const char* name,
+            const std::array<double, 4>& values) {
+            line_trace_file << "  \"" << name << "\": ["
+                << values[0] << "," << values[1] << ","
+                << values[2] << "," << values[3] << "],\n";
+        };
         line_trace_file << "{\n";
         line_trace_file << "  \"scan_line_count\": " << capture.scan_line_count << ",\n";
-        line_trace_file << "  \"sample_count\": " << capture.sample_count << "\n";
+        line_trace_file << "  \"sample_count\": " << capture.sample_count << ",\n";
+        line_trace_file << "  \"normal_trace_executed\": "
+            << (capture.fastmatch_normal_trace.executed ? "true" : "false") << ",\n";
+        line_trace_file << "  \"normal_trace_succeeded\": "
+            << (capture.fastmatch_normal_trace.succeeded ? "true" : "false") << ",\n";
+        line_trace_file << "  \"normal_trace_reason\": \""
+            << JsonEscape(capture.fastmatch_normal_trace.reason) << "\",\n";
+        line_trace_file << "  \"candidate_count\": "
+            << capture.fastmatch_normal_trace.candidate_count << ",\n";
+        line_trace_file << "  \"deduplicated_count\": "
+            << capture.fastmatch_normal_trace.deduplicated_count << ",\n";
+        line_trace_file << "  \"trace_point_count\": "
+            << capture.fastmatch_normal_trace.trace_point_count << ",\n";
+        line_trace_file << "  \"normal_pair_count\": "
+            << capture.fastmatch_normal_trace.normal_pair_count << ",\n";
+        line_trace_file << "  \"directional_side_count\": "
+            << capture.fastmatch_normal_trace.directional_side_count << ",\n";
+        line_trace_file << "  \"trace_segment_count\": "
+            << capture.fastmatch_normal_trace.trace_segment_count << ",\n";
+        line_trace_file << "  \"closure_error_px\": "
+            << capture.fastmatch_normal_trace.closure_error_px << ",\n";
+        line_trace_file << "  \"max_consecutive_gap_px\": "
+            << capture.fastmatch_normal_trace.max_consecutive_gap_px << ",\n";
+        line_trace_file << "  \"gradient_coverage\": "
+            << capture.fastmatch_normal_trace.gradient_coverage << ",\n";
+        line_trace_file << "  \"normal_pair_findline_bound_count\": "
+            << capture.fastmatch_normal_trace.normal_pair_findline_bound_count
+            << ",\n";
+        line_trace_file << "  \"normal_pair_binding_miss_count\": "
+            << capture.fastmatch_normal_trace.normal_pair_binding_miss_count
+            << ",\n";
+        line_trace_file << "  \"normal_pair_corner_rejected_count\": "
+            << capture.fastmatch_normal_trace.normal_pair_corner_rejected_count
+            << ",\n";
+        line_trace_file << "  \"loop_erased_point_count\": "
+            << capture.fastmatch_normal_trace.loop_erased_point_count
+            << ",\n";
+        write_int4("normal_pair_counts_by_direction",
+            capture.fastmatch_normal_trace.normal_pair_counts_by_direction);
+        write_int4("domain_deduplicated_counts",
+            capture.fastmatch_normal_trace.domain_deduplicated_counts);
+        write_int4("compressed_keypoint_counts",
+            capture.fastmatch_normal_trace.compressed_keypoint_counts);
+        write_int4("ann_edge_counts",
+            capture.fastmatch_normal_trace.ann_edge_counts);
+        write_int4("ann_component_counts",
+            capture.fastmatch_normal_trace.ann_component_counts);
+        write_int4("ann_selected_point_counts",
+            capture.fastmatch_normal_trace.ann_selected_point_counts);
+        write_double4("ann_selected_coverage",
+            capture.fastmatch_normal_trace.ann_selected_coverage);
+        write_point_array("dijkstra_trace_points",
+            capture.fastmatch_normal_trace.dijkstra_trace_points, true);
+        write_point_array("normal_pair_a",
+            capture.fastmatch_normal_trace.normal_pair_a, true);
+        write_point_array("normal_pair_b",
+            capture.fastmatch_normal_trace.normal_pair_b, false);
         line_trace_file << "}\n";
         line_trace_file.close();
     }
@@ -3233,6 +3348,28 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         object_state_file << "  \"fastmatch_learn_a2_count\": " << capture.fastmatch_learn_a2_count << ",\n";
         object_state_file << "  \"fastmatch_learn_b2_count\": " << capture.fastmatch_learn_b2_count << ",\n";
         object_state_file << "  \"fastmatch_learn_status_code\": " << capture.fastmatch_learn_status_code << ",\n";
+        object_state_file << "  \"fastmatch_normal_trace\": {"
+            << "\"executed\":" << (capture.fastmatch_normal_trace.executed ? "true" : "false")
+            << ",\"succeeded\":" << (capture.fastmatch_normal_trace.succeeded ? "true" : "false")
+            << ",\"reason\":\"" << JsonEscape(capture.fastmatch_normal_trace.reason) << "\""
+            << ",\"candidate_count\":" << capture.fastmatch_normal_trace.candidate_count
+            << ",\"deduplicated_count\":" << capture.fastmatch_normal_trace.deduplicated_count
+            << ",\"trace_point_count\":" << capture.fastmatch_normal_trace.trace_point_count
+            << ",\"normal_pair_count\":" << capture.fastmatch_normal_trace.normal_pair_count
+            << ",\"directional_side_count\":" << capture.fastmatch_normal_trace.directional_side_count
+            << ",\"trace_segment_count\":" << capture.fastmatch_normal_trace.trace_segment_count
+            << ",\"closure_error_px\":" << capture.fastmatch_normal_trace.closure_error_px
+            << ",\"max_consecutive_gap_px\":" << capture.fastmatch_normal_trace.max_consecutive_gap_px
+            << ",\"gradient_coverage\":" << capture.fastmatch_normal_trace.gradient_coverage
+            << ",\"normal_pair_findline_bound_count\":"
+            << capture.fastmatch_normal_trace.normal_pair_findline_bound_count
+            << ",\"normal_pair_binding_miss_count\":"
+            << capture.fastmatch_normal_trace.normal_pair_binding_miss_count
+            << ",\"normal_pair_corner_rejected_count\":"
+            << capture.fastmatch_normal_trace.normal_pair_corner_rejected_count
+            << ",\"loop_erased_point_count\":"
+            << capture.fastmatch_normal_trace.loop_erased_point_count
+            << "},\n";
         object_state_file << "  \"fastmatch_model_width\": " << capture.fastmatch_model_width << ",\n";
         object_state_file << "  \"fastmatch_model_height\": " << capture.fastmatch_model_height << ",\n";
         object_state_file << "  \"fastmatch_pattern_a_count\": " << capture.fastmatch_pattern_a_count << ",\n";
@@ -3806,6 +3943,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             setGlobal("global_fastmatch_learn_linegap" + suffix, options.linegap);
             setGlobal("global_fastmatch_learn_objfilter" + suffix, 1);
             setGlobal("global_fastmatch_learn_compare_gap" + suffix, options.compare_gap);
+            setGlobal("global_fastmatch_learn_edge_count" + suffix, 2);
+            setGlobal("global_fastmatch_learn_selected_edge" + suffix, 0);
         }
         setGlobal("global_max_elapsed_ms", options.max_elapsed_ms);
         setGlobal("global_max_scan_lines", options.max_scan_lines);

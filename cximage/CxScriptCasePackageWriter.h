@@ -11,6 +11,8 @@ struct CxEvidenceCandidateSaveOptions
     std::string root_dir = "cxscript_runs/evidence_candidates";
     std::string candidate_id;
     std::string case_id_override;
+    // Explicit immutable script provenance for a new candidate run.
+    std::string source_evidence_script_path_override;
     std::string mode = "draft";
     bool request_run = false;
     bool add_to_evidence_chain = true;
